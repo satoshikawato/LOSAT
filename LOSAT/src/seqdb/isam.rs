@@ -117,7 +117,7 @@
 //!   `CSeqIdException` (a `ti` tag that is not a number, a string tag of `BL_ORD_ID` or `PIG`)
 //!   are [`SimplifyError::Exception`] with NCBI's exception (`ncbi_str::string_to_int8`'s, or
 //!   `CObject_id::GetId()`'s `CInvalidChoiceSelection`, thrown in code that NCBI's `datatool`
-//!   generates: `ThrowSite::generated`).
+//!   generates, at the place that BLAST+ 2.17.0's report of it names: `OBJECT_ID_GET_ID`).
 //! - The functions assume the C locale (`tolower`, `toupper`, `isdigit`, `atoi`).
 
 use std::path::{Path, PathBuf};
@@ -295,12 +295,14 @@ pub(super) fn index_exists(index: &Path, data: &Path) -> bool {
 pub(super) fn open_files(index: &Path, data: &Path) -> Result<(DbFile, DbFile), SeqDbError> {
     let message = || {
         SeqDbError::NotFound(
-            format!(
-                "Error: Could not open input file ({}/{})",
-                index.display(),
-                data.display()
-            )
-            .into(),
+            [
+                b"Error: Could not open input file (".as_slice(),
+                &crate::utils::os_bytes::path_bytes(index),
+                b"/",
+                &crate::utils::os_bytes::path_bytes(data),
+                b")",
+            ]
+            .concat(),
         )
     };
     let index_file = DbFile::open(index).map_err(|_| message())?;
@@ -345,22 +347,24 @@ pub struct StringIsam {
 impl StringIsam {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1173-1210
     /// `CSeqDBIsam::x_MakeFilenames` (`file_ext_char` is `s`): `<dbname>.ps?` or `.ns?`, the index
-    /// file ending in `i` and the data file in `d`.
-    pub fn file_names(dbname: &str, protein: bool) -> Result<(PathBuf, PathBuf), SeqDbError> {
-        if dbname.is_empty() {
+    /// file ending in `i` and the data file in `d`. The volume's path `dbname` is the bytes of
+    /// NCBI's `std::string`.
+    pub fn file_names(dbname: &Path, protein: bool) -> Result<(PathBuf, PathBuf), SeqDbError> {
+        if dbname.as_os_str().is_empty() {
             return Err(SeqDbError::NotFound(
                 "Error: argument not valid".to_string().into(),
             ));
         }
-        let mut index = format!("{dbname}.{}s", if protein { 'p' } else { 'n' });
+        let mut index = dbname.as_os_str().to_os_string();
+        index.push(if protein { ".ps" } else { ".ns" });
         let mut data = index.clone();
-        index.push('i');
-        data.push('d');
+        index.push("i");
+        data.push("d");
         Ok((PathBuf::from(index), PathBuf::from(data)))
     }
 
     /// `CSeqDBIsam::IndexExists` for the string index ([`index_exists`]: two regular files).
-    pub fn index_exists(dbname: &str, protein: bool) -> bool {
+    pub fn index_exists(dbname: &Path, protein: bool) -> bool {
         match Self::file_names(dbname, protein) {
             Ok((index, data)) => index_exists(&index, &data),
             Err(_) => false,
@@ -368,14 +372,14 @@ impl StringIsam {
     }
 
     /// The string index of the volume `dbname` (its path without extension).
-    pub fn open_volume(dbname: &str, protein: bool) -> Result<Self, SeqDbError> {
+    pub fn open_volume(dbname: &Path, protein: bool) -> Result<Self, SeqDbError> {
         let (index, data) = Self::file_names(dbname, protein)?;
         Self::open(&index, &data)
     }
 
     /// `x_OpenStrFile`: the string index of the volume `dbname` (its path without extension, a
     /// volume with sequences), `None` where it has none ([`open_if_exists`]).
-    pub fn open_existing(dbname: &str, protein: bool) -> Result<Option<Self>, SeqDbError> {
+    pub fn open_existing(dbname: &Path, protein: bool) -> Result<Option<Self>, SeqDbError> {
         let (index, data) = Self::file_names(dbname, protein)?;
         open_if_exists(&index, &data)?
             .map(|(index, data)| Self::from_files(index, data))
@@ -1545,14 +1549,29 @@ impl std::fmt::Display for SimplifyError {
 
 impl std::error::Error for SimplifyError {}
 
+// NCBI reference (598d8ae6): c++/src/serial/datatool/choicestr.cpp:887-893 (cited at
+// `ThrowSite::generated`: the generated `C<type>_Base::ThrowInvalidSelection`)
+/// The place of `CObject_id::GetId()`'s throw in the file that NCBI's `datatool` generates for
+/// the CHOICE, as BLAST+ 2.17.0's `what()` of it names it: `src/objects/general/Object_id_.cpp`,
+/// line 96, no function (`Error: NCBI C++ Exception:` of a search whose Seq-align id is
+/// `gnl|PIG|abc`, exit status 255; probe t7 of line DBID pfoff-7,
+/// `blastdb-ids-20261021/R/pf7/t7`).
+pub(crate) const OBJECT_ID_GET_ID: ThrowSite = ThrowSite {
+    file: "src/objects/general/Object_id_.cpp",
+    line: 96,
+    kind: "CInvalidChoiceSelection::eFail",
+    function: None,
+};
+
 // NCBI reference (598d8ae6): c++/src/serial/exception.cpp:122-150
 /// `CObject_id::GetId()`: a string tag is NCBI's `CInvalidChoiceSelection` (probe D11 of line
-/// BDC), thrown by the code that NCBI's `datatool` generates for the CHOICE.
+/// BDC), thrown by the code that NCBI's `datatool` generates for the CHOICE
+/// ([`OBJECT_ID_GET_ID`]).
 fn object_id_id(tag: &ObjectId) -> Result<i64, SimplifyError> {
     match tag {
         ObjectId::Id(n) => Ok(i64::from(*n)),
         ObjectId::Str(_) => Err(SimplifyError::Exception(NcbiException::new(
-            ThrowSite::generated("CInvalidChoiceSelection::eFail"),
+            OBJECT_ID_GET_ID,
             "CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str",
         ))),
     }

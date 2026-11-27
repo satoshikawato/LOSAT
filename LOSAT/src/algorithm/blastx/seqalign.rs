@@ -41,7 +41,7 @@ use crate::report::serial::{write_query_to, SerialFormat};
 
 /// The subjects of a BLASTX search as the Seq-aligns name them: the records of `-subject`
 /// (`Subject_N`), or a database's reported sequences by rank with the database's title.
-pub(super) enum SeqalignSubjects<'a> {
+pub(crate) enum SeqalignSubjects<'a> {
     Records,
     Database {
         reported: &'a ReportedSubjects,
@@ -59,7 +59,7 @@ pub(super) enum SeqalignSubjects<'a> {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_seqalign(
     format: SerialFormat,
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     stderr: &mut dyn Write,
     options: &super::args::ResolvedOptions,
     queries: &[FastaRecord],
@@ -69,12 +69,12 @@ pub(super) fn write_blastx_seqalign(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastx,
-        rps: options.rpstblastn.is_some(),
         db_title: match names {
             SeqalignSubjects::Records => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: options.gapped,
+        program_type: options.program_type(),
     };
     let mut subject_records: Vec<SubjectRecord<'_>> = Vec::new();
     let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();
@@ -97,6 +97,7 @@ pub(super) fn write_blastx_seqalign(
             write_query_to(
                 format,
                 &run,
+                options.app_name,
                 &query_record,
                 &subject_records,
                 &hsp_records,
@@ -154,6 +155,7 @@ pub(super) fn query_records<'a>(
                 subject: subject_index,
                 q_offset: hsp.hsp.q_start,
                 q_end: hsp.hsp.q_end,
+                q_left_out: i32::try_from(hsp.query_left_out)?,
                 s_offset: hsp.hsp.s_start,
                 s_end,
                 q_frame: hsp.hsp.frame,
@@ -166,6 +168,7 @@ pub(super) fn query_records<'a>(
                 num_positives: i32::try_from(hsp.positive)?,
                 comp_adjust: u8::try_from(hsp.composition_method)?,
                 ops: &hsp.edit_script,
+                std_seg_nullb: None,
             });
         }
     }

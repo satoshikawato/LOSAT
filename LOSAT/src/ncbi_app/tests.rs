@@ -10,6 +10,9 @@ fn run_dustmasker_words(words: Vec<OsString>) -> (i32, Vec<u8>, Vec<u8>) {
         help: include_str!("../dustmasker/help.txt"),
         post_prefix: None,
         components: &[],
+        help_full: None,
+        short_description: None,
+        write_failure: None,
         dry_run: None,
     };
     fn body(
@@ -38,12 +41,11 @@ fn run_dustmasker_words(words: Vec<OsString>) -> (i32, Vec<u8>, Vec<u8>) {
 // NCBI prints the versions before it reads the arguments, whatever their bytes (review 1 F4 of
 // line RG item E3: NCBI BLAST+ 2.17.0 `blastdbcmd -out $'\xff' -version-full`, rc 0), and its
 // reader takes a word's bytes as they are: its errors and its help words come first, and quote
-// the bytes (line RG item K4i-2a, probe `K/k4i2/nonutf8`). LOSAT refuses a value that is not
-// UTF-8 where the body would start, after the read and `-dryrun`, but those it opens by their
-// bytes: `-out` (`Args::output_file`, below) and `-logfile`.
+// the bytes (line RG item K4i-2a, probe `K/k4i2/nonutf8`). The body then reads each value by
+// its bytes (`Args::bytes`), as NCBI's strings hold them (line RG item K10a, probe `K/kd`).
 #[cfg(unix)]
 #[test]
-fn a_word_that_is_not_utf8_is_read_first_and_refused_after_the_read() {
+fn a_word_that_is_not_utf8_is_read_by_its_bytes() {
     use std::os::unix::ffi::OsStringExt;
     let run = run_dustmasker_words;
     let bytes = || OsString::from_vec(vec![0xff]);
@@ -60,19 +62,13 @@ fn a_word_that_is_not_utf8_is_read_first_and_refused_after_the_read() {
             (0, printed.into_bytes(), Vec::new())
         );
     }
-    let refusal = b"Error: the value of -infmt is not UTF-8; NCBI BLAST+ reads the bytes of an \
-                    option's value, which is not supported by LOSAT's DUSTMASKER\n";
-    assert_eq!(
-        run(vec!["-infmt".into(), bytes()]),
-        (1, Vec::new(), refusal.to_vec())
-    );
-    // Of two such values, the refusal names the first of the command line.
-    let (status, _, err) = run(vec!["-in".into(), bytes(), "-infmt".into(), bytes()]);
-    assert_eq!(status, 1);
-    assert!(
-        err.starts_with(b"Error: the value of -in is not UTF-8;"),
-        "{err:?}"
-    );
+    // The body runs with such values.
+    for words in [
+        vec!["-infmt".into(), bytes()],
+        vec!["-in".into(), bytes(), "-infmt".into(), bytes()],
+    ] {
+        assert_eq!(run(words), (0, b"ran\n".to_vec(), Vec::new()));
+    }
     // `-dryrun` runs no body: status 0 (NCBI BLAST+ 2.17.0 dustmasker `-infmt $'\xff' -dryrun`).
     assert_eq!(
         run(vec!["-infmt".into(), bytes(), "-dryrun".into()]),
@@ -87,7 +83,6 @@ fn a_word_that_is_not_utf8_is_read_first_and_refused_after_the_read() {
     let err = String::from_utf8(err).unwrap();
     assert_eq!((status, out), (1, Vec::new()));
     assert!(err.contains("Unknown argument: \"bogus\""), "{err}");
-    assert!(!err.contains("not UTF-8"), "{err}");
     // A refused value is quoted with its bytes.
     let (status, _, err) = run(vec!["-outfmt".into(), bytes()]);
     assert_eq!(status, 1);
@@ -132,15 +127,13 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         help: "USAGE\n  p [-h]\n\nOPTIONAL ARGUMENTS\n -h\n",
         post_prefix: None,
         components: &[],
+        help_full: None,
+        short_description: None,
+        write_failure: None,
         dry_run: None,
     };
     let mut stderr = Vec::new();
-    let mut diag = Diag {
-        target: DiagTarget::Stderr,
-        stderr: &mut stderr,
-        tool: &TOOL,
-        record: None,
-    };
+    let mut diag = Diag::new(&DiagTarget::Stderr, &mut stderr, &TOOL);
     let error = ArgException::new("eNoFile", "Argument \"in\". X".to_string());
     assert_eq!(diag.run_arg_exception(error), 1);
     assert_eq!(
@@ -155,12 +148,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
     );
     // `eNoValue` prints no usage.
     let mut stderr = Vec::new();
-    let mut diag = Diag {
-        target: DiagTarget::Stderr,
-        stderr: &mut stderr,
-        tool: &TOOL,
-        record: None,
-    };
+    let mut diag = Diag::new(&DiagTarget::Stderr, &mut stderr, &TOOL);
     diag.run_arg_exception(ArgException::new("eNoValue", "m".to_string()));
     assert_eq!(
         String::from_utf8(stderr).unwrap(),

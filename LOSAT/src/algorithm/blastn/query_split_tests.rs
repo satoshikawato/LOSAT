@@ -355,6 +355,82 @@ fn a_negative_chunk_size_splits_only_a_long_enough_batch() {
     assert!(!SplitSizes::new(false, Some(3000), Some(-10)).negative_chunk_size());
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:149,166-170
+// The chunk ranges in 64-bit `size_t` without debug-build underflow or overflow:
+// - positive pairs with evened chunk size below overlap: (140, 100) on 90 bases (evened 96),
+//   (120, 100) on 40 bases, (101, 100) on 2 bases, and (100, 95) on 31 bases (evened 85) wrap
+//   `chunk_start` past the batch after chunk 0, leaving chunks 1.. empty;
+// - positive pair at the exact overlap boundary (150, 100): 99 bases does not split, 100 bases
+//   gives evened chunk size 100 and stops after chunk 0 leaving chunk 1 empty, 101 bases gives
+//   two non-empty overlapping chunks (0..100 and 0..101, NCBI re-split -> Exception 1);
+// - negative pairs: (-100, -200) on 310 bases wraps `chunk_size` past 310 (chunks 1 and 2 empty),
+//   (-133, -200) on 200 bases and (-132, -200) on 201 bases keep `chunk_size` 1 without wrapping
+//   yet advance `chunk_start` past or to the batch end (chunk 1 empty), while (-100, -200) on 248
+//   bases and (-1, -200) on 930 bases leave 200-base gaps with every chunk holding a query.
+#[test]
+fn the_chunk_ranges_wrap_as_ncbis_size_t() {
+    let ranges = |lengths: &[usize], sizes| -> Vec<Vec<(usize, usize)>> {
+        split_query_batch(lengths, sizes, QueryStrand::Both)
+            .unwrap()
+            .iter()
+            .map(|chunk| {
+                chunk
+                    .queries
+                    .iter()
+                    .map(|part| (part.from, part.to))
+                    .collect()
+            })
+            .collect()
+    };
+    let negative = SplitSizes::new(false, Some(-100), Some(-200));
+    assert_eq!(
+        ranges(&[310], negative),
+        vec![vec![(0, 310)], vec![], vec![]]
+    );
+    assert_eq!(
+        ranges(&[248], negative),
+        vec![vec![(0, 25)], vec![(225, 248)]]
+    );
+    assert_eq!(
+        ranges(&[200], SplitSizes::new(false, Some(-133), Some(-200))),
+        vec![vec![(0, 1)], vec![]]
+    );
+    assert_eq!(
+        ranges(&[201], SplitSizes::new(false, Some(-132), Some(-200))),
+        vec![vec![(0, 1)], vec![]]
+    );
+    assert_eq!(
+        ranges(&[930], SplitSizes::new(false, Some(-1), Some(-200))),
+        vec![
+            vec![(0, 83)],
+            vec![(283, 366)],
+            vec![(566, 649)],
+            vec![(849, 930)],
+        ]
+    );
+    let close = SplitSizes::new(false, Some(100), Some(95));
+    assert_eq!(
+        ranges(&[31], close),
+        vec![vec![(0, 31)], vec![], vec![], vec![], vec![], vec![]]
+    );
+    assert_eq!(
+        ranges(&[90], SplitSizes::new(false, Some(140), None)),
+        vec![vec![(0, 90)], vec![]]
+    );
+    assert_eq!(
+        ranges(&[40], SplitSizes::new(false, Some(120), None)),
+        vec![vec![(0, 40)], vec![]]
+    );
+    assert_eq!(
+        ranges(&[2], SplitSizes::new(false, Some(101), None)),
+        vec![vec![(0, 2)], vec![]]
+    );
+    let c150 = SplitSizes::new(false, Some(150), None);
+    assert!(split_query_batch(&[99], c150, QueryStrand::Both).is_none());
+    assert_eq!(ranges(&[100], c150), vec![vec![(0, 100)], vec![]]);
+    assert_eq!(ranges(&[101], c150), vec![vec![(0, 100)], vec![(0, 101)]]);
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:392-410,604-626
 // A strand that is not searched has no chunk context and the offset INT4_MAX; the other
 // strand's offsets are those of the split with both strands.
@@ -390,4 +466,122 @@ fn a_single_strand_split_keeps_the_offsets_of_the_strand_it_searches() {
         minus[1].context_offsets,
         vec![i32::MAX, 0, i32::MAX, 1_000_000 - 42]
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-290
+// `SplitBatchSteps` with `QueryChunk` and `without_resplit_stop()` (BLASTN): empty chunks refuse
+// through `empty_chunk_refusal`, re-splitting chunks (Exception 1: 150/100 on L=101) proceed,
+// `ReadFails::Setup` stops before validity, `setup_checks` run once on the first valid chunk (or
+// become `UnmetChecks` when no chunk is valid), `ReadFails::Search` stops after `setup_checks`,
+// and D13 negative-pair gaps refuse only with subjects in hand.
+#[test]
+fn blastn_split_batch_steps_follow_ncbis_order_and_skip_resplit_stop() {
+    let stop = |error: anyhow::Error| error;
+    assert_eq!(
+        empty_chunk_refusal("BLASTN"),
+        "a query chunk without a query is not supported by LOSAT's BLASTN"
+    );
+    // Empty chunk (140/100 on L=90) refuses in `new` before any read or check.
+    let empty_sizes = SplitSizes::new(false, Some(140), None);
+    let empty_chunks = split_query_batch(&[90], empty_sizes, QueryStrand::Both).expect("split");
+    let err = SplitBatchSteps::new(
+        "BLASTN",
+        &empty_chunks,
+        empty_sizes,
+        Some(ReadFails::Setup),
+        Err(SetupCheckFailure::Engine(anyhow::anyhow!("short"))),
+        &stop,
+    )
+    .err()
+    .expect("empty chunk stops");
+    assert_eq!(err.to_string(), empty_chunk_refusal("BLASTN"));
+
+    // Approved Exception 1 (150/100 on L=101): `chunk_would_be_split` is true, so default stops
+    // while `without_resplit_stop` searches both chunks.
+    let ex1_sizes = SplitSizes::new(false, Some(150), None);
+    let ex1_chunks = split_query_batch(&[101], ex1_sizes, QueryStrand::Both).expect("split");
+    assert!(chunk_would_be_split(&ex1_chunks, ex1_sizes));
+    let mut strict = SplitBatchSteps::new("BLASTN", &ex1_chunks, ex1_sizes, None, Ok(()), &stop)
+        .expect("non-empty");
+    assert!(strict.before_read(&ex1_chunks[0], true).is_err());
+    let mut blastn = SplitBatchSteps::new("BLASTN", &ex1_chunks, ex1_sizes, None, Ok(()), &stop)
+        .expect("non-empty")
+        .without_resplit_stop();
+    for chunk in &ex1_chunks {
+        assert_eq!(blastn.before_read(chunk, true).unwrap(), ChunkStep::Read);
+        blastn.before_search(true).expect("positive pair");
+    }
+
+    // Negative pair with gaps (-100/-200 on L=248): OID 0 read stops before validity; invalid
+    // chunks leave `unmet_checks` (`TracebackFailed` for engine error, preserved refusal for
+    // count-0/greedy); valid chunk meets setup checks, then `ReadFails::Search`, then D13 gaps.
+    let gap_sizes = SplitSizes::new(false, Some(-100), Some(-200));
+    let gap_chunks = split_query_batch(&[248], gap_sizes, QueryStrand::Both).expect("split");
+    let mut setup_read = SplitBatchSteps::new(
+        "BLASTN",
+        &gap_chunks,
+        gap_sizes,
+        Some(ReadFails::Setup),
+        Err(SetupCheckFailure::Engine(anyhow::anyhow!("short"))),
+        &stop,
+    )
+    .unwrap()
+    .without_resplit_stop();
+    assert_eq!(
+        setup_read.before_read(&gap_chunks[0], false).unwrap(),
+        ChunkStep::End
+    );
+
+    let mut gapvalid_engine = SplitBatchSteps::new(
+        "BLASTN",
+        &gap_chunks,
+        gap_sizes,
+        Some(ReadFails::Search),
+        Err(SetupCheckFailure::Engine(anyhow::anyhow!("short"))),
+        &stop,
+    )
+    .unwrap()
+    .without_resplit_stop();
+    for chunk in &gap_chunks {
+        assert_eq!(
+            gapvalid_engine.before_read(chunk, false).unwrap(),
+            ChunkStep::Skip
+        );
+    }
+    assert!(matches!(
+        gapvalid_engine.unmet_checks(),
+        Some(UnmetChecks::TracebackFailed)
+    ));
+
+    let mut gapvalid_refusal = SplitBatchSteps::new(
+        "BLASTN",
+        &gap_chunks,
+        gap_sizes,
+        None,
+        Err(SetupCheckFailure::Refusal(anyhow::anyhow!("count 0"))),
+        &stop,
+    )
+    .unwrap()
+    .without_resplit_stop();
+    for chunk in &gap_chunks {
+        assert_eq!(
+            gapvalid_refusal.before_read(chunk, false).unwrap(),
+            ChunkStep::Skip
+        );
+    }
+    assert!(matches!(
+        gapvalid_refusal.unmet_checks(),
+        Some(UnmetChecks::Refusal(error)) if error.to_string() == "count 0"
+    ));
+
+    let mut gap_valid = SplitBatchSteps::new("BLASTN", &gap_chunks, gap_sizes, None, Ok(()), &stop)
+        .unwrap()
+        .without_resplit_stop();
+    assert_eq!(
+        gap_valid.before_read(&gap_chunks[0], true).unwrap(),
+        ChunkStep::Read
+    );
+    gap_valid.before_search(false).expect("no subjects in hand");
+    let gap_err = gap_valid.before_search(true).unwrap_err();
+    assert_eq!(gap_err.to_string(), negative_split_refusal("BLASTN"));
 }

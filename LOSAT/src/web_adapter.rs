@@ -19,34 +19,150 @@
 
 use std::ffi::OsString;
 
-// The command line's arguments (`cli.rs`): the clap types of every program, the parser's
-// messages, the text that the command line prints where its reader stopped at a help word, and
-// the command line's own errors.
-pub use crate::cli::{
-    command_line_message, printed_text, Cli, Commands, NativeError, WEB_V2_PROGRAMS,
-};
+// The command line's arguments (`cli.rs`): the option types of every program, how NCBI's reader
+// and LOSAT's refusals end an argv (the text that the command line prints where its reader
+// stopped at a help word, an argument error's report, a refusal), and the command line's own
+// errors.
+pub use crate::cli::{ArgvError, Cli, Commands, NativeError, WEB_V2_PROGRAMS};
 
 // The values that NCBI's arguments allow, as LOSAT's argument tables give them (`ncbi_app::args`,
 // made from each program's NCBI XML): the genetic codes that `describe` lists and the tasks whose
-// defaults it resolves.
+// defaults it resolves (the defaults and the choices come with `described_parameters`).
 pub use crate::ncbi_app::args::{genetic_codes, string_values};
 
 /// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
-/// as the command line reads it after its application start, NCBI's single-dash options included.
-/// A run of ABI v2 makes its own start (`start_run`), so the toolkit's words that the start reads
-/// (`-logfile`, `-conffile`, `-dryrun`) are taken, as the library API takes them, and the help
-/// words stop the reader as on the command line, `-xmlhelp` included: the run prints their text
-/// (`printed_text`; line WQA's D14, 2026-11-20). The versions are printed by the start
-/// (`CallerStart::version`) and never reach the reader.
+/// as the command line reads it after its application start (NCBI's reader, LOSAT's refusals,
+/// the program's options: `cli::reader`). A run of ABI v2 makes its own start (`start_run`), so the
+/// toolkit's words that the start reads (`-logfile`, `-conffile`, `-dryrun`) are taken, as the
+/// library API takes them, and the help words stop the reader as on the command line, `-xmlhelp`
+/// included: the run prints their text (`ArgvError::Printed`; line WQA's D14, 2026-11-20). The
+/// versions are printed by the start (`CallerStart::version`) and never reach the reader.
+///
+/// The posts of an argument error go to the `-logfile` target of the run's start `started`
+/// (`CallerStart::target`: the file of `-logfile`, which the run hands over with
+/// `CallerStart::finish`), and the error's report is what the command line writes to its standard
+/// error then: NCBI's usage, its line that points to the error logs, the line of `=`. Without a
+/// start (an argv read on its own: `None`) the posts are the report's, as without `-logfile`.
 ///
 /// Only `Cli`: the adapter parses nothing else, so the façade does not offer the parser for any
-/// other clap type.
-pub fn try_parse_cli<I, S>(argv: I) -> Result<Cli, clap::Error>
+/// other type.
+pub fn try_parse_cli<I, S>(argv: I, started: Option<&CallerStart>) -> Result<Cli, ArgvError>
 where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    crate::cli::try_parse_with_printing_start(argv)
+    let target = started.map_or(
+        &crate::blastinput::ncbi_environment::DiagTarget::Stderr,
+        CallerStart::target,
+    );
+    crate::cli::try_parse_with_printing_start(argv, target)
+}
+
+/// The message of an argv that the reader or LOSAT's refusals end (`try_parse_cli`), as LOSAT Web
+/// gives it to the host (docs/web/abi_v2.md §4): an argument error's report as the command line
+/// writes it to its standard error, ending with its line end; LOSAT's refusal as the library API
+/// gives it (`api::Error::Argv`: without the command line's `Error: ` and newline); the text that
+/// the command line prints where the reader stopped at a help word.
+pub fn argv_message(error: &ArgvError) -> String {
+    error.to_string()
+}
+
+/// Scans `words` (the command line after the program's name) using `program`'s NCBI argument
+/// definitions (`ncbi_app::args::scan_argv`), calling `visit(canonical_name, value)` for each
+/// recognized option before `--` (`None` for a flag, `Some(value)` for an option taking a value).
+pub fn scan_program_argv(
+    program: &str,
+    words: &[&str],
+    mut visit: impl FnMut(&'static str, Option<&str>),
+) {
+    crate::ncbi_app::args::scan_argv(program, words, |name, value| {
+        visit(name, value.and_then(std::ffi::OsStr::to_str));
+    });
+}
+
+/// The input file names that a `windowmasker` run with `words` opens for reading
+/// (`windowmasker::read_files`): `(for_logfile, for_out)`.
+pub fn windowmasker_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    crate::windowmasker::read_files(words)
+}
+
+/// File names that `seqdb` checks or opens for a search's `-db` (`dbs`) and BLASTN's
+/// `-filtering_db` (`filtering_dbs`), plus the taxonomy lookup files
+/// (`seqdb::taxdb::lookup_files_for_use`) when `outfmt` consults `taxdb`
+/// (`algorithm::common::database::outfmt_taxdb_use`) and `taxonomy4blast.sqlite3` when
+/// `expands_taxids` is true and a taxonomy file exists on the search path (line WQA D19b).
+pub fn search_database_read_files(
+    program: crate::api::Program,
+    arguments: &[&str],
+    registry: &dyn RegistryFiles,
+    dbs: &[&str],
+    filtering_dbs: &[&str],
+    outfmt: &str,
+    expands_taxids: bool,
+) -> Vec<Vec<u8>> {
+    use crate::algorithm::common::database::{
+        outfmt_prefetches_taxdb, outfmt_taxdb_use, OutfmtTaxdbUse,
+    };
+    use crate::report::archive::options::RequestKind;
+    let request_kind = match program {
+        crate::api::Program::Blastp => RequestKind::Blastp,
+        crate::api::Program::Blastn => RequestKind::Blastn,
+        crate::api::Program::Blastx => RequestKind::Blastx,
+        crate::api::Program::Tblastn => RequestKind::Tblastn,
+        crate::api::Program::Tblastx => RequestKind::Tblastx,
+        crate::api::Program::Psiblast => RequestKind::Psiblast,
+    };
+    let has_db = !dbs.is_empty();
+    let taxdb_use = outfmt_taxdb_use(outfmt, request_kind, has_db);
+    if !has_db && filtering_dbs.is_empty() && taxdb_use == OutfmtTaxdbUse::None {
+        return Vec::new();
+    }
+    let blastdb = crate::blastinput::ncbi_environment::ApplicationStart::with_files(
+        program.name(),
+        arguments,
+        &[],
+        registry,
+    )
+    .settings()
+    .ok()
+    .and_then(|settings| settings.blastdb);
+    let seqtype = match program {
+        crate::api::Program::Blastp
+        | crate::api::Program::Blastx
+        | crate::api::Program::Psiblast => crate::seqdb::SeqType::Protein,
+        crate::api::Program::Blastn
+        | crate::api::Program::Tblastn
+        | crate::api::Program::Tblastx => crate::seqdb::SeqType::Nucleotide,
+    };
+    let mut out = Vec::new();
+    let push_db = |out: &mut Vec<Vec<u8>>, db: &str, db_type: crate::seqdb::SeqType| {
+        let trimmed = crate::seqdb::db_argument_name_bytes(db.as_bytes());
+        out.extend(crate::seqdb::alias::database_lookup_files(
+            trimmed,
+            db_type,
+            blastdb.as_deref(),
+        ));
+    };
+    for db in dbs {
+        push_db(&mut out, db, seqtype);
+    }
+    let prefetches = has_db && outfmt_prefetches_taxdb(outfmt);
+    out.extend(crate::seqdb::taxdb::lookup_files_for_use(
+        blastdb.as_deref(),
+        taxdb_use,
+        prefetches,
+    ));
+    if has_db && expands_taxids {
+        let tax_file = crate::blastinput::db_filter::TAXONOMY_FILE.as_bytes();
+        let search = crate::seqdb::SearchPath::from_environment(blastdb.as_deref());
+        if search.resolve_file(tax_file).is_some() {
+            out.push(tax_file.to_vec());
+        }
+    }
+    for fdb in filtering_dbs {
+        push_db(&mut out, fdb, crate::seqdb::SeqType::Nucleotide);
+    }
+    out
 }
 
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
@@ -56,7 +172,203 @@ pub use crate::api::start::{CallerSink, CallerStart, ErrorSource};
 pub use crate::blastinput::ncbi_environment::{
     log_file, preparse, ApplicationSettings, Preparsed, RegistryFiles, TextPlace,
 };
-pub use crate::report::run_files::{FileReceiver, RunFiles};
+pub use crate::report::run_files::{FileReceiver, FileStream, RunFiles};
+/// The names of the command line's programs (`losat <program>`, and the names that run one without
+/// its word): LOSAT Web's tool run tells a program that it does not run from a name that is none.
+pub use crate::utils::entry_names::ENTRY_NAMES as PROGRAMS;
+
+// The search strategy file of a run (`-export_search_strategy`, line RG item F1w): made through the
+// run's files where the command line makes it, and given to each search of the run.
+pub use crate::report::archive::strategy::StrategyFile;
+
+/// What LOSAT Web reads of the arguments of a search that may write `-export_search_strategy`
+/// (`search_files`): the name of the strategy file, the program's label in NCBI's messages, the
+/// files of `-query`, `-subject` and BLASTN's `-window_masker_db`, and what the search reads from
+/// the run's working directory: the filters of the database of `-db` (`filter`, `None` without
+/// `-db`) and BLASTN's `-filtering_db` (`repeats`).
+struct SearchFiles<'a> {
+    strategy: Option<&'a std::path::Path>,
+    label: &'a str,
+    query: &'a std::path::Path,
+    subject: Option<&'a std::path::Path>,
+    masker: Option<&'a std::ffi::OsStr>,
+    filter: Option<&'a crate::blastinput::db_filter::DbFilterArgs>,
+    repeats: Option<&'a std::ffi::OsStr>,
+}
+
+/// `SearchFiles` of the arguments `command`: `None` for a program that writes no strategy file.
+fn search_files(command: &Commands) -> Option<SearchFiles<'_>> {
+    let (strategy, label, query, subject, db, filter, masker, repeats) = match command {
+        Commands::Blastp(args) => (
+            &args.export_search_strategy,
+            args.app.name(),
+            &args.query,
+            &args.subject,
+            &args.db,
+            &args.db_filter,
+            None,
+            None,
+        ),
+        Commands::Blastn(args) => (
+            &args.export_search_strategy,
+            "BLASTN",
+            &args.query,
+            &args.subject,
+            &args.db,
+            &args.db_filter,
+            args.window_masker_db.as_deref(),
+            args.filtering_db.as_deref(),
+        ),
+        Commands::Tblastn(args) => (
+            &args.export_search_strategy,
+            "TBLASTN",
+            &args.query,
+            &args.subject,
+            &args.db,
+            &args.db_filter,
+            None,
+            None,
+        ),
+        Commands::Tblastx(args) => (
+            &args.export_search_strategy,
+            "TBLASTX",
+            &args.query,
+            &args.subject,
+            &args.db,
+            &args.db_filter,
+            None,
+            None,
+        ),
+        Commands::Blastx(args) => (
+            &args.export_search_strategy,
+            "BLASTX",
+            &args.query,
+            &args.subject,
+            &args.db,
+            &args.db_filter,
+            None,
+            None,
+        ),
+        _ => return None,
+    };
+    Some(SearchFiles {
+        strategy: strategy.as_deref(),
+        label,
+        query: query.as_path(),
+        subject: subject.as_deref(),
+        masker,
+        filter: db.is_some().then_some(filter),
+        repeats,
+    })
+}
+
+/// The `-export_search_strategy` file of the arguments `command` (`words`: the arguments after the
+/// program's name) of a run whose files go to `run_files` (LOSAT Web: `RunFiles::Receiver`), made
+/// where the command line makes it (`strategy::open_strategy_file_in`, as the command line's
+/// `open_strategy_file`): after the settings and a dry run's end, before `-outfmt` is read. `None`
+/// without the option. The error is the command line's (NCBI's `File is not accessible` for a name
+/// that the command line cannot open); the run's other files that the name may be are its `-query`,
+/// `-subject`, `-logfile`, BLASTN's `-window_masker_db`, and the files of the run's working directory
+/// that the search reads (`-db`, the lists of its filters, BLASTN's `-filtering_db`).
+pub fn open_strategy_file(
+    command: &Commands,
+    words: &[&str],
+    run_files: &RunFiles,
+) -> anyhow::Result<Option<StrategyFile>> {
+    use crate::report::run_files::RunFileName;
+    let Some(files) = search_files(command) else {
+        return Ok(None);
+    };
+    let mut others = vec![RunFileName {
+        option: "query",
+        name: files.query.as_os_str(),
+    }];
+    others.extend(files.subject.map(|subject| RunFileName {
+        option: "subject",
+        name: subject.as_os_str(),
+    }));
+    others.extend(log_file(words).map(|name| RunFileName {
+        option: "logfile",
+        name,
+    }));
+    others.extend(files.masker.map(|masker| RunFileName {
+        option: "window_masker_db",
+        name: masker,
+    }));
+    // The files of the run's working directory that the search reads (docs/web/abi_v2.md §3), which
+    // the host gives the engine there: with `-db` (line WQA D12a) the database and the lists of its
+    // filters, with BLASTN's `-filtering_db` (line RG item D4) the database of repeats. The lists are
+    // compared under their options; any other file of that directory that a relative name opens is
+    // a database's (the taxonomy database's too): `-filtering_db`'s for a name that starts with its
+    // value or in a run without `-db`, else `-db`'s.
+    if files.filter.is_some() || files.repeats.is_some() {
+        if let Some(filter) = files.filter {
+            for (option, list) in [
+                ("gilist", &filter.gilist),
+                ("negative_gilist", &filter.negative_gilist),
+                ("seqidlist", &filter.seqidlist),
+                ("negative_seqidlist", &filter.negative_seqidlist),
+                ("taxidlist", &filter.taxidlist),
+                ("negative_taxidlist", &filter.negative_taxidlist),
+                ("ipglist", &filter.ipglist),
+                ("negative_ipglist", &filter.negative_ipglist),
+            ] {
+                others.extend(list.as_deref().map(|name| RunFileName {
+                    option,
+                    name: std::ffi::OsStr::new(name),
+                }));
+            }
+        }
+        let read_there = files
+            .strategy
+            .filter(|path| path.is_relative() && path.is_file());
+        if let Some(path) = read_there {
+            let repeats = files.filter.is_none()
+                || files.repeats.is_some_and(|repeats| {
+                    crate::utils::os_bytes::os_str_bytes(path.as_os_str())
+                        .starts_with(&crate::utils::os_bytes::os_str_bytes(repeats))
+                });
+            others.push(RunFileName {
+                option: if repeats { "filtering_db" } else { "db" },
+                name: path.as_os_str(),
+            });
+        }
+    }
+    crate::report::archive::strategy::open_strategy_file_in(
+        run_files,
+        files.strategy,
+        files.label,
+        &others,
+    )
+}
+
+/// Gives the search of `command` (a search of LOSAT Web's run of the argv, `run_local`) the export
+/// of its requests into `file` (`open_strategy_file`), made as the command line's run makes it
+/// (`StrategyExport::for_args`, the program's `StrategyArgs`), with the `HitlistSize` of the argv's
+/// format numbered `outfmt`, none for a value that the early reading left to the formatting
+/// handler (`early_format_choice`), as the command line's (the archive's request shares the
+/// export's options handle, `run_local` and `run_local_database`).
+pub fn give_strategy(command: &mut Commands, file: StrategyFile, outfmt: Option<i32>) {
+    use crate::report::archive::strategy::{StrategyArgs, StrategyExport};
+    let options = crate::report::archive::OptionsHandle::default();
+    let export =
+        |args: &dyn StrategyArgs| Some(StrategyExport::for_args(args, file, outfmt, &options));
+    match command {
+        Commands::Blastp(args) => args.strategy = export(&*args),
+        Commands::Blastn(args) => args.strategy = export(&*args),
+        Commands::Tblastn(args) => args.strategy = export(&*args),
+        Commands::Tblastx(args) => args.strategy = export(&*args),
+        Commands::Blastx(args) => args.strategy = export(&*args),
+        _ => {}
+    }
+}
+
+/// The `-export_search_strategy` name of the arguments `command`, if any: a run that writes the file
+/// reads its records as the command line's reader then reads them (their deflines kept, LOSAT
+/// Web's `store`).
+pub fn export_search_strategy_of(command: &Commands) -> Option<&std::path::Path> {
+    search_files(command)?.strategy
+}
 
 /// The NCBI application start of a run of `program` with the arguments `words` (after the
 /// program's name), as the command line's (`cli::main_entry`) in an environment of the
@@ -75,6 +387,89 @@ pub fn start_run(
         program, words, variables, files,
     );
     crate::api::start::begin_with(start, words, run_files, diagnostics)
+}
+
+/// Runs `windowmasker` with `words` (the command line after `losat windowmasker`) as the command
+/// line runs it in its working directory, and its exit status (the tool runs of ABI v2,
+/// `losat_web2_tool`; line NP WW3a, 2026-11-22): it opens its input files by name in the run's
+/// working directory, which LOSAT Web's host gives the engine (docs/web/abi_v2.md §3), reads `input`
+/// where the command line reads its standard input, writes its standard output to `out` and its
+/// standard error to `err`, and gives the files that it writes (`-out FILE`, `-logfile FILE`) to
+/// `run_files` (`RunFiles::Receiver`: each file as it is written when the receiver opens it,
+/// `FileReceiver::open`, else whole when the run ends; one file per path, also where the run opens
+/// it twice, `-out x -logfile x`, as the system shares it). The application start is the command
+/// line's (its environment and its registry files: the run's `.ncbirc`, the file of `-conffile`),
+/// and `-xmlhelp` prints NCBI's XML, as there.
+pub fn run_windowmasker(
+    words: &[&str],
+    run_files: &RunFiles,
+    input: &mut dyn std::io::Read,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> i32 {
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    crate::windowmasker::run_in(&words, run_files, input, out, err)
+}
+
+/// Checks the words of a `windowmasker` run as `run_windowmasker` runs them, up to where the tool
+/// reads its input or opens a file: the application start (which reads the registry files of the
+/// run's working directory, `.ncbirc`, the file of `-conffile`, as the command line does), the
+/// arguments (NCBI's reader and its checks), LOSAT's settings and the checks of the mode before its
+/// files (`-mk_counts` with `-ids` and `-exclude_ids`, or with `-infmt seqids`; `-convert -in -`)
+/// (LOSAT Web's validation of a tool's words, `losat_web2_validate`; line NP WW3a, D-WW3-7 and
+/// D-WW3-10, 2026-11-23). `Err` with what the command line writes for the words that it refuses:
+/// its standard error, then the file of `-logfile` where the argv has one, without the last line
+/// end.
+pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
+    use std::sync::{Arc, Mutex};
+    /// The file of `-logfile`, kept for the message, carrying the tool's read input names so
+    /// `-logfile` and `-out` naming a missing input that the CLI reads back are refused.
+    struct Log {
+        bytes: Mutex<Vec<u8>>,
+        read: Vec<Vec<u8>>,
+        out_read: Vec<Vec<u8>>,
+    }
+    impl FileReceiver for Log {
+        fn receive(&self, _name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+            self.bytes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .extend_from_slice(bytes);
+            Ok(())
+        }
+
+        fn read_files(&self) -> &[Vec<u8>] {
+            &self.read
+        }
+
+        fn output_read_files(&self) -> &[Vec<u8>] {
+            &self.out_read
+        }
+    }
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    let (read, out_read) = crate::windowmasker::read_files(&words);
+    let log = Arc::new(Log {
+        bytes: Mutex::new(Vec::new()),
+        read,
+        out_read,
+    });
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let status =
+        crate::windowmasker::check_in(&words, &RunFiles::Receiver(log.clone()), &mut out, &mut err);
+    if status == 0 {
+        return Ok(());
+    }
+    err.extend_from_slice(&out);
+    err.extend_from_slice(
+        &log.bytes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    if err.last() == Some(&b'\n') {
+        err.pop();
+    }
+    Err(String::from_utf8_lossy(&err).into_owned())
 }
 
 // The checks of the options alone, without the inputs (the `validate` of ABI v2), and BLASTN's
@@ -126,8 +521,8 @@ pub use crate::wording::{
 pub use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, SAM as SAM_FORMAT};
 pub use crate::blastinput::app::Program as EngineProgram;
 pub use crate::blastinput::app::{
-    engine_error, formatting_handler_check, missing_subject_error, parse_formatting_string,
-    report_format,
+    early_format_choice, engine_error, formatting_handler_check, missing_subject_error,
+    parse_formatting_string, report_format, EarlyFormat,
 };
 
 // The hit list sizes of the formats (`blastinput/report_counts.rs`), the scoring matrices that
@@ -149,21 +544,44 @@ pub use crate::blastinput::fasta_reader::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
 // The reader's own counts for LOSAT Web's index scan (`web/adapter/src/scan/ncbi.rs`), which reads
-// the inputs as the reader does without holding their letters: the letters of a `>?` gap line and
-// the refusal of a record longer than LOSAT reads.
+// the inputs as the reader does without holding their letters: the letters of a `>?` gap line,
+// the refusal of a record longer than LOSAT reads, and the `-parse_deflines` molecule and letter
+// rules (`defline_named_molecule`, `DataLineAlphabet`).
+pub use crate::blastinput::fasta_reader::believed::defline_named_molecule;
+pub use crate::blastinput::fasta_reader::reader::DataLineAlphabet;
 pub use crate::blastinput::fasta_reader::{gap_line_letters, record_too_long, MAX_RECORD_LETTERS};
 
+/// Every option of `program` that LOSAT's descriptions list, in the order of the usage line of the
+/// command line's `-help`, as the library API's `describe` gives each (NCBI's argument tables,
+/// line RG DECISIONS K4i-3-1): the rows of the adapter's `describe`, which leaves out the options
+/// that the adapter sets itself. `api::describe` lists the same rows but those that the library
+/// API sets.
+pub fn described_parameters(program: crate::api::Program) -> Vec<crate::api::Parameter> {
+    crate::api::described_parameters(program).collect()
+}
+
 /// The options of `program`'s command line that the browser's searches of records do not take:
-/// the search strategy file, which the library API refuses too (`api::search::file_options`), and
 /// tblastn's `-in_pssm` (the query as a PSSM file), which the browser refuses until line PS's PSW1
 /// (`tblastn::refuse_browser_pssm_query`; the library API's records take it, `api::Inputs::pssm`).
-/// The adapter's `describe` leaves them out.
+/// The adapter's `describe` leaves them out. The search strategy file, which the library API
+/// refuses (`api::search::file_options`), is a file of the run in the browser
+/// (`open_strategy_file`, line RG item F1w).
 pub fn records_refused_options(program: crate::api::Program) -> &'static [&'static str] {
     match program {
-        crate::api::Program::Tblastn => &["in_pssm", "export_search_strategy"],
-        program => crate::api::file_options(program),
+        crate::api::Program::Tblastn => &["in_pssm"],
+        _ => &[],
     }
 }
+
+// A search strategy file given as bytes (`-import_search_strategy`, `file_begin` kind 3): the
+// engine's import over them (the strategy's program's arguments, `program_of`), the file that the
+// parsed arguments name, and the warnings of the import, which the run writes first
+// (`api::strategy`; the same path as the command line's and the library's
+// `Search::read_strategy`).
+pub use crate::api::strategy::{
+    apply as import_strategy, import_name as strategy_file_name, program_of,
+    take_warnings as take_strategy_warnings,
+};
 
 // The WindowMasker unit counts of `-window_masker_db` that the adapter holds in memory under their
 // names (`file_begin`): NCBI's check of the format and the counts readers on the bytes, and the

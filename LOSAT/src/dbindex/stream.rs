@@ -9,12 +9,13 @@ use std::rc::Rc;
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqdb::mask::MaskRanges;
+use crate::seqdb::MaskBlock;
 use crate::seqdb::SeqType;
 use crate::seqid::model::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{BdbError, MaskBdbReader};
 use crate::sequence::title::get_title_without_source;
 use crate::writedb::fasta_source::reader::{
-    past_seq_pos_refusal, FastaReader, ReadError, ReaderFlags, ReaderWarning, Record, SeqInst,
+    FastaReader, ReadError, ReaderFlags, ReaderWarning, Record,
 };
 
 /// `CSequenceIStream::TSeqData` of a sequence (a null `seq_entry_` is `None` of `next`).
@@ -207,6 +208,9 @@ pub(crate) struct BlastDbStream {
     reader: MaskBdbReader,
     /// `filter_algo_id_` when `use_filter_`.
     filter: Option<i32>,
+    /// The buffers of the masks' reads, kept from one sequence to the next
+    /// (`SeqDb::mask_ranges_in`).
+    mask_block: MaskBlock,
     /// NCBI's warning 803.10 of the read of a header that took a UTF8String for a VisibleString
     /// (without its line feed), once in the run, to be posted before the sequence's messages.
     warnings: Vec<Vec<u8>>,
@@ -225,7 +229,8 @@ fn bdb_error(error: BdbError) -> StreamError {
 /// an `int`) or by the text of `-db_mask` (the `string` constructor).
 pub(crate) enum Filter<'a> {
     None,
-    Name(&'a str),
+    /// The bytes of `-db_mask`.
+    Name(&'a [u8]),
 }
 
 impl BlastDbStream {
@@ -236,13 +241,13 @@ impl BlastDbStream {
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:48-57
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:62-96
     pub(crate) fn open(
-        dbname: &str,
+        dbname: &[u8],
         filter: Filter<'_>,
-        registry: Result<Option<&str>, &str>,
+        database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
         titles: bool,
     ) -> Result<Self, StreamError> {
         let mut reader =
-            MaskBdbReader::open(dbname, SeqType::Nucleotide, registry, false, super::PROGRAM)
+            MaskBdbReader::open(dbname, SeqType::Nucleotide, database, false, super::PROGRAM)
                 .map_err(bdb_error)?;
         if titles {
             reader.ask_get_title();
@@ -250,11 +255,12 @@ impl BlastDbStream {
         let mut stream = BlastDbStream {
             reader,
             filter: None,
+            mask_block: MaskBlock::default(),
             warnings: Vec::new(),
         };
         stream.filter = match filter {
             Filter::None => None,
-            Filter::Name(name) => match crate::ncbi_str::string_to_int(name.as_bytes(), 0).ok() {
+            Filter::Name(name) => match crate::ncbi_str::string_to_int(name, 0).ok() {
                 Some(id) => Some(stream.checked_id(id)?),
                 None => Some(stream.named_id(name)?),
             },
@@ -263,7 +269,7 @@ impl BlastDbStream {
     }
 
     /// `FindVolumePaths` (with `paths` and true) of the database opened as `dbname`.
-    pub(crate) fn volume_paths(&self, dbname: &str) -> Result<Vec<String>, StreamError> {
+    pub(crate) fn volume_paths(&self, dbname: &[u8]) -> Result<Vec<Vec<u8>>, StreamError> {
         self.reader.volume_paths(dbname).map_err(bdb_error)
     }
 
@@ -307,21 +313,23 @@ impl BlastDbStream {
     }
 
     /// `GetMaskAlgorithmId` of the database (`seqdb_`) with `name`; its `CSeqDBException` is thrown
-    /// again as a `CSequenceIStream_Exception`.
+    /// again as a `CSequenceIStream_Exception`. Its text is the reader's (`MaskAlgorithms::id_of`):
+    /// the remapper's for mask columns, the names table of `MASKLIST` for GI-indexed masks.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:78-94
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2266
-    fn named_id(&self, name: &str) -> Result<i32, StreamError> {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2292-2296
+    fn named_id(&self, name: &[u8]) -> Result<i32, StreamError> {
         let found = self
             .reader
             .db()
             .mask_algorithms()
             .map(|algorithms| algorithms.id_of(name))
             .map_err(|error| bdb_error(self.reader.database_error(error)))?;
-        if let Some(id) = found {
-            return Ok(id);
-        }
-        let message = "Cannot find string algorithm id in algorithm map.";
-        let site = crate::seqdb::throw_site(message.as_bytes())
+        let message = match found {
+            Ok(id) => return Ok(id),
+            Err(message) => message,
+        };
+        let site = crate::seqdb::throw_site(&message)
             .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
         Err(StreamError::Ncbi(
             NcbiException::new(site, message).rethrow(
@@ -402,7 +410,7 @@ impl SequenceStream for BlastDbStream {
             let db = self.reader.db();
             let ranges = db
                 .locate_oid(oid)
-                .and_then(|at| db.mask_ranges_at(at, algo_id))
+                .and_then(|at| db.mask_ranges_in(at, algo_id, &mut self.mask_block))
                 .map_err(|error| bdb_error(self.reader.database_error(error)))?;
             match ranges {
                 MaskRanges::Ranges(ranges) => masks.push(
@@ -485,18 +493,29 @@ impl<'a> FastaStream<'a> {
         let record: Record = match result {
             Ok(record) => record,
             // NCBI catches every exception of the reader and ends the input.
-            Err(ReadError::Parse(_) | ReadError::Ncbi(_) | ReadError::OutOfMemory) => {
-                return Ok(None)
+            Err(
+                ReadError::Parse(_)
+                | ReadError::Ncbi(_)
+                | ReadError::OutOfMemory
+                | ReadError::OutOfRange { .. },
+            ) => return Ok(None),
+            // NCBI crashes (SIGSEGV) where the reader packs the record.
+            Err(ReadError::PackOverflow) => {
+                return Err(StreamError::Refused(super::unsupported(
+                    &crate::writedb::fasta_source::reader::pack_overflow_what(),
+                )));
             }
         };
-        if let SeqInst::PastSeqPos { length, .. } = record.inst {
-            let mut id = Vec::new();
-            if let Some(first) = record.ids.first() {
-                crate::seqid::label::fasta(first, &mut id);
-            }
-            return Err(StreamError::Refused(super::unsupported(
-                &past_seq_pos_refusal(&String::from_utf8_lossy(&id), length),
-            )));
+        // Gaps stay pieces only where their sum wraps NCBI's `TSeqPos` to 0 past 2^32
+        // letters (`reader::RecordState::assemble_seq`); the index reads the sequence's
+        // `CSeqVector` outside the reader's `try`.
+        if let Some(fault) = crate::seqmasks_io::fasta_reader::seq_map_error(
+            &record.inst,
+            crate::seqmasks_io::fasta_reader::SeqMapRead::Sequential,
+        ) {
+            return Err(StreamError::Ncbi(
+                crate::seqmasks_io::fasta_reader::seq_map_exception(fault.error),
+            ));
         }
         let id = if self.titles {
             let ids = [ParsedSeqId::Local(crate::seqid::model::ObjectId::Id(

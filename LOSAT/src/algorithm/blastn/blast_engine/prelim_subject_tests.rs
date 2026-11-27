@@ -1,6 +1,14 @@
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 use super::super::SeqRanges;
 use super::*;
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 fn chunk(length: usize) -> SubjectChunk {
     SubjectChunk {
         offset: 0,
@@ -16,6 +24,10 @@ fn chunk(length: usize) -> SubjectChunk {
 /// The batches of `next_chunk_batch` of the chunks of `lengths` with at most `max_jobs` jobs
 /// each: per batch the lengths of each job's chunks. Fails if a batch is empty or the chunks
 /// come out of order, or if `next_chunk` is called after it ended.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 fn batches(lengths: &[usize], max_jobs: usize) -> Vec<Vec<Vec<usize>>> {
     let mut source = lengths.iter().enumerate();
     let mut ended = false;
@@ -60,6 +72,10 @@ fn batches(lengths: &[usize], max_jobs: usize) -> Vec<Vec<Vec<usize>>> {
 // too) are one job, searched serially; full chunks are a job each, as are the chunks of a
 // range over MAX_DBSEQ_LEN letters after a short one (`hard1` of
 // `tests/blastn_db_hard_long.rs`: 1,001, 5,000,000 and 299,100 letters).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 #[test]
 fn chunk_batches_hold_jobs_of_at_most_ncbi_s_chunk_length() {
     const MAX: usize = MAX_DBSEQ_LEN;
@@ -123,5 +139,50 @@ fn chunk_batches_hold_jobs_of_at_most_ncbi_s_chunk_length() {
                 assert!(letters + following[0] > MAX, "{lengths:?} {max_jobs}");
             }
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1526
+// PD-LOSAT-NCBI-DEFECTS 1.21 (rule 3): `record_chunk_merge_error` orders cell entries by ordinal
+// id while naming the sequence by its mapped database OID (`OidMap::oid`), so filtered databases
+// (`-gilist`, `-seqidlist`, `-taxids`, alias ranges) report the real OID rather than the ordinal.
+#[test]
+fn record_chunk_merge_error_names_mapped_oid_and_orders_by_ordinal() {
+    let cell: std::sync::Mutex<Option<(u32, anyhow::Error)>> = std::sync::Mutex::new(None);
+    let oid_of = |ordinal: u32| ordinal + 100;
+
+    record_chunk_merge_error(&cell, 42, oid_of);
+    {
+        let guard = cell.lock().unwrap();
+        let (key, error) = guard.as_ref().expect("recorded ordinal 42");
+        assert_eq!(*key, 42);
+        assert!(
+            error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>(),
+            "expected ShortChunkSeedRefusal, got {error:?}"
+        );
+        let text = error.to_string();
+        assert!(text.contains("BLASTN: sequence of OID 142"), "{text}");
+        assert!(!text.contains("OID 42"), "{text}");
+        assert!(text.contains("undefined in NCBI BLAST+"), "{text}");
+    }
+
+    // A later subject (higher ordinal) does not replace an earlier ordinal.
+    record_chunk_merge_error(&cell, 50, oid_of);
+    {
+        let guard = cell.lock().unwrap();
+        let (key, error) = guard.as_ref().expect("kept ordinal 42");
+        assert_eq!(*key, 42);
+        assert!(error.to_string().contains("BLASTN: sequence of OID 142"));
+    }
+
+    // An earlier subject (lower ordinal) replaces the higher ordinal and names its mapped OID.
+    record_chunk_merge_error(&cell, 5, oid_of);
+    {
+        let guard = cell.lock().unwrap();
+        let (key, error) = guard.as_ref().expect("replaced with ordinal 5");
+        assert_eq!(*key, 5);
+        let text = error.to_string();
+        assert!(text.contains("BLASTN: sequence of OID 105"), "{text}");
+        assert!(!text.contains("OID 5"), "{text}");
     }
 }

@@ -7,9 +7,13 @@
 //! holds for its other formats.
 //!
 //! - `options`: the request's `algorithm-options` (the fold of NCBI's `Set*` calls);
+//! - `fields`: the Blast4 parameters' names and value types, which the writer and the reader share;
 //! - `bioseq`: the Bioseq of a query or subject record;
 //! - `masks`: the `Blast4-mask` lists (results and the `LCaseMask` options);
-//! - `writer`: the document.
+//! - `writer`: the document;
+//! - `read`: the reader of an archive file (`blast_formatter -archive`): its objects one after
+//!   another, each as the typed request and results NCBI's `CRemoteBlast` reads; and what NCBI
+//!   makes of a stored request (the options and queries of a search strategy).
 //!
 //! What a run keeps from one archive to the next is `RunState`: the diagnostics saved since the
 //! last archive (`DiagLog`) and what the searches have set in the options handle so far
@@ -18,8 +22,10 @@
 //! - `requests`: the request inputs of a batch from its records.
 
 pub mod bioseq;
+pub mod fields;
 pub mod masks;
 pub mod options;
+pub(crate) mod read;
 pub mod requests;
 pub mod strategy;
 pub mod writer;
@@ -43,12 +49,16 @@ use crate::stats::tables::KarlinParams;
 use options::OptionInputs;
 
 pub use writer::{
-    write_archive, write_error_archive, AlignSource, ArchiveOut, BatchArchive, KaBlock,
-    RequestInputs, SearchedContext0,
+    write_archive, write_error_archive, AlignSource, ArchiveOut, ArchiveRound, BatchArchive,
+    KaBlock, RequestInputs, SearchedContext0,
 };
 
-/// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.
+/// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes: the missing
+/// one (-1) for a block that the ancillary data does not keep (`stats::tables::ancillary_kept`).
 pub(crate) fn ka_block(params: &KarlinParams, gapped: bool) -> KaBlock {
+    if !crate::stats::tables::ancillary_kept(params.lambda) {
+        return KaBlock::missing(gapped);
+    }
     KaBlock {
         lambda: params.lambda,
         k: params.k,
@@ -100,6 +110,18 @@ impl ArchiveEncoding {
         }
     }
 
+    /// The format of the delay buffers that the archive's stream copies as they were read
+    /// (`Encoder::data_format` of its encoder); `None` where NCBI writes nothing.
+    pub(crate) fn data_format(self) -> Option<crate::report::serial::asn_input::Encoding> {
+        use crate::report::serial::asn_input::Encoding;
+        match self {
+            ArchiveEncoding::Text => Some(Encoding::Text),
+            ArchiveEncoding::Binary => Some(Encoding::Binary),
+            ArchiveEncoding::Xml => Some(Encoding::Xml),
+            ArchiveEncoding::Nothing => None,
+        }
+    }
+
     /// The encoding the environment asks for.
     pub fn from_env() -> Self {
         Self::of(std::env::var_os("ARCHIVE_FORMAT").as_deref())
@@ -124,7 +146,7 @@ impl ArchiveEncoding {
     /// Whether the string values of `params` are written as they are (`writes_text`).
     pub fn writes_params(self, params: &[options::Param]) -> bool {
         params.iter().all(|param| match &param.value {
-            options::ParamValue::Str(value) => self.writes_text(value.as_bytes()),
+            options::ParamValue::Str(value) => self.writes_text(value),
             _ => true,
         })
     }
@@ -137,9 +159,9 @@ impl ArchiveEncoding {
 /// `11 qseqid`; the batches' archives accept such a text (`-outfmt "11 <spec>"`), only the
 /// error archive does not. `TruncateSpaces` (`eTrunc_Both`) and `StringToInt` (flags 0) are
 /// `ncbi_str::truncate_spaces` and `ncbi_str::string_to_int`.
-pub fn writes_error_archive(outfmt: &str) -> bool {
+pub fn writes_error_archive(outfmt: impl AsRef<[u8]>) -> bool {
     use crate::ncbi_str::{string_to_int, truncate_spaces};
-    string_to_int(truncate_spaces(outfmt.as_bytes()), 0)
+    string_to_int(truncate_spaces(outfmt.as_ref()), 0)
         .is_ok_and(|value| value == crate::blastinput::app::output_format::ARCHIVE_FORMAT)
 }
 
@@ -161,14 +183,15 @@ pub struct ArchiveRequest {
     /// from the records).
     pub database: Option<Vec<u8>>,
     /// The `Web_StepNumber` format option: psiblast's `-num_iterations` with `-db`, when it is not
-    /// 0.
+    /// 0 (the search strategy's; psiblast's archive of a round has the round's number,
+    /// `writer::ArchiveRound`).
     pub step_number: Option<i32>,
 }
 
 impl ArchiveRequest {
     /// The request of a run of `inputs.kind`: `database` is the `-db` argument as typed (`None`
     /// for `-subject`).
-    pub(crate) fn for_inputs(inputs: &OptionInputs, database: Option<&str>) -> Self {
+    pub(crate) fn for_inputs(inputs: &OptionInputs, database: Option<&[u8]>) -> Self {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:289-295,305-309
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:745-751
         // psiblast's `-num_iterations` (1 by default) with `-db` (`p9.ps.q.db.itdef.f6`), none
@@ -178,10 +201,12 @@ impl ArchiveRequest {
             .filter(|&iterations| iterations != 0 && database.is_some());
         Self {
             program: inputs.kind.program(),
-            application: inputs.kind.application(),
+            application: inputs
+                .application
+                .unwrap_or_else(|| inputs.kind.application()),
             service: options::service(inputs.kind, &inputs.task),
             algorithm: options::algorithm_options(inputs),
-            database: database.map(|name| name.as_bytes().to_vec()),
+            database: database.map(<[u8]>::to_vec),
             step_number,
         }
     }
@@ -282,8 +307,8 @@ struct DatabaseMasking {
 
 #[derive(Debug)]
 struct DatabaseFilter {
-    /// The `TaxidList` or `NegativeTaxidList` program option.
-    list: Option<options::Param>,
+    /// The `GiList`/`NegativeGiList` and `TaxidList`/`NegativeTaxidList` program options.
+    list: Vec<options::Param>,
     /// How the `EffectiveSearchSpace` option of a searched batch is made.
     request_length: RequestLength,
 }
@@ -296,6 +321,8 @@ struct SearchSets {
     before_batches: Vec<options::Param>,
     /// Set by each batch's set-up, before its search space.
     each_batch: Vec<options::Param>,
+    /// Set by the application after each batch, after its search space.
+    after_batch: Vec<options::Param>,
 }
 
 /// What the searches of the batches that one writer of a run's requests (the archive, the search
@@ -308,14 +335,14 @@ pub struct HandleCarry(options::ParamList);
 impl OptionsHandle {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
     /// What the database's list and statistics make of the requests: its `program-options`
-    /// parameter (`DbFilterArgs::archive_parameter`), and how the `EffectiveSearchSpace` option
+    /// parameter (`DbFilterArgs::archive_parameters`), and how the `EffectiveSearchSpace` option
     /// of a searched batch is made (`RequestLength`, `common::database::note_archive_database_filter`):
     /// for a statistics length that is not positive it is not the search's own value, though the
     /// statistics of the results read the length of OID 0 (`SeqDb::statistics`). Set once per
     /// run, where the database is opened; a second setting is LOSAT's internal error.
     pub fn set_database_filter(
         &self,
-        list: Option<options::Param>,
+        list: Vec<options::Param>,
         request_length: RequestLength,
     ) -> anyhow::Result<()> {
         let set = self.0.filter.set(DatabaseFilter {
@@ -350,20 +377,24 @@ impl OptionsHandle {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:257-269
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:532
     /// The parameters that the run sets in the handle after the command line's options and
     /// besides the batches' `EffectiveSearchSpace`: `before_batches` once, before the first batch
-    /// (rpsblast's `CompositionBasedStats` 0 for a database without frequency ratios), and
+    /// (rpsblast's `CompositionBasedStats` 0 for a database without frequency ratios),
     /// `each_batch` at each batch's set-up (the RPS database's length and `.aux` costs,
-    /// `rps_search::volumes::search_sets`). Set once per run, where the database is opened; a
-    /// second setting is LOSAT's internal error.
+    /// `rps_search::volumes::search_sets`), and `after_batch` after each batch (psiblast's reset of
+    /// the composition-based statistics after PHI-BLAST's batch, `phi_hooks::note_handle_sets`).
+    /// Set once per run, where the database is opened; a second setting is LOSAT's internal error.
     pub fn set_search_sets(
         &self,
         before_batches: Vec<options::Param>,
         each_batch: Vec<options::Param>,
+        after_batch: Vec<options::Param>,
     ) -> anyhow::Result<()> {
         let set = self.0.search.set(SearchSets {
             before_batches,
             each_batch,
+            after_batch,
         });
         anyhow::ensure!(
             set.is_ok(),
@@ -390,8 +421,10 @@ impl OptionsHandle {
         self.0
             .filter
             .get()
-            .and_then(|filter| filter.list.clone())
+            .map(|filter| &filter.list)
             .into_iter()
+            .flatten()
+            .cloned()
             .chain(
                 self.0
                     .masking
@@ -412,11 +445,11 @@ impl OptionsHandle {
         let mut sets = options::ParamList::default();
         if let Some(search) = self.0.search.get() {
             for param in &search.before_batches {
-                sets.set(param.name, param.value.clone());
+                sets.set(param.field(), param.value.clone());
             }
         }
         for param in carry.0.params() {
-            sets.set(param.name, param.value.clone());
+            sets.set(param.field(), param.value.clone());
         }
         sets.into_params()
     }
@@ -427,11 +460,11 @@ impl OptionsHandle {
     /// (`SplitQuery_SetEffectiveSearchSpace` writes it into the handle): `searched` is the batch's
     /// context 0 (the option is the search's own value, or what `RequestLength` makes of it),
     /// `None` for a batch NCBI does not search, which leaves the option as the batch before left
-    /// it.
+    /// it; then what the application sets after the batch (`after_batch`).
     pub fn pass(&self, carry: &mut HandleCarry, searched: Option<SearchedContext0>) {
         if let Some(search) = self.0.search.get() {
             for param in &search.each_batch {
-                carry.0.set(param.name, param.value.clone());
+                carry.0.set(param.field(), param.value.clone());
             }
         }
         if let Some(context0) = searched {
@@ -441,9 +474,14 @@ impl OptionsHandle {
                 .get()
                 .map_or(RequestLength::Search, |filter| filter.request_length);
             carry.0.set(
-                "EffectiveSearchSpace",
+                fields::EFFECTIVE_SEARCH_SPACE,
                 options::ParamValue::BigInteger(length.space(context0)),
             );
+        }
+        if let Some(search) = self.0.search.get() {
+            for param in &search.after_batch {
+                carry.0.set(param.field(), param.value.clone());
+            }
         }
     }
 
@@ -504,7 +542,7 @@ impl ArchiveHandle {
     /// (made once per run; its search strategy shares it).
     pub fn for_program(
         inputs: &OptionInputs,
-        database: Option<&str>,
+        database: Option<&[u8]>,
         options: &OptionsHandle,
     ) -> Self {
         Self::for_encoding(ArchiveEncoding::from_env(), inputs, database, options)
@@ -514,7 +552,7 @@ impl ArchiveHandle {
     pub fn for_encoding(
         encoding: ArchiveEncoding,
         inputs: &OptionInputs,
-        database: Option<&str>,
+        database: Option<&[u8]>,
         options: &OptionsHandle,
     ) -> Self {
         Self::new(
@@ -549,7 +587,7 @@ impl ArchiveHandle {
     /// (`writes_error_archive`): NCBI's `PrintErrorArchive` writes none for `11 <spec>`.
     /// The archives of the batches are not affected.
     #[must_use]
-    pub fn with_outfmt_text(self, outfmt: &str) -> Self {
+    pub fn with_outfmt_text(self, outfmt: impl AsRef<[u8]>) -> Self {
         self.0
             .error_archive
             .store(writes_error_archive(outfmt), Ordering::Relaxed);
@@ -641,6 +679,11 @@ impl ArchiveHandle {
         self.with_state(|state| state.log.take())
     }
 
+    /// The messages of an archive whose write failed, saved again (`DiagLog::restore`).
+    pub fn restore_messages(&self, messages: Vec<Message>) {
+        self.with_state(|state| state.log.restore(messages));
+    }
+
     /// What the next archive's request holds of the options handle beyond the command line's
     /// options, after its batch (`OptionsHandle::request_sets`): its `EffectiveSearchSpace` option
     /// is the batch's own value when the batch was searched (`searched`, its context 0; kept for
@@ -713,11 +756,40 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
     fn real(&mut self, _: f64) {}
     fn octets(&mut self, _: &[u8]) {}
     fn null(&mut self) {}
-    fn utf8_str(&mut self, _: &[u8]) {}
+    fn null_element(&mut self, _: &str) {}
+    /// NCBI's XML stream checks a UTF8String's bytes as a VisibleString's
+    /// (`XmlEncoder::utf8_str`); ASN.1 text writes them as they are.
+    fn utf8_str(&mut self, value: &[u8]) {
+        if self.encoding == ArchiveEncoding::Xml {
+            self.as_is &= self.encoding.writes_text(value);
+        }
+    }
+    /// The archive's stream copies a buffer of its format (its strings are written as they were
+    /// read) and writes a buffer of another format by its values, whose strings are checked.
+    fn data_format(&self) -> Option<crate::report::serial::asn_input::Encoding> {
+        self.encoding.data_format()
+    }
     fn delayed(&mut self, _: &[u8]) {}
+    fn unread_delayed(&mut self) {}
+    /// A delayed member whose read posts replaced bytes: written through `Traced`, which posts
+    /// them.
+    fn delayed_posts(&mut self, _: &[crate::report::serial::encoder::ReplacedChar]) {
+        self.as_is = false;
+    }
     fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
         None
     }
+}
+
+/// Whether `encoding` writes the strings of the PSSM `pssm` (a request's `queries pssm`) as they
+/// are: its VisibleStrings, and in XML its UTF8Strings.
+pub(crate) fn pssm_written_as_is(
+    encoding: ArchiveEncoding,
+    pssm: &crate::report::serial::pssm::PssmWithParameters,
+) -> bool {
+    let mut check = StringsAsIs::new(encoding);
+    crate::report::serial::pssm::write_value(&mut check, pssm);
+    check.as_is
 }
 
 /// Whether `encoding` writes the strings of the Seq-id `id` as they are.
@@ -728,6 +800,122 @@ pub(crate) fn seq_id_written_as_is(
     let mut check = StringsAsIs::new(encoding);
     id.write(&mut check);
     check.as_is
+}
+
+/// An encoder that writes nothing and finds the first value of a PSSM file's members (the values
+/// of the generic reader, `report::serial::asn_types::write`) that LOSAT's stream of the archive
+/// in `encoding` does not write as NCBI's does yet: a member that the reader kept in a delay
+/// buffer of another format (`Auth-list.names` of a binary or XML file in ASN.1 text, of a text
+/// or XML file in ASN.1 binary, of a text or binary file in XML), which NCBI's
+/// `CDelayBuffer::Update` reads again before it writes it, when that read fails
+/// (`Encoder::unread_delayed`: NCBI ends the run with its exception after the part of the archive
+/// that its buffer had written). A read that posts a replaced byte is written: through `Traced`
+/// (`pssm_written_as_is`), which posts it where NCBI does, while it writes the archive, so the
+/// archive's messages do not hold it (line RG-F3, PR 2: probe AR dlpost). A buffer of the
+/// stream's own format is copied (`Encoder::delayed`); the other values are written as NCBI
+/// writes them (line RG-F3, PR 2: the XML stream's anonymous SEQUENCE and CHOICE, NULL and
+/// UTF8String, the binary stream's UTF8String and its NaN and infinite REALs; line PS item
+/// PS15b-1's probe XA, 2026-11-23). It also finds a list element stated as `NULL`
+/// (`Encoder::null_element`, `pssm_holds_null_element`), where every stream of NCBI's throws in
+/// the middle of the archive, as LOSAT's does through `Traced` (`encoder::NullElement`,
+/// `writer::write_archive`).
+struct PssmGaps {
+    encoding: ArchiveEncoding,
+    gap: Option<PssmGap>,
+    null_element: bool,
+}
+
+/// What an archive's stream does not write yet of a PSSM file's members (`pssm_unwritten`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PssmGap {
+    /// A member read into a delay buffer of another format that NCBI's `CDelayBuffer::Update`
+    /// reads again with an error (`Encoder::unread_delayed`), which no writer of LOSAT writes.
+    ReadAgain,
+}
+
+impl PssmGap {
+    /// The gap in the words of LOSAT's refusal.
+    pub(crate) fn what(self) -> &'static str {
+        match self {
+            PssmGap::ReadAgain => {
+                "a member read into a delay buffer of another format that NCBI reads again with an error"
+            }
+        }
+    }
+}
+
+impl crate::report::serial::encoder::Encoder for PssmGaps {
+    fn data_format(&self) -> Option<crate::report::serial::asn_input::Encoding> {
+        self.encoding.data_format()
+    }
+    fn begin_document(&mut self, _: &str) {}
+    fn end_document(&mut self) {}
+    fn begin_sequence(&mut self, _: &str) {}
+    fn end_sequence(&mut self) {}
+    fn member(&mut self, _: &str, _: u8) {}
+    fn end_member(&mut self) {}
+    fn begin_list(&mut self, _: bool) {}
+    fn element(&mut self) {}
+    fn end_list(&mut self) {}
+    fn variant(&mut self, _: &str, _: &str, _: u8) {}
+    fn end_variant(&mut self) {}
+    fn int(&mut self, _: i32) {}
+    fn big_int(&mut self, _: i64) {}
+    fn enumerated(&mut self, _: &str, _: i32) {}
+    fn named_int(&mut self, _: &str, _: i32) {}
+    fn boolean(&mut self, _: bool) {}
+    fn visible_str(&mut self, _: &[u8]) {}
+    fn real(&mut self, _: f64) {}
+    fn octets(&mut self, _: &[u8]) {}
+    fn null(&mut self) {}
+    /// A list element stated as `NULL`: every stream of NCBI's throws there in the middle of the
+    /// archive, as LOSAT's does through `Traced` (`encoder::NullElement`).
+    fn null_element(&mut self, _: &str) {
+        self.null_element = true;
+    }
+    fn utf8_str(&mut self, _: &[u8]) {}
+    fn delayed(&mut self, _: &[u8]) {}
+    fn unread_delayed(&mut self) {
+        if self.gap.is_none() && self.encoding != ArchiveEncoding::Nothing {
+            self.gap = Some(PssmGap::ReadAgain);
+        }
+    }
+    /// Written through `Traced` (`pssm_written_as_is`).
+    fn delayed_posts(&mut self, _: &[crate::report::serial::encoder::ReplacedChar]) {}
+    fn error(&self) -> Option<crate::report::serial::encoder::SerialError> {
+        None
+    }
+}
+
+/// What the archive's stream of `encoding` does not write yet of `pssm`, the PSSM that a
+/// request holds (`queries pssm`, `report::serial::pssm::write_value`; `PssmGaps`): `None` when
+/// it writes all of it as NCBI's does. The PSSMs that LOSAT makes (a FASTA query's later rounds,
+/// `-in_msa`) have none; a PSSM file's members can.
+pub(crate) fn pssm_unwritten(
+    encoding: ArchiveEncoding,
+    pssm: &crate::report::serial::pssm::PssmWithParameters,
+) -> Option<PssmGap> {
+    let mut check = PssmGaps {
+        encoding,
+        gap: None,
+        null_element: false,
+    };
+    crate::report::serial::pssm::write_value(&mut check, pssm);
+    check.gap
+}
+
+/// Whether `pssm` holds a list element stated as `NULL` (`PssmGaps::null_element`), where the
+/// archive's stream throws (`writer::RequestInputs::written_as_is`).
+pub(crate) fn pssm_holds_null_element(
+    pssm: &crate::report::serial::pssm::PssmWithParameters,
+) -> bool {
+    let mut check = PssmGaps {
+        encoding: ArchiveEncoding::Nothing,
+        gap: None,
+        null_element: false,
+    };
+    crate::report::serial::pssm::write_value(&mut check, pssm);
+    check.null_element
 }
 
 /// The error lines of a run that stopped with `error`, when NCBI writes an error archive for
@@ -745,8 +933,7 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-220
     // `BLAST options error:` is that report of an options error that the search raises inside
     // `Run`: BLASTN's database mask that the database lacks (`DbMaskOption::validate_at_open`,
-    // review 1 F1 of M4a-2a) and PSIBLAST's PSSM options (`IPssmInputData`; LOSAT's PSIBLAST
-    // refuses `-outfmt 11`).
+    // review 1 F1 of M4a-2a) and PSIBLAST's PSSM options (`IPssmInputData`).
     // (An exception report, `Error: ` and NCBI's `what()` in LOSAT's words, has exit status 255:
     // `catch_all` below, `cli::NativeError::exception`.)
     const PREFIXES: [&[u8]; 5] = [
@@ -756,6 +943,22 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
         OPTIONS_ERROR.as_bytes(),
         QUERY_OPTIONS_ERROR.as_bytes(),
     ];
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+    // The report stream's failure (`ostream::ReportStream::finish`): NCBI's handler saves the
+    // posts of the exception's region (802.4 of `~CObjectOStream`) and that post, one message
+    // each (`CBlastAppDiagHandler::Post`, blast_aux.cpp:1155-1170).
+    if native.exit == 6 && native.message.ends_with(b"BLAST failed to write output\n") {
+        return Some(
+            native
+                .message
+                .split(|&byte| byte == b'\n')
+                .filter_map(|line| {
+                    let text = crate::report::diag_log::sanitize(line);
+                    (!text.is_empty()).then_some((ERROR, text))
+                })
+                .collect(),
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
     // `CATCH_ALL`'s two reports of an exception, a `CException`'s and a `std::exception`'s
     // (`NativeError::exception`, `NativeError::std_exception`: exit status 255, `Error: `): the
@@ -797,9 +1000,12 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // several lines (an exception's chain), and the macro of an invalid input posts the user
     // manual footer (`USER_MANUAL_FOOTER`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12) as a
     // second one.
+    // The post of a stream's failure that `cli::NativeError::null_element` writes before
+    // `CATCH_ALL`'s report (`encoder::NullElement::post`) is a post of its own too.
     let refer_line = crate::wording::USER_MANUAL_FOOTER.as_bytes();
-    let text = &native.message[..native
-        .message
+    let (stream_post, report) =
+        crate::report::serial::encoder::NullElement::split_post(&native.message);
+    let text = &report[..report
         .iter()
         .rposition(|&byte| byte != b'\n')
         .map_or(0, |last| last + 1)];
@@ -808,7 +1014,9 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
         _ => (text, None),
     };
     Some(
-        std::iter::once(first)
+        stream_post
+            .into_iter()
+            .chain(std::iter::once(first))
             .chain(refer)
             .filter_map(|part| {
                 let text = crate::report::diag_log::sanitize(part);
@@ -841,7 +1049,7 @@ pub fn write_error_archive_after_post(
     handle: &ArchiveHandle,
     error: &anyhow::Error,
     lines: &[Message],
-    sink: &mut dyn Write,
+    sink: &mut dyn crate::report::ostream::ReportWrite,
 ) -> anyhow::Result<()> {
     if handle.error_archive_enabled() {
         let _ = sink.flush();

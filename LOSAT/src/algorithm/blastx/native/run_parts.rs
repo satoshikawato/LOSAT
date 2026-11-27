@@ -7,21 +7,21 @@
 //! handlers process the options and read the `-subject` file) is at `RunSetup::open`.
 //!
 //! This module is a child of `native` for the functions of that file it calls (`reported_error`,
-//! `archive_error`, `subject_input_error`, `reader_warning`, `batch_titles`, `ReportedAsks`). Each
+//! `archive_error`, `batch_titles`, `ReportedAsks`). Each
 //! function is the statements of `run_inner` at its place, in their order.
 
-use super::{
-    archive_error, batch_titles, reader_warning, reported_error, subject_input_error, ReportedAsks,
-};
+use super::{archive_error, batch_titles, reported_error, ReportedAsks};
 use crate::algorithm::blastx::args::{
     BlastxArgs, ProgramName, ResolvedOptions, SemanticOptionsError,
 };
 use crate::algorithm::blastx::database::{BlastxDatabase, ReportedSubjects};
-use crate::algorithm::blastx::input::{parse_fasta_stream_keeping, FastaRecord, FastaStream};
+use crate::algorithm::blastx::input::FastaRecord;
+use crate::algorithm::blastx::input_source::from_upper;
 use crate::algorithm::blastx::runtime::BatchResults;
 use crate::algorithm::blastx::subjects::Subjects;
 use crate::algorithm::blastx::{archive, seqalign};
 use crate::blastinput::app::{self, EarlyFormat, Program};
+use crate::blastinput::fasta_reader;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::blastinput::query_batch::QueryScopes;
 use crate::blastinput::seq_range::SequenceRange;
@@ -71,10 +71,10 @@ impl RunSetup {
         // that does not parse is left to the formatting handler (`app::early_format_choice`).
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
-            args.out.as_deref(),
             program.upper,
         )?;
-        let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+        let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt);
+        let choice = app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
         let format = choice.report_format(Program::Blastx, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -85,20 +85,14 @@ impl RunSetup {
             format == Some(app::ReportFormat::ArchiveFormat),
             &options_handle,
         )
-        .map(|handle| handle.with_outfmt_text(&args.outfmt));
+        .map(|handle| handle.with_outfmt_text(&outfmt_bytes));
         archive_slot.clone_from(&archive);
         // The search strategy's request, with the archive's options handle.
         let strategy = strategy_file.map(|file| {
-            crate::report::archive::strategy::StrategyExport::for_run(
+            crate::report::archive::strategy::StrategyExport::for_args(
+                args,
                 file,
-                archive::option_inputs(args),
                 choice.number(),
-                crate::report::archive::strategy::HitlistArgs {
-                    max_target_seqs: args.max_target_seqs.map(|count| count as usize),
-                    num_descriptions: args.num_descriptions,
-                    num_alignments: args.num_alignments,
-                },
-                args.db.as_deref().map(crate::seqdb::db_argument_name),
                 &options_handle,
             )
         });
@@ -181,36 +175,27 @@ pub(super) fn read_subjects(
         crate::blastinput::seq_range::RangeRole::Subject,
     )
     .map_err(early_archive_error)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:221-247
+    // The subjects are read as the other programs' are (`fasta_reader::read_subjects_upper`), each
+    // record's messages as it is read, and each is given its BLASTX form as it is read.
     let subjects = match subject_file {
-        Some(subject_file) => parse_fasta_stream_keeping(
-            &mut {
-                let mut stream = FastaStream::from_file(subject_file);
-                stream.parse_deflines = args.parse_deflines;
-                stream.id_scope = id_scope.clone();
-                stream.seq_id_role = settings.data_loaders.then_some("subject");
-                stream
-            },
-            true,
-            args.lcase_masking,
-            if subject_range.is_some() {
-                0
-            } else {
-                usize::MAX
-            },
-            archive.is_some() || strategy.is_some(),
-            None,
-            &mut |records| {
-                if let Some(range) = &subject_range {
-                    for record in records {
-                        crate::blastinput::seq_range::record_cut(range, record.sequence.len())?;
-                    }
-                }
-                Ok(())
-            },
-            &mut |warning| reader_warning(warning, stderr),
-        )
-        .map_err(subject_input_error)
-        .map_err(early_archive_error)?,
+        Some(subject_file) => {
+            let mut source = fasta_reader::FastaInputSource::from_file(
+                subject_file,
+                fasta_reader::ReaderConfig::subject("BLASTX", true, settings.data_loaders)
+                    .with_defline(archive.is_some() || strategy.is_some())
+                    .with_parse_deflines(args.parse_deflines),
+            );
+            source.set_id_scope(id_scope.clone());
+            fasta_reader::read_subjects_upper(
+                &mut source,
+                subject_range.as_ref(),
+                args.lcase_masking,
+                &mut |message| stderr.write_all(message),
+                |record, masks| Ok(from_upper(record, masks)),
+            )
+            .map_err(early_archive_error)?
+        }
         None => Vec::new(),
     };
     Ok((subject_range, subjects))
@@ -257,15 +242,12 @@ impl ArchiveBatch<'_> {
             query_scopes,
         } = self;
         // The BLAST archive (outfmt 11): one document per query batch, written from the
-        // data of outfmt 8's Seq-aligns.
-        for batch in results.iter_mut() {
-            for lists in &mut batch.queries {
-                for list in lists {
-                    list.sort_evalue();
-                }
-            }
-        }
-        let reported;
+        // data of outfmt 8's Seq-aligns, in the reports' order (`report::sort_lists`).
+        crate::algorithm::blastx::report::sort_lists(
+            results,
+            crate::algorithm::blastx::empty_rows::SubjectLoc::of_run(database.is_some()),
+        );
+        let mut reported;
         let (subject_names, call_subjects): (_, &[FastaRecord]) =
             match (&database, &pairwise_database) {
                 (Some(database), Some(pairwise)) => {
@@ -274,8 +256,10 @@ impl ArchiveBatch<'_> {
                         search_subjects,
                         results,
                         options.gapped,
-                        ReportedAsks::default(),
-                        &mut *diagnostics,
+                        // The archive reads no title besides the Seq-aligns' (no prefetch;
+                        // RPSTBLASTN still stays `Reports`).
+                        ReportedAsks::of_archive(options),
+                        (&mut *diagnostics, Some(handle)),
                     )? {
                         None => ReportedSubjects::default(),
                         Some(titles) => ReportedSubjects::for_batch(
@@ -293,8 +277,11 @@ impl ArchiveBatch<'_> {
                             false,
                             crate::report::tabular::PrintedIds::default(),
                             false,
-                            false,
-                            false,
+                            crate::report::db_subject::ReportRead {
+                                one_by_one: false,
+                                batch: Some(queries_before),
+                                prefetch_fails: false,
+                            },
                             usize::MAX,
                             (crate::report::db_subject::FormatThrow::Unread, None),
                         )
@@ -305,6 +292,7 @@ impl ArchiveBatch<'_> {
                             results,
                             options.gapped,
                             scopes.numbered_from(queries_before),
+                            &crate::report::query_bioseq::SeenRun::REFUSED,
                         )?;
                     }
                     (

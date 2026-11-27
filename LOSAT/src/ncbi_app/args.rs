@@ -5,7 +5,7 @@
 //! `CArgDescriptions` has (the help flags, `-logfile`, `-conffile`), reads the words, and refuses
 //! every command line that NCBI's reader refuses with NCBI's text: NCBI's conversion of each type
 //! (`Kind`) and NCBI's constraints (`Constraint`). NCBI reads the bytes of each word, and so does
-//! this reader (`parse`): an error quotes the bytes of the word, and a value keeps its bytes. The
+//! this reader (`parse_in`): an error quotes the bytes of the word, and a value keeps its bytes. The
 //! values are read as NCBI's `CArgs` gives them (`Args`): the text of a key, a flag, the integer of
 //! an `eInteger` key, the number of an `eDouble` key, and the streams of the file keys
 //! (`files::open_input_file`, `Args::output_file`, module `files`).
@@ -16,11 +16,15 @@ use std::io::Write;
 
 use super::files::{self, OutputFile};
 use super::Tool;
+use crate::report::run_files::OpenFiles;
 
 #[path = "constraint.rs"]
 mod constraint;
 
-pub(crate) use constraint::{file_name_length, is_genetic_code, string_to_int8, Constraint};
+pub(crate) use constraint::{is_genetic_code, string_to_int8, Constraint};
+// The file name rule of LOSAT Web ABI v1's own output path parser (`web_v1_argv`).
+#[cfg(any(losat_web_abi_v1, test))]
+pub(crate) use constraint::file_name_length;
 
 /// What an argument holds (`CArgDescriptions::EType` of a key, or a flag).
 ///
@@ -61,10 +65,11 @@ impl Kind {
     }
 }
 
-/// The converted value of an `eBoolean`, `eInteger` or `eDouble` key.
+/// The converted value of an `eBoolean`, `eInt8`, `eInteger` or `eDouble` key.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Number {
+pub(crate) enum Number {
     Boolean(bool),
+    Int8(i64),
     Integer(i32),
     Double(f64),
 }
@@ -117,6 +122,11 @@ pub(crate) struct Desc {
     constraint: Option<Constraint>,
     /// `AddKey` (a key without `optional="true"`): the key must be given (`CArgDescMandatory`).
     mandatory: bool,
+    /// `<description>`: the argument's comment, which NCBI's `-help` prints (`described`).
+    description: Text,
+    /// `fPreOpen` of an `eOutputFile` key (blastdb_aliastool's `-gi_file_out`): the reader opens
+    /// the file as it reads the word (`files::pre_open_output`).
+    pre_open: bool,
 }
 
 impl Desc {
@@ -168,6 +178,15 @@ impl Arguments {
         aliases.map(|&(alias, name)| (alias.get(), name.get()))
     }
 
+    /// The keys of `AddDefaultKey` with their defaults, in the order of `m_Args`: the values that
+    /// NCBI's `CArgs` holds for those the command line does not give (the import of a search
+    /// strategy compares them with the strategy's, `report::archive::read::import`).
+    pub(crate) fn defaults(self) -> impl Iterator<Item = (&'static str, &'static str)> {
+        self.descs()
+            .iter()
+            .filter_map(|desc| Some((desc.name(), desc.default()?)))
+    }
+
     /// The entries of `m_Dependencies`: (first name, dependency, second name).
     pub(crate) fn dependencies(self) -> impl Iterator<Item = (&'static str, Dep, &'static str)> {
         let dependencies = self.dependencies.of(&DEPENDENCIES).iter();
@@ -199,7 +218,7 @@ impl Refused {
 
 /// How LOSAT refuses one of NCBI's arguments that it does not run (AGENTS.md rule 2: explicit
 /// unsupported errors): the one list of them, the rows of `REFUSED` in `build/ncbi_args.rs` (line
-/// RG DECISIONS K4i-2), which the readers' and the runs' refusals (`cli::named_refusal`,
+/// RG DECISIONS K4i-2), which the readers' and the runs' refusals (`cli::reader::named_refusal`,
 /// `cli::run_refusal`) and `-xmlhelp` (`cli::xml_help_text`) read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Refusal {
@@ -255,12 +274,86 @@ pub fn string_values(program: &str, name: &str) -> Option<Vec<&'static str>> {
     }
 }
 
+/// The values that `program`'s key `name` allows where its constraint is a set (`CArgAllow_Strings`,
+/// `CArgAllowStringSet`, `CArgAllowIntegerSet`), as LOSAT's descriptions of the program list them:
+/// in the order of `DISPLAY_ORDERS` where it has a row (line RG DECISIONS K4i-2b-1), else of NCBI's
+/// set; `None` for a key of another constraint or none, and for a flag. The library API's and LOSAT
+/// Web's descriptions (`api::describe`, `web_adapter`) and the check of a task that a caller set
+/// (`value_parsers::TaskParser::check`) read it.
+pub fn choices(program: &str, name: &str) -> Option<Vec<String>> {
+    let display = DISPLAY_ORDERS
+        .iter()
+        .find(|(of, key, _)| of.is(program) && key.is(name));
+    if let Some((_, _, values)) = display {
+        return Some(constraint::strings(*values).map(str::to_string).collect());
+    }
+    match find_desc(arguments(program)?, name)?.constraint? {
+        Constraint::Strings(values) | Constraint::StringSet(values) => {
+            Some(constraint::strings(values).map(str::to_string).collect())
+        }
+        Constraint::IntegerSet(values) => Some(
+            constraint::integers(values)
+                .iter()
+                .map(i32::to_string)
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+/// One argument that LOSAT's descriptions of a program list (`described`), as NCBI's tables give
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Described {
+    /// The name, without its dash.
+    pub(crate) name: &'static str,
+    pub(crate) kind: Kind,
+    /// `<default>`: the default of a key of `AddDefaultKey`, which the library API's and LOSAT
+    /// Web's descriptions give as the option's default (line RG DECISIONS K4i-2b-1 (3)).
+    pub(crate) default: Option<&'static str>,
+    /// The values of its set (`choices`); empty for a key of another constraint or none, and for
+    /// a flag.
+    pub(crate) choices: Vec<String>,
+    /// `<description>`: NCBI's comment of the argument, which its `-help` prints (NCBI's words).
+    pub(crate) description: &'static str,
+}
+
+// No NCBI counterpart: line RG DECISIONS K4i-3-1. NCBI's `-help` prints the usage line first, which
+// names the arguments in the order in which the program described them (`usage_position`), then the
+// arguments with their comments, by group.
+/// The arguments of `tool`'s program that LOSAT's descriptions of it list (the library API's
+/// `describe`, LOSAT Web's): every argument of its XML (the arguments of every NCBI application,
+/// the help flags, `-logfile`, `-conffile`, `-version`, ..., are not in its tables) but those that
+/// LOSAT refuses by name (`Refusal::Read`), in the order of the usage line of NCBI's `-help`
+/// (`usage_position` in `Tool::help`; blastn: `-task`, `-db`, `-dbsize`, ...), not of the list of
+/// arguments under it (blastn: `-query`, `-query_loc`, `-strand`, `-task`, ...).
+pub(crate) fn described(tool: &Tool) -> impl Iterator<Item = Described> {
+    let mut listed: Vec<(usize, Described)> = tool_arguments(tool)
+        .descs()
+        .iter()
+        .filter(|desc| !matches!(refusal(tool.program, desc.name()), Some(Refusal::Read(_))))
+        .map(|desc| {
+            let name = desc.name();
+            let described = Described {
+                name,
+                kind: desc.kind,
+                default: desc.default(),
+                choices: choices(tool.program, name).unwrap_or_default(),
+                description: desc.description.get(),
+            };
+            (usage_position(tool.help, name), described)
+        })
+        .collect();
+    listed.sort_by_key(|(position, _)| *position);
+    listed.into_iter().map(|(_, described)| described)
+}
+
 // The tables (`TEXT`, `HELP_FLAGS`, `FILE_ARGUMENTS`, `DESCS`, `ALIASES`, `DEPENDENCIES`,
-// `STRING_VALUES`, `INTEGER_VALUES`, `REFUSALS`, `PROGRAMS`), written by `LOSAT/build.rs`
-// (`build/ncbi_args.rs`) from the XML of every program LOSAT embeds. `HELP_FLAGS` are the
-// arguments of every `CArgDescriptions` before the program's own (the help flags of its
-// constructor), `FILE_ARGUMENTS` those of every application after them
-// (`AddDefaultFileArguments`: `-logfile`, `-conffile`); the build script cites NCBI's lines.
+// `STRING_VALUES`, `INTEGER_VALUES`, `REFUSALS`, `DISPLAY_ORDERS`, `PROGRAMS`), written by
+// `LOSAT/build.rs` (`build/ncbi_args.rs`) from the XML of every program LOSAT embeds. `HELP_FLAGS`
+// are the arguments of every `CArgDescriptions` before the program's own (the help flags of its
+// constructor), `FILE_ARGUMENTS` those of every application after them (`AddDefaultFileArguments`:
+// `-logfile`, `-conffile`); the build script cites NCBI's lines.
 include!(concat!(env!("OUT_DIR"), "/ncbi_args.rs"));
 
 /// The argument descriptions of `program` (`PROGRAMS`), if LOSAT has its XML.
@@ -326,10 +419,9 @@ pub(crate) enum Dep {
 /// `m_Dependencies` in the order of its `multimap` (`Arguments::dependencies`), of the arguments
 /// that `given` says were given: the first exclusion between two given arguments is the error
 /// (`Err`, its message, bytes as `arg_message` gives them), else the arguments that the given
-/// ones require, each with its first requester, and those they exclude. The one port of the
-/// walk: the programs on NCBI's reader (`post_check`) and makeblastdb, whose command line LOSAT
-/// reads with its own parser (`writedb::makeblastdb::dependency_error`), use it.
-pub(crate) fn walk_dependencies<'a>(
+/// ones require, each with its first requester, and those they exclude: the walk of the reader's
+/// `post_check`.
+fn walk_dependencies<'a>(
     deps: impl IntoIterator<Item = (&'a str, Dep, &'a str)>,
     given: &dyn Fn(&str) -> bool,
 ) -> Result<DependencyWalk<'a>, Vec<u8>> {
@@ -422,6 +514,9 @@ pub(crate) enum ArgsError {
     Usage,
     /// `-help` (`CArgHelpException::eHelpFull`): the full description on stdout, exit status 0.
     Help,
+    /// `-help-full` (`CArgHelpException::eHelpShowAll`): the full description with the hidden
+    /// arguments on stdout, exit status 0.
+    HelpFull,
     /// `-xmlhelp` (`CArgHelpException::eHelpXml`): the description in XML on stdout, exit status
     /// 0 (`ncbi_xmlhelp`).
     XmlHelp,
@@ -448,18 +543,30 @@ pub(crate) fn arg_message(name: &str, what: &str, attr: &[u8]) -> Vec<u8> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:207-209, 223-224
-/// The exception of a stream asked of the argument `name` that has no value.
-fn no_value(name: &str) -> ArgException {
+/// The exception of a stream or a value asked of the argument `name` that has no value
+/// (`CArg_NoValue`: `args[name].AsString()` inside `Run` of a key without a value, which the
+/// application reports as one of the reader's, `Diag::run_arg_exception`).
+pub(crate) fn no_value(name: &str) -> ArgException {
     ArgException::new(
         "eNoValue",
         arg_message(name, "The argument has no value", b""),
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:239-249
+/// The exception of a value asked of the argument `name` that a given argument excludes
+/// (`CArg_ExcludedValue`): blastdb_aliastool's default `-dbtype` beside `-seqid_file_out`.
+fn excluded_value(name: &str) -> ArgException {
+    ArgException::new(
+        "eExcludedValue",
+        arg_message(name, "The value is excluded by other arguments.", b""),
+    )
+}
+
 /// A key's value as the command line gives it: its text, or its bytes where they are not UTF-8
-/// (NCBI's argument holds the bytes; LOSAT's programs of `ncbi_app` read text,
-/// `Args::text_values_refusal`). The word is read as UTF-8 once, when the reader takes it.
-#[derive(Debug)]
+/// (NCBI's argument holds the bytes, which the programs of `ncbi_app` read: `Args::bytes`). The
+/// word is read as UTF-8 once, when the reader takes it.
+#[derive(Debug, Clone)]
 enum Value {
     Text(String),
     Bytes(OsString),
@@ -476,16 +583,31 @@ impl Value {
 }
 
 /// The arguments of one command line: those given and the defaults NCBI adds.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Args {
+    /// The descriptions that the arguments were read with (the program's), which the check of a
+    /// read of a value as text looks the key up in (`check_text_read`) and which the readers of
+    /// the options of the programs on their own option types check their names against and take
+    /// a key's table default from (`option_or_default`).
+    arguments: Arguments,
     /// The value of each argument that has one: the value given (`None` for a flag), else the
     /// default of a key that no given argument excludes.
     values: BTreeMap<&'static str, Option<Value>>,
-    /// The converted value of each `eBoolean`, `eInteger` and `eDouble` key that has a value
-    /// (`CArg_Boolean`, `CArg_Integer`, `CArg_Double`).
+    /// The converted value of each `eBoolean`, `eInt8`, `eInteger` and `eDouble` key that has a
+    /// value (`CArg_Boolean`, `CArg_Int8`, `CArg_Integer`, `CArg_Double`).
     numbers: BTreeMap<&'static str, Number>,
     /// The names given on the command line, in their order.
     given: Vec<&'static str>,
+    /// The arguments not given that a given argument excludes (`CArg_ExcludedValue`), whose
+    /// values `as_string` refuses with NCBI's exception.
+    excluded: Vec<&'static str>,
+    /// Where the files that the program opens by name for writing go (`output_file`): the file
+    /// system, or LOSAT Web's files (`OpenFiles`), which the application gives the arguments.
+    files: OpenFiles,
+    /// The names that the options' readers read (`given_option`, `option_or_default`, `flag`),
+    /// for the test that every argument of a program is read.
+    #[cfg(test)]
+    read: std::sync::Arc<std::sync::Mutex<BTreeSet<&'static str>>>,
 }
 
 impl Args {
@@ -494,59 +616,140 @@ impl Args {
         self.given.contains(&name)
     }
 
-    /// The value of the key `name` as text (`AsString`): given, or its default; `None` for a
-    /// value that is not UTF-8, which the programs of `ncbi_app` do not run
-    /// (`text_values_refusal`).
+    /// The value of the key `name` as text (`AsString`): given, or its default. Only a key whose
+    /// value the reader has made ASCII is read so (`check_text_read`); the others are read by
+    /// their bytes (`bytes`), as NCBI's `std::string` holds them.
     pub(crate) fn value(&self, name: &str) -> Option<&str> {
-        let value = self.values.get(name);
-        // A body reads a value that is not UTF-8 only by its bytes (`os_value`): the others are
-        // refused before it (`text_values_refusal`).
-        debug_assert!(
-            !matches!(value, Some(Some(Value::Bytes(_)))),
-            "-{name} is not UTF-8: read it with `os_value`"
-        );
-        match value {
+        self.check_text_read(name);
+        match self.values.get(name) {
             Some(Some(Value::Text(text))) => Some(text),
             _ => None,
         }
     }
 
-    // No NCBI counterpart: NCBI's `AsString` is the value's bytes; LOSAT's programs of `ncbi_app`
-    // read their values as text.
-    /// LOSAT's refusal of a value that is not UTF-8 of an argument that a program of `ncbi_app`
-    /// reads as text (`value`), which `ncbi_app::run_app` writes where the body would start, so
-    /// that NCBI's errors of the reader and `-dryrun` come first: NCBI's `Run` reads the bytes.
-    /// It names the first such argument in the command line's order, in the words of the
-    /// programs on clap (`cli::non_utf8_value_refusal`). The values read by their bytes are not
-    /// refused: an `eOutputFile` key, which the programs open by its name's bytes (`output_file`,
-    /// `os_value`), `-logfile`, which the application opens before the reader, and `-conffile`,
-    /// whose file the application loads before the reader (`ncbi_environment`).
-    pub(crate) fn text_values_refusal(&self, tool: &Tool) -> Option<String> {
-        let read_as_bytes = |name: &str| {
-            FILE_ARGUMENTS.iter().any(|desc| desc.name.is(name))
-                || find_desc(tool_arguments(tool), name)
-                    .is_some_and(|desc| desc.kind == Kind::OutputFile)
-        };
-        let refused = self.given.iter().find(|&&name| {
-            matches!(self.values.get(name), Some(Some(Value::Bytes(_)))) && !read_as_bytes(name)
-        })?;
-        Some(crate::cli::non_utf8_value_refusal(
-            tool.refusal_name,
-            refused,
-        ))
+    /// The value of the key `name` as its bytes (`AsString`, NCBI's `std::string`): given, or
+    /// its default, UTF-8 or not (on a system whose names are not bytes, the text with each
+    /// byte that is not UTF-8 replaced: `utils::os_bytes`).
+    pub(crate) fn bytes(&self, name: &str) -> Option<std::borrow::Cow<'_, [u8]>> {
+        self.os_value(name)
+            .map(crate::utils::os_bytes::os_str_bytes)
+    }
+
+    // No NCBI counterpart: NCBI's `AsString` is the value's bytes.
+    /// The check, in a debug build, that the key `name` read as text (`value`) is one whose value
+    /// the reader has made ASCII: a flag, a number (`eBoolean`, `eInt8`, `eInteger`, `eDouble`),
+    /// or a key of a constraint other than a file name's length (a list of choices, a range of
+    /// numbers, a genetic code). Every other key's value may be any bytes (`bytes`).
+    fn check_text_read(&self, name: &str) {
+        debug_assert!(
+            find_desc(self.arguments, name).is_some_and(|desc| {
+                matches!(
+                    desc.kind,
+                    Kind::Flag | Kind::Boolean | Kind::Int8 | Kind::Integer | Kind::Double
+                ) || desc.constraint.as_ref().is_some_and(|constraint| {
+                    !matches!(constraint, Constraint::MaxFileNameLength(_))
+                })
+            }),
+            "-{name} is not a key whose value is ASCII: read it with `Args::bytes`"
+        );
+    }
+
+    /// The arguments given on the command line, in their order, each with its value's bytes
+    /// (`None` for a flag), which LOSAT's refusals of the programs on `cli::reader` read
+    /// (`cli::reader::refusal_after_read`).
+    pub(crate) fn given_values(&self) -> impl Iterator<Item = (&'static str, Option<&OsStr>)> + '_ {
+        self.given.iter().map(|&name| (name, self.os_value(name)))
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:509-516
     /// `args[name]` (and `AsBoolean`) of the flag `name`: whether its word was given.
-    pub(crate) fn flag(&self, name: &str) -> bool {
+    pub(crate) fn flag(&self, name: &'static str) -> bool {
+        self.check_read(name, &[Kind::Flag]);
         self.given(name)
+    }
+
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each
+    // value; LOSAT's ten programs on their own option types (`BlastnArgs`, ...) read them once,
+    // in each type's `from_args` (line RG DECISIONS K4i-3-1).
+    /// The option `T` of the key `name` when it was given on the command line, `None` when it was
+    /// not, whatever its default: an option whose default the program resolves itself (`-out`'s
+    /// standard output, `-mt_mode`'s 0, a task's preset). `NotConverted` where `T` does not hold
+    /// the value (`OptionValue::of`).
+    pub(crate) fn given_option<T: OptionValue>(
+        &self,
+        name: &'static str,
+    ) -> Result<Option<T>, NotConverted> {
+        self.check_read(name, T::KINDS);
+        if !self.given(name) {
+            return Ok(None);
+        }
+        let value = self.os_value(name).ok_or(NotConverted { name })?;
+        T::of(value, self.numbers.get(name).copied())
+            .map(Some)
+            .ok_or(NotConverted { name })
+    }
+
+    /// The option `T` of the key `name`: given, else its default in the program's tables, which
+    /// NCBI's reader added (`post_check`) unless a given argument excludes the key; there it is
+    /// still the option's value (tblastn's and psiblast's `-query` under `-in_pssm`, `-in_msa`:
+    /// line RG DECISIONS K4i-3-1 Q8). `NotConverted` for a key without a value and without a
+    /// default (a mandatory key that a given argument excludes), or where `T` does not hold the
+    /// value.
+    pub(crate) fn option_or_default<T: OptionValue>(
+        &self,
+        name: &'static str,
+    ) -> Result<T, NotConverted> {
+        self.check_read(name, T::KINDS);
+        let converted = match self.os_value(name) {
+            Some(value) => T::of(value, self.numbers.get(name).copied()),
+            None => {
+                let desc = find_desc(self.arguments, name).ok_or(NotConverted { name })?;
+                let default = desc.default().ok_or(NotConverted { name })?;
+                let number = process_value(desc, default.as_bytes()).ok().flatten();
+                T::of(OsStr::new(default), number)
+            }
+        };
+        converted.ok_or(NotConverted { name })
+    }
+
+    /// The check, in a debug build, that `name` is an argument of the program, by its own name
+    /// (not an alias), of one of the kinds `kinds`; in a test build, the record of the read.
+    fn check_read(&self, name: &'static str, kinds: &[Kind]) {
+        debug_assert!(
+            find_desc(self.arguments, name)
+                .is_some_and(|desc| desc.name.is(name) && kinds.contains(&desc.kind)),
+            "-{name} is not an argument of one of the kinds {kinds:?}"
+        );
+        #[cfg(test)]
+        self.read.lock().unwrap().insert(name);
+    }
+
+    /// The names that the options' readers have read (`check_read`).
+    #[cfg(test)]
+    pub(crate) fn names_read(&self) -> BTreeSet<&'static str> {
+        self.read.lock().unwrap().clone()
     }
 
     /// `args[name].AsString()` inside `Run`: the value of the key `name`, or NCBI's exception
     /// of an argument without a value (`CArg_NoValue`), which the application reports as one of
     /// the reader's (`Diag::run_arg_exception`).
+    /// An argument that a given one excludes throws `eExcludedValue` instead
+    /// (`CArg_ExcludedValue`). Read as text as [`Args::value`] reads it.
     pub(crate) fn as_string(&self, name: &str) -> Result<&str, ArgException> {
+        if self.excluded.contains(&name) {
+            return Err(excluded_value(name));
+        }
         self.value(name).ok_or_else(|| no_value(name))
+    }
+
+    /// `args[name].AsString()` inside `Run`, as raw bytes (for free-form string keys like `-rid`
+    /// whose value is not constrained to ASCII): returns `eExcludedValue` if excluded, or
+    /// `eNoValue` if missing.
+    pub(crate) fn as_bytes(&self, name: &str) -> Result<std::borrow::Cow<'_, [u8]>, ArgException> {
+        if self.excluded.contains(&name) {
+            return Err(excluded_value(name));
+        }
+        self.bytes(name).ok_or_else(|| no_value(name))
     }
 
     /// `AsBoolean()` of the `eBoolean` key `name`: given, or its default.
@@ -573,25 +776,43 @@ impl Args {
         }
     }
 
+    /// The run's files, where the files that the program opens by name for writing go.
+    pub(crate) fn files(&self) -> &OpenFiles {
+        &self.files
+    }
+
+    /// The arguments of a run whose files go to `files` (the application's: `ncbi_app::run_in`).
+    pub(crate) fn with_files(self, files: &OpenFiles) -> Self {
+        Args {
+            files: files.clone(),
+            ..self
+        }
+    }
+
     /// `args[name].AsOutputFile()`: the stream of the `eOutputFile` key `name`, the file of its
-    /// value's bytes as NCBI opens it, `stdout` for `-`, or NCBI's exception when it does not
-    /// open. A `CArgException` thrown in `Run` is reported by the application as one of the
-    /// reader's (`Diag::run_arg_exception`). The stream of an `eInputFile` key is
-    /// `files::open_input_file` of its value, which the programs open where NCBI's `Run` reads
-    /// it.
+    /// value's bytes as NCBI opens it in the run's files (`files`), `stdout` for `-`, or NCBI's
+    /// exception when it does not open. A `CArgException` thrown in `Run` is reported by the
+    /// application as one of the reader's (`Diag::run_arg_exception`). The stream of an
+    /// `eInputFile` key is `files::open_input_file` of its value, which the programs open where
+    /// NCBI's `Run` reads it.
     pub(crate) fn output_file<'a>(
         &self,
         name: &str,
         stdout: &'a mut dyn Write,
     ) -> Result<OutputFile<'a>, ArgException> {
         let value = self.os_value(name).ok_or_else(|| no_value(name))?;
-        files::open_output_file(name, value, stdout)
+        files::open_output_file(name, value, stdout, &self.files)
     }
 
     /// The value of the key `name` as its bytes (`AsString` of a name that a program opens):
-    /// given, or its default, UTF-8 or not. The programs open an `eOutputFile` key's file by it
-    /// (`output_file`, windowmasker's counts), which `text_values_refusal` leaves to them.
+    /// given, or its default, UTF-8 or not. The programs open a file by it (`output_file`,
+    /// `files::open_input_file`). In a debug build `name` must be an argument of the program by
+    /// its own name (the values are kept by it), so that a misspelt key does not read as absent.
     pub(crate) fn os_value(&self, name: &str) -> Option<&OsStr> {
+        debug_assert!(
+            find_desc(self.arguments, name).is_some_and(|desc| desc.name.is(name)),
+            "-{name} is not an argument of the program"
+        );
         match self.values.get(name) {
             Some(Some(Value::Text(text))) => Some(OsStr::new(text.as_str())),
             Some(Some(Value::Bytes(bytes))) => Some(bytes.as_os_str()),
@@ -600,7 +821,126 @@ impl Args {
     }
 }
 
+/// The key that an option's reader (`Args::given_option`, `Args::option_or_default`) could not
+/// read into the option's type: LOSAT's error (`cli::reader::conversion_error`), which no value
+/// that NCBI's reader took reaches (the constraint of each key that a narrower type reads keeps
+/// it in that type's range).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NotConverted {
+    /// The key.
+    pub(crate) name: &'static str,
+}
+
+/// A type of a program's option that `Args` reads from a key's value: the kinds of the keys it
+/// reads, and the option of a value (`None` where the type does not hold it). The value's bytes
+/// are those of the command line, or of the table's default.
+pub(crate) trait OptionValue: Sized {
+    /// The kinds of the keys whose values it holds.
+    const KINDS: &'static [Kind];
+    /// The option of a key's value `value` and its number (`Number`, for the kinds that have
+    /// one).
+    fn of(value: &OsStr, number: Option<Number>) -> Option<Self>;
+}
+
+/// The kinds of the keys whose value is text.
+const TEXT_KINDS: &[Kind] = &[Kind::Text, Kind::InputFile, Kind::OutputFile];
+
+/// The text of a key's value (`AsString`): a value that is not UTF-8 is refused before the options
+/// are read (`cli::reader::refusal_after_read`), or read lossily by a dry run's caller
+/// (`Args::with_lossy_text`).
+impl OptionValue for String {
+    const KINDS: &'static [Kind] = TEXT_KINDS;
+    fn of(value: &OsStr, _: Option<Number>) -> Option<Self> {
+        value.to_str().map(str::to_string)
+    }
+}
+
+/// The bytes of a key's value, by which the program opens its file.
+impl OptionValue for std::path::PathBuf {
+    const KINDS: &'static [Kind] = TEXT_KINDS;
+    fn of(value: &OsStr, _: Option<Number>) -> Option<Self> {
+        Some(value.into())
+    }
+}
+
+/// The bytes of a key's value.
+impl OptionValue for OsString {
+    const KINDS: &'static [Kind] = TEXT_KINDS;
+    fn of(value: &OsStr, _: Option<Number>) -> Option<Self> {
+        Some(value.to_os_string())
+    }
+}
+
+/// `AsBoolean()` of an `eBoolean` key.
+impl OptionValue for bool {
+    const KINDS: &'static [Kind] = &[Kind::Boolean];
+    fn of(_: &OsStr, number: Option<Number>) -> Option<Self> {
+        match number? {
+            Number::Boolean(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+/// `AsInt8()` of an `eInt8` key.
+impl OptionValue for i64 {
+    const KINDS: &'static [Kind] = &[Kind::Int8];
+    fn of(_: &OsStr, number: Option<Number>) -> Option<Self> {
+        match number? {
+            Number::Int8(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+/// `AsInteger()` of an `eInteger` key.
+impl OptionValue for i32 {
+    const KINDS: &'static [Kind] = &[Kind::Integer];
+    fn of(_: &OsStr, number: Option<Number>) -> Option<Self> {
+        match number? {
+            Number::Integer(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+/// `AsInteger()` of an `eInteger` key whose constraint keeps it at or above 0 (a count, a number
+/// of threads, a length).
+impl OptionValue for usize {
+    const KINDS: &'static [Kind] = &[Kind::Integer];
+    fn of(value: &OsStr, number: Option<Number>) -> Option<Self> {
+        usize::try_from(i32::of(value, number)?).ok()
+    }
+}
+
+/// `AsInteger()` of an `eInteger` key whose constraint keeps it in 0 to 255 (a genetic code, a
+/// mode, a template length).
+impl OptionValue for u8 {
+    const KINDS: &'static [Kind] = &[Kind::Integer];
+    fn of(value: &OsStr, number: Option<Number>) -> Option<Self> {
+        u8::try_from(i32::of(value, number)?).ok()
+    }
+}
+
+/// `AsDouble()` of an `eDouble` key.
+impl OptionValue for f64 {
+    const KINDS: &'static [Kind] = &[Kind::Double];
+    fn of(_: &OsStr, number: Option<Number>) -> Option<Self> {
+        match number? {
+            Number::Double(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+/// [`parse_in`] of a run on the file system (the tests' reader).
+#[cfg(test)]
+pub(crate) fn parse(tool: &Tool, words: &[OsString]) -> Result<Args, ArgsError> {
+    parse_in(tool, words, &OpenFiles::disk())
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2856-2932
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:744-752
 /// Reads `words` (the command line after the program's name, without the words NCBI's
 /// application takes before the reader: `ncbi_environment::preparse`) as NCBI's
 /// `CArgDescriptions::CreateArgs` reads `tool`'s: each word in its order, then the dependencies
@@ -608,7 +948,16 @@ impl Args {
 /// so a word that is not an option, and every word after `--`, is one too many. The words are
 /// read as their bytes, as NCBI reads `argv`: a name is the bytes after the dash up to `=`, and
 /// a name that is not ASCII is not an argument's name (`is_argument_name`).
-pub(crate) fn parse(tool: &Tool, words: &[OsString]) -> Result<Args, ArgsError> {
+///
+/// The run's files go to `files`: the file of an `fPreOpen` key (blastdb_aliastool's
+/// `-gi_file_out`) is made or emptied there as its word is read, before the reader looks at the
+/// next word and at the dependencies (NCBI 2.17.0: `-gi_file_out x.bgl` alone leaves an empty
+/// `x.bgl` and the error that it requires `-gi_file_in`, probe G10 of row RG-D2a).
+pub(crate) fn parse_in(
+    tool: &Tool,
+    words: &[OsString],
+    files: &OpenFiles,
+) -> Result<Args, ArgsError> {
     let arguments = tool_arguments(tool);
     let mut values: BTreeMap<&'static str, Option<Value>> = BTreeMap::new();
     let mut numbers: BTreeMap<&'static str, Number> = BTreeMap::new();
@@ -650,6 +999,11 @@ pub(crate) fn parse(tool: &Tool, words: &[OsString]) -> Result<Args, ArgsError> 
             number,
             used,
         } = create_arg(arguments, arg1, name, arg2)?;
+        if desc.pre_open {
+            if let Some(value) = &value {
+                files::pre_open_output(desc.name(), value, files).map_err(ArgsError::Invalid)?;
+            }
+        }
         if values.contains_key(desc.name()) {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1928-1941
             return Err(invalid(
@@ -667,11 +1021,131 @@ pub(crate) fn parse(tool: &Tool, words: &[OsString]) -> Result<Args, ArgsError> 
         given.push(desc.name());
         at += if used { 2 } else { 1 };
     }
-    post_check(tool, arguments, &mut values, &mut numbers, &given)?;
+    let excluded = post_check(tool, arguments, &mut values, &mut numbers, &given)?;
     Ok(Args {
+        arguments,
         values,
         numbers,
         given,
+        excluded,
+        files: files.clone(),
+        #[cfg(test)]
+        read: Default::default(),
+    })
+}
+
+// No NCBI counterpart: NCBI's application opens `-logfile` before parsing arguments; LOSAT scans
+// the raw argv through the program's own argument definitions (`arguments`, `resolve_known_desc`)
+// so both parsed and unparsed argvs skip option values accurately (line WQA D19/D23).
+/// Scans `words` (the command line after the program's name) using `program`'s argument
+/// definitions (`arguments`), calling `visit(canonical_name, value)` for each recognized option
+/// before `--`: `None` for a flag (`Kind::Flag`, without `=`), `Some(value)` for an option that
+/// takes a value (`-name=value`, or `-name` followed by the next word whatever it is). Unknown
+/// words, positional words, and flags consume one word.
+pub(crate) fn scan_argv<S: AsRef<OsStr>>(
+    program: &str,
+    words: &[S],
+    mut visit: impl FnMut(&'static str, Option<&OsStr>),
+) {
+    scan_argv_kinds(program, words, |name, _kind, value| visit(name, value));
+}
+
+/// Like [`scan_argv`], also passing each recognized option's [`Kind`] so callers can identify
+/// `Kind::InputFile` options across every program without duplicating option lists.
+pub(crate) fn scan_argv_kinds<S: AsRef<OsStr>>(
+    program: &str,
+    words: &[S],
+    mut visit: impl FnMut(&'static str, Kind, Option<&OsStr>),
+) {
+    let Some(arguments) = arguments(program) else {
+        return;
+    };
+    let mut at = 0;
+    while at < words.len() {
+        let word = words[at].as_ref();
+        let bytes = word.as_encoded_bytes();
+        if bytes == b"--" {
+            break;
+        }
+        if bytes.len() > 1 && bytes[0] == b'-' {
+            let after_dash = &bytes[1..];
+            let (name_bytes, eq_value) = match after_dash.iter().position(|&b| b == b'=') {
+                Some(eq) => (&after_dash[..eq], Some(&after_dash[eq + 1..])),
+                None => (after_dash, None),
+            };
+            let desc = is_argument_name(name_bytes)
+                .then(|| std::str::from_utf8(name_bytes).ok())
+                .flatten()
+                .and_then(|name| resolve_known_desc(arguments, name));
+            if let Some(desc) = desc {
+                if desc.kind == Kind::Flag {
+                    if eq_value.is_none() {
+                        visit(desc.name(), desc.kind, None);
+                    }
+                } else if let Some(val_bytes) = eq_value {
+                    // SAFETY: `val_bytes` follows an ASCII `=` in `word`, so it starts on a
+                    // valid encoded boundary and ends at the end of `word`.
+                    let val = unsafe { OsStr::from_encoded_bytes_unchecked(val_bytes) };
+                    visit(desc.name(), desc.kind, Some(val));
+                } else if let Some(next) = words.get(at + 1) {
+                    visit(desc.name(), desc.kind, Some(next.as_ref()));
+                    at += 2;
+                    continue;
+                }
+            }
+        }
+        at += 1;
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2975-2989
+/// Looks up the argument description for the valid argument name `name` in `arguments`, following
+/// aliases (`find_desc`) and NCBI's `-file` / `-verbatim` suffixes.
+fn resolve_known_desc(arguments: Arguments, name: &str) -> Option<&'static Desc> {
+    let find = |n: &str| find_desc(arguments, n);
+    find(name).or_else(|| {
+        let dash = name.rfind('-').filter(|&dash| dash != 0)?;
+        let suffix = &name[dash + 1..];
+        if suffix.eq_ignore_ascii_case("file") || suffix.eq_ignore_ascii_case("verbatim") {
+            find(&name[..dash])
+        } else {
+            None
+        }
+    })
+}
+
+// No NCBI counterpart: NCBI has no Web engine.
+/// The arguments of the words `given` of `tool` (each name and its value's bytes, `None` for a
+/// flag) that another reader has checked: LOSAT Web's ABI v1, whose frozen reader checks its
+/// words with its own texts (`web_v1_argv`, line RG DECISIONS K4i-3-1 Q4). Each value is
+/// converted by its key's kind, without its constraint (`kind_value`), and no default is added:
+/// the options' readers take a key's table default (`Args::option_or_default`). `None` where a
+/// name is not one of `tool`'s or a value does not convert.
+#[cfg(any(losat_web_abi_v1, test))]
+pub(crate) fn checked(tool: &Tool, given: &[(String, Option<OsString>)]) -> Option<Args> {
+    let arguments = tool_arguments(tool);
+    let mut values: BTreeMap<&'static str, Option<Value>> = BTreeMap::new();
+    let mut numbers: BTreeMap<&'static str, Number> = BTreeMap::new();
+    let mut names: Vec<&'static str> = Vec::new();
+    for (name, value) in given {
+        let desc = find_desc(arguments, name)?;
+        if let Some(value) = value {
+            if let Some(number) = kind_value(desc, value.as_encoded_bytes()).ok()? {
+                numbers.insert(desc.name(), number);
+            }
+        }
+        values.insert(desc.name(), value.clone().map(Value::of));
+        names.push(desc.name());
+    }
+    Some(Args {
+        arguments,
+        values,
+        numbers,
+        given: names,
+        excluded: Vec::new(),
+        files: OpenFiles::disk(),
+        #[cfg(test)]
+        read: Default::default(),
     })
 }
 
@@ -697,20 +1171,11 @@ fn create_arg(
         ));
     };
     let bytes = arg1.as_encoded_bytes();
-    let find = |name: &str| find_desc(arguments, name);
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2975-2989
     // The confidential arguments read their value from a file (`-name-file`); LOSAT's programs
     // have none, but the lookup of the name before the dash stays: `-info-file` is `-info`, and
     // `-db-file NAME` is `-db NAME` (the separator is looked for after the whole name).
-    let desc = find(name).or_else(|| {
-        let dash = name.rfind('-').filter(|&dash| dash != 0)?;
-        let suffix = &name[dash + 1..];
-        if suffix.eq_ignore_ascii_case("file") || suffix.eq_ignore_ascii_case("verbatim") {
-            find(&name[..dash])
-        } else {
-            None
-        }
-    });
+    let desc = resolve_known_desc(arguments, name);
     let Some(desc) = desc else {
         if name.is_empty() {
             // `n_plain` is `kMax_UInt` here: the positional arguments have not started.
@@ -729,9 +1194,11 @@ fn create_arg(
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2840-2852
         match bytes {
             b"-h" => return Err(ArgsError::Usage),
-            // `-help-full` adds the hidden arguments, of which LOSAT's programs have none: the
-            // text is that of `-help` (probe C05 of line BDC).
-            b"-help" | b"-help-full" => return Err(ArgsError::Help),
+            b"-help" => return Err(ArgsError::Help),
+            // `-help-full` adds the hidden arguments: makeblastdb's `-randomize`
+            // (`Tool::help_full`); the other programs have none, and their text is that of
+            // `-help` (probe C05 of line BDC).
+            b"-help-full" => return Err(ArgsError::HelpFull),
             // The help in XML (`ncbi_xmlhelp`).
             b"-xmlhelp" => return Err(ArgsError::XmlHelp),
             _ => {}
@@ -807,16 +1274,7 @@ fn is_argument_name(bytes: &[u8]) -> bool {
 /// converted value of an `eBoolean`, `eInteger` or `eDouble` key. `value` is the bytes of the
 /// value.
 fn process_value(desc: &Desc, value: &[u8]) -> Result<Option<Number>, ArgsError> {
-    let number = match desc.kind {
-        Kind::Integer => Some(Number::Integer(integer_value(desc, value)?)),
-        Kind::Int8 => {
-            int8_value(desc, value)?;
-            None
-        }
-        Kind::Double => Some(double_value(desc, value)?),
-        Kind::Boolean => Some(Number::Boolean(boolean_value(desc, value)?)),
-        Kind::Text | Kind::Flag | Kind::InputFile | Kind::OutputFile => None,
-    };
+    let number = kind_value(desc, value)?;
     match desc.constraint {
         Some(constraint) if !constraint.verify(value) => Err(invalid(
             "eConstraint",
@@ -828,6 +1286,19 @@ fn process_value(desc: &Desc, value: &[u8]) -> Result<Option<Number>, ArgsError>
         )),
         _ => Ok(number),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1228-1262
+/// The conversion of `value` to the type of the key `desc` (`process_value` before the
+/// constraint): the converted value of an `eBoolean`, `eInt8`, `eInteger` or `eDouble` key.
+fn kind_value(desc: &Desc, value: &[u8]) -> Result<Option<Number>, ArgsError> {
+    Ok(match desc.kind {
+        Kind::Integer => Some(Number::Integer(integer_value(desc, value)?)),
+        Kind::Int8 => Some(Number::Int8(int8_value(desc, value)?)),
+        Kind::Double => Some(double_value(desc, value)?),
+        Kind::Boolean => Some(Number::Boolean(boolean_value(desc, value)?)),
+        Kind::Text | Kind::Flag | Kind::InputFile | Kind::OutputFile => None,
+    })
 }
 
 /// The `eConvert` exception of a value of the argument `desc` that its conversion did not read:
@@ -893,12 +1364,14 @@ fn post_check(
     values: &mut BTreeMap<&'static str, Option<Value>>,
     numbers: &mut BTreeMap<&'static str, Number>,
     given: &[&'static str],
-) -> Result<(), ArgsError> {
+) -> Result<Vec<&'static str>, ArgsError> {
     let walk = walk_dependencies(arguments.dependencies(), &|name| given.contains(&name))
         .map_err(|message| invalid("eConstraint", message))?;
     // NCBI asks the arguments in the order of its `m_KeyFlagArgs` and stops at the first one that
     // throws; of the arguments that throw, the one first in the usage is the one NCBI names.
     let mut first: Option<(usize, ArgsError)> = None;
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3279-3283
+    let mut excluded = Vec::new();
     for desc in descs(arguments) {
         if given.contains(&desc.name()) {
             continue;
@@ -906,6 +1379,7 @@ fn post_check(
         let error = if let Some(message) = walk.missing(desc.name()) {
             invalid("eConstraint", message)
         } else if walk.excludes(desc.name()) {
+            excluded.push(desc.name());
             continue;
         } else if let Some(default) = desc.default() {
             match process_value(desc, default.as_bytes()) {
@@ -933,7 +1407,7 @@ fn post_check(
     }
     match first {
         Some((_, error)) => Err(error),
-        None => Ok(()),
+        None => Ok(excluded),
     }
 }
 

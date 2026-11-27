@@ -69,19 +69,19 @@ pub(crate) fn rounds_input(file: InPssmFile, request: &PssmRequest) -> InPssmRou
     }
 }
 
+/// The refusal of a PSSM whose matrix name NCBI cannot write (`InPssmFile::matrix_name_unwritable`),
+/// where `writer` names what writes it: `with -out_pssm` here, and the archive of `-outfmt 11`
+/// (`algorithm::psiblast::in_pssm::check_in_pssm_options`).
+pub(crate) fn matrix_name_refusal(writer: &str) -> String {
+    format!(
+        "a PSSM of frequency ratios only without params.rpsdbparams {writer} (NCBI BLAST+ cannot write the matrix name it lacks and stops with a C++ exception) is not supported by LOSAT's PSIBLAST"
+    )
+}
+
 /// The refusals of `rounds_input`.
 fn written_back_refusal(file: &InPssmFile, request: &PssmRequest) -> Result<()> {
-    if request.asn_path.is_some() {
-        let rpsdbparams = file
-            .object
-            .params
-            .as_ref()
-            .is_some_and(|params| params.rpsdbparams.is_some());
-        if file.computed && !rpsdbparams {
-            bail!(
-                "a PSSM of frequency ratios only without params.rpsdbparams with -out_pssm (NCBI BLAST+ cannot write the matrix name it lacks and stops with a C++ exception) is not supported by LOSAT's PSIBLAST"
-            );
-        }
+    if request.asn_path.is_some() && file.matrix_name_unwritable() {
+        bail!("{}", matrix_name_refusal("with -out_pssm"));
     }
     if request.ascii_path.is_some() {
         check_long_ascii(&file.object)?;
@@ -200,13 +200,8 @@ fn check_long_ascii(object: &PssmWithParameters) -> Result<()> {
 fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
     const LETTERS: &[u8; BLASTAA_SIZE] =
         crate::algorithm::pssm_search::in_pssm::NCBISTDAA_TO_AMINOACID;
-    match object
-        .pssm
-        .query
-        .as_ref()
-        .and_then(SeqEntry::seq)
-        .and_then(|query| query.inst.seq_data.as_ref())
-    {
+    let query = object.pssm.query.as_ref().and_then(SeqEntry::seq);
+    let mut codes = match query.and_then(|query| query.inst.seq_data.as_ref()) {
         Some(SeqData::Ncbistdaa(codes)) => codes.clone(),
         Some(SeqData::Iupacaa(text)) => text
             .iter()
@@ -223,12 +218,38 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
             SeqData::Iupacna(_) | SeqData::Ncbi2na(_) | SeqData::Ncbi4na(_) | SeqData::Other(_),
         )
         | None => Vec::new(),
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:202, 253-258
+    // NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:61-74 (`CPssm::GetQueryLength`)
+    // `PrintAsciiPssm` loops up to `GetQueryLength()`: 0 when `Seq-inst.length` is absent, and
+    // `length` when the query has one letter more than its Seq-inst's `length` (searched as its
+    // first `length` letters, `in_pssm`; NCBI BLAST+ 2.17.0, line PS item PS7c).
+    match query.and_then(|query| query.inst.length) {
+        None => codes.clear(),
+        Some(length)
+            if usize::try_from(length)
+                .is_ok_and(|length| length >= 1 && length + 1 == codes.len()) =>
+        {
+            codes.pop();
+        }
+        Some(_) => {}
     }
+    codes
 }
 
-/// The files of the input PSSM: its ASN.1 text, its ASCII PSSM and NCBI's posts of the bytes that
-/// the ASN.1 text's stream replaces.
-pub(crate) type InputFiles = (Option<Vec<u8>>, Option<Vec<u8>>, Vec<ReplacedChar>);
+/// The files of the input PSSM (`InPssmRounds::files`).
+#[derive(Debug)]
+pub(crate) struct InputFiles {
+    /// Its ASN.1 text (the bytes before NCBI's throw, `thrown`).
+    pub(crate) asn: Option<Vec<u8>>,
+    /// Its ASCII PSSM (none after NCBI's throw: `SavePssmToFile` writes the ASN.1 file first).
+    pub(crate) ascii: Option<Vec<u8>>,
+    /// NCBI's posts of the bytes that the ASN.1 text's stream replaces.
+    pub(crate) posts: Vec<ReplacedChar>,
+    /// NCBI's error where its ASN.1 text stream threw at an element stated as `NULL` in the
+    /// query (`pssm::WrittenPssm::thrown`), which ends the run after the file is written.
+    pub(crate) thrown: Option<crate::cli::NativeError>,
+}
 
 impl InPssmRounds {
     /// LOSAT's refusal of the input PSSM's files (`rounds_input`), made once the database is opened
@@ -243,22 +264,43 @@ impl InPssmRounds {
     /// The files of the input PSSM at the start of round 1 (`SavePssmToFile`): its ASN.1 text and
     /// its ASCII PSSM, as requested.
     ///
-    /// The third value is NCBI's post of each byte that its ASN.1 text stream replaces in the
-    /// file (a query title outside the visible ASCII range; `pssm::file_posts`).
+    /// With them NCBI's post of each byte that its ASN.1 text stream replaces in the file (a
+    /// query title outside the visible ASCII range; `pssm::file_posts`), and NCBI's error where
+    /// that stream throws (`InputFiles::thrown`: an element stated as `NULL` in the query, NCBI
+    /// BLAST+ 2.17.0 probe D3c-3b `probe4`, `probe5`, `probe6`: the file up to the element, no
+    /// ASCII PSSM).
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:392-408
     pub(crate) fn files(&self, request: &PssmRequest) -> Result<InputFiles> {
         let Some(object) = self.object.as_ref() else {
-            return Ok((None, None, Vec::new()));
+            return Ok(InputFiles {
+                asn: None,
+                ascii: None,
+                posts: Vec::new(),
+                thrown: None,
+            });
         };
-        let (asn, posts) = match request.asn_path {
+        let (asn, posts, thrown) = match request.asn_path {
             Some(_) => {
-                let (asn, posts) = crate::report::serial::pssm::asn_text_posting(object)
+                let written = crate::report::serial::pssm::asn_text_written(object, None)
                     .map_err(|error| anyhow::anyhow!("{error}"))?;
-                (Some(asn), posts)
+                let thrown = written
+                    .thrown
+                    .map(|thrown| crate::cli::NativeError::null_element("psiblast", &thrown));
+                (Some(written.bytes), written.replaced, thrown)
             }
-            None => (None, Vec::new()),
+            None => (None, Vec::new(), None),
         };
-        let ascii = request.ascii_path.as_ref().map(|_| ascii_pssm(object));
-        Ok((asn, ascii, posts))
+        let ascii = request
+            .ascii_path
+            .as_ref()
+            .filter(|_| thrown.is_none())
+            .map(|_| ascii_pssm(object));
+        Ok(InputFiles {
+            asn,
+            ascii,
+            posts,
+            thrown,
+        })
     }
 
     /// The ASN.1 text of the input PSSM after round 1's K/A write-back (`ungapped`: `kbp_psi[0]`,
@@ -280,7 +322,12 @@ impl InPssmRounds {
         let (Some(object), Some(_)) = (self.object.as_ref(), request.asn_path.as_ref()) else {
             return Ok((None, Vec::new()));
         };
-        // The six values are written in place of the object's (no copy of the object).
+        // Round 1's write of the object (`files`) read each delay buffer of another format into
+        // it (`PssmWithParameters::update_delayed`): this write writes the values read, without
+        // the messages of that read again (line RG-F3, PR 2: probe AR4 P).
+        let mut object = object.clone();
+        object.update_delayed(crate::report::serial::asn_input::Encoding::Text);
+        // The six values are written in place of the object's (NCBI sets them in its object).
         let karlin = crate::report::serial::pssm::FinalKarlin {
             lambda: gapped.lambda,
             kappa: gapped.k,
@@ -289,7 +336,7 @@ impl InPssmRounds {
             kappa_ungapped: ungapped.k,
             h_ungapped: ungapped.h,
         };
-        crate::report::serial::pssm::asn_text_posting_with_karlin(object, Some(karlin))
+        crate::report::serial::pssm::asn_text_posting_with_karlin(&object, Some(karlin))
             .map(|(asn, posts)| (Some(asn), posts))
             .map_err(|error| anyhow::anyhow!("{error}"))
     }

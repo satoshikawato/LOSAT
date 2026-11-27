@@ -9,7 +9,7 @@
 //! the PSSM's, as NCBI's `eBlastTypePsiTblastn` (`PSSM_QUERY_MASK` OR-ed with `eBlastTypeTblastn`) takes
 //! tblastn's code everywhere except where `Blast_QueryIsPssm` selects the PSSM.
 //!
-//! NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_program.h:82-83
+//! NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_program.h:83
 
 use std::path::Path;
 
@@ -21,26 +21,50 @@ use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 
+/// The upper-case name of PSI-TBLASTN as a literal (for `concat!`): the one spelling of `PROGRAM`
+/// and of the program line of outfmt 7 (`tabular::PSI_PROGRAM_VERSION`).
+macro_rules! psi_tblastn_name {
+    () => {
+        "PSITBLASTN"
+    };
+}
+pub(super) use psi_tblastn_name;
+
 /// The program line of PSI-TBLASTN's reports (`Blast_ProgramNameFromType` of
 /// `eBlastTypePsiTblastn`, upper-cased by the formatter).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:690
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:343-344
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
-pub(super) const PROGRAM: &str = "PSITBLASTN";
+pub(super) const PROGRAM: &str = psi_tblastn_name!();
+
+/// The program type of a TBLASTN search (`RunRecord::program_type`): PSI-TBLASTN's with
+/// `-in_pssm` (`pssm`), whose reports name it and show no query masks
+/// (`report::record::carries_query_masks`); `None` (TBLASTN's own) without.
+pub(super) fn program_type(pssm: bool) -> Option<crate::report::record::ProgramType> {
+    pssm.then_some(crate::report::record::ProgramType::PsiTblastn)
+}
 
 /// Reads `-in_pssm path` for tblastn: psiblast's reader (NCBI's `CPsiBlastArgs`, the same handler
 /// for both programs), whose refusals name LOSAT's TBLASTN and whose scores of a PSSM of
 /// frequency ratios only are made with the options' matrix (`matrix_name`); `strategy` and
 /// `database` are whether the run writes a search strategy and searches `-db`
-/// (`PssmReader::strategy`); the messages of NCBI's reader go to `diagnostics`.
+/// (`PssmReader::strategy`); `write_verification` is the run's `SERIAL_VERIFY_DATA_WRITE`
+/// (`PssmReader::write_verification`), `read_verification` its `SERIAL_VERIFY_DATA_READ` and
+/// `SERIAL_VERIFY_DATA_GET` (`PssmReader::read_verification`); the messages of NCBI's reader go
+/// to `diagnostics`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:125-130
+#[allow(clippy::too_many_arguments)]
 pub(super) fn read(
     path: &Path,
     matrix_name: &str,
+    gap_open: i32,
+    gap_extend: i32,
     strategy: bool,
     database: bool,
     archive: Option<&crate::report::archive::ArchiveHandle>,
+    write_verification: Option<&crate::blastinput::ncbi_environment::WriteVerification>,
+    read_verification: &crate::blastinput::ncbi_environment::ReadVerification,
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<PsiSearch> {
     let (search, _file) = read_in_pssm(
@@ -48,9 +72,14 @@ pub(super) fn read(
         PssmReader {
             program: "TBLASTN",
             matrix_name,
+            gap_open,
+            gap_extend,
             strategy,
             database,
             archive,
+            write_verification,
+            out_pssm: false,
+            read_verification: Some(read_verification),
         },
         diagnostics,
     )?;
@@ -61,7 +90,7 @@ pub(super) fn read(
 /// code 1, `check_options`), and NCBI's command line takes the codes of its list only, without
 /// the code 32 that LOSAT's TBLASTN adds for its own translations (`PD-TLOSAN-LOCAL-GENCODE-32`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1011-1015
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1003-1006
 pub(super) fn check_db_gencode(code: u8) -> Result<()> {
     if code == 32 {
         bail!(
@@ -71,25 +100,10 @@ pub(super) fn check_db_gencode(code: u8) -> Result<()> {
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
-/// Whether `error` is NCBI's error of a `-in_pssm` file that cannot be opened (`cli::inaccessible`),
-/// which NCBI raises inside `Run`: the options' handler opens the file there, so its `CATCH_ALL`
-/// writes the error archive of outfmt 11 for it (NCBI BLAST+ 2.17.0, `-in_pssm` of a missing file
-/// with `-subject` and with `-db`), as for the files that `archive::error_lines` takes as the
-/// subjects' (`subject_file`).
-pub(super) fn file_error_in_run(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<crate::cli::NativeError>()
-        .is_some_and(|native| {
-            native
-                .message
-                .starts_with(b"Command line argument error: Argument \"in_pssm\".")
-        })
-}
-
 /// LOSAT's refusals of a PSI-TBLASTN search, after NCBI's checks of the options and the opening of
-/// the database, before anything is written: NCBI's crash of `-mt_mode 1` (DECISIONS 35 Q4), the
-/// output formats other than 0 to 4, 6, 7 and 10 (item PS15b of line PS; 11 crashes NCBI).
+/// the database, before anything is written: NCBI's crash of `-mt_mode 1` (DECISIONS 35 Q4) and
+/// the archive, outfmt 11 (item PS15b of line PS: it crashes NCBI, with a report that changes from
+/// run to run). Every other format is written (item PS15b-2).
 pub(super) fn check_limits(
     args: &TblastnArgs,
     resolved: &ResolvedTblastnArgs,
@@ -119,7 +133,7 @@ pub(super) fn check_limits(
     }
     // `-use_sw_tback` is refused where the Smith-Waterman redo of the PSSM query reaches a match
     // (`match_redo::sw_pssm_refusal`), after the prolog: a search without hits ends as NCBI's.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:791-796 (the tabular
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:772-782 (the tabular
     // formats of tblastn; the pairwise report, `PrintOneResultSet`)
     // The pairwise report and the tabular formats 6, 7 and 10 (their field lists too). A run that
     // NCBI stops before the search (`PsiSearch::stop_before_search`: the search strategy's "Remote
@@ -134,14 +148,13 @@ pub(super) fn check_limits(
     // The query-anchored formats 1 to 4 are outfmt 0's report with another alignment section
     // (line RG T3b: NCBI 2.17.0's `-in_pssm` sections, probes `tn.t3b.pssm.*`, are those of the
     // PSSM's query).
-    if searched && !matches!(outfmt, 0..=4 | 6 | 7 | 10) {
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:330-332
+    // With a PSSM NCBI's tblastn writes the archive from a query factory it never made: the null
+    // reference's exception carries a stack trace whose addresses change from run to run (also in
+    // the error archive), so outfmt 11 has no fixed bytes to match.
+    if searched && outfmt == 11 {
         bail!(
-            "output format {outfmt} with -in_pssm is not supported by LOSAT's TBLASTN yet{}",
-            if outfmt == 11 {
-                " (NCBI BLAST+ 2.17.0's tblastn stops with a C++ exception)"
-            } else {
-                ""
-            }
+            "output format 11 with -in_pssm is not supported by LOSAT's TBLASTN (NCBI BLAST+ 2.17.0's tblastn stops with a C++ exception whose report changes from run to run)"
         );
     }
     Ok(())

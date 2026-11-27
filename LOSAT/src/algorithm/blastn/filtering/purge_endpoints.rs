@@ -29,7 +29,7 @@ fn blastn_hsp_context(hsp: &BlastnHsp) -> u32 {
     hsp.q_idx * 2 + if hsp.query_frame < 0 { 1 } else { 0 }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2285-2318
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2286-2320
 fn compare_query_offset_hsps_for_common_endpoint(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
     blastn_hsp_context(a)
         .cmp(&blastn_hsp_context(b))
@@ -40,7 +40,7 @@ fn compare_query_offset_hsps_for_common_endpoint(a: &BlastnHsp, b: &BlastnHsp) -
         .then_with(|| b.internal_s_end_0.cmp(&a.internal_s_end_0))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2350-2384
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2351-2386
 fn compare_query_end_hsps_for_common_endpoint(a: &BlastnHsp, b: &BlastnHsp) -> Ordering {
     blastn_hsp_context(a)
         .cmp(&blastn_hsp_context(b))
@@ -634,7 +634,7 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     (hits, extra_start)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2268-2387
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2278-2283,2343-2348
 // NCBI's qsort callbacks sort NULL HSP pointers after real HSPs. The active
 // prefix normally contains only real HSPs, but preserve the NULL ordering when
 // mirroring Blast_HSPListPurgeHSPsWithCommonEndpoints exactly.
@@ -839,7 +839,7 @@ fn stats_from_edit_ops(
 /// Update identity/length stats and apply Blast_HSPTestIdentityAndLength filtering.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:656-663
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:745-818
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:745-836,1003-1025
 pub fn blast_hsp_test_identity_and_length(
     hit: &mut BlastnHsp,
     query_nomask: ContextQuery<'_>,
@@ -881,7 +881,7 @@ pub fn blast_hsp_test_identity_and_length(
     hit.length = align_length;
     hit.mismatch = mismatches;
     hit.gapopen = gap_opens;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:745-836
     hit.num_ident = matches;
     hit.num_positives = matches;
     hit.identity = if align_length > 0 {

@@ -120,7 +120,7 @@ fn blastp_trace_matches_hsp(target: BlastpTraceHspTarget, hsp: &BlastpHsp) -> bo
         && hsp.s_start.max(hsp.s_end) == target.s_end
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:360-374
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:364-366
 fn blastp_trace_gap_summary(gap_info: Option<&[GapEditOp]>) -> String {
     let Some(gap_info) = gap_info else {
         return "ungapped".to_string();
@@ -290,7 +290,7 @@ fn unified_p_without_search_space(refusal: UnifiedPRefusal<'_>, query: usize) ->
 /// every E-value of the query before it as 0, an alignment whose E-value was 0 without an
 /// E-value (the product of 0 and infinity is not a number), and drops a match of such alignments
 /// only. With unified P-values that batch is refused (`refuse` is `Some`; the error is a
-/// `HeaderReadError` of the batch's first query, so the reports of the batches before are
+/// `ErrorAfterBatchReports` of the batch's first query, so the reports of the batches before are
 /// written first, and its text names the two queries).
 pub(crate) fn evalue_adjust_contexts(
     contexts: &[QueryContext],
@@ -323,11 +323,10 @@ pub(crate) fn evalue_adjust_contexts(
             if let Some(refusal) = refuse {
                 if ctx.is_valid && ctx.aa_len > 0 && next.eff_searchsp == 0.0 {
                     // Before the batch's redo: none of its fetches read a header.
-                    return Err(crate::algorithm::common::database::HeaderReadError {
-                        query: batch.start,
-                        error: unified_p_without_search_space(refusal, q_idx),
-                        utf8: None,
-                    }
+                    return Err(crate::blastinput::app::ErrorAfterBatchReports::of_batch(
+                        batch.start,
+                        unified_p_without_search_space(refusal, q_idx),
+                    )
                     .into());
                 }
             }
@@ -1513,14 +1512,18 @@ pub(crate) fn postprocess_preliminary_hits(
 
 /// The redo of one match with `-use_sw_tback` (item X4): `postprocess_preliminary_hits` with
 /// NCBI's Smith-Waterman redo (`smith_waterman::redo_one_match_smith_waterman`) in place of the
-/// X-drop redo; the steps after it are the same. `would_insert(evalue, score)` asks the query's
-/// heap of redone matches (`BlastCompo_HeapWouldInsert` with the match's subject index). The
-/// errors `SwRedoFailed` and `SwRedoEndless` are NCBI's failed and endless redos.
+/// X-drop redo; the steps after it are the same. `would_insert(evalue, score)` answers the test of
+/// the query's heap of redone matches (`BlastCompo_HeapWouldInsert` with the match's subject
+/// index): the one-thread loop asks the heap (`SwHeapAnswer::Known`); a job of the parallel redo
+/// may leave it open (`Deferred`: the match ends as on FALSE, and `kept` gets the test's state),
+/// and the continuation of such a match resumes from that state (`resume`; item X4-mt). The errors
+/// `SwRedoFailed` and `SwRedoEndless` are NCBI's failed and endless redos.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3605
 // Out of line: the one-thread loop calls it where `-use_sw_tback` asks for it, and the X-drop
 // redo's function keeps its own body.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn postprocess_preliminary_hits_smith_waterman(
     preliminary_hits: &[BlastpPreliminaryHsp],
     query_workspace: &BlastpKappaQueryWorkspace,
@@ -1528,6 +1531,7 @@ pub(crate) fn postprocess_preliminary_hits_smith_waterman(
     query_nomask: &[u8],
     subject: &[u8],
     matrix: ScoringMatrix,
+    unadjusted: Option<&AdjustedProteinMatrix>,
     karlin_params: &KarlinParams,
     gumbel_params: Option<&BlastGumbelBlk>,
     redo_align_params: &BlastRedoAlignParams,
@@ -1536,7 +1540,9 @@ pub(crate) fn postprocess_preliminary_hits_smith_waterman(
     subject_range_cache: &mut BlastpKappaSubjectRangeCache,
     engine_positives: bool,
     sw_scratch: &mut smith_waterman::SwMatchScratch,
-    would_insert: &mut dyn FnMut(f64, i32) -> bool,
+    resume: Option<&smith_waterman::SwMatchResume>,
+    would_insert: &mut dyn FnMut(f64, i32) -> smith_waterman::SwHeapAnswer,
+    kept: &mut Option<Box<smith_waterman::SwMatchResume>>,
 ) -> Result<BlastpPostprocessResult> {
     postprocess_with(
         preliminary_hits,
@@ -1564,8 +1570,11 @@ pub(crate) fn postprocess_preliminary_hits_smith_waterman(
                 &BLASTP_REDO_ALIGN_CALLBACKS,
                 composition_workspace,
                 matrix_state,
+                unadjusted,
                 expect_value,
+                resume,
                 &mut |_query_index, evalue, score| would_insert(evalue, score),
+                kept,
                 sw_scratch,
             )
         },
@@ -1757,7 +1766,7 @@ where
     if let Some(target) = blastp_trace_hsp_target() {
         for (index, hsp) in hsp_list.hsps.iter().enumerate() {
             if blastp_trace_matches_hsp(target, hsp) {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:459-535
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:531,3691-3701
                 eprintln!(
                     "[BLASTP_TRACE_HSP] final_hsp[{index}] q={}..{} s={}..{} raw_score={} bit_score={:.12} evalue={:.12e} len={} ident={} positives={} gaps={} gap_opens={} mismatch={} identity={:.6} {}",
                     hsp.q_start,

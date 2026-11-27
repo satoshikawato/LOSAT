@@ -47,8 +47,8 @@ fn pssm(id: ObjectId, columns: usize, rows: usize) -> PssmWithParameters {
 
 fn request(asn: bool, ascii: bool) -> PssmRequest {
     PssmRequest {
-        asn_path: asn.then(|| "f.asn".to_string()),
-        ascii_path: ascii.then(|| "f.txt".to_string()),
+        asn_path: asn.then(|| std::path::PathBuf::from("f.asn")),
+        ascii_path: ascii.then(|| std::path::PathBuf::from("f.txt")),
         save_each: false,
         pseudocount: 0,
         versions: Default::default(),
@@ -117,7 +117,7 @@ const GAPPED: KarlinBlk = KarlinBlk {
 fn a_ratio_only_pssm_gets_the_constructors_scores() {
     let mut value = pssm(ObjectId::Id(7), 2, 26);
     let rows = vec![[1; BLASTAA_SIZE], [2; BLASTAA_SIZE]];
-    with_computed_scores(&mut value, &rows, GAPPED);
+    with_computed_scores(&mut value, &rows, GAPPED, 11, 1);
     let matrix = &value.pssm;
     assert_eq!(matrix.num_rows, 28);
     let ratios = &matrix.intermediate_data.as_ref().unwrap().freq_ratios;
@@ -131,6 +131,11 @@ fn a_ratio_only_pssm_gets_the_constructors_scores() {
     assert_eq!(data.lambda_ungapped, None);
     let rps = value.params.unwrap().rpsdbparams.unwrap();
     assert_eq!((rps.gap_open, rps.gap_extend), (Some(11), Some(1)));
+    // Non-default search gap costs (PS7b): `PsiBlastAddAncillaryPssmData` writes the search's.
+    let mut custom = pssm(ObjectId::Id(8), 2, 28);
+    with_computed_scores(&mut custom, &rows, GAPPED, 9, 2);
+    let rps = custom.params.unwrap().rpsdbparams.unwrap();
+    assert_eq!((rps.gap_open, rps.gap_extend), (Some(9), Some(2)));
 }
 
 // The refusals of `rounds_input`, and what it keeps: the query's Seq-id (an integer stays
@@ -191,7 +196,7 @@ fn rounds_input_keeps_the_id_and_refuses_what_ncbi_writes_otherwise() {
         &request(true, false),
     ))
     .unwrap();
-    let (asn, _, _) = input.files(&request(true, false)).unwrap();
+    let asn = input.files(&request(true, false)).unwrap().asn;
     let asn = String::from_utf8(asn.unwrap()).unwrap();
     assert!(
         asn.contains("comment \"x\"")
@@ -206,6 +211,18 @@ fn rounds_input_keeps_the_id_and_refuses_what_ncbi_writes_otherwise() {
     .unwrap_err()
     .to_string();
     assert!(error.contains("without params.rpsdbparams"), "{error}");
+    assert!(error.contains("with -out_pssm"), "{error}");
+    // The one owner of the condition, which the archive of `-outfmt 11` reads too: computed
+    // scores without the file's own `rpsdbparams`.
+    assert!(file(vec![], true, false).matrix_name_unwritable());
+    assert!(!file(vec![], false, false).matrix_name_unwritable());
+    assert!(!file(vec![], true, true).matrix_name_unwritable());
+    let archive = matrix_name_refusal("in the archive of -outfmt 11");
+    assert!(
+        archive.contains("rpsdbparams in the archive of -outfmt 11 (NCBI")
+            && archive.ends_with("is not supported by LOSAT's PSIBLAST"),
+        "{archive}"
+    );
     refusal(rounds_input(
         file(vec![], false, false),
         &request(true, false),
@@ -240,7 +257,7 @@ fn the_long_ascii_form_reads_the_first_cells_and_refuses_weights_outside_int() {
         let mut object = pssm(ObjectId::Id(1), 1, 28);
         let mut row = [-1; BLASTAA_SIZE];
         row[0] = BLAST_SCORE_MIN;
-        with_computed_scores(&mut object, &[row], GAPPED);
+        with_computed_scores(&mut object, &[row], GAPPED, 11, 1);
         let data = object.pssm.intermediate_data.as_mut().unwrap();
         data.information_content = Some(vec![0.5]);
         data.num_matching_seqs = Some(vec![1]);
@@ -272,7 +289,7 @@ fn the_long_ascii_form_reads_the_first_cells_and_refuses_weights_outside_int() {
 #[test]
 fn the_write_back_sets_the_searched_blocks() {
     let mut object = pssm(ObjectId::Str(b"myq".to_vec()), 1, 28);
-    with_computed_scores(&mut object, &[[0; BLASTAA_SIZE]], GAPPED);
+    with_computed_scores(&mut object, &[[0; BLASTAA_SIZE]], GAPPED, 11, 1);
     let input = InPssmRounds {
         object: Some(object),
         refusal: None,
@@ -311,7 +328,7 @@ fn a_file_pssm_without_information_content_prints_the_short_form() {
     let mut row = [-1; BLASTAA_SIZE];
     row[1] = 4;
     row[0] = BLAST_SCORE_MIN;
-    with_computed_scores(&mut object, &[row], GAPPED);
+    with_computed_scores(&mut object, &[row], GAPPED, 11, 1);
     let text = String::from_utf8(ascii_pssm(&object)).unwrap();
     let expected = "\nLast position-specific scoring matrix computed\n           A  R  N  D  C  Q  E  G  H  I  L  K  M  F  P  S  T  W  Y  V\n    1 M    4 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 \n\n                      K         Lambda\nPSI Ungapped         0.0000     0.0000\nPSI Gapped           0.0425     0.2670\n";
     assert_eq!(text, expected);

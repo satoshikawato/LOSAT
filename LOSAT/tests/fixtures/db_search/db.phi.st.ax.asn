@@ -1,0 +1,218 @@
+Blast4-request ::= {
+  body queue-search {
+    program "blastp",
+    service "plain",
+    queries bioseq-set {
+      seq-set {
+        seq {
+          id {
+            local str "Query_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">x10"
+                }
+              }
+            },
+            title "x10"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 10,
+            seq-data ncbieaa "XXXXXXXXXX"
+          }
+        }
+      }
+    },
+    subject sequences {
+      {
+        id {
+          local str "Subject_1"
+        },
+        descr {
+          user {
+            type str "CFastaReader",
+            data {
+              {
+                label str "DefLine",
+                data str ">sdneq rich"
+              }
+            }
+          },
+          title "sdneq rich"
+        },
+        inst {
+          repr raw,
+          mol aa,
+          length 63,
+          seq-data ncbieaa "MKTAYIAKDNEQDDNNEEQQDNEQDDNNEEQQDNEQDDNNEEQQDNEQDD
+NNEEQQLLGKAVW"
+        }
+      }
+    },
+    algorithm-options {
+      {
+        name "EvalueThreshold",
+        value cutoff e-value { 1, 10, 1 }
+      },
+      {
+        name "MaskAtHash",
+        value boolean FALSE
+      },
+      {
+        name "SegFiltering",
+        value boolean FALSE
+      },
+      {
+        name "WordThreshold",
+        value integer 11
+      },
+      {
+        name "WindowSize",
+        value integer 40
+      },
+      {
+        name "HitlistSize",
+        value integer 500
+      },
+      {
+        name "GapTrigger",
+        value real { 22, 10, 0 }
+      },
+      {
+        name "IgnoreMsaMaster",
+        value boolean FALSE
+      },
+      {
+        name "PseudoCountWeight",
+        value integer 0
+      },
+      {
+        name "InclusionThreshold",
+        value real { 2, 10, -3 }
+      },
+      {
+        name "PHIPattern",
+        value string "x(3)"
+      }
+    }
+  }
+}
+Blast4-request ::= {
+  body queue-search {
+    program "blastp",
+    service "plain",
+    queries bioseq-set {
+      seq-set {
+        seq {
+          id {
+            local str "Query_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">p30 short"
+                }
+              }
+            },
+            title "p30 short"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 30,
+            seq-data ncbieaa "MDVSSYKSTIDYHNIEDMDDLQRATYKDRM"
+          }
+        }
+      }
+    },
+    subject sequences {
+      {
+        id {
+          local str "Subject_1"
+        },
+        descr {
+          user {
+            type str "CFastaReader",
+            data {
+              {
+                label str "DefLine",
+                data str ">sdneq rich"
+              }
+            }
+          },
+          title "sdneq rich"
+        },
+        inst {
+          repr raw,
+          mol aa,
+          length 63,
+          seq-data ncbieaa "MKTAYIAKDNEQDDNNEEQQDNEQDDNNEEQQDNEQDDNNEEQQDNEQDD
+NNEEQQLLGKAVW"
+        }
+      }
+    },
+    algorithm-options {
+      {
+        name "EvalueThreshold",
+        value cutoff e-value { 1, 10, 1 }
+      },
+      {
+        name "MaskAtHash",
+        value boolean FALSE
+      },
+      {
+        name "SegFiltering",
+        value boolean FALSE
+      },
+      {
+        name "WordThreshold",
+        value integer 11
+      },
+      {
+        name "WindowSize",
+        value integer 40
+      },
+      {
+        name "HitlistSize",
+        value integer 500
+      },
+      {
+        name "GapTrigger",
+        value real { 22, 10, 0 }
+      },
+      {
+        name "IgnoreMsaMaster",
+        value boolean FALSE
+      },
+      {
+        name "PseudoCountWeight",
+        value integer 0
+      },
+      {
+        name "InclusionThreshold",
+        value real { 2, 10, -3 }
+      },
+      {
+        name "PHIPattern",
+        value string "x(3)"
+      },
+      {
+        name "EffectiveSearchSpace",
+        value big-integer 60
+      },
+      {
+        name "CompositionBasedStats",
+        value integer 0
+      }
+    }
+  }
+}

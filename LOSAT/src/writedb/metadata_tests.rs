@@ -1,4 +1,5 @@
 use super::*;
+use crate::utils::test_dir::TempDir;
 
 // The file makeblastdb 2.17.0 wrote for the three proteins of survey A's
 // f1_tiny.fa (`-title t -out db`, version 5).
@@ -50,30 +51,9 @@ fn strings_are_escaped_as_ncbi_s_json_writer_does() {
     );
 }
 
-/// A directory of its own under the system's temporary directory.
-struct TempDir(std::path::PathBuf);
-
-impl TempDir {
-    fn new(name: &str) -> Self {
-        let dir = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-metadata-{name}-{}-{:?}",
-            crate::utils::test_dir::process_id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
-    }
-
-    fn db(&self) -> String {
-        self.0.join("db").to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
+/// The path of the database `db` in `dir`, as the text the metadata writer takes.
+fn db_path(dir: &Path) -> String {
+    dir.join("db").to_string_lossy().into_owned()
 }
 
 /// The metadata of a protein database of `volumes` volumes of four files each, with a
@@ -106,7 +86,7 @@ fn metadata(volumes: usize, pad: usize) -> DbMetadata {
 /// messages and the exception that ends makeblastdb.
 fn written(path: &str, metadata: &DbMetadata) -> (Option<Vec<u8>>, String, Option<&'static str>) {
     let mut err = Vec::new();
-    let escaped = write_metadata_file(path, true, metadata, &mut err);
+    let escaped = write_metadata_file(path.as_bytes(), true, metadata, &mut err);
     let pjs = format!("{path}.pjs");
     let text = std::fs::metadata(&pjs)
         .is_ok_and(|meta| meta.is_file())
@@ -120,9 +100,9 @@ fn written(path: &str, metadata: &DbMetadata) -> (Option<Vec<u8>>, String, Optio
 #[test]
 fn the_metadata_file_holds_the_object_and_a_line_feed() {
     for volumes in [1, 130] {
-        let tmp = TempDir::new(&format!("ok{volumes}"));
+        let tmp = TempDir::unique(&format!("metadata-ok{volumes}"));
         let metadata = metadata(volumes, 3);
-        let (text, err, escaped) = written(&tmp.db(), &metadata);
+        let (text, err, escaped) = written(&db_path(&tmp), &metadata);
         assert_eq!(text, Some(metadata.to_json()), "{volumes}");
         assert_eq!((err.as_str(), escaped), ("", None));
     }
@@ -135,11 +115,11 @@ fn the_metadata_file_holds_the_object_and_a_line_feed() {
 #[test]
 fn a_metadata_file_that_cannot_be_opened_reports_a_write_fault() {
     for (volumes, at) in [(1, None), (130, Some(4096))] {
-        let tmp = TempDir::new(&format!("blocked{volumes}"));
-        std::fs::create_dir(format!("{}.pjs", tmp.db())).unwrap();
+        let tmp = TempDir::unique(&format!("metadata-blocked{volumes}"));
+        std::fs::create_dir(format!("{}.pjs", db_path(&tmp))).unwrap();
         let metadata = metadata(volumes, 3);
         let at = at.unwrap_or(metadata.to_json().len() - 1);
-        let (_, err, escaped) = written(&tmp.db(), &metadata);
+        let (_, err, escaped) = written(&db_path(&tmp), &metadata);
         assert_eq!(
             err,
             format!(
@@ -162,9 +142,9 @@ fn the_buffer_is_written_where_a_call_does_not_fit() {
         .unwrap();
     let metadata = metadata(130, 4092 - eol);
     assert_eq!(&metadata.to_json()[4092..4097], b"\n    ");
-    let tmp = TempDir::new("straddle");
-    std::fs::create_dir(format!("{}.pjs", tmp.db())).unwrap();
-    let (_, err, _) = written(&tmp.db(), &metadata);
+    let tmp = TempDir::unique("metadata-straddle");
+    std::fs::create_dir(format!("{}.pjs", db_path(&tmp))).unwrap();
+    let (_, err, _) = written(&db_path(&tmp), &metadata);
     assert_eq!(
         err,
         "Error: (802.5) [makeblastdb] CObjectOStream: error at byte 4093: stack is empty: \
@@ -181,11 +161,11 @@ fn the_buffer_is_written_where_a_call_does_not_fit() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_metadata_file_on_a_full_device_cannot_be_written() {
-    let tmp = TempDir::new("full");
-    std::os::unix::fs::symlink("/dev/full", format!("{}.pjs", tmp.db())).unwrap();
+    let tmp = TempDir::unique("metadata-full");
+    std::os::unix::fs::symlink("/dev/full", format!("{}.pjs", db_path(&tmp))).unwrap();
     let small = metadata(1, 3);
     let at = small.to_json().len() - 1;
-    let (_, err, escaped) = written(&tmp.db(), &small);
+    let (_, err, escaped) = written(&db_path(&tmp), &small);
     // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
     assert_eq!(
         err,
@@ -200,7 +180,7 @@ fn a_metadata_file_on_a_full_device_cannot_be_written() {
         ))
     );
     assert_eq!(escaped, Some("COStreamBuffer::Flush: failed"));
-    let (_, err, escaped) = written(&tmp.db(), &metadata(130, 3));
+    let (_, err, escaped) = written(&db_path(&tmp), &metadata(130, 3));
     assert_eq!(
         err,
         "Error: (802.5) [makeblastdb] CObjectOStream: error at byte 8192: stack is empty: \

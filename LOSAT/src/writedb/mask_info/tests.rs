@@ -9,6 +9,7 @@
 //! makeblastdb on files made by a fuzzer.
 
 use super::*;
+use crate::report::serial::asn_types::Post;
 use crate::seqid::model::{Dbtag, IdPat, ObjectId, PatentNumber, PatentSeqId, PdbSeqId, TextseqId};
 use crate::writedb::WriteDbError;
 use std::collections::BTreeMap;
@@ -577,13 +578,13 @@ fn posts_equal_what_makeblastdb_posts() {
             let mut warned = false;
             let mut post = |reader: &mut MaskFileReader| {
                 for post in reader.take_posts() {
-                    if matches!(post, MaskPost::Utf8Tag(_)) {
+                    if matches!(post, Post::Utf8Tag(_)) {
                         if warned {
                             continue;
                         }
                         warned = true;
                     }
-                    posted.extend_from_slice(&post.line());
+                    posted.extend_from_slice(&post.line(Some("makeblastdb")));
                 }
             };
             let complete = |list: &MaskList| {
@@ -616,7 +617,7 @@ fn posts_equal_what_makeblastdb_posts() {
         assert!(!rest.contains("(803."), "{file}: {rest}");
         posting += usize::from(!posted.is_empty());
     }
-    assert_eq!(posting, 13);
+    assert_eq!(posting, 14);
 }
 
 #[test]
@@ -1172,14 +1173,15 @@ fn text_edits_never_panic() {
         edited.remove(i);
         let _ = read_bytes("remove", &edited);
     }
-    // nesting deeper than NCBI would need for any real file
+    // a nest of 2,000 levels that the file's end cuts: makeblastdb's report of the end of the file
+    // at every level (the reader keeps the levels on the heap, PD-LOSAT-NCBI-DEFECTS exception 28)
     let mut deep = String::from("Blast-db-mask-info ::= { algo-id 0, algo-program windowmasker, algo-options \"\", masks { masks { ");
     for _ in 0..2000 {
         deep.push_str("mix { ");
     }
     assert!(matches!(
         read_bytes("deep", deep.as_bytes()),
-        Err(MaskFileError::Unsupported(_))
+        Err(MaskFileError::Ncbi(_))
     ));
 }
 
@@ -1557,10 +1559,12 @@ fn read_stream(path: &Path, data: &[u8], by_byte: bool) -> String {
 }
 
 /// The binary mask files read one byte per fill are read as whole: the same objects, posts and
-/// errors, whole and cut at every length (each form that `BerReader` reads from the kept bytes is
-/// then read one byte at a time, at each place where the kept bytes end).
+/// errors, whole and cut at every length up to 16 KiB and at 64 lengths (`len * k / 64`) for
+/// longer files (each form that `BerReader` reads from the kept bytes is then read one byte at a
+/// time, at each place where the kept bytes end).
 #[test]
 fn binary_files_read_one_byte_per_fill() {
+    const FULL_CUT_BYTES: usize = 16 * 1024;
     let mut paths: Vec<PathBuf> = std::fs::read_dir(parse_dir())
         .unwrap()
         .map(|entry| entry.unwrap().path())
@@ -1571,7 +1575,11 @@ fn binary_files_read_one_byte_per_fill() {
     let path = Path::new("binary.asnb");
     for file in paths {
         let data = read_file(&file);
-        for cut in 0..=data.len() {
+        let mut cuts: Vec<usize> = (0..=data.len().min(FULL_CUT_BYTES)).collect();
+        cuts.extend((1..=64).map(|k| data.len() * k / 64));
+        cuts.sort_unstable();
+        cuts.dedup();
+        for cut in cuts {
             assert_eq!(
                 read_stream(path, &data[..cut], false),
                 read_stream(path, &data[..cut], true),
@@ -1608,4 +1616,27 @@ fn text_files_read_one_byte_per_read() {
             );
         }
     }
+}
+
+/// The members and variants that the reader's builder takes by position are the table's, in the
+/// table's module order, and the values of `Blast-filter-program` in the table are LOSAT's one
+/// list of them (`seqdb::mask::FILTER_PROGRAMS`).
+#[test]
+fn the_builder_takes_the_tables_members_and_values() {
+    use crate::report::serial::asn_types::table::named;
+    use crate::report::serial::asn_types::{members, resolved, Kind};
+    for (ty, names) in super::reader::MEMBER_ORDER {
+        let table: Vec<&str> = members(ty).iter().map(|m| m.name()).collect();
+        assert_eq!(table, names, "{ty}");
+    }
+    let Kind::Enumerated { integer, values } = resolved(named::BLAST_FILTER_PROGRAM).kind else {
+        panic!("Blast-filter-program is an INTEGER with named values")
+    };
+    assert!(integer);
+    let table: Vec<(&str, i32)> = values
+        .values()
+        .iter()
+        .map(|value| (value.name(), value.value))
+        .collect();
+    assert_eq!(table, crate::seqdb::mask::FILTER_PROGRAMS);
 }

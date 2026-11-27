@@ -131,43 +131,55 @@ test('the file of -logfile is a file of the run: shown after the formats and sav
 
 /**
  * What the native CLI writes for the search `words` (program first) with `-logfile NAME` on the inputs, with the run's
- * one thread, in a new working directory where the name's directories exist: its standard error, and the file that the
- * name makes (undefined where it makes none), which is the name without the '/'s at its end, as NCBI reads it (`logs/`
- * makes `logs`). Undefined without LOSAT_WEB_NATIVE.
+ * one thread, in a new working directory holding only `query.fa`, `subject.fa` and `extraFiles`: its standard error,
+ * and the file that the name makes (undefined where it makes none). Undefined without LOSAT_WEB_NATIVE.
  */
 function nativeNamedLog(
   words: readonly string[],
   name: string,
   query: string,
   subject: string,
-): { readonly stderr: Buffer; readonly file: Buffer | undefined } | undefined {
+  extraFiles: Readonly<Record<string, string>> = {},
+): { readonly stderr: Buffer; readonly file: Buffer | undefined; readonly madeName: string | undefined } | undefined {
   if (NATIVE === undefined) return undefined;
   const directory = nativeDirectory(query, subject);
-  const made = name.replace(/\/+$/, '');
-  const slash = made.lastIndexOf('/');
-  if (slash > 0) mkdirSync(join(directory, made.slice(0, slash)), { recursive: true });
+  for (const [rel, content] of Object.entries(extraFiles)) {
+    const full = join(directory, rel);
+    const slash = rel.lastIndexOf('/');
+    if (slash > 0) mkdirSync(join(directory, rel.slice(0, slash)), { recursive: true });
+    writeFileSync(full, content);
+  }
   const run = spawnSync(NATIVE, [words[0]!, '-query', 'query.fa', '-subject', 'subject.fa', ...words.slice(1), '-logfile', name, '-num_threads', '1'], { cwd: directory });
   expect(run.status, `native ${words.join(' ')} -logfile ${name}: ${run.stderr.toString('utf8')}`).toBe(0);
-  const path = join(directory, made);
-  return { stderr: run.stderr, file: existsSync(path) && statSync(path).isFile() ? readFileSync(path) : undefined };
+  const made = name.trim().replace(/\/+$/, '');
+  const candidate = made === '' || made.startsWith('/') ? undefined : join(directory, made);
+  const exists = candidate !== undefined && existsSync(candidate) && statSync(candidate).isFile();
+  return { stderr: run.stderr, file: exists ? readFileSync(candidate) : undefined, madeName: exists ? made : undefined };
 }
 
-// A -logfile name is read as the CLI on Linux reads it where the name's directories exist (ABI v2 §4 `losat_web2_start`;
-// line WQA's sweep, D11, 2026-11-20): a name with a directory makes a file of the run under its whole name, as the CLI
-// makes it there (TBLASTX writes the warning of -max_target_seqs 1 into it, BLASTN to its warnings, the file empty), and
-// it is saved with each '/' as '_'; /dev/stderr is the standard error, so TBLASTX's warning is among its Warnings and the
-// run has no file. Before, the press was refused: "the -logfile name logs/run.log has a directory, which LOSAT Web does
-// not have: give a file name without one". `logs/` is the file `logs`, as NCBI reads the name and the CLI makes it, saved
-// as `…logfile.logs` (D11 round 2, 2026-11-20; before, it was a directory and the warning was among the Warnings).
-test('a -logfile name with a directory makes a file of that name, and /dev/stderr is the Warnings', async ({ page, browserName }, testInfo) => {
+// A -logfile name is read against the run's real files (ABI v2 §4 `losat_web2_start`): a name in a missing folder
+// (`logs/run.log` without `logs`) or naming a folder (`sub` from `-conffile sub/settings.ini`) keeps the warnings on
+// Warnings with no file; `logs/` makes the file `logs`, `run.log` makes `run.log`, and `sub/run.log` (when the run
+// holds `sub/settings.ini`) makes `sub/run.log`, saved with `/` as `_`; `/dev/stderr` keeps the warnings on Warnings;
+// and a `-logfile` naming a file of the run (`sub/settings.ini`, `query.fa`) is refused at validation.
+test('a -logfile name follows the run directory files, and /dev/stderr is the Warnings', async ({ page, browserName }, testInfo) => {
   if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the files: ${NO_NATIVE_REASON}` });
-  const cases = [
-    { id: 'tblastx', name: 'logs/run.log', saved: 'logs_run\\.log' },
-    { id: 'blastn', name: 'a/b/run.log', saved: 'a_b_run\\.log' },
-    { id: 'tblastx', name: 'logs/', saved: 'logs' },
-    { id: 'tblastx', name: '/dev/stderr', saved: undefined },
-  ] as const;
-  for (const [index, { id, name, saved }] of cases.entries()) {
+  const settings = '[BLAST]\n';
+  const cases: ReadonlyArray<{
+    readonly id: 'tblastx' | 'blastn';
+    readonly name: string;
+    readonly shown: string | undefined;
+    readonly saved: string | undefined;
+    readonly conffile?: string;
+  }> = [
+    { id: 'tblastx', name: 'logs/run.log', shown: undefined, saved: undefined },
+    { id: 'tblastx', name: 'run.log', shown: 'run.log', saved: 'run\\.log' },
+    { id: 'tblastx', name: 'logs/', shown: 'logs', saved: 'logs' },
+    { id: 'tblastx', name: '/dev/stderr', shown: undefined, saved: undefined },
+    { id: 'tblastx', name: 'sub/run.log', shown: 'sub/run.log', saved: 'sub_run\\.log', conffile: 'sub/settings.ini' },
+    { id: 'tblastx', name: 'sub', shown: undefined, saved: undefined, conffile: 'sub/settings.ini' },
+  ];
+  for (const [index, { id, name, shown, saved, conffile }] of cases.entries()) {
     // Each case on a page of its own: its run is run 1.
     if (index > 0) await openSearch(page);
     await program(page, id);
@@ -176,10 +188,13 @@ test('a -logfile name with a directory makes a file of that name, and /dev/stder
     await openParameters(page);
     await page.getByTestId('param-max_target_seqs').selectOption('other');
     await page.getByTestId('param-max_target_seqs-other').fill('1');
-    await page.getByTestId('param-extra').fill(`-logfile ${name}`);
+    const extra = conffile === undefined ? `-logfile ${name}` : `-conffile ${conffile} -logfile ${name}`;
+    await page.getByTestId('param-extra').fill(extra);
+    if (conffile !== undefined) {
+      await page.getByTestId('param-conffile-file').setInputFiles({ name: 'settings.ini', mimeType: 'text/plain', buffer: Buffer.from(settings) });
+    }
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
     await submit(page);
-    // The press starts run 1 (before D11 it was refused with the sentence about the -logfile name).
     const message = page.getByTestId('search-message');
     await expect(page.getByTestId('run-1-option').or(message).first()).toBeAttached();
     const refusal = (await message.count()) > 0 ? await message.textContent() : '';
@@ -187,10 +202,11 @@ test('a -logfile name with a directory makes a file of that name, and /dev/stder
     await waitStatus(page, 1, 'completed');
     await chooseRun(page, 1);
     const warning = `Warning: [${id}] Examining 5 or more matches is recommended\n`;
-    const native = nativeNamedLog([id, '-max_target_seqs', '1'], name, QUERY, SUBJECT);
+    const cliExtra = conffile === undefined ? ['-max_target_seqs', '1'] : ['-max_target_seqs', '1', '-conffile', conffile];
+    const native = nativeNamedLog([id, ...cliExtra], name, QUERY, SUBJECT, conffile === undefined ? {} : { [conffile]: settings });
     await page.getByTestId('results-view-outputs').click();
-    if (saved === undefined) {
-      // The standard error: no file of the run, and the warning is among the run's Warnings, as the CLI writes it.
+    if (saved === undefined || shown === undefined) {
+      // Missing folder, folder name, or /dev/stderr: no file of the run, and the warning is among Warnings.
       await expect(page.getByTestId('format-run-files')).toHaveCount(0);
       await page.getByTestId('results-view-details').click();
       await expect(page.getByTestId('run-diagnostics')).toHaveText(warning.trimEnd());
@@ -203,24 +219,34 @@ test('a -logfile name with a directory makes a file of that name, and /dev/stder
     }
     const text = id === 'tblastx' ? warning : '';
     const tab = page.getByTestId('format-run-files');
-    await expect(tab).toHaveText(`-logfile ${name}`);
+    await expect(tab).toHaveText(`-logfile ${shown}`);
     await tab.click();
     const file = page.getByTestId('run-file-0');
-    await expect(file.getByTestId('run-file-name')).toHaveText(name);
+    await expect(file.getByTestId('run-file-name')).toHaveText(shown);
     if (text === '') await expect(file.getByTestId('run-file-empty')).toHaveText('The file is empty.');
     else await expect(file.getByTestId('run-file-text')).toHaveText(text);
-    await shoot(page.getByTestId('results-outputs'), `08-outputs-logfile-${id}-${name.replace(/[^a-z]+/g, '-')}`, browserName);
+    await shoot(page.getByTestId('results-outputs'), `08-outputs-logfile-${id}-${shown.replace(/[^a-z]+/g, '-')}`, browserName);
     const download = await downloaded(page, () => page.getByTestId('run-file-download-0').click());
     expect(download.name).toMatch(new RegExp(`^losat-run1-${id}-.*Z\\.logfile\\.${saved}$`));
     expect(download.bytes.toString('utf8')).toBe(text);
     await page.getByTestId('results-download-all').click();
-    await expect(page.getByTestId('results-download-menu').getByTestId('results-download-run-file-0')).toHaveText(`${name} (-logfile)`);
+    await expect(page.getByTestId('results-download-menu').getByTestId('results-download-run-file-0')).toHaveText(`${shown} (-logfile)`);
     await page.keyboard.press('Escape');
     if (native !== undefined) {
       expect(native.file?.equals(download.bytes), `${id} -logfile ${name}: the CLI's file`).toBe(true);
       expect(native.stderr.toString('utf8'), `${id} -logfile ${name}: the CLI's standard error`).toBe(id === 'tblastx' ? '' : warning);
     }
   }
+  // A -logfile naming a file of the run's directory (`sub/settings.ini`) is refused at validation.
+  await openSearch(page);
+  await program(page, 'tblastx');
+  await paste(page, 'query', QUERY);
+  await paste(page, 'subject', SUBJECT);
+  await openParameters(page);
+  await page.getByTestId('param-extra').fill('-conffile sub/settings.ini -logfile sub/settings.ini');
+  await page.getByTestId('param-conffile-file').setInputFiles({ name: 'settings.ini', mimeType: 'text/plain', buffer: Buffer.from(settings) });
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await expect(page.getByTestId('argv-validation')).toContainText("a -logfile file 'sub/settings.ini' that is a file of the run's directory");
 });
 
 // TBLASTX writes the error that ends its run into the file of -logfile (ABI v2 §5: stream 8 comes also
@@ -591,4 +617,46 @@ test('a dry run says that it searched nothing', async ({ page, browserName }) =>
   await page.getByTestId('results-view-outputs').click();
   await page.getByTestId('format-run-files').click();
   await expect(page.getByTestId('run-file-0').getByTestId('run-file-empty')).toHaveText('The file is empty.');
+});
+
+// The search strategy file of -export_search_strategy (line RG item F1w; ABI v2 §5 stream 8) is a file of the run as the
+// file of -logfile is: shown under its option after the formats and saved as the CLI writes it. A name that the CLI
+// cannot open is NCBI's error before the run, as on the command line.
+test('the file of -export_search_strategy is a file of the run, saved as the CLI writes it', async ({ page, browserName }, testInfo) => {
+  if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the file: ${NO_NATIVE_REASON}` });
+  await program(page, 'blastn');
+  await paste(page, 'query', QUERY);
+  await paste(page, 'subject', SUBJECT);
+  await openParameters(page);
+  const extra = page.getByTestId('param-extra');
+  await extra.fill('-export_search_strategy /etc/s.asn');
+  const validation = page.getByTestId('argv-validation');
+  await expect(validation).toHaveAttribute('data-state', 'invalid');
+  await expect(validation).toContainText('Argument "export_search_strategy". File is not accessible:  `/etc/s.asn\'');
+  await extra.fill('-export_search_strategy out/s.asn -logfile run.log');
+  await expect(validation).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await page.getByTestId('results-view-outputs').click();
+  const tab = page.getByTestId('format-run-files');
+  await expect(tab).toHaveText('-export_search_strategy out/s.asn, -logfile run.log');
+  await tab.click();
+  const file = page.getByTestId('run-file-0');
+  await expect(file.getByTestId('run-file-name')).toHaveText('out/s.asn');
+  await expect(file.getByTestId('run-file-text')).toContainText('Blast4-request ::= {');
+  await shoot(page.getByTestId('results-outputs'), '09-outputs-strategy', browserName);
+  const saved = await downloaded(page, () => page.getByTestId('run-file-download-0').click());
+  expect(saved.name).toMatch(/^losat-run1-blastn-.*Z\.export_search_strategy\.out_s\.asn$/);
+  await page.getByTestId('results-download-all').click();
+  const item = page.getByTestId('results-download-menu').getByTestId('results-download-run-file-0');
+  await expect(item).toHaveText('out/s.asn (-export_search_strategy)');
+  expect(await downloaded(page, () => item.click())).toEqual(saved);
+  if (NATIVE !== undefined) {
+    const directory = nativeDirectory(QUERY, SUBJECT);
+    mkdirSync(join(directory, 'out'));
+    const cli = spawnSync(NATIVE, ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-export_search_strategy', 'out/s.asn', '-num_threads', '1'], { cwd: directory });
+    expect(cli.status, cli.stderr.toString('utf8')).toBe(0);
+    expect(saved.bytes.equals(readFileSync(join(directory, 'out/s.asn'))), "blastn -export_search_strategy out/s.asn: the CLI's file").toBe(true);
+  }
 });

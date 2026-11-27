@@ -14,6 +14,7 @@ use crate::seqid::model::Dbtag;
 use crate::seqid::parse::parse_ids;
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{DeflineSet, ParsedSeqId};
+use crate::sequence::write_fasta_lines;
 
 use super::bioseq::DbBioseq;
 use super::letters::{apply_masks, reverse_complement};
@@ -27,6 +28,8 @@ pub(super) struct FastaFormatter {
     /// `CFastaOstream::m_PreviousWholeIds`: the FASTA strings of the ids written without a
     /// range.
     previous_whole_ids: HashSet<Vec<u8>>,
+    /// The bytes of the record being written, kept from one sequence to the next.
+    text: Vec<u8>,
 }
 
 impl FastaFormatter {
@@ -35,6 +38,7 @@ impl FastaFormatter {
             width,
             long_seqids,
             previous_whole_ids: HashSet::new(),
+            text: Vec::new(),
         }
     }
 
@@ -47,7 +51,7 @@ impl FastaFormatter {
         source: &Source,
         oid: u32,
         config: &Config,
-        target: Option<&str>,
+        target: Option<&[u8]>,
         out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
         DbBioseq::with(source, oid, false, target, target_id, out, |bioseq, out| {
@@ -67,7 +71,25 @@ impl FastaFormatter {
         let (set, shown, length) = (&bioseq.set, bioseq.shown(), bioseq.length);
         let target_seqid = bioseq.target.as_ref();
         let range = config.range.clipped(length);
-        let mut text = Vec::new();
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:462-489
+        // The masks of the algorithm are read first; a Seq-loc of the masks (where the sequence has
+        // some) or of the range takes the Bioseq's best id, which a front line without Seq-ids
+        // leaves null: NCBI's dereference throws before any byte of the sequence (line RG
+        // D1c-1c-b; `-strand minus` alone reads no id).
+        let masks = if config.filt_algo != -1 {
+            Some(source.masks(oid, config.filt_algo)?)
+        } else {
+            None
+        };
+        let no_ids = shown
+            .deflines
+            .first()
+            .is_some_and(|line| line.ids.is_empty());
+        if no_ids && (range.is_some() || masks.as_ref().is_some_and(|masks| !masks.is_empty())) {
+            return Err(super::retrieve::null_pointer());
+        }
+        let mut text = std::mem::take(&mut self.text);
+        text.clear();
         if self.long_seqids {
             // The Bioseq's first source, from every line the filter keeps (the target's first),
             // names the organism of a title made from it: the long header's alone.
@@ -84,16 +106,18 @@ impl FastaFormatter {
         // the whole length of a protein (NCBI's whole-sequence mapper keeps the first third
         // of it), and a sequence without masks of the algorithm stays in upper case (NCBI
         // keeps the mask of the batch line before when the Seq-id is the same).
-        if config.filt_algo != -1 {
-            apply_masks(&mut letters, &source.masks(oid, config.filt_algo)?, range);
+        if let Some(masks) = &masks {
+            apply_masks(&mut letters, masks, range);
         }
         if config.strand_minus {
             reverse_complement(&mut letters);
         }
-        write_sequence(&letters, self.width, &mut text);
+        write_fasta_lines(&letters, self.width, &mut text);
         // `out` writes to an `ncbi_app::files::Ostream` (`retrieve::process`): a failed write
         // does nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
-        out.write_all(&text).map_err(Stop::write)
+        let written = out.write_all(&text).map_err(Stop::write);
+        self.text = text;
+        written
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2927-2975
@@ -155,7 +179,7 @@ impl FastaFormatter {
 /// The id of a `-target_only` target as `GetBioseq` gets it: the GI of a number
 /// (`GetBioseq` with `oid` and `gi`, which `x_GetTaxDefline` makes a `CSeq_id` of type `e_Gi` with
 /// the number `gi`), else the Seq-id of the text.
-fn target_id(target: &str) -> Result<ParsedSeqId, Stop> {
+fn target_id(target: &[u8]) -> Result<ParsedSeqId, Stop> {
     match numeric_target(target) {
         Some(number) => Ok(ParsedSeqId::Gi(number)),
         None => parse_target(target),
@@ -272,7 +296,12 @@ fn short_header(
     out: &mut Vec<u8>,
 ) -> Result<(), Stop> {
     let ids = &set.deflines[0].ids;
-    let first = &ids[0];
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:959-985
+    // A front line without Seq-ids gives no first id: NCBI writes no header line, the letters
+    // follow (line RG D1c-1c-b).
+    let Some(first) = ids.first() else {
+        return Ok(());
+    };
     let range_text = range.map(|(from, to)| {
         if config.strand_minus {
             format!(":c{}-{} ", to + 1, from + 1)
@@ -337,7 +366,7 @@ fn generated_title(
     title: &[u8],
 ) -> Result<Vec<u8>, Stop> {
     let ids = &set.deflines[0].ids;
-    let mut bioseq_facts = crate::report::db_subject::bioseq_facts(ids);
+    let mut bioseq_facts = crate::report::defline::bioseq_facts(ids);
     bioseq_facts.local_annots_only = true;
     bioseq_facts.has_source = source_taxid.is_some();
     let from_source = bioseq_title_from_source(title, || bioseq_facts.clone());
@@ -359,16 +388,6 @@ fn generated_title(
         )));
     }
     Ok(defline.text)
-}
-
-// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3295-3317
-/// The sequence lines of `CFastaOstream::x_WriteSequence`: lines of `width` letters, the
-/// last one shorter, each ended by a line feed.
-fn write_sequence(letters: &[u8], width: u32, out: &mut Vec<u8>) {
-    for line in letters.chunks(width.max(1) as usize) {
-        out.extend_from_slice(line);
-        out.push(b'\n');
-    }
 }
 
 /// `ObjectId` of a `BL_ORD_ID` tag, for tests.

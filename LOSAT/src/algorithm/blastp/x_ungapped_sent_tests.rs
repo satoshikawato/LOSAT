@@ -90,9 +90,9 @@ fn check_call_of(
     let q = query_of(matrix, block, &[d]).expect("block on the path");
     let s = XSentSubject::new(subject).expect("subject on the path");
     let raw = &subject[1..subject.len() - 1];
-    let expect = extend_two_hit(matrix, block, raw, sl, sr, qr, d, 3);
+    let expect = extend_two_hit(matrix, block, raw, sl as i32, sr, qr, d, 3);
     // SAFETY: d is in 1..=127 (checked by `query_of`).
-    let got = unsafe { two_hit(&q, s, sl, sr, qr, d) };
+    let got = unsafe { two_hit(&q, s, sl as i32, sr, qr, d) };
     assert_eq!(
         got, expect,
         "{matrix:?} two_hit sl={sl} sr={sr} qr={qr} d={d}"
@@ -317,7 +317,7 @@ fn keys_decode_and_order_as_the_reference_compares() {
         let key = ((score as i64) << 32) - (i + 1);
         assert_eq!(
             best_of(key),
-            (score, (i + 1) as i32),
+            (score, (i + 1) as u32),
             "score {score} step {i}"
         );
     }

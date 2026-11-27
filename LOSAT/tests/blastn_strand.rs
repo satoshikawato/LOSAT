@@ -1,6 +1,6 @@
 //! `blastn -strand plus|minus|both` on whole searches: the option is accepted (an unknown value is
-//! a clap error), `both` is the search without the option, and the searches of the two strands
-//! together are the search of both (NCBI BLAST+ 2.17.0 `-num_threads 1`, checked over
+//! NCBI's argument error), `both` is the search without the option, and the searches of the two
+//! strands together are the search of both (NCBI BLAST+ 2.17.0 `-num_threads 1`, checked over
 //! 543 + 91 probe cases: the lines of `plus` are the plus/plus lines of `both` and the lines of
 //! `minus` the plus/minus lines, with the same e-values; only the order of the subjects can
 //! change). That the bytes equal NCBI's is the business of the probe (`ncbi-parity` O2a) and the
@@ -58,10 +58,10 @@ const CASES: [(&str, &str); 2] = [
 ];
 
 #[test]
-fn an_unknown_strand_is_a_clap_error() {
+fn an_unknown_strand_is_ncbis_argument_error() {
     for value in ["foo", "PLUS", "Both", "", "1"] {
         let output = run(CASES[0].0, CASES[0].1, &["-strand", value]);
-        assert_eq!(output.status.code(), Some(2), "-strand {value:?}");
+        assert_eq!(output.status.code(), Some(1), "-strand {value:?}");
         assert!(output.stdout.is_empty(), "-strand {value:?}");
         assert!(!output.stderr.is_empty(), "-strand {value:?}");
     }

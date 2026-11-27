@@ -49,26 +49,29 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::MaskedRangeSet;
-use crate::ncbi_str::{string_to_int, truncate_spaces_str};
+use crate::blastinput::ncbi_environment::ReadVerification;
+use crate::ncbi_str::{string_to_int, truncate_spaces};
 use crate::report::serial::asn_input::Utf8TagOnce;
-use crate::writedb::build_db::BuildDatabase;
+use crate::report::serial::asn_types::Post;
+use crate::utils::os_bytes::path_of_bytes;
+use crate::writedb::build_db::{endl, BuildDatabase};
 use crate::writedb::fasta_source::Warn;
 use crate::writedb::makeblastdb::MakedbError;
-use crate::writedb::mask_info::{MaskFileError, MaskFileReader, MaskPost};
+use crate::writedb::mask_info::{MaskFileError, MaskFileReader};
 use crate::writedb::WriteDbError;
 
 /// The values of the options that `x_ProcessMaskData` reads: `None` for an option that was not
-/// given (`CArgValue::HasValue()` false), `Some("")` for one given with an empty value.
+/// given (`CArgValue::HasValue()` false), `Some(b"")` for one given with an empty value.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct MaskDataOptions<'a> {
     /// `-mask_data`.
-    pub(crate) mask_data: Option<&'a str>,
+    pub(crate) mask_data: Option<&'a [u8]>,
     /// `-mask_id`.
-    pub(crate) mask_id: Option<&'a str>,
+    pub(crate) mask_id: Option<&'a [u8]>,
     /// `-mask_desc`.
-    pub(crate) mask_desc: Option<&'a str>,
+    pub(crate) mask_desc: Option<&'a [u8]>,
     /// `-gi_mask_name`.
-    pub(crate) gi_mask_name: Option<&'a str>,
+    pub(crate) gi_mask_name: Option<&'a [u8]>,
     /// The directory in which a relative mask file name is looked up (`None`: the current
     /// directory, as makeblastdb does). The names in the log, the messages and the registry stay
     /// as given. A hook for tests, which cannot change the directory of the process.
@@ -128,13 +131,29 @@ impl MaskDataError {
     ///   for a file it refuses ("Error: NCBI C++ Exception: ..." of a `CException`, status 255;
     ///   "BLAST ran out of memory" of a `std::bad_alloc`, status 4; "Error: ..." of the
     ///   `std::length_error` of a string longer than `std::string` holds, status 255); LOSAT's
-    ///   refusal of a negative algorithm id ("losat makeblastdb: ...", status 1).
+    ///   refusal of a negative algorithm id ("losat makeblastdb: ...", status 1); the closed pipe
+    ///   of a log line ([`WriteDbError::ClosedPipe`], status 0, no message).
     /// * [`MaskFileError::Unsupported`]: NCBI reads the file and LOSAT does not
     ///   (`MakedbError::Unsupported`, status 1).
     /// * [`MaskFileError::EofInContinuation`]: `None`, exactly as NCBI (status 0, nothing is
     ///   printed here; the destructor's message follows).
-    pub(crate) fn into_makedb_error(self) -> Option<MakedbError> {
+    /// * What NCBI's reader throws where a check of the data fails that the run's settings
+    ///   (`read_verification`) turn off, after which NCBI reads on: LOSAT's refusal
+    ///   (`MakedbError::Unsupported`, status 1; `ReadVerification::refused`), at the place of
+    ///   NCBI's error.
+    pub(crate) fn into_makedb_error(
+        self,
+        read_verification: &ReadVerification,
+    ) -> Option<MakedbError> {
         match self {
+            MaskDataError::File(MaskFileError::Ncbi(WriteDbError::Exception(exception))) => Some(
+                match read_verification.refused(&exception, "mask data (-mask_data)") {
+                    Some(refused) => MakedbError::Unsupported(format!(
+                        "{refused} is not supported by LOSAT's makeblastdb"
+                    )),
+                    None => MakedbError::Build(WriteDbError::Exception(exception)),
+                },
+            ),
             MaskDataError::Ncbi(error) | MaskDataError::File(MaskFileError::Ncbi(error)) => {
                 Some(MakedbError::Build(error))
             }
@@ -150,11 +169,11 @@ impl MaskDataError {
 /// `NStr::Split` of `text` at `","` into `list` (no flags): the empty string gives no token, any
 /// other string one token for each comma plus one, empty tokens included ("," gives two, "a," gives
 /// "a" and ""). The tokens are not trimmed.
-fn split_commas(text: &str) -> Vec<&str> {
+fn split_commas(text: &[u8]) -> Vec<&[u8]> {
     if text.is_empty() {
         Vec::new()
     } else {
-        text.split(',').collect()
+        text.split(|&b| b == b',').collect()
     }
 }
 
@@ -163,8 +182,8 @@ fn split_commas(text: &str) -> Vec<&str> {
 /// `NStr::StringToNumeric` of `text` to an `Int4` (`nid`, with `fConvErr_NoThrow`, base 10):
 /// whether `text` converts (`StringToInt` with no flag, `ncbi_str::string_to_int`; with
 /// `fConvErr_NoThrow` a failed conversion gives 0 and sets errno).
-fn is_numeric_int4(text: &str) -> bool {
-    string_to_int(text.as_bytes(), 0).is_ok()
+fn is_numeric_int4(text: &[u8]) -> bool {
+    string_to_int(text, 0).is_ok()
 }
 
 fn options_error(message: &str) -> MaskDataError {
@@ -191,18 +210,18 @@ pub(crate) fn process_mask_data(
     let Some(files) = options.mask_data else {
         return Ok(());
     };
-    let file_list = split_commas(truncate_spaces_str(files));
+    let file_list = split_commas(truncate_spaces(files));
     if file_list.is_empty() {
         return Err(options_error(
             "mask_data option found, but no files were specified.",
         ));
     }
 
-    let mut id_list: Vec<&str> = Vec::new();
-    let desc_list: Vec<&str>;
+    let mut id_list: Vec<&[u8]> = Vec::new();
+    let desc_list: Vec<&[u8]>;
 
     if let Some(ids) = options.mask_id {
-        id_list = split_commas(truncate_spaces_str(ids));
+        id_list = split_commas(truncate_spaces(ids));
         if file_list.len() != id_list.len() {
             return Err(options_error(
                 "the size of mask_id does not match that of mask_data.",
@@ -215,7 +234,7 @@ pub(crate) fn process_mask_data(
     }
 
     if let Some(descs) = options.mask_desc {
-        desc_list = split_commas(truncate_spaces_str(descs));
+        desc_list = split_commas(truncate_spaces(descs));
         if file_list.len() != desc_list.len() {
             return Err(options_error(
                 "the size of mask_desc does not match that of mask_data.",
@@ -223,12 +242,12 @@ pub(crate) fn process_mask_data(
         }
     } else {
         // description is optional
-        desc_list = vec![""; id_list.len()];
+        desc_list = vec![b""; id_list.len()];
     }
 
-    let mut gi_mask_names: Vec<&str> = Vec::new();
+    let mut gi_mask_names: Vec<&[u8]> = Vec::new();
     if let Some(gi_names) = options.gi_mask_name {
-        gi_mask_names = split_commas(truncate_spaces_str(gi_names));
+        gi_mask_names = split_commas(truncate_spaces(gi_names));
         if file_list.len() != gi_mask_names.len() {
             return Err(options_error(
                 "the size of gi_mask_name does not match that of mask_data.",
@@ -237,20 +256,25 @@ pub(crate) fn process_mask_data(
     }
 
     for (i, &file) in file_list.iter().enumerate() {
+        let file_path = path_of_bytes(file);
         let path: PathBuf = match options.root {
-            Some(root) => root.join(file),
-            None => PathBuf::from(file),
+            Some(root) => root.join(&*file_path),
+            None => file_path.into_owned(),
         };
         if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
             warn(
-                format!("Error: [makeblastdb] Ignoring mask file '{file}' as it does not exist.")
-                    .as_bytes(),
+                &[
+                    b"Error: [makeblastdb] Ignoring mask file '".as_slice(),
+                    file,
+                    b"' as it does not exist.",
+                ]
+                .concat(),
             );
             continue;
         }
 
         // The name in the messages is the one given, not the path it was looked up under.
-        let mut reader = open_mask_file(&path, Path::new(file))?;
+        let mut reader = open_mask_file(&path, &path_of_bytes(file))?;
 
         let mut algo_id: Option<i32> = None;
         loop {
@@ -262,21 +286,20 @@ pub(crate) fn process_mask_data(
             let algo_id = match algo_id {
                 Some(id) => id,
                 None => {
-                    let _ = writeln!(db.log(), "Mask file: {file}");
+                    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:962-963
+                    // The line ends as every line of the log, with a flush (`build_db::endl`),
+                    // where a closed pipe ends the build.
+                    let _ = db
+                        .log()
+                        .write_all(b"Mask file: ")
+                        .and_then(|()| db.log().write_all(file));
+                    endl(db.log())?;
                     let opts = &first_obj.algo_options;
                     let id = if !id_list.is_empty() {
-                        db.register_masking_algorithm_id(
-                            id_list[i].as_bytes(),
-                            desc_list[i].as_bytes(),
-                            opts,
-                        )?
+                        db.register_masking_algorithm_id(id_list[i], desc_list[i], opts)?
                     } else {
                         let name = gi_mask_names.get(i).copied().unwrap_or(file);
-                        db.register_masking_algorithm(
-                            first_obj.algo_program,
-                            opts,
-                            name.as_bytes(),
-                        )?
+                        db.register_masking_algorithm(first_obj.algo_program, opts, name)?
                     };
                     algo_id = Some(id);
                     id
@@ -323,10 +346,10 @@ pub(crate) fn process_mask_data(
 /// run's: `BuildDatabase::utf8_once`), whichever file it is in.
 fn write_posts(reader: &mut MaskFileReader, warn: Warn<'_>, utf8_once: &mut Utf8TagOnce) {
     for post in reader.take_posts() {
-        if matches!(post, MaskPost::Utf8Tag(_)) && !utf8_once.first() {
+        if matches!(post, Post::Utf8Tag(_)) && !utf8_once.first() {
             continue;
         }
-        let line = post.line();
+        let line = post.line(Some("makeblastdb"));
         warn(line.strip_suffix(b"\n").unwrap_or(&line));
     }
 }

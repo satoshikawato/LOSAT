@@ -71,7 +71,7 @@ Every format is the bytes of NCBI BLAST+ 2.17.0 `rpstblastn -num_threads 1`, at 
 
 ## What LOSAT refuses
 
-Not yet supported: `-html`; `rpstblastn` in the library API and in LOSAT Web.
+Not yet supported: `rpstblastn` in the library API and in LOSAT Web.
 
 Also refused:
 
@@ -80,7 +80,7 @@ Also refused:
 - `-sum_stats true`, because NCBI's result then depends on memory contents or crashes.
 - `-remote`, `-entrez_query` and `-import_search_strategy`.
 - Profile databases with the problems that `rpsblast` refuses.
-- `-subject`, which is not an `rpstblastn` option (exit status 2).
+- `-subject`, which is not an `rpstblastn` option (NCBI's argument error, exit status 1).
 
 NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux` come as in NCBI, with exit status 3. For the full list, see [What LOSAT refuses](../refusals.md).
 

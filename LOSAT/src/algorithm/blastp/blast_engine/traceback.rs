@@ -27,7 +27,7 @@ use super::super::hsp::{
 };
 use super::super::x_prelim_compact::XPrelimHsp;
 use super::super::x_redo_subjects::XRedoSubjects;
-use super::{besthit, culling, pssm_hooks, redo_run};
+use super::{besthit, culling, phi_hooks, pssm_hooks, redo_run};
 // The preliminary stage's helpers that this module calls are inlined everywhere or have other
 // callers; it does not call `preliminary_hit_from_local_match_hsp`,
 // `purge_preliminary_hits_with_common_endpoints` or `kappa::recompute_num_identities`, whose one
@@ -348,7 +348,7 @@ fn prelim_lists_of_queries(
 /// at `HitList::put_in_traceback_order` of BLASTN): the traceback reads the preliminary
 /// lists by OID. Where the results are sorted at the end, the order of insertion changes
 /// nothing (the comparison is total); where they are not, it is the report's order.
-fn hit_lists_of_traced(
+pub(super) fn hit_lists_of_traced(
     mut traced: Vec<(usize, Option<BlastpHspList>)>,
     queries: usize,
     hitlist_size: usize,
@@ -466,16 +466,19 @@ impl UngappedFinish<'_> {
 }
 
 /// The final hit lists of a call whose traceback is not the composition-based redo (`redo_run`):
-/// rpsblast's, psiblast `-in_pssm`'s, `-ungapped`'s and `-comp_based_stats 0`'s; `None` for a call
-/// that `run_call`'s redo finishes.
+/// psiblast `-phi_pattern`'s, rpsblast's, psiblast `-in_pssm`'s, `-ungapped`'s and
+/// `-comp_based_stats 0`'s; `None` for a call that `run_call`'s redo finishes (checking the
+/// Smith-Waterman matrix first when `sw_c0_redo` is set).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1478-1499
 /// `BLAST_ComputeTraceback_MT` chooses RPS-BLAST's traceback, the composition-based redo, or the
 /// ordinary traceback (which skips alignment for `-ungapped` at line 1526); here `final_lists`
 /// runs every non-redo branch and returns `None` when `run_call`'s redo runs instead.
-pub(super) struct NonRedoTraceback<'a> {
+pub(super) struct NonRedoTraceback<'a, 'p> {
+    pub(super) phi: Option<&'a mut phi_hooks::PhiCall<'p>>,
     pub(super) args: &'a ResolvedBlastpArgs,
     pub(super) ordinary_traceback: bool,
+    pub(super) sw_c0_redo: bool,
     pub(super) contexts: &'a [QueryContext],
     pub(super) total_query_span: i32,
     pub(super) subjects: XRedoSubjects<'a>,
@@ -492,20 +495,31 @@ pub(super) struct NonRedoTraceback<'a> {
     pub(super) pool: &'a crate::utils::threading::SearchPool<'a>,
 }
 
-impl NonRedoTraceback<'_> {
-    /// Runs the call's non-redo traceback (rpsblast's final lists, psiblast `-in_pssm`'s
-    /// traceback, `-ungapped`'s finish, or `-comp_based_stats 0`'s ordinary traceback), taking
-    /// every preliminary list so `run_call`'s redo finds none; returns `None` when `run_call`'s
-    /// redo runs instead.
+impl NonRedoTraceback<'_, '_> {
+    /// Runs the call's non-redo traceback (psiblast `-phi_pattern`'s traceback, rpsblast's final
+    /// lists, psiblast `-in_pssm`'s traceback, `-ungapped`'s finish, or `-comp_based_stats 0`'s
+    /// ordinary traceback), taking every preliminary list so `run_call`'s redo finds none;
+    /// returns `None` when `run_call`'s redo runs instead (after `sw_matrix_check` for
+    /// `sw_c0_redo`).
     pub(super) fn final_lists(
-        &self,
+        self,
         preliminary_hit_lists: &mut [Option<BlastpHitList>],
         compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Option<Vec<Option<BlastpHitList>>>> {
         // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
         // preliminary list here, so `run_call`'s redo finds none; its hit lists replace the
         // redo's after it.
-        Ok(if self.args.rps_search.is_some() {
+        Ok(if let Some(phi) = self.phi {
+            // psiblast `-phi_pattern`: the PHI-BLAST traceback (`phi_hooks::phi_traceback`).
+            Some(phi_hooks::phi_traceback(
+                phi,
+                self.args,
+                self.contexts,
+                self.subjects,
+                compact_hit_lists,
+                self.sorts_results,
+            )?)
+        } else if self.args.rps_search.is_some() {
             // rpsblast: the RPS engine's final hit lists (`rps_hooks::rps_search`).
             Some(preliminary_hit_lists.iter_mut().map(Option::take).collect())
         } else if self.ordinary_traceback && self.args.psi_search.is_some() {
@@ -565,6 +579,13 @@ impl NonRedoTraceback<'_> {
             };
             Some(ordinary.run(preliminary_hit_lists, compact_hit_lists, self.pool)?)
         } else {
+            if self.sw_c0_redo {
+                redo_run::sw_matrix_check(
+                    self.args.scoring.matrix,
+                    self.query_batches,
+                    self.query_batch_skipped,
+                )?;
+            }
             None
         })
     }

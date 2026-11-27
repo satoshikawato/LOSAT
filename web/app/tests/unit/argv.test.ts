@@ -4,20 +4,19 @@ import { resolve } from 'node:path';
 import { toProgramDescription } from 'losat';
 import { CUSTOM_OUTPUT, type ProgramId } from 'losat/domain';
 import {
-  DATABASE_MASK_FLAGS,
-  DATABASE_MASK_PROGRAMS,
   buildArgv,
   commandWords,
-  DATABASE_FLAGS,
   optionNames,
   optionValue,
   refusedFields,
+  runTask,
   RESERVED_FLAGS,
   shellWords,
   splitOptions,
   userArgv,
   toShellCommand,
 } from '../../src/domain/argv';
+import { ALL_DB_FILTER_FLAGS, FILTERING_DB_FLAG } from '../../src/domain/blast-db';
 import { PROGRAMS } from '../../src/domain/programs';
 
 describe('buildArgv', () => {
@@ -104,56 +103,61 @@ describe('buildArgv', () => {
     buildArgv({ program, queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: words });
   // Line WQA's D14, 2026-11-20: the engine prints the command line's help or version for these words, as the CLI does
   // (WA-FM-05 refused the help words).
-  it.each(['-h', '-help', '-help-full', '-xmlhelp', '--help', '-version', '-version-full', '-version-full-xml', '-version-full-json'])(
+  it.each(['-h', '-help', '-help-full', '-xmlhelp', '-version', '-version-full', '-version-full-xml', '-version-full-json'])(
     'passes %s, which asks the CLI for its help or version, to the engine',
     (word) => {
       for (const program of PROGRAMS) expect(extra(program.id, ['-evalue', '1', word])(), program.id).toContain(word);
     },
   );
 
-  it('refuses the database options, also written -flag=value, as the browser build cannot search a database', () => {
+  it('builds a database search argv with -db when databaseName is given', () => {
+    const argv = buildArgv({
+      program: 'blastn',
+      queryName: 'q.fa',
+      databaseName: 'mydb/nt_small',
+      parameters: [
+        ['-seqidlist', 'ids.txt'],
+        ['-filtering_db', 'repeats/rep'],
+      ],
+    });
+    expect(argv).toEqual(['blastn', '-query', 'q.fa', '-db', 'mydb/nt_small', '-seqidlist', 'ids.txt', '-filtering_db', 'repeats/rep']);
+    expect(userArgv({ argv })).toEqual(argv);
+    expect(userArgv({ argv, prints: 'version' })).toEqual(['blastn', '-seqidlist', 'ids.txt', '-filtering_db', 'repeats/rep']);
+  });
+
+  it('directs -db typed in Additional options to the Subject control, and lets database filter options pass through to the engine (WQA D12b + RG-D4 W2)', () => {
     for (const program of PROGRAMS) {
-      expect(extra(program.id, ['-db', 'nt']), program.id).toThrow(/^-db \(a database search\) is not supported in the browser yet$/);
-      for (const flag of DATABASE_FLAGS.slice(1)) {
-        expect(extra(program.id, [`${flag}=x`]), `${program.id} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
+      expect(extra(program.id, ['-db', 'nt']), program.id).toThrow(/^-db is set in the form: Subject$/);
+      expect(extra(program.id, ['-db=nt']), program.id).toThrow(/^-db is set in the form: Subject$/);
+      for (const flag of ALL_DB_FILTER_FLAGS) {
+        expect(extra(program.id, [flag, 'x'])(), `${program.id} ${flag}`).toEqual([program.id, '-query', 'q.fa', '-subject', 's.fa', flag, 'x']);
       }
     }
+    expect(extra('blastn', [FILTERING_DB_FLAG, 'repeats'])()).toEqual(['blastn', '-query', 'q.fa', '-subject', 's.fa', FILTERING_DB_FLAG, 'repeats']);
   });
 
-  // The database masks of every mode's CLI: their parser would name -subject, which the browser
-  // sets itself (WA-FM-04).
-  it('refuses the database masks of every mode, also written -flag=value', () => {
-    expect(DATABASE_MASK_PROGRAMS).toEqual(['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']);
-    for (const program of DATABASE_MASK_PROGRAMS) {
-      for (const flag of DATABASE_MASK_FLAGS) {
-        expect(extra(program, [flag, '11']), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
-        expect(extra(program, [`${flag}=dust`]), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
-      }
-    }
-  });
-
-  // BLASTN's -filtering_db searches a BLAST database of repeats: the engine reads it from the run's directory, but the
-  // form has no input for its files yet (D4-W2, with WQA D12b; Owner 2026-11-22).
-  it('refuses the database of repeats of BLASTN, also written -flag=value', () => {
-    for (const words of [['-filtering_db', 'repeats'], ['-filtering_db=repeats']]) {
-      expect(extra('blastn', words)).toThrow(/^-filtering_db \(a BLAST database of repeats\) is not supported in the browser yet$/);
-    }
-  });
-
-  it("lists the database masks in the engine's options of the modes that have them (describe)", () => {
+  it("lists the database options in each mode's engine description (describe)", () => {
     const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+    const commonDbFlags = [
+      '-db',
+      '-gilist',
+      '-negative_gilist',
+      '-seqidlist',
+      '-negative_seqidlist',
+      '-taxids',
+      '-taxidlist',
+      '-negative_taxids',
+      '-negative_taxidlist',
+      '-no_taxid_expansion',
+      '-db_soft_mask',
+      '-db_hard_mask',
+    ];
     for (const program of PROGRAMS) {
       const flags = toProgramDescription(described[program.id]).parameters.map((option) => option.flag);
-      const has = DATABASE_MASK_FLAGS.filter((flag) => flags.includes(flag));
-      expect(has, program.id).toEqual(DATABASE_MASK_PROGRAMS.includes(program.id) ? [...DATABASE_MASK_FLAGS] : []);
-    }
-  });
-
-  it("lists the database options of every mode's engine (describe)", () => {
-    const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
-    for (const program of PROGRAMS) {
-      const flags = toProgramDescription(described[program.id]).parameters.map((option) => option.flag);
-      expect(flags, program.id).toEqual(expect.arrayContaining([...DATABASE_FLAGS]));
+      expect(flags, program.id).toEqual(expect.arrayContaining(commonDbFlags));
+      const ipg = ['-ipglist', '-negative_ipglist'].filter((flag) => flags.includes(flag));
+      expect(ipg, program.id).toEqual(program.id === 'blastp' || program.id === 'blastx' ? ['-ipglist', '-negative_ipglist'] : []);
+      if (program.id === 'blastn') expect(flags).toContain(FILTERING_DB_FLAG);
     }
   });
 
@@ -252,6 +256,34 @@ describe('toShellCommand', () => {
     expect(toShellCommand(['blastp', '-outfmt=+014 x'], CUSTOM_OUTPUT)).toBe("losat blastp '-outfmt=+014 x' -out results");
     expect(toShellCommand(['blastp', '-outfmt', '14'], 6)).toBe('losat blastp -outfmt 6');
   });
+
+  it('prepends BLASTDB=<dir> when a folder-picked database mounted taxonomy files at root (F1)', () => {
+    const argv = ['blastp', '-query', 'q.faa', '-db', 'protdb/tfp', '-taxids', '40674'];
+    expect(commandWords(argv, 6, { blastdb: 'protdb' })).toEqual([
+      'BLASTDB=protdb',
+      'losat',
+      'blastp',
+      '-query',
+      'q.faa',
+      '-db',
+      'protdb/tfp',
+      '-taxids',
+      '40674',
+      '-outfmt',
+      '6',
+    ]);
+    expect(toShellCommand(argv, 6, { blastdb: 'protdb' })).toBe(
+      'BLASTDB=protdb losat blastp -query q.faa -db protdb/tfp -taxids 40674 -outfmt 6',
+    );
+    const spaced = toShellCommand(['blastp', '-query', 'q.faa', '-db', 'my db/tfp'], 6, { blastdb: 'my db' });
+    expect(spaced).toBe("BLASTDB='my db' losat blastp -query q.faa -db 'my db/tfp' -outfmt 6");
+    expect(splitOptions(spaced)).toEqual(['BLASTDB=my db', 'losat', 'blastp', '-query', 'q.faa', '-db', 'my db/tfp', '-outfmt', '6']);
+    expect(
+      optionNames(commandWords(argv, 6, { blastdb: 'protdb' }), (flag) => flag === '-taxids')
+        .filter((part) => part.name)
+        .map((part) => part.text),
+    ).toEqual(['-query', '-db', '-taxids', '-outfmt']);
+  });
 });
 
 describe('optionValue', () => {
@@ -262,6 +294,27 @@ describe('optionValue', () => {
     expect(optionValue(argv, '-word_size')).toBeUndefined();
     expect(optionValue(['blastn', '-task'], '-task')).toBeUndefined();
   });
+
+  it('reads -flag=value as the engine does', () => {
+    expect(optionValue(['blastp', '-task=blastp-short'], '-task')).toBe('blastp-short');
+    expect(optionValue(['blastp', '-task', 'blastp', '-task=blastp-short'], '-task')).toBe('blastp-short');
+    expect(optionValue(['blastp', '-task=blastp-short', '-task', 'blastp-fast'], '-task')).toBe('blastp-fast');
+    expect(optionValue(['blastp', '-task_x=1'], '-task')).toBeUndefined();
+  });
+});
+
+describe('runTask', () => {
+  const options = [{ flag: '-task', defaultValue: 'blastp' }, { flag: '-evalue' }];
+
+  it('is the task that the engine runs: the argv\'s -task in either form, else the default task', () => {
+    expect(runTask(['blastp', '-task', 'blastp-short'], options)).toBe('blastp-short');
+    // The engine reads -task=blastp-short as -task blastp-short (NCBI's reader).
+    expect(runTask(['blastp', '-task=blastp-short'], options)).toBe('blastp-short');
+    expect(runTask(['blastp', '-evalue', '1'], options)).toBe('blastp');
+    // TBLASTX has no -task; without the engine's description only the argv's -task is known.
+    expect(runTask(['tblastx'], [{ flag: '-evalue' }])).toBeUndefined();
+    expect(runTask(['blastp', '-task=blastp-short'], [])).toBe('blastp-short');
+  });
 });
 
 describe('refusedFields', () => {
@@ -269,52 +322,98 @@ describe('refusedFields', () => {
     const { extra: inExtra, flags } = refusedFields(message, extra);
     return { extra: inExtra, flags: [...flags].sort() };
   };
+  // The engine's argument error: a usage that lists every option of the program, a line of 72 "=",
+  // an empty line, and two posts (the second with two spaces after "Error:").
+  const USAGE = [
+    'USAGE',
+    '  blastn [-h] [-help] [-query input_file] [-subject subject_input_file]',
+    '    [-evalue evalue] [-word_size int_value] [-culling_limit int_value]',
+    '    [-best_hit_overhang float_value] [-ungapped] [-num_threads int_value]',
+    '',
+    'DESCRIPTION',
+    '   Nucleotide-Nucleotide BLAST (LOSAT)',
+    '',
+    "Use '-help' to print detailed descriptions of command line arguments",
+    '='.repeat(72),
+    '',
+  ];
+  const ncbi = (post: string) => [...USAGE, `Error: ${post}`, `Error:  ${post}`, ''].join('\n');
   it("names the form's fields of the options that a message names, and no words of its sentences", () => {
-    expect(fields("error: invalid value '3' for '-word_size <WORD_SIZE>': expected an integer >= 4\n\nFor more information, try '--help'.")).toEqual({
-      extra: false,
-      flags: ['-word_size'],
-    });
     expect(fields('LOSAT query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12')).toEqual({
       extra: false,
       flags: [],
     });
     expect(fields('the e-value of -penalty -3 and -2')).toEqual({ extra: false, flags: ['-penalty'] });
   });
+  it("names the options of NCBI's argument error posts, and not those of its usage", () => {
+    // Both options of "Incompatible with" (the first by its name, the second in backquotes).
+    expect(fields(ncbi('Argument "culling_limit". Incompatible with argument:  `best_hit_overhang\''))).toEqual({
+      extra: false,
+      flags: ['-best_hit_overhang', '-culling_limit'],
+    });
+    expect(fields(ncbi('Argument "mask_data". Must be specified, as it is required by argument:  `mask_id\''))).toEqual({
+      extra: false,
+      flags: ['-mask_data', '-mask_id'],
+    });
+    // The value in backquotes is not an option.
+    expect(fields(ncbi('Argument "word_size". Illegal value, expected >=4:  `3\''))).toEqual({ extra: false, flags: ['-word_size'] });
+    expect(fields(ncbi('Argument "evalue". Argument cannot be converted:  `abc\''))).toEqual({ extra: false, flags: ['-evalue'] });
+    // Only "Value is missing" writes the dash.
+    expect(fields(ncbi('Argument "-evalue". Value is missing'))).toEqual({ extra: false, flags: ['-evalue'] });
+    expect(fields(ncbi('Argument "dbtype". Mandatory value is missing:  `String, `nucl\', `prot\''))).toEqual({ extra: false, flags: ['-dbtype'] });
+    expect(fields(ncbi('Argument with this name is defined already: evalue'))).toEqual({ extra: false, flags: ['-evalue'] });
+  });
+  it("names \"Additional options\" for the words that NCBI's posts name there, also those of the form", () => {
+    expect(fields(ncbi('Argument "culling_limit". Incompatible with argument:  `best_hit_overhang\''), '-culling_limit 1 -best_hit_overhang 0.1')).toEqual({
+      extra: true,
+      flags: [],
+    });
+    // Only one of the two typed there: the other is the form's field.
+    expect(fields(ncbi('Argument "culling_limit". Incompatible with argument:  `best_hit_overhang\''), '-best_hit_overhang 0.1')).toEqual({
+      extra: true,
+      flags: ['-culling_limit'],
+    });
+    expect(fields(ncbi('Argument "-evalue". Value is missing'), '-evalue')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Argument with this name is defined already: evalue'), '-evalue 1 -evalue 2')).toEqual({ extra: true, flags: [] });
+    // The usage lists -word_size and -ungapped, which the extra box types: not named.
+    expect(fields(ncbi('Argument "evalue". Argument cannot be converted:  `abc\''), '-word_size 11 -ungapped')).toEqual({
+      extra: false,
+      flags: ['-evalue'],
+    });
+  });
+  it('reads the typed word that Unknown argument, Invalid argument and the offending value name', () => {
+    // `-foo` is "foo": the word without its first dash; `--foo` is "-foo".
+    expect(fields(ncbi('Unknown argument: "foo"'), '-qcov_hsp_perc 50 -foo')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Unknown argument: "foo"'), '-foo=3')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Unknown argument: "-foo"'), '--foo')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Unknown argument: "foo"'), '-strand plus')).toEqual({ extra: false, flags: [] });
+    // The whole typed word.
+    expect(fields(ncbi('Invalid argument: -ungapped=1'), '-ungapped=1')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Invalid argument: -ungapped=1'), '-strand plus')).toEqual({ extra: false, flags: [] });
+    expect(fields(ncbi('Too many positional arguments (1), the offending value: evalue'), 'evalue 1e-5')).toEqual({ extra: true, flags: [] });
+    expect(fields(ncbi('Too many positional arguments (1), the offending value: evalue'), '-strand plus')).toEqual({ extra: false, flags: [] });
+    // CRLF line ends are read alike.
+    expect(fields(ncbi('Unknown argument: "foo"').replaceAll('\n', '\r\n'), '-foo')).toEqual({ extra: true, flags: [] });
+  });
+  it("reads LOSAT's one-line refusals whole, with the dash of their names", () => {
+    expect(fields("the NCBI BLAST+ option -remote is not supported by LOSAT's BLASTN", '-remote')).toEqual({ extra: true, flags: [] });
+    expect(fields("the NCBI BLAST+ option -remote is not supported by LOSAT's BLASTN", '-strand plus')).toEqual({
+      extra: false,
+      flags: ['-remote'],
+    });
+    expect(fields("the option -dryrun runs on the command line of LOSAT's BLASTN only: use it there")).toEqual({ extra: false, flags: ['-dryrun'] });
+  });
   it('names "Additional options" for the options typed there, also those of the form', () => {
     expect(fields('-evalue is set in the form: Expect threshold', '-evalue abc')).toEqual({ extra: true, flags: [] });
-    expect(fields("error: unknown option or argument '-foo'; use -help to list the options", '-qcov_hsp_perc 50 -foo')).toEqual({
-      extra: true,
-      flags: ['-help'],
-    });
     expect(fields('-num_threads is set in the form: Threads', '-num_threads=2')).toEqual({ extra: true, flags: [] });
-    expect(fields("error: invalid value 'x' for '-qcov_hsp_perc <QCOV_HSP_PERC>'", '-qcov_hsp_perc x')).toEqual({ extra: true, flags: [] });
-  });
-  it('does not read the options of clap\'s Usage line, which the argv lists, as named by the sentence', () => {
-    const message = [
-      "error: the argument '-max_target_seqs <MAX_TARGET_SEQS>' cannot be used with '-num_alignments <int_value>'",
-      '',
-      'Usage: losat blastn -query <PATH> -subject <PATH> -evalue <EVALUE> -max_target_seqs <MAX_TARGET_SEQS>',
-      '',
-      "For more information, try '--help'.",
-    ].join('\n');
-    expect(fields(message)).toEqual({ extra: false, flags: ['-max_target_seqs', '-num_alignments'] });
-    // --help of the closing line is not the option typed in Additional options.
-    expect(fields(message, '--help')).toEqual({ extra: false, flags: ['-max_target_seqs', '-num_alignments'] });
   });
   it('names "Additional options" for a word typed there that is not an option name', () => {
     expect(fields('--help is not available in the browser', '--help')).toEqual({ extra: true, flags: [] });
     expect(fields('--help is not available in the browser', '-strand plus')).toEqual({ extra: false, flags: [] });
-    expect(fields("error: unknown option or argument 'evalue'; use -help to list the options", 'evalue 1e-5')).toEqual({
-      extra: true,
-      flags: ['-help'],
-    });
-    expect(fields("error: unknown option or argument 'evalue'", '-strand plus')).toEqual({ extra: false, flags: [] });
-    // The engine quotes the whole word, with its =value.
-    expect(fields("error: unknown option or argument '--evalue=1e-5'; use -help to list the options", '--evalue=1e-5')).toEqual({
-      extra: true,
-      flags: ['-help'],
-    });
-    expect(fields("error: unknown option or argument 'evalue=10'", '-strand plus evalue=10')).toEqual({ extra: true, flags: [] });
+    // A word that a message quotes, with its =value.
+    expect(fields("the word 'evalue' is not read", 'evalue 1e-5')).toEqual({ extra: true, flags: [] });
+    expect(fields("the word 'evalue' is not read", '-strand plus')).toEqual({ extra: false, flags: [] });
+    expect(fields("the word '--evalue=1e-5' is not read", '--evalue=1e-5')).toEqual({ extra: true, flags: [] });
   });
   it('names "Additional options" for the messages about its text', () => {
     expect(fields("Additional options: a quote (') is not closed", "-strand 'plus")).toEqual({ extra: true, flags: [] });

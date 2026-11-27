@@ -138,7 +138,7 @@ fn parse_extra_args(raw: &str) -> Vec<&str> {
     raw.split('\0').filter(|value| !value.is_empty()).collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:36-37
 //
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 fn web_outfmt_or_default(outfmt: &str) -> &str {
@@ -172,14 +172,15 @@ fn parse_num_threads_arg(value: &str, flag: &str) -> Result<usize, String> {
 /// any other word.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
-/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2234-2236,2570-2572
 fn take_search_space_arg(
     args: &[&str],
     index: &mut usize,
     searchsp: &mut Option<i64>,
     dbsize: &mut Option<i64>,
 ) -> Result<bool, String> {
-    use crate::blastinput::value_parsers::{ncbi_int8, nonnegative_ncbi_int8};
+    use crate::web_v1_argv::ncbi_int8;
+    use crate::web_v1_argv::nonnegative_ncbi_int8;
     let flag = args[*index];
     let (name, joined) = match flag.split_once('=') {
         Some((name, value)) => (name, Some(value)),
@@ -289,9 +290,14 @@ fn parse_blastn_args(
         off_diagonal_range: None,
         verbose: false,
         scan_step: 0,
-        outfmt: "6".to_string(),
+        outfmt: "6".into(),
         archive: None,
         export_search_strategy: None,
+        import_search_strategy: None,
+        import: None,
+        strategy_algorithms: None,
+        strategy_template_type: None,
+        given: Default::default(),
         strategy: None,
         command_line: None,
         // The command line's progress bar; a web search writes nothing to standard error.
@@ -314,9 +320,9 @@ fn parse_blastn_args(
         } else if flag == "-task" {
             args.task = next_arg(extra_args, &mut index, flag)?.to_string();
         } else if flag == "-outfmt" {
-            args.outfmt = next_arg(extra_args, &mut index, flag)?.to_string();
+            args.outfmt = next_arg(extra_args, &mut index, flag)?.into();
         } else if let Some(value) = flag.strip_prefix("-outfmt=") {
-            args.outfmt = value.to_string();
+            args.outfmt = value.into();
         } else if flag == "-word_size" {
             args.word_size = v1_blastn_word_size(
                 next_arg(extra_args, &mut index, flag)?
@@ -337,14 +343,12 @@ fn parse_blastn_args(
         } else if flag == "-evalue" {
             // The forms that NCBI's CArg_Double reads, as the CLI (`blastn_evalue`).
             args.evalue = Some(
-                crate::blastinput::value_parsers::blastn_evalue(next_arg(
-                    extra_args, &mut index, flag,
-                )?)
-                .map_err(|err| format!("{flag} parse error: {err}"))?,
+                crate::web_v1_argv::ncbi_double(next_arg(extra_args, &mut index, flag)?)
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else if let Some(value) = flag.strip_prefix("-evalue=") {
             args.evalue = Some(
-                crate::blastinput::value_parsers::blastn_evalue(value)
+                crate::web_v1_argv::ncbi_double(value)
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else {
@@ -380,7 +384,7 @@ fn parse_tblastx_args(
     let mut args = tblastx::TblastxArgs {
         query,
         subject: Some(subject),
-        // A database search is not part of LOSAT Web yet (DB-7).
+        // The frozen web ABI v1 (plan TD-1) has no database search.
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
         db_filter: Default::default(),
@@ -413,7 +417,7 @@ fn parse_tblastx_args(
         qcov_hsp_perc: None,
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:83-85
         // Default SEG parameters from `kSegWindow`, `kSegLocut`, and `kSegHicut`.
-        seg: "yes".to_string(),
+        seg: "yes".into(),
         soft_masking: None,
         sum_stats: None,
         lcase_masking: false,
@@ -421,7 +425,7 @@ fn parse_tblastx_args(
         strand: "both".to_string(),
         xdrop_ungap: None,
         window_size: None,
-        outfmt: "6".to_string(),
+        outfmt: "6".into(),
         culling_limit: None,
         best_hit_overhang: None,
         best_hit_score_edge: None,
@@ -431,13 +435,18 @@ fn parse_tblastx_args(
         subject_loc: None,
         archive: None,
         export_search_strategy: None,
+        import_search_strategy: None,
+        import: None,
+        given: Default::default(),
         strategy: None,
         tabular_taxdb: None,
         subject_taxdb: None,
         taxdb_setting: None,
         first_query_ordinal: 0,
+        one_query_batch: false,
         scope_refusal: None,
         matrix_file: None,
+        command_line: None,
     };
 
     let mut index = 0;
@@ -476,9 +485,10 @@ fn parse_tblastx_args(
         } else if flag == "-outfmt" {
             args.outfmt = crate::blastinput::value_parsers::tblastx_v1_outfmt(next_arg(
                 extra_args, &mut index, flag,
-            )?)?;
+            )?)?
+            .into();
         } else if let Some(value) = flag.strip_prefix("-outfmt=") {
-            args.outfmt = crate::blastinput::value_parsers::tblastx_v1_outfmt(value)?;
+            args.outfmt = crate::blastinput::value_parsers::tblastx_v1_outfmt(value)?.into();
         } else if flag == "-evalue" {
             args.evalue = next_arg(extra_args, &mut index, flag)?
                 .parse()
@@ -554,7 +564,7 @@ fn parse_blastp_args(
         matrix: None,
         gap_open: None,
         gap_extend: None,
-        comp_based_stats: "2".to_string(),
+        comp_based_stats: "2".into(),
         seg: None,
         soft_masking: None,
         lcase_masking: false,
@@ -562,14 +572,19 @@ fn parse_blastp_args(
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,
         subject_loc: None,
-        outfmt: "6".to_string(),
+        outfmt: "6".into(),
         archive: None,
         export_search_strategy: None,
+        import_search_strategy: None,
+        import: None,
+        given: Default::default(),
         strategy: None,
         request_inputs: None,
         app: blastp::args::BlastpApp::Blastp,
         taxdb_setting: None,
         matrix_search: None,
+        write_verification: None,
+        read_verification: Default::default(),
         inclusion_ethresh: None,
         gap_trigger: None,
         sum_stats: false,
@@ -592,9 +607,9 @@ fn parse_blastp_args(
         } else if flag == "-task" {
             args.task = next_arg(extra_args, &mut index, flag)?.to_string();
         } else if flag == "-outfmt" {
-            args.outfmt = next_arg(extra_args, &mut index, flag)?.to_string();
+            args.outfmt = next_arg(extra_args, &mut index, flag)?.into();
         } else if let Some(value) = flag.strip_prefix("-outfmt=") {
-            args.outfmt = value.to_string();
+            args.outfmt = value.into();
         } else if flag == "-evalue" {
             args.evalue = Some(
                 next_arg(extra_args, &mut index, flag)?
@@ -680,9 +695,9 @@ fn parse_blastp_args(
                     .min(i32::MAX as usize) as i32,
             );
         } else if flag == "-matrix" {
-            args.matrix = Some(next_arg(extra_args, &mut index, flag)?.to_string());
+            args.matrix = Some(next_arg(extra_args, &mut index, flag)?.into());
         } else if let Some(value) = flag.strip_prefix("-matrix=") {
-            args.matrix = Some(value.to_string());
+            args.matrix = Some(value.into());
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:93-94:
         } else if flag == "-gapopen" {
             args.gap_open = Some(
@@ -711,17 +726,17 @@ fn parse_blastp_args(
         } else if flag == "-comp_based_stats" {
             let value = next_arg(extra_args, &mut index, flag)?;
             parse_blastp_comp_based_stats(value)?;
-            args.comp_based_stats = value.to_string();
+            args.comp_based_stats = value.into();
         } else if let Some(value) = flag.strip_prefix("-comp_based_stats=") {
             parse_blastp_comp_based_stats(value)?;
-            args.comp_based_stats = value.to_string();
+            args.comp_based_stats = value.into();
         } else if flag == "-seg" {
             let value = next_arg(extra_args, &mut index, flag)?;
             parse_blastp_seg(value)?;
-            args.seg = Some(value.to_string());
+            args.seg = Some(value.into());
         } else if let Some(value) = flag.strip_prefix("-seg=") {
             parse_blastp_seg(value)?;
-            args.seg = Some(value.to_string());
+            args.seg = Some(value.into());
         } else if flag == "-ungapped" {
             args.ungapped = true;
         } else if let Some(value) = flag.strip_prefix("-ungapped=") {

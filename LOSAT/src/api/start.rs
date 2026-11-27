@@ -24,6 +24,8 @@ use crate::report::run_files::RunFiles;
 pub(super) struct Opened {
     pub(super) start: ApplicationStart,
     pub(super) target: DiagTarget,
+    /// The host file name for `RunFiles::deliver_log` (`None` on `Disk` or when no file is made).
+    pub(super) log_name: Option<Vec<u8>>,
 }
 
 /// The application start of `program` with the arguments `words` (after the program's name), of
@@ -58,9 +60,24 @@ fn open_with<S: AsRef<OsStr> + Clone>(
         }
         Err(reason) => return Err(Error::Search(reason.into())),
     }
-    let mut target = files.log_target(log_file(words));
+    let (mut target, log_name) = match files.log_target_for(words, &start, log_file(words)) {
+        Ok(opened) => opened,
+        Err(reason) => {
+            let program = crate::cli::reader::tool(start.program()).map_or_else(
+                || start.program().to_ascii_uppercase(),
+                |tool| tool.refusal_name.to_string(),
+            );
+            return Err(Error::Search(
+                crate::seqmasks_io::run::unsupported(&reason, &program).into(),
+            ));
+        }
+    };
     start.write_log_setup(&mut target, diagnostics);
-    Ok(Opened { start, target })
+    Ok(Opened {
+        start,
+        target,
+        log_name,
+    })
 }
 
 impl Opened {
@@ -167,7 +184,7 @@ impl CallStart {
         let _run = crate::ncbi_exception::MainDiag::enter(Some(diag.clone()));
         let program = search.program().name();
         let started = begin(program, search.argv(), diagnostics)?;
-        let command = search.command(inputs)?;
+        let command = search.command(inputs, &started.target)?;
         let settings = started
             .settings
             .map_err(|reason| Error::Search(reason.into()))?;
@@ -414,8 +431,8 @@ pub struct CallerStart {
     log: RunLog,
     /// The `-logfile` target otherwise.
     target: Option<DiagTarget>,
-    /// The file of `-logfile` (`log_file`) and where it goes, for `finish`.
-    log_name: Option<std::ffi::OsString>,
+    /// The file of `-logfile` (`RunFiles::log_target`) and where it goes, for `finish`.
+    log_name: Option<Vec<u8>>,
     files: RunFiles,
 }
 
@@ -423,11 +440,11 @@ pub struct CallerStart {
 /// up to its configuration load (`open`, `Opened::load`): the usage report's messages and the
 /// configuration's that go to `cerr` are written to `diagnostics`, the file of `-logfile` goes to
 /// `files`. `Err` when the start ends before its `-logfile` target is open (LOSAT's refusal of the
-/// usage report); a start that ends at the load is a
-/// `CallerStart` whose `ended` is the error, and whose file of `-logfile` has its messages. A
-/// version word (`-version` or a full version) is printed where the command line's entry prints
-/// it, after the `-logfile` target is open and before the load, which the start then does not
-/// make (`CallerStart::version`; line WQA's D14, 2026-11-20).
+/// usage report, or a `-logfile` naming a file of the run's directory); a start that ends at the
+/// load is a `CallerStart` whose `ended` is the error, and whose file of `-logfile` has its
+/// messages. A version word (`-version` or a full version) is printed where the command line's
+/// entry prints it, after the `-logfile` target is open and before the load, which the start then
+/// does not make (`CallerStart::version`; line WQA's D14, 2026-11-20).
 pub fn begin_with<S: AsRef<OsStr> + Clone>(
     start: ApplicationStart,
     words: &[S],
@@ -470,7 +487,7 @@ pub fn begin_with<S: AsRef<OsStr> + Clone>(
         version,
         log,
         target,
-        log_name: log_file(words).map(OsStr::to_os_string),
+        log_name: opened.log_name,
         files: files.clone(),
     })
 }
@@ -520,6 +537,15 @@ impl CallerStart {
     /// when the run's messages go there, where the command line writes it (`RunLog::post`).
     pub fn post(&mut self, text: &[u8]) {
         self.log.post_text(text);
+    }
+
+    /// The run's `-logfile` target, where the posts of an argument error go
+    /// (`web_adapter::try_parse_cli`), as the command line's go to its own: `cerr` without one.
+    pub(crate) fn target(&self) -> &DiagTarget {
+        match (&self.log.0, &self.target) {
+            (Some(target), _) | (None, Some(target)) => target,
+            (None, None) => &DiagTarget::Stderr,
+        }
     }
 
     /// Hands the file of `-logfile` to the run's files (`RunFiles::deliver_log`) at the end of the

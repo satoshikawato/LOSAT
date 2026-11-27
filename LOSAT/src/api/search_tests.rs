@@ -7,7 +7,7 @@ fn the_argv_is_parsed_as_on_the_command_line() {
     assert_eq!(search.program(), Program::Blastp);
     assert_eq!(search.argv(), ["-evalue", "0.1", "-num_threads", "2"]);
     let inputs = Inputs::new(&[], &[]).named("q.faa", "s.faa");
-    match search.command(inputs).unwrap() {
+    match search.command(inputs, &DiagTarget::Stderr).unwrap() {
         Commands::Blastp(args) => {
             assert_eq!(args.evalue, Some(0.1));
             assert_eq!(args.num_threads, 2);
@@ -20,11 +20,11 @@ fn the_argv_is_parsed_as_on_the_command_line() {
     validate(Program::Tblastx, &[]).unwrap();
     // A parser error is the command line's message.
     let error = validate(Program::Blastp, &["-evalue"]).unwrap_err();
-    let cli = crate::cli::try_parse_from::<Cli, _, _>([
+    let cli = crate::cli::try_parse_from([
         "losat", "blastp", "-query", "query", "-subject", "subject", "-evalue",
     ])
     .unwrap_err();
-    assert_eq!(error, Error::Argv(crate::cli::render_message(&cli).into()));
+    assert_eq!(error, Error::of_argv(cli));
     let error = validate(Program::Blastn, &["-nosuchoption", "1"]).unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error}");
 }
@@ -142,7 +142,10 @@ fn the_alignment_master_options_go_with_the_alignment_input() {
             Inputs::msa_database(path, "db"),
         ] {
             assert_eq!(inputs.query_count(), 1);
-            match search.command(inputs.named("q.faa", "s.faa")).unwrap() {
+            match search
+                .command(inputs.named("q.faa", "s.faa"), &DiagTarget::Stderr)
+                .unwrap()
+            {
                 Commands::Psiblast(args) => {
                     assert_eq!(args.in_msa.as_deref(), Some(path), "{argv:?}");
                     assert_eq!(args.msa_master_idx.is_some(), argv[0].contains("idx"));
@@ -152,10 +155,14 @@ fn the_alignment_master_options_go_with_the_alignment_input() {
             }
         }
         // Without the alignment the parser's message: the options need `-in_msa`.
-        let error = search.command(Inputs::new(&records, &records)).unwrap_err();
+        let error = search
+            .command(Inputs::new(&records, &records), &DiagTarget::Stderr)
+            .unwrap_err();
         assert!(matches!(error, Error::Argv(_)), "{argv:?}: {error:?}");
         assert!(!error.to_string().contains("library API"), "{error}");
-        let error = search.command(Inputs::pssm(path, &records)).unwrap_err();
+        let error = search
+            .command(Inputs::pssm(path, &records), &DiagTarget::Stderr)
+            .unwrap_err();
         assert!(matches!(error, Error::Argv(_)), "{argv:?}: {error:?}");
     }
     // A value the parser refuses is its message, with the alignment as the query.
@@ -169,9 +176,12 @@ fn the_alignment_master_options_go_with_the_alignment_input() {
     )
     .is_err());
     let ranged = validate(Program::Psiblast, &["-query_loc", "1-10"]).unwrap();
-    let error = ranged.command(Inputs::msa(path, &[])).unwrap_err();
+    let error = ranged
+        .command(Inputs::msa(path, &[]), &DiagTarget::Stderr)
+        .unwrap_err();
     assert!(
-        matches!(&error, Error::Argv(_)) && error.to_string().contains("cannot be used with"),
+        matches!(&error, Error::Argv(_))
+            && error.to_string().contains("Incompatible with argument:  `"),
         "{error}"
     );
     // The other programs have no such options: the parser's message.
@@ -191,7 +201,10 @@ fn an_alignment_query_is_psiblasts_and_a_file() {
     let path = std::path::Path::new("m.aln");
     let search = validate(Program::Psiblast, &["-evalue", "1"]).unwrap();
     for inputs in [Inputs::msa(path, &[]), Inputs::msa_database(path, "db")] {
-        let in_msa = match search.command(inputs.named("q.faa", "s.faa")).unwrap() {
+        let in_msa = match search
+            .command(inputs.named("q.faa", "s.faa"), &DiagTarget::Stderr)
+            .unwrap()
+        {
             Commands::Psiblast(args) => args.in_msa,
             other => panic!("{other:?}"),
         };
@@ -199,7 +212,7 @@ fn an_alignment_query_is_psiblasts_and_a_file() {
     }
     let standard_input = std::path::Path::new("-");
     let error = search
-        .command(Inputs::msa(standard_input, &[]))
+        .command(Inputs::msa(standard_input, &[]), &DiagTarget::Stderr)
         .unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error:?}");
     assert!(error.to_string().contains("standard input"), "{error}");
@@ -212,7 +225,9 @@ fn an_alignment_query_is_psiblasts_and_a_file() {
     ] {
         let search = validate(program, &[]).unwrap();
         assert_eq!(
-            search.command(Inputs::msa(path, &[])).unwrap_err(),
+            search
+                .command(Inputs::msa(path, &[]), &DiagTarget::Stderr)
+                .unwrap_err(),
             Error::Argv(
                 format!(
                     "a query alignment (Inputs::msa) is searched by psiblast, not by {}",
@@ -244,7 +259,10 @@ fn psiblast_pssm_files_are_the_command_lines_options() {
     ] {
         let search = validate(Program::Psiblast, argv).unwrap();
         let query = crate::api::read_fasta(Program::Psiblast, Role::Query, b">q\nMKT\n").unwrap();
-        match search.command(Inputs::new(&query, &query)).unwrap() {
+        match search
+            .command(Inputs::new(&query, &query), &DiagTarget::Stderr)
+            .unwrap()
+        {
             Commands::Psiblast(args) => assert!(
                 args.out_pssm.is_some() || args.out_ascii_pssm.is_some(),
                 "{argv:?}"
@@ -300,7 +318,10 @@ fn a_pssm_query_is_an_input_that_the_search_gives_the_parser() {
         let search = validate(program, &["-evalue", "1"]).unwrap();
         for inputs in [Inputs::pssm(path, &[]), Inputs::pssm_database(path, "db")] {
             assert_eq!(inputs.query_count(), 1);
-            let in_pssm = match search.command(inputs.named("q.faa", "s.faa")).unwrap() {
+            let in_pssm = match search
+                .command(inputs.named("q.faa", "s.faa"), &DiagTarget::Stderr)
+                .unwrap()
+            {
                 Commands::Psiblast(args) => args.in_pssm,
                 Commands::Tblastn(args) => args.in_pssm,
                 other => panic!("{other:?}"),
@@ -310,22 +331,27 @@ fn a_pssm_query_is_an_input_that_the_search_gives_the_parser() {
         // `-in_pssm` excludes `-query_loc`: the parser's error of the search, as `-db` and
         // `-subject_loc`.
         let ranged = validate(program, &["-query_loc", "1-10"]).unwrap();
-        let error = ranged.command(Inputs::pssm(path, &[])).unwrap_err();
+        let error = ranged
+            .command(Inputs::pssm(path, &[]), &DiagTarget::Stderr)
+            .unwrap_err();
         assert!(
-            matches!(&error, Error::Argv(_)) && error.to_string().contains("cannot be used with"),
+            matches!(&error, Error::Argv(_))
+                && error.to_string().contains("Incompatible with argument:  `"),
             "{program}: {error}"
         );
     }
     let search = validate(Program::Psiblast, &[]).unwrap();
     let standard_input = std::path::Path::new("-");
     let error = search
-        .command(Inputs::pssm(standard_input, &[]))
+        .command(Inputs::pssm(standard_input, &[]), &DiagTarget::Stderr)
         .unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error:?}");
     assert!(error.to_string().contains("standard input"), "{error}");
     let search = validate(Program::Blastp, &[]).unwrap();
     assert_eq!(
-        search.command(Inputs::pssm(path, &[])).unwrap_err(),
+        search
+            .command(Inputs::pssm(path, &[]), &DiagTarget::Stderr)
+            .unwrap_err(),
         Error::Argv(
             "a PSSM query (Inputs::pssm) is searched by psiblast and tblastn, not by blastp".into()
         )
@@ -346,7 +372,7 @@ fn psiblast_rounds_are_accepted_by_validate_and_every_search() {
     let inputs = Inputs::new(&query, &query).named("q.faa", "s.faa");
     for (rounds, number) in [("0", 0), ("1", 1), ("3", 3)] {
         let search = validate(Program::Psiblast, &["-num_iterations", rounds]).unwrap();
-        match search.command(inputs).unwrap() {
+        match search.command(inputs, &DiagTarget::Stderr).unwrap() {
             Commands::Psiblast(args) => assert_eq!(args.num_iterations, number),
             other => panic!("{other:?}"),
         }
@@ -354,7 +380,7 @@ fn psiblast_rounds_are_accepted_by_validate_and_every_search() {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
-// (cited at `blastinput::value_parsers::blastn_output_path`)
+// (cited at `ncbi_app::constraint::Constraint::MaxFileNameLength`)
 /// `run_to_file`'s file is the parser's `-out` (`Search::writing_to`): any name, one that looks
 /// like a toolkit word (`-dryrun`, `--`) or is not UTF-8 among them, is the file and leaves the
 /// argv as it is; a name of 256 bytes or more is NCBI's error.
@@ -383,7 +409,7 @@ fn the_file_of_run_to_file_is_the_parsers_out() {
     for name in names {
         let writing = search.writing_to(std::path::Path::new(&name));
         assert!(!writing.dry_run(), "{name:?}");
-        match writing.command(inputs).unwrap() {
+        match writing.command(inputs, &DiagTarget::Stderr).unwrap() {
             Commands::Blastn(args) => {
                 assert_eq!(args.out.as_deref(), Some(std::path::Path::new(&name)));
                 assert!(args.ungapped, "{name:?}");
@@ -394,7 +420,7 @@ fn the_file_of_run_to_file_is_the_parsers_out() {
     let long = "a".repeat(256);
     let error = search
         .writing_to(std::path::Path::new(&long))
-        .command(inputs)
+        .command(inputs, &DiagTarget::Stderr)
         .unwrap_err();
     assert!(matches!(error, Error::Argv(_)), "{error:?}");
     assert!(

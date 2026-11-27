@@ -8,6 +8,8 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 
+use crate::report::run_files::{Created, OpenFiles, OpenedFile};
+
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{input_lines, LineEnds, Ostream};
@@ -31,9 +33,9 @@ use super::work::{
 enum Sink {
     /// The standard output (`-out -`).
     Stdout,
-    /// A file opened by name; after a failed write the rest is lost, as NCBI's `ofstream`
-    /// loses it.
-    File(Option<BufWriter<File>>),
+    /// A file opened by name (`OpenFiles::create`); after a failed write the rest is lost, as
+    /// NCBI's `ofstream` loses it.
+    File(Option<BufWriter<OpenedFile>>),
     /// A name that did not open: NCBI's writer writes to its failed `ofstream`, which loses
     /// everything without a message.
     Lost,
@@ -81,20 +83,29 @@ impl Write for SinkStream<'_, '_> {
 /// (`CSeqMaskerOstatFactory::create`): the stream constructor for `-`, which the binary
 /// format starts with an extra word on (written to `stdout`, where the next post brings it
 /// out); otherwise the name constructor, whose `ofstream` makes or empties the file at once
-/// (an ascii writer given an empty name writes to the standard output).
+/// (an ascii writer given an empty name writes to the standard output), a file of the run's
+/// files (`OpenFiles::create`; LOSAT Web's name of the standard output writes there, without the
+/// stream's extra word). `Err` with LOSAT's refusal of a name that LOSAT Web does not write.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_ascii.cpp:69-77
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_bin.cpp:55-67
-fn open_sink(name: &OsStr, format: CountsFormat, stdout: &mut Ostream<'_>) -> Sink {
+fn open_sink(
+    name: &OsStr,
+    format: CountsFormat,
+    stdout: &mut Ostream<'_>,
+    files: &OpenFiles,
+) -> Result<Sink, Failure> {
     if name == "-" || (name.is_empty() && format == CountsFormat::Ascii) {
         if name == "-" {
             let _ = stdout.write_all(format.stream_prefix());
         }
-        return Sink::Stdout;
+        return Ok(Sink::Stdout);
     }
-    match File::create(name) {
-        Ok(file) => Sink::File(Some(BufWriter::with_capacity(1 << 16, file))),
-        Err(_) => Sink::Lost,
+    match files.create(name) {
+        Ok(Created::File(file)) => Ok(Sink::File(Some(BufWriter::with_capacity(1 << 16, file)))),
+        Ok(Created::Stdout) => Ok(Sink::Stdout),
+        Ok(Created::Refused(reason)) => Err(Failure::Refused(unsupported(&reason))),
+        Err(_) => Ok(Sink::Lost),
     }
 }
 
@@ -125,14 +136,14 @@ fn finalize(
 /// open or read gives no more names.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_gen_counts.cpp:228-242
-fn file_list(input: &str, fa_list: bool) -> Vec<Vec<u8>> {
+pub(crate) fn file_list(input: &OsStr, fa_list: bool) -> Vec<Vec<u8>> {
     if !fa_list {
         if input.is_empty() {
             return Vec::new();
         }
-        return input
-            .split(',')
-            .map(|name| name.as_bytes().to_vec())
+        return crate::utils::os_bytes::os_str_bytes(input)
+            .split(|&byte| byte == b',')
+            .map(<[u8]>::to_vec)
             .collect();
     }
     let mut bytes = Vec::new();
@@ -175,7 +186,8 @@ pub(super) struct GenomeInput<'r, 'd, 'w, 'o> {
     files: Vec<Vec<u8>>,
     database: bool,
     lists: &'r IdLists,
-    registry: Result<Option<&'r str>, &'r str>,
+    /// The settings of the database reader (`ApplicationSettings::database`).
+    reader_settings: crate::blastinput::ncbi_environment::DatabaseSettings<'r>,
     /// The standard output, which comes out before each post.
     out: &'d mut Ostream<'o>,
     diag: &'d mut Diag<'w>,
@@ -216,8 +228,7 @@ impl GenomeInput<'_, '_, '_, '_> {
     fn read_files(&mut self, f: &mut RecordFn<'_>) -> Result<(), Failure> {
         for name in &self.files {
             let mut source: Box<dyn SequenceSource> = if self.database {
-                // Names that are not UTF-8 were refused before (`make_counts`).
-                database_source(&String::from_utf8_lossy(name), self.registry, false)?
+                database_source(name, self.reader_settings, false)?
             } else {
                 let file = File::open(path_from_bytes(name.as_slice()))
                     .map_err(|_| Failure::Ncbi(read_error()))?;
@@ -281,6 +292,17 @@ pub(super) fn mk_counts(
     }
 }
 
+/// The refusal of `-mk_counts` before it reads its input (LOSAT Web's validation too,
+/// `app::check`): `-infmt seqids`, whose sequences NCBI fetches over the network.
+pub(super) fn check_mk_counts(args: &Args) -> Result<(), Failure> {
+    if args.value("infmt") == Some("seqids") {
+        return Err(Failure::Refused(unsupported(
+            "-mk_counts with -infmt seqids (NCBI BLAST+ fetches each sequence from NCBI over the network)",
+        )));
+    }
+    Ok(())
+}
+
 /// The settings of the generator from `args`; `to_file` when the counts go to a named file,
 /// whose constructor alone takes the `-t_*_pct` percentages.
 ///
@@ -321,12 +343,8 @@ fn mk_counts_run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> Result<i32, Failure> {
+    check_mk_counts(args)?;
     let infmt = args.value("infmt").expect("-infmt has a default");
-    if infmt == "seqids" {
-        return Err(Failure::Refused(unsupported(
-            "-mk_counts with -infmt seqids (NCBI BLAST+ fetches each sequence from NCBI over the network)",
-        )));
-    }
     let mut stdout = Ostream::new(out);
     let result = make_counts(args, settings, lists, infmt, &mut stdout, diag);
     output_then(&mut stdout, result)
@@ -352,28 +370,19 @@ fn make_counts(
     stdout: &mut Ostream<'_>,
     diag: &mut Diag,
 ) -> Result<i32, Failure> {
-    let input = args.value("in").expect("-in has a default");
+    let input = args.os_value("in").expect("-in has a default");
     let files = file_list(input, args.boolean("fa_list").unwrap_or(false));
     let database = infmt == "blastdb";
-    // NCBI's CSeqDB opens a database by the bytes of its name; LOSAT's database reader takes
-    // names of text, so a -fa_list line that is not UTF-8 is refused before anything is written.
-    if database && files.iter().any(|name| std::str::from_utf8(name).is_err()) {
-        return Err(Failure::Refused(unsupported(
-            "-infmt blastdb with a -fa_list line (a database name) that is not UTF-8 text",
-        )));
-    }
     let output = args.os_value("out").expect("-out has a default");
     let format = counts_format(args);
-    let mut sink = open_sink(output, format, stdout);
-    let mut writer = CountsWriter::new(format, args.value("meta").unwrap_or_default().as_bytes());
+    let mut sink = open_sink(output, format, stdout, args.files())?;
+    let meta = args.bytes("meta").unwrap_or_default();
+    let mut writer = CountsWriter::new(format, &meta);
     let mut source = GenomeInput {
         files,
         database,
         lists,
-        registry: match &settings.blastdb {
-            Ok(value) => Ok(value.as_deref()),
-            Err(reason) => Err(reason.as_str()),
-        },
+        reader_settings: settings.database(),
         out: &mut *stdout,
         diag: &mut *diag,
         posts: Vec::new(),
@@ -447,16 +456,27 @@ fn convert_failure(file: &str, error: WinMaskError) -> Failure {
     }
 }
 
-/// `CWinMaskCountsConverter` of `-in` to `-out`.
-fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Result<i32, Failure> {
-    let input = args.value("in").expect("-in has a default");
-    let output = args.os_value("out").expect("-out has a default");
-    if input == "-" {
-        let line = if output == "-" { 77 } else { 55 };
+/// The exception of `-convert` before it reads its counts (LOSAT Web's validation too,
+/// `app::check`): `-in -`, which the converter's constructors refuse.
+pub(super) fn check_convert(args: &Args) -> Result<(), Failure> {
+    if args.os_value("in") == Some(OsStr::new("-")) {
+        let line = if args.os_value("out") == Some(OsStr::new("-")) {
+            77
+        } else {
+            55
+        };
         return Err(Failure::Ncbi(input_name_exception(line)));
     }
+    Ok(())
+}
+
+/// `CWinMaskCountsConverter` of `-in` to `-out`.
+fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Result<i32, Failure> {
+    check_convert(args)?;
+    let input = args.os_value("in").expect("-in has a default");
+    let output = args.os_value("out").expect("-out has a default");
     diag.post("reading counts...");
-    let file = format!("-in {input}");
+    let file = format!("-in {}", input.to_string_lossy());
     let istat = open_counts(
         input,
         &file,
@@ -467,15 +487,11 @@ fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Resul
     let count_map = istat
         .count_map()
         .map_err(|error| convert_failure(&file, error))?;
-    let meta = args.value("meta").unwrap_or_default();
-    let metadata = if meta.is_empty() {
-        istat.note()
-    } else {
-        meta.as_bytes()
-    };
+    let meta = args.bytes("meta").unwrap_or_default();
+    let metadata = if meta.is_empty() { istat.note() } else { &meta };
     let format = counts_format(args);
     let mut writer = CountsWriter::new(format, metadata);
-    let mut sink = open_sink(output, format, stdout);
+    let mut sink = open_sink(output, format, stdout, args.files())?;
     // The messages come after the output written so far (the binary format's extra word); a
     // closed pipe ends the run at the first, as SIGPIPE ends NCBI's.
     let mut closed = false;

@@ -20,8 +20,6 @@
 //! - the query length of the construction: the searched length (`query_data.GetSeqLength`,
 //!   blast_seqalign.cpp:1972, with `-query_loc` the interval's).
 
-use std::io::Write;
-
 use anyhow::Result;
 
 use super::hsp::BlastnHitList;
@@ -42,18 +40,20 @@ pub(crate) fn write_blastn_seqalign(
     queries: &QueryNames<'_>,
     subjects: SubjectNames<'_>,
     subject_placements: &Placements,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: &mut QueryWarnings<'_>,
+    app: &str,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,
-        rps: false,
         db_title: subjects.db_title(),
         gapped,
+        program_type: None,
     };
     write_hit_list_seqaligns(
         format,
         &run,
+        app,
         hit_lists,
         queries,
         writer,
@@ -96,6 +96,7 @@ pub(crate) fn query_records<'a>(
                 subject,
                 q_offset: hsp.internal_q_offset_0,
                 q_end: hsp.internal_q_end_0,
+                q_left_out: 0,
                 s_offset: hsp.internal_s_offset_0 as i32,
                 s_end: hsp.internal_s_end_0 as i32,
                 q_frame: if hsp.query_frame < 0 { -1 } else { 1 },
@@ -108,6 +109,7 @@ pub(crate) fn query_records<'a>(
                 num_positives: 0,
                 comp_adjust: 0,
                 ops: hsp.gap_info.as_deref().unwrap_or(&[]),
+                std_seg_nullb: None,
             });
         }
     }

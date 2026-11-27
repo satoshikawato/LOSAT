@@ -5,7 +5,11 @@
 //! query's context (BLASTN's two strands are `blastn/query_split.rs`).
 
 use crate::algorithm::blastn::query_split::{
-    calculate_num_chunks, ChunkQuery, SplitSizes, QUERY_CHUNK_OVERLAP,
+    calculate_num_chunks, chunk_would_be_split, ChunkQuery, SplitChunk, SplitSizes,
+    QUERY_CHUNK_OVERLAP,
+};
+pub(crate) use crate::algorithm::blastn::query_split::{
+    split_batch_reaches_read, ChunkStep, ReadFails, SetupCheckFailure, SplitBatchSteps, UnmetChecks,
 };
 use crate::algorithm::common::masks::lowercase_runs;
 use crate::blastinput::app::read_query_split_variable;
@@ -39,6 +43,31 @@ pub fn protein_split_sizes(
 pub struct ProteinQueryChunk {
     pub queries: Vec<ChunkQuery>,
     pub context_offsets: Vec<i32>,
+}
+
+impl SplitChunk for ProteinQueryChunk {
+    fn chunk_queries(&self) -> &[ChunkQuery] {
+        &self.queries
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:60-61
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:86-93
+/// Whether NCBI's query splitter (`CQuerySplitter`) splits the query batches of a search at all
+/// (`split_protein_batch` then decides by a batch's length): never those of an ungapped search
+/// (`gapped` false), of a PSSM query (`pssm_query`: `-in_pssm`, whose query factory is not
+/// `CObjMgr_QueryFactory` and makes one chunk), against PSSM subjects (`pssm_subjects`:
+/// RPS-BLAST) or of PHI-BLAST (`phi_pattern`: psiblast `-phi_pattern`, `Blast_ProgramIsPhiBlast`).
+/// The one rule of BLASTP's, psiblast's and TBLASTN's searches
+/// (`blast_engine::split_steps::splits_batches`, `tblastn::stage_d_pipeline`'s `BatchSplit`).
+pub(crate) fn splits_query_batches(
+    gapped: bool,
+    pssm_query: bool,
+    pssm_subjects: bool,
+    phi_pattern: bool,
+) -> bool {
+    gapped && !pssm_query && !pssm_subjects && !phi_pattern
 }
 
 /// The query chunks of a protein batch with queries of `lengths` residues, or `None` when
@@ -174,10 +203,7 @@ fn context_offsets(parts: &[Vec<ChunkQuery>], chunk_num: usize, overlap_size: us
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
 pub fn protein_chunk_would_be_split(chunks: &[ProteinQueryChunk], sizes: SplitSizes) -> bool {
-    chunks.iter().any(|chunk| {
-        let length = chunk.queries.iter().map(|part| part.to - part.from).sum();
-        calculate_num_chunks(sizes, length).0 > 1
-    })
+    chunk_would_be_split(chunks, sizes)
 }
 
 /// The residues of a query part as the chunk's query reads them with lower-case masking: NCBI

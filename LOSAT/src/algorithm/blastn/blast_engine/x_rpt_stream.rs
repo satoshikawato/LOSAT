@@ -48,24 +48,29 @@
 //!   report call whose rows look a name up (`common::database::tabular_names`), as they go to the
 //!   first such row of the one call.
 //! - the errors: an error of NCBI's that a batch meets (a reader error, an `eEOF` batch, a batch
-//!   of queries without letters, `ErrorAfterInvalidBatches`, a header file that cannot be read)
+//!   of queries without letters, `after_batch_reports`, a header file that cannot be read)
 //!   comes after the reports of the batches before, without the epilog, in both: here they were
 //!   written when the loop took them, so the error paths write only what follows them (the
-//!   batch's title and reader warnings). An error that LOSAT raises where NCBI would not stop
-//!   (LOSAT's refusals) is written without the reports of the batches before by the off path,
-//!   and after them with the switch (drop-in DECISIONS 44: as NCBI reads them, the stored data
-//!   and the report ids of a batch's reported subjects are checked in that batch, nothing is read
-//!   before the search). These are the refusals of a reported subject: with `-db` a definition
-//!   line that does not read as the reports read it, holds a byte outside ' ' ..= '~' or gives no
-//!   tabular subject id (`database::reported_subjects`), with parsed Seq-ids a header that the
-//!   reports refuse and two sequences that outfmt 0 would join (`check_reported_parsed`,
-//!   `refuse_joined_hits`), one that the batches' prefetch reads where no report reads it (the
-//!   Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a table of fields that read nothing of the
-//!   subject) and cannot read as NCBI does (`check_prefetched_parsed`), ambiguity data that the
-//!   traceback cannot decode (`traceback_listed`), a taxid or a lookup of the taxonomy database
-//!   that the prefetch refuses (`batch_prefetch`), and what a custom
-//!   tabular report reads (the taxonomy fields, the names of the taxonomy database, `sall*`); with
-//!   a subject set a report id (`tabular_subject_ids`; the ids are made once where LOSAT refuses
+//!   batch's title and reader warnings). Search space overflows
+//!   (`context_statistics::setup_failure` -> `ErrorAfterBatchReports`) and tabular failed-lookup
+//!   refusals (`FailedLookupRefusal`, including a subject set's refused tabular id from
+//!   `tabular_subject_ids`) follow the same path, so both stream on and stream off write the
+//!   reports of the batches before and then the refusal, matching NCBI. Any other error that LOSAT
+//!   raises where NCBI would not stop (LOSAT's other refusals: stored title, ambiguity data,
+//!   prefetch, parsed Seq-id, taxonomy record, and the like) is written without the reports of the
+//!   batches before by the off path, and after them with the switch (drop-in DECISIONS 44: as NCBI
+//!   reads them, the stored data and the report ids of a batch's reported subjects are checked in
+//!   that batch, nothing is read before the search). These are the refusals of a reported subject:
+//!   with `-db` a definition line that does not read as the reports read it, holds a byte outside
+//!   ' ' ..= '~' or gives no tabular subject id (`database::reported_subjects`), with parsed
+//!   Seq-ids a header that the reports refuse and two sequences that outfmt 0 would join
+//!   (`check_reported_parsed`, `refuse_joined_hits`), one that the batches' prefetch reads where
+//!   no report reads it (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a table of fields
+//!   that read nothing of the subject) and cannot read as NCBI does (`check_prefetched_parsed`),
+//!   ambiguity data that the traceback cannot decode (`traceback_listed`), a taxid or a lookup of
+//!   the taxonomy database that the prefetch refuses (`batch_prefetch`), and what a custom tabular
+//!   report reads (the taxonomy fields, the names of the taxonomy database, `sall*`); with a
+//!   subject set a report id (`tabular_subject_ids`; the ids are made once where LOSAT refuses
 //!   none, `SubjectCache`) and with `-parse_deflines` the parsed ids that a custom tabular report
 //!   shows. Each is made by the report call (or the search) of the batch before that batch writes
 //!   a byte, so the output is the reports of the batches before (without the epilog) and their
@@ -85,14 +90,16 @@
 //!   never streamed (`Off::Xml`, any number of batches). The refusals of the options and the
 //!   query lengths that a later batch could meet keep the reports after the loop: scoring options
 //!   without Karlin-Altschul values, large greedy gap costs or matrix-only scoring with the
-//!   greedy extension (`search_query_batch`, in `context_statistics`), a negative
-//!   `CHUNK_SIZE` (`search_query_chunks`), a search space that could overflow (`SearchSpace`) and
-//!   an ungapped cutoff of a query too long (`UngappedCutoff`). With one batch (the first batch takes
-//!   every query record) nothing can come after it, so none of these checks is made and no
-//!   subject value is made ahead (the one call makes them as without the switch). LOSAT's
-//!   internal invariant errors and panics are not argued; a write error of the output stops the
-//!   run where it happens (at the end without the switch); a `-db` file that changes or fails
-//!   after the preliminary stage has read it is not argued either.
+//!   greedy extension (`search_query_batch`, in `context_statistics`) and an ungapped cutoff of a
+//!   query too long (`UngappedCutoff`). The refusals of a split batch's query chunks
+//!   (`search_query_chunks`) and of the fetch under a negative seqid list come after the reports of
+//!   the batches before in both paths (`after_batch_reports`, line RG item X-short-bat-2), so a
+//!   negative `CHUNK_SIZE` streams. With one batch (the first batch takes every query record)
+//!   nothing can come after it, so none of these checks is made and no subject value is made ahead
+//!   (the one call makes them as without the switch). LOSAT's internal invariant errors and panics
+//!   are not argued; a write error of the output stops the run where it happens (at the end without
+//!   the switch); a `-db` file that changes or fails after the preliminary stage has read it is not
+//!   argued either.
 //! - what the report path writes to standard error (the query warnings) keeps its bytes and its
 //!   place before each query's report; `-verbose` and the debug and trace output, which a batch
 //!   writes while it is searched and the reports write again, keep the reports at the end
@@ -116,9 +123,9 @@
 //! the batch's first query (`run_in_pool`), so both paths write them before that query's report.
 //! Their lookups can be refused (a taxonomy database or a taxid that LOSAT cannot read as NCBI
 //! does), in the batch that first reports the sequence, and so can the run for NCBI's taxonomy
-//! cache (`TaxdbRun::cache_collision`), in the first batch that fetches a subject (NCBI looks
-//! nothing up before it); either writes the refusal after the reports of the batches before
-//! (above).
+//! cache (`TaxdbRun::cache_collision`), in a batch that fetches a subject (a report's reads at
+//! the first, a prefetch where NCBI's order of its loads decides the texts); either writes the
+//! refusal after the reports of the batches before (above).
 //!
 //! `finish_sam` at NCBI's five error sites writes the document of the batches before as in the off
 //! path. Memory: the records of the batches before are rendered text, and each batch's lists are
@@ -151,8 +158,8 @@ use crate::stats::NuclValues;
 use crate::utils::dust::MaskedInterval;
 
 use super::{
-    check_greedy_gap_costs, configure_task, record_title, x_debug_output, BlastnArgs,
-    BlastnOutputFormat, QueryBatching, SubjectLetters, SubjectRanges, SubjectSource,
+    configure_task, record_title, x_debug_output, BlastnArgs, BlastnOutputFormat, QueryBatching,
+    SubjectLetters, SubjectRanges, SubjectSource,
 };
 use crate::algorithm::blastn::scoring::check_greedy_matrix_only;
 
@@ -181,14 +188,10 @@ pub(super) enum Off {
     /// `-outfmt 5` (BLAST XML), 15 and 16 (the XML2 / JSON documents), which are written after
     /// the loop (the module doc has the reason).
     Xml,
-    /// A negative `CHUNK_SIZE`.
-    ChunkSize,
     /// An ungapped (`-ungapped`) or matrix-only search with a query of 2^30 letters or more, which
     /// LOSAT refuses in the batch that holds it (the word cutoff's doubled length overflows NCBI's `Int4`): a
     /// later batch's refusal would come after the first batch's reports.
     UngappedCutoff,
-    /// A database length times a query length that could overflow NCBI's 64-bit search space.
-    SearchSpace,
 }
 
 impl Off {
@@ -199,9 +202,7 @@ impl Off {
             Off::Debug => "debug",
             Off::Xml => "xml",
             Off::Scoring => "scoring",
-            Off::ChunkSize => "chunk_size",
             Off::UngappedCutoff => "ungapped_cutoff",
-            Off::SearchSpace => "search_space",
         }
     }
 }
@@ -480,8 +481,8 @@ fn check(
     }
     // The scoring of `search_query_batch` (`context_blocks`, called in
     // `context_statistics::karlin_blocks`: `NuclValues::gapped` fails exactly
-    // where `check_gaps` does, for every context) and its greedy gap costs: neither depends on
-    // the queries.
+    // where `check_gaps` does, for every context) and its matrix-only greedy refusal:
+    // neither depends on the queries.
     let config = configure_task(args);
     let spec = NuclScoringSpec {
         reward: config.score_reward,
@@ -492,13 +493,9 @@ fn check(
     if NuclValues::new(spec.reward, spec.penalty)
         .and_then(|values| values.check_gaps(&spec))
         .is_err()
-        || check_greedy_gap_costs(args).is_err()
         || check_greedy_matrix_only(args, args.ungapped).is_err()
     {
         return Err(Off::Scoring);
-    }
-    if batching.split.negative_chunk_size() {
-        return Err(Off::ChunkSize);
     }
     // The word cutoff of an ungapped search and of matrix-only scoring
     // (`batch_setup::batch_cutoffs`).
@@ -508,26 +505,6 @@ fn check(
         })
     {
         return Err(Off::UngappedCutoff);
-    }
-    // The search space of a context (`search_query_batch`, in `context_statistics`): the
-    // effective database length
-    // `db - n x a` (at least 1) times the effective query length `q - a` (at least 1), with the
-    // length adjustment `a` between 0 and the smaller root of `n a^2 - (q n + db) a + c`, which is
-    // at most `2 c / (q n + db) <= 2 q` (`compute_length_adjustment_ncbi`, `c <= q db`). So
-    // `(db + n (2 q + 1)) (2 q + 1)` bounds every product that can overflow there; a negative
-    // `n` (an alias file's `NSEQ`, NCBI's `Int4`) adds `|n| a` to the database length, so the
-    // bound takes `|n|`.
-    let metadata = source.metadata();
-    let db_length = if args.db_length() > 0 {
-        i128::from(args.db_length())
-    } else {
-        i128::from(metadata.db_len_total)
-    };
-    let factor = 2 * lengths.iter().copied().max().unwrap_or(0) as i128 + 1;
-    if (db_length.abs() + i128::from(metadata.db_num_seqs.unsigned_abs()) * factor) * factor
-        > i128::from(i64::MAX)
-    {
-        return Err(Off::SearchSpace);
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-312
     // The stored data and the report ids of the reported subjects (a database's definition

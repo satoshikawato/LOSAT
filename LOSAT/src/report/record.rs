@@ -39,6 +39,21 @@ impl ReportNeeds {
     }
 }
 
+/// Overrides on a translated gapped Std-seg Seq-align produced when `-subject`'s Seq-loc mapper
+/// truncates a TBLASTN `-in_pssm -window_size 0` alignment that started on its frame's NULLB.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1565,3083-3094
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StdSegNullb {
+    /// `x_InvalidateScores`: omit the `score` member of the `Seq-align`.
+    pub omit_scores: bool,
+    /// Last Std-seg override `(subject_fuzz_to_in_searched_coords, query_to_decrement)`:
+    /// writes an alternative `fuzz-to` at `subject_fuzz_to` shifted by the subject offset on the
+    /// last subject interval and subtracts `query_to_decrement` (1 when the trailing substitution
+    /// has at least two residues, 0 when it has one) from the last query interval's `to`.
+    pub last_seg_fuzz: Option<(u32, i32)>,
+}
+
 /// One HSP of a query's final hit list, as NCBI's `BlastHSP` holds it when the Seq-aligns
 /// are made (`BlastHitList2SeqAlign_OMF`).
 #[derive(Clone, Copy, Debug)]
@@ -51,6 +66,10 @@ pub struct HspRecord<'a> {
     /// translated query), in the searched letters.
     pub q_offset: i32,
     pub q_end: i32,
+    /// The query letters that `-subject`'s Seq-loc mapper left out of the HSP (the records of
+    /// BLASTX and TBLASTN come mapped, `serial::seqalign::mapped_script`: an end `Ins`), which its
+    /// `hsp_percent_coverage` still counts (`MappedScript::query_left_out`); 0 for every other HSP.
+    pub q_left_out: i32,
     /// `subject.offset` and `subject.end` (exclusive), likewise for the subject.
     pub s_offset: i32,
     pub s_end: i32,
@@ -73,6 +92,9 @@ pub struct HspRecord<'a> {
     /// `gap_info`: the edit script, in the context's direction. An empty script stands
     /// for one substitution over the query's extent.
     pub ops: &'a [GapEditOp],
+    /// Optional `-subject` mapper override for TBLASTN NULLB-start alignments (`None` for all
+    /// ordinary HSPs).
+    pub std_seg_nullb: Option<StdSegNullb>,
 }
 
 /// A query of the search, as the Seq-aligns name and measure it.
@@ -120,16 +142,73 @@ pub struct SubjectRecord<'a> {
 pub struct RunRecord<'a> {
     /// The program, which names the "Blast Type" and selects the segment form.
     pub program: Program,
-    /// Whether the search is the RPS search of `program` (rpsblast: BLASTP's, rpstblastn:
-    /// BLASTX's), whose subjects are the profiles of an RPS database: the Seq-annot's "Blast
-    /// Type" (outfmt 8, 9, 12) names the RPS program. Nothing else reads it (the archive's
-    /// Seq-aligns carry no Blast Type).
-    pub rps: bool,
     /// The database title (`-db`), or `None` for a `-subject` search.
     pub db_title: Option<&'a [u8]>,
     /// Whether the search is gapped (`BLASTHspListToSeqAlign`) or ungapped
     /// (`BLASTUngappedHspListToSeqAlign`).
     pub gapped: bool,
+    /// The program type of a search that `program` does not name (`ProgramType`; `None`:
+    /// `program`'s): the Seq-annots' "Blast Type", and psiblast's rule for a `num_ident` of 0.
+    pub program_type: Option<ProgramType>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:666-673
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:676-694
+/// The program type (`EBlastProgramType`) of a search that its `Program` does not name, which
+/// the formatter's program name is (`Blast_ProgramNameFromType`): the Seq-annots' "Blast Type"
+/// (outfmt 8, 9, 12) is `ProgramNameToEnum` of it. A PSSM search's options are their own
+/// (psiblast's, also of a FASTA query's first round, and PSI-TBLASTN's of tblastn `-in_pssm`), and
+/// so are an RPS search's, whose subjects are the profiles of an RPS database (rpsblast of
+/// BLASTP, rpstblastn of BLASTX). The archive's Seq-aligns carry no Blast Type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProgramType {
+    /// `psiblast`, `ePSIBlast`.
+    PsiBlast,
+    /// `psitblastn`, `ePSITblastn`.
+    PsiTblastn,
+    /// `rpsblast`, `eRPSBlast`.
+    RpsBlast,
+    /// `rpstblastn`, `eRPSTblastn`.
+    RpsTblastn,
+}
+
+impl ProgramType {
+    /// The program's name (`Blast_ProgramNameFromType`, the one spelling of each): the Seq-annots'
+    /// "Blast Type" and BLAST XML's `BlastOutput_program`.
+    pub fn name(self) -> &'static str {
+        match self {
+            ProgramType::PsiBlast => "psiblast",
+            ProgramType::PsiTblastn => "psitblastn",
+            ProgramType::RpsBlast => "rpsblast",
+            ProgramType::RpsTblastn => "rpstblastn",
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:861-871
+    /// Whether a search of the program is an iterative one (`IsIterativeSearch`, the formatter's
+    /// `m_IsIterative`): psiblast and PSI-TBLASTN (tblastn `-in_pssm`); NCBI's third, DELTA-BLAST,
+    /// is not a LOSAT program. The one owner of this fact for every report: the XML2 and JSON
+    /// documents of such a search are held (`blast_xml2::reports_held`) and list a database
+    /// search's results as its rounds.
+    pub fn is_iterative(self) -> bool {
+        matches!(self, ProgramType::PsiBlast | ProgramType::PsiTblastn)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:120-168
+/// Whether the results of a search of `program_type` (`RunRecord::program_type`; `None`: its
+/// `Program`'s own) carry the query's masks, the SEG intervals and `-lcase_masking` runs that the
+/// reports show (outfmt 0's lower case, BLAST XML's masked letters, the archive's masks):
+/// `CLocalBlast::Run` sets them on its results (BLASTP, RPS-BLAST and the others), while
+/// `CPsiBlastImpl::Run` returns the traceback's results without them (psiblast in every round,
+/// also a FASTA query's first, and PSI-TBLASTN of tblastn `-in_pssm`). The one owner of this rule
+/// for every report of these searches.
+pub fn carries_query_masks(program_type: Option<ProgramType>) -> bool {
+    !matches!(
+        program_type,
+        Some(ProgramType::PsiBlast | ProgramType::PsiTblastn)
+    )
 }
 
 impl RunRecord<'_> {

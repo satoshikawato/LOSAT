@@ -6,7 +6,8 @@ use super::*;
 #[test]
 fn a_read_failed_in_the_search_fails_as_the_check_s_error() {
     let engine = batch_failure(
-        XReadError(PreliminaryReadError("Database memory map file error").into()).into(),
+        XReadError(PreliminaryReadError::from_static("Database memory map file error").into())
+            .into(),
     )
     .expect("the engine error");
     let native = engine
@@ -21,6 +22,21 @@ fn a_read_failed_in_the_search_fails_as_the_check_s_error() {
     assert_eq!(refusal.to_string(), "refused");
     let other = batch_failure(anyhow::anyhow!("other")).unwrap_err();
     assert_eq!(other.to_string(), "other");
+}
+
+// A refusal of a step where NCBI's search of the batch crashes fails the batch with the refusal
+// itself (exit status 1, its message unchanged), after the reports of the batches before
+// (`tests/tblastn_batch_refusal.rs`).
+#[test]
+fn a_refusal_after_the_batches_reports_fails_the_batch() {
+    let message = "TBLASTN: a refused step";
+    let refusal = batch_failure(anyhow::Error::new(ErrorAfterBatchReports::new(
+        anyhow::anyhow!("{message}"),
+    )))
+    .expect("the batch's failure");
+    assert!(!refusal.is::<ErrorAfterBatchReports>());
+    assert!(refusal.downcast_ref::<crate::cli::NativeError>().is_none());
+    assert_eq!(refusal.to_string(), message);
 }
 
 // NCBI 2.17.0 tblastn with `-searchsp` or `OLD_FSC` and `-subject` of three empty records
@@ -46,11 +62,32 @@ fn a_short_average_subject_length_fails_the_batch_with_the_engine_error() {
 fn a_setup_count_of_zero_fails_the_batch_with_the_refusal() {
     let refusal = crate::algorithm::common::database::check_setup_count(100, 0, false, "TBLASTN")
         .expect_err("the refusal");
-    let failed = batch_failure(SetupRefusal(refusal).into()).expect("the batch's failure");
+    let failed =
+        batch_failure(ErrorAfterBatchReports::new(refusal).into()).expect("the batch's failure");
     assert!(failed.downcast_ref::<crate::cli::NativeError>().is_none());
     assert!(failed
         .to_string()
         .starts_with(crate::algorithm::common::database::STATISTICS_COUNT_ZERO));
     assert!(crate::algorithm::common::database::check_setup_count(100, 0, true, "TBLASTN").is_ok());
     assert!(crate::algorithm::common::database::check_setup_count(0, 0, false, "TBLASTN").is_ok());
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:946-951,975
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-302
+// A search space overflow in a batch's setup fails that batch after the reports of the batches
+// before (`fails_one_batch`, `batch_failure`), with LOSAT's refusal itself (not an engine error).
+#[test]
+fn a_search_space_overflow_fails_the_batch_with_the_refusal() {
+    let overflow = crate::stats::setup::SearchSpaceOverflow {
+        db_length: 1_537_228_672_809_129_301,
+        query_length: 649,
+        program: "TBLASTN".to_string(),
+    };
+    let wrapped: anyhow::Error = ErrorAfterBatchReports::new(overflow.into()).into();
+    assert!(fails_one_batch(&wrapped));
+    let failed = batch_failure(wrapped).expect("the batch's failure");
+    assert!(failed.downcast_ref::<crate::cli::NativeError>().is_none());
+    assert!(failed
+        .to_string()
+        .contains("overflows NCBI BLAST+'s 64-bit effective search space"));
 }

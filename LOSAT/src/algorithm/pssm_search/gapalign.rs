@@ -184,6 +184,9 @@ pub(crate) fn pssm_get_offsets_for_gapped_alignment<R: PssmRows>(
     let score_at = |q: i32, s: i32| -> Option<i32> {
         let row = (q >= 0 && (q as usize) < rows.len()).then(|| rows.row(q as usize))?;
         let s = subject.get(usize::try_from(s).ok()?)?;
+        if rows.reads_by_letter(row) {
+            rows.letters_read(row, std::iter::once(*s));
+        }
         Some(row[*s as usize])
     };
     let mut score = 0;
@@ -586,6 +589,14 @@ fn align_ex<R: PssmRows>(
             cells.push(script);
             b_index += 1;
         }
+        // The letters of the cells this row read (before the band's end or the fence), for a row
+        // whose letters are read one by one (`PssmRows::reads_by_letter`).
+        if rows.reads_by_letter(matrix_row) {
+            rows.letters_read(
+                matrix_row,
+                (orig_b_index..b_index).map(|b| subject_letter(subject, s_base, n, b, reverse)),
+            );
+        }
         if first_b_index == b_size || *fence_hit {
             break;
         }
@@ -649,6 +660,91 @@ fn align_ex<R: PssmRows>(
         })
         .collect();
     (a_offset, b_offset, best_score, edit_ops)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:671-736
+/// PHI-BLAST's score-only extension (`phi_search::align`): `semi_gapped_align_score_only` with the
+/// rows of the query's score matrix, whose cells NCBI's matrix branch reads when the call's query
+/// offset is its query pointer's (DESIGN_ps8 §2.1). Returns (`*a_offset`, `*b_offset`, score).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn phi_score_only(
+    rows: &super::rows::QueryPssm,
+    m: usize,
+    query_offset: usize,
+    subject: &[u8],
+    s_base: usize,
+    n: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    reverse: bool,
+    scratch: &mut PssmGapScratch,
+) -> (usize, usize, i32) {
+    if reverse {
+        semi_gapped_align_score_only::<super::rows::QueryPssm, true>(
+            rows,
+            m,
+            query_offset,
+            subject,
+            s_base,
+            n,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+        )
+    } else {
+        semi_gapped_align_score_only::<super::rows::QueryPssm, false>(
+            rows,
+            m,
+            query_offset,
+            subject,
+            s_base,
+            n,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+        )
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:831-906
+/// PHI-BLAST's `ALIGN_EX` (`phi_search::align`), with the query's matrix rows; no fence.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn phi_align_ex(
+    rows: &super::rows::QueryPssm,
+    m: usize,
+    query_offset: usize,
+    subject: &[u8],
+    s_base: usize,
+    n: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    reverse: bool,
+    scratch: &mut PssmGapScratch,
+) -> (usize, usize, i32, Vec<GapEditOp>) {
+    let mut fence_hit = false;
+    align_ex(
+        rows,
+        m,
+        query_offset,
+        subject,
+        s_base,
+        n,
+        gap_open,
+        gap_extend,
+        x_drop,
+        reverse,
+        scratch,
+        &mut fence_hit,
+    )
+}
+
+/// PHI-BLAST's edit script of its left operations (with the pattern's appended) and right ones.
+pub(crate) fn phi_edit_script(rev: Vec<GapEditOp>, fwd: Vec<GapEditOp>) -> Vec<GapEditOp> {
+    prelim_edit_blocks_to_script(rev, fwd)
 }
 
 /// `Blast_PrelimEditBlockToGapEditScript`: the left extension's operations as they are, then the
@@ -806,6 +902,20 @@ impl<R: PssmRows> PssmRows for RowsFrom<'_, R> {
     #[inline(always)]
     fn len(&self) -> usize {
         self.rows.len() + 1 - self.start
+    }
+
+    #[inline(always)]
+    fn reads_by_letter(&self, row: &[i32; crate::core::blast_util::BLASTAA_SIZE]) -> bool {
+        self.rows.reads_by_letter(row)
+    }
+
+    #[inline(always)]
+    fn letters_read(
+        &self,
+        row: &[i32; crate::core::blast_util::BLASTAA_SIZE],
+        letters: impl Iterator<Item = u8>,
+    ) {
+        self.rows.letters_read(row, letters);
     }
 }
 

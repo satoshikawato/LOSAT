@@ -6,8 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use clap::CommandFactory;
-use losat::web_adapter::{Cli, Commands};
+use losat::web_adapter::Commands;
 
 use crate::json;
 use crate::run::Program;
@@ -265,15 +264,9 @@ pub fn defaults(program: Program) -> Result<Defaults, String> {
         let values = resolved(&words(program, &task, &[]))?;
         out.tasks.insert(task, values);
     }
-    let described = |flag: &str| {
-        Cli::command()
-            .find_subcommand(program.name())
-            .is_some_and(|command| {
-                command
-                    .get_arguments()
-                    .any(|arg| arg.get_long() == flag.strip_prefix('-'))
-            })
-    };
+    // The options of the program in NCBI's argument tables (`describe`'s rows).
+    let options = losat::web_adapter::described_parameters(program.api());
+    let described = |flag: &str| options.iter().any(|option| option.flag == flag);
     let matrices: Vec<String> = losat::web_adapter::ScoringMatrix::ALL
         .iter()
         .map(|matrix| matrix.ncbi_name().to_string())
@@ -439,28 +432,6 @@ mod tests {
         Program::Blastx,
     ];
 
-    /// The help text and the clap default of a program's option.
-    fn help(program: Program, flag: &str) -> (String, Option<String>) {
-        let root = Cli::command();
-        let arg = root
-            .find_subcommand(program.name())
-            .and_then(|command| {
-                command
-                    .get_arguments()
-                    .find(|arg| arg.get_long() == flag.strip_prefix('-'))
-            })
-            .unwrap_or_else(|| panic!("{} has no {flag}", program.name()));
-        let defaults: Vec<String> = arg
-            .get_default_values()
-            .iter()
-            .map(|value| value.to_string_lossy().into_owned())
-            .collect();
-        (
-            arg.get_help().map(ToString::to_string).unwrap_or_default(),
-            (!defaults.is_empty()).then(|| defaults.join(" ")),
-        )
-    }
-
     /// Whether `text` holds `value` as a word of its own ("3", not the 3 of "BLOSUM62" or "13").
     fn names(text: &str, value: &str) -> bool {
         text.match_indices(value).any(|(at, _)| {
@@ -471,28 +442,66 @@ mod tests {
         })
     }
 
-    // The CLI states each default that the engine resolves for a task, as the clap default or
-    // in the help: the help and the resolution agree (before, programs.ts held a copy of the
-    // help, checked the same way).
+    /// The task defaults that NCBI's comment of the option does not name although it states a
+    /// default: (program, task, flag, the engine's value). NCBI's comment of BLASTP's `-evalue`
+    /// states the value of BLASTP's other tasks only; blastp-short's is the task's preset in
+    /// NCBI's options factory, which the engine's task options follow (`blastp::args`,
+    /// `BlastpTaskOptions::create`).
+    const UNNAMED: [(Program, &str, &str, &str); 1] =
+        [(Program::Blastp, "blastp-short", "-evalue", "20000")];
+
+    // The engine resolves for each task the default that NCBI states for the option: NCBI's
+    // reader adds the default of a key that its argument table gives one (`<default>`,
+    // `describe`'s `default`), the same in every task; for the other options NCBI's comment
+    // (`describe`'s `help`) states the defaults where it states one, a task's own among them
+    // (blastn's `-evalue` and `-dust` for blastn-short), and names the value that each task
+    // resolves. The other options' defaults (the word size, the scores, the matrix, ...) are
+    // stated by neither, and the engine's resolution is their source (the tests below).
     #[test]
-    fn every_task_default_is_a_value_that_the_help_names() {
-        let mut unnamed = Vec::new();
+    fn every_task_resolves_the_default_that_ncbi_states() {
+        let (mut by_default, mut by_help, mut differ) = (0, 0, Vec::new());
         for program in PROGRAMS {
+            let described = losat::web_adapter::described_parameters(program.api());
             let defaults = defaults(program).unwrap();
             for (task, values) in &defaults.tasks {
                 for (flag, value) in values {
-                    let (text, clap_default) = help(program, flag);
-                    let stated = match &clap_default {
-                        Some(clap_default) => clap_default == value,
-                        None => text.to_lowercase().contains("default") && names(&text, value),
+                    let parameter = described
+                        .iter()
+                        .find(|parameter| parameter.flag == *flag)
+                        .unwrap_or_else(|| panic!("{} does not describe {flag}", program.name()));
+                    let stated = match &parameter.default {
+                        Some(default) => {
+                            by_default += 1;
+                            default == value
+                        }
+                        None if parameter.help.to_lowercase().contains("default") => {
+                            by_help += 1;
+                            let unnamed =
+                                UNNAMED.contains(&(program, task.as_str(), *flag, value.as_str()));
+                            // A task's value that the comment leaves out is listed, and only while
+                            // the comment leaves it out.
+                            names(&parameter.help, value) != unnamed
+                        }
+                        None => continue,
                     };
                     if !stated {
-                        unnamed.push(format!("{} {task} {flag} {value}: {text}", program.name()));
+                        differ.push(format!(
+                            "{} {task} {flag}: {value}, NCBI's {:?} / {:?}",
+                            program.name(),
+                            parameter.default,
+                            parameter.help
+                        ));
                     }
                 }
             }
         }
-        assert!(unnamed.is_empty(), "{unnamed:#?}");
+        assert!(differ.is_empty(), "{differ:#?}");
+        // Every listed exception is one that the tables resolve.
+        for (program, task, flag, value) in UNNAMED {
+            assert_eq!(defaults(program).unwrap().tasks[task][flag], value);
+        }
+        println!("{by_default} task defaults are NCBI's table's, {by_help} NCBI's comment's");
+        assert!(by_default > 0 && by_help > 0);
     }
 
     #[test]

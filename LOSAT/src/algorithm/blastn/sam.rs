@@ -11,13 +11,14 @@
 use anyhow::{Context, Result};
 
 use super::hsp::BlastnHitList;
+use super::pairwise::QueryRecords;
 use super::x_subject_store::SubjectLetters;
 use crate::blastinput::app::Program;
-use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::report::record::{HspRecord, QueryNames, RunRecord, SubjectNames, SubjectRecord};
-use crate::report::sam::{SamDocument, SamId, SamLetters, SamRow, SamSequence};
-use crate::report::seqid::SeqId;
+use crate::report::sam::{
+    database_sam_id, fasta_sam_id, SamDocument, SamId, SamLetters, SamRow, SamSequence,
+};
 
 /// The lengths of the subjects the hit lists name, by index (rank for a database).
 pub(crate) struct SubjectLengths<'a> {
@@ -45,9 +46,9 @@ pub(crate) fn add_blastn_sam(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,
-        rps: false,
         db_title: subjects.db_title(),
         gapped: !ungapped,
+        program_type: None,
     };
     let mut sam_subjects: Vec<SamSequence<'_>> = Vec::new();
     let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();
@@ -65,12 +66,7 @@ pub(crate) fn add_blastn_sam(
             let subject = sam_subjects.len() as u32;
             let (id, offset, key) = match subjects {
                 SubjectNames::Records(records) => (
-                    match records[s_idx].believed() {
-                        Some(ids) => SeqId::Db(crate::report::db_subject::forced_accession(
-                            &ids.best, &ids.ids,
-                        )),
-                        None => SeqId::Local(&records[s_idx].local_id),
-                    },
+                    fasta_sam_id(&records[s_idx]),
                     subject_placements.offset(s_idx) as i32,
                     s_idx as u64,
                 ),
@@ -82,10 +78,11 @@ pub(crate) fn add_blastn_sam(
                     parsed,
                     ..
                 } => (
-                    match parsed.get(s_idx).and_then(Option::as_deref) {
-                        Some(subject) => SeqId::Db(subject.sam_id()),
-                        None => SeqId::BlOrdId(oids.oid(ordinals[s_idx])),
-                    },
+                    database_sam_id(
+                        parsed.get(s_idx).and_then(Option::as_deref),
+                        oids,
+                        ordinals[s_idx],
+                    ),
                     0,
                     u64::from(ordinals[s_idx]),
                 ),
@@ -107,6 +104,7 @@ pub(crate) fn add_blastn_sam(
                     subject,
                     q_offset: hsp.internal_q_offset_0,
                     q_end: hsp.internal_q_end_0,
+                    q_left_out: 0,
                     s_offset: hsp.internal_s_offset_0 as i32,
                     s_end: hsp.internal_s_end_0 as i32,
                     q_frame: if hsp.query_frame < 0 { -1 } else { 1 },
@@ -119,14 +117,13 @@ pub(crate) fn add_blastn_sam(
                     num_positives: 0,
                     comp_adjust: 0,
                     ops: hsp.gap_info.as_deref().unwrap_or(&[]),
+                    std_seg_nullb: None,
                 });
             }
         }
         let mut query_record = queries.record(q_idx);
-        if let Some(ids) = queries.records[q_idx].believed() {
-            query_record.id = SeqId::Db(crate::report::db_subject::forced_accession(
-                &ids.best, &ids.ids,
-            ));
+        if queries.records[q_idx].believed().is_some() {
+            query_record.id = fasta_sam_id(&queries.records[q_idx]);
         }
         let query = SamSequence {
             record: SamId::Query(query_record),
@@ -152,9 +149,9 @@ pub(crate) enum SubjectSource<'a> {
 
 /// The letters of the queries and the subjects for SEQ.
 pub(crate) struct BlastnSamLetters<'a> {
-    /// The searched query records (with `-query_loc`, the interval's letters).
-    pub queries: &'a [FastaRecord],
-    pub query_placements: &'a Placements,
+    /// The query records (with `-query_loc`, their input records, whole: NCBI's `CSeqVector` of
+    /// the query's Bioseq, sam_formatter.cpp:222-233).
+    pub queries: QueryRecords<'a>,
     pub subjects: SubjectSource<'a>,
 }
 
@@ -169,13 +166,13 @@ impl SamLetters for BlastnSamLetters<'_> {
     ) -> Result<()> {
         match row {
             SamRow::Query => {
-                let offset = self.query_placements.offset(index);
-                let record = self.queries[index].seq();
-                let letters = from
-                    .checked_sub(offset)
-                    .zip(to.checked_sub(offset))
-                    .and_then(|(from, to)| record.get(from..to))
-                    .context("a SAM record lies outside the searched query letters")?;
+                // `from` and `to` are record positions within the record's length
+                // (`SamDocument::query`).
+                let letters = self
+                    .queries
+                    .record(index)
+                    .and_then(|record| record.letters.get(from..to))
+                    .context("a SAM record lies outside its query's record")?;
                 out.extend(letters.iter().map(u8::to_ascii_uppercase));
             }
             SamRow::Subject => match &self.subjects {

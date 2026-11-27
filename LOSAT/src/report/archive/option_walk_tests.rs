@@ -13,7 +13,7 @@
 use super::options::OptionInputs;
 use super::strategy::{hitlist_size, HitlistArgs};
 use super::ArchiveRequest;
-use crate::cli::{Cli, Commands};
+use crate::cli::Commands;
 
 /// A change of the default request: the parameter in its place, a new one after another, or a
 /// parameter gone; or the parser refuses the words with the base command line (`Conflicts`: an
@@ -28,7 +28,7 @@ enum Edit {
 
 use Edit::{After, At, Conflicts, Drop};
 
-/// One run of the walk: the argument's id (clap's), the words added to the base command line,
+/// One run of the walk: the argument's name, the words added to the base command line,
 /// and what changes in the request.
 type Case = (&'static str, &'static [&'static str], &'static [Edit]);
 
@@ -40,24 +40,29 @@ struct App {
     default: &'static [&'static str],
     cases: &'static [Case],
     /// The application's options and its `-db` from a parsed command line.
-    inputs: fn(Commands) -> (OptionInputs, Option<String>),
+    inputs: fn(Commands) -> (OptionInputs, Option<Vec<u8>>),
 }
 
 fn parse(program: &str, words: &[&str]) -> Result<Commands, String> {
     let mut argv = vec!["losat", program];
     argv.extend_from_slice(words);
-    crate::cli::try_parse_from::<Cli, _, _>(argv)
+    crate::cli::try_parse_from(argv)
         .map(|cli| cli.command)
-        .map_err(|error| crate::cli::render_message(&error))
+        .map_err(|error| error.to_string())
 }
 
 /// The request's options, `HitlistSize` included, and `Web_StepNumber` last.
-fn render(inputs: &OptionInputs, database: Option<&str>) -> Vec<String> {
+fn render(inputs: &OptionInputs, database: Option<&[u8]>) -> Vec<String> {
     let request = ArchiveRequest::for_inputs(inputs, database);
     let mut listed: Vec<String> = request
         .algorithm
         .iter()
-        .map(|param| format!("{}={:?}", param.name, param.value))
+        .map(|param| match &param.value {
+            super::options::ParamValue::Str(bytes) => {
+                format!("{}=Str({:?})", param.name(), String::from_utf8_lossy(bytes))
+            }
+            other => format!("{}={:?}", param.name(), other),
+        })
         .collect();
     if let Some(step) = request.step_number {
         listed.push(format!("Web_StepNumber=Integer({step})"));
@@ -94,16 +99,11 @@ fn expected(default: &[&str], edits: &[Edit]) -> Vec<String> {
 }
 
 fn walk(app: &App) {
-    // Every argument of the program's command line has a case.
-    let command = <Cli as clap::CommandFactory>::command();
-    let subcommand = command
-        .find_subcommand(app.program)
-        .expect("the program's subcommand");
-    let missing: Vec<String> = subcommand
-        .get_arguments()
-        .map(|arg| arg.get_id().as_str().to_string())
-        .filter(|id| !matches!(id.as_str(), "help" | "ncbi_help"))
-        .filter(|id| !app.cases.iter().any(|case| case.0 == id))
+    // Every argument that the program's options read has a case.
+    let tool = crate::cli::reader::tool(app.program).expect("the program is on the reader");
+    let missing: Vec<&str> = crate::cli::reader::options_tests::names_read(tool)
+        .into_iter()
+        .filter(|name| !app.cases.iter().any(|case| case.0 == *name))
         .collect();
     assert!(
         missing.is_empty(),
@@ -151,15 +151,17 @@ fn walk(app: &App) {
 }
 
 fn hitlist(
-    outfmt: &str,
+    outfmt: &std::ffi::OsStr,
     max_target_seqs: Option<usize>,
     num_descriptions: Option<usize>,
     num_alignments: Option<usize>,
 ) -> i32 {
     hitlist_size(
-        crate::blastinput::app::parse_formatting_string(outfmt)
-            .expect("outfmt")
-            .number,
+        crate::blastinput::app::parse_formatting_string(
+            crate::utils::os_bytes::os_str_bytes(outfmt).as_ref(),
+        )
+        .expect("outfmt")
+        .number,
         HitlistArgs {
             max_target_seqs,
             num_descriptions,
@@ -171,6 +173,8 @@ fn hitlist(
 /// The database lists (`DbFilterArgs`): program options of the database (`OptionsHandle`), never
 /// algorithm options.
 const DB_FILTERS: &[Case] = &[
+    ("gilist", &["-gilist", "g.gil"], &[]),
+    ("negative_gilist", &["-negative_gilist", "g.gil"], &[]),
     ("seqidlist", &["-seqidlist", "s.txt"], &[]),
     ("negative_seqidlist", &["-negative_seqidlist", "s.txt"], &[]),
     ("taxids", &["-taxids", "9606"], &[]),
@@ -184,11 +188,17 @@ const DB_FILTERS: &[Case] = &[
     ),
 ];
 
+/// The IPG database lists of protein-database programs (`blastp`, `blastx`, `psiblast`).
+const IPG_FILTERS: &[Case] = &[
+    ("ipglist", &["-ipglist", "p.ipg"], &[]),
+    ("negative_ipglist", &["-negative_ipglist", "p.ipg"], &[]),
+];
+
 /// The formatting arguments (`FormattingArgs`): the report's only.
 const FORMATTING: &[Case] = &[
     ("line_length", &["-line_length", "80"], &[]),
-    ("sort_hits", &["-sorthits", "1"], &[]),
-    ("sort_hsps", &["-sorthsps", "1"], &[]),
+    ("sorthits", &["-sorthits", "1"], &[]),
+    ("sorthsps", &["-sorthsps", "1"], &[]),
 ];
 
 fn with(cases: &[&'static [Case]]) -> &'static [Case] {
@@ -210,6 +220,9 @@ const PSIBLAST: &[Case] = &[
         )],
     ),
     ("show_gis", &["-show_gis"], &[]),
+    // NCBI's `CFormattingArgs::ExtractAlgorithmOptions` records the hit list size only
+    // (blast_args.cpp:2894-2978): `-html` is the formatter's (`m_IsHTML`), not the request's.
+    ("html", &["-html"], &[]),
     ("parse_deflines", &["-parse_deflines"], &[]),
     (
         "searchsp",
@@ -263,7 +276,7 @@ const PSIBLAST: &[Case] = &[
         &[At("HitlistSize", "Integer(600)")],
     ),
     (
-        "max_hsps_per_subject",
+        "max_hsps",
         &["-max_hsps", "3"],
         &[After(
             "PseudoCountWeight",
@@ -337,12 +350,12 @@ const PSIBLAST: &[Case] = &[
         ],
     ),
     (
-        "gap_open",
+        "gapopen",
         &["-gapopen", "9"],
         &[After("PseudoCountWeight", "GapOpeningCost", "Integer(9)")],
     ),
     (
-        "gap_extend",
+        "gapextend",
         &["-gapextend", "2"],
         &[After("PseudoCountWeight", "GapExtensionCost", "Integer(2)")],
     ),
@@ -433,6 +446,27 @@ const PSIBLAST: &[Case] = &[
         &["-in_msa", "m.aln", "-ignore_msa_master"],
         &[At("IgnoreMsaMaster", "Boolean(true)")],
     ),
+    // A pattern (`-phi_pattern`, line PS item PS8a) makes the handle PHI-BLAST's
+    // (`RequestKind::Phiblastp`): no composition-based statistics or Smith-Waterman mode, psiblast's
+    // own options after the window and gap trigger ones, and the pattern as the file gives it last
+    // (NCBI BLAST+ 2.17.0 `fi.export.it1`, PS/ncbi8/ws).
+    (
+        "phi_pattern",
+        &["-phi_pattern", "tests/fixtures/phi/ploop.pat"],
+        &[
+            Drop("InclusionThreshold"),
+            Drop("PseudoCountWeight"),
+            Drop("CompositionBasedStats"),
+            Drop("SmithWatermanMode"),
+            After("IgnoreMsaMaster", "PseudoCountWeight", "Integer(0)"),
+            After("PseudoCountWeight", "InclusionThreshold", "Real(0.002)"),
+            After(
+                "InclusionThreshold",
+                "PHIPattern",
+                "Str(\"[AG]-x(4)-G-K-[ST]\")",
+            ),
+        ],
+    ),
 ];
 
 /// psiblast's request of the base command line (`p9.ps.q.db.itdef.f6`, `p9.pp.db.itdef.f6`).
@@ -452,7 +486,7 @@ const PSIBLAST_DEFAULT: &[&str] = &[
     "Web_StepNumber=Integer(1)",
 ];
 
-fn psiblast_inputs(command: Commands) -> (OptionInputs, Option<String>) {
+fn psiblast_inputs(command: Commands) -> (OptionInputs, Option<Vec<u8>>) {
     match command {
         Commands::Psiblast(args) => {
             let mut inputs = args.option_inputs();
@@ -462,7 +496,12 @@ fn psiblast_inputs(command: Commands) -> (OptionInputs, Option<String>) {
                 args.num_descriptions,
                 args.num_alignments,
             );
-            (inputs, args.db.clone())
+            (
+                inputs,
+                args.db
+                    .as_deref()
+                    .map(|s| crate::utils::os_bytes::os_str_bytes(s).into_owned()),
+            )
         }
         _ => unreachable!(),
     }
@@ -493,7 +532,7 @@ fn every_psiblast_argument_is_recorded_as_ncbi_records_it() {
         program: "psiblast",
         base: &["-query", "q.faa", "-db", "d"],
         default: PSIBLAST_DEFAULT,
-        cases: with(&[PSIBLAST, DB_FILTERS, FORMATTING]),
+        cases: with(&[PSIBLAST, DB_FILTERS, IPG_FILTERS, FORMATTING]),
         inputs: psiblast_inputs,
     });
 }
@@ -510,13 +549,17 @@ fn every_psiblast_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
         base: &["-in_pssm", "p.asn", "-db", "d"],
         default: PSIBLAST_DEFAULT,
         cases: excluding(
-            with(&[PSIBLAST, DB_FILTERS, FORMATTING]),
+            with(&[PSIBLAST, DB_FILTERS, IPG_FILTERS, FORMATTING]),
             &[
                 ("query", &["-query", "q.faa"]),
                 ("query_loc", &["-query_loc", "1-10"]),
                 ("in_msa", &["-in_msa", "m.aln"]),
                 ("msa_master_idx", &["-msa_master_idx", "2"]),
                 ("ignore_msa_master", &["-ignore_msa_master"]),
+                (
+                    "phi_pattern",
+                    &["-phi_pattern", "tests/fixtures/phi/ploop.pat"],
+                ),
             ],
         ),
         inputs: psiblast_inputs,
@@ -560,6 +603,9 @@ const RPS_COMMON: &[Case] = &[
     ),
     ("outfmt", &["-outfmt", "6"], &[]),
     ("show_gis", &["-show_gis"], &[]),
+    // NCBI's `CFormattingArgs::ExtractAlgorithmOptions` records the hit list size only
+    // (blast_args.cpp:2894-2978): `-html` is the formatter's (`m_IsHTML`), not the request's.
+    ("html", &["-html"], &[]),
     (
         "num_descriptions",
         &["-num_descriptions", "3", "-num_alignments", "2"],
@@ -576,7 +622,7 @@ const RPS_COMMON: &[Case] = &[
         &[At("HitlistSize", "Integer(3)")],
     ),
     (
-        "max_hsps_per_subject",
+        "max_hsps",
         &["-max_hsps", "2"],
         &[After("EvalueThreshold", "MaxHspsPerSubject", "Integer(2)")],
     ),
@@ -663,7 +709,12 @@ fn every_rpsblast_argument_is_recorded_as_ncbi_records_it() {
                     args.num_descriptions,
                     args.num_alignments,
                 );
-                (inputs, args.db.clone())
+                (
+                    inputs,
+                    args.db
+                        .as_deref()
+                        .map(|s| crate::utils::os_bytes::os_str_bytes(s).into_owned()),
+                )
             }
             _ => unreachable!(),
         },
@@ -723,7 +774,12 @@ fn every_rpstblastn_argument_is_recorded_as_ncbi_records_it() {
                     args.num_descriptions,
                     args.num_alignments,
                 );
-                (inputs, args.db.clone())
+                (
+                    inputs,
+                    args.db
+                        .as_deref()
+                        .map(|s| crate::utils::os_bytes::os_str_bytes(s).into_owned()),
+                )
             }
             _ => unreachable!(),
         },
@@ -782,6 +838,12 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &["-export_search_strategy", "s.asn"],
             &[],
         ),
+        // An imported strategy is read by the run (`import::apply`), not recorded.
+        (
+            "import_search_strategy",
+            &["-import_search_strategy", "s.asn"],
+            &[],
+        ),
         (
             "evalue",
             &["-evalue", "0.001"],
@@ -793,12 +855,12 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &[After("WordThreshold", "WordSize", "Integer(4)")],
         ),
         (
-            "gap_open",
+            "gapopen",
             &["-gapopen", "9"],
             &[After("WordThreshold", "GapOpeningCost", "Integer(9)")],
         ),
         (
-            "gap_extend",
+            "gapextend",
             &["-gapextend", "2"],
             &[After("WordThreshold", "GapExtensionCost", "Integer(2)")],
         ),
@@ -966,7 +1028,12 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
                     args.num_descriptions,
                     args.num_alignments,
                 );
-                (inputs, args.db.clone())
+                (
+                    inputs,
+                    args.db
+                        .as_deref()
+                        .map(|s| crate::utils::os_bytes::os_str_bytes(s).into_owned()),
+                )
             }
             _ => unreachable!(),
         },

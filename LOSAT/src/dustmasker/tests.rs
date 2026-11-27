@@ -14,7 +14,7 @@ fn run_words(line: &[&str]) -> (i32, String, String) {
 
 #[test]
 fn the_short_usage_is_the_head_of_the_help() {
-    let usage = crate::ncbi_app::short_usage(HELP);
+    let usage = crate::ncbi_app::short_usage(&TOOL);
     assert_eq!(usage.len(), 443);
     assert!(usage.starts_with("USAGE\n  dustmasker [-h] [-help] [-xmlhelp] [-in input_file_name]"));
     assert_eq!(HELP.len(), 1673);
@@ -211,8 +211,11 @@ fn integer_keys_take_hexadecimal_values() {
     assert_eq!(args.integer("window"), Some(16));
     assert_eq!(args.integer("level"), Some(20));
     assert_eq!(args.integer("linker"), Some(1));
-    assert_eq!(args.value("outfmt"), Some("interval"));
-    assert_eq!(args.value("infmt"), Some("fasta"));
+    assert_eq!(
+        args.bytes("outfmt").as_deref(),
+        Some(b"interval".as_slice())
+    );
+    assert_eq!(args.bytes("infmt").as_deref(), Some(b"fasta".as_slice()));
     assert!(!args.flag("parse_seqids") && !args.given("window-x"));
     let args = crate::ncbi_app::args::parse(&TOOL, &words(&["-window=0X"])).unwrap();
     assert_eq!(args.integer("window"), Some(0));

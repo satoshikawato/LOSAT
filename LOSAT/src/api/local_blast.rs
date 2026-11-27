@@ -15,6 +15,12 @@ use crate::record::FastaRecord;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
+/// What every program's `run_local` returns when its arguments name `-db` (no NCBI counterpart:
+/// the caller contract of LOSAT's entries). `run_local` searches the caller's subject records; a
+/// `-db` search runs through the program's `run_local_database` (or the command line's `run`).
+pub(crate) const RUN_LOCAL_DB_REFUSAL: &str =
+    "-db (a database search) is run by run_local_database, not run_local";
+
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:106-111
 pub use crate::algorithm::tblastx::blast_engine::run_local as run_local_tblastx;
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:113-119
@@ -71,6 +77,9 @@ pub enum OutputSink<'a> {
         &'a mut (dyn Write + Send),
         crate::report::blast_xml2::SideFileSink,
     ),
+    /// The command line's report stream (`-out` or standard output), which writes as NCBI's
+    /// stream does (`report::ostream::ReportStream`); otherwise as `Writer`.
+    Report(&'a mut crate::report::ostream::ReportStream),
 }
 
 impl OutputSink<'_> {
@@ -85,7 +94,19 @@ impl OutputSink<'_> {
             OutputSink::File(path) => Box::new(BufWriter::new(File::create(path)?)),
             OutputSink::Writer(writer) | OutputSink::Files(writer, _) => Box::new(&mut **writer),
             OutputSink::Out(out) => Box::new(&mut **out),
+            OutputSink::Report(stream) => Box::new(&mut **stream),
         })
+    }
+
+    /// The command line's report stream behind the sink (`OutputSink::Report`), or the `-out`
+    /// stream of `run_to_file` (`OutputSink::Out`, `OutFile::report_handle`), which takes NCBI's
+    /// regions and flushes (`report::ostream::ReportWrite`).
+    pub(crate) fn report_handle(&self) -> Option<crate::report::ostream::ReportHandle> {
+        match self {
+            OutputSink::Report(stream) => Some(stream.handle()),
+            OutputSink::Out(out) => out.report_handle(),
+            _ => None,
+        }
     }
 
     /// The caller's receiver of the side files of outfmt 13 and 14 (`OutputSink::Files`).
@@ -101,8 +122,23 @@ impl OutputSink<'_> {
     pub(crate) fn is_writer(&self) -> bool {
         matches!(
             self,
-            OutputSink::Writer(_) | OutputSink::Files(..) | OutputSink::Out(_)
+            OutputSink::Writer(_)
+                | OutputSink::Files(..)
+                | OutputSink::Out(_)
+                | OutputSink::Report(_)
         )
+    }
+
+    /// The same sink, borrowed for a view of the outputs (`ViewParts::view`).
+    fn reborrow(&mut self) -> OutputSink<'_> {
+        match self {
+            OutputSink::Stdout => OutputSink::Stdout,
+            OutputSink::File(path) => OutputSink::File(path),
+            OutputSink::Writer(writer) => OutputSink::Writer(&mut **writer),
+            OutputSink::Out(out) => OutputSink::Out(out),
+            OutputSink::Report(stream) => OutputSink::Report(stream),
+            OutputSink::Files(writer, side) => OutputSink::Files(&mut **writer, side.clone()),
+        }
     }
 }
 
@@ -116,53 +152,67 @@ impl OutputSink<'_> {
 /// so an error after that point leaves the file empty and an error before it leaves no file, as on
 /// the command line. The first write makes it too: the error archive of an earlier error (outfmt
 /// 11, `ReportOutputs::finish_archive`), as NCBI's `PrintErrorArchive` opens `-out`. A making that
-/// failed is not tried again. The file is written through the command line's report stream
-/// (`cli::ReportStream::of_cli`: the organism report's is NCBI's buffer), and the call's run ends
-/// it as the command line's run ends its `-out` (`OutFile::finish`).
+/// failed is not tried again. The file is written through the command line's `-out` stream of the
+/// format (`report::ostream::ReportStream::of_library_file`: NCBI's buffer, regions and flushes),
+/// whose posts are the call's diagnostics in the command line's order (`Posts`), and the call's
+/// run ends it as the command line's run ends its `-out` (`OutFile::finish`).
 pub struct OutFile {
     path: std::path::PathBuf,
-    /// The program whose file names must be UTF-8 (`cli::create_out_file`).
-    program: Option<&'static str>,
-    /// The report of the file's `-outfmt` (`report_format_of`).
-    format: Option<crate::blastinput::app::ReportFormat>,
+    /// The application's name in NCBI's posts.
+    app: &'static str,
+    /// The file's `-outfmt` value.
+    outfmt: String,
+    /// The posts of the file's stream, until the call's diagnostics take them.
+    posts: Posts,
     state: OutState,
 }
 
 /// Whether `OutFile` has been made.
 enum OutState {
     Unmade,
-    Made { stream: crate::cli::ReportStream },
+    Made {
+        stream: crate::report::ostream::ReportStream,
+        /// Whether `OutFile::finish` ended it.
+        ended: bool,
+    },
     Failed,
 }
 
 impl OutFile {
-    /// The file `path` of a search of `program` (`cli::create_out_file`) that writes the report of
-    /// `outfmt`, not made yet.
-    pub(crate) fn new(path: &Path, program: Option<&'static str>, outfmt: &str) -> Self {
+    /// The file `path` of a search (`cli::create_out_file`), the application `app`, that writes
+    /// the report of `outfmt`, not made yet.
+    pub(crate) fn new(path: &Path, app: &'static str, outfmt: &str) -> Self {
         OutFile {
             path: path.to_path_buf(),
-            program,
-            format: report_format_of(outfmt),
+            app,
+            outfmt: outfmt.to_owned(),
+            posts: Posts::default(),
             state: OutState::Unmade,
         }
     }
 
+    /// The posts that the file's stream makes (`PostsFirst` writes them to the call's
+    /// diagnostics).
+    pub(crate) fn posts(&self) -> Posts {
+        self.posts.clone()
+    }
+
     /// Makes the file as the command line makes `-out` (`cli::create_out_file`), once, behind the
-    /// command line's report stream of the format (`cli::ReportStream::of_cli`).
+    /// command line's `-out` stream of the format (`ReportStream::of_library_file`).
     fn make(&mut self) -> anyhow::Result<()> {
         match self.state {
-            OutState::Unmade => match crate::cli::create_out_file(&self.path, self.program) {
+            OutState::Unmade => match crate::cli::create_out_file(&self.path) {
                 Ok(file) => {
-                    let tax_report =
-                        self.format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
-                    // No strategy file holds the report: the library refuses
+                    // No strategy file comes before the report: the library refuses
                     // `-export_search_strategy` (`search::file_options`).
                     self.state = OutState::Made {
-                        stream: crate::cli::ReportStream::of_cli(
-                            Some(BufWriter::new(file)),
-                            tax_report,
-                            None,
+                        stream: crate::report::ostream::ReportStream::of_library_file(
+                            file,
+                            self.app,
+                            &self.outfmt,
+                            Box::new(self.posts.clone()),
                         ),
+                        ended: false,
                     };
                     Ok(())
                 }
@@ -176,20 +226,27 @@ impl OutFile {
         }
     }
 
+    /// The file's stream, which takes NCBI's regions and flushes, once the file is made
+    /// (`OutputSink::report_handle`).
+    pub(crate) fn report_handle(&self) -> Option<crate::report::ostream::ReportHandle> {
+        match &self.state {
+            OutState::Made { stream, .. } => Some(stream.handle()),
+            OutState::Unmade | OutState::Failed => None,
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-    /// The end of the call's run, `result` being its result, as the command line's run of the
-    /// format ends its `-out` stream (`cli::ReportStream::finish`): the stream of outfmt 0 to 4
-    /// (`report::pairwise::PairwiseView`) and the organism report's throw where a write failed. A
-    /// file not made has nothing to end.
+    /// The end of the call's run, `result` being its result, as the command line's run ends its
+    /// `-out` stream (`ReportStream::finish`). A file not made has nothing to end.
+    /// The file ends once: the error archive after the run's end is written on the ended stream
+    /// (`ReportOutputs::finish_archive`), as the command line's.
     pub(crate) fn finish(&mut self, result: anyhow::Result<()>) -> anyhow::Result<()> {
-        use crate::blastinput::app::ReportFormat;
-        let throws = self.format.is_some_and(|format| {
-            crate::report::pairwise::PairwiseView::of(format).is_some()
-                || format == ReportFormat::TaxFormat
-        });
         match &mut self.state {
-            OutState::Made { stream } => stream.finish(result, throws),
-            OutState::Unmade | OutState::Failed => result,
+            OutState::Made { stream, ended } if !*ended => {
+                *ended = true;
+                stream.finish(result)
+            }
+            OutState::Made { .. } | OutState::Unmade | OutState::Failed => result,
         }
     }
 }
@@ -200,21 +257,92 @@ impl Write for OutFile {
             self.make().map_err(io::Error::other)?;
         }
         match &mut self.state {
-            OutState::Made { stream } => stream.write(buf),
+            OutState::Made { stream, .. } => stream.write(buf),
             _ => Err(io::Error::other("the -out file could not be made")),
         }
     }
 
     fn flush(&mut self) -> io::Result<()> {
         match &mut self.state {
-            OutState::Made { stream } => stream.flush(),
+            OutState::Made { stream, .. } => stream.flush(),
             _ => Ok(()),
         }
     }
 }
 
+/// The posts of NCBI's that the `-out` stream of `run_to_file` makes while its report is written
+/// (`OutFile`), which the command line writes to its standard error, until the call's diagnostics
+/// take them (`PostsFirst`).
+#[derive(Clone, Default)]
+pub(crate) struct Posts(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl Posts {
+    fn take(&self) -> Vec<u8> {
+        std::mem::take(
+            &mut *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+}
+
+impl Write for Posts {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The call's diagnostics `inner`, which take the `-out` stream's posts so far (`Posts`) before
+/// each of their own writes and at `drain`: the posts keep their place among the call's messages,
+/// as on the command line's standard error.
+pub(crate) struct PostsFirst<'a> {
+    posts: Posts,
+    inner: &'a mut (dyn Write + Send),
+}
+
+impl<'a> PostsFirst<'a> {
+    pub(crate) fn new(posts: Posts, inner: &'a mut (dyn Write + Send)) -> Self {
+        PostsFirst { posts, inner }
+    }
+
+    /// Writes the posts made so far.
+    pub(crate) fn drain(&mut self) -> io::Result<()> {
+        let posts = self.posts.take();
+        if posts.is_empty() {
+            return Ok(());
+        }
+        self.inner.write_all(&posts)
+    }
+}
+
+impl Write for PostsFirst<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.drain()?;
+        self.inner.write(buf)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.drain()?;
+        self.inner.write_all(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.drain()?;
+        self.inner.flush()
+    }
+}
+
 /// The report of the `-outfmt` value `outfmt` (`None` for a value that NCBI's reading refuses).
-fn report_format_of(outfmt: &str) -> Option<crate::blastinput::app::ReportFormat> {
+fn report_format_of(outfmt: impl AsRef<[u8]>) -> Option<crate::blastinput::app::ReportFormat> {
     use crate::blastinput::app::{parse_formatting_string, ReportFormat};
     parse_formatting_string(outfmt)
         .ok()
@@ -225,7 +353,7 @@ fn report_format_of(outfmt: &str) -> Option<crate::blastinput::app::ReportFormat
 /// One requested output: an `-outfmt` value, parsed and validated by the program exactly
 /// as on the command line, where to write it, and what LOSAT's refusal of its report does.
 pub struct FormatOutput<'a> {
-    pub outfmt: &'a str,
+    pub outfmt: &'a [u8],
     pub sink: OutputSink<'a>,
     pub refusal: FormatRefusal,
 }
@@ -549,7 +677,7 @@ pub struct ReportOutputs<'a> {
     pub html_posts: Option<&'a mut (dyn Write + Send)>,
 }
 
-impl ReportOutputs<'_> {
+impl<'a> ReportOutputs<'a> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452 (cited at
     // `FormatOutput::writes_query_warnings`): a structured report returns before the warnings.
     /// Whether the first format writes the queries' result warnings with its reports (a call
@@ -587,6 +715,32 @@ impl ReportOutputs<'_> {
                 OutputSink::Out(out) => out.finish(result),
                 _ => result,
             })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627 (cited at
+    // `app::early_format_choice`)
+    /// Each requested format as the command line's early reading of its `-outfmt` reads it before
+    /// the option handlers (`app::early_format_choice`), with LOSAT's refusal of a format that
+    /// `program` does not write (`EarlyFormat::report_format`, with the format's `-out`,
+    /// `FormatOutput::side_out` of the run's `out`). `strategy`: the argv names a search strategy
+    /// file (`-export_search_strategy`), with which a value that does not parse is left to the
+    /// program's formatting handler, after the arguments' own errors, as on the command line (line
+    /// RG F1w review 2, S-a: LOSAT Web gives such a value as the run's one format and as the
+    /// arguments' `-outfmt`, which the handlers read again).
+    pub(crate) fn early_choices(
+        &self,
+        program: crate::blastinput::app::Program,
+        out: Option<&Path>,
+        strategy: bool,
+    ) -> anyhow::Result<Vec<crate::blastinput::app::EarlyFormat>> {
+        self.formats
+            .iter()
+            .map(|format| {
+                let choice = crate::blastinput::app::early_format_choice(format.outfmt, strategy)?;
+                choice.report_format(program, format.side_out(out))?;
+                Ok(choice)
+            })
+            .collect()
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:887-899
@@ -643,12 +797,21 @@ impl ReportOutputs<'_> {
     /// error archive after the archives of the batches before when the application stops with one
     /// of its own errors, and when the run ends with messages that no archive carried. `no_query`:
     /// the run ended at `Query is Empty!`, where NCBI returns before its `PrintErrorArchive`.
+    ///
+    /// The `-out` file of `run_to_file` ends first, as the command line's report stream ends
+    /// (`~CBlastFormat`, `CATCH_ALL`) before `PrintErrorArchive`, and the archive is written on
+    /// its stream (`OutFile`): what that stream posted before is the call's diagnostics, and its
+    /// posts while it writes the archive come after the error's text on the command line's
+    /// standard error (`archive::write_error_archive_after_post`), so they end the error's
+    /// message.
     pub(crate) fn finish_archive(
         &mut self,
         handle: &crate::report::archive::ArchiveHandle,
         no_query: bool,
         result: anyhow::Result<()>,
     ) -> anyhow::Result<()> {
+        let mut result = self.finish_out(result);
+        let _ = self.diagnostics.flush();
         let lines = match &result {
             // The errors of `Run`, the files' among them (`run_local_database` opens no file
             // that the argument handling opens).
@@ -668,9 +831,17 @@ impl ReportOutputs<'_> {
             {
                 let _ = out.make();
             }
-            let mut writer = format.sink.open()?;
-            let written = crate::report::archive::write_error_archive(handle, &lines, &mut writer)
-                .and_then(|()| writer.flush().map_err(anyhow::Error::from));
+            let written = {
+                let mut writer = crate::report::ostream::NcbiOstream::sink(&mut format.sink)?;
+                crate::report::archive::write_error_archive(handle, &lines, &mut writer)
+                    .and_then(|()| writer.flush().map_err(anyhow::Error::from))
+            };
+            if let (Err(error), OutputSink::Out(out)) = (&mut result, &format.sink) {
+                let after = out.posts().take();
+                if let Some(native) = error.downcast_mut::<crate::cli::NativeError>() {
+                    native.message.extend_from_slice(&after);
+                }
+            }
             if result.is_ok() {
                 written?;
             }
@@ -685,6 +856,36 @@ impl ReportOutputs<'_> {
         handle: crate::report::archive::ArchiveHandle,
         f: impl FnOnce(&mut ReportOutputs<'_>) -> R,
     ) -> R {
+        let (formats, diagnostics, mut parts) = self.split();
+        let mut tee = crate::report::archive::DiagTee::new(diagnostics, handle);
+        let mut view = parts.view(
+            formats
+                .iter_mut()
+                .map(|format| FormatOutput {
+                    outfmt: format.outfmt,
+                    sink: format.sink.reborrow(),
+                    // Moved into the view and back after `f` (a format that fails alone).
+                    refusal: std::mem::take(&mut format.refusal),
+                })
+                .collect(),
+            &mut tee,
+        );
+        let result = f(&mut view);
+        let refusals = view.into_refusals();
+        FormatOutput::take_back(formats, refusals);
+        result
+    }
+
+    /// The outputs as their formats, their diagnostics stream and the rest (`ViewParts`), for a
+    /// view of them that sees the formats through other sinks or the diagnostics through another
+    /// stream (`ViewParts::view`).
+    fn split(
+        &mut self,
+    ) -> (
+        &mut Vec<FormatOutput<'a>>,
+        &mut (dyn Write + Send),
+        ViewParts<'_, 'a>,
+    ) {
         let ReportOutputs {
             other_outfmts,
             formats,
@@ -694,48 +895,110 @@ impl ReportOutputs<'_> {
             observer,
             html_posts,
         } = self;
-        let mut tee = crate::report::archive::DiagTee::new(&mut **diagnostics, handle);
-        let mut view = ReportOutputs {
-            other_outfmts,
-            formats: formats
-                .iter_mut()
-                .map(|format| FormatOutput {
-                    outfmt: format.outfmt,
-                    sink: match &mut format.sink {
-                        OutputSink::Stdout => OutputSink::Stdout,
-                        OutputSink::File(path) => OutputSink::File(path),
-                        OutputSink::Writer(writer) => OutputSink::Writer(&mut **writer),
-                        OutputSink::Out(out) => OutputSink::Out(out),
-                        OutputSink::Files(writer, sink) => {
-                            OutputSink::Files(&mut **writer, sink.clone())
-                        }
-                    },
-                    // Moved into the view and back after `f` (a format that fails alone).
-                    refusal: std::mem::take(&mut format.refusal),
-                })
-                .collect(),
-            diagnostics: &mut tee,
-            // Not saved in the archive: the archive's run (outfmt 11 first) writes none of them.
-            later_warnings: later_warnings.as_deref_mut(),
-            // A later search's `-html` posts go where they went (`ReportOutputs::html_posts`).
-            html_posts: html_posts
-                .as_deref_mut()
-                .map(|posts| posts as &mut (dyn Write + Send)),
-            hits: hits.as_mut().map(|hits| &mut **hits as &mut HitsSink<'_>),
-            observer: observer
-                .as_mut()
-                .map(|observer| &mut **observer as &mut (dyn FormatObserver + Send)),
-        };
-        let result = f(&mut view);
-        let refusals: Vec<FormatRefusal> = view
-            .formats
+        (
+            formats,
+            &mut **diagnostics,
+            ViewParts {
+                other_outfmts,
+                later_warnings,
+                hits,
+                observer,
+                html_posts,
+            },
+        )
+    }
+
+    /// The refusal of each format of a view (`ViewParts::view`), which `FormatOutput::take_back`
+    /// gives back to the formats it was lent from.
+    fn into_refusals(self) -> Vec<FormatRefusal> {
+        self.formats
             .into_iter()
             .map(|format| format.refusal)
-            .collect();
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:250-262 (cited at
+    // `strategy::check_report_stream`): the report stream before NCBI's first request.
+    /// A run of records (each program's `run_local` and `run_local_database`) as the command
+    /// line's run of the argv ends: `run` searches and reports, with the BLAST archive (outfmt 11)
+    /// of `archive`, whose diagnostics stream saves the messages (`with_archive_diagnostics`); the
+    /// run ends with the search strategy file of the arguments (`strategy`,
+    /// `strategy::end_run`, LOSAT Web's: `strategy::open_strategy_file_in`), and then the archive's
+    /// error archive (`finish_archive`; `no_query`: the run has no query, NCBI's `Query is
+    /// Empty!`). Each format's writer takes the run's bytes as the command line's report stream
+    /// takes them: where LOSAT refuses the strategy file at NCBI's first request
+    /// (`strategy::check_report_stream`), what a format was written before that point (NCBI's
+    /// prolog) stays before the refusal, and a run that NCBI ends before it keeps what each format
+    /// was written.
+    pub(crate) fn run_records(
+        &mut self,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+        no_query: bool,
+        run: impl FnOnce(&mut ReportOutputs<'_>) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        let result = match archive {
+            Some(handle) => self.with_archive_diagnostics(handle.clone(), run),
+            None => run(self),
+        };
+        let result = crate::report::archive::strategy::end_run(strategy, result);
+        match archive {
+            Some(handle) => self.finish_archive(handle, no_query, result),
+            None => result,
+        }
+    }
+}
+
+/// The fields of a `ReportOutputs` other than its formats and its diagnostics stream
+/// (`ReportOutputs::split`), which a view of the outputs borrows as they are.
+struct ViewParts<'s, 'a> {
+    other_outfmts: &'a [&'a str],
+    later_warnings: &'s mut Option<&'a mut [Vec<u8>]>,
+    hits: &'s mut Option<&'a mut HitsSink<'a>>,
+    observer: &'s mut Option<&'a mut (dyn FormatObserver + Send)>,
+    html_posts: &'s mut Option<&'a mut (dyn Write + Send)>,
+}
+
+impl ViewParts<'_, '_> {
+    /// The outputs seen through `formats` (each format's `-outfmt` text, the sink that the step
+    /// writes it through, and its refusal, moved into the view and back after it) and the
+    /// diagnostics stream `diagnostics`, with the other fields as they are: the one rebuild of the
+    /// outputs for a step that sees them through other sinks or another diagnostics stream (the
+    /// BLAST archive's saved messages, `ReportOutputs::with_archive_diagnostics`). The view's
+    /// refusals go back with `ReportOutputs::into_refusals` and `FormatOutput::take_back`.
+    fn view<'v>(
+        &'v mut self,
+        formats: Vec<FormatOutput<'v>>,
+        diagnostics: &'v mut (dyn Write + Send),
+    ) -> ReportOutputs<'v> {
+        ReportOutputs {
+            other_outfmts: self.other_outfmts,
+            formats,
+            diagnostics,
+            later_warnings: self.later_warnings.as_deref_mut(),
+            // A later search's `-html` posts go where they went (`ReportOutputs::html_posts`).
+            html_posts: self
+                .html_posts
+                .as_deref_mut()
+                .map(|posts| posts as &mut (dyn Write + Send)),
+            hits: self
+                .hits
+                .as_mut()
+                .map(|hits| &mut **hits as &mut HitsSink<'_>),
+            observer: self
+                .observer
+                .as_mut()
+                .map(|observer| &mut **observer as &mut (dyn FormatObserver + Send)),
+        }
+    }
+}
+
+impl FormatOutput<'_> {
+    /// Gives each of `formats` back the refusal of its view (`ReportOutputs::into_refusals`).
+    fn take_back(formats: &mut [FormatOutput<'_>], refusals: Vec<FormatRefusal>) {
         for (format, refusal) in formats.iter_mut().zip(refusals) {
             format.refusal = refusal;
         }
-        result
     }
 }
 
@@ -744,7 +1007,7 @@ impl ReportOutputs<'_> {
 impl<'a> ReportOutputs<'a> {
     /// The command-line shape: one output format and warnings, no records or observer.
     pub fn single(
-        outfmt: &'a str,
+        outfmt: &'a (impl AsRef<[u8]> + ?Sized),
         sink: OutputSink<'a>,
         diagnostics: &'a mut (dyn Write + Send),
     ) -> Self {
@@ -752,7 +1015,7 @@ impl<'a> ReportOutputs<'a> {
             other_outfmts: &[],
             html_posts: None,
             formats: vec![FormatOutput {
-                outfmt,
+                outfmt: outfmt.as_ref(),
                 sink,
                 refusal: FormatRefusal::FailsCall,
             }],

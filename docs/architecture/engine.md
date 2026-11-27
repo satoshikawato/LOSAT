@@ -35,12 +35,12 @@ which runs blastp's; the library runs psiblast through blastp's `run_local*`.
 
 ```mermaid
 flowchart LR
-  bin["losat binary<br/>main.rs → main_entry"] --> cli["cli<br/>(clap, Commands)"]
+  bin["losat binary<br/>main.rs → main_entry"] --> cli["cli<br/>(NCBI's reader, from_args, Commands)"]
   cli --> run["&lt;program&gt;::run"]
   lib["library users<br/>python/, LOSAT/examples"] --> api["api<br/>(run, run_batches, ...)"]
   api --> lb["api::local_blast"]
   adapter["web/adapter<br/>(Web ABI v2)"] --> lb
-  webapi["web_api<br/>(Web ABI v1, wasm32)"] -->|"blastn, blastp, tblastx"| local
+  webapi["web_api<br/>(Web ABI v1, wasm32 but the WASI command)"] -->|"blastn, blastp, tblastx"| local
   webapi -->|"blastx, tblastn"| pair["blastx::web::run_pair<br/>tblastn::web::run_pair"]
   pair --> engine
   lb --> local["&lt;program&gt;::run_local<br/>&lt;program&gt;::run_local_database"]
@@ -49,15 +49,21 @@ flowchart LR
 ```
 
 - The binary: `main.rs` only calls `main_entry` (`cli/main_entry.rs`, re-exported at the crate
-  root). `main_entry` reads a few words before clap (`blastdbcmd`, `--install-shims`, `-version`),
-  then `cli::try_parse_from`, then dispatches on `cli::Commands` to the program.
-  `losat blastdbcmd` bypasses clap and reads its arguments as NCBI's `blastdbcmd` does
+  root). `main_entry` reads a few words before the arguments (`blastdbcmd`, `--install-shims`,
+  `-version`), then reads the program's arguments with NCBI's argument reader (`ncbi_app`,
+  through `cli::reader`: the help, the argument errors and the usage are NCBI's), then LOSAT's
+  refusals of what it does not run, then the program's options read the arguments that NCBI's
+  reader read (each option type's `from_args`, through `cli::reader::options`;
+  `cli::try_parse_from` for the callers that run no application start; since line RG item
+  K4i-3c, 2026-11-24, clap's conversion before), and dispatches on `cli::Commands` to the
+  program. `losat blastdbcmd` and the other tools read their arguments with NCBI's reader alone
   (`blastdbcmd::run`).
 - The library: `api` is the only documented module of the crate (`lib.rs`). It reads FASTA
   records, validates a command line and runs it through `api::local_blast`, which re-exports the
   programs' `run_local*` functions. A library search writes nothing to the process's standard
   output or error and never ends the process (`api/mod.rs`).
-- The Web: Web ABI v1 is the `extern "C"` exports of `web_api` (built only for `wasm32`), which
+- The Web: Web ABI v1 is the `extern "C"` exports of `web_api` (built only for `wasm32`, and not
+  for the WASI command line, which selects the feature `no-web-abi-v1`), which
   call `run_local` for blastn, blastp and tblastx and `web::run_pair` for blastx and tblastn; Web
   ABI v2 is the separate crate `web/adapter`, which calls `run_local*` like the library.
 
@@ -76,7 +82,7 @@ number (the Web adapter and the tests name them); the `losat` binary calls one h
 | `algorithm` | the search programs, one directory each ([Programs](#programs)) | `app/blast/*_app.cpp` and the per-program code of `algo/blast/core` |
 | `api` | the library API; `api::local_blast` routes reports to outputs | `algo/blast/api` (`CLocalBlast`) |
 | `blastinput` | NCBI's application layer: FASTA reader, query batches, ranges, input files, the environment and registry check, value parsers | `algo/blast/blastinput` |
-| `cli` | the command line's entry `main_entry`, clap `Cli` and `Commands`, NCBI-style `-help` and `-version`, `NativeError` and the exit, the report stream | `blastinput/blast_args.cpp`, `cmdline_flags.cpp`, `blast_app_util.hpp` |
+| `cli` | the command line's entry `main_entry` and LOSAT's top level (`losat`, `-help`, `--version`), NCBI's argument reader for the ten programs that read their own option types (`cli::reader`, each type's `from_args`), `Cli` and `Commands` (the options of the program that runs), NCBI's `-help` and `-version`, `NativeError` and the exit, the report stream | `blastinput/blast_args.cpp`, `cmdline_flags.cpp`, `blast_app_util.hpp` |
 | `core` | ports of `core/` that several programs share: encoding, composition-based statistics, HSP filters, the PSSM engine | `algo/blast/core`, `algo/blast/composition_adjustment` |
 | `stats` | Karlin-Altschul parameters, length adjustment, search space, Spouge's finite-size correction, sum statistics, the matrix tables | `core/blast_stat.c`, `core/blast_setup.c` (`BLAST_CalcEffLengths`) |
 | `report` | every output format: pairwise, tabular, XML, XML2, JSON, archive, SAM, serial ASN.1 | `objtools/align_format`, `algo/blast/format` |
@@ -88,7 +94,7 @@ number (the Web adapter and the tests name them); the `losat` binary calls one h
 | `config` | scoring specifications, a compatibility mode (`CompatMode`) and configuration structs (`SeedConfig`, ..., `BlastnConfig`, `TblastxConfig`) | none |
 | `common` (the file `common.rs`) | `Hit`, `GapEditOp`, the HSP sort comparisons and the `write_output*` writers | `core/blast_hits.c`, `gapinfo.h` |
 | `sequence` | packed letters and packed subjects | via `core/blast_encoding.c` |
-| `web_api` | Web ABI v1 exports (`wasm32` only) | none |
+| `web_api` | Web ABI v1 exports (`wasm32` only, but not the WASI command line: `no-web-abi-v1`) | none |
 | `record` | the type `api::FastaRecord` | `CBlastFastaInputSource` |
 
 Four names are used more than once: the file `common.rs` and the directory `algorithm/common/` are
@@ -126,7 +132,7 @@ flowchart TD
 The dashed edges carry the output-routing types of `api::local_blast` (`OutputSink`,
 `ReportOutputs`, ...), the error type `cli::NativeError` with `cli::post_native_error`,
 `cli::ReportStream`, `cli::inaccessible`, `cli::report_standard_output` and, in the Web ABI v1
-paths of blastx and tblastn, the command-line parser, and the archive, serial, tabular-check and
+paths of blastx and tblastn, the command-line argument reader, and the archive, serial, tabular-check and
 warning helpers of `report` that `blastinput` uses. Edges that
 the diagram leaves out also close the cycle: `core` → `common` (`GapEditOp`), `common` → `api` and
 `report` (its writers), `sequence` → `core` and `seqdb`, `seqdb` → `writedb` (one helper),
@@ -142,7 +148,7 @@ the diagram leaves out also close the cycle: `core` → `common` (`GapEditOp`), 
 | :--- | :--- | :--- | :--- |
 | `blastn` | `blast_engine::run` | `run_local`, `run_local_database` | megablast, blastn, dc-megablast, blastn-short, rmblastn; `blast_engine/run.rs` holds the search |
 | `blastp` | `blast_engine::run` | `run_local`, `run_local_database` | also the driver of psiblast and rpsblast (`args::BlastpApp`) |
-| `blastx` | `BlastxArgs::run` → `native::run` | `local::run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | its own FASTA reader in `input.rs` |
+| `blastx` | `BlastxArgs::run` → `native::run` | `local::run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | reads FASTA with `blastinput::fasta_reader`; `input_source.rs` gives each record BLASTX's form and cuts the reader batches of the command line, the library and the Web |
 | `tblastn` | `TblastnArgs::run` | `run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | |
 | `tblastx` | `blast_engine::run` | `run_local`, `run_local_database` | `lookup/` is the protein word lookup that the other protein programs also use |
 | `psiblast` | `psiblast::run` → `blastp::run` | through `api` as `Program::Psiblast` | PSSM build and files, rounds, `-in_pssm` |
@@ -221,10 +227,10 @@ rpsblast yet.
 | FASTA reader | `blastinput::fasta_reader` (makeblastdb reuses it) |
 | errors | `cli::NativeError` |
 
-Known copies that remain: blastx keeps its own FASTA reader types in `blastx/input.rs`
-(`FastaRecord`, `EolStyle`, `PushbackBuffer`, `FastaStream`) next to the shared ones in
-`blastinput/fasta_reader`; each program has its own function that purges HSPs with common
-endpoints, written for its own HSP type; blastx has its own port of `hspfilter_culling.c`
+Known copies that remain: blastx keeps its own record type (`blastx/input.rs`, `FastaRecord`),
+made from the shared reader's record by `blastx/input_source.rs`, which also cuts the reader
+batches of the command line and of the library; each program has its own function that purges
+HSPs with common endpoints, written for its own HSP type; blastx has its own port of `hspfilter_culling.c`
 (`blastx/culling.rs`) instead of `core::hspfilter_culling`; and each of the five programs keeps its own report glue
 (`tabular.rs`, `blast_xml.rs`, `seqalign.rs`, `archive.rs`) in front of `report`.
 
@@ -550,8 +556,8 @@ wherever it happens (`panic = "abort"` in the release profile).
 | Status | NCBI's meaning (`app/blast/blast_app_util.hpp`) | LOSAT |
 | :--- | :--- | :--- |
 | 0 | success | success |
-| 1 | input error (`BLAST query/options error:`, `Command line argument error:`, ...) | the same errors, and every LOSAT refusal (`Error: ...`) |
-| 2 | database error (`BLAST Database error:`) | the same; also clap's parser errors (NCBI exits 1 there, an approved difference) |
+| 1 | input error (`BLAST query/options error:`, `Command line argument error:`, ...) | the same errors, NCBI's argument errors (usage and `Error: ...`), and every LOSAT refusal (`Error: ...`) |
+| 2 | database error (`BLAST Database error:`) | the same |
 | 3 | engine error (`BLAST engine error:`) | the same |
 | 4 | out of memory | makeblastdb only; the search programs abort on a failed allocation |
 | 5 | network error | not used (no `-remote`) |

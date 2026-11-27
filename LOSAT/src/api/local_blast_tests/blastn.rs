@@ -121,12 +121,12 @@ fn unsupported_formats_fail_before_searching() {
             html_posts: None,
             formats: vec![
                 FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut valid),
                 },
                 FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut invalid),
                 },
@@ -177,7 +177,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 .iter()
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
@@ -373,7 +373,7 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
             other_outfmts: &[],
             html_posts: None,
             formats: vec![FormatOutput {
-                outfmt,
+                outfmt: outfmt.as_bytes(),
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut output),
             }],
@@ -434,7 +434,7 @@ fn run_local_outputs(
                 .iter()
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
@@ -456,7 +456,7 @@ fn run_local_outputs(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1326
-// The command line's `-word_size` is at least 4 (clap's `blastn_word_size`); a caller of
+// The command line's `-word_size` is at least 4 (NCBI's argument reader); a caller of
 // `run_local` that sets the field itself gets the error of NCBI's core (the task's lookup word
 // is longer, so the search would have wrapped `word - lut + 1` and reported other hits).
 #[test]
@@ -491,7 +491,7 @@ fn a_word_size_below_four_is_ncbis_core_error() {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
@@ -573,7 +573,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
@@ -604,7 +604,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
             other_outfmts: &[],
             html_posts: None,
             formats: vec![FormatOutput {
-                outfmt: "6",
+                outfmt: b"6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
@@ -856,7 +856,7 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
     let queries = read_fasta(Program::Blastn, Role::Query, &copied).unwrap();
     let subjects = read_fasta(Program::Blastn, Role::Subject, &once).unwrap();
     for task in ["blastn", "megablast"] {
-        let cli = crate::cli::try_parse_from::<crate::cli::Cli, _, _>([
+        let cli = crate::cli::try_parse_from([
             "losat", "blastn", "-query", "q", "-subject", "s", "-task", task,
         ])
         .unwrap();
@@ -872,7 +872,7 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut report),
                 }],
@@ -902,7 +902,8 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
 
 // Line RG item T7-W (review 3 of line RG T7): with `-parse_deflines`, LOSAT refuses outfmt 0 of a
 // `-subject` record whose description id is longer than 65 bytes, where NCBI BLAST+ 2.17.0 pads
-// the description line without end (`db_subject::check_pairwise_records`). The refusal is outfmt
+// the description line without end (`common::database::refuse_described_records`, where the
+// report prints that line: review 2 of line RG-KB item 12, N2). The refusal is outfmt
 // 0's: a call in which outfmt 0 fails alone (`FormatRefusal::FailsAlone`, a LOSAT Web format that
 // the argv does not ask for) writes outfmt 6, and one in which it fails the call (the command
 // line's one format) fails with it.
@@ -950,12 +951,12 @@ fn an_outfmt_0_refusal_of_a_parse_deflines_record_fails_outfmt_0_alone_or_the_ca
             html_posts: None,
             formats: vec![
                 FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     sink: OutputSink::Writer(&mut six),
                     refusal: FormatRefusal::FailsCall,
                 },
                 FormatOutput {
-                    outfmt: "0",
+                    outfmt: b"0",
                     sink: OutputSink::Writer(&mut zero),
                     refusal: if alone {
                         FormatRefusal::FailsAlone

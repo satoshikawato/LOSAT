@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use super::super::x_seed_fused::x_test_hit;
 use super::BlastpRuntimeLookup;
+use crate::algorithm::common::diag_entry::{batch_context_distance, DiagTable};
 use crate::algorithm::common::masks::lowercase_runs;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
@@ -200,9 +201,44 @@ fn scan(
     }
 }
 
-// NCBI's longest subject chunk (`MAX_DBSEQ_LEN`, c++/include/algo/blast/core/blast_gapalign.h:54) and the overlap of two
-// subject chunks (`DBSEQ_CHUNK_OVERLAP`, blast_hits.h:192): the one copy of both macros.
-use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
+// NCBI's longest subject chunk (`MAX_DBSEQ_LEN`, c++/include/algo/blast/core/blast_gapalign.h:54), the overlap of two
+// subject chunks (`DBSEQ_CHUNK_OVERLAP`, blast_hits.h:192), and the one owner of `s_GetNextSubjectChunk` (`HardSplitState`).
+use crate::core::subject_split::{HardSplitState, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:280-310 (`s_GetNextSubjectChunk`)
+/// Cuts soft-mask scan ranges `ranges` (subject coordinates) to the chunk `[offset, offset +
+/// chunk_length)` in chunk-local coordinates into `out`, advancing `sm_index` as NCBI's
+/// `s_GetNextSubjectChunk` does (saturating at 0 when the first chunk has no overlapping range).
+/// Returns `false` when no range overlaps the chunk (`SUBJECT_SPLIT_NO_RANGE`).
+pub(super) fn cut_chunk_soft_ranges(
+    ranges: &[(i32, i32)],
+    sm_index: &mut usize,
+    offset: i32,
+    chunk_length: i32,
+    out: &mut Vec<(i32, i32)>,
+) -> bool {
+    let end_pos = offset + chunk_length;
+    let mut i = *sm_index;
+    while i < ranges.len() && ranges[i].1 < offset {
+        i += 1;
+    }
+    let first = i;
+    while i < ranges.len() && ranges[i].0 < end_pos {
+        i += 1;
+    }
+    *sm_index = i.saturating_sub(1);
+    out.clear();
+    if i == first {
+        return false;
+    }
+    for &(left, right) in &ranges[first..i] {
+        out.push((left - offset, right - offset));
+    }
+    out[0].0 = out[0].0.max(0);
+    let last = out.len() - 1;
+    out[last].1 = out[last].1.min(chunk_length);
+    true
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310 (`s_GetNextSubjectChunk`)
 /// The words that NCBI's word finder scans in the chunks of a subject of `length` letters with the
@@ -224,36 +260,16 @@ fn chunk_scans(
         Some(previous) if first <= previous.1 + 1 => previous.1 = previous.1.max(last),
         _ => scans.push((first, last)),
     };
-    let mut next = 0;
-    let mut sm_index = 0;
-    while next < length {
-        let offset = next;
-        let chunk_length = if offset + (MAX_DBSEQ_LEN as i32) < length {
-            next = offset + MAX_DBSEQ_LEN as i32 - DBSEQ_CHUNK_OVERLAP as i32;
-            MAX_DBSEQ_LEN as i32
-        } else {
-            next = length;
-            length - offset
-        };
-        let mut i = sm_index;
-        while ranges[i].1 < offset {
-            i += 1;
-        }
-        let first = i;
-        while i < ranges.len() && ranges[i].0 < offset + chunk_length {
-            i += 1;
-        }
-        sm_index = i - 1;
-        if i == first {
+    let mut split = HardSplitState::default();
+    split.start(length as usize, vec![(0, length)], false);
+    let mut sm_index = 0usize;
+    let mut chunk: Vec<(i32, i32)> = Vec::new();
+    while let Some(hard) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
+        let offset = hard.offset as i32;
+        let chunk_length = hard.length;
+        if !cut_chunk_soft_ranges(ranges, &mut sm_index, offset, chunk_length, &mut chunk) {
             continue;
         }
-        let mut chunk: Vec<(i32, i32)> = ranges[first..i]
-            .iter()
-            .map(|&(left, right)| (left - offset, right - offset))
-            .collect();
-        chunk[0].0 = chunk[0].0.max(0);
-        let end = chunk.len() - 1;
-        chunk[end].1 = chunk[end].1.min(chunk_length);
         let mut range = [0, chunk[0].0, chunk[0].1 - word_size];
         if clamps_scan_end && range[2] < range[1] {
             range[2] = range[1];
@@ -285,22 +301,28 @@ fn chunk_scans(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-552 (cited at
 // `x_seed_fused::x_test_hit`)
-/// The two-hit test of each hit of [`x_for_each_hit`], in scan order; `candidate(query_offset,
-/// subject_offset, last_hit, diff, entry)` as for `x_seed_fused::x_scan_two_hit`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
+/// The two-hit test of each hit of [`x_for_each_hit`], in scan order, on the diagonal table
+/// `table` at the offset `diag_offset`: the scan's one ring (`common::diag_entry::DiagRing`), or
+/// NCBI's ring of each query batch (`common::query_batch_tables::QueryBatchTables`, a
+/// `-db_hard_mask` sequence that `db_masked.rs` keeps apart). `candidate(query_offset,
+/// subject_offset, last_hit, diff, entry)` as for `x_seed_fused::x_scan_two_hit`, with the
+/// distance as its context test reads it in the offsets of the hit's batch
+/// (`common::diag_entry::batch_context_distance`; as it is on one ring, whose batch starts at 0).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn x_scan_two_hit_ranges<F>(
+pub(super) fn x_scan_two_hit_ranges<T, F>(
     lookup: &BlastpRuntimeLookup,
     subject: &[u8],
     subject_length: usize,
     ranges: &[(i32, i32)],
     offset_pairs: &mut [OffsetPair],
-    diag_array: &mut [DiagStruct],
-    diag_mask: i32,
+    table: &mut T,
     diag_offset: i32,
     window: i32,
     word_size: i32,
     mut candidate: F,
 ) where
+    T: DiagTable<Cell = DiagStruct>,
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     x_for_each_hit(
@@ -313,7 +335,7 @@ pub(super) fn x_scan_two_hit_ranges<F>(
         &mut |pair, fresh| {
             let query_offset = pair.q_off as i32;
             let subject_offset = pair.s_off as i32;
-            let entry = &mut diag_array[((query_offset - subject_offset) & diag_mask) as usize];
+            let (entry, batch_start) = table.two_hit_entry(query_offset, subject_offset);
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:172
             // A chunk's diagonals start past every hit of the chunk before, so the raised word of
             // a later chunk only becomes its diagonal's last hit (`x_test_hit` with a hit a window
@@ -326,6 +348,7 @@ pub(super) fn x_scan_two_hit_ranges<F>(
             if let Some((last_hit, diff)) =
                 x_test_hit(entry, subject_offset, diag_offset, window, word_size)
             {
+                let diff = batch_context_distance(query_offset, diff, batch_start);
                 candidate(query_offset, subject_offset, last_hit, diff, entry);
             }
         },

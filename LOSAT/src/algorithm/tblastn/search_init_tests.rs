@@ -935,7 +935,7 @@ fn x_two_hit_table_kept_across_units_gives_the_hits_of_a_cleared_table() {
             .map(|unit| {
                 let mut hits = Vec::new();
                 two_hit.pairs(1, 0, unit, &x_word_pairs(query, unit), &mut hits);
-                two_hit.exit(unit.len());
+                two_hit.exit(unit.len() as i32);
                 hits
             })
             .collect()
@@ -1229,15 +1229,34 @@ fn x_pairs_bf_gives_the_hits_and_table_of_pairs() {
                     got, expected,
                     "{matrix:?} window {window} packed {packed} {mode} unit {u}: init HSPs"
                 );
+                // After a clear (`Diagonals::finish_frame`), `Pair` cells hold NCBI's (-window,
+                // false) while `Packed` cells hold (0, false); packed tables never run lead
+                // subjects and both values lie at least a window behind every hit at offset 0 or
+                // more.
+                let reference_table: Vec<(i32, bool)> = if packed {
+                    reference
+                        .x_table()
+                        .into_iter()
+                        .map(|cell| {
+                            if cell == (-window, false) {
+                                (0, false)
+                            } else {
+                                cell
+                            }
+                        })
+                        .collect()
+                } else {
+                    reference.x_table()
+                };
                 assert_eq!(
                     branch_free.x_table(),
-                    reference.x_table(),
+                    reference_table,
                     "{matrix:?} window {window} packed {packed} {mode} unit {u}: table"
                 );
                 found += expected.len();
                 if mode != "cleared" {
-                    reference.exit(unit.len());
-                    branch_free.exit(unit.len());
+                    reference.exit(unit.len() as i32);
+                    branch_free.exit(unit.len() as i32);
                 }
             }
         }
@@ -1322,8 +1341,8 @@ fn x_byte_table_walks_give_the_reference_hits_and_table() {
                     "{matrix:?} X-drops {x_dropoffs:?}: diagonal table"
                 );
                 found += got.len();
-                fast.exit(unit.len());
-                reference.exit(unit.len());
+                fast.exit(unit.len() as i32);
+                reference.exit(unit.len() as i32);
             }
         }
         assert!(
@@ -1340,4 +1359,458 @@ fn x_byte_table_walks_give_the_reference_hits_and_table() {
     );
     assert_eq!((b62.0, b62.1.is_some()), (on, false));
     assert_eq!((b45.0, b45.1.is_some()), (on, on));
+}
+
+/// `length` random residues from the generator state `seed`.
+fn x_negative_letters(length: usize, seed: &mut u64) -> Vec<u8> {
+    const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+    (0..length)
+        .map(|_| {
+            *seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            RESIDUES[((*seed >> 33) as usize) % RESIDUES.len()]
+        })
+        .collect()
+}
+
+/// A subject's residues as the word finder reads them (the encoded letters, no sentinel).
+fn x_negative_encoded(letters: &[u8]) -> Vec<u8> {
+    encode_tblastn_lookup_query(letters, None, false).aa_seq[1..=letters.len()].to_vec()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:42-65,109-157
+// The table of a window below 0: `diag_array_length` is the smallest power of two, from 1, that is
+// not below `query length + window` (so the table can be shorter than the query, and is one cell
+// when the sum is 1 or less), `diag_mask` is that length less 1, `offset` starts at the window and
+// the cells (`calloc`) at `last_hit` 0.
+#[test]
+fn a_negative_windows_table_has_ncbis_length_and_start() {
+    for (query_length, window, cells) in [
+        (5000, -1, 8192),
+        (100, -1, 128),
+        (100, -36, 64),
+        (100, -37, 64),
+        (100, -98, 2),
+        (100, -99, 1),
+        (100, -100, 1),
+        (100, -5000, 1),
+        (100, i32::MIN, 1),
+    ] {
+        let table = NegDiagonals::new(query_length, window);
+        assert_eq!(
+            table.cells.len(),
+            cells,
+            "query {query_length} window {window}"
+        );
+        assert_eq!(table.mask as usize, cells - 1);
+        assert_eq!(table.offset, i64::from(window));
+        assert_eq!(table.window, window);
+        assert!(table.cells.iter().all(|&cell| cell == 0));
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:90-106,162-185
+// `Blast_ExtendWordExit` adds the subject's length and the window to the offset (it falls with a
+// window below the length), and from a quarter of `INT4_MAX` on sets it back to the window and every cell
+// to `-window`; the offset of a window that overflows `Int4` is taken in `i64`.
+#[test]
+fn a_negative_windows_table_moves_its_offset_and_clears_at_ncbis_limit() {
+    let mut table = NegDiagonals::new(100, -40);
+    table.exit(1000);
+    assert_eq!(table.offset, -40 + 1000 - 40);
+    table.exit(0);
+    assert_eq!(table.offset, -40 + 1000 - 40 - 40);
+    table.cells[3] = 77;
+    table.offset = i64::from(i32::MAX / 4) - 1;
+    table.exit(10);
+    assert_eq!(table.offset, i64::from(i32::MAX / 4) - 1 + 10 - 40);
+    assert_eq!(table.cells[3], 77, "below the limit nothing is cleared");
+    table.offset = i64::from(i32::MAX / 4);
+    table.exit(10);
+    assert_eq!(table.offset, -40);
+    assert!(table.cells.iter().all(|&cell| cell == 40));
+
+    let mut wide = NegDiagonals::new(100, i32::MIN);
+    wide.exit(7);
+    assert_eq!(wide.offset, 2 * i64::from(i32::MIN) + 7);
+    wide.cells[0] = 5;
+    wide.offset = i64::from(i32::MAX / 4);
+    wide.exit(1);
+    assert_eq!(wide.offset, i64::from(i32::MIN));
+    assert_eq!(
+        wide.cells[0], 0,
+        "-window of INT_MIN is 2^31, whose low 31 bits are 0"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:51-55
+// `last_hit` is a signed bit field of 31 bits.
+#[test]
+fn the_last_hit_of_a_cell_keeps_its_low_31_bits_as_a_signed_number() {
+    for (value, stored) in [
+        (5, 5),
+        (-5, -5),
+        ((1 << 30) - 1, (1 << 30) - 1),
+        (1 << 30, -(1 << 30)),
+        (-(1 << 30), -(1 << 30)),
+        (-(1 << 30) - 1, (1 << 30) - 1),
+        (1 << 31, 0),
+        ((1 << 40) + 7, 7),
+    ] {
+        assert_eq!(last_hit_31(value), stored, "{value}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:773-803
+// A table that starts with `offset` = -40 and `last_hit` 0 holds `last_hit - offset` = 40 on every
+// diagonal: the one-hit word finder extends no word whose subject offset is below 40 (`diff =
+// s_off - (last_hit - offset)` below 0). A call that ended before (`exit` after 100 letters, with
+// no hit) leaves `last_hit - offset` = -20 on the diagonals it did not touch, so the next call
+// extends from its first word on: the table carries from one call to the next.
+#[test]
+fn a_negative_windows_one_hit_finder_skips_the_words_before_its_window_and_carries_its_table() {
+    let mut seed = 0x51ed_270b_u64;
+    let query_letters = x_negative_letters(120, &mut seed);
+    let (query, offsets) = x_concatenated(&[&query_letters]);
+    let subject = x_negative_encoded(&query_letters[10..90]);
+    let pairs = x_word_pairs(&query, &subject);
+    let x_dropoffs = [16];
+    let cutoffs = [24];
+    let window = -40;
+    let finder = XTwoHit::with_table(
+        None,
+        &query,
+        &offsets,
+        &x_dropoffs,
+        &cutoffs,
+        ScoringMatrix::Blosum62,
+        window,
+        3,
+    );
+    let seeds = |table: &mut NegDiagonals| -> Vec<u32> {
+        let mut hits = Vec::new();
+        finder
+            .x_pairs_one_hit_negative(
+                table,
+                crate::algorithm::tblastn::score::MatrixScore,
+                1,
+                0,
+                &subject,
+                &pairs,
+                &mut hits,
+            )
+            .unwrap();
+        hits.iter().map(|hit| hit.s_seed).collect()
+    };
+    let mut fresh = NegDiagonals::new(query.len() - 1, window);
+    let first = seeds(&mut fresh);
+    assert_eq!(first.first(), Some(&40), "{first:?}");
+    assert!(first.iter().all(|&s| s >= 40), "{first:?}");
+    assert!(fresh.cells.iter().any(|&cell| cell != 0));
+
+    let mut carried = NegDiagonals::new(query.len() - 1, window);
+    carried.exit(100);
+    assert_eq!(carried.offset, -40 + 100 - 40);
+    let second = seeds(&mut carried);
+    assert_eq!(second.first(), Some(&0), "{second:?}");
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:765-769
+// A table shorter than the query (62 of 70 letters rounds up to 64 cells) gives the diagonals
+// whose numbers differ by a multiple of its length one cell: an extension that reached offset 100
+// on diagonal 100 blocks a word at offset 46 on diagonal 36.
+#[test]
+fn a_negative_windows_table_shorter_than_the_query_shares_cells_between_diagonals() {
+    use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
+    let mut seed = 0x2f6b_8e03_u64;
+    let query_letters = x_negative_letters(70, &mut seed);
+    let (query, offsets) = x_concatenated(&[&query_letters]);
+    let subject = x_negative_encoded(&x_negative_letters(200, &mut seed));
+    let x_dropoffs = [16];
+    let cutoffs = [i32::MAX];
+    let window = -8;
+    let finder = XTwoHit::with_table(
+        None,
+        &query,
+        &offsets,
+        &x_dropoffs,
+        &cutoffs,
+        ScoringMatrix::Blosum62,
+        window,
+        3,
+    );
+    let mut table = NegDiagonals::new(query.len() - 1, window);
+    assert_eq!(table.cells.len(), 64);
+    let mut run = |q_off, s_off| {
+        let mut hits = Vec::new();
+        finder
+            .x_pairs_one_hit_negative(
+                &mut table,
+                crate::algorithm::tblastn::score::MatrixScore,
+                1,
+                0,
+                &subject,
+                &[BlastOffsetPair { q_off, s_off }],
+                &mut hits,
+            )
+            .unwrap();
+    };
+    run(0, 100);
+    let written: Vec<usize> = table
+        .cells
+        .iter()
+        .enumerate()
+        .filter(|(_, &cell)| cell != 0)
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(written, [36]);
+    let cell = table.cells[36];
+    let mut run = |q_off, s_off| {
+        let mut hits = Vec::new();
+        finder
+            .x_pairs_one_hit_negative(
+                &mut table,
+                crate::algorithm::tblastn::score::MatrixScore,
+                1,
+                0,
+                &subject,
+                &[BlastOffsetPair { q_off, s_off }],
+                &mut hits,
+            )
+            .unwrap();
+    };
+    run(10, 46);
+    assert_eq!(
+        table.cells[36], cell,
+        "the word at offset 46 is not extended"
+    );
+    assert_eq!(table.cells.iter().filter(|&&cell| cell != 0).count(), 1);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:42-65
+// A window below 0 of any size (down to INT_MIN) runs the preliminary stage of a subject (its
+// frames are units of one table) without a panic: no word reaches the cutoff, so no HSP is saved.
+#[test]
+fn a_negative_window_runs_the_preliminary_stage_of_a_subject() {
+    let root = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../docs/evidence/tlosan_stage_c/ambiguity_20260923/"
+    );
+    let query = &read_fasta(&format!("{root}query.faa"))[0].1;
+    let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
+    for window in [-1, -40, -5000, i32::MIN] {
+        let stages = preliminary_stages(
+            &[query],
+            subject,
+            1,
+            word_finder_profile(
+                None,
+                13,
+                window,
+                &[16],
+                &[i32::MAX],
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+            ),
+        )
+        .unwrap();
+        assert!(stages.initial.is_empty(), "window {window}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66,87-107,131-144,162-173
+/// `HardTable` on TBLASTN's `Diagonals` and `Pair` clear to `(-window, false)`: `ncbi_table`
+/// sets NCBI's offset and unwritten-cell value, `clear_table` and `finish_frame` at INT4_MAX / 4
+/// clear `Pair` cells to `(-window, false)`, and `move_offset` checks Int4 overflow.
+#[test]
+fn diagonals_hard_table_and_pair_clear_match_ncbi() {
+    use crate::algorithm::common::hard_chunk_walk::{HardTable, NcbiStart, TableStart};
+
+    let mut table = Diagonals::new(32, 40, false);
+    for (start, want_cell) in [
+        (
+            NcbiStart {
+                offset: 536_875_512,
+                cleared: false,
+            },
+            (0, false),
+        ),
+        (
+            NcbiStart {
+                offset: 40,
+                cleared: true,
+            },
+            (-40, false),
+        ),
+    ] {
+        TableStart::New(start).apply(&mut table, 40).unwrap();
+        assert_eq!(table.offset, start.offset);
+        assert_eq!(
+            table.entries,
+            XDiagCells::Pair(vec![want_cell; table.entries.len()])
+        );
+    }
+
+    // Reaching INT4_MAX / 4 clears Pair cells to (-window, false) and resets offset to window.
+    table.offset = i32::MAX / 4;
+    table.finish_frame(5_000_000);
+    assert_eq!(table.offset, 40);
+    assert_eq!(
+        table.entries,
+        XDiagCells::Pair(vec![(-40, false); table.entries.len()])
+    );
+
+    // clear_table and move_offset (including Int4 overflow check).
+    table.move_offset(100).unwrap();
+    assert_eq!(table.offset, 140);
+    assert!(table.move_offset(i32::MAX).is_err());
+    table.clear_table(40);
+    assert_eq!(
+        (table.offset, &table.entries),
+        (
+            40,
+            &XDiagCells::Pair(vec![(-40, false); table.entries.len()])
+        )
+    );
+
+    // Packed clear keeps 0 (a packed table never runs a lead subject).
+    let mut packed = Diagonals::new(32, 40, true);
+    packed.offset = i32::MAX / 4;
+    packed.finish_frame(5_000_000);
+    assert_eq!(packed.offset, 40);
+    assert_eq!(
+        packed.entries,
+        XDiagCells::Packed(vec![0; packed.entries.len()])
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-607, 773-803
+/// Negative Int4 chunk length in `Diagonals::finish_frame`, plus two-hit (`x_pairs_bf`,
+/// `x_pairs_bf_of`) and one-hit (`x_pairs_one_hit`) loops on `Pair` cells when an entry lies
+/// above the hit (negative diff), when `s` is non-negative with negative `s_left_off`, and when
+/// `diff` exceeds `q` (unsigned context boundary check).
+#[test]
+fn diagonals_negative_exit_and_pairs_with_entry_above_hit() {
+    use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
+
+    // 1. Negative chunk length moves offset backward; clear at INT4_MAX / 4 is unchanged.
+    let mut table = Diagonals::new(32, 40, false);
+    table.finish_frame(40);
+    assert_eq!(table.offset, 120);
+    table.finish_frame(-140);
+    assert_eq!(table.offset, 20);
+    table.offset = i32::MAX / 4;
+    table.finish_frame(-140);
+    assert_eq!(table.offset, 40);
+    assert_eq!(
+        table.entries,
+        XDiagCells::Pair(vec![(-40, false); table.entries.len()])
+    );
+
+    // 2. Two-hit `x_pairs_bf` and `x_pairs_bf_of` on `Pair` cells with entry above hit.
+    let q_bytes = b"WWWWWWACDEFGHIKLMNPQ";
+    let (query, offsets) = x_concatenated(&[q_bytes]);
+    let subject =
+        encode_tblastn_lookup_query(q_bytes, None, false).aa_seq[1..=q_bytes.len()].to_vec();
+    let x_dropoffs = [16];
+    let cutoffs = [11];
+
+    let set_cell = |two_hit: &mut XTwoHit<'_>, index: usize, value: (i32, bool)| {
+        if let XDiagCells::Pair(cells) = &mut two_hit.diagonals.entries {
+            cells[index] = value;
+        }
+    };
+    let run_bf = |mode: u8,
+                  two_hit: &mut XTwoHit<'_>,
+                  pairs: &[BlastOffsetPair],
+                  hits: &mut Vec<InitHsp>| {
+        if let Some(mat_table) = two_hit.x_ungap_matrix() {
+            two_hit.x_pairs_bf_of(mat_table, 1, 0, &subject, pairs, hits);
+        } else if mode == 1 {
+            two_hit.x_pairs_bf_walks(XBlosum62Walks, 1, 0, &subject, pairs, hits);
+        } else {
+            two_hit.x_pairs_bf(1, 0, &subject, pairs, hits);
+        }
+    };
+
+    for (mode, matrix) in [
+        (0, ScoringMatrix::Blosum62),
+        (1, ScoringMatrix::Blosum62),
+        (2, ScoringMatrix::Blosum45),
+    ] {
+        let mut two_hit = XTwoHit::x_with_layout(
+            false,
+            None,
+            &query,
+            &offsets,
+            &x_dropoffs,
+            &cutoffs,
+            matrix,
+            40,
+            3,
+        );
+        // Diagonal (q=10, s=5) with s + offset = 45: unflagged entry above hit (diff = -15) stays
+        // unchanged; flagged entry above hit stays flagged; flagged entry at/below hit clears flag.
+        let idx = ((10i32 - 5) & two_hit.diagonals.mask) as usize;
+        let pair = [BlastOffsetPair {
+            q_off: 10,
+            s_off: 5,
+        }];
+        let mut hits = Vec::new();
+        for (initial, want, msg) in [
+            ((60, false), (60, false), "unflagged entry above hit"),
+            ((60, true), (60, true), "flagged entry above hit"),
+            ((45, true), (45, false), "flagged entry at hit"),
+        ] {
+            set_cell(&mut two_hit, idx, initial);
+            run_bf(mode, &mut two_hit, &pair, &mut hits);
+            assert!(hits.is_empty(), "{msg} must be skipped without hit");
+            assert_eq!(two_hit.x_cell(idx), want, "{msg}");
+        }
+
+        // 3. Non-negative s with negative s_left_off and no x_around extends normally, and diff
+        //    exceeding q wraps unsigned above context start 0 (accepted by NCBI's Uint4 test):
+        //    offset 40, s 0, q 0, last_hit 30 -> previous -10, diff 10, s_left_off -7.
+        set_cell(&mut two_hit, 0, (30, false));
+        let pair_neg_left = [BlastOffsetPair { q_off: 0, s_off: 0 }];
+        hits.clear();
+        run_bf(mode, &mut two_hit, &pair_neg_left, &mut hits);
+        assert_eq!(
+            hits.len(),
+            1,
+            "mode {mode} ({matrix:?}): s >= 0 with s_left_off < 0 must still extend without x_around"
+        );
+    }
+
+    // 4. One-hit (`x_pairs_one_hit`) skips hits when entry lies above s + offset.
+    let mut one_hit = XTwoHit::x_with_layout(
+        false,
+        None,
+        &query,
+        &offsets,
+        &x_dropoffs,
+        &cutoffs,
+        ScoringMatrix::Blosum62,
+        0,
+        3,
+    );
+    one_hit.diagonals.offset = -10;
+    let mut hits = Vec::new();
+    one_hit
+        .x_pairs_one_hit(
+            super::super::score::MatrixScore,
+            1,
+            0,
+            &subject,
+            &[BlastOffsetPair { q_off: 0, s_off: 0 }],
+            &mut hits,
+        )
+        .unwrap();
+    assert!(
+        hits.is_empty(),
+        "one-hit at offset -10 on unwritten 0 must be skipped"
+    );
 }

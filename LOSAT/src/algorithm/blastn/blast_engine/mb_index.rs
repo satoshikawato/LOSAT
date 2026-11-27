@@ -58,10 +58,11 @@ pub(super) fn note_index_use(
         (None, None) => return Ok(()),
     };
     options.set_search_sets(
-        vec![crate::report::archive::options::Param {
-            name: "ForceMbIndex",
-            value: crate::report::archive::options::ParamValue::Boolean(true),
-        }],
+        vec![crate::report::archive::options::Param::new(
+            crate::report::archive::fields::FORCE_MB_INDEX,
+            crate::report::archive::options::ParamValue::Boolean(true),
+        )],
+        Vec::new(),
         Vec::new(),
     )
 }
@@ -109,7 +110,7 @@ pub(super) fn megablast_index(
             database,
             posts: Vec::new(),
         };
-        let result = loader.db_index_init(index_name, old_style, word_size);
+        let result = loader.db_index_init(&index_name, old_style, word_size);
         (loader.posts, result)
     };
     let index = match result {
@@ -122,7 +123,12 @@ pub(super) fn megablast_index(
     };
     for post in posts {
         let mut error = |text: &[u8]| {
-            let line = [b"Error: [blastn] ".as_slice(), text, b"\n"].concat();
+            let line = [
+                format!("Error: [{}] ", args.app().ncbi_name()).as_bytes(),
+                text,
+                b"\n",
+            ]
+            .concat();
             write_post(args, diagnostics, ERROR, &line)
         };
         match post {
@@ -141,7 +147,7 @@ pub(super) fn megablast_index(
     // The warning that `ERR_POST_EX` posts (code 1, subcode 1): `errstr`, then
     // " Database index will not be used.".
     let warning = [
-        b"Warning: (1.1) [blastn] ".as_slice(),
+        format!("Warning: (1.1) [{}] ", args.app().ncbi_name()).as_bytes(),
         &text,
         b" Database index will not be used.\n",
     ]
@@ -202,15 +208,15 @@ enum Failed {
 /// with its number of sequences, or the path and the sequences of a database volume without an
 /// index; the index volumes of `CIndexedDb_Old`, whose numbers of sequences their headers give).
 struct Loaded {
-    first: String,
+    first: Vec<u8>,
     old_style: bool,
     volumes: Vec<Entry>,
 }
 
-/// One of `volumes_`: a path, whether it is an index volume, and its number of sequences (of
-/// a new-style volume; an old-style one's is read from its header).
+/// One of `volumes_`: a path (as NCBI's `std::string` bytes), whether it is an index volume, and
+/// its number of sequences (of a new-style volume; an old-style one's is read from its header).
 struct Entry {
-    path: String,
+    path: Vec<u8>,
     has_index: bool,
     n_oids: u32,
 }
@@ -230,12 +236,13 @@ impl Loaded {
             let n_oids = if !entry.has_index {
                 entry.n_oids
             } else {
-                let volume = IndexVolume::open(Path::new(&entry.path)).map_err(|why| {
-                    format!(
-                        "a MegaBLAST index volume that LOSAT does not read ({}: {why})",
-                        entry.path
-                    )
-                })?;
+                let volume = IndexVolume::open(&crate::utils::os_bytes::path_of_bytes(&entry.path))
+                    .map_err(|why| {
+                        format!(
+                            "a MegaBLAST index volume that LOSAT does not read ({}: {why})",
+                            String::from_utf8_lossy(&entry.path)
+                        )
+                    })?;
                 if self.old_style {
                     volume.stop.wrapping_sub(volume.start)
                 } else {
@@ -280,9 +287,9 @@ const READ_FAILURE: ThrowSite = ThrowSite {
 };
 
 impl Loader<'_> {
-    /// Keeps NCBI's error line `text`.
-    fn error(&mut self, text: String) {
-        self.posts.push(Post::Line(text.into_bytes()));
+    /// Keeps NCBI's error line `text` (bytes).
+    fn error(&mut self, text: impl Into<Vec<u8>>) {
+        self.posts.push(Post::Line(text.into()));
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1122-1171
@@ -290,7 +297,7 @@ impl Loader<'_> {
     /// `-index_name` asks for the old one), then the old style after a failure, whose
     /// exceptions' texts join with a line feed; a loaded index gets the word size check, whose
     /// text replaces any earlier one.
-    fn db_index_init(&mut self, indexname: &str, old_style: bool, word_size: usize) -> Init {
+    fn db_index_init(&mut self, indexname: &[u8], old_style: bool, word_size: usize) -> Init {
         let mut result = Vec::new();
         if !old_style {
             match self.new_style(indexname) {
@@ -320,21 +327,22 @@ impl Loader<'_> {
     /// `AddIndexInfo`; an exception when no volume has an index, or the database reader's when
     /// the value does not open as it is (white space other than spaces at its ends, which the
     /// search's own opening drops).
-    fn new_style(&mut self, indexname: &str) -> Result<Loaded, Failed> {
+    fn new_style(&mut self, indexname: &[u8]) -> Result<Loaded, Failed> {
         let volumes = self
             .database
             .index_volumes(indexname)
             .map_err(|error| match error {
                 Some(exception) => Failed::Ncbi(exception),
                 None => Failed::Refused(format!(
-                    "a -db value that NCBI's index loader opens apart from the search ('{indexname}')"
+                    "a -db value that NCBI's index loader opens apart from the search ('{}')",
+                    String::from_utf8_lossy(indexname)
                 )),
             })?;
         // `volumes_`: each index volume of an indexed database volume, or the database
         // volume's own path for one without an index.
         let mut entries: Vec<Entry> = Vec::new();
-        for (vol_name, dbnseq) in &volumes {
-            self.add_index_info(vol_name, *dbnseq, &mut entries)?;
+        for (vol_name, dbnseq) in volumes {
+            self.add_index_info(&vol_name, dbnseq, &mut entries)?;
         }
         if !entries.iter().any(|entry| entry.has_index) {
             return Err(Failed::Ncbi(NcbiException::new(
@@ -360,7 +368,7 @@ impl Loader<'_> {
     /// no index volume adds nothing.
     fn add_index_info(
         &mut self,
-        vol_name: &str,
+        vol_name: &[u8],
         dbnseq: u32,
         entries: &mut Vec<Entry>,
     ) -> Result<(), Failed> {
@@ -372,7 +380,7 @@ impl Loader<'_> {
                 n_oids,
             })),
             None => entries.push(Entry {
-                path: vol_name.to_string(),
+                path: vol_name.to_vec(),
                 has_index: false,
                 n_oids: dbnseq,
             }),
@@ -384,58 +392,85 @@ impl Loader<'_> {
     /// of sequences, or `None` (not resolved) after the error line of the check that failed.
     fn resolve_volume_index(
         &mut self,
-        vol_name: &str,
+        vol_name: &[u8],
         dbnseq: u32,
-    ) -> Result<Option<Vec<(String, u32)>>, Failed> {
-        let Some(shdr) = SuperHeader::load(Path::new(&format!("{vol_name}.shd"))) else {
+    ) -> Result<Option<Vec<(Vec<u8>, u32)>>, Failed> {
+        let shd_bytes = [vol_name, b".shd"].concat();
+        let Some(shdr) = SuperHeader::load(&crate::utils::os_bytes::path_of_bytes(&shd_bytes))
+        else {
             return Ok(None);
         };
         if shdr.num_seq != dbnseq {
-            self.error(format!(
-                "numbers of OIDs reported by the database and by the index do not match. \
-                     Index for volume {vol_name} will not be used"
-            ));
+            self.error(
+                [
+                    b"numbers of OIDs reported by the database and by the index do not match. \
+                      Index for volume "
+                        .as_slice(),
+                    vol_name,
+                    b" will not be used",
+                ]
+                .concat(),
+            );
             return Ok(None);
         }
         let mut names = Vec::new();
         let mut total_idxvol_oids: u64 = 0;
         for i in 0..shdr.num_vol {
             let Some(name) = self.database.resolve_db_path(&volume_name(vol_name, i)) else {
-                self.error(format!(
-                    "index volume  not resolved; index will not be used for {vol_name}"
-                ));
+                self.error(
+                    [
+                        b"index volume  not resolved; index will not be used for ".as_slice(),
+                        vol_name,
+                    ]
+                    .concat(),
+                );
                 return Ok(None);
             };
-            let idxvol_oids = match crate::dbindex::format::volume_oids(Path::new(&name)) {
+            let idxvol_oids = match crate::dbindex::format::volume_oids(
+                &crate::utils::os_bytes::path_of_bytes(&name),
+            ) {
                 VolumeOids::Count(count) => count,
                 VolumeOids::ReadFailure(place) => {
                     return Err(Failed::Ncbi(NcbiException::new(
                         READ_FAILURE,
-                        format!("[{name}] {place}"),
+                        [b"[".as_slice(), &name, b"] ", place.as_bytes()].concat(),
                     )))
                 }
                 VolumeOids::Undefined => {
                     return Err(Failed::Refused(format!(
-                        "a MegaBLAST index volume whose header NCBI does not read whole ({name})"
+                        "a MegaBLAST index volume whose header NCBI does not read whole ({})",
+                        String::from_utf8_lossy(&name)
                     )))
                 }
             };
             if idxvol_oids == 0 {
-                self.error(format!(
-                    "index volume {name} reports no sequences; index will not be used for \
-                         {vol_name}"
-                ));
+                self.error(
+                    [
+                        b"index volume ".as_slice(),
+                        &name,
+                        b" reports no sequences; index will not be used for ",
+                        vol_name,
+                    ]
+                    .concat(),
+                );
                 return Ok(None);
             }
             names.push((name, idxvol_oids));
             total_idxvol_oids += u64::from(idxvol_oids);
         }
         if u64::from(dbnseq) != total_idxvol_oids {
-            self.error(format!(
-                "total of oids reported by index volumes ({total_idxvol_oids}) does not match \
-                     the number of oids reported by the superheader ({dbnseq}); index will not be \
-                     used for {vol_name}"
-            ));
+            self.error(
+                [
+                    format!(
+                        "total of oids reported by index volumes ({total_idxvol_oids}) does not \
+                         match the number of oids reported by the superheader ({dbnseq}); index \
+                         will not be used for "
+                    )
+                    .as_bytes(),
+                    vol_name,
+                ]
+                .concat(),
+            );
             return Ok(None);
         }
         Ok(Some(names))
@@ -447,12 +482,15 @@ impl Loader<'_> {
     /// default, `atoi` of the numbers), the volumes `<base>.NN.idx` found on the search path
     /// (`SeqDB_ResolveDbPath`), an error line for each volume missing between two found ones;
     /// an exception when none is found.
-    fn old_style(&mut self, indexnames: &str) -> Result<Loaded, Failed> {
-        let mut index_names: Vec<String> = Vec::new();
+    fn old_style(&mut self, indexnames: &[u8]) -> Result<Loaded, Failed> {
+        let mut index_names: Vec<Vec<u8>> = Vec::new();
         if !indexnames.is_empty() {
             let mut dbnames = split_old_style_names(indexnames);
             dbnames.sort_by(|a, b| {
-                crate::seqdb::SeqDb::compare_volume_paths(Path::new(a), Path::new(b))
+                crate::seqdb::SeqDb::compare_volume_paths(
+                    &crate::utils::os_bytes::path_of_bytes(a),
+                    &crate::utils::os_bytes::path_of_bytes(b),
+                )
             });
             for indexname in &dbnames {
                 let (index_base, start_vol, stop_vol) = parse_old_style_name(indexname);
@@ -467,21 +505,20 @@ impl Loader<'_> {
                     || (stop_vol > i64::MAX as u64 && start_vol <= i64::MAX as u64)
                 {
                     return Err(Failed::Refused(format!(
-                        "an -index_name range of volumes that NCBI's loader does not finish ('{indexname}')"
+                        "an -index_name range of volumes that NCBI's loader does not finish ('{}')",
+                        String::from_utf8_lossy(indexname)
                     )));
                 }
                 let mut last_i: i64 = -1;
                 let mut i = start_vol as i64;
                 while (i as u64) <= stop_vol {
                     let number = if i >= 0 {
-                        format!("{i:02}")
+                        format!(".{i:02}.idx")
                     } else {
-                        i.to_string()
+                        format!(".{i}.idx")
                     };
-                    if let Some(name) = self
-                        .database
-                        .resolve_db_path(&format!("{index_base}.{number}.idx"))
-                    {
+                    let candidate = [index_base.as_slice(), number.as_bytes()].concat();
+                    if let Some(name) = self.database.resolve_db_path(&candidate) {
                         if last_i + 1 < i {
                             self.posts.push(Post::Gaps(last_i + 1, i));
                         }
@@ -507,7 +544,12 @@ impl Loader<'_> {
             }),
             None => Err(Failed::Ncbi(NcbiException::new(
                 NO_INDEX_FILE,
-                format!("no index file specified or index '{indexnames}*' not found."),
+                [
+                    b"no index file specified or index '".as_slice(),
+                    indexnames,
+                    b"*' not found.",
+                ]
+                .concat(),
             ))),
         }
     }
@@ -521,18 +563,21 @@ impl Loader<'_> {
     /// clears `-use_index` and so never installs the indexed search. An empty volume crashes
     /// NCBI's reading.
     fn check_min_word_size(&self, loaded: Loaded, word_size: usize) -> Init {
-        let min_ws = match min_index_word_size(Path::new(&loaded.first)) {
-            MinWordSize::Read(min_ws) => min_ws,
-            MinWordSize::Unreadable => {
-                return Init::NotUsed(b"Failed to read index MegaBLAST db min word size.".to_vec())
-            }
-            MinWordSize::Empty => {
-                return Init::Refused(format!(
-                    "an empty MegaBLAST index volume ({})",
-                    loaded.first
-                ))
-            }
-        };
+        let min_ws =
+            match min_index_word_size(&crate::utils::os_bytes::path_of_bytes(&loaded.first)) {
+                MinWordSize::Read(min_ws) => min_ws,
+                MinWordSize::Unreadable => {
+                    return Init::NotUsed(
+                        b"Failed to read index MegaBLAST db min word size.".to_vec(),
+                    )
+                }
+                MinWordSize::Empty => {
+                    return Init::Refused(format!(
+                        "an empty MegaBLAST index volume ({})",
+                        String::from_utf8_lossy(&loaded.first)
+                    ))
+                }
+            };
         if (word_size as i64) < i64::from(min_ws) {
             return Init::NotUsed(
                 format!("MegaBLAST database index requires word size greater than {min_ws}.")
@@ -584,16 +629,15 @@ fn min_index_word_size(fname: &Path) -> MinWordSize {
     }
 }
 
-/// `CIndexedDb_Old`'s names: the text up to each space, then from the next character that is
+/// `CIndexedDb_Old`'s names: the bytes up to each space, then from the next byte that is
 /// not a space (`find_first_of(" ")`, `find_first_not_of(" ")`): a leading space gives an
 /// empty first name, trailing spaces none.
-fn split_old_style_names(indexnames: &str) -> Vec<String> {
-    let bytes = indexnames.as_bytes();
+fn split_old_style_names(bytes: &[u8]) -> Vec<Vec<u8>> {
     let mut names = Vec::new();
     let mut start = Some(0usize);
     while let Some(at) = start {
         let end = bytes[at..].iter().position(|&b| b == b' ').map(|o| at + o);
-        names.push(indexnames[at..end.unwrap_or(bytes.len())].to_string());
+        names.push(bytes[at..end.unwrap_or(bytes.len())].to_vec());
         start = end.and_then(|end| {
             bytes[end..]
                 .iter()
@@ -604,10 +648,9 @@ fn split_old_style_names(indexnames: &str) -> Vec<String> {
     names
 }
 
-/// `CIndexedDb_Old`'s reading of one name `base[,ignored[,first[,last]]]`: the base and the
+/// `CIndexedDb_Old`'s reading of one name `base[,ignored[,first[,last]]]`: the base bytes and the
 /// first and last volumes (0 and 99 unless given; `atoi` of the text, kept as `unsigned long`).
-fn parse_old_style_name(indexname: &str) -> (String, u64, u64) {
-    let bytes = indexname.as_bytes();
+fn parse_old_style_name(bytes: &[u8]) -> (Vec<u8>, u64, u64) {
     let len = bytes.len();
     let find = |from: usize| -> Option<usize> {
         bytes
@@ -622,7 +665,7 @@ fn parse_old_style_name(indexname: &str) -> (String, u64, u64) {
     let mut start_vol: u64 = 0;
     let mut stop_vol: u64 = 99;
     let end = find(0);
-    let index_base = String::from_utf8_lossy(substr(0, end)).into_owned();
+    let index_base = substr(0, end).to_vec();
     // `start = end + 1`: npos + 1 is 0.
     let mut start = end.map_or(0, |end| end + 1);
     if start < len && end.is_some() {

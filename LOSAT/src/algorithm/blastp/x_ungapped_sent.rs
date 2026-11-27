@@ -59,12 +59,15 @@
 
 use super::extension::{BlastpTwoHitUngappedResult, BlastpUngappedData};
 use super::x_ungapped_fast::Table;
+// The key walks (`walk`, `best_of`), their keys (`KeyTable`) and the query codes they read
+// (`XQueryCode`) are in algorithm/common (`x_key_walk.rs`), where TBLASTX's sentinel walks take
+// them too.
+use crate::algorithm::common::x_key_walk::{best_of, walk, KEY_TABLE_LEN};
+pub(crate) use crate::algorithm::common::x_key_walk::{KeyTable, XQueryCode};
 use std::sync::OnceLock;
 
-/// The key of a step for every pair of codes below 32 (`q << 5 | s`): `(t << 32) - 1`, `t` the
-/// byte table's score (-128 for the sentinel). The walks add it (module comment).
-pub(crate) type KeyTable = [i64; KEY_TABLE_LEN];
-const KEY_TABLE_LEN: usize = (CODES as usize) * (CODES as usize);
+// The keys (`KeyTable`, in algorithm/common) cover the codes below `CODES`.
+const _: () = assert!(KEY_TABLE_LEN == (CODES as usize) * (CODES as usize));
 
 /// The keys of the byte table `table` (its first 32 x 32 codes).
 // No NCBI counterpart: the reference's scores in LOSAT's form (module comment).
@@ -96,34 +99,6 @@ pub(crate) fn blosum62_keys() -> Option<Box<KeyTable>> {
         }
     }
     Some(keys)
-}
-
-/// The score and the length of a best key (module comment).
-#[inline(always)]
-fn best_of(best: i64) -> (i32, i32) {
-    let len = (best.wrapping_neg() as u64 & 0xffff_ffff) as i64;
-    (((best + len) >> 32) as i32, len as i32)
-}
-
-/// A query code as the walks read it: the row of the keys (`code << 5`). blastp's block is kept
-/// shifted (`u16`), BLASTX's buffers are bytes.
-pub(crate) trait XQueryCode: Copy {
-    /// `code << 5`.
-    fn row(self) -> usize;
-}
-
-impl XQueryCode for u8 {
-    #[inline(always)]
-    fn row(self) -> usize {
-        (self as usize) << 5
-    }
-}
-
-impl XQueryCode for u16 {
-    #[inline(always)]
-    fn row(self) -> usize {
-        self as usize
-    }
 }
 
 /// `[0, query.., 0]` with each code shifted by 5 (module comment).
@@ -306,54 +281,6 @@ impl<'a> XSentSubject<'a> {
     }
 }
 
-/// One walk of `s_BlastAaExtendRight` (`RIGHT`) or `s_BlastAaExtendLeft` from `qp`, `sp`, until
-/// the X-drop test (or, right, `score <= 0`) holds: (best, length, steps before the stop), on the
-/// keys of the module comment.
-///
-/// SAFETY: walking from `qp`, `sp` in the direction, both sequences reach a sentinel (code 0)
-/// with every position up to it readable and fewer than `2^32 - 1` positions before it, all codes
-/// up to it are below 32, `keys` is the table's keys and `1 <= dropoff <= 127`.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 (see the module comment).
-#[inline(always)]
-unsafe fn walk<const RIGHT: bool, Q: XQueryCode>(
-    keys: *const i64,
-    qp: *const Q,
-    sp: *const u8,
-    dropoff: i32,
-    maxscore: i32,
-) -> (i32, i32, usize) {
-    let mut key = (maxscore as i64) << 32;
-    let mut best = key;
-    let drop = (dropoff as i64) << 32;
-    let mut off: isize = 0;
-    let dir: isize = if RIGHT { 1 } else { -1 };
-    macro_rules! step {
-        ($l:lifetime) => {{
-            let row = (*qp.offset(off)).row();
-            let sc = *sp.offset(off) as usize;
-            key += *keys.add(row | sc);
-            if key > best {
-                best = key;
-            }
-            let stop = if RIGHT {
-                key <= 0 || key + drop <= best
-            } else {
-                key + drop <= best
-            };
-            if stop {
-                break $l;
-            }
-            off += dir;
-        }};
-    }
-    'w: loop {
-        step!('w);
-        step!('w);
-    }
-    let (best, len) = best_of(best);
-    (best, len, off.unsigned_abs())
-}
-
 /// `s_BlastAaExtendTwoHit` for word size 3 on a checked query block and subject (`subject_raw`
 /// offsets, as `extend_two_hit_blosum62` takes them): the reference's result, `None` for its
 /// early return (a word that does not fit).
@@ -365,7 +292,7 @@ unsafe fn walk<const RIGHT: bool, Q: XQueryCode>(
 pub(crate) unsafe fn two_hit(
     query: &XSentQuery,
     subject: XSentSubject<'_>,
-    s_left_off: usize,
+    s_left_off: i32,
     s_right_off: usize,
     q_right_off: usize,
     dropoff: i32,
@@ -401,7 +328,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize
     keys: &KeyTable,
     query: &[Q],
     subject: &[u8],
-    s_left_off: usize,
+    s_left_off: i32,
     s_right_off: usize,
     q_right_off: usize,
     dropoff: i32,
@@ -420,7 +347,6 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize
     let qb = query.as_ptr().add(1);
     let sb = subject.as_ptr().add(1);
     let mut q_right_off = q_right_off as i32;
-    let s_left_off = s_left_off as i32;
     let mut s_right_off = s_right_off as i32;
 
     // the word loop of `W` letters (inside both sequences: checked above), on keys from 0: its
@@ -435,7 +361,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize
             best = key;
         }
     }
-    let (_, right_d) = best_of(best);
+    let right_d = best_of(best).1 as i32;
     q_right_off += right_d;
     s_right_off += right_d;
 
@@ -451,7 +377,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize
             dropoff,
             0,
         );
-        (best, len)
+        (best, len as i32)
     };
 
     let mut right_extend = false;
@@ -475,7 +401,7 @@ pub(crate) unsafe fn two_hit_in<const TAIL: usize, Q: XQueryCode, const W: usize
             dropoff,
             left_score,
         );
-        (right_score, right_d, s_last_off) = (best, len, s_right_off + end as i32);
+        (right_score, right_d, s_last_off) = (best, len as i32, s_right_off + end as i32);
     }
 
     Some(BlastpTwoHitUngappedResult {

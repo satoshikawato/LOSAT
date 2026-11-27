@@ -19,10 +19,7 @@ fn search(
         "losat", "blastx", "-query", "query", "-subject", "subject", "-seg", "no",
     ];
     args.extend_from_slice(extra);
-    let crate::cli::Commands::Blastx(args) =
-        crate::cli::try_parse_from::<crate::cli::Cli, _, _>(args)
-            .unwrap()
-            .command
+    let crate::cli::Commands::Blastx(args) = crate::cli::try_parse_from(args).unwrap().command
     else {
         unreachable!()
     };
@@ -174,7 +171,6 @@ fn record(letters: &[u8], runs: &[(i32, i32)]) -> FastaRecord {
         title: Vec::new(),
         sequence: letters.to_vec(),
         lowercase_masks: runs.to_vec(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,

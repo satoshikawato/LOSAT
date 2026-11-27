@@ -166,9 +166,9 @@ impl SubjectEmit<'_> {
     // `Blast_HSPReevaluateWithAmbiguitiesUngapped` reads the HSP's letters (blast_hits.c:692-700),
     // and NCBI BLAST+ 2.17.0 dies with SIGSEGV. Every HSP that reaches LOSAT's re-evaluation has a
     // length of 1 or more (those of length 0 or less, which read nothing in NCBI's, are dropped
-    // after the first linking call, `subject_link::link_subject_hits_int4`, or without sum
-    // statistics before this refusal, `subject_link::drop_unread_without_linking`), so NCBI dies
-    // at the first HSP of every such list. The query batch fails with LOSAT's refusal
+    // after the fetch and before this refusal, `subject_link::drop_unread_int4_inverted`), so
+    // NCBI dies at the first HSP of length 1 or more of every such list, and a list of only HSPs
+    // of length 0 or less is deleted unread there. The query batch fails with LOSAT's refusal
     // (PD-LOSAT-NCBI-DEFECTS 1.51, rule 3) after the reports of the batches before
     // (`ErrorAfterBatchReports`), as the earliest such subject's error (`XReadFailure`).
     /// The refusal of subject `s_idx`, whose HSPs reach the re-evaluation's read of the translation
@@ -180,7 +180,7 @@ impl SubjectEmit<'_> {
     pub(super) fn refuse_untranslated_frame(&self, s_idx: usize) {
         self.x_read_failure.fail(
             s_idx,
-            anyhow::Error::new(super::ErrorAfterBatchReports(
+            anyhow::Error::new(super::ErrorAfterBatchReports::new(
                 crate::core::blast_hits::x_untranslated_frame_refusal(
                     "TBLASTX",
                     "the ungapped re-evaluation",
@@ -196,7 +196,7 @@ impl SubjectEmit<'_> {
 // LOSAT's refusal comes there too (`ErrorAfterBatchReports`; the Owner's decision of 2026-11-16
 // on line RG's Q-X2c: "the results of the query batches before are written"). The run passes on
 // the refusal itself (`FetchRefusal`).
-/// The check of `reevaluation_fetch_keeps` under a negative seqid list with ids: whether the fetch
+/// The check of `reevaluation_fetch_keeps` under a negative seqid list: whether the fetch
 /// of subject `ordinal` keeps it; a header that cannot be read is the batch's failure, after the
 /// reports of the batches before.
 #[inline(never)]
@@ -210,7 +210,7 @@ fn x_fetch_keeps(
         Err(error) => {
             x_read_failure.fail(
                 ordinal as usize,
-                anyhow::Error::new(super::ErrorAfterBatchReports(FetchExcluded::refusal(
+                anyhow::Error::new(super::ErrorAfterBatchReports::new(FetchExcluded::refusal(
                     (ordinal, error),
                     "TBLASTX",
                 ))),

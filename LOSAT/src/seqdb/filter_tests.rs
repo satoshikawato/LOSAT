@@ -220,6 +220,10 @@ fn restricted_oids_are_ncbis_on_the_tx_fixture() {
             matches!(&list, TaxidList::Negative(set) if set.iter().all(|t| *t == 999)),
             "{line}"
         );
+        // Every list is the volumes' list, that one too: its lines without a Seq-id are erased
+        // and a sequence left without a line gets no Seq-align.
+        assert!(db.drops_lineless_hits(), "{line}");
+        assert!(!db.excludes_lineless_at_fetch(), "{line}");
         // The sequences read through the ordinal ids are those of the OIDs.
         let mut whole_db = SeqDb::open(name.to_str().unwrap(), SeqType::Protein).unwrap();
         whole_db.filter = None;
@@ -631,7 +635,29 @@ fn a_sequence_kept_without_a_definition_line_gets_no_seq_align() {
 }
 
 #[test]
-fn a_negative_list_with_ids_excludes_its_lineless_sequences_at_the_fetches() {
+fn a_sequence_whose_lines_hold_no_seqid_keeps_no_line_without_a_list() {
+    // tests/db_search/idlist (make_idlist.py `build_d1c1b`): ln's sequence 2 has one line, with
+    // no Seq-id, and sequences 1 and 3 have a line without one beside a line with one; lnn's
+    // sequence 0 has one line, with none. NCBI makes no Seq-align of a sequence whose lines hold
+    // no Seq-id, without a list too (line RG D1c-1c-b).
+    let idlist = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/idlist");
+    for (name, seqtype, kept) in [
+        ("ln", SeqType::Protein, vec![true, true, false, true]),
+        ("lnn", SeqType::Nucleotide, vec![false, true, true]),
+    ] {
+        let db = SeqDb::open(idlist.join(name).to_str().unwrap(), seqtype).unwrap();
+        assert!(!db.drops_lineless_hits());
+        let read: Vec<bool> = (0..db.num_seqs())
+            .map(|ordinal| db.keeps_line(ordinal).unwrap())
+            .collect();
+        assert_eq!(read, kept, "{name}");
+        // The walk reads no string, so it reports no UTF8String.
+        assert!((0..db.num_seqs()).all(|ordinal| !db.line_read(ordinal).unwrap().1));
+    }
+}
+
+#[test]
+fn every_negative_list_excludes_its_lineless_sequences_at_the_fetches() {
     // A negative seqid list keeps a line with an id that is neither a gi nor a ti nor listed.
     // prot_v4's sequences 14 (`gi|1414`) and 28 (`gnl|ti|123`) have one line, with a gi or a
     // ti only, and the one line of sequence 11, `ref|XP_000011.2|`, is the list's
@@ -661,16 +687,22 @@ fn a_negative_list_with_ids_excludes_its_lineless_sequences_at_the_fetches() {
         .unwrap();
     assert!(positive.drops_lineless_hits());
     assert!(!positive.excludes_lineless_at_fetch());
-    // A negative list of gis only is empty on a version 5 database once the gis are dropped
-    // (`s_ProcessSeqIDsForV5`): no line rule, no id set.
-    let mut gis = ids_db("prot_v5", SeqType::Protein);
-    gis.restrict(
-        &DbList::Seqids(list_of(b"gi|1414\n", true)),
-        &mut Vec::new(),
-    )
-    .unwrap();
-    assert!(!gis.drops_lineless_hits());
-    assert!(!gis.excludes_lineless_at_fetch());
+    // A list of gis only is empty on a version 5 database once the gis are dropped
+    // (`s_ProcessSeqIDsForV5`), but it is still the volumes' list, which erases the lines
+    // without a Seq-id (review 2 of line RG D1c, R2), and NCBI's id set was made from the
+    // negative one as read, before that processing (review 1 of D1c-1b, F1): its fetches still
+    // exclude. prot_v5's lines all have a Seq-id.
+    for negative in [true, false] {
+        let mut gis = ids_db("prot_v5", SeqType::Protein);
+        gis.restrict(
+            &DbList::Seqids(list_of(b"gi|1414\n", negative)),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert!(gis.drops_lineless_hits());
+        assert_eq!(gis.excludes_lineless_at_fetch(), negative);
+        assert!((0..gis.num_seqs() as u32).all(|ordinal| gis.keeps_line(ordinal).unwrap()));
+    }
 }
 
 #[test]
@@ -729,6 +761,15 @@ fn definition_lines_follow_ncbis_rules() {
     assert!(negative.keeps(&defline(Some(0), None)));
     // No taxid at all: an empty set is a subset of every list.
     assert!(!negative.keeps(&defline(None, None)));
+    // A list without taxids tests none (`GetNumTaxIds` 0): a negative list of taxids the
+    // database does not hold.
+    for empty in [
+        DeflineRule::NegativeTaxids(set(&[])),
+        DeflineRule::Taxids(set(&[])),
+    ] {
+        assert!(empty.keeps(&defline(None, None)));
+        assert!(empty.keeps(&defline(Some(9606), None)));
+    }
 }
 
 /// A line of the taxid `taxid` with one Seq-id.
@@ -740,33 +781,69 @@ fn line_with_id(taxid: i32) -> BlastDefline {
 }
 
 #[test]
-fn a_rule_that_keeps_no_line_keeps_every_line() {
+fn every_list_tests_each_line_as_ncbis() {
     let rule = DeflineRule::Taxids([5].into_iter().collect());
     let set = DeflineSet {
         deflines: vec![line_with_id(1), line_with_id(5)],
         utf8: false,
     };
     assert_eq!(
-        line_mask(Some(&rule), &[], &set),
+        line_mask(Some(&rule), &[], &set, None),
         Ok(Some(vec![false, true]))
     );
+    // A taxid test that passes no line erases every line, as NCBI's read does (a header whose
+    // taxids are not those of the lookup files): the sequence gets no Seq-align.
     let none = DeflineSet {
         deflines: vec![line_with_id(1), line_with_id(2)],
         utf8: false,
     };
     assert_eq!(
-        line_mask(Some(&rule), &[], &none),
-        Ok(Some(vec![true, true]))
+        line_mask(Some(&rule), &[], &none, None),
+        Ok(Some(vec![false, false]))
     );
     // NCBI's id test runs under any list (`x_HaveIdFilter`): a line without a Seq-id passes
-    // none of it.
+    // none of it, also under a list without ids or taxids (a version 5 seqid list of gis only,
+    // a negative taxid list of none the database holds; review 2 of line RG D1c, R2).
     let bare = DeflineSet {
         deflines: vec![defline(Some(5), None), line_with_id(5)],
         utf8: false,
     };
     assert_eq!(
-        line_mask(Some(&rule), &[], &bare),
+        line_mask(Some(&rule), &[], &bare, None),
         Ok(Some(vec![false, true]))
+    );
+    for empty in [
+        DeflineRule::NegativeTaxids(BTreeSet::new()),
+        DeflineRule::Seqids(Vec::new()),
+        DeflineRule::NegativeSeqids(Vec::new()),
+        DeflineRule::Gis(Vec::new()),
+        DeflineRule::NegativeGis(Vec::new()),
+        DeflineRule::Pigs,
+        DeflineRule::NegativePigs,
+    ] {
+        assert_eq!(
+            line_mask(Some(&empty), &[], &bare, None),
+            Ok(Some(vec![false, true])),
+            "{empty:?}"
+        );
+    }
+    assert_eq!(
+        line_mask(None, &[], &bare, None),
+        Ok(Some(vec![true, true]))
+    );
+    // A sequence of lines without Seq-ids keeps none: a seqid list's reads refuse it, a taxid
+    // list's give no line (both drop its hits, `SeqDb::keeps_line`).
+    let lineless = DeflineSet {
+        deflines: vec![defline(Some(5), None)],
+        utf8: false,
+    };
+    assert_eq!(
+        line_mask(Some(&DeflineRule::Seqids(Vec::new())), &[], &lineless, None),
+        Ok(None)
+    );
+    assert_eq!(
+        line_mask(Some(&rule), &[], &lineless, None),
+        Ok(Some(vec![false]))
     );
     let mut lines = vec![1, 2, 3];
     lines.retain_lines(&[true, false, true]);
@@ -898,7 +975,9 @@ fn a_later_read_of_an_lmdb_or_lookup_file_is_losats_own_error() {
                 std::fs::copy(&path, dir.join(&name)).unwrap();
             }
         }
-        let file = dir.join(format!("tx.{ext}"));
+        // The file under the name the reader opens it by, its links followed
+        // (`crate::utils::test_dir::ncbi_dir`).
+        let file = crate::utils::test_dir::ncbi_dir(&dir).join(format!("tx.{ext}"));
         let short = dir.join("short");
         std::fs::write(&short, &std::fs::read(&file).unwrap()[..keep]).unwrap();
         crate::seqdb::file::refused_reads::refuse(&file, &short);
@@ -939,11 +1018,14 @@ fn a_meta_page_that_cannot_be_read_gives_mdb_env_opens_text() {
             source,
         })
     };
+    // Code 5 is EIO on Linux, whose text NCBI gives; on Windows (`ERROR_ACCESS_DENIED`) LOSAT
+    // has no NCBI text for a code (`ncbi_strerror`), and the error stays LOSAT's own.
     match lmdb_open_error(&file, unreadable(std::io::Error::from_raw_os_error(5))) {
-        SeqDbError::NotFound(text) => assert_eq!(
+        SeqDbError::NotFound(text) if !cfg!(windows) => assert_eq!(
             text,
             b"LMDB runtime error: mdb_env_open: Input/output error"
         ),
+        error if cfg!(windows) => assert!(error.is_unreadable(), "{error:?}"),
         other => panic!("{other:?}"),
     }
     let error = lmdb_open_error(
@@ -983,11 +1065,11 @@ fn the_id_tests_of_a_line_alternate_as_ncbis() {
         deflines: vec![line(general("ti", "abc")), line(general("PIG", "abc"))],
         utf8: false,
     };
-    let thrown = line_mask(Some(&rule), &[alias], &set).unwrap_err();
+    let thrown = line_mask(Some(&rule), &[alias], &set, None).unwrap_err();
     assert!(thrown
         .get_msg()
         .starts_with(b"Cannot convert string 'abc' to Int8"));
-    let thrown = line_mask(Some(&rule), &[], &set).unwrap_err();
+    let thrown = line_mask(Some(&rule), &[], &set, None).unwrap_err();
     assert!(thrown.get_msg().starts_with(b"CObject_id::GetId()"));
 }
 
@@ -1007,4 +1089,109 @@ fn ordinals_in_names_the_ordinals_of_an_oid_range() {
     }
     assert_eq!(OidMap::unrestricted().ordinals_in(3, 7), 3..7);
     assert_eq!(OidMap::unrestricted().ordinals_in(7, 3), 7..7);
+}
+
+/// Lines rejected by `MEMB_BIT` (`memb_kept[i] == false`) are skipped before `x_FilterHasId`,
+/// taxid tests and `user_passed_any`: a `ti` string tag on a rejected line does not throw, and a
+/// user seqid rule that only matched the rejected line returns `Ok(None)`.
+#[test]
+fn memb_bit_short_circuits_id_lookups_and_user_passed_any() {
+    let general = |db: &str, tag: &str| {
+        ParsedSeqId::General(crate::seqid::model::Dbtag {
+            db: db.as_bytes().to_vec(),
+            tag: crate::seqid::model::ObjectId::Str(tag.as_bytes().to_vec()),
+        })
+    };
+    let line = |id: ParsedSeqId| BlastDefline {
+        ids: vec![id],
+        ..BlastDefline::default()
+    };
+    let rule = DeflineRule::Gis(vec![1001]);
+    let alias = Arc::new(super::super::id_list::AliasIdList {
+        gis: vec![7001],
+        ..Default::default()
+    });
+    // Line 0 has a bad `ti` string tag (would throw in alias lookup) and fails MEMB_BIT;
+    // line 1 passes MEMB_BIT and matches `rule`.
+    let set = DeflineSet {
+        deflines: vec![line(general("ti", "abc")), line(ParsedSeqId::Gi(1001))],
+        utf8: false,
+    };
+    assert_eq!(
+        line_mask(
+            Some(&rule),
+            &[Arc::clone(&alias)],
+            &set,
+            Some(&[false, true])
+        ),
+        Ok(Some(vec![false, false]))
+    );
+    assert_eq!(
+        line_mask(Some(&rule), &[], &set, Some(&[false, true])),
+        Ok(Some(vec![false, true]))
+    );
+    // Line 0 matches `rule` but fails MEMB_BIT; line 1 passes MEMB_BIT but fails `rule`:
+    // `user_passed_any` stays false -> `Ok(None)`.
+    let set2 = DeflineSet {
+        deflines: vec![line(ParsedSeqId::Gi(1001)), line(ParsedSeqId::Gi(2002))],
+        utf8: false,
+    };
+    assert_eq!(
+        line_mask(Some(&rule), &[], &set2, Some(&[false, true])),
+        Ok(None)
+    );
+}
+
+/// Alias `TAXIDLIST` rescues a line rejected by a search list (or with no Seq-id) before a
+/// negative user taxid list runs (`seqdbvol.cpp:2036-2055`), but never rescues a line already
+/// dropped by `MEMB_BIT` (`seqdbvol.cpp:2008-2059`).
+#[test]
+fn alias_taxid_list_rescues_lines_before_negative_user_taxids() {
+    let local = |name: &str| ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(name.into()));
+    let line = |ids: Vec<ParsedSeqId>, taxid: i32| BlastDefline {
+        ids,
+        taxid: Some(taxid),
+        ..BlastDefline::default()
+    };
+    let set = DeflineSet {
+        deflines: vec![
+            line(vec![local("a")], 9606),
+            line(vec![local("b")], 10090),
+            line(vec![], 9606),
+        ],
+        utf8: false,
+    };
+    let alias_tx = Arc::new(super::super::id_list::AliasIdList {
+        taxids: [9606, 10090].into_iter().collect(),
+        ..Default::default()
+    });
+    // Positive user seqid list matching only `b` (or matching nothing): alias TAXIDLIST still
+    // rescues every line whose taxid is in the alias list, so `line_mask` returns `Some`.
+    let pos_seq = DeflineRule::Seqids(vec![b"b".to_vec()]);
+    assert_eq!(
+        line_mask(Some(&pos_seq), std::slice::from_ref(&alias_tx), &set, None).unwrap(),
+        Some(vec![true, true, true])
+    );
+    let pos_none = DeflineRule::Seqids(vec![b"other".to_vec()]);
+    assert_eq!(
+        line_mask(Some(&pos_none), std::slice::from_ref(&alias_tx), &set, None).unwrap(),
+        Some(vec![true, true, true])
+    );
+    // Negative user taxid list runs AFTER alias TAXIDLIST rescue, so 10090 is removed.
+    let neg_tax = DeflineRule::NegativeTaxids([10090].into_iter().collect());
+    assert_eq!(
+        line_mask(Some(&neg_tax), std::slice::from_ref(&alias_tx), &set, None).unwrap(),
+        Some(vec![true, false, true])
+    );
+    // MEMB_BIT runs before alias TAXIDLIST rescue: line 0 dropped by MEMB_BIT stays dropped.
+    assert_eq!(
+        line_mask(
+            Some(&pos_seq),
+            &[alias_tx],
+            &set,
+            Some(&[false, true, true])
+        )
+        .unwrap(),
+        Some(vec![false, true, true])
+    );
 }

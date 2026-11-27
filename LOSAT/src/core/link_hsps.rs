@@ -19,6 +19,7 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1760-1814
 
+use crate::core::blast_util::ncbi_int4_from_double;
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::cmp::Ordering;
 
@@ -50,12 +51,15 @@ pub(crate) const BLAST_GAP_DECAY_RATE: f64 = 0.5;
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:77-78
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:788-815
-/// The option is not negative (the command line refuses a negative value, as NCBI's does), so
-/// `longest_intron - 2` cannot pass the range of `Int4`; C's division truncates toward zero, as
-/// Rust's does.
+/// The command line refuses a negative value, as NCBI's does; a search strategy can carry any
+/// `int` (`LongestIntronLength`), and the subtraction of 2 passes the range of `Int4` for the
+/// two smallest values, where NCBI's arithmetic is undefined: LOSAT computes the difference in 64
+/// bits (its mathematical value) and NCBI's division of it, which truncates toward zero as Rust's
+/// does and falls in the range of `Int4` again.
 pub(crate) fn translated_longest_intron(max_intron_length: i32, gapped: bool) -> Option<i32> {
     const DEFAULT_LONGEST_INTRON: i32 = 122;
-    let max_protein_gap = (max_intron_length - 2) / 3;
+    // Within the range of `i32`: |(i32::MIN - 2) / 3| < 2^31.
+    let max_protein_gap = ((i64::from(max_intron_length) - 2) / 3) as i32;
     if !gapped {
         Some(max_protein_gap.max(0))
     } else if max_intron_length == 0 {
@@ -225,7 +229,14 @@ pub(crate) fn calculate_link_hsp_cutoffs(
     };
     let search_sp = query_length as i64 * subject_length as i64;
     let mut x_variable = 0.25 * y_variable * search_sp as f64;
-    let cutoff = |x: f64| (x.glibc_ln() / kbp.lambda).floor() as i32 + 1;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1061-1072
+    // The `(Int4)` of `floor(log(x) / Lambda)` is NCBI's x86-64 conversion
+    // (`ncbi_int4_from_double`). Where the database is not longer than the subject less the
+    // expected length (one subject, for an expected length of 0), an expected length of 0 makes
+    // `y_variable` and `x_variable` 0 and the logarithm -inf, and a negative one makes them
+    // negative and the logarithm NaN; both convert to `INT_MIN`, so the big-gap cutoff is one more
+    // than `INT_MIN` (Rust's `as i32` would give 0 for NaN, a cutoff of 1).
+    let cutoff = |x: f64| ncbi_int4_from_double((x.glibc_ln() / kbp.lambda).floor()) + 1;
     let (gap_prob, cutoff_small_gap, cutoff_big_gap) = if search_sp > 8 * window_size * window_size
     {
         x_variable /= 1.0 - gap_prob + K_EPSILON;

@@ -13,6 +13,7 @@ export {
   EngineCallError,
   EngineStoppedError,
   FILE_REGISTRY,
+  FILE_SEARCH_STRATEGY,
   FILE_CHUNK_BYTES,
   FILE_WINDOW_MASKER_COUNTS,
   loadFile,
@@ -21,6 +22,7 @@ export {
   PLACE_NOWHERE,
   PLACE_RUN,
   ReactorAbi,
+  TOOL_FILES_STREAM,
   ROLE_QUERY,
   ROLE_SUBJECT,
   RUN_FILES_STREAM,
@@ -33,12 +35,14 @@ export {
   type FileLoader,
   type RegistryFileInfo,
   type RegisteredInput,
+  type StrategyFileInfo,
   type StreamSink,
+  type ToolSink,
 } from './infra/reactor/abi.js';
 export { inspectReactor, type MemoryLimits, type ReactorArtifact, type ReactorKind } from './infra/reactor/artifact.js';
 export { engineBuildName, type EngineAssets, type ReactorAsset } from './infra/reactor/assets.js';
 export { ReactorInputChecker } from './infra/reactor/checker.js';
-export { reactorControl, toProgramDescription, type EngineControl } from './infra/reactor/control.js';
+export { reactorControl, toProgramDescription, type EngineControl, type ToolControl } from './infra/reactor/control.js';
 export { ReactorInflater } from './infra/reactor/inflater.js';
 export { compileReactor, instantiateSerial, loadReactor, type CompiledReactor, type ReactorInstance } from './infra/reactor/instance.js';
 export { fileReaderSync, RunDirectory, TABLE_BYTES, type BlobReader } from './infra/reactor/run-directory.js';

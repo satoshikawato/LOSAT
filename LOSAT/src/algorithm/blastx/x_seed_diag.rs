@@ -530,6 +530,7 @@ pub(crate) fn x_word_finder_diag<S: BxScoring>(
         entries: diagonals.entries.clone(),
         offset: diagonals.offset,
         window: diagonals.window,
+        wide_offset: diagonals.wide_offset,
         x_db_masks: None,
     };
     let reference = word_finder_any(
@@ -733,7 +734,8 @@ fn x_word_finder_fused<K: XCell, S: BxScoring>(
                         .saturating_sub(1)
                 });
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
-                if q - diff < batch.contexts[context].offset as i32 {
+                // (unsigned, as in `seed::word_finder_over`)
+                if (q.wrapping_sub(diff) as u32) < batch.contexts[context].offset as u32 {
                     entry.set_last_hit(s.wrapping_add(offset));
                     return;
                 }
@@ -745,7 +747,7 @@ fn x_word_finder_fused<K: XCell, S: BxScoring>(
                     scoring,
                     query,
                     subject,
-                    (previous + word) as usize,
+                    previous + word,
                     s as usize,
                     q as usize,
                     p.word_xdrop,
@@ -835,7 +837,7 @@ fn x_word_finder_fused_sent<K: XCell, S: BxScoring, const W: usize>(
                                 .partition_point(|c| c.offset as i32 <= q)
                                 .saturating_sub(1)
                         });
-                        if q - diff < batch.contexts[context].offset as i32 {
+                        if (q.wrapping_sub(diff) as u32) < batch.contexts[context].offset as u32 {
                             entry.set_last_hit(s.wrapping_add(offset));
                             return;
                         }
@@ -843,7 +845,7 @@ fn x_word_finder_fused_sent<K: XCell, S: BxScoring, const W: usize>(
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
                         // (`x_ungap_sent.rs`)
                         let Some(result) = sent.two_hit::<$shadow, W>(
-                            (previous + word) as usize,
+                            previous + word,
                             s as usize,
                             q as usize,
                             p.word_xdrop,

@@ -37,20 +37,23 @@ async function press(page: Page, key: string, chosen: string): Promise<void> {
   expect(await focused(page)).toBe(chosen);
 }
 
-const MAIN = ['tab-search', 'tab-results'];
+const MAIN = ['tab-search', 'tab-results', 'tab-windowmasker'];
 const VIEWS = ['results-view-hits', 'pane-dotplot', 'results-view-details', 'results-view-outputs'];
 const FORMATS = ['format-0', 'format-6', 'format-7'];
 const PROTEIN = 'MKLVVLAAGGHHKLMKLVVLAAGGHHKLMSTNPKPQRKTKRNTNRRPQDVKFPGG';
 
-test('Search and Results, the results views and the output formats are tabs that the arrow keys reach', async ({ page }) => {
+test('Search, Results and WindowMasker, the results views and the output formats are tabs that the arrow keys reach', async ({ page }) => {
   await openSearch(page);
   await expectTabs(page, 'Main', MAIN, 'tab-search');
   await page.getByTestId('tab-search').focus();
   await press(page, 'ArrowRight', 'tab-results');
   await expectTabs(page, 'Main', MAIN, 'tab-results');
   await expect(page.getByTestId('results-panel')).toBeVisible();
+  await press(page, 'ArrowRight', 'tab-windowmasker');
+  await expectTabs(page, 'Main', MAIN, 'tab-windowmasker');
+  await expect(page.getByTestId('wm-panel')).toBeVisible();
   await press(page, 'ArrowRight', 'tab-search');
-  await press(page, 'End', 'tab-results');
+  await press(page, 'End', 'tab-windowmasker');
   await press(page, 'Home', 'tab-search');
   await expect(page.getByTestId('search-panel')).toBeVisible();
 

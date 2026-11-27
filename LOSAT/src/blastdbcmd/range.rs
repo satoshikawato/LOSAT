@@ -21,15 +21,19 @@ impl SeqRange {
         self.from > self.to
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:285-291
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:477-486
+    // NCBI reference (598d8ae6): c++/include/util/range.hpp:148-155
+    // NCBI reference (598d8ae6): c++/include/util/range.hpp:180-183
     /// The range clipped to a sequence of `length` letters: `None` where NCBI then takes the
-    /// whole sequence (no range, or a range whose start is at or past the end).
+    /// whole sequence (no range, a zero-length sequence where `SetTo` sets the open end to zero,
+    /// or a range whose start is at or past the end).
     pub fn clipped(self, length: u32) -> Option<(u32, u32)> {
-        if self.is_empty() {
+        if length == 0 || self.is_empty() {
             return None;
         }
         let to = if length <= self.to {
-            length.wrapping_sub(1)
+            length - 1
         } else {
             self.to
         };
@@ -48,8 +52,8 @@ pub(super) const NO_RANGE: SeqRange = SeqRange {
 /// `NStr::StringToInt` of `text` (`ncbi_str::string_to_int`): the number, or the message of NCBI's
 /// exception as `GetMsg` gives it (`Int8` for the text that is not a number or passes a 64-bit
 /// integer, `int` for one that fits 64 bits but not 32).
-fn string_to_int(text: &str) -> Result<i32, String> {
-    crate::ncbi_str::string_to_int(text.as_bytes(), 0)
+fn string_to_int(text: &[u8]) -> Result<i32, String> {
+    crate::ncbi_str::string_to_int(text, 0)
         .map_err(|error| String::from_utf8_lossy(error.get_msg()).into_owned())
 }
 
@@ -63,9 +67,9 @@ fn string_to_int(text: &str) -> Result<i32, String> {
 ///
 /// `-range ""` is not reproduced: NCBI reads `tokens.front()` of an empty vector (it
 /// crashed, exit status 139, probe D61).
-pub(super) fn parse_sequence_range_open_end(text: &str) -> Result<SeqRange, String> {
+pub(super) fn parse_sequence_range_open_end(text: impl AsRef<[u8]>) -> Result<SeqRange, String> {
     const PREFIX: &str = "Failed to parse sequence range";
-    let tokens: Vec<&str> = text.split('-').collect();
+    let tokens: Vec<&[u8]> = text.as_ref().split(|&byte| byte == b'-').collect();
     let (Some(&front), Some(&back)) = (tokens.first(), tokens.last()) else {
         unreachable!("split gives at least one piece");
     };

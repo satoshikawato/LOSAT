@@ -945,6 +945,34 @@ test('with -html, outfmt 0 is stored as HTML and the subject list shows the plai
   expect(readFileSync((await download.path())!, 'utf8')).toBe(stored);
 });
 
+// With -html and -outfmt 1 the run's own output (the custom output, outfmt 1) is NCBI's HTML too (line RG T4b, decision
+// T4a2-5 as for outfmt 0): stored and exported as written, while the subject list (read from outfmt 0) shows the plain title.
+test('with -html -outfmt 1, the custom output is stored as HTML and the subject list shows the plain title', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'The FakeEngine writes no HTML.');
+  await openParameters(page);
+  await program(page, 'blastp');
+  await paste(page, 'query', '>q protein query\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n');
+  await paste(page, 'subject', '>s1 protein <subject> & co\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n');
+  await page.getByTestId('param-extra').fill('-html -outfmt 1');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await run(page, 1);
+  await openRun(page, 1);
+  const description = subjectRows(page).first().locator('[data-field="description"]');
+  await expect(description).toContainText('protein <subject> & co');
+  await expect(description).not.toContainText(/<a\b|&lt;|&amp;|<\/a>/);
+  // The stored outfmt 1 is the engine's HTML.
+  await page.getByTestId('results-view-outputs').click();
+  await expect(page.getByTestId('results-outputs').getByRole('tab')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7', 'outfmt 1']);
+  await page.getByTestId('format-custom').click();
+  await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:4');
+  const stored = await text(page.getByTestId('result-output'));
+  expect(stored.startsWith('<HTML>\n<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>\n')).toBe(true);
+  expect(stored).toContain('protein &lt;subject&gt; &amp; co');
+  await page.getByTestId('results-download-all').click();
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('results-download-menu').getByTestId('results-download-custom').click()]);
+  expect(readFileSync((await download.path())!, 'utf8')).toBe(stored);
+});
+
 test('an HSP that outfmt 0 does not show, and a hit list that may have reached its limit', async ({ page }) => {
   // many.blastn of the outfmt 0 manifest: 260 subjects with hits, outfmt 0 shows the alignments
   // of the first 250 (BLAST+'s -num_alignments). The FakeEngine leaves its third subject out.
@@ -2277,8 +2305,8 @@ test('narrow screens: the results are no wider than the screen; "Run LOSAT" open
 test('long option names: from 320 to 1280 px the results are no wider than the window, and a name is whole where its line holds it', async ({
   page,
 }) => {
-  // -export_search_strategy and -logfile are not in the FakeEngine's description. The file of -logfile is shown under its
-  // option's name, with its own (long) name.
+  // -export_search_strategy and -logfile make files of the run, which the FakeEngine does not make. Each file is shown
+  // under its option's name, with its own (long) name (the strategy file since line RG item F1w).
   const extra = `-min_raw_gapped_score 20 -off_diagonal_range 0${BUILD_HAS_ENGINE ? ' -export_search_strategy strategy.asn -logfile a_log_file_name_longer_than_a_line.log' : ''}`;
   await program(page, 'blastn');
   await paste(page, 'query', `>q1\n${A}\n`);

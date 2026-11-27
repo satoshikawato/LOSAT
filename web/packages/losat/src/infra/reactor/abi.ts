@@ -8,11 +8,13 @@
 // and length is converted with `>>> 0` before it is used as an offset into the memory.
 import type { FastaReader, RecordKey, ShownIds } from '../../domain/dataset.js';
 import { isPrintedKind } from '../../domain/run-files.js';
-import { FileReadError, type StartResult, type ValidationResult } from '../../ports/engine.js';
+import { parseToolFrame, type ToolFrame } from '../../domain/tool-frames.js';
+import { FileReadError, type StartResult, type ToolValidation, type ValidationResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
+import { DIAGNOSTICS_STREAM } from '../../ports/run-output.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 12;
+export const ABI_VERSION = 15;
 /** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -40,6 +42,11 @@ export const MESSAGES_STREAM = 10;
  * `-xmlhelp`, or a version), for an argv whose start `prints` (ABI v2 §5, version 10; line WQA's D14, 2026-11-20).
  */
 export const PRINTED_STREAM = 11;
+/**
+ * Stream 12: the files that a tool run writes (`losat_web2_tool`, ABI v2 §5, version 13; line NP WW3a, D-WW3-6, 2026-11-22),
+ * each as it is written: every `emit` is one frame (domain/tool-frames.ts, `parseToolFrame`).
+ */
+export const TOOL_FILES_STREAM = 12;
 /** The place "nowhere" in the signals of streams 9 and 10 (ABI v2 §5): TBLASTX's `-logfile ""` or `-logfile /dev/null`. */
 export const PLACE_NOWHERE = 0xffff_ffff;
 /**
@@ -90,6 +97,8 @@ export const ROLE_SUBJECT = 1;
 export const FILE_WINDOW_MASKER_COUNTS = 1;
 /** The kind of a named input file (`file_begin`, ABI v2 §4): a registry file of NCBI's application start, the file of `-conffile`. */
 export const FILE_REGISTRY = 2;
+/** The kind of a named input file (`file_begin`, ABI v2 §4): a search strategy file, the file of `-import_search_strategy` (line RG item F2-4). */
+export const FILE_SEARCH_STRATEGY = 3;
 /** Bytes of a named input file given to the engine at a time, through one buffer of engine memory (`loadFile`). */
 export const FILE_CHUNK_BYTES = 8 * 1024 * 1024;
 
@@ -115,6 +124,7 @@ export interface AbiExports {
   readonly losat_web2_inflate_chunk: Export;
   readonly losat_web2_inflate_end: Export;
   readonly losat_web2_run: Export;
+  readonly losat_web2_tool: Export;
   readonly losat_web2_file_begin: Export;
   readonly losat_web2_file_chunk: Export;
   readonly losat_web2_file_end: Export;
@@ -123,6 +133,17 @@ export interface AbiExports {
 
 /** Receives the output streams of a run; `bytes` is valid only during the call. */
 export type StreamSink = (stream: number, bytes: Uint8Array) => void;
+
+/**
+ * Receives the streams of a tool run as the engine writes them (ABI v2 §4 `losat_web2_tool`): the standard output
+ * (stream 11), the standard error (stream 3) and the frames of the files (stream 12). `bytes` of a chunk or of a frame of
+ * bytes is valid only during the call: the receiver copies it (`ownedFrame`) or posts it on.
+ */
+export interface ToolSink {
+  stdout(bytes: Uint8Array): void;
+  stderr(bytes: Uint8Array): void;
+  file(frame: ToolFrame): void;
+}
 
 /** An export returned -1; the message is the engine's error text (ABI v2 §4). */
 export class EngineCallError extends Error {
@@ -196,9 +217,10 @@ function registeredInput(input: RecordsResponse): RegisteredInput {
  * The *file* JSON of `file_end` (ABI v2 §9). The contents of the file do not fail `file_end`: a
  * counts file that BLASTN cannot read has `stat_type` other than `obinary` and `binary`, or an
  * `error`, and the run that names it reports the CLI's own message; the start of `validate` and
- * `run` reads a registry file (kind 2) and reports it where the CLI does.
+ * `run` reads a registry file (kind 2) and reports it where the CLI does; the import of `validate`,
+ * `register_inputs` and `run` reads a search strategy file (kind 3) as the CLI's import reads it.
  */
-export type FileInfo = CountsFileInfo | RegistryFileInfo;
+export type FileInfo = CountsFileInfo | RegistryFileInfo | StrategyFileInfo;
 
 interface FileInfoOfAnyKind {
   readonly handle: number;
@@ -219,6 +241,11 @@ export interface CountsFileInfo extends FileInfoOfAnyKind {
 /** The *file* JSON of a registry file (kind 2). */
 export interface RegistryFileInfo extends FileInfoOfAnyKind {
   readonly kind: 'registry';
+}
+
+/** The *file* JSON of a search strategy file (kind 3). */
+export interface StrategyFileInfo extends FileInfoOfAnyKind {
+  readonly kind: 'search_strategy';
 }
 
 /** Memory of the instance for the chunks of a file, taken once and used for every chunk (`chunkBuffer`). */
@@ -287,7 +314,8 @@ export class ReactorAbi {
 
   /**
    * The *start* JSON of an argv (ABI v2 §4 `losat_web2_start`, §9): the registry file of its
-   * `-conffile`, the file of its `-logfile`, whether it is a dry run, whether its inputs are read
+   * `-conffile`, the file of its `-logfile`, the file of its `-export_search_strategy` (an engine
+   * before line RG item F1w gives none), whether it is a dry run, whether its inputs are read
    * together (`registerInputs`), what it prints in place of a search (`prints`) and whether it searches the database of
    * `-db` (`database`); or the CLI's message for an argv that the engine cannot start (a program that ABI v2 does not run).
    */
@@ -297,6 +325,8 @@ export class ReactorAbi {
     const json = this.response() as {
       conffile: string | null;
       log_file: string | null;
+      log_file_name?: string | null;
+      strategy_file?: string | null;
       dry_run: boolean;
       register_inputs: boolean;
       prints: string | null;
@@ -308,6 +338,8 @@ export class ReactorAbi {
       start: {
         conffile: json.conffile,
         logFile: json.log_file,
+        logFileName: json.log_file_name ?? null,
+        strategyFile: json.strategy_file ?? null,
         dryRun: json.dry_run,
         registerInputs: json.register_inputs,
         prints: json.prints,
@@ -318,21 +350,47 @@ export class ReactorAbi {
 
   /**
    * The verdict on an argv: the CLI's error text, or whether its run reads the inputs with NCBI's
-   * data loaders on (the *validation* JSON, ABI v2 §9, version 8), which `register` and `scanBegin`
-   * then take.
+   * data loaders on and, when the argv parses, with `-parse_deflines` on (the *validation* JSON,
+   * ABI v2 §9, version 15), which `register` and `scanBegin` then take. When the argv does not
+   * parse, `parse_deflines` is omitted so the host keeps its previous setting.
    */
   validate(argv: readonly string[]): ValidationResult {
     const status = this.call(this.exports.losat_web2_validate, [encoder.encode(argv.join('\0'))]);
     // The *validation* comes before the option checks, so a refused argv may have it too (line WQA's D13 round 3, L1):
     // it is read before the error, whose call drops the responses.
-    const known = status < 0 && this.responses.length === 0 ? undefined : (this.response() as { data_loaders: boolean }).data_loaders;
-    if (status < 0) return { ok: false, message: this.lastError(), ...(known === undefined ? {} : { dataLoaders: known }) };
-    return { ok: true, dataLoaders: known! };
+    const known =
+      status < 0 && this.responses.length === 0
+        ? undefined
+        : (this.response() as { data_loaders: boolean; parse_deflines?: boolean });
+    if (status < 0) {
+      return {
+        ok: false,
+        message: this.lastError(),
+        ...(known === undefined
+          ? {}
+          : {
+              dataLoaders: known.data_loaders,
+              ...(known.parse_deflines === undefined ? {} : { parseDeflines: known.parse_deflines }),
+            }),
+      };
+    }
+    return { ok: true, dataLoaders: known!.data_loaders, parseDeflines: known!.parse_deflines ?? false };
   }
 
-  /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders on or off (ABI v2 §4, version 8). */
-  register(program: string, role: number, dataLoaders: boolean, bytes: Uint8Array): RegisteredInput {
-    const handle = this.check(this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, bytes]));
+  /**
+   * The verdict on the argv of a tool run (`losat_web2_validate` with a tool's name as `argv[0]`, ABI v2 §4, version 13): the
+   * command line's error text, or valid. The call emits no response for it, and none is read.
+   */
+  validateTool(argv: readonly string[]): ToolValidation {
+    const status = this.call(this.exports.losat_web2_validate, [encoder.encode(argv.join('\0'))]);
+    return status < 0 ? { ok: false, message: this.lastError() } : { ok: true };
+  }
+
+  /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders and `-parse_deflines` on or off (ABI v2 §4, version 15). */
+  register(program: string, role: number, dataLoaders: boolean, parseDeflines: boolean, bytes: Uint8Array): RegisteredInput {
+    const handle = this.check(
+      this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, parseDeflines ? 1 : 0, bytes]),
+    );
     try {
       return { ...registeredInput(this.response() as RecordsResponse), handle };
     } catch (error) {
@@ -381,13 +439,14 @@ export class ReactorAbi {
     this.check(this.call(this.exports.losat_web2_release, [handle]));
   }
 
-  /** Starts an index scan with the engine's reader `reader` (ABI v2 §4, version 8). */
+  /** Starts an index scan with the engine's reader `reader` (ABI v2 §4, version 15). */
   scanBegin(reader: FastaReader): number {
     return this.check(
       this.call(this.exports.losat_web2_scan_begin, [
         encoder.encode(reader.program),
         reader.role === 'query' ? ROLE_QUERY : ROLE_SUBJECT,
         reader.dataLoaders ? 1 : 0,
+        reader.parseDeflines ? 1 : 0,
       ]),
     );
   }
@@ -499,6 +558,28 @@ export class ReactorAbi {
     }
   }
 
+  /**
+   * Runs a tool (ABI v2 §4 `losat_web2_tool`): its standard output, standard error and the frames of its files go to `sink`
+   * during the call, as the tool writes them, and nothing of them is kept here; returns the exit status that the run's
+   * *status* response gives (the command line's, for any status). A name that is not a tool that the engine runs throws
+   * the engine's message.
+   */
+  tool(argv: readonly string[], sink: ToolSink): number {
+    this.sink = (stream, bytes) => {
+      if (stream === PRINTED_STREAM) sink.stdout(bytes);
+      else if (stream === DIAGNOSTICS_STREAM) sink.stderr(bytes);
+      else if (stream === TOOL_FILES_STREAM) sink.file(parseToolFrame(bytes));
+    };
+    try {
+      this.check(this.call(this.exports.losat_web2_tool, [encoder.encode(argv.join('\0'))]));
+    } finally {
+      this.sink = undefined;
+    }
+    const { status } = this.response() as { status?: unknown };
+    if (typeof status !== 'number' || !Number.isInteger(status)) throw new EngineCallError('the engine sent no exit status of the tool run');
+    return status;
+  }
+
   private inflating(sink: (bytes: Uint8Array) => void, body: () => void): void {
     this.sink = (stream, bytes) => {
       if (stream === INFLATED_STREAM) sink(bytes);
@@ -586,8 +667,8 @@ export class ReactorAbi {
 export type FileLoader = Pick<ReactorAbi, 'stoppedBy' | 'fileBegin' | 'chunkBuffer' | 'fileChunk' | 'fileEnd' | 'fileRelease' | 'freeChunkBuffer'>;
 
 /**
- * Gives the engine a named input file (ABI v2 §4: a WindowMasker counts file, kind 1, or a registry
- * file, kind 2) and returns its *file* JSON: `file_begin` with the file's size, its bytes in chunks of
+ * Gives the engine a named input file (ABI v2 §4: a WindowMasker counts file, kind 1, a registry
+ * file, kind 2, or a search strategy file, kind 3) and returns its *file* JSON: `file_begin` with the file's size, its bytes in chunks of
  * at most `FILE_CHUNK_BYTES` read from the Blob one at a time and given through one buffer of engine
  * memory taken once, `file_end`. A file that the engine refuses (a chunk or its end), or that cannot
  * be read (`FileReadError`, with the browser's reason), is released, unless the instance stopped, so

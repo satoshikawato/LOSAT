@@ -20,7 +20,7 @@ pub(super) fn run_web_pair(
     // NCBI reference (598d8ae6): c++/include/algo/blast/api/local_blast.hpp:76-78
     // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
     let mut output = Vec::new();
-    let outfmt = args.outfmt.clone();
+    let outfmt = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
     let mut stderr = std::io::stderr();
     run_local(
         args,

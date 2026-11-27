@@ -2,8 +2,9 @@
 //! `blastdbcmd` reads one, `dustmasker` masks the low-complexity regions of nucleotide
 //! sequences and `segmasker` those of protein sequences, `windowmasker` masks the over-represented
 //! regions of nucleotide sequences by a counts file, `convert2blastmask` turns the lower case
-//! letters of FASTA input into masking information, and `makembindex` writes the megablast index
-//! of a BLAST database or of FASTA input. They take the command line's words,
+//! letters of FASTA input into masking information, `makembindex` writes the megablast index
+//! of a BLAST database or of FASTA input, and `blast_formatter` writes the reports of a BLAST
+//! archive (`-outfmt 11`) again. They take the command line's words,
 //! read the caller's reader where the command line reads its standard input, and write what it
 //! writes, to the caller's writers; none touches the process's standard streams.
 //!
@@ -14,6 +15,7 @@
 //! NCBI reference (598d8ae6): c++/src/app/winmasker/main.cpp:39-42
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
 //! NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/main.cpp:51-54
+//! NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:588-592
 #![warn(missing_docs, unused)]
 
 use std::ffi::OsString;
@@ -21,7 +23,7 @@ use std::io::{self, Read, Write};
 
 use super::error::Error;
 use crate::blastinput::ncbi_environment::{preparse, Preparsed};
-use crate::cli::{Cli, Commands};
+use crate::cli::Commands;
 use crate::writedb::makeblastdb;
 use crate::writedb::time::LocalTime;
 use crate::writedb::Platform;
@@ -75,17 +77,13 @@ fn refused(mut recorded: Recorded<'_>, reason: &[u8]) -> Error {
     }
 }
 
-/// The parser's refusal `error` of a tool's argv (makeblastdb's, which LOSAT's parser reads): the
-/// command line writes its message to standard error (`cli::command_line_message`, exit status 2),
-/// so it goes to the diagnostics, and the error is what the run wrote there without its last line
-/// feeds, as a tool's error (`outcome`), of the parser's kind (`Error::Argv`). The help (`-h`,
-/// `-help`), which the command line writes to standard output, is the error's text alone.
-fn parser_refused(mut recorded: Recorded<'_>, error: &clap::Error) -> Error {
-    if !error.use_stderr() {
-        return Error::Argv(crate::cli::render_message(error).into());
-    }
-    let _ = recorded.write_all(crate::cli::command_line_message(error, false).as_bytes());
-    Error::written_argv(recorded.bytes)
+/// LOSAT's refusal `reason` of an argument of a tool's argv (makeblastdb's, after NCBI's reader:
+/// `cli::reader::refusal_after_read`), written to its diagnostics as the command line writes it
+/// (`Error: ` and the reason; exit status 1 there); the error is the refusal's text, of the argv's
+/// kind (`Error::Argv`), as the searches' refusals of an argument.
+fn refused_argument(mut recorded: Recorded<'_>, reason: String) -> Error {
+    let _ = recorded.write_all(format!("Error: {reason}\n").as_bytes());
+    Error::Argv(reason.into_bytes())
 }
 
 /// Runs `blastdbcmd` with the words after the program name, as on the command line. `input` is what
@@ -157,11 +155,11 @@ pub fn run_segmasker(
 }
 
 /// Runs `windowmasker` with the words after the program name, as on the command line: as
-/// [`run_dustmasker`], with the unit counts of `-ustat` (making counts, `-mk_counts`, and
-/// converting them, `-convert`, are refused). `input` is what the command line reads as standard
-/// input (`-in -`, and without `-in`), what it writes to standard output goes to `output` (`-out`
-/// is a file, as there), what it writes to standard error to `diagnostics`, and a failure is an
-/// error whose message is that text without its last newlines. The call runs NCBI's application
+/// [`run_dustmasker`], in its three modes: making unit counts (`-mk_counts`), converting them to
+/// another format (`-convert`), and masking with them (`-ustat`). `input` is what the command line
+/// reads as standard input (`-in -`, and without `-in`), what it writes to standard output goes to
+/// `output` (`-out` is a file, as there), what it writes to standard error to `diagnostics`, and a
+/// failure is an error whose message is that text without its last newlines. The call runs NCBI's application
 /// start, as the command line does (`-logfile`, `-conffile`, `-dryrun`, the versions); `-xmlhelp`,
 /// whose XML only the command line writes, is refused.
 pub fn run_windowmasker(
@@ -221,6 +219,26 @@ pub fn run_makembindex(
     outcome(status, recorded.bytes)
 }
 
+/// Runs `blast_formatter` with the words after the program name, as on the command line: as
+/// [`run_dustmasker`], for the reports of a BLAST archive (`-archive`, the file of `-outfmt 11`).
+/// `input` is what the command line reads as standard input (`-archive -`), what it writes to
+/// standard output goes to `output` (`-out` is a file, as there), what it writes to standard error
+/// to `diagnostics`, and a failure is an error whose message is that text.
+pub fn run_blast_formatter(
+    argv: &[&str],
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> Result<(), Error> {
+    let words: Vec<OsString> = argv.iter().map(OsString::from).collect();
+    let mut recorded = Recorded {
+        writer: diagnostics,
+        bytes: Vec::new(),
+    };
+    let status = crate::blast_formatter::run_with(&words, input, output, &mut recorded);
+    outcome(status, recorded.bytes)
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1041
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1134-1136
 /// Runs `makeblastdb` with the words after the program name, as on the command line, which
@@ -228,8 +246,12 @@ pub fn run_makembindex(
 /// (`-in -`, and without `-in`), so a database can be built from FASTA in memory. What the command
 /// line writes to standard output goes to `output`, what it writes to standard error to
 /// `diagnostics`. A failure is an error whose message is that text without its last newlines; an
-/// argv that the parser refuses is `Error::Argv`, with the parser's message in the diagnostics too.
-/// The call runs NCBI's application start, as the command line does:
+/// argv that NCBI's argument reader refuses is `Error::Argv`, with the reader's report in the
+/// diagnostics too (with `-logfile`, the report's posts go to its file and the diagnostics say
+/// where they are, as on the command line), and so is LOSAT's refusal of an NCBI option that it
+/// does not run. A help word (`-h`, `-help`, `-help-full`) writes the help to `output` and returns
+/// `Ok(())`, as the command line prints it and exits with status 0, and as the library's other
+/// tools do. The call runs NCBI's application start, as the command line does:
 /// the file of `-logfile` gets its messages, the file of `-conffile` is loaded, the versions are
 /// printed to `output`, and `-dryrun` ends the call after the arguments and the settings.
 pub fn run_makeblastdb(
@@ -261,13 +283,50 @@ pub fn run_makeblastdb(
         Ok(Some(status)) => return outcome(status, recorded.bytes),
         Err(reason) => return Err(refused(recorded, reason.as_bytes())),
     }
-    drop(opened.target);
-    let cli: Cli = match crate::cli::try_parse_with_own_start(words()) {
-        Ok(cli) => cli,
-        Err(error) => return Err(parser_refused(recorded, &error)),
+    // NCBI's reader of the words that the start leaves to it (`-dryrun` taken), as on the command
+    // line (`cli::main_entry`): the help on `output`, an argument error's usage on the
+    // diagnostics and its posts where the diagnostics go (the file of `-logfile`); `-xmlhelp`,
+    // whose XML only the command line writes, is refused.
+    let tool = crate::cli::reader::tool("makeblastdb").expect("makeblastdb is on the reader");
+    let (words, dryrun) = match preparse(argv) {
+        Preparsed::Words { words, dryrun, .. } => (words, dryrun),
+        Preparsed::Version(_) => unreachable!("the versions are printed above"),
     };
-    let Commands::Makedb(args) = cli.command else {
-        unreachable!("the first word names makeblastdb");
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    let mut diag = crate::ncbi_app::Diag::new(&opened.target, &mut recorded, tool);
+    let read = crate::ncbi_app::read(
+        tool,
+        &words,
+        output,
+        &mut diag,
+        None,
+        &crate::report::run_files::OpenFiles::disk(),
+    );
+    drop(diag);
+    let args = match read {
+        Ok(args) => args,
+        Err(crate::ncbi_app::ReadEnd::Exit(0)) => return Ok(()),
+        Err(crate::ncbi_app::ReadEnd::Exit(_)) => return Err(Error::written_argv(recorded.bytes)),
+        Err(crate::ncbi_app::ReadEnd::Refused(reason)) => {
+            return Err(refused_argument(recorded, reason))
+        }
+    };
+    // `-dryrun` ends here, after the settings that LOSAT refuses, as on the command line
+    // (`cli::main_entry`).
+    if dryrun {
+        return match opened.start.settings() {
+            Ok(_) => Ok(()),
+            Err(reason) => Err(refused(recorded, reason.as_bytes())),
+        };
+    }
+    let converted = match crate::cli::reader::refusal_after_read(tool, &args) {
+        Some(reason) => Err(reason),
+        None => crate::cli::reader::options(tool, &args),
+    };
+    let args = match converted {
+        Ok(Commands::Makedb(args)) => args,
+        Ok(_) => unreachable!("makeblastdb's arguments are makeblastdb's"),
+        Err(reason) => return Err(refused_argument(recorded, reason)),
     };
     // NCBI's application layer reads the environment and the registry files before `Run`, and
     // LOSAT rejects the settings that change the output (`cli/main_entry.rs`).
@@ -275,10 +334,6 @@ pub fn run_makeblastdb(
         Ok(settings) => settings,
         Err(reason) => return Err(refused(recorded, reason.as_bytes())),
     };
-    // `-dryrun` ends here, as on the command line (`cli::main_entry`).
-    if matches!(preparse(argv), Preparsed::Words { dryrun: true, .. }) {
-        return Ok(());
-    }
     let checked = makeblastdb::check_registry_settings(
         &args,
         settings
@@ -294,7 +349,7 @@ pub fn run_makeblastdb(
     let now = LocalTime::now();
     let status = makeblastdb::run_with(
         &args,
-        makeblastdb::registry_blastdb(&settings),
+        &settings,
         now.as_ref(),
         Platform::host(),
         input,

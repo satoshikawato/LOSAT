@@ -30,9 +30,17 @@ use super::super::constants::{
     GREEDY_MAX_COST, GREEDY_MAX_COST_FRACTION, INVALID_DIAG, INVALID_OFFSET,
 };
 use super::super::sequence_compare::{find_first_mismatch, find_first_mismatch_ex};
-use super::utilities::gdb3;
+use super::utilities::{gdb3, gdb3_i64};
 use super::{AdjustedSubject, ContextQuery, SeqPointer};
 use crate::common::GapEditOp;
+
+#[path = "greedy_sparse.rs"]
+mod greedy_sparse;
+
+/// Largest gap open or gap extend cost handled by the dense 32-bit affine greedy tables.
+/// Costs above this boundary (up to `i32::MAX`) dispatch to `greedy_sparse`, leaving the hot
+/// dense path and default megablast unchanged.
+const MAX_DENSE_GREEDY_GAP_COST: i32 = 32767;
 
 /// Thread-local memory pool for non-affine greedy alignment.
 /// This avoids per-call allocation overhead by reusing memory across calls.
@@ -537,6 +545,7 @@ pub struct GreedyAlignScratch {
     pub(super) max_dist: i32,
     non_affine_mem: GreedyNonAffineMem,
     affine_mem: GreedyAffineMem,
+    sparse_mem: Option<Box<greedy_sparse::SparseAffineMem>>,
     fwd_prelim_tback: GapPrelimEditBlock,
     rev_prelim_tback: GapPrelimEditBlock,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2499-2507
@@ -555,6 +564,7 @@ impl GreedyAlignScratch {
             max_dist: 0,
             non_affine_mem: GreedyNonAffineMem::new(),
             affine_mem: GreedyAffineMem::new(),
+            sparse_mem: None,
             fwd_prelim_tback: GapPrelimEditBlock::new(),
             rev_prelim_tback: GapPrelimEditBlock::new(),
             x_edit_script: GapEditScript::new(0),
@@ -2410,7 +2420,7 @@ unsafe fn x_greedy_cell_slow<const REVERSE: bool>(
     // The reference loop indexes the slices with these offsets.
     assert!(seq1_index >= 0 && seq2_index >= 0);
     let index = x_first_mismatch::<REVERSE>(seq1, seq2, len1, len2, seq1_index, seq2_index);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:331-334,356-359
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:336-339,359-362
     let stop1 = seq1_index + index;
     let stop2 = seq2_index + index;
     if stop2 < len2 {
@@ -3435,7 +3445,7 @@ pub(crate) fn greedy_xdrop_offset(
     gap_extend: i32,
 ) -> i32 {
     let (mut match_score, mut mismatch_score, mut xdrop_threshold) = (reward, -penalty, x_dropoff);
-    let (mut gap_open, mut gap_extend) = (gap_open, gap_extend);
+    let (mut gap_open, mut gap_extend) = (i64::from(gap_open), i64::from(gap_extend));
     if match_score % 2 == 1 {
         match_score *= 2;
         mismatch_score *= 2;
@@ -3447,9 +3457,11 @@ pub(crate) fn greedy_xdrop_offset(
         return xdrop_threshold.wrapping_add(match_score / 2) / (match_score + mismatch_score) + 1;
     }
     let match_score_half = match_score / 2;
-    let mut op_cost = match_score + mismatch_score;
-    let mut gap_extend = gap_extend + match_score_half;
-    let score_common_factor = gdb3(&mut op_cost, &mut gap_open, &mut gap_extend);
+    let mut op_cost = i64::from(match_score) + i64::from(mismatch_score);
+    gap_extend += i64::from(match_score_half);
+    // `score_common_factor` divides `op_cost` (at most 2 * (32766 + 32767) = 131066), so it fits
+    // in `i32` without overflow while the widened gap costs avoid NCBI's 32-bit signed overflow.
+    let score_common_factor = gdb3_i64(&mut op_cost, &mut gap_open, &mut gap_extend) as i32;
     xdrop_threshold.wrapping_add(match_score_half) / score_common_factor + 1
 }
 
@@ -3995,6 +4007,37 @@ pub(super) fn greedy_gapped_alignment_internal(
     scratch: &mut GreedyAlignScratch,
     do_traceback: bool,
 ) -> Option<GreedyGappedCore> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:802-873
+    // Odd rewards double `x_drop` with `wrapping_mul(2)`, so raw values below `-2^30` wrap
+    // positive; gating on `x_drop.unsigned_abs()` catches those wraps as well as large positives.
+    if gap_open > MAX_DENSE_GREEDY_GAP_COST
+        || gap_extend > MAX_DENSE_GREEDY_GAP_COST
+        || ((gap_open | gap_extend) != 0
+            && (scratch.max_dist > 16_384 || x_drop.unsigned_abs() > 100_000_000)
+            && greedy_sparse::dense_affine_overflows(
+                scratch.max_dist.max(GREEDY_MAX_COST as i32),
+                x_drop,
+                reward,
+                -penalty,
+                gap_open,
+                gap_extend,
+            ))
+    {
+        return greedy_sparse::greedy_gapped_alignment_sparse(
+            query,
+            subject,
+            q_off,
+            s_off,
+            reward,
+            penalty,
+            gap_open,
+            gap_extend,
+            x_drop,
+            scratch,
+            do_traceback,
+        );
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2783-2786
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:331,353,471-472
     // A length below 0 (`q_avail` or `s_avail` for a start past an end of the context or of the
@@ -4083,7 +4126,7 @@ pub(super) fn greedy_gapped_alignment_internal(
             return None;
         }
         if debug_greedy_traceback_enabled(q_off, s_off) {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2805-2831
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2808-2818
             eprintln!(
                 "[GREEDY_DIRECTION] right q_ext={} s_ext={} score={}",
                 q_ext_r, s_ext_r, score
@@ -4093,8 +4136,33 @@ pub(super) fn greedy_gapped_alignment_internal(
             scratch.max_dist = max_dist;
             break;
         }
-        max_dist *= 2;
-        scratch.max_dist = max_dist;
+        if (gap_open | gap_extend) == 0 {
+            max_dist = max_dist.saturating_mul(2);
+            scratch.max_dist = max_dist;
+            continue;
+        }
+        let next = max_dist.saturating_mul(2);
+        scratch.max_dist = next;
+        if max_dist > i32::MAX / 2
+            || greedy_sparse::dense_affine_overflows(
+                next, x_drop, reward, -penalty, gap_open, gap_extend,
+            )
+        {
+            return greedy_sparse::greedy_gapped_alignment_sparse(
+                query,
+                subject,
+                q_off,
+                s_off,
+                reward,
+                penalty,
+                gap_open,
+                gap_extend,
+                x_drop,
+                scratch,
+                do_traceback,
+            );
+        }
+        max_dist = next;
     }
 
     loop {
@@ -4124,7 +4192,7 @@ pub(super) fn greedy_gapped_alignment_internal(
             return None;
         }
         if debug_greedy_traceback_enabled(q_off, s_off) {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2836-2864
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2839-2851
             eprintln!(
                 "[GREEDY_DIRECTION] left q_ext={} s_ext={} score={}",
                 q_ext_l, s_ext_l, score_left
@@ -4135,8 +4203,33 @@ pub(super) fn greedy_gapped_alignment_internal(
             scratch.max_dist = max_dist;
             break;
         }
-        max_dist *= 2;
-        scratch.max_dist = max_dist;
+        if (gap_open | gap_extend) == 0 {
+            max_dist = max_dist.saturating_mul(2);
+            scratch.max_dist = max_dist;
+            continue;
+        }
+        let next = max_dist.saturating_mul(2);
+        scratch.max_dist = next;
+        if max_dist > i32::MAX / 2
+            || greedy_sparse::dense_affine_overflows(
+                next, x_drop, reward, -penalty, gap_open, gap_extend,
+            )
+        {
+            return greedy_sparse::greedy_gapped_alignment_sparse(
+                query,
+                subject,
+                q_off,
+                s_off,
+                reward,
+                penalty,
+                gap_open,
+                gap_extend,
+                x_drop,
+                scratch,
+                do_traceback,
+            );
+        }
+        max_dist = next;
     }
 
     if gap_open == 0 && gap_extend == 0 {
@@ -4145,13 +4238,47 @@ pub(super) fn greedy_gapped_alignment_internal(
         score /= 2;
     }
 
+    Some(finish_greedy_gapped_core(
+        query,
+        subject,
+        q_off,
+        s_off,
+        q_ext_l,
+        s_ext_l,
+        q_ext_r,
+        s_ext_r,
+        score,
+        fwd_start_point,
+        rev_start_point,
+        scratch,
+        do_traceback,
+    ))
+}
+
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn finish_greedy_gapped_core(
+    query: ContextQuery<'_>,
+    subject: SeqPointer<'_>,
+    q_off: i32,
+    s_off: i32,
+    q_ext_l: i32,
+    s_ext_l: i32,
+    q_ext_r: i32,
+    s_ext_r: i32,
+    score: i32,
+    fwd_start_point: GreedySeed,
+    rev_start_point: GreedySeed,
+    scratch: &mut GreedyAlignScratch,
+    do_traceback: bool,
+) -> GreedyGappedCore {
     let mut q_seed_start = q_off;
     let mut s_seed_start = s_off;
     let mut edit_script = None;
 
     if do_traceback {
-        let rev = rev_prelim_tback.as_ref().unwrap();
-        let fwd = fwd_prelim_tback.as_ref().unwrap();
+        let rev = &scratch.rev_prelim_tback;
+        let fwd = &scratch.fwd_prelim_tback;
         let recycled = std::mem::replace(&mut scratch.x_edit_script, GapEditScript::new(0));
         if let Some(mut esp) = prelim_edit_block_to_gap_edit_script(rev, fwd, recycled) {
             let q_start = q_off - q_ext_l;
@@ -4188,7 +4315,7 @@ pub(super) fn greedy_gapped_alignment_internal(
                 subject.at(s_end),
             );
             if debug_traceback {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2669-2758
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2669-2759
                 eprintln!(
                     "[GREEDY_TRACEBACK] start=({}, {}) post_reduce={}",
                     q_off,
@@ -4239,7 +4366,7 @@ pub(super) fn greedy_gapped_alignment_internal(
         }
     }
 
-    Some(GreedyGappedCore {
+    GreedyGappedCore {
         q_start: q_off - q_ext_l,
         q_end: q_off + q_ext_r,
         s_start: s_off - s_ext_l,
@@ -4248,7 +4375,7 @@ pub(super) fn greedy_gapped_alignment_internal(
         s_seed_start,
         score,
         edit_script,
-    })
+    }
 }
 
 /// Greedy gapped alignment with traceback, from NCBI's `Int4` start `q_off` of the context `query`

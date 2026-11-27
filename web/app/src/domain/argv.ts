@@ -9,49 +9,24 @@ import { FILES_OUT, isFilesOutput, OUTFMT_FLAG, outfmtOption } from './output-fo
  */
 export const RESERVED_FLAGS: readonly string[] = Object.freeze(['-query', '-subject', '-out', '-num_threads']);
 
-/** The CLI's database options: `-db` and the filters of a database search. */
-export const DATABASE_FLAGS: readonly string[] = Object.freeze([
-  '-db',
-  '-seqidlist',
-  '-negative_seqidlist',
-  '-taxids',
-  '-taxidlist',
-  '-negative_taxids',
-  '-negative_taxidlist',
-  '-no_taxid_expansion',
-]);
-
-/**
- * The database masks (`-db_soft_mask`, `-db_hard_mask`): filters of a database search that the
- * CLI of the modes of DATABASE_MASK_PROGRAMS has.
- */
-export const DATABASE_MASK_FLAGS: readonly string[] = Object.freeze(['-db_soft_mask', '-db_hard_mask']);
-
-/** The modes whose CLI has the database masks (BLASTN; BLASTP, BLASTX, TBLASTN and TBLASTX, series NP M4b). */
-export const DATABASE_MASK_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']);
-
 /** The modes whose CLI has -mt_mode, which needs -num_threads (TBLASTX's has none). */
 const MT_MODE_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp', 'blastx', 'tblastn']);
 
 /**
  * Why a word of "Additional options" is refused before the engine reads it: options that the
- * application manages, and the CLI's options that a search in the browser cannot have, whose
- * CLI message would name what the user cannot change here (`-subject`, `-num_threads`; WA-FM-04);
- * undefined for the other words. The words of the CLI's help and version (`-h`, `-help`,
- * `-help-full`, `--help`, `-xmlhelp`, `-version` and its full forms) are not refused: the engine
- * prints the command line's text for them and searches nothing (*start*'s `prints`; line WQA's D14,
- * 2026-11-20, in place of WA-FM-05's refusal).
+ * application manages, and `-db` which is chosen in the Subject panel. The words of the CLI's
+ * help and version (`-h`, `-help`, `-help-full`, `-xmlhelp`, `-version` and its full forms) are
+ * not refused: the engine prints the command line's text for them and searches nothing (*start*'s
+ * `prints`; line WQA's D14, 2026-11-20). Database filters (`-seqidlist`, `-taxids`, `-db_soft_mask`,
+ * etc.) and BLASTN's `-filtering_db` are no longer refused here (WQA D12b + RG-D4 W2); `-remote`
+ * and `-entrez_query` remain refused by the engine.
  */
 function refusedWord(program: ProgramId, word: string): string | undefined {
   // -flag=value is the command line's form of -flag value too.
   const flag = word.split('=', 1)[0]!;
   if (flag === '-num_threads') return '-num_threads is set in the form: Threads';
+  if (flag === '-db') return '-db is set in the form: Subject';
   if (RESERVED_FLAGS.includes(flag) || (flag === '-mt_mode' && MT_MODE_PROGRAMS.includes(program))) return `${flag} is managed by LOSAT`;
-  if (flag === '-db') return '-db (a database search) is not supported in the browser yet';
-  if (program === 'blastn' && flag === '-filtering_db') return '-filtering_db (a BLAST database of repeats) is not supported in the browser yet';
-  if (DATABASE_FLAGS.includes(flag) || (DATABASE_MASK_PROGRAMS.includes(program) && DATABASE_MASK_FLAGS.includes(flag))) {
-    return `${flag} (a database search filter) is not supported in the browser yet`;
-  }
   return undefined;
 }
 
@@ -65,7 +40,10 @@ export const PASTED_NAMES = Object.freeze({ query: 'query.fa', subject: 'subject
 export interface ArgvInput {
   readonly program: ProgramId;
   readonly queryName: string;
-  readonly subjectName: string;
+  /** Subject FASTA name (`-subject`). Provide either `subjectName` or `databaseName`. */
+  readonly subjectName?: string;
+  /** Local BLAST database name (`-db`). Takes precedence over `subjectName` when present. */
+  readonly databaseName?: string;
   /** Parameters the user set explicitly, in display order. `true` means a bare flag. */
   readonly parameters: ReadonlyArray<readonly [flag: string, value: string | true]>;
   /** Words of other options, as on a command line ("Additional options", `splitOptions`), after the parameters. */
@@ -79,19 +57,22 @@ export interface ArgvInput {
  * D20, 2026-11-23).
  */
 export function userArgv(run: { readonly argv: readonly string[]; readonly prints?: unknown }): readonly string[] {
-  // buildArgv's layout: [program, '-query', name, '-subject', name, ...].
+  // buildArgv's layout: [program, '-query', name, '-subject' | '-db', name, ...].
   return run.prints === undefined ? run.argv : [run.argv[0]!, ...run.argv.slice(5)];
 }
 
 /**
- * Builds `[program, -query, name, -subject, name, ...parameters]`.
+ * Builds `[program, -query, name, -subject|-db, name, ...parameters]`.
  * Engine defaults are never written out, so the CLI command stays minimal.
  */
 export function buildArgv(input: ArgvInput): readonly string[] {
-  const argv = [input.program, '-query', input.queryName, '-subject', input.subjectName];
+  const argv =
+    input.databaseName !== undefined
+      ? [input.program, '-query', input.queryName, '-db', input.databaseName]
+      : [input.program, '-query', input.queryName, '-subject', input.subjectName ?? PASTED_NAMES.subject];
   for (const [flag, value] of input.parameters) {
     if (!flag.startsWith('-')) throw new Error(`parameter must start with "-": ${flag}`);
-    if (RESERVED_FLAGS.includes(flag)) throw new Error(`${flag} is managed by LOSAT`);
+    if (RESERVED_FLAGS.includes(flag) || flag === '-db') throw new Error(`${flag} is managed by LOSAT`);
     argv.push(flag);
     if (value !== true) argv.push(value);
   }
@@ -145,19 +126,44 @@ export function splitOptions(text: string): readonly string[] {
   return Object.freeze(words);
 }
 
+/** The line that ends the usage of an argument error of the engine (72 `=`): its posts follow. */
+const POSTS_RULE = '='.repeat(72);
+
+/**
+ * What the posts of an argument error of the engine name: the options (`flags`, as `-name`), and
+ * the words as they were typed (`words`: `Unknown argument: "foo"` names `-foo`, `Invalid argument: W`
+ * and `the offending value: W` name W). The posts write option names without their dash, except
+ * `Argument "-name". Value is missing`; a backquoted word after `argument:  ` is an option name only
+ * after "Incompatible with" and "required by" (after "cannot be converted" and "Illegal value" it
+ * is the value), and a name after "defined already: ". No look-behind (older Safari).
+ */
+function namedByPosts(posts: string): { readonly flags: ReadonlySet<string>; readonly words: ReadonlySet<string> } {
+  const flags = new Set<string>();
+  const words = new Set<string>();
+  for (const found of posts.matchAll(/Argument "-?([^"\s]+)"/g)) flags.add(`-${found[1]!}`);
+  for (const found of posts.matchAll(/(?:Incompatible with|required by) argument:\s+`([^'\s]+)'/g)) flags.add(`-${found[1]!}`);
+  for (const found of posts.matchAll(/defined already: (\S+)/g)) flags.add(`-${found[1]!}`);
+  for (const found of posts.matchAll(/Unknown argument: "([^"]*)"/g)) words.add(`-${found[1]!}`);
+  for (const found of posts.matchAll(/(?:Invalid argument: |the offending value: )(.+)/g)) words.add(found[1]!.trimEnd());
+  return { flags, words };
+}
+
 /**
  * The fields of the form that a refusal of the argv names (WA2-AX-05), which are marked as refused
  * and point to it: the options that it names (`-word_size`, not the `e-value` of a sentence), and
  * whether "Additional options" is one of them, as the Web's own messages about its words say
- * ("Additional options: …", "-evalue is set in the form: …"), or as an option typed there is named.
- * An option typed in "Additional options" is that field's, not the form's field of the same flag.
+ * ("Additional options: …", "-evalue is set in the form: …"), or as an option or a word typed there
+ * is named. An option typed in "Additional options" is that field's, not the form's field of the
+ * same flag.
+ *
+ * Two kinds of message are read. The engine's argument error is its usage, a line of 72 `=`, an
+ * empty line and two posts: only the posts are read, since the usage names every option of the
+ * program (`namedByPosts`). Any other message (the engine's one-line refusal, the Web's own) is
+ * read whole up to its first empty line, with options named by their dash.
  */
 export function refusedFields(message: string, extra: string): { readonly extra: boolean; readonly flags: ReadonlySet<string> } {
-  // The sentence ends at its first empty line: clap's `Usage:` line lists the options of the argv,
-  // and its `For more information, try '--help'.` line is not about the argv.
-  const sentence = message.split(/\n[ \t]*\n/, 1)[0]!;
-  // No look-behind (`(?<!…)`): a bundle with one does not load in an older Safari.
-  const named = new Set([...sentence.matchAll(/(?:^|[^\w-])(-[A-Za-z][A-Za-z0-9_]*)/g)].map((found) => found[1]!));
+  const lines = message.split(/\r?\n/);
+  const rule = lines.indexOf(POSTS_RULE);
   let words: readonly string[];
   try {
     words = splitOptions(extra);
@@ -165,14 +171,31 @@ export function refusedFields(message: string, extra: string): { readonly extra:
     words = [];
   }
   const typed = words.map((word) => word.split('=', 1)[0]!);
+  if (rule >= 0) {
+    const { flags, words: named } = namedByPosts(lines.slice(rule + 1).join('\n'));
+    return {
+      extra: words.some((word) => named.has(word)) || typed.some((word) => flags.has(word) || named.has(word)),
+      flags: new Set([...flags].filter((flag) => !typed.includes(flag))),
+    };
+  }
+  // The sentence ends at its first empty line.
+  const sentence = message.split(/\n[ \t]*\n/, 1)[0]!;
+  // No look-behind (`(?<!…)`): a bundle with one does not load in an older Safari.
+  const named = new Set([...sentence.matchAll(/(?:^|[^\w-])(-[A-Za-z][A-Za-z0-9_]*)/g)].map((found) => found[1]!));
   // A word typed there that is not an option name (`--help`, `evalue` without its `-`) is named as
-  // the start of the sentence ("--help is not available in the browser") or in quotes
-  // ("unknown option or argument 'evalue'"); the engine names the whole word (`'evalue=10'`).
+  // the start of the sentence ("--help is not available in the browser") or in quotes; the whole
+  // word is named (`'evalue=10'`).
   const quoted = (word: string) => word !== '' && (sentence.includes(`'${word}'`) || (sentence.startsWith(word) && /^\s|^$/.test(sentence.slice(word.length))));
   return {
     extra: message.startsWith('Additional options') || typed.some((word) => named.has(word) || quoted(word)) || words.some(quoted),
     flags: new Set([...named].filter((flag) => !typed.includes(flag))),
   };
+}
+
+/** Environment variables that a CLI reproduction command sets before `losat`. */
+export interface CommandEnv {
+  /** Relative folder for `BLASTDB=<dir>` when a folder-picked `-db` has auxiliary taxonomy files. */
+  readonly blastdb?: string;
 }
 
 /**
@@ -182,21 +205,33 @@ export function refusedFields(message: string, extra: string): { readonly extra:
  * format's -outfmt in place of the argv's; that of the argv's own -outfmt is the argv, with
  * `-out results` for 13 and 14, which the CLI writes as files (the files of the archive).
  */
-export function toShellCommand(argv: readonly string[], output: RunOutput): string {
-  return shellWords(commandWords(argv, output));
+export function toShellCommand(argv: readonly string[], output: RunOutput, env?: CommandEnv): string {
+  return shellWords(commandWords(argv, output, env));
 }
 
 /** The words of `toShellCommand`'s command. */
-export function commandWords(argv: readonly string[], output: RunOutput): readonly string[] {
-  if (output === CUSTOM_OUTPUT) return isFilesOutput(argv, output) ? ['losat', ...argv, '-out', FILES_OUT] : ['losat', ...argv];
+export function commandWords(argv: readonly string[], output: RunOutput, env?: CommandEnv): readonly string[] {
+  const prefix = env?.blastdb !== undefined && env.blastdb !== '' ? [`BLASTDB=${env.blastdb}`] : [];
+  if (output === CUSTOM_OUTPUT) {
+    return isFilesOutput(argv, output) ? [...prefix, 'losat', ...argv, '-out', FILES_OUT] : [...prefix, 'losat', ...argv];
+  }
   const option = outfmtOption(argv);
   const words = option === undefined ? argv : [...argv.slice(0, option.at), ...argv.slice(option.at + option.words)];
-  return ['losat', ...words, '-outfmt', String(output)];
+  return [...prefix, 'losat', ...words, '-outfmt', String(output)];
 }
+
+const SAFE_SHELL_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+const ENV_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s;
 
 /** A word as a POSIX shell reads it back (`splitOptions`): quoted only where it needs it. */
 export function shellWord(word: string): string {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
+  if (SAFE_SHELL_WORD.test(word)) return word;
+  const env = ENV_ASSIGNMENT.exec(word);
+  if (env !== null) {
+    const [, name, value] = env;
+    return `${name}=${SAFE_SHELL_WORD.test(value!) ? value! : `'${value!.replaceAll("'", "'\\''")}'`}`;
+  }
+  return `'${word.replaceAll("'", "'\\''")}'`;
 }
 
 /** Words as a POSIX shell reads them back (`splitOptions`): quoted only where they need it. */
@@ -219,13 +254,34 @@ export function optionNames(
   return words.map((word) => {
     const name = !value && word.startsWith('-');
     // -flag=value carries its value.
-    value = name && takesValue !== undefined && !word.includes('=') && (RESERVED_FLAGS.includes(word) || word === OUTFMT_FLAG || takesValue(word));
+    value =
+      name &&
+      takesValue !== undefined &&
+      !word.includes('=') &&
+      (RESERVED_FLAGS.includes(word) || word === '-db' || word === OUTFMT_FLAG || takesValue(word));
     return { text: shellWord(word), name };
   });
 }
 
-/** The value of an option in an argv (the word after its last occurrence), or undefined where it is not given. */
+/**
+ * The value of an option in an argv as the engine reads it (NCBI's reader takes `-flag value` and
+ * `-flag=value`): the word after its last occurrence, or the text after `=` where that occurrence is
+ * `-flag=value`; undefined where it is not given.
+ */
 export function optionValue(argv: readonly string[], flag: string): string | undefined {
-  const at = argv.lastIndexOf(flag);
-  return at < 0 || at + 1 >= argv.length ? undefined : argv[at + 1];
+  for (let at = argv.length - 1; at >= 0; at--) {
+    const word = argv[at]!;
+    if (word === flag) return argv[at + 1];
+    if (word.startsWith(`${flag}=`)) return word.slice(flag.length + 1);
+  }
+  return undefined;
+}
+
+/**
+ * The task that the engine runs for an argv: its -task (`-task value` or `-task=value`), else the
+ * default task of the program's options (`describe`'s `default` of -task); undefined for a program
+ * without -task, and where the options are unknown and the argv gives none.
+ */
+export function runTask(argv: readonly string[], options: ReadonlyArray<{ readonly flag: string; readonly defaultValue?: string }>): string | undefined {
+  return optionValue(argv, '-task') ?? options.find((option) => option.flag === '-task')?.defaultValue;
 }

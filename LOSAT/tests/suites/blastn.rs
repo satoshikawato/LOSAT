@@ -6,10 +6,16 @@
 // integration tests run natively only (WASI has no `std::env::temp_dir()` or `std::process::id()`)
 #![allow(clippy::disallowed_methods)]
 
+#[path = "../blastn_batch_refusal.rs"]
+mod blastn_batch_refusal;
 #[path = "../blastn_bn_csr.rs"]
 mod blastn_bn_csr;
 #[path = "../blastn_bn_seed_lists.rs"]
 mod blastn_bn_seed_lists;
+#[path = "../blastn_chunk_stops.rs"]
+mod blastn_chunk_stops;
+#[path = "../blastn_csr_qs_keep.rs"]
+mod blastn_csr_qs_keep;
 #[path = "../blastn_db_cut.rs"]
 mod blastn_db_cut;
 #[path = "../blastn_db_hard_long.rs"]
@@ -20,6 +26,10 @@ mod blastn_db_search;
 mod blastn_db_soft_long;
 #[path = "../blastn_db_stream.rs"]
 mod blastn_db_stream;
+#[path = "../blastn_dc_emit_hoist.rs"]
+mod blastn_dc_emit_hoist;
+#[path = "../blastn_dc_latest.rs"]
+mod blastn_dc_latest;
 #[path = "../blastn_dc_qs_ahead.rs"]
 mod blastn_dc_qs_ahead;
 #[path = "../blastn_dc_seed_lean.rs"]

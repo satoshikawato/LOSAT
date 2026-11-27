@@ -1,0 +1,8 @@
+case	label	arm	tool	threads	runs	wall_s	max_rss_mib	rss_anon_mib	rows	sha16	parity	build_note
+reads1e6	1M shotgun reads (megablast)	losat	LOSAT	16	2	23.29	599.67	593.44	48482	378cff80bd4324c2	same	LOSAT dde737f18
+reads1e6	1M shotgun reads (megablast)	ncbi	NCBI BLAST+	16	2	59.11	5809.46	5402.56	48482	378cff80bd4324c2	baseline	NCBI BLAST+ 2.17.0
+amp1e3	1,000 amplicons (QIIME 2)	losat	LOSAT	16	2	115.19	90.73	90.91	9992	51388b942d840d62	same	LOSAT dde737f18
+amp1e3	1,000 amplicons (QIIME 2)	ncbi	NCBI BLAST+	16	2	179.53	531.67	20.81	9992	51388b942d840d62	baseline	NCBI BLAST+ 2.17.0
+amp1e3	1,000 amplicons (QIIME 2)	vsearch	vsearch	16	1	349.04	15426.2	15432.14	10943	7d34b2533e498560	heuristic_56pct_overlap	vsearch 2.32.0
+amp1e4	10,000 amplicons (QIIME 2)	losat	LOSAT	16	2	1173.36	100.08	98.83	100007	9a94ceff9d8941d3	same_as_ncbi_n1	LOSAT dde737f18
+amp1e4	10,000 amplicons (QIIME 2)	ncbi	NCBI BLAST+	16	2	1845.71	574.63	20.82	100012	f7d0bf7e2c8ad42d	mt_drifts_5_rows	NCBI BLAST+ 2.17.0

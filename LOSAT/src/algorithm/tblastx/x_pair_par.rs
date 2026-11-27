@@ -427,7 +427,7 @@ fn x_mask_max_cells(kib: usize, threads: usize) -> usize {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516
 // The cell of a hit in a unit's table: the raw diagonal minus the unit's lowest one, without a
 // mask (`XUnmasked`, module doc item 3), or, with LOSAT_X_TBXUNITMASK, that value masked to the
 // unit's table of `x_masked_cells` cells (`XMasked`, module doc). One type per form, so that the
@@ -441,6 +441,10 @@ pub(super) trait XCells: Copy {
     fn of(lo: u32, mask: u32) -> Self;
     /// The cell of hit (q, s).
     fn cell(self, query_offset: u32, subject_offset: u32) -> usize;
+    /// LOSAT_X_TBXHITSTEP (x_tbx_hitbf.rs `x_hits_steps`): the unit's lowest raw diagonal as an
+    /// exact integer, so that the cell of a hit (q, s) of the unit is q - s minus it, without a
+    /// wrap (`XUnmasked`); 0 for `XMasked`, whose cells are masked (`cell`).
+    fn lowest_diagonal(self) -> isize;
 }
 
 /// The unmasked cells: q - s - lo (u32 wrapping).
@@ -460,6 +464,15 @@ impl XCells for XUnmasked {
         query_offset
             .wrapping_sub(subject_offset)
             .wrapping_sub(self.lo) as usize
+    }
+    // No NCBI counterpart: `lo` is q_min - (s_len - 1) of a unit (`scan_unit` and the batched and
+    // sliced scans set it so). q_min is a query offset, below 2^31 (a frame's `frame_base` plus a
+    // position, an i32), and s_len is below 2^29 (x_tbx_hitbf.rs `fits`), so as an i32 `lo` is
+    // that exact value; every hit (q, s) of the unit has q_min <= q and s < s_len, so q - s - lo,
+    // computed without a wrap, is its cell.
+    #[inline(always)]
+    fn lowest_diagonal(self) -> isize {
+        self.lo as i32 as isize
     }
 }
 
@@ -482,6 +495,10 @@ impl XCells for XMasked {
             .wrapping_sub(subject_offset)
             .wrapping_sub(self.lo)
             & self.mask) as usize
+    }
+    #[inline(always)]
+    fn lowest_diagonal(self) -> isize {
+        0
     }
 }
 
@@ -1474,7 +1491,7 @@ impl XGroup {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-511
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:504-505
     /// One scan call of this group's table: `x_scan_subject_byte` on a table with presence bytes
     /// (LOSAT_X_TBXSCANBYTE), `x_scan_subject` (LOSAT_X_TBXSCANBF's choice), or
     /// `x_scan_subject_compact` on a compacted table. The offset array holds
@@ -1544,13 +1561,19 @@ impl XGroup {
     }
 }
 
-/// One unit: subject frame `f`, its chunk number `k`, context group `g`.
+/// One unit: subject frame `f`, its chunk number `k`, context group `g` (`XPairPar::x_unit`).
 #[derive(Clone, Copy)]
 pub(super) struct XUnit {
     f: usize,
     k: usize,
     chunk: SubjectChunk,
     g: usize,
+    /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): whether the frame `f` may take the walks the sentinels
+    /// stop (`x_tbx_sent_frame`: the batch's contexts allow them and every byte of the frame's
+    /// buffer is a key's). That check reads the whole buffer, so `x_unit` finds it once for each
+    /// chunk where the units are listed (`run_subject_units`), not in every unit's
+    /// `x_unit_sent`.
+    sent_frame: bool,
 }
 
 /// Per-thread scratch of the units: the offset pairs and the unit diagonal table.
@@ -2265,14 +2288,10 @@ impl<M: TbxScore> XPairPar<M> {
                 if chunk.length < inp.wordsize as usize {
                     continue;
                 }
+                let first = self.x_unit(inp, f, k, *chunk, 0);
                 for g in 0..self.x_group_count() {
                     if self.x_group_has_entries(g) {
-                        units.push(XUnit {
-                            f,
-                            k,
-                            chunk: *chunk,
-                            g,
-                        });
+                        units.push(XUnit { g, ..first });
                     }
                 }
             }
@@ -2495,7 +2514,7 @@ impl<M: TbxScore> XPairPar<M> {
                     let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
                     // Scan batches until the current subject offset advances past the end bound.
                     while scan_range[1] <= scan_range[2] {
-                        if !x_unit_batch::<S, XNoProbe, XUnmasked, _, false, false, 0>(
+                        if !x_unit_batch::<S, XNoProbe, XUnmasked, _, false, false, false, 0>(
                             table,
                             subject,
                             &seq_ranges,
@@ -2979,7 +2998,7 @@ impl<M: TbxScore> XPairPar<M> {
         init_hsps: &mut S,
         probe: &mut P,
     ) {
-        self.scan_unit_hits::<S, P, PF, false, 0>(unit, inp, scratch, init_hsps, probe);
+        self.scan_unit_hits::<S, P, PF, false, false, 0>(unit, inp, scratch, init_hsps, probe);
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
@@ -2993,6 +3012,7 @@ impl<M: TbxScore> XPairPar<M> {
         P: XProbe,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -3004,11 +3024,12 @@ impl<M: TbxScore> XPairPar<M> {
     ) {
         // EXPERIMENT (LOSAT_X_TBXUNITMASK): the masked table where the rule holds (module doc).
         match self.x_unit_mask(unit, inp.window) {
-            None => self.scan_unit_cells::<S, P, XUnmasked, PF, BF, SENT>(
+            None => self.scan_unit_cells::<S, P, XUnmasked, PF, BF, STEP, SENT>(
                 unit, inp, scratch, init_hsps, probe, 0,
             ),
-            Some(mask) => self
-                .scan_unit_masked::<S, P, PF, BF, SENT>(unit, inp, scratch, init_hsps, probe, mask),
+            Some(mask) => self.scan_unit_masked::<S, P, PF, BF, STEP, SENT>(
+                unit, inp, scratch, init_hsps, probe, mask,
+            ),
         }
     }
 
@@ -3021,6 +3042,7 @@ impl<M: TbxScore> XPairPar<M> {
         P: XProbe,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -3031,19 +3053,38 @@ impl<M: TbxScore> XPairPar<M> {
         probe: &mut P,
         mask: u32,
     ) {
-        self.scan_unit_cells::<S, P, XMasked, PF, BF, SENT>(
+        self.scan_unit_cells::<S, P, XMasked, PF, BF, STEP, SENT>(
             unit, inp, scratch, init_hsps, probe, mask,
         );
     }
 
+    /// The unit of the context group `g` on the chunk `k` (`chunk`) of the subject frame `f`.
+    pub(super) fn x_unit(
+        &self,
+        inp: &XSubject<'_>,
+        f: usize,
+        k: usize,
+        chunk: SubjectChunk,
+        g: usize,
+    ) -> XUnit {
+        let sent_frame = x_tbx_sent_frame(self.sent, &inp.s_frames_preliminary[f].aa_seq);
+        XUnit {
+            f,
+            k,
+            chunk,
+            g,
+            sent_frame,
+        }
+    }
+
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): never on wasm32 (line W keeps its walks there).
-    /// Whether the extensions of `unit` take the walks the sentinels stop: the batch's contexts
-    /// allow them (`sent`) and the unit's chunk is its whole subject frame.
+    /// Whether the extensions of `unit` take the walks the sentinels stop: its frame may
+    /// (`XUnit::sent_frame`) and the unit's chunk is its whole subject frame.
     #[inline(always)]
     pub(super) fn x_unit_sent(&self, unit: &XUnit, inp: &XSubject<'_>) -> bool {
         cfg!(not(target_arch = "wasm32"))
             && x_tbx_sent_subject(
-                self.sent,
+                unit.sent_frame,
                 &inp.s_frames_preliminary[unit.f].aa_seq,
                 unit.chunk.offset,
                 unit.chunk.length,
@@ -3061,6 +3102,7 @@ impl<M: TbxScore> XPairPar<M> {
         C: XCells,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -3163,7 +3205,7 @@ impl<M: TbxScore> XPairPar<M> {
             // Scan batches until the current subject offset advances past the end bound.
             while scan_range[1] <= scan_range[2] {
                 // One batch per call (`x_unit_batch`: its own function on wasm32 only).
-                if !x_unit_batch::<S, P, C, _, PF, BF, SENT>(
+                if !x_unit_batch::<S, P, C, _, PF, BF, STEP, SENT>(
                     group,
                     subject,
                     &seq_ranges,
@@ -3205,6 +3247,7 @@ fn x_unit_batch<
     M: TbxScore,
     const PF: bool,
     const BF: bool,
+    const STEP: bool,
     const SENT: usize,
 >(
     group: &XGroup,
@@ -3243,7 +3286,7 @@ fn x_unit_batch<
         // scratch.diag.len() as below; `fits` holds (the caller's rule). `x_hit` gets the cell of
         // its hit, as below.
         unsafe {
-            x_tbx_hitbf::x_hits_bf::<C, PF>(
+            x_tbx_hitbf::x_hits_bf::<C, PF, STEP>(
                 diag_ptr,
                 offset_pairs_ptr,
                 hits as usize,

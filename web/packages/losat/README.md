@@ -10,7 +10,7 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 12, `docs/web/abi_v2.md` in the repository). A search
+The two builds speak the same ABI (ABI v2 at version 15, `docs/web/abi_v2.md` in the repository). A search
 gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
@@ -27,7 +27,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 12 |
+| 0.2.0 | 0.2.0 | 15 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
@@ -111,26 +111,43 @@ of that output, whose error is at `error`: `'diagnostics'`, `'logfile'` or `'now
 A host that keeps every chunk would keep output that the command line does not write.
 
 `engine.start(argv)` reads what the command line reads before its arguments: the file that
-`-conffile` names, the file that `-logfile` names, and whether the argv has `-dryrun`. Give the
+`-conffile` names, the file that `-logfile` names (`StartInfo.logFile` and its normalized host
+name `StartInfo.logFileName`), the search strategy file that
+`-export_search_strategy` names (`StartInfo.strategyFile`), and whether the argv has `-dryrun`. Give the
 file of `-conffile` under that name to `engine.validate(argv, registry)` and as
 `EngineRunRequest.conffile`; `reactorControl` validates it on an instance of its own, opened with its
-second argument. A run returns the `-logfile` file in `RuntimeInfo.runFiles`. When a
-run fails, `runFilesOf(error)` returns it. A run that the engine failed after it began to write ends
+second argument. A run returns the `-logfile` file and the search strategy file in
+`RuntimeInfo.runFiles`, each `RunFile` with the option that names it (`runFileOption(file)`:
+`'logfile'` or `'export_search_strategy'`). When a run fails, `runFilesOf(error)` returns them. A run that the engine failed after it began to write ends
 its output with `fail` in place of `end` (`runOutputFailedOf(error)` is then true): the stream 3 that
 arrived holds the warnings that the command line writes to its standard error before the error. The engine reads a `-logfile` name as the command line on
-Linux reads it where the name's directories exist: the file's name is the whole name, which may
-contain `/` (`logs/run.log`, `/tmp/run.log`, `/dev/stdout`, `logs/`, which the command line makes as
-the file `logs`); show and save it as a name, not as a path. The standard error (`/dev/stderr`), a
+Linux reads it in a working directory holding the run's files (the run directory's files, plus a
+search's `-query`, `-subject`, `-conffile` and `-window_masker_db` names): a name in a folder that
+is missing (`logs/run.log` without `logs`) or naming a folder gives no file and keeps its messages
+on stream 3; a name that is an existing file of the run or a file the run opens or checks for reading even when that file is missing (`q.fa`, `.ncbirc`, `/tmp/q.fa`, a `-db` list file, a database lookup file of `-db`, `-filtering_db` or `windowmasker -infmt blastdb`, `taxdb.bti` when `-outfmt` consults the taxonomy database, an input of `windowmasker` including entries listed by `-fa_list true`, inside or outside the working directory) is refused, because LOSAT Web does not write to the run's files. When a file is
+made, its name is the command line's file name (`run.log` for ` run.log` and `./run.log`, `logs` for
+`logs/`, `sub/run.log` when `sub` is a folder of the run, `/tmp/run.log` outside the working
+directory, and `/dev/stdout` for a search's `/dev/stdout`); show and save it as a name, not as a
+path. The standard error (`/dev/stderr`), a
 directory (`.`, `logs/.`) and a name where a user's command line cannot make or open a file give
 no file: their messages are on stream 3. A user makes files in the working directory, in a home
 (`/home/<user>/...`) and where every user does (`/tmp`, `/var/tmp`, `/dev/shm`, `/run/lock`,
 `/var/lock`, `/var/crash`); every other directory is root's (`/etc/run.log`, `/data/run.log`,
 `/dev/run.log`, `//run.log`), and the system refuses a component of more than 255 bytes. A name
 may climb out of a directory of root's (`/etc/default/../../tmp/run.log` is `/tmp/run.log`), but not out of one
-that a user cannot enter (`/root/../tmp/run.log`). `/dev/fd/2` and
+that a user cannot enter (`/root/../tmp/run.log`). `/dev/fd/2`, `/dev/fd/1` and
 `/proc/self/fd/2` give no file and send the messages that go to the file nowhere, as `/dev/null`
 does: the command line writes nothing to a log on a file system without free space, which these
 are.
+
+The search strategy file holds the command line's bytes for the argv. Its name is read as the
+`-logfile` name is, as the command line opens it for writing: a name the command line cannot open
+(`""`, a directory, `/etc/s.asn`) is the command line's `File is not accessible` error at once;
+`/dev/null` and the devices whose writes are lost give no file; `-` and the standard output are the
+command line's refusals, and the standard error, the other devices and files of the system, and the
+file of `-query`, `-subject`, `-logfile` or `-window_masker_db` are LOSAT Web's, raised where the
+command line writes its first request. A run that fails after the file is made keeps it, empty or cut
+back as the command line leaves it.
 
 `RuntimeInfo.messages` says where the run's messages went (the warnings that the command line writes
 to its standard error without `-logfile`): `'diagnostics'` (stream 3), `'logfile'` (the file of
@@ -185,8 +202,8 @@ const argv = ['blastp', '-query', 'query.faa', '-subject', 'subject.faa', '-num_
 // The verdict on the argv says whether its run reads the inputs with NCBI's data loaders on.
 const validation = abi.validate(argv);
 if (!validation.ok) throw new Error(validation.message);
-const query = abi.register('blastp', ROLE_QUERY, validation.dataLoaders, queryFasta);
-const subject = abi.register('blastp', ROLE_SUBJECT, validation.dataLoaders, subjectFasta);
+const query = abi.register('blastp', ROLE_QUERY, validation.dataLoaders, validation.parseDeflines, queryFasta);
+const subject = abi.register('blastp', ROLE_SUBJECT, validation.dataLoaders, validation.parseDeflines, subjectFasta);
 let outfmt6: Uint8Array[] = [];
 // -query and -subject name the inputs in the outputs; the sequences come from the handles.
 abi.run(argv, query.handle, subject.handle, (stream, bytes) => {
@@ -200,6 +217,119 @@ abi.release(subject.handle);
 
 The package's tests run this example on one of the repository's fixtures (`tests/package.test.ts`):
 its outfmt 6 is byte for byte what NCBI BLAST+ 2.17.0 writes for the same search.
+
+## Running windowmasker
+
+`engine.runTool(argv, options)` runs the command line's `windowmasker` (`losat windowmasker`: `-mk_counts` in each
+`-sformat`, `-convert`, and the masking of `-ustat` in each `-outfmt`, with their options, help and version) on the
+user's files, as the command line runs it in a folder that holds them. `argv[0]` is `windowmasker`, then the command
+line's words. `options.directory` holds the files that the words name (`-in`, `-ustat`, `-fa_list` and the files it
+lists, `-ids`, `-exclude_ids`, a BLAST database of `-infmt blastdb`, `-conffile`), each a `DirectoryFile` that the engine
+reads in place, as for a search of `-db` (above). A folder of the directory opens as it does on Linux, and a read of it
+fails: `-in <folder>` ends as the command line does, with "Is a directory". The promise resolves with the command line's
+exit status (`status`, whatever it is) and what the tool wrote: `stdout`, `stderr` and `files` (`-out FILE`, `-logfile FILE`,
+in the order the run opened them, under the command line's file name: `x.counts` for `./x.counts`, `logs` for `-logfile logs/`,
+`sub/x` when `sub` is a folder of the directory; `-logfile /dev/stdout` writes diagnostic messages into `stdout` in the command
+line's order, and a `-logfile` naming an existing file or an input the run opens or checks for reading (including `-fa_list true` entries and `-infmt blastdb` database lookup files), or a `-out` naming an existing file or a missing input that the command line reads after opening `-out` (`-in` of `-mk_counts`, including `-fa_list true` entries and `-infmt blastdb` lookup files, and `-ustat` of masking), is refused with status 1). The status is the command line's: an argument error and a refusal by LOSAT are status 1, NCBI's exceptions
+(a missing file, a bad counts file) are status 3, a `-conffile` that is not there is status 255, and a registry file that is
+malformed (a `-conffile`, or a `windowmasker.ini` in the directory, with a bad section or entry line) is status 2; their text
+is on `stderr`, but with `-logfile FILE` NCBI's report is in that file, as it is on the command line. `stderr` arrives as
+the tool writes it, not when the run ends, so `onStderr` can show a warning while the run goes on. A name that is not a tool
+rejects. The run is one at a time with the searches; `options.signal` cancels it.
+
+```ts
+import { WasmEngine } from 'losat';
+
+declare const engine: WasmEngine; // as in "Use"
+declare const fasta: File; // the genome, from a file picker
+
+const argv = ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-unit', '15', '-out', 'genome.counts', '-logfile', 'genome.log'];
+const directory = [{ name: 'genome.fa', file: fasta }];
+// The command line's check of the words, before any file is opened. It reads the files that the run reads
+// (`-conffile`, `.ncbirc`, `windowmasker.ini`), so give it the run's directory.
+const verdict = await engine.validateTool(argv, { directory });
+if (!verdict.ok) throw new Error(verdict.message);
+
+// Without sinks, each output is collected as a Blob (a list of the engine's chunks, never one joined array).
+const { status, stderr, files } = await engine.runTool(argv, { directory });
+const counts = files.find((file) => file.name === 'genome.counts')?.file; // a Blob
+if (status !== 0) throw new Error(await stderr.text());
+```
+
+A tool's output may be larger than the browser's memory (human unit counts are 724 MB, a genome masked as FASTA is
+3.1 GB), so the engine sends it in pieces as it writes it (a file's bytes in frames of up to 1 MiB), and a sink takes each
+chunk instead of the host keeping it. A file that grows slowly, such as a `-logfile`'s messages, reaches the sink in a frame
+that is sent when it fills, before the run writes elsewhere in that file or cuts it, and when the run ends: a small log may
+arrive only then. The standard error is the exception: it arrives at each write.
+
+```ts
+declare const folder: FileSystemDirectoryHandle; // the user's choice, from showDirectoryPicker()
+
+// One TextDecoder for the whole stream, with `stream: true`, so that a character that two chunks split is not garbled.
+const decoder = new TextDecoder();
+const result = await engine.runTool(
+  ['windowmasker', '-ustat', 'genome.counts', '-in', 'genome.fa', '-outfmt', 'fasta', '-out', 'masked.fa'],
+  {
+    directory: [
+      { name: 'genome.counts', file: counts! },
+      { name: 'genome.fa', file: fasta },
+    ],
+    sinks: {
+      onStderr: (chunk) => console.warn(decoder.decode(chunk, { stream: true })),
+      // One sink for each file that the run opens (one call for a file that it opens twice, as `-out X -logfile X` does).
+      // The host calls `write` for each chunk, in order, then `close`.
+      onFile: async (name) => {
+        // A name may hold `/`: `sub/x` is the file `x` of the folder `sub`.
+        let parent = folder;
+        const parts = name.split('/');
+        for (const part of parts.slice(0, -1)) parent = await parent.getDirectoryHandle(part, { create: true });
+        const writable = await (await parent.getFileHandle(parts.at(-1)!, { create: true })).createWritable();
+        return {
+          // The bytes go at `offset` of the file: an append in the usual case, but not always (see below).
+          write: (chunk, offset) => writable.write({ type: 'write', position: offset, data: chunk }),
+          // The file's length becomes `length`: the run empties a file when it opens it again for writing.
+          truncate: (length) => writable.truncate(length),
+          close: () => writable.close(),
+          abort: (reason) => writable.abort(reason),
+        };
+      },
+    },
+  },
+);
+decoder.decode(); // the end of the standard error: the decoder flushes a character that was left incomplete
+// The files and the standard error went to the sinks, so `result.files` is empty and `result.stderr` is an empty Blob;
+// `result.status` is the exit status. A sink that returns undefined for a name has that file collected in `files`.
+```
+
+The host awaits each call of a sink before the next one (`write`, `truncate` and `close` may return a promise), and the chunks
+are the sink's own. A run that opens one file twice (`-out X -logfile X`, or `-out ./X -logfile X`: the same file) writes
+one file, as the command line does: each handle has its own position, so a write may come at an offset before the end of
+the file, and one past the end leaves zero bytes between. A sink that writes at `offset` and cuts at `truncate` is exact for
+that; the default collection, a Blob, is too. `onFile` is called once for each file that the run opens, also then. A cancel, a
+failure of the engine or an error of a sink ends the run and calls `abort` of each sink whose file is still open, and the
+promise rejects.
+
+A sink slower than the engine does not make the page hold the output. Where the page can share memory with the Engine worker
+(a cross-origin isolated page, which the threaded module needs too; Node), the worker stops the engine while more than 64 MiB
+of the bytes that it posted wait for the sinks, and goes on as they take them. Where the page is not cross-origin isolated
+(no `SharedArrayBuffer`), nothing can wait: the chunks queue on the page until the sink takes them, so a sink that is slower
+than the engine holds what the engine has written and the sink has not taken. Serve the page isolated to bound it, or take the
+output with a sink that keeps up. A file that no sink takes is collected as a Blob, and does not queue.
+
+`engine.validateTool(argv, { directory })` checks the words as the command line does before the tool opens a file, and reads
+the run's registry files (`-conffile`, `.ncbirc`, `windowmasker.ini`) as the command line does, so it takes the same
+`directory` as `runTool`: it opens the files on the instance that the Engine worker has loaded (a threaded runtime that the
+searches use keeps its threads, its retained subject and counts file; the serial one is loaded only when none is). It takes
+its turn there like a run: it waits behind a run in progress. It does not make the engine busy: a run may start while a
+check is pending, and a check may be asked during a run. When the worker that has it ends (a cancel, a renewal, a stop), the
+check goes to the next worker; a check that three workers ended through no run's doing is given up. A check whose instance
+stops ends the worker as a run's does: that check rejects, a run posted behind it on that worker fails with "Run the search
+again.", and the next run starts a new worker.
+
+`engine.describeTool(tool)` reads a tool's options, defaults, value lists, ranges and exclusions by running
+`[tool, '-xmlhelp']` (on the control reactor when `reactorControl` provides it, else through `runTool`) and parsing the
+XML with `parseToolDescription`. `parseToolDescription(xml)` is also exported from `losat` and `losat/domain` and needs
+no `DOMParser`, so it works in workers and in Node.
 
 ## License
 

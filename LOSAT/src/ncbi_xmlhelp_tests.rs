@@ -2,24 +2,15 @@
 //! refuses by name, against the readers themselves.
 
 use super::*;
-use crate::cli::{run_refusal, try_parse_from, xml_help_refusal, xml_help_text, Cli};
+use crate::blastinput::ncbi_environment::DiagTarget;
+use crate::cli::{run_refusal, try_parse_from, xml_help_refusal, xml_help_text, ArgvError};
 use crate::ncbi_app::args::{refusal, Refusal};
-use clap::error::ErrorKind;
 use std::ffi::OsString;
 
-/// The programs that `cli::try_parse_from` reads.
-const CLAP_PROGRAMS: [&str; 10] = [
-    "blastn",
-    "blastp",
-    "blastx",
-    "tblastn",
-    "tblastx",
-    "psiblast",
-    "rpsblast",
-    "rpstblastn",
-    "makeblastdb",
-    "rpsbproc",
-];
+/// The programs whose arguments NCBI's reader reads into their options (`cli::reader`).
+fn reader_programs() -> impl Iterator<Item = &'static str> {
+    crate::cli::reader::options_tests::programs()
+}
 
 /// NCBI's arguments that its application start reads before the arguments
 /// (`ncbi_environment::preparse`), which the parser of the Web engine (`try_parse_from`: no
@@ -63,48 +54,38 @@ fn dependencies(xml: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-// Each argument of NCBI's XML is read by the parser or refused by name (none is unknown), the
-// parser refuses by name exactly the rows of the refusals that say so (`Refusal::Read`), and the
-// XML keeps exactly the ones read and not refused at the run (`Refusal::Run`): the parser is asked
-// with the argument (a value `1` for a key) before `-h`, whose help ends the reading when the
-// argument passed.
+// The arguments of NCBI's XML, which NCBI's reader reads (its tables are made from the XML), and
+// those that the programs' options read are one table (line RG DECISIONS K4i-2b-2 (2), item
+// K4i-3c): each argument of the XML is read into the options under its name, or refused by name
+// after the read (`Refusal::Read`, never read); the options read no other argument. Each read is
+// of the argument's kind in the tables, a key or a flag as the XML says (the debug check of
+// `Args::check_read`, on in the tests). The XML that `-xmlhelp` prints keeps exactly the arguments
+// not refused (by name or at the run, `Refusal::Run`).
 #[test]
-fn the_xml_keeps_the_arguments_that_the_parser_reads() {
-    for program in CLAP_PROGRAMS {
+fn the_xml_names_are_the_arguments_that_the_options_read() {
+    for program in reader_programs() {
         let xml = xml_help_text(program).unwrap();
-        for (name, flag) in ncbi_argument_names(program) {
+        let tool = crate::cli::reader::tool(program).unwrap();
+        let read = crate::cli::reader::options_tests::names_read(tool);
+        let names = ncbi_argument_names(program);
+        for &(name, _) in &names {
             let kept = has_argument(&xml, name);
-            if READ_BEFORE_OR_HELP.contains(&name) {
+            if READ_BEFORE_OR_HELP.contains(&name) || name == "xmlhelp" || name == "help-full" {
                 assert!(kept, "{program} -{name}");
                 continue;
             }
-            let word = format!("-{name}");
-            let mut argv = vec!["losat", program, word.as_str()];
-            if !flag {
-                argv.push("1");
-            }
-            argv.push("-h");
-            let refused = match try_parse_from::<Cli, _, _>(argv) {
-                Ok(_) => false,
-                Err(error) => {
-                    assert_ne!(
-                        error.kind(),
-                        ErrorKind::UnknownArgument,
-                        "{program} -{name}: NCBI's argument is neither read nor refused by name"
-                    );
-                    let text = error.to_string();
-                    text.contains(&format!("option -{name} is not supported by LOSAT's"))
-                }
-            };
-            // The arguments whose run LOSAT refuses whatever their value pass the parser.
             let row = refusal(program, name);
-            let run_refused = matches!(row, Some(Refusal::Run(_)));
-            assert_eq!(
-                refused,
-                matches!(row, Some(Refusal::Read(_))),
-                "{program} -{name}"
+            let by_name = matches!(row, Some(Refusal::Read(_)));
+            assert_eq!(read.contains(name), !by_name, "{program} -{name}");
+            assert_eq!(kept, row.is_none(), "{program} -{name}");
+        }
+        // The options read nothing that the reader does not read (the hooks of LOSAT Web are no
+        // argument).
+        for name in read {
+            assert!(
+                names.iter().any(|&(xml, _)| xml == name),
+                "{program} -{name} is no argument of NCBI's XML"
             );
-            assert_eq!(kept, !refused && !run_refused, "{program} -{name}");
         }
     }
 }
@@ -127,7 +108,7 @@ fn run_refusals_name_the_argument_and_the_program() {
 // and the dependencies that name one are missing.
 #[test]
 fn the_xml_is_ncbis_without_the_refused_arguments() {
-    for program in CLAP_PROGRAMS {
+    for program in reader_programs() {
         // NCBI's XML in LOSAT's words (the program's description names LOSAT's version).
         let ncbi = crate::wording::losat_text(ncbi_xml(program).unwrap()).into_owned();
         let xml = xml_help_text(program).unwrap();
@@ -210,25 +191,22 @@ fn a_refused_name_takes_its_dependencies() {
 // XML (`the_web_engine_prints_the_command_lines_help`).
 #[test]
 fn the_library_refuses_xmlhelp() {
-    for program in CLAP_PROGRAMS {
-        let error = try_parse_from::<Cli, _, _>(["losat", program, "-xmlhelp"]).unwrap_err();
-        let shown = if program == "makeblastdb" {
-            program.to_string()
-        } else {
-            program.to_ascii_uppercase()
-        };
+    for program in reader_programs() {
+        let error = try_parse_from(["losat", program, "-xmlhelp"]).unwrap_err();
+        let shown = crate::cli::reader::tool(program).unwrap().refusal_name;
         assert_eq!(
-            error.to_string().trim_end(),
-            format!("error: {}", xml_help_refusal(&shown)),
+            error,
+            ArgvError::Refused(xml_help_refusal(shown)),
             "{program}"
         );
-        let short = try_parse_from::<Cli, _, _>(["losat", program, "-h", "-xmlhelp"]);
+        // The printed `-h` may name `-xmlhelp` (rpsbproc's synopsis does); it is not refused.
+        let short = try_parse_from(["losat", program, "-h", "-xmlhelp"]);
         assert!(
-            !matches!(&short, Err(error) if error.to_string().contains("-xmlhelp")),
+            !matches!(&short, Err(ArgvError::Refused(text)) if text.contains("-xmlhelp")),
             "{program}"
         );
     }
-    let value = try_parse_from::<Cli, _, _>(["losat", "blastn", "-out", "-xmlhelp"]);
+    let value = try_parse_from(["losat", "blastn", "-out", "-xmlhelp"]);
     assert!(!matches!(&value, Err(error) if error.to_string().contains("-xmlhelp")));
     type RunWith = fn(
         &[OsString],
@@ -236,7 +214,7 @@ fn the_library_refuses_xmlhelp() {
         &mut dyn std::io::Write,
         &mut dyn std::io::Write,
     ) -> i32;
-    let readers: [(&str, RunWith); 7] = [
+    let readers: [(&str, RunWith); 10] = [
         ("BLASTDBCMD", crate::blastdbcmd::run_with),
         ("DUSTMASKER", crate::dustmasker::run_with),
         ("SEGMASKER", crate::segmasker::run_with),
@@ -244,6 +222,9 @@ fn the_library_refuses_xmlhelp() {
         ("CONVERT2BLASTMASK", crate::convert2blastmask::run_with),
         ("MAKEMBINDEX", crate::makembindex::run_with),
         ("MAKEPROFILEDB", crate::makeprofiledb::run_with),
+        ("BLASTDB_ALIASTOOL", crate::blastdb_aliastool::run_with),
+        ("BLASTDBCHECK", crate::blastdbcheck::run_with),
+        ("BLAST_FORMATTER", crate::blast_formatter::run_with),
     ];
     for (shown, run_with) in readers {
         let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -262,11 +243,11 @@ fn the_library_refuses_xmlhelp() {
     }
 }
 
-// The readers of blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask and
-// makembindex and makeprofiledb (`ncbi_app`) read every argument of NCBI's XML (none is refused by name; their
-// XML is NCBI's whole but for makeprofiledb's `-binary`, which its run refuses, `Refusal::Run`): the
-// argument with a value `1` for a key, then `-h`, writes the usage or an
-// error of the value, never NCBI's
+// The readers of blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask,
+// makembindex, makeprofiledb, blastdb_aliastool, blastdbcheck and blast_formatter (`ncbi_app`)
+// read every argument of NCBI's XML (none is refused by name; their XML is NCBI's whole but for
+// blast_formatter's `-rid`, which its run refuses): the argument with a value `1` for a key, then
+// `-h`, writes the usage or an error of the value, never NCBI's
 // `Unknown argument` or a refusal.
 #[test]
 fn the_ncbi_readers_read_every_argument_of_the_xml() {
@@ -276,7 +257,7 @@ fn the_ncbi_readers_read_every_argument_of_the_xml() {
         &mut dyn std::io::Write,
         &mut dyn std::io::Write,
     ) -> i32;
-    let readers: [(&str, RunWith); 7] = [
+    let readers: [(&str, RunWith); 10] = [
         ("blastdbcmd", crate::blastdbcmd::run_with),
         ("dustmasker", crate::dustmasker::run_with),
         ("segmasker", crate::segmasker::run_with),
@@ -284,10 +265,16 @@ fn the_ncbi_readers_read_every_argument_of_the_xml() {
         ("convert2blastmask", crate::convert2blastmask::run_with),
         ("makembindex", crate::makembindex::run_with),
         ("makeprofiledb", crate::makeprofiledb::run_with),
+        ("blastdb_aliastool", crate::blastdb_aliastool::run_with),
+        ("blastdbcheck", crate::blastdbcheck::run_with),
+        ("blast_formatter", crate::blast_formatter::run_with),
     ];
     for (program, run_with) in readers {
         for (name, flag) in ncbi_argument_names(program) {
-            if READ_BEFORE_OR_HELP.contains(&name) {
+            // blastdb_aliastool's `-gi_file_out` is made as the reader reads it (`fPreOpen`): a
+            // file `1` would be left in the test's directory (its reading is the fixture rows' G08,
+            // G10 and G15, `tests/blastdb_aliastool_fixtures.rs`).
+            if READ_BEFORE_OR_HELP.contains(&name) || name == "gi_file_out" {
                 continue;
             }
             let mut words = vec![OsString::from(format!("-{name}"))];
@@ -308,33 +295,38 @@ fn the_ncbi_readers_read_every_argument_of_the_xml() {
 
 // Line WQA's D14 (2026-11-20): the reader of LOSAT Web's ABI v2 stops at the help words as the
 // command line's does, `-xmlhelp` included, and the run prints the text that the command line's
-// entry prints for them (`printed_text`, which `cli::main_entry` writes): the parser's help, and
-// the XML of `-xmlhelp`. The words before them are read first.
+// entry prints for them (`ncbi_app::read`, which `cli::main_entry` calls): NCBI's help, and the
+// XML of `-xmlhelp`. The words before them are read first.
 #[test]
 fn the_web_engine_prints_the_command_lines_help() {
-    use crate::cli::{printed_text, try_parse_with_printing_start, WEB_V2_PROGRAMS};
+    use crate::cli::{try_parse_with_printing_start, WEB_V2_PROGRAMS};
     for program in WEB_V2_PROGRAMS {
         let web = |words: &[&str]| {
             let argv = ["losat", program].into_iter().chain(words.iter().copied());
-            try_parse_with_printing_start::<Cli, _, _>(argv).map(|_| ())
+            try_parse_with_printing_start(argv, &DiagTarget::Stderr).map(|_| ())
         };
         let xml = web(&["-evalue", "1", "-xmlhelp", "-bogus"]).unwrap_err();
         assert_eq!(
-            printed_text(&xml, false),
-            Some(xml_help_text(program).unwrap()),
+            xml,
+            ArgvError::Printed(xml_help_text(program).unwrap()),
             "{program}"
         );
-        for word in ["-h", "-help", "-help-full", "--help"] {
+        let tool = crate::cli::reader::tool(program).unwrap();
+        for (word, text) in [
+            ("-h", crate::ncbi_app::short_usage(tool)),
+            ("-help", crate::ncbi_app::help_text(tool.help).into_owned()),
+            (
+                "-help-full",
+                crate::ncbi_app::help_text(tool.help).into_owned(),
+            ),
+        ] {
             let help = web(&["-dryrun", word]).unwrap_err();
-            let command_line = try_parse_from::<Cli, _, _>(["losat", program, word]).unwrap_err();
-            assert_eq!(
-                printed_text(&help, false),
-                Some(crate::cli::command_line_message(&command_line, false)),
-                "{program} {word}"
-            );
+            assert_eq!(help, ArgvError::Printed(text.clone()), "{program} {word}");
+            let command_line = try_parse_from(["losat", program, word]).unwrap_err();
+            assert_eq!(command_line, ArgvError::Printed(text), "{program} {word}");
         }
         let refused = web(&["-evalue", "x", "-xmlhelp"]).unwrap_err();
-        assert_eq!(printed_text(&refused, false), None, "{program}");
+        assert!(matches!(refused, ArgvError::Report(_)), "{program}");
         // The library refuses `-xmlhelp`, naming the places that print it.
         assert!(xml_help_refusal(&program.to_ascii_uppercase())
             .contains("runs on the command line and in LOSAT Web of LOSAT's"));

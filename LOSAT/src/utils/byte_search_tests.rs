@@ -84,6 +84,56 @@ fn find_first_is_the_first_index() {
 }
 
 #[test]
+fn find_first_finds_a_match_at_every_place_of_every_window() {
+    // One match alone, and with a second match at the end, at every place of haystacks across the
+    // 32-byte folds, the first window of 64, the later windows and the overlapping last one; and
+    // no match.
+    let is_b = |byte: u8| byte == b'b';
+    for len in 1..=260usize {
+        let mut text = vec![b'a'; len];
+        assert_eq!(find_first(&text, is_b), None, "{len}");
+        for at in 0..len {
+            text[at] = b'b';
+            assert_eq!(find_first(&text, is_b), Some(at), "{len} {at}");
+            assert_eq!(find_byte(&text, b'b'), Some(at), "byte {len} {at}");
+            assert_eq!(
+                find_two_bytes(&text, b'b', b'c'),
+                Some(at),
+                "two first {len} {at}"
+            );
+            text[at] = b'c';
+            assert_eq!(
+                find_two_bytes(&text, b'b', b'c'),
+                Some(at),
+                "two second {len} {at}"
+            );
+            text[at] = b'b';
+            if at + 1 < len {
+                text[len - 1] = b'b';
+                assert_eq!(find_first(&text, is_b), Some(at), "{len} {at} and the end");
+                assert_eq!(
+                    find_byte(&text, b'b'),
+                    Some(at),
+                    "byte {len} {at} and the end"
+                );
+                text[len - 1] = b'c';
+                assert_eq!(
+                    find_two_bytes(&text, b'b', b'c'),
+                    Some(at),
+                    "two {len} {at} and c at end"
+                );
+                text[len - 1] = b'a';
+            }
+            text[at] = b'a';
+        }
+        assert_eq!(find_byte(&text, b'b'), None, "byte none {len}");
+        assert_eq!(find_two_bytes(&text, b'b', b'c'), None, "two none {len}");
+    }
+    assert_eq!(find_byte(b"", b'b'), None);
+    assert_eq!(find_two_bytes(b"", b'b', b'c'), None);
+}
+
+#[test]
 fn find_is_the_first_occurrence() {
     let texts = search_texts();
     for needle in search_needles() {
@@ -99,4 +149,30 @@ fn find_is_the_first_occurrence() {
     assert_eq!(find(b"", b"a"), None);
     assert_eq!(find(b"ab", b"abc"), None);
     assert_eq!(find(b"xab", b"ab"), Some(1));
+}
+
+#[test]
+fn the_mask_of_a_byte_is_the_bytes_equal_to_it() {
+    // Every byte value at every place of the block, against every other value around it.
+    for byte in 0..=u8::MAX {
+        for other in 0..=u8::MAX {
+            for place in 0..16 {
+                let mut block = [other; 16];
+                block[place] = byte;
+                for wanted in [byte, other] {
+                    let (low, high) = equal_bytes_16(&block, wanted);
+                    let mask = gather_high_bits(low) | gather_high_bits(high) << 8;
+                    let expected = (0..16)
+                        .filter(|&k| block[k] == wanted)
+                        .fold(0u32, |mask, k| mask | 1 << k);
+                    assert_eq!(
+                        mask, expected,
+                        "{byte:#04x} {other:#04x} {place} {wanted:#04x}"
+                    );
+                    assert_eq!(low & !0x8080_8080_8080_8080, 0);
+                    assert_eq!(high & !0x8080_8080_8080_8080, 0);
+                }
+            }
+        }
+    }
 }

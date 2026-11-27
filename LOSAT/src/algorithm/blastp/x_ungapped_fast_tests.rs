@@ -42,8 +42,8 @@ fn mutate(rng: &mut Rng, base: &[u8], rate: u64) -> Vec<u8> {
 /// Both paths on one call (the reference through the matrix-generic entry points, which the
 /// switch does not touch); the fast path must handle it.
 fn check_call(q: &[u8], s: &[u8], sl: usize, sr: usize, qr: usize, d: i32, w: usize) {
-    let expect = extend_two_hit(ScoringMatrix::Blosum62, q, s, sl, sr, qr, d, w);
-    let got = two_hit(q, s, sl, sr, qr, d, w).expect("fast path handles the call");
+    let expect = extend_two_hit(ScoringMatrix::Blosum62, q, s, sl as i32, sr, qr, d, w);
+    let got = two_hit(q, s, sl as i32, sr, qr, d, w).expect("fast path handles the call");
     assert_eq!(got, expect, "two_hit sl={sl} sr={sr} qr={qr} d={d} w={w}");
     let expect = extend_one_hit(ScoringMatrix::Blosum62, q, s, qr, sr, d, w);
     let got = one_hit(q, s, qr, sr, d, w).expect("fast path handles the call");
@@ -334,9 +334,9 @@ fn matrix_walks_equal_the_reference_for_every_matrix() {
                 let qr = rng.below(q.len() as u64) as usize;
                 let sr = rng.below(s.len() as u64) as usize;
                 let sl = sr.saturating_sub(rng.below(8) as usize);
-                let expect = extend_two_hit(matrix, &q, &s, sl, sr, qr, d, w);
-                let got =
-                    two_hit_of(m, &q, &s, sl, sr, qr, d, w).expect("fast path handles the call");
+                let expect = extend_two_hit(matrix, &q, &s, sl as i32, sr, qr, d, w);
+                let got = two_hit_of(m, &q, &s, sl as i32, sr, qr, d, w)
+                    .expect("fast path handles the call");
                 assert_eq!(
                     got, expect,
                     "{matrix:?} sl={sl} sr={sr} qr={qr} d={d} w={w}"
@@ -355,9 +355,10 @@ fn matrix_walks_equal_the_reference_for_every_matrix() {
                 let p = 5;
                 q[p + k] = 0;
                 for d in [1, 30, 127] {
-                    let expect = extend_two_hit(matrix, &q, &s, p - 3, p, p, d, w);
-                    let got = two_hit_of(m, &q, &s, p - 3, p, p, d, w)
-                        .expect("fast path handles the call");
+                    let sl = (p - 3) as i32;
+                    let expect = extend_two_hit(matrix, &q, &s, sl, p, p, d, w);
+                    let got =
+                        two_hit_of(m, &q, &s, sl, p, p, d, w).expect("fast path handles the call");
                     assert_eq!(got, expect, "{matrix:?} w={w} k={k} d={d}");
                     compared += 1;
                 }

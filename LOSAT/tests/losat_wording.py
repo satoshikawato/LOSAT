@@ -84,8 +84,9 @@ def _literal(text: bytes, i: int, expected: bytes) -> int | None:
     return i + len(expected) if text.startswith(expected, i) else None
 
 
-def _tag(text: bytes, i: int) -> int | None:
-    """The end of `(<class>::<code>) ` at `i` and of the function after it (`<function>() - `)."""
+def _tag(text: bytes, i: int) -> tuple[int, bytes] | None:
+    """The end of `(<class>::<code>) ` at `i` and of the function after it (`<function>() - `),
+    with `<code>` (`wording::tag`)."""
     j = _literal(text, i, b"(")
     if j is None:
         return None
@@ -98,24 +99,38 @@ def _tag(text: bytes, i: int) -> int | None:
     k = _literal(text, k, b"::")
     if k is None:
         return None
+    code_start = k
     close = [p for p in (text.find(b")", k), text.find(b"\n", k)) if p >= 0]
     if not close:
         return None
-    k = _literal(text, min(close), b") ")
+    code_end = min(close)
+    code = text[code_start:code_end]
+    k = _literal(text, code_end, b")")
     if k is None:
         return None
+    if k == len(text) or text[k : k + 1] == b"\n":
+        return k, code
+    if text[k : k + 1] != b" ":
+        return None
+    k += 1
     f = k
     while f < len(text) and (text[f : f + 1].isalnum() and text[f] < 128 or text[f : f + 1] in (b"_", b":", b"~")):
         f += 1
     if f > k:
+        if text[k:f].endswith(b"::operator") and text.startswith(b"()", f):
+            f += 2
         end = _literal(text, f, b"() - ")
         if end is not None:
             k = end
-    return k
+        else:
+            end = _literal(text, f, b"() -")
+            if end is not None and (end == len(text) or text[end : end + 1] == b"\n"):
+                k = end
+    return k, code
 
 
-def _place(text: bytes, i: int) -> int | None:
-    """The end of `T<thread> "<file>", line <n>: <severity>: ` at `i` and of its tag."""
+def _place(text: bytes, i: int) -> tuple[int, bytes] | None:
+    """The end of `T<thread> "<file>", line <n>: <severity>: ` at `i` and of its tag, with `<code>`."""
     j = _digits(text, i + 1)
     j = j and _literal(text, j, b' "')
     if j is None:
@@ -137,6 +152,22 @@ def _place(text: bytes, i: int) -> int | None:
     return None if j is None else _tag(text, j)
 
 
+def _keep_code_if_empty(out: bytearray, text: bytes, i: int, code: bytes) -> int:
+    """`wording::keep_code_if_empty`: keep `code` when the message body after a removed tag or place
+    is empty on its line, and return the new index."""
+    j = i
+    while j < len(text) and text[j : j + 1] == b" ":
+        j += 1
+    next_place = text.startswith(b"T", j) and _place(text, j) is not None
+    if j == len(text) or text[j : j + 1] == b"\n" or next_place:
+        if code:
+            out += code
+            if next_place:
+                out += b" "
+        return j
+    return i
+
+
 def _glue(out: bytearray) -> None:
     """`wording::glue`: `: ` in place of a removed report or tag inside a line."""
     kept = out.rstrip(b" ")
@@ -148,9 +179,31 @@ def _glue(out: bytearray) -> None:
 
 _BER_VISIBLE_STRING = 0x1A  # `wording::BER_VISIBLE_STRING`: a binary archive's VisibleString tag
 IDENT_GROWTH = len(LOSAT_VERSION) - len(NCBI_VERSION)  # `wording::IDENT_GROWTH`
-_BYTE_POSITION = b" in string at byte "  # `wording::BYTE_POSITION`
-# `wording::archive_byte_post`: a byte's post of a binary archive, whose trace names the archive.
-_ARCHIVE_BYTE_POST = re.compile(rb"(Blast4-(?:archive|request)[A-Za-z0-9._-]*\nBad char \[0x[0-9A-F]+\]) in string at byte (\d+)")
+_BYTE_POSITION = b"byte "  # `wording::BYTE_POSITION`
+# `wording::archive_stream_position`: a position of a binary archive's stream, whose trace names the
+# archive: a replaced char's post, the stream's error post, its exception (NCBI's words, with its place).
+_ARCHIVE_BYTE_POST = re.compile(
+    rb"(Blast4-(?:archive|request)[A-Za-z0-9._-]*\nBad char \[0x[0-9A-F]+\] in string at byte )(\d+)"
+    rb"|(CObjectOStream: error at byte )(\d+)(?=: Blast4-(?:archive|request))"
+    rb"|(CObjectOStreamAsnBinary::[A-Za-z0-9_]*\(\) - byte )(\d+)(?=: [^\n]* \( at Blast4-(?:archive|request))")
+_BER_SEQUENCE = 0x30  # `wording::BER_SEQUENCE`
+_BER_INDEFINITE_LENGTH = 0x80  # `wording::BER_INDEFINITE_LENGTH`
+
+
+def _move_positions(text: bytes, by: int) -> bytes:
+    """`wording::archive_positions`: each position of a binary archive's stream moved by `by`."""
+    def moved(m: re.Match) -> bytes:
+        lead, number = next((m.group(i), m.group(i + 1)) for i in (1, 3, 5) if m.group(i) is not None)
+        return lead + str(int(number) + by).encode()
+    return _ARCHIVE_BYTE_POST.sub(moved, text) if _BYTE_POSITION in text else text
+
+
+def _ber_length(length: int) -> bytes:
+    """`report::serial::asn_ber::write_length`: one byte up to 127, else 0x80 + count and the fewest bytes."""
+    if length <= 127:
+        return bytes([length])
+    body = length.to_bytes((length.bit_length() + 7) // 8, "big")
+    return bytes([0x80 + len(body)]) + body
 
 
 def _after_program_name(out: bytearray) -> bool:
@@ -180,6 +233,20 @@ def _xmlhelp_version(out: bytearray, text: bytes, i: int) -> int | None:
     return m.end() if m else None
 
 
+_BAD_CHAR_LINE = re.compile(rb"Bad char \[0x([0-9A-F]{1,2})\] in string at (?:line|byte) [0-9]+[\n ]")
+
+
+def _quoted_piece(text: bytes, i: int) -> int | None:
+    """The end of a byte post's line and of the piece it quotes at `i`, when the piece (up to the next
+    line end) holds the byte (`wording::quoted_piece`), or None."""
+    m = _BAD_CHAR_LINE.match(text, i)
+    if not m:
+        return None
+    end = text.find(b"\n", m.end())
+    end = len(text) if end < 0 else end
+    return end if int(m.group(1), 16) in text[m.end():end] else None
+
+
 def losat_bytes(text: bytes) -> bytes:
     """LOSAT's text of NCBI's `text` (`wording::losat_bytes`)."""
     needles = (NCBI_USER_MANUAL_FOOTER, _HEADER, _NCBI_POSITION, b"::", NCBI_VERSION, b" error:", _RPSBPROC_TITLE,
@@ -189,6 +256,13 @@ def losat_bytes(text: bytes) -> bytes:
     out = bytearray()
     i = 0
     while i < len(text):
+        if text.startswith(b"B", i) and (not out or out[-1:] in (b"\n", b" ")):
+            # The piece that a byte's post quotes (the input's bytes) is copied as it is.
+            end = _quoted_piece(text, i)
+            if end is not None:
+                out += text[i:end]
+                i = end
+                continue
         if text.startswith(NCBI_VERSION, i) and out.endswith(bytes([_BER_VISIBLE_STRING, len(NCBI_VERSION)])):
             out[-1] = len(LOSAT_VERSION)
             out += LOSAT_VERSION
@@ -222,22 +296,25 @@ def losat_bytes(text: bytes) -> bytes:
             while j < len(text) and text[j] in b" \n":
                 j += 1
             if j > i + len(_HEADER):
-                end = _place(text, j) if text.startswith(b"T", j) else None
-                if end is not None:
+                found = _place(text, j) if text.startswith(b"T", j) else None
+                if found is not None:
+                    end, code = found
                     if out and out[-1:] not in (b" ", b"\n", b":"):
                         _glue(out)
-                    i = end
+                    i = _keep_code_if_empty(out, text, end, code)
                     continue
         if text.startswith(b"T", i) and out.endswith(b" "):
-            end = _place(text, i)
-            if end is not None:
-                i = end
+            found = _place(text, i)
+            if found is not None:
+                end, code = found
+                i = _keep_code_if_empty(out, text, end, code)
                 continue
         if text.startswith(b"(", i):
-            end = _tag(text, i)
-            if end is not None:
+            found = _tag(text, i)
+            if found is not None:
+                end, code = found
                 _glue(out)
-                i = end
+                i = _keep_code_if_empty(out, text, end, code)
                 continue
         if text.startswith(_NCBI_POSITION, i):
             out += _POSITION
@@ -323,25 +400,121 @@ def _asn_string(text: bytes, quote: int) -> tuple[bytes, int] | None:
 
 def losat_output_bytes(output: bytes) -> bytes:
     """`wording::losat_output_bytes`: a whole output (standard output, an `-out` file, or both
-    merged), whose ASN.1 text archive messages are mapped and wrapped again, and the position of each
-    byte's post of a binary archive moved by IDENT_GROWTH (`wording::archive_positions`)."""
-    words = _output_words(output)
-    if _BYTE_POSITION not in words:
-        return words
-    return _ARCHIVE_BYTE_POST.sub(lambda m: m.group(1) + _BYTE_POSITION + str(int(m.group(2)) + IDENT_GROWTH).encode(), words)
+    merged), each position of a binary archive's stream moved by IDENT_GROWTH first
+    (`wording::archive_positions`), whose ASN.1 text archive messages are mapped and wrapped again,
+    and the VisibleStrings of a binary archive that starts it written again with their lengths
+    (`wording::ber_archive`)."""
+    return _output_mapping(output, True)
+
+
+def _output_mapping(output: bytes, positions: bool) -> bytes:
+    """`wording::output_mapping`."""
+    archive = _ber_archive(output, positions)
+    if archive is None:
+        return _moved_words(output, positions, _text_archive_words)
+    out, end = archive
+    return out + _moved_words(output[end:], positions, _text_archive_words)
+
+
+def _moved_words(text: bytes, positions: bool, words) -> bytes:
+    """`wording::moved_words`."""
+    return words(_move_positions(text, IDENT_GROWTH) if positions else text)
+
+
+def _ber_archive(output: bytes, positions: bool) -> tuple[bytes, int] | None:
+    """`wording::ber_archive`: the binary archives that start `output` (the last one may be cut), their
+    VisibleStrings mapped and written with their new lengths, and the end; None when there is none, an
+    item does not parse, or no string changes."""
+    out = bytearray()
+    changed = False
+    depth = 0
+    i = 0
+    while i < len(output) and (depth > 0 or output.startswith(bytes([_BER_SEQUENCE, _BER_INDEFINITE_LENGTH]), i)):
+        if i + 2 > len(output):
+            return None
+        if output[i : i + 2] == b"\0\0":
+            out += b"\0\0"
+            i += 2
+            depth -= 1
+            if depth < 0:
+                return None
+            continue
+        start = i
+        first = output[i]
+        i += 1
+        if first & 0x1F == 0x1F:
+            while True:
+                if i >= len(output):
+                    return None
+                i += 1
+                if output[i - 1] < 0x80:
+                    break
+        tag_end = i
+        if i >= len(output):
+            return None
+        length_byte = output[i]
+        i += 1
+        if length_byte == _BER_INDEFINITE_LENGTH:
+            out += output[start:i]
+            depth += 1
+            continue
+        if length_byte < 0x80:
+            length = length_byte
+        else:
+            count = length_byte & 0x7F
+            if i + count > len(output):
+                return None
+            length = int.from_bytes(output[i : i + count], "big")
+            i += count
+        end = i + length
+        if end > len(output):
+            return None
+        content = output[i:end]
+        if first == _BER_VISIBLE_STRING:
+            mapped = _moved_words(content, positions, losat_bytes)
+            changed |= mapped != content
+            out += output[start:tag_end] + _ber_length(len(mapped)) + mapped
+        else:
+            out += output[start:end]
+        i = end
+    return (bytes(out), i) if changed else None
 
 
 def _output_words(output: bytes) -> bytes:
-    """`wording::output_words`: `losat_output_bytes` without the positions of the byte posts."""
-    if _ARCHIVE_MESSAGE not in output:
+    """`wording::losat_output_words`: `losat_output_bytes` without the positions of the byte posts."""
+    return _output_mapping(output, False)
+
+
+def _text_archive_words(output: bytes) -> bytes:
+    """`wording::text_archive_words`: `losat_bytes` with the messages of an ASN.1 text archive mapped and
+    wrapped again, and those of an XML archive read without their entities, mapped and escaped again."""
+    if _ARCHIVE_MESSAGE not in output and _XML_MESSAGE_START not in output:
         return losat_bytes(output)
     out = bytearray()
     done = 0
     search = 0
     while True:
-        at = output.find(_ARCHIVE_MESSAGE, search)
-        if at < 0:
+        text_at = output.find(_ARCHIVE_MESSAGE, search)
+        xml_at = output.find(_XML_MESSAGE_START, search)
+        if text_at < 0 and xml_at < 0:
             break
+        if xml_at >= 0 and (text_at < 0 or xml_at < text_at):
+            value_at = xml_at + len(_XML_MESSAGE_START)
+            search = value_at
+            end = output.find(_XML_MESSAGE_END, value_at)
+            if end < 0:
+                continue
+            value = _xml_unescaped(output[value_at:end])
+            if value is None:
+                continue
+            search = end
+            mapped = losat_bytes(value)
+            if mapped != value:
+                out += losat_bytes(output[done:value_at])
+                out += _xml_escaped(mapped)
+                done = end
+            continue
+        at = text_at
         line_start = output.rfind(b"\n", 0, at) + 1
         quote = at + len(_ARCHIVE_MESSAGE) - 1
         search = quote + 1
@@ -360,6 +533,48 @@ def _output_words(output: bytes) -> bytes:
     if done == 0:
         return losat_bytes(output)
     out += losat_bytes(output[done:])
+    return bytes(out)
+
+
+_XML_MESSAGE_START = b"<Blast4-error_message>"  # `wording::XML_MESSAGE_START`
+_XML_MESSAGE_END = b"</Blast4-error_message>"  # `wording::XML_MESSAGE_END`
+_XML_ENTITIES = ((b"&amp;", b"&"), (b"&lt;", b"<"), (b"&gt;", b">"), (b"&apos;", b"'"), (b"&quot;", b'"'))  # `wording::XML_ENTITIES`
+_XML_HEX = re.compile(rb"&#x([0-9a-fA-F]+);")
+
+
+def _xml_unescaped(text: bytes) -> bytes | None:
+    """`wording::xml_unescaped`: None at a `&` that starts no entity."""
+    out = bytearray()
+    i = 0
+    while i < len(text):
+        if text[i] != 0x26:
+            out.append(text[i])
+            i += 1
+            continue
+        entity = next(((e, b) for e, b in _XML_ENTITIES if text.startswith(e, i)), None)
+        if entity is not None:
+            out += entity[1]
+            i += len(entity[0])
+            continue
+        m = _XML_HEX.match(text, i)
+        if m is None or int(m.group(1), 16) > 0xFF:
+            return None
+        out.append(int(m.group(1), 16))
+        i = m.end()
+    return bytes(out)
+
+
+def _xml_escaped(value: bytes) -> bytes:
+    """`wording::xml_escaped`."""
+    out = bytearray()
+    for byte in value:
+        entity = next((e for e, b in _XML_ENTITIES if b[0] == byte), None)
+        if entity is not None:
+            out += entity
+        elif byte in (0x09, 0x0A, 0x0D):
+            out += b"&#x" + b"0123456789abcdef"[byte & 0xF : (byte & 0xF) + 1] + b";"
+        else:
+            out.append(byte)
     return bytes(out)
 
 
@@ -392,7 +607,7 @@ def ncbi_hash_form(losat: bytes, positions: bool = True) -> bytes:
     out = losat.replace(_RPSBPROC_TITLE + b" " + REPORT_VERSION, _NCBI_RPSBPROC_BANNER)
     out = _XMLHELP_LOSAT.sub(lambda m: m.group(1) + _ncbi_xmlhelp_version(m.group(2)) + m.group(3), out)
     if positions:
-        out = _ARCHIVE_BYTE_POST.sub(lambda m: m.group(1) + _BYTE_POSITION + str(int(m.group(2)) - IDENT_GROWTH).encode(), out)
+        out = _move_positions(out, -IDENT_GROWTH)
     out = out.replace(bytes([_BER_VISIBLE_STRING, len(LOSAT_VERSION)]) + LOSAT_VERSION,
                       bytes([_BER_VISIBLE_STRING, len(NCBI_VERSION)]) + NCBI_VERSION)
     out = out.replace(REPORT_VERSION, NCBI_VERSION).replace(LOSAT_VERSION, NCBI_VERSION)
@@ -414,12 +629,13 @@ def names_ncbi(output: bytes) -> bytes | None:
 
 def unescape_sample(field: str) -> str:
     """A field of samples.tsv: `\\n` and `\\t` are a line feed and a tab, `\\xNN` the byte NN (below
-    0x80), `{version}` is LOSAT's crate version, `{verlen}` the length byte of `LOSAT <version>` and
-    `{at<n>}` the number n + IDENT_GROWTH (`wording::tests::unescape`)."""
+    0x80 in samples.tsv; any byte in output_samples.tsv, whose fields are read as Latin-1), `{version}` is
+    LOSAT's crate version, `{verlen}` the length byte of `LOSAT <version>` and `{at<n>}` the number
+    n + IDENT_GROWTH (`wording::tests::unescape`)."""
     field = field.replace("\\n", "\n").replace("\\t", "\t").replace("{version}", LOSAT_CRATE_VERSION)
     field = field.replace("{verlen}", chr(len(LOSAT_VERSION)))
     field = re.sub(r"\{at(\d+)\}", lambda m: str(int(m.group(1)) + IDENT_GROWTH), field)
-    return re.sub(r"\\x([0-7][0-9a-fA-F])", lambda m: chr(int(m.group(1), 16)), field)
+    return re.sub(r"\\x([0-9a-fA-F]{2})", lambda m: chr(int(m.group(1), 16)), field)
 
 
 def check_samples() -> int:
@@ -447,7 +663,8 @@ def check_output_samples() -> int:
         ncbi, losat = (unescape_sample(field).encode("latin-1") for field in line.split("\t"))
         if losat_output_bytes(ncbi) != losat:
             raise RuntimeError(f"{OUTPUT_SAMPLES}: {ncbi!r} maps to {losat_output_bytes(ncbi)!r}, not {losat!r}")
-        if ncbi_hash_form(losat) != ncbi:
+        # An exception report cannot be read back (`ncbi_hash_form`).
+        if _HEADER not in ncbi and ncbi_hash_form(losat) != ncbi:
             raise RuntimeError(f"{OUTPUT_SAMPLES}: {losat!r} reads back as {ncbi_hash_form(losat)!r}, not {ncbi!r}")
         count += 1
     return count

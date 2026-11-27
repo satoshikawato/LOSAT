@@ -27,6 +27,8 @@ use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::read::import;
+use crate::report::archive::read::options::{EProgram, Setter};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RequestRecord, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -34,6 +36,23 @@ use crate::report::archive::{
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 use crate::stats::tables::KarlinParams;
+
+/// What a BLASTX run's arguments give its search strategy's requests
+/// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
+/// of the `HitlistSize` and the database of `-db`.
+impl crate::report::archive::strategy::StrategyArgs for BlastxArgs {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs {
+        crate::report::archive::strategy::StrategyInputs {
+            inputs: option_inputs(self),
+            counts: crate::report::archive::strategy::HitlistArgs {
+                max_target_seqs: self.max_target_seqs.map(|count| count as usize),
+                num_descriptions: self.num_descriptions,
+                num_alignments: self.num_alignments,
+            },
+            database: self.database_name(),
+        }
+    }
+}
 
 /// The recorded options of a BLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
@@ -44,7 +63,7 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     let hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments.map(|size| size as i32))
-        .map_or(500, |size| size);
+        .map_or(args.formatting.recorded_hitlist_start(), |size| size);
     if let Some(inputs) = &args.request_inputs {
         let mut inputs = OptionInputs::clone(inputs);
         inputs.hitlist_size = hitlist_size;
@@ -56,7 +75,10 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.evalue = Some(args.evalue);
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
-    inputs.matrix = args.matrix.clone();
+    inputs.matrix = args
+        .matrix
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
     // `-xdrop_gap` and `-xdrop_gap_final` as given (`SetGapXDropoff`, `SetGapXDropoffFinal`);
     // `-xdrop_ungap` has no entry (NCBI records none).
     inputs.xdrop_gap = args.xdrop_gap;
@@ -82,8 +104,12 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.subject_besthit = args.subject_besthit;
     inputs.max_intron_length = args.max_intron_length;
     inputs.query_gencode = i32::from(args.query_gencode);
+    inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
+    inputs.application = args.import.as_ref().map(|_| args.app_name());
     inputs.hitlist_size = hitlist_size;
-    inputs.comp_based_stats = i32::from(super::args::composition_mode(&args.comp_based_stats));
+    inputs.comp_based_stats = i32::from(super::args::composition_mode(
+        crate::utils::os_bytes::os_str_bytes(&args.comp_based_stats),
+    ));
     inputs
 }
 
@@ -99,10 +125,10 @@ pub(crate) fn handle_for(
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
-    let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
+    let database = args.database_name();
     Some(ArchiveHandle::for_program(
         &option_inputs(args),
-        database,
+        database.as_deref(),
         options,
     ))
 }
@@ -421,6 +447,7 @@ fn with_batch(
                 search_space: first.search_space,
                 length_adjustment: first.length_adjustment,
                 searched_space: batch_searched_space(call.batches, options),
+                round: None,
             })
         },
     )
@@ -432,17 +459,17 @@ fn with_batch(
 /// the bytes that the archive's stream replaces go to `diagnostics` (`write_archive`).
 pub(crate) fn write_blastx_archive(
     call: &ArchiveCall<'_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastx,
-        rps: call.batch.options.rpstblastn.is_some(),
         db_title: match &call.names {
             SeqalignSubjects::Records => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: call.batch.options.gapped,
+        program_type: call.batch.options.program_type(),
     };
     // `-subject`'s Seq-loc mapper cuts an HSP of length 0 at the first letter of the searched part
     // of a subject with HSPs of letters in two, and makes alignments without scores of a subject
@@ -461,6 +488,157 @@ pub(crate) fn write_blastx_archive(
         };
         write_archive(call.handle, batch, &mut aligns, writer, diagnostics)
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:130-135
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
+/// blastx's part of `-import_search_strategy` ([`import::apply`]): the arguments its command
+/// line keeps and its table of the strategy's setters over its own options.
+impl import::StrategyArgs for BlastxArgs {
+    const PROGRAM: Program = Program::Blastx;
+
+    fn runs(program: EProgram) -> bool {
+        program == EProgram::Blastx
+    }
+
+    fn imports(&self) -> bool {
+        self.import_search_strategy.is_some() && self.import.is_none() && self.rpstblastn.is_none()
+    }
+
+    fn defaults() -> Result<Self> {
+        match import::defaults_of("blastx")? {
+            crate::cli::Commands::Blastx(args) => Ok(args),
+            _ => unreachable!("the arguments of blastx"),
+        }
+    }
+
+    fn kept(self) -> import::Kept {
+        let given = self.given.list().to_vec();
+        import::Kept {
+            path: self.import_search_strategy.expect("an import"),
+            given,
+            query: self.query,
+            query_loc: self.query_loc,
+            strand: Some(self.strand),
+            lcase_masking: self.lcase_masking,
+            parse_deflines: self.parse_deflines,
+            id_scope: None,
+            out: self.out,
+            outfmt: self.outfmt,
+            show_gis: self.show_gis,
+            html: self.html,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            max_target_seqs: self.max_target_seqs.map(i64::from),
+            formatting: self.formatting,
+            num_threads: i64::from(self.num_threads),
+            mt_mode: self.mt_mode,
+            database: import::KeptDatabase::given(
+                self.db,
+                self.subject,
+                self.subject_loc,
+                self.db_filter,
+                self.db_mask,
+                self.dbsize,
+            ),
+            use_index: false,
+            mb_index: import::MbIndexRequest::None,
+        }
+    }
+
+    fn keep(&mut self, kept: import::Kept) -> Result<()> {
+        self.query = kept.query;
+        self.query_loc = kept.query_loc;
+        if let Some(strand) = kept.strand {
+            self.strand = strand;
+        }
+        self.lcase_masking = kept.lcase_masking;
+        self.parse_deflines = kept.parse_deflines;
+        self.out = kept.out;
+        self.outfmt = kept.outfmt;
+        self.show_gis = kept.show_gis;
+        self.html = kept.html;
+        self.num_descriptions = kept.num_descriptions;
+        self.num_alignments = kept.num_alignments;
+        self.max_target_seqs = kept
+            .max_target_seqs
+            .map(|n| i32::try_from(n).unwrap_or(i32::MAX));
+        self.formatting = kept.formatting;
+        self.num_threads = i32::try_from(kept.num_threads).unwrap_or(i32::MAX);
+        self.mt_mode = kept.mt_mode;
+        Ok(())
+    }
+
+    fn fields(&mut self) -> import::Fields<'_> {
+        import::Fields {
+            import_search_strategy: &mut self.import_search_strategy,
+            db: &mut self.db,
+            subject: &mut self.subject,
+            subject_loc: &mut self.subject_loc,
+            db_filter: &mut self.db_filter,
+            db_mask: &mut self.db_mask,
+            dbsize: &mut self.dbsize,
+            searchsp: &mut self.searchsp,
+            formatting: &mut self.formatting,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            outfmt: &self.outfmt,
+            import: &mut self.import,
+        }
+    }
+
+    fn set_task(&mut self, task: &str) {
+        self.task = task.to_string();
+    }
+
+    fn set(&mut self, setter: &Setter) -> Result<bool> {
+        let program = Program::Blastx.name();
+        match setter {
+            Setter::EvalueThreshold(v) => self.evalue = *v,
+            Setter::WordSize(n) => self.word_size = Some(*n),
+            Setter::WordThreshold(n) => self.threshold = Some(f64::from(*n)),
+            Setter::WindowSize(n) => self.window_size = Some(*n),
+            Setter::MatrixName(name) => self.matrix = Some(name.clone().into()),
+            Setter::GapOpeningCost(n) => self.gap_open = Some(*n),
+            Setter::GapExtensionCost(n) => self.gap_extend = Some(*n),
+            Setter::GapXDropoff(v) => self.xdrop_gap = Some(*v),
+            Setter::GapXDropoffFinal(v) => self.xdrop_gap_final = Some(*v),
+            Setter::CullingLimit(n) => self.culling_limit = Some(*n),
+            Setter::MaxHspsPerSubject(n) => self.max_hsps = Some(*n).filter(|n| *n > 0),
+            Setter::QueryCovHspPerc(v) => self.qcov_hsp_perc = Some(*v),
+            Setter::MaskAtHash(on) => self.soft_masking = *on,
+            Setter::GappedMode(gapped) => self.ungapped = !*gapped,
+            Setter::SumStatisticsMode(on) => self.sum_stats = Some(*on),
+            Setter::QueryGeneticCode(n) => {
+                self.query_gencode = import::Start::genetic_code(*n, "query", program)?
+            }
+            Setter::LongestIntronLength(n) => self.max_intron_length = *n,
+            Setter::SubjectBestHit => self.subject_besthit = true,
+            Setter::BestHitOverhang(v) => self.best_hit_overhang = Some(*v),
+            Setter::BestHitScoreEdge(v) => self.best_hit_score_edge = Some(*v),
+            Setter::SmithWatermanMode(false) | Setter::OutOfFrameMode(false) => {}
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    fn finish(&mut self, collected: import::Collected, _run: &import::ImportRun) -> Result<()> {
+        let program = Program::Blastx.name();
+        collected.no_dust(program)?;
+        collected.no_repeat(program)?;
+        collected.no_nucleotide_algorithms(program)?;
+        if let Some(value) = collected.seg.value() {
+            self.seg = value.into();
+        }
+        if let Some(value) = collected.composition_value(false, program)? {
+            self.comp_based_stats = value.into();
+        }
+        Ok(())
+    }
+
+    fn into_command(self) -> crate::cli::Commands {
+        crate::cli::Commands::Blastx(self)
+    }
 }
 
 #[cfg(test)]

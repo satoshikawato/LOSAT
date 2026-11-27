@@ -463,7 +463,94 @@ fn test_compo_heap_would_insert_uses_ncbi_score_and_subject_tie_breakers() {
     assert!(!heap.would_insert(1e-20, 50, 0));
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:391-414
+/// A fixed xorshift sequence below `bound`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn xorshift_below(state: &mut u64, bound: usize) -> usize {
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+    (*state % bound as u64) as usize
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:251-276
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:329-400
+/// `would_insert_view` answers as `would_insert` on random heaps of both forms (an array that
+/// reached its threshold before any insert or test turned it into a heap, and a heap), ties of
+/// keys included; and a FALSE stays FALSE after any later inserts, those the redo makes (after
+/// a TRUE of `would_insert`) and any other. The windows of the parallel redo stop a
+/// Smith-Waterman match at its first round on a FALSE of the heap as a window's start left it
+/// (`x_redo_par.rs`), and rest on both.
+#[test]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn test_compo_heap_would_insert_view_equals_would_insert_and_a_false_stays_false() {
+    const ECUTOFF: f64 = 0.002;
+    // Around the cutoff, its stretch and the heap's comparison of E-values.
+    let evalues = [0.0, 1e-200, 1e-30, 1e-5, ECUTOFF, 0.004, 0.01, 1.0, 10.0];
+    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    let list = |oid: u32, evalue: f64| {
+        let mut list = BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![BlastpHsp::from_hit(make_hit(60, 1, 10, 1, 10))],
+            best_evalue: evalue,
+        };
+        list.hsps[0].e_value = evalue;
+        list
+    };
+    let (mut compared, mut array_form, mut false_kept) = (0, 0, 0);
+    for heap_threshold in [1, 2, 3, 5, 8] {
+        for _ in 0..100 {
+            let mut heap = BlastCompoHeap::new(heap_threshold, ECUTOFF);
+            let mut refused: Vec<(f64, i32, u32)> = Vec::new();
+            for _ in 0..30 {
+                for _ in 0..4 {
+                    let evalue = evalues[xorshift_below(&mut state, evalues.len())];
+                    let score = xorshift_below(&mut state, 5) as i32;
+                    let oid = xorshift_below(&mut state, 12) as u32;
+                    let view = heap.would_insert_view(evalue, score, oid);
+                    assert_eq!(
+                        view,
+                        heap.clone().would_insert(evalue, score, oid),
+                        "{evalue} {score} {oid} on {heap:?}"
+                    );
+                    compared += 1;
+                    array_form +=
+                        usize::from(heap.heap_array.is_none() && heap.n >= heap_threshold);
+                    if !view {
+                        refused.push((evalue, score, oid));
+                    }
+                }
+                // Inserts within the cutoff more often, so that heaps fill to it.
+                let evalue = evalues[xorshift_below(&mut state, 6)];
+                let score = xorshift_below(&mut state, 5) as i32;
+                let oid = xorshift_below(&mut state, 12) as u32;
+                if xorshift_below(&mut state, 2) == 0 || heap.would_insert(evalue, score, oid) {
+                    heap.insert(list(oid, evalue), evalue, score, oid);
+                }
+                for &(evalue, score, oid) in &refused {
+                    assert!(
+                        !heap.would_insert_view(evalue, score, oid)
+                            && !heap.clone().would_insert(evalue, score, oid),
+                        "{evalue} {score} {oid}: FALSE before, TRUE on {heap:?}"
+                    );
+                    false_kept += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        compared > 50_000 && array_form > 500 && false_kept > 50_000,
+        "compared {compared} array form {array_form} FALSE kept {false_kept}"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:443-468
 #[test]
 fn test_compo_heap_pop_returns_worst_record_first() {
     let mut heap = BlastCompoHeap::new(2, 1e-50);
@@ -600,4 +687,52 @@ fn test_fill_results_from_compo_heaps_builds_hitlist_via_hitlist_update() {
     assert_eq!(hit_list.hsplist_count, 2);
     assert_eq!(hit_list.hsplist_array[0].oid, 2);
     assert_eq!(hit_list.hsplist_array[1].oid, 1);
+}
+
+// `BlastpHsp` stays 168 bytes (64-bit) while carrying `PhiOccurrenceIndex` in `subject_frame`
+// between `phi_traceback` and `PhiCall::split_occurrences`.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn blastp_hsp_size_stays_168_bytes() {
+    assert_eq!(std::mem::size_of::<BlastpHsp>(), 168);
+}
+
+#[test]
+fn phi_occurrence_round_trips_past_u16_max_and_clears_subject_frame() {
+    let mut hsp = BlastpHsp {
+        identity: 100.0,
+        length: 10,
+        mismatch: 0,
+        gapopen: 0,
+        q_start: 1,
+        q_end: 10,
+        s_start: 1,
+        s_end: 10,
+        gapped_q_start: 0,
+        gapped_s_start: 0,
+        e_value: 1e-5,
+        bit_score: 40.0,
+        num_ident: 10,
+        query_context: 0,
+        query_frame: 0,
+        subject_frame: 0,
+        query_length: 100,
+        q_idx: 0,
+        s_idx: 0,
+        raw_score: 50,
+        gap_info: None,
+        num_positives: 10,
+        comp_adjustment_method: 0,
+        num: 1,
+    };
+    assert_eq!(hsp.take_phi_occurrence(), None);
+    for index in [0usize, 64, 65_600] {
+        hsp = hsp.with_phi_occurrence(PhiOccurrenceIndex::new(index));
+        assert_eq!(
+            hsp.take_phi_occurrence(),
+            Some(PhiOccurrenceIndex::new(index))
+        );
+        assert_eq!(hsp.subject_frame, 0);
+        assert_eq!(hsp.take_phi_occurrence(), None);
+    }
 }

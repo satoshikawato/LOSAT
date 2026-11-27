@@ -1339,6 +1339,32 @@ class UnbacktickedCodeTest(unittest.TestCase):
             [],
         )
 
+    def test_prose_case_lines_and_urls_after_cited_declarations_pass(self) -> None:
+        # Uncited `case <one lowercase word>:` prose passes; a tail that ends as a statement fails.
+        self.assert_all_clean(
+            (
+                "// case study: see hit(s) in the list\n",
+                "// case insensitive: match(es) are reported\n",
+                "// case sensitive: yes; no otherwise\n",
+                "// case insensitive: a == b\n",
+                "// case sensitive: the names differ (A != a)\n",
+            )
+        )
+        for bad in ("// case done: break;\n", "// case x: y += 1;\n", "// case eof: s++;\n"):
+            self.assertEqual(self.unbackticked(bad), [(1, checker.UNBACKTICKED_QUOTE)], bad)
+        # A `//` inside a URL is not a trailing comment of a cited C declaration line.
+        self.assertEqual(
+            checker.check_text(
+                "x.rs",
+                (self.CITE + "// Int4 values, see https://example.com/a few words here\n").splitlines(),
+                "slash",
+                TABLE,
+            ),
+            [],
+        )
+        # A backticked span that ends with an apostrophe (`` `n'` ``) is not a GNU-style quote.
+        self.assertIsNone(checker.GNU_QUOTE_RE.search("`n'`"))
+
     def test_unbackticked_regexes_are_linear_time(self) -> None:
         import time
 
@@ -1386,6 +1412,8 @@ class UnbacktickedCodeTest(unittest.TestCase):
             ("c_decl_comment_spam", "x.rs", "slash", lambda n: self.CITE + "// Int4 values, " + "/* " * (n // 3) + "a b c d\n"),
             ("case_bt_spam", "x.rs", "slash", lambda n: "// case kFoo: " + "`a` " * (n // 4) + "ok\n"),
             ("gnu_quote_spam", "x.rs", "slash", lambda n: "// see " + "`a' " * (n // 4) + "ok\n"),
+            ("case_word_spam", "x.rs", "slash", lambda n: "// case x: " + "a; " * (n // 3) + "ok\n"),
+            ("decl_slash_spam", "x.rs", "slash", lambda n: self.CITE + "// Int4 v, " + "a// " * (n // 4) + "b c d e\n"),
         )
         # Use process CPU time and an 8x size jump (linear ~8x vs quadratic ~64x) so host load
         # preemption spikes never flake the bound.

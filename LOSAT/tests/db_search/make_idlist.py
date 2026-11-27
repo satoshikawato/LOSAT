@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Builds LOSAT/tests/db_search/idlist/: databases with the alias keys GILIST, TILIST and SEQIDLIST
-(line RG, series D, D1c-1; remaining-gaps-20261112/D/SURVEY_D1c.md), with NCBI BLAST+ 2.17.0's
-makeblastdb (comparison-only tooling, as the fixtures' NCBI outputs; LOSAT never runs NCBI).
+"""Builds LOSAT/tests/db_search/idlist/: databases with the alias keys GILIST, TILIST, SEQIDLIST and
+TAXIDLIST (line RG, series D, D1c-1 and D1c-2; remaining-gaps-20261112/D/SURVEY_D1c.md), with NCBI
+BLAST+ 2.17.0's makeblastdb (comparison-only tooling, as the fixtures' NCBI outputs; LOSAT never
+runs NCBI).
 
 Usage: make_idlist.py NCBI_BIN   (writes into the idlist directory next to this script; g.faa, g.map,
 n.fna, n.map, q.faa and nq.fna there are the committed sources, every other file is made again).
@@ -30,6 +31,61 @@ Databases (the `.pjs`/`.njs` metadata, with the build's paths and dates, are dro
 - `gtx`: `gt` again, its TI data file 64 zero bytes longer than its index says (NCBI's TI ISAM is then
   not initialised: `x_InitSearch` fails).
 - `gd`: `g4` again, its GI data file 64 zero bytes longer than its index says.
+- `ln` (D1c-1b, review 2 R2 of D1c): version 5 of ln.faa (4 proteins, OIDs 1 and 3 with two lines) with
+  taxids from ln.map, its headers rewritten so that the second line of OID 1, the only line of OID 2 and
+  the first line of OID 3 have no Seq-id (makeblastdb writes none such; NCBI's lists erase such lines).
+  `lnq.faa` holds the four sequences as queries, `lnq.fna` the same back-translated (BLASTX).
+- `lx` (D1c-1b): version 5 of lx.faa (4 proteins, OID 3 with two lines) with the header taxids of lx.map
+  and the taxid lookup files (`.pot`, `.ptf`, `.pto`) of a build with lx2.map: OIDs 1 and 2 are 9606 in
+  their headers and 10090 in the lookup files, so a taxid list selects them and erases every line.
+  `lxq.faa` / `lxq.fna` as for `ln`.
+- `lt` (review 2 of D1c-1b, G1): version 5 of lt.faa in two volumes (`lt.00` OID 0, `lt.01` OID 1), taxids from
+  lt.map: OID 1 holds `ref|NP_300002.1|` (10090) and `gnl|BL_ORD_ID|xyz` (9606), a string tag that NCBI's
+  read of a volume after the first cannot make an OID (its exception), also where a list then erases that line.
+  `ltq.faa` is OID 0's sequence.
+- `lnn` (review 1 of D1c-1b, F1): version 5 of lnn.fna (3 nucleotides, taxids from lnn.map), the only line of
+  OID 0 rewritten to have no Seq-id; OID 0 is `lnnq.fna` (the back-translation of `lnnq.faa`), OID 1 the same
+  with every 37th base changed, OID 2 unrelated.
+- `lr`, `ls` (D1c-1c, review 2 G2 of D1c-1b): version 5 of lr.faa and ls.faa in three volumes (one sequence each):
+  OID 0 a filler, then the query `lrq.faa` (`ref|NP_700002.1| strong` in lr, `ref|NP_700001.1|` in ls) and a random
+  1000-residue `gnl|BL_ORD_ID|xyz weak` (best E-value about 2.5), weak before strong in lr and after it in ls: under a
+  negative seqid list NCBI's fetch of the weak subject cannot read its header (the string tag in a later volume), and
+  the composition-based redo frees it unfetched once the strong hit fills the hit list. `lrn`, `lsn`: the same,
+  back-translated (TBLASTN), `lrq.fna` the back-translated query (BLASTX). `lrqw.faa` (and `lrqw.fna`) holds that query
+  and then the weak sequence `w`, whose own search fetches the weak subject: with `BATCH_SIZE=1` NCBI writes the first
+  batch's report and then ends.
+- `lm` (D1c-1c-b): `ln` with its first 30 letters made `Q` in every sequence and the SEG masks of `segmasker
+  -parse_seqids` (algorithm 21) in the volume, the same lines rewritten without Seq-ids: blastdbcmd's masks of a
+  sequence whose front line has none (NCBI's Seq-loc of the masks takes the null best id and throws).
+- `x1` (D1c-1c-b PR 2b): version 5 of x1.faa (7 proteins, taxids from x1.map), lines rewritten without Seq-ids
+  (`drop_seqids`, a title removed or emptied where said): OID 0 `ref|NP_000101.1| alpha`; OID 1 `gi|5|ref|NP_000102.1|
+  beta1` and a line `beta2` without one; OID 2 `ref|NP_000104.1| short`, `ref|NP_000105.1|` with a title of about 4300
+  bytes and a line `tail` without one (the description's walk passes 4096 bytes before it); OID 3 a line without a
+  Seq-id or a title, then `ref|NP_000106.1| delta2`; OID 4 `ref|NP_000107.1| e1` and a line without a Seq-id or a
+  title; OID 5 two lines without Seq-ids (no Seq-align); OID 6 `ref|NP_000110.1| g1` and a line without a Seq-id whose
+  title is empty. `x1q0.faa` to `x1q6.faa` hold each sequence as a query, `x1q01.faa` the first two.
+- `xw` (D1c-1c-b PR 2b): version 5 of xw.faa (2 proteins): `ref|...| short`, a line whose title makes the description
+  4096 bytes (OID 0) or 4097 bytes (OID 1) long, and a line `tail` rewritten without a Seq-id: NCBI's walk meets that
+  line after 4096 bytes and stops at it after 4097. `xwq0.faa`, `xwq1.faa` hold each sequence as a query.
+- `pn` (D1c-1c-b PR 2b): version 5 of ln.faa back-translated (nucleotides, taxids from ln.map), the lines of `ln`
+  rewritten without Seq-ids. `lnq0.faa`, `lnq1.faa` and `lnq3.faa` hold OIDs 0, 1 and 3 of ln.faa as queries, the
+  `.fna` files of the same names the same back-translated. OIDs 0 and 1 of ln.faa with a letter put after the 20th
+  of a query's line (`write_edited_queries`): `lnqw.faa` and the back-translated `lnqw.fna` an invalid `1` in q1
+  (NCBI's reader message), `lnqo0.faa` and `lnqo1.faa` an `O` in q0 or q1 (the query's own warning): the stderr
+  that NCBI writes before it stops at the sallacc of q1's subject.
+- `pw`, `nw` (line DBID pfoff-7): version 4 of pw.faa and of nw.fna (its back-translation) with parsed Seq-ids: gi 7001
+  (`ref|NP_7001.1|`), then the general ids PIG|abc (gi 7001's letters with 4 changes), ti|xyz, BL_ORD_ID|zz and xyz|77,
+  whose lookups as Seq-align ids throw on the id itself where the tag is a string (PIG, BL_ORD_ID: `CObject_id::GetId()`)
+  or not a number (ti); NCBI's prefetch of a batch fails there (`Error pre-fetching sequence data`) and its formats load
+  the subjects one by one. `pwq.faa` (and `pwq.fna`, back-translated) holds a query without hits, then one query per
+  sequence after the first (the PIG|abc query hits gi 7001 second).
+- `pwk` (review 1 of line DBID pf7, M1): version 4 of pwk.faa with parsed Seq-ids: PIG|abc, `ref|NP_7001.1|` (no gi)
+  and `sp|P69905.2|HBA_HUMAN` (pw's third sequence), whose name gives it weak keys: in the batch whose prefetch fails
+  at PIG|abc the formats load it one by one, and no other sequence's id matches it weakly.
+- `gp` (D6): version 5 of g.faa with parsed Seq-ids, taxids from g.map, and a PIG ISAM (`gp.ppi`, `gp.ppd`)
+  mapping PIGs 1001, 1002, 1005 and 2147483649 (>= 2^31) to OIDs 0, 2, 5 and 10, leaving the other OIDs without
+  a PIG; `gpx` is `gp` again with its `.ppd` 64 zero bytes longer than its index says (uninitialised PIG ISAM).
+  `q_bx.fna` is `q.faa` back-translated (BLASTX).
 
 The list files and alias files are written below (`LISTS`, `ALIASES`). The rows of the -db manifests
 that use them are db.il.*; the blastdbcmd cases A272 on (D/fixtures/make_d1c_blastdbcmd.py).
@@ -43,7 +99,10 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parent / "idlist"
 SOURCES = {"g.faa", "g.map", "n.fna", "n.map", "q.faa", "nq.fna", "tz.faa", "pz.faa", "tq.faa", "cv0.faa",
-           "cv1.faa"}
+           "cv1.faa", "ln.faa", "ln.map", "lnq.faa", "lx.faa", "lx.map", "lx2.map", "lxq.faa", "lt.faa", "lt.map",
+           "ltq.faa", "lnn.fna", "lnn.map", "lnnq.fna", "lnnq.faa", "lr.faa", "ls.faa", "lrq.faa", "lrqw.faa",
+           "pw.faa", "nw.fna", "pwq.faa", "pwq.fna", "pwk.faa", "lnq2.faa", "x1.faa", "x1.map",
+           "xw.faa"}
 
 # An absolute path that is not a file: printed as it is, the same on every machine.
 MISSING = "/losat-idlist-fixture-missing/none.txt"
@@ -59,6 +118,28 @@ def ti_bin4(tis):
 
 def ti_bin8(tis):
     return b"\xff\xff\xff\xfc" + struct.pack(">I", len(tis)) + b"".join(struct.pack(">q", t) for t in tis)
+
+
+def bsl_bin(ids, title="sq_v5", date="Nov 25, 2026  1:00 PM"):
+    """A version-0 binary Seq-id list (.bsl), as written by blastdb_aliastool -seqid_file_in."""
+    title_b = title.encode("ascii")
+    date_b = date.encode("ascii")
+    body = bytearray()
+    for raw in ids:
+        b = raw.encode("ascii")
+        assert len(b) < 255
+        body.append(len(b))
+        body.extend(b)
+    header_rest = (
+        struct.pack("<Q", len(ids))
+        + struct.pack("<I", len(title_b))
+        + title_b
+        + bytes([len(date_b)])
+        + date_b
+        + struct.pack("<Q", 0)
+    )
+    file_size = 1 + 8 + len(header_rest) + len(body)
+    return b"\x00" + struct.pack("<Q", file_size) + header_rest + bytes(body)
 
 
 LISTS = {
@@ -110,10 +191,40 @@ LISTS = {
     "ti_a4.bin": ti_bin4([1020, 1050]),
     "ti_a8.bin": ti_bin8([1020, 1050]),
     "ti_bad.bin": gi_bin([1020]),
-    # A taxid list (version 4 reads none).
+    # A taxid list (version 4 reads none; version 5 reads it through LMDB).
     "tx_a.txt": b"9606\n",
+    # D1c-2: version 5 SEQIDLIST and TAXIDLIST files.
+    "sq_v5.bsl": bsl_bin(["NP_000103.1", "NP_000118.1", "P10102.1", "loc7"], title="sq_v5"),
+    "sq_v5_zero.bsl": bsl_bin([], title="sq_v5_zero"),
+    "sq_v5_ver.txt": b"NP_000103\nLOC7\nNP_000118.1\n",
+    "sq_v5_unp.txt": b"sp||\nNP_000103.1\n",
+    "tx_b.txt": b"10090\n7227\n",
+    "tx_big.txt": b"9606\n5000000000\n",
+    "tx_unk.txt": b"999999\n",
+    "tx_empty.txt": b"",
+    "tx_alpha.txt": b"9606\nabc\n",
+    "tx_hash.txt": b"#c\n9606\n",
+    "tx_n.txt": b"10090\n7955\n",
+    "u_1abc.txt": b"1ABC\n",
+    "u_np103v.txt": b"NP_000103\n",
     # An OID list of OIDs 1, 2 and 3 of g.
     "m123.msk": (13).to_bytes(4, "big") + bytes([0b0111_0000, 0]),
+    # CLI -gilist / -negative_gilist / -ipglist / -negative_ipglist (D6).
+    "gi_zero.txt": b"0\n",
+    "gi_dup.txt": b"117\n102\n108\n102\n",
+    "gi_101.txt": b"101\n",
+    "gi_102.txt": b"102\n",
+    "gi_101_102.txt": b"101\n102\n",
+    "gi_long.bin": b"\xff\xff\xff\xfe" + struct.pack(">I", 1) + struct.pack(">Q", 101),
+    "ipg_a.txt": b"2147483649\n1001\n1005\n",
+    "ipg_a.bin": gi_bin([1001, 1005, 2147483649]),
+    "ipg_neg.txt": b"1001\n1002\n",
+    "ipg_all.txt": b"1001\n1002\n1005\n2147483649\n",
+    "ipg_zero.txt": b"0\n",
+    "ipg_unk.txt": b"99999\n",
+    "ipg_alpha.txt": b"1001\nabc\n",
+    "ipg_bad.bin": b"\xff\xff\xff\xfe" + struct.pack(">I", 1) + struct.pack(">Q", 1001),
+    "ipg_empty.txt": b"",
 }
 
 ALIASES = {
@@ -199,6 +310,60 @@ ALIASES = {
     "n_gi.nal": "TITLE gi n\nDBLIST n\nGILIST gi_n.txt\n",
     "n4_sq.nal": "TITLE sq n v4\nDBLIST n4\nSEQIDLIST sq_n.txt\n",
     "n4_gi.nal": "TITLE gi n v4\nDBLIST n4\nGILIST gi_n.txt\n",
+    # D1c-2: version 5 SEQIDLIST and TAXIDLIST over g, gm, gu, ln, lx and n.
+    "g_sq.pal": "TITLE sq v5\nDBLIST g\nSEQIDLIST sq_a.txt\n",
+    "g_sql.pal": "TITLE sq v5 walk\nDBLIST g\nSEQIDLIST sq_a.txt\nNSEQ 4\nLENGTH 495\n",
+    "g_sqb.pal": "TITLE sq v5 bsl\nDBLIST g\nSEQIDLIST sq_v5.bsl\n",
+    "g_sqc.pal": "TITLE sq v5 forms\nDBLIST g\nSEQIDLIST sq_c.txt\n",
+    "g_sqd.pal": "TITLE sq v5 lower\nDBLIST g\nSEQIDLIST sq_d.txt\n",
+    "g_sqver.pal": "TITLE sq v5 ver\nDBLIST g\nSEQIDLIST sq_v5_ver.txt\n",
+    "g_squnp.pal": "TITLE sq v5 unparseable\nDBLIST g\nSEQIDLIST sq_v5_unp.txt\n",
+    "g_sqe.pal": "TITLE sq v5 empty\nDBLIST g\nSEQIDLIST sq_empty.txt\n",
+    "g_sqbe.pal": "TITLE sq v5 empty bsl\nDBLIST g\nSEQIDLIST sq_v5_zero.bsl\n",
+    "g_sqm.pal": f"TITLE sq v5 missing\nDBLIST g\nSEQIDLIST {MISSING}\n",
+    "g_sqml.pal": f"TITLE sq v5 missing walk\nDBLIST g\nSEQIDLIST {MISSING}\nNSEQ 4\nLENGTH 495\n",
+    "g_sq_gi.pal": "TITLE gi b and sq v5\nDBLIST g\nGILIST gi_b.txt\nSEQIDLIST sq_a.txt\n",
+    "g_sq_tx.pal": "TITLE sq and tx v5\nDBLIST g\nSEQIDLIST sq_a.txt\nTAXIDLIST tx_a.txt\n",
+    "g_sq_sib.pal": "TITLE sq v5 sib\nDBLIST g_sq g_gb\n",
+    "g_sq_bare.pal": "TITLE sq v5 bare\nDBLIST g_sq g\n",
+    "g_tx.pal": "TITLE tx v5\nDBLIST g\nTAXIDLIST tx_a.txt\n",
+    "g_txl.pal": "TITLE tx v5 walk\nDBLIST g\nTAXIDLIST tx_a.txt\nNSEQ 8\nLENGTH 999\n",
+    "g_txb.pal": "TITLE tx b v5\nDBLIST g\nTAXIDLIST tx_b.txt\n",
+    "g_txbig.pal": "TITLE tx big v5\nDBLIST g\nTAXIDLIST tx_big.txt\n",
+    "g_txunk.pal": "TITLE tx unk v5\nDBLIST g\nTAXIDLIST tx_unk.txt\n",
+    "g_txe.pal": "TITLE tx empty v5\nDBLIST g\nTAXIDLIST tx_empty.txt\n",
+    "g_txel.pal": "TITLE tx empty v5 walk\nDBLIST g\nTAXIDLIST tx_empty.txt\nNSEQ 4\nLENGTH 495\n",
+    "g_txalpha.pal": "TITLE tx alpha v5\nDBLIST g\nTAXIDLIST tx_alpha.txt\n",
+    "g_txhash.pal": "TITLE tx hash v5\nDBLIST g\nTAXIDLIST tx_hash.txt\n",
+    "g_txm.pal": f"TITLE tx missing v5\nDBLIST g\nTAXIDLIST {MISSING}\n",
+    "g_txml.pal": f"TITLE tx missing v5 walk\nDBLIST g\nTAXIDLIST {MISSING}\nNSEQ 4\nLENGTH 495\n",
+    "g_tx_gr.pal": "TITLE tx range\nDBLIST g\nTAXIDLIST tx_a.txt\nFIRST_OID 1\nLAST_OID 5\n",
+    "g_tx_go.pal": "TITLE tx oidlist\nDBLIST g\nTAXIDLIST tx_a.txt\nOIDLIST m123.msk\n",
+    "g_tx_nest.pal": "TITLE tx over tx\nDBLIST g_tx\nTAXIDLIST tx_b.txt\n",
+    "g_tx_sib.pal": "TITLE tx a or b\nDBLIST g_tx g_txb\n",
+    "g_tx_bare.pal": "TITLE tx bare\nDBLIST g_tx g\n",
+    "gm_sq.pal": "TITLE sq two volumes\nDBLIST gm\nSEQIDLIST sq_a.txt\n",
+    "gm_sq_v0.pal": "TITLE sq v0\nDBLIST gm.00\nSEQIDLIST sq_a.txt\n",
+    "gm_sq_v1.pal": "TITLE sq v1\nDBLIST gm.01\nSEQIDLIST sq_a.txt\n",
+    "gm_sq_v01.pal": "TITLE sq each vol\nDBLIST gm_sq_v0 gm_sq_v1\n",
+    "gm_sq_mix.pal": "TITLE sq v0 bare v1\nDBLIST gm_sq_v0 gm.01\n",
+    "gm_tx.pal": "TITLE tx two volumes\nDBLIST gm\nTAXIDLIST tx_a.txt\n",
+    "gm_tx_v0.pal": "TITLE tx v0\nDBLIST gm.00\nTAXIDLIST tx_a.txt\n",
+    "gm_tx_mix.pal": "TITLE tx v0 bare v1\nDBLIST gm_tx_v0 gm.01\n",
+    "gu_sq.pal": "TITLE sq over gu\nDBLIST gu\nSEQIDLIST sq_a.txt\n",
+    "gu_tx.pal": "TITLE tx over gu\nDBLIST gu\nTAXIDLIST tx_a.txt\n",
+    "ln_tx.pal": "TITLE tx over ln\nDBLIST ln\nTAXIDLIST tx_b.txt\n",
+    "lx_tx.pal": "TITLE tx over lx\nDBLIST lx\nTAXIDLIST tx_b.txt\n",
+    "n_sq.nal": "TITLE sq n v5\nDBLIST n\nSEQIDLIST sq_n.txt\n",
+    "n_sql.nal": "TITLE sq n v5 walk\nDBLIST n\nSEQIDLIST sq_n.txt\nNSEQ 2\nLENGTH 766\n",
+    "n_sqml.nal": f"TITLE sq n v5 missing walk\nDBLIST n\nSEQIDLIST {MISSING}\nNSEQ 2\nLENGTH 766\n",
+    "n_tx.nal": "TITLE tx n v5\nDBLIST n\nTAXIDLIST tx_n.txt\n",
+    "n_txl.nal": "TITLE tx n v5 walk\nDBLIST n\nTAXIDLIST tx_n.txt\nNSEQ 3\nLENGTH 1089\n",
+    "n_txml.nal": f"TITLE tx n v5 missing walk\nDBLIST n\nTAXIDLIST {MISSING}\nNSEQ 3\nLENGTH 1089\n",
+    # PIG ISAM database with alias GILIST (D6) and v5 SEQIDLIST / TAXIDLIST (D1c-2 R4).
+    "gp_gi.pal": "TITLE gp gi\nDBLIST gp\nGILIST gi_b.txt\n",
+    "gp_sq.pal": "TITLE gp sq v5\nDBLIST gp\nSEQIDLIST sq_a.txt\n",
+    "gp_tx.pal": "TITLE gp tx v5\nDBLIST gp\nTAXIDLIST tx_a.txt\n",
 }
 
 
@@ -217,6 +382,13 @@ def ti_isam(base: Path, num_oids: int, pad: int = 0):
     base.with_suffix(".ptd").write_bytes(data + bytes(pad))
 
 
+def build_pf7(mk):
+    """The databases of line DBID pfoff-7: pw, nw, and pwk of its review 1."""
+    for name, source, kind in (("pw", "pw.faa", "prot"), ("nw", "nw.fna", "nucl"), ("pwk", "pwk.faa", "prot")):
+        run([mk, "-in", source, "-dbtype", kind, "-out", name, "-title", name, "-parse_seqids",
+             "-blastdb_version", "4"])
+
+
 def build_d1c_fix1(mk, common):
     """The databases of review 1 of D1c-1: pz, tq, cv0, cv1, gtx, gd."""
     for name in ("pz", "tq", "cv0", "cv1"):
@@ -229,6 +401,214 @@ def build_d1c_fix1(mk, common):
          "-blastdb_version", "4"])
     with open(OUT / "gd.pnd", "ab") as data:
         data.write(bytes(64))
+
+
+def ber_parse(buf, pos):
+    """One BER node of a header (`Blast-def-line-set`) at `pos`: (tag, bytes or child nodes), end."""
+    tag, length = buf[pos], buf[pos + 1]
+    pos += 2
+    if length == 0x80:
+        kids = []
+        while buf[pos] or buf[pos + 1]:
+            kid, pos = ber_parse(buf, pos)
+            kids.append(kid)
+        return (tag, kids), pos + 2
+    if length & 0x80:
+        width = length & 0x7F
+        length = int.from_bytes(buf[pos:pos + width], "big")
+        pos += width
+    if tag & 0x20:
+        end, kids = pos + length, []
+        while pos < end:
+            kid, pos = ber_parse(buf, pos)
+            kids.append(kid)
+        return (tag, kids), end
+    return (tag, bytes(buf[pos:pos + length])), pos + length
+
+
+def ber_encode(node):
+    tag, value = node
+    if isinstance(value, list):
+        return bytes([tag, 0x80]) + b"".join(ber_encode(kid) for kid in value) + b"\0\0"
+    if len(value) < 0x80:
+        return bytes([tag, len(value)]) + value
+    width = (len(value).bit_length() + 7) // 8
+    return bytes([tag, 0x80 | width]) + len(value).to_bytes(width, "big") + value
+
+
+def drop_seqids(base: Path, lines, kind="p", titles=None):
+    """Empties the Seq-id list (member `seqid`, [1]) of the definition lines `lines` ({oid: {line}},
+    0-based) of the version 5 volume `base` (.phr, or .nhr with `kind` "n"), with the header offsets of
+    its index (.pin, .nin: the same layout up to them). `titles` ({oid: {line: None or b""}}) removes the
+    title (member `title`, [0]) of those lines or empties it."""
+    pin = bytearray(base.with_suffix(f".{kind}in").read_bytes())
+    phr = base.with_suffix(f".{kind}hr").read_bytes()
+    at = 12  # version, sequence type, volume number
+    for _ in range(3):  # title, LMDB name, date
+        at += 4 + struct.unpack(">i", pin[at:at + 4])[0]
+    num_oids = struct.unpack(">i", pin[at:at + 4])[0]
+    at += 4 + 8 + 4  # OIDs, total length, longest
+    offsets = [struct.unpack(">i", pin[at + 4 * i:at + 4 * i + 4])[0] for i in range(num_oids + 1)]
+    out, starts = bytearray(), []
+    for oid in range(num_oids):
+        record = phr[offsets[oid]:offsets[oid + 1]]
+        starts.append(len(out))
+        if oid in lines:
+            node, end = ber_parse(record, 0)
+            assert end == len(record)
+            for line in lines[oid]:
+                members = node[1][line][1]
+                for i, member in enumerate(members):
+                    if member[0] == 0xA1:
+                        members[i] = (0xA1, [(member[1][0][0], [])])
+                title = (titles or {}).get(oid, {})
+                if line in title:
+                    members[:] = [member if member[0] != 0xA0 else (0xA0, [(member[1][0][0], title[line])])
+                                  for member in members if member[0] != 0xA0 or title[line] is not None]
+            record = ber_encode(node)
+        out += record
+    starts.append(len(out))
+    for i, start in enumerate(starts):
+        pin[at + 4 * i:at + 4 * i + 4] = struct.pack(">i", start)
+    base.with_suffix(f".{kind}hr").write_bytes(bytes(out))
+    base.with_suffix(f".{kind}in").write_bytes(bytes(pin))
+
+
+def back_translate(faa: Path, fna: Path):
+    """The proteins of `faa` as DNA, one fixed codon per letter (a BLASTX query of each)."""
+    codon = dict(zip("ACDEFGHIKLMNPQRSTVWY", "GCT TGT GAT GAA TTT GGT CAT ATT AAA CTG ATG AAT CCG CAG CGT "
+                                            "TCT ACC GTG TGG TAT".split()))
+    out = []
+    for line in faa.read_text().splitlines():
+        out.append(line if line.startswith(">") else "".join(codon[letter] for letter in line))
+    fna.write_text("\n".join(out) + "\n")
+
+
+def build_d1c1b(mk, common):
+    """The databases of D1c-1b: ln and lnn (lines without Seq-ids), lx (header taxids apart from the
+    lookup's), lt (a string BL_ORD_ID tag in a later volume)."""
+    run([mk, "-in", "ln.faa", "-dbtype", "prot", "-out", "ln", "-title", "ln", *common, "ln.map"])
+    drop_seqids(OUT / "ln", {1: {1}, 2: {0}, 3: {0}})
+    run([mk, "-in", "lx.faa", "-dbtype", "prot", "-out", "lx2", "-title", "lx", *common, "lx2.map"])
+    run([mk, "-in", "lx.faa", "-dbtype", "prot", "-out", "lx", "-title", "lx", *common, "lx.map"])
+    for ext in (".pot", ".ptf", ".pto"):
+        shutil.move(OUT / f"lx2{ext}", OUT / f"lx{ext}")
+    for path in OUT.glob("lx2.*"):
+        path.unlink()
+    back_translate(OUT / "lnq.faa", OUT / "lnq.fna")
+    back_translate(OUT / "lnq2.faa", OUT / "lnq2.fna")
+    back_translate(OUT / "lxq.faa", OUT / "lxq.fna")
+    run([mk, "-in", "lt.faa", "-dbtype", "prot", "-out", "lt", "-title", "lt", *common, "lt.map",
+         "-max_file_sz", "1000B"])
+    run([mk, "-in", "lnn.fna", "-dbtype", "nucl", "-out", "lnn", "-title", "lnn", *common, "lnn.map"])
+    drop_seqids(OUT / "lnn", {0: {0}}, "n")
+
+
+def build_d1c1c(mk):
+    """The databases of D1c-1c: lr and ls (a later volume's string BL_ORD_ID tag on a weak subject), and their
+    nucleotide forms lrn and lsn."""
+    back_translate(OUT / "lrq.faa", OUT / "lrq.fna")
+    back_translate(OUT / "lrqw.faa", OUT / "lrqw.fna")
+    for name in ("lr", "ls"):
+        run([mk, "-in", f"{name}.faa", "-dbtype", "prot", "-out", name, "-title", name, "-parse_seqids",
+             "-max_file_sz", "1000B"])
+        back_translate(OUT / f"{name}.faa", OUT / f"{name}.fna")
+        run([mk, "-in", f"{name}.fna", "-dbtype", "nucl", "-out", f"{name}n", "-title", f"{name}n", "-parse_seqids",
+             "-max_file_sz", "1000B"])
+        (OUT / f"{name}.fna").unlink()
+
+
+def build_d1c1cb(ncbi: Path):
+    """The databases of D1c-1c-b: lm (ln's lines without Seq-ids over a volume with SEG masks), and x1, xw and pn
+    (PR 2b: lines without Seq-ids beside lines with them)."""
+    lines = (OUT / "ln.faa").read_text().splitlines()
+    (OUT / "lm.faa").write_text("\n".join(line if line.startswith(">") else "Q" * 30 + line[30:]
+                                          for line in lines) + "\n")
+    run([str(ncbi / "segmasker"), "-in", "lm.faa", "-infmt", "fasta", "-parse_seqids", "-outfmt",
+         "maskinfo_asn1_bin", "-out", "lm.asnb"])
+    run([str(ncbi / "makeblastdb"), "-in", "lm.faa", "-dbtype", "prot", "-out", "lm", "-title", "lm",
+         "-parse_seqids", "-taxid_map", "ln.map", "-mask_data", "lm.asnb"])
+    drop_seqids(OUT / "lm", {1: {1}, 2: {0}, 3: {0}})
+    for name in ("lm.faa", "lm.asnb"):
+        (OUT / name).unlink()
+    build_x1(ncbi)
+    build_xw(ncbi)
+    build_pn(ncbi)
+
+
+def write_queries(source: str, names: dict[str, list[int]]):
+    """Query files of the records of `source`: each name gets the records of its indices (0-based), named
+    `x<index>` (an x1 or xw record) or `q<index>` (an ln record)."""
+    text = (OUT / source).read_text()
+    records = [record.split("\n", 1)[1] for record in text.split(">")[1:]]
+    tag = "q" if source.startswith("ln") else "x"
+    for name, indices in names.items():
+        (OUT / name).write_text("".join(f">{tag}{i}\n{records[i]}" for i in indices))
+
+
+def build_x1(ncbi: Path):
+    """The database x1 of D1c-1c-b PR 2b and its queries."""
+    run([str(ncbi / "makeblastdb"), "-in", "x1.faa", "-dbtype", "prot", "-out", "x1", "-title", "x1",
+         "-parse_seqids", "-taxid_map", "x1.map"])
+    drop_seqids(OUT / "x1", {1: {1}, 2: {2}, 3: {0}, 4: {1}, 5: {0, 1}, 6: {1}},
+                titles={3: {0: None}, 4: {1: None}, 6: {1: b""}})
+    write_queries("x1.faa", {**{f"x1q{i}.faa": [i] for i in range(7)}, "x1q01.faa": [0, 1]})
+
+
+def build_xw(ncbi: Path):
+    """The database xw of D1c-1c-b PR 2b (the 4096-byte limit of the description's walk) and its queries."""
+    run([str(ncbi / "makeblastdb"), "-in", "xw.faa", "-dbtype", "prot", "-out", "xw", "-title", "xw",
+         "-parse_seqids"])
+    drop_seqids(OUT / "xw", {0: {2}, 1: {2}})
+    write_queries("xw.faa", {"xwq0.faa": [0], "xwq1.faa": [1]})
+
+
+def build_pn(ncbi: Path):
+    """The database pn of D1c-1c-b PR 2b (ln's lines without Seq-ids in a nucleotide database) and its queries."""
+    back_translate(OUT / "ln.faa", OUT / "pn.fna")
+    run([str(ncbi / "makeblastdb"), "-in", "pn.fna", "-dbtype", "nucl", "-out", "pn", "-title", "pn",
+         "-parse_seqids", "-taxid_map", "ln.map"])
+    drop_seqids(OUT / "pn", {1: {1}, 2: {0}, 3: {0}}, "n")
+    (OUT / "pn.fna").unlink()
+    write_queries("ln.faa", {"lnq0.faa": [0], "lnq1.faa": [1], "lnq3.faa": [3]})
+    for name in ("lnq0", "lnq1", "lnq3"):
+        back_translate(OUT / f"{name}.faa", OUT / f"{name}.fna")
+    write_edited_queries()
+
+
+def write_edited_queries():
+    """The queries q0 and q1 of ln.faa with one letter put after the 20th of a query's line (`build_pn`)."""
+    write_queries("ln.faa", {"lnq01.faa": [0, 1]})
+    back_translate(OUT / "lnq01.faa", OUT / "lnq01.fna")
+    for source, name, query, letter in (("lnq01.faa", "lnqw.faa", 1, "1"), ("lnq01.fna", "lnqw.fna", 1, "1"),
+                                        ("lnq01.faa", "lnqo0.faa", 0, "O"), ("lnq01.faa", "lnqo1.faa", 1, "O")):
+        lines = (OUT / source).read_text().splitlines()
+        lines[2 * query + 1] = lines[2 * query + 1][:20] + letter + lines[2 * query + 1][20:]
+        (OUT / name).write_text("\n".join(lines) + "\n")
+    for name in ("lnq01.faa", "lnq01.fna"):
+        (OUT / name).unlink()
+
+
+def pig_isam(base: Path, rows, pad: int = 0):
+    """A numeric PIG ISAM of 4-byte unsigned keys in one page; `pad` zero bytes after the data
+    file's rows, which its index does not count."""
+    rows = sorted(rows)
+    data = b"".join(struct.pack(">II", k, o) for k, o in rows)
+    header = struct.pack(">9i", 1, 0, len(data), len(rows), 1, 256, 0, 0, 0)
+    index = header + struct.pack(">II", rows[0][0], rows[0][1]) + struct.pack(">Ii", 0xFFFFFFFF, 0)
+    base.with_suffix(".ppi").write_bytes(index)
+    base.with_suffix(".ppd").write_bytes(data + bytes(pad))
+
+
+def build_d6(mk, common):
+    """The databases of D6: gp (PIG ISAM with high PIG >= 2^31 and OIDs without PIG), gpx
+    (uninitialised PIG ISAM), and q_bx.fna (back-translated q.faa for BLASTX)."""
+    pig_rows = [(1001, 0), (1002, 2), (1005, 5), (2147483649, 10)]
+    run([mk, "-in", "g.faa", "-dbtype", "prot", "-out", "gp", "-title", "gp", *common, "g.map"])
+    pig_isam(OUT / "gp", pig_rows)
+    run([mk, "-in", "g.faa", "-dbtype", "prot", "-out", "gpx", "-title", "gpx", *common, "g.map"])
+    pig_isam(OUT / "gpx", pig_rows[:2], pad=64)
+    back_translate(OUT / "q.faa", OUT / "q_bx.fna")
 
 
 def main():
@@ -256,6 +636,11 @@ def main():
     run([mk, "-in", "n.fna", "-dbtype", "nucl", "-out", "n4", "-title", "n4", *common, "n.map",
          "-blastdb_version", "4"])
     build_d1c_fix1(mk, common)
+    build_d1c1b(mk, common)
+    build_d1c1c(mk)
+    build_d1c1cb(ncbi)
+    build_pf7(mk)
+    build_d6(mk, common)
     for path in list(OUT.glob("*.pjs")) + list(OUT.glob("*.njs")):
         path.unlink()
     for name, data in LISTS.items():

@@ -22,8 +22,6 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:331-342
 
-use std::io::Write;
-
 use anyhow::{Context, Result};
 
 use super::stage_d_results::KappaResultHitList;
@@ -40,26 +38,28 @@ use crate::report::serial::{write_query_to, SerialFormat};
 /// Writes the documents of every query of `hitlists` (indexed by query) to `writer`, each
 /// query's warnings before it and NCBI's posts of the bytes that its stream replaces in the
 /// query's document after them (on the warnings' sink, `write_query_to`). `subject_records` and `subject_letters` are indexed by the hit
-/// lists' subject index (a `-db` search's reported sequences by rank, `shown`).
+/// lists' subject index (a `-db` search's reported sequences by rank, `shown`). `program_type`
+/// is PSI-TBLASTN's (`RunRecord::program_type`), `None` for TBLASTN's.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_tblastn_seqalign(
     format: SerialFormat,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,
     shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     ranges: &ReportRanges<'_>,
+    program_type: Option<crate::report::record::ProgramType>,
     warnings: &mut QueryWarnings<'_>,
     gapped: bool,
 ) -> Result<()> {
     // An ungapped search's alignments are Std-seg diagonals (`report::serial::seqalign`).
     let run = RunRecord {
         program: Program::Tblastn,
-        rps: false,
         db_title: shown.db_title(),
         gapped,
+        program_type,
     };
     let mut subjects: Vec<SubjectRecord<'_>> = Vec::new();
     let mut hsps: Vec<HspRecord<'_>> = Vec::new();
@@ -84,6 +84,7 @@ pub(super) fn write_tblastn_seqalign(
         write_query_to(
             format,
             &run,
+            "tblastn",
             &query,
             &subjects,
             &hsps,
@@ -128,10 +129,27 @@ pub(super) fn query_records_of<'a>(
         });
         for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
             let hsp = &linked.hsp;
+            let (q_left_out, std_seg_nullb) = match payload.nullb {
+                Some(nullb) => (
+                    if nullb.scores_invalidated {
+                        0
+                    } else {
+                        nullb.blast_hsp_q_span - (hsp.q_end - hsp.q_start)
+                    },
+                    (nullb.scores_invalidated || nullb.last_seg_fuzz.is_some()).then_some(
+                        crate::report::record::StdSegNullb {
+                            omit_scores: nullb.scores_invalidated,
+                            last_seg_fuzz: nullb.last_seg_fuzz,
+                        },
+                    ),
+                ),
+                None => (i32::try_from(payload.query_left_out)?, None),
+            };
             hsps.push(HspRecord {
                 subject,
                 q_offset: hsp.q_start,
                 q_end: hsp.q_end,
+                q_left_out,
                 s_offset: hsp.s_start,
                 s_end: hsp.s_end,
                 q_frame: 0,
@@ -148,6 +166,7 @@ pub(super) fn query_records_of<'a>(
                     _ => 2,
                 },
                 ops: &payload.edit_script,
+                std_seg_nullb,
             });
         }
     }

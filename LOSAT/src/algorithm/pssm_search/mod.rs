@@ -90,6 +90,17 @@ pub struct PsiSearch {
     /// run that writes one (`in_pssm::PssmReader::strategy`, `pssm_request_written`) of a PSSM that
     /// NCBI's check passes; `None` otherwise and for a FASTA query's later rounds.
     pub(crate) request: Option<PssmQueryRequest>,
+    /// The PSSM that psiblast's archive (outfmt 11) of a round of this search holds in its request
+    /// before the round's K/A write-back (`algorithm::blastp::archive::PsiArchive`): `-in_pssm`'s
+    /// object after `CPsiBlastImpl`'s constructor (the scores of a PSSM of frequency ratios only
+    /// computed, `in_pssm::InPssmFile::object`), or the engine's PSSM of a later round
+    /// (`algorithm::psiblast::pssm::QueryPssm::object`). Kept only for a run that writes the
+    /// archive; `None` otherwise and for tblastn.
+    pub(crate) archive_pssm:
+        Option<std::sync::Arc<crate::report::serial::pssm::PssmWithParameters>>,
+    /// Whether `archive_pssm` is a PSSM that NCBI cannot write (`in_pssm::InPssmFile::
+    /// matrix_name_unwritable`), so NCBI's archive of the round stops with its exception.
+    pub(crate) archive_matrix_name_unwritable: bool,
     /// What NCBI's object manager makes of the annotations of the PSSM's query when the query
     /// joins the scope (`annot_index::index_entry`): its messages, the diagnostic stream it
     /// leaves failed and its exception, which the run writes where NCBI posts them
@@ -115,13 +126,18 @@ pub struct PsiSearch {
     /// The PSSM was made from psiblast's `-in_msa` alignment, not read from `-in_pssm`: the
     /// refusals that name the option name that one.
     pub(crate) from_msa: bool,
-    /// The query's Seq-inst has the molecule `other` (psiblast only), with the coding number of
+    /// The query's Seq-inst has the molecule `other` (psiblast and tblastn), with the coding number of
     /// its Seq-data (`CSeq_data::E_Choice`: iupacaa 2, ncbieaa 8, ncbistdaa 10). NCBI searches it
     /// as a protein; the tabular formats read the query's letters through the object manager for
     /// the fields `qseq`, `sseq`, `btop`, `positive`, `ppos`, `nident`, `mismatch` and `pident`
     /// (the default fields among them), which throws `CSeqVectorException` at the first row
     /// (`report::tabular::query_sequence_exception`).
     pub(crate) query_other_coding: Option<i32>,
+    /// The letter that a query with one letter more than its Seq-inst's `length` has past the
+    /// `length` (ASCII; empty for any other query): the search reads the first `length` letters,
+    /// and the PSSM engine of the next round (NCBI BLAST+ 2.17.0 reads the query's whole Seq-data)
+    /// all of them (line PS item PS7c).
+    pub(crate) query_tail: Vec<u8>,
 }
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
@@ -349,6 +365,30 @@ impl PsiSearch {
         self.joins_scope() && self.stop_before_search(strategy, database).is_none()
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-262 (round 1's files)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:150-168 (the archive)
+    /// Whether the run writes the PSSM that the application read into a file of NCBI's object
+    /// streams, where a list element stated as NULL meets their check: the search strategy's
+    /// request (`request`, written before the stops that follow NCBI's check of the PSSM,
+    /// `PssmQueryStop::after_request`), psiblast's `-out_pssm` of round 1 (`out_pssm`, before the
+    /// query set-up's stop, `PssmQueryStop::after_round_files`) and the archive of a database
+    /// search (`archive`: psiblast's outfmt 11, after the search; with `-subject` NCBI stops at it,
+    /// `blastp::report_write::psi_archive`). None of them where the query does not join NCBI's
+    /// scope (`joins_scope`). `strategy` and `database` are as for `stop_before_search`.
+    pub(crate) fn writes_pssm_as_read(
+        &self,
+        strategy: bool,
+        database: bool,
+        out_pssm: bool,
+        archive: bool,
+    ) -> bool {
+        let stop = self.stop_before_search(strategy, database);
+        self.joins_scope()
+            && (self.request.is_some()
+                || (out_pssm && stop.as_ref().is_none_or(PssmQueryStop::after_round_files))
+                || (archive && database && stop.is_none()))
+    }
+
     /// The query that NCBI's scope holds for the PSSM of `-in_pssm`: the PSSM's Bioseq, which
     /// psiblast and tblastn add to the scope with its Seq-ids `query_ids` before the search
     /// (`query_batch::QueryScope::of_bioseq_ids`; psiblast_app.cpp:537, tblastn_app.cpp:226), for
@@ -426,12 +466,15 @@ impl PsiSearch {
             setup_messages,
             warning_title: None,
             request: None,
+            archive_pssm: None,
+            archive_matrix_name_unwritable: false,
             annot: annot_index::AnnotOutcome::default(),
             defline_reads_annot: false,
             round_query: None,
             split_setup: None,
             from_msa: false,
             query_other_coding: None,
+            query_tail: Vec::new(),
         }
     }
 
@@ -464,14 +507,9 @@ impl PsiSearch {
         }
     }
 
-    /// The exception with which NCBI's object manager ends the run (`CATCH_ALL`'s report).
+    /// The exception with which NCBI's object manager ends the run (`CATCH_ALL`'s report), or
+    /// LOSAT's refusal at that place (`annot_index::Abort::Refused`).
     pub(crate) fn annot_abort(&self) -> Option<anyhow::Error> {
-        self.annot.abort.as_ref().map(|abort| {
-            crate::cli::NativeError {
-                exit: abort.exit,
-                message: abort.message.clone(),
-            }
-            .into()
-        })
+        self.annot.abort.as_ref().map(annot_index::Abort::error)
     }
 }

@@ -5,7 +5,8 @@
 import type { RecordKey, ShownIds } from '../../domain/dataset.js';
 import type { CountsUse } from '../../domain/counts.js';
 import type { DirectoryFile, MessagePlace, RegistryFile, RunFile } from '../../domain/run-files.js';
-import type { EnginePhase } from '../../ports/engine.js';
+import type { ToolFrame } from '../../domain/tool-frames.js';
+import type { EnginePhase, ToolValidation } from '../../ports/engine.js';
 import type { OutputStream } from '../../ports/run-output.js';
 import type { ReactorArtifact } from '../reactor/artifact.js';
 import type { ReactorAsset } from '../reactor/assets.js';
@@ -47,6 +48,8 @@ export interface WorkerInput {
    * one the worker holds is not registered again (plan §4.6 R1).
    */
   readonly key: string;
+  /** Whether `bytes` was assembled from parts (`EngineInput.assembled`, line WQA's D17). */
+  readonly assembled?: boolean;
 }
 
 /**
@@ -86,6 +89,39 @@ export interface WorkerRun {
 }
 
 /**
+ * A tool run (`Engine.runTool`, ABI v2 `losat_web2_tool`, version 13): the words of the command line, `argv[0]` the tool's
+ * name, and the files of the run's working directory (Files are shared, not copied). It runs on the serial module. Its
+ * standard output, standard error and files come back as `tool-chunk` and `tool-file` events as the tool writes them, and its
+ * exit status in `tool-done`, which comes last; an error comes as `done` with `ok: false`.
+ */
+export interface WorkerTool {
+  readonly type: 'tool';
+  readonly generation: number;
+  readonly runId: string;
+  readonly argv: readonly string[];
+  readonly files?: readonly DirectoryFile[];
+  /**
+   * The counter of the bytes that the worker has posted and the page has not taken (tool-credit.ts): the worker waits in the
+   * engine's call while it is above the limit. Absent where the page cannot share memory with the worker: nothing waits then.
+   */
+  readonly credit?: SharedArrayBuffer;
+}
+
+/**
+ * The check of a tool's words (`ToolEngine.validateTool`, ABI v2 `losat_web2_validate` with a tool's name as `argv[0]`): it
+ * runs on the instance that the worker has loaded (the serial one when none is), in the worker's turn like a run (behind a run in progress), with the files of
+ * the run's directory opened there as for a run, because the check reads the run's registry files. The answer is
+ * `tool-validated` with the same `id`.
+ */
+export interface WorkerToolValidate {
+  readonly type: 'tool-validate';
+  readonly generation: number;
+  readonly id: string;
+  readonly argv: readonly string[];
+  readonly files?: readonly DirectoryFile[];
+}
+
+/**
  * Starts what a search of `threads` threads would start (the instance and, for more than one
  * thread, its thread workers) before the search comes (EngineGateway.prepare). A failure is
  * not reported: the search that follows starts them again and reports it.
@@ -121,7 +157,7 @@ export type WorkerTestCommand =
   | { readonly type: 'test-end'; readonly id: number; readonly writer: number }
   | { readonly type: 'test-post'; readonly id: number; readonly writer: number; readonly message: unknown };
 
-export type EngineCommand = EngineInit | WorkerRun | WorkerPrepare | WorkerTestCommand;
+export type EngineCommand = EngineInit | WorkerRun | WorkerTool | WorkerToolValidate | WorkerPrepare | WorkerTestCommand;
 
 export interface MemoryRecord {
   /** Linear memory of the instance before and after the search, in bytes. */
@@ -151,6 +187,21 @@ export interface WorkerRunResult {
   readonly runFiles?: readonly RunFile[];
   /** The text that the run printed in place of a search (stream 11; `RuntimeInfo.printed`). */
   readonly printed?: Uint8Array;
+  /** Records read at `register` for an assembled input when they differ from the per-file table (`RuntimeInfo.readRecords`). */
+  readonly readRecords?: {
+    readonly query?: readonly RecordKey[];
+    readonly subject?: readonly RecordKey[];
+  };
+}
+
+/** The end of a tool run that the engine ran to its exit status (`tool-done`). */
+export interface WorkerToolResult {
+  /** The command line's exit status. */
+  readonly status: number;
+  /** Linear memory of the instance around the run, as for a search: the renewal policy reads it. */
+  readonly memory: MemoryRecord;
+  /** The bytes of the counts file that the instance holds after the run; absent when it holds none. */
+  readonly countsBytes?: number;
 }
 
 export interface WorkerError {
@@ -183,6 +234,27 @@ export type EngineEvent =
   | ({ readonly generation: number } & ThreadFault)
   | { readonly type: 'phase'; readonly generation: number; readonly runId: string; readonly phase: EnginePhase }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: true; readonly result: WorkerRunResult }
+  /**
+   * A chunk of a tool's standard output or standard error, posted as the tool writes it, with its buffer transferred. The
+   * events of a run reach the main thread in the order that the worker posted them: all the chunks and frames of a tool run
+   * come before its `tool-done`.
+   */
+  | {
+      readonly type: 'tool-chunk';
+      readonly generation: number;
+      readonly runId: string;
+      readonly stream: 'stdout' | 'stderr';
+      readonly bytes: Uint8Array;
+    }
+  /** A frame of a file that a tool writes (stream 12), posted as it arrives, with its bytes transferred. */
+  | { readonly type: 'tool-file'; readonly generation: number; readonly runId: string; readonly frame: ToolFrame }
+  /**
+   * The answer to a `tool-validate`: the verdict, or the error that stopped the check (a stopped instance sets `stopped`: the
+   * Gateway ends the worker and posts the checks that are still pending to the next one).
+   */
+  | { readonly type: 'tool-validated'; readonly generation: number; readonly id: string; readonly verdict: ToolValidation }
+  | { readonly type: 'tool-validate-failed'; readonly generation: number; readonly id: string; readonly error: WorkerError }
+  | { readonly type: 'tool-done'; readonly generation: number; readonly runId: string; readonly result: WorkerToolResult }
   | { readonly type: 'done'; readonly generation: number; readonly runId: string; readonly ok: false; readonly error: WorkerError }
   | { readonly type: 'test-reply'; readonly id: number; readonly ok: boolean; readonly value?: number; readonly error?: WorkerError };
 

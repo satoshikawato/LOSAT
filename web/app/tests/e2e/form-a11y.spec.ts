@@ -55,8 +55,9 @@ test('a refusal of "Additional options" marks its text box, which points to the 
   await expect(page.locator(`#${REFUSAL}`)).toHaveText('-evalue is set in the form: Expect threshold');
   // The engine's refusal of an option typed there.
   await extra.fill('-qcov_hsp_perc 50 -foo');
-  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help to list the options");
-  await expectRefused(extra, "error: unknown option or argument '-foo'; use -help to list the options");
+  // The fake engine and the engine both end with NCBI's two posts (`Unknown argument: "foo"`), after a usage.
+  await expect(validation).toContainText('Error: Unknown argument: "foo"');
+  await expectRefused(extra, /Error:\s+Unknown argument: "foo"\s*$/);
   // A message about its text.
   await extra.fill("-strand 'plus");
   await expect(validation).toHaveText("Additional options: a quote (') is not closed");
@@ -109,7 +110,9 @@ test("the engine's refusal of a form's value marks the field that holds it, unti
   await page.getByTestId('param-word_size').selectOption('other');
   const other = page.getByTestId('param-word_size-other');
   await other.fill('3');
-  const message = /^error: invalid value '3' for '-word_size <WORD_SIZE>': expected an integer >= 4/;
+  // The engine's argument error: the usage, a line of 72 "=", and NCBI's two posts; the text ends with the second
+  // (`Error:  Argument ...`, two spaces).
+  const message = /Error:\s+Argument "word_size"\. Illegal value, expected >=4:\s+`3'\s*$/;
   await expect(page.getByTestId('argv-validation')).toHaveText(message);
   await expectRefused(other, message);
   // The text box after "Other" holds the value; the select beside it and the other fields are not marked.
@@ -121,10 +124,19 @@ test("the engine's refusal of a form's value marks the field that holds it, unti
   await expectAccepted(other);
 });
 
-/** The middle of an element, in the page's coordinates. */
+/** The middle of an element, in the viewport's coordinates (those of page.mouse). */
 async function middle(locator: Locator): Promise<{ x: number; y: number }> {
   const box = (await locator.boundingBox())!;
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+/** Expects a point inside the viewport: page.mouse and elementFromPoint reach it only there. */
+function expectInViewport(page: Page, point: { x: number; y: number }): void {
+  const { width, height } = page.viewportSize()!;
+  expect(point.x).toBeGreaterThan(0);
+  expect(point.x).toBeLessThan(width);
+  expect(point.y).toBeGreaterThan(0);
+  expect(point.y).toBeLessThan(height);
 }
 
 test('the "?" help closes with Escape wherever the focus is, which stays there', async ({ page }) => {
@@ -187,37 +199,58 @@ test('the "?" help stays while the pointer moves from the "?" onto it, and goes 
 });
 
 test('two "?" helps are not open by the pointer at once, where one "?" is inside the box around another', async ({ page }) => {
+  // The page as it is, with NCBI's helps (line RG item K4i-3a): 960 pixels wide, the "?" of BLASTP's -lcase_masking, in
+  // the row under -soft_masking, is inside the box around -soft_masking's "?" and its help, in the three browsers (the
+  // other modes alike; at 1280 pixels no "?" is inside another's box).
+  await page.setViewportSize({ width: 960, height: 900 });
   await openSearch(page);
+  await program(page, 'blastp');
   await openParameters(page);
-  await page.getByTestId('param-gapcosts').selectOption('other');
-  const open = page.getByTestId('param-gapopen-help-toggle');
-  const extend = page.getByTestId('param-gapextend-help-toggle');
+  const first = page.getByTestId('param-soft_masking-help-toggle');
+  const second = page.getByTestId('param-lcase_masking-help-toggle');
+  const firstHelp = page.getByTestId('param-soft_masking-help');
+  const secondHelp = page.getByTestId('param-lcase_masking-help');
   const helps = page.locator('[role="tooltip"].help');
-  await open.hover();
+  // The pointer moves by coordinates, which hold only inside the viewport (elementFromPoint finds
+  // nothing outside it): the second "?" is brought into view first, then the pointer goes onto the
+  // first with page.mouse, not hover(). In WebKit, a scroll under the resting pointer (here on the
+  // "Algorithm parameters" bar) is followed about 0.1 s later by a mousemove of WebKit's own at that
+  // place; hover()'s hit-target check took it for its own move, and hover() retried with the first
+  // "?" scrolled to the bottom edge, the second below the viewport (Web runs 45391577563, 45397305733).
+  await second.scrollIntoViewIfNeeded();
+  const from = await middle(first);
+  expectInViewport(page, from);
+  await page.mouse.move(from.x, from.y);
   await expect(helps).toHaveCount(1);
+  await expect(firstHelp).toBeVisible();
   // Across the box of the first help, onto the second "?": a pointer move at a time, so that the
   // two helps are never open together.
-  const from = await middle(open);
-  const to = await middle(extend);
-  // The premise: the second "?" is inside the box around the first "?" and its help.
-  const boxes = [(await open.boundingBox())!, (await page.getByTestId('param-gapopen-help').boundingBox())!];
+  const to = await middle(second);
+  expectInViewport(page, to);
+  // The premise: the second "?" is inside the box around the first "?" and its help, and the
+  // pointer reaches it there (the help does not cover it).
+  const boxes = [(await first.boundingBox())!, (await firstHelp.boundingBox())!];
   expect(to.x).toBeGreaterThanOrEqual(Math.min(...boxes.map((b) => b.x)));
   expect(to.x).toBeLessThanOrEqual(Math.max(...boxes.map((b) => b.x + b.width)));
   expect(to.y).toBeGreaterThanOrEqual(Math.min(...boxes.map((b) => b.y)));
   expect(to.y).toBeLessThanOrEqual(Math.max(...boxes.map((b) => b.y + b.height)));
-  await page.mouse.move(from.x, from.y);
+  const reached = await page.evaluate(
+    ([x, y]) => document.elementFromPoint(x, y)?.closest('[data-testid]')?.getAttribute('data-testid'),
+    [to.x, to.y] as const,
+  );
+  expect(reached).toBe('param-lcase_masking-help-toggle');
   const steps = 24;
   for (let i = 1; i <= steps; i++) {
     await page.mouse.move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
     expect(await helps.count()).toBeLessThanOrEqual(1);
   }
-  await expect(page.getByTestId('param-gapextend-help')).toBeVisible();
-  await expect(page.getByTestId('param-gapopen-help')).toHaveCount(0);
+  await expect(secondHelp).toBeVisible();
+  await expect(firstHelp).toHaveCount(0);
   await expect(helps).toHaveCount(1);
   // Back onto the first: the second goes.
   await page.mouse.move(from.x, from.y, { steps });
-  await expect(page.getByTestId('param-gapopen-help')).toBeVisible();
-  await expect(page.getByTestId('param-gapextend-help')).toHaveCount(0);
+  await expect(firstHelp).toBeVisible();
+  await expect(secondHelp).toHaveCount(0);
   // Away from both: gone.
   await page.mouse.move(0, 0, { steps: 4 });
   await expect(helps).toHaveCount(0);

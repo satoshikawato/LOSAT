@@ -79,6 +79,9 @@ pub(super) struct PrelimRun<'a> {
     pub(super) query_batches: &'a [RangedBatch],
     pub(super) query_batch_skipped: &'a [bool],
     pub(super) query_chunk: bool,
+    /// Whether a batch's search reads the database (`split_steps::CallSteps::Search`): none does
+    /// where every searched batch is split into chunks without a valid context.
+    pub(super) reads: bool,
     /// rpsblast: whether the engine counts each HSP's identities again for the reports
     /// (`rps_hooks::RpsSearchRun::recount_identities`), decided from the reports that the call's
     /// formats are (`call_setup::requested_reports`): none is a custom table.
@@ -92,6 +95,8 @@ pub(super) struct PrelimRun<'a> {
     pub(super) x_block_call: bool,
     pub(super) lookup: &'a BlastpRuntimeLookup,
     pub(super) contexts: &'a [QueryContext],
+    /// psiblast `-phi_pattern`: the call's PHI-BLAST searches (`phi_hooks::phi_prelim`).
+    pub(super) phi: Option<&'a super::phi_hooks::PhiCall<'a>>,
     // The statistics and the cutoffs.
     pub(super) gapped_params: &'a KarlinParams,
     pub(super) gapped_gumbel: &'a Option<BlastGumbelBlk>,
@@ -255,6 +260,7 @@ where
         query_batches,
         query_batch_skipped,
         query_chunk,
+        reads,
         rps_recount_identities,
         database,
         subjects,
@@ -285,6 +291,7 @@ where
         total_query_span,
         timing_enabled,
         timing,
+        phi,
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -421,17 +428,60 @@ where
                     query_batch_skipped,
                     query_chunk,
                     database.name(),
-                    read_error.0,
+                    read_error.as_bytes(),
                 ),
                 Err(other) => other,
             },
             None => error,
         })?;
-    } else if database.is_some() && !contexts.iter().any(|ctx| ctx.is_valid) {
+    } else if let Some(phi) = phi {
+        // psiblast `-phi_pattern`: the pattern scan in place of the word lookup
+        // (`phi_hooks::phi_prelim`).
+        let new_scratch = || {
+            BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span)
+        };
+        super::phi_hooks::phi_prelim(
+            phi,
+            contexts,
+            window,
+            &new_scratch,
+            database,
+            subjects,
+            blastp_parallel_pool,
+            prelim_filter.as_mut(),
+            prelim_hitlist_size,
+            x_compact_hit_lists,
+        )
+        .map_err(|error| match database {
+            // A sequence file that cannot be read: NCBI's error of the batch's preliminary
+            // search, as for blastp's database search below.
+            Some(database) => match error.downcast::<database::PreliminaryReadError>() {
+                Ok(read_error) => preliminary_search_error(
+                    args,
+                    query_records,
+                    subject_source,
+                    subject_label,
+                    outputs,
+                    blastp_parallel_pool,
+                    ranges,
+                    reports,
+                    query_batches,
+                    query_batch_skipped,
+                    query_chunk,
+                    database.name(),
+                    &read_error.0,
+                ),
+                Err(other) => other,
+            },
+            None => error,
+        })?;
+    } else if database.is_some() && (!reads || !contexts.iter().any(|ctx| ctx.is_valid)) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
         // No query of the call has Karlin-Altschul parameters: NCBI searches none of its
         // batches and reads no sequence of the database (a sequence file that cannot be read
-        // fails no batch: NCBI 2.17.0 blastp, an all-X query, exit 0; line PS DECISIONS 30).
+        // fails no batch: NCBI 2.17.0 blastp, an all-X query, exit 0; line PS DECISIONS 30). Nor
+        // does a call whose searched batches are all split into chunks without a valid context
+        // (`reads`; NCBI 2.17.0 probe `g6_gapvalid_nopsq` of line RG item X-bpgap: exit 0).
     } else if let Some(blocks) = x_blocks.as_deref() {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the preliminary stage in blocks of whole batches, NCBI's
@@ -496,8 +546,8 @@ where
                         query_batches,
                         query_batch_skipped,
                         query_chunk,
-                        database.map_or("", |database| database.name()),
-                        read_error.0,
+                        database.map_or(b"".as_slice(), |database| database.name()),
+                        read_error.as_bytes(),
                     ),
                     Err(other) => other,
                 });
@@ -582,7 +632,7 @@ where
                         query_batch_skipped,
                         query_chunk,
                         database.name(),
-                        read_error.0,
+                        read_error.as_bytes(),
                     ),
                     Err(other) => other,
                 }

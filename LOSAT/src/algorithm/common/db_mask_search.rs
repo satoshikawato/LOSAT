@@ -179,32 +179,21 @@ impl SubjectPlan {
 
     /// The next hard chunk (`None`: none left), with NCBI's chunk overlap (`DBSEQ_CHUNK_OVERLAP`,
     /// which NCBI's merge takes after every chunk that ends a range, as it compares the chunk's
-    /// offset with the next range's left). BLASTP and BLASTX append each chunk's HSPs: a chunk
-    /// ends where its range does and no HSP reaches into the mask after it, so the merge finds
-    /// none past the next chunk's offset (blast_hits.c:2888-2899). A long range's chunks overlap.
+    /// offset with the next range's left). BLASTP and BLASTX search every chunk, whatever its
+    /// length (`algorithm::common::hard_chunk_walk::DiagonalWalk::chunk`), and merge each chunk's
+    /// HSPs across `chunk.overlap` via `core::blast_hits::merge_subject_chunk_hsps`
+    /// (`Blast_HSPListsMerge`, series NP, M4b-3d).
     pub(crate) fn next_chunk(&mut self) -> Option<HardChunk> {
         self.split
             .next_chunk(crate::core::subject_split::DBSEQ_CHUNK_OVERLAP)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-500 and 762-766
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
-    // NCBI searches a hard chunk as a subject of its own. In a chunk shorter than the word the
-    // one-hit scan (`-window_size 0`) has an empty scan range, which nothing raises, so it reads
-    // no word. The two-hit scan raises the range's end to its start and reads the one word there,
-    // which runs past the chunk: each of its hits is the only one on its diagonal in the chunk
-    // (one subject offset) and is taken as a first hit, as every hit of a later chunk is on the
-    // diagonals of this one (`Blast_ExtendWordExit` moves the diagonal offset past the chunk's
-    // length and the window), so no extension starts from it.
-    /// The next hard chunk that holds a word of `word` letters ([`SubjectPlan::next_chunk`]): a
-    /// chunk shorter than the word is passed over, as NCBI's search of it finds nothing in the
-    /// one-hit scan and in the two-hit scan alike, and leaves nothing that a later chunk reads.
-    pub(crate) fn next_searched_chunk(&mut self, word: usize) -> Option<HardChunk> {
-        loop {
-            let chunk = self.next_chunk()?;
-            if chunk.length >= word {
-                return Some(chunk);
-            }
+    /// Every hard chunk of the sequence started by [`SubjectPlan::start_hard`], in order, into
+    /// `chunks` (which it replaces).
+    pub(crate) fn hard_chunks(&mut self, chunks: &mut Vec<HardChunk>) {
+        chunks.clear();
+        while let Some(chunk) = self.next_chunk() {
+            chunks.push(chunk);
         }
     }
 }
@@ -216,7 +205,8 @@ impl SubjectPlan {
 /// Writes [`HARD_MASK_PROTEIN_LETTER`] over the residues of `residues` (a whole protein sequence,
 /// from its first residue) that the stored masks `masks` cover, as NCBI's fetch of the sequence
 /// after the preliminary stage does with `-db_hard_mask` (masks past the sequence are cut at its
-/// end; `HardMaskShape::Unsorted` refused the masks out of order before the search).
+/// end; masks that overlap or nest, or are out of the order of their start, are each written, and
+/// NCBI's scan stops at the first mask that starts at or past the end).
 pub(crate) fn mask_protein_letters(residues: &mut [u8], masks: &[(u32, u32)]) {
     let end = residues.len();
     let mut i = 0;

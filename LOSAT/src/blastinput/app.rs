@@ -9,6 +9,7 @@ use std::path::Path;
 
 use crate::blastinput::value_parsers::SegSpec;
 use crate::cli::NativeError;
+use crate::report::archive::options::RequestKind;
 
 use crate::wording::USER_MANUAL_FOOTER;
 
@@ -37,14 +38,63 @@ pub fn options_error_bytes(message: &[u8]) -> anyhow::Error {
     .into()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1543-1548
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1824-1844
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1927-1947
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1320-1398
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/hspfilter_besthit.h:80-91
+/// The HSP filtering check of NCBI's hit saving options (`BlastHSPFilteringOptionsValidate`,
+/// after the hit list size, e-value and intron checks): the best hit filter's values, set by
+/// `best_hit_overhang` or `best_hit_score_edge` (the other one at its default, 0.1), must lie
+/// strictly between 0 and 0.5, and the best hit filter cannot run with culling (a
+/// `culling_limit` above 0: a smaller one sets no culling) in the preliminary stage, where both
+/// run. The command line's parser keeps every value inside (`-best_hit_*` above 0 and below
+/// 0.5, and either option excludes `-culling_limit`), so only an imported search strategy meets
+/// NCBI's error.
+pub fn check_hsp_filtering(
+    culling_limit: Option<i32>,
+    best_hit_overhang: Option<f64>,
+    best_hit_score_edge: Option<f64>,
+) -> anyhow::Result<()> {
+    match hsp_filtering_error(culling_limit, best_hit_overhang, best_hit_score_edge) {
+        Some(message) => Err(options_error(message)),
+        None => Ok(()),
+    }
+}
+
+/// The message of [`check_hsp_filtering`]'s error, for a program that raises NCBI's option
+/// errors itself (BLASTX's `SemanticOptionsError`).
+pub(crate) fn hsp_filtering_error(
+    culling_limit: Option<i32>,
+    best_hit_overhang: Option<f64>,
+    best_hit_score_edge: Option<f64>,
+) -> Option<&'static str> {
+    if best_hit_overhang.is_none() && best_hit_score_edge.is_none() {
+        return None;
+    }
+    let outside = |value: Option<f64>| value.is_some_and(|value| value <= 0.0 || value >= 0.5);
+    (outside(best_hit_overhang)
+        || outside(best_hit_score_edge)
+        || culling_limit.is_some_and(|limit| limit > 0))
+    .then_some("HSP Filtering options invalid")
+}
+
+/// NCBI's engine error of a traceback that fails (`engine_error`): the traceback's own setup of a
+/// split batch whose chunks found nothing (`blastn::query_split::UnmetChecks`), a failed
+/// Smith-Waterman redo of a batch (`sw_batch_failed_error`). The one text of BLASTN's, BLASTP's,
+/// psiblast's and TBLASTN's error there.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-252
+pub const TRACEBACK_FAILED: &str = "Traceback failed";
+
 /// An error that NCBI raises as a `CBlastException` that is neither an option nor a
-/// memory error (exit 3).
+/// memory error (exit 3); `message` is written as its bytes (a path in it as the system's).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
-pub fn engine_error(message: &str) -> anyhow::Error {
+pub fn engine_error(message: impl AsRef<[u8]>) -> anyhow::Error {
     NativeError {
         exit: 3,
-        message: format!("{ENGINE_ERROR} {message}\n").into(),
+        message: [ENGINE_ERROR.as_bytes(), b" ", message.as_ref(), b"\n"].concat(),
     }
     .into()
 }
@@ -63,24 +113,155 @@ pub fn query_error(message: &str) -> anyhow::Error {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275,289-291,300-302 (TBLASTX's
-// loop is the same, tblastx_app.cpp:176-207)
+// loop is the same, tblastx_app.cpp:176-207; BLASTN's loop, blastn_app.cpp:295-318)
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
 /// An error of a query batch's search that comes after the reports of the batches before, for
 /// every program: NCBI searches a batch and prints its reports before it reads the next one, so
 /// when the search of a batch stops NCBI has printed the reports of the batches before, without
-/// the epilog. The error held is the run's error as it is: NCBI's own (`engine_error`, exit 3) or
-/// LOSAT's refusal of a step where NCBI crashes, does not finish or stops (exit 1). The batch loop
-/// that meets it writes those reports (for the first batch, the prologs), then the failing batch's
-/// reader messages and search strategy posts, and returns the error it holds, its message
-/// unchanged: TBLASTX's (`tblastx::blast_engine::run_impl`, the X2c form, the Owner's decision of
-/// 2026-11-16 on line RG's Q-X2c: "the results of the query batches before are written") and
-/// TBLASTN's (`tblastn::tblastn_app::batch_failure`). Any other refusal of a batch's search comes
-/// before the run's first byte.
+/// the epilog. The one type of that concept (line RG item X-short-bat-2, X4's Q2): the error held
+/// is the run's error as it is, NCBI's own (`engine_error`, exit 3; a reader error of a header file
+/// that the batch's hit lists reach, `common::database::stored_title`, rpsblast's profile
+/// sequences read by a batch's traceback, a lookup that fails on a file in a batch's prefetch, a
+/// `-use_sw_tback` redo whose batch's last redone match fails, `Traceback failed`) or LOSAT's
+/// refusal of a step where NCBI crashes, does not finish or stops (exit 1: a fetch of a header
+/// that cannot be read under a negative seqid list, a Smith-Waterman redo without end, a query
+/// chunk split again or without a query, a compressed table that fills NCBI's overflow banks).
+/// The batch loop that meets it writes those reports (for the first batch, the prologs), then the
+/// failing batch's reader messages and search strategy posts, then NCBI's warning of `utf8` where
+/// the run has not posted it, and returns the error it holds, its message unchanged: TBLASTX's
+/// (`tblastx::blast_engine::run_impl`, the X2c form, the Owner's decision of 2026-11-16 on line
+/// RG's Q-X2c: "the results of the query batches before are written"), TBLASTN's
+/// (`tblastn::tblastn_app::batch_failure`), BLASTX's (`blastx::native`), BLASTN's
+/// (`blastn::blast_engine::run::run_in_pool`: its titles and prefetch, and its set-up failures
+/// and database search errors, `context_statistics::setup_failure` and `database_search_error`),
+/// and BLASTP's, psiblast's and rpsblast's (`blastp::blast_engine::search`, which searches all
+/// batches together and then the batches before the failing one again alone, so it needs
+/// `query`). Any other refusal of a batch's search comes before the run's first byte. A
+/// tabular row at which NCBI stops in a batch's report (`report::tabular::FailedLookupRefusal`)
+/// comes after the reports of the batches before too, then what NCBI writes to stderr of the
+/// failing batch before that row (its reader messages, its search strategy posts, its UTF8String
+/// warning, its prefetch texts, and for each of its queries up to the row's the query's own
+/// warnings, its formatter's taxdb warning and its subject reads up to the row:
+/// `FailedLookupRefusal::posts_before_stop`): TBLASTN, TBLASTX and BLASTN off its report stream,
+/// which check every batch's rows at once, write those reports first
+/// (`FailedLookupRefusal::batch_start`), then those posts; BLASTP and PSIBLAST fail that query's
+/// batch (`ErrorAfterBatchReports`, whose `common::database::ErrorAfterPosts` holds the posts after
+/// the batch's own); BLASTX and BLASTN on its stream check each batch's rows when they write them.
 #[derive(Debug)]
-pub(crate) struct ErrorAfterBatchReports(pub(crate) anyhow::Error);
+pub(crate) struct ErrorAfterBatchReports {
+    pub(crate) error: anyhow::Error,
+    /// The first query of the failing batch (in the numbering of the search call that raised
+    /// it), where the raising step knows it: a driver that searches all batches together
+    /// (BLASTP's `search`) reads it; a loop that searches one batch at a time has the batch in
+    /// hand (`None` there).
+    pub(crate) query: Option<usize>,
+    /// The first UTF8String that the batch's reads before the failure (in NCBI's order), or the
+    /// failed read itself before its failure, took for a VisibleString
+    /// (`common::database::HeaderReader::first_utf8`): NCBI posted its warning before the error
+    /// (`common::database::Utf8Read::post`).
+    pub(crate) utf8: Option<crate::algorithm::common::database::Utf8Read>,
+    /// The ordinal ids of the subjects whose headers the batch's Seq-aligns read up to the
+    /// failed one, which ends them (that one alone until the batch adds the reads before it,
+    /// `after_seq_aligns`), whose titles NCBI posted before the error (`title_posts`); empty for
+    /// a failure elsewhere (a fetch, the prefetch).
+    pub(crate) title_reads: Vec<u32>,
+}
+
+impl ErrorAfterBatchReports {
+    /// `error` of the batch that a loop searching one batch at a time has in hand.
+    #[cold]
+    pub(crate) fn new(error: anyhow::Error) -> Self {
+        Self {
+            error,
+            query: None,
+            utf8: None,
+            title_reads: Vec::new(),
+        }
+    }
+
+    /// `error` of the batch whose first query is `query`.
+    #[cold]
+    pub(crate) fn of_batch(query: usize, error: anyhow::Error) -> Self {
+        Self {
+            error,
+            query: Some(query),
+            utf8: None,
+            title_reads: Vec::new(),
+        }
+    }
+
+    /// `error` of a batch whose Seq-aligns NCBI makes from the reads `reads` (as
+    /// `common::database::batch_title_posts` takes them: the ordinal ids of the subjects of its
+    /// final hit lists that get a Seq-align, query by query in the order of each list), where it
+    /// is an `ErrorAfterBatchReports` of the read of one of them (`title_reads`): with the reads
+    /// before the first of that one, which NCBI made before it failed.
+    pub(crate) fn after_seq_aligns(
+        error: anyhow::Error,
+        reads: impl IntoIterator<Item = u32>,
+    ) -> anyhow::Error {
+        match error.downcast::<ErrorAfterBatchReports>() {
+            Ok(mut failure) => {
+                if let &[failed] = failure.title_reads.as_slice() {
+                    failure.title_reads = reads
+                        .into_iter()
+                        .take_while(|&ordinal| ordinal != failed)
+                        .chain([failed])
+                        .collect();
+                }
+                anyhow::Error::new(failure)
+            }
+            Err(error) => error,
+        }
+    }
+
+    /// NCBI's posts of the titles that the failed batch's Seq-aligns read before the error
+    /// (`title_reads`), delegating to `common::database::failed_batch_title_posts`.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn title_posts(
+        &self,
+        db: &crate::seqdb::SeqDb,
+        utf8_posted: bool,
+        program: &str,
+    ) -> anyhow::Result<crate::report::diag_log::Posts> {
+        crate::algorithm::common::database::failed_batch_title_posts(
+            &self.title_reads,
+            db,
+            utf8_posted,
+            program,
+        )
+    }
+
+    /// `error` of a batch that fails after NCBI's reads of its Seq-aligns' headers (its
+    /// prefetch), with `read`, the first of those reads that met a UTF8String (`first_utf8`),
+    /// where it is the failure of a named batch (`query`) without one: NCBI posted its warning
+    /// before the failure.
+    pub(crate) fn after_reads(
+        error: anyhow::Error,
+        read: Option<&crate::algorithm::common::database::Utf8Read>,
+    ) -> anyhow::Error {
+        match error.downcast::<ErrorAfterBatchReports>() {
+            Ok(mut failure) => {
+                if failure.query.is_some() && failure.utf8.is_none() {
+                    failure.utf8 = read.cloned();
+                }
+                anyhow::Error::new(failure)
+            }
+            Err(error) => error,
+        }
+    }
+
+    /// The error held, where `error` is an `ErrorAfterBatchReports`, else `error` as it is.
+    pub(crate) fn held(error: anyhow::Error) -> anyhow::Error {
+        error
+            .downcast::<Self>()
+            .map_or_else(|error| error, |failure| failure.error)
+    }
+}
 
 impl std::fmt::Display for ErrorAfterBatchReports {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.error)
     }
 }
 
@@ -139,9 +320,9 @@ use output_format::*;
 pub struct FormatChoice {
     pub number: i32,
     /// The custom fields (`custom_fmt_spec`), without a `delim=` token.
-    pub spec: String,
+    pub spec: Vec<u8>,
     /// The custom delimiter (`custom_delim`), empty when none is given.
-    pub delimiter: String,
+    pub delimiter: Vec<u8>,
 }
 
 impl FormatChoice {
@@ -151,12 +332,13 @@ impl FormatChoice {
     }
 
     /// The format as LOSAT's reports read it: the number and the custom fields.
-    pub fn normalized(&self) -> String {
-        if self.spec.is_empty() {
-            self.number.to_string()
-        } else {
-            format!("{} {}", self.number, self.spec)
+    pub fn normalized(&self) -> Vec<u8> {
+        let mut out = self.number.to_string().into_bytes();
+        if !self.spec.is_empty() {
+            out.push(b' ');
+            out.extend_from_slice(&self.spec);
         }
+        out
     }
 }
 
@@ -192,7 +374,7 @@ impl EarlyFormat {
     /// The choice at the program's formatting handler, the last of its option handlers: a
     /// deferred value reads the value `outfmt` again, with NCBI's error (the one owner of where
     /// the value's error comes), any other is as read.
-    pub fn at_formatting_handler(&self, outfmt: &str) -> anyhow::Result<FormatChoice> {
+    pub fn at_formatting_handler(&self, outfmt: impl AsRef<[u8]>) -> anyhow::Result<FormatChoice> {
         match self {
             EarlyFormat::Parsed(choice) => Ok(choice.clone()),
             EarlyFormat::Deferred => parse_formatting_string(outfmt),
@@ -319,6 +501,25 @@ impl ReportFormat {
     /// the organism report (18, at each Seq-align it does not skip, `report::tax_report`); the
     /// others write them before the query's report.
     ///
+    /// Whether the report writes the description table with its `-html` id links, and with
+    /// `-html` reads NCBI's formatter registries (`./.ncbirc`, InitConfig) while it writes: the
+    /// pairwise report (0) and the query-anchored ones (1 to 4), which NCBI's apps give the same
+    /// `eHtml` flag (blast_format.cpp `s_SetFlags`). The one rule of `formats_link_ids` and of the
+    /// formats that get the posts of those reads (`report::query_warnings::report_posts`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:617-640
+    pub fn writes_html_links(self) -> bool {
+        use ReportFormat::*;
+        matches!(
+            self,
+            Pairwise
+                | QueryAnchoredIdentities
+                | QueryAnchoredNoIdentities
+                | FlatQueryAnchoredIdentities
+                | FlatQueryAnchoredNoIdentities
+        )
+    }
+
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997
     pub fn places_subject_reads(self) -> bool {
@@ -331,12 +532,26 @@ impl ReportFormat {
                 | FlatQueryAnchoredIdentities
                 | FlatQueryAnchoredNoIdentities
                 | Xml
+                | Json
+                | Xml2
+                | JsonS
+                | Xml2S
                 | Tabular
                 | TabularWithComments
                 | CommaSeparatedValues
                 | TaxFormat
                 | CommaSeparatedValuesWithHeader
         )
+    }
+
+    /// Whether NCBI's report writer joins adjacent hits whose Seq-align ids match into one `Hit`
+    /// (`Xml`, `Xml2`, `Json`, `Xml2S`, `JsonS`), reading only the first copy's subject Bioseq.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:478-487
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:476-509
+    pub fn joins_adjacent_copies(self) -> bool {
+        use ReportFormat::*;
+        matches!(self, Xml | Xml2 | Json | Xml2S | JsonS)
     }
 }
 
@@ -363,6 +578,38 @@ impl Program {
             Program::Blastx => "BLASTX",
             Program::Tblastn => "TBLASTN",
             Program::Tblastx => "TBLASTX",
+        }
+    }
+
+    /// NCBI's name of the program, as its diagnostics prefix reads it (`Warning: [blastn] ...`).
+    pub fn ncbi_name(self) -> &'static str {
+        match self {
+            Program::Blastn => "blastn",
+            Program::Blastp => "blastp",
+            Program::Blastx => "blastx",
+            Program::Tblastn => "tblastn",
+            Program::Tblastx => "tblastx",
+        }
+    }
+
+    /// The query batch size that the program's application reads (`GetQueryBatchSize` of its
+    /// arguments, with an imported strategy's task set on them) when `BATCH_SIZE` is not set:
+    /// tblastx's and blastx's 10002 nucleotides (blastx's for any task of the application without
+    /// its multi-threaded mode, a TBLASTX one too), tblastn's 20000 and blastp's 10000 residues.
+    /// `None` for BLASTN's application, which asks without a default (its `CBatchSizeMixer`,
+    /// `query_batch::LoopBatchSizes::of_blastn_app`). A run's batches are its running
+    /// application's, also where it runs another program's options (`ImportRun::app`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:131-135
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:129-133
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:143-149
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:69-141
+    pub(crate) fn fixed_query_batch_size(self) -> Option<u32> {
+        match self {
+            Program::Blastn => None,
+            Program::Tblastx | Program::Blastx => Some(10002),
+            Program::Tblastn => Some(20000),
+            Program::Blastp => Some(10000),
         }
     }
 
@@ -445,26 +692,43 @@ impl Program {
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
 /// `NStr::TruncateSpaces` (`eTrunc_Both`) is `ncbi_str::truncate_spaces_str`; `NStr::StringToInt`
 /// is `ncbi_str::string_to_int` (its digits end at a NUL, as NCBI's do).
-pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
-    use crate::ncbi_str::truncate_spaces_str;
-    let choice = truncate_spaces_str(spec);
-    let (choice, custom) = choice.split_once(' ').unwrap_or((choice, ""));
-    let mut custom = custom.to_string();
-    let mut delimiter = String::new();
-    if custom.starts_with("delim") {
-        let token = custom.split(' ').next().unwrap_or_default().to_string();
-        let Some((_, value)) = token.split_once('=') else {
+pub fn parse_formatting_string(spec: impl AsRef<[u8]>) -> anyhow::Result<FormatChoice> {
+    use crate::ncbi_str::truncate_spaces;
+    let choice = truncate_spaces(spec.as_ref());
+    let (choice, custom_slice) = match choice.iter().position(|&b| b == b' ') {
+        Some(pos) => (&choice[..pos], &choice[pos + 1..]),
+        None => (choice, &[][..]),
+    };
+    let mut custom = custom_slice.to_vec();
+    let mut delimiter = Vec::new();
+    if custom.starts_with(b"delim") {
+        let token_end = custom
+            .iter()
+            .position(|&b| b == b' ')
+            .unwrap_or(custom.len());
+        let token = custom[..token_end].to_vec();
+        let Some(eq) = token.iter().position(|&b| b == b'=') else {
             return Err(options_error(
                 "Delimiter format is invalid. Valid format is delim=<delimiter value>",
             ));
         };
-        delimiter = value.to_string();
-        custom = truncate_spaces_str(&custom.replace(&token, "")).to_string();
+        delimiter = token[eq + 1..].to_vec();
+        let mut replaced = Vec::with_capacity(custom.len());
+        let mut i = 0;
+        while i < custom.len() {
+            if !token.is_empty() && custom[i..].starts_with(&token) {
+                i += token.len();
+            } else {
+                replaced.push(custom[i]);
+                i += 1;
+            }
+        }
+        custom = truncate_spaces(&replaced).to_vec();
     }
-    let Ok(number) = crate::ncbi_str::string_to_int(choice.as_bytes(), 0) else {
-        return Err(options_error(&format!(
-            "'{choice}' is not a valid output format"
-        )));
+    let Ok(number) = crate::ncbi_str::string_to_int(choice, 0) else {
+        return Err(options_error_bytes(
+            &[b"'", choice, b"' is not a valid output format"].concat(),
+        ));
     };
     if !(0..END_VALUE).contains(&number) {
         return Err(NativeError {
@@ -544,8 +808,15 @@ pub fn report_format(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
 pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyhow::Result<()> {
+    formatting_handler_check_with(choice, program.is_sam())
+}
+
+/// `formatting_handler_check` of formatting arguments made with `eIsSAM` (`is_sam`) or without:
+/// the search programs' (`Program::is_sam`) and blast_formatter's, whose formatting arguments
+/// are made for SAM and not for a query (blast_formatter.cpp:131, `blast_formatter::formatting`).
+pub fn formatting_handler_check_with(choice: &FormatChoice, is_sam: bool) -> anyhow::Result<()> {
     match choice.number {
-        SAM if !program.is_sam() => Err(options_error("SAM format is only applicable to blastn")),
+        SAM if !is_sam => Err(options_error("SAM format is only applicable to blastn")),
         AIRR_REARRANGEMENT => Err(options_error(
             "AIRR rearrangement format is only applicable to igblastn",
         )),
@@ -562,63 +833,110 @@ pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyh
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-/// LOSAT's refusal of `-html` with the format `number` when it is 1 to 4 (the query-anchored
-/// alignments), until item T4b of line RG writes their HTML: one check for the five programs, made
-/// where each one's formatting handler checks the format (`formatting_handler_check`), with the
-/// program's option `html`. The refusal's form is that of `cli::run_refusal`.
-pub fn html_format_check(number: i32, program: Program, html: bool) -> anyhow::Result<()> {
-    if html
-        && (output_format::QUERY_ANCHORED_IDENTITIES
-            ..=output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES)
-            .contains(&number)
-    {
+/// `formatting_handler_check` of a search that the program `engine` runs for the running
+/// application `app`: NCBI's checks read the running application's flags (`eIsSAM` of `app`), and
+/// the search is the strategy's (`engine`'s: tblastx running a blastn strategy, blastn running a
+/// tblastx one). A format that `app`'s handler accepts and LOSAT's `engine` does not write is
+/// LOSAT's refusal (`report_format`'s words): SAM of a translated search, except TBLASTX's, which
+/// BLASTN's application runs from a search strategy (`algorithm::tblastx::sam`). NCBI's SAM
+/// formatter converts the Std-seg alignments of that search into Dense-segs, which fails where the
+/// HSPs of one alignment change a row's strand (one exception post for each such alignment, no
+/// record for it); LOSAT writes the report as NCBI's formatter does.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2875-2878
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-753
+pub fn formatting_handler_check_of_run(
+    choice: &FormatChoice,
+    app: Program,
+    engine: Program,
+) -> anyhow::Result<()> {
+    formatting_handler_check(choice, app)?;
+    if choice.number == SAM && !engine.is_sam() && engine != Program::Tblastx {
         anyhow::bail!(
-            "-html (with -outfmt 1, 2, 3 or 4) is not supported by LOSAT's {}",
-            program.name()
+            "output format {} is not supported by LOSAT's {}",
+            choice.number,
+            engine.name()
         );
     }
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:225,1453-1460,1535-1553
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:494
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:119
+// NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:119
 /// The `-html` links of a run (`report::html_ids::HtmlLinks`), `None` without `-html` or when
 /// none of the run's formats `formats` links ids: the `./.ncbirc` of the prolog's references and
 /// of each query's description table and alignments (`FormatterNcbirc::read`) and NCBI's
 /// formatter registry (`InitConfig::read`:
 /// `FMTCFG`, `NCBI`, `GETURL_DEBUG` and the file), read once per run where each program checks
-/// its formats (`html_format_check`), so that LOSAT's refusal of the file comes before the first
-/// byte; `database` is the `-db` value as NCBI keeps it (`database_name()`, `None` for
-/// `-subject`). One function for the five programs; the links go where the option went
-/// (`PairwiseConfig::html`). NCBI calls `InitConfig` only from the id links of the pairwise
-/// report (outfmt 0; 1 to 4 are refused with `-html`, `html_format_check`): the organism report
-/// (outfmt 18) takes the option alone (`CBlastFormat::m_IsHTML`), so a run of it reads no file.
+/// its formats (`formatting_handler_check`), so that LOSAT's refusal of the file comes before
+/// the first byte; `database` is the `-db` value as NCBI keeps it (`database_name()`, `None` for
+/// `-subject`). One function for every search program: `app` is the running application whose
+/// name carries registry posts (`RequestKind::application`) and refusals in upper case, and
+/// `engine` is the program that runs the search (which gives the subjects' molecule,
+/// `RequestKind::subject_is_nucleotide`, differing from `app` when blastn, blastx or tblastx runs
+/// another program's strategy). The links go where the option went (`PairwiseConfig::html`). NCBI
+/// calls `InitConfig` only from the id links of the report of formats 0 to 4, which share the
+/// description table and its id links (`PrintOneResultSet` writes the table of the pairwise report
+/// and of the query-anchored ones alike): the organism report (outfmt 18) takes the option alone
+/// (`CBlastFormat::m_IsHTML`), so a run of it reads no file.
 pub(crate) fn html_links(
     html: bool,
-    program: Program,
-    database: Option<&str>,
+    app: RequestKind,
+    engine: RequestKind,
+    database: Option<&[u8]>,
     formats: &[i32],
 ) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
-    if !html || !formats.contains(&output_format::PAIRWISE) {
+    html_links_with(
+        html,
+        app,
+        engine,
+        database,
+        formats,
+        crate::report::formatter_registry::FormatterNcbirc::read,
+        crate::report::formatter_registry::InitConfig::read,
+    )
+}
+
+/// [`html_links`] with the `./.ncbirc` and `InitConfig` readers supplied by the caller.
+fn html_links_with(
+    html: bool,
+    app: RequestKind,
+    engine: RequestKind,
+    database: Option<&[u8]>,
+    formats: &[i32],
+    read_ncbirc: impl FnOnce(&str) -> Result<crate::report::formatter_registry::FormatterNcbirc, String>,
+    read_registry: impl FnOnce(&str) -> Result<crate::report::formatter_registry::InitConfig, String>,
+) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
+    if !html || !formats_link_ids(formats) {
         return Ok(None);
     }
-    let lower = program.name().to_ascii_lowercase();
+    let lower = app.application();
+    let upper = lower.to_ascii_uppercase();
     // The prolog's references read `./.ncbirc` before the first id link reads InitConfig's file.
-    let ncbirc = crate::report::formatter_registry::FormatterNcbirc::read(&lower)
-        .map_err(|what| anyhow::anyhow!("{what}'s {}", program.name()))?;
-    let registry = crate::report::formatter_registry::InitConfig::read(&lower)
-        .map_err(|what| anyhow::anyhow!("{what}'s {}", program.name()))?;
+    let ncbirc = read_ncbirc(lower).map_err(|what| anyhow::anyhow!("{what}'s {upper}"))?;
+    let registry = read_registry(lower).map_err(|what| anyhow::anyhow!("{what}'s {upper}"))?;
     Ok(Some(std::sync::Arc::new(
         crate::report::html_ids::HtmlLinks {
             registry,
             ncbirc,
-            db_name: database.unwrap_or_default().as_bytes().to_vec(),
-            // `m_IsDbNa`: the subjects of BLASTN, TBLASTN and TBLASTX are nucleotide sequences.
-            nucleotide: matches!(
-                program,
-                Program::Blastn | Program::Tblastn | Program::Tblastx
-            ),
+            db_name: database.unwrap_or_default().to_vec(),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:225
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
+            // `m_IsDbNa` (whether the subject database is nucleotide, `Blast_SubjectIsNucleotide`).
+            nucleotide: engine.subject_is_nucleotide(),
         },
     )))
+}
+
+/// Whether one of the formats `formats` writes the description table with its `-html` id links
+/// (`html_links`, `ReportFormat::writes_html_links`): the pairwise report (0) and the
+/// query-anchored ones (1 to 4).
+fn formats_link_ids(formats: &[i32]) -> bool {
+    formats.iter().any(|&number| {
+        ReportFormat::from_number(number).is_some_and(ReportFormat::writes_html_links)
+    })
 }
 
 /// NCBI's error for the XInclude formats (13 and 14) written to standard output, after
@@ -665,7 +983,10 @@ pub fn ncbi_refuses_format(choice: &FormatChoice, program: Program, out: Option<
 /// has no number for it).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
-pub fn early_format_choice(outfmt: &str, strategy: bool) -> anyhow::Result<EarlyFormat> {
+pub fn early_format_choice(
+    outfmt: impl AsRef<[u8]>,
+    strategy: bool,
+) -> anyhow::Result<EarlyFormat> {
     match parse_formatting_string(outfmt) {
         Ok(choice) => Ok(EarlyFormat::Parsed(choice)),
         Err(_) if strategy => Ok(EarlyFormat::Deferred),
@@ -682,31 +1003,32 @@ pub fn early_format_choice(outfmt: &str, strategy: bool) -> anyhow::Result<Early
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:375-384
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:423-428
-pub fn parse_seg_option(value: &str) -> anyhow::Result<SegSpec> {
+pub fn parse_seg_option(value: impl AsRef<[u8]>) -> anyhow::Result<SegSpec> {
     read_seg_option(value).map_err(options_error)
 }
 
 /// `parse_seg_option` with NCBI's error as its message (a `CInputException`), for a program that
 /// reports it with its other deferred errors (BLASTX: `algorithm::blastx::args`).
-pub fn read_seg_option(value: &str) -> Result<SegSpec, &'static str> {
+pub fn read_seg_option(value: impl AsRef<[u8]>) -> Result<SegSpec, &'static str> {
+    let value = value.as_ref();
     match value {
-        "no" => return Ok(SegSpec::No),
-        "yes" => return Ok(SegSpec::Yes),
+        b"no" => return Ok(SegSpec::No),
+        b"yes" => return Ok(SegSpec::Yes),
         _ => {}
     }
-    let tokens: Vec<&str> = value.split(' ').collect();
+    let tokens: Vec<&[u8]> = value.split(|&b| b == b' ').collect();
     if tokens.len() != 3 {
         return Err("Invalid number of arguments to filtering option");
     }
     let invalid = || "Invalid input for filtering parameters";
     // `NStr::StringToInt` of the first token, flags 0.
-    let window = crate::ncbi_str::string_to_int(tokens[0].as_bytes(), 0).map_err(|_| invalid())?;
+    let window = crate::ncbi_str::string_to_int(tokens[0], 0).map_err(|_| invalid())?;
     // NCBI reads the values with `NStr::StringToDouble` of the token (default flags,
     // `ncbi_str::string_to_double`: glibc's `strtod`, decimal or hexadecimal, which must end at
     // the end of the token).
     let mut cuts = [0.0; 2];
     for (cut, token) in cuts.iter_mut().zip(&tokens[1..]) {
-        *cut = crate::ncbi_str::string_to_double(token.as_bytes()).map_err(|_| invalid())?;
+        *cut = crate::ncbi_str::string_to_double(token).map_err(|_| invalid())?;
     }
     Ok(SegSpec::WindowLocutHicut {
         window,
@@ -732,11 +1054,11 @@ pub enum CompositionMode {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:834-892
 pub fn parse_comp_based_stats(
-    value: &str,
+    value: impl AsRef<[u8]>,
     blastp: bool,
     ungapped: bool,
 ) -> anyhow::Result<(CompositionMode, bool)> {
-    let bytes = value.as_bytes();
+    let bytes = value.as_ref();
     let mode = match bytes.first() {
         Some(b'1') => CompositionMode::CompositionBasedStats,
         Some(b'D' | b'd' | b'2' | b'T' | b't') => CompositionMode::CompositionMatrixAdjust,

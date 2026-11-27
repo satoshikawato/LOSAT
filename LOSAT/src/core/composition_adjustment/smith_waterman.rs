@@ -584,7 +584,7 @@ fn find_start_row<V: CellValue>(
 /// up), avoiding `forbidden`. `gap_open` and `gap_extend` are NCBI's (a gap of `k` letters costs
 /// `gap_open + k * gap_extend`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:276-341
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:243-341,545-575
 // One call per scan, out of line: the row loop keeps its values in registers. On a CPU with AVX2
 // the scan compiled for it runs (`score_only_avx2`); both compute the same values.
 #[inline(never)]
@@ -988,14 +988,19 @@ pub(crate) enum SwWindowRedo {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:428-432
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/gapinfo.c:61-62
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1856-1876
+///
+/// RPS-BLAST's redo asks the heap with the round's score; the square matrix's match body asks it
+/// with the round's end (`smith_waterman_redo_window_from`), which it keeps where its caller leaves
+/// the test open, and resumes the window there.
 // Generic over the caller's rows, heap and traceback: one instance per redo (the square matrix's
 // match body, `smith_waterman_match`, and RPS-BLAST's), each on the Smith-Waterman path only.
+#[inline]
 pub(crate) fn smith_waterman_redo_window<'r, F, H, T>(
     window: &SwWindow<'_, F>,
     significance: SwSignificance,
     query_had_none: bool,
     mut would_insert: H,
-    mut traceback: T,
+    traceback: T,
     rounds: &mut SwRounds,
 ) -> SwWindowRedo
 where
@@ -1003,28 +1008,74 @@ where
     H: FnMut(f64, i32) -> bool,
     T: FnMut((usize, usize), (usize, usize), i32) -> SwXdropTraceback,
 {
+    smith_waterman_redo_window_from(
+        window,
+        significance,
+        query_had_none,
+        None,
+        |evalue, end: SwEnd| would_insert(evalue, end.score),
+        traceback,
+        rounds,
+    )
+}
+
+/// The round loop of one window (`smith_waterman_redo_window`), its heap test asked with the round's
+/// e-value and end (`would_insert(evalue, end)`, whose score is the one NCBI's test reads), from
+/// `resumed` where given: the end of the window's first round, which an earlier call of the window
+/// scanned (its score significant) and whose heap test has been answered TRUE since. The loop then
+/// goes on from that round's start scan, without its score-only scan and its tests, which gave that
+/// end and that answer; the rounds after it are the loop's own. A caller resumes so only with the
+/// window as the earlier call had it (the same subject range, rows, gap costs and HSP count; the
+/// query without an alignment before the window). `None`: the window's first round scans.
+// One instance per caller of the square matrix's match body and per RPS-BLAST's redo (through
+// `smith_waterman_redo_window`).
+pub(crate) fn smith_waterman_redo_window_from<'r, F, H, T>(
+    window: &SwWindow<'_, F>,
+    significance: SwSignificance,
+    query_had_none: bool,
+    resumed: Option<SwEnd>,
+    mut would_insert: H,
+    mut traceback: T,
+    rounds: &mut SwRounds,
+) -> SwWindowRedo
+where
+    F: Fn(usize) -> &'r [i32; BLASTAA_SIZE] + Copy,
+    H: FnMut(f64, SwEnd) -> bool,
+    T: FnMut((usize, usize), (usize, usize), i32) -> SwXdropTraceback,
+{
     let letters = &window.subject_from_sentinel[1..=window.subject_length];
     let rows = window.rows;
     rounds.forbidden.initialize(window.query_length);
     rounds.forbidden.clear();
     let mut alignments: Vec<SwAlignment> = Vec::new();
+    let mut resumed = resumed;
     loop {
-        let end = smith_waterman_score_only(
-            letters,
-            window.query_length,
-            rows,
-            window.gap_open,
-            window.gap_extend,
-            &rounds.forbidden,
-            &mut rounds.scan,
-        );
-        let (evalue, mut alignment_is_significant) = significance.test(end.score);
-        if let (Some(evalue), true) = (evalue, query_had_none && alignments.is_empty()) {
-            alignment_is_significant = alignment_is_significant && would_insert(evalue, end.score);
-        }
-        if !alignment_is_significant {
-            break;
-        }
+        let end = if let Some(end) = resumed.take() {
+            // The first round as the earlier call left it: significant, its heap test TRUE.
+            debug_assert!(
+                query_had_none && significance.test(end.score).1,
+                "a resumed round is a first round whose heap test was asked"
+            );
+            end
+        } else {
+            let end = smith_waterman_score_only(
+                letters,
+                window.query_length,
+                rows,
+                window.gap_open,
+                window.gap_extend,
+                &rounds.forbidden,
+                &mut rounds.scan,
+            );
+            let (evalue, mut alignment_is_significant) = significance.test(end.score);
+            if let (Some(evalue), true) = (evalue, query_had_none && alignments.is_empty()) {
+                alignment_is_significant = alignment_is_significant && would_insert(evalue, end);
+            }
+            if !alignment_is_significant {
+                break;
+            }
+            end
+        };
         // The regime of a significant score of 0 (see above), at the first round.
         if alignments.is_empty() && window.hspcnt > 1 && significance.test(0).1 {
             // `ALIGN_EX`'s cell (1, 1): row 0 (`query_offset` is `queryStart` less 1) against

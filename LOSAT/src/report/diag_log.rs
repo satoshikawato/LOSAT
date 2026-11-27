@@ -66,10 +66,9 @@ impl Posts {
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-282
     /// The place where NCBI writes the search strategy request of `export`'s batch whose first
-    /// query (the run's) is `first`: writing these posts there (`write`) marks the requests through
-    /// that batch as NCBI's (`StrategyExport::release_through`; those after the last place reached
-    /// are cut from the file when NCBI's error ends the run). It shows nothing on the diagnostics
-    /// (`has_text`).
+    /// query (the run's) is `first`: writing these posts there (`write`) releases the requests
+    /// through that batch to the strategy stream (`StrategyExport::release_through`), interleaving
+    /// any `803.7` posts and write-failure diagnostics with the stream's writes.
     pub fn request(export: crate::report::archive::strategy::StrategyExport, first: usize) -> Self {
         Self(vec![Post::Request(RequestMark { export, first })])
     }
@@ -208,9 +207,10 @@ impl Posts {
         self.0.is_empty()
     }
 
-    /// Whether a post shows text on the diagnostics (a request mark alone shows none, nor do a
-    /// later format's lines, `later`; loads, whose texts are made where they are written, count
-    /// as text unless none of them can make one: `placed` first where it decides).
+    /// Whether a post holds text on the diagnostics directly (a request mark's diagnostics are
+    /// emitted on release by its strategy sink, not held here; a later format's lines, `later`,
+    /// show none; loads, whose texts are made where they are written, count as text unless none of
+    /// them can make one: `placed` first where it decides).
     pub fn has_text(&self) -> bool {
         self.0.iter().any(|post| match post {
             Post::Request(_) | Post::Later(_) => false,
@@ -238,9 +238,10 @@ impl Posts {
 
     /// Writes the posts to `diagnostics`, the stream of the run's diagnostics: the lines as they
     /// are, and with the BLAST archive (`archive`, whose handle saves what that stream writes)
-    /// each whole post saved as one message (`ArchiveHandle::write_post`); a request mark marks its
-    /// search strategy requests reached (`request`); the loads' texts are made here (`placed`). A
-    /// later format's lines (`later`) are not the diagnostics': nothing of them is written.
+    /// each whole post saved as one message (`ArchiveHandle::write_post`); a request mark releases
+    /// its search strategy requests to the strategy stream (`request`); the loads' texts are made
+    /// here (`placed`). A later format's lines (`later`) are not the diagnostics': nothing of them
+    /// is written.
     pub fn write(
         &self,
         diagnostics: &mut dyn std::io::Write,
@@ -248,7 +249,10 @@ impl Posts {
     ) -> std::io::Result<()> {
         for post in &self.0 {
             match (post, archive) {
-                (Post::Request(mark), _) => mark.export.release_through(mark.first)?,
+                (Post::Request(mark), _) => {
+                    mark.export
+                        .release_through(mark.first, diagnostics, archive)?
+                }
                 (Post::Later(_), _) => {}
                 (Post::Loads(reads), _) => {
                     for read in reads {
@@ -276,14 +280,15 @@ pub struct DiagLog {
 }
 
 impl DiagLog {
-    /// Saves the lines that `bytes` complete as warnings (a line of standard error is a
-    /// warning or reader message; the error lines of an aborted run are posted with
-    /// `post`).
+    /// Saves the lines that `bytes` complete, each of the severity that its header shows
+    /// (`line_severity`: a line of standard error is a warning or reader message, or the one-line
+    /// error of a load, such as the taxonomy database's; the error lines of an aborted run are
+    /// posted with `post`).
     pub fn feed(&mut self, bytes: &[u8]) {
         for &byte in bytes {
             if byte == b'\n' {
                 let line = std::mem::take(&mut self.line);
-                self.post(WARNING, &line);
+                self.post(line_severity(&line), &line);
             } else {
                 self.line.push(byte);
             }
@@ -303,9 +308,32 @@ impl DiagLog {
         std::mem::take(&mut self.saved)
     }
 
+    /// `messages`, taken by an archive whose write failed, saved again before the later ones
+    /// (the exception skips the archive's `ResetMessages`).
+    pub fn restore(&mut self, mut messages: Vec<Message>) {
+        messages.append(&mut self.saved);
+        self.saved = messages;
+    }
+
     /// Whether no message is waiting for an archive.
     pub fn is_empty(&self) -> bool {
         self.saved.is_empty()
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4017-4018, 5835-5844
+/// The severity of a one-line post by the header that NCBI's diagnostics write before its text,
+/// the severity's name and `:` (`Error: [psiblast] Error: Tax database file has wrong magic
+/// number.`, a load's lookup of the taxonomy database, NCBI BLAST+ 2.17.0 psiblast `-outfmt 11`:
+/// `code 2`; `Warning: (803.10) [blastp] ...`); a line without such a header (a reader's message)
+/// is a warning.
+fn line_severity(line: &[u8]) -> i32 {
+    if line.starts_with(b"Error: ") {
+        ERROR
+    } else if line.starts_with(b"Critical: ") {
+        CRITICAL
+    } else {
+        WARNING
     }
 }
 

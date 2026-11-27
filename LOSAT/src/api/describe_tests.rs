@@ -14,6 +14,7 @@ fn api_owned_options_are_not_described_and_search_options_are() {
             .iter()
             .chain(file_options(program))
             .chain(alignment_owned(program))
+            .chain(pattern_owned(program))
         {
             assert!(
                 !flags.contains(&format!("-{owned}").as_str()),
@@ -29,7 +30,7 @@ fn api_owned_options_are_not_described_and_search_options_are() {
             .find(|parameter| parameter.flag == "-evalue")
             .unwrap();
         assert!(evalue.takes_value);
-        // The help texts are the command line's; some options have none.
+        // The help texts are NCBI's comments of the options (line RG DECISIONS K4i-3-1).
         assert!(description
             .parameters
             .iter()
@@ -50,7 +51,7 @@ fn task_choices_are_the_tasks_the_parser_accepts() {
             "-task",
             task,
         ];
-        crate::cli::try_parse_from::<Cli, _, _>(argv).is_ok()
+        crate::cli::try_parse_from(argv).is_ok()
     };
     // Every -task lists its tasks: the default among them, each one accepted.
     for program in Program::ALL {
@@ -111,9 +112,9 @@ fn genetic_codes_are_listed_for_the_translated_programs_only() {
     }
 }
 
-// Until the programs on clap move onto NCBI's reader (line RG item K4i-2b), clap's parser decides
-// which genetic codes a run takes: describe's codes, which come from the argument tables, must be
-// those that the parser takes (the probe of every code below 64 that describe ran before K4i-2a).
+// NCBI's reader decides which genetic codes a run takes (line RG item K4i-2b): describe's codes,
+// which come from the same argument tables, are those that the command line takes (the probe of
+// every code below 64 that describe ran before K4i-2a).
 #[test]
 fn the_genetic_codes_are_those_that_the_parser_takes() {
     for program in Program::ALL {
@@ -135,10 +136,76 @@ fn the_genetic_codes_are_those_that_the_parser_takes() {
                         name,
                         &code,
                     ];
-                    crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv).is_ok()
+                    crate::cli::try_parse_from(argv).is_ok()
                 })
                 .collect();
             assert_eq!(listed, &taken, "{program} {name}");
         }
     }
+}
+
+// Line RG item K4i-3a: describe reads NCBI's argument tables, and the options it lists are those
+// that the command line's options read (`from_args`, line RG item K4i-3c): the names of each
+// program's XML but the standard arguments and the arguments refused by name. The value kinds are
+// the tables' types; psiblast's `-out_pssm` and `-out_ascii_pssm`, NCBI's output files, are paths.
+#[test]
+fn the_described_options_are_those_that_the_command_line_reads() {
+    for program in Program::ALL {
+        let tool = crate::cli::reader::tool(program.name())
+            .expect("every API program is a program of the CLI");
+        let mut read: Vec<String> = crate::cli::reader::options_tests::names_read(tool)
+            .into_iter()
+            .map(|name| format!("-{name}"))
+            .collect();
+        let mut described: Vec<String> = parameters(program)
+            .map(|parameter| parameter.flag)
+            .collect();
+        read.sort();
+        described.sort();
+        assert_eq!(described, read, "{program}");
+    }
+    let kind = |flag: &str| {
+        parameters(Program::Psiblast)
+            .find(|parameter| parameter.flag == flag)
+            .map(|parameter| parameter.value_kind)
+    };
+    assert_eq!(kind("-out_pssm"), Some(ValueKind::Path));
+    assert_eq!(kind("-out_ascii_pssm"), Some(ValueKind::Path));
+}
+
+// The help of an option is NCBI's comment of it (the `<description>` of its XML, which `-help`
+// prints), in LOSAT's words (`wording::losat_text`), and the options come in the order of the usage
+// line of `-help`.
+#[test]
+fn the_help_is_ncbis_comment_in_the_order_of_the_help() {
+    let blastn = describe(Program::Blastn);
+    let help = |flag: &str| {
+        let parameter = blastn
+            .parameters
+            .iter()
+            .find(|parameter| parameter.flag == flag);
+        parameter.map(|parameter| parameter.help.as_str())
+    };
+    assert_eq!(
+        help("-evalue"),
+        Some(
+            "Expectation value (E) threshold for saving hits. Default = 10 (1000 for blastn-short)"
+        )
+    );
+    assert_eq!(
+        help("-num_alignments"),
+        Some("Number of database sequences to show alignments for\nDefault = `250'")
+    );
+    let flags: Vec<&str> = blastn
+        .parameters
+        .iter()
+        .map(|parameter| parameter.flag.as_str())
+        .collect();
+    // NCBI's usage of blastn: `-task` first (after the search strategy files, which the API does
+    // not take), `-evalue`, `-word_size` and `-gapopen` in turn, `-mt_mode` last (before `-remote`,
+    // which LOSAT refuses).
+    let at = |flag: &str| flags.iter().position(|listed| *listed == flag).unwrap();
+    assert_eq!(flags.first(), Some(&"-task"));
+    assert!(at("-evalue") < at("-word_size") && at("-word_size") < at("-gapopen"));
+    assert_eq!(flags.last(), Some(&"-mt_mode"));
 }

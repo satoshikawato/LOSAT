@@ -1,14 +1,15 @@
-//! `losat dustmasker`, `losat segmasker`, `losat windowmasker` and `losat convert2blastmask`
-//! against NCBI BLAST+ 2.17.0 dustmasker 1.0.0, segmasker 1.0.0, windowmasker 1.0.0 and
-//! convert2blastmask: each row of
-//! `tests/<program>/cases.tsv` (its arguments as shell words, run in `tests/<program>`; `< file`
-//! is the standard input) gives NCBI's standard output, standard error and exit status, frozen
-//! in `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line RG, items K1, K2 and K3,
-//! 2026-11-12 and 11-13, on ws and the local official release; windowmasker's of line NP item
-//! M5a, 2026-11-20 on ws, `tests/windowmasker/make_fixtures.py`). A name the table repeats is
-//! compared on its last row, whose output the probe kept. NCBI is not run here. Every row runs
-//! through the library API too (`losat::api::run_dustmasker`, `run_segmasker`,
-//! `run_windowmasker`, `run_convert2blastmask`, by `examples/library_command_line`), with the
+//! `losat dustmasker`, `losat segmasker`, `losat windowmasker`, `losat convert2blastmask` and
+//! `losat blast_formatter` against NCBI BLAST+ 2.17.0 dustmasker 1.0.0, segmasker 1.0.0,
+//! windowmasker 1.0.0, convert2blastmask and blast_formatter: each row of
+//! `tests/<program>/cases.tsv` (its arguments as shell words, run in `tests/<program>`; `< file` is
+//! the standard input) gives NCBI's standard output, standard error and exit status, frozen in
+//! `tests/<program>/ncbi/<name>.{out,err,rc}` (probes of line RG, items K1, K2 and K3, 2026-11-12
+//! and 11-13, on ws and the local official release; windowmasker's of line NP item M5a, 2026-11-20
+//! on ws, `tests/windowmasker/make_fixtures.py`; blast_formatter's of line RG item F3, 2026-11-20
+//! on ws and 2026-11-23 on the local official release). A name the table repeats is compared on its
+//! last row, whose output the probe kept. NCBI is not run here. Every row runs through the library
+//! API too (`losat::api::run_dustmasker`, `run_segmasker`, `run_windowmasker`,
+//! `run_convert2blastmask`, `run_blast_formatter`, by `examples/library_command_line`), with the
 //! same bytes.
 
 use std::fs;
@@ -16,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::library_examples::example_binary;
-use crate::ncbi_windows_paths::ncbi_paths_on_windows;
+use crate::ncbi_windows_paths::{alias_list_path_on_windows, canonical, ncbi_paths_on_windows};
 
 /// The fixtures of `program`.
 fn fixtures(program: &str) -> PathBuf {
@@ -35,15 +36,16 @@ struct Case {
 }
 
 /// The variables of the first words of `words` of the form `NAME=value` (`NAME` in upper case,
-/// such as `BLASTDB`, where the taxonomy database is), taken out of `words`: the shell's
-/// assignments before the command.
+/// digits and `_`, not starting with a digit, such as `BLASTDB`, where the taxonomy database is,
+/// or `BL2SEQ_LEGACY`), taken out of `words`: the shell's assignments before the command.
 pub(crate) fn take_variables(words: &mut Vec<String>) -> Vec<(String, String)> {
     let mut variables = Vec::new();
     while let Some((name, value)) = words.first().and_then(|word| word.split_once('=')) {
         if name.is_empty()
+            || name.as_bytes()[0].is_ascii_digit()
             || !name
                 .bytes()
-                .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
         {
             break;
         }
@@ -245,6 +247,7 @@ fn expected(program: &str, case: &Case) -> Streams {
                         &format!(" - {missing_name}\n"),
                         &format!(" - {directory}\n"),
                     )
+                    .replace(&format!(": {missing_name}\n"), &format!(": {directory}\n"))
                     .into_bytes()
             };
             let (out, err, status) = expected_row(program, missing);
@@ -361,6 +364,34 @@ fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:196-208
+// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:467-482
+// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_gen_counts.cpp:237
+// `FillIdList` reads the `-ids` and `-exclude_ids` lists with `NcbiGetlineEOL`, whose line ends
+// are the platform's: `\n` with a last `\r` dropped on Windows, `\r` or `\n` on macOS
+// (`NCBI_OS_DARWIN`), `\n` elsewhere. The `-fa_list` list is read with `std::getline` (`\n`).
+/// Whether `case` of windowmasker names a list whose lines NCBI's build for this platform reads
+/// otherwise than its Linux build, whose bytes are frozen (on Linux a `\r` stays in the line): on
+/// Windows a list (`-ids`, `-exclude_ids`, and `-in` with `-fa_list`) with a `\r\n`, which the
+/// text mode of the stream reads as `\n`; on macOS an id list (`-ids`, `-exclude_ids`) with a
+/// `\r`, where `NcbiGetlineEOL` ends a line (`ncbi_app::files::LineEnds`, whose
+/// `input_lines` tests pin each platform's lines on every host).
+fn list_read_otherwise_than_on_linux(program: &str, case: &Case) -> bool {
+    let fa_list = case.words.windows(2).any(|pair| {
+        pair[0] == "-fa_list" && ["t", "true", "1"].contains(&pair[1].to_ascii_lowercase().as_str())
+    });
+    program == "windowmasker"
+        && case.words.windows(2).any(|pair| {
+            let id_list = matches!(pair[0].as_str(), "-ids" | "-exclude_ids");
+            let list = id_list || (fa_list && pair[0] == "-in");
+            list && fs::read(fixtures(program).join(&pair[1])).is_ok_and(|bytes| {
+                let crlf = bytes.windows(2).any(|two| two == b"\r\n");
+                let cr = bytes.contains(&b'\r');
+                (cfg!(windows) && crlf) || (cfg!(target_os = "macos") && id_list && cr)
+            })
+        })
+}
+
 /// Whether `case` is a row of windowmasker's `-convert`.
 fn converts_counts(program: &str, case: &Case) -> bool {
     program == "windowmasker" && case.words.iter().any(|word| word == "-convert")
@@ -375,10 +406,61 @@ fn counts_directory(program: &str, case: &Case) -> bool {
             .is_some_and(|name| !name.trim().is_empty() && fixtures(program).join(name).is_dir())
 }
 
+/// The rows whose error quotes an `OIDLIST` value that starts with `/`, which NCBI joins to a
+/// directory on Windows (`alias_list_path_on_windows`): the program, the row, that directory
+/// relative to the program's fixtures and the value. The directory is the alias file's, or, where
+/// the first name of its `DBLIST` is a volume, that volume's (`seqdb::alias::compute_masks`):
+/// `n_miss` and `n_missl` name the alias `tfn`, `p_miss` and `p_missl` the volume `tfp`.
+const OIDLIST_ROWS: &[(&str, &str, &str, &str)] = &[
+    (
+        "dustmasker",
+        "db_oidlist_miss_interval",
+        "../db_search/oidlist",
+        MISSING_OIDLIST,
+    ),
+    (
+        "dustmasker",
+        "db_oidlist_missl_interval",
+        "../db_search/oidlist",
+        MISSING_OIDLIST,
+    ),
+    (
+        "segmasker",
+        "db_oidlist_miss_interval",
+        "../db_search/taxfilter",
+        MISSING_OIDLIST,
+    ),
+    (
+        "segmasker",
+        "db_oidlist_missl_interval",
+        "../db_search/taxfilter",
+        MISSING_OIDLIST,
+    ),
+];
+
+/// The `OIDLIST` value of `tests/db_search/oidlist/{n,p}_miss{,l}` (make_oidlist.py `MISSING`).
+const MISSING_OIDLIST: &str = "/losat-oidlist-fixture-missing/none.msk";
+
 /// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen; the standard
 /// output and error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8:
-/// `-xmlhelp`'s version of the program, the prefixes).
+/// `-xmlhelp`'s version of the program, the prefixes). A row that LOSAT refuses by name has its
+/// message in `refused/<name>.err` (no standard output, exit status 1), and a row of
+/// `REFUSED_ROWS` that says what NCBI's record of it must show; NCBI's bytes of that row stay in
+/// `ncbi/` as that record.
 fn expected_row(program: &str, name: &str) -> Streams {
+    if let Ok(err) = fs::read(
+        fixtures(program)
+            .join("refused")
+            .join(format!("{name}.err")),
+    ) {
+        let refused = refused_row(program, name);
+        assert!(
+            refused.fits(&fixtures(program), &err),
+            "{program} {name}: NCBI's record or LOSAT's message is not the one of a refusal of {}",
+            refused.kind
+        );
+        return (Vec::new(), err, 1);
+    }
     let file = |extension: &str| {
         fixtures(program)
             .join("ncbi")
@@ -402,6 +484,17 @@ fn expected_row(program: &str, name: &str) -> Streams {
     } else {
         err
     };
+    let err = match OIDLIST_ROWS
+        .iter()
+        .find(|(each, row, ..)| *each == program && *row == name)
+    {
+        Some(&(_, _, dir, value)) if cfg!(windows) => {
+            let dir = canonical(&fixtures(program).join(dir));
+            let text = String::from_utf8(err).unwrap();
+            alias_list_path_on_windows(&text, &dir.to_string_lossy(), value).into_bytes()
+        }
+        _ => err,
+    };
     (
         losat::wording::losat_output_bytes(&fs::read(file("out")).unwrap()).into_owned(),
         losat::wording::losat_bytes(&err).into_owned(),
@@ -409,12 +502,134 @@ fn expected_row(program: &str, name: &str) -> Streams {
     )
 }
 
+/// A row that LOSAT refuses by name (`refused/<name>.err`): the kind of its refusal, the exit
+/// status and a text of NCBI's frozen record that show what NCBI's run depends on there, and a
+/// text of LOSAT's message. A row cannot move to `refused/` over a result of NCBI's that LOSAT
+/// should reproduce without a row here that says why.
+struct RefusedRow {
+    program: &'static str,
+    name: &'static str,
+    kind: &'static str,
+    ncbi_status: i32,
+    ncbi_err: &'static str,
+    losat_err: &'static str,
+}
+
+/// The rows that LOSAT refuses by name.
+const REFUSED_ROWS: [RefusedRow; 4] = [
+    // NCBI's database reader does not open it: NCBI then asks its servers (its remote loader's
+    // failure under `unshare -rn`).
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_database",
+        kind: "Database",
+        ncbi_status: 255,
+        ncbi_err: "s_InitializeSubject",
+        losat_err: "asks NCBI's servers",
+    },
+    // A stored Fatal message: NCBI's post carries a stack trace of its own binary.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_fatal_message",
+        kind: "FatalMessage",
+        ncbi_status: 255,
+        ncbi_err: "Note[F]",
+        losat_err: "severity Fatal",
+    },
+    // An output format outside what LOSAT's blast_formatter writes (8, 9 and 12): NCBI writes it.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_of6",
+        kind: "OutputFormat",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "output format 6 is not supported",
+    },
+    // A NaN or an infinite real number in the results: NCBI stops at it in JSON with an error of
+    // its stream (in ASN.1 binary it writes its one special octet, as LOSAT does: row
+    // real_pinf_9).
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_real_12",
+        kind: "Unwritable",
+        ncbi_status: 1,
+        ncbi_err: "invalid double: not a number",
+        losat_err: "output format 12 of a BLAST archive with a NaN or an infinite real number",
+    },
+];
+
+/// The row of `REFUSED_ROWS` for `name` of `program`.
+fn refused_row(program: &str, name: &str) -> &'static RefusedRow {
+    REFUSED_ROWS
+        .iter()
+        .find(|row| row.program == program && row.name == name)
+        .unwrap_or_else(|| panic!("{program} {name}: refused/ without a row of REFUSED_ROWS"))
+}
+
+impl RefusedRow {
+    /// Whether NCBI's frozen record of the row in `dir` and LOSAT's message `err` are those of
+    /// the refusal.
+    fn fits(&self, dir: &Path, err: &[u8]) -> bool {
+        let ncbi = |extension: &str| {
+            fs::read(dir.join("ncbi").join(format!("{}.{extension}", self.name))).unwrap()
+        };
+        let status: i32 = String::from_utf8(ncbi("rc"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let ncbi_err = String::from_utf8_lossy(&ncbi("err")).into_owned();
+        let err = String::from_utf8_lossy(err);
+        status == self.ncbi_status
+            && ncbi_err.contains(self.ncbi_err)
+            && err.starts_with("Error: ")
+            && err.contains(self.losat_err)
+    }
+}
+
+#[test]
+fn every_refused_row_names_its_refusal_and_ncbi_s_record_fits_it() {
+    for program in [
+        "dustmasker",
+        "segmasker",
+        "windowmasker",
+        "convert2blastmask",
+        "blast_formatter",
+    ] {
+        let Ok(entries) = fs::read_dir(fixtures(program).join("refused")) else {
+            continue;
+        };
+        for entry in entries {
+            let file = entry.unwrap().file_name().to_string_lossy().into_owned();
+            let name = file.strip_suffix(".err").expect("refused/<name>.err");
+            let err = fs::read(fixtures(program).join("refused").join(&file)).unwrap();
+            let row = refused_row(program, name);
+            assert!(row.fits(&fixtures(program), &err), "{program} {name}");
+        }
+    }
+    for row in &REFUSED_ROWS {
+        assert!(
+            fixtures(row.program)
+                .join("refused")
+                .join(format!("{}.err", row.name))
+                .is_file(),
+            "{} {}: a row of REFUSED_ROWS without its refused/ file",
+            row.program,
+            row.name
+        );
+    }
+}
+
 /// Whether `case` of `program` runs on this platform: a row that writes its output to a device
 /// file runs where the file is, `/dev/full` on Linux, `/dev/null` on Unix (`-logfile /dev/null`
 /// means no log file on every platform: NCBI's `SetLogFile` compares the name,
-/// corelib/ncbidiag.cpp:7594); a `counts_directory` row runs on Unix.
+/// corelib/ncbidiag.cpp:7594); a `counts_directory` row runs on Unix; a row whose list NCBI reads
+/// here otherwise than on Linux (`list_read_otherwise_than_on_linux`) does not run.
 fn runs_here(program: &str, case: &Case) -> bool {
     if counts_directory(program, case) && !cfg!(unix) {
+        return false;
+    }
+    if list_read_otherwise_than_on_linux(program, case) {
         return false;
     }
     let out = case
@@ -499,6 +714,52 @@ fn windowmasker_gives_ncbis_bytes() {
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
 }
 
+#[test]
+fn windowmasker_empty_genome_reports_code_instead_of_blank_error() {
+    let expected_err = concat!(
+        "computing the genome length\n",
+        "Error: empty genome\n",
+        "Error: (106.16) Application's execution failed: empty genome\n",
+    );
+    // Run the exact reported command in an empty directory: `losat windowmasker -mk_counts
+    // -fa_list true -in list.txt -out c.counts` (rc 3).
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("windowmasker-empty-genome-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .args([
+            "windowmasker",
+            "-mk_counts",
+            "-fa_list",
+            "true",
+            "-in",
+            "list.txt",
+            "-out",
+            "c.counts",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let _ = fs::remove_dir_all(&dir);
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr, expected_err);
+    assert!(!stderr.contains("Error: \n"));
+    assert!(!stderr.contains("Application's execution failed: \n"));
+
+    // Frozen NCBI 2.17.0 empty-genome rows map to the exact same non-blank stderr.
+    let rows = cases("windowmasker");
+    for name in ["k_falist_missing", "k_emptyfile", "k_ids_none"] {
+        let case = rows.iter().find(|c| c.name == name).expect(name);
+        let got = run("windowmasker", case);
+        let want = expected("windowmasker", case);
+        assert_eq!(got, want, "{name}");
+        assert_eq!(String::from_utf8(got.1).unwrap(), expected_err, "{name}");
+    }
+}
+
 /// The rows of `EMPTY_ID_ROWS` are what the table says: each row is NCBI's crash (exit status 139,
 /// no output) after the error of its first such line, the one `bad id` error of a row of one line;
 /// and each row is its near row with only its list changed, the list of the near row with the lines
@@ -576,9 +837,72 @@ fn convert2blastmask_gives_ncbis_bytes() {
     assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
 }
 
-// `run_dustmasker`, `run_segmasker`, `run_windowmasker` and `run_convert2blastmask` run NCBI's
-// application start as the command line does (`ncbi_app::run_with`, line RG item E1w-2): the
-// rows of `-logfile`,
+#[test]
+fn blast_formatter_gives_ncbis_bytes() {
+    let differ = rows_that_differ("blast_formatter");
+    assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
+}
+
+/// blast_formatter's standard output on a full device and on a closed pipe: NCBI's runtime
+/// aborts (`std::terminate` inside the serial stream's destructor, its post's flush of `cout`
+/// through `cerr`'s tie: exit status 134 by SIGABRT, the runtime's report on the standard error,
+/// no post; probes of line RG item F3, agent C6, 2026-11-23, NCBI BLAST+ 2.17.0, the official
+/// Linux x64 release: every archive of the table with outfmt 8, 9 and 12).
+#[cfg(target_os = "linux")]
+#[test]
+fn blast_formatter_standard_output_failure_aborts() {
+    use std::os::unix::process::ExitStatusExt;
+    let want: &[u8] = b"terminate called after throwing an instance of 'std::__ios_failure'\n  \
+        what():  basic_ios::clear: iostream error\n";
+    let dir = fixtures("blast_formatter");
+    for (archive, outfmt) in [("db", "8"), ("bn", "12")] {
+        let words = format!("{archive}.asn -outfmt {outfmt}");
+        let case = Case {
+            name: "standard_output_failure".to_string(),
+            words: vec![
+                "-archive".to_string(),
+                dir.join("in")
+                    .join(format!("{archive}.asn"))
+                    .display()
+                    .to_string(),
+                "-outfmt".to_string(),
+                outfmt.to_string(),
+            ],
+            stdin: None,
+            // The run is out of the fixtures: the archive's database `in/db/s3` from `BLASTDB`.
+            variables: vec![("BLASTDB".to_string(), dir.display().to_string())],
+        };
+        let binary = Path::new(env!("CARGO_BIN_EXE_losat"));
+        let full = fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .unwrap();
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
+        for (what, stdout) in [
+            ("/dev/full", Stdio::from(full)),
+            ("a closed pipe", Stdio::from(writer)),
+        ] {
+            // Out of the fixtures, where an abort may leave a core file.
+            let output = command(binary, "blast_formatter", &case)
+                .current_dir(env!("CARGO_TARGET_TMPDIR"))
+                .stdout(stdout)
+                .stderr(Stdio::piped())
+                .output()
+                .unwrap();
+            assert_eq!(
+                (output.status.signal(), output.stderr.as_slice()),
+                (Some(6), want),
+                "{words} on {what}: {:?}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+}
+
+// `run_dustmasker`, `run_segmasker`, `run_windowmasker`, `run_convert2blastmask` and
+// `run_blast_formatter` run NCBI's application start as the command line does
+// (`ncbi_app::run_with`, line RG item E1w-2): the rows of `-logfile`,
 // `-conffile` and `-dryrun` give the command line's bytes through the library too. `-xmlhelp`,
 // whose XML only the command line writes, is refused (line RG DECISIONS E2x-1). The example ends
 // every failure with exit status 1. The rows of `program`'s table whose run through the library
@@ -586,7 +910,29 @@ fn convert2blastmask_gives_ncbis_bytes() {
 fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Vec<String> {
     let example = example_binary("library_command_line");
     let mut differ = Vec::new();
-    let (mut refused, mut started) = (0, 0);
+    let mut started = 0;
+    let xmlhelp_refused: Streams = (
+        Vec::new(),
+        format!(
+            "Error: the option -xmlhelp runs on the command line of \
+             LOSAT's {refusal_name} only: the library API and the Web engine do not write \
+             NCBI's XML description of the arguments\n"
+        )
+        .into_bytes(),
+        1,
+    );
+    // `-xmlhelp` alone, also where the table has no row of it (blast_formatter's XML is not
+    // NCBI's bytes: it lists no `-rid`).
+    let xmlhelp = Case {
+        name: "xmlhelp_through_the_library".to_string(),
+        words: vec!["-xmlhelp".to_string()],
+        stdin: None,
+        variables: Vec::new(),
+    };
+    let got = run_binary(&example, program, &xmlhelp);
+    if got != xmlhelp_refused {
+        differ.push((xmlhelp.name.clone(), got, xmlhelp_refused.clone()));
+    }
     for case in cases_here(program) {
         let (out, err, status) = run_binary(&example, program, &case);
         let help = case
@@ -594,13 +940,7 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
             .iter()
             .find(|given| matches!(given.as_str(), "-h" | "-help" | "-help-full" | "-xmlhelp"));
         let expected = if help.is_some_and(|given| given == "-xmlhelp") {
-            refused += 1;
-            let text = format!(
-                "Error: the option -xmlhelp runs on the command line of \
-                 LOSAT's {refusal_name} only: the library API and the Web engine do not write \
-                 NCBI's XML description of the arguments\n"
-            );
-            (Vec::new(), text.into_bytes(), 1)
+            xmlhelp_refused.clone()
         } else {
             if ["-conffile", "-dryrun"].into_iter().any(|word| {
                 case.words
@@ -617,7 +957,7 @@ fn rows_that_differ_through_the_library(program: &str, refusal_name: &str) -> Ve
             differ.push((case.name.clone(), got, expected));
         }
     }
-    assert!(refused > 0 && started > 0, "{program}: {refused} {started}");
+    assert!(started > 0, "{program}: no row of -conffile or -dryrun");
     if !differ.is_empty() {
         eprintln!("{}", describe(&differ));
     }
@@ -654,6 +994,15 @@ fn windowmasker_through_the_library_gives_the_command_line_s_bytes() {
 #[test]
 fn convert2blastmask_through_the_library_gives_the_command_line_s_bytes() {
     let differ = rows_that_differ_through_the_library("convert2blastmask", "CONVERT2BLASTMASK");
+    assert!(
+        differ.is_empty(),
+        "rows that differ through the library: {differ:?}"
+    );
+}
+
+#[test]
+fn blast_formatter_through_the_library_gives_the_command_line_s_bytes() {
+    let differ = rows_that_differ_through_the_library("blast_formatter", "BLAST_FORMATTER");
     assert!(
         differ.is_empty(),
         "rows that differ through the library: {differ:?}"

@@ -15,14 +15,14 @@ use crate::seqdb::taxdb::SourceNames;
 use crate::seqid::accguide::parse_flags::ANY_RAW;
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
-use super::retrieve::{parse_target_with, Output, Source, Stop};
+use super::retrieve::{parse_target_with, HeaderSet, Output, Source, Stop};
 
 /// What NCBI's two `GetBioseq` calls of one `Write` of `oid`, `config` and `target` read of the
 /// sequence `oid` (`with`): the first `GetBioseq` of `oid`, then `GetBioseq` of `oid`, `gi` and
 /// `seqid` for a `-target_only` target or `GetBioseq` of `oid` again.
-pub(super) struct DbBioseq {
+pub(super) struct DbBioseq<'s> {
     /// `GetHdr` of `oid`: every definition line the database keeps.
-    pub set: DeflineSet,
+    pub set: HeaderSet<'s>,
     /// The user object's header (`x_GetFilteredBinaryHeader`), read for `%b` alone.
     pub header: Vec<u8>,
     /// The lines of the Bioseq's ids and title for a target: the first that holds it.
@@ -33,7 +33,7 @@ pub(super) struct DbBioseq {
     pub length: u32,
 }
 
-impl DbBioseq {
+impl DbBioseq<'_> {
     /// The definition lines of the Bioseq's ids (the first line's) and title: the target's line,
     /// or every line.
     pub fn shown(&self) -> &DeflineSet {
@@ -54,10 +54,10 @@ impl DbBioseq {
         source: &Source,
         oid: u32,
         with_header: bool,
-        target: Option<&str>,
-        target_id: fn(&str) -> Result<ParsedSeqId, Stop>,
+        target: Option<&[u8]>,
+        target_id: fn(&[u8]) -> Result<ParsedSeqId, Stop>,
         out: &mut Output<'a, 'b>,
-        write: impl FnOnce(&DbBioseq, &mut Output<'a, 'b>) -> Result<(), Stop>,
+        write: impl FnOnce(&DbBioseq<'_>, &mut Output<'a, 'b>) -> Result<(), Stop>,
     ) -> Result<(), Stop> {
         let read = if with_header {
             source.deflines_with_header(oid)?
@@ -78,11 +78,14 @@ impl DbBioseq {
         // `GetBioseq` looks the taxids up for a Bioseq it gives, one with definition lines and
         // letters, the first call for `oid` and the second for the target or `oid` again.
         let length = if set.deflines.is_empty() {
-            0
+            0i64
         } else {
             source.length(oid)?
         };
         let made = length >= 1;
+        if !made && !set.deflines.is_empty() {
+            source.check_non_positive_protein_range(oid)?;
+        }
         if made {
             source.post_bioseq_texts(oid, &set, None, out)?;
         }
@@ -100,17 +103,11 @@ impl DbBioseq {
         if made {
             source.post_bioseq_texts(oid, &set, target.as_ref(), out)?;
         }
-        let shown = kept.as_ref().unwrap_or(&set);
-        let Some(defline) = shown.deflines.first() else {
-            return Ok(());
-        };
-        if defline.ids.is_empty() {
-            return Err(Stop::Refused(format!(
-                "a definition line without Seq-ids is not supported by LOSAT's {}",
-                super::PROGRAM
-            )));
-        }
-        if !made {
+        // A front line without Seq-ids (makeblastdb writes none; an edited header) makes a Bioseq
+        // of no ids, as NCBI's: each formatter reads it as NCBI's does (`fasta::short_header`
+        // writes no header line, a range or a mask of it throws, `%b` writes the empty list;
+        // line RG D1c-1c-b).
+        if !made || kept.as_ref().unwrap_or(&set).deflines.is_empty() {
             return Ok(());
         }
         let bioseq = DbBioseq {
@@ -118,7 +115,7 @@ impl DbBioseq {
             header,
             kept,
             target,
-            length,
+            length: length as u32,
         };
         write(&bioseq, out)
     }
@@ -152,7 +149,7 @@ pub(super) struct BioseqFormatter;
 /// The Seq-id of a `-target_only` target as `CBlastDB_BioseqFormatter` gets it: `CSeq_id` of `text`
 /// (`fParse_AnyRaw`: a number is a GI), whose GI `SeqDB_SimplifySeqid` gives as one
 /// (`GetBioseq` of `oid` and `gi`).
-fn bioseq_target_id(text: &str) -> Result<ParsedSeqId, Stop> {
+fn bioseq_target_id(text: &[u8]) -> Result<ParsedSeqId, Stop> {
     parse_target_with(text, ANY_RAW)
 }
 
@@ -164,7 +161,7 @@ impl BioseqFormatter {
         &self,
         source: &Source,
         oid: u32,
-        target: Option<&str>,
+        target: Option<&[u8]>,
         out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
         DbBioseq::with(

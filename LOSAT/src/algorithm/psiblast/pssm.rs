@@ -32,8 +32,8 @@ use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa, BLASTAA_SIZE, BLAST_
 pub struct PsiblastPssmOptions {
     pub save_pssm_after_last_round: bool,
     pub save_each_pssm: bool,
-    pub out_pssm: Option<String>,
-    pub out_ascii_pssm: Option<String>,
+    pub out_pssm: Option<std::path::PathBuf>,
+    pub out_ascii_pssm: Option<std::path::PathBuf>,
     pub pseudocount: i32,
     /// `-in_pssm`: the query as a PSSM file (`algorithm::psiblast::in_pssm`).
     pub in_pssm: Option<std::path::PathBuf>,
@@ -48,15 +48,18 @@ pub struct PsiblastPssmOptions {
     /// when it is not 1 (0: until convergence), or 1 with `-in_pssm` and a PSSM file (the input
     /// PSSM is written before round 1); `None` for the one search of today's call.
     pub rounds: Option<u32>,
+    /// `-phi_pattern`: the pattern file of a PHI-BLAST round 1 (`algorithm::phi_search`), read
+    /// with the options (`BlastpArgs::check_options`).
+    pub phi_pattern: Option<std::path::PathBuf>,
 }
 
 /// A run that writes the PSSM of each query whose round-1 results have alignments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PssmRequest {
     /// `-out_pssm`, as given: the ASN.1 text PSSM (`SaveCheckpoint`).
-    pub asn_path: Option<String>,
+    pub asn_path: Option<std::path::PathBuf>,
     /// `-out_ascii_pssm`, as given (`SaveAsciiPssm`).
-    pub ascii_path: Option<String>,
+    pub ascii_path: Option<std::path::PathBuf>,
     /// `-save_each_pssm`: the files are `F.1`, `F.2`, ... (`CAutoOutputFileReset` with versions).
     pub save_each: bool,
     /// `-pseudocount` (`PSIBlastOptions::pseudo_count`).
@@ -134,7 +137,7 @@ impl PssmRequest {
     /// where it is requested: with `-save_each_pssm` they number their files with the run's
     /// numbers (`versions`).
     pub(crate) fn streams(&self) -> [Option<OutputFileReset>; 2] {
-        let stream = |path: Option<&str>, version: &Version| {
+        let stream = |path: Option<&std::path::Path>, version: &Version| {
             path.map(|path| OutputFileReset::new(path, self.save_each.then(|| version.clone())))
         };
         [
@@ -175,7 +178,11 @@ impl PsiblastPssmOptions {
     // `-out_ascii_pssm` (`SaveCheckpoint`, `SaveAsciiPssm`).
     // With more rounds the driver writes the files (`rounds::RoundFiles`), not the search.
     pub(crate) fn request(&self) -> Option<PssmRequest> {
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:270-310
+        // A PHI-BLAST round makes no PSSM (only a PSI round computes the next one), so one round
+        // saves none.
         if self.rounds.is_some()
+            || self.phi_pattern.is_some()
             || !self.save_pssm_after_last_round
             || (self.out_pssm.is_none() && self.out_ascii_pssm.is_none())
         {
@@ -243,6 +250,49 @@ pub(crate) struct PssmAlignment<'a> {
     pub(crate) ops: Option<&'a [GapEditOp]>,
 }
 
+/// The E-value that the PSSM reads of an HSP (`GetLowestEvalue`: the lowest `e_value` or `sum_e`
+/// score of the Seq-align, at most `BLAST_EXPECT_VALUE` 10, and 10 where it has none,
+/// `seqalign_evalue_absent`); any other value of 1e-180 or less, a negative one of a database
+/// with a negative size too, is 0 in it. The one owner of the inclusion test of a round
+/// (`psi_round::included`) and of the PSSM's multiple alignment (`input_msa`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:512-545
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:158
+pub(crate) fn seqalign_pssm_evalue(e_value: f64) -> f64 {
+    const BLAST_EXPECT_VALUE: f64 = 10.0;
+    if crate::report::serial::seqalign::seqalign_evalue_absent(e_value) {
+        return BLAST_EXPECT_VALUE;
+    }
+    crate::report::serial::seqalign::seqalign_evalue(e_value).min(BLAST_EXPECT_VALUE)
+}
+
+impl<'a> PssmAlignment<'a> {
+    /// The Seq-align of the BLASTP HSP `hsp` (1-based ends), whose query starts `q_shift` letters
+    /// into the query's record (`-query_loc`).
+    pub(crate) fn of_hsp(
+        hsp: &'a crate::algorithm::blastp::hsp::BlastpHsp,
+        q_shift: usize,
+    ) -> Self {
+        PssmAlignment {
+            subject: hsp.s_idx,
+            e_value: crate::report::serial::seqalign::seqalign_evalue(hsp.e_value),
+            q_start: hsp.q_start - 1 + q_shift,
+            s_start: hsp.s_start - 1,
+            q_length: hsp.q_end + 1 - hsp.q_start,
+            ops: hsp.gap_info.as_deref(),
+        }
+    }
+
+    /// The fewest letters of a Bioseq from which NCBI's read of the Seq-align's subject range
+    /// takes letters (`x_GetSubjectSequence`'s `CSeqVector` of that range, cited at `input_msa`):
+    /// the end of the range; a shorter one throws, and the read gets none. The one rule of
+    /// `input_msa` and of LOSAT's refusal of a read held by another sequence
+    /// (`ListedTitles::check_pssm_holds` of BLASTP; review 5 of line DBID pfoff-4, H1).
+    pub(crate) fn subject_end(&self) -> usize {
+        self.s_start + subject_span(self)
+    }
+}
+
 /// The Karlin-Altschul blocks of the round's ancillary data (`CBlastAncillaryData`, the blocks of
 /// the query's context): `kbp_std`, `kbp_gap`, `kbp_psi` and `kbp_gap_psi`. In the first round
 /// the PSI blocks are copies of the standard ones (`kbp_psi` and `kbp_gap_psi` of the search's
@@ -295,6 +345,10 @@ pub(crate) struct PssmScoring<'a> {
 /// `-out_ascii_pssm`.
 #[derive(Debug)]
 pub(crate) struct QueryPssm {
+    /// The `PssmWithParameters` of the PSSM, made for its ASN.1 text (`-out_pssm`) and for
+    /// psiblast's archive (outfmt 11), whose request of the round that searches the PSSM holds it
+    /// (`PsiSearch::archive_pssm`); `None` when neither is written.
+    pub(crate) object: Option<std::sync::Arc<PssmWithParameters>>,
     pub(crate) asn: Option<Vec<u8>>,
     /// NCBI's posts of the bytes that its stream replaces in the ASN.1 text (a query title
     /// outside the visible ASCII range; `report::serial::pssm::asn_text_posting`), which come
@@ -314,7 +368,8 @@ pub(crate) struct QueryPssm {
 /// `rounds::SetKey`), the round's ancillary data, and the gapped block of the matrix and gap
 /// costs (`gapped`, the score block's `kbp_gap_std[0]`). `unread` receives the subject of each
 /// Seq-align whose letters cannot be read, in order (NCBI's warning `Failed to retrieve
-/// sequence`, `input_msa`), also where the PSSM then fails.
+/// sequence`, `input_msa`), also where the PSSM then fails. `archive`: the run's archive holds the
+/// PSSM's object (`QueryPssm::object`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast.cpp:110-150
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:380-404
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:131-148
@@ -347,6 +402,7 @@ pub(crate) fn query_pssm(
     key: &dyn Fn(u32) -> SetKey,
     ancillary: PssmAncillary,
     unread: &mut Vec<u32>,
+    archive: bool,
 ) -> Result<QueryPssm> {
     let mut sbp = score_block(scoring.matrix, gapped)?;
     sbp.set_ungapped_statistical_params(ancillary.psi_gapped);
@@ -366,20 +422,29 @@ pub(crate) fn query_pssm(
     let pssm =
         psi::create_pssm_with_diagnostics(&msa, request.pseudocount, &sbp, request.diagnostics())
             .map_err(|error| crate::blastinput::app::engine_error(error_code_to_string(error)))?;
-    let (asn, asn_posts) = match request.asn_path {
-        Some(_) => {
-            let value = pssm_with_parameters(&pssm, letters, &query, scoring, request.pseudocount);
-            let (asn, posts) = crate::report::serial::pssm::asn_text_posting(&value)
+    let object = (request.asn_path.is_some() || archive).then(|| {
+        std::sync::Arc::new(pssm_with_parameters(
+            &pssm,
+            letters,
+            &query,
+            scoring,
+            request.pseudocount,
+        ))
+    });
+    let (asn, asn_posts) = match (&request.asn_path, &object) {
+        (Some(_), Some(value)) => {
+            let (asn, posts) = crate::report::serial::pssm::asn_text_posting(value)
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
             (Some(asn), posts)
         }
-        None => (None, Vec::new()),
+        _ => (None, Vec::new()),
     };
     let ascii = request
         .ascii_path
         .as_ref()
         .map(|_| print_ascii_pssm(&pssm, letters, ancillary));
     Ok(QueryPssm {
+        object,
         asn,
         asn_posts,
         ascii,
@@ -567,18 +632,9 @@ fn input_msa(
     inclusion_ethresh: f64,
     unread: &mut Vec<u32>,
 ) -> Result<PsiMsa> {
-    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:158
-    const BLAST_EXPECT_VALUE: f64 = 10.0;
-    let lowest_evalue = |e_value: f64| {
-        if e_value < BLAST_EXPECT_VALUE {
-            e_value
-        } else {
-            BLAST_EXPECT_VALUE
-        }
-    };
     let qualifying: std::collections::BTreeSet<SetKey> = alignments
         .iter()
-        .filter(|alignment| lowest_evalue(alignment.e_value) < inclusion_ethresh)
+        .filter(|alignment| seqalign_pssm_evalue(alignment.e_value) < inclusion_ethresh)
         .map(|alignment| key(alignment.subject))
         .collect();
     let mut msa = PsiMsa::new(query.len(), qualifying.len());
@@ -592,7 +648,7 @@ fn input_msa(
     let mut last_sid: Option<SetKey> = None;
     for alignment in alignments {
         let current_sid = key(alignment.subject);
-        if lowest_evalue(alignment.e_value) < inclusion_ethresh {
+        if seqalign_pssm_evalue(alignment.e_value) < inclusion_ethresh {
             if last_sid
                 .as_ref()
                 .is_some_and(|last| !current_sid.matches(last))
@@ -605,7 +661,7 @@ fn input_msa(
                 );
             };
             match subject(alignment.subject)?
-                .filter(|letters| letters.len() >= alignment.s_start + subject_span(alignment))
+                .filter(|letters| letters.len() >= alignment.subject_end())
             {
                 Some(letters) => process_denseg(row, alignment, &letters),
                 None => {
@@ -753,13 +809,25 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
                 .as_ref()
                 .expect(REQUESTED),
         }),
-        &[
-            ("Standard Ungapped    ", ancillary.ungapped),
-            ("Standard Gapped      ", ancillary.gapped),
-            ("PSI Ungapped         ", ancillary.psi_ungapped),
-            ("PSI Gapped           ", ancillary.psi_gapped),
-        ],
+        &ancillary_blocks(&ancillary),
     )
+}
+
+/// The blocks that the footer of a computed PSSM prints: each of the round's ancillary blocks that
+/// the results keep (`stats::tables::ancillary_kept`, for all four). The input PSSM's footer of
+/// round 1 (`in_pssm_files`) prints its two PSI blocks as the file holds them: NCBI makes that
+/// ancillary data from the PSSM's values without the check (`ExtractPssmAncillaryData`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:296-326
+fn ancillary_blocks(ancillary: &PssmAncillary) -> Vec<(&'static str, KarlinBlk)> {
+    [
+        ("Standard Ungapped    ", ancillary.ungapped),
+        ("Standard Gapped      ", ancillary.gapped),
+        ("PSI Ungapped         ", ancillary.psi_ungapped),
+        ("PSI Gapped           ", ancillary.psi_gapped),
+    ]
+    .into_iter()
+    .filter(|(_, block)| crate::stats::tables::ancillary_kept(block.lambda))
+    .collect()
 }
 
 /// The columns that the long form of `PrintAsciiPssm` prints (a PSSM with its information
@@ -891,16 +959,16 @@ pub(crate) fn file_posts(application: &str, replaced: &[ReplacedChar]) -> Posts 
 // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:54-55
 #[derive(Debug)]
 pub(crate) struct OutputFileReset {
-    file_name: String,
+    file_name: std::path::PathBuf,
     /// `m_Version`: `None` for version 0 (no `-save_each_pssm`), else the run's number of the
     /// stream (`PssmVersions`).
     version: Option<Version>,
 }
 
 impl OutputFileReset {
-    fn new(file_name: &str, version: Option<Version>) -> Self {
+    fn new(file_name: &std::path::Path, version: Option<Version>) -> Self {
         Self {
-            file_name: file_name.to_string(),
+            file_name: file_name.to_path_buf(),
             version,
         }
     }
@@ -909,16 +977,22 @@ impl OutputFileReset {
     pub(crate) fn next_file(&mut self) -> PssmFile {
         let Some(version) = self.version.as_ref() else {
             return PssmFile {
-                path: std::path::PathBuf::from(&self.file_name),
+                path: self.file_name.clone(),
                 replaced: true,
             };
         };
         let number = version.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         PssmFile {
-            path: std::path::PathBuf::from(format!("{}.{number}", self.file_name)),
+            path: numbered_pssm_path(&self.file_name, number),
             replaced: false,
         }
     }
+}
+
+fn numbered_pssm_path(base: &std::path::Path, number: u32) -> std::path::PathBuf {
+    let mut name = base.as_os_str().to_os_string();
+    name.push(format!(".{number}"));
+    std::path::PathBuf::from(name)
 }
 
 /// One file of `CAutoOutputFileReset::GetStream`.
@@ -1505,10 +1579,10 @@ pub(crate) fn check_pssm_files(
         };
         let names: Vec<std::path::PathBuf> = if request.save_each {
             (first..first.saturating_add(u32::try_from(queries).unwrap_or(u32::MAX)))
-                .map(|n| std::path::PathBuf::from(format!("{path}.{n}")))
+                .map(|n| numbered_pssm_path(path, n))
                 .collect()
         } else {
-            vec![std::path::PathBuf::from(path)]
+            vec![path.to_path_buf()]
         };
         for name in &names {
             check.check(option, name)?;

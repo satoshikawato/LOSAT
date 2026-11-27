@@ -16,8 +16,10 @@ import {
   reopening,
   toProgramDescription,
 } from 'losat';
-import { INFLATED_TOO_LARGE } from 'losat/ports';
+import { INFLATED_TOO_LARGE, InputMismatchError } from 'losat/ports';
+import { parseToolDescription } from 'losat/domain';
 import { findReactors } from '../../build/reactors';
+import { WINDOWMASKER_USAGE_ORDER } from '../../src/domain/tools';
 import { ABI_VERSION, EngineStoppedError, ReactorAbi, stopMessage, type AbiExports } from '../../../packages/losat/src/infra/reactor/abi';
 import { ABI_EXPORTS, inspectReactor } from '../../../packages/losat/src/infra/reactor/artifact';
 import { inflateFile } from '../../src/infra/data/inflate';
@@ -396,7 +398,7 @@ describe('ReactorAbi', () => {
 
   it('releases a registered handle whose response cannot be read', () => {
     const { abi, released } = fakeReactor('{"handle": 7, "records": [', 4);
-    expect(() => abi.register('blastn', 1, true, new Uint8Array([62, 115]))).toThrow(SyntaxError);
+    expect(() => abi.register('blastn', 1, true, false, new Uint8Array([62, 115]))).toThrow(SyntaxError);
     expect(released).toEqual([7]);
   });
 
@@ -554,15 +556,64 @@ describe.skipIf(reactors === undefined)('responses of more than 1 MiB from the s
   it('scans and registers thousands of records', async () => {
     const instance = await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource));
     const scanner = new ReactorScanner(async () => instance.abi);
-    const scan = await scanner.scan({ program: 'blastn', role: 'subject', dataLoaders: true }, (async function* () {
+    const scan = await scanner.scan({ program: 'blastn', role: 'subject', dataLoaders: true, parseDeflines: false }, (async function* () {
       yield fasta;
     })());
     expect(scan.records).toHaveLength(25_000);
     expect(scan.records[24_999]).toMatchObject({ id: 'record_24999', length: 32 });
-    const registered = instance.abi.register('blastn', 1, true, fasta);
+    const registered = instance.abi.register('blastn', 1, true, false, fasta);
     expect(registered.records).toHaveLength(25_000);
     expect(registered.records[24_999]).toEqual({ id: 'record_24999', length: 32 });
     instance.abi.release(registered.handle);
+  }, 60_000);
+
+  it('accepts register records for assembled inputs and returns readRecords, while rejecting non-assembled mismatches (D17)', async () => {
+    const mod = new WebAssembly.Module(reactors!.serial.bytes as BufferSource);
+    const runtime = new EngineRuntime({
+      serial: async () => mod,
+      threads: async () => {
+        throw new Error('unused');
+      },
+      builds: { serial: 'serial', threads: 'threads' },
+      main: NO_LINKS,
+      use: undefined,
+    });
+    const encoder = new TextEncoder();
+    const queryBytes = encoder.encode('>q1\nACGTTGCAACGTACGTACGT\n>q2\nTTTTTTTTCCCCCCCCGGGG\n');
+    const subjectBytes = encoder.encode('>s1\nACGTTGCAACGTACGTACGT\n');
+    const staleTable = [
+      { id: 'q1', length: 20 },
+      { id: 'q2', length: 99 },
+    ];
+    const runWith = async (assembled: boolean) => {
+      const channel = new MessageChannel();
+      try {
+        return await runtime.run(
+          {
+            type: 'run',
+            generation: 1,
+            runId: assembled ? 'r-assembled' : 'r-plain',
+            program: 'blastn',
+            argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa'],
+            threads: 1,
+            query: { bytes: queryBytes, records: staleTable, key: 'q', ...(assembled ? { assembled: true } : {}) },
+            subject: { bytes: subjectBytes, records: [{ id: 's1', length: 20 }], key: 's' },
+            output: channel.port1,
+          },
+          () => undefined,
+        );
+      } finally {
+        channel.port2.close();
+      }
+    };
+    await expect(runWith(false)).rejects.toBeInstanceOf(InputMismatchError);
+    const result = await runWith(true);
+    expect(result.readRecords).toEqual({
+      query: [
+        { id: 'q1', length: 20 },
+        { id: 'q2', length: 20 },
+      ],
+    });
   }, 60_000);
 });
 
@@ -588,11 +639,29 @@ describe.skipIf(reactors === undefined)('the serial reactor scans with the NCBI 
     ['blastn', 'query'],
     ['blastp', 'subject'],
   ] as const)("scans a small input with the reader of %s's %s", async (program, role) => {
-    const scan = await scanner.scan({ program, role, dataLoaders: true }, bytes());
+    const scan = await scanner.scan({ program, role, dataLoaders: true, parseDeflines: false }, bytes());
     expect(scan.records.map(({ id, length }) => ({ id, length }))).toEqual([
       { id: 'a', length: 4 },
       { id: 'b', length: 6 },
     ]);
+  });
+
+  it('scans opposite-molecule -parse_deflines records with NCBI lengths only when parseDeflines is on', async () => {
+    const repo = new URL('../../../../LOSAT/tests/fasta/outfmt0/pd_mol/', import.meta.url);
+    const sp = readFileSync(new URL('s_sp_nucx_bn.fa', repo));
+    const ti = readFileSync(new URL('s_ti_prot.fa', repo));
+    const chunksOf = (data: Uint8Array) =>
+      (async function* () {
+        yield data;
+      })();
+    const spOff = await scanner.scan({ program: 'blastn', role: 'subject', dataLoaders: true, parseDeflines: false }, chunksOf(sp));
+    const spOn = await scanner.scan({ program: 'blastn', role: 'subject', dataLoaders: true, parseDeflines: true }, chunksOf(sp));
+    expect(spOff.records.map((r) => r.length)).toEqual([287]);
+    expect(spOn.records.map((r) => r.length)).toEqual([300]);
+    const tiOff = await scanner.scan({ program: 'blastp', role: 'subject', dataLoaders: true, parseDeflines: false }, chunksOf(ti));
+    const tiOn = await scanner.scan({ program: 'blastp', role: 'subject', dataLoaders: true, parseDeflines: true }, chunksOf(ti));
+    expect(tiOff.records.map((r) => r.length)).toEqual([150, 110]);
+    expect(tiOn.records.map((r) => r.length)).toEqual([107, 110]);
   });
 });
 
@@ -608,6 +677,22 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
     await expect(`${JSON.stringify(described, null, 1)}\n`).toMatchFileSnapshot('../../src/infra/fake/describe.json');
   });
 
+  it("FakeEngine's windowmasker-xmlhelp.json is the reactor's windowmasker -xmlhelp", async () => {
+    const abi = await open();
+    const chunks: Uint8Array[] = [];
+    const status = abi.tool(['windowmasker', '-xmlhelp'], {
+      stdout: (bytes) => chunks.push(bytes.slice()),
+      stderr: () => undefined,
+      file: () => undefined,
+    });
+    expect(status).toBe(0);
+    const xml = Buffer.concat(chunks).toString('utf8');
+    await expect(`${JSON.stringify({ xml })}\n`).toMatchFileSnapshot('../../src/infra/fake/windowmasker-xmlhelp.json');
+    const parsed = parseToolDescription(xml);
+    const flags = new Set(parsed.parameters.map((param) => param.flag));
+    for (const flag of WINDOWMASKER_USAGE_ORDER) expect(flags, flag).toContain(flag);
+  });
+
   it('every field of the search form is an option that the engine describes', async () => {
     const abi = await open();
     for (const program of PROGRAMS) {
@@ -620,7 +705,12 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
 
   it("checks an input with the engine's register: the verdict and the message", async () => {
     const checker = new ReactorInputChecker(reopening(open));
-    const reader = (program: 'blastn' | 'blastp' | 'tblastx', role: 'query' | 'subject', dataLoaders = true) => ({ program, role, dataLoaders });
+    const reader = (program: 'blastn' | 'blastp' | 'tblastx', role: 'query' | 'subject', dataLoaders = true, parseDeflines = false) => ({
+      program,
+      role,
+      dataLoaders,
+      parseDeflines,
+    });
     expect(await checker.check(reader('blastn', 'query'), new TextEncoder().encode('>a\nACGT\n>b\nACGT\n'))).toEqual({
       ok: true,
       records: [
@@ -666,8 +756,8 @@ describe.skipIf(reactors === undefined)('the warm-up on the serial reactor', () 
   const open = async () => (await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource))).abi;
   // Streams 0, 6 and 7 (the three output formats) of one search on an instance.
   const search = (abi: ReactorAbi, argv: readonly string[], query: Uint8Array, subject: Uint8Array) => {
-    const q = abi.register(argv[0]!, 0, true, query).handle;
-    const s = abi.register(argv[0]!, 1, true, subject).handle;
+    const q = abi.register(argv[0]!, 0, true, false, query).handle;
+    const s = abi.register(argv[0]!, 1, true, false, subject).handle;
     const out: Record<number, string> = { 0: '', 6: '', 7: '' };
     const decoder = new TextDecoder();
     abi.run(argv, q, s, (stream, bytes) => {

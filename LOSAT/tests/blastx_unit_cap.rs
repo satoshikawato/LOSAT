@@ -7,8 +7,10 @@
 //! the cap: `LOSAT_X_BXCAPFILL`), their lookup tables built on the threads the cap leaves them
 //! (`LOSAT_X_BXBUILDPAR`), and the fused loop's context table made once per lookup table
 //! (`LOSAT_X_BXCTXONCE`; `src/algorithm/blastx/x_bx_mem.rs`, `src/algorithm/tblastx/lookup/x_lut_direct.rs`,
-//! `src/algorithm/blastx/x_seed_diag.rs`), and a batch end making no more composition-redo workers
-//! than it has matches (`LOSAT_X_BXKAPPAFIT`, `src/algorithm/blastx/runtime.rs`).
+//! `src/algorithm/blastx/x_seed_diag.rs`), a batch end making no more composition-redo workers
+//! than it has matches (`LOSAT_X_BXKAPPAFIT`, `src/algorithm/blastx/runtime.rs`), and the redo's
+//! matches made ahead as a flow instead of in fork-join batches (`LOSAT_X_BXREDOFLOW`,
+//! `src/algorithm/blastx/runtime/kappa_batch.rs`).
 //!
 //! They are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
 //! thread computes what, and the vectors the tables are built on, not what is computed, so the
@@ -195,6 +197,7 @@ const ALL_OFF: &[(&str, &str)] = &[
     ("LOSAT_X_BXDIAGKEEP", "0"),
     ("LOSAT_X_BXKAPPAFIT", "0"),
     ("LOSAT_X_BXPOOLN1", "0"),
+    ("LOSAT_X_BXREDOFLOW", "0"),
     ("LOSAT_X_BXUNITCAP", "0"),
 ];
 
@@ -572,5 +575,133 @@ fn few_subjects_give_the_report_without_kappa_fit() {
     let (query, set) = inputs_from(&dir, 0, 8, 4_000, 40);
     let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
     assert!(sides(&dir, &query, &args, 2, &[], "LOSAT_X_BXKAPPAFIT").1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The counts of the composition redo in one search, summed over both `[TIMING]
+/// blastx_batch_end_*` lines of `LOSAT_TIMING`: (matches, reused, serial, ahead).
+fn redo_counts(
+    query: &Path,
+    args: &[&str],
+    threads: u32,
+    env: &[(&str, &str)],
+) -> (u64, u64, u64, u64) {
+    let output = losat()
+        .arg("blastx")
+        .arg("-query")
+        .arg(query)
+        .args(args)
+        .args(["-num_threads", &threads.to_string()])
+        .envs(env.iter().copied())
+        .env("LOSAT_TIMING", "1")
+        .output()
+        .expect("run LOSAT");
+    assert!(
+        output.status.success(),
+        "{args:?} {env:?}: LOSAT_TIMING run failed"
+    );
+    let count = |line: &str, name: &str| -> u64 {
+        let field = line
+            .split(&format!("{name}="))
+            .nth(1)
+            .unwrap_or_else(|| panic!("the batch end line counts {name}: {line}"));
+        let digits: String = field.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse().unwrap()
+    };
+    let mut sums = (0, 0, 0, 0);
+    for line in String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter(|line| line.starts_with("[TIMING] blastx_batch_end_"))
+    {
+        sums.0 += count(line, "matches");
+        sums.1 += count(line, "reused");
+        sums.2 += count(line, "serial");
+        sums.3 += count(line, "ahead");
+    }
+    sums
+}
+
+#[test]
+fn the_redo_flow_gives_the_report_of_one_thread() {
+    // One query of 9,000 letters (one batch searched with the pool inside) against 40 and 595
+    // proteins, and eight of 4,000 against 40 (the batch flow: three batch ends of about 70
+    // matches each), with the X-drop redo of the default and with -use_sw_tback (cutoff-score
+    // mode: the matches are redone ahead). Two rows with a short hit list end the redo early
+    // for most matches while the flow's ring of matches ahead wraps: 1 x 9,000 x 595
+    // -use_sw_tback -max_target_seqs 3 (205 matches) and 8 x 4,000 x 595 -max_target_seqs 1
+    // (about 1,000). The report at 2, 4 and 8 threads with the composition redo's flow
+    // (LOSAT_X_BXREDOFLOW) and with its fork-join batches (=0) equals the report at one thread.
+    let dir = temp_dir("redo-flow");
+    let rows: [(usize, usize, usize, &[&str]); 6] = [
+        (1, 9_000, 40, &[]),
+        (1, 9_000, 40, &["-use_sw_tback"]),
+        (1, 9_000, 595, &[]),
+        (8, 4_000, 40, &[]),
+        (1, 9_000, 595, &["-use_sw_tback", "-max_target_seqs", "3"]),
+        (8, 4_000, 595, &["-max_target_seqs", "1"]),
+    ];
+    for (pieces, length, proteins, extra) in rows {
+        let (query, set) = inputs_from(&dir, 0, pieces, length, proteins);
+        let mut args = vec!["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+        args.extend_from_slice(extra);
+        let reference = blastx(&query, &args, 1, &[]);
+        assert!(
+            reference.iter().filter(|&&b| b == b'\n').count() > 2,
+            "{pieces} x {length} against {proteins} {extra:?}: too few hits to test"
+        );
+        for threads in [2, 4, 8] {
+            for env in [&[][..], &[("LOSAT_X_BXREDOFLOW", "0")][..]] {
+                assert!(
+                    blastx(&query, &args, threads, env) == reference,
+                    "{pieces} x {length} against {proteins} {extra:?}, {threads} threads, \
+                     {env:?}: report differs"
+                );
+            }
+        }
+    }
+    // The flow ran: it made matches ahead; with =0 the batches did and the flow none.
+    let (query, set) = inputs_from(&dir, 0, 1, 9_000, 595);
+    let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+    assert!(redo_counts(&query, &args, 4, &[]).3 > 0);
+    assert_eq!(
+        redo_counts(&query, &args, 4, &[("LOSAT_X_BXREDOFLOW", "0")]).3,
+        0
+    );
+    // Early termination with the flow, in the two rows with a short hit list: the loop's test in
+    // stream order skipped some matches (reused + serial < matches), and the flow redid ahead only
+    // matches that the filling heaps still let through (`XPending` of runtime/kappa_batch.rs: each
+    // match offered ahead with a best E-value at or below the cutoff counts as an entry of its
+    // query's heap). The matches it redid ahead and the loop did not take (ahead - reused) are at
+    // most one per thread: none in each of 12 runs on 4 CPUs (2, 4 and 8 threads, twice). The guess
+    // on the heaps as they were (empty when the whole window was offered) left up to 36 / 101 / 173
+    // of 1 x 9,000 at 2 / 4 / 8 threads, where the loop redoes 32 of 205 matches (up to 6 times one
+    // thread's time, hours under `-C instrument-coverage`), and 167 and 339 of 8 x 4,000 at 8
+    // threads. The flow still redid ahead matches that the loop took (reused, summed).
+    for (pieces, length, extra) in [
+        (1, 9_000, &["-use_sw_tback", "-max_target_seqs", "3"][..]),
+        (8, 4_000, &["-max_target_seqs", "1"][..]),
+    ] {
+        let (query, set) = inputs_from(&dir, 0, pieces, length, 595);
+        let mut args = vec!["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+        args.extend_from_slice(extra);
+        let mut reused = 0;
+        for threads in [2, 4, 8] {
+            let counts = redo_counts(&query, &args, threads, &[]);
+            assert!(
+                counts.1 + counts.2 < counts.0,
+                "{pieces} x {length} {extra:?}, {threads} threads: no early termination {counts:?}"
+            );
+            assert!(
+                counts.3 <= counts.1 + u64::from(threads),
+                "{pieces} x {length} {extra:?}, {threads} threads: the flow redid ahead matches \
+                 the loop left {counts:?} (matches, reused, serial, ahead)"
+            );
+            reused += counts.1;
+        }
+        assert!(
+            reused > 0,
+            "{pieces} x {length} {extra:?}: the flow redid no match ahead that the loop took"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

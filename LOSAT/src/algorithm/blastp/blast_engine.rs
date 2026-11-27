@@ -10,7 +10,6 @@ use anyhow::{bail, Context, Result};
 ))]
 use rayon::prelude::*;
 use std::io::Write;
-use std::path::Path;
 use std::sync::{
     atomic::{AtomicU64, Ordering as AtomicOrdering},
     Arc,
@@ -18,8 +17,10 @@ use std::sync::{
 use std::time::Instant;
 
 use crate::algorithm::blastn::blast_engine::QueryReading;
-use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, TreeHsp};
 use crate::algorithm::common::db_mask_search::SearchMask;
+use crate::algorithm::common::hard_chunk_walk::{HardTable, NcbiStart};
+use crate::algorithm::common::query_batch_tables::QueryBatchTables;
 use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
 };
@@ -28,7 +29,7 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_bp_build_compressed_lookup, x_bp_build_compressed_lookup_of, x_bpclut_on, XCompressedLookup,
     XFlatCompressedLookup, X_BLASTP, X_BLASTP_MATRIX,
 };
-use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
+use crate::algorithm::tblastx::lookup::compressed::{BanksFilled, BlastCompressedAaLookupTable};
 use crate::algorithm::tblastx::lookup::{
     x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as, BackboneCell16, BlastAaLookupTable,
     QueryContext, XBpLookup,
@@ -64,6 +65,26 @@ mod database;
 // `-db_soft_mask` and `-db_hard_mask` (series NP, M4b): the kernels of a masked database search,
 // chosen once per call in place of the kernel (`prelim_run::run_preliminary_with`).
 mod db_masked;
+// What the replay of the parallel redo's windows (`x_redo_par.rs`, built where they run) reads of
+// the one-thread loop's Smith-Waterman redo: the marks of the lists that the redo's fetch excludes
+// and the loop's reader of a query's marks, the errors of a batch and of a match (with the refusal
+// or the warning of a header read before them), and the notes they read (the status of a query
+// batch is core's `smith_waterman_match::SwBatchStatus`, which both import).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) use {
+    database::{FetchExcludedMatch, FetchNotes},
+    redo_run::{query_fetch_excluded_reached, sw_batch_failed_after, sw_endless_after},
+};
+// The errors that the windows' tests expect (`x_redo_par_tests.rs`).
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) use redo_run::{sw_batch_failed, sw_endless};
 // The kernel of one subject (`BlastpPrelimKernel::search_subject`): its scan and ungapped
 // extensions, then its gapped half, from the subject's letters to its HSP lists.
 mod prelim_kernel;
@@ -93,9 +114,15 @@ pub(super) mod x_subject_meta;
 mod traceback;
 // The composition-based redo: its parameters of each query, its plan and its paths (`run_call`).
 mod redo_run;
+// `-comp_based_stats 0 -use_sw_tback` (item X4-c0): the OID-ordered Smith-Waterman redo without
+// composition adjustment (one-thread loop and windowed parallel path).
+mod sw_c0;
 // psiblast `-in_pssm` (series PS, item PS4a): the stages of a PSSM search, reached through the
 // `psi_search` hooks of `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
 mod pssm_hooks;
+// psiblast `-phi_pattern` (series PS, item PS8a): the stages of a PHI-BLAST search, reached through
+// the `phi` hooks of `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
+mod phi_hooks;
 // rpsblast (series PR, item PS11a): the RPS engine's search, reached through the `rps_search`
 // hooks of `search_cli`, `run_call` and its preliminary stage (`blast_engine/prelim_run.rs`).
 mod rps_hooks;
@@ -107,6 +134,9 @@ pub(super) mod query_rows;
 // The setup of a call before its search: its requested reports, query frames, subjects, scoring
 // values, lookup table, search spaces, cutoffs, hit lists and scan's sizes (`run_call`).
 mod call_setup;
+// BLASTP's split query batches and where the failures of a call's setup come when a split batch
+// meets them first (`run_call`, `search_split_query_batches`, psiblast's first read).
+mod split_steps;
 // The warning lines of a call's queries, the checks and the prefetch of its reported subjects and
 // its refusals before any format is written (`run_call`).
 mod report_prep;
@@ -190,7 +220,7 @@ impl InitHSP {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1498
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1633-1688
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1350
 struct BlastpSubjectResult {
     subject_index: usize,
     // The lists with the compact element (`x_prelim_compact.rs`).
@@ -260,7 +290,17 @@ struct BlastpSubjectScratch {
     offset_pairs: Vec<OffsetPair>,
     diag_array: Vec<DiagStruct>,
     diag_offset: i32,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:253-267
+    // The diagonal offset of a search with a negative `-window_size` (a search strategy's: the
+    // command line takes none), which the one-hit scan of `BlastpPrelimKernel::search_subject_in_neg`
+    // reads and moves in 64 bits where NCBI's `Int4` would overflow; `diag_offset` is the offset of
+    // the searches with a window of 0 or more and does not move for it.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,162-172
+    neg_offset: i64,
+    // Per-batch carried diagonal rings (`QueryBatchTables`) for a multi-batch call with a negative
+    // `-window_size` (`None` for every non-negative window and every single-batch call); their
+    // shared 64-bit offset lives in `neg_offset`.
+    neg_batches: Option<QueryBatchTables>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:216-227
     init_hsps: Vec<InitHSP>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
     chaining_nodes: Vec<BlastpInitHspNode>,
@@ -480,7 +520,9 @@ impl BlastpSubjectScratch {
                     .expect("NCBI BLAST diagonal array size must fit in usize")
             ],
             diag_offset: window,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:253-267
+            neg_offset: i64::from(window),
+            neg_batches: None,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:223-224
             init_hsps: x_ih_pool::own_array(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
             chaining_nodes: Vec::new(),
@@ -536,24 +578,63 @@ impl BlastpSubjectScratch {
         self.preliminary_interval_tree.reset();
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    /// The table cleared (`s_BlastDiagClear`: every entry the window less than 0, the offset the
+    /// window): by `Blast_ExtendWordExit` where the offset reached INT4_MAX / 4 (`finish_chunk`),
+    /// and in a `-db_hard_mask` search between two sequences where moving the offset to keep them
+    /// apart would take it there (`db_masked.rs`, `common::hard_chunk_walk::DiagonalWalk::start`,
+    /// `DiagonalWalk::after`).
+    #[cold]
+    fn clear_table(&mut self, window: i32) {
+        self.diag_offset = window;
+        for diag in &mut self.diag_array {
+            *diag = DiagStruct::clear(window);
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:152-172
     fn finish_subject(&mut self, subject_length: usize, window: i32) {
+        self.finish_chunk(subject_length as i32, window);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+    /// `Blast_ExtendWordExit` after a subject, or a hard chunk, of `length` letters (NCBI's
+    /// `Int4`: negative for a chunk between overlapping masks, `db_masked.rs`).
+    #[inline(always)]
+    fn finish_chunk(&mut self, length: i32, window: i32) {
         if self.diag_offset >= i32::MAX / 4 {
-            self.diag_offset = window;
-            for diag in &mut self.diag_array {
-                *diag = DiagStruct::clear(window);
-            }
+            self.clear_table(window);
         } else {
-            self.diag_offset += subject_length as i32 + window;
+            self.diag_offset += length + window;
         }
     }
 }
 
-#[inline]
-fn path_label(path: &Path) -> String {
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string())
+// The search with `-db_hard_mask` moves the table between its sequences
+// (`common::hard_chunk_walk::TableStart::apply`, `TableEnd::apply`; `db_masked.rs`).
+impl HardTable for BlastpSubjectScratch {
+    type Error = std::convert::Infallible;
+
+    fn ncbi_table(&mut self, start: NcbiStart, window: i32) {
+        self.diag_offset = start.offset;
+        let entry = if start.cleared {
+            DiagStruct::clear(window)
+        } else {
+            DiagStruct::default()
+        };
+        self.diag_array.fill(entry);
+    }
+
+    fn clear_table(&mut self, window: i32) {
+        BlastpSubjectScratch::clear_table(self, window);
+    }
+
+    // Below INT4_MAX / 4 after the move (`DiagonalWalk::start`, `DiagonalWalk::after` clear the
+    // table instead), so it never passes Int4.
+    fn move_offset(&mut self, by: i32) -> Result<(), Self::Error> {
+        self.diag_offset += by;
+        Ok(())
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
@@ -1472,15 +1553,6 @@ pub(super) fn blastp_hsp_from_preliminary(hit: &BlastpPreliminaryHsp, e_value: f
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-518
-//
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:776-779
-#[inline]
-fn blastp_diag_coord(offset_delta: i32, diag_mask: i32) -> usize {
-    usize::try_from(offset_delta & diag_mask)
-        .expect("NCBI BLAST masked diagonal index must be non-negative")
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:358-372
 fn blastp_save_init_hsp(
     init_hsps: &mut Vec<InitHSP>,
@@ -1557,7 +1629,6 @@ fn ncbi_compressed_lookup_tables(
     if query_chunk {
         return Ok(vec![0..locations.len()]);
     }
-    let sizes = protein_query_split_sizes(10000)?;
     // The first lookup segment of query `q_idx` or of a query after it.
     let first_segment = |q_idx: usize| {
         let context = contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
@@ -1565,21 +1636,71 @@ fn ncbi_compressed_lookup_tables(
             locations.partition_point(|&(left, _)| left < context.frame_base)
         })
     };
+    Ok(
+        ncbi_table_batches(query_batches, query_lengths, splits_queries)?
+            .map(|searched| first_segment(searched.start)..first_segment(searched.end))
+            .collect(),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:192-201
+/// The searched queries of each query batch that has a table of its own in
+/// `ncbi_compressed_lookup_tables` (a call of the search, not a query chunk's), in order: a
+/// batch with searched queries that NCBI does not split (an ungapped search splits none,
+/// `search_split_query_batches`).
+fn ncbi_table_batches<'a>(
+    query_batches: &'a [seq_range::RangedBatch],
+    query_lengths: &'a [usize],
+    splits_queries: bool,
+) -> Result<impl Iterator<Item = std::ops::Range<usize>> + 'a> {
+    let sizes = protein_query_split_sizes(10000)?;
     Ok(query_batches
         .iter()
         .map(|batch| batch.searched.clone())
         .filter(|searched| !searched.is_empty())
-        .filter(|searched| {
-            // An ungapped search splits no query batch (`search_split_query_batches`).
+        .filter(move |searched| {
             !splits_queries
                 || crate::algorithm::blastp::protein_query_split::split_protein_batch(
                     &query_lengths[searched.clone()],
                     sizes,
                 )
                 .is_none()
-        })
-        .map(|searched| first_segment(searched.start)..first_segment(searched.end))
-        .collect())
+        }))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
+/// LOSAT's refusal of a compressed table whose words fill NCBI's overflow banks, past which NCBI
+/// writes and corrupts its heap: `filled` is the first of NCBI's tables that fills them
+/// (`ncbi_compressed_lookup_tables`, the builders' `BanksFilled`). NCBI builds each batch's table in
+/// the batch's search, after it has printed the reports of the batches before, so the refusal is
+/// that batch's (`split_steps::batch_failure`, of its first searched query). A query chunk's call
+/// has its batch's chunk as its one table: its refusal names the call's first query, and
+/// `search_split_query_batches` makes it its batch's. Cold: only a refused build comes here.
+#[cold]
+#[inline(never)]
+fn banks_filled_refusal(
+    args: &ResolvedBlastpArgs,
+    query_batches: &[seq_range::RangedBatch],
+    query_lengths: &[usize],
+    query_chunk: bool,
+    filled: BanksFilled,
+) -> anyhow::Error {
+    let refusal = anyhow::anyhow!(
+        "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's BLASTP: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
+        args.threshold,
+        args.word_size
+    );
+    if query_chunk {
+        return split_steps::batch_failure(args, 0, refusal);
+    }
+    match ncbi_table_batches(query_batches, query_lengths, !args.ungapped)
+        .map(|mut batches| batches.nth(filled.0))
+    {
+        Ok(Some(searched)) => split_steps::batch_failure(args, searched.start, refusal),
+        // The tables are those batches' (`ncbi_compressed_lookup_tables` made them).
+        _ => refusal,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-242
@@ -1774,7 +1895,7 @@ impl BlastpOffsetPairScanMode {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:86-93
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:111-114
 #[inline(always)]
 fn blastp_visit_scanned_offset_pairs<F>(offset_pairs: &[OffsetPair], hits: i32, visit: &mut F)
 where
@@ -1938,6 +2059,16 @@ fn blastp_for_each_offset_pair_of<F>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4209-4319
 fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     let program = args.app.name();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137,162-172
+    // A negative `-window_size` (a search strategy's; the command line takes none) runs in
+    // BLASTP's scan, one-hit, on NCBI's one table; PSI-BLAST's and RPS-BLAST's scans (a later
+    // round's PSSM, the profiles' database) do not take it.
+    if args.window_size < 0 && args.app != BlastpApp::Blastp {
+        bail!(
+            "a -window_size of {} is not supported by LOSAT's {program}",
+            args.window_size
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918
     // LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
     // LOSAT's blastp engine does not implement. `-ungapped` is searched (series NP, O4b: the
@@ -1949,28 +2080,23 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         args.comp_based_stats.is_enabled(),
         program,
     )?;
+    // psiblast `-phi_pattern` (item PS8a): LOSAT's refusals of a pattern whose compilation
+    // NCBI's code does not define (`phi_search::pattern::PhiError::Refusal`). The limits of the
+    // search come after NCBI's errors of its setup (`phi_hooks::phi_limits`).
+    if let Some(Err(crate::algorithm::phi_search::pattern::PhiError::Refusal(message))) =
+        args.phi.as_deref()
+    {
+        bail!("{message}");
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
-    // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based
-    // statistics 1 to 3 (`kappa::smith_waterman`). Without them (`-comp_based_stats 0`, and
-    // IDENTITY's reset, `identity_cbs_reset`) NCBI runs the redo too,
-    // without an adjustment, on the preliminary lists in subject order (the stream is not sorted
-    // by score), which LOSAT's redo loop does not read yet (the next item, X4-c0). psiblast's redo
-    // of a PSSM keeps its refusal (the position-based Smith-Waterman redo).
-    if args.use_sw_tback {
-        if args.app != BlastpApp::Blastp || args.psi_search.is_some() {
-            bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
-        }
-        // `-ungapped` (which only `-comp_based_stats 0` allows): NCBI crashes at the redo's set-up
-        // in the traceback of each query batch it searches, before any match is redone, and LOSAT
-        // refuses there (`redo_run::sw_ungapped_check`, in `run_call`), after the reports of the
-        // batches before, which have no valid context. A run without such a batch ends as NCBI's
-        // does.
-        if !args.ungapped && !args.comp_based_stats.is_enabled() {
-            bail!(
-                "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's {program} yet"
-            );
-        }
+    // `-use_sw_tback` (items X4 and X4-c0): BLASTP runs NCBI's Smith-Waterman redo in modes 1 to 3
+    // (`kappa::smith_waterman`) and in mode 0 (`sw_c0`, including `-matrix IDENTITY`'s reset,
+    // `identity_cbs_reset`). With `-ungapped` (allowed only in mode 0), NCBI crashes at the redo's
+    // set-up of every searched batch, and LOSAT refuses there (`redo_run::sw_ungapped_check`).
+    // psiblast keeps its refusal (the position-based Smith-Waterman redo).
+    if args.use_sw_tback && (args.app != BlastpApp::Blastp || args.psi_search.is_some()) {
+        bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1389-1392
     // The compressed lookup table runs at each of its word sizes, 5 to 7
@@ -1980,6 +2106,7 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     if !matches!(args.word_size, 2..=4)
         && args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable
         && args.psi_search.is_none()
+        && args.phi.is_none()
     {
         bail!(
             "-word_size {} (the lookup table) is not supported by LOSAT's {program}",
@@ -2002,20 +2129,10 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // frequency ratios, `score_block`; the contexts' Karlin blocks, `pssm_hooks::psi_contexts`;
     // the positives, `pssm_search::traceback0::final_hsp`; and the table's gapped block): every
     // matrix of NCBI's tables but IDENTITY, which psiblast's options handler refuses as NCBI's
-    // does (`std_matrix_only`). A PSSM query (`-in_pssm`, `psi_search` before the search) keeps
-    // BLOSUM62 11/1 (line PS, PS7b).
-    if args.psi_search.is_some()
-        && (args.scoring.matrix != ScoringMatrix::Blosum62
-            || args.scoring.gap_open != 11
-            || args.scoring.gap_extend != 1)
-    {
-        bail!(
-            "the matrix {} with gap costs {}/{} is not supported by LOSAT's {program}",
-            args.matrix_name,
-            args.scoring.gap_open,
-            args.scoring.gap_extend
-        );
-    }
+    // does (`std_matrix_only`). `-in_pssm` and `-in_msa` run with every supported matrix and gap
+    // pair too (line PS, PS7b): `PssmReader` carries the options' matrix and gap costs for
+    // frequency-ratios-only PSSMs, and the search's contexts, cutoffs, traceback, redo and later
+    // rounds read them.
     // Unified P-values (a `u` after the mode, BLASTP only) run in the composition-based redo
     // (`kappa::evalue_adjust_contexts`: each query's E-values take the lengths and the search
     // space that NCBI 2.17.0 reads, the next query's of the batch; item X5 of line RG). A search
@@ -2078,28 +2195,47 @@ impl BlastpReport {
         )
     }
 
+    /// The report as the first format of a run of `app` that NCBI's prefetch of each query batch
+    /// asks (`shared::PrefetchFormat`, the one owner of whether a batch prefetches).
+    fn prefetch_format(self, app: BlastpApp) -> crate::algorithm::common::database::PrefetchFormat {
+        use crate::blastinput::app::output_format::{
+            ARCHIVE_FORMAT, JSON, JSON_S, TABULAR, TABULAR_WITH_COMMENTS, XML, XML2, XML2_S,
+        };
+        use crate::report::blast_xml2::Xml2Kind;
+        crate::algorithm::common::database::PrefetchFormat::of(
+            match self {
+                BlastpReport::Pairwise(view) => view.outfmt(),
+                BlastpReport::Text(outfmt) => outfmt as i32,
+                // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and
+                // 20): they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy
+                // names come with the rows (`report::tabular::TabularNames`).
+                BlastpReport::CustomTabular(spec) => match spec.kind {
+                    crate::report::tabular::TabularKind::Commented => TABULAR_WITH_COMMENTS,
+                    _ => TABULAR,
+                },
+                BlastpReport::Xml => XML,
+                BlastpReport::Seqalign(serial) => serial.outfmt(),
+                BlastpReport::Xml2(kind) => match kind {
+                    Xml2Kind::Single16 => XML2_S,
+                    Xml2Kind::Single15 => JSON_S,
+                    Xml2Kind::Files14 => XML2,
+                    Xml2Kind::Files13 => JSON,
+                },
+                BlastpReport::Archive => ARCHIVE_FORMAT,
+            },
+            app.request_kind(),
+        )
+    }
+
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
-    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7; with
-    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
-    /// the call's first report, the taxonomy database's messages of that prefetch go with the
-    /// query warnings.
-    fn prefetches_subjects(self) -> bool {
-        crate::algorithm::common::database::prefetches_subjects(match self {
-            BlastpReport::Pairwise(view) => Some(view.outfmt()),
-            BlastpReport::Text(outfmt) => Some(outfmt as i32),
-            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
-            // they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy names
-            // come with the rows (`report::tabular::TabularNames`).
-            BlastpReport::CustomTabular(spec) => Some(match spec.kind {
-                crate::report::tabular::TabularKind::Commented => 7,
-                _ => 6,
-            }),
-            BlastpReport::Xml => Some(5),
-            BlastpReport::Seqalign(serial) => Some(serial.outfmt()),
-            // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
-            // (`TaxdbPrinter`).
-            BlastpReport::Archive | BlastpReport::Xml2(_) => None,
-        })
+    /// reports (outfmt 0 to 7 and 13 to 18, 10 and 20 as 6 and 7; with
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, and psiblast's archive 11,
+    /// `database::prefetches_subjects`): as the call's first
+    /// report, the posts of that prefetch go with the query warnings. The archive of the other
+    /// applications fetches nothing; the XML2 and JSON `Hit`s write only the texts of their own
+    /// lookups (`database::RowLookups::Taxids`).
+    fn prefetches_subjects(self, app: BlastpApp) -> bool {
+        crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format(app)))
     }
 
     /// Whether the report reads the sequence that NCBI's formatters find by a subject's Seq-align
@@ -2116,6 +2252,70 @@ impl BlastpReport {
             | BlastpReport::Xml
             | BlastpReport::Xml2(_) => true,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:409-445
+    /// Whether the call's reports `formats` resolve the subjects' Seq-align ids in NCBI's scope
+    /// (`common::database::ParsedShown::resolves_subject`), where a query of the batch that holds
+    /// such an id takes the subject's place (`ListedTitles::refuse_ids_of_queries`): a report
+    /// reads their Bioseqs, or the batches' prefetch loads them (the first format's, unless
+    /// `PRE_FETCH_SEQS_LIMIT` turns it off for every batch). psiblast's rounds read the aligned
+    /// letters of the subjects from that scope for a PSSM, whatever the format, where the call
+    /// can make one (`psi_reads`, `psi_reads_scope`; review 3 of line RG-KB item 12, F1).
+    fn resolve_subjects(formats: &[BlastpReport], app: BlastpApp, psi_reads: bool) -> bool {
+        (app == BlastpApp::Psiblast && psi_reads)
+            || formats.iter().any(|format| format.reads_subjects())
+            || (formats
+                .first()
+                .is_some_and(|format| format.prefetches_subjects(app))
+                && !crate::algorithm::common::database::prefetch_always_off(
+                    report_prep::prefetch_format(app, formats),
+                ))
+    }
+
+    /// Whether the call reads its subjects' letters from NCBI's scope for a PSSM: psiblast's
+    /// `-in_pssm` (the archive of its rounds) or a round (`round`) that makes the PSSM of the next
+    /// round or the last one saved (`PsiRoundIo::may_make_next`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+    fn psi_reads(
+        args: &ResolvedBlastpArgs,
+        round: Option<&crate::algorithm::psiblast::rounds::PsiRoundIo>,
+    ) -> bool {
+        args.psi_pssm.is_some()
+            || round.is_some_and(crate::algorithm::psiblast::rounds::PsiRoundIo::may_make_next)
+    }
+
+    /// Whether the call's reports `formats` of `app` show NCBI's bytes for a subject that the
+    /// scope finds as a query of its batch (`report::query_bioseq`): blastp's tables that read no
+    /// letter of the found Bioseq and its organism report (`query_bioseq::tabular_shows`), the
+    /// Seq-annots and the archive (which write the Seq-align id alone). The other formats, and
+    /// psiblast's calls that can make a PSSM (`psi_reads`, which reads the found Bioseq's letters),
+    /// search one (`-in_pssm`), or search a pattern (`-phi_pattern`, whose occurrence tables key
+    /// rows by occurrence index), keep LOSAT's refusal.
+    fn shows_query_bioseqs(
+        formats: &[BlastpReport],
+        args: &ResolvedBlastpArgs,
+        psi_reads: bool,
+    ) -> bool {
+        use crate::report::query_bioseq::tabular_shows;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2039-2057
+        (args.app == BlastpApp::Blastp
+            || (args.app == BlastpApp::Psiblast
+                && !psi_reads
+                && args.psi_search.is_none()
+                && args.phi.is_none()))
+            && formats.iter().all(|format| match *format {
+                BlastpReport::Seqalign(_) | BlastpReport::Archive => true,
+                BlastpReport::CustomTabular(spec) => {
+                    tabular_shows(Some(spec), crate::blastinput::app::Program::Blastp)
+                }
+                BlastpReport::Text(OutputFormat::Tabular | OutputFormat::TabularWithComments) => {
+                    tabular_shows(None, crate::blastinput::app::Program::Blastp)
+                }
+                _ => false,
+            })
     }
 
     /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
@@ -2149,7 +2349,7 @@ impl BlastpReport {
 /// The Seq-annot format of a `-outfmt` value (outfmt 8, 12), read as NCBI reads the value
 /// (`app::parse_formatting_string`, which drops a custom specification of these formats);
 /// `None` for the other formats.
-fn blastp_seqalign_format(outfmt: &str) -> Option<crate::report::serial::SerialFormat> {
+fn blastp_seqalign_format(outfmt: impl AsRef<[u8]>) -> Option<crate::report::serial::SerialFormat> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     crate::report::serial::SerialFormat::of(crate::blastinput::app::ReportFormat::from_number(
         choice.number,
@@ -2186,20 +2386,14 @@ fn recounts_rps_identities(reports: &[BlastpReport]) -> bool {
     })
 }
 
-/// The pairwise view (`PairwiseView::of`) of the format number `number` where `app` writes it:
-/// outfmt 0, and the query-anchored 1 to 4 of BLASTP and RPSBLAST (`Program::writes`; psiblast
-/// refuses those, item PS15b). NCBI's application writes 0 to 4 through one frame
-/// (`PrintProlog`, the query batches, `PrintOneResultSet`), and so does LOSAT; `None` for the
-/// other formats.
-fn blastp_pairwise_view_of(
-    app: BlastpApp,
-    number: i32,
-) -> Option<crate::report::pairwise::PairwiseView> {
+/// The pairwise view (`PairwiseView::of`) of the format number `number`: outfmt 0 and the
+/// query-anchored 1 to 4, which BLASTP, RPSBLAST and PSIBLAST all write (psiblast's since item
+/// PS15b-2, each round's section as its outfmt 0 round). NCBI's application writes 0 to 4 through
+/// one frame (`PrintProlog`, the query batches, `PrintOneResultSet`), and so does LOSAT; `None`
+/// for the other formats.
+fn blastp_pairwise_view_of(number: i32) -> Option<crate::report::pairwise::PairwiseView> {
     crate::blastinput::app::ReportFormat::from_number(number)
         .and_then(crate::report::pairwise::PairwiseView::of)
-        .filter(|view| {
-            *view == crate::report::pairwise::PairwiseView::Pairwise || app != BlastpApp::Psiblast
-        })
 }
 
 /// The format of a `-outfmt` value that is outfmt 0, 6 or 7 to LOSAT's own writers (not a custom
@@ -2209,37 +2403,36 @@ fn blastp_pairwise_view_of(
 /// for the other numbers.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2829
-fn blastp_text_format(outfmt: &str) -> std::result::Result<OutputFormat, String> {
+fn blastp_text_format(outfmt: impl AsRef<[u8]>) -> std::result::Result<OutputFormat, String> {
+    let outfmt = outfmt.as_ref();
     match crate::blastinput::app::parse_formatting_string(outfmt).map(|choice| choice.number) {
         Ok(0) => Ok(OutputFormat::Pairwise),
         Ok(6) => Ok(OutputFormat::Tabular),
         Ok(7) => Ok(OutputFormat::TabularWithComments),
         _ => Err(format!(
             "Unsupported output format: {}. Supported: 0, 6, 7",
-            OutputFormat::split_fields(outfmt).0
+            OutputFormat::split_fields(&String::from_utf8_lossy(outfmt)).0
         )),
     }
 }
 
-/// The query-anchored view of a `-outfmt` value of 1 to 4 that `app` writes
-/// (`blastp_pairwise_view_of`), read as NCBI reads the value; `None` for the other formats. The
+/// The query-anchored view of a `-outfmt` value of 1 to 4 (`blastp_pairwise_view_of`), read as NCBI reads the value; `None` for the other formats. The
 /// words after the number (the library's value as given) are dropped, as NCBI drops them for
 /// every format but the tables (`parse_formatting_string`) and the command line's value does
 /// (`FormatChoice::normalized`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2845-2851
 fn blastp_query_anchored_view(
-    app: BlastpApp,
-    outfmt: &str,
+    outfmt: impl AsRef<[u8]>,
 ) -> Option<crate::report::pairwise::PairwiseView> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
-    blastp_pairwise_view_of(app, choice.number)
+    blastp_pairwise_view_of(choice.number)
         .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise)
 }
 
 /// Whether a `-outfmt` value is the BLAST archive (outfmt 11), read as NCBI reads it (a
 /// specification after the number is ignored).
-fn blastp_is_archive(outfmt: &str) -> bool {
+fn blastp_is_archive(outfmt: impl AsRef<[u8]>) -> bool {
     crate::blastinput::app::parse_formatting_string(outfmt).is_ok_and(|choice| {
         crate::blastinput::app::ReportFormat::from_number(choice.number)
             == Some(crate::blastinput::app::ReportFormat::ArchiveFormat)
@@ -2247,7 +2440,7 @@ fn blastp_is_archive(outfmt: &str) -> bool {
 }
 
 /// Whether a `-outfmt` value is BLAST XML (outfmt 5), read as NCBI reads it.
-fn blastp_is_xml(outfmt: &str) -> bool {
+fn blastp_is_xml(outfmt: impl AsRef<[u8]>) -> bool {
     crate::blastinput::app::parse_formatting_string(outfmt).is_ok_and(|choice| {
         crate::blastinput::app::ReportFormat::from_number(choice.number)
             == Some(crate::blastinput::app::ReportFormat::Xml)
@@ -2257,7 +2450,7 @@ fn blastp_is_xml(outfmt: &str) -> bool {
 /// The XML2 / JSON document of a `-outfmt` value (outfmt 13 to 16), read as NCBI reads it;
 /// `None` for the other formats. Outfmt 13 and 14 write files next to `-out`: only the command
 /// line reaches them (`resolve_for_formats` stops the other callers at NCBI's XInclude check).
-fn blastp_xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
+fn blastp_xml2_kind(outfmt: impl AsRef<[u8]>) -> Option<crate::report::blast_xml2::Xml2Kind> {
     use crate::blastinput::app::ReportFormat;
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(choice.number)?)
@@ -2307,10 +2500,12 @@ fn write_blastp_outfmt7_header<W: Write>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:790-803
     if let Some(db) = context
         .database_name
-        .as_ref()
-        .or(context.subject_name.as_ref())
+        .as_deref()
+        .or(context.subject_name.as_deref())
     {
-        writeln!(writer, "# Database: {}", db)?;
+        writer.write_all(b"# Database: ")?;
+        writer.write_all(db)?;
+        writer.write_all(b"\n")?;
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1277-1278
     // A query of an unsearched batch has no Seq-align set, so no hit count is written.
@@ -2449,7 +2644,9 @@ fn blastp_seq_aligns(hit_lists: &[Option<BlastpHitList>], gapped: bool) -> usize
 /// format's refusal is that format's (`FormatRefusal::check`). `parsed`: the subjects' parsed
 /// Seq-ids (a database's listed titles'); `loads`: the reports' loads (`HitLoads::of`), whose
 /// throwing subjects are refused where the first row of a report stops NCBI
-/// (`TabularSpec::may_stop_at_failed_lookup`).
+/// (`TabularSpec::may_stop_at_failed_lookup`). NCBI's run stops in the batch of the query whose
+/// row it has no result for, after the reports of the batches before: the caller makes a refusal
+/// that fails the call that batch's failure (`failed_lookup_batch`).
 #[allow(clippy::too_many_arguments)]
 fn check_tabular_lookups(
     formats: &mut [crate::api::local_blast::FormatOutput<'_>],
@@ -2460,7 +2657,7 @@ fn check_tabular_lookups(
     loads: &crate::report::db_subject::HitLoads,
     listed_titles: Option<&database::ListedTitles<'_>>,
     subject_records: &[FastaRecord],
-    application: &str,
+    (application, taxdb_found): (&str, bool),
 ) -> Result<()> {
     for (format, outfmt) in formats
         .iter_mut()
@@ -2473,19 +2670,31 @@ fn check_tabular_lookups(
             subject_ids,
             parsed,
             loads,
+            crate::blastinput::app::Program::Blastp,
         ) {
             continue;
         }
+        // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
         let checked = crate::report::tabular::check_failed_lookups(
             spec,
-            hit_lists.iter().flatten().map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                hit_list.hsplist_array[..count]
-                    .iter()
-                    .filter_map(|hsp_list| hsp_list.hsps.first())
-                    .map(|hsp| hsp.s_idx as usize)
-            }),
+            hit_lists
+                .iter()
+                .enumerate()
+                .filter_map(|(q_idx, hit_list)| Some((q_idx, hit_list.as_ref()?)))
+                .map(|(q_idx, hit_list)| {
+                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                    hit_list.hsplist_array[..count]
+                        .iter()
+                        .filter_map(|hsp_list| hsp_list.hsps.first())
+                        .map(move |hsp| match listed_titles {
+                            Some(titles) => titles.seen_row(q_idx, hsp.s_idx as usize),
+                            None => hsp.s_idx as usize,
+                        })
+                }),
             |s_idx| {
+                if s_idx == crate::report::query_bioseq::SEEN_ROW {
+                    return None;
+                }
                 crate::algorithm::common::tabular::subject_lookup_failure(
                     spec,
                     subject_ids,
@@ -2496,21 +2705,102 @@ fn check_tabular_lookups(
                     s_idx,
                 )
             },
-            |s_idx| match listed_titles {
+            |s_idx, failure| match listed_titles {
                 Some(titles) => crate::report::tabular::failed_database_subject(
                     titles.oid(s_idx),
                     loads.thrown(s_idx),
+                    parsed.get(s_idx).and_then(Option::as_deref),
+                    failure,
                 ),
                 None => crate::report::tabular::failed_record_title(
                     s_idx,
                     subject_records[s_idx].shown_id(),
                 ),
             },
+            crate::blastinput::app::Program::Blastp,
             application,
+            taxdb_found,
         );
         format.refusal.check(checked)?;
     }
     Ok(())
+}
+
+/// What the failure of the batch of a query whose tabular row NCBI has no result for needs
+/// (`failed_lookup_batch`), of the call's reports.
+struct LookupStop<'a> {
+    /// The call's hit lists, by query (the result sets of the check are those that are `Some`).
+    hit_lists: &'a [Option<BlastpHitList>],
+    /// The call's query batches.
+    batches: &'a [seq_range::RangedBatch],
+    /// The warning lines of each query (`report_prep::query_warning_lines`), whose first bytes in
+    /// a batch's first query are the batch's reader messages (`reader`, by query).
+    lines: &'a [Vec<u8>],
+    reader: &'a [Vec<u8>],
+    /// The texts of each batch's prefetch, with its first query (`PrefetchedSubjects::posts`).
+    prefetches: &'a [(usize, crate::report::diag_log::Posts)],
+    /// The texts of the subjects that each query's report reads one by one, by query
+    /// (`ReportedPrefetch::subject_reads`; empty where its warning lines hold them).
+    reads: &'a [crate::report::query_warnings::QueryReads],
+    /// The call's first read of a header that holds a UTF8String (`CallTitles::utf8`).
+    utf8: Option<&'a database::Utf8Read>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+/// A refusal of `report::tabular::check_failed_lookups` that fails the call (`FailedLookupRefusal`,
+/// at a result set of `stop.hit_lists`) as the failure of that query's batch
+/// (`ErrorAfterBatchReports`): the call writes the reports of the batches before, then the
+/// batch's reader messages, the posts of its search strategy request and its UTF8String warning
+/// (`utf8`, where the batch's Seq-aligns read the call's first), as NCBI's run does before it
+/// stops (the Owner's form of 2026-11-16 for line RG's Q-X2c), and then what NCBI writes of the
+/// batch's reports up to that row (`database::ErrorAfterPosts`): the batch's prefetch texts, and
+/// for each of its queries up to the row's its own warnings, its formatter's warning and its
+/// subject reads (`FailedLookupRefusal::posts_before_stop`). Any other error stays.
+fn failed_lookup_batch(error: anyhow::Error, stop: &LookupStop<'_>) -> anyhow::Error {
+    let Some(refusal) = error.downcast_ref::<crate::report::tabular::FailedLookupRefusal>() else {
+        return error;
+    };
+    let Some(query) = (0..stop.hit_lists.len())
+        .filter(|&query| stop.hit_lists[query].is_some())
+        .nth(refusal.set())
+    else {
+        return error;
+    };
+    let batch = stop
+        .batches
+        .iter()
+        .map(|batch| batch.searched.clone())
+        .find(|span| span.contains(&query))
+        .unwrap_or(query..query + 1);
+    // The own warnings of the batch's queries up to `query`, after the batch's reader messages.
+    let lines = (batch.start..=query)
+        .map(|query| {
+            let lines = stop.lines.get(query).map_or(&[][..], Vec::as_slice);
+            let reader = stop.reader.get(query).map_or(0, Vec::len).min(lines.len());
+            lines[reader..].to_vec()
+        })
+        .collect();
+    let prefetch = stop
+        .prefetches
+        .iter()
+        .filter(|(first, _)| *first == batch.start)
+        .map(|(_, posts)| (0, posts.clone()))
+        .collect();
+    let posts = refusal.posts_before_stop(
+        &crate::report::query_warnings::query_posts(lines, Vec::new(), prefetch, |_| 0, None),
+        stop.reads.get(batch.start..).unwrap_or_default(),
+        |s_idx| s_idx as u32,
+    );
+    crate::blastinput::app::ErrorAfterBatchReports {
+        query: Some(query),
+        error: anyhow::Error::new(database::ErrorAfterPosts { posts, error }),
+        utf8: stop
+            .utf8
+            .filter(|read| batch.contains(&read.query))
+            .cloned(),
+        title_reads: Vec::new(),
+    }
+    .into()
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -2519,7 +2809,7 @@ fn check_tabular_lookups(
 fn write_blastp_tabular_hit_lists(
     hit_lists: &[Option<BlastpHitList>],
     outfmt: OutputFormat,
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     query_ids: &[Arc<[u8]>],
     query_titles: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
@@ -2562,6 +2852,8 @@ fn write_blastp_tabular_hit_lists(
             )?;
         }
         let Some(hit_list) = hit_list_opt else {
+            // `~CBlastTabularInfo` of the query's report flushes the stream.
+            writer.ncbi_flush()?;
             continue;
         };
         // The query's formatter (`report::tabular::TabularRows`): the subject that a row whose
@@ -2624,6 +2916,14 @@ fn write_blastp_tabular_hit_lists(
                 rows.found(hsp.s_idx as usize);
                 let subject_id =
                     SubjectIdFields::of(subject_ids, subject_accessions, hsp.s_idx as usize);
+                // The columns inside the query row's range (a Smith-Waterman alignment's end gaps
+                // in the query's row are left out), as every table counts them.
+                let counts = crate::report::serial::seqalign::AlignLengths {
+                    length: hsp.length,
+                    gaps: hsp.gap_letters(),
+                    gap_opens: hsp.gapopen,
+                }
+                .within_query_range(hsp.gap_info.as_deref().unwrap_or_default());
                 crate::report::outfmt6::write_hit_fields_bytes(
                     writer,
                     query_id,
@@ -2631,9 +2931,9 @@ fn write_blastp_tabular_hit_lists(
                     subject_id.accession_version,
                     hsp.identity,
                     hsp.num_ident,
-                    hsp.length,
+                    counts.length,
                     hsp.mismatch,
-                    hsp.gapopen,
+                    counts.gap_opens,
                     hsp.q_start,
                     hsp.q_end,
                     hsp.s_start,
@@ -2649,6 +2949,7 @@ fn write_blastp_tabular_hit_lists(
                 hsp_index += 1;
             }
         }
+        writer.ncbi_flush()?;
     }
 
     // The warnings after the last query's report (`QueryWarnings::after_last_query`).
@@ -2665,6 +2966,8 @@ fn write_blastp_tabular_hit_lists(
             "# BLAST processed {} queries",
             queries_before + query_titles.len()
         )?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -2779,6 +3082,64 @@ fn set_row_masks(
             table.push(masks.copy_rows());
         }
     }
+}
+
+/// The query masks of the search's results, which every report of the call reads (outfmt 0's
+/// lower case, BLAST XML's masked letters, the archive's masks, outfmt 0's refusal of a query
+/// that is also a subject): `query_record_masks`, or none for each query of a PSSM search
+/// (`report::record::carries_query_masks` of `app`'s program type: psiblast in every round).
+fn result_query_masks(
+    app: crate::algorithm::blastp::args::BlastpApp,
+    query_frames: &[Vec<QueryFrame>],
+    offsets: &seq_range::Placements,
+) -> Vec<Vec<(i32, i32)>> {
+    if !crate::report::record::carries_query_masks(app.program_type()) {
+        return vec![Vec::new(); query_frames.len()];
+    }
+    query_record_masks(query_frames, offsets)
+}
+
+/// Outfmt 0's refusal of a query that is also a subject and has masks, each outfmt 0 output's
+/// (`believed::refuse_shared_masks_in`; the query-anchored sections draw these masks as NCBI
+/// does, `query_anchored::fill_loc_list`). A PSSM search's results carry no query masks
+/// (`report::record::carries_query_masks`), so neither arm of the refusal applies to psiblast:
+/// its Sbjct rows show the subject's masks on the subject's rows only (`SetSubjectMasks`, and only
+/// query masks are drawn by id).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1583-1584
+fn refuse_shared_record_masks(
+    args: &ResolvedBlastpArgs,
+    format_plans: &[BlastpReport],
+    outputs: &mut ReportOutputs<'_>,
+    query_records: &[FastaRecord],
+    query_frames: &[Vec<QueryFrame>],
+    offsets: &seq_range::Placements,
+) -> Result<()> {
+    let pairwise = |outfmt: &BlastpReport| {
+        matches!(
+            outfmt,
+            BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
+        )
+    };
+    if !args.parse_deflines
+        || !crate::report::record::carries_query_masks(args.app.program_type())
+        || !format_plans.iter().any(pairwise)
+    {
+        return Ok(());
+    }
+    let masks = query_record_masks(query_frames, offsets);
+    crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
+        outputs
+            .formats
+            .iter_mut()
+            .zip(format_plans)
+            .filter(|(_, outfmt)| pairwise(outfmt))
+            .map(|(format, _)| &mut format.refusal),
+        query_records,
+        |query| masks.get(query).is_some_and(|m| !m.is_empty()),
+        args.lcase_masking,
+        args.app.name(),
+    )
 }
 
 /// The masked regions of each query as NCBI's `TMaskedQueryRegions` holds them (`Map`,
@@ -2914,14 +3275,7 @@ fn psiblast_pssms(
         let alignments: Vec<PssmAlignment<'_>> = hit_list.hsplist_array[..count]
             .iter()
             .flat_map(|hsp_list| &hsp_list.hsps)
-            .map(|hsp| PssmAlignment {
-                subject: hsp.s_idx,
-                e_value: crate::report::serial::seqalign::seqalign_evalue(hsp.e_value),
-                q_start: hsp.q_start - 1 + q_shift,
-                s_start: hsp.s_start - 1,
-                q_length: hsp.q_end + 1 - hsp.q_start,
-                ops: hsp.gap_info.as_deref(),
-            })
+            .map(|hsp| PssmAlignment::of_hsp(hsp, q_shift))
             .collect();
         if alignments.is_empty() {
             continue;
@@ -2945,13 +3299,20 @@ fn psiblast_pssms(
             psi_gapped: gapped,
         };
         let mut unread = Vec::new();
+        let query_letters = [
+            record.seq(),
+            args.psi_search
+                .as_deref()
+                .map_or(&[][..], |psi| psi.query_tail.as_slice()),
+        ]
+        .concat();
         let made = query_pssm(
             request,
             scoring,
             gapped,
             args.inclusion_ethresh,
             PssmQueryRecord {
-                letters: record.seq(),
+                letters: &query_letters,
                 id: &id,
                 title: record.title(),
             },
@@ -2960,6 +3321,8 @@ fn psiblast_pssms(
             &|s_idx| keys.key(s_idx),
             ancillary,
             &mut unread,
+            // The PSSM after the last round, which no archive holds.
+            false,
         );
         let mut warnings = crate::algorithm::psiblast::pssm::PssmReadMessages::default();
         keys.unread_warnings(args.app.ncbi_name(), &unread, &mut warnings);
@@ -3090,37 +3453,68 @@ fn row_start(hit: &Hit, side: RowSide) -> usize {
 }
 
 // No NCBI counterpart: how LOSAT's reports reach the queries' letters.
-/// The queries whose letters the reports read, by query index: their records, and the letters of
-/// a PSSM query's Bioseq where they are not its record's (`bioseq`, `PsiSearch::bioseq_letters`;
-/// a run of such a query has no other query).
+/// The queries whose letters the reports read, by query index: their records, the letters of a
+/// PSSM query's Bioseq where they are not its record's (`bioseq`, `PsiSearch::bioseq_letters`; a
+/// run of such a query has no other query), and PHI-BLAST's letters of a query whose results NCBI
+/// shows with the Bioseq of its batch's first query, which has none (`phi_shown`,
+/// `phi_hooks::PhiCall::shown_gaps`; empty without a pattern).
 #[derive(Clone, Copy)]
 struct ShownQueries<'a> {
     records: &'a [FastaRecord],
     bioseq: Option<&'a [u8]>,
+    phi_shown: &'a [Option<Box<[u8]>>],
 }
 
 impl<'a> ShownQueries<'a> {
-    /// The queries `records` of the run `args`.
-    fn of(records: &'a [FastaRecord], args: &'a ResolvedBlastpArgs) -> Self {
+    /// The queries `records` of the run `args` and of its PHI-BLAST call `phi`.
+    fn of(
+        records: &'a [FastaRecord],
+        args: &'a ResolvedBlastpArgs,
+        phi: Option<&'a phi_hooks::PhiCall<'_>>,
+    ) -> Self {
         let bioseq = args
             .psi_search
             .as_deref()
             .and_then(|psi| psi.bioseq_letters.as_deref());
-        Self { records, bioseq }
+        let phi_shown = phi.map_or(&[][..], |phi| &phi.shown_gaps[..]);
+        Self {
+            records,
+            bioseq,
+            phi_shown,
+        }
     }
 
-    /// The record letters of the query `q_idx` (none past the queries).
+    /// PHI-BLAST's letters of the query `q_idx` (`phi_shown`).
+    fn phi_letters(self, q_idx: usize) -> Option<&'a [u8]> {
+        self.phi_shown.get(q_idx)?.as_deref()
+    }
+
+    /// The record letters of the query `q_idx` (none past the queries), PHI-BLAST's where it has
+    /// them (`phi_letters`).
     fn record(self, q_idx: usize) -> &'a [u8] {
+        if let Some(letters) = self.phi_letters(q_idx) {
+            return letters;
+        }
         self.records
             .get(q_idx)
             .map_or(&[][..], |record| record.seq())
     }
 
-    /// The letters of the query `q_idx` as the reports read them (`ShownLetters::query`).
+    /// The letters of the query `q_idx` as the reports read them (`ShownLetters::query`), shown as
+    /// a Bioseq's where PHI-BLAST has them (`phi_letters`).
     fn letters(self, q_idx: usize) -> Option<ShownLetters<'a>> {
+        if let Some(letters) = self.phi_letters(q_idx) {
+            return Some(ShownLetters::Bioseq(letters));
+        }
         self.records
             .get(q_idx)
             .map(|record| ShownLetters::query(record.seq(), self.bioseq))
+    }
+
+    /// `letters`, past the queries `ShownLetters::query` of no letters.
+    fn shown(self, q_idx: usize) -> ShownLetters<'a> {
+        self.letters(q_idx)
+            .unwrap_or(ShownLetters::query(&[], self.bioseq))
     }
 }
 
@@ -3443,7 +3837,7 @@ fn build_pairwise_hits(
             (None, None)
         };
         let query_record = queries.record(q_idx);
-        let query_letters = ShownLetters::query(query_record, queries.bioseq);
+        let query_letters = queries.shown(q_idx);
         let query_seq = restore_displayed_o(query_seq, query_letters, &hit, RowSide::Query);
         let subject_seq = restore_displayed_o(
             subject_seq,
@@ -3488,14 +3882,9 @@ fn build_pairwise_hits(
             positives: Some(positives),
             gaps: Some(gaps),
             subject_length: Some(subjects[s_idx].aa_len),
-            // The title after its first word, as the other programs give it; the reports take the
-            // subject's title bytes by subject index (`write_blastp_pairwise_report`).
-            subject_title: shown_subjects.title(s_idx).and_then(|title| {
-                title
-                    .iter()
-                    .position(|&byte| byte == b' ')
-                    .map(|space| String::from_utf8_lossy(&title[space + 1..]).into_owned())
-            }),
+            subject_title: shown_subjects
+                .title(s_idx)
+                .and_then(crate::blastinput::fasta_reader::hit_subject_title),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:332-342: the HSP's composition adjustment.
             comp_adjust_method: Some(comp_adjustment_method),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1180-1182
@@ -3510,6 +3899,7 @@ fn build_pairwise_hits(
             // engine's, which `hit.num_ident` holds unless the display recount replaced it
             // (`recount_shown_identities`).
             seqalign_num_ident,
+            edge: crate::report::pairwise::PairwiseEdge::Normal,
         })
     };
     // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the rows of the final list as an indexed map on the
@@ -3607,7 +3997,7 @@ fn build_restricted_align_array_into(
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:153-156
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:145-150
 struct BlastpInitHspNode {
     init_index: usize,
     best_score: i32,
@@ -3836,7 +4226,7 @@ fn blastp_trace_init_hsp_overlaps_target(target: BlastpTraceHspTarget, init_hsp:
         && s_end <= target.s_end
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1329-1356
 fn preliminary_score_compare(
     a: &BlastpPreliminaryHsp,
     b: &BlastpPreliminaryHsp,
@@ -4098,24 +4488,30 @@ pub(super) fn preliminary_hit_from_local_match_hsp(local_hsp: &BlastpHsp) -> Bla
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3975-4000
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:510-795 (cited at
+// `BlastIntervalTree::try_add_hsp`)
+/// The interval tree rebuilt from the HSPs `preliminary_hits` that the exact retry keeps: their
+/// count, or `None` where NCBI's insertion of one of them never ends (an HSP out of the tree's
+/// bounds, of a hard chunk shorter than the word: `BlastpPrelimKernel::one_word_gapped`).
 fn rebuild_preliminary_interval_tree_from_list(
     interval_tree: &mut BlastIntervalTree,
     preliminary_hits: &[BlastpPreliminaryHsp],
     contexts: &[QueryContext],
-) -> usize {
+) -> Option<usize> {
     interval_tree.reset();
     let mut inserted = 0usize;
     for preliminary_hsp in preliminary_hits {
         let context_idx = usize::try_from(preliminary_hsp.query_context)
             .expect("preliminary blastp query context must be non-negative");
-        interval_tree.add_hsp(
+        if !interval_tree.try_add_hsp(
             preliminary_tree_hsp(preliminary_hsp, contexts[context_idx].frame_base),
             contexts[context_idx].frame_base,
-            IndexMethod::QueryAndSubject,
-        );
+        ) {
+            return None;
+        }
         inserted += 1;
     }
-    inserted
+    Some(inserted)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3777-3786
@@ -4161,6 +4557,17 @@ fn blastp_get_start_for_gapped_alignment_int4_length(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4246-4258, 4262-4295
+// The left extension reads the subject's letters from its start to the gapped start, the right one
+// runs only where the gapped start lies before the subject's last letter, over the rest of its
+// length; a subject shorter than 90,000 letters (MAX_SUBJECT_OFFSET) is not shifted.
+/// The preliminary gapped alignment of `init_hsp` on the subject whose letters after the leading
+/// sentinel are `subject_sequence` (the sentinel after them included) and whose length is
+/// `subject_length` (NCBI's `subject->length`: the subject's letters, or the length of a hard chunk
+/// shorter than the word, `Int4`, whose seed lies in the stored letters past it,
+/// `BlastpPrelimKernel::one_word_gapped`). The alignment reads the letters up to the larger of
+/// that length and one past the gapped start, which gives NCBI's two extensions in both cases.
+#[allow(clippy::too_many_arguments)]
 fn extend_preliminary_blastp_hit(
     init_hsp: &mut InitHSP,
     s_idx: u32,
@@ -4168,6 +4575,7 @@ fn extend_preliminary_blastp_hit(
     ctx: &QueryContext,
     query_sequence: &[u8],
     subject_sequence: &[u8],
+    subject_length: i32,
     matrix: ScoringMatrix,
     gap_open: i32,
     gap_extend: i32,
@@ -4176,7 +4584,6 @@ fn extend_preliminary_blastp_hit(
     scratch: &mut GapAlignScratch,
 ) -> BlastpPreliminaryHsp {
     let query_raw = &query_sequence[..ctx.aa_len];
-    let subject_raw = &subject_sequence[..subject_sequence.len() - 1];
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3900-3905
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3900-3945
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3945
@@ -4195,6 +4602,10 @@ fn extend_preliminary_blastp_hit(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3943-3945
     init_hsp.s_seed += gapped_q_start - init_hsp.q_seed_absolute;
     init_hsp.q_seed_absolute = gapped_q_start;
+    let s_seed = usize::try_from(init_hsp.s_seed)
+        .expect("NCBI BLAST preliminary gapped subject start must be non-negative");
+    let subject_raw =
+        &subject_sequence[..usize::try_from(subject_length).unwrap_or(0).max(s_seed + 1)];
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3943-3949
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3949-3978
     let aligned = blastp_score_only_gapped_alignment_with_scratch(
@@ -4202,8 +4613,7 @@ fn extend_preliminary_blastp_hit(
         subject_raw,
         usize::try_from(gapped_q_start)
             .expect("NCBI BLAST preliminary gapped query start must be non-negative"),
-        usize::try_from(init_hsp.s_seed)
-            .expect("NCBI BLAST preliminary gapped subject start must be non-negative"),
+        s_seed,
         matrix,
         gap_open,
         gap_extend,
@@ -4239,9 +4649,13 @@ pub fn run(
     mut args: BlastpArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
+    // An `-import_search_strategy` was imported by the caller (`import::apply`), before the run.
     args.id_scope = args.parse_deflines.then(Default::default);
+    // The run's `SERIAL_VERIFY_DATA_WRITE`, `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET`,
+    // which `-in_pssm`'s reader reads (`BlastpArgs::write_verification`, `read_verification`).
+    args.write_verification = settings.write_verification.clone();
+    args.read_verification = settings.read_verification.clone();
     use crate::blastinput::app;
-    use crate::blastinput::input_files;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:128-133
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
@@ -4252,10 +4666,10 @@ pub fn run(
     // (`app::early_format_choice`).
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
-        args.out.as_deref(),
         args.app.name(),
     )?;
-    let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+    let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
+    let choice = app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
     let format = choice.report_format(app::Program::Blastp, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -4266,24 +4680,16 @@ pub fn run(
         format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
         &options,
     )
-    .map(|handle| handle.with_outfmt_text(&args.outfmt));
+    .map(|handle| handle.with_outfmt_text(&outfmt_bytes));
     // The search strategy's request, with the archive's options handle.
-    args.strategy = strategy_file
-        .map(|file| {
-            anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
-                file,
-                super::archive::option_inputs(&args),
-                choice.number(),
-                crate::report::archive::strategy::HitlistArgs {
-                    max_target_seqs: args.max_target_seqs,
-                    num_descriptions: args.num_descriptions,
-                    num_alignments: args.num_alignments,
-                },
-                args.db.as_deref().map(crate::seqdb::db_argument_name),
-                &options,
-            ))
-        })
-        .transpose()?;
+    args.strategy = strategy_file.map(|file| {
+        crate::report::archive::strategy::StrategyExport::for_args(
+            &args,
+            file,
+            choice.number(),
+            &options,
+        )
+    });
     // LOSAT's thread capability is checked before any input or output, as for BLASTN.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
@@ -4300,6 +4706,10 @@ pub fn run(
         }
         None => &mut stderr,
     };
+    // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
+    if let Some(import) = &args.import {
+        diagnostics.write_all(&import.warning_lines())?;
+    }
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
     // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
@@ -4353,10 +4763,13 @@ pub fn run(
     let query_file = if pssm_query(&args) {
         None
     } else {
-        input_files::check_utf8_file_name(&args.query, "query", args.app.name())?;
         // NCBI opens the query file inside `Run` too: its error is saved and an error archive
         // follows.
-        match input_files::open_input(&args.query, "query", args.app.name()) {
+        match crate::report::archive::read::import::ImportRun::open_query(
+            args.import.as_ref(),
+            &args.query,
+            args.app.name(),
+        ) {
             Ok(file) => Some(file),
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -4365,32 +4778,31 @@ pub fn run(
         }
     };
     let out_file = open_out_file(&args)?;
-    // Outfmt 0 to 4 (`blastp_pairwise_view_of`; psiblast refuses 1 to 4 before its search): the
-    // stream of NCBI's `CBlastFormat`.
-    let pairwise =
-        format.is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
-    // The organism report's `-out` file is written as NCBI's buffer writes it.
-    let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
     // LOSAT's reports read the format number and the custom fields that NCBI keeps; a custom
     // tabular report of a delimiter, which `normalized` drops, reads the value as given, as the
     // library's: whether the app's formatter gets the delimiter (blastp's does, psiblast's and
     // rpsblast's do not, so their `6 delim=@` is the default outfmt 6) is the spec's, the one
     // that the reports read (`tabular::custom_tabular_spec`, `TabularSpec::of_app`).
     // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers below.
-    let outfmt = match choice.parsed() {
+    let outfmt: Vec<u8> = match choice.parsed() {
         Some(parsed)
             if parsed.delimiter.is_empty()
-                || super::tabular::custom_tabular_spec(&args.outfmt, args.app).is_none() =>
+                || super::tabular::custom_tabular_spec(&outfmt_bytes, args.app).is_none() =>
         {
             parsed.normalized()
         }
-        _ => args.outfmt.clone(),
+        _ => outfmt_bytes.clone(),
     };
-    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report, args.strategy.as_ref());
+    let mut stream = crate::cli::ReportStream::of_cli(
+        out_file,
+        args.app.post_name(),
+        &outfmt_bytes,
+        args.strategy.as_ref(),
+    );
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
-            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
+            ReportOutputs::single(&outfmt, OutputSink::Report(&mut stream), &mut *diagnostics);
         search_cli(
             args,
             list,
@@ -4403,19 +4815,31 @@ pub fn run(
     };
     // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
     let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+    // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+    let result = stream.finish(result);
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status).
     if let Some(handle) = &archive {
         match &result {
             Err(error) => {
-                if let Some(lines) = super::archive::error_lines(error, false) {
+                // psiblast's `-in_pssm` file, which NCBI opens inside `Run` too.
+                let in_run = crate::algorithm::pssm_search::in_pssm::file_error_in_run(error);
+                if let Some(lines) = super::archive::error_lines(error, in_run) {
                     let _ = crate::report::archive::write_error_archive_after_post(
                         handle,
                         error,
                         &lines,
                         &mut stream,
                     );
+                } else if let Some(lines) = crate::report::archive::silent_end_lines(handle, error)
+                {
+                    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:573-576
+                    // A run that `CATCH_ALL` ended without a post (`cli::NativeError::silent_end`:
+                    // psiblast's `-in_pssm` reader, NCBI's object manager): the archive of the
+                    // messages saved before it, with no text before it, as tblastn's end writes.
+                    let _ =
+                        crate::report::archive::write_error_archive(handle, &lines, &mut stream);
                 }
             }
             Ok(()) => {
@@ -4425,10 +4849,7 @@ pub fn run(
             }
         }
     }
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-    // The stream of the outfmt 0 to 4 formatter throws when a write fails, as the organism
-    // report's where NCBI's buffer writes it (`cli::ReportStream::finish`).
-    stream.finish(result, pairwise || tax_report)
+    result
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote
@@ -4450,25 +4871,28 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, false, None);
+        let mut report = crate::cli::ReportStream::of_cli(
+            out_file,
+            args.app.post_name(),
+            crate::utils::os_bytes::os_str_bytes(&args.outfmt),
+            None,
+        );
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
             &lines,
             &mut report,
         );
-        let _ = std::io::Write::flush(&mut report);
+        let _ = report.finish(Ok(()));
     }
 }
 
 /// The `-out` file, created (`-`: standard output).
-fn open_out_file(args: &BlastpArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+fn open_out_file(args: &BlastpArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| {
-            crate::cli::create_out_file(path, Some(args.app.name())).map(std::io::BufWriter::new)
-        })
+        .map(crate::cli::create_out_file)
         .transpose()
 }
 
@@ -4488,11 +4912,16 @@ fn read_cli_subjects(
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2553-2562
     // The handler of the database arguments reads the subjects (an empty subject set
     // fails there), before the query and the output are opened.
-    let Some(subject_path) = args.subject.as_deref() else {
-        return Err(app::missing_subject_error());
+    // An imported strategy's subject Bioseqs (`import::apply`) stand for `-subject`.
+    let subject_file = match args.import.as_ref().and_then(|run| run.subjects.as_ref()) {
+        Some(text) => crate::report::archive::read::import::ImportRun::input_of("subject", text)?,
+        None => {
+            let Some(subject_path) = args.subject.as_deref() else {
+                return Err(app::missing_subject_error());
+            };
+            input_files::open_input(subject_path, "subject", args.app.name())?
+        }
     };
-    input_files::check_utf8_file_name(subject_path, "subject", args.app.name())?;
-    let subject_file = input_files::open_input(subject_path, "subject", args.app.name())?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
     // The subject range is read after the subject file is opened, before it is read.
     let subject_range = seq_range::parse_optional_range(
@@ -4576,6 +5005,9 @@ fn open_search_database(
     // open and the output file exists) and before the test for an empty query.
     let database = match resolved.db.as_deref() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+                outputs.formats.first().map(|format| format.outfmt),
+            );
             let database = database::BlastpDatabase::open_restricted(
                 name,
                 settings,
@@ -4584,7 +5016,9 @@ fn open_search_database(
                 resolved.db_mask.as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             let rps = resolved.rps_search.is_some();
             let database = if rps {
                 rps_hooks::with_units(resolved, database)?
@@ -4607,10 +5041,11 @@ fn open_search_database(
                     args.archive.as_ref(),
                     args.strategy.as_ref(),
                     &args.db_filter,
+                    database.list_gis(),
                     database.list_taxids(),
                     &database.statistics(),
                     false,
-                    rps || args.searchsp.is_some_and(|space| space > 0),
+                    rps || args.searchsp.is_some_and(|space| space != 0),
                     !rps && args.dbsize.is_some_and(|size| size > 0),
                     args.app.name(),
                 )?;
@@ -4638,6 +5073,17 @@ fn open_search_database(
         }
         None => None,
     };
+    // psiblast `-phi_pattern`: what psiblast sets in the options handle after each batch
+    // (`phi_hooks::note_handle_sets`), with `-db` and with `-subject`.
+    if let (Some(_), Some(handle)) = (
+        resolved.phi.as_deref(),
+        args.archive
+            .as_ref()
+            .map(crate::report::archive::ArchiveHandle::options)
+            .or_else(|| args.strategy.as_ref().map(|strategy| strategy.options())),
+    ) {
+        phi_hooks::note_handle_sets(handle)?;
+    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-133
     // A custom tabular field list that looks every taxid up (the plural names of the taxonomy
     // database, the organism report) asks whether `taxdb.bti` is on the search path: the plural
@@ -4652,7 +5098,7 @@ fn open_search_database(
                 settings,
             )),
             outputs,
-        )?;
+        );
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -4682,18 +5128,16 @@ fn subject_taxonomy(
     resolved: &mut ResolvedBlastpArgs,
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
     outputs: &ReportOutputs<'_>,
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        args.app.name(),
         outputs
             .formats
             .iter()
             .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt, args.app)),
-    )?;
+    );
     resolved.subject_taxdb = taxonomy.taxdb;
     resolved.subject_taxdb_found = taxonomy.found.unwrap_or(false);
-    Ok(())
 }
 
 /// The part of `run` after the files are opened: NCBI's processing of the options,
@@ -4857,10 +5301,10 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTP_TASK.check(&mut args.task)?;
-    // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
-    // database is read from files by the command line only.
+    // `run_local` searches subject records (the library, `api::run`; LOSAT Web's adapter; ABI v1);
+    // a `-db` search runs through `run_local_database` (or the command line's `run`).
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
+        bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     report_formats(&args, outputs)?;
     // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
@@ -4869,38 +5313,30 @@ pub fn run_local(
         .formats
         .iter()
         .any(|format| blastp_is_archive(format.outfmt));
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     if archive_requested {
         args.archive = super::archive::handle_for(
             &args,
             true,
-            &crate::report::archive::OptionsHandle::default(),
+            &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
-        if let Some(handle) = args.archive.clone() {
-            let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(
-                    args,
-                    query_records,
-                    query_end,
-                    subject_records,
-                    query_label,
-                    subject_label,
-                    view,
-                )
-            });
-            return outputs.finish_archive(&handle, no_query, result);
-        }
     }
-    run_local_formats(
-        args,
-        query_records,
-        query_end,
-        subject_records,
-        query_label,
-        subject_label,
-        outputs,
-    )
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        run_local_formats(
+            args,
+            query_records,
+            query_end,
+            subject_records,
+            query_label,
+            subject_label,
+            outputs,
+        )
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-543
@@ -4911,8 +5347,10 @@ pub fn run_local(
 /// input PSSM's files that NCBI would write back in a way LOSAT does not (`-out_pssm`,
 /// `-out_ascii_pssm`, written in round 1, which a run stopped before its search never reaches),
 /// are refused here, once the database is opened (NCBI's error of a database it cannot open comes
-/// first) and before any output; so are LOSAT's limits of the PSSM search for each requested
-/// format (`check_in_pssm_options`) and the PSSM files of the rounds that LOSAT cannot write as NCBI does
+/// first) and before any output; so are LOSAT's limits on the PSSM's query annotations and archive
+/// members for the requested formats (`check_in_pssm_options`; unsupported `-outfmt` numbers are
+/// refused earlier by `PsiblastArgs::check_outfmt`) and the PSSM files of the rounds that LOSAT
+/// cannot write as NCBI does
 /// (`check_pssm_files`, checked as a FASTA query's).
 ///
 /// The query is the PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with
@@ -4984,6 +5422,16 @@ fn search_pssm_query(
     // prolog, where a FASTA query's batch has its reader's messages: they are the PSSM query's
     // (`psiblast_stop_at_pssm_query` marks the stream they fail).
     record.warnings = psi.annot.posts.text();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
+    // With the archive as the first format (no prolog before them) each of these posts is saved
+    // as one message of its severity, as tblastn's (`PsiSearch::write_annot_posts`), where the
+    // diagnostics stream would save each of its lines as a warning: they are written here.
+    if let (Some(11), Some(handle)) = (outfmts.first(), resolved.archive.as_ref()) {
+        psi.annot
+            .posts
+            .write(&mut *outputs.diagnostics, Some(handle))?;
+        record.warnings.clear();
+    }
     let records = vec![record];
     // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's
     // (`check_psiblast_pssm_files`: not where NCBI's error of the format comes first).
@@ -5139,7 +5587,7 @@ fn run_local_formats(
     outputs.open_out()?;
     let mut resolved = resolve_for_formats(&args, outputs)?;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
-    subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs)?;
+    subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs);
     let xinclude = xinclude_format(&args, outputs)?;
     let scope = pssm_check_scope(&args);
     let args = resolved;
@@ -5198,27 +5646,27 @@ pub fn run_local_database(
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTP_TASK.check(&mut args.task)?;
     report_formats(&args, outputs)?;
+    args.write_verification = settings.write_verification.clone();
+    args.read_verification = settings.read_verification.clone();
     let archive_requested = outputs
         .formats
         .iter()
         .any(|format| blastp_is_archive(format.outfmt));
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run`).
     args.archive = super::archive::handle_for(
         &args,
         archive_requested,
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    match args.archive.clone() {
-        Some(handle) => {
-            let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, query_end, settings, view)
-            });
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_database(args, query_records, query_end, settings, outputs),
-    }
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input() && !pssm_query(&args);
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        search_database(args, query_records, query_end, settings, outputs)
+    })
 }
 
 /// `run_local_database` from the taxid or seqid list on.
@@ -5316,23 +5764,59 @@ fn check_shown_subject_titles(
     Ok(())
 }
 
-/// The titles that a pairwise report shows, checked where the subjects are a database's
-/// (`ListedTitles::check_shown_titles`, which takes the subjects whose load throws from `loads`)
-/// or a FASTA set's (`check_shown_subject_titles`).
+/// The titles that a pairwise report (`pairwise`) shows, the subjects of the final lists
+/// (`shown`), checked where the subjects are a database's (`ListedTitles::check_shown_titles`,
+/// which takes the subjects whose load throws from the view's `hit_loads`, then
+/// `ListedTitles::refuse_described_lines` of the subjects of the final hit lists whose
+/// description lines the report prints, `report_prep::described_in`: the first review of line
+/// RG-KB item 12) or a FASTA set's (`check_shown_subject_titles`, then the same refusals of the
+/// description lines of the records whose ids `-parse_deflines` read, the view's
+/// `listed_parsed`: the second review, N2). `rows_of` is `run_call`'s closure of the rows of a
+/// range of queries.
 fn check_pairwise_shown_titles(
-    listed_titles: Option<&database::ListedTitles<'_>>,
-    database: Option<&database::BlastpDatabase>,
+    view: &report_write::ReportView<'_>,
+    pairwise: crate::report::pairwise::PairwiseView,
+    rows_of: &impl Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
     shown: &std::collections::BTreeSet<usize>,
-    subject_records: &[FastaRecord],
-    loads: &crate::report::db_subject::HitLoads,
 ) -> Result<()> {
-    match listed_titles {
-        Some(titles) => titles.check_shown_titles(
-            database.expect("listed titles are a database's"),
-            shown,
-            loads,
-        ),
-        None => check_shown_subject_titles(shown.iter().copied(), subject_records),
+    let described = report_prep::described_in(
+        pairwise,
+        view.args,
+        view.pairwise_hits,
+        rows_of,
+        view.listed_titles,
+        view.psi_found_before,
+    );
+    match view.listed_titles {
+        Some(titles) => {
+            titles.check_shown_titles(
+                view.database.expect("listed titles are a database's"),
+                shown,
+                view.hit_loads,
+            )?;
+            titles.refuse_described_lines(view.hit_lists, view.hit_loads, described)
+        }
+        None => {
+            check_shown_subject_titles(shown.iter().copied(), view.subject_records)?;
+            if view.listed_parsed.is_empty() {
+                return Ok(());
+            }
+            crate::algorithm::common::database::refuse_described_records(
+                view.hit_lists.len(),
+                |query| match &view.hit_lists[query] {
+                    Some(hit_list) => hit_list
+                        .hsplist_array
+                        .iter()
+                        .take(hit_list.hsplist_count)
+                        .filter_map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx))
+                        .collect(),
+                    None => Vec::new(),
+                },
+                described,
+                view.listed_parsed,
+                view.args.app.name(),
+            )
+        }
     }
 }
 
@@ -5365,6 +5849,32 @@ impl<'a> BlastpSubjectSource<'a> {
         match self {
             Self::Fasta(_) => None,
             Self::Database(database) => Some(database),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
+    /// A subject longer than `MAX_DBSEQ_LEN`, which NCBI searches in overlapping parts: the first
+    /// such record of a subject set, or a database's longest sequence, described as the refusals
+    /// name it (`too_long_subject_refusal`, `too_long_phi_subject_refusal`) with its length.
+    fn longest_split(self) -> Option<(String, usize)> {
+        match self {
+            Self::Fasta(records) => records
+                .iter()
+                .enumerate()
+                .find(|(_, record)| {
+                    record.sequence.len() > crate::core::subject_split::MAX_DBSEQ_LEN
+                })
+                .map(|(index, record)| {
+                    (
+                        format!("subject sequence {}", index + 1),
+                        record.sequence.len(),
+                    )
+                }),
+            Self::Database(database) => {
+                let longest = database.seqdb().max_length() as usize;
+                (longest > crate::core::subject_split::MAX_DBSEQ_LEN)
+                    .then(|| ("a database sequence".to_string(), longest))
+            }
         }
     }
 
@@ -5442,20 +5952,18 @@ fn split_option_space(batch: &[i64], context_index: usize, options_searchsp: i64
 }
 
 /// Each requested format as NCBI parses `-outfmt` before its option handlers run, and LOSAT's
-/// rejection of a format that its BLASTP does not write (`app::report_format`): the command line's
-/// checks before it opens `-out` (`run`). The formatting handler's come after
-/// (`resolve_for_formats`).
+/// rejection of a format that its BLASTP does not write (`ReportOutputs::early_choices`): the
+/// command line's checks before it opens `-out` (`run`). The formatting handler's come after
+/// (`resolve_for_formats`), and so does the error of a value left to it with a search strategy
+/// file.
 fn report_formats(args: &BlastpArgs, outputs: &ReportOutputs<'_>) -> Result<()> {
-    use crate::blastinput::app;
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        app::report_format(
-            &choice,
-            app::Program::Blastp,
-            format.side_out(args.out.as_deref()),
-        )?;
-    }
-    Ok(())
+    outputs
+        .early_choices(
+            crate::blastinput::app::Program::Blastp,
+            args.out.as_deref(),
+            args.export_search_strategy.is_some(),
+        )
+        .map(drop)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
@@ -5468,15 +5976,21 @@ fn resolve_for_formats(
     let mut resolved_formats = Vec::with_capacity(outputs.formats.len());
     for (index, format) in outputs.formats.iter().enumerate() {
         let mut requested = args.clone();
-        requested.outfmt = format.outfmt.to_string();
-        let choice = crate::blastinput::app::parse_formatting_string(&requested.outfmt)?;
+        requested.outfmt = crate::utils::os_bytes::os_string_from_bytes(format.outfmt.to_vec());
+        let choice = crate::blastinput::app::early_format_choice(
+            format.outfmt,
+            args.export_search_strategy.is_some(),
+        )?;
         let program = crate::blastinput::app::Program::Blastp;
         let out = format.side_out(args.out.as_deref());
         // A format without a report: NCBI's formatting handler refuses SAM, AIRR and FASTA here;
         // the XInclude formats without a file come after `Query is Empty!`, in `search`
-        // (`xinclude_format`).
-        if crate::blastinput::app::report_format(&choice, program, out)?.is_none() {
-            crate::blastinput::app::formatting_handler_check(&choice, program)?;
+        // (`xinclude_format`). A value left to the formatting handler
+        // (`app::EarlyFormat::Deferred`) fails in `check_options`, after the query options.
+        if let Some(choice) = choice.parsed() {
+            if crate::blastinput::app::report_format(choice, program, out)?.is_none() {
+                crate::blastinput::app::formatting_handler_check(choice, program)?;
+            }
         }
         // The options handlers of every format (`check_options`, also through `resolve`) make
         // the formatting handler's checks, the custom delimiter's among them.
@@ -5504,13 +6018,25 @@ fn resolve_for_formats(
         })
         .collect::<Result<_>>()?;
     let shared = crate::blastinput::report_counts::common_report_counts(&numbers, &counts)?;
+    // The hit lists are cut once for every report of the search (`report_prep::report_values`),
+    // so its formats' cuts must be one (`BlastpApp::list_cut`): the library searches formats of
+    // other cuts apart (`api::run::search_groups`).
+    if numbers
+        .iter()
+        .any(|&number| args.app.list_cut(number) != args.app.list_cut(numbers[0]))
+    {
+        bail!(
+            "output formats that cut the hit lists differently in one search (outfmt 11 and 18 keep the search's lists, psiblast's outfmt 5 and 13 to 16 cut them before each round's PSSM) are not supported by LOSAT's {}; request them in separate runs",
+            args.app.name()
+        );
+    }
     let search_options = |resolved: &ResolvedBlastpArgs| {
         let mut options = resolved.clone();
         options.outfmt.clear();
         options.num_descriptions = 0;
         options.num_alignments = 0;
-        // The `-html` links belong to the format as well: only the pairwise report reads them
-        // (`blastinput::app::html_links`), so a run of outfmt 0 and 6 has them for 0 alone.
+        // The `-html` links belong to the format as well: only the reports of outfmt 0 to 4 read
+        // them (`blastinput::app::html_links`), so a run of outfmt 0 and 6 has them for 0 alone.
         options.html = None;
         format!("{options:?}")
     };
@@ -5523,8 +6049,8 @@ fn resolve_for_formats(
         if search_options(&resolved) != first_options {
             bail!("the requested output formats resolve to different search options");
         }
-        // The run's `-html` links are those of the format that reads them (outfmt 0, in any
-        // place among the formats).
+        // The run's `-html` links are those of the format that reads them (outfmt 0 to 4, in
+        // any place among the formats).
         first.html = first.html.or(resolved.html);
     }
     first.num_descriptions = shared.num_descriptions;
@@ -5578,6 +6104,7 @@ const INVALID_PSSM_QUERY_REFUSAL: &str = "a PSSM query whose letters give no Kar
 
 fn psiblast_stop_at_invalid_query(
     args: &ResolvedBlastpArgs,
+    (input_records, query_input): (&[FastaRecord], &seq_range::QueryInput),
     searched_queries: &[FastaRecord],
     database: Option<&database::BlastpDatabase>,
     mut batches: crate::blastinput::query_batch::QueryBatches,
@@ -5617,19 +6144,53 @@ fn psiblast_stop_at_invalid_query(
     // give no Karlin-Altschul parameters crashes NCBI before, below); a sequence file that cannot
     // be opened stops the first batch when its query and `kbp_psi` are valid (the first read of the
     // preliminary search; volumes in the order NCBI reads them).
-    let read_stop = match (&read_failure, contexts.first()) {
+    let mut read_stop = match (&read_failure, contexts.first()) {
         (Some(failure), Some(context)) if failure.precedes_setup_checks() => {
             args.psi_search.is_none() || context.is_valid
         }
         (Some(_), Some(context)) => context.is_valid && kbp_psi_valid(context),
         _ => false,
     };
+    // A query that NCBI splits meets its chunks' stops before the read, and the read where a chunk
+    // gets to it; one whose chunks have no valid context reads nothing, and the next valid query
+    // reads (`split_steps::split_query_reads`; NCBI 2.17.0 probe `p4_epF` of line RG item X-bpgap).
+    let (mut read_at, mut split_stop) = (0, None);
+    if let Some(failure) = read_failure.as_ref().filter(|_| read_stop) {
+        let class = match failure.precedes_setup_checks() {
+            true => crate::algorithm::blastp::protein_query_split::ReadFails::Setup,
+            false => crate::algorithm::blastp::protein_query_split::ReadFails::Search,
+        };
+        loop {
+            let query = batches.starts[read_at].1;
+            let whole = (
+                input_records[query_input.ordinal(query)].seq(),
+                query_input.placements.offset(query),
+            );
+            match split_steps::split_query_reads(args, &searched_queries[query], whole, class) {
+                Some(Err(stop)) => split_stop = Some(stop),
+                Some(Ok(false)) => {
+                    read_at += 1;
+                    read_stop = contexts
+                        .get(read_at)
+                        .is_some_and(|context| context.is_valid && kbp_psi_valid(context));
+                    if read_stop {
+                        continue;
+                    }
+                }
+                None | Some(Ok(true)) => {}
+            }
+            break;
+        }
+    }
+    // PHI-BLAST's score block is the pattern table's (`s_PHIScoreBlkFill`, blast_setup.c:504-506):
+    // no query's letters are checked, and a query without letters to search has no occurrence
+    // (`phi_hooks::phi_start`).
     let first_stop = if read_stop {
-        Some(0)
+        Some(read_at)
     } else {
-        contexts
-            .iter()
-            .position(|context| !context.is_valid || !kbp_psi_valid(context))
+        contexts.iter().position(|context| {
+            (!context.is_valid && args.phi.is_none()) || !kbp_psi_valid(context)
+        })
     };
     let Some(batch) = first_stop else {
         return batches;
@@ -5638,6 +6199,7 @@ fn psiblast_stop_at_invalid_query(
     let span = batches.searched_span(searched_start);
     let query_length = searched_queries[searched_start].seq().len();
     let error = match protein_query_split_sizes(10000) {
+        _ if split_stop.is_some() => split_stop.expect("the chunks' stop"),
         _ if read_stop => read_failure
             .expect("the first read's failure")
             .error(args.app.name()),
@@ -5686,119 +6248,50 @@ fn psiblast_stop_at_invalid_query(
     batches
 }
 
-/// The stop of the query batch of LOSAT's refusal of two queries of one scope with one id
-/// (`QueryBatches::scope_refusal`), in the one form of every program
+/// The stops of the query batches of LOSAT's refusals of two queries of one scope with one id
+/// (`QueryBatches::resolve_refusals`), in the one form of every program
 /// (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
 /// `-export_search_strategy` the refusal (no request of the batch is written: `stop_batch` stays
 /// `None`), else NCBI's error of the set-up of the batch's records that are first in the scope
-/// (`refused_batch_setup_error`), else the refusal. NCBI's errors of the batches before come
-/// first: their searches fail before the stop is acted on.
+/// (`split_steps::refused_batch_setup_error`), else, where that set-up passes and the run's XML
+/// failure for its matrix name takes the refusal (`ScopeRefusal::xml_takes`), the batch's search,
+/// else the refusal. NCBI's errors of the batches before come first: their searches fail before
+/// the stop is acted on.
 fn refused_batch_stop(
     args: &ResolvedBlastpArgs,
     database: Option<&database::BlastpDatabase>,
     subject_records: &[FastaRecord],
-    searched: &[FastaRecord],
+    (input_records, searched): (&[FastaRecord], &[FastaRecord]),
     input: &seq_range::QueryInput,
     mut batches: crate::blastinput::query_batch::QueryBatches,
 ) -> crate::blastinput::query_batch::QueryBatches {
-    if !batches.scope_refusal {
-        return batches;
-    }
-    let Some((warnings, refusal)) = batches.stop.take() else {
-        return batches;
-    };
-    let (input_done, searched_done) = (batches.input_done, batches.searched_done);
-    let error = crate::blastinput::query_batch::refused_batch_error(
-        refusal,
+    use crate::blastinput::query_batch::BatchSetUp;
+    batches.resolve_refusals(
         args.strategy.is_some(),
-        |first| {
+        |(input_start, searched_start), first| {
             // psiblast's batch holds the repeated query alone; rpsblast's set-up reads its
             // database's files first (`rps_hooks::RpsEngineError`): both refuse.
             if args.app != BlastpApp::Blastp {
-                return None;
+                return BatchSetUp::Unknown;
             }
-            let batch: Vec<usize> = (searched_done..searched.len())
-                .take_while(|&query| input.ordinal(query) < input_done + first.len())
+            // NCBI's batch: each searched query, with its whole record where it is first in its
+            // scope (`split_steps::refused_batch_setup_error`).
+            let batch: Vec<(&FastaRecord, Option<(&[u8], usize)>)> = (searched_start
+                ..searched.len())
+                .take_while(|&query| input.ordinal(query) < input_start + first.len())
+                .map(|query| {
+                    let ordinal = input.ordinal(query);
+                    let whole = (input_records[ordinal].seq(), input.placements.offset(query));
+                    (
+                        &searched[query],
+                        first[ordinal - input_start].then_some(whole),
+                    )
+                })
                 .collect();
-            let lengths: Vec<usize> = batch
-                .iter()
-                .map(|&query| searched[query].seq().len())
-                .collect();
-            let queries: Vec<FastaRecord> = batch
-                .iter()
-                .filter(|&&query| first[input.ordinal(query) - input_done])
-                .map(|&query| searched[query].clone())
-                .collect();
-            refused_batch_setup_error(args, database, subject_records, &lengths, &queries)
+            split_steps::refused_batch_setup_error(args, database, subject_records, &batch)
         },
     );
-    batches.scope_refusal = !error.is::<crate::cli::NativeError>();
-    batches.stop = Some((warnings, error));
     batches
-}
-
-/// BLASTP's set-up of the query records `queries` of a batch whose searched queries have the
-/// lengths `batch_lengths` (`refused_batch_stop`): NCBI's error where a context of theirs is valid
-/// and the set-up fails for the subjects, as `run_call` fails the first searched batch (a database
-/// without sequences, `Database memory map file error`; the average subject length against
-/// `-searchsp` or `OLD_FSC`), or where the search's first read of the database then fails (a
-/// sequence file that cannot be opened, `BlastpDatabase::sequence_file_read_error`: `Database
-/// memory map file error`; line WQA D10 round 6, review 4 M2); `None` where it passes, where no
-/// context is valid, and for a batch that NCBI splits into chunks (each chunk is set up apart,
-/// `search_split_query_batches`), which is refused.
-fn refused_batch_setup_error(
-    args: &ResolvedBlastpArgs,
-    database: Option<&database::BlastpDatabase>,
-    subject_records: &[FastaRecord],
-    batch_lengths: &[usize],
-    queries: &[FastaRecord],
-) -> Option<anyhow::Error> {
-    let split = protein_query_split_sizes(10000).map_or(true, |sizes| {
-        crate::algorithm::blastp::protein_query_split::split_protein_batch(batch_lengths, sizes)
-            .is_some()
-    });
-    if split {
-        return None;
-    }
-    // `call_setup::call_lookup`'s validity: a context without letters is invalid.
-    let contexts = pssm_hooks::psi_contexts(args, &blastp_query_frames(args, queries));
-    if !contexts
-        .iter()
-        .any(|context| context.is_valid && context.aa_len > 0)
-    {
-        return None;
-    }
-    if database.is_some_and(database::BlastpDatabase::first_oid_read_fails) {
-        return Some(crate::blastinput::app::engine_error(
-            "Database memory map file error",
-        ));
-    }
-    let encoded: Vec<EncodedProtein> = match database {
-        Some(_) => Vec::new(),
-        None => subject_records
-            .iter()
-            .map(|record| encode_protein_sequence(record.seq()))
-            .collect(),
-    };
-    let extent = call_setup::db_extent(args, database, &encoded).ok()?;
-    if crate::stats::setup::setup_subject_length(
-        extent.total_db_len,
-        extent.num_subjects,
-        (!args.old_fsc).then_some((extent.cutoff_subject_length, false)),
-    )
-    .is_none()
-    {
-        return Some(crate::blastinput::app::engine_error(
-            "The average subject length is too short",
-        ));
-    }
-    let read_error = database?.sequence_file_read_error("BLASTP")?;
-    Some(
-        match read_error.downcast::<database::PreliminaryReadError>() {
-            Ok(read_error) => crate::blastinput::app::engine_error(read_error.0),
-            Err(error) => error,
-        },
-    )
 }
 
 /// psiblast: LOSAT's refusal of a subject set (`-subject`) none of whose sequences has letters
@@ -5907,7 +6400,7 @@ fn psiblast_stop_at_pssm_query(
 /// NCBI's BLAST XML report data does not know (`blast_xml::matrix::xml_formatting_failure`), with
 /// the facts of the search: no database (`-subject`, `m_IsBl2Seq`) and psiblast (`m_IsIterative`).
 /// The one decision behind the search strategy's last request (`search`) and the formats' error
-/// (`run_call`).
+/// (`run_call`, at the run's query of `blastp_xml_failing_query`).
 fn blastp_xml_matrix_failure(
     args: &ResolvedBlastpArgs,
     outputs: &ReportOutputs<'_>,
@@ -5917,8 +6410,24 @@ fn blastp_xml_matrix_failure(
         outputs.formats.iter().map(|format| format.outfmt),
         &args.matrix_name,
         !database,
-        args.app == BlastpApp::Psiblast,
+        args.app
+            .program_type()
+            .is_some_and(crate::report::record::ProgramType::is_iterative),
     )
+}
+
+/// The run's query at which blastp's formats of `outputs` fail for the matrix name
+/// (`blastp_xml_matrix_failure`), of the run's scopes of the batches added (`scopes`, under
+/// `-parse_deflines`): `QueryScopes::xml_failing_query`.
+fn blastp_xml_failing_query(
+    args: &ResolvedBlastpArgs,
+    outputs: &ReportOutputs<'_>,
+    database: bool,
+    scopes: Option<&crate::blastinput::query_batch::QueryScopes>,
+) -> Option<crate::blastinput::query_batch::XmlFailingQuery> {
+    blastp_xml_matrix_failure(args, outputs, database).map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(scopes, failure)
+    })
 }
 
 /// The search of `run_local` and of the CLI, after NCBI's processing of the options and
@@ -5982,6 +6491,7 @@ fn search(
             database.name(),
             option,
             args.app.name(),
+            args.app.ncbi_name(),
             archive,
             args.strategy.as_ref(),
             &mut |text| match archive {
@@ -6041,12 +6551,21 @@ fn search(
         ),
     };
     // LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`) come where NCBI
-    // starts the search, after its checks.
+    // starts the search, after its checks. The lookup table can hold a word with the residue 0
+    // only where a query holds the gap `-` (`common::hard_chunk_walk::DiagonalWalk::new`; a
+    // query's masked letters are counted too, which can only refuse more). The FASTA reader drops
+    // `-` with NCBI's warning, so a query read from FASTA never holds it.
     if let (Some(database), Some(mask)) = (database, args.db_mask_resolved.as_ref()) {
         mask.check_losat_limits(
             database.seqdb(),
             args.app.name(),
-            crate::blastinput::db_mask::HardScan::Protein,
+            crate::blastinput::db_mask::HardScan::Protein {
+                word: args.word_size as i32,
+                window: args.window_size,
+                zero_words: searched_queries
+                    .iter()
+                    .any(|record| record.sequence.contains(&b'-')),
+            },
         )?;
     }
     check_blastp_environment(args.app, database.is_none())?;
@@ -6071,7 +6590,15 @@ fn search(
             ),
         args.app.name(),
     )
-    .map(|scopes| scopes.with_refusal(args.scope_refusal.clone()));
+    .map(|scopes| {
+        scopes
+            .with_refusal(args.scope_refusal.clone())
+            .with_xml_matrix_failure(blastp_xml_matrix_failure(
+                &args,
+                outputs,
+                database.is_some(),
+            ))
+    });
     let batches = match args.app {
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:158-159
         // NCBI never splits an RPS-BLAST query, so it does not read OVERLAP_CHUNK_SIZE for it
@@ -6089,6 +6616,7 @@ fn search(
         }
         BlastpApp::Psiblast => psiblast_stop_at_invalid_query(
             &args,
+            (query_records, &query_input),
             &searched_queries,
             database,
             crate::blastinput::query_batch::read_psiblast_query_batches(
@@ -6097,6 +6625,8 @@ fn search(
                 &query_input,
                 reading,
                 query_scopes,
+                // PHI-BLAST's one round (`phi_hooks::PhiBatch`).
+                args.phi.is_some() && args.psi_rounds.is_none(),
             ),
         ),
     };
@@ -6114,7 +6644,7 @@ fn search(
         &args,
         database,
         &subjects.records,
-        &searched_queries,
+        (query_records, &searched_queries),
         &query_input,
         batches,
     );
@@ -6124,6 +6654,11 @@ fn search(
     // search writes the requests where its call ends, after the searches, which would hold the
     // reports). A batch that stops with LOSAT's refusal of an id is read first too.
     if batches.first_request_end().is_some() {
+        // NCBI's prolog comes before that request (`StrategyExport::refused`).
+        let refused = crate::report::archive::strategy::StrategyExport::refused;
+        if args.strategy.as_ref().is_some_and(refused) {
+            write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+        }
         crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     }
     // LOSAT's limits come where NCBI starts the search, after its checks: a run that stops at its
@@ -6138,8 +6673,10 @@ fn search(
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
-    // one search per round per query (`psi_round`).
-    if let Some(plan) = args.psi_rounds.clone() {
+    // one search per round per query (`psi_round`). PHI-BLAST's round 1 is this call's search:
+    // LOSAT refuses the rounds after it where NCBI's table has a Karlin block, and without one it
+    // is the run's last (`phi_hooks::phi_limits`).
+    if let Some(plan) = args.psi_rounds.clone().filter(|_| args.phi.is_none()) {
         return psi_round::search_rounds(
             &args,
             &plan,
@@ -6341,9 +6878,9 @@ fn search(
     // found by the name as typed)
     // NCBI fails when it formats a batch's results in BLAST XML with a matrix name that its XML
     // data does not know ("unsupported score matrix", `run_resolved_in_pool`'s format loop): the
-    // batch of the run's first searched query, or of its second where the report is held
-    // (`blastp_xml_matrix_failure`; `XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of
-    // another Seq-id, the second as LOSAT refuses two queries of one id before any output); the
+    // batch of the run's first searched query, or where the report is held
+    // (`blastp_xml_matrix_failure`; `XmlMatrixFailure::SecondQueryOrEnd`) of NCBI's next query of
+    // another Seq-id (`QueryScopes::xml_failing_query` of the batches' scopes); the
     // search strategy's file then holds the requests up to that
     // batch's (probe 7 of RG-F1, probe K4f of line RG), whichever call writes them. A held report
     // that fails at the run's end, or a run that stops before, writes every request it makes.
@@ -6379,7 +6916,7 @@ fn search(
             html_posts,
         } = &mut *outputs;
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the outputs' `-outfmt` values, in request order.
-        let outfmts: Vec<&str> = formats.iter().map(|format| format.outfmt).collect();
+        let outfmts: Vec<&[u8]> = formats.iter().map(|format| format.outfmt).collect();
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the reports the blocks write, whose titles are checked
         // below.
         let x_pairwise = x_kinds.contains(&XBlockReport::Pairwise);
@@ -6420,16 +6957,16 @@ fn search(
                     super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
                 };
-                // Outfmt 0, 5, 6 and 7 (psiblast's 0, 6 and 7) prefetch the subjects of each
+                // Outfmt 0, 5, 6 and 7 (psiblast's too) prefetch the subjects of each
                 // batch, which with `taxdb.bti` on the search path reads their taxids and looks
                 // them up in the taxonomy database (`ListedTitles::prefetch_messages`); a refusal
                 // there would come in a later block, so their checks then also read every
                 // sequence's taxid and ask whether any lookup can be refused
                 // (`shared::taxdb_may_refuse`, without the scientific names, which the prefetch
                 // does not ask for). The refusal of NCBI's taxonomy cache
-                // (`shared::TaxdbRun::cache_collision`) comes at the first batch that prefetches,
-                // which with `PRE_FETCH_SEQS_LIMIT` can be in a later block: such a run takes the
-                // search of all queries, which refuses before any row. So does a run whose first
+                // (`shared::TaxdbRun::cache_collision`) can come at any batch that prefetches or
+                // reads (`shared::TaxdbRun::cache_may_refuse`), in a later block: such a run takes
+                // the search of all queries, which refuses before any row. So does a run whose first
                 // format is a Seq-annot that the batches prefetch for
                 // (`PRE_FETCH_SEQS_LIMIT=2147483647`, `shared::seq_annots_prefetch`), whose
                 // prefetch can refuse a subject with parsed Seq-ids too
@@ -6442,7 +6979,12 @@ fn search(
                         crate::algorithm::common::database::seq_annots_prefetch(
                             crate::blastinput::app::parse_formatting_string(outfmt)
                                 .ok()
-                                .map(|choice| choice.number),
+                                .map(|choice| {
+                                    crate::algorithm::common::database::PrefetchFormat::of(
+                                        choice.number,
+                                        args.app.request_kind(),
+                                    )
+                                }),
                         )
                     })
                 {
@@ -6463,7 +7005,7 @@ fn search(
                     (Some(database), _)
                         if (x_prefetch_taxids(x_kind)
                             || matches!(x_kind, XBlockReport::Xml2) && database.taxdb_found())
-                            && database.prefetch_refused() =>
+                            && database.cache_may_refuse() =>
                     {
                         false
                     }
@@ -6579,10 +7121,7 @@ fn search(
                                     // The block search runs only where no format's check can
                                     // refuse (`x_query_block_plan`): a refusal fails the call.
                                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
-                                    sink: match side {
-                                        Some(side) => OutputSink::Files(output, side.clone()),
-                                        None => OutputSink::Writer(output),
-                                    },
+                                    sink: output.block_sink(side.as_ref()),
                                 }
                             })
                             .collect(),
@@ -6714,12 +7253,13 @@ fn search(
             // A header file that NCBI cannot read (or rpsblast's profile sequences, read by a
             // batch's traceback, or blastp's `-use_sw_tback` redo whose batch's last redone match
             // fails, `Traceback failed`, `redo_run::sw_batch_failed`) fails the batch whose
-            // hit lists reach it first (`database::HeaderReadError`), after the outfmt 0 prolog,
+            // hit lists reach it first (`ErrorAfterBatchReports`), after the outfmt 0 prolog,
             // the reports of the batches before (without the epilog) and that batch's reader
             // messages; so do LOSAT's refusals of a step where NCBI's search of the batch stops or
             // never ends or crashes (`redo_run::sw_endless`, `redo_run::sw_batch_failed` where the
             // batch's first query holds a redone match, a query chunk split again or without a
-            // query in `search_split_query_batches`), as TBLASTX's and TBLASTN's
+            // query in `search_split_query_batches`, a compressed table that fills NCBI's overflow
+            // banks, `banks_filled_refusal`), as TBLASTX's and TBLASTN's
             // (`blastinput::app::ErrorAfterBatchReports`). LOSAT searches all batches together: the
             // batches before are searched again alone. A failure that the first search meets
             // before its redo (unified P-values refused for a batch,
@@ -6727,22 +7267,30 @@ fn search(
             // redo finds (`-use_sw_tback`): the search again then fails at that earlier batch,
             // which NCBI reached first, and the batches before it are searched again in turn
             // (review R3 of line RG item X5, M1).
+            // The failing batch is the one whose first query the error names (every step of
+            // this search names it: `split_steps::batch_failure`).
             let as_failure = |result: Result<()>| match result {
-                Err(error) if error.is::<database::HeaderReadError>() => Ok(error
-                    .downcast::<database::HeaderReadError>()
-                    .expect("the error was checked to be a HeaderReadError")),
-                other => Err(other),
+                Err(error) => {
+                    match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+                        Ok(failure) => match failure.query {
+                            Some(query) => Ok((query, failure)),
+                            None => Err(Err(failure.into())),
+                        },
+                        Err(error) => Err(Err(error)),
+                    }
+                }
+                Ok(()) => Err(Ok(())),
             };
-            let mut failure = match as_failure(result) {
+            let (mut failed, mut failure) = match as_failure(result) {
                 Ok(failure) => failure,
                 Err(other) => return other,
             };
             let (searched_start, failed_end) = loop {
-                let (input_start, searched_start) = batches.start_of(failure.query);
+                let (input_start, searched_start) = batches.start_of(failed);
                 // The failed batch's search strategy request, which NCBI writes before its
                 // search: after the requests of the batches before, which their search again
                 // releases with it (`NextRequest`), or alone, before any output.
-                let span = batches.searched_span(failure.query);
+                let span = batches.searched_span(failed);
                 let failed_end = span.end;
                 if searched_start == 0 {
                     write_alone(span)?;
@@ -6764,7 +7312,7 @@ fn search(
                     false,
                     Some(next_request(span)),
                 )) {
-                    Ok(earlier) => failure = earlier,
+                    Ok(earlier) => (failed, failure) = earlier,
                     Err(Ok(())) => break (searched_start, failed_end),
                     Err(other) => return other,
                 }
@@ -6774,18 +7322,28 @@ fn search(
                 .write_all(&batches.warnings[searched_start])?;
             write_request_posts(&args, &mut *outputs.diagnostics)?;
             // NCBI's warning of its first read of a UTF8String header, where the failed batch
-            // made it (before its failure; a batch before posted its own in its reports).
-            if let Some(posts) = database.and_then(|database: &database::BlastpDatabase| {
+            // made it (before its failure; a batch before posted its own in its reports), then
+            // the posts of the titles that its Seq-aligns read before the failure.
+            let utf8 = database.and_then(|database: &database::BlastpDatabase| {
                 database::Utf8Read::post_in(
                     failure.utf8.as_ref(),
                     0..failed_end,
                     database.seqdb(),
                     args.app.ncbi_name(),
                 )
-            }) {
+            });
+            let titled = match database {
+                Some(database) => database.failed_title_posts(&failure, utf8.is_some())?,
+                None => Default::default(),
+            };
+            for posts in utf8.iter().chain([&titled]) {
                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
-            Err(failure.error)
+            Err(database::ErrorAfterPosts::written(
+                failure.error,
+                &mut *outputs.diagnostics,
+                args.archive.as_ref(),
+            )?)
         })?;
     } else if batches.stop.is_some() {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253
@@ -6793,7 +7351,16 @@ fn search(
         // without letters) has its search strategy request: NCBI made its query factory before
         // the search (`QueryBatches::stop_batch`); it is written before the prolog.
         if let Some(span) = batches.stop_batch.clone() {
-            write_alone(span)?;
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 340
+            // NCBI's stream that throws while it writes the request (an empty descriptor of a
+            // PSSM query, `encoder::NullElement`) ends the run after the prolog (NCBI BLAST+
+            // 2.17.0, probe D3c-3b `probe5` `t_dn1.strat0`).
+            if let Err(error) = write_alone(span) {
+                if error.is::<crate::cli::NativeError>() {
+                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+                }
+                return Err(error);
+            }
         }
         write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {
@@ -6892,8 +7459,11 @@ fn x_query_block_plan(
     // P-values without a search space given (`-searchsp`): the redo's set-up may refuse a query
     // batch (`redo_run::evalue_adjust_contexts`: a query before one without a search space, known
     // only once the queries are set up), after the reports of the batches before
-    // (`database::HeaderReadError`). An ungapped search plans no blocks (`args.ungapped`).
+    // (`ErrorAfterBatchReports`). An ungapped search plans no blocks (`args.ungapped`). A search
+    // with a negative `-window_size` has its own blocks in the preliminary stage only
+    // (`x_prelim_block_plan`: one batch each, NCBI's diagonal table of each batch).
     if args.query_range.is_some()
+        || args.window_size < 0
         || args.psi_pssm.is_some()
         || args.psi_search.is_some()
         || args.rps_search.is_some()
@@ -6963,17 +7533,17 @@ fn x_query_block_plan(
             subject_source.database().is_some() && (needs.all_deflines || needs.taxonomy);
         (!db_reads_more).then_some(spec.kind)
     };
-    let default_kind = |outfmt: &str| match blastp_text_format(outfmt) {
+    let default_kind = |outfmt: &[u8]| match blastp_text_format(outfmt) {
         Ok(OutputFormat::Tabular | OutputFormat::TabularWithComments) => {
             Some(XBlockReport::Tabular)
         }
         Ok(OutputFormat::Pairwise) => Some(XBlockReport::Pairwise),
-        // Outfmt 1 to 4 (BLASTP's, `blastp_pairwise_view_of`): outfmt 0's report with each
+        // Outfmt 1 to 4 (`blastp_pairwise_view_of`): outfmt 0's report with each
         // query's alignments as one section, which reads only that query's hits and the
         // sequences (`report::query_anchored`).
         Err(_)
             if crate::blastinput::app::parse_formatting_string(outfmt)
-                .is_ok_and(|choice| blastp_pairwise_view_of(args.app, choice.number).is_some()) =>
+                .is_ok_and(|choice| blastp_pairwise_view_of(choice.number).is_some()) =>
         {
             Some(XBlockReport::Pairwise)
         }
@@ -6994,10 +7564,10 @@ fn x_query_block_plan(
         _ => None,
     };
     // A custom tabular report of outfmt 6 or 7 takes the default one's kind.
-    let kind_of = |outfmt: &str| match super::tabular::custom_tabular_spec(outfmt, args.app) {
+    let kind_of = |outfmt: &[u8]| match super::tabular::custom_tabular_spec(outfmt, args.app) {
         Some(spec) => match custom_kind(spec) {
-            Some(crate::report::tabular::TabularKind::Tabular) => default_kind("6"),
-            Some(crate::report::tabular::TabularKind::Commented) => default_kind("7"),
+            Some(crate::report::tabular::TabularKind::Tabular) => default_kind(b"6"),
+            Some(crate::report::tabular::TabularKind::Commented) => default_kind(b"7"),
             _ => None,
         },
         None => default_kind(outfmt),
@@ -7130,6 +7700,12 @@ fn x_prelim_block_plan(
         return None;
     }
     let query_batches = query_input.batches(batch_size);
+    // A negative `-window_size`: one block for each batch, whatever its letters.
+    if args.window_size < 0 {
+        let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+        let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, 0, None)?;
+        return (blocks.len() > 1).then_some(blocks);
+    }
     let blocks = x_batch_blocks(args, queries, &query_batches)?;
     let (blocks, _) = x_word_blocks(args, queries, query_input, batch_size, &blocks, pool)?;
     (blocks.len() > 1).then_some(blocks)
@@ -7187,7 +7763,7 @@ fn x_block_search_refuses_nothing(
     let Ok(query_length) = i32::try_from(query_length) else {
         return false;
     };
-    let window = args.window_size as i32;
+    let window = args.window_size;
     if crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP").is_err() {
         return false;
     }
@@ -7347,7 +7923,7 @@ fn x_each_batch_on<T: Send>(
 /// The words a block of the standard table may always hold: 2^22 (16 MiB of `Int4` offsets).
 const X_AA_BLOCK_WORDS_FLOOR: u64 = 1 << 22;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-358 (BlastAaLookupFinalize:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:346-357 (BlastAaLookupFinalize:
 // a cell of at most AA_HITS_PER_CELL offsets keeps them in the backbone, a cell of more puts all of
 // its offsets in the overflow array)
 // EXPERIMENT (LOSAT_X_BPQBLOCK), item SC8b: the blocks of the standard table (`AaLookupTable`) closed
@@ -7512,40 +8088,31 @@ fn x_block_shown_titles_allowed(
 }
 
 /// The `Database:` text of the pairwise reports of a local `-subject` search
-/// (`blastp_scan_mode_definition` of `blastp_subject_tag`).
-fn blastp_database_name(args: &ResolvedBlastpArgs, subject_label: &str) -> String {
-    blastp_scan_mode_definition(&blastp_subject_tag(args, subject_label))
+/// (`report::pairwise::scan_mode_definition_bytes` of `blastp_subject_tag`).
+fn blastp_database_name(args: &ResolvedBlastpArgs, subject_label: &str) -> Vec<u8> {
+    crate::report::pairwise::scan_mode_definition_bytes(&blastp_subject_tag(args, subject_label))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:242-243
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:497-499
 /// The subject tag of the formatter (`m_SubjectTag`): `subject_label`, or the `-subject`
 /// argument; psiblast makes its formatter without one (the default `kEmptyStr`).
-fn blastp_subject_tag(args: &ResolvedBlastpArgs, subject_label: &str) -> String {
+fn blastp_subject_tag(args: &ResolvedBlastpArgs, subject_label: &str) -> Vec<u8> {
     match args.app {
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:182-184
-        BlastpApp::Psiblast | BlastpApp::Rpsblast => String::new(),
-        BlastpApp::Blastp if subject_label.is_empty() => args.subject.display().to_string(),
-        BlastpApp::Blastp => subject_label.to_string(),
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:418-424
-/// The definition of a subject set in the pairwise report (`FillScanModeBlastDbInfo`), without
-/// its period, which the writers add (`ensure_trailing_period`).
-fn blastp_scan_mode_definition(tag: &str) -> String {
-    if tag.is_empty() {
-        "User specified sequence set".to_string()
-    } else {
-        format!("User specified sequence set (Input: {tag})")
+        BlastpApp::Psiblast | BlastpApp::Rpsblast => Vec::new(),
+        BlastpApp::Blastp if subject_label.is_empty() => {
+            crate::utils::os_bytes::os_str_bytes(args.subject.as_os_str()).into_owned()
+        }
+        BlastpApp::Blastp => subject_label.as_bytes().to_vec(),
     }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
 /// Writes and flushes the prolog of every outfmt 0 to 4, 15, 16 and 20 format (`PrintProlog`;
-/// 1 to 4 where BLASTP writes them, `blastp_pairwise_view_of`), for a run that stops at its
-/// first query batch (outfmt 20's line of the field names; its formatter's warning came before
-/// the search, `search`).
+/// 0 to 4 are `blastp_pairwise_view_of`'s), for a run that stops at its first query batch
+/// (outfmt 20's line of the field names; its formatter's warning came before the search,
+/// `search`).
 fn write_pairwise_prologs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -7558,13 +8125,13 @@ fn write_pairwise_prologs(
         .map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
-        if blastp_pairwise_view_of(args.app, number).is_some() {
-            let mut writer = format.sink.open()?;
+        if blastp_pairwise_view_of(number).is_some() {
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
                 crate::wording::REPORT_VERSION,
-                args.app.ncbi_name(),
-                blastp_database_name(args, subject_label).as_bytes(),
+                args.report_program(),
+                &blastp_database_name(args, subject_label),
                 num_sequences,
                 total_letters,
                 pairwise_database.as_ref(),
@@ -7630,11 +8197,11 @@ fn write_reports_without_queries(
                     Some(database) => database.taxdb_found(),
                     None => args.subject_taxdb_found,
                 };
-            let mut writer = format.sink.open()?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             super::tabular::write_tabular_without_queries(
                 spec,
                 taxdb_found,
-                args.app.ncbi_name(),
+                args.report_program(),
                 &mut writer,
                 &mut *outputs.diagnostics,
             )?;
@@ -7660,17 +8227,17 @@ fn write_reports_without_queries(
             continue;
         }
         // Outfmt 1 to 4 write what outfmt 0 writes without a query.
-        let view = blastp_query_anchored_view(args.app, format.outfmt);
+        let view = blastp_query_anchored_view(format.outfmt);
         let outfmt = match view {
             Some(_) => OutputFormat::Pairwise,
             None => blastp_text_format(format.outfmt).map_err(anyhow::Error::msg)?,
         };
-        let mut writer = format.sink.open()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         match outfmt {
             OutputFormat::Pairwise => {
                 let report = BlastpPairwiseReport {
                     version: crate::wording::REPORT_VERSION.to_string(),
-                    database_name: blastp_database_name(args, subject_label).into(),
+                    database_name: blastp_database_name(args, subject_label),
                     database_num_sequences: num_sequences,
                     database_total_letters: total_db_len,
                     // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:194-229
@@ -7681,7 +8248,7 @@ fn write_reports_without_queries(
                     gap_open: args.scoring.gap_open,
                     gap_extend: args.scoring.gap_extend,
                     word_threshold: args.threshold,
-                    window_size: args.window_size as i32,
+                    window_size: args.window_size,
                     // None for an ungapped search, whose gap costs NCBI does not read
                     // (`call_setup::gapped_block`).
                     gapped_karlin: call_setup::gapped_block(args).unwrap_or_default(),
@@ -7704,7 +8271,7 @@ fn write_reports_without_queries(
                 let config = PairwiseConfig {
                     line_length: args.line_length,
                     show_frame: false,
-                    program: args.app.ncbi_name().to_string(),
+                    program: args.report_program().to_string(),
                     protein_matrix: args.scoring.matrix,
                     sort: args.sort,
                     view: view.unwrap_or_default(),
@@ -7784,8 +8351,8 @@ fn preliminary_search_error(
     query_batches: &[seq_range::RangedBatch],
     query_batch_skipped: &[bool],
     first_batch: bool,
-    database_name: &str,
-    text: &str,
+    database_name: &[u8],
+    text: &[u8],
 ) -> anyhow::Error {
     if !(first_batch || query_batch_skipped.first() == Some(&false)) {
         return unsearched_batches_then_engine_error(
@@ -7829,6 +8396,65 @@ fn preliminary_search_error(
         Ok(()) => crate::blastinput::app::engine_error(text),
         Err(error) => error,
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:515-560
+/// psiblast `-phi_pattern` (item PS8a): NCBI's engine error of query `query`'s PHI-BLAST setup
+/// (`phi_hooks::PhiStart::EngineError`). psiblast searches one query with letters per batch, and
+/// PHI-BLAST searches every batch (`phi_hooks::phi_lookup`): the first batch's error follows the
+/// prolog (`preliminary_search_error`); a later batch's follows the reports of the batches before
+/// it, without the epilog (`reports_then_engine_error`).
+#[allow(clippy::too_many_arguments)]
+fn phi_setup_error(
+    args: &ResolvedBlastpArgs,
+    query_records: &[FastaRecord],
+    subject_source: BlastpSubjectSource<'_>,
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    ranges: &BlastpRanges<'_>,
+    reports: &BlastpReports<'_>,
+    query_batches: &[seq_range::RangedBatch],
+    query_batch_skipped: &[bool],
+    query: usize,
+    text: &str,
+) -> anyhow::Error {
+    let batch = query_batches
+        .iter()
+        .find(|batch| batch.searched.contains(&query))
+        .expect("every query is in a batch");
+    let first_searched = query_batches
+        .iter()
+        .find(|batch| !batch.searched.is_empty());
+    if first_searched.is_none_or(|first| first.searched.start == batch.searched.start) {
+        return preliminary_search_error(
+            args,
+            query_records,
+            subject_source,
+            subject_label,
+            outputs,
+            pool,
+            ranges,
+            reports,
+            query_batches,
+            query_batch_skipped,
+            true,
+            b"",
+            text.as_bytes(),
+        );
+    }
+    reports_then_engine_error(
+        args,
+        query_records,
+        subject_source,
+        subject_label,
+        outputs,
+        pool,
+        ranges,
+        reports,
+        batch,
+        text.as_bytes(),
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
@@ -7966,16 +8592,23 @@ fn rps_request_spaces(
 /// The searched space of each batch of `call` (`CallRequests::set_searched`): its context 0
 /// (`context0_searched`) where NCBI searches the batch (not `query_batch_skipped`), with
 /// rpsblast's the space its last search unit leaves in the options handle
-/// (`rps_hooks::request_space`).
+/// (`rps_hooks::request_space`), and PHI-BLAST's the pattern's (`phi_hooks::request_searched`).
 fn set_call_searched(
     call: &CallRequests<'_>,
     args: &ResolvedBlastpArgs,
-    rps_units: Option<&crate::algorithm::rps_search::volumes::RpsUnits>,
+    (rps_units, phi): (
+        Option<&crate::algorithm::rps_search::volumes::RpsUnits>,
+        Option<&phi_hooks::PhiCall<'_>>,
+    ),
     contexts: &[QueryContext],
     gapped_params: &KarlinParams,
     (query_valid, query_batch_skipped): (&[bool], &[bool]),
     (exact_search_spaces, search_spaces): (&[Option<i64>], &[SearchSpace]),
 ) -> Result<()> {
+    if let Some(phi) = phi {
+        call.set_searched(|first| phi_hooks::request_searched(phi, contexts, query_valid, first));
+        return Ok(());
+    }
     let rps_request_spaces = rps_request_spaces(
         call.batch_firsts(),
         rps_units,
@@ -8111,14 +8744,19 @@ impl<'a> CallRequests<'a> {
     /// it (every batch before the formats; the batch an NCBI error belongs to), so they are
     /// written now (`write_through`), before the output of the call's end, and the place is
     /// marked. NCBI's posts of the bytes that ASN.1 text replaced in them wait for the starts of
-    /// their batches (`take_posts`, `write_request_posts`).
+    /// their batches (`take_posts`, `write_request_posts`). A request whose stream throws (an
+    /// element stated as `NULL` in a PSSM query, `encoder::NullElement`) ends the call there too:
+    /// NCBI's error follows it, so the place is marked before the error returns (`release`).
     fn end_at(&self, through: usize) -> Result<()> {
-        self.write_through(through)?;
+        let written = self.write_through(through);
+        if matches!(&written, Err(error) if !error.is::<crate::cli::NativeError>()) {
+            return written;
+        }
         *self
             .through
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(through);
-        Ok(())
+        written
     }
 
     /// Takes NCBI's posts of the bytes replaced in the requests written of the call's batches,
@@ -8229,16 +8867,15 @@ fn unsearched_batches_then_engine_error(
     reports: &BlastpReports<'_>,
     query_batches: &[seq_range::RangedBatch],
     query_batch_skipped: &[bool],
-    database_name: &str,
-    text: &str,
+    database_name: &[u8],
+    text: &[u8],
 ) -> anyhow::Error {
     let first_searched = query_batches
         .iter()
         .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start]);
     let ported_formats = outputs.formats.iter().all(|format| {
         crate::blastinput::app::parse_formatting_string(format.outfmt).is_ok_and(|choice| {
-            matches!(choice.number, 6 | 7 | 10)
-                || blastp_pairwise_view_of(args.app, choice.number).is_some()
+            matches!(choice.number, 6 | 7 | 10) || blastp_pairwise_view_of(choice.number).is_some()
         })
     });
     let Some(batch) = first_searched
@@ -8247,13 +8884,44 @@ fn unsearched_batches_then_engine_error(
         let searched = if database_name.is_empty() {
             "the subjects".to_string()
         } else {
-            format!("the database {database_name}")
+            format!("the database {}", String::from_utf8_lossy(database_name))
         };
         return anyhow::anyhow!(
-            "a search of {searched} that fails with NCBI BLAST+'s error \"{text}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
+            "a search of {searched} that fails with NCBI BLAST+'s error \"{}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
+            String::from_utf8_lossy(text),
             args.app.name()
         );
     };
+    reports_then_engine_error(
+        args,
+        query_records,
+        subject_source,
+        subject_label,
+        outputs,
+        pool,
+        ranges,
+        reports,
+        batch,
+        text,
+    )
+}
+
+/// The engine error of the search of `batch` (`text`, `unsearched_batches_then_engine_error`),
+/// after the reports of the batches before it, which the search of that prefix of the queries
+/// writes without the epilog.
+#[allow(clippy::too_many_arguments)]
+fn reports_then_engine_error(
+    args: &ResolvedBlastpArgs,
+    query_records: &[FastaRecord],
+    subject_source: BlastpSubjectSource<'_>,
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    ranges: &BlastpRanges<'_>,
+    reports: &BlastpReports<'_>,
+    batch: &seq_range::RangedBatch,
+    text: &[u8],
+) -> anyhow::Error {
     let (searched_end, input_end) = (batch.searched.start, batch.input.start);
     let input = ranges.query_input;
     let prefix_input = seq_range::QueryInput {
@@ -8300,7 +8968,7 @@ fn unsearched_batches_then_engine_error(
         // call (the XML formats, the only readers of `last_call`, keep the refusal before here).
         last_call: true,
         psi_round: None,
-        // BLASTP only (`args.app` above): no psiblast PSSM stops here.
+        // BLASTP and psiblast's PHI-BLAST round (no PSSM): no psiblast PSSM stops here.
         stopped_pssms: None,
         query_scopes: reports.query_scopes,
         prefetch_scope: None,
@@ -8357,8 +9025,8 @@ struct BlastpReports<'a> {
     x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
     /// Whether this call is the run's last report call, so that without the epilog the run stops
     /// after it (`blast_xml::BlastpXml::stops`). Not a block of the block search before the last
-    /// (LOSAT_X_BPQBLOCK), a chunk's search (which reports nothing) or a psiblast round (which
-    /// writes no XML document, `psiblast::args::PsiblastArgs::check_outfmt`).
+    /// (LOSAT_X_BPQBLOCK), a chunk's search (which reports nothing) or a psiblast round (whose
+    /// XML document the rounds end, `psi_round::write_round_epilogs`).
     last_call: bool,
     /// psiblast's round of a FASTA query (`psi_round`): the round's number and previous
     /// inclusion set for its reports, and where its outcome goes; `None` outside the rounds.
@@ -8461,46 +9129,30 @@ fn search_split_query_batches(
     query_lengths: &[usize],
     option_space_of_query: &dyn Fn(usize) -> Result<i64>,
     query_input: &seq_range::QueryInput,
+    query_batch_skipped: &[bool],
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     x_prolog: bool,
     call: Option<&CallRequests<'_>>,
 ) -> Result<()> {
     use crate::algorithm::blastp::protein_query_split::{
-        protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
+        split_protein_batch, ChunkStep, SplitBatchSteps,
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:86-93
-    // An RPS-BLAST query batch is never split.
-    if args.rps_search.is_some() {
-        return Ok(());
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:61
-    // An ungapped search splits no query batch (and so builds one compressed lookup table for
-    // each batch, `ncbi_compressed_lookup_tables`).
-    if args.ungapped {
-        return Ok(());
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129 (cited at
-    // `psi_round::run_queries`: a query factory that is not `CObjMgr_QueryFactory` makes one
-    // chunk)
-    // A PSSM search splits only a later round of a FASTA query (`PsiSearch::split_setup`); a PSSM
-    // query (`-in_pssm`, `CObjMgrFree_QueryFactory`) is never split.
-    if args
-        .psi_search
-        .as_deref()
-        .is_some_and(|psi| psi.split_setup.is_none())
-    {
+    if !split_steps::splits_batches(args) {
         return Ok(());
     }
     let sizes = protein_query_split_sizes(10000)?;
     let batch_size = args.query_batch_size()?;
+    let subjects_in_hand = split_steps::subjects_in_hand(subject_source);
     // The batches count whole records (`seq_range::QueryInput::batches`); a batch is
-    // split by the lengths of its searched queries (their intervals with `-query_loc`).
+    // split by the lengths of its searched queries (their intervals with `-query_loc`). A batch of
+    // invalid queries only is not searched (local_blast.cpp:177-180, cited at
+    // `split_steps::call_steps`), so it is not split either.
     for range in query_input
         .batches(batch_size)
         .into_iter()
         .map(|batch| batch.searched)
-        .filter(|searched| !searched.is_empty())
+        .filter(|searched| !searched.is_empty() && !query_batch_skipped[searched.start])
     {
         let Some(chunks) = split_protein_batch(&query_lengths[range.clone()], sizes) else {
             // A later round that the round driver split (`psi_round::run_queries`, the same
@@ -8514,64 +9166,15 @@ fn search_split_query_batches(
             );
             continue;
         };
-        // NCBI stops in the search of the batch (its exception) after it has printed the reports of
-        // the batches before (`blastp_app.cpp:257-276`, cited in `search`): so do the refusals
-        // below, as the batch's failure (`database::HeaderReadError`, the batch's first query;
-        // TBLASTN's and TBLASTX's are `blastinput::app::ErrorAfterBatchReports`). psiblast searches
-        // one query at a time and NCBI's stops in the query's round 1 (it splits that round too),
-        // after the rounds of the queries before: every round of a query makes the same chunks,
-        // so a later round never reaches these refusals, and the refusal of the query's search is
-        // the plain error.
-        let batch_refusal = |refusal: anyhow::Error| -> anyhow::Error {
-            if args.psi_search.is_some() {
-                refusal
-            } else {
-                // Before the batch's search: nothing of it read a header.
-                database::HeaderReadError {
-                    query: range.start,
-                    error: refusal,
-                    utf8: None,
-                }
-                .into()
-            }
-        };
-        // NCBI's `CQuerySplitter::Split` makes the query factory of every chunk before it sets any
-        // chunk up, and a chunk without a query has no query vector to make it from
-        // (`CCoreException::eNullPtr`), so NCBI stops there before a chunk is split again (as with
-        // a positive pair whose evened chunk size falls below the overlap, or a negative pair whose
-        // wrapped size passes the batch's length: chunk 0 covers the batch); `split_protein_batch`
-        // makes no part for such a chunk.
-        //
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:234,876-879
-        if chunks.iter().any(|chunk| chunk.queries.is_empty()) {
-            return Err(batch_refusal(anyhow::anyhow!(
-                "a query chunk without a query is not supported by LOSAT's {}",
-                args.app.name()
-            )));
-        }
-        // Every chunk holds a query: NCBI sets the chunks up one by one after the split
-        // (prelim_stage.cpp:235-244) and stops at the missing lookup table of a chunk that it would
-        // split again (prelim_search_runner.hpp:77).
-        if protein_chunk_would_be_split(&chunks, sizes) {
-            return Err(batch_refusal(anyhow::anyhow!(
-                "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's {}",
-                args.app.name()
-            )));
-        }
-        // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it,
-        // and NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:145-171, cited at
-        // `split_protein_batch`): where the first range covers the batch, the chunks after it
-        // hold no query and NCBI stops above. Otherwise the ranges leave gaps between chunks that
-        // each hold a query and would not be split again, which NCBI searches on with the hits in
-        // the gaps lost: the maintainer kept that setting refused (PD-LOSAT-NCBI-DEFECTS version
-        // 1.1), and the refusal comes where the batch's search would start, after the reports of
-        // the batches before (the form of 1.40 for a refusal in the middle of a run).
-        if sizes.negative_chunk_size() {
-            return Err(batch_refusal(anyhow::anyhow!(
-                "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's {}",
-                args.app.name()
-            )));
-        }
+        // NCBI's stops in the search of the batch come in its order (`SplitBatchSteps`), in the
+        // batch's form (`split_steps::batch_failure`): a chunk without a query before any chunk is
+        // set up, then chunk by chunk a chunk that NCBI would split again, and D13's gaps of a
+        // negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE at the first chunk with a valid
+        // context whose search reads subjects in hand. The call's search above has met the setup's
+        // failures and the reads (`split_steps::call_steps` puts them where a split batch meets
+        // them first), so the steps have none: a chunk's validity is read only where D13 decides.
+        let stop = |refusal: anyhow::Error| split_steps::batch_failure(args, range.start, refusal);
+        let mut steps = SplitBatchSteps::new(args.app.name(), &chunks, sizes, None, Ok(()), &stop)?;
         let mut merged: Vec<Option<BlastpHitList>> = (0..range.len()).map(|_| None).collect();
         // The options' search spaces of the batch's contexts (one per query), which every chunk
         // reads by its own context index (`SplitQuery_SetEffectiveSearchSpace`, cited at
@@ -8582,27 +9185,19 @@ fn search_split_query_batches(
             .map(option_space_of_query)
             .collect::<Result<_>>()?;
         for chunk in &chunks {
-            let parts: Vec<FastaRecord> = chunk
-                .queries
-                .iter()
-                .map(|part| {
-                    let query = range.start + part.query;
-                    let mut cut = query_records[query].cut(part.from, part.to);
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:278-281
-                    // `-lcase_masking`: the chunk's lower case is the runs of the query's whole
-                    // record restricted to the part as NCBI restricts them (each run one letter
-                    // longer, and with `-query_loc` in the part's coordinates without the
-                    // interval's start).
-                    if args.lcase_masking {
-                        cut.sequence = protein_chunk_part_in_record(
-                            input_records[query_input.ordinal(query)].seq(),
-                            query_input.placements.offset(query),
-                            part,
-                        );
-                    }
-                    cut
-                })
-                .collect();
+            let parts = split_steps::chunk_parts(
+                args,
+                (query_records, input_records),
+                query_input,
+                range.start,
+                chunk,
+            );
+            let valid =
+                !steps.gap_step_pending(subjects_in_hand) || split_steps::chunk_valid(args, &parts);
+            if steps.before_read(chunk, valid)? == ChunkStep::Skip {
+                continue;
+            }
+            steps.before_search(subjects_in_hand)?;
             let mut chunk_lists = Vec::new();
             let part_input = seq_range::QueryInput::whole(&parts);
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:191-196
@@ -8644,8 +9239,15 @@ fn search_split_query_batches(
             // longer than a chunk, a query whose second chunk is all X, an empty database and one
             // without its sequence file, 28 cases equal to NCBI). Such an error would write no
             // reader messages of its batch, and the reports of the batches before it would be
-            // missing.
+            // missing. A stop of the chunk's own search (its table fills NCBI's overflow banks,
+            // `banks_filled_refusal`, which names the chunk's call's first query) is the batch's:
+            // NCBI builds the chunk's table in the batch's search, after the reports of the
+            // batches before.
             if let Err(error) = searched {
+                if error.is::<crate::blastinput::app::ErrorAfterBatchReports>() {
+                    let refusal = crate::blastinput::app::ErrorAfterBatchReports::held(error);
+                    return Err(split_steps::batch_failure(args, range.start, refusal));
+                }
                 if let Some(call) = call {
                     call.end_at(range.end)?;
                     write_request_posts(args, &mut *outputs.diagnostics)?;
@@ -8750,7 +9352,7 @@ fn x_bplk16() -> bool {
 /// with a window (the fused two-hit loop scans it; the offset-pair scan of a search without one
 /// reads the 32-bit table) that is not a query chunk of a split batch (`x_chunk`).
 fn x_bplk16_for(args: &ResolvedBlastpArgs, x_chunk: bool) -> bool {
-    args.window_size != 0 && !x_chunk
+    args.window_size > 0 && !x_chunk
 }
 
 // No NCBI counterpart: LOSAT_X_BPLK16's table in the runtime lookup; it does not change any value
@@ -8997,12 +9599,8 @@ fn blastp_compressed_lookup(
         x_flat.build_args(x_appends),
     )
     .context("failed to build NCBI compressed amino-acid lookup table")?
-    .map_err(|()| {
-        anyhow::anyhow!(
-            "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's BLASTP: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
-            args.threshold,
-            args.word_size
-        )
+    .map_err(|filled| {
+        banks_filled_refusal(args, query_batches, query_lengths, query_chunk, filled)
     })?;
     let lookup = match lookup {
         XCompressedLookup::Reference(lookup) => {
@@ -9073,12 +9671,8 @@ fn blastp_matrix_compressed_lookup(
             args.word_size
         )
     })?
-    .map_err(|()| {
-        anyhow::anyhow!(
-            "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's BLASTP: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
-            args.threshold,
-            args.word_size
-        )
+    .map_err(|filled| {
+        banks_filled_refusal(args, query_batches, query_lengths, query_chunk, filled)
     })?;
     let lookup = match lookup {
         XCompressedLookup::Reference(lookup) => {
@@ -9265,6 +9859,19 @@ fn run_resolved_in_pool(
         call_requests: call.as_ref(),
         ..*reports
     };
+    // A negative `-window_size` (a search strategy's; the command line takes none): NCBI's one
+    // diagonal table passes from each subject to the next, so the call searches the subjects one
+    // after the other on one thread, in NCBI's one-thread order, at any `-num_threads`; every
+    // stage of `run_call`, a query chunk's and a block's calls included, takes this pool. A window of 0 or
+    // more keeps the caller's.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
+    let x_neg_window_pool;
+    let blastp_parallel_pool = if args.window_size < 0 {
+        x_neg_window_pool = crate::utils::threading::SearchPool::x_serial();
+        &x_neg_window_pool
+    } else {
+        blastp_parallel_pool
+    };
     let result = run_call(
         args,
         query_records,
@@ -9329,27 +9936,18 @@ fn ungapped_setup_failure(
             }));
         }
     }
-    if args.ungapped && query_valid.iter().any(|valid| *valid) {
-        let longest = match subject_source {
-            BlastpSubjectSource::Fasta(records) => records
-                .iter()
-                .enumerate()
-                .find(|(_, record)| {
-                    record.sequence.len() > crate::core::subject_split::MAX_DBSEQ_LEN
-                })
-                .map(|(index, record)| {
-                    (
-                        format!("subject sequence {}", index + 1),
-                        record.sequence.len(),
-                    )
-                }),
-            BlastpSubjectSource::Database(database) => {
-                let longest = database.seqdb().max_length() as usize;
-                (longest > crate::core::subject_split::MAX_DBSEQ_LEN)
-                    .then(|| ("a database sequence".to_string(), longest))
-            }
-        };
-        if let Some((what, length)) = longest {
+    // An ungapped search over a subject longer than NCBI's part length: LOSAT's refusal
+    // (hard-masked databases split and merge long subjects via `db_masked::hard_chunks`).
+    // PHI-BLAST refuses such a subject too, after NCBI's errors of its setup
+    // (`phi_hooks::phi_limits`).
+    if args.ungapped
+        && !args
+            .db_mask_resolved
+            .as_ref()
+            .is_some_and(|mask| mask.is_hard())
+        && query_valid.iter().any(|valid| *valid)
+    {
+        if let Some((what, length)) = subject_source.longest_split() {
             return Some(UngappedSetupFailure::Refusal(too_long_subject_refusal(
                 &what, length,
             )));
@@ -9386,6 +9984,16 @@ fn query_xml_stats(
             // An ungapped search has no `kbp_gap`: the XML statistics are the query's own
             // `kbp_std` (probe 1: kappa 0.12756, lambda 0.314758 of query 1).
             let block = call_setup::context_block(args, &gapped, &contexts[q_idx]);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:236-251
+            // A gapped block that the ancillary data does not keep (a PSSM file's,
+            // `stats::tables::ancillary_kept`): the XML takes the query's ungapped block.
+            let block = if args.psi_search.is_some()
+                && !crate::stats::tables::ancillary_kept(gapped.lambda)
+            {
+                &contexts[q_idx].karlin_params
+            } else {
+                block
+            };
             crate::report::blast_xml::XmlStats {
                 hsp_len: search_spaces[q_idx].length_adjustment as i32,
                 eff_space: exact_search_spaces[q_idx]
@@ -9398,6 +10006,45 @@ fn query_xml_stats(
             }
         })
         .collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:836-866
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+/// Resolves database subjects whose Seq-align id matches a `-parse_deflines` query Bioseq in the
+/// same scope, refusing formats where NCBI's scope reads letters of the query Bioseq as a subject.
+fn resolve_seen_queries(
+    listed_titles: Option<&mut database::ListedTitles<'_>>,
+    hit_lists: &[Option<BlastpHitList>],
+    query_records: &[FastaRecord],
+    args: &ResolvedBlastpArgs,
+    requested_formats: &[BlastpReport],
+    reports: &BlastpReports<'_>,
+    can_show: bool,
+) -> Result<()> {
+    let psi_reads = BlastpReport::psi_reads(args, reports.psi_round);
+    let (Some(titles), Some(scopes), true) = (
+        listed_titles,
+        reports.query_scopes,
+        BlastpReport::resolve_subjects(requested_formats, args.app, psi_reads),
+    ) else {
+        return Ok(());
+    };
+    let record = |query: usize| {
+        crate::report::query_bioseq::QueryRecordRef::of(
+            query_records.get(query.checked_sub(scopes.first())?)?,
+        )
+    };
+    let run = crate::report::query_bioseq::SeenRun {
+        shows: BlastpReport::shows_query_bioseqs(requested_formats, args, psi_reads) && can_show,
+        known: scopes.first()..if reports.last_call {
+            usize::MAX
+        } else {
+            scopes.first() + query_records.len()
+        },
+        record: &record,
+        protein: true,
+    };
+    titles.refuse_ids_of_queries(hit_lists, scopes, &run)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -9548,7 +10195,7 @@ fn run_call(
     // The setup of the first searched batch fails: its error follows the outfmt 0 prolog and the
     // reports of the batches before it (`preliminary_search_error`).
     let setup_error =
-        |outputs: &mut ReportOutputs<'_>, first_batch: bool, database_name: &str, text: &str| {
+        |outputs: &mut ReportOutputs<'_>, first_batch: bool, database_name: &[u8], text: &str| {
             preliminary_search_error(
                 &args,
                 query_records,
@@ -9562,7 +10209,7 @@ fn run_call(
                 &query_batch_skipped,
                 first_batch,
                 database_name,
-                text,
+                text.as_bytes(),
             )
         };
     // An ungapped search's failures before the search of its first query batch
@@ -9571,48 +10218,21 @@ fn run_call(
     let failure = ungapped_setup_failure(&call_in, &query_batches, &query_valid, subject_source);
     if let Some(failure) = failure {
         return Err(match failure {
-            UngappedSetupFailure::Engine(text) => setup_error(outputs, true, "", &text),
+            UngappedSetupFailure::Engine(text) => setup_error(outputs, true, b"", &text),
             UngappedSetupFailure::Refusal(error) => error,
         });
     }
 
-    // A database without sequences (makeblastdb builds none; a volume whose index holds
-    // no sequence) and without an alias file's LENGTH or STATS_TOTLEN
-    // (`SeqDb::first_oid_read_fails`): NCBI opens it, writes the outfmt 0 prolog, reads the
-    // first query batch and fails in that batch's preliminary search, where its reader cannot
-    // map the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
-    // A first batch of invalid queries only is not searched: the batches up to the first one that
-    // is are reported before the error (`unsearched_batches_then_engine_error`); a call of invalid
-    // queries only searches no batch, and NCBI reports them (NCBI 2.17.0 blastp, an all-X query
-    // and the empty database: exit 0).
-    if let Some(database) = database.filter(|database| {
-        database.first_oid_read_fails()
-            && (query_chunk || query_batch_skipped.iter().any(|skipped| !skipped))
-    }) {
-        return Err(setup_error(
-            outputs,
-            query_chunk,
-            database.name(),
-            "Database memory map file error",
-        ));
-    }
-
-    // The database's extent (`call_setup::db_extent`) and NCBI's error of its setup's average
-    // subject length (`call_setup::setup_fails`, after LOSAT's refusal of a count of 0).
-    let extent = call_setup::db_extent(&args, database, subjects)?;
-    // The setup of the first searched batch fails: NCBI has written the outfmt 0 prolog and the
-    // batch's reader messages (`preliminary_search_error`; NCBI 2.17.0 blastp and psiblast
-    // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
-    // batch of invalid queries only, which NCBI does not search, the error follows the reports of
-    // the batches before the first searched one (`unsearched_batches_then_engine_error`).
-    if call_setup::setup_fails(&args, &extent, &contexts)? {
-        return Err(setup_error(
-            outputs,
-            query_chunk,
-            "",
-            crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,
-        ));
-    }
+    // The setup of the first searched batch before the call's search, in NCBI's order
+    // (`split_steps::first_batch_setup`: a split batch's steps, the read of OID 0, the checks).
+    let first_error = |name: &[u8], text: &str| setup_error(outputs, query_chunk, name, text);
+    let (reads, extent) = split_steps::first_batch_setup(
+        &call_in,
+        (subject_source, subjects),
+        &contexts,
+        split_steps::CallBatches(&query_batches, &query_batch_skipped, &query_lengths),
+        first_error,
+    )?;
     let call_setup::BlastpDbExtent {
         total_db_len,
         sorts_results,
@@ -9623,6 +10243,20 @@ fn run_call(
         rps_units,
         ..
     } = extent;
+    // psiblast `-phi_pattern` (item PS8a): each query's PHI-BLAST setup (`phi_hooks::phi_call`),
+    // whose errors follow the reports of the queries before (`phi_setup_error`).
+    let mut phi_call = start_phi_call(
+        &call_in,
+        query_frames,
+        subject_source,
+        subject_label,
+        outputs,
+        &requested_formats,
+        &query_batches,
+        &query_batch_skipped,
+        eff_db_length,
+        i64::from(num_subjects),
+    )?;
     let call_statistics = call_setup::CallStatistics {
         args: &args,
         database,
@@ -9690,6 +10324,7 @@ fn run_call(
         diag_mask,
         total_query_span,
         x_soft_subjects,
+        neg_batch_layout,
     } = call_setup::scan_shape(
         &call_in,
         &lookup,
@@ -9716,6 +10351,7 @@ fn run_call(
     // ungapped extensions and gapped half) with what it reads of the call; the preliminary stage
     // calls it with the subject's preliminary statistics `values` (`prelim_run::
     // run_preliminary_with`), alone or inside the masked kernels (`db_masked.rs`).
+    let tree_without_end = std::sync::atomic::AtomicBool::new(false);
     let kernel = prelim_kernel::BlastpPrelimKernel {
         args: &args,
         query_ids: &query_ids,
@@ -9737,21 +10373,19 @@ fn run_call(
         x_trace_query_base,
         timing_enabled,
         timing: &timing,
+        tree_without_end: &tree_without_end,
+        neg_batch_layout: &neg_batch_layout,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1498
     // The preliminary stage (`blast_engine/prelim_run.rs`): the choice of the pool and the call's
     // branch, into the hit lists and the culling writer; RPS-BLAST's gapped K and its volumes'
     // merge are read below.
     // `-db_soft_mask` and `-db_hard_mask` (`db_masked.rs`): a database search with either searches
-    // its sequences with the masked kernels below, chosen once here.
-    let db_masking = database
-        .zip(SearchMask::of(args.db_mask_resolved.as_ref()))
-        .map(|(database, mask)| db_masked::BlastpDbMasking {
-            db: database.seqdb(),
-            mask,
-            program: args.app.name(),
-            error: std::sync::Mutex::new(None),
-        });
+    // its sequences with the masked kernels below, chosen once here; with `-db_hard_mask` they
+    // start the sequences that NCBI's one-thread search reaches below their start on a new table
+    // (`ResolvedMask::hard_starts`, the walk that `check_losat_limits` ran).
+    let db_masking =
+        db_masked::BlastpDbMasking::of(database, &args, &query_batches, &contexts, query_chunk);
     let prelim_stage = prelim_run::PrelimRun {
         args: &args,
         query_records,
@@ -9763,6 +10397,7 @@ fn run_call(
         query_batches: &query_batches,
         query_batch_skipped: &query_batch_skipped,
         query_chunk,
+        reads,
         rps_recount_identities: recounts_rps_identities(&requested_formats),
         database,
         subjects,
@@ -9772,6 +10407,7 @@ fn run_call(
         x_block_call: x_block_inputs.is_some(),
         lookup: &lookup,
         contexts: &contexts,
+        phi: phi_call.as_ref(),
         gapped_params: &gapped_params,
         gapped_gumbel: &gapped_gumbel,
         exact_search_spaces: &exact_search_spaces,
@@ -9837,6 +10473,9 @@ fn run_call(
             outputs,
         )?,
     };
+    if tree_without_end.load(std::sync::atomic::Ordering::Relaxed) {
+        anyhow::bail!("BLASTP: an interval tree insertion of a whole subject never ends");
+    }
     let no_alignment_set = no_alignment_sets(&query_batch_skipped, rps_multi_volume);
 
     // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the
@@ -9863,7 +10502,7 @@ fn run_call(
         set_call_searched(
             call,
             &args,
-            rps_units,
+            (rps_units, phi_call.as_ref()),
             &contexts,
             &gapped_params,
             (&query_valid, &query_batch_skipped),
@@ -9881,6 +10520,7 @@ fn run_call(
         &query_lengths,
         &|query| Ok(option_space_of(&contexts[query])?),
         ranges.query_input,
+        &query_batch_skipped,
         &mut preliminary_hit_lists,
         &mut x_compact_hit_lists,
         reports.x_prolog,
@@ -9906,6 +10546,7 @@ fn run_call(
             database,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
+            !args.ungapped,
         )?),
         None => None,
     };
@@ -9947,14 +10588,21 @@ fn run_call(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_win_expand = false;
-    // `-comp_based_stats 0`: the ordinary traceback below reads the compact lists as they are.
-    // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`, mode 0 or the
-    // position-based redo) takes the place of both, and reads them as they are too.
-    let ordinary_traceback = args.comp_based_stats.mode
+    // `-comp_based_stats 0` without `-use_sw_tback`: the ordinary traceback below reads the
+    // compact lists as they are. With `-use_sw_tback` (item X4-c0), NCBI runs the Smith-Waterman
+    // redo without composition adjustment in batch OID order (`sw_c0`). psiblast `-in_pssm` and
+    // rpsblast take their own paths and leave the redo unused.
+    let sw_c0_redo = !args.ungapped
+        && args.use_sw_tback
+        && args.psi_search.is_none()
+        && args.rps_search.is_none()
+        && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats;
+    let ordinary_traceback = (args.comp_based_stats.mode
         == BlastpCompositionMode::NoCompositionBasedStats
+        && !sw_c0_redo)
         || args.psi_search.is_some()
         || args.rps_search.is_some();
-    if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
+    if x_compact_expand_all && !x_win_expand && !ordinary_traceback && !sw_c0_redo {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
 
@@ -9968,12 +10616,15 @@ fn run_call(
     // Item SC2d: a flat table's vectors go to the next block's build here.
     let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
     let kappa_redo_start = blastp_timing_start(timing_enabled);
-    let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database);
-    // Non-redo traceback (`traceback::NonRedoTraceback`: rpsblast, psiblast `-in_pssm`,
-    // `-ungapped`, `-comp_based_stats 0`); when `Some`, its hit lists replace the redo's after it.
+    let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database, sw_c0_redo);
+    // Non-redo traceback (`traceback::NonRedoTraceback`: psiblast `-phi_pattern`, rpsblast,
+    // psiblast `-in_pssm`, `-ungapped`, `-comp_based_stats 0`); when `Some`, its hit lists
+    // replace the redo's after it.
     let ordinary_hit_lists = traceback::NonRedoTraceback {
+        phi: phi_call.as_mut(),
         args: &args,
         ordinary_traceback,
+        sw_c0_redo,
         contexts: &contexts,
         total_query_span,
         subjects,
@@ -10030,8 +10681,12 @@ fn run_call(
             .as_ref()
             .map_or(&[][..], |listed| listed.fetch_excluded.as_slice()),
         fetch_notes: &fetch_notes,
+        listed_ordinals: listed_subjects
+            .as_ref()
+            .map(|listed| listed.ordinals.as_slice()),
         x_win_expand,
         ordinary_traceback,
+        sw_c0_redo,
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -10043,54 +10698,15 @@ fn run_call(
         ))]
         timing_enabled,
     };
-    // The plan chooses the redo's path (`redo_run::RedoPath`) and expands the compact lists that
-    // the path reads expanded; the path redoes the matches.
-    match redo_run::plan_redo_and_expand_lists(
+    // The plan chooses the redo's path (`redo_run::RedoPath`), expands the compact lists that
+    // the path reads expanded, and redoes the matches (`redo_run::run_redo`).
+    redo_run::run_redo(
         &redo,
         &mut preliminary_hit_lists,
         &mut x_compact_hit_lists,
-    ) {
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        redo_run::RedoPath::Windows => redo_run::x_windows_redo(
-            &redo,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            &mut redone_matches,
-            &mut x_prelim_freed,
-        )?,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        redo_run::RedoPath::MatchParallel(q_idx) => redo_run::match_parallel_redo(
-            &redo,
-            q_idx,
-            &preliminary_hit_lists,
-            &mut redone_matches,
-        )?,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        redo_run::RedoPath::QueryParallel(kappa_parallel_query_indices) => {
-            redo_run::query_parallel_redo(
-                &redo,
-                &kappa_parallel_query_indices,
-                &preliminary_hit_lists,
-                &mut redone_matches,
-            )?
-        }
-        redo_run::RedoPath::OneThread => redo_run::one_thread_redo(
-            &redo,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            &mut redone_matches,
-            &mut x_prelim_freed,
-        )?,
-    }
+        &mut redone_matches,
+        &mut x_prelim_freed,
+    )?;
 
     if timing_enabled {
         eprintln!("[TIMING] x_bppfree: freed_lists={x_prelim_freed}");
@@ -10103,7 +10719,7 @@ fn run_call(
             x_ih_pool::x_pooled() - x_pooled_at_start
         );
     }
-    fetch_notes.after(&redone_matches, &ordinary_hit_lists, &kappa_query_batches);
+    fetch_notes.after(&redone_matches, &ordinary_hit_lists, &kappa_query_batches)?;
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
     if let Some(ordinary_hit_lists) = ordinary_hit_lists {
@@ -10125,12 +10741,12 @@ fn run_call(
         rps_multi_volume,
         sorts_results,
     );
-    // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a
-    // subject that the seqid list keeps without a definition line (line DBID item lineless).
-    // psiblast's lists are cut to the preliminary size here; the formatter's cut to
-    // `-max_target_seqs` below takes the Seq-aligns, so such a subject takes no place there.
+    // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a subject
+    // that the seqid list keeps without a definition line (line DBID item lineless; `-ungapped`:
+    // also under a negative list). psiblast's lists are cut to the preliminary size here; the
+    // formatter's cut to `-max_target_seqs` below takes the Seq-aligns: no place for it there.
     if let (Some(listed), Some(database)) = (listed_subjects.as_ref(), database) {
-        listed.drop_unaligned(database, &mut hit_lists);
+        listed.drop_unaligned(database, &mut hit_lists, !args.ungapped);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:267-275
     // A database: the definition lines of the final hit lists are read first, where NCBI
@@ -10151,12 +10767,20 @@ fn run_call(
         query_batches: &query_batches,
         database,
         requested_formats: &requested_formats,
+        list_cut: outputs
+            .formats
+            .first()
+            .and_then(|format| crate::blastinput::app::parse_formatting_string(format.outfmt).ok())
+            .map_or(crate::algorithm::blastp::args::ListCut::Uncut, |choice| {
+                args.app.list_cut(choice.number)
+            }),
         contexts: &contexts,
         gapped_params: &gapped_params,
         subject_source,
         subject_label,
         total_db_len,
         unlisted: &rps_unlisted,
+        phi: phi_call.as_ref(),
     };
     report_prep::read_shown_residues(
         &setup,
@@ -10169,19 +10793,32 @@ fn run_call(
         Some(listed) => &listed.encoded,
         None => subject_set,
     };
-    let reads = database::CallTitles::new(database, &query_batches);
-    let listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
+    let reads = database::CallTitles::new(
+        database,
+        &query_batches,
+        report_prep::prefetch_format(args.app, &requested_formats),
+    );
+    let mut listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
-    if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
-        titles.refuse_ids_of_queries(&hit_lists, scopes)?;
-    }
+    resolve_seen_queries(
+        listed_titles.as_mut(),
+        &hit_lists,
+        query_records,
+        &args,
+        &requested_formats,
+        reports,
+        ranges.query_input.range_length.is_none()
+            && database.is_some_and(|database| !database.loads_write_texts()),
+    )?;
     let (subject_records, subject_titles, shown_subjects) =
         report_prep::shown_of(&listed_titles, subjects, subject_records, &subject_titles);
     let report_prep::ReportValues {
+        prefetch_format,
         batches_prefetch,
         prefetch_taxids,
         prefetch_only,
         psiblast_prefetched,
+        pre_prune_replaced_titles,
         batch_ranges,
         batch_prefetch,
         pssm_reads,
@@ -10209,17 +10846,8 @@ fn run_call(
     // The requested output formats; only the reporting depends on the format, the search above
     // does not.
     let format_plans: &[BlastpReport] = &requested_formats;
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-986
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
-    // The final hits in record coordinates and lengths, which the reports print
-    // (`shift_hsp_to_records`); the rows are made from them (`rows_of`).
-    for hit_list in hit_lists.iter_mut().flatten() {
-        for hsp_list in &mut hit_list.hsplist_array {
-            for hsp in &mut hsp_list.hsps {
-                shift_hsp_to_records(hsp, ranges);
-            }
-        }
-    }
+    // Final hits in record coordinates (`shift_hsp_to_records`) and PHI-BLAST per-occurrence split.
+    shift_and_split_hit_lists(&mut hit_lists, ranges, phi_call.as_mut());
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:271-327
     // The rendered rows of the HSPs of the queries `window` (`PairwiseHit`, in the order of the
     // lists): each row is read from the searched letters, so its hit moves back from the records
@@ -10232,37 +10860,22 @@ fn run_call(
     // psiblast's later rounds: the reports read the record's letters
     // (`psi_round::report_contexts`).
     let report_contexts = psi_round::report_contexts(&args, &contexts, query_records);
+    let row_inputs = RowBuildInputs {
+        engine_counts: &engine_counts,
+        ranges,
+        report_contexts: &report_contexts,
+        subjects,
+        matrix: args.scoring.matrix,
+        shown_queries: ShownQueries::of(query_records, &args, phi_call.as_ref()),
+        shown_subjects,
+        x_rows_pool,
+    };
+    let rows_of_lists =
+        |lists: &[Option<BlastpHitList>], first: usize| row_inputs.build(lists, first);
     let rows_of = |window: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
         let end = window.end.min(hit_lists.len());
         let first = window.start.min(end);
-        let mut hits =
-            collect_hits_and_methods_from_hit_lists(&hit_lists[first..end], first, &engine_counts);
-        for (hit, _, _, _) in hits.iter_mut() {
-            let q_shift = ranges.query_input.placements.offset(hit.q_idx as usize);
-            let s_shift = ranges.subject_placements.offset(hit.s_idx as usize);
-            hit.q_start -= q_shift;
-            hit.q_end -= q_shift;
-            hit.s_start -= s_shift;
-            hit.s_end -= s_shift;
-        }
-        let mut rows = build_pairwise_hits(
-            hits,
-            &report_contexts,
-            subjects,
-            args.scoring.matrix,
-            true,
-            ShownQueries::of(query_records, &args),
-            shown_subjects,
-            x_rows_pool,
-        )?;
-        for row in rows.iter_mut() {
-            let s_idx = row.hit.s_idx as usize;
-            shift_to_records(&mut row.hit, ranges);
-            row.subject_length = row
-                .subject_length
-                .map(|searched| ranges.subject_placements.length(s_idx, searched));
-        }
-        Ok(rows)
+        rows_of_lists(&hit_lists[first..end], first)
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1585
     // NCBI makes and prints the alignments of one query's result set at a time: the reports
@@ -10344,22 +10957,35 @@ fn run_call(
         psiblast_hits_found: &psiblast_hits_found,
         filtered_empty,
         rps_multi_volume,
+        prefetch_format,
         batches_prefetch,
         prefetch_taxids,
         prefetch_only,
         psiblast_prefetched: &psiblast_prefetched,
+        pre_prune_replaced_titles: &pre_prune_replaced_titles,
         batch_ranges: &batch_ranges,
         batch_prefetch: &batch_prefetch,
         pssm_made,
         pssm_reads: &pssm_reads,
     };
     let (mut query_warning_lines, kept) = report_prep::query_warning_lines(&prep);
+    // PHI-BLAST's reports (`report_write::write_phi_report`) with each query's messages.
+    let phi_result_warnings = phi_call
+        .as_ref()
+        .map(|call| report_prep::phi_result_warnings(&prep, call.no_statistics.as_deref()));
+    let phi_reports = report_write::PhiPairwise::of(
+        phi_call.as_ref(),
+        &rows_of_lists,
+        phi_result_warnings.as_deref(),
+    );
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
         &mut psiblast_pssms,
     )
-    .map_err(|error| database::HeaderReadError::after_reads(error, reads.utf8()))?;
+    .map_err(|error| {
+        crate::blastinput::app::ErrorAfterBatchReports::after_reads(error, reads.utf8())
+    })?;
     // An ungapped HSP of length 0 at the first letter of a `-subject`'s searched part ends the call
     // with NCBI's exception after the formats' prologs (`empty_alignments`).
     let subject_start_exception = empty_alignments::subject_start_exception(
@@ -10368,38 +10994,17 @@ fn run_call(
         database.is_none(),
     );
     let unreportable = report_prep::refuse_unreportable(&prep, &rows_of);
-    // Outfmt 0's refusal of a query that is also a subject and has masks, each outfmt 0 output's
-    // (`believed::refuse_shared_masks_in`; the query-anchored sections draw these masks as NCBI
-    // does, `query_anchored::fill_loc_list`). It was the first of `refuse_unreportable`'s refusals
-    // and its error still comes first; it is made after them because they read `prep`, which
-    // holds the outputs (line WQA's sweep, D7, 2026-11-19).
-    if args.parse_deflines
-        && format_plans.iter().any(|outfmt| {
-            matches!(
-                outfmt,
-                BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
-            )
-        })
-    {
-        let masks = query_record_masks(query_frames, &ranges.query_input.placements);
-        crate::blastinput::fasta_reader::believed::refuse_shared_masks_in(
-            outputs
-                .formats
-                .iter_mut()
-                .zip(format_plans.iter())
-                .filter(|(_, outfmt)| {
-                    matches!(
-                        outfmt,
-                        BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)
-                    )
-                })
-                .map(|(format, _)| &mut format.refusal),
-            query_records,
-            |query| masks.get(query).is_some_and(|m| !m.is_empty()),
-            args.lcase_masking,
-            args.app.name(),
-        )?;
-    }
+    // It was the first of `refuse_unreportable`'s refusals and its error still comes first; it is
+    // made after them because they read `prep`, which holds the outputs (line WQA's sweep, D7,
+    // 2026-11-19).
+    refuse_shared_record_masks(
+        &args,
+        format_plans,
+        outputs,
+        query_records,
+        query_frames,
+        &ranges.query_input.placements,
+    )?;
     unreportable?;
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
@@ -10473,8 +11078,28 @@ fn run_call(
         &prefetched.hit_loads,
         listed_titles.as_ref(),
         subject_records,
-        args.app.name(),
-    )?;
+        (
+            args.app.name(),
+            database.map_or(args.subject_taxdb_found, |database| database.taxdb_found()),
+        ),
+    )
+    .map_err(|error| {
+        let (lines, reader) = (&query_warning_lines, reports.reader_warnings);
+        let (prefetches, utf8) = (&prefetched.posts, reads.utf8());
+        let (hit_lists, batches) = (&hit_lists, &query_batches);
+        failed_lookup_batch(
+            error,
+            &LookupStop {
+                hit_lists,
+                batches,
+                lines,
+                reader,
+                prefetches,
+                reads: prefetched.subject_reads.queries(),
+                utf8,
+            },
+        )
+    })?;
     // The `stitle` text of the custom tabular reports by subject: the stored titles of a
     // database (the first definition line's of a sequence with parsed Seq-ids); none for the
     // records of a subject set, which have no BLAST definition line (`N/A`).
@@ -10552,9 +11177,9 @@ fn run_call(
             query_records.len(),
         )
     };
-    // Where the run's BLAST XML family formats fail for a matrix name that NCBI's XML does not
-    // know (`blastp_xml_matrix_failure`; `None` for a name it knows).
-    let xml_matrix_failure = blastp_xml_matrix_failure(&args, outputs, database.is_some());
+    // Where the run's XML formats fail for the matrix name (`blastp_xml_failing_query`).
+    let scopes = reports.query_scopes.map(|scopes| scopes.run());
+    let xml_matrix_failure = blastp_xml_failing_query(&args, outputs, database.is_some(), scopes);
     let observer = &mut outputs.observer;
     if let Some(observer) = observer.as_deref_mut() {
         for (q_idx, stats) in query_stats().into_iter().enumerate() {
@@ -10699,7 +11324,7 @@ fn run_call(
         // (`FormatRefusal::check`) leaves them to the next. The shown subjects are those of the
         // final lists (the rows' subjects).
         let pairwise_shown: Option<std::collections::BTreeSet<usize>> = match outfmt {
-            BlastpReport::Pairwise(_) => {
+            BlastpReport::Pairwise(view) => {
                 let shown: std::collections::BTreeSet<usize> = hit_lists
                     .iter()
                     .flatten()
@@ -10707,13 +11332,7 @@ fn run_call(
                     .flat_map(|hsp_list| &hsp_list.hsps)
                     .map(|hsp| hsp.s_idx as usize)
                     .collect();
-                let checked = check_pairwise_shown_titles(
-                    listed_titles.as_ref(),
-                    database,
-                    &shown,
-                    subject_records,
-                    &prefetched.hit_loads,
-                );
+                let checked = check_pairwise_shown_titles(&report_view, view, &rows_of, &shown);
                 if !format.refusal.check(checked)? {
                     continue;
                 }
@@ -10769,60 +11388,14 @@ fn run_call(
                 None => warnings,
             }
         });
-        let format_result: Result<()> = match outfmt {
-            _ if report_view.prolog_only => empty_alignments::write_exception_prolog(
-                &report_view,
-                outfmt,
-                format,
-                &mut warnings,
-                &mut probe,
-                &pairwise_shown,
-                &rows_of,
-            ),
-            BlastpReport::Seqalign(serial) => {
-                report_write::write_seqalign(&report_view, serial, format, &mut warnings)
-            }
-            BlastpReport::Archive => report_write::write_archive(
-                &report_view,
-                format,
-                &mut warnings,
-                &first_context,
-                &batch_spans,
-            ),
-            BlastpReport::Xml | BlastpReport::Xml2(_) => report_write::write_xml(
-                &report_view,
-                outfmt,
-                format,
-                &mut warnings,
-                &side_sink,
-                &query_stats,
-                &rows_of,
-            ),
-            BlastpReport::Pairwise(view) => report_write::write_pairwise(
-                &report_view,
-                view,
-                format,
-                &mut warnings,
-                &mut probe,
-                &pairwise_shown,
-                &rows_of,
-            ),
-            BlastpReport::CustomTabular(spec) => report_write::write_custom_tabular(
-                &report_view,
-                spec,
-                format,
-                &mut warnings,
-                &mut probe,
-                &rows_of,
-            ),
-            BlastpReport::Text(
-                outfmt @ (OutputFormat::Tabular | OutputFormat::TabularWithComments),
-            ) => report_write::write_text(&report_view, outfmt, format, &mut warnings, &mut probe),
-            // Outfmt 0 is `BlastpReport::Pairwise` (`requested_formats`).
-            BlastpReport::Text(OutputFormat::Pairwise) => Err(anyhow::anyhow!(
-                "LOSAT internal error: outfmt 0 as a BLASTP tabular report"
-            )),
-        };
+        let format_result = write_format_report(
+            &report_view,
+            outfmt,
+            phi_reports,
+            format,
+            (&mut warnings, &mut probe, &pairwise_shown, &side_sink),
+            (&first_context, &batch_spans, &query_stats, &rows_of),
+        );
         // An error of the format's report fails the call, or this format alone (`FormatRefusal`):
         // the formats after it are written then.
         if let Err(error) = format.refusal.check(format_result) {
@@ -10918,6 +11491,219 @@ fn unknown_matrix_message(records: &[FastaRecord]) -> String {
 fn too_long_subject_refusal(what: &str, length: usize) -> anyhow::Error {
     anyhow::anyhow!(
         "{what} has {length} residues; a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTP",
+        crate::core::subject_split::MAX_DBSEQ_LEN
+    )
+}
+
+/// Dispatches a single requested BLASTP/PSIBLAST/RPSBLAST report format (`run_call`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-874
+#[allow(clippy::type_complexity)]
+fn write_format_report(
+    report_view: &report_write::ReportView<'_>,
+    outfmt: BlastpReport,
+    phi_reports: Option<report_write::PhiPairwise<'_>>,
+    format: &mut crate::api::local_blast::FormatOutput<'_>,
+    (warnings, probe, pairwise_shown, side_sink): (
+        &mut Option<crate::report::query_warnings::QueryWarnings<'_>>,
+        &mut Option<crate::api::local_blast::FormatProbe<'_>>,
+        &Option<std::collections::BTreeSet<usize>>,
+        &Option<crate::report::blast_xml2::SideFileSink>,
+    ),
+    (first_context, batch_spans, query_stats, rows_of): (
+        &impl Fn(usize) -> super::archive::FirstContext,
+        &impl Fn() -> Vec<std::ops::Range<usize>>,
+        &impl Fn() -> Vec<crate::report::blast_xml::XmlStats>,
+        &impl Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
+    ),
+) -> Result<()> {
+    match outfmt {
+        _ if report_view.prolog_only => empty_alignments::write_exception_prolog(
+            report_view,
+            outfmt,
+            format,
+            warnings,
+            probe,
+            pairwise_shown,
+            rows_of,
+        ),
+        // psiblast `-phi_pattern` (item PS8a): PHI-BLAST's reports.
+        _ if phi_reports.is_some() => report_write::write_phi_report(
+            report_view,
+            outfmt,
+            phi_reports.expect("a PHI-BLAST call"),
+            format,
+            warnings,
+            probe,
+            pairwise_shown,
+            rows_of,
+        ),
+        BlastpReport::Seqalign(serial) => {
+            report_write::write_seqalign(report_view, serial, format, warnings)
+        }
+        BlastpReport::Archive => {
+            report_write::write_archive(report_view, format, warnings, first_context, batch_spans)
+        }
+        BlastpReport::Xml | BlastpReport::Xml2(_) => report_write::write_xml(
+            report_view,
+            outfmt,
+            format,
+            warnings,
+            side_sink,
+            query_stats,
+            rows_of,
+        ),
+        BlastpReport::Pairwise(view) => report_write::write_pairwise(
+            report_view,
+            view,
+            format,
+            warnings,
+            probe,
+            pairwise_shown,
+            rows_of,
+            None,
+        ),
+        BlastpReport::CustomTabular(spec) => report_write::write_custom_tabular(
+            report_view,
+            spec,
+            format,
+            warnings,
+            probe,
+            rows_of,
+            None,
+        ),
+        BlastpReport::Text(
+            outfmt @ (OutputFormat::Tabular | OutputFormat::TabularWithComments),
+        ) => report_write::write_text(report_view, outfmt, format, warnings, probe),
+        // Outfmt 0 is `BlastpReport::Pairwise` (`requested_formats`).
+        BlastpReport::Text(OutputFormat::Pairwise) => Err(anyhow::anyhow!(
+            "LOSAT internal error: outfmt 0 as a BLASTP tabular report"
+        )),
+    }
+}
+
+/// Starts PHI-BLAST's call (`phi_hooks::phi_call`), routing any setup error through
+/// `phi_setup_error`.
+#[allow(clippy::too_many_arguments)]
+fn start_phi_call<'s, 'a>(
+    call_in: &call_setup::CallSetup<'s, 'a>,
+    query_frames: &[Vec<QueryFrame>],
+    subject_source: BlastpSubjectSource<'_>,
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+    requested_formats: &[BlastpReport],
+    query_batches: &[seq_range::RangedBatch],
+    query_batch_skipped: &[bool],
+    db_length: i64,
+    db_num_seqs: i64,
+) -> Result<Option<phi_hooks::PhiCall<'s>>> {
+    phi_hooks::phi_call(
+        call_in.args,
+        query_frames,
+        query_batches,
+        phi_hooks::PhiLimits::new(requested_formats, subject_source),
+        db_length,
+        db_num_seqs,
+        |query, text| {
+            phi_setup_error(
+                call_in.args,
+                call_in.query_records,
+                subject_source,
+                subject_label,
+                outputs,
+                call_in.blastp_parallel_pool,
+                call_in.ranges,
+                call_in.reports,
+                query_batches,
+                query_batch_skipped,
+                query,
+                text,
+            )
+        },
+    )
+}
+
+/// Shifts final hit coordinates into record coordinates (`shift_hsp_to_records`) and, for
+/// PHI-BLAST, splits each query's final hit list by pattern occurrence (`PHIBlast_HSPResultsSplit`).
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-986
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
+fn shift_and_split_hit_lists(
+    hit_lists: &mut [Option<BlastpHitList>],
+    ranges: &BlastpRanges<'_>,
+    phi_call: Option<&mut phi_hooks::PhiCall<'_>>,
+) {
+    for hit_list in hit_lists.iter_mut().flatten() {
+        for hsp_list in &mut hit_list.hsplist_array {
+            for hsp in &mut hsp_list.hsps {
+                shift_hsp_to_records(hsp, ranges);
+            }
+        }
+    }
+    if let Some(phi) = phi_call {
+        phi.split_occurrences(hit_lists);
+    }
+}
+
+/// Shared inputs for rendering pairwise alignment rows (`PairwiseHit`) from final hit lists.
+struct RowBuildInputs<'a> {
+    engine_counts: &'a super::seqalign::EngineCounts,
+    ranges: &'a BlastpRanges<'a>,
+    report_contexts: &'a [QueryContext],
+    subjects: &'a [EncodedProtein],
+    matrix: ScoringMatrix,
+    shown_queries: ShownQueries<'a>,
+    shown_subjects: ShownSubjects<'a>,
+    x_rows_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
+}
+
+impl RowBuildInputs<'_> {
+    /// Renders pairwise alignment rows (`PairwiseHit`) for `lists` starting at query `first`,
+    /// shifting coordinates back to searched letters for alignment rendering and back to record
+    /// coordinates afterwards.
+    fn build(&self, lists: &[Option<BlastpHitList>], first: usize) -> Result<Vec<PairwiseHit>> {
+        let mut hits = collect_hits_and_methods_from_hit_lists(lists, first, self.engine_counts);
+        for (hit, _, _, _) in hits.iter_mut() {
+            let q_shift = self
+                .ranges
+                .query_input
+                .placements
+                .offset(hit.q_idx as usize);
+            let s_shift = self.ranges.subject_placements.offset(hit.s_idx as usize);
+            hit.q_start -= q_shift;
+            hit.q_end -= q_shift;
+            hit.s_start -= s_shift;
+            hit.s_end -= s_shift;
+        }
+        let mut rows = build_pairwise_hits(
+            hits,
+            self.report_contexts,
+            self.subjects,
+            self.matrix,
+            true,
+            self.shown_queries,
+            self.shown_subjects,
+            self.x_rows_pool,
+        )?;
+        for row in rows.iter_mut() {
+            let s_idx = row.hit.s_idx as usize;
+            shift_to_records(&mut row.hit, self.ranges);
+            row.subject_length = row
+                .subject_length
+                .map(|searched| self.ranges.subject_placements.length(s_idx, searched));
+        }
+        Ok(rows)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-250
+/// The refusal of PHI-BLAST's search (`-phi_pattern`) of a subject longer than `MAX_DBSEQ_LEN`
+/// (`phi_hooks::phi_limits`): NCBI's parts keep the occurrences and the alignments that each part
+/// holds (an alignment past a part's end stops there unless the next part holds its occurrence),
+/// which LOSAT does not port yet. NCBI's output is the same at 1 and 8 threads (probe
+/// `PS/ncbi8/long`, 11-23); the parts and their merge are item PS8a-2's port.
+fn too_long_phi_subject_refusal(what: &str, length: usize) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{what} has {length} residues; -phi_pattern with a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's PSIBLAST yet",
         crate::core::subject_split::MAX_DBSEQ_LEN
     )
 }

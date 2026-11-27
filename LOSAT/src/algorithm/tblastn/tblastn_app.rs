@@ -9,7 +9,7 @@ use super::database::TblastnDatabase;
 use super::stage_d_pipeline::{
     run_local_for_report_threads, LocalStageDProfile, SubjectSetNumbers,
 };
-use super::stage_d_pipeline::{SetupEngineError, SetupRefusal};
+use super::stage_d_pipeline::{ReadFails, SetupEngineError};
 use super::stage_d_stats::LocalSubjectParameters;
 use super::stage_e_report::{render, ShownSubjects};
 use super::x_subject_store::SubjectLetters;
@@ -18,42 +18,44 @@ use crate::algorithm::common::database::PreliminaryReadError;
 use crate::algorithm::common::x_db_stream::XReadError;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::api::QueryEnd;
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
 use crate::report::tabular::SubjectFetch;
 
 /// Whether `error` may fail one batch, after the reports of the batches before, rather than the
-/// run: the errors `batch_failure` reads (a read of the database, the batch's setup, LOSAT's
-/// refusal of the setup where NCBI's crashes, and a batch whose search fails after the reports of
-/// the batches before: the failed or endless Smith-Waterman redo of `-use_sw_tback`). The batches
-/// searched ahead are then searched again one at a time, so that the batch that fails does in its
-/// place (`batch_failure` decides).
+/// run: the errors `batch_failure` reads (a read of the database that failed, `XReadError`; a
+/// batch whose setup failed, `SetupEngineError`; or one whose search LOSAT refuses or fails after
+/// the reports of the batches before, `ErrorAfterBatchReports`: a step where NCBI's search crashes,
+/// does not finish or stops, and the failed or endless Smith-Waterman redo of `-use_sw_tback`). The
+/// batches searched ahead (`stage_d_pipeline::x_search_batches`) are then searched again one at a
+/// time, so that the earliest batch that fails does in its place, after the reports of the batches
+/// before it, and nothing of it or of the batches after it is written (`batch_failure` decides).
 fn fails_one_batch(error: &anyhow::Error) -> bool {
     error.is::<XReadError>()
         || error.is::<SetupEngineError>()
-        || error.is::<SetupRefusal>()
-        || error.is::<crate::blastinput::app::ErrorAfterBatchReports>()
+        || error.is::<ErrorAfterBatchReports>()
 }
 
 /// The failure of a batch whose search failed where NCBI's fails it with its engine error: a
 /// read of the database (`common::x_db_stream::XReadError`), as the check's error fails the first
 /// batch with a valid context, when the reader's error is NCBI's own, and the batch's setup
 /// (`stage_d_pipeline::SetupEngineError`: a PSSM query whose `kbp_psi` is not valid, the average
-/// subject length), LOSAT's refusal of the setup where NCBI's crashes
-/// (`stage_d_pipeline::SetupRefusal`), and an error of the batch's search that comes after the
-/// reports of the batches before (`app::ErrorAfterBatchReports`: the failed or endless
-/// Smith-Waterman redo of `-use_sw_tback`, `match_redo`), as it is. LOSAT's other refusals (and
-/// any other error) are returned as `Err` to stop the run.
+/// subject length); and where LOSAT refuses a step at which NCBI's search of the batch crashes,
+/// does not finish or stops, after it has printed the reports of the batches before
+/// (`ErrorAfterBatchReports`: line RG item X-short-bat, the setup's statistics count of 0,
+/// `stage_d_pipeline::preliminary_setup_checks`, D1a-5 of line RG, and a search space that
+/// overflows NCBI's `Int8`, `stage_d_pipeline::search_space_overflow`, line RG D1a-6 review A
+/// F2), or the batch's search fails
+/// after those reports (the failed or endless Smith-Waterman redo of `-use_sw_tback`,
+/// `match_redo`): that error, as the batch's failure. Any other refusal of LOSAT's (and any other
+/// error) is returned as `Err` to stop the run before its first byte.
 fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
     if let Some(SetupEngineError(text)) = error.downcast_ref::<SetupEngineError>() {
-        return Ok(crate::blastinput::app::engine_error(text));
+        return Ok(crate::blastinput::app::engine_error(text.as_bytes()));
     }
-    let error = match error.downcast::<SetupRefusal>() {
-        Ok(SetupRefusal(refusal)) => return Ok(refusal),
-        Err(error) => error,
-    };
-    let error = match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
-        Ok(crate::blastinput::app::ErrorAfterBatchReports(error)) => return Ok(error),
+    let error = match error.downcast::<ErrorAfterBatchReports>() {
+        Ok(failure) => return Ok(failure.error),
         Err(error) => error,
     };
     let error = match error.downcast::<XReadError>() {
@@ -61,7 +63,7 @@ fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, any
         Err(error) => return Err(error),
     };
     match error.downcast::<PreliminaryReadError>() {
-        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.0)),
+        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.as_bytes())),
         Err(error) => Err(error),
     }
 }
@@ -70,14 +72,21 @@ fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, any
 /// search of the first batch with a valid context (`search`): its stream, or the read's error (a
 /// database without sequences, a Gumbel block's shortest length that leaves no residue, a sequence
 /// file that cannot be read; with `-in_pssm`, SeqDB's own error), and whether that error comes
-/// before the batch's setup checks (`PsiSearchReadFailure::precedes_setup_checks`). One owner for
-/// the search and the set-up of a refused batch (`refused_batch_stop`).
+/// before the batch's setup checks (`PsiSearchReadFailure::precedes_setup_checks`). The error
+/// comes with the step of NCBI's search of a split batch that meets it (`ReadFails`, decided once,
+/// here): the setup's read of the length of OID 0 (`Setup`, before the chunk's Karlin-Altschul
+/// check), else the search's first read of a sequence (`Search`, after it; also the subject-length
+/// error, which the chunk's own setup checks meet first). One owner for the search and the set-up
+/// of a refused batch (`refused_batch_stop`).
 fn first_database_read<'d>(
     database: &'d TblastnDatabase,
     resolved: &ResolvedTblastnArgs,
     subject_set: &SubjectSetNumbers,
 ) -> (
-    Result<crate::algorithm::common::x_db_stream::XDbStream<'d>>,
+    std::result::Result<
+        crate::algorithm::common::x_db_stream::XDbStream<'d>,
+        (anyhow::Error, ReadFails),
+    >,
     bool,
 ) {
     // `-in_pssm` (PSI-TBLASTN): `CPsiBlast` reads the database without `CLocalBlast`'s
@@ -91,12 +100,14 @@ fn first_database_read<'d>(
     let before_setup = pssm_failure
         .as_ref()
         .is_some_and(|failure| failure.precedes_setup_checks());
-    let read = if database.first_oid_read_fails() {
-        Err(match pssm_failure {
+    if database.first_oid_read_fails() {
+        let error = match pssm_failure {
             Some(failure) => failure.error("TBLASTN"),
-            None => PreliminaryReadError("Database memory map file error").into(),
-        })
-    } else if !subject_set.old_fsc
+            None => PreliminaryReadError::from_static("Database memory map file error").into(),
+        };
+        return (Err((error, ReadFails::Setup)), before_setup);
+    }
+    let read = if !subject_set.old_fsc
         && crate::stats::setup::setup_subject_length(
             0,
             1,
@@ -104,23 +115,30 @@ fn first_database_read<'d>(
         )
         .is_none()
     {
-        Err(PreliminaryReadError(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into())
+        Err(PreliminaryReadError::from_static(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into())
     } else if let Some(failure) = pssm_failure {
         Err(failure.error("TBLASTN"))
     } else {
         database.x_stream(resolved.num_threads, resolved.db_mask.as_ref())
     };
-    (read, before_setup)
+    (
+        read.map_err(|error| (error, ReadFails::Search)),
+        before_setup,
+    )
 }
 
-/// NCBI's error of the set-up of the records of a refused batch that are first in their scope
-/// (`first`, by input record from `input_done`; the batch's searched queries start at
-/// `searched_done`), where NCBI's set-up of the batch fails for the subjects
-/// (`stage_d_pipeline::set_up_batch`, then the first read of the database, as the search of a
-/// batch fails in `search`), in the one form of every program (`query_batch::refused_batch_error`;
-/// line WQA D10 round 5, 2026-11-20); `None` where it succeeds, so that the refusal comes. NCBI's
-/// errors of the batches before come first: their searches fail before the stop is acted on.
-/// `queries`: the input records, the searched ones and how they map (`QueryInput`).
+/// NCBI's set-up of the records of a refused batch that are first in their scope (`first`, by
+/// input record from `input_done`; the batch's searched queries start at `searched_done`): its
+/// error where NCBI's set-up of the batch fails for the subjects
+/// (`stage_d_pipeline::set_up_batch`, then the first read of the database where the batch's search
+/// gets to it, as the search of a batch fails in `search`), in the one form of every program
+/// (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20); `Searched` where it
+/// passes with a valid context, so that the refusal comes unless the run's XML failure takes it;
+/// `Unknown` without a valid context or where LOSAT's error is not NCBI's. The batch that NCBI
+/// splits holds the repeated ids too, by the lengths of their own records (line RG item
+/// X-short-bat, review 4 M1). NCBI's errors of the batches before come first: their searches fail
+/// before the stop is acted on. `queries`: the input records, the searched ones and how they map
+/// (`QueryInput`).
 fn refused_batch_setup_error(
     first: &[bool],
     (input_done, searched_done): (usize, usize),
@@ -138,12 +156,25 @@ fn refused_batch_setup_error(
         crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode,
         super::stage_d_pipeline::LocalStageDScoring,
     ),
-) -> Option<anyhow::Error> {
+) -> crate::blastinput::query_batch::BatchSetUp {
+    use crate::blastinput::query_batch::BatchSetUp;
     let (input_records, searched_queries, query_input) = queries;
-    let queries: Vec<usize> = (searched_done..searched_queries.len())
+    // NCBI's batch (`stage_d_pipeline::BatchRecord`): each searched query by its own length, with
+    // the index of its letters among those set up where it is first in its scope.
+    let mut queries: Vec<usize> = Vec::new();
+    let mut records: Vec<super::stage_d_pipeline::BatchRecord> = Vec::new();
+    for query in (searched_done..searched_queries.len())
         .take_while(|&query| query_input.ordinal(query) < input_done + first.len())
-        .filter(|&query| first[query_input.ordinal(query) - input_done])
-        .collect();
+    {
+        let own = first[query_input.ordinal(query) - input_done];
+        records.push((
+            searched_queries[query].seq().len(),
+            own.then_some(queries.len()),
+        ));
+        if own {
+            queries.push(query);
+        }
+    }
     let letters: Vec<Vec<u8>> = queries
         .iter()
         .map(|&query| searched_queries[query].seq().to_vec())
@@ -157,6 +188,16 @@ fn refused_batch_setup_error(
             )
         })
         .collect();
+    // NCBI's first read of the database: where the batch's search gets to it (`set_up_batch`, whose
+    // chunks meet a read that fails where NCBI's do), its error.
+    let read = database.map(|database| first_database_read(database, resolved, &subject_set).0);
+    let subject_set = SubjectSetNumbers {
+        read_fails: match &read {
+            Some(Err((_, class))) => Some(*class),
+            _ => None,
+        },
+        ..subject_set
+    };
     let seg = resolved.seg.params();
     let profile = LocalStageDProfile {
         seg: seg.as_ref(),
@@ -178,6 +219,7 @@ fn refused_batch_setup_error(
     };
     let setup = super::stage_d_pipeline::set_up_batch(
         &letters,
+        &records,
         match database {
             Some(_) => SubjectLetters::Packed(&[]),
             None => subject_letters,
@@ -188,11 +230,11 @@ fn refused_batch_setup_error(
         scoring,
     );
     match setup {
-        Err(error) => batch_failure(error).ok(),
-        Ok(validity) if !validity.iter().any(|&valid| valid) => None,
-        Ok(_) => match first_database_read(database?, resolved, &subject_set).0 {
-            Ok(_) => None,
-            Err(error) => database_read_failure(error).ok(),
+        Err(error) => batch_failure(error).ok().into(),
+        Ok(false) => BatchSetUp::Unknown,
+        Ok(true) => match read {
+            None | Some(Ok(_)) => BatchSetUp::Searched,
+            Some(Err((error, _))) => database_read_failure(error).ok().into(),
         },
     }
 }
@@ -202,7 +244,7 @@ fn refused_batch_setup_error(
 /// `-in_pssm` (`TblastnDatabase::pssm_search_read_failure`); `Err`: LOSAT's refusal.
 fn database_read_failure(error: anyhow::Error) -> Result<anyhow::Error> {
     match error.downcast::<PreliminaryReadError>() {
-        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.0)),
+        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.as_bytes())),
         Err(error) if error.is::<crate::cli::NativeError>() => Ok(error),
         Err(error) => Err(error),
     }
@@ -229,7 +271,7 @@ impl TblastnArgs {
     /// returned instead of written to standard output. The `query` and `subject` of `self` are
     /// only the names the report shows for the inputs; `out` is `None`. The diagnostics go to
     /// standard error, as the command line's.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(any(losat_web_abi_v1, test))]
     pub(crate) fn run_in_memory(
         self,
         settings: crate::blastinput::ncbi_environment::ApplicationSettings,
@@ -266,7 +308,14 @@ impl TblastnArgs {
         use crate::blastinput::input_files;
         use crate::blastinput::seq_range;
         let mut args = self;
+        // An `-import_search_strategy` was imported by the caller (`import::apply`), before the
+        // run.
         args.id_scope = args.parse_deflines.then(Default::default);
+        // The run's `SERIAL_VERIFY_DATA_WRITE`, `SERIAL_VERIFY_DATA_READ` and
+        // `SERIAL_VERIFY_DATA_GET`, which `-in_pssm`'s reader reads
+        // (`TblastnArgs::write_verification`, `read_verification`).
+        args.write_verification = settings.write_verification.clone();
+        args.read_verification = settings.read_verification.clone();
         // NCBI's score block looks for the file of an ungapped search's `-matrix` that its tables
         // do not have when it sets up a batch (`TblastnArgs::find_matrix_file`); the search
         // refuses it there (`args::check_search_limits`).
@@ -280,10 +329,10 @@ impl TblastnArgs {
         // (`app::early_format_choice`).
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
-            args.out.as_deref(),
             "TBLASTN",
         )?;
-        let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+        let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
+        let choice = app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
         let format = choice.report_format(app::Program::Tblastn, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -294,24 +343,16 @@ impl TblastnArgs {
             format == Some(app::ReportFormat::ArchiveFormat),
             &options,
         )
-        .map(|handle| handle.with_outfmt_text(&args.outfmt));
+        .map(|handle| handle.with_outfmt_text(&outfmt_bytes));
         // The search strategy's request, with the archive's options handle.
-        args.strategy = strategy_file
-            .map(|file| {
-                anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
-                    file,
-                    super::archive::option_inputs(&args),
-                    choice.number(),
-                    crate::report::archive::strategy::HitlistArgs {
-                        max_target_seqs: args.max_target_seqs,
-                        num_descriptions: args.num_descriptions,
-                        num_alignments: args.num_alignments,
-                    },
-                    args.database_name(),
-                    &options,
-                ))
-            })
-            .transpose()?;
+        args.strategy = strategy_file.map(|file| {
+            crate::report::archive::strategy::StrategyExport::for_args(
+                &args,
+                file,
+                choice.number(),
+                &options,
+            )
+        });
         let archive = args.archive.clone();
         // LOSAT's thread capability is checked before any input or output, as for BLASTN.
         crate::utils::threading::validate_threads(args.num_threads)?;
@@ -326,6 +367,10 @@ impl TblastnArgs {
             }
             None => &mut stderr,
         };
+        // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
+        if let Some(import) = &args.import {
+            diagnostics.write_all(&import.warning_lines())?;
+        }
         // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
         // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
         // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
@@ -358,13 +403,20 @@ impl TblastnArgs {
             Ok(if args.db.is_some() {
             (Vec::new(), seq_range::Placements::default(), None)
         } else {
-            let Some(subject_path) = args.subject.clone() else {
-                return Err(app::missing_subject_error());
+            // An imported strategy's subject Bioseqs (`import::apply`) stand for
+            // `-subject`.
+            let imported = args.import.as_ref().and_then(|run| run.subjects.as_ref());
+            let subject_path = match (&args.subject, imported) {
+                (_, Some(_)) => std::path::PathBuf::new(),
+                (Some(path), None) => path.clone(),
+                (None, None) => return Err(app::missing_subject_error()),
             };
             // Web ABI v1's subjects are the call's bytes: no file to name or open.
             let subject_input = match &io {
+                RunIo::Files if imported.is_some() => Input::File(
+                    crate::report::archive::read::import::ImportRun::input_of("subject", imported.expect("imported subjects"))?,
+                ),
                 RunIo::Files => {
-                    input_files::check_utf8_file_name(&subject_path, "subject", "TBLASTN")?;
                     Input::File(input_files::open_input(&subject_path, "subject", "TBLASTN")?)
                 }
                 RunIo::Memory { subject, .. } => Input::Bytes(subject),
@@ -463,10 +515,13 @@ impl TblastnArgs {
             // (`check_options`); NCBI opens the default `-query -` and never reads it.
             RunIo::Files if args.in_pssm.is_some() => Input::Bytes(&[]),
             RunIo::Files => {
-                input_files::check_utf8_file_name(&args.query, "query", "TBLASTN")?;
                 // NCBI opens the query file inside `Run` too: its error is saved and an error
                 // archive follows.
-                match input_files::open_input(&args.query, "query", "TBLASTN") {
+                match crate::report::archive::read::import::ImportRun::open_query(
+                    args.import.as_ref(),
+                    &args.query,
+                    "TBLASTN",
+                ) {
                     Ok(file) => Input::File(file),
                     Err(error) => {
                         write_run_error_archive(&args, &io, archive.as_ref(), &error);
@@ -476,25 +531,19 @@ impl TblastnArgs {
             }
             RunIo::Memory { query, .. } => Input::Bytes(query),
         };
-        // The organism report's `-out` file is written as NCBI's buffer writes it.
-        let tax_report = format == Some(app::ReportFormat::TaxFormat);
-        let mut stream = report_stream(&args, &io, tax_report)?;
-        // Outfmt 0 to 4: the pairwise report (`report::pairwise::PairwiseView`).
-        let pairwise = format
-            .and_then(crate::report::pairwise::PairwiseView::of)
-            .is_some();
+        let mut stream = report_stream(&args, &io)?;
         // The format as the reports read it: the number and the custom fields, or the value as
         // given when it has a delimiter, which `normalized` drops and the custom tabular report
         // reads (`tabular::tabular_spec`, which parses it again as NCBI does).
         // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers below.
-        let outfmt = match choice.parsed() {
+        let outfmt: Vec<u8> = match choice.parsed() {
             Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
-            _ => args.outfmt.clone(),
+            _ => outfmt_bytes,
         };
         let strategy = args.strategy.clone();
         let result = {
             let mut outputs =
-                ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
+                ReportOutputs::single(&outfmt, OutputSink::Report(&mut stream), &mut *diagnostics);
             search_cli(
                 args,
                 list,
@@ -509,6 +558,8 @@ impl TblastnArgs {
         };
         // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
         let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+        // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+        let result = stream.finish(result);
         // NCBI writes an error archive after the archives of the batches before when the
         // application stops with one of its own errors, and when the run ends with messages that
         // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status).
@@ -516,7 +567,7 @@ impl TblastnArgs {
             match &result {
                 Err(error) => {
                     // The `-in_pssm` file, which NCBI opens inside `Run` too.
-                    let in_run = super::in_pssm::file_error_in_run(error);
+                    let in_run = crate::algorithm::pssm_search::in_pssm::file_error_in_run(error);
                     if let Some(lines) = super::archive::error_lines(error, in_run) {
                         let _ = write_error_archive(&io, handle, error, &lines, &mut stream);
                     } else if let Some(lines) =
@@ -539,10 +590,7 @@ impl TblastnArgs {
                 }
             }
         }
-        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-        // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI
-        // aborts and LOSAT reports the error (`cli::ReportStream::finish`).
-        stream.finish(result, pairwise || tax_report)
+        result
     }
 }
 
@@ -553,7 +601,7 @@ enum RunIo<'a> {
     Files,
     /// Web ABI v1 (`run_in_memory`): the call's bytes, and the report kept in memory.
     #[cfg_attr(
-        not(any(target_arch = "wasm32", test)),
+        not(any(losat_web_abi_v1, test)),
         expect(
             dead_code,
             reason = "made only by `run_in_memory`, for the web ABI (wasm32) and tests"
@@ -649,9 +697,9 @@ fn write_run_error_archive(
     let Some(lines) = super::archive::error_lines(error, true) else {
         return;
     };
-    if let Ok(mut report) = report_stream(args, io, false) {
+    if let Ok(mut report) = report_stream(args, io) {
         let _ = write_error_archive(io, handle, error, &lines, &mut report);
-        let _ = std::io::Write::flush(&mut report);
+        let _ = report.finish(Ok(()));
     }
 }
 
@@ -675,30 +723,26 @@ fn write_error_archive(
 
 /// The report stream of a run: the `-out` file (created) or standard output, or the report
 /// in memory (`RunIo::Memory`).
-fn report_stream(
-    args: &TblastnArgs,
-    io: &RunIo<'_>,
-    tax_report: bool,
-) -> Result<crate::cli::ReportStream> {
+fn report_stream(args: &TblastnArgs, io: &RunIo<'_>) -> Result<crate::cli::ReportStream> {
     Ok(match io {
         RunIo::Files => crate::cli::ReportStream::of_cli(
             open_out_file(args)?,
-            tax_report,
+            "tblastn",
+            crate::utils::os_bytes::os_str_bytes(&args.outfmt),
             args.strategy.as_ref(),
         ),
-        RunIo::Memory { report, .. } => crate::cli::ReportStream {
-            inner: Box::new(MemoryReport(report.clone())),
-            failed: false,
-        },
+        RunIo::Memory { report, .. } => {
+            crate::cli::ReportStream::memory(Box::new(MemoryReport(report.clone())), "tblastn")
+        }
     })
 }
 
 /// The `-out` file, created (`-`: standard output).
-fn open_out_file(args: &TblastnArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+fn open_out_file(args: &TblastnArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("TBLASTN")).map(std::io::BufWriter::new))
+        .map(crate::cli::create_out_file)
         .transpose()
 }
 
@@ -722,14 +766,19 @@ fn open_search_database(
     // `Query is Empty!` (as BLASTN's).
     let database = match args.database_name() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+                outputs.formats.first().map(|format| format.outfmt),
+            );
             let database = super::database::TblastnDatabase::open_restricted(
-                name,
+                &name,
                 settings,
                 list,
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             if !joins_scope {
                 return Ok(Some(database));
             }
@@ -737,10 +786,11 @@ fn open_search_database(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
                 &args.db_filter,
+                database.list_gis(),
                 database.list_taxids(),
                 &database.statistics(),
                 true,
-                args.searchsp.is_some_and(|space| space > 0),
+                args.searchsp.is_some_and(|space| space != 0),
                 args.dbsize.is_some_and(|size| size > 0),
                 "TBLASTN",
             )?;
@@ -781,7 +831,7 @@ fn open_search_database(
                 settings,
             )),
             outputs,
-        )?,
+        ),
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -810,17 +860,15 @@ fn subject_taxonomy(
     args: &mut TblastnArgs,
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
     outputs: &ReportOutputs<'_>,
-) -> Result<()> {
+) {
     let specs: Vec<_> = outputs
         .formats
         .iter()
         .filter_map(|format| super::tabular::tabular_spec(format.outfmt))
         .collect();
-    let taxonomy =
-        crate::algorithm::common::database::subject_taxonomy(setting, "TBLASTN", &specs)?;
+    let taxonomy = crate::algorithm::common::database::subject_taxonomy(setting, &specs);
     args.subject_taxdb = taxonomy.taxdb;
     args.tabular_taxdb = taxonomy.found;
-    Ok(())
 }
 
 /// The part of `run` after the files are opened: NCBI's processing of the options,
@@ -844,7 +892,8 @@ fn search_cli(
     };
     let resolved = args.check_options(outputs.diagnostics)?;
     // The options' handlers have read a value that the early reading left to them (`Deferred`).
-    let choice = &choice.at_formatting_handler(&args.outfmt)?;
+    let choice =
+        &choice.at_formatting_handler(crate::utils::os_bytes::os_str_bytes(&args.outfmt))?;
     let joins_scope = resolved
         .pssm
         .as_deref()
@@ -1045,9 +1094,9 @@ fn search_pssm_query(
 /// NCBI's gapped tblastn with the Gumbel block never stops for the average subject length,
 /// also when every subject is without letters: its shortest subject is raised to
 /// `BLAST_SEQSRC_MINLENGTH` before the division by 3 (`run_local_search_with_pool` ports
-/// blast_setup.c:969-980 and seqsrc_multiseq.cpp:226-240). Without it (`-searchsp` or
-/// `OLD_FSC`; LOSAT rejects `-ungapped`) the average is used, and below one letter the batch
-/// fails (`stage_d_pipeline::SetupEngineError::SUBJECT_LENGTH_INVALID`).
+/// blast_setup.c:969-980 and seqsrc_multiseq.cpp:226-240). Without it (`-searchsp`, `OLD_FSC`
+/// or an ungapped search) the average is used, and below one letter the batch fails
+/// (`stage_d_pipeline::SetupEngineError::SUBJECT_LENGTH_INVALID`).
 fn before_prolog(
     subjects: &[FastaRecord],
     x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
@@ -1113,11 +1162,11 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::TBLASTN_TASK.check(&mut args.task)?;
-    // The host has no database files; LOSAT Web searches the records it gives.
+    // `run_local` searches subject records; a `-db` search runs through `run_local_database`.
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported in the browser yet");
+        anyhow::bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
-    report_formats(outputs, args.out.as_deref())?;
+    report_formats(outputs, &args)?;
     // The BLAST archive (outfmt 11) among the formats: its request and a diagnostics stream that
     // saves the messages. The records' deflines are
     // those the caller's reader kept; records without one get `>` and their title.
@@ -1125,45 +1174,58 @@ pub fn run_local(
         .formats
         .iter()
         .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run_io`).
     if archive_requested {
         args.archive = super::archive::handle_for(
             &args,
             true,
-            &crate::report::archive::OptionsHandle::default(),
+            &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
         )
         .map(|handle| outputs.with_archive_outfmt(handle));
-        if let Some(handle) = args.archive.clone() {
-            let no_query =
-                query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                run_local_formats(args, query_records, query_end, subject_records, view)
-            });
-            return outputs.finish_archive(&handle, no_query, result);
-        }
     }
-    run_local_formats(args, query_records, query_end, subject_records, outputs)
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        run_local_formats(args, query_records, query_end, subject_records, outputs)
+    })
 }
 
 /// Each requested format as NCBI parses `-outfmt` before its option handlers run, and LOSAT's
-/// rejection of a format that its TBLASTN does not write (`app::report_format`): the command line's
-/// checks before it opens `-out` (`run_io`). The formatting handler's come after (`read_formats`).
-fn report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
-    use crate::blastinput::app;
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        app::report_format(&choice, app::Program::Tblastn, format.side_out(out))?;
-    }
-    Ok(())
+/// rejection of a format that its TBLASTN does not write (`ReportOutputs::early_choices`): the
+/// command line's checks before it opens `-out` (`run_io`). The formatting handler's come after
+/// (`read_formats`), and so does the error of a value left to it with a search strategy file.
+fn report_formats(outputs: &ReportOutputs<'_>, args: &TblastnArgs) -> Result<()> {
+    outputs
+        .early_choices(
+            crate::blastinput::app::Program::Tblastn,
+            args.out.as_deref(),
+            args.export_search_strategy.is_some(),
+        )
+        .map(drop)
 }
 
 /// The numbers of the requested formats, each read as on the command line. `out`: the file of
 /// `api::run_to_file` (a format with the caller's receiver of side files takes that receiver's,
-/// `FormatOutput::side_out`).
-fn read_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<Vec<i32>> {
+/// `FormatOutput::side_out`). `strategy`: the argv names a search strategy file, with which a value
+/// that does not parse is left to the formatting handler of the options
+/// (`TblastnArgs::check_options_for_formats`, which reads the arguments' `-outfmt`: LOSAT Web gives
+/// such a value as the run's one format and as the arguments' `-outfmt`); it has no number here.
+fn read_formats(
+    outputs: &ReportOutputs<'_>,
+    out: Option<&std::path::Path>,
+    strategy: bool,
+) -> Result<Vec<i32>> {
     use crate::blastinput::app;
     let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
+        let Some(choice) = app::early_format_choice(format.outfmt, strategy)?
+            .parsed()
+            .cloned()
+        else {
+            continue;
+        };
         // A format without a report: NCBI's formatting handler refuses SAM, AIRR and FASTA here;
         // the XInclude formats without a file come after `Query is Empty!`
         // (`ReportOutputs::xinclude_check`).
@@ -1198,29 +1260,28 @@ pub fn run_local_database(
     super::args::TBLASTN_TASK.check(&mut args.task)?;
     // The file of an unknown `-matrix`, as the command line's `run_io` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
-    report_formats(outputs, args.out.as_deref())?;
+    args.write_verification = settings.write_verification.clone();
+    args.read_verification = settings.read_verification.clone();
+    report_formats(outputs, &args)?;
     let archive_requested = outputs
         .formats
         .iter()
         .any(|format| super::stage_e_report::format_number(format.outfmt) == 11);
+    // The archive shares the options handle of the run's search strategy (LOSAT Web's
+    // `-export_search_strategy`, `web_adapter::give_strategy`), as on the command line (`run_io`).
     args.archive = super::archive::handle_for(
         &args,
         archive_requested,
-        &crate::report::archive::OptionsHandle::default(),
+        &crate::report::archive::strategy::options_of(args.strategy.as_ref()),
     )
     .map(|handle| outputs.with_archive_outfmt(handle));
     crate::utils::threading::validate_threads(args.num_threads)?;
-    match args.archive.clone() {
-        Some(handle) => {
-            let no_query =
-                query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
-            let result = outputs.with_archive_diagnostics(handle.clone(), |view| {
-                search_database(args, query_records, query_end, settings, view)
-            });
-            outputs.finish_archive(&handle, no_query, result)
-        }
-        None => search_database(args, query_records, query_end, settings, outputs),
-    }
+    let archive = args.archive.clone();
+    let strategy = args.strategy.clone();
+    let no_query = query_records.is_empty() && query_end.is_input() && args.in_pssm.is_none();
+    outputs.run_records(strategy.as_ref(), archive.as_ref(), no_query, |outputs| {
+        search_database(args, query_records, query_end, settings, outputs)
+    })
 }
 
 /// `run_local_database` from the taxid or seqid list on.
@@ -1238,7 +1299,11 @@ fn search_database(
     // `-out` (`run_to_file`) is made where the command line opens it (`run_io`); the formatting
     // handler's checks come after it.
     outputs.open_out()?;
-    let outfmts = read_formats(outputs, args.out.as_deref())?;
+    let outfmts = read_formats(
+        outputs,
+        args.out.as_deref(),
+        args.export_search_strategy.is_some(),
+    )?;
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
     let joins_scope = resolved
         .pssm
@@ -1318,11 +1383,15 @@ fn run_local_formats(
     // `-out` (`run_to_file`) is made where the command line opens it (`run_io`); the formatting
     // handler's checks come after it.
     outputs.open_out()?;
-    let outfmts = read_formats(outputs, args.out.as_deref())?;
+    let outfmts = read_formats(
+        outputs,
+        args.out.as_deref(),
+        args.export_search_strategy.is_some(),
+    )?;
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     let setting = args.taxdb_setting.take();
-    subject_taxonomy(&mut args, setting.as_ref(), outputs)?;
+    subject_taxonomy(&mut args, setting.as_ref(), outputs);
     let whole_subjects = seq_range::Placements::default();
     let (searched_subjects, subject_placements) = match &ranged_subjects {
         Some((cut, placements)) => (cut.as_slice(), placements),
@@ -1390,7 +1459,7 @@ fn write_first_batch_prologs(
     // The run's `-html` data (`ResolvedTblastnArgs::html`; `None`: the plain report).
     html: Option<&crate::report::html_ids::HtmlLinks>,
 ) -> Result<()> {
-    let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_name);
+    let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_definition);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
     // The subject set's total as NCBI's `Int8`.
     let total: i64 = match database {
@@ -1400,7 +1469,7 @@ fn write_first_batch_prologs(
     for format in outputs.formats.iter_mut() {
         if (0..=4).contains(&crate::blastinput::app::parse_formatting_string(format.outfmt)?.number)
         {
-            let mut writer = format.sink.open()?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,
                 program,
@@ -1571,7 +1640,7 @@ fn search(
     // `-in_pssm` (PSI-TBLASTN): the query's PSSM, which the batch's search and reports read.
     let pssm = resolved.pssm.clone();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_memento_priv.hpp:64-74
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:289
     // IDENTITY's reset (`search_settings`) writes through the memento's pointers into the options
     // that every query batch reuses: the first batch resets the mode and warns its queries, and
     // the later batches start in mode 0 without the warning. These are the searched queries of
@@ -1584,10 +1653,19 @@ fn search(
     } else {
         0
     };
-    // LOSAT's refusals of the masked search (`-db_hard_mask`; series NP, M4b PR 2) come where NCBI
-    // starts the search, after its checks.
+    // LOSAT's refusals of the masked search (`-db_hard_mask`; series NP, M4b PR 2 and M4b-3c part
+    // 2) come where NCBI starts the search, after its checks.
     if let (Some(database), Some(mask)) = (database, resolved.db_mask.as_ref()) {
-        database.check_mask_limits(mask, usize::try_from(resolved.word_size)?)?;
+        let zero_words = searched_queries
+            .iter()
+            .any(|record| record.seq().contains(&b'-'))
+            || pssm.as_deref().is_some_and(|psi| {
+                psi.pssm
+                    .rows
+                    .iter()
+                    .any(|row| row[0] > crate::utils::matrix::BLAST_SCORE_MIN)
+            });
+        database.check_mask_limits(mask, resolved.word_size, resolved.window_size, zero_words)?;
     }
     app::check_search_environment("TBLASTN", database.is_none())?;
     let subjects = subject_records;
@@ -1620,7 +1698,11 @@ fn search(
         searchsp: args.searchsp,
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
         // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307).
-        old_fsc: args.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
+        old_fsc: crate::report::archive::read::import::ImportRun::old_fsc(
+            args.import.as_ref(),
+            args.searchsp,
+        ),
+        read_fails: None,
     };
     // Without the Gumbel block NCBI's shortest subject length is the statistics' average
     // (blast_setup.c:975), which divides by their number of sequences: a count of 0 is LOSAT's
@@ -1628,8 +1710,17 @@ fn search(
     // (`stage_d_pipeline::run_local_search_with_pool`).
     let pairwise_database =
         database.map(|database| database.pairwise_database_masked(resolved.db_mask.as_ref()));
+    // An imported strategy's subjects have no input file (an empty tag).
+    let no_input = std::path::PathBuf::new();
     let subject_path = match database {
         Some(_) => None,
+        None if args
+            .import
+            .as_ref()
+            .is_some_and(|run| run.subjects.is_some()) =>
+        {
+            Some(&no_input)
+        }
         None => Some(
             args.subject
                 .as_ref()
@@ -1715,30 +1806,32 @@ fn search(
                 ),
             "TBLASTN",
         )
-        .map(|scopes| scopes.with_refusal(args.scope_refusal.clone())),
+        .map(|scopes| {
+            scopes
+                .with_refusal(args.scope_refusal.clone())
+                .with_xml_matrix_failure(super::stage_e_report::xml_matrix_failure(
+                    &outputs.formats,
+                    &resolved.matrix_name,
+                    database.is_some(),
+                    pssm.is_some(),
+                ))
+        }),
     );
-    if let Some((warnings, refusal)) = batches.stop.take_if(|_| batches.scope_refusal) {
-        let done = (batches.input_done, batches.searched_done);
-        let error = crate::blastinput::query_batch::refused_batch_error(
-            refusal,
-            args.strategy.is_some(),
-            |first| {
-                refused_batch_setup_error(
-                    first,
-                    done,
-                    (input_records, &searched_queries, &query_input),
-                    &resolved,
-                    subject_set,
-                    engine_positives,
-                    database,
-                    subject_letters,
-                    (compo_adjust_mode, scoring),
-                )
-            },
-        );
-        batches.scope_refusal = !error.is::<crate::cli::NativeError>();
-        batches.stop = Some((warnings, error));
-    }
+    // Where the run's XML failure for its matrix name takes a refusal (`ScopeRefusal::xml_takes`),
+    // a batch whose set-up passes is searched (`QueryBatches::resolve_refusals`).
+    batches.resolve_refusals(args.strategy.is_some(), |start, first| {
+        refused_batch_setup_error(
+            first,
+            start,
+            (input_records, &searched_queries, &query_input),
+            &resolved,
+            subject_set,
+            engine_positives,
+            database,
+            subject_letters,
+            (compo_adjust_mode, scoring),
+        )
+    });
     // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch, and
     // LOSAT's limits of the search apply where it searches (`check_search_limits`): a run that
     // stops at its first batch (or before it, `pssm_stop` above) gives NCBI's error.
@@ -1777,7 +1870,9 @@ fn search(
             )?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-        // The first batch fails after the outfmt 0 prolog (`formatter.PrintProlog()`).
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270-285
+        // The first batch fails after the outfmt 0 prolog (`formatter.PrintProlog()`), which
+        // names `PSITBLASTN` for a PSSM query (`-in_pssm`).
         write_first_batch_prologs(
             outputs,
             subject_path.map(|path| path.as_path()),
@@ -1785,7 +1880,7 @@ fn search(
             subject_letters,
             pairwise_database.as_ref(),
             args.tabular_taxdb.unwrap_or(false),
-            "TBLASTN",
+            pssm.as_ref().map_or("TBLASTN", |_| super::in_pssm::PROGRAM),
             resolved.html.as_deref(),
         )?;
     } else {
@@ -1811,6 +1906,7 @@ fn search(
         // With `-in_pssm`, whether the read's failure comes before the batch's setup checks
         // (`PsiSearchReadFailure::precedes_setup_checks`: the empty database).
         let mut read_before_setup = false;
+        let mut read_fails = None;
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
                 // `-in_pssm` (PSI-TBLASTN): `CPsiBlast` reads the database without `CLocalBlast`'s
@@ -1819,13 +1915,15 @@ fn search(
                 // gets `Database memory map file error`.
                 let (read, before_setup) = first_database_read(database, &resolved, &subject_set);
                 read_before_setup = before_setup;
-                let read = read.map(|stream| {
-                    x_stream = Some(stream);
-                    Vec::new()
-                });
                 match read {
-                    Ok(stores) => (stores, None),
-                    Err(error) => (Vec::new(), Some(error)),
+                    Ok(stream) => {
+                        x_stream = Some(stream);
+                        (Vec::new(), None)
+                    }
+                    Err((error, class)) => {
+                        read_fails = Some(class);
+                        (Vec::new(), Some(error))
+                    }
                 }
             }
             None => (Vec::new(), None),
@@ -1835,19 +1933,29 @@ fn search(
             (Some(_), None) => SubjectLetters::Packed(&database_stores),
             (None, _) => subject_letters,
         };
+        // Where NCBI's search first fails to read the database (the chunks of a split batch): the
+        // class was decided with the error (`first_database_read`).
+        let subject_set = SubjectSetNumbers {
+            read_fails,
+            ..subject_set
+        };
         // The batches before the stop are searched and reported; a reader at the end of its
         // input reads no batch (its `End()` is true), and the reports have no query (an empty
         // pipe, or `-query -` after `-subject -`).
         let searched_done = batches.searched_done;
         let queries = &searched_queries[..searched_done];
+        // The query Bioseqs that NCBI's scope finds for reported sequences
+        // (`report::query_bioseq`), noted at each batch's refusal of a sequence with the id of a
+        // query of its scope (below).
+        let mut query_bioseqs = crate::report::query_bioseq::QueryBioseqs::default();
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the BLAST
         // XML report data of the first result NCBI formats: the matrix of its formatting table,
         // found by the name as typed)
         // NCBI fails when it formats a batch in BLAST XML with a matrix name its XML data does not
         // know (`stage_e_report::xml_matrix_failure`, the decision of `stage_e_report::render`):
-        // the batch of the run's first searched query, or of its second where the report is held
-        // (`-subject`, `-in_pssm`; `XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of
-        // another Seq-id, the second as LOSAT refuses two queries of one id before any output);
+        // the batch of the run's first searched query, or where the report is held (`-subject`,
+        // `-in_pssm`; `XmlMatrixFailure::SecondQueryOrEnd`) of NCBI's next query of another
+        // Seq-id (`QueryScopes::xml_failing_query` of the batches' scopes);
         // the search strategy's file holds the requests up to that
         // batch's, whatever the number of batches after it (probe 7 of RG-F1, probe K4f of line
         // RG). A held report that fails at the run's end, or a run that stops before, writes every
@@ -1892,7 +2000,13 @@ fn search(
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
         // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
         // the search's batches (`database::fetch_excluded`), and their reads of headers.
-        let reads = super::database::CallReads::of(database, || query_input.batches(batch_size));
+        // The first format, whose prefetch each batch asks (`database::prefetch_format`).
+        let prefetch_format = super::database::prefetch_format(&outputs.formats);
+        let reads = super::database::CallReads::of(
+            database,
+            || query_input.batches(batch_size),
+            prefetch_format,
+        );
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -1945,6 +2059,20 @@ fn search(
             Err(error) if fails_one_batch(&error) => None,
             Err(error) => return Err(error),
         };
+        // NCBI's prolog comes before the first batch's request (`StrategyExport::refused`).
+        let refused = crate::report::archive::strategy::StrategyExport::refused;
+        if searched_done > 0 && args.strategy.as_ref().is_some_and(refused) {
+            write_first_batch_prologs(
+                outputs,
+                subject_path.map(|path| path.as_path()),
+                subjects.len(),
+                subject_letters,
+                pairwise_database.as_ref(),
+                args.tabular_taxdb.unwrap_or(false),
+                pssm.as_ref().map_or("TBLASTN", |_| super::in_pssm::PROGRAM),
+                resolved.html.as_deref(),
+            )?;
+        }
         for range in query_input
             .batches(batch_size)
             .into_iter()
@@ -2040,6 +2168,17 @@ fn search(
                         ));
                         break;
                     }
+                    // `-db`: the first batch whose search reads the sequences (one with a valid
+                    // context searched whole, a split one whose chunks get there) meets the read's
+                    // failure; a reader error of NCBI's own fails it (the preliminary search's
+                    // text, or with `-in_pssm` SeqDB's own error,
+                    // `TblastnDatabase::pssm_search_read_failure`), LOSAT's refusal stops the run.
+                    // (The search gives the marker only where the read fails: `stores_error`.)
+                    Err(error) if error.is::<super::stage_d_pipeline::DatabaseReadReached>() => {
+                        let error = stores_error.take().expect("the database's read failure");
+                        failed = Some((range, database_read_failure(error)?));
+                        break;
+                    }
                     Err(error) => match batch_failure(error) {
                         Ok(failure) => {
                             reads.fetched_before_failure(&range);
@@ -2050,16 +2189,6 @@ fn search(
                     },
                 }
             };
-            // `-db`: the first batch with a valid context reads the sequences (above); a
-            // reader error of NCBI's own fails it (the preliminary search's text, or with
-            // `-in_pssm` SeqDB's own error, `TblastnDatabase::pssm_search_read_failure`), LOSAT's
-            // refusal stops the run.
-            if batch_validity.iter().any(|&valid| valid) {
-                if let Some(error) = stores_error.take() {
-                    failed = Some((range, database_read_failure(error)?));
-                    break;
-                }
-            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
             filter_final_hitlists(
                 &mut batch_results,
@@ -2089,6 +2218,28 @@ fn search(
             // NCBI's own errors of the batch: the reports would show it (the prefetch's error
             // above comes first).
             if let (Some(database), Some(scopes)) = (database, batches.query_scopes.as_ref()) {
+                // The batch's searched queries (`range`), the scope's span.
+                let record = |query: usize| {
+                    crate::report::query_bioseq::QueryRecordRef::of(
+                        queries.get(query).filter(|_| query < range.end)?,
+                    )
+                };
+                let shows = outputs
+                    .formats
+                    .iter()
+                    .all(|format| super::stage_e_report::shows_query_bioseqs(format.outfmt))
+                    && resolved.query_range.is_none()
+                    && !database.loads_write_texts();
+                let run = crate::report::query_bioseq::SeenRun {
+                    shows,
+                    known: range.start..if scopes.span_of(range.start).end == usize::MAX {
+                        usize::MAX
+                    } else {
+                        range.end
+                    },
+                    record: &record,
+                    protein: true,
+                };
                 crate::algorithm::common::database::refuse_reported_ids_of_queries(
                     &titles,
                     batch_results
@@ -2101,6 +2252,9 @@ fn search(
                         }),
                     database.oid_map(),
                     scopes,
+                    super::database::parsed_shown(&outputs.formats),
+                    &mut query_bioseqs,
+                    &run,
                     "TBLASTN",
                 )?;
             }
@@ -2121,16 +2275,6 @@ fn search(
             query_batch_skipped.extend(std::iter::repeat_n(skipped, batch_validity.len()));
             query_validity.extend(batch_validity);
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2777-2792
-        // A PSSM query whose letters give no Karlin-Altschul parameters (one that `-seg` masks
-        // completely) makes NCBI BLAST+ 2.17.0's tblastn crash (SIGSEGV, probe `gs.masked`): LOSAT
-        // refuses it (DECISIONS 35 Q5 of line PS, as psiblast's, DECISIONS 12 S4), before
-        // anything is written.
-        if pssm.is_some() && query_validity.iter().any(|&valid| !valid) {
-            anyhow::bail!(
-                "a PSSM query whose letters give no Karlin-Altschul parameters (one that -seg masks completely), with which NCBI BLAST+ 2.17.0's tblastn crashes, is not supported by LOSAT's TBLASTN"
-            );
-        }
         // A run without a searched query has no parameters of a query set.
         let mut lengths = lengths.unwrap_or(LocalSubjectParameters {
             lengths: Vec::new(),
@@ -2146,16 +2290,8 @@ fn search(
             .formats
             .first()
             .map(|format| super::stage_e_report::format_number(format.outfmt));
-        let first_prefetches = first_number.is_some_and(|number| {
-            crate::algorithm::common::database::prefetches_subjects(Some(match number {
-                10 | 18 | 20 => 6,
-                number => number,
-            }))
-        });
-        // The XML2 and JSON formats (13 to 16), whose prefetch NCBI runs too but which write the
-        // taxonomy texts at each `Hit`: of the prefetch only its stop
-        // (`shared::held_batch_prefetch_stop`).
-        let first_xml2 = first_number.is_some_and(|number| matches!(number, 13..=16));
+        let first_prefetches = first_number.is_some()
+            && crate::algorithm::common::database::prefetches_subjects(Some(prefetch_format));
         // The query records that NCBI's scope holds at the prefetch of the batch of the searched
         // queries `span` (`shared::PrefetchQueries`, made only where the batch stops): the PSSM's
         // query of `-in_pssm` (`PsiSearch::query_scope`), else the input records that NCBI's
@@ -2183,20 +2319,24 @@ fn search(
         // its prefetch (`database::prefetch_stop`): as a batch that a database file failed, it is
         // not reported, nor are the batches after it; its error is made after the prefetches of
         // the batches before (below), which look the taxonomy up first.
-        let prefetch_stop = if database.is_some() && (first_prefetches || first_xml2) {
+        let prefetch_stop = if database.is_some() && first_prefetches {
             let spans: Vec<std::ops::Range<usize>> = query_input
                 .batches(batch_size)
                 .into_iter()
                 .map(|batch| batch.searched)
                 .filter(|searched| !searched.is_empty() && searched.end <= results.len())
                 .collect();
-            super::database::prefetch_stop(&titles, &results, &spans, resolved.gapped).filter(
-                |(span, _)| {
-                    failed
-                        .as_ref()
-                        .is_none_or(|(range, _)| span.start < range.start)
-                },
+            super::database::prefetch_stop(
+                &titles,
+                &results,
+                &spans,
+                (prefetch_format, resolved.gapped, pssm.is_some()),
             )
+            .filter(|(span, _)| {
+                failed
+                    .as_ref()
+                    .is_none_or(|(range, _)| span.start < range.start)
+            })
         } else {
             None
         };
@@ -2249,8 +2389,11 @@ fn search(
             .first()
             .and_then(crate::api::local_blast::FormatOutput::report_format)
             == Some(crate::blastinput::app::ReportFormat::Xml);
+        // The record that the report shows (`query_batch::xml_shown_of`).
+        let shown_scopes = batches.query_scopes.as_ref().map(|s| s.numbered_from(0));
         let xml_cut = |query: usize| {
-            queries.get(query).is_some_and(|record| {
+            let shown = crate::blastinput::query_batch::xml_shown_of(shown_scopes, query);
+            queries.get(shown).is_some_and(|record| {
                 crate::report::blast_xml::names::iteration_cut_before_hits(
                     record.local_id.as_bytes(),
                     record.warning_id(),
@@ -2319,6 +2462,7 @@ fn search(
         // `-db`: the reported sequences by rank, with their records and lengths, and their packed
         // subjects where a report reads their letters; the database's other sequences are dropped
         // before the reports.
+        let has_nullb = pssm.is_some() && super::nullb_report::hitlists_have_nullb(&results);
         let reported = match database {
             Some(database) => Some(
                 super::database::reported_subjects(
@@ -2330,12 +2474,15 @@ fn search(
                         outputs,
                         pssm.as_deref(),
                         hard_masked,
+                        has_nullb,
                     ),
                     &outputs.formats,
-                    outputs.other_outfmts,
+                    (outputs.other_outfmts, resolved.html.is_some()),
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,
                     resolved.gapped,
+                    has_nullb,
+                    query_bioseqs.numbered_from(0),
                 )
                 // A read of a reported sequence that
                 // failed: the run's error, as the check's error would be.
@@ -2371,9 +2518,10 @@ fn search(
         // (`TblastnDatabase::prefetch_messages`: the texts of opening it at the run's first
         // lookup, a volume's lookup of a taxid once per run): after the reader's messages of the
         // batch and before the warnings of its first query. They go with the warnings, where the
-        // first format is outfmt 0, 5, 6 or 7, or with `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or
-        // 12, which write the reader's messages only (`database::prefetches_subjects`); XML2 and JSON
-        // write theirs at each `Hit` (`TaxdbPrinter`). They are read here, after the refusals of
+        // first format is outfmt 0 to 7 or 13 to 18 (10 and 20 as 6 and 7), or with
+        // `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or 12, which write the reader's messages only
+        // (`database::prefetches_subjects`); the XML2 and JSON `Hit`s write only the texts of
+        // their own lookups (`shared::RowLookups::Taxids`). They are read here, after the refusals of
         // the reported subjects and before any format is written, so a refusal (a taxonomy
         // database or a taxid that LOSAT cannot read as NCBI does) comes before any byte, as
         // those refusals do; without `taxdb.bti` nothing is read. A failed batch is not reported
@@ -2397,20 +2545,11 @@ fn search(
             // after those messages (`TblastnDatabase::batch_prefetch`), with or without
             // `taxdb.bti`.
             let taxdb_found = database.taxdb_found();
-            let xml2_reads = (reported, &mut subject_reads);
-            let after = super::database::after_throw(&outputs.formats, outputs.other_outfmts);
-            prefetch_posts.extend(reads.xml2(
-                first_xml2,
-                xml2_reads,
-                &results,
-                &batch_spans,
-                after.run(),
-            )?);
-            if first_prefetches && (taxdb_found || database.parsed_seqids()) {
+            if first_prefetches && (taxdb_found || database.parsed_seqids() || has_nullb) {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
-                // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
-                // the taxonomy database before a later batch's prefetch
-                // (`TaxdbRun::open_for_rows`).
+                // taxid 0 too, and the XML2 and JSON `Hit`s each taxid that is not 0, which the
+                // prefetch does not: the rows of a batch with hits may open the taxonomy database
+                // before a later batch's prefetch (`shared::RowLookups`).
                 let first_spec = outputs
                     .formats
                     .first()
@@ -2429,15 +2568,31 @@ fn search(
                 let pairwise = first_report
                     .and_then(crate::report::pairwise::PairwiseView::of)
                     .and(pairwise_reading(&resolved, &outputs.formats));
-                let plural_names = taxdb_found
-                    && first_spec
-                        .as_ref()
-                        .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid);
-                let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList]| {
-                    if plural_names && reported.loads_a_row(hitlists) {
-                        database.open_for_tabular_rows()?;
-                    }
-                    Ok::<(), anyhow::Error>(())
+                let row_lookups = if taxdb_found {
+                    crate::algorithm::common::database::RowLookups::of_first_format(
+                        first_report,
+                        first_spec
+                            .as_ref()
+                            .is_some_and(crate::report::tabular::TabularSpec::looks_up_every_taxid),
+                    )
+                } else {
+                    crate::algorithm::common::database::RowLookups::None
+                };
+                let ends_on_throw = super::database::after_throw(
+                    &outputs.formats,
+                    (outputs.other_outfmts, resolved.html.is_some()),
+                )
+                .run()
+                .is_some_and(|run| {
+                    matches!(
+                        run.after,
+                        crate::report::db_subject::AfterThrow::EndsReport
+                            | crate::report::db_subject::AfterThrow::EndsRun
+                    )
+                });
+                let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList],
+                                 stop_on_throw| {
+                    database.open_for_rows(reported, hitlists, row_lookups, stop_on_throw)
                 };
                 for span in &batch_spans {
                     // No batch after the run's end is prefetched, nor read one by one.
@@ -2459,9 +2614,84 @@ fn search(
                     // lookups are made here before any report is written, so the run's refusal
                     // of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) is asked
                     // only there: a later batch that fetches still refuses before any byte.
-                    if crate::algorithm::common::database::prefetch_off(seq_aligns) {
-                        // No prefetch; no fetch writes without `taxdb.bti` or such a lookup.
+                    // The reports load the batch's subjects one by one where its prefetch is off
+                    // or fails at a subject whose lookup throws on the id (the one answer,
+                    // `shared::BatchPrefetch::loads_one_by_one`): after such a prefetch, its posts
+                    // (below), then the texts of the reads of the loads that it did not make
+                    // (review 1 of line DBID pf7, H1).
+                    let one_by_one = reported.prefetch.loads_one_by_one(span.start);
+                    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
+                    // A batch without Seq-aligns prefetches no sequence.
+                    if !crate::algorithm::common::database::prefetch_off(
+                        prefetch_format,
+                        seq_aligns,
+                    ) && seq_aligns > 0
+                    {
+                        if has_nullb
+                            && super::nullb_report::hitlists_have_empty_subject_row_db(hitlists)
+                        {
+                            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:677-679,778-786
+                            // `s_ExtractSeqidsAndRanges` calls `GetSeqRange` on row 1 before
+                            // `LoadSequencesToScope`, throwing `Row is empty` and posting the
+                            // prefetch warning without loading any subject.
+                            prefetch_posts.push((
+                                span.start,
+                                crate::report::diag_log::Posts::of_lines(
+                                    crate::algorithm::common::database::prefetch_warning("tblastn"),
+                                ),
+                            ));
+                        } else if taxdb_found || database.parsed_seqids() {
+                            let prefetched = |query: usize| {
+                                prefetch_posts
+                                    .iter()
+                                    .find(|(first, _)| *first == query)
+                                    .map(|(_, posts)| posts)
+                            };
+                            let xml_before =
+                                xml_cuts.reports_before(subject_reads.queries(), &prefetched);
+                            let scope = || batch_scope(span);
+                            // The batches before (`results`): what NCBI's data loader loaded for them
+                            // (`super::database::LoadedBefore`), read only where this batch stops; a call
+                            // of the library's batches after the first (`api::run_batches`) has those of
+                            // the calls before unrecorded.
+                            let messages = database.batch_prefetch(
+                                reported,
+                                super::database::LoadedBefore {
+                                    hits: &results[..span.start],
+                                    spans: &batch_spans,
+                                    format: prefetch_format,
+                                    rows: first_rows,
+                                    cuts: xml_cuts,
+                                },
+                                hitlists,
+                                &crate::algorithm::common::database::PrefetchQueries::new(
+                                    span.start, &scope,
+                                )
+                                .after_xml_reports(xml_before.as_ref())
+                                .where_reports_unchanged_by_load_throws(
+                                    crate::report::db_subject::unchanged_by_load_throws_outfmts(
+                                        outputs.formats.iter().map(|format| format.outfmt),
+                                        crate::blastinput::app::Program::Tblastn,
+                                        crate::report::archive::options::RequestKind::Tblastn,
+                                    ),
+                                ),
+                            )?;
+                            // The rows of a batch whose reports load one by one open it with each
+                            // query's reads (below).
+                            if !one_by_one {
+                                rows_open(hitlists, false)?;
+                            }
+                            // After the reader's messages of the batch, in its first query
+                            // (`query_warnings::query_posts`).
+                            if !messages.is_empty() {
+                                prefetch_posts.push((span.start, messages));
+                            }
+                        }
+                    }
+                    if one_by_one {
+                        // No fetch writes without `taxdb.bti` or such a lookup.
                         if !taxdb_found && !database.scope_utf8_seen() {
+                            database.reset_scope();
                             continue;
                         }
                         let rows = first_rows;
@@ -2478,14 +2708,18 @@ fn search(
                                 // The first format writes the texts where it reads each subject
                                 // (`places_subject_reads`), else before the report.
                                 if places_reads {
+                                    let joins_copies = first_report.is_some_and(
+                                        crate::blastinput::app::ReportFormat::joins_adjacent_copies,
+                                    );
                                     subject_reads.set(
                                         query,
                                         database.subject_read_texts(
                                             reported,
                                             shown,
                                             rows,
-                                            plural_names,
+                                            row_lookups,
                                             pairwise,
+                                            (joins_copies, ends_on_throw),
                                         )?,
                                     );
                                 } else {
@@ -2494,55 +2728,12 @@ fn search(
                                     query_warning_lines[query].extend(messages);
                                 }
                             }
-                            rows_open(shown)?;
+                            rows_open(shown, ends_on_throw)?;
                         }
-                        continue;
                     }
-                    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
-                    // A batch without Seq-aligns prefetches no sequence.
-                    if seq_aligns == 0 {
-                        continue;
-                    }
-                    let prefetched = |query: usize| {
-                        prefetch_posts
-                            .iter()
-                            .find(|(first, _)| *first == query)
-                            .map(|(_, posts)| posts)
-                    };
-                    let xml_before = xml_cuts.reports_before(subject_reads.queries(), &prefetched);
-                    let scope = || batch_scope(span);
-                    // The batches before (`results`): what NCBI's data loader loaded for them
-                    // (`super::database::LoadedBefore`), read only where this batch stops; a call
-                    // of the library's batches after the first (`api::run_batches`) has those of
-                    // the calls before unrecorded.
-                    let messages = database.batch_prefetch(
-                        reported,
-                        super::database::LoadedBefore {
-                            hits: &results[..span.start],
-                            spans: &batch_spans,
-                            rows: first_rows,
-                            cuts: xml_cuts,
-                        },
-                        hitlists,
-                        &crate::algorithm::common::database::PrefetchQueries::new(
-                            span.start, &scope,
-                        )
-                        .after_unrecorded_calls(args.first_query_ordinal > 0)
-                        .after_xml_reports(xml_before.as_ref())
-                        .where_reports_unchanged_by_load_throws(
-                            crate::report::db_subject::unchanged_by_load_throws_outfmts(
-                                outputs.formats.iter().map(|format| format.outfmt),
-                                crate::blastinput::app::Program::Tblastn,
-                                crate::report::archive::options::RequestKind::Tblastn,
-                            ),
-                        ),
-                    )?;
-                    rows_open(hitlists)?;
-                    // After the reader's messages of the batch, in its first query
-                    // (`query_warnings::query_posts`).
-                    if !messages.is_empty() {
-                        prefetch_posts.push((span.start, messages));
-                    }
+                    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+                    database.reset_scope();
                 }
             }
         }
@@ -2564,16 +2755,15 @@ fn search(
                 super::database::LoadedBefore {
                     hits: &results,
                     spans: &batch_spans,
+                    format: prefetch_format,
                     rows: first_rows,
                     cuts: xml_cuts,
                 },
                 &subjects,
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
-                    .after_unrecorded_calls(args.first_query_ordinal > 0)
                     .after_xml_reports(xml_before.as_ref()),
-                first_xml2,
             );
-            match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+            match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
                 Ok(failure) => failed = Some((span, failure.error)),
                 Err(error) => return Err(error),
             }
@@ -2626,6 +2816,7 @@ fn search(
                 .query_range
                 .as_ref()
                 .map(crate::blastinput::seq_range::SequenceRange::length),
+            ungapped: args.ungapped,
             html: resolved.html.clone(),
             is_html: args.html,
         };
@@ -2668,6 +2859,7 @@ fn search(
                     reported,
                     oids: database.oid_map(),
                     hard_masked,
+                    seen: query_bioseqs.numbered_from(0),
                 },
             ),
             _ => (
@@ -2696,7 +2888,13 @@ fn search(
             args.strategy
                 .as_ref()
                 .map_or_else(Vec::new, |strategy| strategy.take_posts(queries.len())),
-            prefetch_posts,
+            // The posts of the titles that the batches' Seq-aligns read come before their
+            // prefetches' (a stable sort by the batch's first query).
+            reads
+                .take_title_posts()
+                .into_iter()
+                .chain(prefetch_posts)
+                .collect(),
             |query| batches.warnings[query].len(),
             reads.header_read(queries.len()),
         );
@@ -2737,6 +2935,7 @@ fn search(
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:342
                 // A run that stops at a query batch writes no epilog.
                 epilog: batches.stop.is_none() && failed.is_none(),
+                query_scopes: batches.query_scopes.as_ref(),
             },
             super::blast_xml::XmlValues {
                 expect: resolved.evalue,
@@ -2751,6 +2950,7 @@ fn search(
                 db_gencode: i32::from(resolved.db_gencode),
                 identity_warned,
                 filtered_empty,
+                pssm: pssm.is_some(),
             },
             xml_taxa,
             args.out.as_deref(),

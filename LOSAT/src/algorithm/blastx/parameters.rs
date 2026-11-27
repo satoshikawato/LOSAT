@@ -1,5 +1,8 @@
 //! BLASTX score-block and preliminary parameter setup, using Rust calculations.
-use super::{args::ResolvedOptions, query_setup::PreparedQueryBatch};
+use super::{
+    args::ResolvedOptions,
+    query_setup::{PreparedQueryBatch, QueryContext},
+};
 use crate::algorithm::tblastx::ncbi_cutoffs::{
     cutoff_score_from_evalue, cutoff_score_sum_stats, gap_trigger_raw_score, x_drop_raw_score,
 };
@@ -57,11 +60,40 @@ pub fn score_block_for(
     batch: &PreparedQueryBatch,
     matrix: ScoringMatrix,
 ) -> Vec<ContextParameters> {
+    score_block_for_in(batch, matrix, false)
+}
+
+/// `score_block_for`; with `on_pool` (a reader batch searched whole, which is left the threads of
+/// its places, `search::x_bx_mem::whole_batch_threads`) the contexts' blocks are computed on the
+/// pool this thread runs on. Each block reads its own context alone, and the blocks are collected
+/// in context order, so the values and their order are those of the loop. No NCBI counterpart of
+/// its own (scheduling only): NCBI fills the contexts' blocks one after another in this loop.
+pub(crate) fn score_block_for_in(
+    batch: &PreparedQueryBatch,
+    matrix: ScoringMatrix,
+    on_pool: bool,
+) -> Vec<ContextParameters> {
     if matrix == ScoringMatrix::Blosum62 {
-        score_block(batch)
+        score_block_in(batch, on_pool)
     } else {
-        score_block_of(batch, matrix)
+        score_block_of(batch, matrix, on_pool)
     }
+}
+
+/// No NCBI counterpart (scheduling only): `block` of each context of `batch`, in context order;
+/// on the pool this thread runs on where `on_pool` (`score_block_for_in`).
+fn context_blocks(
+    batch: &PreparedQueryBatch,
+    on_pool: bool,
+    block: impl Fn(&QueryContext) -> ContextParameters + Sync + Send,
+) -> Vec<ContextParameters> {
+    #[cfg(feature = "parallel")]
+    if on_pool {
+        use rayon::prelude::*;
+        return batch.contexts.par_iter().map(block).collect();
+    }
+    let _ = on_pool;
+    batch.contexts.iter().map(block).collect()
 }
 
 /// `score_block` with another matrix than BLOSUM62: the contexts' score profiles over the
@@ -70,7 +102,11 @@ pub fn score_block_for(
 /// Not inlined, so that BLOSUM62's `score_block` keeps its code.
 #[cold]
 #[inline(never)]
-fn score_block_of(batch: &PreparedQueryBatch, matrix: ScoringMatrix) -> Vec<ContextParameters> {
+fn score_block_of(
+    batch: &PreparedQueryBatch,
+    matrix: ScoringMatrix,
+    on_pool: bool,
+) -> Vec<ContextParameters> {
     use crate::algorithm::tblastx::lookup::{ideal_karlin_params_of, matrix_score_bounds};
     let std = compute_std_aa_composition();
     let ideal = ideal_karlin_params_of(matrix);
@@ -80,69 +116,66 @@ fn score_block_of(batch: &PreparedQueryBatch, matrix: ScoringMatrix) -> Vec<Cont
     // The matrix's ungapped row (BLOSUM62's are the computed block's defaults), as TBLASTX's
     // contexts take them (`tblastx/blast_engine/run_impl.rs`).
     let row = crate::stats::tables::lookup_protein_params_ungapped(matrix);
-    batch
-        .contexts
-        .iter()
-        .map(|c| {
-            let mut seq = vec![0];
-            seq.extend_from_slice(&batch.sequence_start[1 + c.offset..1 + c.offset + c.length]);
-            seq.push(0);
-            let comp = compute_aa_composition(&seq, c.length);
-            let profile = compute_score_freq_profile_for_matrix(&comp, &std, low, high, matrix);
-            let ka = compute_karlin_params_ungapped(&profile).ok().map(|p| {
-                let mut ka = apply_check_ideal(p, ideal);
-                ka.alpha = row.alpha;
-                ka.beta = row.beta;
-                ka
-            });
-            ContextParameters {
-                valid: c.is_valid && ka.is_some(),
-                ungapped: ka.unwrap_or_default(),
-                search_space: 0,
-                length_adjustment: 0,
-                word_cutoff: i32::MAX,
-                word_xdrop_init: 0,
-                word_xdrop: 0,
-                hit_cutoff: i32::MAX,
-                hit_cutoff_max: 0,
-            }
-        })
-        .collect()
+    context_blocks(batch, on_pool, |c| {
+        let mut seq = vec![0];
+        seq.extend_from_slice(&batch.sequence_start[1 + c.offset..1 + c.offset + c.length]);
+        seq.push(0);
+        let comp = compute_aa_composition(&seq, c.length);
+        let profile = compute_score_freq_profile_for_matrix(&comp, &std, low, high, matrix);
+        let ka = compute_karlin_params_ungapped(&profile).ok().map(|p| {
+            let mut ka = apply_check_ideal(p, ideal);
+            ka.alpha = row.alpha;
+            ka.beta = row.beta;
+            ka
+        });
+        ContextParameters {
+            valid: c.is_valid && ka.is_some(),
+            ungapped: ka.unwrap_or_default(),
+            search_space: 0,
+            length_adjustment: 0,
+            word_cutoff: i32::MAX,
+            word_xdrop_init: 0,
+            word_xdrop: 0,
+            hit_cutoff: i32::MAX,
+            hit_cutoff_max: 0,
+        }
+    })
 }
 
 pub fn score_block(batch: &PreparedQueryBatch) -> Vec<ContextParameters> {
+    score_block_in(batch, false)
+}
+
+/// `score_block`, on the pool where `on_pool` (`score_block_for_in`).
+fn score_block_in(batch: &PreparedQueryBatch, on_pool: bool) -> Vec<ContextParameters> {
     let std = compute_std_aa_composition();
     let ideal = if ka_once_on() {
         ideal_block()
     } else {
         ideal_block_computed(&std)
     };
-    batch
-        .contexts
-        .iter()
-        .map(|c| {
-            let mut seq = vec![0];
-            seq.extend_from_slice(&batch.sequence_start[1 + c.offset..1 + c.offset + c.length]);
-            seq.push(0);
-            let comp = compute_aa_composition(&seq, c.length);
-            let profile =
-                compute_score_freq_profile_for_matrix(&comp, &std, -4, 11, ScoringMatrix::Blosum62);
-            let ka = compute_karlin_params_ungapped(&profile)
-                .ok()
-                .map(|p| apply_check_ideal(p, ideal));
-            ContextParameters {
-                valid: c.is_valid && ka.is_some(),
-                ungapped: ka.unwrap_or_default(),
-                search_space: 0,
-                length_adjustment: 0,
-                word_cutoff: i32::MAX,
-                word_xdrop_init: 0,
-                word_xdrop: 0,
-                hit_cutoff: i32::MAX,
-                hit_cutoff_max: 0,
-            }
-        })
-        .collect()
+    context_blocks(batch, on_pool, |c| {
+        let mut seq = vec![0];
+        seq.extend_from_slice(&batch.sequence_start[1 + c.offset..1 + c.offset + c.length]);
+        seq.push(0);
+        let comp = compute_aa_composition(&seq, c.length);
+        let profile =
+            compute_score_freq_profile_for_matrix(&comp, &std, -4, 11, ScoringMatrix::Blosum62);
+        let ka = compute_karlin_params_ungapped(&profile)
+            .ok()
+            .map(|p| apply_check_ideal(p, ideal));
+        ContextParameters {
+            valid: c.is_valid && ka.is_some(),
+            ungapped: ka.unwrap_or_default(),
+            search_space: 0,
+            length_adjustment: 0,
+            word_cutoff: i32::MAX,
+            word_xdrop_init: 0,
+            word_xdrop: 0,
+            hit_cutoff: i32::MAX,
+            hit_cutoff_max: 0,
+        }
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:913-920
@@ -272,8 +305,9 @@ pub struct SubjectNumbers {
     /// negative for an alias file's `LENGTH` of 0 or of 2^63 or more), a FASTA set's total.
     pub gumbel_total: i64,
     /// `BlastSeqSrcGetMinSeqLen` (blast_setup.c:969-973): a database's `GetMinLength`
-    /// (`SeqDb::min_length`), a FASTA set's shortest record raised to `BLAST_SEQSRC_MINLENGTH`.
-    pub shortest: usize,
+    /// (`SeqDb::min_length`, signed 32-bit `Int4`), a FASTA set's shortest record raised to
+    /// `BLAST_SEQSRC_MINLENGTH`.
+    pub shortest: i32,
     /// `BlastSeqSrcGetAvgSeqLen` (blast_engine.c:1372-1374, the word parameters): a database's
     /// `GetTotalLength` divided by the larger of 1 and `GetNumSeqs` (`SeqDb::average_length`, no `STATS_*` key), a
     /// FASTA set's total over its records.
@@ -291,7 +325,8 @@ impl SubjectNumbers {
             total: length as i64,
             count: 1,
             gumbel_total: length as i64,
-            shortest: length.max(super::subjects::BLAST_SEQSRC_MINLENGTH),
+            shortest: i32::try_from(length.max(super::subjects::BLAST_SEQSRC_MINLENGTH))
+                .unwrap_or(i32::MAX),
             average: length as i32,
             request_count: 1,
         }
@@ -334,7 +369,7 @@ pub fn subject_parameters(
     let Some(n) = crate::stats::setup::setup_subject_length(
         db_length,
         db_count,
-        gumbel_block_used.then_some((i32::try_from(shortest).unwrap_or(i32::MAX), false)),
+        gumbel_block_used.then_some((shortest, false)),
     ) else {
         bail!(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT);
     };

@@ -15,7 +15,7 @@ use crate::seqid::rank::{find_best, text_score};
 
 /// The `-html` links of a run (`PairwiseConfig::html` holds them through `HtmlReport`): NCBI's
 /// formatter registry (`CAlignFormatUtil::InitConfig`, `m_Reg`, `m_Protocol`: statics, one per
-/// run), read once at the program's setup and only with `-html` and outfmt 0, whose ids link
+/// run), read once at the program's setup and only with `-html` and outfmt 0 to 4, whose ids link
 /// (`blastinput::app::html_links`, so that LOSAT's refusal of the file comes before the first
 /// byte; outfmt 18 takes no links); the `-db` text as NCBI keeps
 /// it (`CBlastFormat::m_DbName`, `NStr::TruncateSpaces` of `-db`; empty for `-subject`), the
@@ -98,8 +98,9 @@ impl HtmlReport {
     /// record `lcl|Subject_<s_idx + 1>`. A row of NCBI's `catch` (`caught`: the title of its
     /// subject or its load throws, `pairwise::DescriptionLabel::caught`) links the Bioseq's ids
     /// with the label of the Seq-align id as the accession, its GI and taxid 0, and has no score
-    /// link. The link calls `InitConfig` (`id_url`, which adds its `HtmlPost` to `posts`); the
-    /// registry's exception is the error.
+    /// link; the row of a subject whose Bioseq the scope does not get
+    /// (`ParsedSubject::scope_finds_none`) has no links. The link calls `InitConfig` (`id_url`,
+    /// which adds its `HtmlPost` to `posts`); the registry's exception is the error.
     pub(crate) fn description_links(
         &self,
         parsed: Option<&ParsedSubject>,
@@ -110,6 +111,9 @@ impl HtmlReport {
     ) -> io::Result<(Vec<u8>, Vec<u8>)> {
         let own;
         let (ids, display, gi, taxid) = match parsed {
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:388-394
+            // An empty Bioseq handle leaves the row without links.
+            Some(subject) if subject.scope_finds_none() => return Ok((Vec::new(), Vec::new())),
             Some(subject) if caught => {
                 let id = subject.alignment_id();
                 (subject.bioseq_ids(), id, id.gi().unwrap_or(0), 0)

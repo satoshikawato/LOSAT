@@ -202,7 +202,7 @@ pub(crate) fn read_to_failure(input: &mut impl std::io::Read) -> Vec<u8> {
 /// open gets NCBI's error (`crate::cli::inaccessible`), and a file named `.gz`, `.bz2` or `.zst`
 /// (`compressed::compression_of_name`) is inflated into an unnamed temporary file first, which is
 /// returned in its place: the program then reads it exactly as it reads the plain file (the same
-/// lines and messages, the same readable-byte hint of `FastaStream::from_file`, the same second
+/// lines and messages, the same readable-byte hint of `fasta_reader::stream::FastaStream::from_file`, the same second
 /// handle of blastn's query stream and second reads of BLASTX's query), while the decoder holds
 /// its window. Concatenated members, streams and frames (bgzip, pbzip2, pzstd, `cat a.gz b.gz`)
 /// are read whole, and a `.gz` file as makeblastdb reads it (`compressed::GzipMembers`: a member's
@@ -268,7 +268,7 @@ fn inflation_directories(path: &std::path::Path) -> impl Iterator<Item = std::pa
 
 /// The directory of temporary files: `temp_dir()`.
 #[cfg(not(target_os = "wasi"))]
-fn temporary_directory() -> Option<std::path::PathBuf> {
+pub(crate) fn temporary_directory() -> Option<std::path::PathBuf> {
     #[allow(clippy::disallowed_methods)] // not WASI: `temp_dir()` is only called off WASI
     Some(std::env::temp_dir())
 }
@@ -277,7 +277,7 @@ fn temporary_directory() -> Option<std::path::PathBuf> {
 /// `library/std/src/sys/pal/wasip1/os.rs:119` of 1.92), where a host gives a module directories
 /// only by its preopens. The WASI command puts the inflated copy beside the input or refuses it.
 #[cfg(target_os = "wasi")]
-fn temporary_directory() -> Option<std::path::PathBuf> {
+pub(crate) fn temporary_directory() -> Option<std::path::PathBuf> {
     None
 }
 
@@ -319,11 +319,30 @@ fn inflate_to_temporary_file(
     Ok(temporary)
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:398-399,436-438
+/// The bytes `text` as an input file, positioned at its start: an unnamed temporary file
+/// (`unnamed_temporary_file`) in the directory of temporary files (NCBI's `CTmpFile`, whose
+/// file the run reads as its query), or the current directory where there is none (WASI).
+pub(crate) fn temporary_input(role: &str, text: &[u8]) -> std::io::Result<std::fs::File> {
+    use std::io::{Seek, Write};
+    let mut temporary = temporary_output(role)?;
+    temporary.write_all(text)?;
+    temporary.seek(std::io::SeekFrom::Start(0))?;
+    Ok(temporary)
+}
+
+/// An empty unnamed temporary file in the directory of [`temporary_input`], for a text that is
+/// written to it a part at a time.
+pub(crate) fn temporary_output(role: &str) -> std::io::Result<std::fs::File> {
+    let directory = temporary_directory().unwrap_or_else(|| std::path::PathBuf::from("."));
+    unnamed_temporary_file(&directory, role)
+}
+
 /// A new, empty file in `directory` that no name reaches: on Unix and WASI its name is removed
 /// as soon as it is open, on Windows it is hidden and deleted when its last handle closes
 /// (`FILE_FLAG_DELETE_ON_CLOSE`, shared for reading, writing and deletion so that `try_clone`
 /// and a second `open` of the handle keep working). It is readable and writable.
-fn unnamed_temporary_file(
+pub(crate) fn unnamed_temporary_file(
     directory: &std::path::Path,
     role: &str,
 ) -> std::io::Result<std::fs::File> {
@@ -449,23 +468,6 @@ pub fn has_stream_position(file: &std::fs::File) -> bool {
     {
         std::io::Seek::stream_position(&mut &*file).is_ok()
     }
-}
-
-/// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
-/// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
-///
-/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:903-911
-/// NCBI takes a file name as bytes: it writes the `-subject` name into the outfmt 0 and 7
-/// reports (`Database: User specified sequence set (Input: ...)`) and every name into its
-/// error messages as they are, which LOSAT's UTF-8 strings do not reproduce (plan DW-13).
-pub fn check_utf8_file_name(path: &std::path::Path, role: &str, program: &str) -> Result<()> {
-    if path.to_str().is_none() {
-        anyhow::bail!(
-            "the -{role} file name {:?} is not UTF-8; NCBI BLAST+ writes the bytes of file names as they are, which is not supported by LOSAT's {program}",
-            path.to_string_lossy()
-        );
-    }
-    Ok(())
 }
 
 /// NCBI's warning for a subject without residues, which it skips when it sets up the

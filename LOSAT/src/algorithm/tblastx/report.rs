@@ -1078,19 +1078,14 @@ impl<'a> PairwiseRows<'a> {
             positives: Some(positives),
             gaps: Some(0),
             subject_length: Some(subject_length),
-            // The title after its first word, as BLASTN's; the reports take the subject's
-            // title bytes by subject index (`write_tblastx_pairwise_report`).
-            subject_title: subject
-                .title
-                .iter()
-                .position(|&byte| byte == b' ')
-                .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
+            subject_title: crate::blastinput::fasta_reader::hit_subject_title(&subject.title),
             comp_adjust_method: None,
             sum_n: Some(hsp.num),
             subject_stored_gaps: Vec::new(),
             query_stored_gaps: Vec::new(),
             query_case: Default::default(),
             seqalign_num_ident: seqalign_num_ident.map_or(hsp.hit.num_ident, |n| n as usize),
+            edge: crate::report::pairwise::PairwiseEdge::Normal,
         }
     }
 }
@@ -1142,14 +1137,16 @@ pub(crate) fn shift_to_records(
 pub(crate) fn write_outfmt7_query_header<W: Write>(
     writer: &mut W,
     query_title: &[u8],
-    database: &str,
+    database: &[u8],
     num_hits: Option<usize>,
 ) -> io::Result<()> {
     writeln!(writer, "# TBLASTX {}", crate::wording::REPORT_VERSION)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
     // The title's bytes (`write_outfmt7_query_line`).
     crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
-    writeln!(writer, "# Database: {database}")?;
+    writer.write_all(b"# Database: ")?;
+    writer.write_all(database)?;
+    writer.write_all(b"\n")?;
     let Some(num_hits) = num_hits else {
         return Ok(());
     };
@@ -1168,12 +1165,12 @@ pub(crate) fn write_outfmt7_query_header<W: Write>(
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn write_tabular<W: Write>(
+pub(crate) fn write_tabular<W: crate::report::ostream::ReportWrite>(
     hits: &[TblastxHsp],
     writer: &mut W,
     comments: bool,
     query_titles: &[&[u8]],
-    database: &str,
+    database: &[u8],
     query_ids: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     loads: &crate::report::db_subject::HitLoads,
@@ -1244,6 +1241,8 @@ pub(crate) fn write_tabular<W: Write>(
                 probe.end(hsp_index);
             }
         }
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1322-1325
@@ -1253,6 +1252,8 @@ pub(crate) fn write_tabular<W: Write>(
             "# BLAST processed {} queries",
             queries_before + query_titles.len()
         )?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -1315,7 +1316,11 @@ pub(crate) enum TblastxOutputFormat {
     Xml2(crate::report::blast_xml2::Xml2Kind),
     /// The BLAST archive (outfmt 11, `tblastx/archive.rs`): one document per query batch.
     Archive,
-    /// A value that TBLASTX does not write (17, and a value that NCBI cannot read), which the
+    /// SAM (outfmt 17, `tblastx/sam.rs`), which only BLASTN's application writes: a TBLASTX search
+    /// strategy that it runs (a TBLASTX run itself fails at its formatting handler, `app::
+    /// formatting_handler_check`). The document is written at the end of the run.
+    Sam(crate::report::sam::SamSpec),
+    /// A value that TBLASTX does not write (a value that NCBI cannot read), which the
     /// command line, the library and LOSAT Web refuse before the search
     /// (`ReportFormat::writes`, `app::report_format`): its writer refuses it, no report is
     /// written for it.
@@ -1357,6 +1362,21 @@ impl TblastxOutputFormat {
         }
     }
 
+    /// Whether the report shows NCBI's bytes for a reported sequence that the scope finds as a
+    /// query of its batch (`report::query_bioseq`): a table that reads no letter of the found
+    /// Bioseq and the organism report (`query_bioseq::tabular_shows`), the Seq-annots and the
+    /// archive (which write the Seq-align id alone).
+    pub(crate) fn shows_query_bioseqs(self) -> bool {
+        use crate::report::query_bioseq::tabular_shows;
+        let program = crate::blastinput::app::Program::Tblastx;
+        match self {
+            Self::Seqalign(_) | Self::Archive => true,
+            Self::Tabular | Self::TabularWithComments => tabular_shows(None, program),
+            Self::CustomTabular(spec) => tabular_shows(Some(spec), program),
+            _ => false,
+        }
+    }
+
     /// Whether the format writes the displayed identity counts of the rows
     /// (`set_displayed_identities`): not the structured formats, which read the engine's counts
     /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5, 15, 16), and not the
@@ -1368,9 +1388,34 @@ impl TblastxOutputFormat {
                 | Self::Xml
                 | Self::Xml2(_)
                 | Self::Archive
+                | Self::Sam(_)
                 | Self::CustomTabular(_)
                 | Self::Unsupported
         )
+    }
+
+    /// The `-outfmt` format of the report (`ReportFormat`), or `None` for `Unsupported`.
+    pub(crate) fn report_format(self) -> Option<crate::blastinput::app::ReportFormat> {
+        use crate::blastinput::app::ReportFormat;
+        use crate::report::tabular::TabularKind;
+        match self {
+            Self::Pairwise(view) => ReportFormat::from_number(view.outfmt()),
+            Self::Tabular => Some(ReportFormat::Tabular),
+            Self::TabularWithComments => Some(ReportFormat::TabularWithComments),
+            Self::CustomTabular(spec) => Some(match spec.kind {
+                TabularKind::Tabular => ReportFormat::Tabular,
+                TabularKind::Commented => ReportFormat::TabularWithComments,
+                TabularKind::Csv => ReportFormat::CommaSeparatedValues,
+                TabularKind::CsvWithHeader => ReportFormat::CommaSeparatedValuesWithHeader,
+                TabularKind::TaxReport => ReportFormat::TaxFormat,
+            }),
+            Self::Seqalign(serial) => ReportFormat::from_number(serial.outfmt()),
+            Self::Xml => Some(ReportFormat::Xml),
+            Self::Xml2(kind) => Some(kind.report_format()),
+            Self::Archive => Some(ReportFormat::ArchiveFormat),
+            Self::Sam(_) => Some(ReportFormat::Sam),
+            Self::Unsupported => None,
+        }
     }
 
     /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which
@@ -1407,30 +1452,44 @@ impl TblastxOutputFormat {
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
-    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7, 10 and 20; with
-    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
-    /// the call's first report, the taxonomy database's messages of that prefetch go with the
-    /// query warnings.
+    /// reports (outfmt 0 to 7 and 13 to 18, 10 and 20 as 6 and 7; with
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as the
+    /// call's first report, the posts of that prefetch go with the query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
-        crate::algorithm::common::database::prefetches_subjects(match self {
-            // `s_IsPrefetchFormat` takes 1 to 4 as 0 (DECISIONS T3-4).
-            Self::Pairwise(view) => Some(view.outfmt()),
-            Self::Xml => Some(5),
-            Self::Tabular => Some(6),
-            Self::TabularWithComments => Some(7),
-            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
-            // they read the subjects as 6 and 7 do, and show no taxonomy name that the prefetch
-            // would look up (`report::tabular` writes `N/A`; a name of the taxonomy database is
-            // LOSAT's refusal, `tabular`).
-            Self::CustomTabular(spec) => Some(match spec.kind {
-                crate::report::tabular::TabularKind::Commented => 7,
-                _ => 6,
-            }),
-            Self::Seqalign(serial) => Some(serial.outfmt()),
-            // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
-            // (`TaxdbPrinter`).
-            Self::Archive | Self::Xml2(_) | Self::Unsupported => None,
-        })
+        // The archive fetches nothing; the XML2 and JSON `Hit`s write only the texts of their own
+        // lookups (`database::RowLookups::Taxids`).
+        crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format()))
+    }
+
+    /// The format as the first format of a TBLASTX run that NCBI's prefetch of each query batch
+    /// asks (`common::database::PrefetchFormat`, the one owner of whether a batch prefetches).
+    pub(crate) fn prefetch_format(self) -> crate::algorithm::common::database::PrefetchFormat {
+        use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, END_VALUE, JSON, SAM, XML};
+        crate::algorithm::common::database::PrefetchFormat::of(
+            match self {
+                // `s_IsPrefetchFormat` takes 1 to 4 as 0 (DECISIONS T3-4).
+                Self::Pairwise(view) => view.outfmt(),
+                Self::Xml => XML,
+                Self::Tabular => 6,
+                Self::TabularWithComments => 7,
+                // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and
+                // 20): they read the subjects as 6 and 7 do, and show no taxonomy name that the
+                // prefetch would look up (`report::tabular` writes `N/A`; a name of the taxonomy
+                // database is LOSAT's refusal, `tabular`).
+                Self::CustomTabular(spec) => match spec.kind {
+                    crate::report::tabular::TabularKind::Commented => 7,
+                    _ => 6,
+                },
+                Self::Seqalign(serial) => serial.outfmt(),
+                Self::Sam(_) => SAM,
+                // The XML2 and JSON documents prefetch as each of 13 to 16 does.
+                Self::Xml2(_) => JSON,
+                Self::Archive => ARCHIVE_FORMAT,
+                // Refused before the search: no report, no prefetch.
+                Self::Unsupported => END_VALUE,
+            },
+            crate::report::archive::options::RequestKind::Tblastx,
+        )
     }
 }
 
@@ -1443,8 +1502,14 @@ impl TblastxOutputFormat {
 /// fields with a tab) are `Tabular` and `TabularWithComments`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
-pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
+pub(crate) fn output_format(outfmt: impl AsRef<[u8]>) -> TblastxOutputFormat {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt);
+    // SAM reads its custom specification (`SQ`, `SR`) and ignores a delimiter.
+    if let Ok(choice) = &choice {
+        if choice.number == crate::blastinput::app::output_format::SAM {
+            return TblastxOutputFormat::Sam(crate::report::sam::SamSpec::parse(&choice.spec));
+        }
+    }
     // Only a value with a custom specification, or outfmt 10 or 20, reads the field list;
     // outfmt 18 (the organism report) is written from the same hit list.
     if let Ok(choice) = &choice {
@@ -1546,8 +1611,9 @@ impl HitFilters<'_> {
     /// and the coverage, which the preliminary reap already applied to these HSPs): the contexts
     /// are the query's frames. The best e-value is not set again, as NCBI's is not. Every HSP here
     /// has a positive length (the one-hit word finder's HSPs of length 0 or less are dropped
-    /// before the re-evaluation, as NCBI's re-evaluation deletes them:
-    /// `link_one_hit_with_int4_ends`), so the `usize` offsets are NCBI's `Int4` ones.
+    /// before the re-evaluation, after its fetch of the subject, as NCBI's re-evaluation deletes
+    /// them: `subject_link::drop_unread_int4_inverted`), so the `usize` offsets are NCBI's `Int4`
+    /// ones.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:858-861
     pub(super) fn subject_besthit(&self, hsps: &mut Vec<TblastxHsp>) {

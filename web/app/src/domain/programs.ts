@@ -1,4 +1,5 @@
 import { PROGRAM_INPUTS, WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type FastaParserKind, type InputRole, type PrintedKind, type ProgramId, type SequenceKind } from 'losat/domain';
+import { FILTERING_DB_FLAG } from './blast-db';
 // Program descriptors: the only place that lists what differs between programs in the UI
 // (plan §2.1 "O"). A descriptor says which engine options the search form shows, in which
 // section, where on the screen and under which label; the sections and labels are those of
@@ -29,13 +30,21 @@ import { PROGRAM_INPUTS, WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG, type Fast
  *   the row of its `file` field and not as a field of its own. The value is `true` while the
  *   box is checked and the ID is not typed (the argv writes nothing, and the search cannot start),
  *   and the ID as typed once it is.
+ * - `database`: an option whose value is a local BLAST database chosen from a folder or files
+ *   (BLASTN's `-filtering_db` repeats database). The value is `true` while enabled with no
+ *   matching database chosen (nothing written to argv, and the search cannot start), and the
+ *   database path once chosen.
+ * - `file-text`: a tool option whose value is a file name typed in a text box or picked with
+ *   "Choose file…" (`-ids`, `-exclude_ids`).
  */
-export type FieldKind = 'text' | 'choice' | 'radio' | 'boolean' | 'flag' | 'gencode' | 'filter' | 'file' | 'taxid';
+export type FieldKind = 'text' | 'choice' | 'radio' | 'boolean' | 'flag' | 'gencode' | 'filter' | 'file' | 'taxid' | 'database' | 'file-text';
 
 export interface ParameterField {
   readonly flag: string;
   readonly label: string;
   readonly kind: FieldKind;
+  /** For `boolean` fields: show as a select with NCBI's default spelling (`F`, `T`, `false`), writing `true`/`false`, instead of a checkbox. */
+  readonly select?: true;
   /** For `choice` and `radio` fields whose choices `describe` gives only in its help text. */
   readonly choices?: readonly string[];
   /** Names shown for choices (NCBI's words); the value written is the choice itself. */
@@ -55,6 +64,8 @@ export interface ParameterField {
    * ID instead (its flag, and the sentence that asks for the ID).
    */
   readonly file?: { readonly label: string; readonly missing: string; readonly taxid?: { readonly flag: string; readonly missing: string } };
+  /** For `database` fields (BLASTN `-filtering_db`): required molecule type and prompt when none is chosen. */
+  readonly database?: { readonly kind: SequenceKind; readonly missing: string };
   /**
    * The name of a row that shows this field with its neighbours of the same row (NCBI's
    * "Match/Mismatch Scores", "Gap Costs", "Filter" and "Mask").
@@ -269,6 +280,13 @@ const windowMaskerTaxid: ParameterField = {
   row: 'Filter',
   inputMode: 'numeric',
 };
+const filteringDb: ParameterField = {
+  flag: FILTERING_DB_FLAG,
+  label: 'Repeats database',
+  kind: 'database',
+  database: { kind: 'nucleotide', missing: 'Choose a repeats database folder or files.' },
+  hint: 'Local nucleotide BLAST database of repeats for query masking',
+};
 const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag', row: 'Mask' };
 // Other Parameters: LOSAT's options that NCBI's page does not show.
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
@@ -394,6 +412,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           { flag: '-dust', label: 'Low complexity regions', kind: 'filter', row: 'Filter' },
           windowMasker,
           windowMaskerTaxid,
+          filteringDb,
           softMasking,
           lcaseMasking,
         ],
@@ -404,10 +423,10 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         shownFor: { flag: '-task', values: ['dc-megablast'] },
         // BLAST+ requires the two together; dc-megablast's template is 18, coding.
         together: { '-template_length': '18', '-template_type': 'coding' },
-        // `describe` lists the template values only in its help text.
+        // `describe` lists the template values (NCBI's reader's sets).
         fields: [
-          { flag: '-template_length', label: 'Template length', kind: 'choice', choices: ['16', '18', '21'] },
-          { flag: '-template_type', label: 'Template type', kind: 'choice', choices: ['coding', 'optimal', 'coding_and_optimal'] },
+          { flag: '-template_length', label: 'Template length', kind: 'choice' },
+          { flag: '-template_type', label: 'Template type', kind: 'choice' },
         ],
       },
       {
@@ -680,13 +699,20 @@ export function printSummaryParts(
 export function searchSummaryParts(
   program: ProgramDescriptor,
   task: string | undefined,
+  database?: { readonly name?: string },
 ): ReadonlyArray<{ readonly text: string; readonly strong?: true }> {
   const query = program.queryNote === undefined ? '' : ` (${program.queryNote})`;
   const note = task === undefined ? undefined : program.taskNotes?.[task];
   const taskText = task === undefined ? '' : `, task ${task}${note === undefined ? '' : ` (${note})`}`;
+  const target =
+    database === undefined
+      ? program.searches
+      : database.name !== undefined && database.name !== ''
+        ? `database ${database.name}`
+        : `${program.subject} database`;
   return [
     { text: 'Search ' },
-    { text: program.searches, strong: true },
+    { text: target, strong: true },
     { text: ' with ' },
     { text: `${program.label}${query}${taskText}`, strong: true },
     { text: '.' },

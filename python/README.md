@@ -44,11 +44,11 @@ For development, `maturin develop` builds the extension into the active virtual 
 
 ## Programs
 
-`pylosat.PROGRAMS` names the search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` are functions of their own (below). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the command line.
+`pylosat.PROGRAMS` names the search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter` are functions of their own (below). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the command line.
 
 ## Options
 
-`Search` takes the program and the command line's options, each as a keyword without its dash: `evalue=1e-5` is `-evalue 1e-5`, and `ungapped=True` is `-ungapped`. `pylosat.describe("blastn")` lists them from the engine's own table, and the type stubs list them by program. `Search.from_argv("blastn", ["-evalue", "1e-5"])` takes the words themselves. An unknown keyword, or a value of the wrong Python type, raises `TypeError`; the command line's parser checks the rest, so an option means, and fails, as it does there (`ArgumentError`).
+`Search` takes the program and the command line's options, each as a keyword without its dash: `evalue=1e-5` is `-evalue 1e-5`, and `ungapped=True` is `-ungapped`. `pylosat.describe("blastn")` lists them from the engine's own table, and the type stubs list them by program. `Search.from_argv("blastn", ["-evalue", "1e-5"])` takes the words themselves. An unknown keyword, or a value of the wrong Python type, raises `TypeError`; the command line's argument reader (NCBI's) checks the rest, so an option means, and fails, as it does there (`ArgumentError`, with the command line's own error text).
 
 `-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and `-outfmt` are not options here: the inputs and the formats are arguments of `run`. psiblast runs its rounds (`num_iterations`) as on the command line, and its `-out_pssm` and `-out_ascii_pssm` (with `-save_pssm_after_last_round` and `-save_each_pssm`) write the command line's PSSM files under their names.
 
@@ -107,9 +107,10 @@ print(pylosat.dustmasker("-outfmt", "fasta", input=nucleotide_fasta).text)
 print(pylosat.segmasker("-outfmt", "fasta", input=protein_fasta).text)
 print(pylosat.convert2blastmask("-masking_algorithm", "other", "-masking_options", "mine",
                                 input=lowercase_masked_fasta).text)
+print(pylosat.blast_formatter("-archive", "results.asn", "-outfmt", "8").text)
 ```
 
-`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`bytes`, `text`) and to standard error (`diagnostics_bytes`, `diagnostics`). `input` is what the command line reads as standard input, so a database can be built from FASTA in memory (with `-title`, which makeblastdb needs for standard input), ids given to `blastdbcmd -entry_batch -`, sequences in memory masked, and the lower case letters of FASTA in memory turned into masking information.
+`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`bytes`, `text`) and to standard error (`diagnostics_bytes`, `diagnostics`). `input` is what the command line reads as standard input, so a database can be built from FASTA in memory (with `-title`, which makeblastdb needs for standard input), ids given to `blastdbcmd -entry_batch -`, sequences in memory masked, and the lower case letters of FASTA in memory turned into masking information, and the reports of a BLAST archive (`-outfmt 11`) written again.
 
 ## Errors
 

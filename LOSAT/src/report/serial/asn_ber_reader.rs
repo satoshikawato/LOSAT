@@ -132,12 +132,12 @@ const TAG_OTHER_POINTER: u8 = 0x7f;
 pub(crate) const SEQUENCE_NUMBER: i32 = 16;
 pub(crate) const SET_NUMBER: i32 = 17;
 /// The first content byte of a REAL: the encoding bits (`eDecimalEncoding`) and the four special
-/// values of a REAL of one content byte.
+/// values of a REAL of one content byte (the binary writer's too, `asn_ber`).
 const REAL_ENCODING_MASK: u8 = 0xc0;
-const REAL_DECIMAL: u8 = 0x00;
-const REAL_PLUS_INFINITY: u8 = 0x40;
-const REAL_MINUS_INFINITY: u8 = 0x41;
-const REAL_NOT_A_NUMBER: u8 = 0x42;
+pub(crate) const REAL_DECIMAL: u8 = 0x00;
+pub(crate) const REAL_PLUS_INFINITY: u8 = 0x40;
+pub(crate) const REAL_MINUS_INFINITY: u8 = 0x41;
+pub(crate) const REAL_NOT_A_NUMBER: u8 = 0x42;
 const REAL_MINUS_ZERO: u8 = 0x43;
 /// `kMaxDoubleLength`.
 const MAX_DOUBLE_LENGTH: u64 = 256;
@@ -191,6 +191,24 @@ impl<S: AsnSource> BerReader<S> {
     #[inline]
     pub(crate) fn release(&mut self) {
         self.src.release_before(self.at);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:443-455
+    /// Skips raw ASCII space, tab, newline and carriage return before the next object and peeks
+    /// the byte that starts it (`None` at end of input), releasing everything before it.
+    pub(crate) fn skip_raw_spaces_and_peek(&mut self) -> Option<u8> {
+        loop {
+            match self.src.byte_at(self.at) {
+                Some(b' ' | b'\t' | b'\n' | b'\r') => {
+                    self.at += 1;
+                    self.release();
+                }
+                other => {
+                    self.release();
+                    return other;
+                }
+            }
+        }
     }
 
     /// The bytes that the source keeps from the cursor on.
@@ -651,7 +669,7 @@ impl<S: AsnSource> BerReader<S> {
     // VisibleString, with a warning once per process; `SERIAL_READ_ANY_UTF8STRING_TAG` is true: a
     // VisibleString is accepted for a UTF8String.)
     /// `ExpectStringTag` of the string type, for a VisibleString (`visible`) or a UTF8String.
-    fn expect_string_tag(&mut self, visible: bool, posts: &mut Vec<StringPost>) -> R<()> {
+    fn expect_string_tag(&mut self, visible: bool, posts: &mut dyn FnMut(StringPost<'_>)) -> R<()> {
         let (tag, other) = if visible {
             (TAG_VISIBLE_STRING, TAG_UTF8_STRING)
         } else {
@@ -660,7 +678,7 @@ impl<S: AsnSource> BerReader<S> {
         let got = self.peek(0)?;
         if got == other {
             if visible {
-                posts.push(StringPost::Utf8Tag);
+                posts(StringPost::Utf8Tag);
             }
         } else if got != tag {
             return Err(self.unexpected_sys_tag_byte(got, tag));
@@ -670,7 +688,11 @@ impl<S: AsnSource> BerReader<S> {
     }
 
     /// The tag of a string of `kind` (`ExpectStringTag`, or the StringStore's `ExpectSysTag`).
-    fn expect_string_kind(&mut self, kind: StringKind, posts: &mut Vec<StringPost>) -> R<()> {
+    fn expect_string_kind(
+        &mut self,
+        kind: StringKind,
+        posts: &mut dyn FnMut(StringPost<'_>),
+    ) -> R<()> {
         match kind {
             StringKind::Visible => self.expect_string_tag(true, posts),
             StringKind::Utf8 => self.expect_string_tag(false, posts),
@@ -752,7 +774,7 @@ impl<S: AsnSource> Input for BerReader<S> {
     const ENCODING: Encoding = Encoding::Binary;
 
     /// `GetPosition()` of the binary stream: the bytes read from the start of the object.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:118-121
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:807-819
     fn position(&self) -> StreamPosition {
         StreamPosition::Byte(self.pos() as u64)
     }
@@ -766,7 +788,6 @@ impl<S: AsnSource> Input for BerReader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:588-597
-    #[cfg(test)]
     fn end_of_data(&mut self) -> bool {
         self.src.byte_at(self.at).is_none()
     }
@@ -988,7 +1009,7 @@ impl<S: AsnSource> Input for BerReader<S> {
     // of `SERIAL_WRONG_CHARS_READ`; of a UTF8String, and `ReadStringStore`, with `eFNP_Allow`: a
     // StringStore keeps its bytes in binary, unlike the text stream.)
     /// A string (`kind`) appended to `out`, with what NCBI posts while it reads it
-    /// in `posts` (also when it then fails): its tag, its length, its bytes (`ReadBytes`:
+    /// given to `posts` (also when it then fails): its tag, its length, its bytes (`ReadBytes`:
     /// `GetChars` of `str` and `count`, which reserves `count` bytes first when they are not all in the
     /// input buffer, and reads to the end of the data), and for a VisibleString each byte outside
     /// `' '..='~'` read as `#`.
@@ -996,7 +1017,7 @@ impl<S: AsnSource> Input for BerReader<S> {
         &mut self,
         kind: StringKind,
         out: &mut Vec<u8>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()> {
         self.expect_string_kind(kind, posts)?;
         let length = self.read_length()?;
@@ -1014,7 +1035,7 @@ impl<S: AsnSource> Input for BerReader<S> {
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2093-2104
     /// `SkipString` of the string type / `SkipStringStore`: the tag, then the bytes skipped.
-    fn skip_string(&mut self, kind: StringKind, posts: &mut Vec<StringPost>) -> R<()> {
+    fn skip_string(&mut self, kind: StringKind, posts: &mut dyn FnMut(StringPost<'_>)) -> R<()> {
         self.expect_string_kind(kind, posts)?;
         self.skip_tag_data()
     }
@@ -1196,15 +1217,21 @@ pub(crate) fn tag_to_string(byte: u8) -> String {
 // `EndOfTag`: the position is the byte after the string. `SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_
 // READING` is 0.)
 /// `FixVisibleChars` of the string `s`, read up to `end`: each byte outside `' '..='~'`
-/// becomes `#`, posted with the string as fixed so far (the bytes before it already `#`).
-fn fix_visible_chars(s: &mut [u8], end: StreamPosition, posts: &mut Vec<StringPost>) {
+/// becomes `#`, posted with the string as fixed so far (the bytes before it already `#`). The one
+/// port of its posts: the binary object stream's and the header reader of a BLAST database's
+/// (`seqid::ber::title_replaced_chars`).
+pub(crate) fn fix_visible_chars(
+    s: &mut [u8],
+    end: StreamPosition,
+    posts: &mut dyn FnMut(StringPost<'_>),
+) {
     for i in 0..s.len() {
         let byte = s[i];
         if !(b' '..=b'~').contains(&byte) {
-            posts.push(StringPost::BadChar {
+            posts(StringPost::BadChar {
                 position: end,
                 byte,
-                string: s.to_vec(),
+                string: s,
             });
             s[i] = b'#';
         }

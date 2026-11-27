@@ -466,9 +466,8 @@ test("the options form: the engine's defaults are not written; tasks, templates 
     await task(page, 'blastn');
     await page.getByTestId('param-word_size').selectOption('other');
     await page.getByTestId('param-word_size-other').fill('3');
-    await expect(page.getByTestId('argv-validation')).toContainText(
-      "error: invalid value '3' for '-word_size <WORD_SIZE>': expected an integer >= 4",
-    );
+    // The engine's argument error: the usage, a line of 72 "=", and the posts.
+    await expect(page.getByTestId('argv-validation')).toContainText(/Error: Argument "word_size"\. Illegal value, expected >=4:\s+`3'/);
     await page.getByTestId('param-word_size-other').fill('');
     // Templates with the megablast task (the default, not written): the section stays, and the engine refuses them.
     // The type alone set writes the length shown with it (WA-FM-03).
@@ -738,8 +737,9 @@ test('empty inputs, every record excluded, a sequence without a defline, and the
   await expect(page.getByTestId('run-losat')).toBeEnabled();
 });
 
-// A mode that reads a role with the other FASTA reader kind reads the source again; coming back to the mode that the
-// source was set up in shows its table as it was left (WA-IN-01).
+// A mode that reads a role with the other FASTA reader kind reads the source again while keeping
+// the records left out excluded (line WQA's D16, Owner Q2=B); coming back restores the subrange
+// of the original kind as well (WA-IN-01).
 test("records left out and a subrange stay through a mode that reads the role with the other kind", async ({ page }) => {
   await program(page, 'blastn');
   const records = '>q1\nACGTACGTACGTAAACCCGGGTTT\n>q2\nACGTACGTACGTAAACCCGGGTTA\n>q3\nACGTACGTACGTAAACCCGGGTTC\n';
@@ -752,10 +752,17 @@ test("records left out and a subrange stay through a mode that reads the role wi
   await page.getByTestId('query-region-start').fill('2');
   await page.getByTestId('query-region-stop').fill('12');
 
-  // BLASTP reads the query with the protein flags: another table, with nothing left out.
+  // BLASTP reads the query with the protein flags: the exclusions persist (D16), while the
+  // nucleotide subrange does not apply to the protein table.
   await program(page, 'blastp');
   await settled(page, 'query');
-  await expect(page.getByTestId('query-source-0-summary')).not.toContainText('included');
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');
+  await showRecords(page, 'query');
+  await expect(page.getByTestId('query-source-0-record-0')).toBeChecked();
+  await expect(page.getByTestId('query-source-0-record-1')).not.toBeChecked();
+  await expect(page.getByTestId('query-source-0-record-2')).not.toBeChecked();
+  await expect(page.getByTestId('query-region-start')).toHaveValue('');
+  await expect(page.getByTestId('query-region-stop')).toHaveValue('');
   await program(page, 'blastn');
   await settled(page, 'query');
   await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');
@@ -1140,7 +1147,7 @@ test('the header, and the "?" help that shows on hover or keyboard focus and sta
   await expect(help).toHaveCount(0);
   // Pointed at: shown; pointed away: gone (as NCBI's helpbox).
   await toggle.hover();
-  await expect(help).toHaveText('Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn');
+  await expect(help).toHaveText('Task to execute');
   await expect(help).toHaveAttribute('data-pinned', 'false');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await page.mouse.move(0, 0);
@@ -1523,7 +1530,8 @@ test("Additional options: the command line's other options after the form's, mar
   await expect(extra).toHaveAccessibleName('Additional options');
   // The engine reads the words as the command line does, and says what it does not read.
   await extra.fill('-qcov_hsp_perc 50 -foo');
-  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help to list the options");
+  // The fake engine and the engine both end with NCBI's two posts.
+  await expect(validation).toContainText('Error: Unknown argument: "foo"');
   await extra.fill('-num_threads 2');
   await expect(validation).toHaveText('-num_threads is set in the form: Threads');
   // The CLI's options that a search in the browser cannot have (WA-FM-04). The engine prints the CLI's help, as the CLI
@@ -1533,7 +1541,9 @@ test("Additional options: the command line's other options after the form's, mar
     await expect(validation).toHaveAttribute('data-state', 'ok');
   }
   await extra.fill('-db nt');
-  await expect(validation).toHaveText('-db (a database search) is not supported in the browser yet');
+  await expect(validation).toHaveText('-db is set in the form: Subject');
+  await extra.fill('-filtering_db repeats');
+  await expect(validation).toHaveText('-filtering_db is set in the form: Repeats database');
   await extra.fill('-mt_mode 1');
   await expect(validation).toHaveText('-mt_mode is managed by LOSAT');
   await extra.fill("-strand 'plus");

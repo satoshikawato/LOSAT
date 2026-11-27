@@ -1,0 +1,11 @@
+PssmWithParameters ::= {
+  pssm {
+    isProtein TRUE,
+    numRows 28,
+    numColumns 30,
+    byRow FALSE,
+    query seq {
+      id {
+        local str "Query_1"
+      },
+      descr {

@@ -1,7 +1,7 @@
 //! TBLASTX's BLAST archive (outfmt 11): the request options from the arguments, the archive of
 //! each query batch from the batch's report data, and the error archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
+//! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-199
 //! One archive per query batch (the reader's batch, `BATCH_SIZE` letters, 10002 by default),
 //! written after the batch's search. LOSAT's TBLASTX searches the batches first and writes every
 //! format at the end, from the hits of all of them (`write_tblastx_outputs`), so the archives are
@@ -20,7 +20,6 @@
 //! +1: 0 when that context is not valid), which is the `EffectiveSearchSpace` option of the
 //! batch (`SplitQuery_SetEffectiveSearchSpace`, `BlastOptions` memento: the first context).
 
-use std::io::Write;
 use std::ops::Range;
 
 use anyhow::Result;
@@ -36,6 +35,8 @@ use crate::blastinput::seq_range::Placements;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
+use crate::report::archive::read::import;
+use crate::report::archive::read::options::{EProgram, Setter};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
     ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
@@ -43,6 +44,23 @@ use crate::report::archive::{
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
+
+/// What a TBLASTX run's arguments give its search strategy's requests
+/// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
+/// of the `HitlistSize` and the database of `-db`.
+impl crate::report::archive::strategy::StrategyArgs for TblastxArgs {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs {
+        crate::report::archive::strategy::StrategyInputs {
+            inputs: option_inputs(self),
+            counts: crate::report::archive::strategy::HitlistArgs {
+                max_target_seqs: self.max_target_seqs,
+                num_descriptions: self.num_descriptions,
+                num_alignments: self.num_alignments,
+            },
+            database: self.database_name(),
+        }
+    }
+}
 
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
@@ -63,7 +81,10 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     // as the lookup table takes it: `ncbi_int4_from_double`). Without `-threshold` and
     // `-window_size` the list holds the matrix's suggestions (`report::archive::options`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
-    inputs.matrix = args.matrix.clone();
+    inputs.matrix = args
+        .matrix
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
     inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
@@ -80,6 +101,8 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     inputs.subject_besthit = args.subject_besthit;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.db_gencode = i32::from(args.db_gencode);
+    inputs.imported = args.import.as_ref().map(|run| run.recorded.clone());
+    inputs.application = args.import.as_ref().map(|run| run.app.ncbi_name());
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:957
     // The argument has a default, so the list always holds it; a value other than 0 stops the run
     // before any archive (`check_ncbi_options`).
@@ -87,7 +110,7 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
-        .map_or(500, |size| size as i32);
+        .map_or(args.formatting.recorded_hitlist_start(), |size| size as i32);
     inputs
 }
 
@@ -105,7 +128,7 @@ pub(crate) fn handle_for(
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     Some(ArchiveHandle::for_program(
         &option_inputs(args),
-        args.database_name(),
+        args.database_name().as_deref(),
         options,
     ))
 }
@@ -326,6 +349,7 @@ fn for_each_batch(
                 search_space,
                 length_adjustment,
                 searched_space: batch_searched_space(searched, stats),
+                round: None,
             };
             each(span, &batch)
         })?;
@@ -341,16 +365,16 @@ pub(super) fn write_tblastx_archives(
     handle: &ArchiveHandle,
     data: &ArchiveData<'_>,
     warnings: &mut QueryWarnings<'_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,
-        rps: false,
         db_title: match data.subjects {
             SeqalignSubjects::Records { .. } => None,
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: false,
+        program_type: None,
     };
     for_each_batch(data, |span, batch| {
         for index in span.clone() {
@@ -359,9 +383,9 @@ pub(super) fn write_tblastx_archives(
         let mut aligns = TblastxAligns {
             run: RunRecord {
                 program: run.program,
-                rps: run.rps,
                 db_title: run.db_title,
                 gapped: run.gapped,
+                program_type: run.program_type,
             },
             data,
             span,
@@ -374,6 +398,167 @@ pub(super) fn write_tblastx_archives(
             &mut *warnings.sink,
         )
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:106-111
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
+/// tblastx's part of `-import_search_strategy` ([`import::apply`]): the arguments its command
+/// line keeps and its table of the strategy's setters over its own options. tblastx searches
+/// without gaps: the gap costs of its handle and the ungapped mode are its defaults, which the
+/// table takes without a change.
+impl import::StrategyArgs for TblastxArgs {
+    const PROGRAM: Program = Program::Tblastx;
+
+    fn runs(program: EProgram) -> bool {
+        program == EProgram::Tblastx
+    }
+
+    fn imports(&self) -> bool {
+        self.import_search_strategy.is_some() && self.import.is_none()
+    }
+
+    fn defaults() -> Result<Self> {
+        match import::defaults_of("tblastx")? {
+            crate::cli::Commands::Tblastx(args) => Ok(args),
+            _ => unreachable!("the arguments of tblastx"),
+        }
+    }
+
+    fn kept(self) -> import::Kept {
+        let given = self.given.list().to_vec();
+        import::Kept {
+            path: self.import_search_strategy.expect("an import"),
+            given,
+            query: self.query,
+            query_loc: self.query_loc,
+            strand: Some(self.strand),
+            lcase_masking: self.lcase_masking,
+            parse_deflines: self.parse_deflines,
+            id_scope: self.id_scope,
+            out: self.out,
+            outfmt: self.outfmt,
+            show_gis: self.show_gis,
+            html: self.html,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            max_target_seqs: self.max_target_seqs.map(|n| n as i64),
+            formatting: self.formatting,
+            num_threads: self.num_threads as i64,
+            mt_mode: None,
+            database: import::KeptDatabase::given(
+                self.db,
+                self.subject,
+                self.subject_loc,
+                self.db_filter,
+                self.db_mask,
+                self.dbsize,
+            ),
+            use_index: false,
+            mb_index: import::MbIndexRequest::None,
+        }
+    }
+
+    fn keep(&mut self, kept: import::Kept) -> Result<()> {
+        self.query = kept.query;
+        self.query_loc = kept.query_loc;
+        if let Some(strand) = kept.strand {
+            self.strand = strand;
+        }
+        self.lcase_masking = kept.lcase_masking;
+        self.parse_deflines = kept.parse_deflines;
+        self.id_scope = kept.id_scope;
+        self.out = kept.out;
+        self.outfmt = kept.outfmt;
+        self.show_gis = kept.show_gis;
+        self.html = kept.html;
+        self.num_descriptions = kept.num_descriptions;
+        self.num_alignments = kept.num_alignments;
+        self.max_target_seqs = kept
+            .max_target_seqs
+            .map(|n| usize::try_from(n).unwrap_or(0));
+        self.formatting = kept.formatting;
+        self.num_threads = usize::try_from(kept.num_threads).unwrap_or(1);
+        Ok(())
+    }
+
+    fn fields(&mut self) -> import::Fields<'_> {
+        import::Fields {
+            import_search_strategy: &mut self.import_search_strategy,
+            db: &mut self.db,
+            subject: &mut self.subject,
+            subject_loc: &mut self.subject_loc,
+            db_filter: &mut self.db_filter,
+            db_mask: &mut self.db_mask,
+            dbsize: &mut self.dbsize,
+            searchsp: &mut self.searchsp,
+            formatting: &mut self.formatting,
+            num_descriptions: self.num_descriptions,
+            num_alignments: self.num_alignments,
+            outfmt: &self.outfmt,
+            import: &mut self.import,
+        }
+    }
+
+    fn set_task(&mut self, _task: &str) {}
+
+    fn set(&mut self, setter: &Setter) -> Result<bool> {
+        let program = Program::Tblastx.name();
+        match setter {
+            Setter::EvalueThreshold(v) => self.evalue = *v,
+            Setter::WordSize(n) => self.word_size = Some(*n),
+            Setter::WordThreshold(n) => self.threshold = Some(f64::from(*n)),
+            Setter::WindowSize(n) => self.window_size = Some(*n),
+            Setter::MatrixName(name) => self.matrix = Some(name.clone().into()),
+            Setter::CullingLimit(n) => self.culling_limit = Some(*n),
+            Setter::MaxHspsPerSubject(n) => {
+                self.max_hsps = usize::try_from(*n).ok().filter(|n| *n > 0)
+            }
+            Setter::QueryCovHspPerc(v) => self.qcov_hsp_perc = Some(*v),
+            Setter::MaskAtHash(on) => self.soft_masking = Some(*on),
+            Setter::QueryGeneticCode(n) => {
+                self.query_gencode = import::Start::genetic_code(*n, "query", program)?
+            }
+            Setter::DbGeneticCode(n) => {
+                self.db_gencode = import::Start::genetic_code(*n, "database", program)?
+            }
+            Setter::SubjectBestHit => self.subject_besthit = true,
+            Setter::BestHitOverhang(v) => self.best_hit_overhang = Some(*v),
+            Setter::BestHitScoreEdge(v) => self.best_hit_score_edge = Some(*v),
+            // A length other than 0 is NCBI's options error, as `-max_intron_length` gives it.
+            Setter::LongestIntronLength(n) => self.max_intron_length = Some(*n),
+            Setter::GapOpeningCost(_)
+            | Setter::GapExtensionCost(_)
+            | Setter::GappedMode(false)
+            | Setter::SmithWatermanMode(false) => {}
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    fn finish(&mut self, collected: import::Collected, _run: &import::ImportRun) -> Result<()> {
+        let program = Program::Tblastx.name();
+        collected.no_dust(program)?;
+        collected.no_repeat(program)?;
+        collected.no_nucleotide_algorithms(program)?;
+        if let Some(value) = collected.seg.value() {
+            self.seg = value.into();
+        }
+        // tblastx has no composition-based statistics: only mode 0 of a strategy runs.
+        if collected
+            .composition_value(false, program)?
+            .is_some_and(|value| value != "0")
+        {
+            return Err(import::Start::unported(
+                "a search strategy with composition-based statistics",
+                program,
+            ));
+        }
+        Ok(())
+    }
+
+    fn into_command(self) -> crate::cli::Commands {
+        crate::cli::Commands::Tblastx(self)
+    }
 }
 
 #[cfg(test)]

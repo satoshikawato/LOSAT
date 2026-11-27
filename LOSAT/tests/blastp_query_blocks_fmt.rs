@@ -853,11 +853,12 @@ fn xml_titles_that_ncbi_cannot_make_leave_the_search_of_all_queries() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// `-db`: one stored title with a Latin-1 byte, on a subject with hits (refused by outfmt 5, 8, 15
-// and 16) and on one without (all complete): the block search is not used, and the run ends as the
-// search of all queries does. One case per path (CI time): with hits outfmt 5 and 8 (one check,
-// `x_titles_read_allow_blocks`) and 15 (the titles with the taxids, `x_titles_taxids_allow_blocks`),
-// without hits 8 and 16; both checks are unit tests at one and four threads (`database.rs`).
+// `-db`: one stored title with a Latin-1 byte, on a subject with hits (refused by outfmt 5, 15 and
+// 16; outfmt 8 writes NCBI's 803.7 posts of its Seq-aligns, line RG-KB 9(b)) and on one without
+// (all complete): the block search is not used, and the run ends as the search of all queries does.
+// One case per path (CI time): with hits outfmt 5 and 8 (one check, `x_titles_read_allow_blocks`)
+// and 15 (the titles with the taxids, `x_titles_taxids_allow_blocks`), without hits 8 and 16; both
+// checks are unit tests at one and four threads (`database.rs`).
 #[test]
 fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries() {
     let dir = std::env::temp_dir().join(format!("losat-bpqblockfmt-dbt-{}", std::process::id()));
@@ -889,13 +890,20 @@ fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries
     );
     // (database text, marker, name, whether the search of all queries completes, its (outfmt,
     // threads))
-    let cases: [(&String, &str, &str, bool, Runs); 2] = [
+    let cases: [(&String, &str, &str, bool, Runs); 3] = [
         (
             &with_hit,
             "cafX",
             "a title on a subject with hits",
             false,
-            &[("5", 1), ("8", 4), ("15", 1)],
+            &[("5", 1), ("15", 1)],
+        ),
+        (
+            &with_hit,
+            "cafX",
+            "a title on a subject with hits in its Seq-aligns",
+            true,
+            &[("8", 4)],
         ),
         (
             &without_hit,
@@ -1863,9 +1871,10 @@ fn an_unopenable_side_file_stops_the_blocks_where_it_stops_the_search_of_all_que
 }
 
 // A side file that is a link to `/dev/full`, in the second block: the write fails
-// after the file was opened. LOSAT stops the run in every program with "BLAST failed to write
-// output" and status 6 (DECISIONS 35: NCBI ignores the error); the blocks do the same at the same
-// report with the same files. Outfmt 14 only, at one thread, in the second block (the first block's
+// after the file was opened. As NCBI's (line RG item T6a), a document that the file's buffer writes
+// before its end fails there (802.5 `write fault`): the run stops with status 0 and an empty master;
+// one that the buffer holds to its end fails at its last flush and the run goes on. The blocks do
+// the same at the same report with the same files. Outfmt 14 only, at one thread, in the second block (the first block's
 // stop is that of the test above, and outfmt 13 writes through the same `FsSideFiles`).
 // Linux only: macOS has no `/dev/full`, so the link cannot be opened and the run ends with status 1.
 #[cfg(target_os = "linux")]
@@ -1900,17 +1909,26 @@ fn a_side_file_that_cannot_be_written_stops_the_blocks_where_it_stops_the_search
                     )
                 };
                 let reference = run(&[SWITCH_OFF], "ref");
-                assert_eq!(reference.0.code, Some(6), "{what}: {}", reference.0.stderr);
+                assert_eq!(reference.0.code, Some(0), "{what}: {}", reference.0.stderr);
                 assert!(
-                    reference.0.stderr.contains("BLAST failed to write output"),
+                    reference
+                        .0
+                        .stderr
+                        .contains("Error: (802.5) [blastp] CObjectOStream: error at byte "),
                     "{what}: {}",
                     reference.0.stderr
                 );
-                assert_eq!(reference.1.len(), n + 1, "{what}");
-                assert!(
-                    reference.1[&format!("rep.{extension}")].is_empty(),
-                    "{what}"
-                );
+                if reference
+                    .0
+                    .stderr
+                    .contains(": stack is empty: write fault\n")
+                {
+                    assert_eq!(reference.1.len(), n + 1, "{what}");
+                    assert!(
+                        reference.1[&format!("rep.{extension}")].is_empty(),
+                        "{what}"
+                    );
+                }
                 let blocks = run(&[BLOCK_80], "blocks");
                 // A failure in the first block (26 queries) is reached by its search alone.
                 assert_same_files(&blocks, &reference, (n > 26).then_some(true), &what);

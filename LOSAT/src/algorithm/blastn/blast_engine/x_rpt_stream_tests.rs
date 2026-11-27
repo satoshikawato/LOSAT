@@ -43,18 +43,9 @@ fn a_batch_input_is_the_batch_part_numbered_from_zero() {
 
 /// The arguments of a `blastn` command line (`extra` after `-query q -subject s`).
 fn args(extra: &[&str]) -> BlastnArgs {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Options {
-        #[command(flatten)]
-        blastn: BlastnArgs,
-    }
-    impl crate::cli::ProgramParser for Options {}
-    let mut argv = vec!["test", "-query", "q", "-subject", "s"];
+    let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
     argv.extend_from_slice(extra);
-    crate::cli::try_parse_from::<Options, _, _>(argv)
-        .unwrap()
-        .blastn
+    crate::cli::try_parse_from(argv).unwrap().blastn()
 }
 
 fn record(
@@ -121,7 +112,7 @@ fn checked_as(
         packed: Vec::new(),
     };
     let batching = QueryBatching {
-        fixed_batch_size: batch_size as i32,
+        fixed: Some(batch_size),
         batch_size,
         split,
     };
@@ -182,7 +173,7 @@ fn the_switch_acts_where_the_outputs_and_options_allow() {
     let mut errors2 = Vec::<u8>::new();
     let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors2);
     outputs.formats.push(FormatOutput {
-        outfmt: "7",
+        outfmt: b"7",
         refusal: crate::api::local_blast::FormatRefusal::FailsCall,
         sink: OutputSink::Writer(&mut two),
     });
@@ -236,32 +227,31 @@ fn the_switch_acts_where_the_outputs_and_options_allow() {
         checked(true, &scoring, &good, 10, 4000, plain, &mut outputs).err(),
         Some(Off::Scoring)
     );
-    assert_eq!(
-        checked(
-            true,
-            &["-dbsize", "9000000000000000000"],
-            &good,
-            10,
-            4000,
-            plain,
-            &mut outputs
-        )
-        .err(),
-        Some(Off::SearchSpace)
-    );
-    assert_eq!(
-        checked(
-            true,
-            &[],
-            &good,
-            10,
-            4000,
-            SplitSizes::new(false, Some(-5), Some(-10)),
-            &mut outputs
-        )
-        .err(),
-        Some(Off::ChunkSize)
-    );
+    // A `-dbsize` whose product could overflow 64-bit search space still streams: search space
+    // overflow fails the batch after earlier reports (`setup_failure` -> `ErrorAfterBatchReports`)
+    // in both stream on and stream off paths.
+    assert!(checked(
+        true,
+        &["-dbsize", "9000000000000000000"],
+        &good,
+        10,
+        4000,
+        plain,
+        &mut outputs
+    )
+    .is_ok_and(|ready| !ready.one_batch));
+    // A negative CHUNK_SIZE streams: its refusals come after the reports of the batches before in
+    // both paths (line RG items X-short-bat-2 and X-chunk).
+    assert!(checked(
+        true,
+        &[],
+        &good,
+        10,
+        4000,
+        SplitSizes::new(false, Some(-5), Some(-10)),
+        &mut outputs
+    )
+    .is_ok_and(|ready| !ready.one_batch));
     // BLAST XML, XML2 and JSON (outfmt 5, 16 and 15) are never streamed, with one batch
     // (20,000 letters) or several.
     for batch_size in [20_000, 4000] {

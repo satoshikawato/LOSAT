@@ -17,7 +17,7 @@ fn fixture(variant: &str) -> PathBuf {
 /// The organism report's names of the taxonomy database in `dir` (as the search path's current
 /// directory and `BLASTDB`), opened at the first lookup.
 fn names_in(dir: &Path) -> TabularNames {
-    let path = SearchPath::new(dir, Some(dir.as_os_str()), None).unwrap();
+    let path = SearchPath::new(dir, Some(dir.as_os_str()), None);
     TabularNames::for_report(
         TaxNamesDb::new(
             std::sync::Arc::new(LazyTaxDb::new(path)),
@@ -35,7 +35,7 @@ fn names(variant: Option<&str>) -> Option<TabularNames> {
 
 /// The lookups of `names` without a `./.ncbirc` (the test process's directory is not read).
 fn lookups(names: Option<&TabularNames>) -> TaxLookups {
-    TaxLookups::with_registry(names, "BLASTP", None)
+    TaxLookups::with_registry(names, "BLASTP", "blastp", None)
 }
 
 struct Subjects(Vec<Vec<TaxDefline>>);
@@ -792,7 +792,7 @@ fn the_html_report_takes_the_scheme_and_the_browser_of_ncbirc() {
     let (subjects, hsps) = t4_query_one();
     let first = |ncbirc: &[u8]| {
         let read = read_registry(ncbirc, Layer::SystemWide).unwrap();
-        let lookups = TaxLookups::with_registry(names.as_ref(), "BLASTP", Some(&read));
+        let lookups = TaxLookups::with_registry(names.as_ref(), "BLASTP", "blastp", Some(&read));
         let out = report_html(&subjects, &hsps[..1], lookups);
         let at = find(&out, b"<tr><th colspan", 0).unwrap();
         String::from_utf8(out[at..find(&out, b"</td><td>subject", at).unwrap()].to_vec()).unwrap()

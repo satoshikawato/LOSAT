@@ -1786,27 +1786,34 @@ fn long_chunk_overlap_merge_matches_ncbi_input_score_and_order() {
             .map(&parse_hsp)
             .collect::<Vec<_>>()
     };
-    let first = merge_subject_chunk_hsps(
-        Vec::new(),
-        for_call("MERGE_IN_HSP", 0),
+    let mut first = Vec::new();
+    let mut first_in = for_call("MERGE_IN_HSP", 0);
+    crate::core::blast_hits::merge_subject_chunk_hsps(
+        &mut first,
+        &mut first_in,
         0,
         0,
         i32::MAX as usize,
         true,
-    );
+        |a, b| compare_gapped_score(&a.1, &b.1),
+    )
+    .unwrap();
     assert_eq!(first, for_call("MERGE_OUT_HSP", 0));
-    let old = for_call("MERGE_OLD_HSP", 1);
+    let mut old = for_call("MERGE_OLD_HSP", 1);
     assert_eq!(first, old);
-    let second = merge_subject_chunk_hsps(
-        old,
-        for_call("MERGE_IN_HSP", 1),
+    let mut second_in = for_call("MERGE_IN_HSP", 1);
+    crate::core::blast_hits::merge_subject_chunk_hsps(
+        &mut old,
+        &mut second_in,
         4_999_900,
         100,
         i32::MAX as usize,
         true,
-    );
-    assert_eq!(second, for_call("MERGE_OUT_HSP", 1));
-    assert_eq!(second[0].1.score, 660);
+        |a, b| compare_gapped_score(&a.1, &b.1),
+    )
+    .unwrap();
+    assert_eq!(old, for_call("MERGE_OUT_HSP", 1));
+    assert_eq!(old[0].1.score, 660);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2762-2864:
@@ -2376,6 +2383,11 @@ fn whole_windows_hold_the_whole_translation() {
             .unwrap_err()
             .to_string();
         assert_eq!(partial, expected, "frame {frame}");
+        // NCBI dies after the reports of the query batches before: so does the refusal.
+        assert!(whole
+            .get(frame, -1, 2)
+            .unwrap_err()
+            .is::<crate::blastinput::app::ErrorAfterBatchReports>());
     }
     // The bound: NCBI translates a subject of 12 bases (`0 < 12 / 3 - 3`), none shorter.
     for n in 1..=12 {
@@ -3262,14 +3274,18 @@ fn long_subject_chunk_local_gapped_hsps_match_ncbi() {
     second.s_start += 4_999_900;
     second.s_end += 4_999_900;
     second.s_gapped_start += 4_999_900;
-    let merged = merge_subject_chunk_hsps(
-        vec![(0, actual[0])],
-        vec![(0, second)],
+    let mut merged = vec![(0, actual[0])];
+    let mut second_in = vec![(0, second)];
+    crate::core::blast_hits::merge_subject_chunk_hsps(
+        &mut merged,
+        &mut second_in,
         4_999_900,
         100,
         i32::MAX as usize,
         true,
-    );
+        |a, b| compare_gapped_score(&a.1, &b.1),
+    )
+    .unwrap();
     let merged_expected: Vec<_> = trace
         .lines()
         .filter(|line| line.starts_with("MERGE_OUT_HSP\t1\t"))
@@ -5042,4 +5058,220 @@ fn a_seed_before_the_chunk_gives_its_gapped_start_with_ncbis_wrap() {
     assert_eq!(x_gapped_subject_start(seed, 15, 14).unwrap(), 0);
     assert_eq!(x_gapped_subject_start(40, 30, 14).unwrap(), 56);
     assert!(x_gapped_subject_start(seed, 14, 14).is_err());
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3393-3404,3942-3945,
+// 4300-4333
+/// `x_crashes_ncbi` and the middle gapped start of an initial alignment starting before its chunk:
+/// lengths 0..=11 with middle in the chunk are searched (`q_start + length / 2`, subject start
+/// `s_start + length / 2 >= 0`, matrix and PSSM alike, scoring only the chunk's letters); lengths
+/// above 11 (as `Uint4`, so negative too) or with middle before the chunk are refused.
+#[test]
+fn short_alignment_starting_before_chunk_uses_middle_and_refuses_ncbi_crashes() {
+    let make_hit = |q_start: i32, s_start: i32, length: i32| InitHsp {
+        frame: 1,
+        chunk_offset: 4_999_900,
+        q_seed: q_start as u32,
+        s_seed: s_start as u32,
+        q_start,
+        s_start,
+        length,
+        score: 60,
+    };
+
+    // Searched cases (middle lies in the chunk, length <= 11): exact gapped starts.
+    for (s_start, length, want_s_gapped) in [(-4, 11, 1), (-5, 11, 0), (-1, 11, 4), (-4, 8, 0)] {
+        let hit = make_hit(10, s_start, length);
+        assert!(!x_crashes_ncbi(&hit), "must search ({s_start}, {length})");
+        let q_gapped = x_gapped_start_before_chunk_middle(10, &hit).unwrap();
+        assert_eq!(q_gapped, 10 + (length as usize) / 2);
+        let s_gapped =
+            x_gapped_subject_start(hit.s_seed, q_gapped as i32, hit.q_seed as i32).unwrap();
+        assert_eq!(s_gapped, want_s_gapped, "({s_start}, {length})");
+    }
+
+    // Refused cases (middle before the chunk, length > 11, or negative length read as Uint4).
+    for (s_start, length) in [(-30, 11), (-6, 11), (-4, 12), (-1, -3), (-1, 0)] {
+        assert!(
+            x_crashes_ncbi(&make_hit(10, s_start, length)),
+            "must refuse ({s_start}, {length})"
+        );
+    }
+
+    // Non-negative subject starts are never refused by x_crashes_ncbi.
+    for (s_start, length) in [(0, 12), (0, -1), (5, 20)] {
+        assert!(!x_crashes_ncbi(&make_hit(10, s_start, length)));
+    }
+
+    // End-to-end score_gapped_chunk with MatrixScore and PssmScore on (-4, 11) -> start +1 and
+    // (-5, 11) -> start 0: scores only the chunk's letters (7 or 6 W/W matches; D/L flanks score
+    // -4 in BLOSUM62 and in the PSSM).
+    const W: u8 = 20;
+    const D: u8 = 3;
+    const L: u8 = 11;
+    let mut query = vec![D; 30];
+    query[10..21].fill(W);
+    let query_frames = [one_hit_frame(0, &query)];
+    let mut pssm_rows = vec![[-4; crate::core::blast_util::BLASTAA_SIZE]; 30];
+    for row in &mut pssm_rows[10..21] {
+        row[usize::from(W)] = 11;
+    }
+    let pssm = crate::algorithm::pssm_search::rows::QueryPssm { rows: pssm_rows };
+
+    struct BeforeChunkCase<'a> {
+        query: &'a [u8],
+        query_frames: &'a [QueryFrame],
+        frame: &'a QueryFrame,
+        chunk: TranslatedChunk,
+        chunk_letters: &'a [u8],
+        hit: InitHsp,
+    }
+    fn run_score<S: super::super::score::TbnScore>(
+        case: &BeforeChunkCase<'_>,
+        score: S,
+        scratch: &mut S::Scratch,
+    ) -> Vec<(usize, GappedHsp)> {
+        score_gapped_chunk::<_, true>(
+            &[case.query],
+            case.query_frames,
+            &[0],
+            30,
+            case.frame,
+            case.chunk,
+            case.chunk_letters,
+            &case.frame.aa_seq[1..],
+            &[case.hit],
+            11,
+            1,
+            38,
+            &[1],
+            ScoringMatrix::Blosum62,
+            scratch,
+            score,
+            None,
+        )
+        .unwrap()
+    }
+
+    for (s_start, want_s_gapped, inside_len) in [(-4i32, 1i32, 7usize), (-5, 0, 6)] {
+        let mut chunk_letters = vec![L; 30];
+        chunk_letters[..inside_len].fill(W);
+        let frame = one_hit_frame(1, &chunk_letters);
+        let case = BeforeChunkCase {
+            query: &query,
+            query_frames: &query_frames,
+            frame: &frame,
+            chunk: TranslatedChunk::new(4_999_900, chunk_letters.len()),
+            chunk_letters: &chunk_letters,
+            hit: make_hit(10, s_start, 11),
+        };
+        let mat = run_score(
+            &case,
+            super::super::score::MatrixScore,
+            &mut GapAlignScratch::new(),
+        );
+        let mut pssm_scratch = (
+            GapAlignScratch::new(),
+            crate::algorithm::pssm_search::gapalign::PssmGapScratch::new(),
+        );
+        let ps = run_score(
+            &case,
+            super::super::score::PssmScore(&pssm),
+            &mut pssm_scratch,
+        );
+        let want = vec![(
+            0,
+            GappedHsp {
+                frame: 1,
+                score: (inside_len as i32) * 11,
+                q_start: 10 + (11 - inside_len as i32),
+                q_end: 21,
+                q_gapped_start: 15,
+                s_start: 0,
+                s_end: inside_len as i32,
+                s_gapped_start: want_s_gapped,
+            },
+        )];
+        assert_eq!(mat, want, "matrix ({s_start})");
+        assert_eq!(ps, want, "pssm ({s_start})");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1513-1515,2973-2995
+// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.122 (rule 3): ungapped one-hit chunk merges whose query lengths
+// sum to 0 refuse with a typed `ShortChunkSeedRefusal` naming the subject OID and reading frame.
+#[test]
+fn merge_adjusted_chunk_refuses_zero_length_sum_with_oid_and_frame() {
+    let chunk = TranslatedChunk::new(100, 300);
+    let zero_len = |s_start: i32| {
+        (
+            0usize,
+            GappedHsp {
+                frame: -2,
+                score: 20,
+                q_start: 50,
+                q_end: 50,
+                q_gapped_start: 50,
+                s_start,
+                s_end: s_start,
+                s_gapped_start: s_start,
+            },
+        )
+    };
+    let error = merge_adjusted_chunk(
+        vec![zero_len(120)],
+        vec![zero_len(20)],
+        chunk,
+        i32::MAX as usize,
+        false,
+        17,
+        -2,
+    )
+    .expect_err("zero query-length sum must be refused");
+    assert!(
+        error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>(),
+        "expected ShortChunkSeedRefusal, got {error:?}"
+    );
+    let text = error.to_string();
+    assert!(
+        text.contains("TBLASTN: sequence of OID 17, frame -2"),
+        "{text}"
+    );
+    assert!(text.contains("undefined in NCBI BLAST+"), "{text}");
+
+    // Positive-length + negative-length one-hit pair whose query lengths sum to 0.
+    let pos = (
+        0usize,
+        GappedHsp {
+            frame: 1,
+            score: 25,
+            q_start: 50,
+            q_end: 52,
+            q_gapped_start: 51,
+            s_start: 120,
+            s_end: 122,
+            s_gapped_start: 121,
+        },
+    );
+    let neg = (
+        0usize,
+        GappedHsp {
+            frame: 1,
+            score: 15,
+            q_start: 52,
+            q_end: 50,
+            q_gapped_start: 51,
+            s_start: 22,
+            s_end: 20,
+            s_gapped_start: 21,
+        },
+    );
+    let error = merge_adjusted_chunk(vec![pos], vec![neg], chunk, i32::MAX as usize, false, 9, 1)
+        .expect_err("cancelling positive/negative query lengths must be refused");
+    assert!(error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>());
+    let text = error.to_string();
+    assert!(
+        text.contains("TBLASTN: sequence of OID 9, frame 1"),
+        "{text}"
+    );
 }

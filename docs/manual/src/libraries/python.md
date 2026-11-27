@@ -42,7 +42,7 @@ outcome.diagnostics                     # what the command line writes to its st
 
 ## What it runs
 
-`pylosat.PROGRAMS` names the six search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` are functions of their own ([below](#database-and-masking-tools)). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the [command line](../installation.md).
+`pylosat.PROGRAMS` names the six search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter` are functions of their own ([below](#database-and-masking-tools)). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the [command line](../installation.md).
 
 ## Options
 
@@ -57,9 +57,9 @@ for param in desc.parameters[:5]:
 search = pylosat.Search.from_argv("blastn", ["-task", "dc-megablast", "-evalue", "1e-5"])
 ```
 
-An unknown keyword, or a value of the wrong Python type, raises `TypeError`. The command line's parser checks everything else, so an option means, and fails, as it does there (`ArgumentError`, with the parser's message).
+An unknown keyword, or a value of the wrong Python type, raises `TypeError`. The command line's argument reader (NCBI's) checks everything else, so an option means, and fails, as it does there (`ArgumentError`, with what the command line writes to its standard error: NCBI's usage and error lines, or, for an NCBI option that LOSAT does not run, the refusal's text).
 
-`-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and `-outfmt` are not options here: the inputs, the formats and the output file are arguments of `run`, `batches` and `run_to_file`. `psiblast` runs its rounds (`num_iterations`) as on the command line, and its PSSM files (`out_pssm` and `out_ascii_pssm`, with `save_pssm_after_last_round` and `save_each_pssm`) are written where the command line writes them. `psiblast` starts from a multiple sequence alignment (Clustal, FASTA, PHYLIP, NEXUS, Sequin or MultAlin) as `-in_msa` does: give an `Alignment` as the query, and choose its master with `msa_master_idx` or `ignore_msa_master`, which are options of `Search` like the others (the command line takes them with `-in_msa` only: a search of another query fails with the parser's message).
+`-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and `-outfmt` are not options here: the inputs, the formats and the output file are arguments of `run`, `batches` and `run_to_file`. `psiblast` runs its rounds (`num_iterations`) as on the command line, and its PSSM files (`out_pssm` and `out_ascii_pssm`, with `save_pssm_after_last_round` and `save_each_pssm`) are written where the command line writes them. `psiblast` starts from a multiple sequence alignment (Clustal, FASTA, PHYLIP, NEXUS, Sequin or MultAlin) as `-in_msa` does: give an `Alignment` as the query, and choose its master with `msa_master_idx` or `ignore_msa_master`, which are options of `Search` like the others (the command line takes them with `-in_msa` only: a search of another query fails with the command line's argument error).
 
 ## Inputs
 
@@ -123,7 +123,7 @@ The GIL is released while a search runs, so other Python threads go on. Python c
 
 ## Database and masking tools
 
-`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`.bytes`, `.text`) and to standard error (`.diagnostics_bytes`, `.diagnostics`). Each text has one U+FFFD per maximal ill-formed subpart of its bytes. `input=` (text or bytes) is what the tool reads as standard input, so you can build a database from FASTA in memory, give ids to `blastdbcmd -entry_batch -`, or mask sequences in memory.
+`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`.bytes`, `.text`) and to standard error (`.diagnostics_bytes`, `.diagnostics`). Each text has one U+FFFD per maximal ill-formed subpart of its bytes. `input=` (text or bytes) is what the tool reads as standard input, so you can build a database from FASTA in memory, give ids to `blastdbcmd -entry_batch -`, mask sequences in memory, or write the reports of a BLAST archive (`-outfmt 11`) again.
 
 ```python
 pylosat.makeblastdb("-dbtype", "prot", "-title", "proteins", "-out", "proteins", input=fasta_text)
@@ -137,7 +137,7 @@ As on the command line, `makeblastdb` needs `-title` when it reads standard inpu
 
 All errors derive from `LosatError` and carry the command line's message for the same failure:
 
-- `ArgumentError`: an option or value that the parser refuses.
+- `ArgumentError`: an option or value that NCBI's argument reader or LOSAT's refusal of an NCBI option it does not run rejects.
 - `InputError`: a FASTA input that does not open, or a subject record that the reader refuses (the command line reads every subject before the first query).
 - `SearchError`: a search, database or tool that fails. A query record that the reader refuses is one too: the command line reads its queries one batch at a time, so the search ends in the batch of that record, after the batches before it. `batches` gives those batches, and `run_to_file` writes their reports, as the command line's `-out` does.
 

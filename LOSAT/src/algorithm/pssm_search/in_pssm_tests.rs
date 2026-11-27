@@ -1,6 +1,16 @@
 use super::*;
 use crate::report::serial::asn_types::Value;
 
+/// The text of the stop `abort`: NCBI's report, or LOSAT's refusal.
+fn abort_text(abort: &super::super::annot_index::Abort) -> String {
+    match abort {
+        super::super::annot_index::Abort::Native { message, .. } => {
+            String::from_utf8(message.clone()).unwrap()
+        }
+        super::super::annot_index::Abort::Refused(text) => text.clone(),
+    }
+}
+
 /// A stream that gives `self.0` and then fails, as a directory given as the standard input
 /// does at once (`read`: EISDIR).
 struct FailsAfter(&'static [u8]);
@@ -51,13 +61,13 @@ use crate::report::serial::pssm::Seqdesc;
 /// (`read_in_pssm`): "read", NCBI's "Unrecognized format" of a `CSerialException`, the silent
 /// "end" of a `CEofException`.
 fn outcome(bytes: &[u8]) -> &'static str {
-    use crate::blastinput::pssm_text::{read_pssm, read_pssm_binary};
+    use crate::blastinput::pssm_text::{read_pssm, read_pssm_binary, read_pssm_xml};
     let read = match guess_format(bytes) {
         PssmFileFormat::TextAsn { start } => read_pssm(&bytes[start..]),
         PssmFileFormat::BinaryAsn { start } => read_pssm_binary(&bytes[start..]),
+        PssmFileFormat::Xml { start } => read_pssm_xml(&bytes[start..]),
         PssmFileFormat::Unsupported => return "Unsupported format",
         PssmFileFormat::Exception(_) => return "exception",
-        PssmFileFormat::Refused { what: XML_PSSM, .. } => return "XML refused",
         PssmFileFormat::Refused { .. } => return "refused",
     };
     match read.result {
@@ -74,7 +84,7 @@ fn outcome(bytes: &[u8]) -> &'static str {
 fn the_format_guess_is_ncbis() {
     use PssmFileFormat as P;
     let binary = |format: &P| matches!(format, P::BinaryAsn { start: 0 });
-    let xml = |format: &P| matches!(format, P::Refused { what: XML_PSSM, .. });
+    let xml = |format: &P| matches!(format, P::Xml { start: 0 });
     assert!(matches!(guess_format(b""), P::Unsupported));
     assert!(matches!(guess_format(b"\x1f\x8b\x08\x00"), P::Unsupported));
     assert!(matches!(guess_format(b">q\nMKV\n"), P::Unsupported));
@@ -222,7 +232,7 @@ fn the_query_entry_joins_the_scope_as_ncbis_object_manager_adds_it() {
             let abort = search.annot.abort.as_ref().unwrap();
             (
                 String::from_utf8(search.annot.posts.text()).unwrap(),
-                String::from_utf8(abort.message.clone()).unwrap(),
+                abort_text(abort),
             )
         })
     };
@@ -288,9 +298,7 @@ fn the_query_entry_joins_the_scope_as_ncbis_object_manager_adds_it() {
                 .annot
                 .abort
                 .as_ref()
-                .map_or_else(String::new, |abort| {
-                    String::from_utf8(abort.message.clone()).unwrap()
-                })
+                .map_or_else(String::new, abort_text)
         })
     };
     let ids =
@@ -300,9 +308,11 @@ fn the_query_entry_joins_the_scope_as_ncbis_object_manager_adds_it() {
         error.contains("duplicate Bioseq id emb|AAA00001.1| present in\n  seq1: emb|AAA00001.1| | emb|AAA00001.1|\n  seq2: emb|AAA00001.1| | emb|AAA00001.1|\n"),
         "{error}"
     );
-    let refusal = two(ids, false).unwrap_err().to_string();
+    // LOSAT's refusal stops the run at the same place (`annot_index::Abort::Refused`).
+    let refusal = two(ids, false).unwrap();
     assert!(
-        refusal.contains("may write as a subject record spelled it"),
+        refusal.contains("may write as a subject record spelled it")
+            && refusal.ends_with("is not supported by LOSAT's PSIBLAST"),
         "{refusal}"
     );
     // Two versions are two handles: no exception.
@@ -359,8 +369,9 @@ fn the_object_managers_stop_comes_before_the_pssms_values() {
 
 // NCBI's unit-test PSSMs: one of frequency ratios only whose query has a gi and a swissprot
 // Seq-id, read (line RG Q1b; NCBI BLAST+ 2.17.0 psiblast: `Query= P01013 Gene X protein
-// (Ovalbumin-related)`, the warning label `129295`, the first id), and one without a query
-// (NCBI's application stops with a C++ exception), refused before the search.
+// (Ovalbumin-related)`, the warning label `129295`, the first id), and one without a query,
+// which ends with NCBI's exception of its empty Seq-entry, exit status 255 (row
+// db.ps.inpssm.err.noquery).
 #[test]
 fn ncbis_unit_test_pssms_are_read_or_refused() {
     let read = |name: &str| {
@@ -375,12 +386,16 @@ fn ncbis_unit_test_pssms_are_read_or_refused() {
         );
         assert_eq!(query.warning_id(), b"129295");
     }
-    let error = psi_search_of(read("pssm/pssm_zero_fratios.asn.gz"))
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("not supported by LOSAT's PSIBLAST"),
-        "{error}"
+    let search = psi_search_of(read("pssm/pssm_zero_fratios.asn.gz")).unwrap();
+    assert!(search.request.is_none() && !search.joins_scope());
+    assert_eq!(
+        search.annot.abort,
+        Some(super::super::annot_index::Abort::Native {
+            exit: 255,
+            message: b"Error: CSeq_entry::GetSeq(): Invalid choice selection: \
+          NCBI-Seqset::Seq-entry.not set\n\n"
+                .to_vec()
+        })
     );
 }
 
@@ -398,8 +413,7 @@ fn the_request_holds_the_pssm_as_read_and_the_engines_errors_come_in_order() {
         program: "TBLASTN",
         matrix_name,
         strategy: request,
-        database: true,
-        archive: None,
+        ..PssmReader::PSIBLAST
     };
     // A PSSM of frequency ratios only: the request holds it as read (no scores), the search
     // and the file the engine's scores (`with_computed_scores`).
@@ -664,12 +678,16 @@ fn empty_annotations_give_no_messages() {
 
 // The review of PS4a, S2 and N3: the record's local id is the Seq-id's `GetSeqIdString()`
 // (NCBI 2.17.0: `local id 5` shows as `5`, `local id -3` as `-3`, in `qseqid` and the warnings).
+// The record's Seq-id is the Bioseq's, with or without `-parse_deflines` (review of PS15b-1, B2:
+// NCBI's Seq-aligns of `local id 5` write `local id 5`, not `local str "5"`).
 #[test]
 fn the_local_id_is_the_seq_id_string() {
     for (id, shown) in [
         (ObjectId::Str(b"myq".to_vec()), "myq"),
         (ObjectId::Id(5), "5"),
         (ObjectId::Id(-3), "-3"),
+        (ObjectId::Id(0), "0"),
+        (ObjectId::Id(i32::MAX), "2147483647"),
     ] {
         let mut pssm = rnd();
         pssm.pssm
@@ -677,11 +695,25 @@ fn the_local_id_is_the_seq_id_string() {
             .as_mut()
             .and_then(SeqEntry::seq_mut)
             .unwrap()
-            .ids = vec![ParsedSeqId::Local(id)];
+            .ids = vec![ParsedSeqId::Local(id.clone())];
         let search = psi_search_of(pssm).unwrap();
         assert_eq!(search.query.local_id, shown);
         assert!(search.query.believed().is_none());
+        assert_eq!(search.query.warning_id(), shown.as_bytes());
         assert!(search.query_record(true).believed().is_some());
+        let parsed = ParsedSeqId::Local(id);
+        for record in [search.query_record(false), search.query_record(true)] {
+            // The Seq-id object that the Seq-aligns write (`SeqId::write`).
+            let written = match record.seq_id() {
+                crate::report::seqid::SeqId::Db(id) => id.clone(),
+                crate::report::seqid::SeqId::Local(text) => {
+                    ParsedSeqId::Local(ObjectId::Str(text.as_bytes().to_vec()))
+                }
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(written, parsed);
+        }
+        assert_eq!(search.query_seq_loc_id(), Some(&parsed));
     }
 }
 
@@ -1018,8 +1050,9 @@ fn a_binary_query_whose_length_is_not_its_letters_is_refused() {
         };
         assert_eq!(
             error.to_string(),
-            "a PSSM query whose letters are missing or of another length than its Seq-inst is \
-             not supported by LOSAT's PSIBLAST"
+            "a PSSM query whose letters are missing or of another length than its Seq-inst \
+             (NCBI BLAST+ 2.17.0 writes outside its query buffer or crashes unless there is one \
+             letter more than the Seq-inst's length) is not supported by LOSAT's PSIBLAST"
         );
     }
 }
@@ -1110,28 +1143,17 @@ fn a_binary_byte_block_past_the_end_is_reserved_as_ncbi_reserves_it() {
     assert_eq!(bit.result, base.result);
 }
 
-// Line RG D3c-3a: Karlin-Altschul values that are not finite numbers, in ASN.1 text and in its
-// binary twins (`ps9_ber_real_*`: `lambda` of PLUS-INFINITY `09 01 40`, MINUS-INFINITY `09 01 41`,
-// NOT-A-NUMBER `09 01 42`, the NR text `INF`). NCBI BLAST+ 2.17.0 goes on with each (probes
-// `D/d3/c3a/probe/realtext`, rows `db.ber.*.real_*`); LOSAT refuses where its search does not yet
-// compute NCBI's hits, E-values and bit scores, and searches where it does (gapped `kappa` and `h`
-// of PLUS-INFINITY; tblastn's `lambdaUngapped` of PLUS-INFINITY).
+// Line PS item PS7c: Karlin-Altschul values that are not finite numbers (or negative), in ASN.1 text
+// and in its binary twins (`ps9_ber_real_*`: `lambda` of PLUS-INFINITY `09 01 40`, MINUS-INFINITY
+// `09 01 41`, NOT-A-NUMBER `09 01 42`, the NR text `INF`). NCBI BLAST+ 2.17.0 goes on with each
+// (line RG D3c-3a probes, line PS `ps7c/` corpus) and so does LOSAT; the search itself is tested by
+// the fixtures (`*.ps7c.tsv`, `db.ber.*.real_*`).
 #[test]
-fn a_karlin_altschul_value_that_is_not_finite_is_refused_where_losat_does_not_compute_it() {
+fn a_karlin_altschul_value_that_is_not_finite_is_read_and_searched() {
     use crate::blastinput::pssm_text::{read_pssm, read_pssm_binary};
     let tblastn = PssmReader {
         program: "TBLASTN",
-        matrix_name: "BLOSUM62",
-        strategy: false,
-        database: true,
-        archive: None,
-    };
-    let refusal = |kind: &str, name: &str, what: &str, program: &str| {
-        format!(
-            "a PSSM whose {kind} Karlin-Altschul parameter {name} is {what} (LOSAT does not yet \
-             compute the hits, E-values and bit scores that NCBI BLAST+ 2.17.0 computes from it) \
-             is not supported by LOSAT's {program}"
-        )
+        ..PssmReader::PSIBLAST
     };
     let search = |pssm: PssmWithParameters, reader: PssmReader<'static>| {
         psi_search_and_object(pssm, reader)
@@ -1150,82 +1172,294 @@ fn a_karlin_altschul_value_that_is_not_finite_is_refused_where_losat_does_not_co
         let edited = format!("{}      {name} {value}{comma}{}", &base[..at], &base[end..]);
         read_pssm(edited.as_bytes()).result.unwrap()
     };
-    for (name, value, what) in [
-        ("lambda", "PLUS-INFINITY", "infinite"),
-        ("lambda", "NOT-A-NUMBER", "not a number"),
-        ("kappa", "NOT-A-NUMBER", "not a number"),
-        ("h", "NOT-A-NUMBER", "not a number"),
+    for name in [
+        "lambda",
+        "kappa",
+        "h",
+        "lambdaUngapped",
+        "kappaUngapped",
+        "hUngapped",
     ] {
-        for (reader, program) in [(PssmReader::PSIBLAST, "PSIBLAST"), (tblastn, "TBLASTN")] {
-            assert_eq!(
-                search(text(name, value), reader),
-                Err(refusal("gapped", name, what, program)),
-                "{name} {value}"
-            );
+        for value in ["PLUS-INFINITY", "MINUS-INFINITY", "NOT-A-NUMBER", "-0.5"] {
+            for reader in [PssmReader::PSIBLAST, tblastn] {
+                assert_eq!(search(text(name, value), reader), Ok(()), "{name} {value}");
+            }
         }
     }
-    assert_eq!(
-        search(
-            text("lambdaUngapped", "PLUS-INFINITY"),
-            PssmReader::PSIBLAST
-        ),
-        Err(refusal(
-            "ungapped",
-            "lambdaUngapped",
-            "infinite",
-            "PSIBLAST"
-        ))
-    );
-    for (name, value) in [
-        ("kappa", "PLUS-INFINITY"),
-        ("h", "PLUS-INFINITY"),
-        ("kappaUngapped", "PLUS-INFINITY"),
-        ("hUngapped", "PLUS-INFINITY"),
-    ] {
-        assert_eq!(
-            search(text(name, value), PssmReader::PSIBLAST),
-            Ok(()),
-            "{name}"
-        );
-    }
-    assert_eq!(
-        search(text("lambdaUngapped", "PLUS-INFINITY"), tblastn),
-        Ok(())
-    );
-    // An ungapped value that is not a number makes NCBI's ungapped block invalid first: the
-    // engine's error of a query without Karlin-Altschul parameters, not this refusal.
-    let mut nan = text("lambda", "NOT-A-NUMBER");
-    let ungapped = text("lambdaUngapped", "NOT-A-NUMBER");
-    nan.pssm.final_data.as_mut().unwrap().lambda_ungapped =
-        ungapped.pssm.final_data.unwrap().lambda_ungapped;
-    assert_eq!(search(nan, PssmReader::PSIBLAST), Ok(()));
-    // The binary twins: the same values, the same answers; MINUS-INFINITY is negative.
     let binary = |name: &str| {
         read_pssm_binary(&fixture(&format!("pssm/ps9_ber_{name}.asnb")))
             .result
             .unwrap()
     };
-    for (name, what) in [
-        ("real_pinf", "infinite"),
-        ("real_inf_text", "infinite"),
-        ("real_nan", "not a number"),
+    for name in [
+        "real_pinf",
+        "real_inf_text",
+        "real_nan",
+        "real_ninf",
+        "real_negzero",
     ] {
-        for (reader, program) in [(PssmReader::PSIBLAST, "PSIBLAST"), (tblastn, "TBLASTN")] {
-            assert_eq!(
-                search(binary(name), reader),
-                Err(refusal("gapped", "lambda", what, program)),
-                "{name}"
-            );
+        for reader in [PssmReader::PSIBLAST, tblastn] {
+            assert_eq!(search(binary(name), reader), Ok(()), "{name}");
         }
     }
+}
+
+// Line PS item PS7c: a query with one letter more than its Seq-inst's `length` is searched as its
+// first `length` letters (NCBI BLAST+ 2.17.0 sizes its buffer by the length: probe `ps7c/` s3,
+// valgrind clean); the PSSM object that the run writes keeps all the columns.
+#[test]
+fn a_query_with_one_letter_more_than_its_length_is_searched_as_its_first_letters() {
+    use crate::blastinput::pssm_text::read_pssm_binary;
+    let base = fixture("pssm/ps9_ber_base.asnb");
+    let length = b"\xa2\x80\x02\x01\x1e\x00\x00";
+    let at = base
+        .windows(length.len())
+        .position(|bytes| bytes == length)
+        .unwrap();
+    let bytes = [&base[..at + 2], b"\x02\x01\x1d", &base[at + 5..]].concat();
+    let read = read_pssm_binary(&bytes);
+    let (search, file) = psi_search_and_object(read.result.unwrap(), PssmReader::PSIBLAST)
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(search.pssm.rows.len(), 29);
+    let full = read_pssm_binary(&base).result.unwrap();
+    assert_eq!(file.object.pssm.num_columns, full.pssm.num_columns);
+}
+
+// Line PS item PS7c (review S1, R3): a PSSM of frequency ratios only whose Seq-inst `length` is not
+// its letters. Without `length`, NCBI BLAST+ 2.17.0's `GetBlastSequence` stops with its query
+// set-up error (`Warning: Cannot get sequence length `, exit 3, valgrind clean) for both
+// ratios-only PSSMs (`scores_error`) and PSSMs with scores (`setup_error`). From one less than the
+// letters up (below 1 GiB) NCBI's PSSM engine stops with its error (probes s1: 29, 31, 32, 60,
+// 255, 1000 and 65,536 for 30 letters, valgrind clean for 29 and 1000); a shorter `length` writes
+// past NCBI's query buffer (valgrind: 27 and 28 of 30, 0 of 1; for 30 letters NCBI aborts on 0 and
+// 1), and a longer one asks for a buffer whose allocation depends on the host's memory: both
+// refused.
+#[test]
+fn a_ratios_only_pssm_of_another_length_gets_the_engines_error_where_ncbi_stays_in_its_buffer() {
+    use crate::report::serial::pssm::{SeqData, SeqEntry};
+    let missing_length = crate::report::query_warnings::missing_length_error();
+    assert_eq!(missing_length, "Warning: Cannot get sequence length ");
+    let with_length = |length: Option<u32>| {
+        let mut pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
+            "pssm/ps5_ratio30_noparams.asn.gz",
+        ))
+        .unwrap();
+        let Some(SeqEntry::Seq(query)) = pssm.pssm.query.as_mut() else {
+            panic!("the PSSM's query");
+        };
+        assert_eq!(query.inst.length, Some(30));
+        query.inst.length = length;
+        psi_search_and_object(pssm, PssmReader::PSIBLAST)
+    };
+    let (search, file) = with_length(None).unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(
-        search(binary("real_ninf"), PssmReader::PSIBLAST),
-        Err(
-            "a PSSM whose gapped Karlin-Altschul parameter lambda is negative (NCBI BLAST+ 2.17.0 \
-             goes on with a Karlin-Altschul block that it holds invalid) is not supported by \
-             LOSAT's PSIBLAST"
-                .to_string()
-        )
+        search.scores_error.as_deref(),
+        Some(missing_length.as_str())
     );
-    assert_eq!(search(binary("real_negzero"), PssmReader::PSIBLAST), Ok(()));
+    assert!(search.setup_error.is_none());
+    assert!(!file.valid);
+    for length in [29, 31, 32, 60, 255, 1000, 65_536] {
+        let (search, file) = with_length(Some(length)).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            search.scores_error.as_deref(),
+            Some(RATIOS_COLUMNS_ERROR),
+            "{length}"
+        );
+        assert!(!file.valid, "{length}");
+    }
+    for (length, words) in [
+        (Some(28), "at least two letters more"),
+        (Some(0), "at least two letters more"),
+        (Some(1 << 30), "depending on the host's memory"),
+        (Some(u32::MAX), "depending on the host's memory"),
+    ] {
+        let Err(error) = with_length(length) else {
+            panic!("{length:?}");
+        };
+        assert!(error.to_string().contains(words), "{length:?}: {error}");
+    }
+    // A 1-letter ratios-only PSSM with length 0 writes outside NCBI's query buffer under valgrind.
+    let mut one = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
+        "pssm/ps5_ratio30_noparams.asn.gz",
+    ))
+    .unwrap();
+    one.pssm.num_columns = 1;
+    if let Some(data) = one.pssm.intermediate_data.as_mut() {
+        data.freq_ratios.truncate(one.pssm.num_rows as usize);
+    }
+    if let Some(SeqEntry::Seq(query)) = one.pssm.query.as_mut() {
+        query.inst.length = Some(0);
+        query.inst.seq_data = Some(SeqData::Ncbistdaa(vec![1]));
+    }
+    let Err(error) = psi_search_and_object(one, PssmReader::PSIBLAST) else {
+        panic!("1-letter ratios-only length 0");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("has length 0 (NCBI BLAST+ 2.17.0 writes outside its query buffer)"),
+        "{error}"
+    );
+    // A PSSM with scores whose Seq-inst has no length stops in query set-up (`setup_error`) in
+    // both psiblast and tblastn.
+    let tblastn = PssmReader {
+        program: "TBLASTN",
+        ..PssmReader::PSIBLAST
+    };
+    for reader in [PssmReader::PSIBLAST, tblastn] {
+        let mut scored = crate::blastinput::pssm_text::read_pssm_with_parameters(&fixture(
+            "db_search/db.ps.asn.rnd.6.asn",
+        ))
+        .unwrap();
+        let Some(SeqEntry::Seq(query)) = scored.pssm.query.as_mut() else {
+            panic!("the PSSM's query");
+        };
+        query.inst.length = None;
+        let (search, file) =
+            psi_search_and_object(scored, reader).unwrap_or_else(|error| panic!("{error}"));
+        assert!(search.scores_error.is_none(), "{}", reader.program);
+        assert_eq!(
+            search.setup_error.as_deref(),
+            Some(missing_length.as_str()),
+            "{}",
+            reader.program
+        );
+        assert!(file.valid, "{}", reader.program);
+    }
+}
+
+// D3c-3c review R1: under a `SERIAL_VERIFY_DATA_WRITE` that turns the check of what is written off,
+// a PSSM with a list element stated as NULL is refused where the run writes the PSSM, and only
+// there (NCBI BLAST+ 2.17.0, probe D3c-3c review `probeF`, rows `u.*`: the strategy's request and
+// `-out_pssm` change, also before the query set-up's stop; the reports and a `-subject` strategy,
+// which NCBI stops first, do not).
+#[test]
+fn a_null_element_is_refused_where_the_setting_leaves_it_out_of_a_written_file() {
+    use crate::blastinput::ncbi_environment::WriteVerification;
+    let off = WriteVerification::of(std::ffi::OsStr::new("NO"));
+    let always = WriteVerification::of(std::ffi::OsStr::new("ALWAYS"));
+    let run = |name: &str,
+               setting: Option<&WriteVerification>,
+               (strategy, database, out_pssm): (bool, bool, bool),
+               program: &'static str| {
+        let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(name)).unwrap();
+        let reader = PssmReader {
+            program,
+            strategy,
+            database,
+            write_verification: setting,
+            out_pssm,
+            ..PssmReader::PSIBLAST
+        };
+        psi_search_and_object(pssm, reader)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    };
+    let refused = |program: &str| {
+        Err(format!(
+            "the environment variable SERIAL_VERIFY_DATA_WRITE=NO, which makes NCBI BLAST+ leave out an element stated as NULL of the -in_pssm PSSM where the run writes it (-export_search_strategy, -out_pssm or -outfmt 11), is not supported by LOSAT's {program}"
+        ))
+    };
+    let hist = "pssm/d3b_hist_ids.asn.gz";
+    assert_eq!(
+        run(hist, off.as_ref(), (true, true, false), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (true, true, false), "TBLASTN"),
+        refused("TBLASTN")
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (false, true, true), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (false, true, false), "PSIBLAST"),
+        Ok(())
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (true, false, true), "PSIBLAST"),
+        Ok(())
+    );
+    assert_eq!(
+        run(hist, always.as_ref(), (true, true, true), "PSIBLAST"),
+        Ok(())
+    );
+    assert_eq!(run(hist, None, (true, true, true), "PSIBLAST"), Ok(()));
+    let base = "pssm/d3b_base.asn.gz";
+    assert_eq!(
+        run(base, off.as_ref(), (true, true, true), "PSIBLAST"),
+        Ok(())
+    );
+    let descr = "pssm/d3b_descr_elem_null.asn.gz";
+    assert_eq!(
+        run(descr, off.as_ref(), (true, true, false), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(descr, off.as_ref(), (false, true, true), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(descr, off.as_ref(), (false, true, false), "PSIBLAST"),
+        Ok(())
+    );
+}
+
+// PS7b: a frequency-ratios-only PSSM computes its scores with 11/1 (`CPsiBlastInputFreqRatios`)
+// while writing the search options' gap costs into `params.rpsdbparams`
+// (`PsiBlastAddAncillaryPssmData`, psiblast_aux_priv.cpp:501-503). When the query is all-X and
+// the matrix does not support 11/1 (e.g. BLOSUM45), NCBI's score block reports the ungapped
+// invalid-query error first (`BlastSetup_ScoreBlkInit`, blast_setup.c:498-520).
+#[test]
+fn ratios_only_pssm_records_search_gap_costs_and_orders_allx_error_first() {
+    let ratios = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
+        "pssm/ps4_tk_ratios.asn.gz",
+    ))
+    .unwrap();
+    let reader = PssmReader {
+        matrix_name: "BLOSUM80",
+        gap_open: 9,
+        gap_extend: 2,
+        ..PssmReader::PSIBLAST
+    };
+    let (search, file) = psi_search_and_object(ratios.clone(), reader).unwrap();
+    assert!(search.scores_error.is_none());
+    assert!(file.valid);
+    let rps = file.object.params.unwrap().rpsdbparams.unwrap();
+    assert_eq!((rps.gap_open, rps.gap_extend), (Some(9), Some(2)));
+    // IDENTITY leaves an inner scores_error rather than bailing out of `read_in_pssm` so
+    // `validate_protein_options` runs after reading and produces NCBI's matrix error.
+    let (search_id, file_id) = psi_search_and_object(
+        ratios,
+        PssmReader {
+            matrix_name: "IDENTITY",
+            ..PssmReader::PSIBLAST
+        },
+    )
+    .unwrap();
+    assert!(search_id.scores_error.is_some());
+    assert!(!file_id.valid);
+    // All-X ratios-only PSSM + BLOSUM45 (no 11/1): ungapped invalid-query error comes first.
+    let allx_bytes = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/pssm/ps7b_allx_ratios.asn"),
+    )
+    .unwrap();
+    let allx = crate::blastinput::pssm_text::read_pssm_with_parameters(&allx_bytes).unwrap();
+    let (search_allx, file_allx) = psi_search_and_object(
+        allx,
+        PssmReader {
+            matrix_name: "BLOSUM45",
+            gap_open: 15,
+            gap_extend: 2,
+            ..PssmReader::PSIBLAST
+        },
+    )
+    .unwrap();
+    assert!(!file_allx.valid);
+    assert_eq!(
+        search_allx.scores_error.as_deref(),
+        Some(crate::report::query_warnings::INVALID_QUERY_MESSAGE)
+    );
 }

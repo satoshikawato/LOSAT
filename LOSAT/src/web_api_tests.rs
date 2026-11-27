@@ -410,7 +410,8 @@ fn search_space_and_database_size_give_the_cli_bytes_of_the_shared_vector() {
 // message, in the words of the other options of ABI v1 (`<flag> parse error: <detail>`).
 #[test]
 fn invalid_search_space_and_database_size_are_refused_as_the_cli_refuses_them() {
-    use crate::blastinput::value_parsers::{ncbi_int8, nonnegative_ncbi_int8};
+    use crate::web_v1_argv::ncbi_int8;
+    use crate::web_v1_argv::nonnegative_ncbi_int8;
     let no_path = || (PathBuf::new(), PathBuf::new(), PathBuf::new());
     let parse = |program: &str, words: &[&str]| -> Result<(Option<i64>, Option<i64>), String> {
         let (query, subject, out) = no_path();

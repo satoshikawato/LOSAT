@@ -16,7 +16,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 - **Query.** `-query` takes a nucleotide FASTA file with one or more records. The default is the standard input, so `-query -` and no `-query` at all read the standard input. A name ending in `.gz`, `.bz2` or `.zst` is decompressed for you.
 - **Subject.** `-subject` takes a nucleotide FASTA file in the same forms. LOSAT compares each query with each record, with no database to build first.
 - **Database.** `-db` searches a nucleotide BLAST database written by `makeblastdb` or `losat makeblastdb`, or one of NCBI's downloaded nucleotide databases. Name several databases in one string (`-db "a b"`). `-db` and `-subject` cannot be used together. See [BLAST databases](../databases.md).
-- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants). `-db_soft_mask` and `-db_hard_mask` use the masks stored in a database that was built with `makeblastdb -mask_data` (see [Masks](../databases.md#masks)).
+- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-gilist` and `-negative_gilist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants). `-db_soft_mask` and `-db_hard_mask` use the masks stored in a database that was built with `makeblastdb -mask_data`, or its GI-indexed masks (`makeblastdb -gi_mask`, ids 0, 1, ... or the names of its alias file's `MASKLIST`; see [Masks](../databases.md#masks)).
 - **Genetic codes.** `-query_gencode` and `-db_gencode` (both default 1) select the codes that translate the query and the subject. They take the NCBI genetic code numbers 1 to 6, 9 to 16, 21 to 31 and 33. See [Genetic code of the subject](#genetic-code-of-the-subject).
 - **Strand.** `-strand` (`both`, `plus`, `minus`) limits the query's frames to one strand. The subject is always searched in all six frames.
 - **Locations.** `-query_loc START-STOP` searches part of the query, and `-subject_loc START-STOP` part of the subject (with `-subject` only). Positions are in nucleotides, 1-based and inclusive.
@@ -90,7 +90,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 - With `-subject` and a `-db_gencode` other than 1, LOSAT translates the subject with that code (see [Genetic code of the subject](#genetic-code-of-the-subject)). See [the decision record on genetic codes for local tblastx subjects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md).
 - On large genome pairs with the default options, NCBI BLAST+ 2.17.0 turns a cutoff that is out of the range of a double into a word cutoff of 1. In the runs we made (a 1.2 Mb query against a 5.5 Mb genome) it ran out of memory or time and wrote nothing. LOSAT keeps the equal finite cutoff and writes the hits. Where the cutoff stays finite, both give the same bytes. With an extreme `-searchsp` and `-evalue` on small inputs, NCBI BLAST+ reports more rows than LOSAT. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 - In format 0, a subject title that consists only of punctuation is written; NCBI BLAST+ crashes on it. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
-- With so many very short queries in one batch that its average translated length is 0, against one subject sequence, NCBI BLAST+ 2.17.0 crashes; LOSAT writes the linked hits. See [`tblastx` with very many short queries against one subject](../differences.md#tblastx-with-very-many-short-queries-against-one-subject) and [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+- With so many very short queries in one batch that its average translated length is 0, or with a very short query against a very short subject, against one subject sequence, NCBI BLAST+ 2.17.0 crashes; LOSAT writes the linked hits. See [Very many short queries, or a very short query, against one subject](../differences.md#very-many-short-queries-or-a-very-short-query-against-one-subject) and [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ## What LOSAT refuses
 
@@ -99,7 +99,7 @@ LOSAT stops with an error for these `tblastx` settings instead of running someth
 - `-db_gencode 32` and `-query_gencode 32`.
 - An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension would pass into the next frame of the query.
 - A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation.
-- `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
+- `-remote` and `-entrez_query`.
 
 ## Examples
 

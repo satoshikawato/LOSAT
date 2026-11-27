@@ -1,0 +1,318 @@
+//! NCBI's argument reader (`ncbi_app::read`, line RG DECISIONS K4i-2) for the ten programs that
+//! read their arguments into their own option types (`options`, line RG DECISIONS K4i-3-1):
+//! blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, rpstblastn, makeblastdb and
+//! rpsbproc. Each program is a `Tool` (its frozen
+//! `-help` text; its argument XML is NCBI's), read in NCBI's order by every caller: the command
+//! line's entry (`cli::main_entry`), the library API (`api::search`, `api::run_makeblastdb`) and
+//! LOSAT Web's ABI v2 (`web_adapter`). NCBI's reader writes the help and the argument errors
+//! (one producer of their bytes); then LOSAT refuses by name what it does not run
+//! (`refusal_after_read`), and each program reads the arguments that the reader read into its
+//! options (`options`, its type's `from_args`), which checks nothing that NCBI's reader has not
+//! checked first.
+
+use std::ffi::OsString;
+
+use super::Commands;
+use crate::blastinput::ncbi_environment::{preparse, DiagTarget, Preparsed};
+use crate::ncbi_app::args::{refusal, Args, NotConverted, Refusal};
+use crate::ncbi_app::{Diag, ReadEnd, Tool};
+
+/// A `Tool` of a program on this reader: NCBI's frozen `-help` text, no diagnostic prefix, no
+/// components.
+macro_rules! tool {
+    ($program:literal, $shown:literal, $help:expr) => {
+        Tool {
+            program: $program,
+            refusal_name: $shown,
+            help: $help,
+            post_prefix: None,
+            components: &[],
+            help_full: None,
+            short_description: None,
+            write_failure: None,
+            dry_run: None,
+        }
+    };
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:89-95 (each search program's
+// `Init` describes its arguments; NCBI BLAST+ 2.17.0's `-help` of each is frozen)
+static BLASTN: Tool = tool!(
+    "blastn",
+    "BLASTN",
+    include_str!("../algorithm/blastn/help.txt")
+);
+static BLASTP: Tool = tool!(
+    "blastp",
+    "BLASTP",
+    include_str!("../algorithm/blastp/help.txt")
+);
+static BLASTX: Tool = tool!(
+    "blastx",
+    "BLASTX",
+    include_str!("../algorithm/blastx/help.txt")
+);
+static TBLASTN: Tool = tool!(
+    "tblastn",
+    "TBLASTN",
+    include_str!("../algorithm/tblastn/help.txt")
+);
+static TBLASTX: Tool = tool!(
+    "tblastx",
+    "TBLASTX",
+    include_str!("../algorithm/tblastx/help.txt")
+);
+static PSIBLAST: Tool = tool!(
+    "psiblast",
+    "PSIBLAST",
+    include_str!("../algorithm/psiblast/help.txt")
+);
+static RPSBLAST: Tool = tool!(
+    "rpsblast",
+    "RPSBLAST",
+    include_str!("../algorithm/rpsblast/help.txt")
+);
+static RPSTBLASTN: Tool = tool!(
+    "rpstblastn",
+    "RPSTBLASTN",
+    crate::algorithm::rpstblastn::args::HELP
+);
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:300-302
+// `-randomize` is described `fHidden`: NCBI's `-help-full` lists it, `-help` does not (NCBI BLAST+
+// 2.17.0, frozen).
+static MAKEBLASTDB: Tool = Tool {
+    help_full: Some(include_str!("../writedb/makeblastdb_help_full.txt")),
+    ..tool!(
+        "makeblastdb",
+        "makeblastdb",
+        include_str!("../writedb/makeblastdb_help.txt")
+    )
+};
+
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:64-65
+// rpsbproc's `Init` gives its usage context a short description, which `-h` writes, and a long one,
+// which `-help` writes (RpsbProc 0.5.1, frozen). A failed write ends it with exit status 4
+// (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9).
+static RPSBPROC: Tool = Tool {
+    short_description: Some(
+        "   Process output from offline rpsblast to annotate sequence with conserved\n   domain \
+         information\n",
+    ),
+    write_failure: Some(crate::rpsbproc::E_OUTPUT_FILE_OPEN_ERROR),
+    ..tool!("rpsbproc", "rpsbproc", include_str!("../rpsbproc/help.txt"))
+};
+
+/// The programs on this reader, in the order of `Commands`' variants.
+static TOOLS: [&Tool; 10] = [
+    &BLASTX,
+    &BLASTN,
+    &BLASTP,
+    &TBLASTX,
+    &TBLASTN,
+    &PSIBLAST,
+    &RPSBLAST,
+    &RPSTBLASTN,
+    &MAKEBLASTDB,
+    &RPSBPROC,
+];
+
+/// The `Tool` of `program`, if it is one of the programs whose options this reader reads.
+pub(crate) fn tool(program: &str) -> Option<&'static Tool> {
+    TOOLS.iter().copied().find(|tool| tool.program == program)
+}
+
+/// LOSAT's refusal of NCBI's argument `-name` of `program` that LOSAT does not run, by name
+/// (`Refusal::Read`, the rows of `ncbi_app::args::refusal`): the program as LOSAT's refusals name
+/// it (`Tool::refusal_name`) and why, if the row says; `None` for an argument that LOSAT runs.
+pub(crate) fn named_refusal(tool: &Tool, name: &str) -> Option<String> {
+    let Some(Refusal::Read(why)) = refusal(tool.program, name) else {
+        return None;
+    };
+    let shown = match why {
+        Some(why) => format!("{} ({why})", tool.refusal_name),
+        None => tool.refusal_name.to_string(),
+    };
+    Some(format!(
+        "the NCBI BLAST+ option -{name} is not supported by LOSAT's {shown}"
+    ))
+}
+
+// No NCBI counterpart: LOSAT's refusals of what it does not run (AGENTS.md rule 2), after NCBI's
+// reader, so that NCBI's errors, help and `-dryrun` come first (line RG DECISIONS K4i-2 D4,
+// K4i-2b-2 (1)).
+/// LOSAT's refusal of the arguments `args` that `tool`'s reader read: the first given argument, in
+/// the command line's order, that LOSAT refuses by name (`named_refusal`); `None` when it runs
+/// them. The command line writes it as its refusals (`Error: ` and the text, exit status 1); the
+/// library API's error is `Error::Argv` of the text.
+pub(crate) fn refusal_after_read(tool: &Tool, args: &Args) -> Option<String> {
+    args.given_values()
+        .find_map(|(name, _)| named_refusal(tool, name))
+}
+
+// No NCBI counterpart: NCBI's `CArgs` is the program's arguments; LOSAT's programs read theirs into
+// their own option types (line RG DECISIONS K4i-3-1).
+/// The options of `tool`'s arguments `args` (each program's `from_args`). A key that the option's
+/// type does not hold is LOSAT's error (`not_converted`).
+pub(crate) fn options(tool: &Tool, args: &Args) -> Result<Commands, String> {
+    use crate::algorithm::{
+        blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx,
+    };
+    let options = match tool.program {
+        "blastx" => blastx::BlastxArgs::from_args(args).map(Commands::Blastx),
+        "blastn" => blastn::BlastnArgs::from_args(args).map(Commands::Blastn),
+        "blastp" => blastp::BlastpArgs::from_args(args).map(Commands::Blastp),
+        "tblastx" => tblastx::TblastxArgs::from_args(args).map(Commands::Tblastx),
+        "tblastn" => tblastn::TblastnArgs::from_args(args).map(Commands::Tblastn),
+        "psiblast" => psiblast::PsiblastArgs::from_args(args).map(Commands::Psiblast),
+        "rpsblast" => rpsblast::RpsblastArgs::from_args(args).map(Commands::Rpsblast),
+        "rpstblastn" => rpstblastn::RpstblastnArgs::from_args(args).map(Commands::Rpstblastn),
+        "makeblastdb" => {
+            crate::writedb::makeblastdb::MakedbArgs::from_args(args).map(Commands::Makedb)
+        }
+        "rpsbproc" => crate::rpsbproc::RpsbprocArgs::from_args(args).map(Commands::Rpsbproc),
+        program => unreachable!("{program} is not on the reader"),
+    };
+    options.map_err(|NotConverted { name }| not_converted(tool, name))
+}
+
+/// LOSAT's error where a program's option type does not hold the value of `-name` that NCBI's
+/// reader read (`options`).
+fn not_converted(tool: &Tool, name: &str) -> String {
+    format!(
+        "LOSAT's {} does not convert the value of -{name} that NCBI's argument reader read",
+        tool.refusal_name
+    )
+}
+
+/// Why a command line was not read into a program's arguments (`read_argv`, `try_parse_from`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArgvError {
+    /// The reader stopped at a help word (`-h`, `-help`, `-help-full`, `-xmlhelp` where the
+    /// caller prints the XML): the text that the command line prints to its standard output,
+    /// exit status 0.
+    Printed(String),
+    /// NCBI's report of an argument error (the usage, the line of `=` and the posts), or the top
+    /// level's error: the bytes that the command line writes to its standard error, as without a
+    /// `-logfile` (exit status 1; the top level's 2).
+    Report(Vec<u8>),
+    /// LOSAT's refusal: its text, which the command line writes after `Error: ` (exit status 1).
+    Refused(String),
+}
+
+impl std::fmt::Display for ArgvError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArgvError::Printed(text) | ArgvError::Refused(text) => f.write_str(text),
+            ArgvError::Report(bytes) => f.write_str(&String::from_utf8_lossy(bytes)),
+        }
+    }
+}
+
+impl std::error::Error for ArgvError {}
+
+/// Who reads a command line through `read_argv`, which decides what NCBI's toolkit words do there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "each variant names the NCBI application start that the caller runs"
+)]
+pub(crate) enum Caller {
+    /// A caller that runs no NCBI application start (the engine's own argv: BLASTN's repeat
+    /// search, the tests): `-logfile`, `-conffile` and `-dryrun` are refused
+    /// (`toolkit_file_word_refusal`; makeblastdb keeps its own `-logfile`), and so are the
+    /// versions (`version_word_refusal`) and `-xmlhelp` (`xml_help_refusal`).
+    NoStart,
+    /// The library API, whose calls run a start of their own (`api::start`): `-logfile`,
+    /// `-conffile` and `-dryrun` are the start's; the versions and `-xmlhelp` are refused.
+    OwnStart,
+    /// LOSAT Web's ABI v2, whose runs make a start of their own (`web_adapter::start_run`) and
+    /// print the command line's texts: the toolkit's words are the start's, the versions are
+    /// printed before the reader (a version word that reaches it is refused), and `-xmlhelp`
+    /// prints the XML, as on the command line.
+    PrintingStart,
+}
+
+/// Reads `argv` (`losat <program> <words>`) as the command line reads it, for a caller other than
+/// the command line's entry (`Caller`): the toolkit's words, NCBI's reader of the program (its
+/// texts in memory: the help, or the report of an argument error, whose posts go to `target`, the
+/// caller's start's `-logfile` target, as the command line's go to its own: `ArgvError::Report`
+/// holds what the command line writes to its standard error, with NCBI's line that points to the
+/// error logs when the target is not `cerr`), then, unless the argv is a dry run, LOSAT's refusals
+/// (`refusal_after_read`), then the program's options (`options`). A caller without a start
+/// (`Caller::NoStart`) gives `cerr` (`DiagTarget::Stderr`): the posts are then the report's. An
+/// argv that names no program on this reader is read by the top level (`top_level`).
+pub(crate) fn read_argv(
+    argv: &[OsString],
+    caller: Caller,
+    target: &DiagTarget,
+) -> Result<Commands, ArgvError> {
+    let Some(tool) = argv.get(1).and_then(|word| word.to_str()).and_then(tool) else {
+        let top_level = super::top_level(argv);
+        return Err(match top_level.error {
+            true => ArgvError::Report(top_level.text.into_bytes()),
+            false => ArgvError::Printed(top_level.text),
+        });
+    };
+    let words = &argv[2..];
+    let (words, dry_run) = match preparse(words) {
+        Preparsed::Version(request) => {
+            return Err(ArgvError::Refused(super::version_word_refusal(
+                tool,
+                request.word(),
+            )))
+        }
+        Preparsed::Words {
+            words: read,
+            conffile,
+            dryrun,
+        } => {
+            if caller == Caller::NoStart {
+                if let Some(word) = super::toolkit_file_word(words, tool.program) {
+                    return Err(ArgvError::Refused(super::toolkit_file_word_refusal(
+                        tool, word,
+                    )));
+                }
+            }
+            debug_assert!(caller != Caller::NoStart || (conffile.is_none() && !dryrun));
+            (read, dryrun)
+        }
+    };
+    let mut out = Vec::new();
+    let mut stderr = Vec::new();
+    let mut diag = Diag::new(target, &mut stderr, tool);
+    let xml_help = match caller {
+        Caller::PrintingStart => Some(super::xml_help_text as fn(&str) -> Option<String>),
+        Caller::NoStart | Caller::OwnStart => None,
+    };
+    let args = match crate::ncbi_app::read(
+        tool,
+        &words,
+        &mut out,
+        &mut diag,
+        xml_help,
+        &crate::report::run_files::OpenFiles::disk(),
+    ) {
+        Ok(args) => args,
+        Err(ReadEnd::Exit(0)) => {
+            return Err(ArgvError::Printed(
+                String::from_utf8_lossy(&out).into_owned(),
+            ))
+        }
+        Err(ReadEnd::Exit(_)) => {
+            drop(diag);
+            return Err(ArgvError::Report(stderr));
+        }
+        Err(ReadEnd::Refused(reason)) => return Err(ArgvError::Refused(reason)),
+    };
+    if !dry_run {
+        if let Some(reason) = refusal_after_read(tool, &args) {
+            return Err(ArgvError::Refused(reason));
+        }
+    }
+    options(tool, &args).map_err(ArgvError::Refused)
+}
+
+#[cfg(test)]
+#[path = "options_tests.rs"]
+pub(crate) mod options_tests;

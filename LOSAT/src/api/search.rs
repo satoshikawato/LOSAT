@@ -10,16 +10,27 @@
 use super::error::Error;
 use super::input::{Inputs, QueryFile};
 use super::program::Program;
+use crate::blastinput::ncbi_environment::DiagTarget;
 use crate::cli::{Cli, Commands};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
 /// The options that the library API sets itself and does not take in an argv: the inputs
 /// (`Inputs` gives the records and their names, a database's name, and the PSSM file of a PSSM
-/// query, `-in_pssm` of psiblast and tblastn), the output file and the output format (arguments
-/// of `run_collect`, `run` and `run_to_file`). psiblast's `-in_msa` is owned the same way for that
-/// program only (`Inputs::msa`; `alignment_owned`), and so is not in this list.
-pub const API_OWNED: &[&str] = &["query", "subject", "db", "in_pssm", "out", "outfmt"];
+/// query, `-in_pssm` of psiblast and tblastn, and the search strategy file of
+/// `-import_search_strategy`, `Search::read_strategy` and `Inputs::strategy`), the output file and
+/// the output format (arguments of `run_collect`, `run` and `run_to_file`). psiblast's `-in_msa` is
+/// owned the same way for that program only (`Inputs::msa`; `alignment_owned`), and so is not in
+/// this list.
+pub const API_OWNED: &[&str] = &[
+    "query",
+    "subject",
+    "db",
+    "in_pssm",
+    "import_search_strategy",
+    "out",
+    "outfmt",
+];
 
 // No NCBI counterpart: the search strategy file (`-export_search_strategy`,
 // `report::archive::strategy`) is an output outside those the API owns too: a file the caller
@@ -31,9 +42,9 @@ const STRATEGY_FILES: &[&str] = &["export_search_strategy"];
 /// search strategy, `STRATEGY_FILES`, line RG item F1b-1; the same for every program): they are not in an argv that
 /// `validate` accepts, and `describe` leaves them out. psiblast's PSSM files (`-out_pssm`,
 /// `-out_ascii_pssm`, `-save_pssm_after_last_round`, `-save_each_pssm`) are written where the
-/// command line writes them (series Q item Q6a). The searches of records of LOSAT Web take none
-/// of them either, and tblastn's `-in_pssm` neither until line PS's PSW1
-/// (`web_adapter::records_refused_options`).
+/// command line writes them (series Q item Q6a). The searches of records of LOSAT Web take the
+/// search strategy file, through the run's files (line RG item F1w, `web_adapter::give_strategy`),
+/// and refuse tblastn's `-in_pssm` until line PS's PSW1 (`web_adapter::records_refused_options`).
 pub(crate) fn file_options(_program: Program) -> &'static [&'static str] {
     STRATEGY_FILES
 }
@@ -45,6 +56,16 @@ pub(crate) fn file_options(_program: Program) -> &'static [&'static str] {
 pub(crate) fn alignment_owned(program: Program) -> &'static [&'static str] {
     match program {
         Program::Psiblast => &["in_msa"],
+        _ => &[],
+    }
+}
+
+/// The option of `program`'s command line that gives a PHI-BLAST pattern file (psiblast's
+/// `-phi_pattern`, item PS8a): the library API will give the pattern as an input (item PS8b), so
+/// `validate` refuses the option until then and `describe` leaves it out.
+pub(crate) fn pattern_owned(program: Program) -> &'static [&'static str] {
+    match program {
+        Program::Psiblast => &["phi_pattern"],
         _ => &[],
     }
 }
@@ -64,6 +85,18 @@ pub struct Search {
 }
 
 impl Search {
+    /// A search of `argv` that `validate` has not checked: the tests of a call's reading of an argv
+    /// that only its start can make fail (`start_tests`: an argument error with `-logfile`, which
+    /// `validate` reports as without one).
+    #[cfg(test)]
+    pub(crate) fn unchecked(program: Program, argv: &[&str]) -> Search {
+        Search {
+            program,
+            argv: argv.iter().map(|word| word.to_string()).collect(),
+            out: None,
+        }
+    }
+
     /// The program.
     pub fn program(&self) -> Program {
         self.program
@@ -85,6 +118,33 @@ impl Search {
         matches!(preparse(&self.argv), Preparsed::Words { dryrun: true, .. })
     }
 
+    /// The file of `run_to_file` (`writing_to`).
+    pub(crate) fn out_path(&self) -> Option<&std::path::Path> {
+        self.out.as_deref()
+    }
+
+    /// The parsed arguments of the search's argv with an `-import_search_strategy` (the file
+    /// itself is the engine's import's, `Search::read_strategy`) and neither `-query`
+    /// nor `-subject`: the command line's import without overrides. The posts of an argument
+    /// error go to `target` (`Search::command`).
+    pub(crate) fn strategy_command(
+        &self,
+        out: Option<&std::path::Path>,
+        target: &DiagTarget,
+    ) -> Result<Commands, Error> {
+        let argv: Vec<String> = self
+            .argv
+            .iter()
+            .cloned()
+            .chain([
+                "-import_search_strategy".to_string(),
+                "strategy".to_string(),
+            ])
+            .collect();
+        let query = (QUERY, std::ffi::OsStr::new("-"));
+        parse_words(self.program, &argv, query, None, out, target)
+    }
+
     /// The parsed arguments, with either kind of subject: `validate` accepted one of them. The
     /// reader's options come from here before the search refuses what the API does not take
     /// (`parse`).
@@ -98,7 +158,7 @@ impl Search {
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
-    // (cited at `blastinput::value_parsers::blastn_output_path`)
+    // (cited at `ncbi_app::constraint::Constraint::MaxFileNameLength`)
     /// The search of `run_to_file`, whose `-out` is `path`: the parser checks it as the command
     /// line's `-out` (a file name of 256 bytes or more is NCBI's `Illegal value`, dry run or not),
     /// and the arguments carry it to the search, which makes the file where the command line makes
@@ -118,8 +178,22 @@ impl Search {
     /// `-subject`, `-query_loc` excludes `-in_pssm` and `-in_msa`, `-msa_master_idx` needs
     /// `-in_msa`), so this can fail with the parser's message where `validate`, which knows no
     /// inputs, could not. A PSSM query is psiblast's and tblastn's only, an alignment query
-    /// psiblast's, and each a file (not `-`).
-    pub(crate) fn command(&self, inputs: Inputs<'_>) -> Result<Commands, Error> {
+    /// psiblast's, and each a file (not `-`). The posts of an argument error go to `target`, the
+    /// call's `-logfile` target (`CallStart::new`), as the command line's go to its own.
+    pub(crate) fn command(
+        &self,
+        inputs: Inputs<'_>,
+        target: &DiagTarget,
+    ) -> Result<Commands, Error> {
+        // A strategy's arguments are the import's (`Search::read_strategy`), set on the program's
+        // defaults; the search's `-out` is the only word of its own that they take.
+        if let Some(strategy) = inputs.strategy {
+            if self.out.is_some() {
+                // The parser checks the name of `-out` as for any search.
+                self.strategy_command(self.out.as_deref(), target)?;
+            }
+            return strategy.command(self);
+        }
         let subject_flag = if inputs.database { DATABASE } else { SUBJECT };
         let query = match inputs.query_file {
             Some(file) => {
@@ -168,6 +242,7 @@ impl Search {
             query,
             [subject_flag, inputs.subject_name],
             self.out.as_deref(),
+            target,
         )
     }
 }
@@ -209,7 +284,14 @@ fn parse_for_some_inputs(program: Program, argv: &[String]) -> Result<Commands, 
     let mut first_error = None;
     for query in queries {
         for subject_flag in [SUBJECT, DATABASE] {
-            match parse(program, argv, query, [subject_flag, "subject"], None) {
+            match parse(
+                program,
+                argv,
+                query,
+                [subject_flag, "subject"],
+                None,
+                &DiagTarget::Stderr,
+            ) {
                 Ok(commands) => return Ok(commands),
                 Err(error) => {
                     first_error.get_or_insert(error);
@@ -228,6 +310,7 @@ fn parse(
     query: (&str, &std::ffi::OsStr),
     subject: [&str; 2],
     out: Option<&std::path::Path>,
+    target: &DiagTarget,
 ) -> Result<Commands, Error> {
     for word in argv {
         let key = key(word);
@@ -238,7 +321,7 @@ fn parse(
             ).into()));
         }
     }
-    parse_words(program, argv, query, subject, out)
+    parse_words(program, argv, query, Some(subject), out, target)
 }
 
 /// Parses the argv with the command line's parser, as `losat <program> <query_flag> <query>
@@ -251,17 +334,19 @@ fn parse_words(
     program: Program,
     argv: &[String],
     (query_flag, query): (&str, &std::ffi::OsStr),
-    [subject_flag, subject]: [&str; 2],
+    subject: Option<[&str; 2]>,
     out: Option<&std::path::Path>,
+    target: &DiagTarget,
 ) -> Result<Commands, Error> {
     let words = [
         std::ffi::OsStr::new("losat"),
         std::ffi::OsStr::new(program.name()),
         std::ffi::OsStr::new(query_flag),
         query,
-        std::ffi::OsStr::new(subject_flag),
-        std::ffi::OsStr::new(subject),
     ];
+    let subject = subject
+        .into_iter()
+        .flat_map(|[flag, name]| [std::ffi::OsStr::new(flag), std::ffi::OsStr::new(name)]);
     let out = out.map(|path| {
         let mut word = std::ffi::OsString::from("-out=");
         word.push(path);
@@ -270,11 +355,14 @@ fn parse_words(
     let cli: Cli = crate::cli::try_parse_with_own_start(
         words
             .iter()
+            .copied()
+            .chain(subject)
             .map(|word| word.to_os_string())
             .chain(out)
             .chain(argv.iter().map(std::ffi::OsString::from)),
+        target,
     )
-    .map_err(|error| Error::Argv(crate::cli::render_message(&error).into()))?;
+    .map_err(Error::of_argv)?;
     Ok(cli.command)
 }
 
@@ -314,6 +402,19 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
         if alignment_owned(program).contains(&name) {
             return Err(Error::Argv(format!(
                 "{key} is not accepted by the library API: a query alignment is given as the inputs (Inputs::msa)"
+            ).into()));
+        }
+        if pattern_owned(program).contains(&name) {
+            return Err(Error::Argv(
+                format!(
+                    "{key} (a PHI-BLAST pattern file) is not supported by LOSAT's library API yet"
+                )
+                .into(),
+            ));
+        }
+        if name == "import_search_strategy" {
+            return Err(Error::Argv(format!(
+                "{key} is not accepted by the library API: a search strategy is given as bytes (Search::read_strategy, Inputs::strategy)"
             ).into()));
         }
         if API_OWNED.contains(&name) {

@@ -3,9 +3,7 @@ use super::{
     args::ResolvedOptions, parameters::ContextParameters, query_setup::PreparedQueryBatch,
     seed::InitHsp,
 };
-use crate::algorithm::blastn::interval_tree::{
-    x_grid_cells, BlastIntervalTree, IndexMethod, TreeHsp,
-};
+use crate::algorithm::blastn::interval_tree::{x_grid_cells, BlastIntervalTree, TreeHsp};
 use crate::algorithm::blastp::gapalign::{
     blastp_get_start_for_gapped_alignment, blastp_score_only_gapped_alignment_with_scratch,
     gapped_start_int4, gapped_start_window, BlastpGappedAlignmentMode, GapAlignScratch,
@@ -26,6 +24,50 @@ pub struct PreliminaryHsp {
     pub s_start: i32,
     pub s_end: i32,
     pub s_gapped_start: i32,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537,2857-3035
+impl crate::core::blast_hits::ChunkMergeHsp for PreliminaryHsp {
+    fn merge_context(&self) -> i32 {
+        self.context as i32
+    }
+    fn merge_subject_frame(&self) -> i32 {
+        0
+    }
+    fn merge_q_start(&self) -> i32 {
+        self.q_start
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.q_end
+    }
+    fn merge_s_start(&self) -> i32 {
+        self.s_start
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.s_end
+    }
+    fn merge_score(&self) -> i32 {
+        self.score
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.q_gapped_start
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.s_gapped_start
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.q_start = q_start;
+        self.q_end = q_end;
+        self.s_start = s_start;
+        self.s_end = s_end;
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.q_gapped_start = q_gapped_start;
+        self.s_gapped_start = s_gapped_start;
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.score = score;
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:212-226
@@ -87,21 +129,30 @@ fn save_hsp(hits: &mut Vec<PreliminaryHsp>, h: PreliminaryHsp, max: usize, heap:
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3900-3953
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4058-4087
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3909-3921
+/// The gapped stage of a subject's initial hits `initial`: `subject` is its letters and the
+/// sentinel after them, `subject_length` its length (NCBI's `subject->length`: the letters, or the
+/// `Int4` length of a hard chunk shorter than the word whose seeds lie in the stored letters of
+/// its one word, `search_db_masked.rs`). `None` where NCBI's insertion of an HSP into the interval
+/// tree never ends (`BlastIntervalTree::try_add_hsp`: such a chunk's HSP out of the tree's bounds;
+/// a whole subject's HSPs lie inside them).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn gapped_observed(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
+    subject_length: i32,
     initial: &[InitHsp],
     xdrop: i32,
     observe: &mut dyn FnMut(&PreliminaryHsp, bool),
-) -> Result<Vec<PreliminaryHsp>> {
+) -> Result<Option<Vec<PreliminaryHsp>>> {
     gapped_observed_with(
         super::seed::Blosum62Bx,
         batch,
         parameters,
         options,
         subject,
+        subject_length,
         initial,
         xdrop,
         observe,
@@ -118,12 +169,21 @@ pub(crate) fn gapped_observed_of<S: super::seed::BxScoring>(
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
+    subject_length: i32,
     initial: &[InitHsp],
     xdrop: i32,
     observe: &mut dyn FnMut(&PreliminaryHsp, bool),
-) -> Result<Vec<PreliminaryHsp>> {
+) -> Result<Option<Vec<PreliminaryHsp>>> {
     gapped_observed_with(
-        scoring, batch, parameters, options, subject, initial, xdrop, observe,
+        scoring,
+        batch,
+        parameters,
+        options,
+        subject,
+        subject_length,
+        initial,
+        xdrop,
+        observe,
     )
 }
 
@@ -136,20 +196,25 @@ fn gapped_observed_with<S: super::seed::BxScoring>(
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
     subject: &[u8],
+    subject_length: i32,
     initial: &[InitHsp],
     xdrop: i32,
     observe: &mut dyn FnMut(&PreliminaryHsp, bool),
-) -> Result<Vec<PreliminaryHsp>> {
+) -> Result<Option<Vec<PreliminaryHsp>>> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3707-3708
     // NCBI returns at once when the initial hit list is empty (and the engine skips the gapped
     // stage, blast_engine.c:500). This port returns the empty list before it builds the interval
     // tree and the DP scratch; the loop below would have done nothing. Most (chunk, subject)
     // pairs have no initial HSP.
     if initial.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Some(Vec::new()));
     }
     let last = batch.contexts.last().expect("BLASTX contexts");
-    let (q_max, s_max) = ((last.offset + last.length + 1) as i32, subject.len() as i32);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3820-3831
+    let (q_max, s_max) = (
+        (last.offset + last.length + 1) as i32,
+        subject_length.saturating_add(1),
+    );
     let mut tree = BlastIntervalTree::new(0, q_max, 0, s_max);
     tree.reset_with_bounds_cells(0, q_max, 0, s_max, x_grid_cells(initial.len()));
     let mut scratch = GapAlignScratch::new();
@@ -207,11 +272,16 @@ fn gapped_observed_with<S: super::seed::BxScoring>(
         };
         h.s_gapped_start += start as i32 - h.q_gapped_start;
         h.q_gapped_start = start as i32;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4246-4258, 4262-4295
+        // (cited at `blastp::blast_engine::extend_preliminary_blastp_hit`): the letters up to the
+        // larger of the subject's length and one past the gapped start give NCBI's extensions.
+        let s_seed = h.s_gapped_start as usize;
+        let letters = usize::try_from(subject_length).unwrap_or(0).max(s_seed + 1);
         let a = blastp_score_only_gapped_alignment_with_scratch(
             query,
-            &subject[..subject.len() - 1],
+            &subject[..letters],
             start,
-            h.s_gapped_start as usize,
+            s_seed,
             scoring.matrix(),
             options.gap_open,
             options.gap_extend,
@@ -229,13 +299,13 @@ fn gapped_observed_with<S: super::seed::BxScoring>(
         h.s_end = a.subject_stop;
         let node = tree_hsp(&h, batch);
         save_hsp(&mut hits, h, max, &mut heap);
-        tree.add_hsp(
-            node,
-            node.query_context_offset,
-            IndexMethod::QueryAndSubject,
-        );
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:510-795 (cited at
+        // `BlastIntervalTree::try_add_hsp`)
+        if !tree.try_add_hsp(node, node.query_context_offset) {
+            return Ok(None);
+        }
     }
-    Ok(hits)
+    Ok(Some(hits))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083 and

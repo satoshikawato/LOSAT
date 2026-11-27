@@ -1,7 +1,7 @@
-//! The reader of a PSSM in ASN.1 text or ASN.1 binary (`PssmWithParameters`, the file of
+//! The reader of a PSSM in ASN.1 text, ASN.1 binary or XML (`PssmWithParameters`, the file of
 //! psiblast's `-out_pssm` and of `-in_pssm`): NCBI's object streams (`CObjectIStreamAsn`,
-//! `CObjectIStreamAsnBinary`) for the types of `report::serial::pssm`, whose writer gives the same
-//! bytes back for a PSSM in ASN.1 text that psiblast wrote.
+//! `CObjectIStreamAsnBinary`, `CObjectIStreamXml`) for the types of `report::serial::pssm`, whose
+//! writer gives the same bytes back for a PSSM in ASN.1 text that psiblast wrote.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1345
 //!
@@ -18,6 +18,9 @@
 //! (`PssmReadError::Refused`).
 
 use crate::report::serial::asn_input::Names;
+use crate::report::serial::asn_text_reader::SliceSource;
+use crate::report::serial::asn_types::read::ObjectStream;
+use crate::report::serial::asn_types::read_xml::XmlStyle;
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::{
     member_index, members, read_ber_document, read_document, resolved, Kind, Post, ReadError, Value,
@@ -58,6 +61,27 @@ pub(crate) fn read_pssm_binary(bytes: &[u8]) -> PssmRead {
     ))
 }
 
+/// A `PssmWithParameters` file of makeprofiledb (ASN.1 text, or ASN.1 binary with `-binary`):
+/// the same table-driven reader with `Names::PROFILE` (`own_serial_message` false, because
+/// makeprofiledb prints NCBI's exception text directly).
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1381-1395
+pub(crate) fn read_profile(bytes: &[u8], binary: bool) -> PssmRead {
+    pssm_read(if binary {
+        read_ber_document(bytes, named::PSSMWITHPARAMETERS, Names::PROFILE)
+    } else {
+        read_document(bytes, named::PSSMWITHPARAMETERS, Names::PROFILE)
+    })
+}
+
+/// [`read_pssm`] of the `PssmWithParameters` object in NCBI's XML at the start of `bytes`
+/// (the stream read as `MSerial_Xml`, in the ASN.1 style).
+pub(crate) fn read_pssm_xml(bytes: &[u8]) -> PssmRead {
+    pssm_read(
+        ObjectStream::xml(SliceSource::new(bytes), XmlStyle::Asn, Names::PSSM)
+            .read_object(named::PSSMWITHPARAMETERS),
+    )
+}
+
 fn pssm_read((value, posts): (Result<Value, ReadError>, Vec<Post>)) -> PssmRead {
     PssmRead {
         result: value
@@ -66,7 +90,7 @@ fn pssm_read((value, posts): (Result<Value, ReadError>, Vec<Post>)) -> PssmRead 
                 ReadError::Unsupported(what) => PssmReadError::Refused(what),
                 error => PssmReadError::Ncbi(error),
             })
-            .map(pssm_of),
+            .and_then(pssm_of),
         posts,
     }
 }
@@ -180,54 +204,68 @@ fn object_id(value: Value) -> ObjectId {
 }
 
 /// The model of a `PssmWithParameters` value, or LOSAT's refusal.
-fn pssm_of(mut value: Value) -> PssmWithParameters {
+fn pssm_of(mut value: Value) -> Result<PssmWithParameters, PssmReadError> {
     const T: u16 = named::PSSMWITHPARAMETERS;
-    PssmWithParameters {
-        pssm: pssm(take(&mut value, T, "pssm").expect("mandatory")),
+    Ok(PssmWithParameters {
+        pssm: pssm(take(&mut value, T, "pssm").expect("mandatory"))?,
         params: take(&mut value, T, "params").map(params),
-    }
+    })
 }
 
-fn pssm(mut value: Value) -> Pssm {
+fn pssm(mut value: Value) -> Result<Pssm, PssmReadError> {
     const T: u16 = named::PSSM;
     let mut get = |name: &str| take(&mut value, T, name);
-    Pssm {
+    Ok(Pssm {
         is_protein: get("isProtein").map(boolean),
         identifier: get("identifier").map(object_id),
         num_rows: get("numRows").map(int4).expect("mandatory"),
         num_columns: get("numColumns").map(int4).expect("mandatory"),
         row_labels: get("rowLabels").map(|labels| list(labels).into_iter().map(string).collect()),
         by_row: get("byRow").map(boolean),
-        query: get("query").map(seq_entry),
+        query: get("query").map(seq_entry).transpose()?,
         intermediate_data: get("intermediateData").map(intermediate_data),
         final_data: get("finalData").map(final_data),
-    }
+    })
 }
 
-/// The query's `Seq-entry`: its `seq` variant, a Bioseq, or its `set` variant as read.
-fn seq_entry(value: Value) -> SeqEntry {
+// NCBI reference (598d8ae6): c++/src/objmgr/bioseq_info.cpp:292-308
+/// The query's `Seq-entry`: its `seq` variant, a Bioseq, or its `set` variant as read (whose
+/// elements stated as `NULL` the object manager's step meets, `pssm_search::annot_index`). An
+/// element of the Bioseq's `id` stated as `NULL` is refused: NCBI's object manager dereferences
+/// each Seq-id when the query joins its scope (`CBioseq_Info`), and its report of the exception
+/// prints memory addresses (psiblast and tblastn 2.17.0, rc 255, probe D3c-3b `t_id_elem_null`,
+/// `tb_id_elem_null`, `b_id_elem_null`); LOSAT's model holds the Seq-ids typed.
+fn seq_entry(value: Value) -> Result<SeqEntry, PssmReadError> {
     let (variant, mut bioseq) = choice(value);
     if members(named::SEQ_ENTRY)[variant].name() != "seq" {
-        return SeqEntry::Set(bioseq);
+        return Ok(SeqEntry::Set(bioseq));
     }
     const T: u16 = named::BIOSEQ;
     let mut get = |name: &str| take(&mut bioseq, T, name);
-    SeqEntry::Seq(Box::new(PssmQuery {
-        ids: list(get("id").expect("mandatory"))
-            .into_iter()
-            .map(|id| {
-                id.into_seq_id()
-                    .unwrap_or_else(|| unreachable!("a Seq-id is read into the Seq-id model"))
-            })
-            .collect(),
+    let ids = list(get("id").expect("mandatory"))
+        .into_iter()
+        .map(|id| match id {
+            Value::Null => Err(PssmReadError::Refused(NULL_SEQ_ID.to_string())),
+            id => Ok(id
+                .into_seq_id()
+                .unwrap_or_else(|| unreachable!("a Seq-id is read into the Seq-id model"))),
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(SeqEntry::Seq(Box::new(PssmQuery {
+        ids,
         descr: get("descr").map(|descr| {
             list(descr)
                 .into_iter()
                 .map(|mut descriptor| {
-                    if let Value::Choice(variant, title) = &mut descriptor {
-                        if members(named::SEQDESC)[usize::from(*variant)].name() == "title" {
+                    match &mut descriptor {
+                        Value::Choice(variant, title)
+                            if members(named::SEQDESC)[usize::from(*variant)].name() == "title" =>
+                        {
                             return Seqdesc::Title(string(title.take()));
                         }
+                        // An element stated as `NULL` (`asn_types::Value::Null`).
+                        Value::Null => return Seqdesc::Empty,
+                        _ => {}
                     }
                     Seqdesc::Other(descriptor)
                 })
@@ -235,8 +273,13 @@ fn seq_entry(value: Value) -> SeqEntry {
         }),
         inst: seq_inst(get("inst").expect("mandatory")),
         annot: get("annot").map(list),
-    }))
+    })))
 }
+
+/// The refusal of an element of the query's `id` stated as `NULL` (`seq_entry`).
+const NULL_SEQ_ID: &str = "an element of PssmWithParameters.pssm.query.seq.id stated as NULL, \
+     which NCBI's object manager dereferences when the query joins its scope (a report of memory \
+     addresses)";
 
 fn seq_inst(mut value: Value) -> SeqInst {
     const T: u16 = named::SEQ_INST;

@@ -1,0 +1,336 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTX 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2g_rk_lcl.faa).
+           2 sequences; 28 total letters
+
+
+
+<b>Query=</b> f0616_q
+
+Length=56
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+AAA00001 top                                                          <a href=#AAA00001>40.0</a>    4e-10  1
+
+
+>AAA00001<a name=AAA00001></a> top
+Length=17
+
+ Score = 40.0 bits (81),  Expect = 4e-10
+ Identities = 16/16 (100%), Positives = 16/16 (100%), Gaps = 0/16 (0%)
+ Frame = +1
+
+Query  1   LSTEQFTARHRCIIAI  48
+           LSTEQFTARHRCIIAI
+Sbjct  1   LSTEQFTARHRCIIAI  16
+
+
+ Score = 13.9 bits (24),  Expect(2) = 0.073
+ Identities = 3/4 (75%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
+ Frame = -1
+
+Query  35  HRCL  24
+           HRC+
+Sbjct  10  HRCI  13
+
+
+ Score =  7.5 bits (10),  Expect(2) = 0.073
+ Identities = 1/4 (25%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
+ Frame = -1
+
+Query  26  LAVN  15
+           +A++
+Sbjct  14  IAIH  17
+
+
+ Score = 10.2 bits (16),  Expect(2) = 0.68
+ Identities = 3/4 (75%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = +3
+
+Query  6   HRTI  17
+           HR I
+Sbjct  10  HRCI  13
+
+
+ Score =  7.0 bits (9),  Expect(2) = 0.68
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = +1
+
+Query  22  ARH  30
+           A H
+Sbjct  15  AIH  17
+
+
+ Score =  9.8 bits (15),  Expect(2) = 1.1
+ Identities = 2/6 (33%), Positives = 3/6 (50%), Gaps = 0/6 (0%)
+ Frame = +3
+
+Query  21  CKAPVH  38
+           C   +H
+Sbjct  12  CIIAIH  17
+
+
+ Score =  6.6 bits (8),  Expect(2) = 1.1
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +3
+
+Query  18  H  20
+           H
+Sbjct  10  H  10
+
+
+ Score =  8.4 bits (12),  Expect = 1.4
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +3
+
+Query  15  IH  20
+           IH
+Sbjct  16  IH  17
+
+
+ Score =  7.9 bits (11),  Expect = 1.9
+ Identities = 2/4 (50%), Positives = 2/4 (50%), Gaps = 0/4 (0%)
+ Frame = -3
+
+Query  45  CYYA  34
+           C  A
+Sbjct  12  CIIA  15
+
+
+ Score =  7.9 bits (11),  Expect = 1.9
+ Identities = 2/5 (40%), Positives = 3/5 (60%), Gaps = 0/5 (0%)
+ Frame = -1
+
+Query  47  IAIMH  33
+           I  +H
+Sbjct  13  IIAIH  17
+
+
+ Score =  7.5 bits (10),  Expect(2) = 2.6
+ Identities = 2/4 (50%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -3
+
+Query  21  SELF  10
+           +E F
+Sbjct  3   TEQF  6
+
+
+ Score =  7.0 bits (9),  Expect(2) = 2.6
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = -3
+
+Query  9   C  7
+           C
+Sbjct  12  C  12
+
+
+ Score =  7.5 bits (10),  Expect = 2.6
+ Identities = 2/5 (40%), Positives = 3/5 (60%), Gaps = 0/5 (0%)
+ Frame = -2
+
+Query  37  CTGAL  23
+           C  A+
+Sbjct  12  CIIAI  16
+
+
+ Score =  7.5 bits (10),  Expect(2) = 3.2
+ Identities = 1/3 (33%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -1
+
+Query  14  CSV  6
+           C +
+Sbjct  12  CII  14
+
+
+ Score =  6.6 bits (8),  Expect(2) = 3.2
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -2
+
+Query  40  LCT  32
+           L T
+Sbjct  1   LST  3
+
+
+ Score =  7.0 bits (9),  Expect = 3.6
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = -3
+
+Query  24  C  22
+           C
+Sbjct  12  C  12
+
+
+ Score =  7.5 bits (10),  Expect(2) = 3.9
+ Identities = 2/6 (33%), Positives = 3/6 (50%), Gaps = 0/6 (0%)
+ Frame = +3
+
+Query  36  HNSNLA  53
+           H   +A
+Sbjct  10  HRCIIA  15
+
+
+ Score =  6.1 bits (7),  Expect(2) = 3.9
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = +2
+
+Query  23  QGT  31
+           Q T
+Sbjct  5   QFT  7
+
+
+ Score =  5.6 bits (6),  Expect = 9.3
+ Identities = 1/4 (25%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -2
+
+Query  13  VLWI  2
+           ++ I
+Sbjct  13  IIAI  16
+
+
+ Score =  5.2 bits (5),  Expect = 13
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +3
+
+Query  12  T  14
+           T
+Sbjct  7   T  7
+
+
+ Score =  5.2 bits (5),  Expect = 13
+ Identities = 0/4 (0%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -2
+
+Query  49  KLLL  38
+           + ++
+Sbjct  11  RCII  14
+
+
+ Score =  5.2 bits (5),  Expect = 13
+ Identities = 0/2 (0%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -3
+
+Query  54  VL  49
+           ++
+Sbjct  13  II  14
+
+
+ Score =  4.7 bits (4),  Expect = 18
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  35  A  37
+           A
+Sbjct  8   A  8
+
+
+ Score =  4.3 bits (3),  Expect = 24
+ Identities = 0/1 (0%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +3
+
+Query  33  V  35
+           +
+Sbjct  14  I  14
+
+
+ Score =  3.8 bits (2),  Expect = 33
+ Identities = 0/1 (0%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = -3
+
+Query  18  E  16
+           +
+Sbjct  5   Q  5
+
+
+ Score =  3.4 bits (1),  Expect = 46
+ Identities = 0/1 (0%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +1
+
+Query  19  T  21
+           +
+Sbjct  2   S  2
+
+
+ Score =  3.4 bits (1),  Expect = 46
+ Identities = 0/1 (0%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +1
+
+Query  4  S  6
+          +
+Sbjct  7  T  7
+
+
+><a title="Show report for AAA00001.1" href="https://www.ncbi.nlm.nih.gov/protein/AAA00001.1?report=genbank&log$=protalign&blast_rank=2&RID=0" >AAA00001.1</a><a name=AAA00001></a> s
+Length=11
+
+ Score =  8.9 bits (13),  Expect = 1.0
+ Identities = 2/5 (40%), Positives = 3/5 (60%), Gaps = 0/5 (0%)
+ Frame = -1
+
+Query  41  IMHRC  27
+           +M  C
+Sbjct  5   MMEYC  9
+
+
+ Score =  8.4 bits (12),  Expect = 1.4
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -3
+
+Query  12  FC  7
+           +C
+Sbjct  8   YC  9
+
+
+ Score =  7.9 bits (11),  Expect = 1.9
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = +3
+
+Query  18  HC  23
+           +C
+Sbjct  8   YC  9
+
+
+ Score =  7.9 bits (11),  Expect = 1.9
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+ Frame = -3
+
+Query  45  CY  40
+           C+
+Sbjct  9   CH  10
+
+
+ Score =  8.9 bits (13),  Expect(3) = 2.0
+ Identities = 2/3 (67%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+ Frame = -3
+
+Query  24  CSE  16
+           C E
+Sbjct  9   CHE  11
+
+
+ Score =  5.6 bits (6),  Expect(3) = 2.0
+ Identities = 0/4 (0%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+ Frame = -2
+
+Query  49  KLLL  38
+           + ++
+Sbjct  3   RFMM  6
+
+

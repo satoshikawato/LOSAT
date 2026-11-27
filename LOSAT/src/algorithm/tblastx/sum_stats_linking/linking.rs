@@ -199,7 +199,7 @@ fn translated_context_group(hit: &UngappedHit) -> usize {
     hit.q_idx as usize * 2 + usize::from(hit.q_frame < 0)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:331-375
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:330-376
 fn rev_compare_hsps_tbx(a: &UngappedHit, b: &UngappedHit) -> Ordering {
     translated_context_group(a)
         .cmp(&translated_context_group(b))
@@ -224,7 +224,7 @@ fn rev_compare_hsps_tbx_int4(a: &UngappedHit, b: &UngappedHit) -> Ordering {
         .then_with(|| b.s_end_int4().cmp(&a.s_end_int4()))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:234-263
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:233-264
 fn rev_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
     translated_context_group(a)
         .cmp(&translated_context_group(b))
@@ -515,7 +515,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2722-2725
     //
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:750-752
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:750-752,865-867
     // Keep per-context logK available for the exact NCBI xsum expression below.
     let log_k_by_ctx: Vec<f64> = query_contexts
         .iter()
@@ -754,6 +754,8 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 // (`Blast_HSPListReevaluateUngapped`, called at blast_engine.c:1492-1497)
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 (in
 // `Blast_HSPReevaluateWithAmbiguitiesUngapped`) and :452-453 (in `s_UpdateReevaluatedHSP`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1480-1497 and
+// c++/src/algo/blast/core/blast_hits.c:2651-2665 (the re-evaluation's fetch of the subject)
 // The first linking call of a subject whose list from the one-hit word finder (`-window_size 0`)
 // holds an HSP of length 0 or less (`UngappedHit::is_int4_inverted`), with its ends as NCBI's
 // `Int4` (`chaining.rs`, the impl of `UngappedHit`). The list is first sorted by score with the
@@ -766,15 +768,14 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 // `rev_compare_hsps_tbx_int4` and the literal port `link_hsp_group_ncbi` for every group
 // (`x_hsp_inplace::link_in_place_int4`): the incremental kernel assumes HSPs whose end is after
 // their start (`linking_incr.rs`), while the literal port computes with `Int4` coordinates as NCBI
-// does. NCBI then sorts by score, reaps by the preliminary E-value and re-evaluates, which scores
-// an HSP of length 0 or less 0 (its loop does not run), below every context's cutoff (at least 1),
-// and deletes it. The reap reads each HSP's own E-value and the sorts are stable, so dropping
-// those HSPs here, before the sort, leaves the other HSPs NCBI keeps in NCBI's order; nothing
-// after this reads a dropped one or an `Int4` end below 0. This path runs only for such a
-// subject; the same subject without such an HSP links with
-// `apply_sum_stats_even_gap_linking_with_parallel`.
-/// The first linking call of a one-hit list holding an HSP of length 0 or less, after which those
-/// HSPs are dropped.
+// does. NCBI then sorts by score, reaps by the preliminary E-value and re-evaluates, whose fetch
+// of the subject comes first for every list that still holds an HSP, and which scores an HSP of length 0 or less 0 (its loop does not run),
+// below every context's cutoff (at least 1), and deletes it. So those HSPs stay in the list with
+// the E-values this call gives them, through the sort and the reap, up to that fetch; they leave
+// after it (`subject_link::drop_unread_int4_inverted`). This path runs only for such a subject;
+// the same subject without such an HSP links with `apply_sum_stats_even_gap_linking_with_parallel`.
+/// The first linking call of a one-hit list holding an HSP of length 0 or less, which keeps those
+/// HSPs.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -792,7 +793,7 @@ pub(crate) fn link_one_hit_with_int4_ends(
         return hits;
     }
     crate::algorithm::tblastx::blast_gapalign::sort_ungapped_hits_by_score_int4(&mut hits);
-    let mut linked = x_hsp_inplace::link_in_place_int4(
+    x_hsp_inplace::link_in_place_int4(
         hits,
         params,
         linking_params,
@@ -801,9 +802,7 @@ pub(crate) fn link_one_hit_with_int4_ends(
         length_adj_per_context,
         eff_searchsp_per_context,
         allow_parallel,
-    );
-    linked.retain(|hit| !hit.is_int4_inverted());
-    linked
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1012-1028
@@ -1889,7 +1888,7 @@ fn link_hsp_group_ncbi(
                 // NCBI lines 863-895: Update this HSP's link info (the sum in i64, see LhHelper)
                 let new_sum = h_sum + (i64::from(i_score) - i64::from(cutoff_big));
                 let ctx_idx = pool_hsp_links[i].ctx_idx;
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:866-867
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:865-867
                 // Preserve C's left-associative evaluation order; adding `score` times `Lambda`
                 // less `logK` as one group changes 1-ULP chain E-value ties.
                 let new_xsum = h_xsum
@@ -1924,9 +1923,9 @@ fn link_hsp_group_ncbi(
                 pool_lh_helpers[h_lh_idx].maxsum1 =
                     pool_lh_helpers[h_lh_idx - 1].maxsum1.max(new_sum);
 
-                // Update next_larger for this entry (NCBI lines 876-884)
+                // Update next_larger for this entry (NCBI lines 877-884)
                 //
-                // NCBI `c++/src/algo/blast/core/link_hsps.c` (s_BlastEvenGapLinkHSPs) lines 876-885:
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:877-884 (s_BlastEvenGapLinkHSPs)
                 let cur_sum = new_sum;
                 let mut prev = h_lh_idx - 1;
                 let mut prev_sum = pool_lh_helpers[prev].sum[1];

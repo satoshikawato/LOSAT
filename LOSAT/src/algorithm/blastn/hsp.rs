@@ -124,75 +124,90 @@ impl BlastnOutputFormat {
         }
     }
 
-    /// What the format does with a subject whose lookup throws where its batch's prefetch is off
-    /// (`report::db_subject::FormatThrow::of`): the default tables write the row (their `saccver`
-    /// is a field of the subject block), a table with a field list as its fields say
-    /// (`TabularSpec::format_throw`), the XML2 and JSON documents as their form says, the pairwise
-    /// reports as their view says (`PairwiseView::after_throw`); the Seq-annots and the archive
-    /// read nothing of the subject; LOSAT refuses it in the others.
-    pub(crate) fn format_throw(&self) -> crate::report::db_subject::FormatThrow {
-        use crate::report::db_subject::{AfterThrow, FormatThrow, RunThrow};
-        match *self {
-            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => {
-                FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow))
-            }
-            BlastnOutputFormat::CustomTabular(spec) => {
-                spec.format_throw(crate::blastinput::app::Program::Blastn)
-            }
-            BlastnOutputFormat::Xml2(kind) => {
-                FormatThrow::Writes(RunThrow::every_row(kind.after_throw()))
-            }
+    /// The `-outfmt` format of the report (the inverse of `of`): a custom tabular report's is its
+    /// field list's kind (`TabularSpec::kind`).
+    pub(crate) fn report_format(self) -> ReportFormat {
+        use crate::report::tabular::TabularKind;
+        match self {
             BlastnOutputFormat::Pairwise(view) => {
-                FormatThrow::Writes(RunThrow::every_row(view.after_throw()))
+                ReportFormat::from_number(view.outfmt()).expect("outfmt 0 to 4")
             }
-            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => FormatThrow::Unread,
-            BlastnOutputFormat::Xml | BlastnOutputFormat::Sam(_) => {
-                FormatThrow::Refused(crate::report::db_subject::ThrowRefusal::Format)
+            BlastnOutputFormat::Tabular => ReportFormat::Tabular,
+            BlastnOutputFormat::TabularWithComments => ReportFormat::TabularWithComments,
+            BlastnOutputFormat::CustomTabular(spec) => match spec.kind {
+                TabularKind::Tabular => ReportFormat::Tabular,
+                TabularKind::Commented => ReportFormat::TabularWithComments,
+                TabularKind::Csv => ReportFormat::CommaSeparatedValues,
+                TabularKind::CsvWithHeader => ReportFormat::CommaSeparatedValuesWithHeader,
+                TabularKind::TaxReport => ReportFormat::TaxFormat,
+            },
+            BlastnOutputFormat::Seqalign(serial) => {
+                ReportFormat::from_number(serial.outfmt()).expect("outfmt 8, 9 or 12")
             }
+            BlastnOutputFormat::Xml => ReportFormat::Xml,
+            BlastnOutputFormat::Xml2(kind) => kind.report_format(),
+            BlastnOutputFormat::Archive => ReportFormat::ArchiveFormat,
+            BlastnOutputFormat::Sam(_) => ReportFormat::Sam,
         }
+    }
+
+    /// What the format does with a subject whose lookup throws where its batch's prefetch is off,
+    /// with `-html` where `html`: `report::db_subject::FormatThrow::of` of its format and field
+    /// list, the one answer of every program.
+    pub(crate) fn format_throw(&self, html: bool) -> crate::report::db_subject::FormatThrow {
+        crate::report::db_subject::FormatThrow::of(
+            self.report_format(),
+            self.tabular_spec(),
+            crate::blastinput::app::Program::Blastn,
+            html,
+        )
     }
 
     /// Whether the format writes the same where every load of a subject with a positive taxid
-    /// throws (`report::db_subject::unchanged_by_load_throws`, of which this is BLASTN's form).
+    /// throws: `report::db_subject::unchanged_by_load_throws` of its format and field list.
     pub(crate) fn unchanged_by_load_throws(&self) -> bool {
-        match *self {
-            BlastnOutputFormat::CustomTabular(spec) => {
-                spec.unchanged_by_load_throws(crate::blastinput::app::Program::Blastn)
-            }
-            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => true,
-            BlastnOutputFormat::Tabular
-            | BlastnOutputFormat::TabularWithComments
-            | BlastnOutputFormat::Xml2(_)
-            | BlastnOutputFormat::Pairwise(_)
-            | BlastnOutputFormat::Xml
-            | BlastnOutputFormat::Sam(_) => false,
-        }
+        crate::report::db_subject::unchanged_by_load_throws(
+            self.report_format(),
+            self.tabular_spec(),
+            crate::blastinput::app::Program::Blastn,
+        )
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
-    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7 and 17; with
-    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
-    /// the call's first report, the taxonomy database's messages of that prefetch go with the
-    /// query warnings.
+    /// reports (outfmt 0 to 7 and 13 to 18, 10 and 20 as 6 and 7; with
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as the
+    /// call's first report, the posts of that prefetch go with the query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
-        crate::algorithm::common::database::prefetches_subjects(match self {
-            BlastnOutputFormat::Pairwise(view) => Some(view.outfmt()),
-            BlastnOutputFormat::Xml => Some(5),
-            BlastnOutputFormat::Tabular => Some(6),
-            BlastnOutputFormat::TabularWithComments => Some(7),
-            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
-            // they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy names
-            // come with the rows (`report::tabular::TabularNames`).
-            BlastnOutputFormat::CustomTabular(spec) => Some(match spec.kind {
-                crate::report::tabular::TabularKind::Commented => 7,
-                _ => 6,
-            }),
-            BlastnOutputFormat::Sam(_) => Some(17),
-            BlastnOutputFormat::Seqalign(serial) => Some(serial.outfmt()),
-            // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
-            // (`TaxdbPrinter`).
-            BlastnOutputFormat::Archive | BlastnOutputFormat::Xml2(_) => None,
-        })
+        // The archive fetches nothing; the XML2 and JSON `Hit`s write only the texts of their own
+        // lookups (`database::RowLookups::Taxids`).
+        crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format()))
+    }
+
+    /// The format as the first format of a BLASTN run that NCBI's prefetch of each query batch
+    /// asks (`common::database::PrefetchFormat`, the one owner of whether a batch prefetches).
+    pub(crate) fn prefetch_format(self) -> crate::algorithm::common::database::PrefetchFormat {
+        use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, JSON, SAM, XML};
+        crate::algorithm::common::database::PrefetchFormat::of(
+            match self {
+                BlastnOutputFormat::Pairwise(view) => view.outfmt(),
+                BlastnOutputFormat::Xml => XML,
+                BlastnOutputFormat::Tabular => 6,
+                BlastnOutputFormat::TabularWithComments => 7,
+                // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and
+                // 20): they read the subjects as 6 and 7 do; the rows' own lookups of the
+                // taxonomy names come with the rows (`report::tabular::TabularNames`).
+                BlastnOutputFormat::CustomTabular(spec) => match spec.kind {
+                    crate::report::tabular::TabularKind::Commented => 7,
+                    _ => 6,
+                },
+                BlastnOutputFormat::Sam(_) => SAM,
+                BlastnOutputFormat::Seqalign(serial) => serial.outfmt(),
+                // The XML2 and JSON documents prefetch as each of 13 to 16 does.
+                BlastnOutputFormat::Xml2(_) => JSON,
+                BlastnOutputFormat::Archive => ARCHIVE_FORMAT,
+            },
+            crate::report::archive::options::RequestKind::Blastn,
+        )
     }
 
     /// Whether the format is the pairwise report of outfmt 0 to 4 (`Pairwise`): the same prolog,
@@ -207,6 +222,23 @@ impl BlastnOutputFormat {
         match self {
             BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => true,
             BlastnOutputFormat::CustomTabular(spec) => spec.writes_rows(),
+            _ => false,
+        }
+    }
+
+    /// Whether the report shows NCBI's bytes for a reported sequence that the scope finds as a
+    /// query of its batch (`report::query_bioseq`): a table that reads no letter of the found
+    /// Bioseq and the organism report (`query_bioseq::tabular_shows`), the Seq-annots and the
+    /// archive (which write the Seq-align id alone).
+    pub(crate) fn shows_query_bioseqs(self) -> bool {
+        use crate::report::query_bioseq::tabular_shows;
+        let program = crate::blastinput::app::Program::Blastn;
+        match self {
+            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => true,
+            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => {
+                tabular_shows(None, program)
+            }
+            BlastnOutputFormat::CustomTabular(spec) => tabular_shows(Some(spec), program),
             _ => false,
         }
     }
@@ -256,14 +288,16 @@ impl BlastnOutputFormat {
 fn write_blastn_outfmt7_header<W: Write>(
     writer: &mut W,
     query_title: &[u8],
-    subject_title: &str,
+    subject_title: &[u8],
     num_hits: Option<usize>,
 ) -> io::Result<()> {
     writeln!(writer, "# BLASTN {}", crate::wording::REPORT_VERSION)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
     // The title's bytes (`write_outfmt7_query_line`).
     crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
-    writeln!(writer, "# Database: {subject_title}")?;
+    writer.write_all(b"# Database: ")?;
+    writer.write_all(subject_title)?;
+    writer.write_all(b"\n")?;
     let Some(num_hits) = num_hits else {
         return Ok(());
     };
@@ -309,10 +343,10 @@ pub struct BlastnHsp {
     pub raw_score: i32,
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:96-101
     /// NCBI's `Int4` `query.offset` and `query.end` in the HSP's context. They lie outside the
-    /// context (`internal_q_offset_0 < 0`, or `internal_q_end_0` past the context's length,
-    /// `BlastnHsp::outside_query_context`) for an HSP from a hit that passes an end of its
-    /// context, which LOSAT refuses where its report starts
-    /// (`blast_engine::run::post_process_hits_and_write`).
+    /// context (`internal_q_offset_0 < 0`, or `internal_q_end_0` past the context's length) for an
+    /// HSP from a hit that passes an end of its context (an ungapped X-drop of 2^30 raw or more,
+    /// remaining-gaps X1b-o): the reports show it where its Seq-align's query start is at least 0,
+    /// and the search stops or refuses where it is below 0 (`BlastnHsp::seqalign_query_start`).
     pub internal_q_offset_0: i32,
     pub internal_q_end_0: i32,
     pub internal_s_offset_0: usize,
@@ -328,16 +362,73 @@ pub struct BlastnHsp {
 const _: () = assert!(std::mem::size_of::<BlastnHsp>() == 176);
 
 impl BlastnHsp {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2390-2391
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1297-1301
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:121-137
+    /// The lowest query start of the HSP's Seq-align on the query's plus strand (the Dense-diag's
+    /// start, or the Dense-seg's lowest segment start: the first segment's on the plus strand, the
+    /// last one's, `query_length - query.end`, on the minus strand). It is below 0 only for an HSP
+    /// that NCBI keeps outside its query context, on the left of the plus strand or the right of
+    /// the minus strand (remaining-gaps X1b-o): the mapping of a subject set's Seq-align throws
+    /// and NCBI's `CAlnMap` takes such a segment for a gap (`run::left_of_query_refusal`). An
+    /// HSP outside its context on the other side has a start past the query's end, which the
+    /// reports show (X1b-p).
+    #[inline]
+    pub fn seqalign_query_start(&self) -> i64 {
+        if self.query_frame < 0 {
+            self.query_length as i64 - i64::from(self.internal_q_end_0)
+        } else {
+            i64::from(self.internal_q_offset_0)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_diag.cpp:72-90
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:910-917
+    /// `seqalign_query_start` in the query's record, after `RemapToQueryLoc` has moved the query
+    /// row of the Seq-align by `offset` (the `-query_loc` interval's start; 0 without it,
+    /// blast_seqalign.cpp:1520-1534): an ungapped search's Dense-diag (`dense_diag`) moves its
+    /// start whatever it is, a gapped search's Dense-seg only its starts at 0 or past it, so a
+    /// start below 0 stays. Below 0 the subject set's mapping throws and `CAlnMap` takes the
+    /// segment for a gap (`run::left_of_query_refusal`); at 0 or past it the reports show the HSP
+    /// with the record's letters (`pairwise::context_letters`, remaining-gaps X1b-p).
+    #[inline]
+    pub fn record_query_start(&self, offset: usize, dense_diag: bool) -> i64 {
+        let start = self.seqalign_query_start();
+        if dense_diag || start >= 0 {
+            start + offset as i64
+        } else {
+            start
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1126-1129
-    /// Whether the HSP lies outside its query context (`query.offset < 0`, which NCBI's debug
-    /// build asserts against, or `query.end` past the context's length `query_length`), where
-    /// NCBI's report coordinates (`Blast_HSPGetAdjustedOffsets`) leave the query: an HSP from a
-    /// hit whose ungapped extension passed an end of its context (an ungapped X-drop of 2^30
-    /// raw or more, remaining-gaps X1b-o).
+    /// Whether the HSP lies outside its query context (`query.offset < 0`, or `query.end` past the
+    /// context's length `query_length`): an HSP from a hit whose ungapped extension passed an end
+    /// of its context (an ungapped X-drop of 2^30 raw or more, remaining-gaps X1b-o).
     #[inline]
     pub fn outside_query_context(&self) -> bool {
         self.internal_q_offset_0 < 0 || self.internal_q_end_0 as i64 > self.query_length as i64
+    }
+
+    /// Whether `record_query_start(offset, dense_diag)` is below 0, where the mapping of a subject
+    /// set's Seq-align throws (`run::left_of_query_refusal`). Only an HSP outside its query
+    /// context (`outside_query_context`) starts there: a start below 0 is a plus-strand
+    /// `query.offset` below 0 or a minus-strand `query.end` past the context's length, which the
+    /// interval's start does not lower. So each HSP of a batch is tested as X1b-o tested it, and
+    /// the start, which reads the strand and the interval, is made only for an HSP outside its
+    /// context (remaining-gaps X1b-p).
+    #[inline]
+    pub fn starts_left_of_record(&self, offset: usize, dense_diag: bool) -> bool {
+        self.outside_query_context() && self.record_start_below_zero(offset, dense_diag)
+    }
+
+    /// `record_query_start(offset, dense_diag) < 0` for an HSP outside its query context, out of
+    /// the loops that test each HSP of a batch (`starts_left_of_record`): only an ungapped X-drop
+    /// of 2^30 raw or more gives such an HSP, so the loops keep none of its fields in registers
+    /// for it.
+    #[cold]
+    #[inline(never)]
+    fn record_start_below_zero(&self, offset: usize, dense_diag: bool) -> bool {
+        self.record_query_start(offset, dense_diag) < 0
     }
 }
 
@@ -345,9 +436,10 @@ impl BlastnHsp {
 /// NCBI's 1-based report offsets of a blastn HSP (`Blast_HSPGetAdjustedOffsets`) from its offsets
 /// in its context: `query_offset` and `query_end` are NCBI's `Int4` ones (`BlastnHsp::
 /// internal_q_offset_0`), `query_length` the context's length and `query_frame` its strand. The
-/// query offsets are computed in `i64`; for an HSP outside its query context
-/// (`BlastnHsp::outside_query_context`) one below 0 is kept as 0: such an HSP never reaches a
-/// report (`run::post_process_hits_and_write` refuses the search).
+/// query offsets are computed in `i64`; for an HSP outside its query context one below 0 is kept
+/// as 0 (its Seq-align's query start is below 0): such an HSP reaches a report only with
+/// `-query_loc`, whose interval's start moves it to 0 or past it, and the report's offsets are
+/// made again from its Seq-align's start there (`run::shift_to_records`).
 pub(crate) fn adjust_blastn_offsets(
     query_offset: i32,
     query_end: i32,
@@ -900,7 +992,7 @@ impl<L: HitListEntry> HitList<L> {
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 #[allow(clippy::too_many_arguments)]
-pub fn write_output_blastn_hitlists_to_writer<W: Write>(
+pub fn write_output_blastn_hitlists_to_writer<W: crate::report::ostream::ReportWrite>(
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
     query_ids: &[Arc<[u8]>],
@@ -908,11 +1000,12 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     loads: &crate::report::db_subject::HitLoads,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
-    subject_title: &str,
+    subject_title: &[u8],
     unsearched: &[bool],
     epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+    left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
 ) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
@@ -931,7 +1024,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
             Some(warnings) => warnings.subject_read(q_idx, s_idx, writer),
             None => Ok(()),
         };
-        write_query_rows(
+        let written = write_query_rows(
             writer,
             q_idx,
             hit_list_opt.as_ref(),
@@ -946,7 +1039,22 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
             &mut hsp_index,
             probe.as_deref_mut(),
             &mut read,
-        )?;
+            left_of_record,
+        );
+        if let Err(error) = written {
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:124-127
+            // `~CBlastTabularInfo()` flushes the stream as the exception unwinds out of
+            // `CBlastFormat::PrintOneResultSet`, and no later subject is read.
+            if crate::ncbi_exception::NcbiException::of_io_error(&error).is_some() {
+                writer.ncbi_flush()?;
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    warnings.end_run();
+                }
+            }
+            return Err(error);
+        }
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        writer.ncbi_flush()?;
     }
     write_tabular_epilog(writer, output_format, epilog)
 }
@@ -968,12 +1076,13 @@ pub(crate) fn write_query_rows<W: Write>(
     loads: &crate::report::db_subject::HitLoads,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
-    subject_title: &str,
+    subject_title: &[u8],
     unsearched: &[bool],
     config: &OutputConfig,
     hsp_index: &mut HspIndex,
     mut probe: Option<&mut FormatProbe<'_>>,
     read: crate::report::query_warnings::SubjectReadHook<'_, W>,
+    left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
 ) -> io::Result<()> {
     write_query_header(
         writer,
@@ -1035,6 +1144,7 @@ pub(crate) fn write_query_rows<W: Write>(
             config,
             hsp_index,
             probe.as_deref_mut(),
+            left_of_record,
         )?;
     }
     Ok(())
@@ -1048,7 +1158,7 @@ pub(crate) fn write_query_header<W: Write>(
     hit_list_opt: Option<&BlastnHitList>,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
-    subject_title: &str,
+    subject_title: &[u8],
     unsearched: &[bool],
 ) -> io::Result<()> {
     if output_format == BlastnOutputFormat::TabularWithComments {
@@ -1078,8 +1188,22 @@ pub(crate) fn write_hsp_rows<W: Write>(
     config: &OutputConfig,
     hsp_index: &mut HspIndex,
     mut probe: Option<&mut FormatProbe<'_>>,
+    left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
 ) -> io::Result<()> {
     for hsp in hsps {
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-1060
+        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:753-755
+        // Default `std` tabular fields include `pident`/`length`/`mismatch`/`gapopen`, so a `-db`
+        // HSP starting left of its query record throws `CAlnVec::x_GetSeqRightSeg()` here after
+        // earlier rows have been written.
+        if let Some((placements, ungapped)) = left_of_record {
+            if hsp.starts_left_of_record(placements.offset(hsp.q_idx as usize), ungapped) {
+                return Err(
+                    crate::report::serial::seqalign::aln_vec_row_gaps_only(0, false)
+                        .into_io_error(),
+                );
+            }
+        }
         let query_id = query_ids
             .get(hsp.q_idx as usize)
             .map(|id| id.as_ref())
@@ -1155,7 +1279,7 @@ pub(crate) fn write_hsp_rows<W: Write>(
 }
 
 /// The line after the last query's lines (outfmt 7's count of queries, when `epilog`).
-pub(crate) fn write_tabular_epilog<W: Write>(
+pub(crate) fn write_tabular_epilog<W: crate::report::ostream::ReportWrite + ?Sized>(
     writer: &mut W,
     output_format: BlastnOutputFormat,
     epilog: Option<usize>,
@@ -1167,6 +1291,8 @@ pub(crate) fn write_tabular_epilog<W: Write>(
     if let (BlastnOutputFormat::TabularWithComments, Some(num_queries)) = (output_format, epilog) {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1324
         writeln!(writer, "# BLAST processed {} queries", num_queries)?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
 
     Ok(())

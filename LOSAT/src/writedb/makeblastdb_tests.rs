@@ -1,5 +1,7 @@
 use super::*;
 use crate::blastinput::ncbi_environment::DiagTarget;
+use crate::utils::test_dir::TempDir;
+use crate::writedb::tests::base_in;
 
 /// The refusals of an index file that NCBI cannot read as a database are LOSAT's own, printed
 /// with makeblastdb's prefix and ended with exit status 1, and their text is the one of
@@ -33,22 +35,19 @@ fn a_refused_index_file_is_printed_as_a_refusal() {
 
 // makedb-v5 DECISIONS 12: `[BLAST] MAX_SEQID_LENGTH` is refused with `-parse_seqids`
 // (build_db.cpp:739-747, cited at `check_registry_settings`), the library's argument
-// rules are makeblastdb's (makeblastdb.cpp:322-329, cited at `check_arguments`).
+// rules are makeblastdb's (makeblastdb.cpp:322-329, cited at `MakedbArgs`).
 #[test]
 fn registry_and_argument_rules_of_parse_seqids() {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Wrap {
-        #[command(flatten)]
-        args: MakedbArgs,
-    }
-    let parse = |words: &[&str]| {
-        let mut argv = vec!["makeblastdb"];
+    let parse = |words: &[&str]| -> MakedbArgs {
+        let mut argv = vec!["losat", "makeblastdb"];
         argv.extend(words);
-        Wrap::try_parse_from(argv).unwrap().args
+        match crate::cli::try_parse_from(argv).unwrap().command {
+            crate::cli::Commands::Makedb(args) => args,
+            command => panic!("not makeblastdb: {command:?}"),
+        }
     };
-    let plain = parse(&["--dbtype", "prot"]);
-    let parsed = parse(&["--dbtype", "prot", "--parse_seqids"]);
+    let plain = parse(&["-dbtype", "prot"]);
+    let parsed = parse(&["-dbtype", "prot", "-parse_seqids"]);
     assert_eq!(check_registry_settings(&plain, Ok(Some("100"))), Ok(()));
     assert_eq!(check_registry_settings(&plain, Err("unread")), Ok(()));
     assert_eq!(check_registry_settings(&parsed, Ok(None)), Ok(()));
@@ -86,215 +85,117 @@ fn registry_and_argument_rules_of_parse_seqids() {
     let mut copied = parsed.clone();
     copied.input_type = "blastdb".to_string();
     assert_eq!(check_registry_settings(&copied, Ok(Some("100"))), Ok(()));
-    let mut map = parse(&["--dbtype", "prot"]);
-    map.taxid_map = Some("m.txt".to_string());
-    let error = check_arguments(&map).unwrap_err();
-    assert_eq!(error.exit_code(), 1);
-    assert_eq!(
-        error.to_string(),
-        "Command line argument error: Argument \"parse_seqids\". Must be specified, as it \
-             is required by argument:  `taxid_map'"
-    );
-    map.parse_seqids = true;
-    assert!(check_arguments(&map).is_ok());
-    map.taxid = Some(1);
-    // NCBI's multimap meets `taxid` (excludes `taxid_map`) first.
-    assert_eq!(
-        check_arguments(&map).unwrap_err().to_string(),
-        "Command line argument error: Argument \"taxid_map\". Incompatible with argument:  \
-         `taxid'"
-    );
 }
 
 /// The dependencies of `-gi_mask` and `-gi_mask_name` among the others, in the order and
 /// with the words of NCBI's argument reader (makeblastdb 2.17.0, survey M4c probes b5/o01-o08:
-/// `Error:  (CArgException::eConstraint) <message>` after the usage, status 1).
+/// `Error:  (CArgException::eConstraint) <message>` after the usage, status 1), which reads
+/// makeblastdb's command line and its library calls (`cli::reader`).
 #[test]
 fn argument_dependencies_follow_ncbis_order() {
-    let base = || {
-        let mut args = parse_makedb_words_for_test();
-        args.dbtype = "nucl".to_string();
-        args
+    let required = |name: &str, by: &str| {
+        format!("Argument \"{name}\". Must be specified, as it is required by argument:  `{by}'")
     };
-    let mut cases: Vec<(MakedbArgs, &str)> = Vec::new();
-    // o01: -mask_data -gi_mask -mask_id
-    let mut a = base();
-    a.mask_data = Some("m".into());
-    a.gi_mask = true;
-    a.mask_id = Some("foo".into());
-    cases.push((
-        a,
-        "Argument \"mask_id\". Incompatible with argument:  `gi_mask'",
-    ));
-    // o02: -gi_mask -gi_mask_name
-    let mut a = base();
-    a.gi_mask = true;
-    a.gi_mask_name = Some("x".into());
-    cases.push((
-        a,
-        "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
-         `gi_mask'",
-    ));
-    // o03: -gi_mask_name -taxid_map
-    let mut a = base();
-    a.gi_mask_name = Some("x".into());
-    a.taxid_map = Some("tm.txt".into());
-    cases.push((
-        a,
-        "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
-         `taxid_map'",
-    ));
-    // o04: -gi_mask -taxid_map -mask_data
-    let mut a = base();
-    a.gi_mask = true;
-    a.taxid_map = Some("tm.txt".into());
-    a.mask_data = Some("m".into());
-    cases.push((
-        a,
-        "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
-         `gi_mask'",
-    ));
-    // o05: -parse_seqids -mask_desc -gi_mask_name -gi_mask
-    let mut a = base();
-    a.parse_seqids = true;
-    a.mask_desc = Some("d".into());
-    a.gi_mask_name = Some("x".into());
-    a.gi_mask = true;
-    cases.push((
-        a,
-        "Argument \"mask_data\". Must be specified, as it is required by argument:  \
-         `gi_mask_name'",
-    ));
-    // o06: -gi_mask_name
-    let mut a = base();
-    a.gi_mask_name = Some("x".into());
-    cases.push((
-        a,
-        "Argument \"mask_data\". Must be specified, as it is required by argument:  \
-         `gi_mask_name'",
-    ));
-    // o07: -parse_seqids -gi_mask -mask_id
-    let mut a = base();
-    a.parse_seqids = true;
-    a.gi_mask = true;
-    a.mask_id = Some("foo".into());
-    cases.push((
-        a,
-        "Argument \"mask_id\". Incompatible with argument:  `gi_mask'",
-    ));
-    // o08: -gi_mask -mask_id -taxid -taxid_map -mask_data
-    let mut a = base();
-    a.gi_mask = true;
-    a.mask_id = Some("foo".into());
-    a.taxid = Some(9606);
-    a.taxid_map = Some("tm.txt".into());
-    a.mask_data = Some("m".into());
-    cases.push((
-        a,
-        "Argument \"mask_id\". Incompatible with argument:  `gi_mask'",
-    ));
-    for (args, message) in cases {
-        let error = check_arguments(&args).unwrap_err();
-        assert_eq!(error.exit_code(), 1);
-        assert_eq!(
-            error.to_string(),
-            format!("Command line argument error: {message}")
+    let excluded =
+        |name: &str, by: &str| format!("Argument \"{name}\". Incompatible with argument:  `{by}'");
+    for (words, message) in [
+        (
+            &["-mask_data", "m", "-gi_mask", "-mask_id", "foo"][..],
+            excluded("mask_id", "gi_mask"),
+        ),
+        (
+            &["-gi_mask", "-gi_mask_name", "x"],
+            required("parse_seqids", "gi_mask"),
+        ),
+        (
+            &["-gi_mask_name", "x", "-taxid_map", "tm.txt"],
+            required("parse_seqids", "taxid_map"),
+        ),
+        (
+            &["-gi_mask", "-taxid_map", "tm.txt", "-mask_data", "m"],
+            required("parse_seqids", "gi_mask"),
+        ),
+        (
+            &[
+                "-parse_seqids",
+                "-mask_desc",
+                "d",
+                "-gi_mask_name",
+                "x",
+                "-gi_mask",
+            ],
+            required("mask_data", "gi_mask_name"),
+        ),
+        (
+            &["-gi_mask_name", "x"],
+            required("mask_data", "gi_mask_name"),
+        ),
+        (
+            &["-parse_seqids", "-gi_mask", "-mask_id", "foo"],
+            excluded("mask_id", "gi_mask"),
+        ),
+        (
+            &[
+                "-gi_mask",
+                "-mask_id",
+                "foo",
+                "-taxid",
+                "9606",
+                "-taxid_map",
+                "tm.txt",
+                "-mask_data",
+                "m",
+            ],
+            excluded("mask_id", "gi_mask"),
+        ),
+        (
+            &["-taxid_map", "m.txt"],
+            required("parse_seqids", "taxid_map"),
+        ),
+        (
+            &["-parse_seqids", "-taxid_map", "m.txt", "-taxid", "1"],
+            excluded("taxid_map", "taxid"),
+        ),
+    ] {
+        let mut argv = vec!["losat", "makeblastdb", "-dbtype", "nucl"];
+        argv.extend(words);
+        let error = crate::cli::try_parse_from(argv).unwrap_err();
+        let crate::cli::ArgvError::Report(stderr) = &error else {
+            panic!("{words:?}: {error}")
+        };
+        let stderr = String::from_utf8_lossy(stderr);
+        assert!(
+            stderr.ends_with(&format!("\nError: {message}\nError:  {message}\n")),
+            "{words:?}: {stderr}"
         );
     }
-    let mut a = base();
-    a.parse_seqids = true;
-    a.gi_mask = true;
-    a.mask_data = Some("m".into());
-    a.gi_mask_name = Some("x".into());
-    assert!(check_arguments(&a).is_ok());
-}
-
-/// The order of `x_PostCheck`'s second walk names every argument of `MakedbArgs` (under NCBI's
-/// name), every argument of a dependency, and only the arguments of NCBI's `Init` that LOSAT
-/// does not register besides; its one mandatory argument is the one clap requires.
-#[test]
-fn the_declaration_order_holds_every_argument() {
-    // The subcommand as LOSAT registers it.
-    let cli = <crate::cli::Cli as clap::CommandFactory>::command();
-    let command = cli.find_subcommand("makeblastdb").unwrap();
-    let mut registered: Vec<String> = command
-        .get_arguments()
-        .map(|arg| match arg.get_id().as_str() {
-            "input" => "in".to_string(),
-            id => id.to_string(),
-        })
-        .collect();
-    registered.sort();
-    let mut listed: Vec<String> = MAKEBLASTDB_ARGUMENTS
-        .iter()
-        .map(|(name, _)| name.to_string())
-        .filter(|name| !["verbose", "limit_defline"].contains(&name.as_str()))
-        .collect();
-    listed.sort();
-    assert_eq!(registered, listed);
-    for (first, _, second) in makeblastdb_dependencies() {
-        for name in [first, second] {
-            assert!(
-                MAKEBLASTDB_ARGUMENTS
-                    .iter()
-                    .any(|&(listed, _)| listed == name),
-                "{name}"
-            );
-        }
-    }
-    let required: Vec<&str> = command
-        .get_arguments()
-        .filter(|arg| arg.is_required_set())
-        .map(|arg| arg.get_id().as_str())
-        .collect();
-    let mandatory: Vec<&str> = MAKEBLASTDB_ARGUMENTS
-        .iter()
-        .filter(|(_, mandatory)| *mandatory)
-        .map(|&(name, _)| name)
-        .collect();
-    assert_eq!(required, mandatory);
-}
-
-/// Without the mandatory molecule type, NCBI's walk reports an exclusion (its first walk) and
-/// stops at the molecule type before any required argument, which it declares later.
-#[test]
-fn a_missing_molecule_type_leaves_only_exclusions() {
-    let given = |words: &'static [&'static str]| move |name: &str| words.contains(&name);
-    assert_eq!(
-        dependency_error(&given(&["taxid", "taxid_map", "parse_seqids"])).as_deref(),
-        Some("Argument \"taxid_map\". Incompatible with argument:  `taxid'")
-    );
-    assert_eq!(dependency_error(&given(&["gi_mask", "mask_data"])), None);
-    assert_eq!(
-        dependency_error(&given(&["dbtype", "gi_mask", "mask_data"])).as_deref(),
-        Some(
-            "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
-             `gi_mask'"
-        )
-    );
-}
-
-/// `MakedbArgs` with makeblastdb's defaults and `-dbtype prot`, without the parser's checks.
-fn parse_makedb_words_for_test() -> MakedbArgs {
-    use clap::Parser;
-    #[derive(Parser)]
-    struct Wrap {
-        #[command(flatten)]
-        args: MakedbArgs,
-    }
-    Wrap::try_parse_from(["makeblastdb", "--dbtype", "prot"])
-        .unwrap()
-        .args
+    let words = [
+        "-parse_seqids",
+        "-gi_mask",
+        "-mask_data",
+        "m",
+        "-gi_mask_name",
+        "x",
+    ];
+    let mut argv = vec!["losat", "makeblastdb", "-dbtype", "nucl"];
+    argv.extend(words);
+    assert!(crate::cli::try_parse_from(argv).is_ok());
 }
 
 #[test]
 fn input_names_split_at_spaces_and_quotes() {
-    assert_eq!(split_quoted("a.fa"), ["a.fa"]);
-    assert_eq!(split_quoted("a.fa b.fa"), ["a.fa", "b.fa"]);
-    assert_eq!(split_quoted("\"a b.fa\""), ["a b.fa"]);
-    assert_eq!(split_quoted("\"a b.fa\" c.fa"), ["a b.fa", "c.fa"]);
-    assert_eq!(split_quoted("  a.fa  "), ["a.fa"]);
-    assert!(split_quoted("").is_empty());
+    assert_eq!(split_quoted(b"a.fa"), [b"a.fa".as_slice()]);
+    assert_eq!(
+        split_quoted(b"a.fa b.fa"),
+        [b"a.fa".as_slice(), b"b.fa".as_slice()]
+    );
+    assert_eq!(split_quoted(b"\"a b.fa\""), [b"a b.fa".as_slice()]);
+    assert_eq!(
+        split_quoted(b"\"a b.fa\" c.fa"),
+        [b"a b.fa".as_slice(), b"c.fa".as_slice()]
+    );
+    assert_eq!(split_quoted(b"  a.fa  "), [b"a.fa".as_slice()]);
+    assert!(split_quoted(b"").is_empty());
 }
 
 #[test]
@@ -329,12 +230,12 @@ fn the_variable_that_changes_stored_titles_is_refused() {
 /// directory have no log.
 #[test]
 fn the_log_and_the_diagnostics_append_to_one_file_in_order() {
-    let tmp = crate::writedb::tests::TempDir::new("log-one-file");
-    let name = tmp.base("mk.log");
+    let tmp = TempDir::unique("writedb-log-one-file");
+    let name = base_in(&tmp, "mk.log");
     std::fs::write(&name, b"before\n").unwrap();
     let target = diag_target(Some(std::ffi::OsStr::new(&name)));
     assert!(matches!(target, DiagTarget::File(_)));
-    let mut log = log_of(&name).expect("the log of a file that opens");
+    let mut log = log_of(std::ffi::OsStr::new(&name)).expect("the log of a file that opens");
     let mut stderr = Vec::new();
     {
         let mut diag = DiagStream {
@@ -351,8 +252,11 @@ fn the_log_and_the_diagnostics_append_to_one_file_in_order() {
         std::fs::read(&name).unwrap(),
         b"before\nlog 1\ndiagnostic\nlog 2\ndiagnostic 2\n"
     );
-    for missing in [String::new(), tmp.base("nodir/mk.log")] {
-        assert!(log_of(&missing).is_none(), "{missing:?}");
+    for missing in [String::new(), base_in(&tmp, "nodir/mk.log")] {
+        assert!(
+            log_of(std::ffi::OsStr::new(&missing)).is_none(),
+            "{missing:?}"
+        );
     }
 }
 
@@ -365,26 +269,23 @@ fn the_log_and_the_diagnostics_append_to_one_file_in_order() {
 #[cfg(unix)]
 #[test]
 fn the_log_is_the_name_as_the_system_opens_it() {
-    let tmp = crate::writedb::tests::TempDir::new("log-two-files");
-    std::fs::create_dir_all(tmp.0.join("sub/deep")).unwrap();
-    std::os::unix::fs::symlink(tmp.0.join("sub/deep"), tmp.0.join("a")).unwrap();
-    let name = tmp.base("a/../mk.log");
+    let tmp = TempDir::unique("writedb-log-two-files");
+    std::fs::create_dir_all(tmp.join("sub/deep")).unwrap();
+    std::os::unix::fs::symlink(tmp.join("sub/deep"), tmp.join("a")).unwrap();
+    let name = base_in(&tmp, "a/../mk.log");
     let target = diag_target(Some(std::ffi::OsStr::new(&name)));
-    let mut log = log_of(&name).expect("the log of a file that opens");
+    let mut log = log_of(std::ffi::OsStr::new(&name)).expect("the log of a file that opens");
     target.write_text(b"diagnostic\n", &mut std::io::sink());
     log.write_all(b"log\n").unwrap();
-    assert_eq!(
-        std::fs::read(tmp.0.join("mk.log")).unwrap(),
-        b"diagnostic\n"
-    );
-    assert_eq!(std::fs::read(tmp.0.join("sub/mk.log")).unwrap(), b"log\n");
-    let name = tmp.base("logs/");
+    assert_eq!(std::fs::read(tmp.join("mk.log")).unwrap(), b"diagnostic\n");
+    assert_eq!(std::fs::read(tmp.join("sub/mk.log")).unwrap(), b"log\n");
+    let name = base_in(&tmp, "logs/");
     assert!(matches!(
         diag_target(Some(std::ffi::OsStr::new(&name))),
         DiagTarget::File(_)
     ));
-    assert!(tmp.0.join("logs").is_file());
-    assert!(log_of(&name).is_none());
+    assert!(tmp.join("logs").is_file());
+    assert!(log_of(std::ffi::OsStr::new(&name)).is_none());
 }
 
 #[test]
@@ -447,5 +348,157 @@ fn errors_end_with_makeblastdb_s_exit_codes_and_prefixes() {
     ] {
         assert_eq!(error.exit_code(), code, "{error}");
         assert_eq!(error.to_string(), text);
+    }
+}
+
+/// A device that records each write and fails the writes whose numbers (from 1) are listed,
+/// once each, with `EAGAIN` (a failure that passes).
+struct Writes {
+    writes: Vec<Vec<u8>>,
+    fail: Vec<usize>,
+    count: usize,
+}
+
+impl Write for Writes {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.count += 1;
+        if self.fail.contains(&self.count) {
+            return Err(std::io::ErrorKind::WouldBlock.into());
+        }
+        self.writes.push(buf.to_vec());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Writes the first lines of a log as `BuildDatabase::new` inserts them, with a title of
+/// `title`.
+fn write_log_head(log: &mut dyn Write, title: &[u8]) {
+    let (time, name) = ("T", "/d/x");
+    let _ = write!(log, "\n\nBuilding a new DB, current time: {time}");
+    let _ = super::super::build_db::endl(log);
+    let _ = write!(log, "New DB name:   {name}");
+    let _ = super::super::build_db::endl(log);
+    let _ = log
+        .write_all(b"New DB title:  ")
+        .and_then(|()| log.write_all(title));
+    let _ = super::super::build_db::endl(log);
+    let _ = write!(log, "Keep MBits: T");
+    let _ = super::super::build_db::endl(log);
+    let _ = super::super::build_db::endl(log);
+}
+
+/// The log on standard output (a pipe or a file) as NCBI's `cout`, over `device`.
+fn cout_log(device: &mut dyn Write) -> CoutLog<'_> {
+    let stream = crate::cli::NcbiStdio::Cout {
+        block: 4096,
+        lines: false,
+    };
+    CoutLog(super::super::cout::cout(device, stream))
+}
+
+/// The log on standard output is NCBI's `cout` with a flush at each line's end: a pipe or a
+/// file gets each line in one write, a title with a new line in it included (line RG item
+/// KC-11b-2).
+#[test]
+fn each_line_of_the_log_reaches_standard_output_in_one_write() {
+    for (title, line) in [
+        (b"x.fa".as_slice(), b"New DB title:  x.fa\n".as_slice()),
+        (b"t\n", b"New DB title:  t\n\n"),
+    ] {
+        let mut device = Writes {
+            writes: Vec::new(),
+            fail: Vec::new(),
+            count: 0,
+        };
+        let mut log = cout_log(&mut device);
+        write_log_head(&mut log, title);
+        log.flush().unwrap();
+        drop(log);
+        let lines: Vec<&[u8]> = vec![
+            b"\n\nBuilding a new DB, current time: T\n",
+            b"New DB name:   /d/x\n",
+            line,
+            b"Keep MBits: T\n",
+            b"\n",
+        ];
+        assert_eq!(device.writes, lines);
+    }
+}
+
+/// A write of the log that finds the pipe closed ends the build at the end of its line
+/// (`build_db::endl`), and so does every later line, as SIGPIPE ends NCBI's process at that
+/// line's flush; a write that fails otherwise (`EAGAIN`) loses its line and ends nothing
+/// (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+#[cfg(not(windows))]
+#[test]
+fn a_closed_pipe_ends_the_log_at_its_line() {
+    /// A device whose pipe is closed from the write `closed_at` (from 1) on.
+    struct Closed {
+        count: usize,
+        closed_at: usize,
+    }
+    impl Write for Closed {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.count += 1;
+            if self.count >= self.closed_at {
+                return Err(std::io::ErrorKind::BrokenPipe.into());
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let lines = ["a", "b", "c"];
+    for closed_at in 1..=lines.len() {
+        let mut device = Closed {
+            count: 0,
+            closed_at,
+        };
+        let mut log = cout_log(&mut device);
+        let ends: Vec<bool> = lines
+            .iter()
+            .map(|line| {
+                let _ = log.write_all(line.as_bytes());
+                super::super::build_db::endl(&mut log).is_err_and(|error| error.is_closed_pipe())
+            })
+            .collect();
+        // Each line reaches the device in one write, at its flush.
+        let expected: Vec<bool> = (1..=lines.len()).map(|line| line >= closed_at).collect();
+        assert_eq!(ends, expected, "closed at write {closed_at}");
+    }
+    let mut device = Writes {
+        writes: Vec::new(),
+        fail: vec![2],
+        count: 0,
+    };
+    let mut log = cout_log(&mut device);
+    for line in lines {
+        let _ = log.write_all(line.as_bytes());
+        assert!(super::super::build_db::endl(&mut log).is_ok(), "{line}");
+    }
+}
+
+/// A write of the log that fails loses its line, and the stream writes nothing after it
+/// (`badbit`), even where the device takes the later writes (line RG item KC-11b-2).
+#[test]
+fn after_a_failed_write_the_log_writes_nothing() {
+    for failed in 1..=5 {
+        let mut device = Writes {
+            writes: Vec::new(),
+            fail: vec![failed],
+            count: 0,
+        };
+        let mut log = cout_log(&mut device);
+        write_log_head(&mut log, b"x.fa");
+        log.flush().unwrap();
+        drop(log);
+        assert_eq!(device.count, failed, "write {failed}");
+        assert_eq!(device.writes.len(), failed - 1, "write {failed}");
     }
 }

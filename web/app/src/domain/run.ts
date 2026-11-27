@@ -1,7 +1,8 @@
 // Run records (plan §5.2). A RunSnapshot is fixed when a job is queued and never
 // changes; what actually happened is appended to the RunRecord.
-import type { CountsFile, CountsUse, MessagePlace, PrintedKind, ProgramId, RecordKey, RunFile, ShownIds } from 'losat/domain';
+import type { CountsFile, CountsUse, MessagePlace, PrintedKind, ProgramId, RecordKey, RunFile, SequenceKind, ShownIds } from 'losat/domain';
 import type { CountsOrigin } from './counts';
+import type { ToolId, WindowMaskerStage } from './tools';
 
 export type RunStatus =
   | 'queued'
@@ -49,8 +50,13 @@ export interface InputSnapshot {
    * `records` are the run's input.
    */
   readonly revisionIds: readonly string[];
-  /** ID and length of each record in `bytes`; the engine checks them at `register`. */
+  /** ID and length of each record from the per-file record tables; the engine checks them at `register`. */
   readonly records: readonly RecordKey[];
+  /**
+   * Whether `bytes` was assembled from parts (several sources joined, or a source with records
+   * left out; line WQA's D17). Absent for a single unmodified source.
+   */
+  readonly assembled?: boolean;
 }
 
 /**
@@ -86,7 +92,30 @@ export interface ConffileSnapshot {
   readonly sha256: string;
 }
 
+/** Metadata of one database filter list file (`-seqidlist`, `-taxidlist`, etc.) mounted for a `-db` run. */
+export interface DatabaseFilterFileSnapshot {
+  readonly flag: string;
+  readonly name: string;
+  readonly size: number;
+}
+
+/** Metadata of a local BLAST database (`-db` or BLASTN `-filtering_db`) fixed when a run is queued. */
+export interface DatabaseSnapshot {
+  /** Exact relative path passed to `-db` or `-filtering_db` (e.g. `mydb/nt_small`). */
+  readonly name: string;
+  readonly folder?: string;
+  readonly kind: SequenceKind;
+  readonly fileCount: number;
+  readonly totalBytes: number;
+  readonly taxdb: boolean;
+  readonly sqlite: boolean;
+  /** Relative database folder whose taxonomy files were mounted at the run directory root (`BLASTDB=<dir>` on CLI). */
+  readonly blastdbEnv?: string;
+  readonly filterFiles?: readonly DatabaseFilterFileSnapshot[];
+}
+
 export interface RunSnapshot {
+  readonly kind?: 'search';
   readonly runId: string;
   /** 1-based position in this working session, used for display and file names. */
   readonly number: number;
@@ -99,6 +128,10 @@ export interface RunSnapshot {
   readonly argv: readonly string[];
   readonly query: InputSnapshot;
   readonly subject: InputSnapshot;
+  /** Present when the run searched a local BLAST database (`-db`); absent for `-subject` FASTA runs. */
+  readonly database?: DatabaseSnapshot;
+  /** Present when a BLASTN run used a local repeats database (`-filtering_db`). */
+  readonly filteringDb?: DatabaseSnapshot;
   readonly requestedThreads: number | 'auto';
   /** The counts file of `-window_masker_db`; absent without the option (BLASTN only). */
   readonly windowMasker?: CountsSnapshot;
@@ -172,8 +205,97 @@ export interface RunRecord {
    * 2026-11-19).
    */
   readonly diagnostics?: string;
+  /**
+   * The records that the engine actually read at `register` for an assembled input
+   * (`InputSnapshot.assembled`) when reading the assembled bytes as one file differs from the
+   * per-file record tables (`InputSnapshot.records`; line WQA's D17). Absent when they agree.
+   */
+  readonly readRecords?: {
+    readonly query?: readonly RecordKey[];
+    readonly subject?: readonly RecordKey[];
+  };
+}
+
+/**
+ * The records that a run actually searched for `role`: the engine's own reading when an assembled
+ * input read differently as one file (`RunRecord.readRecords`), otherwise the snapshot's record table.
+ */
+export function runInputRecords(
+  run: { readonly snapshot: RunSnapshot; readonly record: RunRecord },
+  role: 'query' | 'subject',
+): readonly RecordKey[] {
+  return run.record.readRecords?.[role] ?? run.snapshot[role].records;
 }
 
 export function isTerminal(status: RunStatus): boolean {
   return TERMINAL_STATUSES.has(status);
+}
+
+// --- Tool runs (windowmasker, WW3b DESIGN §3-§4) -------------------------------------------
+
+export type ToolFileOrigin =
+  | { readonly kind: 'picked' }
+  | { readonly kind: 'pasted' }
+  | { readonly kind: 'inflated'; readonly from: string }
+  | { readonly kind: 'combined'; readonly parts: readonly string[] }
+  | { readonly kind: 'made'; readonly runNumber: number }
+  | { readonly kind: 'saved'; readonly taxid: number };
+
+/** Metadata of one file placed in a tool run's working directory (for Run details). */
+export interface ToolDirectoryEntry {
+  readonly name: string;
+  readonly size: number;
+  readonly origin: ToolFileOrigin;
+}
+
+/** One output stream or file kept in session storage for a tool run. */
+export interface ToolOutputEntry {
+  /** Key under which the Data worker keeps this block (`'stdout'`, `'stderr'`, or `'file:0'`, ...). */
+  readonly key: string;
+  /** Name as written in the argv (for example `wmasker.ascii`, `run.log`), or `'stdout'` / `'stderr'`. */
+  readonly name: string;
+  readonly size: number;
+  /** Option(s) that named the file (`'-out'`, `'-logfile'`, `'-out, -logfile'`), if applicable. */
+  readonly option?: string;
+  /** True for the `-out` file of `-mk_counts` and `-convert` (offered to BLASTN and Mask). */
+  readonly isCounts?: true;
+}
+
+export interface ToolRunSnapshot {
+  readonly kind: 'tool';
+  readonly runId: string;
+  /** 1-based position in this working session, shared with search runs. */
+  readonly number: number;
+  readonly tool: ToolId;
+  readonly stage: WindowMaskerStage;
+  readonly argv: readonly string[];
+  readonly directory: readonly ToolDirectoryEntry[];
+  readonly prints?: PrintedKind;
+  readonly queuedAt: number;
+  readonly group?: RunGroup;
+}
+
+export interface ToolRunRecord {
+  readonly exitStatus?: number;
+  readonly stdout?: ToolOutputEntry;
+  readonly stderr?: ToolOutputEntry;
+  readonly files?: readonly ToolOutputEntry[];
+  readonly runtimePath?: 'serial' | 'fake';
+  readonly engineBuild?: string;
+  readonly memory?: {
+    readonly linearBytesBefore: number;
+    readonly linearBytesAfter: number;
+    readonly instanceRuns: number;
+  };
+  readonly startedAt?: number;
+  readonly phaseTimes?: { readonly preparing?: number; readonly running?: number; readonly finalizing?: number };
+  readonly endedAt?: number;
+  readonly error?: string;
+}
+
+export type AnyRunSnapshot = RunSnapshot | ToolRunSnapshot;
+export type AnyRunRecord = RunRecord | ToolRunRecord;
+
+export function isToolSnapshot(snapshot: AnyRunSnapshot): snapshot is ToolRunSnapshot {
+  return snapshot.kind === 'tool';
 }

@@ -4,19 +4,27 @@ import os
 from typing import Literal, TypedDict
 
 class BlastnOptions(TypedDict, total=False):
+    task: Literal['megablast', 'dc-megablast', 'blastn', 'blastn-short', 'rmblastn']
+    """Task to execute"""
+    dbsize: int
+    """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
     seqidlist: str
     """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
     negative_seqidlist: str
     """Restrict search of database to everything except the specified SeqIDs"""
     taxids: str
     """Restrict search of database to include only the specified taxonomy IDs and their
     descendants (multiple IDs delimited by ',')"""
-    taxidlist: str
-    """Restrict search of database to include only the specified taxonomy IDs and their
-    descendants"""
     negative_taxids: str
     """Restrict search of database to everything except the specified taxonomy IDs and their
     descendants (multiple IDs delimited by ',')"""
+    taxidlist: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants"""
     negative_taxidlist: str
     """Restrict search of database to everything except the specified taxonomy IDs and their
     descendants"""
@@ -26,591 +34,56 @@ class BlastnOptions(TypedDict, total=False):
     """Filtering algorithm ID to apply to the BLAST database as soft masking"""
     db_hard_mask: str
     """Filtering algorithm ID to apply to the BLAST database as hard masking"""
-    dbsize: int
-    """Effective length of the database"""
-    show_gis: bool
-    """Show NCBI GIs in deflines?"""
-    html: bool
-    """Produce HTML output?"""
-    parse_deflines: bool
-    """Should the query and subject defline(s) be parsed?"""
-    searchsp: int
-    """Effective length of the search space"""
-    task: Literal['megablast', 'dc-megablast', 'blastn', 'blastn-short', 'rmblastn']
-    """Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn"""
-    template_type: str
-    """Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal"""
-    template_length: int
-    """Discontiguous MegaBLAST template length: 16, 18 or 21"""
-    word_size: int
-    """Word size for wordfinder algorithm (default: 28 for megablast, 11 for blastn and
-    dc-megablast, 7 for blastn-short)"""
-    num_threads: int
-    mt_mode: int
-    """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
-    does not depend on it)"""
-    use_index: bool
-    """Use MegaBLAST database index [default: false]"""
-    index_name: str
-    """MegaBLAST database index name (deprecated; use only for old style indices)"""
+    subject_loc: str
+    """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
     evalue: float
-    """Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)"""
+    """Expectation value (E) threshold for saving hits. Default = 10 (1000 for blastn-short)"""
+    word_size: int
+    """Word size for wordfinder algorithm (length of best perfect match)"""
+    gapopen: int
+    """Cost to open a gap"""
+    gapextend: int
+    """Cost to extend a gap"""
     perc_identity: float
-    """Percent identity threshold for filtering HSPs (default: 0, no filtering)"""
-    max_target_seqs: int
-    """Maximum number of aligned sequences to keep (default: 500)"""
-    num_descriptions: int
-    """Number of database sequences to show one-line descriptions for. Not applicable for outfmt
-    > 4 [default: 500]"""
-    num_alignments: int
-    """Number of database sequences to show alignments for [default: 250]"""
-    line_length: int
-    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
-    sorthits: int
-    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
-    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
-    Not applicable for outfmt > 4"""
-    sorthsps: int
-    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
-    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
-    for outfmt != 0"""
-    max_hsps: int
-    """Maximum number of HSPs per subject (unlimited when omitted)"""
+    """Percent identity"""
     qcov_hsp_perc: float
     """Percent query coverage per hsp"""
-    reward: int
-    """Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn
-    and dc-megablast, 0 for rmblastn; 0 needs penalty 0)"""
+    max_hsps: int
+    """Set maximum number of HSPs per subject sequence to save for each query"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions"""
+    xdrop_gap: float
+    """X-dropoff value (in bits) for preliminary gapped extensions"""
+    xdrop_gap_final: float
+    """X-dropoff value (in bits) for final gapped alignment"""
+    searchsp: int
+    """Effective length of the search space"""
     penalty: int
-    """Penalty for a nucleotide mismatch (default: -2 for megablast, 0 for rmblastn, -3 for the
-    other tasks)"""
-    gapopen: int
-    """Cost to open a gap (default: 0 for megablast, 5 for the other tasks)"""
-    gapextend: int
-    """Cost to extend a gap (default: 0 for megablast, 2 for the other tasks)"""
+    """Penalty for a nucleotide mismatch"""
+    reward: int
+    """Reward for a nucleotide match"""
+    no_greedy: bool
+    """Use non-greedy dynamic programming extension"""
+    min_raw_gapped_score: int
+    """Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback
+    stages"""
+    template_type: Literal['coding', 'optimal', 'coding_and_optimal']
+    """Discontiguous MegaBLAST template type"""
+    template_length: Literal[16, 18, 21]
+    """Discontiguous MegaBLAST template length"""
     dust: str
-    """DUST: no, yes, or LEVEL WINDOW LINKER (default: 20 64 1; no for blastn-short)"""
-    lcase_masking: bool
-    soft_masking: bool
-    """Apply filtering locations as soft masks [default: true]"""
+    """Filter query sequence with DUST (Format: 'yes', 'level window linker', or 'no' to
+    disable) Default = '20 64 1' ('no' for blastn-short)"""
     filtering_db: str
     """BLAST database containing filtering elements (i.e.: repeats)"""
     window_masker_taxid: int
     """Enable WindowMasker filtering using a Taxonomic ID"""
     window_masker_db: str
     """Enable WindowMasker filtering using this repeats database."""
-    strand: Literal['both', 'plus', 'minus']
-    query_loc: str
-    """Location on the query sequence in 1-based offsets (Format: start-stop)"""
-    subject_loc: str
-    """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
-    subject_besthit: bool
-    """Apply subject best hit filtering (disabled by default)"""
-    culling_limit: int
-    """If the query range of a hit is enveloped by that of at least this many higher-scoring
-    hits, delete the hit (default: 0, no culling)"""
-    best_hit_overhang: float
-    """Best Hit algorithm overhang value (recommended value: 0.1)"""
-    best_hit_score_edge: float
-    """Best Hit algorithm score edge value (recommended value: 0.1)"""
-    ungapped: bool
-    """Perform ungapped alignment only"""
-    xdrop_ungap: float
-    """X-dropoff value (in bits) for ungapped extensions (default: 20 for blastn, dc-megablast
-    and blastn-short; megablast uses the ungapped cutoff score)"""
-    xdrop_gap: float
-    """X-dropoff value (in bits) for preliminary gapped extensions (default: 25 for megablast,
-    30 for the other tasks)"""
-    xdrop_gap_final: float
-    """X-dropoff value (in bits) for final gapped alignment (default: 100)"""
-    no_greedy: bool
-    """Use non-greedy dynamic programming extension"""
-    min_raw_gapped_score: int
-    """Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback
-    stages"""
-    window_size: int
-    """Multiple hits window size, use 0 to specify 1-hit algorithm (default: 40 for
-    dc-megablast, 0 for the other tasks)"""
-    off_diagonal_range: int
-    """Number of off-diagonals to search for the 2nd hit, use 0 to turn off (default: 0)"""
-
-class BlastpOptions(TypedDict, total=False):
-    seqidlist: str
-    """Restrict search of database to list of SeqIDs"""
-    negative_seqidlist: str
-    """Restrict search of database to everything except the specified SeqIDs"""
-    taxids: str
-    """Restrict search of database to include only the specified taxonomy IDs and their
-    descendants (multiple IDs delimited by ',')"""
-    taxidlist: str
-    """Restrict search of database to include only the specified taxonomy IDs and their
-    descendants"""
-    negative_taxids: str
-    """Restrict search of database to everything except the specified taxonomy IDs and their
-    descendants (multiple IDs delimited by ',')"""
-    negative_taxidlist: str
-    """Restrict search of database to everything except the specified taxonomy IDs and their
-    descendants"""
-    no_taxid_expansion: bool
-    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
-    db_soft_mask: str
-    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
-    db_hard_mask: str
-    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
-    dbsize: int
-    """Effective length of the database"""
-    show_gis: bool
-    """Show NCBI GIs in deflines?"""
-    html: bool
-    """Produce HTML output?"""
-    parse_deflines: bool
-    """Should the query and subject defline(s) be parsed?"""
-    searchsp: int
-    """Effective length of the search space"""
-    task: Literal['blastp', 'blastp-fast', 'blastp-short']
-    evalue: float
-    """Expectation value (E) threshold for saving hits [default: 10; 20000 for blastp-short]"""
-    threshold: float
-    """Minimum word score such that the word is added to the BLAST lookup table [default: 11, or
-    the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast; 16
-    (PAM30's) for blastp-short]"""
-    word_size: int
-    """Word size for wordfinder algorithm [default: 3; 2 for blastp-short; 5 for blastp-fast]"""
-    num_threads: int
-    mt_mode: int
-    """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
-    does not depend on it)"""
-    max_target_seqs: int
-    """Maximum number of aligned sequences to keep [default: 500]"""
-    num_descriptions: int
-    """Number of database sequences to show one-line descriptions for. Not applicable for outfmt
-    > 4 [default: 500]"""
-    num_alignments: int
-    """Number of database sequences to show alignments for [default: 250]"""
-    line_length: int
-    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
-    sorthits: int
-    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
-    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
-    Not applicable for outfmt > 4"""
-    sorthsps: int
-    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
-    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
-    for outfmt != 0"""
-    max_hsps: int
-    qcov_hsp_perc: float
-    """Percent query coverage per hsp"""
-    culling_limit: int
-    """If the query range of a hit is enveloped by that of at least this many higher-scoring
-    hits, delete the hit (default: 0, no culling)"""
-    best_hit_overhang: float
-    """Best Hit algorithm overhang value (recommended value: 0.1)"""
-    best_hit_score_edge: float
-    """Best Hit algorithm score edge value (recommended value: 0.1)"""
-    subject_besthit: bool
-    """Return only the best HSP for each non overlapping query region"""
-    ungapped: bool
-    xdrop_ungap: float
-    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
-    xdrop_gap: float
-    """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
-    xdrop_gap_final: float
-    """X-dropoff value (in bits) for final gapped alignment [default: 25]"""
-    window_size: int
-    """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
-    suggestion; 15 (PAM30's) for blastp-short]"""
-    matrix: str
-    """Scoring matrix name [default: BLOSUM62; PAM30 for blastp-short]"""
-    gapopen: int
-    """Cost to open a gap [default: 11, or the matrix's best value; 9 for blastp-short]"""
-    gapextend: int
-    """Cost to extend a gap [default: 1, or the matrix's best value]"""
-    comp_based_stats: str
-    """Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d,
-    T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score
-    matrix adjustment"""
-    seg: str
-    """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: no]"""
     soft_masking: bool
-    """Apply filtering locations as soft masks [default: false]"""
-    lcase_masking: bool
-    use_sw_tback: bool
-    query_loc: str
-    """Location on the query sequence in 1-based offsets (Format: start-stop)"""
-    subject_loc: str
-    """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
-
-class BlastxOptions(TypedDict, total=False):
-    subject_loc: str
-    """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
-    seqidlist: str
-    """Restrict search of database to list of SeqIDs"""
-    negative_seqidlist: str
-    """Restrict search of database to everything except the specified SeqIDs"""
-    taxids: str
-    """Restrict search of database to include only the specified taxonomy IDs and their
-    descendants (multiple IDs delimited by ',')"""
-    taxidlist: str
-    """Restrict search of database to include only the specified taxonomy IDs and their
-    descendants"""
-    negative_taxids: str
-    """Restrict search of database to everything except the specified taxonomy IDs and their
-    descendants (multiple IDs delimited by ',')"""
-    negative_taxidlist: str
-    """Restrict search of database to everything except the specified taxonomy IDs and their
-    descendants"""
-    no_taxid_expansion: bool
-    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
-    db_soft_mask: str
-    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
-    db_hard_mask: str
-    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
-    dbsize: int
-    """Effective length of the database"""
-    show_gis: bool
-    """Show NCBI GIs in deflines?"""
-    html: bool
-    """Produce HTML output?"""
-    parse_deflines: bool
-    """Should the query and subject defline(s) be parsed?"""
-    searchsp: int
-    """Effective length of the search space"""
-    task: Literal['blastx', 'blastx-fast']
-    evalue: float
-    word_size: int
-    """Word size for wordfinder algorithm [default: 3; 5 for blastx-fast]"""
-    max_hsps: int
-    qcov_hsp_perc: float
-    """Percent query coverage per hsp"""
-    sum_stats: bool
-    """Use sum statistics [default: true]"""
-    gapopen: int
-    """Cost to open a gap [default: 11]"""
-    gapextend: int
-    """Cost to extend a gap [default: 1]"""
-    max_intron_length: int
-    seg: str
-    soft_masking: bool
-    matrix: str
-    """Scoring matrix name [default: BLOSUM62]"""
-    threshold: float
-    """Minimum word score such that the word is added to the BLAST lookup table [default: 12;
-    19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastx-fast]"""
-    window_size: int
-    """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]"""
-    xdrop_ungap: float
-    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
-    xdrop_gap: float
-    """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
-    xdrop_gap_final: float
-    """X-dropoff value (in bits) for final gapped alignment [default: 25]"""
-    culling_limit: int
-    """If the query range of a hit is enveloped by that of at least this many higher-scoring
-    hits, delete the hit [default: 0, no culling]"""
-    best_hit_overhang: float
-    """Best Hit algorithm overhang value (recommended value: 0.1)"""
-    best_hit_score_edge: float
-    """Best Hit algorithm score edge value (recommended value: 0.1)"""
-    subject_besthit: bool
+    """Apply filtering locations as soft masks"""
     ungapped: bool
-    lcase_masking: bool
-    use_sw_tback: bool
-    strand: Literal['both', 'plus', 'minus']
-    query_loc: str
-    """Location on the query sequence in 1-based offsets (Format: start-stop)"""
-    query_gencode: int
-    max_target_seqs: int
-    """Maximum number of aligned sequences to keep [default: 500]"""
-    num_descriptions: int
-    """Number of database sequences to show one-line descriptions for. Not applicable for outfmt
-    > 4 [default: 500]"""
-    num_alignments: int
-    """Number of database sequences to show alignments for [default: 250]"""
-    line_length: int
-    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
-    sorthits: int
-    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
-    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
-    Not applicable for outfmt > 4"""
-    sorthsps: int
-    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
-    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
-    for outfmt != 0"""
-    num_threads: int
-    """Number of threads (CPUs); serial WASI accepts only 1"""
-    mt_mode: int
-    """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
-    does not depend on it)"""
-    comp_based_stats: str
-    """Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d,
-    T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score
-    matrix adjustment"""
-
-class TblastnOptions(TypedDict, total=False):
-    seqidlist: str
-    """Restrict search of database to list of SeqIDs"""
-    negative_seqidlist: str
-    """Restrict search of database to everything except the specified SeqIDs"""
-    taxids: str
-    """Restrict search of database to include only the specified taxonomy IDs and their
-    descendants (multiple IDs delimited by ',')"""
-    taxidlist: str
-    """Restrict search of database to include only the specified taxonomy IDs and their
-    descendants"""
-    negative_taxids: str
-    """Restrict search of database to everything except the specified taxonomy IDs and their
-    descendants (multiple IDs delimited by ',')"""
-    negative_taxidlist: str
-    """Restrict search of database to everything except the specified taxonomy IDs and their
-    descendants"""
-    no_taxid_expansion: bool
-    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
-    db_soft_mask: str
-    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
-    db_hard_mask: str
-    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
-    dbsize: int
-    """Effective length of the database"""
-    show_gis: bool
-    """Show NCBI GIs in deflines?"""
-    html: bool
-    """Produce HTML output?"""
-    parse_deflines: bool
-    """Should the query and subject defline(s) be parsed?"""
-    searchsp: int
-    """Effective length of the search space"""
-    task: Literal['tblastn', 'tblastn-fast']
-    evalue: float
-    """Expectation value (E) threshold for saving hits [default: 10]"""
-    word_size: int
-    """Word size for wordfinder algorithm [default: 3; 5 for tblastn-fast]"""
-    gapopen: int
-    """Cost to open a gap [default: 11, or the matrix's best value]"""
-    gapextend: int
-    """Cost to extend a gap [default: 1, or the matrix's best value]"""
-    db_gencode: int
-    max_intron_length: int
-    """Length of the largest intron allowed in a translated nucleotide sequence when linking
-    multiple distinct alignments [default: 0]"""
-    matrix: str
-    """Scoring matrix name [default: BLOSUM62]"""
-    threshold: float
-    """Minimum word score such that the word is added to the BLAST lookup table [default: 13, or
-    the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for
-    tblastn-fast]"""
-    xdrop_ungap: float
-    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
-    xdrop_gap: float
-    """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
-    xdrop_gap_final: float
-    """X-dropoff value (in bits) for final gapped alignment [default: 25]"""
-    comp_based_stats: str
-    """Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d,
-    T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score
-    matrix adjustment"""
-    query_loc: str
-    """Location on the query sequence in 1-based offsets (Format: start-stop)"""
-    subject_loc: str
-    """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
-    seg: str
-    """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: 12 2.2 2.5]"""
-    lcase_masking: bool
-    use_sw_tback: bool
-    soft_masking: bool
-    """Apply filtering locations as soft masks [default: false]"""
-    sum_stats: bool
-    """Use sum statistics [default: true]"""
-    window_size: int
-    """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
-    suggestion]"""
-    max_target_seqs: int
-    """Maximum number of aligned sequences to keep [default: 500]"""
-    num_descriptions: int
-    """Number of database sequences to show one-line descriptions for. Not applicable for outfmt
-    > 4 [default: 500]"""
-    num_alignments: int
-    """Number of database sequences to show alignments for [default: 250]"""
-    line_length: int
-    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
-    sorthits: int
-    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
-    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
-    Not applicable for outfmt > 4"""
-    sorthsps: int
-    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
-    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
-    for outfmt != 0"""
-    max_hsps: int
-    """Set maximum number of HSPs per subject sequence to save for each query"""
-    qcov_hsp_perc: float
-    """Percent query coverage per hsp"""
-    culling_limit: int
-    """If the query range of a hit is enveloped by that of at least this many higher-scoring
-    hits, delete the hit (default: 0, no culling)"""
-    best_hit_overhang: float
-    """Best Hit algorithm overhang value (recommended value: 0.1)"""
-    best_hit_score_edge: float
-    """Best Hit algorithm score edge value (recommended value: 0.1)"""
-    subject_besthit: bool
-    """Return only the best HSP for each non overlapping query region"""
-    num_threads: int
-    mt_mode: int
-    """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
-    does not depend on it)"""
-    ungapped: bool
-
-class TblastxOptions(TypedDict, total=False):
-    seqidlist: str
-    """Restrict search of database to list of SeqIDs"""
-    negative_seqidlist: str
-    """Restrict search of database to everything except the specified SeqIDs"""
-    taxids: str
-    """Restrict search of database to include only the specified taxonomy IDs and their
-    descendants (multiple IDs delimited by ',')"""
-    taxidlist: str
-    """Restrict search of database to include only the specified taxonomy IDs and their
-    descendants"""
-    negative_taxids: str
-    """Restrict search of database to everything except the specified taxonomy IDs and their
-    descendants (multiple IDs delimited by ',')"""
-    negative_taxidlist: str
-    """Restrict search of database to everything except the specified taxonomy IDs and their
-    descendants"""
-    no_taxid_expansion: bool
-    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
-    db_soft_mask: str
-    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
-    db_hard_mask: str
-    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
-    dbsize: int
-    """Effective length of the database"""
-    show_gis: bool
-    """Show NCBI GIs in deflines?"""
-    html: bool
-    """Produce HTML output?"""
-    parse_deflines: bool
-    """Should the query and subject defline(s) be parsed?"""
-    searchsp: int
-    """Effective length of the search space"""
-    evalue: float
-    threshold: float
-    """Minimum word score such that the word is added to the BLAST lookup table [default: 13, or
-    the matrix's suggestion]"""
-    matrix: str
-    """Scoring matrix name [default: BLOSUM62]"""
-    word_size: int
-    """Word size for wordfinder algorithm [default: 3]"""
-    num_threads: int
-    query_gencode: int
-    db_gencode: int
-    max_intron_length: int
-    """Length of the largest intron allowed in a translated nucleotide sequence when linking
-    multiple distinct alignments [default: 0]"""
-    max_target_seqs: int
-    """Maximum number of aligned sequences to keep (default: 500)"""
-    num_descriptions: int
-    """Number of database sequences to show one-line descriptions for. Not applicable for outfmt
-    > 4 [default: 500]"""
-    num_alignments: int
-    """Number of database sequences to show alignments for [default: 250]"""
-    line_length: int
-    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
-    sorthits: int
-    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
-    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
-    Not applicable for outfmt > 4"""
-    sorthsps: int
-    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
-    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
-    for outfmt != 0"""
-    max_hsps: int
-    """Set maximum number of HSPs per subject sequence to save for each query"""
-    qcov_hsp_perc: float
-    """Percent query coverage per hsp"""
-    seg: str
-    """SEG: no, yes, or WINDOW LOCUT HICUT"""
-    soft_masking: bool
-    """Apply filtering locations as soft masks [default: false]"""
-    sum_stats: bool
-    """Use sum statistics [default: true]"""
-    lcase_masking: bool
-    strand: Literal['both', 'plus', 'minus']
-    xdrop_ungap: float
-    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
-    window_size: int
-    """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
-    suggestion]"""
-    culling_limit: int
-    """If the query range of a hit is enveloped by that of at least this many higher-scoring
-    hits, delete the hit (default: 0, no culling)"""
-    best_hit_overhang: float
-    """Best Hit algorithm overhang value (recommended value: 0.1)"""
-    best_hit_score_edge: float
-    """Best Hit algorithm score edge value (recommended value: 0.1)"""
-    subject_besthit: bool
-    """Return only the best HSP for each non overlapping query region"""
-    query_loc: str
-    """Location on the query sequence in 1-based offsets (Format: start-stop)"""
-    subject_loc: str
-    """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
-
-class PsiblastOptions(TypedDict, total=False):
-    seqidlist: str
-    """Restrict search of database to list of SeqIDs"""
-    negative_seqidlist: str
-    """Restrict search of database to everything except the specified SeqIDs"""
-    taxids: str
-    """Restrict search of database to include only the specified taxonomy IDs and their
-    descendants (multiple IDs delimited by ',')"""
-    taxidlist: str
-    """Restrict search of database to include only the specified taxonomy IDs and their
-    descendants"""
-    negative_taxids: str
-    """Restrict search of database to everything except the specified taxonomy IDs and their
-    descendants (multiple IDs delimited by ',')"""
-    negative_taxidlist: str
-    """Restrict search of database to everything except the specified taxonomy IDs and their
-    descendants"""
-    no_taxid_expansion: bool
-    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
-    dbsize: int
-    """Effective length of the database"""
-    show_gis: bool
-    """Show NCBI GIs in deflines?"""
-    parse_deflines: bool
-    """Should the query and subject defline(s) be parsed?"""
-    searchsp: int
-    """Effective length of the search space"""
-    sum_stats: bool
-    """Use sum statistics"""
-    evalue: float
-    """Expectation value (E) threshold for saving hits [default: 10]"""
-    threshold: float
-    """Minimum word score such that the word is added to the BLAST lookup table [default: 11, or
-    the matrix's suggestion]"""
-    word_size: int
-    """Word size for wordfinder algorithm [default: 3]"""
-    num_threads: int
-    max_target_seqs: int
-    """Maximum number of aligned sequences to keep [default: 500]"""
-    num_descriptions: int
-    """Number of database sequences to show one-line descriptions for. Not applicable for outfmt
-    > 4 [default: 500]"""
-    num_alignments: int
-    """Number of database sequences to show alignments for [default: 250]"""
-    line_length: int
-    """Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]"""
-    sorthits: int
-    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
-    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage;
-    Not applicable for outfmt > 4"""
-    sorthsps: int
-    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
-    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable
-    for outfmt != 0"""
-    max_hsps: int
-    qcov_hsp_perc: float
-    """Percent query coverage per hsp"""
+    """Perform ungapped alignment only?"""
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit"""
@@ -620,46 +93,652 @@ class PsiblastOptions(TypedDict, total=False):
     """Best Hit algorithm score edge value (recommended value: 0.1)"""
     subject_besthit: bool
     """Return only the best HSP for each non overlapping query region"""
-    xdrop_ungap: float
-    """X-dropoff value (in bits) for ungapped extensions [default: 7]"""
-    xdrop_gap: float
-    """X-dropoff value (in bits) for preliminary gapped extensions [default: 15]"""
-    xdrop_gap_final: float
-    """X-dropoff value (in bits) for final gapped alignment [default: 25]"""
-    gap_trigger: float
-    """Number of bits to trigger gapping"""
     window_size: int
-    """Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's
-    suggestion]"""
-    matrix: str
-    """Scoring matrix name [default: BLOSUM62]"""
-    gapopen: int
-    """Cost to open a gap [default: 11, or the matrix's best value]"""
-    gapextend: int
-    """Cost to extend a gap [default: 1, or the matrix's best value]"""
-    comp_based_stats: str
-    """Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d,
-    T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score
-    matrix adjustment"""
-    seg: str
-    """SEG: no, yes, or 'WINDOW LOCUT HICUT' [default: no]"""
-    soft_masking: bool
-    """Apply filtering locations as soft masks [default: false]"""
+    """Multiple hits window size, use 0 to specify 1-hit algorithm"""
+    off_diagonal_range: int
+    """Number of off-diagonals to search for the 2nd hit, use 0 to turn off"""
+    use_index: bool
+    """Use MegaBLAST database index"""
+    index_name: str
+    """MegaBLAST database index name (deprecated; use only for old style indices)"""
     lcase_masking: bool
-    use_sw_tback: bool
+    """Use lower case filtering in query and subject sequence(s)?"""
     query_loc: str
     """Location on the query sequence in 1-based offsets (Format: start-stop)"""
+    strand: Literal['both', 'plus', 'minus']
+    """Query strand(s) to search against database/subject"""
+    parse_deflines: bool
+    """Should the query and subject defline(s) be parsed?"""
+    show_gis: bool
+    """Show NCBI GIs in deflines?"""
+    num_descriptions: int
+    """Number of database sequences to show one-line descriptions for Not applicable for outfmt
+    > 4 Default = `500'"""
+    num_alignments: int
+    """Number of database sequences to show alignments for Default = `250'"""
+    line_length: int
+    """Line length for formatting alignments Not applicable for outfmt > 4 Default = `60'"""
+    html: bool
+    """Produce HTML output?"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage Not
+    applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start Not applicable
+    for outfmt != 0"""
+    max_target_seqs: int
+    """Maximum number of aligned sequences to keep (value of 5 or more is recommended) Default =
+    `500'"""
+    num_threads: int
+    """Number of threads (CPUs) to use in the BLAST search"""
+    mt_mode: int
+    """Multi-thread mode to use in BLAST search: 0 auto split by database or queries 1 split by
+    queries 2 split by database"""
+
+class BlastpOptions(TypedDict, total=False):
+    task: Literal['blastp', 'blastp-fast', 'blastp-short']
+    """Task to execute"""
+    dbsize: int
+    """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
+    seqidlist: str
+    """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
+    negative_seqidlist: str
+    """Restrict search of database to everything except the specified SeqIDs"""
+    taxids: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    negative_taxids: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    taxidlist: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants"""
+    negative_taxidlist: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants"""
+    no_taxid_expansion: bool
+    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    ipglist: str
+    """Restrict search of database to list of IPGs"""
+    negative_ipglist: str
+    """Restrict search of database to everything except the specified IPGs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     subject_loc: str
     """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
+    evalue: float
+    """Expectation value (E) threshold for saving hits. Default = 10"""
+    word_size: int
+    """Word size for wordfinder algorithm"""
+    gapopen: int
+    """Cost to open a gap"""
+    gapextend: int
+    """Cost to extend a gap"""
+    qcov_hsp_perc: float
+    """Percent query coverage per hsp"""
+    max_hsps: int
+    """Set maximum number of HSPs per subject sequence to save for each query"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions"""
+    xdrop_gap: float
+    """X-dropoff value (in bits) for preliminary gapped extensions"""
+    xdrop_gap_final: float
+    """X-dropoff value (in bits) for final gapped alignment"""
+    searchsp: int
+    """Effective length of the search space"""
+    seg: str
+    """Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to
+    disable)"""
+    soft_masking: bool
+    """Apply filtering locations as soft masks"""
+    matrix: str
+    """Scoring matrix name (normally BLOSUM62)"""
+    threshold: float
+    """Minimum word score such that the word is added to the BLAST lookup table"""
+    culling_limit: int
+    """If the query range of a hit is enveloped by that of at least this many higher-scoring
+    hits, delete the hit"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
+    window_size: int
+    """Multiple hits window size, use 0 to specify 1-hit algorithm"""
+    lcase_masking: bool
+    """Use lower case filtering in query and subject sequence(s)?"""
+    query_loc: str
+    """Location on the query sequence in 1-based offsets (Format: start-stop)"""
+    parse_deflines: bool
+    """Should the query and subject defline(s) be parsed?"""
+    show_gis: bool
+    """Show NCBI GIs in deflines?"""
+    num_descriptions: int
+    """Number of database sequences to show one-line descriptions for Not applicable for outfmt
+    > 4 Default = `500'"""
+    num_alignments: int
+    """Number of database sequences to show alignments for Default = `250'"""
+    line_length: int
+    """Line length for formatting alignments Not applicable for outfmt > 4 Default = `60'"""
+    html: bool
+    """Produce HTML output?"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage Not
+    applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start Not applicable
+    for outfmt != 0"""
+    max_target_seqs: int
+    """Maximum number of aligned sequences to keep (value of 5 or more is recommended) Default =
+    `500'"""
+    num_threads: int
+    """Number of threads (CPUs) to use in the BLAST search"""
+    mt_mode: int
+    """Multi-thread mode to use in BLAST search: 0 auto split by database or queries 1 split by
+    queries 2 split by database"""
+    ungapped: bool
+    """Perform ungapped alignment only?"""
+    comp_based_stats: str
+    """Use composition-based statistics: D or d: default (equivalent to 2 ) 0 or F or f: No
+    composition-based statistics 1: Composition-based statistics as in NAR 29:2994-3005, 2001 2
+    or T or t : Composition-based score adjustment as in Bioinformatics 21:902-911, 2005,
+    conditioned on sequence properties 3: Composition-based score adjustment as in
+    Bioinformatics 21:902-911, 2005, unconditionally"""
+    use_sw_tback: bool
+    """Compute locally optimal Smith-Waterman alignments?"""
+
+class BlastxOptions(TypedDict, total=False):
+    task: Literal['blastx', 'blastx-fast']
+    """Task to execute"""
+    dbsize: int
+    """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
+    seqidlist: str
+    """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
+    negative_seqidlist: str
+    """Restrict search of database to everything except the specified SeqIDs"""
+    taxids: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    negative_taxids: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    taxidlist: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants"""
+    negative_taxidlist: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants"""
+    no_taxid_expansion: bool
+    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    ipglist: str
+    """Restrict search of database to list of IPGs"""
+    negative_ipglist: str
+    """Restrict search of database to everything except the specified IPGs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
+    subject_loc: str
+    """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
+    evalue: float
+    """Expectation value (E) threshold for saving hits. Default = 10"""
+    word_size: int
+    """Word size for wordfinder algorithm"""
+    gapopen: int
+    """Cost to open a gap"""
+    gapextend: int
+    """Cost to extend a gap"""
+    qcov_hsp_perc: float
+    """Percent query coverage per hsp"""
+    max_hsps: int
+    """Set maximum number of HSPs per subject sequence to save for each query"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions"""
+    xdrop_gap: float
+    """X-dropoff value (in bits) for preliminary gapped extensions"""
+    xdrop_gap_final: float
+    """X-dropoff value (in bits) for final gapped alignment"""
+    searchsp: int
+    """Effective length of the search space"""
+    sum_stats: bool
+    """Use sum statistics"""
+    max_intron_length: int
+    """Length of the largest intron allowed in a translated nucleotide sequence when linking
+    multiple distinct alignments"""
+    seg: str
+    """Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to
+    disable)"""
+    soft_masking: bool
+    """Apply filtering locations as soft masks"""
+    matrix: str
+    """Scoring matrix name (normally BLOSUM62)"""
+    threshold: float
+    """Minimum word score such that the word is added to the BLAST lookup table"""
+    culling_limit: int
+    """If the query range of a hit is enveloped by that of at least this many higher-scoring
+    hits, delete the hit"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
+    window_size: int
+    """Multiple hits window size, use 0 to specify 1-hit algorithm"""
+    ungapped: bool
+    """Perform ungapped alignment only?"""
+    lcase_masking: bool
+    """Use lower case filtering in query and subject sequence(s)?"""
+    query_loc: str
+    """Location on the query sequence in 1-based offsets (Format: start-stop)"""
+    strand: Literal['both', 'plus', 'minus']
+    """Query strand(s) to search against database/subject"""
+    parse_deflines: bool
+    """Should the query and subject defline(s) be parsed?"""
+    query_gencode: int
+    """Genetic code to use to translate query (see
+    https://www.ncbi.nlm.nih.gov/Taxonomy/taxonomyhome.html/index.cgi?chapter=cgencodes for
+    details)"""
+    show_gis: bool
+    """Show NCBI GIs in deflines?"""
+    num_descriptions: int
+    """Number of database sequences to show one-line descriptions for Not applicable for outfmt
+    > 4 Default = `500'"""
+    num_alignments: int
+    """Number of database sequences to show alignments for Default = `250'"""
+    line_length: int
+    """Line length for formatting alignments Not applicable for outfmt > 4 Default = `60'"""
+    html: bool
+    """Produce HTML output?"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage Not
+    applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start Not applicable
+    for outfmt != 0"""
+    max_target_seqs: int
+    """Maximum number of aligned sequences to keep (value of 5 or more is recommended) Default =
+    `500'"""
+    num_threads: int
+    """Number of threads (CPUs) to use in the BLAST search"""
+    mt_mode: int
+    """Multi-thread mode to use in BLAST search: 0 auto split by database or queries 1 split by
+    queries 2 split by database"""
+    comp_based_stats: str
+    """Use composition-based statistics: D or d: default (equivalent to 2 ) 0 or F or f: No
+    composition-based statistics 1: Composition-based statistics as in NAR 29:2994-3005, 2001 2
+    or T or t : Composition-based score adjustment as in Bioinformatics 21:902-911, 2005,
+    conditioned on sequence properties 3: Composition-based score adjustment as in
+    Bioinformatics 21:902-911, 2005, unconditionally"""
+    use_sw_tback: bool
+    """Compute locally optimal Smith-Waterman alignments?"""
+
+class TblastnOptions(TypedDict, total=False):
+    task: Literal['tblastn', 'tblastn-fast']
+    """Task to execute"""
+    dbsize: int
+    """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
+    seqidlist: str
+    """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
+    negative_seqidlist: str
+    """Restrict search of database to everything except the specified SeqIDs"""
+    taxids: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    negative_taxids: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    taxidlist: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants"""
+    negative_taxidlist: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants"""
+    no_taxid_expansion: bool
+    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
+    subject_loc: str
+    """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
+    evalue: float
+    """Expectation value (E) threshold for saving hits. Default = 10"""
+    word_size: int
+    """Word size for wordfinder algorithm"""
+    gapopen: int
+    """Cost to open a gap"""
+    gapextend: int
+    """Cost to extend a gap"""
+    qcov_hsp_perc: float
+    """Percent query coverage per hsp"""
+    max_hsps: int
+    """Set maximum number of HSPs per subject sequence to save for each query"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions"""
+    xdrop_gap: float
+    """X-dropoff value (in bits) for preliminary gapped extensions"""
+    xdrop_gap_final: float
+    """X-dropoff value (in bits) for final gapped alignment"""
+    searchsp: int
+    """Effective length of the search space"""
+    sum_stats: bool
+    """Use sum statistics"""
+    db_gencode: int
+    """Genetic code to use to translate database/subjects (see user manual for details)"""
+    ungapped: bool
+    """Perform ungapped alignment only?"""
+    max_intron_length: int
+    """Length of the largest intron allowed in a translated nucleotide sequence when linking
+    multiple distinct alignments"""
+    seg: str
+    """Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to
+    disable)"""
+    soft_masking: bool
+    """Apply filtering locations as soft masks"""
+    matrix: str
+    """Scoring matrix name (normally BLOSUM62)"""
+    threshold: float
+    """Minimum word score such that the word is added to the BLAST lookup table"""
+    culling_limit: int
+    """If the query range of a hit is enveloped by that of at least this many higher-scoring
+    hits, delete the hit"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
+    window_size: int
+    """Multiple hits window size, use 0 to specify 1-hit algorithm"""
+    lcase_masking: bool
+    """Use lower case filtering in query and subject sequence(s)?"""
+    query_loc: str
+    """Location on the query sequence in 1-based offsets (Format: start-stop)"""
+    parse_deflines: bool
+    """Should the query and subject defline(s) be parsed?"""
+    show_gis: bool
+    """Show NCBI GIs in deflines?"""
+    num_descriptions: int
+    """Number of database sequences to show one-line descriptions for Not applicable for outfmt
+    > 4 Default = `500'"""
+    num_alignments: int
+    """Number of database sequences to show alignments for Default = `250'"""
+    line_length: int
+    """Line length for formatting alignments Not applicable for outfmt > 4 Default = `60'"""
+    html: bool
+    """Produce HTML output?"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage Not
+    applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start Not applicable
+    for outfmt != 0"""
+    max_target_seqs: int
+    """Maximum number of aligned sequences to keep (value of 5 or more is recommended) Default =
+    `500'"""
+    num_threads: int
+    """Number of threads (CPUs) to use in the BLAST search"""
+    mt_mode: int
+    """Multi-thread mode to use in BLAST search: 0 auto split by database or queries 1 split by
+    queries 2 split by database"""
+    comp_based_stats: str
+    """Use composition-based statistics: D or d: default (equivalent to 2 ) 0 or F or f: No
+    composition-based statistics 1: Composition-based statistics as in NAR 29:2994-3005, 2001 2
+    or T or t : Composition-based score adjustment as in Bioinformatics 21:902-911, 2005,
+    conditioned on sequence properties 3: Composition-based score adjustment as in
+    Bioinformatics 21:902-911, 2005, unconditionally"""
+    use_sw_tback: bool
+    """Compute locally optimal Smith-Waterman alignments?"""
+
+class TblastxOptions(TypedDict, total=False):
+    dbsize: int
+    """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
+    seqidlist: str
+    """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
+    negative_seqidlist: str
+    """Restrict search of database to everything except the specified SeqIDs"""
+    taxids: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    negative_taxids: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    taxidlist: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants"""
+    negative_taxidlist: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants"""
+    no_taxid_expansion: bool
+    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
+    subject_loc: str
+    """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
+    evalue: float
+    """Expectation value (E) threshold for saving hits. Default = 10"""
+    word_size: int
+    """Word size for wordfinder algorithm"""
+    qcov_hsp_perc: float
+    """Percent query coverage per hsp"""
+    max_hsps: int
+    """Set maximum number of HSPs per subject sequence to save for each query"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions"""
+    searchsp: int
+    """Effective length of the search space"""
+    sum_stats: bool
+    """Use sum statistics"""
+    max_intron_length: int
+    """Length of the largest intron allowed in a translated nucleotide sequence when linking
+    multiple distinct alignments"""
+    seg: str
+    """Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to
+    disable)"""
+    soft_masking: bool
+    """Apply filtering locations as soft masks"""
+    matrix: str
+    """Scoring matrix name (normally BLOSUM62)"""
+    threshold: float
+    """Minimum word score such that the word is added to the BLAST lookup table"""
+    culling_limit: int
+    """If the query range of a hit is enveloped by that of at least this many higher-scoring
+    hits, delete the hit"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
+    window_size: int
+    """Multiple hits window size, use 0 to specify 1-hit algorithm"""
+    lcase_masking: bool
+    """Use lower case filtering in query and subject sequence(s)?"""
+    query_loc: str
+    """Location on the query sequence in 1-based offsets (Format: start-stop)"""
+    strand: Literal['both', 'plus', 'minus']
+    """Query strand(s) to search against database/subject"""
+    parse_deflines: bool
+    """Should the query and subject defline(s) be parsed?"""
+    query_gencode: int
+    """Genetic code to use to translate query (see
+    https://www.ncbi.nlm.nih.gov/Taxonomy/taxonomyhome.html/index.cgi?chapter=cgencodes for
+    details)"""
+    db_gencode: int
+    """Genetic code to use to translate database/subjects (see user manual for details)"""
+    show_gis: bool
+    """Show NCBI GIs in deflines?"""
+    num_descriptions: int
+    """Number of database sequences to show one-line descriptions for Not applicable for outfmt
+    > 4 Default = `500'"""
+    num_alignments: int
+    """Number of database sequences to show alignments for Default = `250'"""
+    line_length: int
+    """Line length for formatting alignments Not applicable for outfmt > 4 Default = `60'"""
+    html: bool
+    """Produce HTML output?"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage Not
+    applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start Not applicable
+    for outfmt != 0"""
+    max_target_seqs: int
+    """Maximum number of aligned sequences to keep (value of 5 or more is recommended) Default =
+    `500'"""
+    num_threads: int
+    """Number of threads (CPUs) to use in the BLAST search"""
+
+class PsiblastOptions(TypedDict, total=False):
+    dbsize: int
+    """Effective length of the database"""
+    gilist: str
+    """Restrict search of database to list of GIs"""
+    seqidlist: str
+    """Restrict search of database to list of SeqIDs"""
+    negative_gilist: str
+    """Restrict search of database to everything except the specified GIs"""
+    negative_seqidlist: str
+    """Restrict search of database to everything except the specified SeqIDs"""
+    taxids: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    negative_taxids: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants (multiple IDs delimited by ',')"""
+    taxidlist: str
+    """Restrict search of database to include only the specified taxonomy IDs and their
+    descendants"""
+    negative_taxidlist: str
+    """Restrict search of database to everything except the specified taxonomy IDs and their
+    descendants"""
+    no_taxid_expansion: bool
+    """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    ipglist: str
+    """Restrict search of database to list of IPGs"""
+    negative_ipglist: str
+    """Restrict search of database to everything except the specified IPGs"""
+    subject_loc: str
+    """Location on the subject sequence in 1-based offsets (Format: start-stop)"""
+    evalue: float
+    """Expectation value (E) threshold for saving hits. Default = 10"""
+    word_size: int
+    """Word size for wordfinder algorithm"""
+    gapopen: int
+    """Cost to open a gap"""
+    gapextend: int
+    """Cost to extend a gap"""
+    qcov_hsp_perc: float
+    """Percent query coverage per hsp"""
+    max_hsps: int
+    """Set maximum number of HSPs per subject sequence to save for each query"""
+    xdrop_ungap: float
+    """X-dropoff value (in bits) for ungapped extensions"""
+    xdrop_gap: float
+    """X-dropoff value (in bits) for preliminary gapped extensions"""
+    xdrop_gap_final: float
+    """X-dropoff value (in bits) for final gapped alignment"""
+    searchsp: int
+    """Effective length of the search space"""
+    sum_stats: bool
+    """Use sum statistics"""
+    seg: str
+    """Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to
+    disable)"""
+    soft_masking: bool
+    """Apply filtering locations as soft masks"""
+    matrix: str
+    """Scoring matrix name (normally BLOSUM62)"""
+    threshold: float
+    """Minimum word score such that the word is added to the BLAST lookup table"""
+    culling_limit: int
+    """If the query range of a hit is enveloped by that of at least this many higher-scoring
+    hits, delete the hit"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
+    subject_besthit: bool
+    """Return only the best HSP for each non overlapping query region"""
+    window_size: int
+    """Multiple hits window size, use 0 to specify 1-hit algorithm"""
+    lcase_masking: bool
+    """Use lower case filtering in query and subject sequence(s)?"""
+    query_loc: str
+    """Location on the query sequence in 1-based offsets (Format: start-stop)"""
+    parse_deflines: bool
+    """Should the query and subject defline(s) be parsed?"""
+    show_gis: bool
+    """Show NCBI GIs in deflines?"""
+    num_descriptions: int
+    """Number of database sequences to show one-line descriptions for Not applicable for outfmt
+    > 4 Default = `500'"""
+    num_alignments: int
+    """Number of database sequences to show alignments for Default = `250'"""
+    line_length: int
+    """Line length for formatting alignments Not applicable for outfmt > 4 Default = `60'"""
+    html: bool
+    """Produce HTML output?"""
+    sorthits: int
+    """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
+    score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage Not
+    applicable for outfmt > 4"""
+    sorthsps: int
+    """Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp
+    query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start Not applicable
+    for outfmt != 0"""
+    max_target_seqs: int
+    """Maximum number of aligned sequences to keep (value of 5 or more is recommended) Default =
+    `500'"""
+    num_threads: int
+    """Number of threads (CPUs) to use in the BLAST search"""
+    comp_based_stats: str
+    """Use composition-based statistics: D or d: default (equivalent to 2 ) 0 or F or f: No
+    composition-based statistics 1: Composition-based statistics as in NAR 29:2994-3005, 2001 2
+    or T or t : Composition-based score adjustment as in Bioinformatics 21:902-911, 2005,
+    conditioned on sequence properties 3: Composition-based score adjustment as in
+    Bioinformatics 21:902-911, 2005, unconditionally"""
+    use_sw_tback: bool
+    """Compute locally optimal Smith-Waterman alignments?"""
+    gap_trigger: float
+    """Number of bits to trigger gapping"""
     num_iterations: int
     """Number of iterations to perform (0 means run until convergence)"""
-    pseudocount: int
-    """Pseudo-count value used when constructing PSSM"""
-    inclusion_ethresh: float
-    """E-value inclusion threshold for pairwise alignments"""
-    out_pssm: str
+    out_pssm: str | os.PathLike[str]
     """File name to store checkpoint file"""
-    out_ascii_pssm: str
+    out_ascii_pssm: str | os.PathLike[str]
     """File name to store ASCII version of PSSM"""
     save_pssm_after_last_round: bool
     """Save PSSM after the last database search"""
@@ -672,3 +751,7 @@ class PsiblastOptions(TypedDict, total=False):
     will be used"""
     ignore_msa_master: bool
     """Ignore the master sequence when creating PSSM"""
+    pseudocount: int
+    """Pseudo-count value used when constructing PSSM"""
+    inclusion_ethresh: float
+    """E-value inclusion threshold for pairwise alignments"""

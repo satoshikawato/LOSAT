@@ -13,8 +13,10 @@ use super::ncbi_registry::{
     running_error_reading_post, running_syntax_error_notice, syntax_error_notice, Layer,
     RegistryEntry, RegistryRead,
 };
+use crate::ncbi_exception::NcbiException;
 use crate::ncbi_str::string_to_bool;
 use crate::report::diag_log::{Posts, CRITICAL, ERROR, WARNING};
+use crate::report::serial::object_frame::DataCheck;
 
 /// Registry entries (section, name; case-insensitive) that change no output of a search with
 /// `-subject`: the database and data-loader settings, the data directory, the directory of
@@ -490,14 +492,7 @@ fn unix_program_name(
             app_path = path_env
                 .split(|&byte| byte == b':')
                 .filter(|dir| !dir.is_empty())
-                .map(|dir| {
-                    let mut candidate = dir.to_vec();
-                    if !candidate.ends_with(b"/") {
-                        candidate.push(b'/');
-                    }
-                    candidate.extend_from_slice(base);
-                    candidate
-                })
+                .map(|dir| PathRules::Unix.make_path(dir, base))
                 .find(|candidate| is_file(candidate))
                 .unwrap_or_default();
         }
@@ -532,11 +527,28 @@ impl PathRules {
         Self::Unix
     };
 
-    /// `DIR_SEPARATOR`.
-    fn separator(self) -> u8 {
+    /// `DIR_SEPARATOR` (`CDirEntry::GetPathSeparator`).
+    pub(crate) fn separator(self) -> u8 {
         match self {
             Self::Unix => b'/',
             Self::Windows => b'\\',
+        }
+    }
+
+    /// `DIR_SEPARATOR` as a UTF-8 string slice.
+    fn separator_str(self) -> &'static str {
+        match self {
+            Self::Unix => "/",
+            Self::Windows => "\\",
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/util/util_misc.cpp:141-145
+    /// `kDelim` (path-list delimiter for `g_FindDataFile`): `:` on Unix, `;` on Windows.
+    fn list_delimiter(self) -> u8 {
+        match self {
+            Self::Unix => b':',
+            Self::Windows => b';',
         }
     }
 
@@ -548,6 +560,12 @@ impl PathRules {
     /// Whether `byte` is one of `ALL_SEPARATORS` (`CDirEntry::IsPathSeparator`).
     fn is_separator(self, byte: u8) -> bool {
         self.is_dir_separator(byte) || (self == Self::Windows && byte == b':')
+    }
+
+    /// Whether `path` needs a trailing `DIR_SEPARATOR` (`CDirEntry::AddTrailingPathSeparator`):
+    /// non-empty and not ending with one of `ALL_SEPARATORS`.
+    fn needs_trailing_separator(self, path: &[u8]) -> bool {
+        path.last().is_some_and(|&byte| !self.is_separator(byte))
     }
 
     /// `CDirEntry::DeleteTrailingPathSeparator`: `path` without its trailing `DIR_SEPARATORS`
@@ -562,7 +580,7 @@ impl PathRules {
     /// `CDirEntry::Reset`: the path of the `CDirEntry` made from it, without its trailing separators, but a
     /// lone separator and (Windows) a disk's name of 2 or 3 bytes (`C:`, `C:\`) kept: `//` and
     /// `///` are empty, a path that no directory has.
-    fn reset(self, path: &[u8]) -> &[u8] {
+    pub(crate) fn reset(self, path: &[u8]) -> &[u8] {
         if path.len() == 1 && self.is_separator(path[0]) {
             return path;
         }
@@ -576,7 +594,7 @@ impl PathRules {
     /// `GetDir` of the `CDirEntry` of `path`: the directory of `path` as `reset` leaves it, up to and with
     /// its last separator (`SplitPath`); `./` (Windows `.\`) for a path without one; empty for an
     /// empty one.
-    fn dir(self, path: &[u8]) -> Vec<u8> {
+    pub(crate) fn dir(self, path: &[u8]) -> Vec<u8> {
         let path = self.reset(path);
         match path.iter().rposition(|&byte| self.is_separator(byte)) {
             Some(at) => path[..=at].to_vec(),
@@ -585,6 +603,71 @@ impl PathRules {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-377
+    /// The base and the extension of `path` as `SplitPath` cuts its name (the bytes after its
+    /// last separator) at the name's last `.`: the extension keeps its `.`; a name without one
+    /// has an empty extension.
+    pub(crate) fn base_and_ext(self, path: &[u8]) -> (&[u8], &[u8]) {
+        let name_at = path
+            .iter()
+            .rposition(|&byte| self.is_separator(byte))
+            .map_or(0, |at| at + 1);
+        let name = &path[name_at..];
+        match name.iter().rposition(|&byte| byte == b'.') {
+            Some(dot) => name.split_at(dot),
+            None => (name, &name[name.len()..]),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:455-462
+    /// `CDirEntry::AddTrailingPathSeparator`: `path` with `DIR_SEPARATOR` after it unless it is
+    /// empty or ends with one of `ALL_SEPARATORS`.
+    pub(crate) fn add_trailing_separator(self, path: &[u8]) -> Vec<u8> {
+        let mut path = path.to_vec();
+        if self.needs_trailing_separator(&path) {
+            path.push(self.separator());
+        }
+        path
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:413-430
+    /// `CDirEntry::MakePath` of a directory and a name: the name after the directory with its
+    /// trailing separator (`add_trailing_separator`); the name alone after an empty directory.
+    /// An absolute name is joined as any other.
+    pub(crate) fn make_path(self, dir: &[u8], name: &[u8]) -> Vec<u8> {
+        let mut path = self.add_trailing_separator(dir);
+        path.extend_from_slice(name);
+        path
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:413-430, 455-462
+    /// `make_path` on OS strings: joins `dir` and `name` with `DIR_SEPARATOR` unless `dir` is
+    /// empty or ends with one of `ALL_SEPARATORS`, preserving non-UTF-8 bytes on Unix and WTF-8
+    /// on Windows.
+    fn make_path_os(self, dir: &OsStr, name: &OsStr) -> PathBuf {
+        let mut path = OsString::with_capacity(dir.len() + 1 + name.len());
+        path.push(dir);
+        if self.needs_trailing_separator(dir.as_encoded_bytes()) {
+            path.push(self.separator_str());
+        }
+        path.push(name);
+        PathBuf::from(path)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1330-1378
+    /// Joins OS-string `parts` with `DIR_SEPARATOR` (`CDirEntry::GetPathSeparator`) unconditionally,
+    /// as `BlastFindMatrixPath` appends separators to `BLASTMAT`, `"nt"` and `"data"`.
+    fn join_os(self, parts: &[&OsStr]) -> PathBuf {
+        let sep = OsStr::new(self.separator_str());
+        let mut path = OsString::new();
+        for (index, part) in parts.iter().enumerate() {
+            if index > 0 {
+                path.push(sep);
+            }
+            path.push(part);
+        }
+        PathBuf::from(path)
+    }
     /// `s_Win_IsDiskPath`: `X:` and a separator. A byte past the end is the string's NUL.
     fn is_disk_path(path: &[u8]) -> bool {
         let at = |index: usize| path.get(index).copied().unwrap_or(0);
@@ -628,10 +711,7 @@ impl PathRules {
                 return Some([cwd.get(..3).unwrap_or(cwd), path].concat());
             }
         }
-        let mut joined = crate::ncbi_str::truncate_spaces(cwd).to_vec();
-        if joined.last().is_some_and(|&byte| !self.is_separator(byte)) {
-            joined.push(self.separator());
-        }
+        let mut joined = self.add_trailing_separator(crate::ncbi_str::truncate_spaces(cwd));
         let mut part = crate::ncbi_str::truncate_spaces(path);
         if !joined.is_empty() && part.first() == Some(&self.separator()) {
             part = &part[1..];
@@ -964,7 +1044,7 @@ fn check_registry_entries(path: &Path, entries: &[RegistryEntry]) -> Result<(), 
 /// its review's `d1` and `d3`: one `Found multiple` warning of a well-formed file so read, and
 /// one before each `Critical` of a malformed file).
 /// `Err` is LOSAT's refusal, which only `-window_masker_taxid` gives: a file LOSAT cannot read,
-/// a value that is not UTF-8, and `[NCBI] .Inherits`, whose files NCBI loads into the same layer.
+/// and `[NCBI] .Inherits`, whose files NCBI loads into the same layer.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1650-1662
 /// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:200-209 (cited at
@@ -1014,7 +1094,7 @@ fn window_masker_ncbirc(
         }
     };
     Ok(NcbircWindowMasker {
-        value: file_text_entry(path, &read.entries, "WINDOW_MASKER", "WINDOW_MASKER_PATH")?,
+        value: last_value(&read.entries, "WINDOW_MASKER", "WINDOW_MASKER_PATH").map(<[u8]>::to_vec),
         load_posts,
         posts_once,
     })
@@ -1023,7 +1103,7 @@ fn window_masker_ncbirc(
 /// What `window_masker_ncbirc` reads of `.ncbirc` (no file: no value, no posts).
 #[derive(Default)]
 struct NcbircWindowMasker {
-    value: Option<String>,
+    value: Option<Vec<u8>>,
     load_posts: Posts,
     posts_once: bool,
 }
@@ -1035,7 +1115,7 @@ pub struct WindowMaskerRegistry {
     /// The directory where `-window_masker_taxid` looks for `<taxid>/wmasker.obinary`: `None`
     /// when no layer has the entry; NCBI uses the current directory for both `None` and an
     /// empty value.
-    pub path: Option<String>,
+    pub path: Option<Vec<u8>>,
     /// What NCBI posts each time it loads the registry (`window_masker_ncbirc`): the posts of a
     /// `.ncbirc` that is malformed or sets an entry again, or nothing.
     pub load_posts: Posts,
@@ -1052,17 +1132,21 @@ pub struct ApplicationSettings {
     /// (`fasta_reader::ReaderConfig::data_loaders`).
     pub data_loaders: bool,
     /// The registry entry `[BLAST] BLASTDB`, the last part of the path where a database
-    /// name is looked for (`seqdb::SearchPath::new`): `Ok(None)` when the registry has no
-    /// such entry, `Ok(Some(value))` with the value NCBI's registry gives. `Err(reason)`
-    /// when a registry file sets the entry to a value that LOSAT does not read as NCBI
-    /// reads it; only a program that opens a database has to refuse to run then, since
-    /// the entry changes nothing else.
-    pub blastdb: Result<Option<String>, String>,
+    /// name is looked for (`seqdb::SearchPath::new`): `None` when the registry has no such
+    /// entry, else the bytes of the value NCBI's registry gives (a `std::string`, UTF-8 or
+    /// not: `utils::os_bytes`).
+    pub blastdb: Option<Vec<u8>>,
     /// The first of `SEQ_ID_RANK_VARIABLES` that is set (with any value). NCBI's choice of the
     /// Seq-ids of a database with parsed Seq-ids depends on it; only a program that opens such
     /// a database has to refuse to run then (`algorithm::common::database::
     /// check_seqids`), since the ids of the other searches are local or ordinal.
     pub seq_id_rank_variable: Option<&'static str>,
+    /// `SERIAL_VERIFY_DATA_WRITE` when its value changes what NCBI's object streams write; only
+    /// the runs that write what it changes have to refuse to run then (`WriteVerification`).
+    pub write_verification: Option<WriteVerification>,
+    /// `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` where they turn NCBI's checks off;
+    /// only a run whose input fails the check has to refuse to run then (`ReadVerification`).
+    pub read_verification: ReadVerification,
     /// The value of the registry entry `[BLAST] MAX_SEQID_LENGTH` in the first layer that has
     /// the entry (the environment, then the program's `.ini` file, then `.ncbirc`), an empty
     /// value too: `registry.Get` answers from that layer, and an empty value there hides the
@@ -1092,6 +1176,194 @@ pub struct ApplicationSettings {
 /// read.)
 pub const SEQ_ID_RANK_VARIABLES: [&str; 2] = ["SEQ_ID_PREFER_ACCESSION_OVER_GI", "SEQ_ID_AVOID_GI"];
 
+/// `SERIAL_VERIFY_DATA_WRITE` with a value that changes what NCBI's object streams write. NCBI reads
+/// the variable only while the parameter `[SERIAL] VERIFY_DATA_WRITE` is unset; LOSAT refuses that
+/// parameter's registry forms (a registry file's entry, `NCBI_CONFIG__SERIAL__VERIFY_DATA_WRITE`) at
+/// every value, as entries it does not know (`rejected_variable`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:233-262
+/// NCBI reference (598d8ae6): c++/include/serial/impl/objostr.inl:376-383
+/// NCBI reference (598d8ae6): c++/include/serial/impl/objostr.inl:396-410
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:784-793
+/// The value is compared with six words, without case; any other value (an empty one, `N`, a
+/// word with a space) keeps NCBI's default, as `YES` does. `NO`, `NEVER`, `DEFVALUE` and
+/// `DEFVALUE_ALWAYS` turn off the check of what is written: a list element stated as NULL is left
+/// out instead of NCBI's throw (`off`). `NEVER`, `ALWAYS` and `DEFVALUE_ALWAYS` also hold against a
+/// writer's own choice, and the BLAST XML report's writer turns the check off for its document,
+/// whose iterations it writes itself (`blast_xml_changed`): under `ALWAYS` it throws at the unset
+/// iterations, under `DEFVALUE_ALWAYS` it writes them empty (`NEVER` is off as the writer's own
+/// choice). NCBI BLAST+ 2.17.0, probe D3c-3c review `probeF`: those are the only changes, every
+/// other report and file is the same with each value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WriteVerification {
+    /// The value as the process has it.
+    value: String,
+    off: bool,
+    blast_xml_changed: bool,
+}
+
+impl WriteVerification {
+    /// The setting of `SERIAL_VERIFY_DATA_WRITE` set to `value`; `None` when the value changes
+    /// nothing (a value that is not UTF-8 is none of the six words).
+    pub fn of(value: &OsStr) -> Option<Self> {
+        let text = value.to_str()?;
+        let off = verification_off(text);
+        let blast_xml_changed = ["ALWAYS", "DEFVALUE_ALWAYS"]
+            .iter()
+            .any(|word| text.eq_ignore_ascii_case(word));
+        (off || blast_xml_changed).then(|| Self {
+            value: text.to_owned(),
+            off,
+            blast_xml_changed,
+        })
+    }
+
+    /// Whether a list element stated as NULL is left out where NCBI throws by default
+    /// (`report::serial::encoder::NullElement`).
+    pub fn off(&self) -> bool {
+        self.off
+    }
+
+    /// Whether the BLAST XML report (outfmt 5) changes.
+    pub fn blast_xml_changed(&self) -> bool {
+        self.blast_xml_changed
+    }
+
+    /// The setting in LOSAT's refusals: the variable and its value as given.
+    pub fn variable(&self) -> String {
+        format!(
+            "the environment variable SERIAL_VERIFY_DATA_WRITE={}",
+            self.value
+        )
+    }
+
+    /// LOSAT's refusal of a run that writes the BLAST XML report (`formats`: the numbers of the
+    /// run's `-outfmt` values) under a setting that changes it; `None` for any other run. The
+    /// report's writer is the same in every program, so is the refusal.
+    pub fn blast_xml_refusal(
+        setting: Option<&Self>,
+        mut formats: impl Iterator<Item = i32>,
+    ) -> Option<String> {
+        let setting = setting.filter(|setting| setting.blast_xml_changed)?;
+        formats
+            .any(|number| number == crate::blastinput::app::output_format::XML)
+            .then(|| {
+                format!(
+                    "{}, which changes NCBI BLAST+'s XML report (-outfmt 5), is not supported by LOSAT",
+                    setting.variable()
+                )
+            })
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:257-287
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:233-262
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:180-221
+/// Whether `value` of `SERIAL_VERIFY_DATA_READ`, `SERIAL_VERIFY_DATA_GET` or
+/// `SERIAL_VERIFY_DATA_WRITE` turns NCBI's check of the data off: `NO`, `NEVER`, `DEFVALUE` or
+/// `DEFVALUE_ALWAYS`, without case. Every other value (`YES`, `ALWAYS`, an empty one, any other
+/// word) keeps NCBI's default, the check (NCBI BLAST+ 2.17.0, probe D3c-3d `probeA` for the read
+/// and get variables, D3c-3c review `probeF` for the write one). The one owner of the words for
+/// the three variables (`WriteVerification`, `ReadVerification`, rpsbproc's refusal).
+pub fn verification_off(value: &str) -> bool {
+    ["NO", "NEVER", "DEFVALUE", "DEFVALUE_ALWAYS"]
+        .iter()
+        .any(|word| value.eq_ignore_ascii_case(word))
+}
+
+/// `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` where their value turns NCBI's check
+/// off (`verification_off`). NCBI reads each variable only while the registry parameter of its
+/// own (`[SERIAL] VERIFY_DATA_READ`, `VERIFY_DATA_GET`) is unset; LOSAT refuses those
+/// parameters' registry forms at every value (`rejected_variable`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
+/// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:266-306
+/// The read check stops a read where a mandatory member is missing ("member X expected"); off,
+/// NCBI posts "member X is missing" and reads on with the member unset. The get check stops the
+/// getter of a member that is not set ("Attempt to get unassigned member"); off, the getter gives
+/// the member's default. Neither changes anything else: every input that NCBI reads without these
+/// errors gives the same output with every value (probes D3c-3d `probeA`, `probeB`, `probeC`:
+/// 58 inputs of every program with such a reader: the search programs, makeblastdb,
+/// makeprofiledb, blastdbcmd, the maskers and makembindex). Where NCBI's check
+/// stops a run, the same run with the check off goes on in ways LOSAT does not follow (an unset
+/// member that later code reads, another exception, makeblastdb `-input_type blastdb` stopping
+/// with an error while it writes the database): LOSAT refuses the run there (`ReadVerification::refused`), where the check
+/// would have stopped it, after what NCBI writes before that point.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ReadVerification {
+    /// The value of `SERIAL_VERIFY_DATA_READ` when it turns the read check off.
+    read: Option<String>,
+    /// The value of `SERIAL_VERIFY_DATA_GET` when it turns the get check off.
+    get: Option<String>,
+}
+
+impl ReadVerification {
+    /// The setting of the values `read` of `SERIAL_VERIFY_DATA_READ` and `get` of
+    /// `SERIAL_VERIFY_DATA_GET` (`None`: the variable is not set; a value that is not UTF-8 is
+    /// none of NCBI's words).
+    pub fn of(read: Option<&OsStr>, get: Option<&OsStr>) -> Self {
+        let off = |value: Option<&OsStr>| {
+            value
+                .and_then(OsStr::to_str)
+                .filter(|text| verification_off(text))
+                .map(str::to_owned)
+        };
+        Self {
+            read: off(read),
+            get: off(get),
+        }
+    }
+
+    /// Whether the setting turns the read check off (`SERIAL_VERIFY_DATA_READ`): the only check
+    /// that a database's header records meet (`seqdb::SeqDb::refuse_unchecked_reads`).
+    pub(crate) fn turns_read_check_off(&self) -> bool {
+        self.read.is_some()
+    }
+
+    /// What LOSAT refuses (the noun phrase before "is not supported by LOSAT's PSIBLAST") where
+    /// NCBI's check threw `exception` while it read `what` (an input: "a PSSM (-in_pssm)"), when
+    /// the setting turns that check off: the variable and its value, with the input and what the
+    /// check found. `None` for an exception of no check (`DataCheck::of`) and for a check that
+    /// the setting keeps: the run reports NCBI's error then. The one test of every reader's and
+    /// getter's error that depends on these variables.
+    pub(crate) fn refused(&self, exception: &NcbiException, what: &str) -> Option<String> {
+        Some(match DataCheck::of(exception)? {
+            DataCheck::Read => format!(
+                "the environment variable SERIAL_VERIFY_DATA_READ={} with {what} that lacks a \
+                 mandatory member",
+                self.read.as_ref()?
+            ),
+            DataCheck::Get => format!(
+                "the environment variable SERIAL_VERIFY_DATA_GET={} with {what} of which NCBI \
+                 BLAST+ gets a member that is not set",
+                self.get.as_ref()?
+            ),
+        })
+    }
+}
+
+/// What a program's reader of a database takes of its application settings
+/// (`ApplicationSettings::database`): the search path's registry entry and the checks of NCBI's
+/// reads of the definition lines.
+#[derive(Clone, Copy, Debug)]
+pub struct DatabaseSettings<'a> {
+    /// `ApplicationSettings::blastdb` as the search path takes it (`seqdb::SearchPath::
+    /// from_environment`): the bytes of the registry entry, `None` without one.
+    pub registry: Option<&'a [u8]>,
+    /// `ApplicationSettings::read_verification` (`seqdb::SeqDb::refuse_unchecked_reads`).
+    pub read_verification: &'a ReadVerification,
+}
+
+impl ApplicationSettings {
+    /// The settings of a program's reader of a database (`DatabaseSettings`).
+    pub fn database(&self) -> DatabaseSettings<'_> {
+        DatabaseSettings {
+            registry: self.blastdb.as_deref(),
+            read_verification: &self.read_verification,
+        }
+    }
+}
+
 impl Default for ApplicationSettings {
     /// No registry entry and no variable: both data loaders on, no `[BLAST] BLASTDB`.
     ///
@@ -1099,8 +1371,10 @@ impl Default for ApplicationSettings {
     fn default() -> Self {
         Self {
             data_loaders: true,
-            blastdb: Ok(None),
+            blastdb: None,
             seq_id_rank_variable: None,
+            write_verification: None,
+            read_verification: ReadVerification::default(),
             max_seqid_length: Ok(None),
             matrix_search: MatrixSearch::default(),
             window_masker_registry: Ok(WindowMaskerRegistry::default()),
@@ -1162,51 +1436,45 @@ impl MatrixSearch {
     /// `ApplicationSettings::matrix_file` with these settings: the file that NCBI reads for the
     /// matrix `name`, which a search of the library looks up with the settings of its start
     /// (`api::start::CallStart::settings`), as the command line does with its own.
-    pub fn file(&self, name: &str) -> Result<Option<PathBuf>, String> {
-        Ok(find_matrix_file(name, self, &Path::is_file, &Path::is_dir)?
-            .filter(|file| std::fs::File::open(file).is_ok()))
+    pub fn file(&self, name: impl AsRef<[u8]>) -> Result<Option<PathBuf>, String> {
+        Ok(
+            find_matrix_file(name.as_ref(), self, &Path::is_file, &Path::is_dir)?
+                .filter(|file| std::fs::File::open(file).is_ok()),
+        )
     }
 }
 
 /// `ApplicationSettings::matrix_file` with `is_file` (`CFile::Exists`: a file, links followed)
-/// and `is_dir` (`CDir::Exists`).
+/// and `is_dir` (`CDir::Exists`), using the host platform's `PathRules`.
 fn find_matrix_file(
-    name: &str,
+    name: &[u8],
+    search: &MatrixSearch,
+    is_file: &dyn Fn(&Path) -> bool,
+    is_dir: &dyn Fn(&Path) -> bool,
+) -> Result<Option<PathBuf>, String> {
+    find_matrix_file_with_rules(PathRules::HOST, name, search, is_file, is_dir)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1385
+// NCBI reference (598d8ae6): c++/src/util/util_misc.cpp:139-179
+/// `find_matrix_file` under explicit `PathRules` (`PathRules::HOST` at runtime, Unix and Windows
+/// in tests).
+fn find_matrix_file_with_rules(
+    rules: PathRules,
+    name: &[u8],
     search: &MatrixSearch,
     is_file: &dyn Fn(&Path) -> bool,
     is_dir: &dyn Fn(&Path) -> bool,
 ) -> Result<Option<PathBuf>, String> {
     let upper = name.to_ascii_uppercase();
-    // `kDelim` (util_misc.cpp:141-145), `CFile::GetPathSeparator` and the separators of
-    // `AddTrailingPathSeparator` (ncbifile.cpp:105-120, 455-462).
-    let (delimiter, separator, separators): (char, &str, &[u8]) = if cfg!(windows) {
-        (';', "\\", b":/\\")
-    } else {
-        (':', "/", b"/")
-    };
-    let concat = |parts: &[&OsStr]| -> PathBuf {
-        let mut path = OsString::new();
-        parts.iter().for_each(|part| path.push(part));
-        PathBuf::from(path)
-    };
     let found = |path: PathBuf| is_file(&path).then_some(path);
-    // `IsAbsolutePath` (ncbifile.cpp:508-523, `s_Win_IsDiskPath` and `s_Win_IsNetworkPath` on
-    // Windows).
-    let bytes = upper.as_bytes();
-    let slash = |byte: u8| byte == b'/' || byte == b'\\';
-    let absolute = if cfg!(windows) {
-        (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && slash(bytes[2]))
-            || (bytes.len() >= 2 && slash(bytes[0]) && slash(bytes[1]))
-    } else {
-        bytes.first() == Some(&b'/')
-    };
     let mut dirs: Vec<OsString> = Vec::new();
-    if absolute {
+    if rules.is_absolute(&upper) {
         dirs.push(OsString::new());
     } else {
         if let Some(data_path) = &search.data_path {
             dirs.extend(
-                split_os(data_path, delimiter)
+                split_os(data_path, rules.list_delimiter())
                     .into_iter()
                     .filter(|dir| !dir.is_empty()),
             );
@@ -1217,24 +1485,18 @@ fn find_matrix_file(
             }
         }
     }
+    let upper_path = crate::utils::os_bytes::path_of_bytes(&upper);
+    let upper = upper_path.as_os_str();
     for dir in &dirs {
-        // `MakePath` of `dir` and `name`: a separator between them unless the directory ends with one.
-        let between = match dir.as_encoded_bytes().last() {
-            Some(last) if !separators.contains(last) => separator,
-            _ => "",
-        };
-        let candidate = concat(&[dir, OsStr::new(between), OsStr::new(&upper)]);
-        if let Some(file) = found(candidate) {
+        if let Some(file) = found(rules.make_path_os(dir, upper)) {
             return Ok(Some(file));
         }
     }
-    let separator = OsStr::new(separator);
-    let upper = OsStr::new(&upper);
     if let Some(blastmat) = search.blastmat.as_deref() {
         if is_dir(Path::new(blastmat)) {
             for candidate in [
-                concat(&[blastmat, separator, upper]),
-                concat(&[blastmat, separator, OsStr::new("nt"), separator, upper]),
+                rules.join_os(&[blastmat, upper]),
+                rules.join_os(&[blastmat, OsStr::new("nt"), upper]),
             ] {
                 if let Some(file) = found(candidate) {
                     return Ok(Some(file));
@@ -1242,17 +1504,17 @@ fn find_matrix_file(
             }
         }
     }
-    Ok(found(concat(&[OsStr::new("data"), separator, upper])))
+    Ok(found(rules.join_os(&[OsStr::new("data"), upper])))
 }
 
-/// `value` split at each `delimiter`, empty parts kept.
-fn split_os(value: &OsStr, delimiter: char) -> Vec<OsString> {
+/// `value` split at each ASCII `delimiter`, empty parts kept.
+fn split_os(value: &OsStr, delimiter: u8) -> Vec<OsString> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
         value
             .as_bytes()
-            .split(|&byte| char::from(byte) == delimiter)
+            .split(|&byte| byte == delimiter)
             .map(|part| OsStr::from_bytes(part).to_os_string())
             .collect()
     }
@@ -1260,7 +1522,7 @@ fn split_os(value: &OsStr, delimiter: char) -> Vec<OsString> {
     {
         value
             .to_string_lossy()
-            .split(delimiter)
+            .split(char::from(delimiter))
             .map(OsString::from)
             .collect()
     }
@@ -1370,10 +1632,13 @@ fn max_seqid_length_entry(
 /// cited at `data_loaders_of`); the file reader stores such an entry
 /// (`CMemoryRegistry::x_Set`, ncbireg.cpp:1066-1070: removing it is "historic behavior;
 /// could inappropriately expose entries in lower layers").
-fn blastdb_of(
-    env: Option<Result<String, String>>,
-    files: [Result<Option<String>, String>; 2],
-) -> Result<Option<String>, String> {
+/// The same layers give the parameter `[NCBI] Data` (`MatrixSearch::data`), whose value LOSAT
+/// reads as text: `E` is why a file's value is not read (`Infallible` for `[BLAST] BLASTDB`,
+/// whose bytes are the value).
+fn blastdb_of<T, E>(
+    env: Option<Result<T, E>>,
+    files: [Result<Option<T>, E>; 2],
+) -> Result<Option<T>, E> {
     if let Some(value) = env {
         return value.map(Some);
     }
@@ -1401,6 +1666,11 @@ pub enum DiagTarget {
     /// (`Write for &File`), and a target stays `Sync` and `RefUnwindSafe` (`api::Batches` holds
     /// one; a `RefCell` would take both away from that public type).
     Memory(std::sync::Mutex<Vec<u8>>),
+    /// The file of `-logfile` of a tool's run whose files LOSAT Web gives its host
+    /// (`report::run_files::OpenFiles`, line NP WW3a, 2026-11-22): an opening of the run's file of
+    /// that path that appends to it, as NCBI's does, and that the run's other openings of the
+    /// file share (`-out x -logfile x`, D-WW3-9). Behind a lock, as `Memory`.
+    Stream(std::sync::Mutex<Box<dyn Write + Send>>),
     /// The file of `-logfile` of a run whose files LOSAT Web gives its host, where the name is the
     /// process's standard error (`report::run_files::RunFiles::log_target`: `/dev/stderr`): a file,
     /// as NCBI opens one there (`CFileHandleDiagHandler`), whose bytes go to `cerr`. It differs from
@@ -1428,7 +1698,9 @@ impl DiagTarget {
     pub fn place(&self) -> TextPlace {
         match self {
             DiagTarget::Stderr | DiagTarget::StderrFile => TextPlace::StandardError,
-            DiagTarget::File(_) | DiagTarget::Memory(_) => TextPlace::LogFile,
+            DiagTarget::File(_) | DiagTarget::Memory(_) | DiagTarget::Stream(_) => {
+                TextPlace::LogFile
+            }
             DiagTarget::Discard => TextPlace::Nowhere,
         }
     }
@@ -1462,6 +1734,12 @@ impl DiagTarget {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .extend_from_slice(text),
+            DiagTarget::Stream(writer) => {
+                let _ = writer
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .write_all(text);
+            }
             DiagTarget::Stderr | DiagTarget::Discard | DiagTarget::StderrFile => {}
         }
     }
@@ -1524,6 +1802,9 @@ impl DiagTarget {
             }
             DiagTarget::Memory(_) => {
                 return Err(refusal("the file is kept in memory".to_string()));
+            }
+            DiagTarget::Stream(_) => {
+                return Err(refusal("the file goes to LOSAT Web's host".to_string()));
             }
         };
         replace_standard_error(file).map_err(refusal)
@@ -1734,7 +2015,7 @@ fn decodes(bytes: &[u8]) -> bool {
 /// the registry turns the file API's logging on, which a run of BLAST+ does not (line WQA's D11
 /// round 3, 2026-11-20: NCBI BLAST+ 2.17.0 tblastx `-logfile run.log` in a working directory of
 /// 4298 bytes writes `run.log` there, with nothing on the standard error).
-fn ncbi_cwd() -> Option<OsString> {
+pub(crate) fn ncbi_cwd() -> Option<OsString> {
     getcwd_reads(std::env::current_dir().ok()?.into_os_string())
 }
 
@@ -1749,7 +2030,7 @@ fn getcwd_reads(cwd: OsString) -> Option<OsString> {
 
 /// The path of the bytes `path` that `log_file_name` gives: any bytes on Unix and WASI.
 #[cfg(not(windows))]
-fn log_path(path: &[u8]) -> &Path {
+pub(crate) fn log_path(path: &[u8]) -> &Path {
     #[cfg(unix)]
     use std::os::unix::ffi::OsStrExt;
     #[cfg(target_os = "wasi")]
@@ -1764,7 +2045,7 @@ fn log_path(path: &[u8]) -> &Path {
 
 /// The path of the bytes `path` that `log_file_name` gives on Windows.
 #[cfg(windows)]
-fn log_path(path: &[u8]) -> &Path {
+pub(crate) fn log_path(path: &[u8]) -> &Path {
     // SAFETY: each path that `log_file_name` gives is made of the encoded bytes of the name and
     // of the working directory (WTF-8), joined at separators and cut at ASCII bytes (separators,
     // ':', spaces), which are boundaries of it, and at NCBI's cuts of bytes (3 of the working
@@ -1954,7 +2235,7 @@ pub enum Preparsed<S> {
 /// application start's configuration (`ApplicationStart::of_process`, line RG item E1).
 /// `words` are the arguments after the program's name. This is the one reading of these words:
 /// the command line's entry (the versions, before the configuration load, and the words that
-/// the argument reader gets, `cli::try_parse_from_start`), `ApplicationStart::of_process`,
+/// the argument reader gets, `cli::reader::read_argv`), `ApplicationStart::of_process`,
 /// `cli::ncbi_version_request` and `ncbi_app` read them here, and `log_file` is NCBI's first scan
 /// of `-logfile`.
 pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
@@ -2007,11 +2288,11 @@ pub fn preparse<S: AsRef<OsStr> + Clone>(words: &[S]) -> Preparsed<S> {
     }
 }
 
-/// The file of the last `-conffile` of `words` (`preparse`): none before a version word.
-fn conffile_of<S: AsRef<OsStr> + Clone>(words: &[S]) -> Option<OsString> {
+/// The file of the last `-conffile` of `words` and whether `words` requests a version (`preparse`).
+fn preparse_start<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Option<OsString>, bool) {
     match preparse(words) {
-        Preparsed::Words { conffile, .. } => conffile,
-        Preparsed::Version(_) => None,
+        Preparsed::Words { conffile, .. } => (conffile, false),
+        Preparsed::Version(_) => (None, true),
     }
 }
 
@@ -2046,6 +2327,9 @@ pub struct ApplicationStart {
     config: Result<ConfigLoad, String>,
     /// The settings after the start (`settings`).
     settings: Result<ApplicationSettings, String>,
+    /// Registry files read by this start (or looked up by its configuration load before
+    /// `-logfile` is opened): `.ncbirc` / `ncbi.ini`, `<program>.ini`, or `-conffile`.
+    registry_inputs: Vec<PathBuf>,
 }
 
 /// The configuration load of an application start.
@@ -2065,15 +2349,17 @@ impl ApplicationStart {
     /// The application start of `program` in this process (its environment, its registry files
     /// and its facts, `ProcessFacts`): what the command line's entry writes before the program's
     /// arguments are read, and the settings that it leaves (`settings`). The entry makes one
-    /// and gives it to what reads after it (the argument reader, `cli::try_parse_from_start`; the
+    /// and gives it to what reads after it (the argument reader, `cli::reader::read_argv`; the
     /// program's run), as NCBI's application starts once.
     ///
     /// `words` are the arguments after the program's name: the file of their last `-conffile`
     /// (`preparse`) is loaded in place of `<program>.ini`.
     pub fn of_process<S: AsRef<OsStr> + Clone>(program: &str, words: &[S]) -> ApplicationStart {
+        let (conffile, is_version) = preparse_start(words);
         application_start(
             program,
-            conffile_of(words).as_deref(),
+            conffile.as_deref(),
+            is_version,
             std::env::vars_os(),
             &|name: &str| std::env::var_os(name),
             &ProcessFacts::of_this_process(),
@@ -2090,6 +2376,7 @@ impl ApplicationStart {
         variables: &[(&str, &str)],
         files: &dyn RegistryFiles,
     ) -> ApplicationStart {
+        let (conffile, is_version) = preparse_start(words);
         let env = |name: &str| {
             variables
                 .iter()
@@ -2098,7 +2385,8 @@ impl ApplicationStart {
         };
         application_start(
             program,
-            conffile_of(words).as_deref(),
+            conffile.as_deref(),
+            is_version,
             variables
                 .iter()
                 .map(|(name, value)| (OsString::from(name), OsString::from(value))),
@@ -2116,6 +2404,13 @@ impl ApplicationStart {
     /// The program whose start this is.
     pub fn program(&self) -> &str {
         &self.program
+    }
+
+    /// The registry files that this application start reads or looks up during configuration load
+    /// (`.ncbirc` / `ncbi.ini`, `<program>.ini`, `-conffile`), for self-referencing `-logfile`
+    /// checks (`report::log_inputs`).
+    pub(crate) fn registry_inputs(&self) -> &[PathBuf] {
+        &self.registry_inputs
     }
 
     /// The NCBI application settings that LOSAT reproduces after the start, or LOSAT's refusal
@@ -2303,8 +2598,8 @@ fn system_wide_posts(read: &RegistryRead, program: &str) -> String {
 /// `WindowMaskerPathGet()` is empty in blastn (only `WindowMaskerPathInit` sets it, and the
 /// applications do not call it).
 fn window_masker_path_of(
-    config: Option<Result<String, String>>,
-    plain: Option<Result<String, String>>,
+    config: Option<Vec<u8>>,
+    plain: Option<Vec<u8>>,
     ncbirc: Result<NcbircWindowMasker, String>,
 ) -> Result<WindowMaskerRegistry, String> {
     let NcbircWindowMasker {
@@ -2312,10 +2607,7 @@ fn window_masker_path_of(
         load_posts,
         posts_once,
     } = ncbirc?;
-    let path = match config.or(plain) {
-        Some(variable) => Some(variable?),
-        None => value,
-    };
+    let path = config.or(plain).or(value);
     Ok(WindowMaskerRegistry {
         path,
         load_posts,
@@ -2332,7 +2624,7 @@ fn application_settings(
     env: &dyn Fn(&str) -> Option<OsString>,
     process: &ProcessFacts,
 ) -> Result<ApplicationSettings, String> {
-    application_start(program, None, variables, env, process).settings()
+    application_start(program, None, false, variables, env, process).settings()
 }
 
 /// The application start of `program` (`ApplicationStart`) over the environment `variables`
@@ -2364,6 +2656,7 @@ fn application_settings(
 fn application_start(
     program: &str,
     conffile: Option<&OsStr>,
+    is_version: bool,
     mut variables: impl Iterator<Item = (OsString, OsString)>,
     env: &dyn Fn(&str) -> Option<OsString>,
     process: &ProcessFacts,
@@ -2374,6 +2667,7 @@ fn application_start(
         usage_report: Ok(String::new()),
         config: Ok(ConfigLoad::Loaded(String::new())),
         settings: Err(String::new()),
+        registry_inputs: Vec::new(),
     };
     // A start whose messages LOSAT would write under a variable that it refuses is refused
     // there.
@@ -2394,6 +2688,14 @@ fn application_start(
     let search_path = match registry_search_path(program, env, process) {
         Ok(path) => path,
         Err(reason) => {
+            if !is_version {
+                if let Some(name) = conffile {
+                    crate::report::log_inputs::push_file(
+                        &mut start.registry_inputs,
+                        PathBuf::from(name),
+                    );
+                }
+            }
             start.settings = Err(environment_refusal.clone().unwrap_or(reason));
             // NCBI's check of the `-conffile` file comes before its load and needs no search
             // path (`conf_file_path`).
@@ -2421,8 +2723,64 @@ fn application_start(
             )
         })
     };
-    // The usage report.
+    // Record the registry files read by this start (`.ncbirc` / `ncbi.ini`, and when not a
+    // `-version` run, `-conffile` or `<program>.ini` along `search_path` up to any existing hit),
+    // before any early return so self-referencing `-logfile` checks see them even on malformed or
+    // missing config files.
     let usage_report_reads = usage_report_reads_ncbirc(program, env);
+    if !dont_use_ncbirc {
+        let ncbirc_found = ncbirc.as_ref().map(|(_, path)| path.as_path());
+        if usage_report_reads {
+            if let Some(ncbirc_path) = ncbirc_found {
+                crate::report::log_inputs::push_file(
+                    &mut start.registry_inputs,
+                    ncbirc_path.to_path_buf(),
+                );
+            }
+        }
+        if !is_version {
+            push_registry_search_candidates(
+                &mut start.registry_inputs,
+                &search_path,
+                OsStr::new(SYSTEM_WIDE_REGISTRY),
+                ncbirc_found,
+            );
+        }
+    }
+    if !is_version {
+        match conffile {
+            Some(name) => {
+                let path = Path::new(name);
+                crate::report::log_inputs::push_file(
+                    &mut start.registry_inputs,
+                    path.to_path_buf(),
+                );
+                let has_directory = path
+                    .parent()
+                    .is_some_and(|parent| !parent.as_os_str().is_empty());
+                if !has_directory {
+                    let found = find_registry(&search_path, name, process.files);
+                    push_registry_search_candidates(
+                        &mut start.registry_inputs,
+                        &search_path,
+                        name,
+                        found.as_deref(),
+                    );
+                }
+            }
+            None => {
+                let ini_name = format!("{program}.ini");
+                let found = find_registry(&search_path, OsStr::new(&ini_name), process.files);
+                push_registry_search_candidates(
+                    &mut start.registry_inputs,
+                    &search_path,
+                    OsStr::new(&ini_name),
+                    found.as_deref(),
+                );
+            }
+        }
+    }
+    // The usage report.
     let mut usage_read = None;
     if usage_report_reads {
         match &ncbirc {
@@ -2530,6 +2888,25 @@ fn application_start(
     start
 }
 
+/// Appends each candidate `<dir>/<file_name>` along `search_path` up to and including `found` (or
+/// every directory when `found` is `None`), so missing registry paths that `-logfile` would create
+/// are caught alongside existing hits.
+fn push_registry_search_candidates(
+    out: &mut Vec<PathBuf>,
+    search_path: &[PathBuf],
+    file_name: &OsStr,
+    found: Option<&Path>,
+) {
+    for dir in search_path {
+        let candidate = dir.join(file_name);
+        let hit = found == Some(candidate.as_path());
+        crate::report::log_inputs::push_file(out, candidate);
+        if hit {
+            break;
+        }
+    }
+}
+
 /// LOSAT's refusal of the usage report's `[BLAST] BLAST_USAGE_REPORT` when it is not a Boolean
 /// (NCBI aborts, before `AppMain`): the value of the environment's layer
 /// (`NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT`), else that of `.ncbirc` when the report reads it
@@ -2615,18 +2992,19 @@ fn settings_of(
             max_seqid_length = max_seqid_length_entry(path, entries);
         }
     }
-    let utf8_variable = |name: &str| {
-        env(name).map(|value| {
-            value.into_string().map_err(|_| {
-                format!("the environment variable {name} is not valid UTF-8; this is not supported by LOSAT")
-            })
-        })
-    };
     let env_data_loaders = env("NCBI_CONFIG__BLAST__DATA_LOADERS");
-    let env_blastdb = utf8_variable("NCBI_CONFIG__BLAST__BLASTDB");
+    let bytes = |value: &OsStr| crate::utils::os_bytes::os_str_bytes(value).into_owned();
+    let blastdb_entry = |file: Option<(&Path, &[RegistryEntry])>| {
+        Ok(file
+            .and_then(|(_, entries)| last_value(entries, "BLAST", "BLASTDB").map(<[u8]>::to_vec)))
+    };
+    let Ok(blastdb) = blastdb_of::<Vec<u8>, std::convert::Infallible>(
+        env("NCBI_CONFIG__BLAST__BLASTDB").map(|value| Ok(bytes(&value))),
+        [blastdb_entry(ini), blastdb_entry(ncbirc)],
+    );
     let window_masker_registry = window_masker_path_of(
-        utf8_variable("NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH"),
-        utf8_variable("WINDOW_MASKER_PATH"),
+        env("NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH").map(|value| bytes(&value)),
+        env("WINDOW_MASKER_PATH").map(|value| bytes(&value)),
         ncbirc_window_masker,
     );
     Ok(ApplicationSettings {
@@ -2636,16 +3014,16 @@ fn settings_of(
                 file.and_then(|(_, entries)| last_value(entries, "BLAST", "DATA_LOADERS"))
             }),
         ),
-        blastdb: blastdb_of(
-            env_blastdb,
-            [
-                text(ini, "BLAST", "BLASTDB"),
-                text(ncbirc, "BLAST", "BLASTDB"),
-            ],
-        ),
+        blastdb,
         seq_id_rank_variable: SEQ_ID_RANK_VARIABLES
             .into_iter()
             .find(|name| env(name).is_some()),
+        write_verification: env("SERIAL_VERIFY_DATA_WRITE")
+            .and_then(|value| WriteVerification::of(&value)),
+        read_verification: ReadVerification::of(
+            env("SERIAL_VERIFY_DATA_READ").as_deref(),
+            env("SERIAL_VERIFY_DATA_GET").as_deref(),
+        ),
         max_seqid_length: max_seqid_length.transpose(),
         matrix_search: MatrixSearch {
             data_path: env("NCBI_DATA_PATH"),

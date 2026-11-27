@@ -124,6 +124,16 @@ enum Refused {
 /// argument is deleting its row. The build checks that each row names an argument of its program's
 /// XML, once.
 const REFUSED: &[(&str, &str, Refused)] = &[
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:123-129
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:530-545
+    // blast_formatter's `-rid` fetches the results of a search from NCBI's servers (line RG
+    // DECISIONS F3-5): refused where NCBI asks for them, after NCBI's errors of the argument without
+    // a value and of the empty value (`blast_formatter::refusals::Refusal::Rid`).
+    (
+        "blast_formatter",
+        "rid",
+        Refused::Run("the results of a search on NCBI's servers"),
+    ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:63-70
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
     // `-db` and `-dbsize` are implemented (`blastn/args.rs`), as are the X-drops,
@@ -132,53 +142,26 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // (`algorithm::blastn::repeat_filter`, line RG item D4) and `-best_hit_overhang` /
     // `-best_hit_score_edge` (series NP O6a).
     ("blastn", "entrez_query", Refused::Read(None)),
-    ("blastn", "gilist", Refused::Read(None)),
-    ("blastn", "import_search_strategy", Refused::Read(None)),
-    ("blastn", "negative_gilist", Refused::Read(None)),
     ("blastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-2, psiblast's
     // too).
     ("blastp", "entrez_query", Refused::Read(None)),
-    ("blastp", "gilist", Refused::Read(None)),
-    ("blastp", "import_search_strategy", Refused::Read(None)),
-    ("blastp", "ipglist", Refused::Read(None)),
-    ("blastp", "negative_gilist", Refused::Read(None)),
-    ("blastp", "negative_ipglist", Refused::Read(None)),
     ("blastp", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
     // `-use_sw_tback` (line RG item X4b-2, #1500).
-    ("blastx", "gilist", Refused::Read(None)),
-    ("blastx", "negative_gilist", Refused::Read(None)),
     ("blastx", "entrez_query", Refused::Read(None)),
-    ("blastx", "ipglist", Refused::Read(None)),
-    ("blastx", "negative_ipglist", Refused::Read(None)),
-    ("blastx", "import_search_strategy", Refused::Read(None)),
     ("blastx", "remote", Refused::Read(None)),
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:398-400,503
-    // The PSSM files in ASN.1 binary (psiblast line item PS10b) are refused where the run starts,
-    // after makeprofiledb's `Init` (`makeprofiledb::work::run`).
-    (
-        "makeprofiledb",
-        "binary",
-        Refused::Run("PSSM files in ASN.1 binary"),
-    ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
-    // PHI-BLAST (PS8; the ASCII and ASN.1 PSSM files are PS2's and PS3's,
-    // `algorithm::psiblast::pssm`, `-in_pssm` PS4's, `algorithm::psiblast::in_pssm`, the MSA
-    // inputs PS6's, `algorithm::psiblast::in_msa`), and the arguments that blastp's engine does
-    // not run either (blastp's rows; psiblast has no database masks, NCBI's unknown arguments of
-    // its parser, and no `-mt_mode`). The search strategy file is written, of a FASTA query and of
-    // `-in_pssm` (items F1b-1 and F1b-2 of line RG).
-    ("psiblast", "phi_pattern", Refused::Read(None)),
+    // The arguments that blastp's engine does not run either (blastp's rows; psiblast has no
+    // database masks, NCBI's unknown arguments of its parser, and no `-mt_mode`). The ASCII and
+    // ASN.1 PSSM files are PS2's and PS3's (`algorithm::psiblast::pssm`), `-in_pssm` PS4's
+    // (`algorithm::psiblast::in_pssm`), the MSA inputs PS6's (`algorithm::psiblast::in_msa`) and
+    // `-phi_pattern` PS8a's (`algorithm::phi_search`). The search strategy file is written, of a
+    // FASTA query and of `-in_pssm` (items F1b-1 and F1b-2 of line RG).
     ("psiblast", "entrez_query", Refused::Read(None)),
-    ("psiblast", "gilist", Refused::Read(None)),
-    ("psiblast", "html", Refused::Read(None)),
     ("psiblast", "import_search_strategy", Refused::Read(None)),
-    ("psiblast", "ipglist", Refused::Read(None)),
-    ("psiblast", "negative_gilist", Refused::Read(None)),
-    ("psiblast", "negative_ipglist", Refused::Read(None)),
     ("psiblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (cited at
     // blastp's check, `validate_requested_blastp_support`)
@@ -189,18 +172,17 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
     // `algorithm::rpsblast::args`)
-    // `-html` (PS15a) and the remote options and `-import_search_strategy` of every program.
+    // The remote options and `-import_search_strategy` (which the five search programs run, line
+    // RG item F2).
     ("rpsblast", "entrez_query", Refused::Read(None)),
-    ("rpsblast", "html", Refused::Read(None)),
     ("rpsblast", "import_search_strategy", Refused::Read(None)),
     ("rpsblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (cited
     // at `algorithm::rpstblastn::args`)
-    // `-html` (PS15a) and the remote options and `-import_search_strategy` of every program. The
-    // composition-based statistics of a later item are refused once per run
+    // The remote options and `-import_search_strategy` (which the five search programs run, line
+    // RG item F2). The composition-based statistics of a later item are refused once per run
     // (`rpstblastn::search::TranslatedRpsSearch::check_options`).
     ("rpstblastn", "entrez_query", Refused::Read(None)),
-    ("rpstblastn", "html", Refused::Read(None)),
     ("rpstblastn", "import_search_strategy", Refused::Read(None)),
     ("rpstblastn", "remote", Refused::Read(None)),
     (
@@ -212,16 +194,10 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
     // `-use_sw_tback` (line RG item X4b-1, #1481).
     ("tblastn", "entrez_query", Refused::Read(None)),
-    ("tblastn", "gilist", Refused::Read(None)),
-    ("tblastn", "import_search_strategy", Refused::Read(None)),
-    ("tblastn", "negative_gilist", Refused::Read(None)),
     ("tblastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
     ("tblastx", "entrez_query", Refused::Read(None)),
-    ("tblastx", "gilist", Refused::Read(None)),
-    ("tblastx", "import_search_strategy", Refused::Read(None)),
-    ("tblastx", "negative_gilist", Refused::Read(None)),
     ("tblastx", "remote", Refused::Read(None)),
 ];
 
@@ -231,6 +207,36 @@ const REFUSED: &[(&str, &str, Refused)] = &[
 /// tblastn's `-db_gencode` (PD-TLOSAN-LOCAL-GENCODE-32, LOSAT's TBLASTN translates with it). The
 /// build checks that each is a key of `CArgAllowGeneticCodeInteger`.
 const GENETIC_CODE_32: [(&str, &str); 1] = [("tblastn", "db_gencode")];
+
+// No NCBI counterpart: line RG DECISIONS K4i-2b-1 (2). The values of a set (`CArgAllow_Strings`,
+// `CArgAllowStringSet`) in the order in which LOSAT's descriptions of a program (`api::describe`,
+// LOSAT Web's) list them, where it is not the XML's: blastn's `-task` and `-template_type` in the
+// order of NCBI's Web page (docs/web/ncbi_ui_mapping.md), the search programs' `-strand` as LOSAT
+// listed it. NCBI's reader and usage keep the XML's order. The build checks that each row is a
+// permutation of the set of the key of each of its programs.
+const DISPLAY_ORDER: [(&[&str], &str, &[&str]); 3] = [
+    (
+        &["blastn"],
+        "task",
+        &[
+            "megablast",
+            "dc-megablast",
+            "blastn",
+            "blastn-short",
+            "rmblastn",
+        ],
+    ),
+    (
+        &["blastn", "blastx", "tblastx"],
+        "strand",
+        &["both", "plus", "minus"],
+    ),
+    (
+        &["blastn"],
+        "template_type",
+        &["coding", "optimal", "coding_and_optimal"],
+    ),
+];
 
 /// One dependency of the XML: the first name, the `Dep` variant of `ncbi_app::args`, the second
 /// name.
@@ -245,6 +251,29 @@ struct Argument {
     default: Option<String>,
     constraint: Option<Spec>,
     aliases: Vec<String>,
+    /// `<description>`: the argument's comment, decoded.
+    description: String,
+    /// `<flags><preOpen/>...`: an `eOutputFile` key of `fPreOpen` (blastdb_aliastool's
+    /// `-gi_file_out`), which the reader opens as it reads the word.
+    pre_open: bool,
+}
+
+impl Argument {
+    /// An argument of `name` and `kind` without a default, a constraint, aliases or a comment:
+    /// the help flags and the file arguments that every reader has (`HELP_FLAGS`,
+    /// `FILE_ARGUMENTS`).
+    fn plain(name: &str, kind: &'static str) -> Self {
+        Argument {
+            name: name.to_string(),
+            kind,
+            mandatory: false,
+            default: None,
+            constraint: None,
+            aliases: Vec::new(),
+            description: String::new(),
+            pre_open: false,
+        }
+    }
 }
 
 /// A `Constraint` of `ncbi_app::args`: the classes with a list of values, whose values go to the
@@ -270,6 +299,7 @@ struct Tables {
     string_values: Vec<String>,
     integer_values: Vec<i32>,
     refusals: Vec<String>,
+    display_orders: Vec<String>,
     programs: Vec<String>,
 }
 
@@ -295,27 +325,28 @@ impl Tables {
         format!("Span {{ first: {first}, count: {count} }}")
     }
 
+    // No NCBI counterpart: line RG DECISIONS K4i-3-1. NCBI's `-help` prints each argument's
+    // comment (`<description>`); LOSAT's descriptions of a program (`api::describe`, LOSAT Web's)
+    // give it as the argument's help. The tables keep it for every program.
     /// The Rust of one `Desc`.
-    fn desc(
-        &mut self,
-        name: &str,
-        kind: &str,
-        default: Option<&str>,
-        constraint: Option<&Spec>,
-        mandatory: bool,
-    ) -> String {
-        let name = self.text(name);
-        let default = match default {
+    fn desc(&mut self, argument: &Argument) -> String {
+        let name = self.text(&argument.name);
+        let kind = argument.kind;
+        let mandatory = argument.mandatory;
+        let pre_open = argument.pre_open;
+        let default = match argument.default.as_deref() {
             Some(default) => format!("Some({})", self.text(default)),
             None => "None".to_string(),
         };
-        let constraint = match constraint {
+        let constraint = match argument.constraint.as_ref() {
             Some(constraint) => format!("Some({})", self.constraint(constraint)),
             None => "None".to_string(),
         };
+        let description = self.text(&argument.description);
         format!(
             "Desc {{ name: {name}, kind: Kind::{kind}, default: {default}, constraint: \
-             {constraint}, mandatory: {mandatory} }}"
+             {constraint}, mandatory: {mandatory}, description: {description}, pre_open: \
+             {pre_open} }}"
         )
     }
 
@@ -353,13 +384,7 @@ impl Tables {
     fn program(&mut self, program: &str, arguments: &[Argument], dependencies: &[Dependency]) {
         let first = self.descs.len();
         for argument in arguments {
-            let desc = self.desc(
-                &argument.name,
-                argument.kind,
-                argument.default.as_deref(),
-                argument.constraint.as_ref(),
-                argument.mandatory,
-            );
+            let desc = self.desc(argument);
             self.descs.push(desc);
         }
         let descs = Self::span(first, self.descs.len());
@@ -399,15 +424,16 @@ impl Tables {
         ));
     }
 
-    /// The Rust of the tables.
+    /// The Rust of the tables. The arguments of every application (`HELP_FLAGS`,
+    /// `FILE_ARGUMENTS`), which no XML describes and no description lists, have an empty comment.
     fn write(mut self) -> String {
         let help_flags: Vec<String> = HELP_FLAGS
             .iter()
-            .map(|name| self.desc(name, "Flag", None, None, false))
+            .map(|name| self.desc(&Argument::plain(name, "Flag")))
             .collect();
         let file_arguments: Vec<String> = FILE_ARGUMENTS
             .iter()
-            .map(|(name, kind)| self.desc(name, kind, None, None, false))
+            .map(|(name, kind)| self.desc(&Argument::plain(name, kind)))
             .collect();
         let mut out = String::from(
             "// Generated by LOSAT/build.rs (build/ncbi_args.rs) from LOSAT/src/ncbi_xmlhelp/*.xml.\n\
@@ -430,6 +456,7 @@ impl Tables {
         let integers: Vec<String> = self.integer_values.iter().map(i32::to_string).collect();
         array("INTEGER_VALUES", "i32", &integers);
         array("REFUSALS", "(Text, Refused)", &self.refusals);
+        array("DISPLAY_ORDERS", "(Text, Text, Span)", &self.display_orders);
         array("PROGRAMS", "(Text, Arguments)", &self.programs);
         out
     }
@@ -465,6 +492,15 @@ pub fn write_tables(manifest_dir: &Path, out_dir: &Path) {
             }
         }
         tables.program(program, &arguments, &dependencies);
+        tables.display_orders(program, &arguments);
+    }
+    for (row_programs, name, _) in DISPLAY_ORDER {
+        for program in row_programs {
+            assert!(
+                tables.display_orders_of(program, name),
+                "DISPLAY_ORDER: no XML has {program} -{name}"
+            );
+        }
     }
     let rows = REFUSED
         .iter()
@@ -479,6 +515,49 @@ pub fn write_tables(manifest_dir: &Path, out_dir: &Path) {
     let target = out_dir.join("ncbi_args.rs");
     let out = tables.write();
     fs::write(&target, out).unwrap_or_else(|error| panic!("{}: {error}", target.display()));
+}
+
+impl Tables {
+    /// The rows of `DISPLAY_ORDER` of `program`: each a permutation of its key's set of strings in
+    /// `arguments`, written to `DISPLAY_ORDERS`.
+    fn display_orders(&mut self, program: &str, arguments: &[Argument]) {
+        for (row_programs, name, values) in DISPLAY_ORDER {
+            if !row_programs.contains(&program) {
+                continue;
+            }
+            let argument = arguments
+                .iter()
+                .find(|argument| argument.name == name)
+                .unwrap_or_else(|| panic!("DISPLAY_ORDER: {program} has no -{name}"));
+            let set = match &argument.constraint {
+                Some(Spec::Strings(set) | Spec::StringSet(set)) => set,
+                _ => panic!("DISPLAY_ORDER: {program} -{name} is no set of strings"),
+            };
+            let (mut sorted, mut shown) = (set.clone(), values.to_vec());
+            sorted.sort();
+            shown.sort_unstable();
+            assert!(
+                sorted == shown,
+                "DISPLAY_ORDER: {program} -{name} lists {values:?}, its set is {set:?}"
+            );
+            let first = self.string_values.len();
+            for value in values {
+                let text = self.text(value);
+                self.string_values.push(text);
+            }
+            let span = Self::span(first, self.string_values.len());
+            let row = format!("({}, {}, {span})", self.text(program), self.text(name));
+            self.display_orders.push(row);
+        }
+    }
+
+    /// Whether the row of `DISPLAY_ORDER` of `program`'s `name` was written.
+    fn display_orders_of(&mut self, program: &str, name: &str) -> bool {
+        let row = format!("({}, {}, ", self.text(program), self.text(name));
+        self.display_orders
+            .iter()
+            .any(|written| written.starts_with(&row))
+    }
 }
 
 /// Checks the rows of `REFUSED` of `program`: each names an argument of its XML (`arguments`),
@@ -561,7 +640,10 @@ fn read_argument<'a>(
         default: None,
         constraint: None,
         aliases: Vec::new(),
+        description: String::new(),
+        pre_open: false,
     };
+    let mut described = false;
     let end = format!("</{tag}>");
     loop {
         let line = lines.next().ok_or_else(|| format!("no {end}"))?;
@@ -575,18 +657,32 @@ fn read_argument<'a>(
             continue;
         }
         match element_of(line) {
-            Some(("description" | "group" | "synopsis", _)) => {}
+            Some(("description", value)) if !described => {
+                argument.description = decode(value)?;
+                described = true;
+            }
+            Some(("group" | "synopsis", _)) => {}
             Some(("default", value)) => argument.default = Some(decode(value)?),
             Some(("alias", value)) => argument.aliases.push(decode(value)?),
             // `fHidden` (makeblastdb's `-randomize`): the argument is read as any other.
             _ if line == "<flags><hidden/></flags>" => {}
             // `fAppend` of makeblastdb's `-logfile`, a standard argument that the tables leave out.
             _ if line == "<flags><append/></flags>" && argument.name == "logfile" => {}
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:744-752
+            // The flags `fPreOpen` and `fBinary` of an `eOutputFile` key (blastdb_aliastool's
+            // `-gi_file_out`): the reader opens the file as it reads the word; LOSAT writes bytes
+            // as they are, so `fBinary` changes nothing.
+            _ if line == "<flags><preOpen/><binary/></flags>" && kind == "OutputFile" => {
+                argument.pre_open = true;
+            }
             _ => return Err(format!("{name}: a line this reader does not know: {line}")),
         }
     }
     if argument.mandatory && argument.default.is_some() {
         return Err(format!("{name}: a mandatory key with a default"));
+    }
+    if !described {
+        return Err(format!("{name}: no <description>"));
     }
     Ok(argument)
 }

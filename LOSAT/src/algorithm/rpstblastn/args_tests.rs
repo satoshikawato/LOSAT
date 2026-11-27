@@ -4,13 +4,13 @@ use crate::cli::{Cli, Commands};
 fn parse(extra: &[&str]) -> Result<RpstblastnArgs, String> {
     let mut argv = vec!["losat", "rpstblastn", "-query", "q.fna", "-db", "cdd"];
     argv.extend_from_slice(extra);
-    match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+    match crate::cli::try_parse_from(argv) {
         Ok(Cli {
             command: Commands::Rpstblastn(args),
             ..
         }) => Ok(args),
         Ok(_) => Err("not rpstblastn".to_string()),
-        Err(error) => Err(crate::cli::render_message(&error)),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -23,54 +23,64 @@ fn search(extra: &[&str]) -> TranslatedRpsSearch {
     parse(extra).unwrap().rps_search().unwrap()
 }
 
-// ncbiargs.cpp:3829-3834 (cited at `USAGE`): `-help` and `-h` write NCBI's texts, whatever
-// follows them; the words before them are read first.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
+// `-help` and `-h` print NCBI's texts (`cli::reader`), whatever follows them; the words before
+// them are read first.
 #[test]
 fn help_and_usage_are_ncbis_texts() {
+    use crate::cli::ArgvError;
     assert_eq!(HELP.len(), 9266);
     assert!(HELP.ends_with("   Compute locally optimal Smith-Waterman alignments?\n\n"));
     let head = &HELP[..HELP.find("OPTIONAL ARGUMENTS").unwrap()];
-    assert_eq!(
-        USAGE,
-        format!("{head}Use '-help' to print detailed descriptions of command line arguments\n")
-    );
-    assert!(USAGE.contains(&format!(
+    let usage =
+        format!("{head}Use '-help' to print detailed descriptions of command line arguments\n");
+    assert!(usage.contains(&format!(
         "   Translated Reverse Position Specific BLAST {}\n",
         crate::NCBI_BLAST_VERSION
     )));
+    let printed = |words: &[&str]| -> Result<String, String> {
+        let mut argv = vec!["losat", "rpstblastn", "-query", "q.fna", "-db", "cdd"];
+        argv.extend_from_slice(words);
+        match crate::cli::try_parse_from(argv) {
+            Err(ArgvError::Printed(text)) => Ok(text),
+            Err(error) => Err(error.to_string()),
+            Ok(_) => Err("read".to_string()),
+        }
+    };
+    let help = crate::wording::losat_text(HELP).into_owned();
+    let usage = crate::wording::losat_text(&usage).into_owned();
     for (words, text) in [
-        (&["-help"][..], HELP),
-        (&["-help", "-no_such_option"], HELP),
-        (&["--help"], HELP),
-        (&["-h"], USAGE),
-        (&["-evalue", "1", "-h", "-xyz", "2"], USAGE),
+        (&["-help"][..], &help),
+        (&["-help", "-no_such_option"], &help),
+        (&["-help-full"], &help),
+        (&["-h"], &usage),
+        (&["-evalue", "1", "-h", "-xyz", "2"], &usage),
         // NCBI checks the dependencies of the words after its reader (`x_PostCheck`).
         (
             &["-max_target_seqs", "1", "-num_alignments", "1", "-help"],
-            HELP,
+            &help,
         ),
     ] {
-        assert_eq!(
-            parse(words).unwrap().ncbi_help_text(),
-            Some(text),
-            "{words:?}"
-        );
+        assert_eq!(printed(words).as_ref(), Ok(text), "{words:?}");
     }
-    assert_eq!(parse(&[]).unwrap().ncbi_help_text(), None);
-    // The hidden argument is the reader's: no word of the user names it.
-    for words in [&["-ncbi_help", "full"][..], &["--ncbi_help=full"]] {
+    // `--help` is not one of NCBI's words; nor is the hidden argument that LOSAT's reader had.
+    for words in [
+        &["--help"][..],
+        &["-ncbi_help", "full"],
+        &["--ncbi_help=full"],
+    ] {
         assert!(
-            parse(words).unwrap_err().contains("unknown option"),
+            printed(words).unwrap_err().contains("Unknown argument"),
             "{words:?}"
         );
     }
     // A word before the help that NCBI's reader refuses is refused first.
-    assert!(parse(&["-no_such_option", "-help"])
+    assert!(printed(&["-no_such_option", "-help"])
         .unwrap_err()
-        .contains("unknown option"));
-    assert!(parse(&["-evalue", "x", "-help"])
+        .contains("Unknown argument"));
+    assert!(printed(&["-evalue", "x", "-help"])
         .unwrap_err()
-        .contains("-evalue"));
+        .contains("\"evalue\""));
 }
 
 // blast_args.cpp:839-865 (cited at `rps_composition_mode`): RPS-BLAST's letters; every mode
@@ -94,7 +104,11 @@ fn composition_modes_run() {
             .unwrap()
             .into_blastx_args()
             .unwrap();
-        assert_eq!(args.comp_based_stats, mode.to_string(), "{value}");
+        assert_eq!(
+            args.comp_based_stats,
+            std::ffi::OsStr::new(&mode.to_string()),
+            "{value}"
+        );
         let search = search(&["-comp_based_stats", value]);
         assert_eq!(search.search.requested_cbs, mode, "{value}");
         assert!(search.check_options().is_ok(), "{value}");
@@ -186,14 +200,27 @@ fn options_of_later_items_are_refused() {
         .unwrap()
         .into_blastx_args()
         .is_ok());
-    for name in ["html", "remote", "entrez_query", "import_search_strategy"] {
-        let error = parse(&[&format!("-{name}"), "x"]).unwrap_err();
+    // `-html` reaches BLASTX's arguments (line RG T4c1).
+    let plain = parse(&[]).unwrap();
+    assert!(!plain.html);
+    assert!(!plain.into_blastx_args().unwrap().html);
+    let html = parse(&["-html"]).unwrap();
+    assert!(html.html);
+    assert!(html.into_blastx_args().unwrap().html);
+    // The flags take no value; `-entrez_query` goes with `-remote` (NCBI's reader), and the first
+    // refused name in the words is the one named.
+    for (name, words) in [
+        ("remote", &["-remote"][..]),
+        ("entrez_query", &["-entrez_query", "x", "-remote"]),
+        ("import_search_strategy", &["-import_search_strategy", "x"]),
+    ] {
+        let error = parse(words).unwrap_err();
         assert!(
             error.contains(&format!("-{name} is not supported by LOSAT's RPSTBLASTN")),
             "{name}: {error}"
         );
     }
-    // NCBI's options of the other programs: LOSAT's parser (PD exception 1).
+    // NCBI's options of the other programs: NCBI's reader's error.
     for name in [
         "subject",
         "word_size",
@@ -205,7 +232,7 @@ fn options_of_later_items_are_refused() {
         assert!(
             parse(&[&format!("-{name}"), "1"])
                 .unwrap_err()
-                .contains("unknown option"),
+                .contains(&format!("Unknown argument: \"{name}\"")),
             "{name}"
         );
     }
@@ -290,10 +317,13 @@ fn the_search_is_blastxs_with_the_rps_search() {
             args.query_gencode,
             args.query_loc.as_deref()
         ),
-        ("minus", 4, Some("10-500"))
+        ("minus", 4, Some(std::ffi::OsStr::new("10-500")))
     );
     assert!(args.lcase_masking);
-    assert_eq!((args.seg.as_str(), args.soft_masking), ("no", false));
+    assert_eq!(
+        (args.seg.as_os_str(), args.soft_masking),
+        (std::ffi::OsStr::new("no"), false)
+    );
     assert_eq!((args.max_hsps, args.qcov_hsp_perc), (None, None));
     assert_eq!((args.max_target_seqs, args.evalue), (Some(7), 0.5));
     assert_eq!((args.num_threads, args.window_size), (1, Some(0)));
@@ -323,6 +353,7 @@ fn the_search_is_blastxs_with_the_rps_search() {
             line_length: Some(70),
             sort_hits: Some(1),
             sort_hsps: None,
+            hitlist_start: None,
         }
     );
     let resolved = args.resolve().unwrap();

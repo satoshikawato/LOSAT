@@ -4,12 +4,13 @@
 //! (`FillSequenceFromBioseq`), and the masks of the results
 //! (`ConvertBlastMaskListToSeqLocInfoVector`, which rpsbproc reads but does not print).
 
-use super::archive::{Align, Mask, MaskLocation, Query, QueryRowId, Segs, SeqEntry};
+use super::archive::{Align, AnnotTitle, Mask, MaskLocation, Query, QueryRowId, Segs, SeqEntry};
 use super::data::{compute_pseudo_pssm_id, CddData};
 use super::domains::{
     calculate, parse_align, parse_std_align, sort_reading_frames, AlignIndex, DomAlign,
 };
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::serial::object_frame::UNASSIGNED_MEMBER;
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 
@@ -85,21 +86,6 @@ pub(crate) fn unassigned_member(module: &str, type_name: &str, member: &str) -> 
         ),
     ))
 }
-
-// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:317-320
-// NCBI reference (598d8ae6): c++/src/serial/datatool/classstr.cpp:849-855
-// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:805-810
-// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:836-842
-// The generated getters call `ThrowUnassigned` with the index, so the place is the `NCBI_THROW` of
-// serialobject.cpp:306 (`file_name` and `file_line` are 0). Its function is a `const` method,
-// whose `__PRETTY_FUNCTION__` ends with `const`, not `)`: `ParseCurrFunctName` names no
-// function then.
-const UNASSIGNED_MEMBER: ThrowSite = ThrowSite {
-    file: "src/serial/serialobject.cpp",
-    line: 306,
-    kind: "CUnassignedMember::eGet",
-    function: None,
-};
 
 /// A query of the output (`TDomQuery`) with its hits.
 #[derive(Debug)]
@@ -190,17 +176,47 @@ fn query_accession(query: &Query) -> Vec<u8> {
     label
 }
 
+/// `CBioseq::IsNa` (`CSeq_inst::IsNa`): `dna` (1), `rna` (2) or `na` (4); `not-set` (0), `aa` (3)
+/// and `other` (255) are false (unlike `FillSequenceFromBioseq`'s `m_bIsNa`, which tests
+/// `mol != aa`).
+// NCBI reference (598d8ae6): c++/src/objects/seq/Bioseq.cpp:345-348
+// NCBI reference (598d8ae6): c++/include/objects/seq/Seq_inst.hpp:90-95,106-109
+pub(crate) fn is_na_mol(mol: i32) -> bool {
+    matches!(mol, 1 | 2 | 4)
+}
+
+/// `GetDescrTitleFromBioseq`: the first `title` descriptor of the Bioseq, else the title taken
+/// from the first matching feature of its `annot` (`Gene-ref.desc` when `CBioseq::IsNa`, else the
+/// first `Prot-ref.name`; `archive::ArchiveStream::bioseq_annot`), else empty.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:297-366
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiobj.hpp:1047-1054,1109-1112
+// (Dereferencing a `NULL` `Seq-annot` or `Seq-feat` reached before a matching feature throws
+// `CCoreException::eNullPtr` with a stack trace of memory addresses: refused.)
+fn query_title(query: &Query) -> Result<Vec<u8>, ProcessError> {
+    if let Some(title) = &query.title {
+        return Ok(title.clone());
+    }
+    match &query.annot_title {
+        AnnotTitle::None => Ok(Vec::new()),
+        AnnotTitle::Title(title) => Ok(title.clone()),
+        AnnotTitle::NullElement(what) => Err(ProcessError::Unsupported(format!(
+            "a query Bioseq without a title descriptor whose annot reaches {what} (NCBI stops with a NULL pointer stack trace) is not supported by LOSAT's rpsbproc"
+        ))),
+    }
+}
+
 /// `FillSequenceFromBioseq` for the members that rpsbproc prints: the label, the title, the
 /// length and the residues (or bases) of a query.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:952-983
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:248-253
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:297-319
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:297-366
 // `Get1LetterSeqData` converts the residues, then asks for `inst.length` whether it is set or
 // not: `GetLength` of an unset member throws `CUnassignedMember`, which ends rpsbproc as NCBI's
 // does (exit 3, after the `SESSION` line). The residues serve the site output (PS16b; a
-// nucleotide query's are translated, PS16c). A
-// query without a title descriptor but with `annot` takes its title from a feature (refused),
-// and a `CFastaReader` DefLine that is not a string is refused (`Query::unread_descriptor`).
+// nucleotide query's are translated, PS16c). A query without a title descriptor takes its title
+// from `annot` (`query_title`), refusing only a `NULL` `Seq-annot` or `Seq-feat` reached before a
+// match (where NCBI prints a host-dependent stack trace), and a `CFastaReader` DefLine that is not
+// a string is refused (`Query::unread_descriptor`).
 // `GetTaxId` (biodata_core.cpp:977) reads the `org` and `source` descriptors but never throws,
 // and the taxid is not printed, so those descriptors are only read past.
 fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32, Vec<u8>), ProcessError> {
@@ -220,6 +236,7 @@ fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32, Vec<u8>), Proc
     let Some(length) = query.length else {
         return Err(unassigned_member("NCBI-Sequence", "Seq-inst", "length"));
     };
+    let title = query_title(query)?;
     if let Some(what) = query.unread_descriptor {
         let local = query
             .ids
@@ -232,15 +249,6 @@ fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32, Vec<u8>), Proc
             )));
         }
     }
-    let title = match &query.title {
-        Some(title) => title.clone(),
-        None if query.has_annot => {
-            return Err(ProcessError::Unsupported(
-                "a query Bioseq without a title descriptor but with annot (NCBI takes the title from a feature) is not supported by LOSAT's rpsbproc".to_string(),
-            ));
-        }
-        None => Vec::new(),
-    };
     let mut residues = residues;
     // `Get1LetterSeqData` cuts the letters to `inst.length` (`GetLength`).
     residues.truncate(length as usize);

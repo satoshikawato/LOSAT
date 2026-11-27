@@ -379,7 +379,7 @@ fn x_resolved_record_frames(
     table: &GeneticCode,
     by_table: bool,
 ) -> Vec<QueryFrame> {
-    let mut random = crate::core::blast_encoding::NcbiRandom::new(letters.len() as u32);
+    let mut random = crate::utils::random_gen::NcbiRandom::new(letters.len() as u32);
     let mut resolve = |letter: u8| {
         let code = ncbi4na_of(letter);
         b"ACGT"[usize::from(crate::core::blast_encoding::resolve_ncbi4na_base(
@@ -536,16 +536,19 @@ impl SubjectSetNumbers {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-846
     /// The length adjustment and the effective search space of a context of `query_len_aa`
-    /// residues (`try_compute_eff_lengths_tblastx`), or `-searchsp` above 0 as the space.
+    /// residues (`try_compute_eff_lengths_tblastx`), or the option's space other than 0 as the
+    /// space (`-searchsp`, or a strategy's `EffectiveSearchSpace`, which can be negative).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:676-696
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1020-1035
     // `stats::setup::eff_lengths_database` and `calc_eff_lengths` (one owner for the six
     // programs, line RG D1a-3): `-dbsize` above 0 or the total, divided by 3 for the translated
-    // subject, NCBI's `Int4` count, and `-searchsp` above 0 as every context's search space.
+    // subject, NCBI's `Int4` count, and a space other than 0 as every context's search space.
     pub(crate) fn context_lengths(
         &self,
         query_len_aa: i64,
         karlin: &crate::stats::KarlinParams,
     ) -> Result<super::ncbi_cutoffs::EffLengthsResult, SearchSpaceOverflow> {
-        let searchsp = self.searchsp.filter(|&searchsp| searchsp > 0).unwrap_or(0);
+        let searchsp = self.searchsp.unwrap_or(0);
         self.context_lengths_with(query_len_aa, karlin, searchsp)
     }
 
@@ -604,7 +607,7 @@ impl SubjectSetNumbers {
         if statistics.gumbel_db_length > 0 && !statistics.per_subject() {
             return Ok(None);
         }
-        let searchsp = self.searchsp.filter(|&searchsp| searchsp > 0).unwrap_or(0);
+        let searchsp = self.searchsp.unwrap_or(0);
         contexts
             .map(|(query_length, karlin)| {
                 crate::stats::setup::preliminary_option_space(
@@ -664,6 +667,7 @@ impl SubjectSetNumbers {
 
     /// The database length of the effective lengths, in bases: `-dbsize` when above 0, else
     /// the real total.
+    #[cfg(test)]
     pub(crate) fn effective_length(&self) -> i64 {
         self.dbsize
             .filter(|&dbsize| dbsize > 0)

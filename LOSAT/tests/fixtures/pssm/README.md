@@ -52,3 +52,30 @@ the same bytes. The probes of `makeblastdb` on the same inputs are in `remaining
 The six `block_*` cases (the query's ncbistdaa OCTET STRING with a length past the end, or as a BIT STRING) are the inputs of
 the review of D3c-3a (`remaining-gaps-20261112/D/d3/c3a/review_probe/`), frozen with the official build under an address limit
 of 8 GiB.
+
+`d3b_<case>.asn.gz` (24 text files), `d3b_<case>.asn` (7 text files whose NCBI answer is an error that names the file,
+kept uncompressed for that reason) and `d3b_b_<case>.asnb` (7 BER files): the inputs of the rows `db.ptr.ps.<case>`
+(psiblast, `-comp_based_stats 0 -evalue 1000`, database `tests/db_search/paja`) and `db.ptr.tbn.<case>` (tblastn,
+`-evalue 1000`, database `tests/db_search/tslice`) in `tests/db_search_manifest/psiblast.ptr.tsv` and `tblastn.ptr.tsv`:
+NCBI's pointer forms where its reader reads a member or an element held by reference (an OPTIONAL member of a class type,
+an element of a list of references, and in a skip every such member): `NULL`, an object index `@n` and a value of a named
+type `:Type value`, in text, and `05 00`, the object index tag `5e` and the long tag `7f` with a type name, in BER.
+`d3b_base.asn.gz` is `../db_search/db.ps.asn.rnd.6.asn` without the Pssm member `intermediateData` (as `ps9_ber_base.asnb`);
+the other text files are that file with one member or element changed (`dl_*`: a pub descriptor whose author list is the
+delayed member `names`), and the BER files are `ps9_ber_base.asnb` with one member or element changed. They were made by
+`remaining-gaps-20261112/D/d3/c3b/tools/gen_rows.py`, which also writes the rows; the probes behind them (official NCBI
+BLAST+ 2.17.0 Linux build, `-num_threads 1`, an address limit of 8 GiB) are in `remaining-gaps-20261112/D/d3/c3b/probe/`.
+The `losat-rejection` rows are LOSAT's refusals of a value of another type than the declared one and of an element stated
+as `NULL` outside a skip (`docs/manual/src/refusals-edge-cases.md`).
+
+`ps15b2_tk_other_stdaa.asn.gz`: `ps4_tk_paja.asn.gz` with its query's Seq-inst molecule `aa` changed to `other` (the first `mol aa,`; ncbistdaa letters), gzipped; the PSSM query of rows `db.ps15b2.p.othr.crash.*`, `.open.*`, `.prow.*`, `.loop.*` and `.past.*` (line PS, PS15b-2 fix 1).
+
+`d3c_r_<case>.asn.gz` (6 text files): the inputs of the rows `db.ptr.ps.o11.r_<case>*` (line RG item D3c-3c) in
+`tests/db_search_manifest/psiblast.ptr.tsv`: `../db_search/db.ps.asn.rnd.6.asn` with an element stated as `NULL` in a
+list of its query that NCBI's object manager does not read and that holds no type the XML archive writer of LOSAT
+cannot write yet (Seq-hist replaces ids, alone and second, and assembly; Seq-ext seg and delta; BioSource subtype), so
+that NCBI's `-outfmt 11` stops at the element in its three streams (ASN.1 text, XML, binary). They were made by
+`remaining-gaps-20261112/D/d3/c3c/tools/gen_probeA2.py` (official NCBI BLAST+ 2.17.0 Linux build, `-num_threads 1`,
+probe `c3c/probeA2/`).
+
+`ps7b_allx_ratios.asn`: a 10-residue all-X protein query with frequency ratios only (`intermediateData.freqRatios`, no `finalData`), hand-written for `db.ps7b.inpssm.allx_ratios.B45.6` and `db.ps7b.tbn.allx_ratios.B45.6` (line PS, item PS7b) to test NCBI's ungapped-before-gapped score-block error order in `PsiBlastComputePssmScores` when `-matrix BLOSUM45` does not support 11/1.

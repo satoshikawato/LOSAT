@@ -1,0 +1,1 @@
+- Added manual Cloudflare Workers Static Assets deployment workflow (`.github/workflows/web-deploy.yml`), configuration (`web/deploy/cloudflare.config.ts`), pre-deploy bundle checks (`web/tools/check_web_dist.mjs`), and post-deploy HTTP/304 header checks (`web/tools/check_deploy_headers.mjs`) for LOSAT Web preview and production hosting.

@@ -14,7 +14,7 @@ fn run_words(line: &[&str], input: &[u8]) -> (i32, String, String) {
 
 #[test]
 fn the_short_usage_is_the_head_of_the_help() {
-    let usage = crate::ncbi_app::short_usage(HELP);
+    let usage = crate::ncbi_app::short_usage(&TOOL);
     assert_eq!(usage.len(), 431);
     assert!(usage.starts_with("USAGE\n  segmasker [-h] [-help] [-xmlhelp] [-in input_file_name]"));
     assert_eq!(HELP.len(), 1582);
@@ -62,8 +62,11 @@ fn the_keys_read_as_ncbis() {
     assert_eq!(args.integer("window"), Some(12));
     assert_eq!(args.double("locut"), Some(2.2));
     assert_eq!(args.double("hicut"), Some(2.5));
-    assert_eq!(args.value("infmt"), Some("fasta"));
-    assert_eq!(args.value("outfmt"), Some("interval"));
+    assert_eq!(args.bytes("infmt").as_deref(), Some(b"fasta".as_slice()));
+    assert_eq!(
+        args.bytes("outfmt").as_deref(),
+        Some(b"interval".as_slice())
+    );
     let args = crate::ncbi_app::args::parse(
         &TOOL,
         &words(&["-window", "0x10", "-locut", "2e", "-hicut=-nan"]),

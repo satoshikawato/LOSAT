@@ -1,7 +1,7 @@
 //! `losat dustmasker`: NCBI BLAST+ 2.17.0 dustmasker 1.0.0 (`CDustMaskApplication`), the masker
 //! of low-complexity regions of nucleotide sequences by the symmetric DUST algorithm. Its
-//! command line is NCBI's (`ncbi_app`, NCBI's application and argument reader), not clap's:
-//! `main` hands it the words after `dustmasker`. The work of its `Run` is in `app`.
+//! command line is NCBI's (`ncbi_app`, NCBI's application and argument reader): `main` hands it
+//! the words after `dustmasker`. The work of its `Run` is in `app`.
 
 mod app;
 mod fasta;
@@ -33,6 +33,9 @@ static TOOL: Tool = Tool {
     help: HELP,
     post_prefix: None,
     components: &[],
+    help_full: None,
+    short_description: None,
+    write_failure: None,
     dry_run: None,
 };
 

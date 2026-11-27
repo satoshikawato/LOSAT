@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::api::{read_input_file, read_inputs, run_to_file, validate, Inputs, Program, Role};
+use crate::utils::test_dir::TempDir;
 
 fn engine() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
@@ -18,29 +19,6 @@ fn inputs() -> PathBuf {
 
 fn frozen() -> PathBuf {
     engine().join("tests/fixtures/outfmt13_14")
-}
-
-fn temp_dir(stem: &str) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time before Unix epoch")
-        .as_nanos();
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat_outfmt1314_crate_{stem}_{}_{}",
-        crate::utils::test_dir::process_id(),
-        nanos
-    ));
-    fs::create_dir_all(&dir).expect("temp dir");
-    dir
-}
-
-/// A directory made by `temp_dir`, removed with what is in it when the value is dropped.
-struct TempDir(PathBuf);
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
 }
 
 /// A `run_local` call without an output file and without a receiver of side files
@@ -63,7 +41,7 @@ fn run_local_does_not_write_outfmt_13_and_14() {
             other_outfmts: &[],
             html_posts: None,
             formats: vec![FormatOutput {
-                outfmt: format,
+                outfmt: format.as_bytes(),
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
@@ -146,10 +124,10 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_tblastx_and_blastx() {
     let (pquery, nsubject) = (inputs().join("qprot_bad.faa"), inputs().join("snucl.fna"));
     let nquery = inputs().join("qnucl_valid.fna");
     let psubject = inputs().join("sprot.faa");
-    let scratch = TempDir(temp_dir("rl"));
+    let scratch = TempDir::unique("outfmt1314-crate-rl");
     let pquery = {
         // qprot_bad.faa has a bad third record: use the first two
-        let valid = scratch.0.join("qprot_valid.faa");
+        let valid = scratch.join("qprot_valid.faa");
         let text = fs::read_to_string(&pquery).unwrap();
         fs::write(&valid, text.split(">q3").next().unwrap()).unwrap();
         valid
@@ -162,7 +140,7 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_tblastx_and_blastx() {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: format,
+                    outfmt: format.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
@@ -296,7 +274,7 @@ fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_fi
     use crate::cli::{try_parse_from, Cli, Commands};
     use crate::report::blast_xml2::SideFileSink;
     use std::sync::Arc;
-    let work = temp_dir("receiver");
+    let work = TempDir::unique("outfmt1314-crate-receiver");
     let pquery = {
         // qprot_bad.faa has a bad third record: use the first two
         let valid = work.join("qprot_valid.faa");
@@ -349,7 +327,7 @@ fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_fi
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: format,
+                    outfmt: format.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Files(&mut master, SideFileSink::new("r", received.clone())),
                 }],
@@ -416,5 +394,4 @@ fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_fi
             );
         }
     }
-    fs::remove_dir_all(work).ok();
 }

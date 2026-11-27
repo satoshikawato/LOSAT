@@ -536,9 +536,17 @@ fn the_structured_formats_read_no_displayed_counts_and_write_no_query_warnings()
         assert!(format.is_tabular(), "{outfmt}");
     }
     // DBID item T: the formats whose batches' prefetch writes the taxonomy database's
-    // messages (not the archive, XML2 and JSON; the Seq-annots only with
-    // `PRE_FETCH_SEQS_LIMIT=2147483647`, DBID P3, which the test process may have set).
-    let seq_annots = |number| crate::algorithm::common::database::seq_annots_prefetch(Some(number));
+    // messages (not the archive; the Seq-annots only with `PRE_FETCH_SEQS_LIMIT=2147483647`, DBID
+    // P3, which the test process may have set; the XML2 and JSON documents too, line DBID
+    // taxpf-1).
+    let seq_annots = |number| {
+        crate::algorithm::common::database::seq_annots_prefetch(Some(
+            crate::algorithm::common::database::PrefetchFormat::of(
+                number,
+                crate::report::archive::options::RequestKind::Tblastx,
+            ),
+        ))
+    };
     for (outfmt, prefetches) in [
         ("0", true),
         ("5", true),
@@ -550,9 +558,9 @@ fn the_structured_formats_read_no_displayed_counts_and_write_no_query_warnings()
         ("9", seq_annots(9)),
         ("11", false),
         ("12", seq_annots(12)),
-        ("13", false),
-        ("15", false),
-        ("16", false),
+        ("13", true),
+        ("15", true),
+        ("16", true),
     ] {
         assert_eq!(
             output_format(outfmt).prefetches_subjects(),
@@ -601,7 +609,7 @@ fn hit_list_keeps_ncbis_subjects_on_ties() {
 fn outfmt7_headers_follow_print_header() {
     let header = |hits| {
         let mut out = Vec::new();
-        write_outfmt7_query_header(&mut out, b"q1 title", "db", hits).unwrap();
+        write_outfmt7_query_header(&mut out, b"q1 title", b"db", hits).unwrap();
         String::from_utf8(out).unwrap()
     };
     assert_eq!(
@@ -647,7 +655,20 @@ fn the_query_anchored_formats_are_pairwise_views_and_others_unsupported() {
             "{outfmt}"
         );
     }
-    assert_eq!(output_format("17"), TblastxOutputFormat::Unsupported);
+    // SAM (17) reads its custom words (`SQ`, `SR`; BLASTN's application writes it for a TBLASTX
+    // strategy, `tblastx::sam`).
+    use crate::report::sam::SamSpec;
+    assert_eq!(
+        output_format("17"),
+        TblastxOutputFormat::Sam(SamSpec::default())
+    );
+    assert_eq!(
+        output_format("17 SQ SR"),
+        TblastxOutputFormat::Sam(SamSpec {
+            subject_as_reference: true,
+            sequence: true
+        })
+    );
     assert_eq!(output_format("99"), TblastxOutputFormat::Unsupported);
 }
 
@@ -680,7 +701,10 @@ fn only_a_field_list_a_delimiter_and_10_and_20_take_the_shared_writer() {
     ] {
         match output_format(outfmt) {
             TblastxOutputFormat::CustomTabular(spec) => {
-                assert_eq!((spec.kind, spec.delimiter.as_str()), (kind, delimiter))
+                assert_eq!(
+                    (spec.kind, spec.delimiter.as_slice()),
+                    (kind, delimiter.as_bytes())
+                )
             }
             other => panic!("{outfmt}: {other:?}"),
         }

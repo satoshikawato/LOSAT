@@ -201,8 +201,9 @@ impl<W: Write> ZipStream<W> {
 }
 
 /// The entries of a stored ZIP archive as (name, bytes), read through its central directory, with
-/// every CRC-32 and size checked (the adapter's tests).
-#[cfg(test)]
+/// every CRC-32 and size checked (the adapter's tests, those of `tests/` too: native builds only,
+/// as `emit::EMITTED`).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn read(archive: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
     let u16_at = |at: usize| u16::from_le_bytes(archive[at..at + 2].try_into().unwrap());
     let u32_at = |at: usize| u32::from_le_bytes(archive[at..at + 4].try_into().unwrap());

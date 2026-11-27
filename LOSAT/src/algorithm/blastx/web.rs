@@ -1,5 +1,7 @@
 //! Existing reactor ABI adapter; the search, batching and reports use BLASTX owners.
-use super::{args::BlastxArgs, input, native, query_setup::BATCH_SIZE, report, runtime};
+#[cfg(feature = "parallel")]
+use super::input;
+use super::{args::BlastxArgs, input_source, native, query_setup::BATCH_SIZE, report, runtime};
 use crate::api::local_blast::OutputSink;
 use anyhow::{bail, Result};
 use std::{cell::RefCell, io::Write, path::Path};
@@ -8,7 +10,8 @@ use std::{cell::RefCell, io::Write, path::Path};
 // The existing CLI v2 parser owns all defaults, lexical/scope validation and
 // code32 rejection. Synthetic paths identify memory input; no file is opened.
 pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
-    // The CLI's `-db` (a database search) waits for stage DB-7 in LOSAT Web, as BLASTP's.
+    // The frozen ABI v1 (plan TD-1) has no database search; LOSAT Web searches a database
+    // through ABI v2.
     if extra
         .iter()
         .any(|key| key.split('=').next().unwrap_or(key) == "-db")
@@ -35,10 +38,11 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
     argv.extend_from_slice(extra);
     // ABI v1 is frozen (plan TD-1): its `-outfmt` keeps the values and the parser errors of
     // the CLI's BLASTX parser before it read `-outfmt` as NCBI (`v1_outfmt`).
-    let command = crate::cli::command_of("blastx").mut_subcommand("blastx", |blastx| {
+    let command = crate::web_v1_argv::command("blastx").mut_subcommand("blastx", |blastx| {
         blastx.mut_arg("outfmt", |outfmt| outfmt.value_parser(v1_outfmt))
     });
-    match crate::cli::try_parse_from_command::<crate::cli::Cli, _, _>(command, argv)?.command {
+    let argv = argv.into_iter().map(Into::into).collect();
+    match crate::web_v1_argv::parse(command, argv).map_err(anyhow::Error::msg)? {
         crate::cli::Commands::Blastx(args) => Ok(args),
         _ => unreachable!("fixed BLASTX subcommand"),
     }
@@ -71,12 +75,13 @@ fn v1_outfmt(value: &str) -> std::result::Result<String, String> {
 /// tabular writer, as the CLI's (`ResolvedOptions::tabular`), without a taxonomy database
 /// (DECISIONS 7 of line CLI C2; ABI v1's fields show no taxonomy).
 fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
-    let mut words = args.outfmt.split_whitespace();
+    let outfmt = args.outfmt.to_string_lossy();
+    let mut words = outfmt.split_whitespace();
     let number = words.next().unwrap_or_default().parse::<u8>()?;
     args.resolve_with_format(&crate::blastinput::app::FormatChoice {
         number: i32::from(number),
-        spec: words.collect::<Vec<_>>().join(" "),
-        delimiter: String::new(),
+        spec: words.collect::<Vec<_>>().join(" ").into_bytes(),
+        delimiter: Vec::new(),
     })
 }
 
@@ -84,7 +89,7 @@ fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
 // Original bytes are reparsed on each call with this role's gencode/mask
 // options; generic FASTA handles never cache translated or masked search state.
 #[cfg_attr(
-    not(target_arch = "wasm32"),
+    not(losat_web_abi_v1),
     expect(dead_code, reason = "called only by the web ABI (`web_api`, wasm32)")
 )]
 pub(crate) fn run_pair(
@@ -95,20 +100,16 @@ pub(crate) fn run_pair(
 ) -> Result<Vec<u8>> {
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     let diagnostics = RefCell::new(std::io::stderr());
-    let subjects = input::parse_fasta_batches_with_warnings(
-        subject,
-        true,
-        args.lcase_masking,
-        usize::MAX,
-        &mut |_| Ok(()),
-        &mut |warning| native::reader_warning(warning, &mut *diagnostics.borrow_mut()),
-    )?;
+    let subjects = input_source::read_web_subjects(subject, args.lcase_masking, &mut |message| {
+        Ok(diagnostics.borrow_mut().write_all(message)?)
+    })?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
     // (The same bytes as before for the options ABI v1 had: a hit list size below 5 from
     // -max_target_seqs; `native::warnings_of` also reads -num_descriptions / -num_alignments,
     // which the CLI parser now accepts.)
     let v1_outfmt_number = args
         .outfmt
+        .to_string_lossy()
         .split_whitespace()
         .next()
         .and_then(|word| word.parse::<i32>().ok())
@@ -131,10 +132,19 @@ pub(crate) fn run_pair(
         parsed: &no_parsed,
     };
     // The run's decision for a matrix name that NCBI's XML does not know
-    // (`blast_xml::xml_matrix_failure`): none, as ABI v1 writes outfmt 0, 6 and 7 (`v1_outfmt`).
-    let xml_matrix = super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), true);
+    // (`blast_xml::xml_matrix_failure`): none, as ABI v1 writes outfmt 0, 6 and 7 (`v1_outfmt`);
+    // its query would be the run's without scopes of `-parse_deflines`, which ABI v1 does not read
+    // (`QueryScopes::xml_failing_query`).
+    let xml_matrix = super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), true)
+        .map(|failure| {
+            crate::blastinput::query_batch::QueryScopes::xml_failing_query(None, failure)
+        });
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:784-788
-    super::native::write_empty_subject_warnings(&subjects, &mut *diagnostics.borrow_mut())?;
+    super::native::write_empty_subject_warnings(
+        &subjects,
+        options.app_name,
+        &mut *diagnostics.borrow_mut(),
+    )?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     report::write_prolog(
         &mut output,
@@ -222,6 +232,8 @@ pub(crate) fn run_pair(
                                 false,
                                 None,
                                 xml_matrix,
+                                // ABI v1 reads no `-parse_deflines` (`parse_args`).
+                                None,
                                 // The queued batches are searched: the pool is free.
                                 Some(pool),
                             )?;
@@ -231,9 +243,8 @@ pub(crate) fn run_pair(
                 }
                 Ok(())
             };
-            let parsed = input::parse_fasta_batches_with_warnings(
+            let parsed = input_source::read_web_queries(
                 query,
-                false,
                 args.lcase_masking,
                 BATCH_SIZE,
                 &mut |queries| {
@@ -259,10 +270,8 @@ pub(crate) fn run_pair(
                     }
                     flushed
                 },
-                &mut |warning| {
-                    let mut bytes = Vec::new();
-                    native::reader_warning(warning, &mut bytes)?;
-                    x_events.borrow_mut().push(XEvent::Warn(bytes));
+                &mut |message| {
+                    x_events.borrow_mut().push(XEvent::Warn(message.to_vec()));
                     Ok(())
                 },
             );
@@ -271,9 +280,8 @@ pub(crate) fn run_pair(
             }
             return parsed;
         }
-        input::parse_fasta_batches_with_warnings(
+        input_source::read_web_queries(
             query,
-            false,
             args.lcase_masking,
             BATCH_SIZE,
             &mut |queries| {
@@ -302,12 +310,14 @@ pub(crate) fn run_pair(
                     false,
                     None,
                     xml_matrix,
+                    // ABI v1 reads no `-parse_deflines` (`parse_args`).
+                    None,
                     x_pool,
                 )?;
                 processed += queries.len();
                 Ok(())
             },
-            &mut |warning| native::reader_warning(warning, &mut *diagnostics.borrow_mut()),
+            &mut |message| Ok(diagnostics.borrow_mut().write_all(message)?),
         )
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279

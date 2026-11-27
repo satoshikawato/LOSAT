@@ -193,15 +193,33 @@ impl RecordSource {
 // these would bring along.
 #[doc(hidden)]
 impl FastaRecord {
-    /// The Seq-ids `-parse_deflines` read, `None` without the option.
+    /// The Seq-ids `-parse_deflines` read, `None` without the option (and for the ids that the
+    /// reports do not show, `keeping_bioseq_ids`).
     pub fn believed(&self) -> Option<&believed::BelievedIds> {
-        self.source.as_ref()?.believed.as_deref()
+        self.source
+            .as_ref()?
+            .believed
+            .as_deref()
+            .filter(|ids| ids.shown)
     }
 
     /// `believed`, shared (for a reader of the records that does not hold them:
     /// `query_batch::BatchCount::next_batch`).
     pub fn believed_shared(&self) -> Option<std::sync::Arc<believed::BelievedIds>> {
-        self.source.as_ref()?.believed.clone()
+        self.source
+            .as_ref()?
+            .believed
+            .clone()
+            .filter(|ids| ids.shown)
+    }
+
+    /// The Seq-ids of the Bioseq that the reports do not show (`keeping_bioseq_ids`).
+    fn kept_bioseq_ids(&self) -> Option<&believed::BelievedIds> {
+        self.source
+            .as_ref()?
+            .believed
+            .as_deref()
+            .filter(|ids| !ids.shown)
     }
 
     /// The record of the Bioseq whose Seq-ids are `ids` (at least one), shown as `-parse_deflines`
@@ -220,6 +238,21 @@ impl FastaRecord {
         self
     }
 
+    /// The record of the Bioseq whose Seq-ids are `ids` (at least one) that the reports show as a
+    /// record without them (its local id and title, as without `-parse_deflines`), and whose
+    /// Seq-aligns take the first (`seq_id`): the query of psiblast's and tblastn's `-in_pssm` whose
+    /// one Seq-id is an integer local id, without `-parse_deflines` (`pssm_search::PsiSearch::
+    /// query_record`; NCBI BLAST+ 2.17.0 shows the title and writes `local id 5` in the Seq-aligns).
+    pub fn keeping_bioseq_ids(mut self, ids: Vec<crate::seqid::ParsedSeqId>) -> Self {
+        let mut kept = believed::BelievedIds::of_bioseq(
+            ids,
+            crate::report::archive::bioseq::SeqLocStrand::Unknown,
+        );
+        kept.shown = false;
+        self.source.get_or_insert_with(Default::default).believed = Some(std::sync::Arc::new(kept));
+        self
+    }
+
     /// The record's names (`RecordNames`): its local ID, its title and the Seq-ids
     /// `-parse_deflines` read.
     pub fn names(&self) -> RecordNames<'_> {
@@ -227,6 +260,7 @@ impl FastaRecord {
             local_id: &self.local_id,
             title: &self.title,
             believed: self.believed(),
+            bioseq_ids: self.kept_bioseq_ids(),
         }
     }
 
@@ -248,11 +282,8 @@ impl FastaRecord {
     /// The record as the Seq-loc of the archive's `seq-loc-list` (`-parse_deflines`, an id that is
     /// not local): the searched interval (`x_FastaToSeqLoc`; the `to` of an empty record is -1).
     pub fn archive_seq_loc(&self) -> Option<crate::report::archive::bioseq::QuerySeqLoc<'_>> {
-        let source = self.source.as_ref()?;
-        let from = source.cut_from as i32;
-        source
-            .believed
-            .as_ref()?
+        let from = self.source.as_ref()?.cut_from as i32;
+        self.believed()?
             .seq_loc(from, from + self.sequence.len() as i32 - 1)
     }
 
@@ -329,6 +360,16 @@ impl FastaRecord {
     }
 }
 
+/// The library's `Hit::subject_title` of a subject read from FASTA: its title after the first word
+/// (lossy UTF-8), `None` for a title without a space. The one producer for every program; no
+/// report reads it (the reports take the title bytes by subject index).
+pub(crate) fn hit_subject_title(title: &[u8]) -> Option<String> {
+    title
+        .iter()
+        .position(|&byte| byte == b' ')
+        .map(|space| String::from_utf8_lossy(&title[space + 1..]).into_owned())
+}
+
 /// The names of a record that the reports show, made from its local ID, its title bytes and the
 /// Seq-ids `-parse_deflines` read: the one owner of these rules, for the shared reader's records
 /// (`FastaRecord::names`) and BLASTX's (`algorithm::blastx::input::FastaRecord::names`).
@@ -341,6 +382,9 @@ pub struct RecordNames<'a> {
     pub title: &'a [u8],
     /// The Seq-ids `-parse_deflines` read, `None` without the option.
     pub believed: Option<&'a believed::BelievedIds>,
+    /// The Seq-ids of the record's Bioseq that the reports do not show
+    /// (`FastaRecord::keeping_bioseq_ids`), which its Seq-id takes; `None` for other records.
+    pub bioseq_ids: Option<&'a believed::BelievedIds>,
 }
 
 impl<'a> RecordNames<'a> {
@@ -377,7 +421,7 @@ impl<'a> RecordNames<'a> {
 
     /// The Seq-id of the record in the Seq-aligns and the archive.
     pub fn seq_id(self) -> crate::report::seqid::SeqId<'a> {
-        match self.believed {
+        match self.believed.or(self.bioseq_ids) {
             Some(ids) => crate::report::seqid::SeqId::Db(&ids.best),
             None => crate::report::seqid::SeqId::Local(self.local_id),
         }
@@ -651,6 +695,14 @@ impl<R: Read> FastaInputSource<R> {
         self.reader.lines.at_eof()
     }
 
+    /// The input this source reads, given back: the bytes its stream buffered are dropped, so the
+    /// caller puts the input's position where its next reading starts
+    /// (`algorithm::blastx::blast_xml::prescan_queries`, which reads the query file before the
+    /// search and hands the same open file to the search).
+    pub(crate) fn into_input(self) -> R {
+        self.reader.lines.into_input()
+    }
+
     /// The search whose records this source reads under `-parse_deflines`: a query and a subject
     /// with one id are compared (`crate::seqid::id_scope::IdScope`).
     pub fn set_id_scope(
@@ -696,7 +748,22 @@ impl<R: Read> FastaInputSource<R> {
         record.warnings = warnings;
         Ok(record)
     }
+
+    /// `next_sequence`, keeping `sequence` in upper case and returning its lowercase mask
+    /// intervals directly when `keep_masks` is set, without retaining the warnings already written
+    /// to `warn` (for `algorithm::blastx::input_source`).
+    pub(crate) fn next_sequence_upper(
+        &mut self,
+        keep_masks: bool,
+        warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+    ) -> Result<UpperRecord, ReadError> {
+        self.reader.read_one_seq_upper(keep_masks, warn)
+    }
 }
+
+/// A FASTA record with upper-case letters and its lowercase mask intervals
+/// (`FastaInputSource::next_sequence_upper`).
+pub(crate) type UpperRecord = (FastaRecord, Vec<(i32, i32)>);
 
 /// All records of an input (`CBlastInput::GetAllSeqs`, the subjects): the messages go to
 /// `warn` as they are written; a reader error stops the reading.
@@ -754,21 +821,50 @@ pub fn read_subjects_map<R: Read, T>(
     source: &mut FastaInputSource<R>,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
     warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
-    mut convert: impl FnMut(FastaRecord) -> anyhow::Result<T>,
+    convert: impl FnMut(FastaRecord) -> anyhow::Result<T>,
 ) -> anyhow::Result<Vec<T>> {
+    read_subjects_with(source, range, |source| source.next_sequence(warn), convert)
+}
+
+/// `read_subjects_map` reading each record with `FastaInputSource::next_sequence_upper` (upper-case
+/// letters and direct mask intervals, without copying warnings into the record).
+pub(crate) fn read_subjects_upper<R: Read, T>(
+    source: &mut FastaInputSource<R>,
+    range: Option<&crate::blastinput::seq_range::SequenceRange>,
+    keep_masks: bool,
+    warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+    mut convert: impl FnMut(FastaRecord, Vec<(i32, i32)>) -> anyhow::Result<T>,
+) -> anyhow::Result<Vec<T>> {
+    read_subjects_with(
+        source,
+        range,
+        |source| source.next_sequence_upper(keep_masks, warn),
+        |(record, masks)| convert(record, masks),
+    )
+}
+
+fn read_subjects_with<R: Read, Raw, T>(
+    source: &mut FastaInputSource<R>,
+    range: Option<&crate::blastinput::seq_range::SequenceRange>,
+    mut next: impl FnMut(&mut FastaInputSource<R>) -> Result<Raw, ReadError>,
+    mut convert: impl FnMut(Raw) -> anyhow::Result<T>,
+) -> anyhow::Result<Vec<T>>
+where
+    Raw: HasSequenceLen,
+{
     use crate::blastinput::seq_range::{record_interval, RecordInterval};
     let mut records = Vec::new();
     while !source.end() {
-        match source.next_sequence(warn) {
-            Ok(record) => {
+        match next(source) {
+            Ok(raw) => {
                 if let Some(range) = range {
-                    if record_interval(range, record.sequence.len()) == RecordInterval::PastEnd {
+                    if record_interval(range, raw.sequence_len()) == RecordInterval::PastEnd {
                         return Err(crate::blastinput::app::options_error(
                             "Invalid from coordinate (greater than sequence length)",
                         ));
                     }
                 }
-                records.push(convert(record)?);
+                records.push(convert(raw)?);
             }
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,
@@ -778,6 +874,22 @@ pub fn read_subjects_map<R: Read, T>(
         }
     }
     Ok(records)
+}
+
+trait HasSequenceLen {
+    fn sequence_len(&self) -> usize;
+}
+
+impl HasSequenceLen for FastaRecord {
+    fn sequence_len(&self) -> usize {
+        self.sequence.len()
+    }
+}
+
+impl HasSequenceLen for (FastaRecord, Vec<(i32, i32)>) {
+    fn sequence_len(&self) -> usize {
+        self.0.sequence.len()
+    }
 }
 
 /// The queries of an input read to its end, as NCBI's batches read them one record at a

@@ -210,6 +210,7 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
                     x_drop_final: self.x_drop_final,
                     contained_before: true,
                     matrix: self.matrix,
+                    reads: None,
                 },
                 hsps,
                 scratch,
@@ -276,6 +277,27 @@ pub(crate) struct TraceHsps<'a, R: PssmRows> {
     pub(crate) contained_before: bool,
     /// The matrix of the search (`sbp->matrix`), for the positives.
     pub(crate) matrix: ScoringMatrix,
+    /// RPS-BLAST's reads of a profile asked where NCBI's leave its data (`TraceReads`); `None`
+    /// for psiblast's query PSSM.
+    pub(crate) reads: Option<&'a dyn TraceReads>,
+}
+
+/// What an RPS-BLAST traceback asks of its profile, whose `.psq` letters can be fewer than the
+/// columns of its preliminary alignments (`rps_search::profile`): the start of each alignment
+/// (before it is made; also the composition-based redo's, `redo1::RedoRun::with_profile_reads`),
+/// the letters of each traced alignment without composition-based statistics (NCBI counts its
+/// identities and positives there, blast_traceback.c:589), and the redo's reads past its copy of
+/// the letters. `starts` and `traced` return whether the loop goes on; after a `false` the list's
+/// traceback ends and the caller refuses.
+pub(crate) trait TraceReads {
+    /// Whether the alignment that starts at the query (profile) position `q_start` is made.
+    fn starts(&self, q_start: usize) -> bool;
+    /// Whether the traced alignment from the query (profile) position `query_start` with
+    /// `edit_script` reads only what NCBI reads.
+    fn traced(&self, query_start: i32, edit_script: &[GapEditOp]) -> bool;
+    /// The composition-based redo's near-identical walk read past the profile's copy of its
+    /// letters or past their words (`redo1::RedoRun::with_profile_reads`).
+    fn copy_read_past(&self);
 }
 
 /// The subject of a list's traceback: its letters, or the frames of a translated subject
@@ -349,6 +371,11 @@ pub(crate) fn trace_hsps<R: PssmRows>(
             hsp.gapped_query_start = q_start;
             hsp.gapped_subject_start = s_start;
         }
+        if let Some(reads) = inputs.reads {
+            if !reads.starts(hsp.gapped_query_start as usize) {
+                return (Vec::new(), 0);
+            }
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:463-473
         let (s_start, s_length, shift) = if translated {
             (hsp.gapped_subject_start as usize, subject.len(), 0)
@@ -375,6 +402,11 @@ pub(crate) fn trace_hsps<R: PssmRows>(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-601
         // `Blast_HSPTest` deletes nothing (psiblast has no percent identity or minimum hit
         // length).
+        if let Some(reads) = inputs.reads {
+            if !reads.traced(aligned.query_start, &aligned.edit_script) {
+                return (Vec::new(), 0);
+            }
+        }
         let shift = shift as i32;
         hsp.raw_score = aligned.score;
         hsp.query_start = aligned.query_start;
@@ -453,7 +485,7 @@ pub(super) fn preliminary_hsp(local: &BlastpHsp) -> BlastpPreliminaryHsp {
 /// (`sbp->matrix`; rpsblast's is BLOSUM62), with the gaps and mismatches that the reports read.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:796-833
-pub(super) fn final_hsp(
+pub(crate) fn final_hsp(
     hsp: &BlastpPreliminaryHsp,
     edit_script: Vec<GapEditOp>,
     query_nomask: &[u8],

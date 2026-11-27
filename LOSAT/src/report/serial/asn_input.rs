@@ -14,13 +14,16 @@
 //! `std::bad_alloc` or another `std::exception` of a string's reserve, or LOSAT's refusal of what
 //! NCBI's process may or may not read by the host's memory. What a primitive posts while it reads
 //! (a byte of a VisibleString read as `#`, a UTF8String tag for a VisibleString) is handed to the
-//! caller in order (`StringPost`), which adds the stack trace that NCBI's message names.
+//! caller as it is made (`StringPost`), which adds the stack trace that NCBI's message names.
 
 use super::asn_text_reader::{
     AsnSource, AsnTextError, AsnTextErrorKind, EnumWord, MemberId, NcbiThrow, PointerType, Reader,
     FILL_BUFFER_EOF, FIND_NAME, FIND_VALUE, SKIP_WHITE_SPACE_EOF, UNEXPECTED_MEMBER,
 };
+use super::asn_types::read::PostSink;
+use super::asn_types::Member;
 use super::encoder::StreamPosition;
+use super::object_frame::{text_frame_site, FrameKind};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str::string_to_int;
 use crate::rpsbproc::{HOST_DEPENDENT_BYTES, USER_SPACE_BYTES};
@@ -35,8 +38,9 @@ use crate::rpsbproc::{HOST_DEPENDENT_BYTES, USER_SPACE_BYTES};
 pub(crate) enum Fail {
     /// NCBI's `CEofException` (see the module comment).
     Eof,
-    /// A `CSerialException`, with the frame stack that `END_OBJECT_FRAME` adds to it.
-    Serial(Box<NcbiException>),
+    /// A `CSerialException`, with the frame stack that `END_OBJECT_FRAME` adds to it
+    /// ([`SerialFail`]).
+    Serial(Box<SerialFail>),
     /// Another `CException` (the `CUtilException` of a number in text, the `CStringException` of
     /// a member's tag), with a line for each frame it leaves (`NCBI_RETHROW_SAME`).
     Exception(Box<NcbiException>),
@@ -48,6 +52,43 @@ pub(crate) enum Fail {
     Std(&'static &'static str),
     /// NCBI reads it, or not, by what LOSAT does not know (the host's memory); LOSAT refuses it.
     Unsupported(Box<Refusal>),
+}
+
+/// A `CSerialException` on its way out through the object frames: the exception, and the names
+/// (`GetFrameName()`) of the frames it has left since it was last used whole, innermost first,
+/// which `END_OBJECT_FRAME` adds to its frame stack (`AddFrameInfo`). They are added at once where
+/// the exception is used whole ([`SerialFail::exception`]): NCBI puts each name in front of the
+/// stack, so an error deep inside a nest of any depth built its stack in time quadratic in the
+/// depth; this builds it in linear time.
+#[derive(Debug)]
+pub(crate) struct SerialFail {
+    exception: NcbiException,
+    frames: Vec<&'static str>,
+}
+
+impl SerialFail {
+    /// `AddFrameInfo` of the frame's name `name` as the exception leaves the frame (an empty name
+    /// adds nothing).
+    pub(crate) fn add_frame(&mut self, name: &'static str) {
+        if !name.is_empty() {
+            self.frames.push(name);
+        }
+    }
+
+    /// `GetErrCode()` of the exception, by its name (`NcbiException::kind`).
+    pub(crate) fn kind(&self) -> &'static str {
+        self.exception.kind()
+    }
+
+    /// The exception with the names of the frames it left added to its frame stack.
+    pub(crate) fn exception(self) -> NcbiException {
+        let SerialFail {
+            mut exception,
+            frames,
+        } = self;
+        exception.add_frame_infos(&frames);
+        exception
+    }
 }
 
 /// What [`Fail::Unsupported`] says of what LOSAT does not read.
@@ -67,7 +108,10 @@ impl Fail {
     /// [`Fail::Serial`] of `e`.
     #[cold]
     pub(crate) fn serial(e: NcbiException) -> Fail {
-        Fail::Serial(Box::new(e))
+        Fail::Serial(Box::new(SerialFail {
+            exception: e,
+            frames: Vec::new(),
+        }))
     }
 
     /// [`Fail::Exception`] of `e`.
@@ -101,32 +145,6 @@ pub(crate) fn throw_error(
     ))
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/member.cpp:712-756
-// (`eNullValue` and `eMissingValue` are not thrown by the readers of these types: `ExpectedMember`
-// throws `eFormatError` with the default `eSerialVerifyData_Yes`.)
-const READ_WITH_SET_FLAG_MEMBER: (&str, u32, &str) = (
-    "src/serial/member.cpp",
-    752,
-    "ncbi::CMemberInfoFunctions::ReadWithSetFlagMember",
-);
-
-/// What reading a SEQUENCE member makes of `fail`: `ReadWithSetFlagMember` rethrows a
-/// `CSerialException` of a member with a set flag (`set_flag`) with `error while reading <name>`
-/// (`NCBI_RETHROW_SAME`). The one owner of that rethrow, for the typed reader (`asn_types::read`)
-/// and the mask files' reader (`writedb::mask_info`).
-#[cold]
-#[inline(never)]
-pub(crate) fn read_with_set_flag_member(fail: Fail, set_flag: bool, name: &str) -> Fail {
-    match fail {
-        Fail::Serial(e) if set_flag => {
-            let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
-            let message = format!("error while reading {name}");
-            Fail::serial(e.rethrow_same(file, line, function, message))
-        }
-        other => other,
-    }
-}
-
 /// The `CSerialException` (`eInvalidData`) of `CEnumeratedTypeValues::FindValue` (a name) or
 /// `FindName` (a number) at `site` for `value`, which names no value of the type (the binary
 /// stream's `ReadEnum` too).
@@ -151,22 +169,54 @@ pub(crate) const VECTOR_RESERVE_LENGTH_ERROR: &str = "vector::reserve";
 /// What LOSAT's own messages call the document that a reader reads, the reader, the input that a
 /// length can pass the end of, and the part of NCBI's program that allocates what a length asks
 /// for (the lexical layer's refusals, `asn_text_reader::Reader::new`, and [`reserve`]'s): the one
-/// owner of those words for each caller.
+/// owner of those words for each caller; and whether NCBI's program reads the objects of a file
+/// with one object stream (`one_stream`).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Names {
     pub(crate) document: &'static str,
     pub(crate) reader: &'static str,
     pub(crate) input: &'static str,
     pub(crate) allocator: &'static str,
+    /// Whether NCBI's program reads all the objects of a file with one object stream, whose line
+    /// count goes on from one object to the next (blast_formatter's archive reader: observed,
+    /// line RG item F3, agent C6, 2026-11-23, a bad byte of an archive's second object posted
+    /// with the line of the file), instead of a new stream for each object
+    /// (`read::ObjectStream`, `Input::new_object`).
+    pub(crate) one_stream: bool,
+    /// Whether the program reports every `CSerialException` of the read with a message of its own
+    /// (psiblast's and tblastn's "Unrecognized format for PSSM", `CPsiBlastArgs`), so that what
+    /// the exception says does not show (`read::TypedReader::other_type`).
+    pub(crate) own_serial_message: bool,
 }
 
 impl Names {
-    /// The PSSM file of `-in_pssm`.
+    /// The PSSM file of `-in_pssm` (psiblast and tblastn).
     pub(crate) const PSSM: Names = Names {
         document: "PSSM",
         reader: "PSSM reader",
         input: "input",
         allocator: "NCBI's reader",
+        one_stream: false,
+        own_serial_message: true,
+    };
+    /// A profile file of makeprofiledb (`-in`, ASN.1 text or `-binary`). makeprofiledb prints the
+    /// exception's own text, so `:OtherType` depends on the types its process has met before.
+    pub(crate) const PROFILE: Names = Names {
+        document: "profile",
+        reader: "PSSM reader",
+        input: "file",
+        allocator: "makeprofiledb",
+        one_stream: false,
+        own_serial_message: false,
+    };
+    /// Binary definition lines (`ASN1_BlastDefLine` user object) of makeprofiledb.
+    pub(crate) const BINARY_DEFLINES: Names = Names {
+        document: "binary definition lines",
+        reader: "binary definition lines reader",
+        input: "binary header",
+        allocator: "makeprofiledb",
+        one_stream: false,
+        own_serial_message: false,
     };
     /// A mask data file of makeblastdb's `-mask_data`.
     pub(crate) const MASK: Names = Names {
@@ -174,6 +224,35 @@ impl Names {
         reader: "mask data reader",
         input: "file",
         allocator: "makeblastdb",
+        one_stream: false,
+        own_serial_message: false,
+    };
+    /// A Seq-entry or Bioseq-set of makeblastdb's `-input_type asn1_txt` / `asn1_bin`.
+    pub(crate) const BIOSEQ: Names = Names {
+        document: "bioseq",
+        reader: "bioseq reader",
+        input: "file",
+        allocator: "makeblastdb",
+        one_stream: false,
+        own_serial_message: false,
+    };
+    /// Binary definition lines (`ASN1_BlastDefLine`) of a Bioseq.
+    pub(crate) const DEFLINE_HEADER: Names = Names {
+        document: "Blast-def-line-set",
+        reader: "Blast-def-line-set reader",
+        input: "header",
+        allocator: "makeblastdb",
+        one_stream: false,
+        own_serial_message: false,
+    };
+    /// The input of `losat rpsbproc`: `Blast4-archive` objects in ASN.1 text (`rpsbproc::archive`).
+    pub(crate) const ARCHIVE: Names = Names {
+        document: "archive",
+        reader: "rpsbproc",
+        input: "input",
+        allocator: "NCBI's rpsbproc",
+        one_stream: false,
+        own_serial_message: false,
     };
     /// The bytes of a delayed member that a writer reads again (`CDelayBuffer::Update`). The read
     /// that kept them took them whole, so no length passes their end.
@@ -182,6 +261,33 @@ impl Names {
         reader: "delayed member reader",
         input: "member's bytes",
         allocator: "NCBI's reader",
+        one_stream: false,
+        own_serial_message: false,
+    };
+    /// A search strategy file of `-import_search_strategy` (`report::archive::read::import`). The
+    /// import has no message of its own for a `CSerialException`: a value of another class
+    /// (`:name`) is LOSAT's refusal (`read::TypedReader::other_type`), as in the other files that
+    /// LOSAT reads without such a message.
+    pub(crate) const STRATEGY: Names = Names {
+        document: "search strategy",
+        reader: "search strategy reader",
+        input: "input",
+        allocator: "NCBI's reader",
+        one_stream: false,
+        own_serial_message: false,
+    };
+    /// A BLAST archive of blast_formatter's `-archive` (`report::archive::read`). blast_formatter
+    /// reports every `CSerialException` of the read as "Invalid input format for BLAST Archive."
+    /// (exit status 1), a value of another class (`:Object-id`, `:No-such-type`, `:Seq-entry`) in
+    /// the messages, the algorithm options and the alignments too (NCBI 2.17.0, line RG item F3,
+    /// agent C8, 2026-11-24).
+    pub(crate) const BLAST_ARCHIVE: Names = Names {
+        document: "ASN.1 text",
+        reader: "ASN.1 text reader",
+        input: "input",
+        allocator: "NCBI's reader",
+        one_stream: true,
+        own_serial_message: true,
     };
     /// The documents of the tests of the readers.
     #[cfg(test)]
@@ -190,6 +296,8 @@ impl Names {
         reader: "test reader",
         input: "input",
         allocator: "NCBI's reader",
+        one_stream: false,
+        own_serial_message: true,
     };
 }
 
@@ -256,9 +364,9 @@ fn host_dependent(length: u64, bytes: u64, what: Reserve, names: Names) -> Fail 
     ))
 }
 
-/// What reading a string posts, in the order NCBI posts it.
+/// What reading a string posts, given to the caller when NCBI posts it.
 #[derive(Debug)]
-pub(crate) enum StringPost {
+pub(crate) enum StringPost<'a> {
     /// The warning of a UTF8String tag for a VisibleString (binary, `ExpectStringTag`,
     /// objistrasnb.cpp:296-305; [`utf8_tag_message`]).
     Utf8Tag,
@@ -267,7 +375,7 @@ pub(crate) enum StringPost {
     BadChar {
         position: StreamPosition,
         byte: u8,
-        string: Vec<u8>,
+        string: &'a [u8],
     },
 }
 
@@ -324,6 +432,8 @@ pub enum Encoding {
     Text,
     /// `eSerial_AsnBinary`
     Binary,
+    /// `eSerial_Xml` (NCBI's ASN.1-style XML, `asn_types::read_xml`)
+    Xml,
 }
 
 /// The members of a SEQUENCE or the variants of a CHOICE, as an encoding looks them up: their
@@ -332,6 +442,10 @@ pub enum Encoding {
 pub(crate) trait Items {
     fn count(&self) -> usize;
     fn name(&self, index: usize) -> &'static str;
+    /// Whether the member or variant at `index` is named `id`.
+    fn is_named(&self, index: usize, id: &[u8]) -> bool {
+        self.name(index).as_bytes() == id
+    }
 }
 
 /// The named values of an ENUMERATED (`integer` false) or of an INTEGER with named values.
@@ -342,23 +456,102 @@ pub(crate) trait EnumItems {
     fn value_of(&self, name: &[u8]) -> Option<i32>;
     /// Whether `value` is one of the named values.
     fn has_value(&self, value: i32) -> bool;
+    /// `GetName()`: the name of the ENUMERATED's type, empty for an anonymous one (the XML
+    /// stream's `ReadEnum` reads the value inside a tag of that name).
+    fn type_name(&self) -> &'static str {
+        ""
+    }
 }
 
-/// The primitives of one encoding (`CObjectIStreamAsn`, `CObjectIStreamAsnBinary`) that NCBI's
-/// object stack calls (the names are NCBI's functions).
+/// The primitives of one encoding (`CObjectIStreamAsn`, `CObjectIStreamAsnBinary`,
+/// `CObjectIStreamXml`) that NCBI's object stack calls (the names are NCBI's functions).
+///
+/// The XML stream's object stack has frames of its own and names its tags by them
+/// (`SkipStackTagName`): the consts and the default methods below (`NAMED_TYPES` to
+/// `drain_posts`) are what the object stack asks of an encoding for them. Their defaults are the
+/// text and binary streams', which inline to nothing (no runtime flag: the stack is monomorphised
+/// for each encoding).
 pub(crate) trait Input {
     /// The encoding.
     const ENCODING: Encoding;
+    /// Whether a named type that is neither a SEQUENCE, a CHOICE nor an ENUMERATED (an alias, a
+    /// named SEQUENCE OF such as `Seq-descr`) is read in a frame of its own with a tag of its own
+    /// (`ReadNamedType`: `BeginNamedType`, `EndNamedType`; the text and binary streams read it
+    /// without either, `VIRTUAL_MID_LEVEL_IO`).
+    const NAMED_TYPES: bool = false;
+    /// Whether a SEQUENCE OF or SET OF of the table is read in an array frame (`eFrameArray`; the
+    /// XML stream's `ReadContainer` pushes none for a container without a name, and every list
+    /// type of the table is read as one: a named one through its named frame).
+    const ARRAY_FRAMES: bool = true;
+    /// Whether the stream throws `eMissingValue` (the XML stream's ENUMERATED without its
+    /// attribute), which `ReadWithSetFlagMember` takes for an OPTIONAL or DEFAULT member.
+    const MISSING_VALUES: bool = false;
+    /// Whether the stream holds what it posts outside its strings until `drain_posts` (the XML
+    /// stream), which the object stack drains at the end of each value it reads.
+    const HELD_POSTS: bool = false;
+    /// Whether the elements of a list of the type `element` are read in an element frame
+    /// (`eFrameArrayElement`; the XML stream's only when the type will have no name,
+    /// `WillHaveName`).
+    #[inline(always)]
+    fn element_frame(_element: u16) -> bool {
+        true
+    }
+    /// The source file, line and function of the `END_OBJECT_FRAME` that leaves a frame of `kind`
+    /// (of a skip function: `skip`), whose line `NCBI_RETHROW_SAME` adds to a `CException` other
+    /// than a `CSerialException` passing through it.
+    #[inline(always)]
+    fn frame_site(kind: FrameKind, skip: bool) -> (&'static str, u32, &'static str) {
+        text_frame_site(kind, skip)
+    }
+    /// A frame of `kind` (of the table's type `ty`: none, `u16::MAX`, for a member frame, the
+    /// element type for an element frame) was pushed; `depth` frames are on the stack.
+    #[inline(always)]
+    fn frame_pushed(&mut self, _kind: FrameKind, _ty: u16, depth: usize) {
+        self.set_stack_depth(depth);
+    }
+    /// The member or variant of the top frame (`SetTopMemberId`).
+    #[inline(always)]
+    fn frame_member(&mut self, _member: &'static Member) {}
+    /// The top frame was left; `depth` frames stay.
+    #[inline(always)]
+    fn frame_popped(&mut self, depth: usize) {
+        self.set_stack_depth(depth);
+    }
+    /// `BeginNamedType` of the type of the named frame on top (`NAMED_TYPES`).
+    #[inline(always)]
+    fn begin_named(&mut self) -> R<()> {
+        Ok(())
+    }
+    /// `EndNamedType`, before the named frame is left.
+    #[inline(always)]
+    fn end_named(&mut self) -> R<()> {
+        Ok(())
+    }
+    /// `EndArrayElement` after each element of a list (the XML stream's closing tag of an
+    /// element read in an element frame).
+    #[inline(always)]
+    fn end_element(&mut self) -> R<()> {
+        Ok(())
+    }
+    /// `SkipNull` (the text and binary streams read what `ReadNull` reads).
+    #[inline(always)]
+    fn skip_null(&mut self) -> R<()> {
+        self.read_null()
+    }
+    /// Moves what the stream posted outside the strings it read (the XML stream posts each byte
+    /// it replaces at once, also in the attributes it skips) to `posts`, in the order posted.
+    #[inline(always)]
+    fn drain_posts(&mut self, _posts: &mut dyn PostSink) {}
     /// `GetPosition()`: `line N` in text, `byte N` (from the start of the object) in binary.
     fn position(&self) -> StreamPosition;
     /// The state of a new object stream at the next byte (each object of a file is read by a
     /// stream of its own in NCBI: its line count, or its byte count and data limits, start
-    /// again).
+    /// again), or, in text, of the one stream of a program that reads all the objects of a file
+    /// with it (`Names::one_stream`: the line count goes on).
     fn new_object(&mut self);
     /// `EndOfData()`: whether no object follows (binary: no byte left; text: nothing but white
-    /// space and comments, or what `SkipWhiteSpace` stops at). Only the tests read several
-    /// objects of one stream so far; makeblastdb's Seq-entry input will (line RG item D3c-3b).
-    #[cfg(test)]
+    /// space and comments, or what `SkipWhiteSpace` stops at): blast_formatter's archive reader
+    /// asks it before each object (`report::archive::read::ArchiveReader`).
     fn end_of_data(&mut self) -> bool;
     /// The depth of NCBI's object stack (`GetStackDepth()`), which the text reader's
     /// `SkipWhiteSpace` asks at the end of the text.
@@ -395,15 +588,16 @@ pub(crate) trait Input {
     fn read_real(&mut self) -> R<f64>;
     fn skip_real(&mut self) -> R<()>;
     /// `ReadString` (`ReadStringStore`) of a string of `kind`, appended to `out`, with what NCBI
-    /// posts while it reads it in `posts` (also when it then fails).
+    /// posts while it reads it given to `posts` when it is posted (also when the read then
+    /// fails).
     fn read_string(
         &mut self,
         kind: StringKind,
         out: &mut Vec<u8>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()>;
     /// `SkipString` (`SkipStringStore`).
-    fn skip_string(&mut self, kind: StringKind, posts: &mut Vec<StringPost>) -> R<()>;
+    fn skip_string(&mut self, kind: StringKind, posts: &mut dyn FnMut(StringPost<'_>)) -> R<()>;
     /// An OCTET STRING (`ReadBytes` of a `vector<char>`), `SkipByteBlock`.
     fn read_octets(&mut self) -> R<Vec<u8>>;
     fn skip_octets(&mut self) -> R<()>;
@@ -446,6 +640,8 @@ pub(crate) struct TextInput<S: AsnSource> {
     block_start: bool,
     /// `GetStackDepth()` (`Input::set_stack_depth`).
     depth: usize,
+    /// `Names::one_stream`: the line count goes on at a new object.
+    one_stream: bool,
 }
 
 /// A `ThrowError` of `CObjectIStreamAsn` (objistrasn.cpp) at `line` of `function`.
@@ -495,6 +691,7 @@ impl<S: AsnSource> TextInput<S> {
             r: Reader::new(src, names.document, names.reader),
             block_start: false,
             depth: 0,
+            one_stream: names.one_stream,
         }
     }
 
@@ -545,6 +742,7 @@ impl<S: AsnSource> TextInput<S> {
     /// searched from `pos` on; one that is not there is an error (`UnexpectedMember`, which lists
     /// them all). `choice`: an empty name is `BeginChoiceVariant`'s error.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1305-1314
+    #[inline(always)]
     fn find_member(&mut self, items: &(impl Items + ?Sized), pos: usize, choice: bool) -> R<usize> {
         let count = items.count();
         let member = self.r.member_or_tag().map_err(|e| self.fail(e))?;
@@ -564,7 +762,17 @@ impl<S: AsnSource> TextInput<S> {
                 if choice && id.is_empty() {
                     return Err(self.throw(BEGIN_CHOICE_VARIANT, "choice variant id expected"));
                 }
-                let found = (pos..count).find(|&i| items.name(i).as_bytes() == id);
+                // A plain loop: the lookup, with the compare it inlines, stays in the caller (an
+                // iterator's `find` is compiled as a function of its own).
+                let mut found = None;
+                let mut i = pos;
+                while i < count {
+                    if items.is_named(i, id) {
+                        found = Some(i);
+                        break;
+                    }
+                    i += 1;
+                }
                 (id, found)
             }
         };
@@ -604,6 +812,24 @@ impl<S: AsnSource> TextInput<S> {
         let result = self.r.expect(c);
         result.map_err(|e| self.fail(e))
     }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:443-455
+    /// Skips raw ASCII space, tab, newline and carriage return before the next object and peeks
+    /// the byte that starts it (`None` at end of input), releasing everything before it.
+    pub(crate) fn skip_raw_spaces_and_peek(&mut self) -> Option<u8> {
+        loop {
+            match self.r.src.byte_at(self.r.pos) {
+                Some(b' ' | b'\t' | b'\n' | b'\r') => {
+                    self.r.pos += 1;
+                    self.r.src.release_before(self.r.pos);
+                }
+                other => {
+                    self.r.src.release_before(self.r.pos);
+                    return other;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -622,14 +848,18 @@ impl<S: AsnSource> Input for TextInput<S> {
         StreamPosition::Line(self.r.line as u64)
     }
 
-    /// The state of a new `CObjectIStreamAsn` at the next byte: line 1, no block started.
+    /// The state of a new `CObjectIStreamAsn` at the next byte: line 1, no block started; with
+    /// `one_stream`, the one stream's state: no block started, the line count going on. The bytes
+    /// before it are not read again (a stream keeps about one object, not the objects before it).
     fn new_object(&mut self) {
-        self.r.line = 1;
+        if !self.one_stream {
+            self.r.line = 1;
+        }
         self.block_start = false;
+        self.r.src.release_before(self.r.pos);
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:98-109
-    #[cfg(test)]
     fn end_of_data(&mut self) -> bool {
         self.r.skip_white_space().is_err()
     }
@@ -801,12 +1031,12 @@ impl<S: AsnSource> Input for TextInput<S> {
         &mut self,
         kind: StringKind,
         out: &mut Vec<u8>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()> {
         self.string(kind, Some(out), posts)
     }
 
-    fn skip_string(&mut self, kind: StringKind, posts: &mut Vec<StringPost>) -> R<()> {
+    fn skip_string(&mut self, kind: StringKind, posts: &mut dyn FnMut(StringPost<'_>)) -> R<()> {
         self.string(kind, None, posts)
     }
 
@@ -923,7 +1153,7 @@ impl<S: AsnSource> TextInput<S> {
         &mut self,
         kind: StringKind,
         out: Option<&mut Vec<u8>>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()> {
         let skip = out.is_none();
         let mut none = Vec::new();
@@ -932,11 +1162,11 @@ impl<S: AsnSource> TextInput<S> {
             out,
             kind != StringKind::Utf8,
             skip,
-            &mut |line, byte, piece| {
-                posts.push(StringPost::BadChar {
+            &mut |_, line, byte, piece| {
+                posts(StringPost::BadChar {
                     position: StreamPosition::Line(line as u64),
                     byte,
-                    string: piece.to_vec(),
+                    string: piece,
                 })
             },
         );

@@ -48,14 +48,15 @@ class Parameter:
     value_kind: str
     """`flag`, `boolean`, `integer`, `real`, `path` or `text`."""
     default: str | None
-    """The default of the parser; `None` for an option without one, whatever its help says."""
+    """The default of NCBI's argument reader (its XML); `None` for an option without one, whatever its
+    help says."""
     choices: tuple[str, ...]
-    """The values the parser accepts, when it lists them."""
+    """The values that NCBI's argument reader accepts, when it lists them; none for a flag."""
 
 
 @dataclass(frozen=True)
 class Description:
-    """The options of a program and the genetic codes its parser accepts."""
+    """The options of a program and the genetic codes that its argument reader accepts."""
 
     program: str
     parameters: tuple[Parameter, ...]
@@ -433,7 +434,7 @@ class Batches(Iterator[Batch]):
 
 
 class Search:
-    """A program and its options, checked by the command line's parser.
+    """A program and its options, checked by the command line's argument reader (NCBI's).
 
     Each keyword is an option of the command line without its dash: `evalue=1e-5` is
     `-evalue 1e-5`. `describe` lists them. `-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and
@@ -608,7 +609,7 @@ def makeblastdb(*words: str, input: bytes | str = b"") -> ToolOutput:
 
     `input` is what the command line reads as standard input (`-in -`, and without `-in`), so a
     database can be built from FASTA in memory. A failure raises `SearchError` (`ArgumentError`
-    for an argument that the parser refuses) with what the command line writes to its standard
+    for an argument error or a refused option) with what the command line writes to its standard
     error. The GIL is released.
     """
     data = input.encode() if isinstance(input, str) else bytes(input)
@@ -686,3 +687,15 @@ def makembindex(*words: str, input: bytes | str = b"") -> ToolOutput:
     """
     data = input.encode() if isinstance(input, str) else bytes(input)
     return ToolOutput(*_pylosat.makembindex(list(words), data))
+
+
+def blast_formatter(*words: str, input: bytes | str = b"") -> ToolOutput:
+    """Runs `blast_formatter` with the command line's words, which writes the reports of a
+    search again from its BLAST archive (`-outfmt 11`) without searching again.
+
+    `input` is what the command line reads as standard input (`-archive -`), so an archive in
+    memory can be formatted. A failure raises `SearchError` with what the command line writes to
+    its standard error. The GIL is released.
+    """
+    data = input.encode() if isinstance(input, str) else bytes(input)
+    return ToolOutput(*_pylosat.blast_formatter(list(words), data))

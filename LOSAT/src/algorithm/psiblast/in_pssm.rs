@@ -106,10 +106,40 @@ pub(crate) fn check_in_pssm_options(
     {
         return Ok(());
     }
-    // The outfmt 0, 6 and 7 reports (the others are item PS15b's).
-    if let Some(number) = outfmts.iter().find(|number| !matches!(number, 0 | 6 | 7)) {
-        let option = if psi.from_msa { "-in_msa" } else { "-in_pssm" };
-        bail!("output format {number} with {option} is not supported by LOSAT's PSIBLAST yet");
+    // The archive's request holds the PSSM that the search holds (`PsiSearch::archive_pssm`):
+    // `-in_pssm`'s object, whose delayed member of another format the archive's stream does not
+    // write yet where NCBI's read of it fails (`report::archive::pssm_unwritten`; the later
+    // rounds' PSSMs keep its query).
+    if outfmts.contains(&crate::blastinput::app::output_format::ARCHIVE_FORMAT) {
+        if let (Some(handle), Some(pssm)) = (args.archive.as_ref(), psi.archive_pssm.as_deref()) {
+            // NCBI's stream stops at the matrix name that a PSSM of frequency ratios only lacks,
+            // in every encoding that writes (`InPssmFile::matrix_name_unwritable`, which
+            // `-out_pssm` refuses too; a value of `ARCHIVE_FORMAT` that NCBI writes nothing for
+            // has no stream to stop). With `-subject` NCBI's archive stops earlier, at the
+            // PSSM round's empty database reference (rc 3), which LOSAT answers as it does.
+            if psi.archive_matrix_name_unwritable
+                && args.db.is_some()
+                && handle.encoding() != crate::report::archive::ArchiveEncoding::Nothing
+            {
+                bail!(
+                    "{}",
+                    super::in_pssm_files::matrix_name_refusal("in the archive of -outfmt 11")
+                );
+            }
+            if let Some(gap) = crate::report::archive::pssm_unwritten(handle.encoding(), pssm) {
+                let what = gap.what();
+                let stream = match handle.encoding() {
+                    crate::report::archive::ArchiveEncoding::Xml => "XML (ARCHIVE_FORMAT=xml)",
+                    crate::report::archive::ArchiveEncoding::Text => {
+                        "ASN.1 text (no ARCHIVE_FORMAT)"
+                    }
+                    _ => "ASN.1 binary (ARCHIVE_FORMAT=bin)",
+                };
+                bail!(
+                    "-outfmt 11 in {stream} with a PSSM whose members hold {what} is not supported by LOSAT's PSIBLAST yet"
+                );
+            }
+        }
     }
     Ok(())
 }

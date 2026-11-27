@@ -1,37 +1,35 @@
-//! Public CLI v2 boundary. Clap's double-dash representation is internal only.
+//! Public CLI v2 boundary: LOSAT's command line, `losat <program> <words>`, whose programs read
+//! their arguments with NCBI's argument reader (`reader`) into their own options (`Commands`).
 
+use crate::blastinput::ncbi_environment::DiagTarget;
 use crate::ncbi_app::args::Refusal;
-use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR};
+use crate::wording::{DATABASE_ERROR, ENGINE_ERROR, OPTIONS_ERROR, QUERY_OPTIONS_ERROR};
 use std::{ffi::OsString, fmt};
-
-use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
 use crate::algorithm::{blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
 // LOSAT retains its program subcommand; search parameter names are NCBI names.
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
-// `-help` and `-h` open with NCBI's two headings, `USAGE` and `DESCRIPTION`: tools that call
-// BLAST+ look for them (BRIG takes a `blastn -help` that prints `USAGE` as BLAST+ found).
-// The options follow in clap's layout.
-const NCBI_HELP_TEMPLATE: &str = "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}";
-
-/// The top level's `-help`: NCBI's headings, and what the entry names need.
-const LOSAT_HELP_TEMPLATE: &str =
-    "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}\n\n{after-help}";
-
 pub use crate::utils::entry_names::{entry_argv, ENTRY_NAMES};
 
 // What the `losat` binary runs; the crate's root re-exports `main_entry` for it.
 pub(crate) mod main_entry;
 
+// NCBI's argument reader of the programs that read their arguments into their options.
+pub(crate) mod reader;
+pub use reader::ArgvError;
+
 // NCBI's buffers of a report stream (`NcbiStdio`, `NcbiBuffer`).
 mod stdio_buffer;
 pub use stdio_buffer::{NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
 
+// The process's standard output with no buffer of Rust's, under the command line's writers.
+mod standard_output;
+pub(crate) use standard_output::standard_output;
+
 /// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
-/// it (`render_message` writes long options with one dash).
+/// it.
 pub const INSTALL_SHIMS_WORDS: [&str; 2] = ["--install-shims", "-install-shims"];
 
 /// `losat --install-shims [DIR]`: makes the `ENTRY_NAMES` in `DIR` (default: the directory of
@@ -135,25 +133,14 @@ fn make_shim(_: &std::path::Path, _: bool, _: &std::path::Path) -> std::io::Resu
     Err(std::io::ErrorKind::Unsupported.into())
 }
 
-/// The `-outfmt` help that every search program shows (`blastn`, `blastp`, `blastx`, `tblastn`,
-/// `tblastx`, `psiblast`, `rpsblast`): the formats the program writes (`written`, from the
-/// README's "Output formats" tables), the ones that take a field list (`fields`), and the
-/// default fields. `note` closes the sentence with what differs for `-in_pssm`, or is empty.
-/// `rpstblastn` shows NCBI's frozen text instead.
-pub(crate) fn outfmt_help(written: &str, fields: &str, note: &str) -> String {
-    format!(
-        "Output format. Written: {written}{note}. Formats {fields} take a field list, for example \
-         -outfmt \"6 qseqid sseqid evalue\"; without one they write qaccver saccver pident length \
-         mismatch gapopen qstart qend sstart send evalue bitscore"
-    )
-}
-
-/// What a program that `main_entry` runs before clap reads the command line (the programs of
-/// `ENTRY_NAMES` that are not a `Commands` variant: they read their words with NCBI's argument
-/// reader, `ncbi_app`) says about itself in the top level's `-help`: NCBI's DESCRIPTION line of
-/// the program (its first line; `convert2blastmask`'s continues in NCBI's text).
-fn entry_program_description(name: &str) -> &'static str {
-    match name {
+/// What a program that `main_entry` runs before `cli::reader` reads the command line (the
+/// programs of `ENTRY_NAMES` that are not a `Commands` variant: they read their words with NCBI's
+/// argument reader, `ncbi_app`) says about itself in the top level's `-help`: NCBI's DESCRIPTION
+/// line of the program (its first line; `convert2blastmask`'s continues in NCBI's text), in LOSAT's
+/// words (`blast_formatter`'s names its version, `wording::losat_text`).
+fn entry_program_description(name: &str) -> std::borrow::Cow<'static, str> {
+    std::borrow::Cow::Borrowed(match name {
+        "blast_formatter" => return crate::wording::losat_text(crate::blast_formatter::description()),
         "blastdbcmd" => "BLAST database client",
         "dustmasker" => "Low complexity region masker based on Symmetric DUST algorithm",
         "segmasker" => "Low complexity region masker based on the SEG algorithm",
@@ -163,19 +150,22 @@ fn entry_program_description(name: &str) -> &'static str {
         }
         "makembindex" => "Create a BLAST database index.",
         "makeprofiledb" => "Application to create databases for rpsblast, cobalt and deltablast",
+        "blastdb_aliastool" => "Application to create BLAST database aliases",
+        "blastdbcheck" => "BLAST database integrity and validity checking application",
+        "cleanup-blastdb-volumes.py" => "Remove needless BLAST database volumes.",
         _ => "",
-    }
+    })
 }
 
 /// The `after_help` of the top level: the programs that `losat NAME` runs and `Commands` does not
-/// list (derived from `ENTRY_NAMES` and the subcommands of `Commands`, so that a new name shows
-/// up), and the shims. No NCBI counterpart.
+/// list (derived from `ENTRY_NAMES` and `is_program`, so that a new name shows up), and the shims.
+/// No NCBI counterpart.
 fn top_level_after_help() -> &'static str {
     static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     TEXT.get_or_init(|| {
         let others: Vec<&str> = ENTRY_NAMES
             .into_iter()
-            .filter(|name| !<Commands as clap::Subcommand>::has_subcommand(name))
+            .filter(|name| !is_program(name))
             .collect();
         let width = others.iter().map(|name| name.len()).max().unwrap_or(0);
         let mut text = String::new();
@@ -194,818 +184,266 @@ fn top_level_after_help() -> &'static str {
     })
 }
 
-// No NCBI counterpart: `losat <program>` names the program, and a run builds the clap command of
-// that program only (`ProgramParser`).
-// LOSAT's command line, `losat <program> <words>` (`Commands`). Its command (`CommandFactory`) is
-// `cli_command`'s: `Cli::command()` has every program's arguments, which the readers of the
-// definitions walk (`api::describe`, LOSAT Web's `describe`, `render_message`), and the parser
-// reads a command line with only its program's arguments (`ProgramParser::program_command`). A
-// doc comment here would be clap's description of the top level (`long_about`).
-#[derive(clap::Args, Debug)]
-#[command(
-    version,
-    about = "Pure-Rust pairwise alignment that matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions",
-    help_template = LOSAT_HELP_TEMPLATE,
-    after_help = top_level_after_help()
-)]
+// No NCBI counterpart: `losat <program>` names the program (NCBI has one executable per program).
+/// LOSAT's command line, `losat <program> <words>`: the options of its program.
+#[derive(Debug)]
 pub struct Cli {
-    #[command(subcommand)]
     pub command: Commands,
 }
 
-// The `Parser` that `#[derive(Parser)]` writes (clap_derive 4.6.7: src/derives/parser.rs:85-107,
-// src/derives/into_app.rs:21-64): `Command::new("losat")` with `Cli`'s `Args`, its program
-// arguments added by `cli_command`.
-impl CommandFactory for Cli {
-    fn command() -> clap::Command {
-        cli_command::<false>(|_| true)
-    }
-
-    fn command_for_update() -> clap::Command {
-        cli_command::<true>(|_| true)
-    }
-}
-
-impl Parser for Cli {}
-
-/// The type that LOSAT's parser reads a command line into (`try_parse_from` and the readers
-/// beside it): a `Parser`, read with its whole command unless it builds less for one command line.
-pub trait ProgramParser: Parser {
-    /// The command that reads `words` (`losat <program> <words>`): `Self::command()`.
-    fn program_command(_words: &[OsString]) -> clap::Command {
-        Self::command()
-    }
-}
-
-/// `Cli` reads a command line with the arguments of its program only, the program that the reader
-/// reads (`read_program`), so that each option of another program costs a run nothing.
-impl ProgramParser for Cli {
-    fn program_command(words: &[OsString]) -> clap::Command {
-        let program = read_program(words, <Commands as Subcommand>::has_subcommand);
-        cli_command::<false>(|name| Some(name) == program)
-    }
-}
-
-/// `Cli`'s command with the arguments of `program` only (`cli_command`).
-pub(crate) fn command_of(program: &str) -> clap::Command {
-    cli_command::<false>(|name| name == program)
-}
-
-/// The words that LOSAT's reader takes at the top level (`parse_command`), before the program's
-/// name: its help and version flags. The top level has no option of its own
-/// (`Cli::command().get_arguments()` is empty before clap builds it).
-const TOP_LEVEL_FLAGS: [&str; 4] = ["-help", "--help", "-h", "--version"];
-
-/// The program whose arguments LOSAT's reader reads in `words` (`losat <words>`,
-/// `parse_command`): the first word after the top level's flags (`TOP_LEVEL_FLAGS`), when
-/// `is_program` takes it. The reader rejects any other word there, before it reads a program, so
-/// such a command line reads no program's arguments. The command that `Cli` is read with has the
-/// arguments of this program only (`program_command`), and the reader checks that the program it
-/// enters is this one, with its arguments.
-fn read_program(words: &[OsString], is_program: impl Fn(&str) -> bool) -> Option<&str> {
-    let word = words
-        .iter()
-        .skip(1)
-        .find(|word| !TOP_LEVEL_FLAGS.iter().any(|flag| word.as_os_str() == *flag))?;
-    word.to_str().filter(|word| is_program(word))
-}
-
-/// `Cli`'s command (`augment_args`, or `augment_args_for_update` with `UPDATE`) where the programs
-/// whose names `selected` takes have their arguments (`program_args`). The others have their
-/// names, descriptions and help template, which the top level's help lists, and no arguments to
-/// LOSAT's reader, which reads a program's arguments before clap builds anything
-/// (`parse_command`): it reads only a selected program. clap adds the others' arguments where it
-/// builds them (`#[command(defer = true)]` on `Commands`). `UPDATE` is a constant so that a
-/// program that never calls `command_for_update` carries none of its code.
-fn cli_command<const UPDATE: bool>(selected: impl Fn(&str) -> bool) -> clap::Command {
-    let command = clap::Command::new("losat");
-    let (mut command, program_args) = if UPDATE {
-        (
-            <Cli as clap::Args>::augment_args_for_update(command),
-            PROGRAM_ARGS_FOR_UPDATE,
-        )
-    } else {
-        (<Cli as clap::Args>::augment_args(command), PROGRAM_ARGS)
-    };
-    debug_assert_eq!(command.get_subcommands().count(), program_args.len());
-    for (program, &args) in command.get_subcommands_mut().zip(program_args) {
-        let deferred = std::mem::take(program);
-        *program = if selected(deferred.get_name()) {
-            args(deferred.defer(no_args))
-        } else {
-            deferred.defer(args)
-        };
-    }
-    command
-}
-
-/// What clap builds of a program whose arguments `cli_command` has added: nothing more.
-fn no_args(command: clap::Command) -> clap::Command {
-    command
-}
-
-/// What `Commands` defers for a program (`#[command(defer = true)]`): the arguments that
-/// `cli_command` adds for `CommandFactory::command` (`PROGRAM_ARGS`) or for `command_for_update`
-/// (`PROGRAM_ARGS_FOR_UPDATE`).
-type ProgramArgs = fn(clap::Command) -> clap::Command;
-
-// clap_derive 4.6.7: src/derives/subcommand.rs:288-358 (a variant's command: its description and
-// help template, `final_from_attrs`, after its `Args`, or before them when deferred)
-/// The arguments of the program whose command is `command` (`A::augment_args`, or
-/// `augment_args_for_update` with `UPDATE`), as clap's derive adds them where it does not defer
-/// them: the description stays the variant's. A deferred `Args` comes after the variant's
-/// description, and the doc comment of an `Args` (`RpsbprocArgs`, `MakedbArgs` and the groups that
-/// the programs flatten) is a description to clap. Every variant has a description and no `Args`
-/// sets a help template (`cli_tests`), so the rest of the variant's command stays as the derive
-/// writes it.
-fn program_args<A: clap::Args, const UPDATE: bool>(command: clap::Command) -> clap::Command {
-    use clap::builder::Resettable;
-    let about = Resettable::from(command.get_about().cloned());
-    let long_about = Resettable::from(command.get_long_about().cloned());
-    let command = if UPDATE {
-        A::augment_args_for_update(command)
-    } else {
-        A::augment_args(command)
-    };
-    command.about(about).long_about(long_about)
-}
-
-/// `Commands`, `PROGRAM_ARGS` and `PROGRAM_ARGS_FOR_UPDATE` from one list of the programs (a
-/// program is added in one place).
-macro_rules! programs {
-    (
-        $(#[$($attr:tt)*])*
-        $vis:vis enum $name:ident {
-            $( $(#[$($variant_attr:tt)*])* $variant:ident($($args:tt)+), )+
+#[cfg(test)]
+impl Cli {
+    /// BLASTN's arguments of a command line that names blastn (the tests' argv).
+    pub(crate) fn blastn(self) -> blastn::BlastnArgs {
+        match self.command {
+            Commands::Blastn(args) => args,
+            command => panic!("not blastn: {command:?}"),
         }
-    ) => {
-        $(#[$($attr)*])*
-        $vis enum $name {
-            $( $(#[$($variant_attr)*])* $variant($($args)+), )+
-        }
-
-        /// Each program's arguments (`program_args` of its variant's type), in the order of
-        /// `Commands`' variants: the order of `Cli`'s subcommands.
-        const PROGRAM_ARGS: &[ProgramArgs] = &[ $( program_args::<$($args)+, false>, )+ ];
-
-        /// `PROGRAM_ARGS` for `command_for_update` (`augment_args_for_update`).
-        const PROGRAM_ARGS_FOR_UPDATE: &[ProgramArgs] = &[ $( program_args::<$($args)+, true>, )+ ];
-    };
-}
-
-programs! {
-    #[derive(Subcommand, Debug, Clone)]
-    #[command(defer = true)]
-    pub enum Commands {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
-        /// Translated nucleotide query vs protein subject (blastx)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Blastx(blastx::BlastxArgs),
-        /// Pairwise nucleotide alignment (megablast [default], blastn, dc-megablast, blastn-short)
-        #[allow(rustdoc::broken_intra_doc_links, reason = "clap prints it as help")]
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Blastn(blastn::BlastnArgs),
-        /// Pairwise protein alignment (blastp)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Blastp(blastp::BlastpArgs),
-        /// Pairwise 6-frame translated nucleotide alignment (tblastx)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Tblastx(tblastx::TblastxArgs),
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
-        /// Protein query vs translated nucleotide subject (tblastn)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Tblastn(tblastn::TblastnArgs),
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
-        /// Position-Specific Iterated BLAST (psiblast)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Psiblast(psiblast::PsiblastArgs),
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
-        /// Reverse Position Specific BLAST (rpsblast)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Rpsblast(rpsblast::RpsblastArgs),
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-51
-        // `-h`, `-help` and `-help-full` write NCBI's frozen texts (`RpstblastnArgs::ncbi_help`; the
-        // reader stops at them, `try_parse_from_command`).
-        /// Translated Reverse Position Specific BLAST (rpstblastn)
-        #[command(help_template = NCBI_HELP_TEMPLATE)]
-        Rpstblastn(rpstblastn::RpstblastnArgs),
-        // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
-        /// makeblastdb: create a BLAST database from a FASTA file (format version 5 by default, 4 with -blastdb_version 4)
-        #[command(name = "makeblastdb", help_template = NCBI_HELP_TEMPLATE)]
-        Makedb(crate::writedb::makeblastdb::MakedbArgs),
-        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:64-65
-        /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein and nucleotide queries)
-        #[command(name = "rpsbproc", help_template = NCBI_HELP_TEMPLATE)]
-        Rpsbproc(crate::rpsbproc::RpsbprocArgs),
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-170,203-207,332-349
-// Translate registered canonical keys only. Consume each value once so a path
-// or a quoted filtering specification can never be interpreted as another key.
-/// Parses `argv` (`losat <program> <words>`) for a caller that runs no NCBI application start
-/// (LOSAT Web's ABI v1, and the engine's own parses of an argv): the toolkit's words that the
-/// start reads (`-logfile`, `-conffile`, `-dryrun`) are refused (`toolkit_file_word_error`;
-/// makeblastdb keeps its own `-logfile` argument), and so are the versions (`version_word_error`)
-/// and `-xmlhelp` (`xml_help_refusal`).
-pub fn try_parse_from<T, I, S>(argv: I) -> Result<T, clap::Error>
+/// The options of the program that a command line runs, one variant for each program on the
+/// reader's table (`reader::tool`), in its order: each read from NCBI's arguments by its type's
+/// `from_args` (`reader::options`, line RG DECISIONS K4i-3-1).
+#[derive(Debug, Clone)]
+pub enum Commands {
+    Blastx(blastx::BlastxArgs),
+    Blastn(blastn::BlastnArgs),
+    Blastp(blastp::BlastpArgs),
+    Tblastx(tblastx::TblastxArgs),
+    Tblastn(tblastn::TblastnArgs),
+    Psiblast(psiblast::PsiblastArgs),
+    Rpsblast(rpsblast::RpsblastArgs),
+    Rpstblastn(rpstblastn::RpstblastnArgs),
+    Makedb(crate::writedb::makeblastdb::MakedbArgs),
+    Rpsbproc(crate::rpsbproc::RpsbprocArgs),
+}
+
+/// Reads `argv` (`losat <program> <words>`) into the program's arguments for a caller that runs no
+/// NCBI application start (the engine's own argv: BLASTN's repeat search; the tests): NCBI's
+/// reader of the program, LOSAT's refusals, the program's options (`reader::read_argv`). The
+/// toolkit's words that the start reads (`-logfile`, `-conffile`, `-dryrun`) are refused
+/// (`toolkit_file_word_refusal`; makeblastdb keeps its own `-logfile` argument), and so are the
+/// versions (`version_word_refusal`) and `-xmlhelp` (`xml_help_refusal`).
+pub fn try_parse_from<I, S>(argv: I) -> Result<Cli, ArgvError>
 where
-    T: ProgramParser,
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    let words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    try_parse_from_command(T::program_command(&words), words)
+    read_cli(argv, reader::Caller::NoStart, &DiagTarget::Stderr)
 }
 
 /// `try_parse_from` for a caller whose calls run an NCBI application start of their own and return
-/// reports: the library API (`api::start`). `-logfile`, `-conffile` and `-dryrun` are taken; the
-/// versions and `-xmlhelp`, whose texts the library has no place for, are refused
-/// (`version_word_error`, `xml_help_refusal`).
-pub(crate) fn try_parse_with_own_start<T, I, S>(argv: I) -> Result<T, clap::Error>
+/// reports: the library API (`api::search`). `-logfile`, `-conffile` and `-dryrun` are the
+/// start's, whose `-logfile` target (`target`) takes the posts of an argument error, as the
+/// command line's; the versions and `-xmlhelp`, whose texts the library has no place for, are
+/// refused (`version_word_refusal`, `xml_help_refusal`).
+pub(crate) fn try_parse_with_own_start<I, S>(argv: I, target: &DiagTarget) -> Result<Cli, ArgvError>
 where
-    T: ProgramParser,
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    let words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    parse_command(T::program_command(&words), words, Reader::OwnStart)
+    read_cli(argv, reader::Caller::OwnStart, target)
 }
 
 /// `try_parse_from` for LOSAT Web's ABI v2, whose runs make their own NCBI application start
 /// (`web_adapter::start_run`) and give the host the text that the command line prints in place of
-/// a run (stream 11; line WQA's D14, 2026-11-20): `-logfile`, `-conffile` and `-dryrun` are taken,
-/// and `-xmlhelp` stops the reader with the request whose XML the run prints (`printed_text`), as
-/// on the command line. The versions are printed before the arguments are read
-/// (`ncbi_version_request`, `api::start::CallerStart::version`), so a version word that reaches
-/// this reader is refused (`version_word_error`).
-pub(crate) fn try_parse_with_printing_start<T, I, S>(argv: I) -> Result<T, clap::Error>
-where
-    T: ProgramParser,
-    I: IntoIterator<Item = S>,
-    S: Into<OsString>,
-{
-    let words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    parse_command(T::program_command(&words), words, Reader::PrintingStart)
-}
-
-/// `try_parse_from` after the command line's application start `start` of the program that
-/// `argv` names (`cli::main_entry`): the start has read `-logfile` and `-conffile`, the entry
-/// ends a `-dryrun` after the arguments, and `-xmlhelp` stops the reader with the request whose
-/// XML the entry prints (`xml_help_program`).
-pub(crate) fn try_parse_from_start<T, I, S>(
+/// a run (stream 11; line WQA's D14, 2026-11-20): `-logfile`, `-conffile` and `-dryrun` are the
+/// start's, whose `-logfile` target (`target`) takes the posts of an argument error, as the
+/// command line's, and `-xmlhelp` prints the XML, as on the command line (`ArgvError::Printed`).
+/// The versions are printed before the arguments are read (`ncbi_version_request`,
+/// `api::start::CallerStart::version`), so a version word that reaches this reader is refused
+/// (`version_word_refusal`).
+pub(crate) fn try_parse_with_printing_start<I, S>(
     argv: I,
-    start: &crate::blastinput::ncbi_environment::ApplicationStart,
-) -> Result<T, clap::Error>
+    target: &DiagTarget,
+) -> Result<Cli, ArgvError>
 where
-    T: ProgramParser,
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    let words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    parse_command(
-        T::program_command(&words),
-        words,
-        Reader::CommandLine(start),
-    )
+    read_cli(argv, reader::Caller::PrintingStart, target)
 }
 
-/// `try_parse_from` with `command`, one of `T`'s commands whose arguments a caller changed
-/// (Web ABI v1's BLASTX keeps its own `-outfmt` values, `blastx/web.rs`), read as clap's
-/// `Parser::try_parse_from` reads `T::command()`. The program that `argv` names has its arguments
-/// in `command` (`program_command`).
-pub(crate) fn try_parse_from_command<T, I, S>(
-    command: clap::Command,
-    argv: I,
-) -> Result<T, clap::Error>
+/// `reader::read_argv` of `argv` for `caller`, with the posts of an argument error going to
+/// `target`, as `Cli`.
+fn read_cli<I, S>(argv: I, caller: reader::Caller, target: &DiagTarget) -> Result<Cli, ArgvError>
 where
-    T: clap::FromArgMatches,
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    parse_command(command, argv, Reader::NoStart)
+    let argv: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    reader::read_argv(&argv, caller, target).map(|command| Cli { command })
 }
 
-/// Who reads an argv (`parse_command`), which decides what NCBI's toolkit words do there.
-#[derive(Clone, Copy)]
-enum Reader<'a> {
-    /// A caller that runs no NCBI application start (LOSAT Web's ABI v1): the toolkit's words,
-    /// the versions and `-xmlhelp` are refused.
-    NoStart,
-    /// The library API, whose calls run a start of their own (`api::start`): `-logfile`,
-    /// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp` are refused.
-    OwnStart,
-    /// LOSAT Web's ABI v2, whose runs make a start of their own (`web_adapter::start_run`) and
-    /// print the command line's texts: the toolkit's words are taken, and `-xmlhelp` is the
-    /// request whose XML the run prints, as on the command line.
-    PrintingStart,
-    /// The command line's entry with its application start: `-xmlhelp` is the request whose XML
-    /// the entry prints.
-    CommandLine(&'a crate::blastinput::ncbi_environment::ApplicationStart),
+/// What LOSAT's top level writes for `argv` (`losat <words>`, whose first word names no program on
+/// a reader, `ENTRY_NAMES`): its help or version on the standard output (exit status 0), or its
+/// error on the standard error (exit status 2). The command line's entry (`main_entry`) writes it,
+/// and the readers of an argv give it (`reader::read_argv`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TopLevel {
+    /// The text, which ends with a line end.
+    pub(crate) text: String,
+    /// Whether it is an error, for the standard error.
+    pub(crate) error: bool,
+    /// The exit status.
+    pub(crate) status: i32,
 }
 
-/// The reader of `try_parse_from`, `try_parse_with_own_start`, `try_parse_with_printing_start`,
-/// `try_parse_from_start` and `try_parse_from_command`.
-fn parse_command<T, I, S>(
-    command: clap::Command,
-    argv: I,
-    reader: Reader<'_>,
-) -> Result<T, clap::Error>
-where
-    T: clap::FromArgMatches,
-    I: IntoIterator<Item = S>,
-    S: Into<OsString>,
-{
-    let mut tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    if let Reader::CommandLine(start) = reader {
-        debug_assert_eq!(
-            tokens.get(1).and_then(|token| token.to_str()),
-            Some(start.program()),
-            "the start of another program"
-        );
-    }
-    // The program that the reader reads (`read_program`), the only one whose arguments it reads,
-    // with the toolkit's file arguments.
-    let read = read_program(&tokens, |word| command.find_subcommand(word).is_some())
-        .and_then(|word| command.find_subcommand(word))
-        .map(|program| program.get_name().to_string());
-    let command = with_toolkit_file_args(command, |name| Some(name) == read.as_deref());
-    // NCBI's application reads its own toolkit words before the program's arguments; the
-    // argument reader gets the words that are left (`ncbi_environment::preparse`).
-    if let Some(program) = tokens
-        .get(1)
-        .and_then(|token| token.to_str())
-        .and_then(|text| command.find_subcommand(text))
-        .filter(|program| TOOLKIT_PROGRAMS.contains(&program.get_name()))
-    {
-        if let Some(word) = ncbi_version_word(&tokens[2..]) {
-            return Err(version_word_error(program.get_name(), word));
-        }
-        if matches!(reader, Reader::NoStart) {
-            if let Some(word) = toolkit_file_word(&tokens[2..]) {
-                return Err(toolkit_file_word_error(program.get_name(), word));
-            }
-        }
-        use crate::blastinput::ncbi_environment::{preparse, Preparsed};
-        if let Preparsed::Words { words, .. } = preparse(&tokens[2..]) {
-            tokens.truncate(2);
-            tokens.extend(words);
-        }
-    } else if tokens.get(1).is_some_and(|token| token == "makeblastdb") {
-        // makeblastdb's application reads the same words (its own refusals of the others come
-        // with its arguments): a last `-logfile` or `-conffile` without a value is dropped,
-        // `-dryrun` goes to the entry (`main_entry`) or the library's call
-        // (`api::run_makeblastdb`), and a caller without a start refuses `-conffile` and
-        // `-dryrun` (NCBI BLAST+ 2.17.0, probes `makeblastdb.log_noval`,
-        // `makeblastdb.conf_noval`: rc 0).
-        use crate::blastinput::ncbi_environment::{preparse, Preparsed};
-        if let Some(word) = ncbi_version_word(&tokens[2..]) {
-            return Err(version_word_error("makeblastdb", word));
-        }
-        if let Preparsed::Words {
-            words,
-            conffile,
-            dryrun,
-        } = preparse(&tokens[2..])
-        {
-            if matches!(reader, Reader::NoStart) && (conffile.is_some() || dryrun) {
-                // makeblastdb takes `-logfile` (its own argument): the word named is the one
-                // refused.
-                let name = if conffile.is_some() {
-                    "-conffile"
-                } else {
-                    "-dryrun"
-                };
-                let word = toolkit_word_as_written(&tokens[2..], name).unwrap_or(name);
-                return Err(toolkit_file_word_error("makeblastdb", word));
-            }
-            tokens.truncate(2);
-            tokens.extend(words);
-        }
-    }
-    let mut input = tokens.into_iter();
-    let mut translated = vec![input.next().unwrap_or_else(|| "losat".into())];
-    let mut scope = &command;
-    // rpstblastn's help flag: the words up to its program name and the value of its
-    // `RpstblastnArgs::ncbi_help`.
-    let mut ncbi_help: Option<(usize, &str)> = None;
-    // The first option of the NCBI search programs whose value is not UTF-8, rejected once the
-    // command line parses (`non_utf8_value_error`).
-    let mut non_utf8_value: Option<(&clap::Command, String)> = None;
-    // The program whose `-xmlhelp` stopped the reader.
-    let mut xml_help: Option<String> = None;
-    while let Some(token) = input.next() {
-        // In the NCBI search programs a word that is not UTF-8 keeps its key readable
-        // (`-name=value` with a value that is not UTF-8 is read below).
-        let lossy = token.to_string_lossy();
-        let text: &str = if is_ncbi_search_program(scope) {
-            &lossy
-        } else {
-            token.to_str().unwrap_or("")
+// No NCBI counterpart: NCBI has one executable per program. LOSAT's top level has no option of its
+// own: its first word is its help (`-h`, `-help`, `--help`), its version (`--version`), or an
+// error; the words after it are not read. Its texts are those of LOSAT 0.2.0, frozen
+// (`top_level_tests`, line RG DECISIONS K4i-3-1 Q5).
+/// What the top level writes for `argv` (`TopLevel`): without a word, its help as an error.
+pub(crate) fn top_level(argv: &[OsString]) -> TopLevel {
+    let Some(first) = argv.get(1) else {
+        return TopLevel {
+            text: top_level_help(usage_name(argv)),
+            error: true,
+            status: 2,
         };
-        if let Some(subcommand) = scope.find_subcommand(text) {
-            // The program that `read_program` names, whose arguments the command has
-            // (`ProgramParser::program_command`): the reader looks its options up itself.
-            debug_assert_eq!(
-                Some(subcommand.get_name()),
-                read.as_deref(),
-                "{translated:?}"
-            );
-            debug_assert!(
-                subcommand.get_arguments().next().is_some(),
-                "{} read without its arguments",
-                subcommand.get_name()
-            );
-            scope = subcommand;
-            translated.push(token);
-            if scope.get_name() == "rpstblastn" {
-                ncbi_help = Some((translated.len(), ""));
-            }
-            continue;
-        }
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852
-        // NCBI's reader stops at its help flags, the words before them read first: a word after
-        // one is never read (NCBI BLAST+ 2.17.0: `-help -bogus`, `-help ... -out` with no value
-        // and `-h -xmlhelp` print the help, exit status 0; line RG item E2). Every program of
-        // this parser follows NCBI's reader; rpstblastn writes NCBI's texts
-        // (`RpstblastnArgs::ncbi_help`). An option's value is not a flag (`-out -help` names a
-        // file). `--help` is LOSAT's spelling of `-help` (clap's) and stops the reader too.
-        // `-help-full` (`s_AutoHelpShowAll`) is `-help` with the arguments defined `fHidden`
-        // (`ShowAllArguments`). Of NCBI's programs only makeblastdb has one, `-randomize`, which
-        // LOSAT's help (its own texts, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1) does not
-        // list, so the text is `-help`'s, as NCBI's other programs write the bytes of `-help` (in
-        // every place: line RG, `E/SURVEY_E2.md`).
-        let stops_at_help = !std::ptr::eq(scope, &command);
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690 (cited at
-        // `ncbi_xmlhelp`)
-        // `-xmlhelp` (`s_AutoHelpXml`) stops the reader as `-help` does, the words before it
-        // read: the command line's entry prints the program's arguments in NCBI's XML
-        // (`xml_help_program`, `ncbi_xmlhelp::print`; line RG item E2x), and so does a run of
-        // LOSAT Web's ABI v2 (`printed_text`; line WQA's D14, 2026-11-20). The library API and the
-        // Web engine's ABI v1, which write no help of NCBI's, refuse it there, after the words
-        // before it (`xml_help_refusal`).
-        if stops_at_help && text == "-xmlhelp" {
-            translated.push("--help".into());
-            xml_help = Some(scope.get_name().to_string());
-            break;
-        }
-        if matches!(text, "-help" | "--help") || (stops_at_help && text == "-help-full") {
-            translated.push("--help".into());
-            if stops_at_help {
-                ncbi_help = ncbi_help.map(|(start, _)| (start, "full"));
-                break;
-            }
-            continue;
-        }
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
-        // `-h` is the short usage of every NCBI program (rc 0); clap's `-h` is its short help.
-        if text == "-h" {
-            translated.push("-h".into());
-            if stops_at_help {
-                ncbi_help = ncbi_help.map(|(start, _)| (start, "short"));
-                break;
-            }
-            continue;
-        }
-        if text == "--version" && std::ptr::eq(scope, &command) {
-            translated.push(token);
-            continue;
-        }
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2866-2872
-        // `--` starts NCBI's positional arguments, which the BLAST programs do not have:
-        // a last `--` changes nothing, and a word after it is an extra positional
-        // argument (NCBI's USAGE error; LOSAT's parser error, exception 1).
-        // makeblastdb reads its arguments with the same parser.
-        if text == "--"
-            && input.len() == 0
-            && matches!(
-                scope.get_name(),
-                "blastn"
-                    | "blastp"
-                    | "tblastn"
-                    | "tblastx"
-                    | "psiblast"
-                    | "rpsblast"
-                    | "rpstblastn"
-                    | "makeblastdb"
-                    | "rpsbproc"
-            )
-        {
-            continue;
-        }
-        // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/argwrapper.cpp:42-43
-        // rpsbproc's aliases (`-infile` of `i`, ...) are its `--infile`, ... (`rpsbproc::args`).
-        let alias = (scope.get_name() == "rpsbproc")
-            .then(|| crate::rpsbproc::alias_word(text))
-            .flatten();
-        let text: &str = alias.as_deref().unwrap_or(text);
-        let key = text.strip_prefix('-').filter(|key| !key.starts_with('-'));
-        let (name, inline) = key
-            .unwrap_or("")
-            .split_once('=')
-            .map_or((key.unwrap_or(""), None), |(k, v)| (k, Some(v)));
-        // rpstblastn's `RpstblastnArgs::ncbi_help` is the reader's own, named by no word; the
-        // other hidden arguments (the toolkit's `-logfile`, `-conffile`) are the user's.
-        let Some(arg) = scope
-            .get_arguments()
-            .find(|arg| arg.get_long() == Some(name))
-            .filter(|_| name != rpstblastn::args::NCBI_HELP_ARG)
-        else {
-            return Err(unknown_option_error(scope, name, text));
-        };
-        if arg.get_action().takes_values() {
-            let value = match inline {
-                Some(value) if token.to_str().is_some() => OsString::from(value),
-                Some(_) => inline_value(&token),
-                None => input.next().ok_or_else(|| {
-                    clap::Error::raw(
-                        ErrorKind::InvalidValue,
-                        format!("-{name} requires one value"),
-                    )
-                })?,
-            };
-            // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270
-            // NCBI keeps the bytes of an option's value. LOSAT's options are UTF-8 strings,
-            // so a value that is not UTF-8 is rejected explicitly, after the parser: NCBI's
-            // USAGE errors and `-help` come first, as for any value. The parser reads the
-            // value with U+FFFD in place of the bytes. The file names keep their bytes and
-            // have their own check where the files are opened (`check_utf8_file_name`).
-            let value = if value.to_str().is_none() && refuses_non_utf8_value(scope, name) {
-                non_utf8_value.get_or_insert_with(|| (scope, name.to_string()));
-                OsString::from(value.to_string_lossy().into_owned())
-            } else {
-                value
-            };
-            let mut internal = OsString::from(format!("--{name}="));
-            internal.push(value);
-            translated.push(internal);
-        } else {
-            if inline.is_some() {
-                return Err(clap::Error::raw(
-                    ErrorKind::TooManyValues,
-                    format!("-{name} is a flag and does not take a value"),
-                ));
-            }
-            translated.push(format!("--{name}").into());
-        }
-    }
-    // The order of the options is read only where clap renders a program's help (`-help`, `-h`,
-    // `-help-full`, `-xmlhelp`'s stop, all `--help` or `-h` here): only then is `-html` given its
-    // place (`with_html_help_place`), so a run that renders no help does no work for it (line RG
-    // T4a2 review S1).
-    let help_command;
-    let command = if translated
-        .iter()
-        .any(|word| word == "--help" || word == "-h")
-    {
-        help_command = with_html_help_place(command.clone());
-        &help_command
-    } else {
-        &command
     };
-    let mut matches = match command.clone().try_get_matches_from(&translated) {
-        // The words before `-xmlhelp` read, as before `-help`: the entry prints the XML.
-        Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
-            let program = xml_help.unwrap_or_default();
-            return Err(match reader {
-                Reader::CommandLine(_) | Reader::PrintingStart => xml_help_request(program),
-                Reader::NoStart | Reader::OwnStart => clap::Error::raw(
-                    ErrorKind::InvalidValue,
-                    xml_help_refusal(&refusal_program_name(&program)),
-                ),
-            });
-        }
-        // The parser stopped at rpstblastn's help flag, the words before it read (NCBI's
-        // order): the program writes NCBI's text (`RpstblastnArgs::ncbi_help_text`), and the
-        // words before the flag, read, are not used (NCBI checks their dependencies after).
-        Err(error) if error.kind() == ErrorKind::DisplayHelp => match ncbi_help {
-            Some((start, value)) if !value.is_empty() => {
-                translated.truncate(start);
-                translated.push(format!("--ncbi_help={value}").into());
-                let mut matches = command.clone().try_get_matches_from(translated)?;
-                return T::from_arg_matches_mut(&mut matches)
-                    .map_err(|error| error.format(&mut command.clone()));
-            }
-            _ => return Err(error),
-        },
-        // NCBI's argument reader reports an exclusion between makeblastdb's arguments before a
-        // missing mandatory one (the first walk of `x_PostCheck`): the words are read again
-        // without the parser's checks to find it.
-        Err(error) if error.kind() == ErrorKind::MissingRequiredArgument => {
-            let unchecked = command
-                .clone()
-                .ignore_errors(true)
-                .try_get_matches_from(&translated);
-            return Err(unchecked
-                .ok()
-                .and_then(|matches| makeblastdb_dependency_error(&matches))
-                .unwrap_or(error));
-        }
-        matches => matches?,
+    let (text, error) = match first.to_str() {
+        Some("-h" | "-help" | "--help") => (top_level_help(usage_name(argv)), false),
+        Some("--version") => (format!("losat {}\n", env!("CARGO_PKG_VERSION")), false),
+        _ => (
+            format!(
+                "error: unknown option or argument '{}'; use -help to list the options\n",
+                first.to_string_lossy()
+            ),
+            true,
+        ),
     };
-    if let Some(error) = makeblastdb_dependency_error(&matches) {
-        return Err(error);
-    }
-    let parsed = T::from_arg_matches_mut(&mut matches)
-        .map_err(|error| error.format(&mut command.clone()))?;
-    match non_utf8_value {
-        Some((scope, name)) => Err(non_utf8_value_error(scope, &name)),
-        None => Ok(parsed),
+    TopLevel {
+        text,
+        error,
+        status: if error { 2 } else { 0 },
     }
 }
 
-/// makeblastdb's dependencies, checked after the parse as NCBI's argument reader checks them
-/// (`x_PostCheck`), in its order and words (`dependency_error`); the error is the parser's (exit
-/// status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES). `None` for the other programs.
-fn makeblastdb_dependency_error(matches: &clap::ArgMatches) -> Option<clap::Error> {
-    let Some(("makeblastdb", words)) = matches.subcommand() else {
-        return None;
-    };
-    let given = |id: &str| words.value_source(id) == Some(clap::parser::ValueSource::CommandLine);
-    let message = crate::writedb::makeblastdb::dependency_error(&given)?;
-    Some(clap::Error::raw(ErrorKind::ArgumentConflict, message))
+/// The arguments that a program's command line gave, by NCBI's names, each with the text of its
+/// value (empty for a flag), in the order of the command line: what the import of a search
+/// strategy compares with NCBI's defaults (`report::archive::read::import::NcbiArguments`, which
+/// keeps them by name, as NCBI's `CArgs` holds them). Read from NCBI's argument reader
+/// (`ncbi_app::args::Args::given_values`) only for a command line that gives
+/// `-import_search_strategy`: the only reader. Every read of an argv makes its own (a default
+/// argument list read later does not replace them).
+#[derive(Debug, Clone, Default)]
+pub struct GivenArguments {
+    list: Vec<(String, String)>,
 }
 
-/// The value of a word `-name=value` that is not UTF-8: its bytes after the first `=`
-/// (`try_parse_from`, which found the name before the first `=` of the word's lossy text; a
-/// replaced byte is never `=`, so the first `=` of the bytes is that one, whatever the name's
-/// letters are).
-fn inline_value(token: &std::ffi::OsStr) -> OsString {
-    let bytes = token.as_encoded_bytes();
-    let start = bytes
-        .iter()
-        .position(|&b| b == b'=')
-        .map_or(bytes.len(), |at| at + 1);
-    // SAFETY: `start` is just after an ASCII `=` or at the end, split points that
-    // `OsStr::from_encoded_bytes_unchecked` allows (after a valid non-empty UTF-8 substring).
-    unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(&bytes[start..]) }.to_os_string()
-}
-
-/// Whether `scope` is one of the programs whose command lines follow NCBI's.
-fn is_ncbi_search_program(scope: &clap::Command) -> bool {
-    matches!(
-        scope.get_name(),
-        "blastn"
-            | "blastp"
-            | "blastx"
-            | "tblastn"
-            | "tblastx"
-            | "psiblast"
-            | "rpsblast"
-            | "rpstblastn"
-    )
-}
-
-/// Whether an option's value that is not UTF-8 is rejected after the parser
-/// ([`non_utf8_value_error`]): each option of makeblastdb, whose values are all UTF-8 strings,
-/// and each option of the NCBI search programs but the file names that keep their bytes
-/// (`check_utf8_file_name`).
-fn refuses_non_utf8_value(scope: &clap::Command, name: &str) -> bool {
-    scope.get_name() == "makeblastdb"
-        || (is_ncbi_search_program(scope) && !matches!(name, "query" | "subject" | "out"))
-}
-
-/// The explicit rejection of an option's value that is not UTF-8 (`try_parse_from`).
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270
-fn non_utf8_value_error(scope: &clap::Command, name: &str) -> clap::Error {
-    clap::Error::raw(
-        ErrorKind::InvalidUtf8,
-        non_utf8_value_refusal(&scope.get_name().to_uppercase(), name),
-    )
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270 (cited at
-// `non_utf8_value_error`)
-/// LOSAT's refusal of the value of `-name` that is not UTF-8 in `program` (its name in LOSAT's
-/// refusals, `MAKEBLASTDB`): NCBI's arguments keep the value's bytes. The one text of it, for the
-/// programs on clap (`non_utf8_value_error`) and those of `ncbi_app`
-/// (`ncbi_app::args::Args::text_values_refusal`).
-pub(crate) fn non_utf8_value_refusal(program: &str, name: &str) -> String {
-    format!(
-        "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, \
-         which is not supported by LOSAT's {program}"
-    )
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:107,143
-// Render the same canonical names in help, usage and parser diagnostics.
-/// `text` with each `--{name}` that is a whole word (not followed by a letter, a digit, `-` or `_`)
-/// written `-{name}` (`render_rpsbproc_message`).
-fn replace_whole_option(text: &str, name: &str) -> String {
-    let pattern = format!("--{name}");
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(at) = rest.find(&pattern) {
-        let after = &rest[at + pattern.len()..];
-        let whole = !after
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_alphanumeric() || c == '-' || c == '_');
-        out.push_str(&rest[..at]);
-        out.push_str(if whole { &pattern[1..] } else { &pattern });
-        rest = after;
-    }
-    out.push_str(rest);
-    out
-}
-
-pub fn render_message(error: &clap::Error) -> String {
-    let mut message = error
-        .to_string()
-        .replace("-h, --help", "-help")
-        .replace("-V, --version", "--version");
-    // Every program's option names, whatever the program of the message: a word of the command
-    // line that names another program's option is written with one dash too.
-    let command = with_toolkit_file_args(Cli::command(), |_| true);
-    for scope in std::iter::once(&command).chain(command.get_subcommands()) {
-        for arg in scope.get_arguments() {
-            // rpsbproc's one-letter arguments are left to `render_rpsbproc_message`: replacing
-            // `--i` here would change other words (`--infile`) in every program's messages.
-            if let Some(name) = arg
-                .get_long()
-                .filter(|name| !matches!(*name, "help" | "version") && name.len() > 1)
-            {
-                message = message.replace(&format!("--{name}"), &format!("-{name}"));
-            }
+impl GivenArguments {
+    /// The arguments that `args` gave, when they give `-import_search_strategy`; else none.
+    pub(crate) fn from_args(args: &crate::ncbi_app::args::Args) -> Self {
+        if !args.given("import_search_strategy") {
+            return Self::default();
         }
+        let list = args
+            .given_values()
+            .map(|(name, value)| {
+                let text = value.map(|value| value.to_string_lossy().into_owned());
+                (name.to_string(), text.unwrap_or_default())
+            })
+            .collect();
+        Self { list }
     }
-    // clap's hints at the foot of the help name the other form: `-h` prints the summary and
-    // `-help` the full text, as in NCBI, so the hint of the full text points back to `-h` and
-    // that of the summary to `-help`.
-    message
-        .replace("'-h'", "'-help'")
-        .replace("-h, --help", "-help")
-        .replace("-V, --version", "--version")
-        .replace("see a summary with '-help'", "see a summary with '-h'")
-        .replace("see more with '--help'", "see more with '-help'")
+
+    /// The arguments given, as `(name, text)`.
+    pub(crate) fn list(&self) -> &[(String, String)] {
+        &self.list
+    }
 }
 
-/// `render_message` for `losat rpsbproc`, whose arguments are NCBI's one-letter keys (`-i`)
-/// with long forms of two dashes (`--infile`, rpsbproc's `AddAlias`): only the one-letter
-/// arguments are written with one dash, and the long forms keep their two.
-pub fn render_rpsbproc_message(error: &clap::Error) -> String {
-    let text = error.to_string();
-    // The word that `unknown_option_error` quotes is the one on the command line (`--i` stays
-    // `--i`); the rest is rendered.
-    const UNKNOWN: &str = "unknown option or argument '";
-    if let Some(start) = text.find(UNKNOWN).map(|at| at + UNKNOWN.len()) {
-        if let Some(len) = text[start..].find('\'') {
-            return format!(
-                "{}{}{}",
-                render_rpsbproc_text(&text[..start]),
-                &text[start..start + len],
-                render_rpsbproc_text(&text[start + len..])
-            );
-        }
-    }
-    render_rpsbproc_text(&text)
+/// What the top level's help says of each program whose options are LOSAT's types: the programs on
+/// the reader's table (`reader::tool`), in its order
+/// (`reader::options_tests::one_list_of_programs`).
+const PROGRAMS: [(&str, &str); 10] = [
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
+    (
+        "blastx",
+        "Translated nucleotide query vs protein subject (blastx)",
+    ),
+    (
+        "blastn",
+        "Pairwise nucleotide alignment (megablast [default], blastn, dc-megablast, blastn-short)",
+    ),
+    ("blastp", "Pairwise protein alignment (blastp)"),
+    (
+        "tblastx",
+        "Pairwise 6-frame translated nucleotide alignment (tblastx)",
+    ),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52
+    (
+        "tblastn",
+        "Protein query vs translated nucleotide subject (tblastn)",
+    ),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
+    ("psiblast", "Position-Specific Iterated BLAST (psiblast)"),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
+    ("rpsblast", "Reverse Position Specific BLAST (rpsblast)"),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-51
+    (
+        "rpstblastn",
+        "Translated Reverse Position Specific BLAST (rpstblastn)",
+    ),
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
+    (
+        "makeblastdb",
+        "makeblastdb: create a BLAST database from a FASTA file (format version 5 by default, 4 \
+         with -blastdb_version 4)",
+    ),
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:64-65
+    (
+        "rpsbproc",
+        "Process output from offline rpsblast to annotate sequence with conserved domain \
+         information (rpsbproc; its domain hits, sites and motifs of protein and nucleotide \
+         queries)",
+    ),
+];
+
+/// Whether `name` is a program whose options are LOSAT's types (`Commands`): one on the reader's
+/// table (`reader::tool`).
+pub(crate) fn is_program(name: &str) -> bool {
+    reader::tool(name).is_some()
 }
 
-/// The text of a parser error as the command line writes it, which LOSAT Web's ABI v2 returns as
-/// it is (`web/adapter/tests/v_abi.js` compares the two): `render_message`, or
-/// `render_rpsbproc_message` for `losat rpsbproc`, ending with a line end. clap's own errors have
-/// one; LOSAT's own refusals and syntax errors (`clap::Error::raw`: an option LOSAT refuses by
-/// name, an unknown option, a missing value) are made without one, and the shell prompt would
-/// follow on the message's line. ABI v1 (frozen) and the library return `render_message`.
-pub fn command_line_message(error: &clap::Error, rpsbproc: bool) -> String {
-    let mut message = if rpsbproc {
-        render_rpsbproc_message(error)
-    } else {
-        render_message(error)
-    };
-    if error.use_stderr() && !message.ends_with('\n') {
-        message.push('\n');
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
+// The help opens with NCBI's two headings, `USAGE` and `DESCRIPTION`: tools that call BLAST+ look
+// for them (BRIG takes a `blastn -help` that prints `USAGE` as BLAST+ found).
+/// The top level's help, whose usage names the executable `executable` (`usage_name`): its usage,
+/// its description, the programs (`PROGRAMS`, and a `help` that the top level of LOSAT 0.2.0
+/// listed), its two flags, and the other programs and the shims (`top_level_after_help`).
+fn top_level_help(executable: &str) -> String {
+    const HELP: (&str, &str) = (
+        "help",
+        "Print this message or the help of the given subcommand(s)",
+    );
+    let listed = || PROGRAMS.iter().chain([&HELP]);
+    let width = listed().map(|(name, _)| name.len()).max().unwrap_or(0);
+    let mut text = format!(
+        "USAGE\n  {executable} <COMMAND>\n\nDESCRIPTION\n   Pure-Rust pairwise alignment that \
+         matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions\n\nCommands:\n",
+    );
+    for (name, about) in listed() {
+        text += &format!("  {name:<width$}  {about}\n");
     }
-    message
+    text += "\nOptions:\n  -help     Print help\n  --version  Print version\n\n\n\n";
+    text += top_level_after_help();
+    text.push('\n');
+    text
 }
 
-/// `render_rpsbproc_message` of a part of a message.
-fn render_rpsbproc_text(text: &str) -> String {
-    let mut message = text
-        .replace("-h, --help", "-help")
-        .replace("-V, --version", "--version");
-    let command = command_of("rpsbproc");
-    if let Some(scope) = command.find_subcommand("rpsbproc") {
-        for name in scope.get_arguments().filter_map(clap::Arg::get_long) {
-            if name.len() == 1 {
-                message = replace_whole_option(&message, name);
-            }
-        }
-    }
-    message.replace("'-h'", "'-help'")
-}
-
-// The rejection of an option that a program does not have: NCBI's options that LOSAT
-// has not ported (`named_refusal`), the NCBI C++ Toolkit options, and the rest (unknown to NCBI
-// too).
-fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
-    named_refusal(scope.get_name(), name).unwrap_or_else(|| {
-        clap::Error::raw(
-            ErrorKind::UnknownArgument,
-            format!("unknown option or argument '{text}'; use -help to list the options"),
-        )
-    })
+// No NCBI counterpart: the name that the top level of LOSAT 0.2.0 wrote, frozen in
+// `top_level_tests` for each form of `argv[0]`.
+/// The name that the top level's usage gives the executable: the file name of `argv[0]`, as it was
+/// called (`losat.exe`, the name of a link), when `argv[0]` has one that is UTF-8; else `losat`
+/// (no `argv[0]`, an empty one, `/`, a file name that is not UTF-8).
+fn usage_name(argv: &[OsString]) -> &str {
+    argv.first()
+        .and_then(|argv0| std::path::Path::new(argv0).file_name())
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("losat")
 }
 
 /// LOSAT's refusal of the run of `-name` in `program` (its name in LOSAT's refusals, `BLASTP`):
@@ -1022,25 +460,6 @@ pub(crate) fn run_refusal(program: &str, name: &str) -> String {
     }
 }
 
-/// LOSAT's refusal of NCBI's argument `-name`, which `program`'s reader does not define, by name
-/// (`Refusal::Read`, the rows of `ncbi_app::args::refusal`): the program as LOSAT's refusals name
-/// it (`refusal_program_name`) and why, if the row says; `None` for a name that LOSAT does not
-/// refuse by name (an unknown option, as NCBI's).
-fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
-    let Some(Refusal::Read(why)) = crate::ncbi_app::args::refusal(program, name) else {
-        return None;
-    };
-    let shown = refusal_program_name(program);
-    let shown = match why {
-        Some(why) => format!("{shown} ({why})"),
-        None => shown,
-    };
-    Some(clap::Error::raw(
-        ErrorKind::InvalidValue,
-        format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's {shown}"),
-    ))
-}
-
 /// The text that `-version` or a full version (`-version-full`, `-version-full-xml`,
 /// `-version-full-json`) prints for `argv` (`losat <program> ... -version ...`), or `None` when
 /// `argv` has no such request.
@@ -1054,7 +473,7 @@ fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
 /// date; LOSAT's names LOSAT and the BLAST+ release its output follows. The full versions are
 /// NCBI's forms with LOSAT's values (`ncbi_version::print`, line RG item E3). `makeblastdb` prints
 /// `makeblastdb`, as NCBI's program does. `main` prints the text on stdout and exits 0, before any
-/// argument is parsed. The top level `losat --version` is clap's and is not read here.
+/// argument is parsed. The top level's `losat --version` is not read here (`top_level`).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977
 pub fn ncbi_version_request<I, S>(argv: I) -> Option<String>
@@ -1063,11 +482,8 @@ where
     S: Into<OsString>,
 {
     let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    // A program's name (`Commands`), with no command built.
-    let name = tokens
-        .get(1)?
-        .to_str()
-        .filter(|word| <Commands as Subcommand>::has_subcommand(word))?;
+    // A program's name (`is_program`).
+    let name = tokens.get(1)?.to_str().filter(|word| is_program(word))?;
     // NCBI's reading of the words before the arguments (`ncbi_environment::preparse`): not
     // after `--`, nor as the value of `-logfile` or `-conffile` (`blastn -logfile -version`
     // logs to the file `-version`).
@@ -1082,40 +498,11 @@ where
     }
 }
 
-/// The NCBI applications whose words before the arguments the parser reads (`parse_command`,
-/// `ncbi_environment::preparse`).
-const TOOLKIT_PROGRAMS: &[&str] = &[
-    "blastn",
-    "blastp",
-    "blastx",
-    "tblastn",
-    "tblastx",
-    "psiblast",
-    "rpsblast",
-    "rpstblastn",
-    "rpsbproc",
-];
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (cited at
-// `ncbi_environment::preparse`: `-version` and the full versions are read before the
-// arguments, anywhere before `--`, also where another option expects its value, but not as the
-// value of `-logfile` or `-conffile`)
-/// The version word (`-version` or a full version) that NCBI's application prints for `tokens`
-/// (`ncbi_environment::preparse`), in an option's value too. The command line never brings one
-/// here: `main` prints the version before parsing (`ncbi_version_request`). The library API of
-/// the search programs and the Web engine, which parse their options here, refuse it
-/// (`version_word_error`).
-fn ncbi_version_word(tokens: &[OsString]) -> Option<&'static str> {
-    use crate::blastinput::ncbi_environment::{preparse, Preparsed};
-    match preparse(tokens) {
-        Preparsed::Version(request) => Some(request.word()),
-        Preparsed::Words { .. } => None,
-    }
-}
-
 /// The first `-logfile`, `-conffile` or `-dryrun` that NCBI's application reads in `tokens` (with
-/// its value; `ncbi_environment::preparse`), as written.
-fn toolkit_file_word(tokens: &[OsString]) -> Option<&str> {
+/// its value; `ncbi_environment::preparse`), as written: the words that a caller without an
+/// application start refuses (`reader::Caller::NoStart`). makeblastdb's `-logfile` is its own
+/// argument (`MakedbArgs::logfile`), which its run opens.
+pub(crate) fn toolkit_file_word<'a>(tokens: &'a [OsString], program: &str) -> Option<&'a str> {
     use crate::blastinput::ncbi_environment::{log_file, preparse, Preparsed};
     let (conffile, dryrun) = match preparse(tokens) {
         Preparsed::Words {
@@ -1123,7 +510,7 @@ fn toolkit_file_word(tokens: &[OsString]) -> Option<&str> {
         } => (conffile.is_some(), dryrun),
         _ => (false, false),
     };
-    if log_file(tokens).is_some() {
+    if program != "makeblastdb" && log_file(tokens).is_some() {
         return toolkit_word_as_written(tokens, "-logfile");
     }
     if conffile {
@@ -1152,19 +539,12 @@ fn toolkit_word_as_written<'a>(tokens: &'a [OsString], name: &str) -> Option<&'a
 // (`api::start`) and of each run of LOSAT Web's ABI v2 (`web_adapter::start_run`) reads `-logfile`
 // and `-conffile` before the arguments, and each ends a `-dryrun` after them; ABI v1 runs none, so
 // it does not take them (line RG items E1w, E1w-3a).
-/// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`) in
-/// `program` when the parser's caller runs no application start: LOSAT Web's ABI v1.
-fn toolkit_file_word_error(program: &str, word: &str) -> clap::Error {
-    clap::Error::raw(
-        ErrorKind::InvalidValue,
-        toolkit_file_word_refusal(program, word),
-    )
-}
-
-/// The text of `toolkit_file_word_error`.
-pub(crate) fn toolkit_file_word_refusal(program: &str, word: &str) -> String {
+/// LOSAT's refusal of the toolkit option `word` (`-logfile`, `-conffile`, `-dryrun`) in the
+/// program of `tool` (named as its other refusals name it, `Tool::refusal_name`) when the reader's
+/// caller runs no application start (`reader::Caller::NoStart`).
+pub(crate) fn toolkit_file_word_refusal(tool: &crate::ncbi_app::Tool, word: &str) -> String {
     let name = toolkit_option_name(word);
-    let shown = refusal_program_name(program);
+    let (program, shown) = (tool.program, tool.refusal_name);
     let places = match library_part(program) {
         LibraryPart::Search if WEB_V2_PROGRAMS.contains(&program) => {
             "the command line, in the library API and in the Web engine's ABI v2"
@@ -1215,17 +595,13 @@ fn toolkit_option_name(word: &str) -> &str {
 // tools print it to their output, `ncbi_app::run_with`, `api::run_makeblastdb`), nor has the Web
 // engine's ABI v1. A run of the Web engine's ABI v2 prints it on its stream of the command line's
 // standard output (`api::start::CallerStart::version`; line WQA's D14, 2026-11-20).
-/// LOSAT's refusal of the version word `word` (`-version` or a full version) in `program` where
-/// the parser's caller prints no version: the library API of the search programs and the Web
-/// engine's ABI v1.
-fn version_word_error(program: &str, word: &str) -> clap::Error {
-    clap::Error::raw(ErrorKind::InvalidValue, version_word_refusal(program, word))
-}
-
-/// The text of `version_word_error`.
-pub(crate) fn version_word_refusal(program: &str, word: &str) -> String {
+/// LOSAT's refusal of the version word `word` (`-version` or a full version) in the program of
+/// `tool` (named as its other refusals name it, `Tool::refusal_name`) where the reader's caller
+/// prints no version: the library API of the search programs and the Web engine's ABI v1
+/// (`reader::read_argv`).
+pub(crate) fn version_word_refusal(tool: &crate::ncbi_app::Tool, word: &str) -> String {
     let name = toolkit_option_name(word);
-    let shown = refusal_program_name(program);
+    let (program, shown) = (tool.program, tool.refusal_name);
     let (places, refusers) = match library_part(program) {
         LibraryPart::Search if WEB_V2_PROGRAMS.contains(&program) => {
             ("the command line and in LOSAT Web", "the library API does")
@@ -1242,24 +618,15 @@ pub(crate) fn version_word_refusal(program: &str, word: &str) -> String {
     )
 }
 
-/// `program` as the refusals of the toolkit's words name it: the BLAST programs in capitals,
-/// makeblastdb as its other refusals do.
-fn refusal_program_name(program: &str) -> String {
-    match program {
-        "makeblastdb" => program.to_string(),
-        _ => program.to_ascii_uppercase(),
-    }
-}
-
 // No NCBI counterpart: NCBI has no library API. NCBI's application prints the XML of `-xmlhelp`
 // (ncbiapp.cpp:685-690, cited at `ncbi_xmlhelp`); LOSAT's library refuses it (line RG DECISIONS
 // E2x-1, the Owner's choice of 2026-11-13). The command line's entries reach the XML
 // (`xml_help_text`, `ncbi_app::run`), and so does a run of the Web engine's ABI v2, which prints it
-// on its stream of the command line's standard output (`printed_text`; line WQA's D14 and Q-XML=A,
+// on its stream of the command line's standard output (`try_parse_with_printing_start`; line WQA's D14 and Q-XML=A,
 // the Owner's choice of 2026-11-20, which takes the XML into the Web engine where E2x-1 and E2x-2
 // left it out); the library and the Web engine's ABI v1 refuse it.
 /// LOSAT's refusal of `-xmlhelp` where no command line's entry prints it: the library API and the
-/// Web engine's ABI v1 of `shown` (`refusal_program_name`, `ncbi_app::Tool::refusal_name`).
+/// Web engine's ABI v1 of `shown` (`ncbi_app::Tool::refusal_name`).
 pub(crate) fn xml_help_refusal(shown: &str) -> String {
     let web = WEB_V2_PROGRAMS
         .iter()
@@ -1274,42 +641,6 @@ pub(crate) fn xml_help_refusal(shown: &str) -> String {
     }
 }
 
-/// The help request that `try_parse_from_start` returns where `-xmlhelp` stopped the reader of
-/// `program`: a `DisplayHelp` error that names the program (`xml_help_program`).
-fn xml_help_request(program: String) -> clap::Error {
-    use clap::error::{ContextKind, ContextValue};
-    let mut error = clap::Error::new(ErrorKind::DisplayHelp);
-    error.insert(ContextKind::Custom, ContextValue::String(program));
-    error
-}
-
-/// The program whose `-xmlhelp` the parser's `error` is (`try_parse_from_start`): the command
-/// line's entry prints its XML (`xml_help_text`) in place of the error, exit status 0.
-pub(crate) fn xml_help_program(error: &clap::Error) -> Option<&str> {
-    use clap::error::{ContextKind, ContextValue};
-    match error.get(ContextKind::Custom) {
-        Some(ContextValue::String(program)) if error.kind() == ErrorKind::DisplayHelp => {
-            Some(program)
-        }
-        _ => None,
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-697
-// NCBI's application writes the help and the XML of `-xmlhelp` to its standard output and exits
-// with status 0.
-/// What the command line prints to its standard output, exit status 0, where its argument reader
-/// stopped with `error` (`cli::main_entry`): the XML of `-xmlhelp` (`xml_help_program`,
-/// `xml_help_text`), or the help that stopped the reader (`-h`, `-help`, `-help-full`, `--help`;
-/// `command_line_message`, `rpsbproc` as there). `None` for an error, which the command line writes
-/// to its standard error. LOSAT Web's ABI v2 prints the same text (stream 11; line WQA's D14,
-/// 2026-11-20): one producer of the text for both.
-pub fn printed_text(error: &clap::Error, rpsbproc: bool) -> Option<String> {
-    xml_help_program(error)
-        .and_then(xml_help_text)
-        .or_else(|| (!error.use_stderr()).then(|| command_line_message(error, rpsbproc)))
-}
-
 /// What `losat <program> -xmlhelp` prints: NCBI's XML of `program` without the arguments that
 /// LOSAT refuses (`ncbi_app::args::refusal`, by name or at the run; `ncbi_xmlhelp::print`).
 pub(crate) fn xml_help_text(program: &str) -> Option<String> {
@@ -1317,102 +648,19 @@ pub(crate) fn xml_help_text(program: &str) -> Option<String> {
     crate::ncbi_xmlhelp::print(program, refused)
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2229-2242 (`AddDefaultFileArguments`:
-// every NCBI application's arguments have `-logfile` and `-conffile`; the BLAST programs hide
-// them from their `-help`, through `HideStdArgs` with `fHideLogfile`, `fHideConffile` and other
-// flags, blastn_app.cpp:92)
-/// `command` with NCBI's two toolkit file arguments, `-logfile` and `-conffile`, in each NCBI
-/// application that runs them (the BLAST programs and makeblastdb) and `selected` takes, hidden as
-/// NCBI hides them. The program's own arguments are in `command` (`cli_command`).
-/// Their values are read by the application start (`ncbi_environment::log_file` and
-/// `ApplicationStart::of_process`), before the arguments: the argument reader only checks them
-/// (one of each, as NCBI's `Argument with this name is defined already`).
-fn with_toolkit_file_args(
-    mut command: clap::Command,
-    selected: impl Fn(&str) -> bool,
-) -> clap::Command {
-    let names: Vec<String> = command
-        .get_subcommands()
-        .map(|sub| sub.get_name().to_string())
-        .filter(|name| TOOLKIT_PROGRAMS.contains(&name.as_str()) || name == "makeblastdb")
-        .filter(|name| selected(name.as_str()))
-        .collect();
-    for name in names {
-        command = command.mut_subcommand(name, |mut sub| {
-            for (key, id) in [
-                ("logfile", "ncbi_toolkit_logfile"),
-                ("conffile", "ncbi_toolkit_conffile"),
-            ] {
-                if !sub.get_arguments().any(|arg| arg.get_long() == Some(key)) {
-                    sub = sub.arg(
-                        clap::Arg::new(id)
-                            .long(key)
-                            .value_name("File_Name")
-                            .value_parser(clap::value_parser!(OsString))
-                            .action(clap::ArgAction::Set)
-                            .hide(true),
-                    );
-                }
-            }
-            sub
-        });
-    }
-    command
-}
-
-/// `command` with `-html` listed in each search program's `-help` right after `-line_length`, as
-/// NCBI BLAST+ 2.17.0's `-help` lists it (`-line_length`, `-html`, `-sorthits`). The field order
-/// of a program's options gives the other places; `-line_length` and `-sorthits` come from the
-/// one `FormattingArgs` that psiblast and rpsblast flatten in too, which have no `-html`, so the
-/// place is given here: the options listed after `-line_length` move down by one. Only clap's
-/// help reads the order, so `parse_command` calls this only for a command line that asks for help.
-fn with_html_help_place(mut command: clap::Command) -> clap::Command {
-    let names: Vec<String> = command
-        .get_subcommands()
-        .filter(|sub| {
-            sub.get_arguments()
-                .any(|arg| arg.get_long() == Some("html"))
-        })
-        .map(|sub| sub.get_name().to_string())
-        .collect();
-    for name in names {
-        command = command.mut_subcommand(name, |mut sub| {
-            let order_of = |sub: &clap::Command, long: &str| {
-                sub.get_arguments()
-                    .find(|arg| arg.get_long() == Some(long))
-                    .map(|arg| (arg.get_id().clone(), arg.get_display_order()))
-            };
-            let (Some((_, line_length)), Some((html, _))) =
-                (order_of(&sub, "line_length"), order_of(&sub, "html"))
-            else {
-                return sub;
-            };
-            let later: Vec<(clap::Id, usize)> = sub
-                .get_arguments()
-                .filter(|arg| arg.get_id() != &html && arg.get_display_order() > line_length)
-                .map(|arg| (arg.get_id().clone(), arg.get_display_order()))
-                .collect();
-            for (id, order) in later {
-                sub = sub.mut_arg(id, |arg| arg.display_order(order + 1));
-            }
-            sub.mut_arg(html, |arg| arg.display_order(line_length + 1))
-        });
-    }
-    command
-}
-
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:78-88
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help. `-logfile` and `-conffile` run in the BLAST programs and
 // makeblastdb (line RG item E1), `-dryrun` in them and blastdbcmd (item E1b), the three in
 // rpsbproc (item E1c, its own `DryRun`: `rpsbproc::dry_run`), `-help-full` in every program (item
-// E2, `try_parse_from`), the full versions in every program (item E3, `ncbi_version_request`),
-// `-xmlhelp` in every program on the command line (item E2x, `xml_help_program`).
+// E2, NCBI's reader: `reader`), the full versions in every program (item E3,
+// `ncbi_version_request`), `-xmlhelp` in every program on the command line (item E2x,
+// `xml_help_text`).
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-230
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NativeError {
     pub exit: i32,
     /// The text NCBI's `CATCH_ALL` writes, as bytes: a name of the command line or of a file
@@ -1430,11 +678,17 @@ impl fmt::Display for NativeError {
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
 impl std::error::Error for NativeError {}
 
-/// Whether `error` is `NativeError::silent_end`.
+/// Whether `error` is `NativeError::silent_end` (including a writer's `StrategyWriteFault`).
 pub(crate) fn is_silent_end(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<NativeError>()
-        .is_some_and(|native| native.exit == 0 && native.message.is_empty())
+    NativeError::caught(error).is_some_and(|native| native.exit == 0 && native.message.is_empty())
+}
+
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:946
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:342
+/// The C-string prefix of `bytes` up to its first NUL byte (`const char *` output of
+/// `CException::what()`).
+pub(crate) fn c_string(bytes: &[u8]) -> &[u8] {
+    bytes.split(|&byte| byte == 0).next().unwrap_or_default()
 }
 
 impl NativeError {
@@ -1453,26 +707,79 @@ impl NativeError {
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:946
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:342
     /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
-    /// BLAST program: `Error: `, the exception's `what()` (which ends with a line feed) and the
-    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`); a `CSeqDBException`, which
-    /// `CATCH_ALL` catches before (its branch comes first), `BLAST Database error: ` and its
-    /// message, exit status 2 (`BLAST_DATABASE_ERROR`). Every place of a `CSeqDBException` that
-    /// LOSAT raises reports the code `eInvalid` (`seqdb::throw_site`), so the texts of that
-    /// branch for `eTooManyOpenFiles` and `eMemoryMappingFailure` do not arise here (the reader's
-    /// errors of those codes are `common::database::database_error`'s). The one producer of these
-    /// reports: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
+    /// BLAST program: a `CBlastException` (`CRemoteBlastException` too) is LOSAT's options error
+    /// of `eInvalidOptions` (exit status 1), `BLAST ran out of memory: ` of a message that names
+    /// memory (`Out of memory`, `Failed to allocate`; exit status 4) and LOSAT's engine error
+    /// otherwise (exit status 3); a `CSeqDBException`, which `CATCH_ALL` catches before (its
+    /// branch comes first), is LOSAT's database error and its message, exit status 2
+    /// (`BLAST_DATABASE_ERROR`); any other is `Error: `, the exception's `what()` as a C string
+    /// (ending at the first NUL byte, dropping any bytes and trailing line feed after it; without
+    /// a NUL, `what()` ends with a line feed) and the post's line feed, exit status 255
+    /// (`BLAST_UNKNOWN_ERROR`). Every place of a `CSeqDBException` that LOSAT raises reports the
+    /// code `eInvalid` (`seqdb::throw_site`), so the texts of that branch for `eTooManyOpenFiles`
+    /// and `eMemoryMappingFailure` do not arise here (the reader's errors of those codes are
+    /// `common::database::database_error`'s). The one producer of these reports: an exception of
+    /// NCBI's that LOSAT raises where NCBI throws it becomes this error.
     pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-229
+        // NCBI reference (598d8ae6): c++/include/algo/blast/api/remote_blast.hpp:63-64
+        // `CATCH_ALL`'s clause of `CBlastException`, which also catches its subclass
+        // `CRemoteBlastException`.
+        if e.kind().starts_with("CBlastException::")
+            || e.kind().starts_with("CRemoteBlastException::")
+        {
+            let msg = e.get_msg();
+            let has = |text: &[u8]| msg.windows(text.len()).any(|part| part == text);
+            return if e.kind() == "CBlastException::eInvalidOptions" {
+                NativeError {
+                    exit: 1,
+                    message: [OPTIONS_ERROR.as_bytes(), b" ", msg, b"\n"].concat(),
+                }
+            } else if has(b"Out of memory") || has(b"Failed to allocate") {
+                // The message names an allocation that failed: exit status 4
+                // (`BLAST_OUT_OF_MEMORY`), the report of `out_of_memory` with the message.
+                NativeError {
+                    exit: 4,
+                    message: [crate::wording::OUT_OF_MEMORY.as_bytes(), b": ", msg, b"\n"].concat(),
+                }
+            } else {
+                NativeError {
+                    exit: 3,
+                    message: [ENGINE_ERROR.as_bytes(), b" ", msg, b"\n"].concat(),
+                }
+            };
+        }
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
                 exit: 2,
                 message: [DATABASE_ERROR.as_bytes(), b" ", e.get_msg(), b"\n"].concat(),
             };
         }
+        let what = e.what();
+        let what = c_string(&what);
         NativeError {
             exit: 255,
-            message: [b"Error: ".as_slice(), &e.what(), b"\n"].concat(),
+            message: [b"Error: ".as_slice(), what, b"\n"].concat(),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384 (cited at
+    // `report::serial::encoder::NullElement`)
+    /// The end of a run whose ASN.1 text stream threw at an element that holds no object
+    /// (`encoder::NullElement`, the application `application`): the stream's post of its first
+    /// failure, then `CATCH_ALL`'s report of the exception (`exception`, exit status 255).
+    pub(crate) fn null_element(
+        application: &str,
+        thrown: &crate::report::serial::encoder::NullElement,
+    ) -> NativeError {
+        let mut error = Self::exception(&thrown.exception());
+        let mut message = thrown.post(Some(application));
+        message.append(&mut error.message);
+        error.message = message;
+        error
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
@@ -1482,6 +789,34 @@ impl NativeError {
         NativeError {
             exit: 255,
             message: format!("Error: {what}\n").into(),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+    /// `CATCH_ALL`'s report of an `ios::failure` (a stream that throws on `badbit`, as the
+    /// formatters set theirs, blast_format.cpp:118-119): "BLAST failed to write output", exit
+    /// status 6. The one producer of the text.
+    pub(crate) fn write_failure() -> NativeError {
+        NativeError {
+            exit: 6,
+            message: b"BLAST failed to write output\n".to_vec(),
+        }
+    }
+
+    /// The end of NCBI's program where its stream's `ios::failure` leaves a destructor or is
+    /// thrown while another unwinds: `std::terminate`, whose C++ runtime writes this report on the
+    /// standard error and aborts (SIGABRT, exit status 134 in a shell; observed with NCBI BLAST+
+    /// 2.17.0, the official Linux x64 release: blastx's tabular formats, blast_formatter's
+    /// standard output on a full device or a closed pipe). `exit_on_native_error` aborts.
+    pub(crate) fn ios_failure_abort() -> NativeError {
+        NativeError {
+            exit: -6,
+            message: format!(
+                "terminate called after throwing an instance of 'std::__ios_failure'\n  what():  \
+                 {}\n",
+                crate::writedb::ofstream::IOS_FAILURE_WHAT
+            )
+            .into_bytes(),
         }
     }
 
@@ -1497,505 +832,66 @@ impl NativeError {
     }
 
     /// The error of a report's writer as the run ends with it: an exception of NCBI's that the
-    /// writer raised mid-report (`NcbiException::of_io_error`: TBLASTX's query-anchored section,
-    /// `report::query_anchored::write_section`) is `CATCH_ALL`'s report of it (`exception`), after
-    /// what the report wrote before it; any other error is the writer's.
+    /// writer raised mid-report is `CATCH_ALL`'s report of it (`of_writer_exception`), after what
+    /// the report wrote before it; any other error is the writer's.
     pub(crate) fn of_writer(error: std::io::Error) -> anyhow::Error {
-        match crate::ncbi_exception::NcbiException::of_io_error(&error) {
-            Some(exception) => NativeError::exception(exception).into(),
+        match NativeError::of_writer_exception::<dyn std::error::Error>(&error) {
+            Some(native) => native.into(),
             None => error.into(),
         }
     }
-}
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-/// The report's output stream (the `-out` file or standard output), which records whether
-/// a write to it failed: NCBI's outfmt 0 stream throws there, which the application
-/// reports as "BLAST failed to write output" (blast_app_util.hpp:252-255).
-pub struct ReportStream {
-    pub inner: Box<dyn std::io::Write + Send>,
-    pub failed: bool,
-}
-
-impl ReportStream {
-    /// The command line's report stream: the `-out` file `out_file` (`None`: standard output),
-    /// behind NCBI's buffer for the organism report (`tax_report`, `report_destination`) and the
-    /// hold of a run whose strategy file `strategy` LOSAT refuses (`report_destination`).
-    pub fn of_cli(
-        out_file: Option<std::io::BufWriter<std::fs::File>>,
-        tax_report: bool,
-        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
-    ) -> Self {
-        ReportStream {
-            inner: report_destination(
-                out_file.map(|file| Box::new(file) as Box<dyn std::io::Write + Send>),
-                tax_report,
-                strategy,
-            ),
-            failed: false,
+    /// `CATCH_ALL`'s report (`exception`) of the exception of NCBI's that the error `error` of a
+    /// report's writer carries, where it carries one (`NcbiException::of_io_error`: raised
+    /// mid-report by the `-html` registries, `report::formatter_registry`, by a subject's load
+    /// that ends the run, `report::x_pairwise_par::end_here`, or by the merge of a query-anchored
+    /// section, `report::query_anchored::write_section` and
+    /// `report::query_anchored::write_unreadable_section`), whichever program wrote the report. The
+    /// one mapping of such an error: at the programs' report boundaries (`of_writer`, BLASTX's
+    /// `native::report_error`) and, through `caught`, at the command line's end
+    /// (`exit_on_native_error`) and in the library's message (`api::error::chain_bytes`), so the
+    /// library's bytes are the command line's.
+    pub(crate) fn of_writer_exception<E: CaughtError + ?Sized>(error: &E) -> Option<NativeError> {
+        let io = error.find::<std::io::Error>()?;
+        if crate::report::ostream::is_strategy_write_fault(io) {
+            return Some(NativeError::silent_end());
         }
+        crate::ncbi_exception::NcbiException::of_io_error(io).map(NativeError::exception)
     }
 
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-    /// The end of a run whose report went to this stream, `result` being the run's: what the
-    /// report wrote stays (a flush, also after an error, such as the outfmt 0 prolog). Where the
-    /// report's stream throws (`throws`: the stream of the outfmt 0 to 4 formatter,
-    /// blast_format.cpp:118-119, and the organism report's, `NcbiReportBuffer`), a write that
-    /// failed (`failed`) or an insertion that set the stream's `badbit` (`BadbitInsertion`) is
-    /// NCBI's "BLAST failed to write output", exit status 6. For the other formats NCBI aborts and
-    /// LOSAT reports the run's error, then the flush's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
-    /// exception 3). The command line's runs of blastn, blastp (psiblast), tblastn and tblastx end
-    /// their report here, and so does the library's `-out` file (`api::local_blast::OutFile`).
-    pub(crate) fn finish(
-        &mut self,
-        result: anyhow::Result<()>,
-        throws: bool,
-    ) -> anyhow::Result<()> {
-        use anyhow::Context;
-        let flushed = std::io::Write::flush(self);
-        let badbit = result.as_ref().is_err_and(BadbitInsertion::is);
-        if (self.failed || badbit) && throws {
-            return Err(NativeError {
-                exit: 6,
-                message: "BLAST failed to write output\n".into(),
-            }
-            .into());
-        }
-        result?;
-        flushed.context("failed to write the output")
-    }
-}
-
-impl std::io::Write for ReportStream {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let written = self.inner.write(buf);
-        self.failed |= written.is_err();
-        written
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        let flushed = self.inner.flush();
-        self.failed |= flushed.is_err();
-        flushed
-    }
-}
-
-// C++ standard, [iostate.flags]: `setstate` calls `clear`, which throws `ios_base::failure` when the bit is in `exceptions()`.
-/// NCBI's `ios::failure` of the outfmt 0 to 4 formatter's stream that an insertion of the report
-/// raises itself, not a write that the file or device refused (`ReportStream::failed`): an
-/// insertion that sets `badbit` (`setstate`, which calls `clear`) throws on a stream whose
-/// `exceptions` mask holds `NcbiBadbit` (blast_format.cpp:118-119), and the application reports it
-/// as "BLAST failed to write output", exit status 6 (blast_app_util.hpp:252-255), after the bytes
-/// the report wrote before it. It travels as the `io::Error` of the report's writes (`error`),
-/// which a program reports as a failed write of the stream (`is`); the epilog's null matrix name
-/// raises it (`report::pairwise::write_matrix_line`).
-#[derive(Debug)]
-pub(crate) struct BadbitInsertion;
-
-impl BadbitInsertion {
-    /// The failure as the error of the report's writes.
-    pub(crate) fn error() -> std::io::Error {
-        std::io::Error::other(BadbitInsertion)
-    }
-
-    /// Whether `error` is this failure (an `io::Error` that holds it).
-    pub(crate) fn is(error: &anyhow::Error) -> bool {
-        error
-            .downcast_ref::<std::io::Error>()
-            .and_then(std::io::Error::get_ref)
-            .is_some_and(|inner| inner.is::<BadbitInsertion>())
-    }
-}
-
-impl std::fmt::Display for BadbitInsertion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("BLAST failed to write output")
-    }
-}
-
-impl std::error::Error for BadbitInsertion {}
-
-/// The stream of the organism report (outfmt 18) as NCBI's buffer writes it: NCBI's formatter
-/// never flushes it, a write to the file or device comes only where the buffer writes
-/// (`NcbiBuffer`), and `~CBlastFormat` turns the stream's exceptions off before its last flush
-/// (the exit flushes C's `stdout` without a check). So a write that fails where NCBI's buffer
-/// writes is "BLAST failed to write output" (`ReportStream::failed`; a reader that closed the
-/// pipe: NCBI is ended by SIGPIPE there), and the bytes still held are written when the run ends,
-/// a failure then unreported (NCBI BLAST+ 2.17.0, probe `T/t2/fix1` `f1.d5.*`: `-out /dev/full`
-/// exit 0 for 2 KB, 6 for 90 KB). One type for both streams: the `-out` file's `basic_filebuf`
-/// (`file`) and standard output's glibc buffer (`standard_output`, line-buffered on a terminal),
-/// and `cerr` is tied to `cout`: a write to standard error writes what standard output holds first
-/// (`tie_standard_output`, `CliStderr`), where NCBI aborts if that write fails (LOSAT: its error,
-/// non-zero exit). LOSAT's flushes of the report hold. Each `write` is one insertion of NCBI's
-/// (`insert`, `insert_streamed`: the writer of the report makes NCBI's insertions, into the
-/// `NcbiOstream` that the run opened, `sink`'s, `standard_output`'s or `file`'s, with nothing
-/// between).
-pub struct NcbiReportBuffer(std::sync::Arc<std::sync::Mutex<HeldReport>>);
-
-/// What `NcbiReportBuffer` holds.
-struct HeldReport {
-    inner: Box<dyn std::io::Write + Send>,
-    /// The bytes that NCBI's buffer holds.
-    held: Vec<u8>,
-    /// NCBI's buffer of the stream.
-    buffer: NcbiBuffer,
-}
-
-impl HeldReport {
-    /// NCBI's buffer writes what it holds (a flush).
-    fn write_held(&mut self) -> std::io::Result<()> {
-        self.buffer.flush();
-        let held = std::mem::take(&mut self.held);
-        self.inner.write_all(&held)?;
-        self.inner.flush()
-    }
-}
-
-impl Drop for HeldReport {
-    fn drop(&mut self) {
-        let _ = self.inner.write_all(&self.held);
-        let _ = self.inner.flush();
-    }
-}
-
-/// The organism report's standard output of the run, which a write to standard error writes
-/// first (`tie_standard_output`): standard output is the process's.
-static TIED_STANDARD_OUTPUT: std::sync::Mutex<
-    Option<std::sync::Weak<std::sync::Mutex<HeldReport>>>,
-> = std::sync::Mutex::new(None);
-
-fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:317-323
-impl NcbiReportBuffer {
-    fn new(inner: Box<dyn std::io::Write + Send>, buffer: NcbiBuffer) -> Self {
-        NcbiReportBuffer(std::sync::Arc::new(std::sync::Mutex::new(HeldReport {
-            inner,
-            held: Vec::new(),
-            buffer,
-        })))
-    }
-
-    /// The `-out` file `inner` (`NcbiStdio::File`: `BUFSIZ - 2` bytes held, the 8191st written
-    /// with them).
-    pub fn file(inner: Box<dyn std::io::Write + Send>) -> Self {
-        Self::new(inner, NcbiBuffer::new(NcbiStdio::File))
-    }
-
-    /// Standard output, glibc's buffer (`NcbiStdio::cout`, line-buffered on a terminal), tied to
-    /// standard error (`tie_standard_output`), writing to `inner` (the process's standard output).
-    pub fn standard_output(inner: Box<dyn std::io::Write + Send>) -> Self {
-        // NCBI's Windows (MSVC) and macOS (libc++, BSD stdio) builds buffer otherwise: there
-        // the exit status of a failing write is unverified (this model is their Linux builds').
-        let report = Self::new(inner, NcbiBuffer::new(NcbiStdio::cout()));
-        *lock(&TIED_STANDARD_OUTPUT) = Some(std::sync::Arc::downgrade(&report.0));
-        report
-    }
-}
-
-impl std::io::Write for NcbiReportBuffer {
-    /// One insertion of NCBI's (`NcbiBuffer::sputn`), whose stream is the bytes held and `buf`:
-    /// what NCBI's buffer writes of them is written, the first of them (all that it held, or
-    /// none), and it holds the rest.
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut report = lock(&self.0);
-        let report = &mut *report;
-        report.held.extend_from_slice(buf);
-        report.buffer.sputn(buf.len(), &report.held);
-        let written = report.held.len() - report.buffer.held();
-        if written > 0 {
-            report.inner.write_all(&report.held[..written])?;
-            report.inner.flush()?;
-            report.held.drain(..written);
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-/// A stream insertion (`operator<<`) in NCBI's report: one insertion (a string or a number) of
-/// `bytes`, one write call, which the organism report's stream takes as one (`NcbiReportBuffer`);
-/// other writers just take the bytes. A string that LOSAT streams is `insert_streamed`.
-pub fn insert(out: &mut (impl std::io::Write + ?Sized), bytes: &[u8]) -> std::io::Result<()> {
-    out.write_all(bytes)
-}
-
-/// One insertion of NCBI's of `len` bytes that LOSAT streams instead of holding (the organism
-/// report, whose runs of about 4 GiB of spaces `tax_report` keeps as counts): `fill` gives the bytes to
-/// the `Insertion`, which writes them in pieces that NCBI's buffers (`NcbiBuffer`) write as they
-/// write the whole. Each piece is longer than a buffer (`basic_filebuf` writes it with what it
-/// holds and keeps nothing; glibc keeps `(held + n) % block`, which adds up over the pieces as
-/// over the whole), and each but the last ends in `NCBI_BUFSIZ` bytes without a newline (so a
-/// line-buffered `cout` keeps its whole remainder there, as within the whole); the last is the
-/// rest. A string without such a place is written in one piece.
-pub fn insert_streamed<W: std::io::Write + ?Sized>(
-    out: &mut W,
-    len: u64,
-    fill: impl FnOnce(&mut Insertion<'_, W>) -> std::io::Result<()>,
-) -> std::io::Result<()> {
-    let mut insertion = Insertion {
-        out,
-        piece: Vec::new(),
-        left: len,
-        since_newline: 0,
-    };
-    fill(&mut insertion)?;
-    debug_assert_eq!(insertion.left, insertion.piece.len() as u64);
-    insertion.out.write_all(&insertion.piece)
-}
-
-/// The bytes of one insertion that LOSAT streams (`insert_streamed`).
-pub struct Insertion<'w, W: std::io::Write + ?Sized> {
-    out: &'w mut W,
-    /// The piece being made.
-    piece: Vec<u8>,
-    /// The bytes of the insertion not written yet, `piece`'s among them.
-    left: u64,
-    /// How many bytes follow the last newline.
-    since_newline: u64,
-}
-
-impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
-    /// The length from which a piece is written where it may end.
-    const PIECE: usize = 1 << 16;
-
-    /// The next bytes of the insertion.
-    pub fn bytes(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-        self.piece.extend_from_slice(bytes);
-        self.since_newline = match bytes.iter().rposition(|&byte| byte == b'\n') {
-            Some(at) => (bytes.len() - at - 1) as u64,
-            None => self.since_newline + bytes.len() as u64,
-        };
-        self.end_piece()
-    }
-
-    /// The next `count` bytes of the insertion, spaces.
-    pub fn spaces(&mut self, mut count: u64) -> std::io::Result<()> {
-        while count > 0 {
-            let n = count.min(Self::PIECE as u64);
-            self.piece.resize(self.piece.len() + n as usize, b' ');
-            self.since_newline += n;
-            count -= n;
-            self.end_piece()?;
-        }
-        Ok(())
-    }
-
-    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long. A
-    /// piece ends only if more than `NCBI_BUFSIZ` bytes follow it, which is at least a block (a
-    /// block never exceeds `NCBI_BUFSIZ`), so the last piece always takes the buffer's branch of
-    /// an insertion longer than the room, as the whole insertion does; a final piece that exactly
-    /// filled a block would differ from the whole.
-    fn end_piece(&mut self) -> std::io::Result<()> {
-        let n = self.piece.len() as u64;
-        if n >= Self::PIECE as u64
-            && self.since_newline >= NCBI_BUFSIZ as u64
-            && self.left - n > NCBI_BUFSIZ as u64
-        {
-            self.out.write_all(&self.piece)?;
-            self.left -= n;
-            self.piece.clear();
-        }
-        Ok(())
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
-/// The stream of a report as NCBI's formatter writes to it (`CBlastFormat::m_Outfile`), with
-/// nothing of a program's before it: each write is one insertion (`operator<<`) of NCBI's
-/// (`insert`, `insert_streamed`), passed on as one write. The organism report (`tax_report`)
-/// writes only to this type, and a writer becomes one only through the constructors below, one per
-/// destination, each saying what comes after it: they are the only places where a buffer or hold
-/// could come between the report's insertions and NCBI's buffer (`NcbiReportBuffer`, which counts
-/// each write as one insertion). A format's sink (`sink`: the command line's `ReportStream` of
-/// blastn, blastp, tblastn and tblastx, the library's and LOSAT Web's writers), blastx's command
-/// line (`standard_output` and `file` for the organism report, `buffered` for every other format),
-/// and the hold of a library call (`held`).
-pub struct NcbiOstream<'a>(Box<dyn std::io::Write + 'a>);
-
-impl<'a> NcbiOstream<'a> {
-    fn new(stream: Box<dyn std::io::Write + 'a>) -> Self {
-        NcbiOstream(stream)
-    }
-
-    /// A format's sink opened as its report's stream (`OutputSink::open`): the caller's writer as
-    /// it is, which the command line of blastn, blastp, tblastn and tblastx makes its
-    /// `ReportStream` (the organism report's is NCBI's buffer, `report_destination`), which the
-    /// library's `run_to_file` makes the same (`api::local_blast::OutFile`) and which a library
-    /// caller or LOSAT Web gives (no stream of NCBI's to model); or, for a library call's `Stdout`
-    /// and `File` sinks, LOSAT's buffered standard output or file (no stream of NCBI's either: the
-    /// report's bytes are NCBI's, the times at which they reach the device are not).
-    pub(crate) fn sink(
-        sink: &'a mut crate::api::local_blast::OutputSink<'_>,
-    ) -> std::io::Result<Self> {
-        sink.open().map(Self::new)
-    }
-
-    /// The organism report's standard output on blastx's command line: NCBI's buffer of `cout`
-    /// (`NcbiReportBuffer::standard_output`) before the process's standard output
-    /// (`report_standard_output`). Nothing comes before the buffer or between it and the device.
-    pub(crate) fn standard_output(
-        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
-    ) -> Self {
-        Self::new(report_destination(None, true, strategy))
-    }
-
-    /// The organism report's `-out` file `file` on blastx's command line: NCBI's `basic_filebuf`
-    /// (`NcbiReportBuffer::file`) before the file, as `standard_output`'s.
-    pub(crate) fn file(
-        file: std::fs::File,
-        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
-    ) -> Self {
-        Self::new(report_destination(Some(Box::new(file)), true, strategy))
-    }
-
-    /// The stream of a format other than the organism report on blastx's command line
-    /// (`native::run_inner`): LOSAT's buffer of 8 KiB (`BufWriter`) before `destination` (the file
-    /// or standard output, behind the held document, `blast_xml::HeldOutput`). NCBI's buffers of these formats
-    /// are not modelled (the order of their texts against the report is item T8 of line RG); the
-    /// organism report never gets this stream (`run_inner` chooses by the format).
-    pub(crate) fn buffered(destination: Box<dyn std::io::Write + 'a>) -> Self {
-        Self::new(Box::new(std::io::BufWriter::new(destination)))
-    }
-
-    /// A format's stream (`sink`'s) behind the hold of a library call (`local::report_batches`,
-    /// `blast_xml::HeldFormats`), which passes the writes and flushes on in their order (at the
-    /// release, while it holds). The caller's writer has no stream of NCBI's (`sink`), so no buffer
-    /// of NCBI's comes after the hold.
-    pub(crate) fn held(
-        stream: crate::algorithm::blastx::HeldFormatWriter<NcbiOstream<'a>>,
-    ) -> Self {
-        Self::new(Box::new(stream))
-    }
-}
-
-impl std::io::Write for NcbiOstream<'_> {
-    /// One insertion, written with one write of the stream.
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.write_all(buf)?;
-        Ok(buf.len())
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        self.0.write_all(buf)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()
-    }
-}
-
-/// `cerr.tie()`: before a write to standard error, the organism report's standard output writes
-/// what it holds (`NcbiReportBuffer::standard_output`); nothing for every other report.
-pub fn tie_standard_output() -> std::io::Result<()> {
-    let tied = lock(&TIED_STANDARD_OUTPUT)
-        .as_ref()
-        .and_then(std::sync::Weak::upgrade);
-    match tied {
-        Some(report) => lock(&report).write_held(),
-        None => Ok(()),
-    }
-}
-
-/// The command line's standard error, tied to the organism report's standard output
-/// (`tie_standard_output`): the process's (`process`), so that what standard output writes before
-/// a text is written before it where the text is made. A whole message is written with one
-/// `write_all` of the stream, which `std::io::Stderr` writes under one lock of standard error, so
-/// that no other thread's message comes inside it. An empty write is no write of NCBI's to `cerr`
-/// (a query without warnings, whose `ERR_POST` NCBI does not make): it writes nothing of the
-/// report. Where the standard error is the file of `-logfile` (tblastx's, rpsblast's and
-/// rpstblastn's run, `DiagTarget::into_standard_error`), a failed write is dropped, as NCBI's
-/// handler of that file drops it: `CFileHandleDiagHandler::Post` ignores what the write returns
-/// (NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/full` runs and writes its report; line WQA's D11
-/// round 2, 2026-11-20).
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
-pub struct CliStderr(std::io::Stderr);
-
-impl CliStderr {
-    /// `result` of a write, dropped where the standard error is the file of `-logfile`.
-    fn logged<T: Default>(result: std::io::Result<T>) -> std::io::Result<T> {
-        match result {
-            Err(_) if crate::blastinput::ncbi_environment::terminal_stderr().is_some() => {
-                Ok(T::default())
-            }
-            result => result,
+    /// The report with which `CATCH_ALL` ends a run whose error (or one error of whose chain) is
+    /// `error`, where it has one: the report of an exception of NCBI's that a report's writer
+    /// raised (`of_writer_exception`), or the `NativeError` itself.
+    pub(crate) fn caught<E: CaughtError + ?Sized>(
+        error: &E,
+    ) -> Option<std::borrow::Cow<'_, NativeError>> {
+        match NativeError::of_writer_exception(error) {
+            Some(native) => Some(std::borrow::Cow::Owned(native)),
+            None => error.find::<NativeError>().map(std::borrow::Cow::Borrowed),
         }
     }
 }
 
-impl CliStderr {
-    /// The process's standard error.
-    pub fn process() -> Self {
-        CliStderr(std::io::stderr())
+/// An error that `NativeError::caught` reads: a run's error (anyhow's `downcast_ref`, which also
+/// finds the error under a context) or one error of a chain (`dyn Error`'s).
+pub(crate) trait CaughtError {
+    /// The error as a `T`, where it is one.
+    fn find<T: std::error::Error + Send + Sync + 'static>(&self) -> Option<&T>;
+}
+
+impl CaughtError for anyhow::Error {
+    fn find<T: std::error::Error + Send + Sync + 'static>(&self) -> Option<&T> {
+        self.downcast_ref()
     }
 }
 
-impl std::io::Write for CliStderr {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-        tie_standard_output()?;
-        Self::logged(self.0.write_all(buf)).map(|()| buf.len())
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        if buf.is_empty() {
-            return Ok(());
-        }
-        tie_standard_output()?;
-        Self::logged(self.0.write_all(buf))
-    }
-
-    fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()> {
-        self.write_all(args.to_string().as_bytes())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()
+impl CaughtError for dyn std::error::Error + 'static {
+    fn find<T: std::error::Error + Send + Sync + 'static>(&self) -> Option<&T> {
+        self.downcast_ref()
     }
 }
 
-/// The report stream's writer of a run: the `-out` file `file` (`None`: standard output), behind
-/// NCBI's buffer for the organism report (`tax_report`, `NcbiReportBuffer`) and, nearest the
-/// destination, the hold of a run whose strategy file `strategy` LOSAT refuses
-/// (`strategy::hold_report_send`).
-pub fn report_destination(
-    file: Option<Box<dyn std::io::Write + Send>>,
-    tax_report: bool,
-    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
-) -> Box<dyn std::io::Write + Send> {
-    use crate::report::archive::strategy::hold_report_send;
-    match (file, tax_report) {
-        (Some(file), true) => Box::new(NcbiReportBuffer::file(hold_report_send(strategy, file))),
-        (Some(file), false) => hold_report_send(strategy, file),
-        (None, true) => Box::new(NcbiReportBuffer::standard_output(hold_report_send(
-            strategy,
-            report_standard_output(),
-        ))),
-        (None, false) => hold_report_send(strategy, report_standard_output()),
-    }
-}
-
-/// Standard output as the report's stream (`ReportStream::inner`).
-///
-/// NCBI writes the report to `cout`; when the process starts with its standard output
-/// closed (`>&-`), its first write fails (outfmt 0: "BLAST failed to write output", exit
-/// 6; outfmt 6 and 7 abort). Rust's runtime opens `/dev/null` on a closed standard
-/// descriptor before `main`, which LOSAT cannot tell from a `/dev/null` that the caller
-/// opened (read and write, as Python's `subprocess.DEVNULL`), so the report is written
-/// there and the run succeeds (approved exception 6 of
-/// `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, accepted by the maintainer in session S08b).
-pub fn report_standard_output() -> Box<dyn std::io::Write + Send> {
-    Box::new(std::io::BufWriter::new(std::io::stdout()))
-}
+pub use crate::report::ostream::{insert, insert_streamed, CliStderr, NcbiOstream, ReportStream};
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
@@ -2003,32 +899,35 @@ pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99 (`s_ArgExptMsg`, cited in
     // `utils::os_bytes`): the name's bytes (probe R1 of line LIB-B: BLASTX's `-query`,
     // `-subject` and `-out` of a name that is not UTF-8).
-    let mut message =
-        format!("Command line argument error: Argument \"{name}\". File is not accessible")
-            .into_bytes();
+    let mut message = format!("Argument \"{name}\". File is not accessible").into_bytes();
     if !path.as_os_str().is_empty() {
         message.extend_from_slice(b":  `");
         message.extend_from_slice(&crate::utils::os_bytes::path_bytes(path));
         message.push(b'\'');
     }
-    message.push(b'\n');
-    NativeError { exit: 1, message }.into()
+    command_line_argument_error(message)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
+/// `CATCH_ALL`'s report of a `CArgException` whose message (`GetMsg()`) is the bytes `message`,
+/// thrown by a program's `Run`: the message after `Command line argument error: `, exit status 1.
+pub(crate) fn command_line_argument_error(message: impl AsRef<[u8]>) -> anyhow::Error {
+    let mut bytes = b"Command line argument error: ".to_vec();
+    bytes.extend_from_slice(message.as_ref());
+    bytes.push(b'\n');
+    NativeError {
+        exit: 1,
+        message: bytes,
+    }
+    .into()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
 /// The `-out` file `path` of a search, created where NCBI's argument handling opens it (after the
 /// subjects are read and the query is opened, before the options are processed): `inaccessible`
-/// when it cannot be made. `program` names the program whose file names must be UTF-8
-/// (`input_files::check_utf8_file_name`); `None` for BLASTX, which has no such check. The command
-/// line's programs (`open_out_file`) and the library's `run_to_file` (`api::local_blast::OutFile`)
-/// make the file here.
-pub(crate) fn create_out_file(
-    path: &std::path::Path,
-    program: Option<&str>,
-) -> anyhow::Result<std::fs::File> {
-    if let Some(program) = program {
-        crate::blastinput::input_files::check_utf8_file_name(path, "out", program)?;
-    }
+/// when it cannot be made. The command line's programs (`open_out_file`) and the library's
+/// `run_to_file` (`api::local_blast::OutFile`) make the file here.
+pub(crate) fn create_out_file(path: &std::path::Path) -> anyhow::Result<std::fs::File> {
     std::fs::File::create(path).map_err(|_| inaccessible("out", path))
 }
 
@@ -2040,23 +939,21 @@ pub(crate) fn create_out_file(
 /// that the run already wrote (`post_native_error`) is not written again. A failed write is
 /// dropped, as NCBI's post drops it (`eprint!` would abort: tblastx `-evalue 0 -logfile /dev/full`
 /// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20). An
-/// error of a report's writer that carries an exception of NCBI's (`NcbiException::into_io_error`:
-/// the `-html` links' registry, `report::formatter_registry::InitConfig`, which NCBI's formatter
-/// reads while it writes) is that exception's report (`NativeError::of_writer`), whichever program
-/// wrote it.
+/// error of a report's writer that carries an exception of NCBI's is that exception's report
+/// (`NativeError::caught`), whichever program wrote it.
+///
+/// The text of `CATCH_ALL` is a post on `cerr`, which a failed standard error does not take
+/// (`report::ostream::cerr_post`); the C++ runtime's text before an abort (exit -6, `std::terminate`)
+/// is written to C's `stderr` whatever `cerr`'s state.
 pub fn exit_on_native_error(error: &anyhow::Error) {
-    let of_writer = error
-        .downcast_ref::<std::io::Error>()
-        .and_then(crate::ncbi_exception::NcbiException::of_io_error)
-        .map(NativeError::exception);
-    if let Some(e) = of_writer
-        .as_ref()
-        .or_else(|| error.downcast_ref::<NativeError>())
-    {
-        if !posted(&e.message) {
+    if let Some(e) = NativeError::caught(error) {
+        if posted(&e.message) {
+        } else if e.exit < 0 {
             let mut stderr = std::io::stderr();
             let _ = std::io::Write::write_all(&mut stderr, catch_all_text(&e.message));
             let _ = std::io::Write::flush(&mut stderr);
+        } else {
+            let _ = crate::report::ostream::cerr_post(catch_all_text(&e.message));
         }
         if e.exit < 0 {
             std::process::abort();
@@ -2115,6 +1012,12 @@ pub fn post_errors_in_run() {
     POST_ERRORS_IN_RUN.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Whether this is the command line's process (`post_errors_in_run`, which `main_entry` alone
+/// calls): its streams post NCBI's texts themselves (`report::ostream::write_side_file`).
+pub fn is_command_line_run() -> bool {
+    POST_ERRORS_IN_RUN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1160
 /// Writes the text of `error` (a `NativeError`) to standard error now. NCBI's `CATCH_ALL` posts
@@ -2130,7 +1033,7 @@ pub fn post_native_error(error: &anyhow::Error) {
         return;
     }
     if let Some(native) = error.downcast_ref::<NativeError>() {
-        let _ = std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&native.message));
+        let _ = crate::report::ostream::cerr_post(catch_all_text(&native.message));
         *POSTED_TEXT
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native.message.clone());
@@ -2139,6 +1042,12 @@ pub fn post_native_error(error: &anyhow::Error) {
 
 #[cfg(test)]
 mod manual_refusals_tests;
+
+#[cfg(test)]
+mod top_level_tests;
+
+#[cfg(test)]
+mod syntax_cases_tests;
 
 #[cfg(all(test, unix))]
 #[path = "cli_tests.rs"]

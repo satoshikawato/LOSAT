@@ -237,8 +237,8 @@ fn the_by_byte_decode_gives_the_reports_of_the_decode_by_base() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// blast_args.cpp:2364-2381: `-db` excludes `-subject` and `-subject_loc` (LOSAT's parser
-// reports it); blast_app_util.hpp:185-203: a database that is not found is NCBI's
+// blast_args.cpp:2364-2381: `-db` excludes `-subject` and `-subject_loc` (NCBI's argument
+// reader reports it, exit status 1); blast_app_util.hpp:185-203: a database that is not found is NCBI's
 // `LOSAT database error` (NCBI's `BLAST Database error`), exit status 2.
 #[test]
 fn database_arguments_are_checked_as_ncbi_checks_them() {
@@ -250,7 +250,7 @@ fn database_arguments_are_checked_as_ncbi_checks_them() {
         .arg(fasta("LC738874.fasta"))
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let dir = temp_dir("missing");
     let missing = dir.join("no_such_db");
     let output = losat()
@@ -269,5 +269,122 @@ fn database_arguments_are_checked_as_ncbi_checks_them() {
         ),
         "{stderr}"
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// A refused first batch (`-parse_deflines` with duplicate query IDs in batch 1) whose set-up check
+// (`refused_batch_setup_error` -> `setup_only: true`) hits a non-`NativeError` refusal (count 0,
+// greedy set-up, or search space overflow) gives way to the duplicate-ID scope refusal and must
+// write each format's prolog once, never twice (`context_statistics::setup_failure`).
+#[test]
+fn a_refused_first_batch_writes_each_prolog_once_on_setup_refusal() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dir = temp_dir("refused-prolog");
+    let cases: &[(&str, &str, &[&str], &str)] = &[
+        (
+            "nseq0",
+            "tests/db_search/aliaskeys/n_nseq0",
+            &[],
+            "the statistics count 0 sequences of the database",
+        ),
+        (
+            "mo00",
+            "tests/db_search/taxfilter/tfn",
+            &[
+                "-reward",
+                "0",
+                "-penalty",
+                "0",
+                "-gapopen",
+                "0",
+                "-gapextend",
+                "0",
+            ],
+            "reward 0 and penalty 0 (matrix-only scoring) with the greedy extension",
+        ),
+        (
+            "n1l62p3",
+            "tests/db_search/aliaskeys/n_nseq1_l62p3",
+            &[],
+            "overflows NCBI BLAST+'s 64-bit effective search space",
+        ),
+    ];
+    for &(tag, db, extra, setup_err) in cases {
+        let control = losat()
+            .args([
+                "blastn",
+                "-db",
+                db,
+                "-query",
+                "tests/db_search/q1c/dup2_bn.fna",
+            ])
+            .args(extra)
+            .args(["-outfmt", "6", "-num_threads", "1"])
+            .current_dir(manifest)
+            .output()
+            .expect("run control blastn");
+        let control_stderr = String::from_utf8_lossy(&control.stderr);
+        assert_eq!(
+            control.status.code(),
+            Some(1),
+            "{tag} control: {control_stderr}"
+        );
+        assert!(
+            control_stderr.contains(setup_err),
+            "{tag} control expected {setup_err:?}, got: {control_stderr}"
+        );
+        let run = |outfmt: &str, out_file: Option<&Path>| {
+            let mut cmd = losat();
+            cmd.args([
+                "blastn",
+                "-db",
+                db,
+                "-query",
+                "tests/db_search/q1c/dup2_bn.fna",
+                "-parse_deflines",
+            ])
+            .args(extra)
+            .args(["-outfmt", outfmt, "-num_threads", "1"])
+            .current_dir(manifest);
+            if let Some(path) = out_file {
+                cmd.arg("-out").arg(path);
+            }
+            let out = cmd.output().expect("run blastn");
+            let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+            assert_eq!(out.status.code(), Some(1), "{tag} of={outfmt}: {stderr}");
+            assert!(
+                stderr.contains("two query records have the Seq-id lcl|dup2"),
+                "{tag} of={outfmt}: {stderr}"
+            );
+            match out_file {
+                Some(path) => {
+                    assert!(out.stdout.is_empty(), "{tag} of={outfmt}: stdout with -out");
+                    std::fs::read(path).expect("read -out file")
+                }
+                None => out.stdout,
+            }
+        };
+        let out0_std = run("0", None);
+        let out0_path = dir.join(format!("{tag}.0.out"));
+        let out0_file = run("0", Some(&out0_path));
+        assert_eq!(out0_std, out0_file, "{tag}: outfmt 0 stdout vs -out");
+        assert_eq!(
+            String::from_utf8_lossy(&out0_std)
+                .matches("BLASTN (LOSAT ")
+                .count(),
+            1,
+            "{tag}: outfmt 0 prolog count"
+        );
+        let out15 = run("15", None);
+        assert_eq!(out15, b"{\n\"BlastOutput2\": [\n", "{tag}: outfmt 15");
+        let out16 = run("16", None);
+        assert_eq!(
+            String::from_utf8_lossy(&out16).matches("<?xml ").count(),
+            1,
+            "{tag}: outfmt 16 prolog count"
+        );
+        let out20 = run("20 qseqid sseqid", None);
+        assert_eq!(out20, b"qseqid,sseqid\n", "{tag}: outfmt 20");
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }

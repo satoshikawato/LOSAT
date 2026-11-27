@@ -30,7 +30,7 @@ A search that v0.1.0 supported gives NCBI BLAST+ 2.17.0's output in v0.2.0 too. 
 | Area | v0.1.0 | v0.2.0 |
 |:---|:---|:---|
 | Search programs | `blastn`, `blastp`, `tblastx` | Also `blastx`, `tblastn`, `psiblast`, `rpsblast` and `rpstblastn` |
-| Database tools | none | `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb` (profile databases for `rpsblast` and `rpstblastn`), and `rpsbproc` for domain annotation |
+| Database tools | none | `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb` (profile databases for `rpsblast`, `rpstblastn` and DELTA-BLAST), `blastdb_aliastool` (alias files and binary lists), `blastdbcheck` (database checks), `cleanup-blastdb-volumes.py` (removes orphaned volume files), `blast_formatter` for the reports of a BLAST archive, and `rpsbproc` for domain annotation |
 | Databases | `-query` against a `-subject` FASTA file only | `-db` searches BLAST databases made by `losat makeblastdb` or NCBI's `makeblastdb`, including NCBI's distributed databases |
 | Standard input | not available | `-query -` in every search program |
 | Tasks | `megablast` and `blastn` for `blastn`; `blastp` for `blastp` | Also `dc-megablast`, `blastn-short`, `rmblastn`, `blastp-fast`, `blastp-short`, `blastx-fast`, `tblastn-fast` |
@@ -40,6 +40,13 @@ A search that v0.1.0 supported gives NCBI BLAST+ 2.17.0's output in v0.2.0 too. 
 | WASI threads | Preview | Supported: tested in CI, outside the release's NCBI parity claim ([Platforms and WebAssembly](platforms.md)) |
 | Libraries and WebAssembly | Internal only | A public Rust library (`losat::api`), a Python package (`pylosat` on PyPI), and a WebAssembly npm package (`losat`, built from the repository) ([Using LOSAT as a library](library.md)) |
 | Web GUI | not part of the release | Preview ([Platforms and WebAssembly](platforms.md)) |
+
+### Speed and memory since v0.1.0
+
+Across all four search modes present in v0.1.0 (`blastn`, `tblastx`, `megablast`, and `blastp`), v0.2.0 runs `5.5×` to `45.5×` faster using `2.0% (1/50.3)` to `35% (1/2.8)` of v0.1.0's peak resident memory at 16 threads while bringing `megablast` and `tblastx` into exact byte-for-byte parity with NCBI BLAST+ 2.17.0 (apart from the local `-subject` genetic-code difference noted above; in the benchmark both arms used genetic code 4, and `blastp` matched form for form — see [Threads, speed and memory](performance.md) for the full v0.2.0 benchmark suite):
+
+<img class="figure-for-light" src="images/fig6_v01_to_v02.png" alt="Wall time and peak memory of LOSAT v0.1.0, NCBI BLAST+ 2.17.0, and LOSAT v0.2.0 across all four v0.1.0 search modes at 16 threads" width="100%">
+<img class="figure-for-dark" src="images/fig6_v01_to_v02_dark.png" alt="Wall time and peak memory of LOSAT v0.1.0, NCBI BLAST+ 2.17.0, and LOSAT v0.2.0 across all four v0.1.0 search modes at 16 threads (dark theme)" width="100%">
 
 ### Databases and `-db`
 
@@ -51,4 +58,4 @@ If you parsed `-outfmt 6` or `7` output in v0.1.0, nothing changes: the columns 
 
 ## What is still not available
 
-`deltablast`, `blast_formatter`, `makeprofiledb -binary`, `-dbtype delta` and `-dbtype cobalt`, `-html`, `psiblast -phi_pattern` and the options that need NCBI's servers (`-remote`, `-entrez_query`) are not in v0.2.0. The [Introduction](introduction.md) lists them, and [What LOSAT refuses](refusals.md) shows the error you get.
+`deltablast`, `makeprofiledb -dbtype cobalt`, `blast_formatter` formats other than `8`, `9` and `12` (and binary or XML archives), `psiblast -phi_pattern` with more than one round (or `-html`) and the options that need NCBI's servers (`-remote`, `-entrez_query`) are not in v0.2.0. The [Introduction](introduction.md) lists them, and [What LOSAT refuses](refusals.md) shows the error you get.

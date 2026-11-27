@@ -67,12 +67,13 @@
 //! `algorithm::tblastx::blast_engine::run_impl::rows_up_front`).
 
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::io;
 use std::sync::{Arc, OnceLock};
 
 use super::pairwise::PairwiseHit;
 use super::query_warnings::{QueryWarnings, ReportHook, ReportPlace};
 use crate::api::local_blast::{FormatProbe, HspIndex};
+use crate::report::ostream::{DisplaySeqalign, ReportWrite};
 use crate::utils::threading::SearchPool;
 
 #[cfg(all(
@@ -191,10 +192,21 @@ impl<'h> QueryGroup<'h> {
                 .iter()
                 .map(|&subject| {
                     let rank = started + 1;
-                    started += match starts(subject) {
-                        HeadingStarts::Once => 1,
-                        HeadingStarts::EachAlignment => self.subject_hits[&subject].len(),
-                        HeadingStarts::Never => 0,
+                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1950-1982,3965-3972
+                    // An HSP whose query row starts left of its record throws in `x_PrepareRowData`
+                    // before `x_PrintDefLine`, so it neither starts a heading nor increments `m_cur_align`.
+                    let shown_hsps = self.subject_hits[&subject]
+                        .iter()
+                        .filter(|hit| !hit.query_left_of_record())
+                        .count();
+                    started += if shown_hsps == 0 {
+                        0
+                    } else {
+                        match starts(subject) {
+                            HeadingStarts::Once => 1,
+                            HeadingStarts::EachAlignment => shown_hsps,
+                            HeadingStarts::Never => 0,
+                        }
                     };
                     (subject, rank)
                 })
@@ -598,7 +610,7 @@ pub(crate) trait QuerySections: Sync {
     /// `ReportPlace` of it: before each description line, where NCBI loads its subject
     /// (`ReportPlace::Load`), and with `-html` the reads of NCBI's formatter registries
     /// (`ReportPlace::Html`).
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -610,7 +622,7 @@ pub(crate) trait QuerySections: Sync {
     /// subject's heading with its first HSP: the parts of `0..` its HSPs in order write the
     /// subject's alignments; `place` at the `-html` reads of NCBI's formatter registries that the
     /// heading's links make (`ReportPlace::Html`, before the heading's bytes).
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -655,11 +667,14 @@ pub(crate) trait QuerySections: Sync {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2002-2009
-    /// Where `merges_alignments`: the merge's work on aligned subject `s_idx` of the query
-    /// (`group`) after it reads the subject and before it reads the next one, all before the
-    /// section's first byte. NCBI makes the Dense-segs of the subject's Std-segs there, which can
-    /// throw (BLASTX's `EmptyRowsStop::StdSegLengths`); nothing by default.
-    fn merged_subject<W: Write>(
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1817-1824
+    /// NCBI's Dense-segs of the Std-segs of aligned subject `s_idx`'s HSPs (`group`), made before
+    /// any byte of the query's alignments, which can throw (BLASTX's
+    /// `EmptyRowsStop::StdSegLengths`): where `merges_alignments`, the merge's work on the subject
+    /// after it reads it and before it reads the next one; in the `-html` pairwise report, for
+    /// the aligned subjects that `html_links_densegs` does not pass over, before the first
+    /// alignment. Nothing by default.
+    fn subject_densegs<W: crate::report::ostream::ReportWrite>(
         &self,
         _writer: &mut W,
         _group: &QueryGroup<'_>,
@@ -668,9 +683,20 @@ pub(crate) trait QuerySections: Sync {
         Ok(())
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4590-4610
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2145-2154
+    /// The Seq-id text (`CSeq_id::GetSeqIdString`) of aligned subject `s_idx`'s Seq-align id
+    /// without and with its version, which the `-html` pairwise report compares with the last
+    /// subject whose Dense-segs it made (`html_links_densegs`). `None` (the default) where the
+    /// report's Dense-segs never throw (`subject_densegs` makes nothing there): then that pass
+    /// makes none for the subject.
+    fn alignment_id_texts(&self, _s_idx: u32) -> Option<[Vec<u8>; 2]> {
+        None
+    }
+
     /// The one section of the alignments of the query's aligned subjects (`group`), where
     /// `merges_alignments`.
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         _writer: &mut W,
         _q_idx: usize,
@@ -682,7 +708,11 @@ pub(crate) trait QuerySections: Sync {
     }
 
     /// The footer of a query with hits.
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()>;
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()>;
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:286-304 (each app's `Run`)
@@ -693,7 +723,7 @@ pub(crate) trait QuerySections: Sync {
 /// run: NCBI leaves its formatting loop for `CATCH_ALL` and loads no subject after it, so no text
 /// of a read is written after it (`QueryWarnings::end_run`), also not when the warnings end.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn write<S: QuerySections, W: Write>(
+pub(crate) fn write<S: QuerySections, W: ReportWrite>(
     writer: &mut W,
     sections: &S,
     first_query: usize,
@@ -741,15 +771,15 @@ pub(crate) fn write<S: QuerySections, W: Write>(
 }
 
 /// Where the alignments of the query of `group` end the run (`aligned_end` of what the report's
-/// view does after a throw, `PairwiseView::after_throw`, the answer that the model of the loads
-/// takes too, `FormatThrow::of`, and of the loads of its aligned subjects,
-/// `QuerySections::thrown`).
+/// view does after a throw, with `-html` where the report has its links,
+/// `PairwiseView::after_throw`, the answer that the model of the loads takes too,
+/// `FormatThrow::of`, and of the loads of its aligned subjects, `QuerySections::thrown`).
 fn alignment_end<'s, S: QuerySections>(
     sections: &'s S,
     group: &QueryGroup<'_>,
 ) -> Option<(usize, &'s crate::ncbi_exception::NcbiException)> {
     aligned_end(
-        sections.view().after_throw(),
+        sections.view().after_throw(sections.html_links().is_some()),
         group.aligned(sections.num_alignments()),
         |s_idx| sections.thrown(s_idx),
     )
@@ -786,29 +816,78 @@ pub(super) fn end_here(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1881-1885
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1907-1914
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1921-1934
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4577-4613
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4188-4212
 /// The start of the alignment of aligned subject `s_idx` at position `position` of the query's
-/// alignments, at its `place`s, before its heading (after `end_here`): its load
-/// (`ReportPlace::Load`); before the first alignment, with `-html`, the read of `./.ncbirc` that
-/// `x_InitAlignParams` makes after `GetDbType` loads the first alignment's subject, before that
-/// load where its Seq-align id is local (`GetDbType` does not load it; its heading does).
-fn alignment_start<S: QuerySections, W: Write>(
+/// alignments (`group`), at its `place`s, before its heading: the end of the run where `end`
+/// (`alignment_end`) is at that position, then its load (`ReportPlace::Load`). Before the first
+/// alignment, with `-html`, `x_InitAlignParams` reads `./.ncbirc` after `GetDbType` loads the
+/// first alignment's subject, so before that load (and before the end of the run there) where
+/// its Seq-align id is local (`GetDbType` does not load it; the merge of a query-anchored
+/// section, outfmt 1 to 4, or the pairwise heading does); then the pairwise report (outfmt 0)
+/// makes the Dense-segs of the HSPs of the aligned subjects that `html_links_densegs` does not
+/// pass over, for its links (`x_PreProcessSeqAlign`, `QuerySections::subject_densegs`), which
+/// can throw, before any alignment. One order for both writers (line RG T4b review a B1, N3).
+fn alignment_start<S: QuerySections, W: ReportWrite>(
     sections: &S,
+    group: &QueryGroup<'_>,
+    end: Option<(usize, &crate::ncbi_exception::NcbiException)>,
     position: usize,
     s_idx: u32,
     writer: &mut W,
     place: ReportHook<'_, W>,
 ) -> io::Result<()> {
     if position > 0 || sections.html_links().is_none() {
+        end_here(end, position)?;
         return place(ReportPlace::Load(s_idx), writer);
     }
     let ncbirc = ReportPlace::Html(super::html_ids::HtmlPost::Ncbirc);
     if sections.alignment_id_is_local(s_idx) {
         place(ncbirc, writer)?;
+        html_links_densegs(sections, group, writer)?;
+        end_here(end, position)?;
         place(ReportPlace::Load(s_idx), writer)
     } else {
+        end_here(end, position)?;
         place(ReportPlace::Load(s_idx), writer)?;
-        place(ncbirc, writer)
+        place(ncbirc, writer)?;
+        html_links_densegs(sections, group, writer)
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4590-4610
+/// The Dense-segs that the `-html` pairwise report (outfmt 0) makes of the HSPs of the aligned
+/// subjects of the query (`group`), in their order, before its first alignment, for the
+/// alignments' links (`x_PreProcessSeqAlign`, `x_CalcUrlLinksParams`; `alignment_start`). A
+/// subject is passed over where both texts of the last subject whose Dense-segs were made are
+/// not empty, its text without the version is that subject's and its text with the version is
+/// not (`QuerySections::alignment_id_texts`: another version of one accession); the passed
+/// subject does not become the last one, and its Dense-segs are made at its own alignment, as in
+/// the plain report (line RG T4b review b F1). The plain report makes each at its alignment, the
+/// query-anchored section at its merge.
+fn html_links_densegs<S: QuerySections, W: ReportWrite>(
+    sections: &S,
+    group: &QueryGroup<'_>,
+    writer: &mut W,
+) -> io::Result<()> {
+    if sections.merges_alignments() {
+        return Ok(());
+    }
+    let mut last: [Vec<u8>; 2] = Default::default();
+    for &s_idx in group.aligned(sections.num_alignments()) {
+        let Some(texts) = sections.alignment_id_texts(s_idx) else {
+            continue;
+        };
+        let [id, versioned] = &last;
+        if !id.is_empty() && !versioned.is_empty() && *id == texts[0] && *versioned != texts[1] {
+            continue;
+        }
+        sections.subject_densegs(writer, group, s_idx)?;
+        last = texts;
+    }
+    Ok(())
 }
 
 /// What the report of query `query` writes to the run's diagnostics at `place`, after the report
@@ -817,7 +896,7 @@ fn alignment_start<S: QuerySections, W: Write>(
 /// the writers: the plain report's places are the loads that it reads alone (line RG T4a2 fix
 /// round 2, review c C5: an out-of-line call at each load of a plain run).
 #[inline]
-pub(crate) fn at_place<W: Write>(
+pub(crate) fn at_place<W: io::Write>(
     warnings: Option<&mut QueryWarnings<'_>>,
     links: Option<&super::html_ids::HtmlLinks>,
     query: usize,
@@ -837,7 +916,7 @@ pub(crate) fn at_place<W: Write>(
 /// for the report of `warnings`, `QueryWarnings::report`), the posts after the report written so
 /// far and the `GETURL_DEBUG` line. One that posts without warnings is LOSAT's internal error
 /// (`query_warnings::HTML_POSTS_WITHOUT_WARNINGS`).
-fn html_at_place<W: Write>(
+fn html_at_place<W: io::Write>(
     warnings: Option<&mut QueryWarnings<'_>>,
     links: Option<&super::html_ids::HtmlLinks>,
     post: super::html_ids::HtmlPost,
@@ -860,13 +939,13 @@ fn html_at_place<W: Write>(
         warnings.html_post(&posts, writer)?;
     }
     if !line.is_empty() {
-        warnings.html_stderr_line(&line)?;
+        warnings.html_stderr_line(&line, writer)?;
     }
     Ok(())
 }
 
 /// The serial writer: each query's warnings and parts on `writer`, in order.
-fn write_serial<S: QuerySections, W: Write>(
+fn write_serial<S: QuerySections, W: ReportWrite>(
     writer: &mut W,
     sections: &S,
     first_query: usize,
@@ -892,20 +971,30 @@ fn write_serial<S: QuerySections, W: Write>(
         };
         sections.head(writer, q_idx, group.as_ref(), &mut place)?;
         if let Some(group) = &group {
+            let mut display = DisplaySeqalign::default();
             if sections.merges_alignments() {
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1997-2003
                 // The merge loads every aligned subject before the section's first byte
-                // (`merged_subject` after each load); without one (`-num_alignments 0`) there is
+                // (`subject_densegs` after each load); without one (`-num_alignments 0`) there is
                 // no section (`DisplaySeqalign` returns at once). A load that throws ends the run
-                // there (`alignment_end`).
+                // there (`alignment_end`). With `-html` the section reads `./.ncbirc` where the
+                // pairwise alignments do, at the first load (`alignment_start`).
                 let aligned = group.aligned(sections.num_alignments());
                 let end = alignment_end(sections, group);
                 if !aligned.is_empty() {
                     for (position, &s_idx) in aligned.iter().enumerate() {
-                        end_here(end, position)?;
-                        place(ReportPlace::Load(s_idx), &mut *writer)?;
-                        sections.merged_subject(writer, group, s_idx)?;
+                        alignment_start(
+                            sections,
+                            group,
+                            end,
+                            position,
+                            s_idx,
+                            &mut *writer,
+                            &mut place,
+                        )?;
+                        sections.subject_densegs(writer, group, s_idx)?;
                     }
+                    display.enter(writer)?;
                     sections.alignments(writer, q_idx, group)?;
                 }
             } else {
@@ -915,8 +1004,16 @@ fn write_serial<S: QuerySections, W: Write>(
                 for (position, &s_idx) in
                     group.aligned(sections.num_alignments()).iter().enumerate()
                 {
-                    end_here(end, position)?;
-                    alignment_start(sections, position, s_idx, &mut *writer, &mut place)?;
+                    alignment_start(
+                        sections,
+                        group,
+                        end,
+                        position,
+                        s_idx,
+                        &mut *writer,
+                        &mut place,
+                    )?;
+                    display.enter(writer)?;
                     let hsps = group.subject_hits[&s_idx].len();
                     sections.subject(
                         writer,
@@ -928,6 +1025,7 @@ fn write_serial<S: QuerySections, W: Write>(
                     )?;
                 }
             }
+            display.leave(writer)?;
             sections.foot(writer, q_idx)?;
         }
     }
@@ -1132,11 +1230,11 @@ fn format_piece<S: QuerySections>(
     piece: Piece,
     marks: bool,
 ) -> Formatted {
-    let mut buffer = Vec::new();
+    let mut buffer = crate::report::ostream::CutBuffer::default();
     let mut places: Vec<(usize, ReportPlace)> = Vec::new();
-    let mut mark = |place: ReportPlace, buffer: &mut Vec<u8>| {
+    let mut mark = |place: ReportPlace, buffer: &mut crate::report::ostream::CutBuffer| {
         if marks {
-            places.push((buffer.len(), place));
+            places.push((buffer.bytes.len(), place));
         }
         Ok(())
     };
@@ -1155,8 +1253,15 @@ fn format_piece<S: QuerySections>(
                 };
                 if from < to {
                     if from == 0 {
-                        end_here(end, position)?;
-                        alignment_start(sections, position, s_idx, &mut buffer, &mut mark)?;
+                        alignment_start(
+                            sections,
+                            group,
+                            end,
+                            position,
+                            s_idx,
+                            &mut buffer,
+                            &mut mark,
+                        )?;
                     }
                     sections.subject(&mut buffer, None, group, s_idx, from..to, &mut mark)?;
                 }
@@ -1167,9 +1272,16 @@ fn format_piece<S: QuerySections>(
             let group = group.expect("a query with a section has hits");
             let end = alignment_end(sections, group);
             for (position, &s_idx) in group.aligned(sections.num_alignments()).iter().enumerate() {
-                end_here(end, position)?;
-                mark(ReportPlace::Load(s_idx), &mut buffer)?;
-                sections.merged_subject(&mut buffer, group, s_idx)?;
+                alignment_start(
+                    sections,
+                    group,
+                    end,
+                    position,
+                    s_idx,
+                    &mut buffer,
+                    &mut mark,
+                )?;
+                sections.subject_densegs(&mut buffer, group, s_idx)?;
             }
             sections.alignments(&mut buffer, piece.query, group)
         }
@@ -1182,31 +1294,35 @@ fn format_piece<S: QuerySections>(
     }
 }
 
-/// A piece formatted into its own buffer (`format_piece`).
+/// A piece formatted into its own buffer (`format_piece`), with NCBI's flushes made in it (a
+/// query footer's).
 struct Formatted {
-    buffer: Vec<u8>,
+    buffer: crate::report::ostream::CutBuffer,
     /// Where the serial writer writes to the diagnostics: the buffer's length then and the place.
     places: Vec<(usize, ReportPlace)>,
     result: io::Result<()>,
 }
 
 impl Formatted {
-    /// Writes the piece of query `query` to `writer` with what the serial writer writes to the
-    /// diagnostics at its places, after the bytes before each (`at_place`).
-    fn write<W: Write>(
+    /// Writes the piece of query `query` to `writer`, with NCBI's insertions, regions and flushes
+    /// of its buffer (`CutCursor`), and what the serial writer writes to the diagnostics at its
+    /// places, after the bytes before each (`at_place`).
+    fn write<W: ReportWrite>(
         &self,
         query: usize,
         writer: &mut W,
         mut warnings: Option<&mut QueryWarnings<'_>>,
         links: Option<&super::html_ids::HtmlLinks>,
     ) -> io::Result<()> {
+        let report = &self.buffer.bytes;
+        let mut cuts = self.buffer.cuts.cursor();
         let mut written = 0;
         for &(at, place) in &self.places {
-            writer.write_all(&self.buffer[written..at])?;
+            cuts.write(writer, report, written, at)?;
             written = at;
             at_place(warnings.as_deref_mut(), links, query, place, writer)?;
         }
-        writer.write_all(&self.buffer[written..])
+        cuts.write(writer, report, written, report.len())
     }
 }
 
@@ -1240,7 +1356,7 @@ fn map<T: Sync, R: Send>(
 /// formatted on `pool` in chunks of at most the budget's estimated bytes (at least one piece),
 /// each chunk written in order by the calling thread before the next. Returns the numbers of
 /// chunks and pieces.
-fn write_parallel<S: QuerySections, W: Write>(
+fn write_parallel<S: QuerySections, W: ReportWrite>(
     writer: &mut W,
     sections: &S,
     first_query: usize,
@@ -1265,7 +1381,7 @@ fn write_parallel<S: QuerySections, W: Write>(
 /// `write_parallel` with windows and chunks of `budget` and pieces of `piece_bytes` estimated
 /// bytes.
 #[allow(clippy::too_many_arguments)]
-fn write_parallel_with<S: QuerySections, W: Write>(
+fn write_parallel_with<S: QuerySections, W: ReportWrite>(
     writer: &mut W,
     sections: &S,
     first_query: usize,
@@ -1281,6 +1397,7 @@ fn write_parallel_with<S: QuerySections, W: Write>(
         .iter()
         .map(|query_hits| query_estimate(query_hits, sections.line_length()))
         .collect();
+    let mut display = DisplaySeqalign::default();
     for window in query_windows(&estimates, budget) {
         let groups = map(pool, &hits_by_query[window.clone()], |query_hits| {
             QueryGroup::for_sections(query_hits, subject_titles, sections)
@@ -1314,6 +1431,10 @@ fn write_parallel_with<S: QuerySections, W: Write>(
                 format_piece(sections, groups[piece.query - first].as_ref(), piece, marks)
             });
             for (piece, formatted) in chunk.iter().zip(buffers) {
+                match piece.part {
+                    Part::Alignments(..) | Part::Section => display.enter(&mut *writer)?,
+                    Part::Head | Part::Foot => display.leave(&mut *writer)?,
+                }
                 if piece.part == Part::Head {
                     if let Some(warnings) = warnings.as_deref_mut() {
                         warnings.before_query(piece.query, &mut *writer)?;

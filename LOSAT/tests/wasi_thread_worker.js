@@ -7,9 +7,9 @@
 const { isMainThread, parentPort, workerData } = require("worker_threads");
 const { WASI } = require("wasi");
 const fs = require("fs");
-const { unsignedWasiImports, blockingStdioWrite } = require("./wasi_artifact");
+const { unsignedWasiImports, blockingStdioWrite, endOnAbortTrap } = require("./wasi_artifact");
 // The table of the files the command opens (wasi_files.js).
-const { sharedFileImports } = require("./wasi_files");
+const { sharedFileImports, directoryReads } = require("./wasi_files");
 
 const DEBUG = process.env.LOSAT_WASI_THREADS_DEBUG === "1";
 
@@ -29,8 +29,11 @@ function writeError(err) {
 // A Wasm trap cannot unwind Rust/Rayon's shared state. The main thread may be
 // blocked inside Wasm, unable to receive a Worker error/exit event. Terminate
 // this command process from the failing worker after flushing its diagnostic;
-// process.exit() in a Node Worker would terminate only that worker.
+// process.exit() in a Node Worker would terminate only that worker. The module's abort on a
+// guest thread ends the command by SIGABRT with no text, as the native abort on any thread
+// (wasi_artifact.js).
 function failWorker(err) {
+  endOnAbortTrap(err);
   try { writeError(err); } finally { process.kill(process.pid, "SIGTERM"); }
 }
 
@@ -106,7 +109,8 @@ function hostImports(module, provided = {}) {
 
 function createImports(wasi, memory, spawnThread, extra, files, directory) {
   const wasiImport = unsignedWasiImports(wasi.wasiImport);
-  const local = { ...wasiImport, fd_write: blockingStdioWrite(wasiImport.fd_write) };
+  // A folder opened for reading fails its reads with EISDIR, as on Linux (directoryReads, wasi_files.js).
+  const local = directoryReads({ ...wasiImport, fd_write: blockingStdioWrite(wasiImport.fd_write) }, memory, directory ?? "/");
   return {
     ...extra,
     env: { memory },

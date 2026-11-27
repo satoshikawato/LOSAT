@@ -1,11 +1,13 @@
 //! `losat makeprofiledb`: NCBI BLAST+ 2.17.0 makeprofiledb (`CMakeProfileDBApp`,
-//! c++/src/app/blastdb/makeprofiledb.cpp) with `-dbtype rps`, which writes the database of
-//! profiles that rpsblast and rpstblastn search: the PSSMs (`.rps`), their frequency ratios
-//! (`.freq`), the table of their words (`.loo`), their statistics (`.aux`) and the protein BLAST
-//! database of their queries (`crate::writedb`). Its command line is NCBI's (`ncbi_app`); the
-//! work of its `Run` is in `work`, the files of a volume in `rps_files`, the checks and the
-//! statistics of a profile in `profile`.
+//! c++/src/app/blastdb/makeprofiledb.cpp) with `-dbtype rps` and `-dbtype delta`, which writes the
+//! database of profiles that rpsblast, rpstblastn and deltablast search: the PSSMs (`.rps`), their
+//! frequency ratios (`.freq`), the table of their words (`.loo`), their statistics (`.aux`), the
+//! protein BLAST database of their queries (`crate::writedb`), and for `-dbtype delta` the
+//! weighted residue frequencies (`.wcounts`) and effective observations (`.obsr`). Its command
+//! line is NCBI's (`ncbi_app`); the work of its `Run` is in `work`, the files of a volume in
+//! `rps_files` and `delta`, the checks and the statistics of a profile in `profile`.
 
+mod delta;
 mod profile;
 mod rps_files;
 mod work;
@@ -32,6 +34,9 @@ static TOOL: Tool = Tool {
     help: HELP,
     post_prefix: None,
     components: &[],
+    help_full: None,
+    short_description: None,
+    write_failure: None,
     dry_run: Some(work::dry_run),
 };
 

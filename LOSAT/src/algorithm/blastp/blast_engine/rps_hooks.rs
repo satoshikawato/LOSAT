@@ -18,7 +18,7 @@ use crate::algorithm::rps_search::engine::{
     batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers,
 };
 use crate::algorithm::rps_search::volumes::{
-    mask_unsupported_letters, merge_volume, report_ordinal_ids, shift_ordinal_ids, Consensus,
+    mask_unsupported_letters, merge_volume, report_ordinal_ids, shift_ordinal_ids, ProfileLetters,
     RpsUnits, RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::algorithm::tblastx::lookup::{
@@ -35,11 +35,11 @@ use crate::stats::KarlinParams;
 /// batch's queries), so the error is the first batch's whatever its queries' validity, after
 /// what that batch writes before (`preliminary_search_error`; series PR, item PS12f, review S1).
 #[derive(Debug)]
-pub(super) struct RpsEngineError(pub(super) String);
+pub(super) struct RpsEngineError(pub(super) Vec<u8>);
 
 impl std::fmt::Display for RpsEngineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{ENGINE_ERROR} {}", self.0)
+        write!(f, "{ENGINE_ERROR} {}", String::from_utf8_lossy(&self.0))
     }
 }
 
@@ -64,15 +64,9 @@ pub(super) fn check_freq_ratio_file(
     let Some(name) = args.db.as_deref() else {
         return Ok(());
     };
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => bail!("{reason} is not supported by LOSAT's RPSBLAST"),
-    };
-    let path = crate::seqdb::SearchPath::from_environment(registry).map_err(|_| {
-        crate::blastinput::app::engine_error("Cannot retrieve path to RPS database")
-    })?;
-    let mut failed: Vec<&str> = Vec::new();
-    for db in name.split(' ').filter(|db| !db.is_empty()) {
+    let path = crate::seqdb::SearchPath::from_environment(settings.blastdb.as_deref());
+    let mut failed: Vec<&[u8]> = Vec::new();
+    for db in name.split(|&byte| byte == b' ').filter(|db| !db.is_empty()) {
         let volumes =
             crate::seqdb::SeqDb::volume_and_alias_paths(db, crate::seqdb::SeqType::Protein, &path)
                 .ok()
@@ -81,7 +75,8 @@ pub(super) fn check_freq_ratio_file(
                 .ok_or_else(|| {
                     crate::blastinput::app::engine_error("Cannot retrieve path to RPS database")
                 })?;
-        if !std::path::Path::new(&format!("{}.freq", volumes[0])).exists() {
+        let freq = [volumes[0].as_slice(), b".freq"].concat();
+        if !crate::utils::os_bytes::path_of_bytes(&freq).exists() {
             failed.push(db);
         }
     }
@@ -90,13 +85,19 @@ pub(super) fn check_freq_ratio_file(
     }
     args.comp_based_stats.mode =
         crate::algorithm::blastp::args::BlastpCompositionMode::NoCompositionBasedStats;
-    let warning = format!(
-        "Warning: [rpsblast] {} contain(s) no freq ratios needed for composition-based statistics.\nRPSBLAST will be run without composition-based statistics.\n",
-        failed.join(", ")
+    let mut warning = b"Warning: [rpsblast] ".to_vec();
+    for (idx, db) in failed.iter().enumerate() {
+        if idx > 0 {
+            warning.extend_from_slice(b", ");
+        }
+        warning.extend_from_slice(db);
+    }
+    warning.extend_from_slice(
+        b" contain(s) no freq ratios needed for composition-based statistics.\nRPSBLAST will be run without composition-based statistics.\n",
     );
     match &args.archive {
-        Some(handle) => handle.write_warning(diagnostics, warning.as_bytes())?,
-        None => diagnostics.write_all(warning.as_bytes())?,
+        Some(handle) => handle.write_warning(diagnostics, &warning)?,
+        None => diagnostics.write_all(&warning)?,
     }
     Ok(())
 }
@@ -115,12 +116,10 @@ pub(super) fn note_handle_sets(
     args: &ResolvedBlastpArgs,
     database: &database::BlastpDatabase,
 ) -> Result<()> {
+    use crate::report::archive::fields;
     use crate::report::archive::options::{Param, ParamValue};
     let before_batches = (rps.requested_cbs != 0 && !args.comp_based_stats.is_enabled())
-        .then_some(Param {
-            name: "CompositionBasedStats",
-            value: ParamValue::Integer(0),
-        })
+        .then(|| Param::new(fields::COMPOSITION_BASED_STATS, ParamValue::Integer(0)))
         .into_iter()
         .collect();
     // The volumes' matrix and gap costs as the first volume's files read them (the search sets the
@@ -131,6 +130,7 @@ pub(super) fn note_handle_sets(
     handle.set_search_sets(
         before_batches,
         crate::algorithm::rps_search::volumes::search_sets(db_length, costs),
+        Vec::new(),
     )
 }
 
@@ -399,7 +399,10 @@ pub(super) fn rps_search(
             // N2 of review A (PS12a): the score block of each query of the first batch fails.
             Err(RpsVolumeError::NoMatrix) => {
                 let queries = run.batches.first().map_or(0, |batch| batch.len());
-                return Err(RpsEngineError("Error: Unknown error code -1 ".repeat(queries)).into());
+                return Err(RpsEngineError(
+                    "Error: Unknown error code -1 ".repeat(queries).into_bytes(),
+                )
+                .into());
             }
         };
         // The unit's concatenated length where NCBI's engine meets it, in the unit's search of the
@@ -407,7 +410,7 @@ pub(super) fn rps_search(
         // `run_call` checked): LOSAT's refusal (`RpsUnit::check_engine_length`; none where no
         // query is searched).
         if searches {
-            unit.check_engine_length(args.window_size as i32, "RPSBLAST")?;
+            unit.check_engine_length(args.window_size, "RPSBLAST")?;
         }
         let masked: Vec<Option<Vec<u8>>> = run
             .contexts
@@ -516,7 +519,7 @@ pub(super) fn rps_search(
             sbp: sbp.as_ref(),
             hitlist_size: args.traceback_hitlist_size(),
             prelim_hitlist_size: run.prelim_hitlist_size,
-            window: args.window_size as i32,
+            window: args.window_size,
             // The unit's concatenated length `Lc` (an alias file's `LENGTH` and `NSEQ` over one
             // volume).
             concat_length: unit.concat_length(),
@@ -553,7 +556,7 @@ pub(super) fn rps_search(
         for (number, batch) in engine
             .search_volume(
                 &files,
-                &Consensus::new(&setup, volume, &files),
+                &ProfileLetters::new(&setup, volume, starts[index]),
                 pool,
                 &workers,
             )?
@@ -681,9 +684,9 @@ pub(super) fn request_space(
 /// The run's error when the query batch `batch` of `run.batches` fails (`rps_search`). NCBI reads,
 /// writes the search strategy request of, searches and reports one batch before it reads the next,
 /// so an error of its own in a batch's search (a profile volume's sequence file that the batch's
-/// traceback reads, `Consensus`: `BLAST Database error`, exit status 2) ends the run after the
+/// traceback reads, `ProfileLetters`: `BLAST Database error`, exit status 2) ends the run after the
 /// reports of the batches before it (without the epilog) and after that batch's reader messages
-/// and request. That is the error of a header file that a batch reaches (`HeaderReadError`, named
+/// and request. That is the error of a header file that a batch reaches (`ErrorAfterBatchReports`, named
 /// by the batch's first query), whose batches before blastp's driver searches again and reports
 /// alone (`search`). LOSAT's refusals end the run as they are.
 #[cold]
@@ -693,12 +696,7 @@ fn failed_batch_error(run: &RpsSearchRun<'_>, batch: usize, error: anyhow::Error
         return error;
     }
     // The traceback fails before the batch's Seq-aligns: NCBI read none of its headers.
-    database::HeaderReadError {
-        query: run.batches[batch].start,
-        error,
-        utf8: None,
-    }
-    .into()
+    crate::blastinput::app::ErrorAfterBatchReports::of_batch(run.batches[batch].start, error).into()
 }
 
 // `MAX_DBSEQ_LEN`: the longest subject (here a user query) that NCBI's engine searches whole (the

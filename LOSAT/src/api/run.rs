@@ -21,7 +21,8 @@ use super::local_blast::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_database_blastn,
     run_local_database_blastp, run_local_database_blastx, run_local_database_tblastn,
     run_local_database_tblastx, run_local_tblastn, run_local_tblastx, with_run_pool,
-    FormatObserver, FormatOutput, HspIndex, OutFile, OutputSink, ReportOutputs, ReportedSubject,
+    FormatObserver, FormatOutput, HspIndex, OutFile, OutputSink, PostsFirst, ReportOutputs,
+    ReportedSubject,
 };
 use super::parts::Parts;
 use super::program::Program;
@@ -150,7 +151,10 @@ pub struct HspRecord {
     /// The subject's length (`slen`) in the letters of the record or the database sequence,
     /// nucleotides for a translated subject: the whole record's, also with `-subject_loc`.
     pub subject_length: usize,
-    /// The alignment's columns, gaps included (`length`).
+    /// The alignment's columns, gaps included (`length`), inside the query row's aligned range as
+    /// the tables count them: the gaps before the query's first letter or after its last (a
+    /// Smith-Waterman alignment of `-use_sw_tback` may start with some) are left out, also of
+    /// `gap_open` and `gaps`.
     pub length: usize,
     /// The columns of identical letters (`nident`).
     pub num_ident: usize,
@@ -472,7 +476,7 @@ pub(super) fn searched_queries(
 }
 
 /// The `-query_loc` of the program's arguments.
-fn query_loc(command: &Commands) -> Option<&str> {
+fn query_loc(command: &Commands) -> Option<&std::ffi::OsStr> {
     match command {
         Commands::Blastp(a) => a.query_loc.as_deref(),
         Commands::Tblastn(a) => a.query_loc.as_deref(),
@@ -487,12 +491,15 @@ fn query_loc(command: &Commands) -> Option<&str> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-/// The `-query_loc` interval of the program's arguments. A value that the search will refuse
-/// has no interval here.
+/// The `-query_loc` interval of the program's arguments, or the query range of the strategy they
+/// import. A value that the search will refuse has no interval here.
 pub(super) fn query_range_of(command: &Commands) -> Option<SequenceRange> {
-    parse_optional_range(query_loc(command), RangeRole::Query)
-        .ok()
-        .flatten()
+    // An imported strategy's range stands for `-query_loc`'s (`strategy::query_range`).
+    super::strategy::query_range(command).or_else(|| {
+        parse_optional_range(query_loc(command), RangeRole::Query)
+            .ok()
+            .flatten()
+    })
 }
 
 /// `-num_threads` of the program's arguments.
@@ -546,30 +553,50 @@ fn hit_list_size(command: &Commands, number: i32) -> usize {
     .hitlist_size
 }
 
-/// The searches of a run: the requested output formats grouped by hit list size, each group a
-/// list of positions in `numbers`, the tabular formats first. One group is one search
+/// How the formatter of the output format `number` cuts the hit lists of `command`'s search
+/// (`BlastpApp::list_cut`: psiblast's and rpsblast's lists; the other programs' are not cut).
+fn list_cut(command: &Commands, number: i32) -> crate::algorithm::blastp::args::ListCut {
+    use crate::algorithm::blastp::args::{BlastpApp, ListCut};
+    match command {
+        Commands::Psiblast(_) => BlastpApp::Psiblast.list_cut(number),
+        Commands::Rpsblast(_) => BlastpApp::Rpsblast.list_cut(number),
+        _ => ListCut::Uncut,
+    }
+}
+
+/// The searches of a run: the requested output formats grouped by hit list size and by the cut
+/// of the hit lists, each group a list of positions in `numbers`. One group is one search
 /// (`run_local` call), and every format of it is written from that search, as the command line
 /// writes it alone: the command line's search depends on the hit list size, which
 /// `-num_descriptions` and `-num_alignments` (without `-max_target_seqs`) can make differ
-/// between the pairwise formats (0 to 4) and the tabular ones. Without those options the sizes
-/// are equal and the one group is every format in the requested order. The tabular group goes
-/// first because the warnings that the formats share belong to the first search's diagnostics,
-/// and the command line writes the tabular formats' (`ReportCounts::warnings`).
+/// between the pairwise formats (0 to 4) and the tabular ones, and on how the format's
+/// formatter cuts the hit lists (`list_cut`): psiblast's XML, XML2 and JSON cut each round's
+/// results before its PSSM (so its rounds can differ from the other formats'), and psiblast's and
+/// rpsblast's archive and organism report keep the uncut lists. Without the count options the sizes are equal, and formats of
+/// one cut are one group in the requested order (the first group's first format is the first
+/// requested one). With them the tabular groups go first because the warnings that the formats
+/// share belong to the first search's diagnostics, and the command line writes the tabular
+/// formats' (`ReportCounts::warnings`).
 ///
-/// LOSAT Web ABI v2 groups its searches the same way (`web/adapter/src/run.rs`).
+/// LOSAT Web ABI v2 groups its searches by hit list size the same way (`web/adapter/src/run.rs`;
+/// it runs neither psiblast nor rpsblast).
 pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usize>> {
     let [_, descriptions, alignments] = count_options(command);
-    if descriptions.is_none() && alignments.is_none() {
-        return vec![(0..numbers.len()).collect()];
-    }
+    let sizes_differ = descriptions.is_some() || alignments.is_some();
     let mut ordered: Vec<usize> = (0..numbers.len()).collect();
-    ordered.sort_by_key(|&position| numbers[position] <= 4);
-    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    if sizes_differ {
+        ordered.sort_by_key(|&position| numbers[position] <= 4);
+    }
+    let mut groups: Vec<(_, Vec<usize>)> = Vec::new();
     for position in ordered {
-        let size = hit_list_size(command, numbers[position]);
-        match groups.iter_mut().find(|(group, _)| *group == size) {
+        let number = numbers[position];
+        let key = (
+            sizes_differ.then(|| hit_list_size(command, number)),
+            list_cut(command, number),
+        );
+        match groups.iter_mut().find(|(group, _)| *group == key) {
             Some((_, group)) => group.push(position),
-            None => groups.push((size, vec![position])),
+            None => groups.push((key, vec![position])),
         }
     }
     groups.into_iter().map(|(_, group)| group).collect()
@@ -604,16 +631,10 @@ fn taxdb_setting(
     start: &CallStart,
     app: RequestKind,
 ) -> Option<crate::algorithm::common::database::TaxdbSetting> {
-    use crate::blastinput::app::{parse_formatting_string, ReportFormat};
-    let looks_up = outputs.formats.iter().any(|format| {
-        parse_formatting_string(format.outfmt).is_ok_and(|choice| {
-            ReportFormat::from_number(choice.number)
-                .and_then(|report| {
-                    crate::report::tabular::TabularSpec::of_app(report, &choice, app)
-                })
-                .is_some_and(|spec| spec.looks_up_every_taxid())
-        })
-    });
+    let looks_up = crate::algorithm::common::database::outfmts_need_subject_taxdb(
+        outputs.formats.iter().map(|format| format.outfmt),
+        app,
+    );
     looks_up.then(|| crate::algorithm::common::database::TaxdbSetting::of(&start.settings()))
 }
 
@@ -686,15 +707,38 @@ pub(super) fn run_local(
 
 /// The program's entry of a `run_local` call.
 fn run_local_entry(
-    command: Commands,
+    mut command: Commands,
     inputs: Inputs<'_>,
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
 ) -> anyhow::Result<()> {
+    // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own
+    // (`strategy::take_warnings`).
+    if inputs.strategy.is_some() {
+        let warnings = super::strategy::take_warnings(&mut command);
+        outputs.diagnostics.write_all(&warnings)?;
+    }
     let (query, subject) = (inputs.query, inputs.subject);
     // How the reading of the query records ended, which the search meets in its batch
     // (`Inputs::query_end`).
     let end = inputs.end();
+    // The BLAST XML report under a `SERIAL_VERIFY_DATA_WRITE` that changes it, refused as on the
+    // command line (`cli::main_entry`), before the search: the call, or the format alone
+    // (`FormatRefusal`).
+    let verification = start.settings().write_verification;
+    for format in outputs.formats.iter_mut() {
+        let number = crate::blastinput::app::parse_formatting_string(format.outfmt)
+            .ok()
+            .map(|choice| choice.number);
+        if let Some(refusal) =
+            crate::blastinput::ncbi_environment::WriteVerification::blast_xml_refusal(
+                verification.as_ref(),
+                number.into_iter(),
+            )
+        {
+            format.refusal.check(Err(anyhow::Error::msg(refusal)))?;
+        }
+    }
     if inputs.database {
         let settings = start.settings();
         return match command {
@@ -745,6 +789,8 @@ fn run_local_entry(
                 args.find_matrix_file(&settings.matrix_search)?;
             }
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn);
+            args.write_verification = start.settings().write_verification;
+            args.read_verification = start.settings().read_verification;
             run_local_tblastn(args, query, end, subject, outputs)
         }
         Commands::Blastn(mut args) => {
@@ -795,6 +841,8 @@ fn run_local_entry(
         Commands::Psiblast(args) => {
             let mut args = psiblast_args(args, outputs)?;
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast);
+            args.write_verification = start.settings().write_verification;
+            args.read_verification = start.settings().read_verification;
             run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
@@ -819,6 +867,7 @@ fn psiblast_args(
             format.outfmt,
             format.side_out(args.out.as_deref()),
             false,
+            false,
         )?;
     }
     args.into_blastp_args()
@@ -841,10 +890,10 @@ pub(super) fn check_inputs(search: &Search, inputs: Inputs<'_>) -> Result<(), Er
     Ok(())
 }
 
-/// The searches of a call: `formats` grouped by hit list size (`search_groups`), and the threads
-/// of the pool they share. A `-outfmt` value that the command line rejects, and a call without
-/// formats (the engines refuse one), fail here, before any search; the command line's error of
-/// a value goes to tblastx's `-logfile` file, as there (`RunLog::post`).
+/// The searches of a call: `formats` grouped by hit list size and cut (`search_groups`), and the
+/// threads of the pool they share. A `-outfmt` value that the command line rejects, and a call
+/// without formats (the engines refuse one), fail here, before any search; the command line's
+/// error of a value goes to tblastx's `-logfile` file, as there (`RunLog::post`).
 fn searches(
     search: &Search,
     inputs: Inputs<'_>,
@@ -877,7 +926,7 @@ fn searches(
     if groups.len() > 1 {
         if let Some(option) = pssm_file_option(command) {
             return Err(Error::Argv(format!(
-                "{option} is not accepted by the library API with formats of two hit list sizes, which take two searches: the PSSM files are one search's; search those formats in calls of their own"
+                "{option} is not accepted by the library API with formats that take two searches (two hit list sizes, or psiblast's outfmt 5 or 11 with other formats): the PSSM files are one search's; search those formats in calls of their own"
             ).into()));
         }
     }
@@ -885,7 +934,7 @@ fn searches(
 }
 
 // No NCBI counterpart: the command line writes one format per run, so one search writes its PSSM
-// files; the library's call of formats of two hit list sizes searches twice (`search_groups`).
+// files; the library's call of formats that take two searches searches twice (`search_groups`).
 /// The PSSM file option (`-out_pssm`, else `-out_ascii_pssm`) of a psiblast search that can write
 /// one (`PsiblastPssmOptions::writes_files`).
 fn pssm_file_option(command: &Commands) -> Option<&'static str> {
@@ -955,7 +1004,7 @@ pub fn run(
                     formats: group
                         .iter()
                         .map(|&position| FormatOutput {
-                            outfmt: formats[position],
+                            outfmt: formats[position].as_bytes(),
                             refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                             sink: OutputSink::Writer(
                                 writers[position].take().expect("one group per format"),
@@ -1035,40 +1084,34 @@ pub fn run_to_file(
         searches(search, inputs, &formats, &start, &mut log)?.1
     };
     let command = start.command();
-    let mut file = OutFile::new(path, out_file_program(search.program()), outfmt);
-    with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
+    let app = search.program().name();
+    let mut file = OutFile::new(path, app, outfmt);
+    let posts = file.posts();
+    with_run_pool(threads, app, || -> Result<(), Error> {
         let mut sink = log.sink(&mut *diagnostics, true);
         let result = {
+            // The file's posts, in their place among the run's messages (`PostsFirst`).
+            let mut messages = PostsFirst::new(posts, &mut sink);
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Out(&mut file),
                 }],
-                diagnostics: &mut sink,
+                diagnostics: &mut messages,
                 later_warnings: None,
                 hits: None,
                 observer: None,
             };
-            run_local(command, inputs, &mut outputs, &mut start)
+            let result = run_local(command, inputs, &mut outputs, &mut start);
+            drop(outputs);
+            let _ = messages.drain();
+            result
         };
         result.map(drop).map_err(|error| sink.failed(&error))
     })
-}
-
-/// The program whose `-out` file names must be UTF-8, as its command line checks them
-/// (`cli::create_out_file`): every search program but BLASTX.
-fn out_file_program(program: Program) -> Option<&'static str> {
-    match program {
-        Program::Blastn => Some("BLASTN"),
-        Program::Blastp => Some("BLASTP"),
-        Program::Psiblast => Some("PSIBLAST"),
-        Program::Tblastn => Some("TBLASTN"),
-        Program::Tblastx => Some("TBLASTX"),
-        Program::Blastx => None,
-    }
 }
 
 /// What one search of `run_collect` gathered.
@@ -1109,7 +1152,7 @@ fn collect_one(
                 .iter()
                 .zip(writers.iter_mut())
                 .map(|(&position, writer)| FormatOutput {
-                    outfmt: formats[position],
+                    outfmt: formats[position].as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(writer),
                 })
@@ -1213,6 +1256,9 @@ pub(super) fn records(
                     length(inputs.subject, s_idx),
                 ),
             };
+            // The counts of the table (`-outfmt 6`): a Smith-Waterman alignment's end gaps in the
+            // query's row are left out; `mismatch` stays.
+            let counts = record.query_range_lengths();
             HspRecord {
                 index,
                 q_idx,
@@ -1243,13 +1289,13 @@ pub(super) fn records(
                 query_length: query_range
                     .map_or_else(|| length(inputs.query, q_idx), |range| range.length()),
                 subject_length,
-                length: hit.length,
+                length: counts.length,
                 num_ident: hit.num_ident,
                 // BLASTN's hits have no positives: its reports show the identities.
                 num_positives: record.positives.unwrap_or(hit.num_ident),
                 mismatch: hit.mismatch,
-                gap_open: hit.gapopen,
-                gaps: record.gaps.unwrap_or_else(|| hit.gap_letters()),
+                gap_open: counts.gap_opens,
+                gaps: counts.gaps,
                 sum_n: record.sum_n,
                 comp_adjust_method: record.comp_adjust_method,
                 query_aligned: record.query_seq.clone(),
@@ -1263,15 +1309,17 @@ pub(super) fn records(
 /// the statistics of each query and the diagnostics.
 ///
 /// Each report is what the command line writes to `-out` for that `-outfmt` alone: the formats
-/// are grouped by hit list size (`search_groups`), one search per group, so a run with
-/// `-num_descriptions` or `-num_alignments` may search twice. The HSP records and the statistics
-/// are those of the first search (the tabular formats'), with their rows and sections in the
-/// reports of that search; the reports of another search give them no span. The diagnostics
-/// are the first search's: the command line's standard error for its first format (the first
-/// tabular format when the formats split, the first requested format otherwise), which holds
-/// the warnings the command line writes once for the run; then the posts of the `-html` reports
-/// of the later searches (their reads of NCBI's formatter registries), which only their search
-/// writes. Each `-html` report posts what the command line's run of its format alone posts.
+/// are grouped by hit list size and by the cut of the hit lists (`search_groups`), one search per
+/// group, so a run with `-num_descriptions` or `-num_alignments`, and psiblast's outfmt 5 or 11
+/// (rpsblast's 11) with other formats, may search twice. The HSP records and the statistics
+/// are those of the first search (the tabular formats' when the hit list sizes split them, else
+/// the first requested format's), with their rows and sections in the reports of that search;
+/// the reports of another search give them no span. The diagnostics are the first search's: the
+/// command line's standard error for its first format (the first tabular format when the hit list
+/// sizes split the formats, the first requested format otherwise), which holds the warnings the
+/// command line writes once for the run; then the posts of the `-html` reports of the later
+/// searches (their reads of NCBI's formatter registries), which only their search writes. Each
+/// `-html` report posts what the command line's run of its format alone posts.
 ///
 /// Any failure fails the call with the command line's message, for the format whose search
 /// failed. A `-outfmt` value that the command line rejects, and a call without formats, fail

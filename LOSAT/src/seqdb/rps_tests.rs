@@ -1,14 +1,8 @@
 use super::*;
 
 /// A temporary directory of this test (tests of one binary run in parallel).
-fn scratch(name: &str) -> PathBuf {
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-rps-{name}-{}",
-        crate::utils::test_dir::process_id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn scratch(name: &str) -> crate::utils::test_dir::TempDir {
+    crate::utils::test_dir::TempDir::unique(&format!("rps-{name}"))
 }
 
 fn words(values: &[i32]) -> Vec<u8> {
@@ -74,7 +68,6 @@ fn a_volume_of_28_columns_is_viewed_in_place() {
     assert_eq!(files.cells().unwrap()[9], [4, 2, 4, 0]);
     assert_eq!(files.overflow().unwrap(), &[99, 3, 5, 6]);
     assert_eq!(files.pv()[0], (1 << 5) | (1 << 9));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // Review C of line RG D1a-4 (SF2 c): NCBI's row after the rows (`rps_pssm[num_pssm_rows]`,
@@ -128,7 +121,6 @@ fn the_row_after_the_rows_reads_the_files_bytes_then_its_last_pages_zeros() {
     assert_eq!(row[..10], [Some(0); 10]);
     assert_eq!(row[10..], [None; 18]);
     drop(files);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -142,7 +134,6 @@ fn a_volume_of_26_columns_reads_the_next_rows_first_columns() {
     // Letters 26 and 27 read the next row's columns 0 and 1 (stride 26).
     assert_eq!((rows[2][26], rows[2][27]), (300, 301));
     assert_eq!((rows[6][26], rows[6][27]), (0, 0));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A `.freq` file of `columns` columns for the two profiles of `write_volume` (rows 0 to
@@ -172,7 +163,7 @@ fn the_freq_rows_have_the_rps_alphabets_stride() {
     write_freq(&base, 28);
     let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
     files.open_freq(&base, "RPSBLAST", None).unwrap();
-    files.freq_ratios(4, 2, &mut bytes, &mut ratios).unwrap();
+    assert!(files.freq_ratios(4, 2, &mut bytes, &mut ratios).unwrap());
     assert_eq!(ratios.len(), 2);
     assert_eq!(ratios[0][0], 4000.0 / 1e9);
     assert_eq!(ratios[1][27], 5027.0 / 1e9);
@@ -184,14 +175,13 @@ fn the_freq_rows_have_the_rps_alphabets_stride() {
     write_freq(&base, 28);
     let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
     files.open_freq(&base, "RPSBLAST", None).unwrap();
-    files.freq_ratios(2, 1, &mut bytes, &mut ratios).unwrap();
+    assert!(files.freq_ratios(2, 1, &mut bytes, &mut ratios).unwrap());
     let flat: Vec<i32> = (0..7)
         .flat_map(|row| (0..28).map(move |column| row * 1000 + column))
         .collect();
     assert_eq!(ratios[0][0], f64::from(flat[52]) / 1e9);
     assert_eq!(ratios[0][25], f64::from(flat[77]) / 1e9);
     assert_eq!((ratios[0][26], ratios[0][27]), (0.0, 0.0));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -203,32 +193,31 @@ fn the_score_bound_of_a_profile_sums_its_rows_positive_maxima() {
     // 0..=3 (the last is its sentinel row), profile 1 rows 4..=6.
     let bounds = files.profile_score_bounds(&base).unwrap();
     assert_eq!(bounds, vec![27 + 127 + 227 + 327, 427 + 527 + 627]);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn a_missing_or_bad_freq_file_is_ncbis_error_and_a_short_one_is_refused() {
     let dir = scratch("freqerr");
     let base = write_volume(&dir, 28, AUX);
-    let shown = canonical_volume_path(&base);
+    let shown = String::from_utf8(canonical_volume_path(&base)).unwrap();
     let text = format!(
         "{shown} contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against {shown}."
     );
     let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
     assert_eq!(
         files.open_freq(&base, "RPSBLAST", None).err(),
-        Some(RpsOpenError::Ncbi(text.clone()))
+        Some(RpsOpenError::Ncbi(text.clone().into_bytes()))
     );
     std::fs::write(base.with_extension("freq"), words(&[7, 2, 0, 4, 7])).unwrap();
     assert_eq!(
         files.open_freq(&base, "RPSBLAST", None).err(),
-        Some(RpsOpenError::Ncbi(text))
+        Some(RpsOpenError::Ncbi(text.into_bytes()))
     );
     // A database of one volume: its `-db` value as given (`RpsVolumeSetup::with_database`).
     assert_eq!(
-        files.open_freq(&base, "RPSTBLASTN", Some("./cdd")).err(),
+        files.open_freq(&base, "RPSTBLASTN", Some(b"./cdd".as_slice())).err(),
         Some(RpsOpenError::Ncbi(
-            "./cdd contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ./cdd.".to_string()
+            "./cdd contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ./cdd.".into()
         ))
     );
     write_freq(&base, 28);
@@ -238,48 +227,73 @@ fn a_missing_or_bad_freq_file_is_ncbis_error_and_a_short_one_is_refused() {
         files.open_freq(&base, "RPSBLAST", None),
         Err(RpsOpenError::Refused(_))
     ));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn ncbis_errors_come_in_ncbis_file_order() {
     let dir = scratch("errors");
     let base = write_volume(&dir, 28, AUX);
-    let shown = canonical_volume_path(&base);
+    let shown = String::from_utf8(canonical_volume_path(&base)).unwrap();
     let open = || RpsVolumeFiles::open(&base, &[3, 2]).err();
     std::fs::write(base.with_extension("rps"), words(&[7, 2])).unwrap();
     assert_eq!(
         open(),
         Some(RpsOpenError::Ncbi(format!(
             "RPS BLAST profile file ({shown}.rps) is either corrupt or constructed for an incompatible architecture"
-        )))
+        ).into_bytes()))
     );
     std::fs::remove_file(base.with_extension("loo")).unwrap();
     assert_eq!(
         open(),
-        Some(RpsOpenError::Ncbi(format!(
-            "Cannot memory map RPS-BLAST database file: {shown}.loo"
-        )))
+        Some(RpsOpenError::Ncbi(
+            format!("Cannot memory map RPS-BLAST database file: {shown}.loo").into_bytes()
+        ))
     );
     std::fs::remove_file(base.with_extension("aux")).unwrap();
     assert_eq!(
         open(),
-        Some(RpsOpenError::Ncbi(format!(
-            "Cannot open RPS-BLAST auxiliary file: {shown}.aux"
-        )))
+        Some(RpsOpenError::Ncbi(
+            format!("Cannot open RPS-BLAST auxiliary file: {shown}.aux").into_bytes()
+        ))
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn inconsistent_files_are_refused() {
     let dir = scratch("refused");
     let base = write_volume(&dir, 28, AUX);
-    // The consensus lengths of the sequence part differ.
-    assert!(matches!(
-        RpsVolumeFiles::open(&base, &[3, 3]),
-        Err(RpsOpenError::Refused(_))
-    ));
+    // `.pin` lengths other than the profiles' columns open: NCBI reads them only in the traceback,
+    // where `rps_search::profile` asks each read (series PR, item PS10e).
+    let files = RpsVolumeFiles::open(&base, &[3, 3]).unwrap();
+    drop(files);
+    // A profile without its sentinel row: offsets that do not ascend.
+    let rps = std::fs::read(base.with_extension("rps")).unwrap();
+    let mut flat = rps.clone();
+    flat[12..16].copy_from_slice(&0i32.to_le_bytes());
+    std::fs::write(base.with_extension("rps"), &flat).unwrap();
+    let Err(RpsOpenError::Refused(text)) = RpsVolumeFiles::open(&base, &[3, 2]) else {
+        panic!("offsets that do not ascend are refused");
+    };
+    assert!(
+        text.contains(
+            ".rps profile 0 has no rows, not even its sentinel row (its offsets 0 and 0 do not ascend)"
+        ),
+        "{text}"
+    );
+    // Offsets that descend (a hand-edited `.rps`): the same text, no row count below 0.
+    let mut descending = rps.clone();
+    descending[12..16].copy_from_slice(&(-3i32).to_le_bytes());
+    std::fs::write(base.with_extension("rps"), &descending).unwrap();
+    let Err(RpsOpenError::Refused(text)) = RpsVolumeFiles::open(&base, &[3, 2]) else {
+        panic!("offsets that descend are refused");
+    };
+    assert!(
+        text.contains(
+            ".rps profile 0 has no rows, not even its sentinel row (its offsets 0 and -3 do not ascend)"
+        ),
+        "{text}"
+    );
+    std::fs::write(base.with_extension("rps"), &rps).unwrap();
     // Too few K values.
     std::fs::write(base.with_extension("aux"), AUX.replace("2\n3.9e-02\n", "")).unwrap();
     assert!(matches!(
@@ -309,7 +323,6 @@ fn inconsistent_files_are_refused() {
         RpsVolumeFiles::open(&base, &[3, 2]),
         Err(RpsOpenError::Refused(_))
     ));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // D6 of PS12s: the files of a volume checked once in the run open again without LOSAT's check of
@@ -341,7 +354,6 @@ fn files_checked_in_the_run_open_without_the_check_of_the_hits() {
         RpsVolumeFiles::open_checked(&base, &[3, 2], "RPSBLAST", false),
         Err(RpsVolumeFault::Files(RpsOpenError::Ncbi(_)))
     ));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A volume of two profiles of 140,000 and 100 letters (140,102 rows: 69 buckets, so two groups
@@ -476,7 +488,6 @@ fn cells_not_in_groups_of_buckets_are_regrouped_stably() {
     let files = RpsVolumeFiles::open(&base, &lengths).unwrap();
     assert!(!files.is_regrouped());
     assert_eq!(files.cells().unwrap()[9][1], 10);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // The sort of one cell: stable, so a group's hits keep the order they had, and idempotent on

@@ -44,7 +44,8 @@ const GENETIC_CODES: [i32; 26] = [
 ];
 
 /// Whether `code` is a genetic code that `CArgAllowGeneticCodeInteger` allows: the one list of
-/// them, for this reader and for the programs on clap (`blastinput::value_parsers::genetic_code`).
+/// them, for this reader and for BLASTX's check of a code that a library caller set
+/// (`blastx::query_setup`).
 pub(crate) fn is_genetic_code(code: i32) -> bool {
     GENETIC_CODES.contains(&code)
 }
@@ -199,7 +200,7 @@ pub(super) fn strings(values: Span) -> impl Iterator<Item = &'static str> {
 }
 
 /// The values of a set of integers (rows of `INTEGER_VALUES`).
-fn integers(values: Span) -> &'static [i32] {
+pub(super) fn integers(values: Span) -> &'static [i32] {
     values.of(&super::INTEGER_VALUES)
 }
 
@@ -225,7 +226,7 @@ fn double_to_string(value: f64) -> String {
 /// `s_StringToInt8` of `value`, NCBI's reading of an integer argument (`CArg_Int8`, `CArg_Integer`)
 /// and of `CArgAllow_Integers`: decimal, then, for a value that starts with `0x` or `0X`, base 16,
 /// whose exception is then the one thrown (`0x` alone reads 0). The one reading of it, for this
-/// reader and for the programs on clap (`blastinput::value_parsers::ncbi_int8`).
+/// reader and for LOSAT Web's ABI v1 (`web_v1_argv::ncbi_int8`).
 pub(crate) fn string_to_int8(bytes: &[u8]) -> Result<i64, crate::ncbi_exception::NcbiException> {
     use crate::ncbi_str::{string_to_int8, string_to_int8_base};
     match string_to_int8(bytes, 0) {
@@ -246,8 +247,8 @@ pub(crate) fn string_to_int8(bytes: &[u8]) -> Result<i64, crate::ncbi_exception:
 /// The length of the `GetName()` of a `CFile` of `path`: the text after the last separator once the
 /// trailing directory separators are removed (a path of one separator, or a disk name, keeps them).
 /// On Unix `DIR_SEPARATORS` and `ALL_SEPARATORS` are `/` (ncbifile.cpp:110-115); on Windows they
-/// are `/\` and `:/\`, with the disk name `C:`. The one reading of it, for this reader and for the
-/// programs on clap (`blastinput::value_parsers`, `CArgAllowMaximumFileNameLength` of `-out`).
+/// are `/\` and `:/\`, with the disk name `C:`. The one reading of it, for this reader and for
+/// LOSAT Web's ABI v1 (`web_v1_argv`, `CArgAllowMaximumFileNameLength` of `-out`).
 pub(crate) fn file_name_length(path: &[u8]) -> usize {
     let (dir_separators, all_separators): (&[u8], &[u8]) = if cfg!(windows) {
         (b"/\\", b":/\\")

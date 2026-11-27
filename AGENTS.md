@@ -55,15 +55,18 @@ authoritative, current guidance for agent behavior in LOSAT.
      statistical formulas, or formatting is permitted. This does not expand
      the TBLASTX exception or authorize NCBI as a runtime/build dependency.
    - Approved CLI exceptions outside the search results, for every program
-     (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): argument-parser syntax errors and
-     `-help`/`-h` use LOSAT's parser text and exit code 2 (NCBI: USAGE, exit
-     1); with `-subject`, LOSAT honors `-num_threads` and does not print NCBI's
-     two thread warnings; a write failure in outfmt 6/7, where NCBI aborts,
-     is reported with a non-zero exit; an allocation failure aborts (NCBI:
-     "BLAST ran out of memory", exit 4); an outfmt 0 write to a closed pipe,
-     where NCBI is ended by SIGPIPE, is reported as "BLAST failed to write
-     output", exit 6, and a closed pipe that LOSAT's completed writes do not
-     reach ends LOSAT with exit 0 (timing; NCBI's later flush gets SIGPIPE);
+     (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): with `-subject`, LOSAT honors `-num_threads` and does not print NCBI's
+     two thread warnings; an allocation failure aborts (NCBI: "BLAST ran out of
+     memory", exit 4); a write to a closed pipe, where NCBI is ended by SIGPIPE, ends as
+     that format's failed write on standard output (outfmt 0-4 and 18: "BLAST failed to
+     write output", exit 6, outfmt 0-4 abort where the alignments' flush fails; 5, 8, 9,
+     11, 12, 15, 16 and 6/7/10 abort; SAM exit 0), a closed pipe on standard error as
+     NCBI's failed write there (the messages are lost and the run goes on), and a closed
+     pipe that LOSAT's completed writes do not reach ends LOSAT with exit 0 (timing: a
+     write fails only when it comes after the reader closes, and LOSAT makes up to 8 KiB
+     of NCBI's writes together, so a short report is one write at the run's end, which
+     succeeds when it lands before the close), as does one reached only by the writes
+     after the formatter (NCBI does not report a failed device there);
      a standard output closed at the start (`>&-`), where NCBI's first write
      fails (outfmt 0 exit 6, outfmt 6/7 abort), is the `/dev/null` that the
      Rust runtime opens before `main`, so LOSAT discards the report and exits
@@ -99,7 +102,9 @@ authoritative, current guidance for agent behavior in LOSAT.
      every other byte of every search result must still match NCBI. Non-UTF-8
      file names and `.ncbirc` keys that change output are explicit rejections, not
      exceptions. `-version` and `-version-full*` (NCBI's forms, LOSAT's version and package),
-     `-help-full` (the text of `-help`), and on the command line `-xmlhelp` (NCBI's XML
+     argument errors (NCBI's usage and messages, exit 1), `-help` and `-h` (NCBI's texts in
+     LOSAT's words, since line RG item K4i-2b), `-help-full` (the text of `-help`;
+     makeblastdb's also lists `-randomize`), and on the command line `-xmlhelp` (NCBI's XML
      without the options LOSAT refuses by name), `-logfile`, `-conffile` and `-dryrun`,
      run as in NCBI (README, NCBI C++ Toolkit options).
    - Approved exceptions for NCBI defects (`PD-LOSAT-NCBI-DEFECTS`): where
@@ -141,7 +146,10 @@ authoritative, current guidance for agent behavior in LOSAT.
      approved exception all the same, by the Owner's decision of 2026-11-21: TBLASTX's linking of a
      query batch whose average query length is 0 against one subject, where NCBI's `Int4` sums
      overflow and it crashes, adds them in 64 bits (PD-LOSAT-NCBI-DEFECTS exception 20, version
-     1.68). A sequence that a seqid list keeps without a definition line is
+     1.68); so do the ungapped linking of TBLASTX, TBLASTN and BLASTX of a short query against a
+     short subject, whose expected length of 0 or less gives NCBI the same big-gap cutoff
+     (`INT_MIN + 1`) and crash, with one subject or several (version 1.99, the Owner's decisions
+     of 2026-11-24). A sequence that a seqid list keeps without a definition line is
      reproduced, not rejected: NCBI drops its hits at the
      Seq-aligns (a positive list, PD-LOSAT-NCBI-DEFECTS 1.32) or where its search
      fetches the subject again (a negative list, 1.34). Approved
@@ -508,6 +516,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── main.rs            # The binary `losat`: calls `main_entry` (cli/main_entry.rs) and nothing else
 │   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
 │   ├── cli/main_entry.rs  # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, makeblastdb, blastdbcmd, rpsbproc
+│   ├── cli/reader.rs      # NCBI's argument reader for the programs whose option types read its `Args` (`from_args`; all above but blastdbcmd, plus rpstblastn)
 │   ├── common.rs          # Shared hit type, gap edit operations and the HSP comparators
 │   ├── algorithm/         # One directory per program (blastn, blastp, blastx, tblastn, tblastx, psiblast) and common/
 │   ├── api/               # Library API: FASTA records in memory, `run_collect`, `run_batches` (library surface plan)
@@ -525,6 +534,7 @@ LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
 │   ├── sequence/          # Sequence storage and 2-bit packed nucleotides
 │   ├── config/            # Scoring matrix and scoring specs (`ScoringMatrix`, `*ScoringSpec`)
 │   ├── web_api.rs         # wasm32 only: Wasm ABI v1 exports and their dispatch to the programs
+│   ├── web_v1_argv.rs     # ABI v1's frozen clap builder (wasm32 and its native tests), the only clap left: a new option reads `Args` in its type's `from_args`
 │   ├── web_api/           # ABI v1 searches of BLASTN, BLASTP, TBLASTX and their input reader
 │   └── web_adapter.rs     # Hidden façade: the engine items that web/adapter names, each named on its own
 └── tests/

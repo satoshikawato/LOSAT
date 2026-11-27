@@ -134,11 +134,14 @@ fn two_records_with_one_id_are_refused_in_one_scope() {
         assert!(error.contains("two query records"), "{error}");
         use crate::blastinput::query_batch::{QueryScopeSpan, QueryScopes};
         let mut batches = QueryScopes::new(QueryScopeSpan::Batch, "BLASTP");
-        batches.add_batch(&records[..1], 0).unwrap();
-        batches.add_batch(&records[1..], 1).unwrap();
+        batches.add_batch(&records[..1], &[false], 0).unwrap();
+        batches.add_batch(&records[1..], &[false], 1).unwrap();
         let mut run = QueryScopes::new(QueryScopeSpan::Run, "BLASTP");
-        run.add_batch(&records[..1], 0).unwrap();
-        let error = run.add_batch(&records[1..], 1).unwrap_err().to_string();
+        run.add_batch(&records[..1], &[false], 0).unwrap();
+        let error = run
+            .add_batch(&records[1..], &[false], 1)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("two query records"), "{error}");
         let config = ReaderConfig::subject("BLASTN", false, false).with_parse_deflines(true);
         let mut source = FastaInputSource::from_bytes(fasta, config);
@@ -205,16 +208,61 @@ fn a_database_ordinal_is_refused() {
     assert!(error.contains("database ordinal"), "{error}");
 }
 
-// `xSetSeqMol`: NCBI reads a record by the molecule its accession names. The letters of a
-// protein are dropped by the nucleotide reading (180 aa -> 121, probe `pdo`); a nucleotide
-// record under a protein accession reads the same.
+// `xSetSeqMol` + `AssignMolType` + `CSeqportUtil::Pack`: NCBI reads each data line with the
+// molecule the accession names (warning on letters invalid for that molecule), then encodes the
+// record for the program's molecule (line RG-XT item X7-5).
 #[test]
-fn only_a_molecule_that_changes_the_letters_is_refused() {
-    let error = read(b">NM_000001.1 a\nMKLVEF\n", true).unwrap_err();
-    assert!(error.contains("names the other molecule"), "{error}");
-    assert!(read(b">NP_000001.1 a\nACGTNNRY\n", false).is_ok());
-    let error = read(b">NP_000001.1 a\nACGU\n", false).unwrap_err();
-    assert!(error.contains("names the other molecule"), "{error}");
+fn other_molecule_accession_follows_ncbis_reading() {
+    let read_with_warnings = |fasta: &[u8], protein: bool| {
+        let config = ReaderConfig::query("BLASTN", protein, false).with_parse_deflines(true);
+        let mut source = FastaInputSource::from_bytes(fasta, config);
+        let mut warnings = Vec::new();
+        let records = read_all(&mut source, &mut |line| {
+            warnings.extend_from_slice(line);
+            Ok(())
+        })
+        .unwrap();
+        (records, String::from_utf8(warnings).unwrap())
+    };
+    // Protein program reading a nucleotide-named accession: non-IUPACna letters are dropped with
+    // NCBI's nucleotide warning; kept nucleotide letters (including U/u) stay as protein letters.
+    let (records, warnings) = read_with_warnings(b">NM_000001.1 a\nMKLVEFu\n", true);
+    assert_eq!(records[0].seq(), b"MKVu");
+    assert_eq!(
+        warnings,
+        "FASTA-Reader: Ignoring invalid nucleotide residues at position(s): On line 2: 3, 5-6\n"
+    );
+    // Nucleotide program reading a protein-named accession: all protein letters are accepted
+    // without warning; `CSeqportUtil::Pack` maps U->T and non-IUPACna letters to N, keeping masks
+    // across `>?` gap lines and on ranged accessions (`xSetSeqMol` runs before `PostProcessIDs`).
+    let nuc_cases: [(&[u8], &[u8]); 5] = [
+        (b">NP_000001.1 a\nACGUefILPQXZ*\n", b"ACGTnnNNNNNNN"),
+        (b">NP_000001.1 a\nACGTNNRY\n", b"ACGTNNRY"),
+        (b">NP_000001.1 a\nACGU\n", b"ACGT"),
+        (b">NP_000001.1 a\nae\n>?2\nfgA\n", b"annnngA"),
+        (b">NP_000001.1:10-40 a\nACGEF\n", b"ACGNN"),
+    ];
+    for (fasta, expected) in nuc_cases {
+        let (records, warnings) = read_with_warnings(fasta, false);
+        assert_eq!(records[0].seq(), expected);
+        assert_eq!(records[0].believed().unwrap().named_molecule, Some(true));
+        assert!(warnings.is_empty(), "{warnings}");
+    }
+    // Protein program with a nucleotide-named accession: lowercase mask stays open across a `>?`
+    // gap line (`X`), and ranged accessions still set `named_molecule` to nucleotide.
+    let (records, warnings) = read_with_warnings(b">NM_000001.1 a\naeu\n>?2\nfgcA\n", true);
+    assert_eq!(records[0].seq(), b"auxxgcA");
+    assert!(
+        warnings.contains("On line 2: 2") && warnings.contains("On line 4: 1"),
+        "{warnings}"
+    );
+    let (records, warnings) = read_with_warnings(b">NM_000001.1:10-40 a\nMKLVEF\n", true);
+    assert_eq!(records[0].seq(), b"MKV");
+    assert_eq!(records[0].believed().unwrap().named_molecule, Some(false));
+    assert!(
+        warnings.contains("invalid nucleotide residues"),
+        "{warnings}"
+    );
     assert!(read(b">NM_000001.1 a\nACGT\n", false).is_ok());
     assert!(read(b">NP_000001.1 a\nMKLVEF\n", true).is_ok());
 }

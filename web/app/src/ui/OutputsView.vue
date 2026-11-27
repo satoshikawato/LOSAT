@@ -8,7 +8,7 @@
 // its outputs (the file of -logfile; line RG E1w-3b) are a tab of their own (RunFiles). A run that printed the command line's help or
 // version in place of a search has that text as its one output, "Help" or "Version" (PrintedText; line WQA's D14, 2026-11-20).
 import { computed, ref, useId, watch } from 'vue';
-import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
+import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputReader, OutputSaver } from '../application/outputs';
 import { failedOutput, keptOutputs } from '../application/results';
@@ -46,6 +46,9 @@ const runFiles = computed(() => (props.files ? (props.run.record.runFiles ?? [])
 /** The output shown: the one chosen, or outfmt 6 for a run that does not keep it, else the first that it kept. */
 const format = computed(() => (outputs.value.includes(chosen.value) ? chosen.value : outputs.value.includes(6) ? 6 : (outputs.value[0] ?? 6)));
 const binary = computed(() => isBinaryOutput(props.run.snapshot.argv, format.value));
+const commandEnv = computed(() =>
+  props.run.snapshot.database?.blastdbEnv ? { blastdb: props.run.snapshot.database.blastdbEnv } : undefined,
+);
 /** Where the error of the output shown is, in words, when the run could not write it, as the engine said (it is empty); undefined where it was written. */
 const notWritten = computed(() => {
   const error = failedOutput(props.run, format.value);
@@ -87,7 +90,7 @@ const tabs = computed(() => [
     : [
         {
           value: FILES as Tab,
-          label: `-logfile ${runFiles.value.map((file) => file.name).join(', ')}`,
+          label: runFiles.value.map((file) => `-${runFileOption(file)} ${file.name}`).join(', '),
           testid: 'format-run-files',
           id: `${ids}-tab-${FILES}`,
           panel: `${ids}-panel`,
@@ -134,7 +137,7 @@ watch(
     <div v-else :id="`${ids}-panel`" role="tabpanel" :aria-labelledby="`${ids}-tab-${format}`" class="outputs-panel">
       <p class="command">
         <!-- The command as Run details shows it: a line does not break after an option's leading hyphen (line WQA's sweep, D7, 2026-11-20). -->
-        Command: <code data-testid="result-command"><CommandText :words="commandWords(run.snapshot.argv, format)" /></code>
+        Command: <code data-testid="result-command"><CommandText :words="commandWords(run.snapshot.argv, format, commandEnv)" /></code>
       </p>
       <!-- Where the command names a file that LOSAT made, the user needs it to run the command (line WQA's D22, 2026-11-23). -->
       <p v-for="made in madeInputs" :key="made.role" class="command" :data-testid="`outputs-${made.role}-file`">

@@ -76,10 +76,10 @@ function setup(
       const failing = fail.validate === true;
       return gated(async () => {
         if (failing) throw new UnavailableError(SERIAL);
-        return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
+        return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
       }, hold.start === true);
     },
-    validate: async () => ({ ok: true, dataLoaders: true }) as const,
+    validate: async () => ({ ok: true, dataLoaders: true, parseDeflines: false }) as const,
     prepare: () => undefined,
   };
   const draft = new SearchDraft({

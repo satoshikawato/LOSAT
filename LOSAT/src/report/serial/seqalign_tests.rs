@@ -65,6 +65,7 @@ fn hsp<'a>(
         subject,
         q_offset,
         q_end: q_offset + q_len as i32,
+        q_left_out: 0,
         s_offset,
         s_end: s_offset + s_len as i32,
         q_frame: frames.0,
@@ -77,6 +78,7 @@ fn hsp<'a>(
         num_positives,
         comp_adjust,
         ops,
+        std_seg_nullb: None,
     }
 }
 
@@ -116,9 +118,9 @@ const MB_HSP2: [GapEditOp; 9] = [
 fn megablast_documents(format: SerialFormat) -> Vec<u8> {
     let run = RunRecord {
         program: Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: true,
+        program_type: None,
     };
     let subjects = [
         subject(SeqId::Local("Subject_1"), 500),
@@ -188,9 +190,9 @@ fn blastp_db_documents(format: SerialFormat, db_title: &[u8]) -> Vec<u8> {
 fn blastp_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
     let run = RunRecord {
         program: Program::Blastp,
-        rps: false,
         db_title,
         gapped: true,
+        program_type: None,
     };
     let subjects = match db_title {
         Some(_) => [
@@ -375,9 +377,9 @@ fn long_database_title_without_spaces_breaks_at_column_78() {
 fn score_list_follows_ncbi_conditions() {
     let run = RunRecord {
         program: Program::Blastp,
-        rps: false,
         db_title: None,
         gapped: true,
+        program_type: None,
     };
     let subjects = [subject(SeqId::Local("Subject_1"), 100)];
     let ops = [Sub(10)];
@@ -423,9 +425,9 @@ fn score_list_follows_ncbi_conditions() {
 fn score_zero_hsps_write_nothing() {
     let run = RunRecord {
         program: Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: true,
+        program_type: None,
     };
     let subjects = [subject(SeqId::Local("Subject_1"), 100)];
     let ops = [Sub(10)];
@@ -544,9 +546,9 @@ const BP_UNGAPPED_SUBJECTS: [u32; 6] = [4, 83, 24, 22, 82, 11];
 fn blastp_ungapped_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
     let run = RunRecord {
         program: Program::Blastp,
-        rps: false,
         db_title,
         gapped: false,
+        program_type: None,
     };
     let subjects: Vec<SubjectRecord<'_>> = BP_UNGAPPED_SUBJECTS
         .iter()
@@ -566,6 +568,7 @@ fn blastp_ungapped_documents(format: SerialFormat, db_title: Option<&[u8]>) -> V
                     subject,
                     q_offset: q_start,
                     q_end: q_start + len,
+                    q_left_out: 0,
                     s_offset: s_start,
                     s_end: s_start + len,
                     q_frame: 0,
@@ -578,6 +581,7 @@ fn blastp_ungapped_documents(format: SerialFormat, db_title: Option<&[u8]>) -> V
                     num_positives: positives,
                     comp_adjust: 0,
                     ops: &[],
+                    std_seg_nullb: None,
                 }
             },
         )
@@ -720,9 +724,9 @@ const BN_UNGAPPED_HSPS: [(u32, i32, i32, i32, bool, i32, f64, f64, i32); 6] = [
 fn blastn_ungapped_dendiag_documents_equal_ncbi() {
     let run = RunRecord {
         program: Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: false,
+        program_type: None,
     };
     let subjects = [
         subject(SeqId::Local("Subject_1"), 1848),
@@ -735,6 +739,7 @@ fn blastn_ungapped_dendiag_documents_equal_ncbi() {
                 subject,
                 q_offset: q_start,
                 q_end: q_start + len,
+                q_left_out: 0,
                 s_offset: s_start,
                 s_end: s_start + len,
                 q_frame: if minus { -1 } else { 1 },
@@ -747,6 +752,7 @@ fn blastn_ungapped_dendiag_documents_equal_ncbi() {
                 num_positives: 0,
                 comp_adjust: 0,
                 ops: &[],
+                std_seg_nullb: None,
             },
         )
         .collect();
@@ -785,9 +791,9 @@ fn blastn_ungapped_dendiag_documents_equal_ncbi() {
 fn an_ungapped_query_without_hsps_writes_nothing() {
     let run = RunRecord {
         program: Program::Blastn,
-        rps: false,
         db_title: None,
         gapped: false,
+        program_type: None,
     };
     let mut buf = Vec::new();
     assert_eq!(
@@ -954,14 +960,16 @@ impl std::io::Write for Combined {
     }
 }
 
+impl crate::report::ostream::ReportWrite for Combined {}
+
 /// The documents of `blastp_db_documents` written by `write_query_to` with the database title
 /// `title`: the report alone, the posts alone, and both in one stream.
 fn blastp_db_documents_posted(format: SerialFormat, title: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let run = RunRecord {
         program: Program::Blastp,
-        rps: false,
         db_title: Some(title),
         gapped: true,
+        program_type: None,
     };
     let subjects = [
         subject(SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(0)), 137),
@@ -989,12 +997,14 @@ fn blastp_db_documents_posted(format: SerialFormat, title: &[u8]) -> (Vec<u8>, V
             &BP_Q1_HSP2,
         ),
     ];
-    let write = |writer: &mut dyn std::io::Write, diagnostics: &mut dyn std::io::Write| {
+    let write = |writer: &mut dyn crate::report::ostream::ReportWrite,
+                 diagnostics: &mut dyn std::io::Write| {
         let mut buf = Vec::new();
         for id in ["Query_1", "Query_2"] {
             super::write_query_to(
                 format,
                 &run,
+                "blastp",
                 &query(id, 140),
                 &subjects,
                 &hsps,
@@ -1067,19 +1077,18 @@ fn a_database_title_outside_the_visible_range_is_written_with_ncbis_posts() {
     assert!(report.windows(title.len()).any(|window| window == title));
 }
 
-/// The mapper of a `-subject` search's remap leaves out a first and a last Std-seg with a gap
-/// row (seq_align_mapper_base.cpp:1568-1580, `std_seg_kept`); a database search keeps every
-/// segment. (BLAST's edit scripts start and end with a substitution; this script does not.)
+/// The Std-segs of a translated HSP are one per segment of its records with either subject: a
+/// `-subject` report's records come mapped (`mapped_script`), so the writer drops none.
 #[test]
-fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
+fn std_segs_are_written_for_every_segment_of_the_records() {
     let ops = [Del(2), Sub(10), Ins(1), Sub(5), Ins(3)];
     let one = hsp(0, (0, 0), (1, 0), 30, 1.0, 1.0, (10, 12, 0), &ops);
     let segments = |db_title: Option<&'static [u8]>| {
         let run = RunRecord {
             program: Program::Blastx,
-            rps: false,
             db_title,
             gapped: true,
+            program_type: None,
         };
         let subjects = [subject(SeqId::Local("Subject_1"), 100)];
         let mut buf = Vec::new();
@@ -1100,8 +1109,222 @@ fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
             text.matches("empty local").count(),
         )
     };
-    assert_eq!(segments(None), (3, 1));
+    assert_eq!(segments(None), (5, 3));
     assert_eq!(segments(Some(b"db")), (5, 3));
+}
+
+/// The mapper of a `-subject` search leaves out the first and the last Std-seg when it has a gap
+/// row, once each (seq_align_mapper_base.cpp:1568-1580): `mapped_script` gives the kept operations
+/// and the letters left out at each end (the query's, which the coverage still counts, in
+/// `query_left_out`); an X-drop script (a substitution at each end) and an ungapped HSP (no
+/// script) keep everything.
+#[test]
+fn mapped_script_leaves_out_an_end_segment_with_a_gap_row_once() {
+    use super::seqalign::{mapped_script, MappedScript};
+    let ops = [Del(2), Sub(10), Ins(1), Sub(5), Ins(3)];
+    assert_eq!(
+        mapped_script(&ops),
+        MappedScript {
+            kept: 1..4,
+            start: [0, 2],
+            end: [3, 0],
+        }
+    );
+    assert!(mapped_script(&ops).drops(&ops));
+    // The coverage still counts the query letters left out: the end `Ins(3)`.
+    assert_eq!(mapped_script(&ops).query_left_out(), 3);
+    // The Smith-Waterman alignment of the probe: 95 subject letters before the query's first.
+    let sw = [Del(95), Sub(190)];
+    assert_eq!(
+        mapped_script(&sw),
+        MappedScript {
+            kept: 1..2,
+            start: [0, 95],
+            end: [0, 0],
+        }
+    );
+    assert_eq!(mapped_script(&sw).query_left_out(), 0);
+    // Only the first segment goes, though the next one has a gap row too.
+    let two = [Ins(4), Del(2), Sub(7)];
+    assert_eq!(
+        mapped_script(&two),
+        MappedScript {
+            kept: 1..3,
+            start: [4, 0],
+            end: [0, 0],
+        }
+    );
+    assert_eq!(mapped_script(&two).query_left_out(), 4);
+    let xdrop = [Sub(10), Ins(1), Sub(5), Del(2), Sub(3)];
+    let kept = mapped_script(&xdrop);
+    assert_eq!(kept.kept, 0..5);
+    assert!(!kept.drops(&xdrop));
+    assert_eq!((kept.start, kept.end), ([0, 0], [0, 0]));
+    assert_eq!(kept.query_left_out(), 0);
+    assert_eq!(mapped_script(&[]).kept, 0..0);
+    // A script of one gap segment (never made) keeps nothing.
+    assert_eq!(mapped_script(&[Del(3)]).kept, 1..1);
+}
+
+/// The end gaps of each row (`row_end_gaps`): the row's gap operations before its first letter
+/// and after its last (a `Del` in the query's row, an `Ins` in the subject's), which NCBI's
+/// `GetAlignLengths` and `x_GetNumGaps` leave out of the query row's counts; the inner gaps and
+/// the other row's are not.
+#[test]
+fn row_end_gaps_are_the_rows_gap_operations_outside_its_letters() {
+    use super::seqalign::{gapped_row_range, row_end_gaps, AlignRow, RowEndGaps, RowRangeError};
+    // A gap start in the query's row (the probe's Smith-Waterman alignment).
+    let query_start = [Del(95), Sub(190)];
+    assert_eq!(
+        row_end_gaps(&query_start, AlignRow::Query),
+        RowEndGaps {
+            leading: 95,
+            trailing: 0,
+            opens: 1,
+        }
+    );
+    assert_eq!(
+        row_end_gaps(&query_start, AlignRow::Subject),
+        RowEndGaps::default()
+    );
+    assert_eq!(
+        gapped_row_range(&query_start, AlignRow::Query),
+        Some(RowRangeError::SeqidsNotConsistent)
+    );
+    assert_eq!(gapped_row_range(&query_start, AlignRow::Subject), None);
+    // A gap start and a gap end in the subject's row: the query row has letters in the first and
+    // the last operation, so its deletions are inner gaps.
+    let ends = [Ins(3), Del(2), Sub(10), Del(1), Sub(4), Del(5), Ins(6)];
+    assert_eq!(
+        row_end_gaps(&ends, AlignRow::Subject),
+        RowEndGaps {
+            leading: 3,
+            trailing: 6,
+            opens: 2,
+        }
+    );
+    assert_eq!(row_end_gaps(&ends, AlignRow::Query), RowEndGaps::default());
+    assert_eq!(row_end_gaps(&ends, AlignRow::Subject).span(31), (3, 25));
+    assert_eq!(
+        gapped_row_range(&ends, AlignRow::Subject),
+        Some(RowRangeError::SeqidsNotConsistent)
+    );
+    assert_eq!(gapped_row_range(&ends, AlignRow::Query), None);
+    // A gap end in the query's row (two operations), after an inner gap that stays.
+    let query_end = [Sub(10), Del(1), Sub(4), Del(5), Del(2)];
+    assert_eq!(
+        row_end_gaps(&query_end, AlignRow::Query),
+        RowEndGaps {
+            leading: 0,
+            trailing: 7,
+            opens: 2,
+        }
+    );
+    assert_eq!(row_end_gaps(&query_end, AlignRow::Query).columns(), 7);
+    assert_eq!(row_end_gaps(&query_end, AlignRow::Query).span(22), (0, 15));
+    assert_eq!(
+        row_end_gaps(&query_end, AlignRow::Subject),
+        RowEndGaps::default()
+    );
+    assert_eq!(gapped_row_range(&query_end, AlignRow::Query), None);
+    // An X-drop script has none: its inner gaps stay in the counts.
+    let xdrop = [Sub(10), Ins(1), Sub(5), Del(2), Sub(3)];
+    for row in [AlignRow::Query, AlignRow::Subject] {
+        assert_eq!(row_end_gaps(&xdrop, row), RowEndGaps::default());
+        assert_eq!(row_end_gaps(&xdrop, row).span(21), (0, 21));
+    }
+    assert_eq!(row_end_gaps(&[], AlignRow::Query), RowEndGaps::default());
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191,226-230
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580
+/// `reported_std_seg_row_range` / `reported_std_seg_rows_range`: `empty_query_rewritten` clears
+/// `RowRangeError::Empty` on the query row alone; any leading gap left in the reported edit
+/// script (`SeqidsNotConsistent`, e.g. after `-subject` dropped one end segment of `[Del, Ins]` or
+/// `[Ins, Del]`) is reported for `-db` and `-subject` alike.
+#[test]
+fn reported_std_seg_row_range_handles_empty_rewrite_and_mapped_leading_gaps() {
+    use super::seqalign::{
+        mapped_script, reported_std_seg_row_range, reported_std_seg_rows_range, AlignRow,
+        RowRangeError,
+    };
+    // Empty ungapped rows: `-subject` rewrites the query row only.
+    assert_eq!(
+        reported_std_seg_row_range(4, 4, &[], AlignRow::Query, false),
+        Some(RowRangeError::Empty)
+    );
+    assert_eq!(
+        reported_std_seg_row_range(4, 4, &[], AlignRow::Query, true),
+        None
+    );
+    assert_eq!(
+        reported_std_seg_row_range(4, 4, &[], AlignRow::Subject, true),
+        Some(RowRangeError::Empty)
+    );
+    assert_eq!(
+        reported_std_seg_rows_range(4, 4, &[], true),
+        Some(RowRangeError::Empty)
+    );
+
+    // `[Del(2), Ins(1), Sub(10)]` mapped once -> `[Ins(1), Sub(10)]` (subject starts with gap).
+    let del_ins = [Del(2), Ins(1), Sub(10)];
+    let mapped = &del_ins[mapped_script(&del_ins).kept];
+    assert_eq!(mapped, &[Ins(1), Sub(10)]);
+    for rewritten in [false, true] {
+        assert_eq!(
+            reported_std_seg_row_range(0, 11, mapped, AlignRow::Query, rewritten),
+            None
+        );
+        assert_eq!(
+            reported_std_seg_row_range(0, 11, mapped, AlignRow::Subject, rewritten),
+            Some(RowRangeError::SeqidsNotConsistent)
+        );
+        assert_eq!(
+            reported_std_seg_rows_range(0, 11, mapped, rewritten),
+            Some(RowRangeError::SeqidsNotConsistent)
+        );
+    }
+
+    // `[Ins(1), Del(2), Sub(10)]` mapped once -> `[Del(2), Sub(10)]` (query starts with gap).
+    let ins_del = [Ins(1), Del(2), Sub(10)];
+    let mapped = &ins_del[mapped_script(&ins_del).kept];
+    assert_eq!(mapped, &[Del(2), Sub(10)]);
+    for rewritten in [false, true] {
+        assert_eq!(
+            reported_std_seg_row_range(1, 11, mapped, AlignRow::Query, rewritten),
+            Some(RowRangeError::SeqidsNotConsistent)
+        );
+        assert_eq!(
+            reported_std_seg_row_range(1, 11, mapped, AlignRow::Subject, rewritten),
+            None
+        );
+        assert_eq!(
+            reported_std_seg_rows_range(1, 11, mapped, rewritten),
+            Some(RowRangeError::SeqidsNotConsistent)
+        );
+    }
+
+    // `[Del(2), Sub(10)]` mapped once -> `[Sub(10)]` (no leading gap remains).
+    let single = [Del(2), Sub(10)];
+    let mapped = &single[mapped_script(&single).kept];
+    assert_eq!(mapped, &[Sub(10)]);
+    for rewritten in [false, true] {
+        assert_eq!(reported_std_seg_rows_range(0, 10, mapped, rewritten), None);
+    }
+}
+
+/// The query frame of a translated query's section (`HspStrands::master_frame`): the HSP's own,
+/// or, where the query row starts with a gap, the minus frame of the record's length (NCBI
+/// BLAST+ 2.17.0 shows queries of 570, 571 and 572 nucleotides under -1, -2 and -3).
+#[test]
+fn a_query_row_that_starts_with_a_gap_takes_the_frame_of_the_records_length() {
+    use crate::report::query_anchored::HspStrands;
+    for frame in [1, 2, 3, -1, -2, -3] {
+        assert_eq!(HspStrands::master_frame(frame, false, 570), frame);
+    }
+    assert_eq!(HspStrands::master_frame(1, true, 570), -1);
+    assert_eq!(HspStrands::master_frame(2, true, 571), -2);
+    assert_eq!(HspStrands::master_frame(-1, true, 572), -3);
 }
 
 /// An ungapped translated search writes one `diags` Seq-align per subject (no `dim`, no
@@ -1112,9 +1335,9 @@ fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
 fn ungapped_translated_hsps_are_diags_seq_aligns() {
     let run = RunRecord {
         program: Program::Tblastx,
-        rps: false,
         db_title: None,
         gapped: false,
+        program_type: None,
     };
     let subjects = [
         SubjectRecord {
@@ -1183,9 +1406,9 @@ fn a_subject_with_strings_writes_the_use_this_seqid_ext() {
             } else {
                 Program::Tblastx
             },
-            rps: false,
             db_title: Some(b"db"),
             gapped,
+            program_type: None,
         };
         let subjects = [
             SubjectRecord {
@@ -1259,4 +1482,273 @@ fn replaced_bytes_of_a_long_string_share_it() {
     assert!(lines.windows(2).all(|pair| pair[0] <= pair[1]));
     let text_lines = buf.iter().filter(|&&byte| byte == b'\n').count() as u64;
     assert!(lines[9_999] <= text_lines);
+}
+
+/// NCBI's insertions of a Seq-annot into the report's stream (`document_pieces`, the writes of its
+/// object stream's buffer) cover the document, and for JSON the model of the stream's calls
+/// (`Traced`) and the one taken back from the bytes (`out_buffer::json_pieces`, which the side
+/// files and outfmt 15 use) give the same pieces, over a document of several buffers.
+#[test]
+fn the_pieces_of_a_seq_annot_cover_it_and_both_json_models_agree() {
+    let run = RunRecord {
+        program: Program::Blastp,
+        db_title: Some(b"a database"),
+        gapped: true,
+        program_type: None,
+    };
+    let subjects: Vec<_> = (0..40)
+        .map(|i| {
+            subject(
+                SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(i)),
+                137 + i as i32,
+            )
+        })
+        .collect();
+    let hsps: Vec<_> = (0..40)
+        .map(|i| {
+            hsp(
+                i,
+                (i as i32, i as i32),
+                (0, 0),
+                652,
+                5.30325651018409e-94,
+                255.758355778158,
+                (125, 130, 2),
+                &BP_Q1_HSP2,
+            )
+        })
+        .collect();
+    let query = query("Query_1", 140);
+    for format in [
+        SerialFormat::AsnText,
+        SerialFormat::AsnBinary,
+        SerialFormat::Json,
+    ] {
+        let mut bytes = Vec::new();
+        assert!(super::write_query(format, &run, &query, &subjects, &hsps, &mut bytes).unwrap());
+        let pieces = super::seqalign::query_pieces(format, &run, &query, &subjects, &hsps);
+        assert!(pieces.len() > 2, "{format:?} {}", bytes.len());
+        assert_eq!(pieces.iter().sum::<usize>(), bytes.len(), "{format:?}");
+        if format == SerialFormat::AsnText {
+            // The separator after the document is a write of its own (`WriteSeparator`).
+            assert_eq!(pieces.last(), Some(&1));
+        }
+        if format == SerialFormat::Json {
+            assert_eq!(
+                crate::report::serial::out_buffer::json_pieces(&bytes),
+                pieces
+            );
+        }
+    }
+}
+
+// Line PS item PS7c: the E-value and bit score that a Seq-align carries (`seqalign_scores`): an
+// E-value is 0 below 1e-180 (a negative one too) and stays the NaN that marks it missing
+// (`seqalign_evalue_absent`, which its readers take as -1), a bit score is missing below 0 and
+// the readers' -1 then.
+#[test]
+fn a_seqalign_lacks_a_nan_or_negative_score() {
+    use super::seqalign::{seqalign_evalue_absent, seqalign_evalue_read, seqalign_scores};
+    assert_eq!(seqalign_scores(1e-200, 5.0), (0.0, 5.0));
+    assert_eq!(seqalign_scores(0.25, 0.0), (0.25, 0.0));
+    let (absent, bits) = seqalign_scores(f64::NAN, f64::NAN);
+    assert!(seqalign_evalue_absent(absent));
+    assert_eq!((seqalign_evalue_read(absent), bits), (-1.0, -1.0));
+    assert_eq!(seqalign_scores(-1.0, -3.5), (0.0, -1.0));
+    assert_eq!(
+        seqalign_scores(f64::INFINITY, f64::INFINITY),
+        (f64::INFINITY, f64::INFINITY)
+    );
+    assert_eq!(
+        seqalign_scores(f64::NEG_INFINITY, f64::NEG_INFINITY),
+        (0.0, -1.0)
+    );
+}
+
+// Line DBID pfoff-4: BLAST XML's `catch` of an HSP whose subject's lookup throws writes the
+// Seq-align's identities as `GetAlnScores` reads them: the count, or -1 where the Seq-align has
+// no `num_ident` (a count below 0; psiblast's 0, which NCBI sets to -1 first), the one rule of
+// the Seq-annot formats too (`seq_align_num_ident`).
+#[test]
+fn the_identities_of_a_seq_align_as_ncbi_reads_them() {
+    use super::seqalign::{read_num_ident, seq_align_num_ident};
+    use crate::report::record::ProgramType;
+    let psiblast = Some(ProgramType::PsiBlast);
+    assert_eq!(read_num_ident(66, None), 66);
+    assert_eq!(read_num_ident(0, None), 0);
+    assert_eq!(read_num_ident(-1, None), -1);
+    assert_eq!(read_num_ident(0, psiblast), -1);
+    assert_eq!(read_num_ident(5, psiblast), 5);
+    assert_eq!(read_num_ident(0, Some(ProgramType::PsiTblastn)), 0);
+    assert_eq!(read_num_ident(i64::from(i32::MAX) + 1, None), i32::MAX);
+    // The score the Seq-annot formats write: none where XML's `catch` reads -1.
+    assert_eq!(seq_align_num_ident(0, psiblast), None);
+    assert_eq!(seq_align_num_ident(0, Some(ProgramType::RpsBlast)), Some(0));
+    assert_eq!(seq_align_num_ident(-1, None), None);
+}
+
+/// A PSSM search's Seq-annot names its program type (`Blast Type`: psiblast 10, psitblastn 11,
+/// blast_format.cpp:666-673), and psiblast's Seq-aligns leave out a `num_ident` of 0
+/// (blast_seqalign.cpp:1490-1496); blastp's write it (`score_list_follows_ncbi_conditions`).
+#[test]
+fn pssm_searches_name_their_type_and_psiblast_omits_zero_identities() {
+    use crate::report::record::ProgramType;
+    let subjects = [subject(SeqId::Local("Subject_1"), 100)];
+    let ops = [Sub(10)];
+    let write = |program_type: Option<ProgramType>, program: Program, num_ident: i32| {
+        let run = RunRecord {
+            program,
+            db_title: None,
+            gapped: true,
+            program_type,
+        };
+        let frames = if program == Program::Tblastn {
+            (0, 1)
+        } else {
+            (0, 0)
+        };
+        let one = hsp(0, (0, 0), frames, 30, 1e-5, 20.5, (num_ident, 0, 0), &ops);
+        let mut buf = Vec::new();
+        write_query(
+            SerialFormat::AsnText,
+            &run,
+            &query("Query_1", 10),
+            &subjects,
+            &[one],
+            &mut buf,
+        )
+        .unwrap();
+        String::from_utf8(buf).unwrap()
+    };
+    let psiblast = write(Some(ProgramType::PsiBlast), Program::Blastp, 0);
+    assert!(psiblast.contains("str \"psiblast\""), "{psiblast}");
+    assert!(psiblast.contains("int 10"), "{psiblast}");
+    assert!(!psiblast.contains("num_ident"), "{psiblast}");
+    let psiblast_ident = write(Some(ProgramType::PsiBlast), Program::Blastp, 7);
+    assert!(psiblast_ident.contains("num_ident"), "{psiblast_ident}");
+    let blastp = write(None, Program::Blastp, 0);
+    assert!(blastp.contains("str \"blastp\""), "{blastp}");
+    assert!(blastp.contains("num_ident"), "{blastp}");
+    let tblastn = write(Some(ProgramType::PsiTblastn), Program::Tblastn, 0);
+    assert!(tblastn.contains("str \"psitblastn\""), "{tblastn}");
+    assert!(tblastn.contains("int 11"), "{tblastn}");
+    assert!(tblastn.contains("num_ident"), "{tblastn}");
+}
+
+// Line PS item PS7c (review S3): the absent E-value is the NaN of the lists of every program,
+// which the readers take as -1; every other value goes through `seqalign_evalue` (a value below
+// 1e-180, a negative one too, is 0), a computed -1 too.
+#[test]
+fn an_absent_evalue_is_a_nan_that_the_readers_take_as_minus_1() {
+    use super::seqalign::{seqalign_evalue_absent, seqalign_evalue_read, seqalign_scores};
+    assert!(seqalign_evalue_absent(f64::NAN));
+    assert!(!seqalign_evalue_absent(-1.0));
+    assert_eq!(seqalign_evalue_read(f64::NAN), -1.0);
+    assert_eq!(seqalign_evalue_read(-1.0), 0.0);
+    assert_eq!(seqalign_evalue_read(-3.5), 0.0);
+    assert_eq!(seqalign_evalue_read(1e-200), 0.0);
+    assert_eq!(seqalign_evalue_read(0.25), 0.25);
+    assert!(seqalign_scores(f64::NAN, -2.0).0.is_nan());
+    assert_eq!(seqalign_scores(-1.0, -2.0), (0.0, -1.0));
+}
+
+/// The Dense-seg of a translated HSP's rows (`translated_row_segments`, NCBI's
+/// `CreateDensegFromStdseg`) gives each row the strand of its first segment with one in every
+/// segment: a minus-frame query row that starts with a gap (whose first Std-seg has an empty
+/// location) is on the minus strand, so outfmt 0 counts its positions down; the protein row has
+/// no strand, and an X-drop script's rows keep theirs.
+#[test]
+fn a_translated_rows_leading_gap_takes_the_rows_strand() {
+    use super::seqalign::{translated_row_segments, Segments, Strand};
+    let strands = |frame: i32, ops: Vec<GapEditOp>| {
+        let hit = crate::common::Hit {
+            identity: 100.0,
+            length: 285,
+            mismatch: 0,
+            gapopen: 1,
+            q_start: 1,
+            q_end: 570,
+            s_start: 1,
+            s_end: 285,
+            e_value: 1e-100,
+            bit_score: 353.0,
+            num_ident: 190,
+            query_frame: frame,
+            query_length: 570,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score: 906,
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: true,
+            gap_info: Some(ops),
+            num_positives: 190,
+        };
+        let mut segments = Segments::default();
+        translated_row_segments(&hit, Some((frame as i8, 570)), None, &mut segments);
+        segments.strands().to_vec()
+    };
+    let (minus, plus, none) = (Strand::Minus, Strand::Plus, Strand::Unknown);
+    assert_eq!(
+        strands(-1, vec![Del(95), Sub(190)]),
+        [minus, none, minus, none]
+    );
+    assert_eq!(
+        strands(1, vec![Del(95), Sub(190)]),
+        [plus, none, plus, none]
+    );
+    assert_eq!(
+        strands(-1, vec![Sub(100), Ins(5), Sub(85)]),
+        [minus, none, minus, none, minus, none]
+    );
+}
+
+#[test]
+fn gapped_row_range_and_aln_vec_row_gaps_only() {
+    use super::seqalign::{aln_vec_row_gaps_only, gapped_row_range, AlignRow, RowRangeError};
+    use crate::common::GapEditOp::{Del, Ins, Sub};
+
+    assert_eq!(
+        gapped_row_range(&[Ins(2)], AlignRow::Subject),
+        Some(RowRangeError::Empty)
+    );
+    assert_eq!(gapped_row_range(&[Ins(2)], AlignRow::Query), None);
+    assert_eq!(
+        gapped_row_range(&[Del(2)], AlignRow::Query),
+        Some(RowRangeError::Empty)
+    );
+    assert_eq!(
+        gapped_row_range(&[Ins(2), Sub(3)], AlignRow::Subject),
+        Some(RowRangeError::SeqidsNotConsistent)
+    );
+    assert_eq!(gapped_row_range(&[Sub(2)], AlignRow::Subject), None);
+
+    let left = aln_vec_row_gaps_only(1, true);
+    assert_eq!(left.site().file, "src/objtools/alnmgr/alnmap.cpp");
+    assert_eq!(left.site().line, 732);
+    assert_eq!(left.site().kind, "CAlnException::eInvalidDenseg");
+    assert!(left
+        .to_string()
+        .contains("CAlnVec::x_GetSeqLeftSeg(): Invalid Dense-seg: Row 1 contains gaps only."));
+
+    let right = aln_vec_row_gaps_only(1, false);
+    assert_eq!(right.site().file, "src/objtools/alnmgr/alnmap.cpp");
+    assert_eq!(right.site().line, 753);
+    assert_eq!(right.site().kind, "CAlnException::eInvalidDenseg");
+    assert!(right
+        .to_string()
+        .contains("CAlnVec::x_GetSeqRightSeg(): Invalid Dense-seg: Row 1 contains gaps only."));
+
+    let row0_left = aln_vec_row_gaps_only(0, true);
+    assert_eq!(row0_left.site().line, 732);
+    assert!(row0_left
+        .to_string()
+        .contains("CAlnVec::x_GetSeqLeftSeg(): Invalid Dense-seg: Row 0 contains gaps only."));
+    let row0_right = aln_vec_row_gaps_only(0, false);
+    assert_eq!(row0_right.site().line, 753);
+    assert!(row0_right
+        .to_string()
+        .contains("CAlnVec::x_GetSeqRightSeg(): Invalid Dense-seg: Row 0 contains gaps only."));
 }

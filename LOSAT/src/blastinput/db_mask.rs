@@ -22,34 +22,43 @@
 use crate::wording::{DATABASE_ERROR, OPTIONS_ERROR};
 use anyhow::Result;
 
+use std::ffi::OsString;
+
+use crate::algorithm::common::hard_chunk_walk::{HardStarts, NcbiStart, NcbiWalk};
 use crate::cli::NativeError;
 use crate::core::subject_split::HardSplitState;
+use crate::report::archive::fields;
 use crate::report::archive::options::{Param, ParamValue};
 use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
+use crate::utils::os_bytes::os_str_bytes;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2342-2356
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2226-2229,2367-2382
-// The exclusions are errors of the argument parser: LOSAT's parser reports them with its own
-// text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1).
+// NCBI's argument reader reports the exclusions (`cli::reader`).
 /// The two options of a program whose database arguments support masking (BLASTN).
-#[derive(clap::Args, Debug, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DbMaskArgs {
     /// `-db_soft_mask`.
-    #[arg(
-        long = "db_soft_mask",
-        value_name = "filtering_algorithm",
-        conflicts_with_all = ["subject", "subject_loc", "db_hard_mask"],
-        help = "Filtering algorithm ID to apply to the BLAST database as soft masking"
-    )]
-    pub db_soft_mask: Option<String>,
+    pub db_soft_mask: Option<OsString>,
     /// `-db_hard_mask` (refused for the masks of `HardMaskShape`: `ResolvedMask::check_losat_limits`).
-    #[arg(
-        long = "db_hard_mask",
-        value_name = "filtering_algorithm",
-        conflicts_with_all = ["subject", "subject_loc"],
-        help = "Filtering algorithm ID to apply to the BLAST database as hard masking"
-    )]
-    pub db_hard_mask: Option<String>,
+    pub db_hard_mask: Option<OsString>,
+}
+
+impl DbMaskArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, the arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(DbMaskArgs {
+            db_soft_mask: args.given_option("db_soft_mask")?,
+            db_hard_mask: args.given_option("db_hard_mask")?,
+        })
+    }
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:234-239
@@ -69,7 +78,7 @@ pub enum FilteringAlgorithm {
     Id(i32),
     /// `m_FilteringAlgorithmString`: any other text, looked up by the database
     /// (`GetMaskAlgorithmId`, case-sensitive).
-    Name(String),
+    Name(Vec<u8>),
 }
 
 /// The masking of a `-db` search that the command line asks for.
@@ -91,9 +100,10 @@ impl DbMaskArgs {
             (None, Some(text)) => (MaskKind::Hard, text),
             (None, None) => return None,
         };
+        let bytes = os_str_bytes(text);
         Some(DbMaskOption {
             kind,
-            algorithm: FilteringAlgorithm::parse(text),
+            algorithm: FilteringAlgorithm::parse(&bytes),
         })
     }
 }
@@ -103,11 +113,11 @@ impl FilteringAlgorithm {
     // `x_ValidateMaskingAlgorithm` returns at once here: the database is not open yet.
     /// The algorithm that the option's text names: `+11` and `011` are the id 11; ` 11`, `11 `,
     /// `11x`, `2147483648` and the empty text are names.
-    pub fn parse(text: &str) -> Self {
+    pub fn parse(text: &[u8]) -> Self {
         // `s_IsNumericId` is `StringToInt` that converts (`seqdb::mask::is_numeric_id`).
-        match crate::ncbi_str::string_to_int(text.as_bytes(), 0) {
+        match crate::ncbi_str::string_to_int(text, 0) {
             Ok(id) => FilteringAlgorithm::Id(id),
-            Err(_) => FilteringAlgorithm::Name(text.to_string()),
+            Err(_) => FilteringAlgorithm::Name(text.to_vec()),
         }
     }
 }
@@ -120,10 +130,15 @@ pub struct ResolvedMask {
     /// The database-wide id of the algorithm (`GetFilteringAlgorithm`).
     pub id: i32,
     /// `GetFilteringAlgorithmKey`: the option's text where it was a name.
-    pub key: Option<String>,
+    pub key: Option<Vec<u8>>,
     /// The algorithm in the database of each name of the `-db` list, in the order of the list
     /// (`SDbInfo::filt_algorithm_name`, `filt_algorithm_options`).
     pub shown: Vec<MaskAlgorithm>,
+    /// With `-db_hard_mask` in BLASTP, BLASTX, TBLASTN and TBLASTX: the searched sequences that
+    /// the search starts on a new table at NCBI's one-thread offset (or apart for walked
+    /// translated sequences), from the walk of `ResolvedMask::check_losat_limits` (shared by the
+    /// clones of the masking).
+    pub(crate) starts: std::sync::Arc<std::sync::OnceLock<HardStarts>>,
 }
 
 impl DbMaskOption {
@@ -136,7 +151,7 @@ impl DbMaskOption {
     pub fn validate_at_open(
         &self,
         db: &SeqDb,
-        db_name: &str,
+        db_name: &[u8],
         nucleotide: bool,
         program: &str,
     ) -> Result<()> {
@@ -150,14 +165,13 @@ impl DbMaskOption {
             .mask_algorithms()
             .map_err(|error| crate::algorithm::common::database::database_error(error, program))?;
         if !algorithms.ids().contains(&id) {
-            return Err(NativeError {
-                exit: 1,
-                message: format!(
-                    "{OPTIONS_ERROR} Masking algorithm ID {id} is not supported in {} '{db_name}' BLAST database\n",
-                    if nucleotide { "nucleotide" } else { "protein" }
-                ).into(),
-            }
-            .into());
+            let kind = if nucleotide { "nucleotide" } else { "protein" };
+            let mut message =
+                format!("{OPTIONS_ERROR} Masking algorithm ID {id} is not supported in {kind} '")
+                    .into_bytes();
+            message.extend_from_slice(db_name);
+            message.extend_from_slice(b"' BLAST database\n");
+            return Err(NativeError { exit: 1, message }.into());
         }
         Ok(())
     }
@@ -173,19 +187,20 @@ impl DbMaskOption {
     /// database of each name of the `-db` list (`SeqDb::name_mask_details`, the tables that the
     /// database's name records keep): an id that one of them does not have is NCBI's database
     /// error, exit 2 (the id 0, an id below -1, or a name's id that a database of the list
-    /// lacks).
+    /// lacks). `app` is the running application, the prefix of the warning.
     pub fn resolve(
         &self,
         db: &SeqDb,
-        db_name: &str,
+        db_name: &[u8],
         program: &str,
+        app: &str,
         warning: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
     ) -> Result<Option<ResolvedMask>> {
         let (id, key) = match &self.algorithm {
             FilteringAlgorithm::Id(id) => (Some(*id), None),
             FilteringAlgorithm::Name(name) => {
                 let id = match db.mask_algorithms() {
-                    Ok(algorithms) => algorithms.id_of(name),
+                    Ok(algorithms) => algorithms.id_of(name).ok(),
                     // NCBI catches its `CSeqDBException` and answers -1.
                     Err(error) if error.ncbi_message().is_some() => None,
                     Err(error) => {
@@ -198,39 +213,21 @@ impl DbMaskOption {
             }
         };
         let Some(id) = id.filter(|&id| id != -1) else {
-            warning(
-                format!(
-                    "Warning: [{}] Subject mask not found in {db_name}, proceeding without subject masking.\n",
-                    program.to_ascii_lowercase()
-                )
-                .as_bytes(),
-            )?;
+            let mut line = format!("Warning: [{app}] Subject mask not found in ").into_bytes();
+            line.extend_from_slice(db_name);
+            line.extend_from_slice(b", proceeding without subject masking.\n");
+            warning(&line)?;
             return Ok(None);
         };
-        let shown = db.name_mask_details(id).map_err(|error| {
-            let error = match &error {
-                NameMaskError::Table(error) => *error,
-                NameMaskError::Details(error) => error,
-                NameMaskError::NotRead => {
-                    return anyhow::anyhow!(
-                        "LOSAT internal error: the database's names were read without their mask algorithms"
-                    )
-                }
-            };
-            match error {
-                SeqDbError::Range(text) => NativeError {
-                    exit: 2,
-                    message: format!("{DATABASE_ERROR} {text}\n").into(),
-                }
-                .into(),
-                error => crate::algorithm::common::database::database_error_of(error, program),
-            }
-        })?;
+        let shown = db
+            .name_mask_details(id)
+            .map_err(|error| name_mask_error(&error, program))?;
         Ok(Some(ResolvedMask {
             kind: self.kind,
             id,
             key,
             shown,
+            starts: Default::default(),
         }))
     }
 }
@@ -250,14 +247,14 @@ impl DbMaskOption {
         match (resolved, &self.algorithm) {
             (Some(mask), _) => mask.archive_params(),
             (None, FilteringAlgorithm::Name(name)) if !name.is_empty() => vec![
-                Param {
-                    name: "DbFilteringAlgorithmKey",
-                    value: ParamValue::Str(name.clone()),
-                },
-                Param {
-                    name: "SubjectMaskingType",
-                    value: ParamValue::Integer(self.kind as i32),
-                },
+                Param::new(
+                    fields::DB_FILTERING_ALGORITHM_KEY,
+                    ParamValue::Str(name.clone()),
+                ),
+                Param::new(
+                    fields::SUBJECT_MASKING_TYPE,
+                    ParamValue::Integer(self.kind as i32),
+                ),
             ],
             (None, _) => Vec::new(),
         }
@@ -265,6 +262,11 @@ impl DbMaskOption {
 }
 
 impl ResolvedMask {
+    /// Whether this resolved masking is `-db_hard_mask` (`eHardSubjMasking`).
+    pub(crate) fn is_hard(&self) -> bool {
+        self.kind == MaskKind::Hard
+    }
+
     /// LOSAT's refusals of the masked search of `db`, where NCBI starts the search (after its own
     /// checks; `program` names the program), before anything is written: the databases whose masks
     /// NCBI reads from undefined or reversed data (`SeqDb::check_search_masks`; decision D5 of
@@ -272,14 +274,66 @@ impl ResolvedMask {
     /// do not handle (`HardMaskShape`; series NP, M4a-2b decisions H3-H5, and M4a-2c: a mask that
     /// runs to the end only below `TAIL_MASK_SEARCHED_WORD`, in BLASTN; series NP, M4b-3: no such
     /// mask in the protein and translated programs), for a search whose scan is `scan`
-    /// (`HardMaskShape::of_scan`).
+    /// (`HardMaskShape::of_scan`). The protein programs' walk visits every searched sequence and
+    /// keeps the sequences that the search starts on a new table (`ResolvedMask::hard_starts`).
     pub fn check_losat_limits(&self, db: &SeqDb, program: &str, scan: HardScan) -> Result<()> {
         db.check_search_masks(self.id)
             .map_err(|error| crate::algorithm::common::database::database_error(error, program))?;
         if self.kind == MaskKind::Hard {
-            let found = db.first_searched_masks(self.id, |masks, bounds, length| {
-                HardMaskShape::of_scan(masks, bounds, length, scan)
-            });
+            let found = match scan {
+                HardScan::Protein {
+                    word,
+                    window,
+                    zero_words,
+                } => {
+                    let (starts, found) = protein_walk(db, self.id, word, window, zero_words);
+                    if found.is_none() {
+                        // A second check of the same masking finds the same table.
+                        let _ = self.starts.set(starts);
+                    }
+                    found
+                }
+                HardScan::Translated {
+                    word,
+                    window,
+                    zero_words,
+                } => {
+                    enum FirstPass {
+                        Refused(HardMaskShape),
+                        Walked,
+                    }
+                    let first = db.first_searched_masks(self.id, |masks, bounds, length| {
+                        if let Some(shape) =
+                            HardMaskShape::of_scan(masks, bounds, length, scan, None)?
+                        {
+                            return Ok(Some(FirstPass::Refused(shape)));
+                        }
+                        if translated_walked(masks) {
+                            return Ok(Some(FirstPass::Walked));
+                        }
+                        Ok(None)
+                    });
+                    match first {
+                        None => None,
+                        Some((oid, volume, FirstPass::Refused(shape))) => {
+                            Some((oid, volume, shape))
+                        }
+                        Some((_, _, FirstPass::Walked)) => {
+                            let (starts, found) =
+                                translated_walk(db, self.id, word, window, zero_words);
+                            if found.is_none() {
+                                let _ = self.starts.set(starts);
+                            }
+                            found
+                        }
+                    }
+                }
+                HardScan::Nucleotide { .. } => {
+                    db.first_searched_masks(self.id, |masks, bounds, length| {
+                        HardMaskShape::of_scan(masks, bounds, length, scan, None)
+                    })
+                }
+            };
             if let Some((oid, volume, shape)) = found {
                 anyhow::bail!(
                     "-db_hard_mask: the sequence of OID {oid} (volume {}) {}; LOSAT's {program} \
@@ -292,29 +346,267 @@ impl ResolvedMask {
         Ok(())
     }
 
+    /// The searched sequences that a BLASTP or BLASTX search of `db` with `-db_hard_mask`, the word
+    /// `word` and the window `window` starts on a new table at NCBI's one-thread offset
+    /// (`algorithm::common::hard_chunk_walk::NcbiWalk`): the table of `check_losat_limits`, which
+    /// the search's start runs, or the same walk where it did not run (a search that a caller
+    /// set up without it).
+    pub(crate) fn hard_starts(&self, db: &SeqDb, word: i32, window: i32) -> &HardStarts {
+        self.starts
+            .get_or_init(|| protein_walk(db, self.id, word, window, false).0)
+    }
+
+    /// The searched sequences of a TBLASTN or TBLASTX `-db_hard_mask` search that run in order on
+    /// their own diagonal table (`translated_walk`): `None` when no sequence in the database had
+    /// overlapping masks (no walk ran).
+    pub(crate) fn translated_starts(&self) -> Option<&HardStarts> {
+        self.starts.get()
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-516
     /// The program options of the BLAST archive and of the search strategy (after the list's).
     /// An empty name is no key (only an `algo_key` other than `kEmptyStr` is one): the id it was
     /// translated to is written.
     pub fn archive_params(&self) -> Vec<Param> {
         let algorithm = match self.key.as_deref() {
-            Some(key) if !key.is_empty() => Param {
-                name: "DbFilteringAlgorithmKey",
-                value: ParamValue::Str(key.to_string()),
-            },
-            _ => Param {
-                name: "DbFilteringAlgorithmId",
-                value: ParamValue::Integer(self.id),
-            },
+            Some(key) if !key.is_empty() => Param::new(
+                fields::DB_FILTERING_ALGORITHM_KEY,
+                ParamValue::Str(key.to_vec()),
+            ),
+            _ => Param::new(
+                fields::DB_FILTERING_ALGORITHM_ID,
+                ParamValue::Integer(self.id),
+            ),
         };
         vec![
             algorithm,
-            Param {
-                name: "SubjectMaskingType",
-                value: ParamValue::Integer(self.kind as i32),
-            },
+            Param::new(
+                fields::SUBJECT_MASKING_TYPE,
+                ParamValue::Integer(self.kind as i32),
+            ),
         ]
     }
+}
+
+/// The error of `SeqDb::name_mask_details`, as the formatter's `GetBlastDbInfo` ends the run with
+/// it (`CATCH_ALL`, cited at `DbMaskOption::resolve`): NCBI's `Filtering algorithm ID ... is not
+/// supported.` of a name's database that lacks the id, or the error of reading its table, as
+/// `LOSAT database error: <text>` with exit status 2 (`common::database::database_error_of`).
+/// The one mapping of these errors: the search programs' database masking (`resolve`) and
+/// blast_formatter's database of an archive (`blast_formatter::archive`).
+pub(crate) fn name_mask_error(error: &NameMaskError<'_>, program: &str) -> anyhow::Error {
+    let error = match error {
+        NameMaskError::Table(error) => *error,
+        NameMaskError::Details(error) => error,
+        NameMaskError::NotRead => {
+            return anyhow::anyhow!(
+                "LOSAT internal error: the database's names were read without their mask algorithms"
+            )
+        }
+    };
+    match error {
+        SeqDbError::Range(text) => NativeError {
+            exit: 2,
+            message: format!("{DATABASE_ERROR} {text}\n").into(),
+        }
+        .into(),
+        error => crate::algorithm::common::database::database_error_of(error, program),
+    }
+}
+
+/// The walk of a BLASTP or BLASTX search of `db` with `-db_hard_mask` (the filtering algorithm
+/// `algo_id`, the word `word`, the window `window`; `zero_words` as in `HardScan::Protein`) over
+/// every sequence that it searches, in the order of the search (`SeqDb::searched_sequences`):
+/// NCBI's one-thread offsets (`NcbiWalk`) with the sequences that the search starts on a new
+/// table and whether a sequence is kept apart (`HardStarts::keeps_apart`), and the first sequence
+/// whose masks LOSAT refuses (`HardMaskShape::of_scan`, at the place that the walk gives it),
+/// after which the table is not complete (the search does not run). A sequence whose masks or
+/// length cannot be read ends the walk without a finding (the search meets that read error first).
+/// With a negative window (a search strategy's; the command line takes none) the search itself runs
+/// on NCBI's one-thread table, in NCBI's order (BLASTP's `db_masked::neg_window_chunks`, BLASTX's
+/// `search_db_masked.rs`): no sequence starts on a new table or is kept apart, and the walk only
+/// finds the refusals.
+fn protein_walk(
+    db: &SeqDb,
+    algo_id: i32,
+    word: i32,
+    window: i32,
+    zero_words: bool,
+) -> (HardStarts, Option<(u32, std::path::PathBuf, HardMaskShape)>) {
+    let scan = HardScan::Protein {
+        word,
+        window,
+        zero_words,
+    };
+    let carried = window < 0;
+    let mut walk = NcbiWalk::new(word, window);
+    let mut starts = HardStarts::default();
+    let mut plan = crate::algorithm::common::db_mask_search::SubjectPlan::default();
+    let mut chunks = Vec::new();
+    let found = db
+        .searched_sequences(algo_id, |ordinal, length, masks| {
+            let masks = masks.read()?;
+            if masks.is_empty() {
+                if let Some(start) = walk.plain(length).filter(|_| !carried) {
+                    starts.push(ordinal, start);
+                }
+                return Ok(None);
+            }
+            // The search's chunker (`db_mask_search::SubjectPlan`), so that the walk and the search
+            // read the same chunks.
+            plan.start_hard(masks, length);
+            plan.hard_chunks(&mut chunks);
+            let (start, reads_back) = walk.masked(length, &chunks);
+            let (start, reads_back) = if carried {
+                (None, false)
+            } else {
+                (start, reads_back)
+            };
+            if let Some(start) = start {
+                starts.push(ordinal, start);
+            } else if reads_back {
+                starts.push_reads_back();
+            }
+            // The length is exact: never read.
+            Ok(
+                HardMaskShape::of_scan(
+                    masks,
+                    Some((length, length)),
+                    &|| Some(length),
+                    scan,
+                    start,
+                )
+                .ok()
+                .flatten(),
+            )
+        })
+        .ok()
+        .flatten();
+    (starts, found)
+}
+
+/// The shortest translated subject searched for a word size in residues (three times the word
+/// size plus two bases, NCBI's `min_subj_seq_length` in `blast_engine.c:1318-1331`).
+fn translated_min_length(word: i32) -> usize {
+    usize::try_from(word).unwrap_or(0) * 3 + 2
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 805-830
+// Each frame maps nucleotide mask boundaries by dividing by 3, so two consecutive stored masks
+// yield a negative frame chunk in every reading frame iff the first mask's floor-divided end
+// exceeds the next mask's floor-divided start.
+/// Whether a translated sequence with stored masks `masks` has a negative frame chunk (a walked
+/// sequence: two consecutive masks whose frame-mapped end and start overlap).
+pub(crate) fn translated_walked(masks: &[(u32, u32)]) -> bool {
+    masks.windows(2).any(|pair| pair[0].1 / 3 > pair[1].0 / 3)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 478-500, 804-855,
+// 1318-1331, 1368-1369, 1429
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 87-107, 162-173
+/// The one-thread walk of a TBLASTN or TBLASTX search of `db` with `-db_hard_mask` (series NP,
+/// M4b-3c part 2): runs only when the first pass of `ResolvedMask::check_losat_limits` finds a
+/// walked sequence (`translated_walked`). Walks every searched sequence in database order with
+/// exact nucleotide lengths (`SeqDb::searched_sequences`), checks the first-pass shapes and the
+/// walk's refusals in order (`of_scan`, `WordPastEnd`, `NoChunkingWithOverlaps`), and records the
+/// `HardStarts` for every walked or New sequence (approved exception 29: a sequence whose hits
+/// would reach another sequence's entries runs on a table of its own at NCBI's offset where it
+/// meets unwritten entries, else apart at `window + below_start`).
+fn translated_walk(
+    db: &SeqDb,
+    algo_id: i32,
+    word: i32,
+    window: i32,
+    zero_words: bool,
+) -> (HardStarts, Option<(u32, std::path::PathBuf, HardMaskShape)>) {
+    use crate::algorithm::common::translated_chunks::{frame_length, translated_db_mask_chunks};
+    use crate::core::subject_split::complement_masks;
+    const NCBI_FRAMES: [i8; 6] = [1, 2, 3, -1, -2, -3];
+
+    let scan = HardScan::Translated {
+        word,
+        window,
+        zero_words,
+    };
+    let min_length = translated_min_length(word);
+    let carried = window < 0;
+    let mut walk = NcbiWalk::new(word, window);
+    let mut starts = HardStarts::default();
+    let mut ranges = Vec::new();
+    let mut split = HardSplitState::default();
+    let mut items = Vec::new();
+
+    let found = db
+        .searched_sequences(algo_id, |ordinal, length, masks| {
+            let masks = masks.read()?;
+            if let Some(shape) =
+                HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan, None)
+                    .ok()
+                    .flatten()
+            {
+                return Ok(Some(shape));
+            }
+            if length < min_length {
+                return Ok(None);
+            }
+            let walked = translated_walked(masks);
+            complement_masks(masks, length, &mut ranges);
+            let neg_first = frame_length(length, -1).unwrap_or(0);
+            items.clear();
+            let mut no_chunking: Option<(i8, u32, u32)> = None;
+            for frame in NCBI_FRAMES {
+                let Some(fl) = frame_length(length, frame) else {
+                    continue;
+                };
+                let Ok(frame_chunks) =
+                    translated_db_mask_chunks(&ranges, true, frame, fl, neg_first, &mut split)
+                else {
+                    return Ok(None);
+                };
+                for (chunk_idx, (chunk, _)) in frame_chunks.iter().enumerate() {
+                    if walked && no_chunking.is_none() && chunk.full_range {
+                        let mask_idx = chunk_idx.min(masks.len() - 1);
+                        let (start, end) = if frame > 0 {
+                            masks[mask_idx]
+                        } else {
+                            masks[masks.len() - 1 - mask_idx]
+                        };
+                        no_chunking = Some((frame, start, end));
+                    }
+                    items.push((fl, chunk.offset, chunk.ncbi_length));
+                }
+            }
+            let step = walk.translated_masked(&items, zero_words);
+            if let Some(offset) = step.word_past_end {
+                return Ok(Some(HardMaskShape::WordPastEnd { offset }));
+            }
+            if let Some((frame, start, end)) = no_chunking {
+                return Ok(Some(HardMaskShape::NoChunkingWithOverlaps {
+                    frame,
+                    start,
+                    end,
+                }));
+            }
+            if !carried {
+                if let Some(start) = step.ncbi {
+                    starts.push(ordinal, start);
+                } else if walked {
+                    let offset =
+                        i32::try_from(i64::from(window) + step.below_start).unwrap_or(i32::MAX);
+                    starts.push(
+                        ordinal,
+                        NcbiStart {
+                            offset,
+                            cleared: false,
+                        },
+                    );
+                }
+            }
+            Ok(None)
+        })
+        .ok()
+        .flatten();
+    (starts, found)
 }
 
 #[cfg(test)]
@@ -340,40 +632,70 @@ pub enum HardScan {
         scanned_word: usize,
     },
     /// blastp and blastx (protein subjects, series NP, M4b): chunks from their hard range's left
-    /// (`residual` 0). A mask that runs to the end after the chunk from the start (after empty
-    /// masks at 0 too) is searched over that chunk alone, at every word (`HardMaskShape::TailMask`
-    /// is never refused here: the same NCBI defect as BLASTN's [`TAIL_MASK_SEARCHED_WORD`]
-    /// (PD-LOSAT-NCBI-DEFECTS exception 13), approved for these programs at every word as exception
-    /// 21; the Owner's answer Q1 = B of M4b, 2026-11-21). A hard range longer than `MAX_DBSEQ_LEN`,
-    /// which NCBI cuts into chunks that its merge joins across their overlap, is refused
-    /// (`HardMaskShape::LongRange`), as is a mask that ends past the sequence
-    /// (`HardMaskShape::PastEnd`). A chunk shorter than the word is searched as NCBI searches it,
-    /// in both scans: the one-hit scan (`-window_size 0`) reads no word of it, and the one word
-    /// that the two-hit scan reads at its start has no other hit on its diagonal, so it extends
-    /// nothing (`algorithm::common::db_mask_search::SubjectPlan::next_searched_chunk`).
-    Protein,
-    /// tblastn and tblastx (translated nucleotide subjects; series NP, M4b PR 2): the complement
-    /// of a sequence's stored masks is mapped to each of its six frames (`x / 3`, the minus
-    /// frames from frame -1's length; `common::translated_chunks::translated_frame_ranges`) and
-    /// each frame is chunked as a protein subject (residual 0). The shape refused is a mask that
-    /// ends past the sequence (`HardMaskShape::PastEnd`, as for the protein programs: its last
-    /// range would be inverted). `TailMask` read per frame (the chunk from the frame's start,
-    /// shorter than the frame, in NCBI's "no chunking" branch) is searched over that chunk alone
-    /// (`common::translated_chunks::translated_db_mask_chunks`; PD-LOSAT-NCBI-DEFECTS exception
-    /// 21, the Owner's answers Q1 = B and Q2 = B of M4b, 2026-11-21), and a frame whose masks
-    /// leave it an empty first part before that branch is searched as its chunks give it, the
-    /// whole frame after the empty part (exception 27, the Owner's answers Q4 = B of M4b,
-    /// 2026-11-22, and Q6 = B, 2026-11-23, which keeps the 1 or 2 masked bases masked in every
-    /// frame: NCBI BLAST+ 2.17.0 searches the frame and then frees memory that it did not
-    /// allocate). Both engines join the chunks of a frame longer than `MAX_DBSEQ_LEN` across
-    /// their overlap, as for an unmasked subject (no `LongRange`), and a chunk shorter than a word
-    /// gives no hit in either scan, as NCBI's (the one-hit scan reads no word of it,
-    /// aa_ungapped.c:762-766; the two-hit scan reads one, :495-500, which no second hit on its
-    /// diagonal follows within the window). A sequence shorter than `min_length` bases is not
-    /// searched (NCBI's subject loop skips it), so it is never refused.
+    /// (`residual` 0), in a search whose words have `word` letters and whose two-hit window is
+    /// `window` (0: the one-hit search, `-window_size 0`). A mask that runs to the end after the
+    /// chunk from the start (after empty masks at 0 too) is searched over that chunk alone, at
+    /// every word (`HardMaskShape::TailMask` is never refused here: the same NCBI defect as
+    /// BLASTN's [`TAIL_MASK_SEARCHED_WORD`] (PD-LOSAT-NCBI-DEFECTS exception 13), approved for
+    /// these programs at every word as exception 21; the Owner's answer Q1 = B of M4b,
+    /// 2026-11-21). Masks may overlap or nest, and be out of the order of their start (series NP,
+    /// M4b-3b: the Owner's answer of 2026-11-21 on overlapping masks): every chunk is searched as
+    /// NCBI searches it, those between overlapping masks of a negative length too, and the
+    /// diagonal offset moves by each chunk's length plus the window
+    /// (`algorithm::common::hard_chunk_walk::DiagonalWalk`); the one-hit scan reads no word of a
+    /// chunk shorter than the word, the two-hit scan the one word at its start. Ranges longer than
+    /// `MAX_DBSEQ_LEN` and out-of-order parts whose alignments overlap are merged across their
+    /// overlap by `core::blast_hits::merge_subject_chunk_hsps` (`Blast_HSPListsMerge`, series NP,
+    /// M4b-3d). Refused: a mask that ends before it starts (`HardMaskShape::Inverted`), a mask
+    /// that ends past the sequence (`HardMaskShape::PastEnd`), a mask that runs to the end after
+    /// the chunk from the start with masks stored after it
+    /// `HardMaskShape::TailMaskWithLaterMasks`), masks out of order whose final chunk overlaps an
+    /// earlier range across NCBI's out-of-bounds overlap read (`HardMaskShape::LastRangeOverlap`),
+    /// and the one word of a chunk that runs past the sequence's sentinel where it can change a
+    /// result (`HardMaskShape::WordPastEnd`). Chunks whose word hits would reach the diagonal entries of
+    /// other sequences are searched with those entries out of reach (PD-LOSAT-NCBI-DEFECTS
+    /// exception 29, the Owner's answer Q5 = B of M4b, 2026-11-22: `algorithm::common::
+    /// hard_chunk_walk::DiagonalWalk::start`), and those whose hits meet entries that no sequence
+    /// wrote in NCBI's one-thread search start on such a table at NCBI's offset (`algorithm::
+    /// common::hard_chunk_walk::NcbiWalk`).
+    Protein {
+        /// The letters of a word.
+        word: i32,
+        /// The two-hit window (0: the one-hit search).
+        window: i32,
+        /// Whether the query's lookup table can hold a word with the residue 0, the sequence's
+        /// sentinel byte (BLASTP: a query that holds the gap `-`; BLASTX never, its translation
+        /// gives `X` for a codon with a gap): `common::hard_chunk_walk::DiagonalWalk::new`.
+        zero_words: bool,
+    },
+    /// tblastn and tblastx (translated nucleotide subjects; series NP, M4b PR 2 and M4b-3c part 2):
+    /// the complement of a sequence's stored masks is mapped to each of its six frames (dividing
+    /// by 3, the minus frames reflected on frame -1's length; `common::translated_chunks::
+    /// translated_frame_ranges`) and each frame is chunked as a protein subject (residual 0). Masks
+    /// that overlap or nest in the order of their start are searched as NCBI searches them (every
+    /// frame's chunk moves the diagonal table by its `Int4` length plus the window, a chunk shorter
+    /// than the word gets its one word in the two-hit scan, and all six frames of a walked or New
+    /// sequence run in order on one table); masks that end before they start or start before the
+    /// start of an earlier mask stay refused (`HardMaskShape::Unsorted`), as do a mask ending past
+    /// the sequence (`HardMaskShape::PastEnd`), a one word past a frame's sentinel when
+    /// `zero_words` is true (`HardMaskShape::WordPastEnd`), and a walked sequence with a frame
+    /// taking NCBI's no-chunking branch (`HardMaskShape::NoChunkingWithOverlaps`). A sequence whose
+    /// hits would reach entries written by earlier sequences is searched on a table of its own
+    /// (PD-LOSAT-NCBI-DEFECTS approved exception 29).
+    /// For masks apart, `TailMask` read per frame (exception 21) and an empty first part before the
+    /// no-chunking branch (exception 27) are searched as before. Both engines join the chunks of a
+    /// frame longer than `MAX_DBSEQ_LEN` across their overlap, as for an unmasked subject. A
+    /// sequence shorter than three times `word` plus two bases is not searched
+    /// (NCBI's subject loop skips it), so it is never refused.
     Translated {
-        /// The shortest subject searched (`word * 3 + 2` bases).
-        min_length: usize,
+        /// The letters of a word.
+        word: i32,
+        /// The two-hit window (0: the one-hit search).
+        window: i32,
+        /// Whether the query's lookup table can hold a word with the residue 0, the frame's
+        /// sentinel byte (TBLASTN: a query with `-` or a PSSM whose column 0 scores above
+        /// `BLAST_SCORE_MIN`; TBLASTX never, its translation has no residue 0).
+        zero_words: bool,
     },
 }
 
@@ -389,8 +711,8 @@ impl HardScan {
 /// series NP, M4a-2b, ncbi-parity-20261019/M/m4a2/SURVEY.md §7.1-7.3): NCBI's hard chunks
 /// (`s_GetNextSubjectChunk`, blast_engine.c:221-310) give no result that LOSAT can check for them.
 /// The shapes are read off the chunks themselves (`core::subject_split::HardSplitState`, the
-/// chunker that the search runs; review S1 of M4a-2b), except `Unsorted`, a check of the stored
-/// masks. The first shape is refused only in BLASTN at a scanned word below
+/// chunker that the search runs; review S1 of M4a-2b), except `Unsorted` and `Inverted`, checks of
+/// the stored masks. The first shape is refused only in BLASTN at a scanned word below
 /// [`TAIL_MASK_SEARCHED_WORD`] (blastn-short): at that word and above, and at every word in the
 /// protein and translated programs, LOSAT searches it over the chunk before the mask, an approved
 /// NCBI defect (series NP, M4a-2c: the Owner's answer of 2026-11-15 to question Q1; M4b-3: the
@@ -402,7 +724,12 @@ pub enum HardMaskShape {
     /// the full range past the chunk, in a subject that the scan reads a word of, at a scanned
     /// word below [`TAIL_MASK_SEARCHED_WORD`] (BLASTN only).
     TailMask { start: u32, end: u32 },
-    /// A mask that ends before it starts, or that starts before the end of the mask before it.
+    /// A mask that ends before it starts, or that starts before the end of the mask before it in
+    /// BLASTN (`HardScan::Nucleotide`), or before the start of the mask before it in TBLASTN and
+    /// TBLASTX (`HardScan::Translated`: masks that overlap or nest in the order of their start are
+    /// searched, while masks out of start order fail NCBI's partial-fetch slice scan and merge;
+    /// the protein programs, `HardScan::Protein`, refuse only an inverted mask before the chunks:
+    /// `HardMaskShape::Inverted`).
     Unsorted {
         before: (u32, u32),
         mask: (u32, u32),
@@ -414,11 +741,6 @@ pub enum HardMaskShape {
     /// ranges decides which of the final chunk's HSPs merge with the earlier chunk's across the
     /// mask.
     ShortLastMask { start: u32, end: u32 },
-    /// A hard range `[left, right)` between masks (or a sequence end) longer than
-    /// `MAX_DBSEQ_LEN`, in a protein program (`HardScan::Protein`; series NP, M4b): NCBI cuts it
-    /// into chunks that overlap and joins their HSPs across the overlap, which LOSAT's protein
-    /// programs do not port.
-    LongRange { left: i32, right: i32 },
     /// A mask `[start, end)` that ends past the sequence's `length` letters, in a protein program
     /// (`HardScan::Protein`; series NP, M4b; review L1 of PR 1) or a translated one
     /// (`HardScan::Translated`, PR 2: `length` bases). makeblastdb does not write such
@@ -426,6 +748,42 @@ pub enum HardMaskShape {
     /// tool, or a damaged one, has it; where such a mask starts past the end, NCBI's chunk before
     /// it runs past the sequence's letters (blast_engine.c:254-258).
     PastEnd { start: u32, end: u32, length: usize },
+    /// A chunk at `offset` shorter than the word, of a two-hit search in a protein or translated
+    /// program (`HardScan::Protein`, `HardScan::Translated`), whose one word runs past the
+    /// sequence's or frame's sentinel where its hits can change a result
+    /// (`algorithm::common::hard_chunk_walk::DiagonalWalk::word_past_end`).
+    WordPastEnd { offset: usize },
+    /// A mask `[start, end)` that ends before it starts, in a protein program
+    /// (`HardScan::Protein`; series NP, M4b-3b). makeblastdb does not write such a mask (it
+    /// refuses one, writedb_impl.cpp:1376-1384), so only a database written by another tool, or a
+    /// damaged one, has it.
+    Inverted { start: u32, end: u32 },
+    /// A mask `[start, end)` that runs to the end after the chunk from the start, with masks
+    /// stored after it, in a protein program (`HardScan::Protein`; series NP, M4b-3b, review L1):
+    /// NCBI's chunk loop ends at that chunk (its "no chunking" branch scans the full range past
+    /// it, PD-LOSAT-NCBI-DEFECTS exception 21) and never applies the later masks in its search,
+    /// while its alignments read their letters as masked (probe of M/m4b3b/probe/fix1: rows that
+    /// differ from those of the masks without the later one, and searches that never end in the
+    /// one-hit search). Exception 21 defines LOSAT's result of a tail mask by the input with that
+    /// mask one letter shorter, whose chunks differ here, so no near input defines it.
+    TailMaskWithLaterMasks { start: u32, end: u32 },
+    /// Masks out of order (`mask` after `before`) in a protein program (`HardScan::Protein`,
+    /// series NP, M4b-3d) where the subject's final chunk (after which NCBI reads
+    /// `backup.hard_ranges[num_hard_ranges].left` one slot past its list, blast_engine.c:579-580)
+    /// scans a word and starts before the end of an earlier chunk from another hard range that
+    /// also scans a word, so that out-of-bounds read decides whether their alignments merge across
+    /// the mask (same boundary as BLASTN's [`HardMaskShape::ShortLastMask`], decision B-d).
+    /// Merges within the final range itself (a final range longer than `MAX_DBSEQ_LEN`) are kept
+    /// with `DBSEQ_CHUNK_OVERLAP`.
+    LastRangeOverlap {
+        before: (u32, u32),
+        mask: (u32, u32),
+    },
+    /// A walked translated sequence (`HardScan::Translated` with overlapping masks giving a
+    /// negative frame chunk) one of whose reading frames has a chunk taking NCBI's no-chunking
+    /// branch (`HardChunk::full_range`), which scans the whole frame past the later masks
+    /// (exceptions 21 and 27 define a result only for masks apart).
+    NoChunkingWithOverlaps { frame: i8, start: u32, end: u32 },
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268 (cited at
@@ -467,9 +825,14 @@ impl HardMaskShape {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1527-1537
     // (cited at blastn's `database::mask_hard_letters`): the partial fetch's slices are masked by
     // a scan that assumes sorted masks.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:233-242
+    // A protein database is never fetched in part.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1326-1333
     /// The shape of the stored masks `masks` (`[start, end)`, as stored, not empty) of a sequence
     /// whose length `length` gives, that `-db_hard_mask` refuses in a search whose scan is `scan`
+    /// (in the protein programs where the search starts it: on a new table at `ncbi`, else
+    /// after sequences whose entries do not reach it, `algorithm::common::hard_chunk_walk::
+    /// NcbiWalk`)
     /// (BLASTN's `HardScan::Nucleotide`, whose words have `scanned_word` letters: the word size,
     /// or the discontiguous template's length), or
     /// `None`; `Err(())` when the length cannot be read (`SeqDb::first_searched_masks`). With
@@ -487,7 +850,10 @@ impl HardMaskShape {
     /// both ends is the shape at every length between them:
     /// - masks out of order (a check of the masks, before the chunks): hard ranges that go back
     ///   (negative chunk lengths, which move the diagonal offset back) and slices that NCBI's
-    ///   partial fetch masks by a scan of sorted masks (§7.2);
+    ///   partial fetch masks by a scan of sorted masks (§7.2); in the protein programs, which
+    ///   NCBI never fetches in part (seqsrc_seqdb.cpp:233-242), only a mask that ends before it
+    ///   starts (`Inverted`), with out-of-order chunks merged across their overlap (series NP,
+    ///   M4b-3d);
     /// - else the sequence's chunks (`HardSplitState` on the complement of the masks, the
     ///   search's own chunker, with `DBSEQ_CHUNK_OVERLAP`): a chunk that takes the "no chunking"
     ///   branch while it is shorter than the sequence (so a mask with letters follows it) scans
@@ -515,92 +881,127 @@ impl HardMaskShape {
     /// their range's left, so that `ShortLastMask` (a residual before the final chunk's range)
     /// never occurs, a mask that runs to the end after the chunk from the start is searched over
     /// that chunk (series NP, M4b-3), a mask that ends past the sequence is `PastEnd` (before its
-    /// chunks: its last hard range would be inverted), and a hard range
-    /// longer than `MAX_DBSEQ_LEN` is `LongRange`.
+    /// chunks: NCBI's chunk before a mask that starts past the end reads past the sequence),
+    /// ranges longer than `MAX_DBSEQ_LEN` and overlapping out-of-order chunks are merged across
+    /// their overlap (series NP, M4b-3d) except where the final chunk (`overlap_past_list`) starts
+    /// before the end of an earlier range (`LastRangeOverlap`, same boundary as BLASTN decision
+    /// B-d), and the walk of the chunks' diagonal offsets gives
+    /// `WordPastEnd` (series NP, M4b-3b, `HardMaskShape::of_protein_chunks`). Its shape is read at
+    /// the sequence's length only, which
+    /// a protein database's index gives exactly (`SeqDb::first_searched_masks`): whether the one
+    /// word of a short chunk near the end covers the sentinel changes with the length.
     pub fn of_scan(
         masks: &[(u32, u32)],
         bounds: Option<(usize, usize)>,
         length: &dyn Fn() -> Option<usize>,
         scan: HardScan,
+        ncbi: Option<NcbiStart>,
     ) -> Result<Option<HardMaskShape>, ()> {
         if masks.is_empty() {
             return Ok(None);
         }
-        let mut before: Option<(u32, u32)> = None;
-        for &mask in masks {
-            if mask.1 < mask.0 || before.is_some_and(|(_, end)| mask.0 < end) {
-                return Ok(Some(HardMaskShape::Unsorted {
-                    before: before.unwrap_or(mask),
-                    mask,
-                }));
+        // The protein programs search masks in any order that end where they start or after, the
+        // order read off their chunks (`of_protein_chunks`); TBLASTN and TBLASTX accept masks in
+        // the order of their start (overlapping or nested included) and refuse masks out of start
+        // order or inverted; BLASTN needs the masks apart and sorted.
+        if matches!(scan, HardScan::Protein { .. }) {
+            if let Some(&(start, end)) = masks.iter().find(|&&(start, end)| end < start) {
+                return Ok(Some(HardMaskShape::Inverted { start, end }));
             }
-            before = Some(mask);
+        } else {
+            let start_order_only = matches!(scan, HardScan::Translated { .. });
+            let mut before: Option<(u32, u32)> = None;
+            for &mask in masks {
+                let out_of_order = before.is_some_and(|(start, end)| {
+                    mask.0 < if start_order_only { start } else { end }
+                });
+                if mask.1 < mask.0 || out_of_order {
+                    return Ok(Some(HardMaskShape::Unsorted {
+                        before: before.unwrap_or(mask),
+                        mask,
+                    }));
+                }
+                before = Some(mask);
+            }
         }
-        if let HardScan::Translated { min_length } = scan {
-            // Only a mask that ends past the sequence is refused (`HardMaskShape::of_frames`):
-            // where every mask ends at or before the shortest length within the bounds (the
-            // sequence's is one of them) none does, and the length is not read.
-            let last_end = masks[masks.len() - 1].1 as usize;
-            if bounds.is_some_and(|(low, _)| last_end <= low) {
+        if let HardScan::Translated { word, .. } = scan {
+            // Only a mask that ends past the sequence is refused here (`HardMaskShape::of_frames`;
+            // overlapping masks may nest, so the last mask need not have the largest end): where
+            // every mask ends at or before the shortest length within the bounds none does, and
+            // the length is not read.
+            let max_end = masks
+                .iter()
+                .map(|&(_, end)| end as usize)
+                .max()
+                .unwrap_or(0);
+            if bounds.is_some_and(|(low, _)| max_end <= low) {
                 return Ok(None);
             }
             let length = length().ok_or(())?;
-            return Ok(Self::of_frames(masks, length, min_length));
+            return Ok(Self::of_frames(masks, length, translated_min_length(word)));
         }
         let mut split = HardSplitState::default();
         split.ranges.reserve(masks.len() + 1);
-        // The masks are sorted: the last one ends last.
+        if matches!(scan, HardScan::Protein { .. }) {
+            // The exact length, from the index or read.
+            let length = match bounds {
+                Some((low, high)) if low == high => low,
+                _ => length().ok_or(())?,
+            };
+            return Ok(Self::of_chunks(masks, length, scan, ncbi, &mut split));
+        }
         let last_end = masks[masks.len() - 1].1 as usize;
         if let Some((low, high)) = bounds.filter(|&(low, _)| last_end < low) {
-            let shape = Self::of_chunks(masks, low, scan, &mut split);
-            if Self::of_chunks(masks, high, scan, &mut split) == shape {
+            let shape = Self::of_chunks(masks, low, scan, ncbi, &mut split);
+            if Self::of_chunks(masks, high, scan, ncbi, &mut split) == shape {
                 return Ok(shape);
             }
         }
         let length = length().ok_or(())?;
-        Ok(Self::of_chunks(masks, length, scan, &mut split))
+        Ok(Self::of_chunks(masks, length, scan, ncbi, &mut split))
     }
 
-    /// The shape of the sorted masks `masks` of a sequence of `length` letters, read off its
-    /// chunks (`HardMaskShape::of_scan`); `split` is the chunker, whose buffer of ranges is reused.
+    /// The shape of the masks `masks` of a sequence of `length` letters (sorted and apart except in
+    /// a protein program, where the search starts it on a new table at `ncbi`, or not), read off
+    /// its chunks (`HardMaskShape::of_scan`); `split` is the chunker, whose buffer of ranges is
+    /// reused.
     fn of_chunks(
         masks: &[(u32, u32)],
         length: usize,
         scan: HardScan,
+        ncbi: Option<NcbiStart>,
         split: &mut HardSplitState,
     ) -> Option<HardMaskShape> {
-        use crate::core::subject_split::{
-            complement_masks, HardChunk, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN,
-        };
-        if matches!(scan, HardScan::Protein) {
+        use crate::algorithm::common::hard_chunk_walk::DiagonalWalk;
+        use crate::core::subject_split::{complement_masks, HardChunk, DBSEQ_CHUNK_OVERLAP};
+        let protein = matches!(scan, HardScan::Protein { .. });
+        if protein {
             if let Some(&(start, end)) = masks.iter().find(|&&(_, end)| end as usize > length) {
                 return Some(HardMaskShape::PastEnd { start, end, length });
             }
         }
         let mut ranges = std::mem::take(&mut split.ranges);
         complement_masks(masks, length, &mut ranges);
-        if matches!(scan, HardScan::Protein) {
-            // The masks are sorted and end within the sequence: no range is inverted.
-            if let Some(&(left, right)) = ranges
-                .iter()
-                .find(|&&(left, right)| (right - left) as usize > MAX_DBSEQ_LEN)
-            {
-                split.ranges = ranges;
-                return Some(HardMaskShape::LongRange { left, right });
-            }
-        }
         split.start(length, ranges, scan.nucleotide());
         let (scanned_word, tail_refused) = match scan {
             HardScan::Nucleotide { scanned_word } => {
                 (scanned_word, scanned_word < TAIL_MASK_SEARCHED_WORD)
             }
-            HardScan::Protein | HardScan::Translated { .. } => (0, false),
+            HardScan::Protein {
+                word,
+                window,
+                zero_words,
+            } => {
+                let walk = DiagonalWalk::new(word, window, length, zero_words);
+                return Self::of_protein_chunks(masks, length, word, walk, ncbi, split);
+            }
+            HardScan::Translated { .. } => (0, false),
         };
         let scans_word = |chunk: &HardChunk| {
             if chunk.full_range {
                 length >= scanned_word
             } else {
-                chunk.length.saturating_sub(chunk.residual) >= scanned_word
+                chunk.letters().saturating_sub(chunk.residual) >= scanned_word
             }
         };
         // The farthest end of the chunks that scan a word: of the ranges before the chunk's
@@ -612,7 +1013,7 @@ impl HardMaskShape {
             }
             let scans = scans_word(&chunk);
             // The chunk's range ends where the mask of the same index starts.
-            if chunk.full_range && chunk.length < length && scans && tail_refused {
+            if chunk.full_range && chunk.letters() < length && scans && tail_refused {
                 let (start, end) = masks[chunk.range];
                 return Some(HardMaskShape::TailMask { start, end });
             }
@@ -621,10 +1022,81 @@ impl HardMaskShape {
                 return Some(HardMaskShape::ShortLastMask { start, end });
             }
             if scans {
-                in_range = in_range.max(chunk.offset + chunk.length);
+                in_range = in_range.max(chunk.offset + chunk.letters());
             }
         }
         None
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 579-584
+    // (cited at `core::subject_split::HardSplitState::next_chunk`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 87-107, 110-155,
+    // 162-173 (cited at `algorithm::common::hard_chunk_walk::DiagonalWalk`): a thread's table is
+    // made with its entries 0 and its offset the window, a clear sets every entry to the window
+    // less than 0, and the exit of each chunk's word finder moves the offset.
+    /// The shape of a protein program's chunks of a sequence of `length` letters (`split`, started
+    /// on the hard ranges of its masks `masks`), walked with `walk` (a new walk of the search's
+    /// word and window) from where the search starts it (`ncbi`: on a new table at NCBI's
+    /// one-thread offset, `NcbiWalk`): refused where the chunk from the start before a mask that
+    /// runs to the end has masks stored after that mask (`TailMaskWithLaterMasks`), where the
+    /// final chunk (`overlap_past_list`) scans a word and starts before the end of an earlier
+    /// chunk from another hard range (`LastRangeOverlap`, same boundary as BLASTN's decision B-d;
+    /// merges within a final range longer than `MAX_DBSEQ_LEN` are kept with
+    /// `DBSEQ_CHUNK_OVERLAP`), else by the walk of their diagonal offsets that the search runs
+    /// (`DiagonalWalk`) where the one word of a short chunk runs past its sentinel with an effect
+    /// (`WordPastEnd`; on a new table the walk starts after its entries, which a chunk below the
+    /// start can meet, `DiagonalWalk::start_on_ncbi_table`; other sequences' entries never reach
+    /// the hits of the others, `DiagonalWalk::start_after_others`).
+    fn of_protein_chunks(
+        masks: &[(u32, u32)],
+        length: usize,
+        word: i32,
+        mut walk: crate::algorithm::common::hard_chunk_walk::DiagonalWalk,
+        ncbi: Option<NcbiStart>,
+        split: &mut HardSplitState,
+    ) -> Option<HardMaskShape> {
+        use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
+        if let Some(start) = ncbi {
+            walk.start_on_ncbi_table(start);
+        }
+        // The farthest end of earlier ranges' chunks that scan a word (`before_range`, with the
+        // index of the mask that ended that range), and of the current range's chunks so far
+        // (`in_range`). Only earlier ranges trigger `LastRangeOverlap` on the final chunk: merges
+        // within a final range longer than `MAX_DBSEQ_LEN` keep `DBSEQ_CHUNK_OVERLAP`, matching
+        // BLASTN decision B-d (`of_chunks`).
+        let mut before_range: Option<(usize, usize)> = None;
+        let (mut in_range, mut range) = (0usize, 0usize);
+        while let Some(chunk) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
+            if chunk.range != range {
+                if in_range > 0 && before_range.is_none_or(|(end, _)| in_range > end) {
+                    before_range = Some((in_range, range));
+                }
+                in_range = 0;
+                range = chunk.range;
+            }
+            // The chunk's range ends where the mask of the same index starts: a mask that runs to
+            // the end, after which the loop ends.
+            if chunk.full_range && chunk.letters() < length && chunk.range + 1 < masks.len() {
+                let (start, end) = masks[chunk.range];
+                return Some(HardMaskShape::TailMaskWithLaterMasks { start, end });
+            }
+            if chunk.length >= word {
+                if chunk.overlap_past_list {
+                    if let Some((held_end, held_range)) = before_range {
+                        if held_end > chunk.offset {
+                            return Some(HardMaskShape::LastRangeOverlap {
+                                before: masks[held_range],
+                                mask: masks[chunk.range - 1],
+                            });
+                        }
+                    }
+                }
+                in_range = in_range.max(chunk.offset + chunk.letters());
+            }
+            walk.chunk(chunk.offset, chunk.length);
+        }
+        walk.word_past_end()
+            .map(|offset| HardMaskShape::WordPastEnd { offset })
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:254-258 (cited at
@@ -640,11 +1112,11 @@ impl HardMaskShape {
         if length < min_length {
             return None;
         }
-        // The masks are sorted: the last one ends last. Past the sequence, its nucleotide range
-        // would be inverted, and so would a frame's chunk of it.
+        // Masks are in start order but may overlap or nest, so scan all ends for one past the
+        // sequence. Past the sequence, its nucleotide range would be inverted.
         masks
-            .last()
-            .filter(|&&(_, end)| end as usize > length)
+            .iter()
+            .find(|&&(_, end)| end as usize > length)
             .map(|&(start, end)| HardMaskShape::PastEnd { start, end, length })
     }
 
@@ -670,15 +1142,35 @@ impl HardMaskShape {
                  ranges",
                 end % 4
             ),
-            HardMaskShape::LongRange { left, right } => format!(
-                "has a range between its masks, [{left}, {right}), longer than the 5,000,000 \
-                 letters of NCBI BLAST+ 2.17.0's chunks, whose overlapping chunks NCBI joins by a \
-                 merge across their overlap"
-            ),
             HardMaskShape::PastEnd { start, end, length } => format!(
                 "has a mask, [{start}, {end}), ending past its {length} letters, which \
                  makeblastdb does not write (NCBI BLAST+ 2.17.0's chunk before a mask that \
                  starts past the end reads past the sequence)"
+            ),
+            HardMaskShape::WordPastEnd { offset } => format!(
+                "has a part between masks at {offset} shorter than the word, whose one word NCBI \
+                 BLAST+ 2.17.0 reads past the sequence's end, from the next sequence's letters, \
+                 where its hits can change the rows"
+            ),
+            HardMaskShape::Inverted { start, end } => format!(
+                "has a mask, [{start}, {end}), that ends before it starts, which makeblastdb does \
+                 not write"
+            ),
+            HardMaskShape::TailMaskWithLaterMasks { start, end } => format!(
+                "has a mask, [{start}, {end}), running to its end after the part from its start, \
+                 and masks stored after it, which NCBI BLAST+ 2.17.0 does not apply when it \
+                 searches that part past its end but applies to the letters of its alignments"
+            ),
+            HardMaskShape::LastRangeOverlap { before, mask } => format!(
+                "has masks out of order ([{}, {}) after [{}, {})), whose final part starts \
+                 before the end of an earlier part from another range, after which NCBI BLAST+ \
+                 2.17.0 merges alignments across an overlap read past its list of ranges",
+                mask.0, mask.1, before.0, before.1
+            ),
+            HardMaskShape::NoChunkingWithOverlaps { frame, start, end } => format!(
+                "has masks that overlap and reading frame {frame}'s part from its start running \
+                 to the frame's end at the mask [{start}, {end}), which NCBI BLAST+ 2.17.0 \
+                 searches as the whole frame past the later masks"
             ),
         }
     }

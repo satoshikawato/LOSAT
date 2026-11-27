@@ -12,6 +12,7 @@
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:176-224
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:236-390
 
+use std::ffi::{OsStr, OsString};
 use std::sync::Arc;
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -114,7 +115,7 @@ const SEARCH_OPTIONS: [&str; 20] = [
 /// settings that look it up (`BLASTDB`, the registry), the caller's (`BlastnArgs::resolve_repeat_filter`).
 #[derive(Debug)]
 pub struct RepeatFilter {
-    database: String,
+    database: OsString,
     settings: ApplicationSettings,
 }
 
@@ -133,7 +134,7 @@ pub(crate) enum RepeatError {
 
 impl RepeatFilter {
     /// The repeat search of the database `database`, looked up with `settings`.
-    pub(crate) fn new(database: String, settings: ApplicationSettings) -> Self {
+    pub(crate) fn new(database: OsString, settings: ApplicationSettings) -> Self {
         Self { database, settings }
     }
 
@@ -146,8 +147,15 @@ impl RepeatFilter {
     /// `strand`, `threads` threads (the pool's, `blast_engine::repeat_search_hits`), every query
     /// in one batch, as NCBI's search of the repeats takes the queries of its caller's batch.
     pub(crate) fn search_args(&self, strand: &str, threads: usize) -> anyhow::Result<BlastnArgs> {
-        let mut argv: Vec<&str> = vec!["losat", "blastn", "-db", &self.database, "-strand", strand];
-        argv.extend(SEARCH_OPTIONS);
+        let mut argv: Vec<OsString> = vec![
+            OsString::from("losat"),
+            OsString::from("blastn"),
+            OsString::from("-db"),
+            self.database.clone(),
+            OsString::from("-strand"),
+            OsString::from(strand),
+        ];
+        argv.extend(SEARCH_OPTIONS.into_iter().map(OsString::from));
         let cli: crate::cli::Cli = crate::cli::try_parse_from(argv).map_err(|error| {
             anyhow::anyhow!("the repeat search of -filtering_db has arguments that LOSAT's BLASTN does not read ({error})")
         })?;
@@ -232,7 +240,7 @@ impl RepeatFilter {
     }
 
     /// The database's name, as `-filtering_db` gives it.
-    pub(crate) fn database(&self) -> &str {
+    pub(crate) fn database(&self) -> &OsStr {
         &self.database
     }
 }
@@ -325,11 +333,11 @@ pub(crate) fn rejection(filter: &RepeatFilter, error: RepeatError) -> anyhow::Er
         // write as NCBI's) is not this run's.
         RepeatError::Search(error) => anyhow::anyhow!(
             "the repeat search of -filtering_db {} failed: {error:#}",
-            filter.database
+            filter.database.to_string_lossy()
         ),
         RepeatError::Posted(text) => anyhow::anyhow!(
             "the repeat search of -filtering_db {} stops with an error ({}) where NCBI BLAST+ reports it otherwise; this is not supported by LOSAT's BLASTN",
-            filter.database,
+            filter.database.to_string_lossy(),
             String::from_utf8_lossy(&text)
         ),
     }

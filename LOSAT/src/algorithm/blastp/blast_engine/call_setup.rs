@@ -131,9 +131,9 @@ pub(super) fn requested_reports(
             if let Some(kind) = blastp_xml2_kind(format.outfmt) {
                 return Ok(BlastpReport::Xml2(kind));
             }
-            // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`), rpsblast's too
-            // (item PS15a-2); psiblast refuses them (line PS item PS15b).
-            if let Some(view) = blastp_query_anchored_view(args.app, format.outfmt) {
+            // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`), rpsblast's (item
+            // PS15a-2) and psiblast's (item PS15b-2, each round's section).
+            if let Some(view) = blastp_query_anchored_view(format.outfmt) {
                 return Ok(BlastpReport::Pairwise(view));
             }
             // Outfmt 0, and outfmt 6 and 7 of the `std` fields and a tab (`custom_tabular_spec`
@@ -434,8 +434,8 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
     let x_drop_bits = (args.x_drop_gapped_bits, args.x_drop_final_bits);
     let (x_drop_gapped, x_drop_gapped_final) =
         crate::core::x_drop::gapped_x_dropoffs(x_drop_bits.0, x_drop_bits.1, gapped_params.lambda);
-    // The final X-drop reaches the unscaled `ALIGN_EX` only on the ordinary traceback (mode 0,
-    // after IDENTITY's reset too; the same choice as `ordinary_traceback` in `run_call`). A PSSM
+    // The final X-drop reaches the unscaled `ALIGN_EX` only at mode 0: the ordinary traceback, or
+    // the Smith-Waterman redo at scale 1 (`sw_c0`), after IDENTITY's reset too. A PSSM
     // search converts its X-drops with the PSSM's Lambda and checks them there
     // (`pssm_hooks::pssm_prelim`).
     if !args.ungapped && args.psi_search.is_none() {
@@ -506,7 +506,7 @@ pub(super) fn call_lookup(
     // whole batches, each block a call of its own with its own lookup table (`PrelimOnly::Block`,
     // `x_prelim_block_plan`); `None`: one table for all queries. Planned only by the search of all
     // queries (`BlastpReports::x_plan_blocks`).
-    let x_blocks = if prelim.is_none() && reports.x_plan_blocks {
+    let x_blocks = if prelim.is_none() && reports.x_plan_blocks && args.phi.is_none() {
         x_prelim_block_plan(
             args,
             query_records,
@@ -528,6 +528,8 @@ pub(super) fn call_lookup(
         _ if args.rps_search.is_some() => rps_hooks::rps_contexts(args, query_frames),
         // psiblast `-in_pssm`: the lookup table of the PSSM (`pssm_hooks::pssm_lookup`).
         _ if args.psi_search.is_some() => pssm_hooks::pssm_lookup(args, query_frames),
+        // psiblast `-phi_pattern`: the contexts, no word table (`phi_hooks::phi_lookup`).
+        _ if args.phi.is_some() => super::phi_hooks::phi_lookup(args, query_frames),
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the preliminary stage in blocks (`x_blocks`): each block
         // builds its own table; this call has the contexts of all queries (`x_blocks_contexts`).
         _ if x_blocks.is_some() => x_blocks_contexts(args, query_frames, blastp_parallel_pool),
@@ -1157,7 +1159,7 @@ pub(super) fn prelim_cutoffs(
         args.comp_based_stats.is_enabled(),
         !args.ungapped,
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1008-1018
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1017
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-940
     // `params->prelim_evalue` is `evalue` without a Gumbel block (blast_parameters.c:931-935).
@@ -1372,6 +1374,47 @@ pub(super) struct BlastpScanShape<'a> {
     pub(super) diag_mask: i32,
     pub(super) total_query_span: i32,
     pub(super) x_soft_subjects: Option<&'a [Vec<(i32, i32)>]>,
+    pub(super) neg_batch_layout: Vec<(i32, i32)>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1004
+// The concatenated query of a batch runs from its first context to the end of its last one (a
+// sentinel between each two); its table's ring is the power of two just at least that length
+// plus the window.
+/// NCBI's query batches of a call (`query_batches`, by query) as places in the call's
+/// concatenated query (`contexts`, in query order): each batch's first offset and its
+/// concatenated length, for the batches that have a context. A query chunk's search is one
+/// batch of all its contexts, as is a call whose batches have none.
+pub(super) fn query_batch_layout(
+    query_batches: &[RangedBatch],
+    contexts: &[QueryContext],
+    query_chunk: bool,
+) -> Vec<(i32, i32)> {
+    let end_of = |context: &QueryContext| context.frame_base + context.aa_len as i32;
+    let whole = || {
+        let start = contexts.first().map_or(0, |context| context.frame_base);
+        vec![(start, contexts.last().map_or(start, end_of) - start)]
+    };
+    if query_chunk {
+        return whole();
+    }
+    let first = |q_idx: usize| contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
+    let layout: Vec<(i32, i32)> = query_batches
+        .iter()
+        .filter_map(|batch| {
+            let (from, to) = (first(batch.searched.start), first(batch.searched.end));
+            (from < to).then(|| {
+                let start = contexts[from].frame_base;
+                (start, end_of(&contexts[to - 1]) - start)
+            })
+        })
+        .collect();
+    if layout.is_empty() {
+        whole()
+    } else {
+        layout
+    }
 }
 
 /// The call's `BlastpScanShape`, with the refusal of a window that the diagonal table cannot hold;
@@ -1390,6 +1433,8 @@ pub(super) fn scan_shape<'a>(
         args,
         subject_records,
         x_block_inputs,
+        query_chunk,
+        ranges,
         ..
     } = *setup;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:195-221
@@ -1402,7 +1447,7 @@ pub(super) fn scan_shape<'a>(
         .iter()
         .map(|ctx| blastp_x_dropoff_init_for_context(ctx, args.x_drop_ungapped_bits))
         .collect();
-    let window = args.window_size as i32;
+    let window = args.window_size;
     let word_size = lookup.word_length();
     // EXPERIMENT (LOSAT_X_BPUNGAPSENT): this block made ready for the inlined two-hit extension of
     // the fused loop (`x_ungapped_sent.rs`); None when the switch is off or a check fails. Another
@@ -1429,6 +1474,25 @@ pub(super) fn scan_shape<'a>(
     };
     if x_ungap_sent.is_none() && x_blocks.is_none() && x_ungapped_sent::on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,162-172
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:216,257
+    // A negative `-window_size` (a search strategy's): each NCBI query batch has its own diagonal
+    // table (`BLAST_DiagTable`) that carries state from one subject to the next. Where the
+    // preliminary stage did not split the call into one block per batch (`x_blocks` None, e.g.
+    // ungapped search, sum-stats, a batch without a searched query, or batches before a failing
+    // later batch), record each searched batch's `(start, length)` in `concatenated_query` so
+    // `search_subject_in_neg` runs one carried ring per batch via `QueryBatchTables`.
+    let mut neg_batch_layout: Vec<(i32, i32)> = Vec::new();
+    if window < 0 && x_blocks.is_none() && x_block_inputs.is_none() && !query_chunk {
+        let query_batches = ranges.query_input.batches(args.query_batch_size()?);
+        let layout = query_batch_layout(&query_batches, contexts, false);
+        if layout.len() > 1 {
+            for &(_, length) in &layout {
+                crate::blastinput::app::check_diag_table_window(length, window, "BLASTP")?;
+            }
+            neg_batch_layout = layout;
+        }
     }
     let offset_array_size = blastp_offset_array_size(lookup.longest_chain());
     let query_length = blastp_concatenated_query_length(contexts);
@@ -1459,5 +1523,6 @@ pub(super) fn scan_shape<'a>(
         diag_mask,
         total_query_span,
         x_soft_subjects,
+        neg_batch_layout,
     })
 }

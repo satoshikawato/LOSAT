@@ -477,15 +477,21 @@ fn the_kind_of_a_seq_align_id_refuses_nothing_before_its_lookup() {
         .unwrap()
         .fetched(false, true, HitLoad::Loaded)
         .is_ok());
-    let replaced = DeflineSet {
+    // A stored title with a byte outside ' ' ..= '~' is read (its posts are the Seq-aligns',
+    // `ParsedSubject::replaced_title_bytes`); such a byte of a stored Seq-id is refused.
+    let replaced = |title, id| DeflineSet {
         deflines: vec![BlastDefline {
             ids: vec![ParsedSeqId::Gi(7)],
-            replaced_title_bytes: 1,
+            replaced_title_bytes: title,
+            replaced_id_bytes: id,
             ..BlastDefline::default()
         }],
         utf8: false,
     };
-    assert!(ParsedSubject::new(replaced).is_err());
+    assert!(ParsedSubject::new(replaced(1, 0))
+        .unwrap()
+        .replaced_title_bytes());
+    assert!(ParsedSubject::new(replaced(0, 1)).is_err());
     assert!(ParsedSubject::new(DeflineSet::default()).is_err());
 }
 
@@ -604,6 +610,7 @@ fn the_hits_after_one_whose_lookup_throws_load_nothing() {
     let subject = |key: usize| parsed[key].as_ref();
     let none = |_: usize, _: usize| 0;
     let loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         Some(RunThrow::every_row(AfterThrow::EndsReport)),
         [
             // Read one by one: 1 loads, 0 throws, the copies 2 and 3, 4 and 6 load nothing.
@@ -643,7 +650,13 @@ fn the_hits_after_one_whose_lookup_throws_load_nothing() {
         (Some(RunThrow::every_row(AfterThrow::EndsReport)), false),
         (None, true),
     ] {
-        let every = HitLoads::of(after, [(one_by_one, vec![Some(0), Some(1)])], subject, none);
+        let every = HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
+            after,
+            [(one_by_one, vec![Some(0), Some(1)])],
+            subject,
+            none,
+        );
         assert!(every.loaded(0) && every.loaded(1));
     }
     // The refusals take the answer: a `Hit` that throws is not refused for what the lookup
@@ -699,34 +712,62 @@ fn the_formats_say_what_loads_after_a_throw() {
     };
     let every = |after| Some(RunThrow::every_row(after));
     let none = |_: usize, _: usize| 0;
-    let rows = HitLoads::of(every(AfterThrow::WritesRow), reports(), subject, none);
+    let rows = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        every(AfterThrow::WritesRow),
+        reports(),
+        subject,
+        none,
+    );
     assert!(rows.loaded(0) && rows.loaded(2) && rows.loaded(4));
     assert_eq!(rows.load(1), HitLoad::Throws);
     assert_eq!(rows.load(3), HitLoad::Throws);
     assert!(rows.any_throws());
-    let run = HitLoads::of(every(AfterThrow::EndsRun), reports(), subject, none);
+    let run = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        every(AfterThrow::EndsRun),
+        reports(),
+        subject,
+        none,
+    );
     assert!(run.loaded(0));
     assert_eq!(run.load(1), HitLoad::Throws);
     // The run ended at 1: the next report reads nothing (3 does not throw).
     for unread in [2, 3, 4] {
         assert_eq!(run.load(unread), HitLoad::Unread, "{unread}");
     }
-    let report = HitLoads::of(every(AfterThrow::EndsReport), reports(), subject, none);
+    let report = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        every(AfterThrow::EndsReport),
+        reports(),
+        subject,
+        none,
+    );
     assert_eq!(report.load(2), HitLoad::Unread);
     assert_eq!(report.load(3), HitLoad::Throws);
     assert_eq!(report.load(4), HitLoad::Unread);
     // The formats' answers.
-    let of = |outfmt: &str| FormatThrow::of_outfmt(outfmt, Program::Blastp, RequestKind::Blastp);
+    let of =
+        |outfmt: &str| FormatThrow::of_outfmt(outfmt, Program::Blastp, RequestKind::Blastp, false);
     let writes = |after| FormatThrow::Writes(RunThrow::every_row(after));
-    for rows in [
-        "6",
-        "7 qseqid sseqid evalue",
-        "10 qseqid stitle slen",
-        "20",
-        "20 qseqid sacc",
-        "18",
+    // The tables of `sacc` or `saccver` (the default fields too) end the run where a report's
+    // first row throws (`tabular::first_thrown_row_ends_run`).
+    for (rows, first_row_ends) in [
+        ("6", true),
+        ("7 qseqid sseqid evalue", false),
+        ("10 qseqid stitle slen", false),
+        ("20", true),
+        ("20 qseqid sacc", true),
+        ("18", false),
     ] {
-        assert_eq!(of(rows), writes(AfterThrow::WritesRow), "{rows}");
+        assert_eq!(
+            of(rows),
+            FormatThrow::Writes(RunThrow {
+                first_row_ends,
+                ..RunThrow::every_row(AfterThrow::WritesRow)
+            }),
+            "{rows}"
+        );
     }
     assert_eq!(of("6 qseqid slen"), writes(AfterThrow::EndsRun));
     assert_eq!(of("6 qseqid pident"), writes(AfterThrow::EndsRun));
@@ -736,33 +777,38 @@ fn the_formats_say_what_loads_after_a_throw() {
         FormatThrow::Writes(RunThrow {
             after: AfterThrow::EndsRun,
             rows: super::super::tabular::SubjectFetch::WithIdentities,
+            first_row_ends: false,
+            keeps_scope: false,
         })
     );
     assert_eq!(of("6 qseqid evalue bitscore"), FormatThrow::Unread);
     assert_eq!(of("13"), writes(AfterThrow::EndsRun));
     assert_eq!(of("15"), writes(AfterThrow::EndsReport));
-    assert_eq!(of("8"), FormatThrow::Unread);
-    for refused in ["5", "17"] {
+    assert_eq!(of("5"), writes(AfterThrow::WritesHit));
+    // Only outfmt 5's formatter keeps NCBI's scope for the run (review 2 of line DBID pfoff-4, M1).
+    for (outfmt, keeps) in [("5", true), ("6", false), ("15", false), ("0", false)] {
         assert_eq!(
-            of(refused),
-            FormatThrow::Refused(ThrowRefusal::Format),
-            "{refused}"
+            of(outfmt).run().map(|run| run.keeps_scope),
+            Some(keeps),
+            "{outfmt}"
         );
     }
+    assert_eq!(of("8"), FormatThrow::Unread);
+    assert_eq!(of("17"), FormatThrow::Refused(ThrowRefusal::Format));
     // Pairwise: the first shown alignment ends the run, a later one is skipped; query-anchored:
     // any shown alignment ends the run.
-    assert_eq!(of("0"), writes(AfterThrow::SkipsAlignment));
+    assert_eq!(of("0"), writes(AfterThrow::SkipsAlignment { html: false }));
     for anchored in ["1", "2", "3", "4"] {
         assert_eq!(
             of(anchored),
-            writes(AfterThrow::EndsAtAlignment),
+            writes(AfterThrow::EndsAtAlignment { html: false }),
             "{anchored}"
         );
     }
     // BLASTN's `pident` and `nident` read nothing of the subject.
     for unread in ["6 qseqid pident", "6 qseqid nident"] {
         assert_eq!(
-            FormatThrow::of_outfmt(unread, Program::Blastn, RequestKind::Blastn),
+            FormatThrow::of_outfmt(unread, Program::Blastn, RequestKind::Blastn, false),
             FormatThrow::Unread,
             "{unread}"
         );
@@ -773,39 +819,202 @@ fn the_formats_say_what_loads_after_a_throw() {
             outfmts.iter().copied(),
             Program::Blastp,
             RequestKind::Blastp,
+            false,
         )
     };
     let after = |outfmts: &[&str]| answer(outfmts).run();
-    // The reason of each refusal: a format of its own (outfmt 5, 17) before a mix.
+    // The reason of each refusal: a format of its own (outfmt 17) before a mix; outfmt 5 with a
+    // pairwise report is a mix.
     assert_eq!(
         answer(&["6", "0"]),
         FormatThrow::Refused(ThrowRefusal::Mixed)
     );
     assert_eq!(
-        answer(&["0", "5", "6"]),
-        FormatThrow::Refused(ThrowRefusal::Format)
+        answer(&["0", "5"]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
     );
     assert_eq!(
-        after(&["6", "8"]),
-        Some(RunThrow::every_row(AfterThrow::WritesRow))
+        answer(&["0", "17", "6"]),
+        FormatThrow::Refused(ThrowRefusal::Format)
     );
+    // Outfmt 5 loads after a throw what a table's rows load but its thrown `Hit`'s copies, which a
+    // row of such a copy looks up itself; more than outfmt 13 to 16, which end there.
+    // The call takes outfmt 5's scope, kept for the run, for both.
+    let sacc_rows = RunThrow {
+        first_row_ends: true,
+        ..RunThrow::every_row(AfterThrow::WritesRow)
+    };
+    assert_eq!(
+        after(&["5", "6"]),
+        Some(RunThrow {
+            keeps_scope: true,
+            ..sacc_rows
+        })
+    );
+    assert_eq!(
+        after(&["5", "8"]),
+        Some(RunThrow::every_row(AfterThrow::WritesHit))
+    );
+    assert_eq!(after(&["6", "8"]), Some(sacc_rows));
     // A pairwise format with another whose throws end elsewhere: refused.
     assert_eq!(after(&["6", "0"]), None);
     assert_eq!(after(&["0", "3"]), None);
-    assert_eq!(
-        after(&["0", "8"]),
-        Some(RunThrow::every_row(AfterThrow::SkipsAlignment))
-    );
     assert_eq!(after(&["6 qseqid evalue"]), None);
+    // A run of one format answers as that format does, whichever place its run stops at (the
+    // fix of review 2's M3 first refused each of these alone, as a mix with no format), and so
+    // does a search of a call without other searches.
+    for single in [
+        "0",
+        "3",
+        "5",
+        "6",
+        "6 qseqid slen",
+        "13",
+        "14",
+        "15",
+        "16",
+        "18",
+    ] {
+        let alone = FormatThrow::of_outfmt(single, Program::Blastp, RequestKind::Blastp, false);
+        assert!(matches!(alone, FormatThrow::Writes(_)), "{single}");
+        assert_eq!(answer(&[single]), alone, "{single}");
+        assert_eq!(
+            alone.of_search(&[], Program::Blastp, RequestKind::Blastp, false),
+            alone,
+            "{single}"
+        );
+    }
+    // Review 2 of line DBID pfoff-4, M3: a format that reads nothing goes on to its end with exit
+    // status 0 and posts nothing, apart from one whose run ends at the throw or at an alignment,
+    // and from outfmt 15 and 16, whose runs post NCBI's error; and those post it where outfmt 5,
+    // 6 and 18 post nothing: the call has one standard error. Refused.
+    for mixed in [
+        &["0", "8"][..],
+        &["8", "0"],
+        &["6 qseqid slen", "8"],
+        &["11", "13"],
+        &["6 qseqid evalue", "3"],
+        &["15", "8"],
+        &["15", "5"],
+        &["16", "6"],
+        &["16", "18", "5"],
+    ] {
+        assert_eq!(
+            answer(mixed),
+            FormatThrow::Refused(ThrowRefusal::Mixed),
+            "{mixed:?}"
+        );
+    }
+    // Review 1 of line DBID pfoff-4, M1: a format whose run ends at the throw with one whose run
+    // goes on, and two that end at different rows (`nident` alone: the rows of HSPs with
+    // identities), stop at different places in NCBI's runs of each: refused.
+    for mixed in [
+        &["6 qseqid slen", "15"][..],
+        &["5", "6 qseqid slen"],
+        &["13", "6"],
+        &["14", "18"],
+        &["6 qseqid nident", "6 qseqid slen"],
+        &["13", "6 qseqid nident"],
+    ] {
+        assert_eq!(
+            answer(mixed),
+            FormatThrow::Refused(ThrowRefusal::Mixed),
+            "{mixed:?}"
+        );
+    }
+    // Runs that stop at the same place: two that end at the same rows, two whose runs go on.
     assert_eq!(
-        after(&["6 qseqid slen", "15"]),
-        Some(RunThrow::every_row(AfterThrow::EndsReport))
-    );
-    // Rows of `nident` alone and rows of every HSP load at every row.
-    assert_eq!(
-        after(&["6 qseqid nident", "6 qseqid slen"]),
+        after(&["13", "6 qseqid slen"]),
         Some(RunThrow::every_row(AfterThrow::EndsRun))
     );
+    assert_eq!(
+        after(&["6 qseqid nident", "7 qseqid nident"]),
+        Some(RunThrow {
+            after: AfterThrow::EndsRun,
+            rows: super::super::tabular::SubjectFetch::WithIdentities,
+            first_row_ends: false,
+            keeps_scope: false,
+        })
+    );
+    assert_eq!(
+        after(&["18", "5", "8"]),
+        Some(RunThrow {
+            keeps_scope: true,
+            ..RunThrow::every_row(AfterThrow::WritesRow)
+        })
+    );
+    assert_eq!(
+        after(&["15", "16"]),
+        Some(RunThrow::every_row(AfterThrow::EndsReport))
+    );
+    assert_eq!(
+        after(&["0", "0"]),
+        Some(RunThrow::every_row(AfterThrow::SkipsAlignment {
+            html: false
+        }))
+    );
+}
+
+// Line DBID pfoff-4 (DECISIONS 62 (15), probe `R/pfoff/p4`): BLAST XML (outfmt 5) looks each
+// `Hit`'s subject up and goes on after a `Hit` whose lookup throws: every `Hit` that throws throws
+// (its first subject; the copies of the record in it load nothing), every other `Hit` loads, in
+// that report and the next; the run never ends there.
+#[test]
+fn each_hit_of_blast_xml_looks_its_own_subject_up() {
+    let throws = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let plain = |accession: &str| ParsedSubject::new(one_defline(vec![gb(accession, 1)])).unwrap();
+    // 0 and its copy 1 throw (one `Hit`); 2 and 4 are found; 3 throws.
+    let copy = plain("AAA00001").found_instead(throws());
+    let parsed: Vec<ParsedSubject> = vec![
+        copy.clone(),
+        copy,
+        plain("AAA00003"),
+        plain("AAA00004").found_instead(throws()),
+        plain("AAA00005"),
+    ];
+    assert!(joins_as_copy(&parsed[0], &parsed[1]));
+    let subject = |key: usize| parsed.get(key);
+    let none = |_: usize, _: usize| 0;
+    let loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        Some(RunThrow::every_row(AfterThrow::WritesHit)),
+        [
+            (true, vec![Some(0), Some(1), None, Some(2), Some(3)]),
+            (true, vec![Some(4)]),
+        ],
+        subject,
+        none,
+    );
+    assert_eq!(loads.load(0), HitLoad::Throws);
+    assert_eq!(loads.load(1), HitLoad::Unread);
+    assert!(loads.loaded(2));
+    assert_eq!(loads.load(3), HitLoad::Throws);
+    assert!(loads.loaded(4));
+    assert!(loads.reaches(0) && loads.reaches(1));
+    assert_eq!(
+        AfterThrow::WritesHit.alignment_end(0..2, |_| true, |_| false),
+        None
+    );
+    assert!(!AfterThrow::WritesHit.is_pairwise());
+    // With a table of a field of the subject block, each row looks its subject up: the copy 1
+    // throws on its own.
+    let rows = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesHit)).and(FormatThrow::Writes(
+            RunThrow::every_row(AfterThrow::WritesRow),
+        )),
+        [(true, vec![Some(0), Some(1), Some(2)])],
+        subject,
+        none,
+    );
+    assert_eq!(rows.load(1), HitLoad::Throws);
+    // The refusals let both through.
+    assert!(parsed[0].fetched(false, true, HitLoad::Throws).is_ok());
+    assert!(parsed[1].fetched(false, true, HitLoad::Unread).is_ok());
 }
 
 // Review 2 of line DBID pfoff-2, M1 and L1 (probe `R/pfoff/p2/review2`, `zP`): where `nident`
@@ -834,6 +1043,8 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
     let nident = Some(RunThrow {
         after: AfterThrow::EndsRun,
         rows: super::super::tabular::SubjectFetch::WithIdentities,
+        first_row_ends: false,
+        keeps_scope: false,
     });
     // The identities of each report's entries: 1's rows have none, 3's have some.
     let identities = |report: usize, entry: usize| [[5, 0, 7], [2, 4, 0]][report][entry];
@@ -843,7 +1054,13 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
             (true, vec![Some(3), Some(4)]),
         ]
     };
-    let loads = HitLoads::of(nident, reports(), subject, identities);
+    let loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        nident,
+        reports(),
+        subject,
+        identities,
+    );
     assert_eq!(loads.load(1), HitLoad::Unread);
     assert!(loads.thrown(1).is_none());
     assert!(loads.loaded(0) && loads.loaded(2));
@@ -851,6 +1068,7 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
     assert_eq!(loads.load(4), HitLoad::Unread);
     // Every row reads the subject: 1 throws and ends the run.
     let every = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         Some(RunThrow::every_row(AfterThrow::EndsRun)),
         reports(),
         subject,
@@ -861,18 +1079,29 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
     // The reports made apart, one call each, carry the end of the run.
     let run = RunLoads::new(nident);
     let [first, second] = reports();
-    let first = run.loads([first], subject, |_, entry| [5, 0, 7][entry]);
+    let first = run.loads(LoadsBefore::NONE, [first], subject, |_, entry| {
+        [5, 0, 7][entry]
+    });
     assert!(!run.ended());
     assert_eq!(first.load(1), HitLoad::Unread);
-    let second = run.loads([second], subject, |_, entry| [2, 4][entry]);
+    let second = run.loads(LoadsBefore::NONE, [second], subject, |_, entry| {
+        [2, 4][entry]
+    });
     assert!(run.ended());
     assert_eq!(second.load(3), HitLoad::Throws);
-    let later = run.loads([(true, vec![Some(0), Some(2)])], subject, |_, _| 9);
+    let later = run.loads(
+        LoadsBefore::NONE,
+        [(true, vec![Some(0), Some(2)])],
+        subject,
+        |_, _| 9,
+    );
     assert_eq!(later.load(0), HitLoad::Unread);
     assert_eq!(later.load(2), HitLoad::Unread);
     // A run without a throw's answer loads every subject and never ends.
     let none = RunLoads::new(None);
-    assert!(none.loads(reports(), subject, identities).loaded(3));
+    assert!(none
+        .loads(LoadsBefore::NONE, reports(), subject, identities)
+        .loaded(3));
     assert!(!none.ended());
 }
 
@@ -907,26 +1136,52 @@ fn the_run_reaches_no_report_after_the_one_that_ends_it() {
             (true, vec![Some(0), Some(2)]),
         ]
     };
-    let ended = HitLoads::of(every(AfterThrow::EndsRun), reports(), subject, none);
+    let ended = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
+        every(AfterThrow::EndsRun),
+        reports(),
+        subject,
+        none,
+    );
     assert!(ended.reaches(0) && ended.reaches(1));
     assert!(!ended.reaches(2) && !ended.reaches(3));
     // A format that writes the row and goes on, one that ends its report, a refusal and a run
     // whose formats read nothing: every report runs.
     for loads in [
-        HitLoads::of(every(AfterThrow::WritesRow), reports(), subject, none),
-        HitLoads::of(every(AfterThrow::EndsReport), reports(), subject, none),
         HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
+            every(AfterThrow::WritesRow),
+            reports(),
+            subject,
+            none,
+        ),
+        HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
+            every(AfterThrow::EndsReport),
+            reports(),
+            subject,
+            none,
+        ),
+        HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
             FormatThrow::Refused(ThrowRefusal::Mixed),
             reports(),
             subject,
             none,
         ),
-        HitLoads::of(FormatThrow::Unread, reports(), subject, none),
+        HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
+            FormatThrow::Unread,
+            reports(),
+            subject,
+            none,
+        ),
     ] {
         assert!(loads.reaches(2) && loads.reaches(usize::MAX), "{loads:?}");
     }
     // The last report ends the run: every report runs, none after it.
     let last = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         every(AfterThrow::EndsRun),
         [(true, vec![Some(0)]), (true, vec![Some(1)])],
         subject,
@@ -935,9 +1190,14 @@ fn the_run_reaches_no_report_after_the_one_that_ends_it() {
     assert!(last.reaches(1) && !last.reaches(2));
     // The reports made apart, one call each: a call after the end reaches none of its reports.
     let run = RunLoads::new(every(AfterThrow::EndsRun));
-    let first = run.loads([(true, vec![Some(0), Some(1)])], subject, none);
+    let first = run.loads(
+        LoadsBefore::NONE,
+        [(true, vec![Some(0), Some(1)])],
+        subject,
+        none,
+    );
     assert!(first.reaches(0) && !first.reaches(1));
-    let later = run.loads([(true, vec![Some(2)])], subject, none);
+    let later = run.loads(LoadsBefore::NONE, [(true, vec![Some(2)])], subject, none);
     assert!(!later.reaches(0));
     // The keys renamed keep the reports reached.
     assert!(!later.renamed(Some).reaches(0));
@@ -953,8 +1213,13 @@ fn the_run_reaches_no_report_after_the_one_that_ends_it() {
 fn the_call_refuses_a_throw_over_all_its_searches() {
     use crate::blastinput::app::Program;
     let search = |own: &[&str], others: &[&str]| {
-        FormatThrow::of_outfmts(own.iter().copied(), Program::Blastp, RequestKind::Blastp)
-            .of_search(others, Program::Blastp, RequestKind::Blastp)
+        FormatThrow::of_outfmts(
+            own.iter().copied(),
+            Program::Blastp,
+            RequestKind::Blastp,
+            false,
+        )
+        .of_search(others, Program::Blastp, RequestKind::Blastp, false)
     };
     let writes = |after| FormatThrow::Writes(RunThrow::every_row(after));
     // One search: its own answer.
@@ -972,24 +1237,61 @@ fn the_call_refuses_a_throw_over_all_its_searches() {
         search(&["0"], &["6 qseqid slen"]),
         FormatThrow::Refused(ThrowRefusal::Mixed)
     );
-    // Outfmt 5 in another search: the call's refusal is outfmt 5's.
+    // Outfmt 17 in another search: the call's refusal is outfmt 17's.
+    assert_eq!(
+        search(&["6"], &["17"]),
+        FormatThrow::Refused(ThrowRefusal::Format)
+    );
+    // Outfmt 5 in another search (line DBID pfoff-4): a table keeps its own answer, outfmt 0
+    // refuses the mix.
     assert_eq!(
         search(&["6"], &["5"]),
-        FormatThrow::Refused(ThrowRefusal::Format)
+        FormatThrow::Writes(RunThrow {
+            first_row_ends: true,
+            ..RunThrow::every_row(AfterThrow::WritesRow)
+        })
+    );
+    assert_eq!(
+        search(&["0"], &["5"]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
     );
     // Formats that agree: each search keeps its own answer (a table of fields that read nothing
     // of the subject too).
-    assert_eq!(search(&["0"], &["8"]), writes(AfterThrow::SkipsAlignment));
+    assert_eq!(
+        search(&["6"], &["8"]),
+        FormatThrow::Writes(RunThrow {
+            first_row_ends: true,
+            ..RunThrow::every_row(AfterThrow::WritesRow)
+        })
+    );
+    assert_eq!(search(&["15"], &["16"]), writes(AfterThrow::EndsReport));
+    assert_eq!(
+        search(&["13"], &["6 qseqid slen"]),
+        writes(AfterThrow::EndsRun)
+    );
+    // Review 2 of line DBID pfoff-4, M3: across the call's searches as within one, a format that
+    // reads nothing with outfmt 0, and outfmt 15 (which posts the error) with outfmt 5 (which
+    // posts nothing), are refused: the call has one result and one standard error.
+    assert_eq!(
+        search(&["0"], &["8"]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
+    );
+    assert_eq!(
+        search(&["15"], &["5"]),
+        FormatThrow::Refused(ThrowRefusal::Mixed)
+    );
+    // A table that ends the run at the throw with outfmt 15, whose run goes on (review 1 of line
+    // DBID pfoff-4, M1).
     assert_eq!(
         search(&["6 qseqid slen"], &["15"]),
-        writes(AfterThrow::EndsRun)
+        FormatThrow::Refused(ThrowRefusal::Mixed)
     );
     assert_eq!(search(&["6 qseqid evalue"], &["6"]), FormatThrow::Unread);
 }
 
 // Review 3 of line DBID pfoff-3, L-2: the reason of a refusal of a subject whose lookup throws
 // says what NCBI does and why LOSAT refuses, one text for each situation
-// (`ThrowRefusal::words`): outfmt 5 and 17, which the command line meets too, say nothing of the
+// (`ThrowRefusal::words`): outfmt 17, which the command line meets too, says nothing of the
 // library; a call that mixes the formats says the library's reason.
 #[test]
 fn a_refused_throw_gives_the_reason_of_its_situation() {
@@ -1010,6 +1312,7 @@ fn a_refused_throw_gives_the_reason_of_its_situation() {
     assert!(thrown.fetched(false, true, HitLoad::Throws).is_ok());
     // The loads of a run whose formats refuse give each subject the reason.
     let loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         FormatThrow::Refused(ThrowRefusal::Format),
         [(true, vec![Some(0)])],
         |_| Some(&thrown),
@@ -1044,6 +1347,7 @@ fn the_names_of_the_tables_take_only_the_loaded_subjects() {
         Some(std::sync::Arc::new(with_taxid("XM_000002", 99990))),
     ];
     let loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::NONE,
         Some(RunThrow::every_row(AfterThrow::WritesRow)),
         [(true, vec![Some(0), Some(1)])],
         |rank| parsed[rank].as_deref(),
@@ -1082,8 +1386,8 @@ fn the_names_of_the_tables_take_only_the_loaded_subjects() {
         crate::blastinput::app::ReportFormat::Tabular,
         &crate::blastinput::app::FormatChoice {
             number: 6,
-            spec: "qseqid sseqid ssciname".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid sseqid ssciname".to_vec(),
+            delimiter: Vec::new(),
         },
         RequestKind::Blastp,
     )
@@ -1091,8 +1395,7 @@ fn the_names_of_the_tables_take_only_the_loaded_subjects() {
     let damaged =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/bad_magic");
     let names = |taxonomy: &super::super::tabular::TabularTaxonomy| {
-        let search =
-            crate::seqdb::SearchPath::new(&damaged, Some(damaged.as_os_str()), None).unwrap();
+        let search = crate::seqdb::SearchPath::new(&damaged, Some(damaged.as_os_str()), None);
         super::super::tabular::TabularNames::look_up(
             &spec,
             &crate::seqdb::taxdb::LazyTaxDb::new(search),
@@ -1121,7 +1424,10 @@ fn the_pssm_refuses_reads_that_losat_does_not_make_as_ncbi() {
     assert_eq!(read(&other), Ok(()));
     for found in [
         FoundInstead::Nothing,
-        FoundInstead::ThrowsOnId("Error: ... is not a valid ordinal id".into()),
+        FoundInstead::ThrowsOnId(crate::ncbi_exception::NcbiException::new(
+            crate::seqdb::isam::OBJECT_ID_GET_ID,
+            "Error: ... is not a valid ordinal id",
+        )),
         FoundInstead::OtherTaxids(DbSequence::of_unrestricted(2)),
     ] {
         assert_eq!(read(&subject.clone().found_instead(Some(found))), Ok(()));
@@ -1197,7 +1503,7 @@ fn a_weak_match_is_refused_only_where_the_batch_reads_one_by_one() {
         );
         let error = subject.fetched(false, true, HitLoad::Loaded).unwrap_err();
         assert!(
-            error.contains("in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off"),
+            error.contains("in a batch whose prefetch is off (PRE_FETCH_SEQS_LIMIT, or a format"),
             "{error}"
         );
         assert_eq!(subject.prefetched(), Prefetched::Itself, "{weak:?}");
@@ -1243,7 +1549,12 @@ fn the_prefetch_of_an_unshown_subject_reads_what_the_lookup_finds() {
         prefetched(Some(FoundInstead::Failed(LookupFailure::ncbi("no accession info")))),
         Prefetched::Failed(reason) if reason.contains("prefetch stops with a BLAST Database error")
     ));
-    let throws = Some(FoundInstead::ThrowsOnId("Invalid choice selection".into()));
+    let throws = Some(FoundInstead::ThrowsOnId(
+        crate::ncbi_exception::NcbiException::new(
+            crate::seqdb::isam::OBJECT_ID_GET_ID,
+            "Invalid choice selection",
+        ),
+    ));
     assert!(matches!(
         prefetched(throws.clone()),
         Prefetched::Failed(reason) if reason.contains("writes Error pre-fetching sequence data")
@@ -1687,26 +1998,53 @@ fn copies_of_one_record_are_joined_and_other_matching_ids_are_not() {
 
 #[test]
 fn refseq_accessions_whose_empty_titles_come_from_the_source() {
-    use RefseqKind::{ChromosomeOrNcrna, Mrna};
-    for (accession, kind) in [
-        ("NC_000001", Some(ChromosomeOrNcrna)),
-        ("AC_000001", Some(ChromosomeOrNcrna)),
-        ("NM_000001", Some(Mrna)),
-        ("NM_000000001", Some(Mrna)),
-        ("XM_000000001", Some(Mrna)),
-        ("NR_000001", Some(ChromosomeOrNcrna)),
-        ("NR_000000001", None),
-        ("NC_0000001", None),
-        ("NP_000001", None),
-        ("WP_000000001", None),
-        ("XR_000001", None),
+    use crate::seqid::model::{PdbSeqId, TextseqId};
+    let flags_of = |accession: &str| {
+        let id = ParsedSeqId::Other(TextseqId {
+            accession: Some(accession.as_bytes().to_vec()),
+            ..TextseqId::default()
+        });
+        let f = bioseq_facts(&[id]);
+        (
+            f.refseq_chromosome_or_ncrna,
+            f.refseq_mrna,
+            f.refseq_contig,
+            f.refseq_unique_prot,
+        )
+    };
+    for (accession, expected) in [
+        ("NC_000001", (true, false, false, false)),
+        ("AC_000001", (true, false, false, false)),
+        ("NM_000001", (false, true, false, false)),
+        ("NM_000000001", (false, true, false, false)),
+        ("XM_000000001", (false, true, false, false)),
+        ("NR_000001", (true, false, false, false)),
+        ("NR_000000001", (false, false, false, false)),
+        ("NC_0000001", (false, false, false, false)),
+        ("NP_000001", (false, false, false, false)),
+        ("NT_000001", (false, false, true, false)),
+        ("NZ_AA000001", (false, false, true, false)),
+        ("WP_000000001", (false, false, false, true)),
+        ("XR_000001", (false, false, false, false)),
     ] {
-        assert_eq!(
-            refseq_accession_kind(accession.as_bytes()),
-            kind,
-            "{accession}"
-        );
+        assert_eq!(flags_of(accession), expected, "{accession}");
     }
+    // NCBI keeps m_PDBChainID set when a later PDB Seq-id sets only m_PDBChain.
+    let pdb_facts = bioseq_facts(&[
+        ParsedSeqId::Pdb(PdbSeqId {
+            mol: b"1ABC".to_vec(),
+            chain: None,
+            chain_id: Some(b"AA".to_vec()),
+            rel: None,
+        }),
+        ParsedSeqId::Pdb(PdbSeqId {
+            mol: b"1ABC".to_vec(),
+            chain: Some(b'B' as i32),
+            chain_id: None,
+            rel: None,
+        }),
+    ]);
+    assert_eq!(pdb_facts.pdb, Some((b"AA".to_vec(), b'B' as i32)));
 }
 /// The subject of a `-subject` record read with `-parse_deflines` (`ParsedSubject::of_record`).
 fn record_subject(defline: &str, protein: bool) -> ParsedSubject {
@@ -1747,6 +2085,8 @@ fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
             subject_id: true,
             all_ids: false,
             bioseq: false,
+            length: false,
+            lineless: false,
         })
     );
     assert_eq!(
@@ -2099,6 +2439,7 @@ fn the_model_and_the_writer_end_the_run_at_the_same_alignment() {
         );
         let run = RunLoads::new(Some(RunThrow::every_row(after)));
         let loads = run.loads(
+            LoadsBefore::NONE,
             [(true, ReportKeys::Pairwise(reads))],
             |key| parsed.get(key),
             |_, _| 0,
@@ -2129,18 +2470,66 @@ fn the_model_and_the_writer_end_the_run_at_the_same_alignment() {
     let every = usize::MAX;
     // Outfmt 0 ends at its first alignment where it throws, not after `-sorthits` moves a
     // loaded one first, nor with no alignment shown.
-    assert_eq!(end(AfterThrow::SkipsAlignment, None, every, false), Some(0));
-    assert_eq!(end(AfterThrow::SkipsAlignment, Some(1), every, false), None);
-    assert_eq!(end(AfterThrow::SkipsAlignment, None, 0, false), None);
-    assert_eq!(end(AfterThrow::SkipsAlignment, None, every, true), None);
+    assert_eq!(
+        end(
+            AfterThrow::SkipsAlignment { html: false },
+            None,
+            every,
+            false
+        ),
+        Some(0)
+    );
+    assert_eq!(
+        end(
+            AfterThrow::SkipsAlignment { html: false },
+            Some(1),
+            every,
+            false
+        ),
+        None
+    );
+    assert_eq!(
+        end(AfterThrow::SkipsAlignment { html: false }, None, 0, false),
+        None
+    );
+    assert_eq!(
+        end(
+            AfterThrow::SkipsAlignment { html: false },
+            None,
+            every,
+            true
+        ),
+        None
+    );
     // Outfmt 1 to 4 end at the first shown alignment that throws, a local one too, unless
     // the cut leaves none.
     assert_eq!(
-        end(AfterThrow::EndsAtAlignment, Some(1), every, false),
+        end(
+            AfterThrow::EndsAtAlignment { html: false },
+            Some(1),
+            every,
+            false
+        ),
         Some(1)
     );
-    assert_eq!(end(AfterThrow::EndsAtAlignment, None, every, true), Some(0));
-    assert_eq!(end(AfterThrow::EndsAtAlignment, Some(1), 1, false), None);
+    assert_eq!(
+        end(
+            AfterThrow::EndsAtAlignment { html: false },
+            None,
+            every,
+            true
+        ),
+        Some(0)
+    );
+    assert_eq!(
+        end(
+            AfterThrow::EndsAtAlignment { html: false },
+            Some(1),
+            1,
+            false
+        ),
+        None
+    );
     for other in [
         AfterThrow::EndsRun,
         AfterThrow::EndsReport,
@@ -2192,7 +2581,13 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
         (one_by_one, keys)
     };
     let loads = |run, reports: Vec<(bool, ReportKeys)>| {
-        let loads = HitLoads::of(run, reports, subject, none);
+        let loads = HitLoads::of(
+            crate::report::db_subject::LoadsBefore::NONE,
+            run,
+            reports,
+            subject,
+            none,
+        );
         (0..6).map(|key| loads.load(key)).collect::<Vec<_>>()
     };
     use HitLoad::{Loaded as L, Throws as T, Unread as U};
@@ -2207,7 +2602,7 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
     let ends_second: [&[usize]; 3] = [&[0, 1, 2], &[3, 4], &[5]];
     assert_eq!(
         loads(
-            run(AfterThrow::SkipsAlignment),
+            run(AfterThrow::SkipsAlignment { html: false }),
             three(every, every, ends_second)
         ),
         [L, T, L, T, L, U]
@@ -2215,31 +2610,43 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
     // A first alignment that loads: the throwing ones are skipped and the run goes on.
     let skips: [&[usize]; 3] = [&[0, 1, 2], &[4, 3], &[5]];
     assert_eq!(
-        loads(run(AfterThrow::SkipsAlignment), three(every, every, skips)),
+        loads(
+            run(AfterThrow::SkipsAlignment { html: false }),
+            three(every, every, skips)
+        ),
         [L, T, L, T, L, L]
     );
     // `-num_alignments 0`: no alignment section, nothing ends.
     assert_eq!(
         loads(
-            run(AfterThrow::SkipsAlignment),
+            run(AfterThrow::SkipsAlignment { html: false }),
             three(every, 0, ends_second)
         ),
         [L, T, L, T, L, L]
     );
     // Outfmt 1 to 4: the first report's second alignment ends the run.
     assert_eq!(
-        loads(run(AfterThrow::EndsAtAlignment), three(every, every, skips)),
+        loads(
+            run(AfterThrow::EndsAtAlignment { html: false }),
+            three(every, every, skips)
+        ),
         [L, T, L, U, U, U]
     );
     // `-num_alignments 1`: only the first alignment is shown, which loads; 3 throws in the
     // description lines alone.
     assert_eq!(
-        loads(run(AfterThrow::EndsAtAlignment), three(every, 1, skips)),
+        loads(
+            run(AfterThrow::EndsAtAlignment { html: false }),
+            three(every, 1, skips)
+        ),
         [L, T, L, T, L, L]
     );
     // `-num_descriptions 0`: only the alignments up to the end load, and 2 is never reached.
     assert_eq!(
-        loads(run(AfterThrow::EndsAtAlignment), three(0, every, skips)),
+        loads(
+            run(AfterThrow::EndsAtAlignment { html: false }),
+            three(0, every, skips)
+        ),
         [L, T, U, U, U, U]
     );
     // The description lines that a report shows are its writer's (`PairwiseReads::described`,
@@ -2256,14 +2663,17 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
         }),
     );
     assert_eq!(
-        loads(run(AfterThrow::SkipsAlignment), vec![two_part]),
+        loads(
+            run(AfterThrow::SkipsAlignment { html: false }),
+            vec![two_part]
+        ),
         [U, U, L, U, L, U]
     );
     // A batch that prefetches loads every subject it shows, where `-num_descriptions 0
     // -num_alignments 1` reads the first alignment alone of a batch that does not.
     assert_eq!(
         loads(
-            run(AfterThrow::SkipsAlignment),
+            run(AfterThrow::SkipsAlignment { html: false }),
             vec![
                 report(false, &[0, 2, 4], 0, 1),
                 report(true, &[5, 1, 3], 0, 1)
@@ -2274,7 +2684,7 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
     // After the run's end a batch that prefetches loads nothing either.
     assert_eq!(
         loads(
-            run(AfterThrow::SkipsAlignment),
+            run(AfterThrow::SkipsAlignment { html: false }),
             vec![
                 report(true, &[1, 0], every, every),
                 report(false, &[2, 3, 4, 5], every, every)
@@ -2293,16 +2703,122 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
         }),
     );
     assert_eq!(
-        loads(run(AfterThrow::SkipsAlignment), vec![copies]),
+        loads(
+            run(AfterThrow::SkipsAlignment { html: false }),
+            vec![copies]
+        ),
         [U, U, U, T, L, L]
     );
     // A later call's reports read nothing after the end (`RunLoads`).
-    let calls = RunLoads::new(run(AfterThrow::SkipsAlignment));
-    let first = calls.loads([report(true, &[3, 4], every, every)], subject, none);
+    let calls = RunLoads::new(run(AfterThrow::SkipsAlignment { html: false }));
+    let first = calls.loads(
+        LoadsBefore::NONE,
+        [report(true, &[3, 4], every, every)],
+        subject,
+        none,
+    );
     assert_eq!(first.load(3), HitLoad::Throws);
     assert!(calls.ended());
-    let later = calls.loads([report(true, &[5], every, every)], subject, none);
+    let later = calls.loads(
+        LoadsBefore::NONE,
+        [report(true, &[5], every, every)],
+        subject,
+        none,
+    );
     assert_eq!(later.load(5), HitLoad::Unread);
+}
+
+// Line RG T4b review b F2 (NCBI BLAST+ 2.17.0, probes `nb.pfo.bpe.na0.f{0,1,3}.rep.h` and
+// `nb2.pfo.bpe.na0.f0.rep.p`): with `-html` the description line of a subject whose load throws
+// ends the run (its `catch` makes the line's link, which loads the subject again outside any
+// `catch`): the lines before it load, no later line, alignment, report or batch's prefetch loads.
+// Without `-html` the line is `Unknown` and the run goes on, with `-num_alignments 0` into the
+// next batch, whose prefetch loads every subject; with `-html` too where no shown line throws.
+#[test]
+fn an_html_description_line_whose_load_throws_ends_the_run() {
+    let throws = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let plain = |accession: &str| ParsedSubject::new(one_defline(vec![gb(accession, 1)])).unwrap();
+    // 1 and 3 throw.
+    let parsed: Vec<ParsedSubject> = vec![
+        plain("AAA00001"),
+        plain("AAA00002").found_instead(throws()),
+        plain("AAA00003"),
+        plain("AAA00004").found_instead(throws()),
+        plain("AAA00005"),
+        plain("AAA00006"),
+    ];
+    let subject = |key: usize| parsed.get(key);
+    let none = |_: usize, _: usize| 0;
+    let every = usize::MAX;
+    // A batch whose prefetch is off reports 0 to 3 (its description lines show the first
+    // `descriptions`, its alignments the first `alignments`), then a batch that prefetches 4, 5.
+    // The report's `after` with `-html` where `html` (`AfterThrow::description_end`).
+    let run = |after: AfterThrow, descriptions: usize, alignments: usize, html| {
+        let after = match after {
+            AfterThrow::SkipsAlignment { .. } => AfterThrow::SkipsAlignment { html },
+            AfterThrow::EndsAtAlignment { .. } => AfterThrow::EndsAtAlignment { html },
+            other => other,
+        };
+        let keys = [0, 1, 2, 3];
+        let first = ReportKeys::Pairwise(PairwiseReads {
+            hits: keys.iter().map(|&key| vec![key]).collect(),
+            described: (0..keys.len().min(descriptions)).collect(),
+            aligned: keys.len().min(alignments),
+        });
+        let second = ReportKeys::Entries(vec![Some(4), Some(5)]);
+        let loads = HitLoads::of(
+            LoadsBefore::NONE,
+            Some(RunThrow::every_row(after)),
+            [(true, first), (false, second)],
+            subject,
+            none,
+        );
+        let reaches_second = loads.reaches(1);
+        (
+            (0..6).map(|key| loads.load(key)).collect::<Vec<_>>(),
+            reaches_second,
+        )
+    };
+    use HitLoad::{Loaded as L, Throws as T, Unread as U};
+    for after in [
+        AfterThrow::SkipsAlignment { html: false },
+        AfterThrow::EndsAtAlignment { html: false },
+    ] {
+        // `-num_alignments 0`: the plain lines of 1 and 3 are `Unknown`, the next batch is
+        // prefetched; with `-html` the line of 1 ends the run.
+        assert_eq!(
+            run(after, every, 0, false),
+            (vec![L, T, L, T, L, L], true),
+            "{after:?}"
+        );
+        assert_eq!(
+            run(after, every, 0, true),
+            (vec![L, T, U, U, U, U], false),
+            "{after:?}"
+        );
+        // With alignments too: the line ends it before them.
+        assert_eq!(
+            run(after, every, every, true),
+            (vec![L, T, U, U, U, U], false),
+            "{after:?}"
+        );
+        // No shown line throws (`-num_descriptions 1`, `-num_descriptions 0 -num_alignments 1`):
+        // the run goes on as without `-html`.
+        assert_eq!(
+            run(after, 1, 0, true),
+            (vec![L, U, U, U, L, L], true),
+            "{after:?}"
+        );
+        assert_eq!(
+            run(after, 0, 1, true),
+            (vec![L, U, U, U, L, L], true),
+            "{after:?}"
+        );
+    }
 }
 
 // DBID pfoff-3, NCBI 2.17.0 (probe `R/pfoff/p3`, `bp.U2.b1.dflt.0`, `bp.U2.b1.gis.0`): the
@@ -2344,4 +2860,882 @@ fn a_thrown_description_is_the_alignment_id_and_unknown() {
         let gap: &[u8] = if subject.show_gis { b"  " } else { b"" };
         assert_eq!(title.text, [gap, b"Unknown"].concat());
     }
+}
+
+fn pdb_id(mol: &str, chain: Option<i32>, chain_id: Option<&str>) -> ParsedSeqId {
+    ParsedSeqId::Pdb(PdbSeqId {
+        mol: mol.as_bytes().to_vec(),
+        chain,
+        rel: None,
+        chain_id: chain_id.map(|c| c.as_bytes().to_vec()),
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:386-431
+// The data loader looks up the Seq-id of the Seq-align id's handle and keeps the sequence only
+// where one of its ids compares equal to it: a record whose only id is `pdb` with chain 321
+// (`char` 65 for the handle) is not served, and NCBI BLAST+ 2.17.0 writes the `catch` of each
+// read (line RG-KB item 12, `i12/ncbi`: `1AB1_A Unknown`, `Sequence with id 1AB1_A no longer
+// exists in database...alignment skipped`).
+#[test]
+fn a_pdb_chain_that_the_handle_changes_finds_no_bioseq() {
+    let unserved = lines(vec![vec![pdb_id("1AB1", Some(321), None)]]);
+    assert!(unserved.scope_finds_none());
+    assert_eq!(
+        unserved.loader_id().into_owned(),
+        pdb_id("1AB1", Some(65), None)
+    );
+    let (start, title, caught) = unserved.description_line(true);
+    assert_eq!(
+        (text(&start), text(&title.text), caught),
+        ("1AB1_A ", "Unknown", true)
+    );
+    assert_eq!(
+        unserved.heading(true, false, None).unwrap(),
+        Err(b"1AB1_A".to_vec())
+    );
+    assert_eq!(
+        unserved.heading_skipped_id(true, false).as_deref(),
+        Some(&b"1AB1_A"[..])
+    );
+    assert!(matches!(unserved.prefetched(), Prefetched::Nothing));
+    // The record is not refused for what the lookup finds: the formats write the `catch`.
+    assert_eq!(unserved.fetched(true, false, HitLoad::Loaded), Ok(()));
+    // Chains that the handle keeps, and a second id that the handle's Seq-id matches, are served.
+    for served in [
+        lines(vec![vec![pdb_id("1AB1", Some(65), None)]]),
+        lines(vec![vec![pdb_id("1AB1", Some(-5), None)]]),
+        lines(vec![vec![pdb_id("1AB1", None, None)]]),
+        lines(vec![vec![pdb_id("1AB1", Some(66), Some("A"))]]),
+        lines(vec![vec![
+            gb("AB600001", 1),
+            pdb_id("1AB1", Some(321), None),
+        ]]),
+    ] {
+        assert!(!served.scope_finds_none(), "{:?}", served.alignment_id());
+        assert!(!served.description_line(true).2);
+    }
+    // Where the handle's Seq-id is held by another definition line than the Seq-align id's, the
+    // Bioseq NCBI builds is made of that line: the description line, the organism report and the
+    // heading's title of an untitled line show its title; the heading lists the sequence's own
+    // lines (review 2 of line RG-KB item 12, N3: probes `e15_twoline`, `e15nt`).
+    use crate::algorithm::common::database::description_line_refusal;
+    let two_lines = |first: Option<&[u8]>| {
+        ParsedSubject::new(DeflineSet {
+            deflines: vec![
+                BlastDefline {
+                    title: first.map(<[u8]>::to_vec),
+                    ids: vec![pdb_id("1AB1", Some(321), None)],
+                    ..BlastDefline::default()
+                },
+                BlastDefline {
+                    title: Some(b"u".to_vec()),
+                    ids: vec![pdb_id("1AB1", Some(65), Some("A"))],
+                    ..BlastDefline::default()
+                },
+            ],
+            utf8: false,
+        })
+        .unwrap()
+    };
+    let other_line = two_lines(Some(b"t"));
+    assert!(!other_line.scope_finds_none());
+    assert_eq!(
+        description_line_refusal(&other_line, HitLoad::Loaded, true),
+        None
+    );
+    let (start, title, caught) = other_line.description_line(true);
+    assert_eq!(
+        (text(&start), text(&title.text), caught),
+        ("1AB1_A ", "u", false)
+    );
+    assert_eq!(
+        text(&other_line.heading(true, false, None).unwrap().unwrap()),
+        ">1AB1_A t\n 1AB1_A u\n"
+    );
+    let untitled = two_lines(None);
+    assert_eq!(
+        text(&untitled.heading(true, false, None).unwrap().unwrap()),
+        ">1AB1_A u\n 1AB1_A u\n"
+    );
+    assert_eq!(other_line.fetched(true, false, HitLoad::Loaded), Ok(()));
+    assert!(matches!(other_line.prefetched(), Prefetched::Itself));
+    // One line that holds both chains: NCBI's Bioseq reads the line's first pdb id, which is not
+    // the handle's, so its load throws: refused where a format reads the Bioseq or the prefetch
+    // reads it; the Seq-annots and the archive read nothing of it (outfmt 8 is NCBI's bytes).
+    let one_line = ParsedSubject::new(DeflineSet {
+        deflines: vec![BlastDefline {
+            title: Some(b"t".to_vec()),
+            ids: vec![
+                pdb_id("1AB1", Some(321), None),
+                pdb_id("1AB1", Some(65), None),
+            ],
+            ..BlastDefline::default()
+        }],
+        utf8: false,
+    })
+    .unwrap();
+    assert!(one_line
+        .fetched(false, false, HitLoad::Loaded)
+        .unwrap_err()
+        .contains("its load throws"));
+    assert!(matches!(
+        one_line.prefetched(),
+        Prefetched::Failed(reason) if reason.contains("oid headers do not contain target gi/seq_id")
+    ));
+    assert!(one_line.pssm_read(false).is_err());
+    assert_eq!(
+        description_line_refusal(&one_line, HitLoad::Loaded, true),
+        None
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:886-892
+// The description line of a sequence whose Bioseq the scope does not get prints, with
+// `-show_gis`, a GI that NCBI never sets; a description id longer than 65 bytes pads the line
+// without end. Both are refused only for a sequence whose line a report prints (the first
+// `-num_descriptions`; review 1 of line RG-KB item 12, R1).
+#[test]
+fn a_description_line_is_refused_only_where_a_report_prints_it() {
+    use crate::algorithm::common::database::{
+        description_line_refusal, refuse_described_lines, refuse_described_records,
+    };
+    let unserved = lines(vec![vec![pdb_id("1AB1", Some(321), None)]]);
+    assert_eq!(
+        description_line_refusal(&unserved, HitLoad::Loaded, true),
+        None
+    );
+    let unserved = unserved.showing_gis(true);
+    assert!(description_line_refusal(&unserved, HitLoad::Loaded, true)
+        .unwrap()
+        .contains("prints a GI that NCBI BLAST+ 2.17.0 never sets"));
+    let long = lines(vec![vec![ParsedSeqId::Local(ObjectId::Str(
+        "x".repeat(70).into_bytes(),
+    ))]]);
+    assert!(description_line_refusal(&long, HitLoad::Loaded, true)
+        .unwrap()
+        .contains("longer than 65 bytes"));
+    let served = lines(vec![vec![pdb_id("1AB4", Some(65), None)]]);
+    let parsed = vec![
+        Some(std::sync::Arc::new(served)),
+        Some(std::sync::Arc::new(unserved)),
+    ];
+    let refuse = |described: Vec<u32>| {
+        refuse_described_lines(
+            1,
+            |_| vec![0, 1],
+            |_| Ok(described.clone()),
+            &parsed,
+            |_| HitLoad::Loaded,
+            crate::seqdb::Oid::of_unrestricted,
+            "BLASTP",
+        )
+    };
+    // `-num_descriptions 1`: rank 1 prints no line.
+    assert!(refuse(vec![0]).is_ok());
+    assert!(refuse(vec![]).is_ok());
+    let error = refuse(vec![0, 1]).unwrap_err().to_string();
+    assert!(error.contains("never sets"), "{error}");
+    // The `-subject` records whose ids `-parse_deflines` read, by subject index: the same rule
+    // (review 2 of line RG-KB item 12, N2; `-num_descriptions 0` prints no line).
+    let records = vec![None, Some(std::sync::Arc::new(long))];
+    let refuse_records = |described: Vec<u32>| {
+        refuse_described_records(
+            1,
+            |_| vec![1],
+            |_| Ok(described.clone()),
+            &records,
+            "BLASTP",
+        )
+    };
+    assert!(refuse_records(vec![]).is_ok());
+    let error = refuse_records(vec![1]).unwrap_err().to_string();
+    assert!(
+        error.contains("subject record") && error.contains("longer than 65 bytes"),
+        "{error}"
+    );
+}
+
+#[test]
+fn the_scope_keys_of_a_pdb_id_are_its_handle() {
+    // `chain` 321 and 65, with or without the `chain-id` "A", are one handle; "B" is another.
+    let keys = |id: &ParsedSeqId| {
+        let mut keys = Vec::new();
+        crate::seqid::defline_set::scope_keys(id, &mut keys);
+        keys
+    };
+    let a = keys(&pdb_id("1AB1", Some(65), Some("A")));
+    assert_eq!(keys(&pdb_id("1AB1", Some(321), None)), a);
+    assert_eq!(keys(&pdb_id("1AB1", Some(65), None)), a);
+    assert_eq!(keys(&pdb_id("1ab1", Some(65), Some("A"))), a);
+    assert_ne!(keys(&pdb_id("1AB1", Some(66), Some("B"))), a);
+    assert_ne!(keys(&pdb_id("1AB1", Some(200), None)), a);
+}
+
+// RG-KB 9(b) review 1 (F2): a database with parsed Seq-ids (`tests/db_search/tchar/tc_ps_p`,
+// makeblastdb -parse_seqids) whose stored title holds 0xE9 is a subject, read as '#', whose
+// Seq-aligns NCBI makes as of the others (`db.tchar.*.ps.8`); a byte of a stored Seq-id is
+// refused.
+#[test]
+fn a_parsed_subject_with_a_replaced_title_byte_is_read() {
+    let base =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/tchar/tc_ps_p");
+    let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+    let replaced = ParsedSubject::new(db.defline_set(0).unwrap()).unwrap();
+    assert!(replaced.replaced_title_bytes());
+    assert_eq!(replaced.first_title(), b"fam#one");
+    let clean = ParsedSubject::new(db.defline_set(1).unwrap()).unwrap();
+    assert!(!clean.replaced_title_bytes());
+    let mut set = db.defline_set(1).unwrap();
+    set.deflines[0].replaced_id_bytes = 1;
+    let refusal = ParsedSubject::new(set).unwrap_err().to_string();
+    assert!(
+        refusal.contains("stored Seq-id with a byte outside"),
+        "{refusal}"
+    );
+}
+
+// Review 1 of line DBID pfoff-4, H1 and H2 (`R/pfoff/p4/review1`, cases `*.scope.*` and
+// `*.scopef.*`): a subject whose lookup fails on a file is held where the run loaded another
+// sequence that holds its Seq-align id before the subject's load, in NCBI's order (the reports
+// before, the rows and `Hit`s before in its report, a pairwise report's description lines before
+// its alignments, the run's record and the calls before), and the reports refuse it with the words
+// of such a holder; a holder loaded after it leaves it thrown (the `U1` and `U2` queries).
+#[test]
+fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
+    let failure = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let plain = |accession: &str, ordinal: u32| {
+        ParsedSubject::new(one_defline(vec![gb(accession, 1)]))
+            .unwrap()
+            .in_database(DbSequence::of_unrestricted(ordinal))
+    };
+    let holder = DbSequence::of_unrestricted(10);
+    // 0: the holder (its own lookup does not fail; another record, as `gi|5001|ref|NP_100001.1|`
+    // is for `ref|NP_100001.1|`: an id of its own handle, so both places hold it); 1: a failing
+    // lookup that 0 holds; 2: one that no other sequence holds; 3: one whose holders LOSAT cannot
+    // list; 4: another subject.
+    let exact = ScopeHolders {
+        loader: Holders::Listed(vec![holder]),
+        scope: Holders::Listed(vec![holder]),
+    };
+    let unknown = ScopeHolders {
+        loader: Holders::Unknown("its holders".to_owned()),
+        scope: Holders::Unknown("its holders".to_owned()),
+    };
+    let parsed: Vec<ParsedSubject> = vec![
+        plain("AAA00009", 10),
+        plain("AAA00001", 11)
+            .found_instead(failure())
+            .scope_holders(exact),
+        plain("AAA00002", 12)
+            .found_instead(failure())
+            .scope_holders(ScopeHolders::default()),
+        plain("AAA00003", 13)
+            .found_instead(failure())
+            .scope_holders(unknown),
+        plain("AAA00004", 14),
+    ];
+    let subject = |key: usize| parsed.get(key);
+    let none = |_: usize, _: usize| 0;
+    let loads = |before: LoadsBefore, after, reports: Vec<(bool, ReportKeys)>| {
+        let loads = HitLoads::of(
+            before,
+            Some(RunThrow::every_row(after)),
+            reports,
+            subject,
+            none,
+        );
+        (0..5).map(|key| loads.load(key)).collect::<Vec<_>>()
+    };
+    let entries = |keys: &[usize]| {
+        (
+            true,
+            ReportKeys::Entries(keys.iter().map(|&key| Some(key)).collect()),
+        )
+    };
+    use HitLoad::{Held as H, Loaded as L, Throws as T, Unread as U};
+    for after in [
+        AfterThrow::WritesHit,
+        AfterThrow::WritesRow,
+        AfterThrow::EndsReport,
+    ] {
+        // The holder after the throw in the report: NCBI looks the id up and it throws (and
+        // the holder is not read where the report ends there).
+        let holder_after = if after == AfterThrow::EndsReport {
+            U
+        } else {
+            L
+        };
+        assert_eq!(
+            loads(LoadsBefore::NONE, after, vec![entries(&[1, 0])]),
+            [holder_after, T, L, L, L],
+            "{after:?}"
+        );
+        // In a later report (H1's query 2): held, and a held subject ends nothing.
+        assert_eq!(
+            loads(
+                LoadsBefore::NONE,
+                after,
+                vec![entries(&[0]), entries(&[1, 3, 2])]
+            )[..4],
+            [L, H(Some(holder)), T, H(None)],
+            "{after:?}"
+        );
+    }
+    // The holder loaded after the throw in the first report, then the subject in the next.
+    assert_eq!(
+        loads(
+            LoadsBefore::NONE,
+            AfterThrow::WritesRow,
+            vec![entries(&[1, 0]), entries(&[1, 2])]
+        )[..3],
+        [L, H(Some(holder)), T]
+    );
+    // Outfmt 5's next `Hit` after the holder's.
+    assert_eq!(
+        loads(
+            LoadsBefore::NONE,
+            AfterThrow::WritesHit,
+            vec![entries(&[0, 1, 4])]
+        ),
+        [L, H(Some(holder)), L, L, L]
+    );
+    // Nothing loaded before: a list that LOSAT cannot make leaves it thrown.
+    assert_eq!(
+        loads(
+            LoadsBefore::NONE,
+            AfterThrow::WritesRow,
+            vec![entries(&[3, 4])]
+        )[3],
+        T
+    );
+    // The run's record of the batches and rounds before, and calls before of which nothing here
+    // holds a record.
+    for before in [
+        LoadsBefore::new(vec![10], (None, Vec::new()), false),
+        LoadsBefore::after_calls(true),
+    ] {
+        assert_eq!(
+            loads(
+                before.clone(),
+                AfterThrow::WritesRow,
+                vec![entries(&[1, 2])]
+            )[1],
+            H(Some(holder)),
+            "{before:?}"
+        );
+    }
+    assert_eq!(
+        loads(
+            LoadsBefore::new(vec![12], (None, Vec::new()), false),
+            AfterThrow::WritesRow,
+            vec![entries(&[1])]
+        )[1],
+        T
+    );
+    // A held subject ends nothing: the run goes on after it (outfmt 13 and 14).
+    let held_first = HitLoads::of(
+        LoadsBefore::NONE,
+        Some(RunThrow::every_row(AfterThrow::EndsRun)),
+        [entries(&[0, 1]), entries(&[4])],
+        subject,
+        none,
+    );
+    assert_eq!(held_first.load(1), H(Some(holder)));
+    assert!(held_first.reaches(1) && held_first.loaded(4) && held_first.thrown(1).is_none());
+    // It reads nothing of its own (the taxonomy texts' reads leave it to `fetched`).
+    assert!(!held_first.loaded(1));
+    // A table of `sacc` whose report's first row throws: NCBI's run ends there (the null pointer,
+    // which `tabular::check_failed_lookups` refuses), so no later report holds the subject; at a
+    // later row the run goes on and the next report holds it.
+    let sacc = RunThrow {
+        first_row_ends: true,
+        ..RunThrow::every_row(AfterThrow::WritesRow)
+    };
+    let first_row = HitLoads::of(
+        LoadsBefore::NONE,
+        Some(sacc),
+        [entries(&[1, 0]), entries(&[1])],
+        subject,
+        none,
+    );
+    assert_eq!(first_row.load(1), T);
+    assert!(first_row.reaches(0) && !first_row.reaches(1));
+    let later_row = HitLoads::of(
+        LoadsBefore::NONE,
+        Some(sacc),
+        [entries(&[4, 1, 0]), entries(&[1])],
+        subject,
+        none,
+    );
+    assert_eq!(later_row.load(1), H(Some(holder)));
+    let thrown_first = HitLoads::of(
+        LoadsBefore::NONE,
+        Some(RunThrow::every_row(AfterThrow::EndsRun)),
+        [entries(&[1, 0]), entries(&[4])],
+        subject,
+        none,
+    );
+    assert_eq!(thrown_first.load(1), T);
+    assert!(!thrown_first.reaches(1));
+    // A pairwise report: the description lines load before the alignments, so the alignment of a
+    // subject whose description line threw is held where a later line loaded its holder.
+    let pairwise = |described: Vec<usize>, aligned: usize| {
+        vec![(
+            true,
+            ReportKeys::Pairwise(PairwiseReads {
+                hits: vec![vec![1], vec![0], vec![4]],
+                described,
+                aligned,
+            }),
+        )]
+    };
+    for after in [
+        AfterThrow::SkipsAlignment { html: false },
+        AfterThrow::EndsAtAlignment { html: false },
+    ] {
+        assert_eq!(
+            loads(LoadsBefore::NONE, after, pairwise(vec![0, 1, 2], 3)),
+            [L, H(Some(holder)), L, L, L],
+            "{after:?}"
+        );
+        // Without description lines, the first alignment throws and ends the run.
+        assert_eq!(
+            loads(LoadsBefore::NONE, after, pairwise(Vec::new(), 3))[..2],
+            [HitLoad::Unread, T],
+            "{after:?}"
+        );
+        // The description line alone throws (no alignments).
+        assert_eq!(
+            loads(LoadsBefore::NONE, after, pairwise(vec![0, 1], 0))[..2],
+            [L, T],
+            "{after:?}"
+        );
+    }
+    // The refusal: the words of another sequence that holds the Seq-align id, as for a lookup that
+    // does not fail; of holders that LOSAT cannot list.
+    let error = parsed[1].fetched(false, true, H(Some(holder))).unwrap_err();
+    assert!(
+        error.contains(&format!("which database sequence {holder} also holds")),
+        "{error}"
+    );
+    let error = parsed[3].fetched(false, true, H(None)).unwrap_err();
+    assert!(error.contains("LOSAT cannot list its holders"), "{error}");
+    // `held_before` asks only a lookup that fails on a file, the loader's holders first.
+    let never = (|_: DbSequence| false, true);
+    let every = (|_: DbSequence| true, true);
+    assert_eq!(parsed[0].held_before(every, every), None);
+    assert_eq!(parsed[1].held_before(never, never), None);
+    assert_eq!(parsed[1].held_before(every, never), Some(Some(holder)));
+    assert_eq!(parsed[1].held_before(never, every), Some(Some(holder)));
+    assert_eq!(parsed[3].held_before(never, (|_| false, false)), Some(None));
+    assert_eq!(
+        parsed[3].held_before((|_| false, false), (|_| false, false)),
+        None
+    );
+}
+
+// Review 2 of line DBID pfoff-4, H1 and M1 (`R/pfoff/p4/review2`, cases `w.*`, `v.*`): NCBI
+// gives a held sequence for a failing lookup from two places: its BLAST database data loader's
+// `m_Ids`, the exact handles of every sequence it loaded, for the whole run; and its scope's
+// index, which also finds another text type of the accession and version and the weak matches,
+// from the load to the end of the query batch (to the end of the run in outfmt 5). A holder in
+// the scope's index alone that an earlier batch loaded holds nothing (NCBI throws: `w.E.21.b1`),
+// in the same batch or in outfmt 5 it holds.
+#[test]
+fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_batch() {
+    let failure = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let plain = |accession: &str, ordinal: u32| {
+        ParsedSubject::new(one_defline(vec![gb(accession, 1)]))
+            .unwrap()
+            .in_database(DbSequence::of_unrestricted(ordinal))
+    };
+    let exact = DbSequence::of_unrestricted(10);
+    let weak = DbSequence::of_unrestricted(11);
+    // 0: a holder of the failing id's own handle; 1: a holder in the scope alone (`emb|X.1|` for
+    // `ref|X.1|`, `ref|X.1|` for `ref|X|`); 2: the failing lookup that 0 holds; 3: the one that 1
+    // holds; 4: one whose weak matches LOSAT cannot list (a name, version 5); 5: another subject.
+    let parsed: Vec<ParsedSubject> = vec![
+        plain("AAA00010", 10),
+        plain("AAA00011", 11),
+        plain("AAA00012", 12)
+            .found_instead(failure())
+            .scope_holders(ScopeHolders {
+                loader: Holders::Listed(vec![exact]),
+                scope: Holders::Listed(vec![exact]),
+            }),
+        plain("AAA00013", 13)
+            .found_instead(failure())
+            .scope_holders(ScopeHolders {
+                loader: Holders::Listed(Vec::new()),
+                scope: Holders::Listed(vec![weak]),
+            }),
+        plain("AAA00014", 14)
+            .found_instead(failure())
+            .scope_holders(ScopeHolders {
+                loader: Holders::Listed(Vec::new()),
+                scope: Holders::Unknown("its weak matches".to_owned()),
+            }),
+        plain("AAA00015", 15),
+    ];
+    let subject = |key: usize| parsed.get(key);
+    let none = |_: usize, _: usize| 0;
+    let report = |batch: usize, keys: &[usize]| {
+        (
+            ReportRead {
+                one_by_one: true,
+                batch: Some(batch),
+                prefetch_fails: false,
+            },
+            ReportKeys::Entries(keys.iter().map(|&key| Some(key)).collect()),
+        )
+    };
+    let loads = |before: LoadsBefore, after, reports: Vec<(ReportRead, ReportKeys)>| {
+        let loads = HitLoads::of(
+            before,
+            Some(RunThrow::every_row(after)),
+            reports,
+            subject,
+            none,
+        );
+        (0..6).map(|key| loads.load(key)).collect::<Vec<_>>()
+    };
+    use HitLoad::{Held as H, Throws as T};
+    // The holders in an earlier batch: the loader's hold for the run, the scope's only in outfmt 5.
+    // The loader's answer puts its holder into the batch's scope, where it may match 4 weakly.
+    let earlier = || vec![report(0, &[0, 1, 5]), report(1, &[2, 3, 4])];
+    assert_eq!(
+        loads(LoadsBefore::NONE, AfterThrow::WritesRow, earlier())[2..5],
+        [H(Some(exact)), T, H(None)]
+    );
+    assert_eq!(
+        loads(
+            LoadsBefore::NONE,
+            AfterThrow::WritesRow,
+            vec![report(0, &[0, 1, 5]), report(1, &[3, 4])]
+        )[3..5],
+        [T, T]
+    );
+    assert_eq!(
+        loads(LoadsBefore::NONE, AfterThrow::WritesHit, earlier())[2..5],
+        [H(Some(exact)), H(Some(weak)), H(None)]
+    );
+    // In the same batch, an earlier report: both places hold.
+    for after in [AfterThrow::WritesRow, AfterThrow::EndsReport] {
+        assert_eq!(
+            loads(
+                LoadsBefore::NONE,
+                after,
+                vec![report(3, &[0, 1, 5]), report(3, &[2, 3, 4])]
+            )[2..5],
+            [H(Some(exact)), H(Some(weak)), H(None)],
+            "{after:?}"
+        );
+    }
+    // A report without a batch name stays in the scope of the one before.
+    assert_eq!(
+        loads(
+            LoadsBefore::NONE,
+            AfterThrow::WritesRow,
+            vec![
+                report(0, &[1]),
+                (true.into(), ReportKeys::Entries(vec![Some(3)]))
+            ]
+        )[3],
+        H(Some(weak))
+    );
+    // The run's record: its loads of the batch named, which share the scope (psiblast's rounds
+    // before), and of other batches, which hold only in the loader.
+    let recorded = |batch| LoadsBefore::new(vec![10, 11], (Some(batch), vec![10, 11]), false);
+    assert_eq!(
+        loads(recorded(2), AfterThrow::WritesRow, vec![report(2, &[2, 3])])[2..4],
+        [H(Some(exact)), H(Some(weak))]
+    );
+    assert_eq!(
+        loads(recorded(1), AfterThrow::WritesRow, vec![report(2, &[2, 3])])[2..4],
+        [H(Some(exact)), T]
+    );
+    assert_eq!(
+        loads(recorded(1), AfterThrow::WritesHit, vec![report(2, &[2, 3])])[2..4],
+        [H(Some(exact)), H(Some(weak))]
+    );
+    // Calls before of which nothing here holds a record: each was a batch of its own.
+    assert_eq!(
+        loads(
+            LoadsBefore::after_calls(true),
+            AfterThrow::WritesRow,
+            vec![report(0, &[3, 4, 2])]
+        )[2..5],
+        [H(Some(exact)), T, T]
+    );
+    assert_eq!(
+        loads(
+            LoadsBefore::after_calls(true),
+            AfterThrow::WritesHit,
+            vec![report(0, &[2, 3, 4])]
+        )[2..5],
+        [H(Some(exact)), H(Some(weak)), H(None)]
+    );
+    // A walk of a run's reports one at a time (`RunLoads`) keeps both places across its calls.
+    for (after, held) in [
+        (AfterThrow::WritesRow, T),
+        (AfterThrow::WritesHit, H(Some(weak))),
+    ] {
+        let run = RunLoads::new(FormatThrow::Writes(RunThrow::every_row(after)));
+        let first = run.loads(LoadsBefore::NONE, [report(0, &[0, 1])], subject, none);
+        assert!(first.loaded(0) && first.loaded(1));
+        let next = run.loads(LoadsBefore::NONE, [report(4, &[2, 3])], subject, none);
+        assert_eq!(
+            [next.load(2), next.load(3)],
+            [H(Some(exact)), held],
+            "{after:?}"
+        );
+        let same = run.loads(
+            LoadsBefore::NONE,
+            [report(4, &[1]), report(4, &[3])],
+            subject,
+            none,
+        );
+        assert_eq!(same.load(3), H(Some(weak)), "{after:?}");
+    }
+}
+
+// Line RG D1c-1c-b PR 2b (NCBI BLAST+ 2.17.0 probes `D/logs/d1c1cb/probe`, rows db.il.*.x1.*,
+// db.il.bp.xw.*): a definition line without a Seq-id beside lines with them. Each format's walk of
+// the lines takes the line's best id, null there, and its `catch` decides what is written.
+fn titled(lines: Vec<(Vec<ParsedSeqId>, Option<&str>)>) -> ParsedSubject {
+    let deflines = lines
+        .into_iter()
+        .map(|(ids, title)| BlastDefline {
+            title: title.map(|title| title.as_bytes().to_vec()),
+            ids,
+            ..BlastDefline::default()
+        })
+        .collect();
+    ParsedSubject::new(DeflineSet {
+        deflines,
+        utf8: false,
+    })
+    .unwrap()
+}
+
+// The description walk adds ` >`, the FASTA label and a space before each later title, and stops
+// only once the text passes 4096 bytes: a text of 4095 or 4096 bytes walks on to the line without
+// a Seq-id (NCBI's `catch`: the Seq-align id and `Unknown`), one of 4097 stops before it (rows
+// db.il.bp.xw.q0.0 and db.il.bp.xw.q1.0).
+#[test]
+fn the_description_walk_meets_a_line_without_a_seq_id_until_it_passes_4096_bytes() {
+    let second = gb("B00002", 1);
+    let mut label = Vec::new();
+    label::fasta(&second, &mut label);
+    let fixed = "s".len() + " >".len() + label.len() + " ".len();
+    for (total, caught) in [(4095, true), (4096, true), (4097, false)] {
+        let long = "w".repeat(total - fixed);
+        let subject = titled(vec![
+            (vec![gb("A00001", 1)], Some("s")),
+            (vec![second.clone()], Some(&long)),
+            (vec![], Some("tail")),
+        ]);
+        let (start, line, thrown) = subject.description_line(true);
+        assert_eq!(thrown, caught, "a text of {total} bytes");
+        if caught {
+            assert_eq!(text(&line.text), "Unknown");
+            assert_eq!(start, subject.thrown_description().0);
+        } else {
+            assert!(line.text.starts_with(b"s"), "{total}");
+        }
+    }
+}
+
+// `GetDisplayIds` labels each line up to the display line's, so a line without a Seq-id before it
+// throws whatever the lengths; the walk labels a line before it looks at its title, so an untitled
+// one throws there too (x1 OIDs 3 and 4).
+#[test]
+fn a_line_without_a_seq_id_before_the_display_line_or_without_a_title_is_met() {
+    let a = || vec![gb("A00001", 1)];
+    for (lines, caught) in [
+        (vec![(vec![], Some("zero")), (a(), Some("a"))], true),
+        (vec![(vec![], None), (a(), Some("a"))], true),
+        (vec![(a(), Some("a")), (vec![], None)], true),
+        (vec![(a(), Some("a")), (vec![], Some(""))], true),
+        (
+            vec![(a(), Some("a")), (vec![gb("B00002", 1)], Some("b"))],
+            false,
+        ),
+    ] {
+        let shown = format!("{lines:?}");
+        assert_eq!(titled(lines).description_line(true).2, caught, "{shown}");
+    }
+}
+
+// `x_FillAlnDispParams` labels every line first: each HSP's heading is the skipped id.
+#[test]
+fn every_heading_of_a_subject_with_a_line_without_a_seq_id_is_the_skipped_id() {
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let skipped = subject.skipped_id().to_vec();
+    assert_eq!(
+        subject.heading(true, false, None).unwrap(),
+        Err(skipped.clone())
+    );
+    assert_eq!(
+        subject.heading(true, true, None).unwrap(),
+        Err(skipped.clone())
+    );
+    assert_eq!(subject.heading_skipped_id(true, false), Some(skipped));
+}
+
+// Outfmt 5 takes the id string of the first titled line (no throw for an empty list there) and
+// throws only at a titled line without a Seq-id after it (an empty title counts): the `Hit`'s
+// `catch` (`xml_hit` gives `None`).
+#[test]
+fn outfmt_5_catches_a_titled_line_without_a_seq_id_after_the_first_titled_line() {
+    let a = || vec![gb("A00001", 1)];
+    let no_id = Vec::new;
+    for (lines, named) in [
+        (vec![(a(), Some("a")), (no_id(), Some("b"))], false),
+        (vec![(a(), Some("a")), (no_id(), Some(""))], false),
+        (vec![(a(), Some("a")), (no_id(), None)], true),
+        (vec![(no_id(), Some("z")), (a(), Some("a"))], true),
+        (vec![(no_id(), None), (a(), Some("a"))], true),
+        (
+            vec![(no_id(), None), (a(), Some("a")), (no_id(), Some("c"))],
+            false,
+        ),
+    ] {
+        let shown = format!("{lines:?}");
+        assert_eq!(titled(lines).xml_hit().is_some(), named, "{shown}");
+    }
+}
+
+// The tabular ids of a line without a Seq-id: `Unknown` and GI 0 (`sallseqid`, `sallgi`); its
+// `sallacc` is NCBI's null pointer (`LookupFailure::lineless`, refused by `failed_lookup_stop`).
+#[test]
+fn a_line_without_a_seq_id_is_unknown_in_the_tabular_ids_and_its_sallacc_stops() {
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let all = subject.all_tabular_ids(true).unwrap();
+    assert!(!all.failed);
+    assert_eq!(text(&all.ids[1].id), "Unknown");
+    assert_eq!(all.ids[1].gi, 0);
+    assert_eq!(
+        subject.lookup_failure(true).unwrap(),
+        Some(crate::report::tabular::LookupFailure {
+            lineless: true,
+            ..Default::default()
+        })
+    );
+    let plain = titled(vec![(vec![gb("A00001", 1)], Some("a"))]);
+    assert_eq!(plain.lookup_failure(true).unwrap(), None);
+}
+
+// The organism report stops at the line without a Seq-id (Owner question Q-D1c1cb-18): refused
+// there, the lines before it as always; a set with no Seq-id at all gets no Seq-align (PR 2a) and
+// is an internal error here.
+#[test]
+fn the_organism_report_refuses_a_line_without_a_seq_id_and_a_set_without_any_is_internal() {
+    use crate::report::tax_report::TaxTitle;
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let lines = subject.tax_deflines(true);
+    assert!(matches!(&lines[0].title, TaxTitle::Text(title) if title == b"a"));
+    assert!(matches!(
+        &lines[1].title,
+        TaxTitle::Refused { reason, shown_only: false } if reason == LINELESS_TAX_REPORT
+    ));
+    let none = DeflineSet {
+        deflines: vec![BlastDefline {
+            title: Some(b"t".to_vec()),
+            ..BlastDefline::default()
+        }],
+        utf8: false,
+    };
+    assert!(ParsedSubject::new(none)
+        .unwrap_err()
+        .contains("internal error"));
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1586-1600
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:895-917
+// When a subject's description title throws (`UnknownEncoding`), NCBI's catch puts the Seq-align
+// id on the description line and pads/wraps using that id rather than the display id. The 65-byte
+// length check in `description_line_refusal` must measure the Seq-align id for both protein and
+// nucleotide databases (display <= 65 & alignment > 65 refuses; display > 65 & alignment <= 65
+// passes), and must also cover an empty nucleotide title whose source name throws.
+#[test]
+fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
+    use crate::algorithm::common::database::description_line_refusal;
+    use crate::report::defline::SourceTaxname;
+    let long_acc = "X".repeat(66);
+    let long_local = ParsedSeqId::Local(ObjectId::Str(vec![b'a'; 66]));
+
+    let make = |ids: Vec<ParsedSeqId>, title: Option<&[u8]>, taxid: Option<i32>| {
+        ParsedSubject::new(DeflineSet {
+            deflines: vec![BlastDefline {
+                ids,
+                title: title.map(|bytes| bytes.to_vec()),
+                taxid,
+                ..BlastDefline::default()
+            }],
+            utf8: false,
+        })
+        .unwrap()
+    };
+
+    let assert_long_id = |subject: &ParsedSubject, protein: bool, program: &str| {
+        let err = description_line_refusal(subject, HitLoad::Loaded, protein)
+            .unwrap_or_else(|| panic!("{program}: expected 65-byte description-line refusal"));
+        assert!(err.contains("longer than 65 bytes"), "{program}: {err}");
+    };
+    let long_align_ids = vec![long_local.clone(), gb("NP_000001", 1)];
+    let long_display_ids = vec![ParsedSeqId::Gi(777), gb(&long_acc, 1)];
+
+    for (protein, program) in [(true, "BLASTP"), (false, "BLASTN")] {
+        // Case 1: display id <= 65 (`NP_000001.1`), Seq-align id > 65 (`lcl|aaaa...`).
+        let long_align_throwing = make(long_align_ids.clone(), Some(b"bad\x81"), None);
+        assert!(long_align_throwing.description_start().len() <= 65);
+        assert!(long_align_throwing.description_line(protein).0.len() > 65);
+        assert_long_id(&long_align_throwing, protein, program);
+
+        let long_align_ok = make(long_align_ids.clone(), Some(b"ok"), None);
+        assert_eq!(
+            description_line_refusal(&long_align_ok, HitLoad::Loaded, protein),
+            None
+        );
+
+        // Case 2: display id > 65 (`XXXX...`), Seq-align id <= 65 (`gi|777`).
+        let long_display_throwing = make(long_display_ids.clone(), Some(b"bad\x81"), None);
+        assert!(long_display_throwing.description_start().len() > 65);
+        assert!(long_display_throwing.description_line(protein).0.len() <= 65);
+        assert_eq!(
+            description_line_refusal(&long_display_throwing, HitLoad::Loaded, protein),
+            None,
+            "{program}: throwing title uses short Seq-align id"
+        );
+
+        let long_display_ok = make(long_display_ids.clone(), Some(b"ok"), None);
+        assert_long_id(&long_display_ok, protein, program);
+    }
+
+    // Empty nucleotide title whose source name throws `UnknownEncoding`: same rule.
+    let nucl_source_throwing = make(vec![long_local, gb("NM_000001", 1)], Some(b""), Some(9606))
+        .with_source(false, |_| {
+            SourceTaxname::Named(std::sync::Arc::from(&b"bad\x81"[..]))
+        });
+    assert!(nucl_source_throwing.description_may_throw());
+    assert_long_id(&nucl_source_throwing, false, "BLASTN");
 }

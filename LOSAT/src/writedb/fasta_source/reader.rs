@@ -26,6 +26,7 @@ use crate::ncbi_str::{
 use crate::seqid::accguide::{identify_seq_id, parse_flags, SeqIdWarning, F_NUC, F_PROT};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best};
+use crate::utils::byte_search::find_first;
 use crate::writedb::bioseq::SeqData;
 
 /// A warning of the reader, as NCBI posts it for a reader without a listener (neither
@@ -322,6 +323,26 @@ pub(crate) enum ReadError {
     /// An allocation whose size the input states could not be made
     /// (`std::bad_alloc` in NCBI, which no reader catches).
     OutOfMemory,
+    /// The `std::out_of_range` of `basic_string::append` from position `pos` of a string of
+    /// `size` (`RecordState::substituted`), which no reader catches either.
+    OutOfRange { pos: u64, size: u64 },
+    /// A nucleotide piece that NCBI's reader packs into a segment whose byte count wraps its
+    /// `TSeqPos` to 0: `CDelta_ext_PackTarget::NewSegment` sizes an NCBI2na segment of `length`
+    /// bases as `(length + 3) / 4` bytes and an NCBI4na one as `(length + 1) / 2`, so one of
+    /// 4294967293 to 4294967295 bases (NCBI2na) or of 4294967295 (NCBI4na) gets 0 bytes, and
+    /// the conversion writes past them (SIGSEGV in every program; survey 11d dm4, probe 2 s3n
+    /// and s7n, probe 3 b4n and b5n). LOSAT's programs refuse it (`pack_overflow_what`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1456-1458,1504
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/Delta_ext.cpp:141-164,201-205
+    PackOverflow,
+}
+
+/// What LOSAT refuses for `ReadError::PackOverflow` (before "is not supported by LOSAT's ...").
+pub(crate) fn pack_overflow_what() -> String {
+    "a nucleotide FASTA record with a stretch of 4,294,967,293 letters or more that NCBI packs \
+     as one piece (NCBI counts the piece's bytes in 32 bits, gets 0 and crashes)"
+        .to_string()
 }
 
 impl From<ParseError> for ReadError {
@@ -363,7 +384,9 @@ pub(crate) enum SeqInst {
     Virtual,
     /// `repr raw`: a delta of one piece, whose `Seq-data` became the sequence's.
     Raw { length: u64, seq_data: SeqData },
-    /// `repr delta` of more than one piece over the IUPACna `residues`.
+    /// `repr delta` of more than one piece over the IUPACna `residues`. Past 2^32 letters
+    /// (`assemble_seq`) gaps that stay pieces can make the pieces longer than `length`, and
+    /// their residues repeat or skip residues where the gaps' wrapped positions do.
     Delta {
         length: u64,
         residues: Vec<u8>,
@@ -371,49 +394,16 @@ pub(crate) enum SeqInst {
     },
     /// A record longer than 2,147,483,647 residues, which `CBuildDatabase::AddSequences`
     /// rejects by its length before it reads the sequence data: LOSAT does not build it.
-    /// `length` is NCBI's (`TSeqPos`, see `PastSeqPos`).
+    /// `length` is NCBI's, the record's count modulo 2^32 (`assemble_seq`).
     TooLong { length: u64 },
-    /// A record of 4,294,967,296 residues or more, counting the letters of its gaps, that
-    /// makeblastdb's length check does not stop. NCBI counts a record's length in a `TSeqPos`
-    /// (`GetCurrentPos`, `m_TotalGapLength`, `SGap::m_uLen`, `m_CurrentGapLength`), which wraps
-    /// there, and goes on with a `Seq-inst` of the wrapped length, `seq_pos_length`, whose data
-    /// is longer (`form`). LOSAT does not build it (no allocation for the gaps).
-    /// convert2blastmask, which reads only the masks, writes them (their positions wrap as
-    /// NCBI's, `RecordState::current_pos_with_gaps`); makeblastdb follows NCBI where NCBI
-    /// skips the record or stops before it builds the data (`fasta_source::next_bioseq`) and
-    /// refuses it where NCBI builds it; dustmasker and segmasker refuse it (NCBI's object
-    /// manager reads the first `seq_pos_length` letters, the gaps as `N` or `X`, after
-    /// allocating the substituted run when the gaps are not kept; a kept gap of 4294967295,
-    /// `kInvalidSeqPos`, is its error instead: not ported yet, line RG series K). `length` is the
-    /// record's, counted on.
-    PastSeqPos {
-        length: u64,
-        seq_pos_length: u64,
-        form: PastSeqPosForm,
-    },
 }
 
-/// The `Seq-inst` that NCBI's `AssembleSeq` makes of a `SeqInst::PastSeqPos` record.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum PastSeqPosForm {
-    /// No gap is kept (no gaps, or runs of `N` or `X` substituted for them): `repr raw`, or
-    /// a delta of literals only, over the residues.
-    Residues,
-    /// The gaps are kept (`fParseGaps`, or `>?` lines whose lengths sum to a multiple of 2^32,
-    /// so that `m_TotalGapLength` is 0): `repr delta`, whose first piece is a literal.
-    Delta,
-    /// As `Delta`, with a gap of unknown length (`Seq-loc null`, a lone hyphen) first.
-    DeltaFromNull,
-}
-
-/// What LOSAT refuses in a program that reads the residues of a `SeqInst::PastSeqPos` record
-/// `id` of `length` letters (the text before `is not supported by LOSAT's <program>`).
-pub(crate) fn past_seq_pos_refusal(id: &str, length: u64) -> String {
-    format!(
-        "a FASTA record of 4,294,967,296 letters or more, counting the letters of its gaps \
-         ({id}: {} letters; NCBI counts the length of a record in 32 bits, which wrap there),",
-        crate::ncbi_str::with_commas(length)
-    )
+// The text is observed, not taken from a library's source: NCBI's 2.17.0 binaries write this
+// `what()` for the `std::out_of_range` of `basic_string::append` (probe of line RG item KC-11d,
+// remaining-gaps-20261112/K/kc/p11d/p2).
+/// The `what()` of `ReadError::OutOfRange`.
+pub(crate) fn out_of_range_what(pos: u64, size: u64) -> String {
+    format!("basic_string::append: __pos (which is {pos}) > this->size() (which is {size})")
 }
 
 /// A record as `CFastaReader::ReadOneSeq` returns it.
@@ -448,6 +438,8 @@ const BAD: u8 = 0;
 const SPACE: u8 = 1;
 const COMMENT: u8 = 2;
 const GAP: u8 = 3;
+/// The least residue value of the switch; short-run scans check the action table against it
+/// directly and longer runs use `Alphabet::is_residue` (tested against it for every byte).
 const RESIDUE_MIN: u8 = b'*';
 
 /// The character switch of `ParseDataLine` for protein (`fAssumeProt`) or nucleotide
@@ -492,6 +484,120 @@ const NUCLEOTIDE_GAP_ACTIONS: [u8; 256] = char_actions(false, true);
 const NUCLEOTIDE_ACTIONS: [u8; 256] = char_actions(false, false);
 const PROTEIN_ACTIONS: [u8; 256] = char_actions(true, false);
 
+/// The residues of a data line, following the protein, nucleotide-with-gaps, and
+/// nucleotide-without-gaps cases of `CFastaReader::ParseDataLine`'s character switch.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-826
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Alphabet {
+    Protein,
+    NucleotideGaps,
+    Nucleotide,
+}
+
+/// Whether `byte` is a letter accepted by protein input in either case, following the letter
+/// cases of `CFastaReader::ParseDataLine`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-918
+const fn is_protein_letter(byte: u8) -> bool {
+    (byte & 0xdf).wrapping_sub(b'A') < 26
+}
+
+/// Whether `byte` is a nucleotide letter in either case (`ABCDGHKMNRSTUVWY`), following the
+/// nucleotide branch of `CFastaReader::ParseDataLine` by the ranges of their offsets from `A`:
+/// A–D, G–H, K, M–N, R–W and Y. Clearing bit 5 folds lower case to upper case without mapping
+/// any non-letter into `A`–`Z`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-874,900-907
+const fn is_nucleotide_letter(byte: u8) -> bool {
+    let offset = (byte & 0xdf).wrapping_sub(b'A');
+    (offset <= 3)
+        | (offset.wrapping_sub(6) <= 1)
+        | (offset == 10)
+        | (offset.wrapping_sub(12) <= 1)
+        | (offset.wrapping_sub(17) <= 5)
+        | (offset == 24)
+}
+
+impl Alphabet {
+    /// The character switch of the alphabet.
+    const fn actions(self) -> &'static [u8; 256] {
+        match self {
+            Alphabet::Protein => &PROTEIN_ACTIONS,
+            Alphabet::NucleotideGaps => &NUCLEOTIDE_GAP_ACTIONS,
+            Alphabet::Nucleotide => &NUCLEOTIDE_ACTIONS,
+        }
+    }
+
+    /// Whether `CFastaReader::ParseDataLine`'s character switch stores `byte` as a residue
+    /// (`actions()[byte] >= RESIDUE_MIN`), computed by arithmetic so `find_first` can test a
+    /// block of bytes at once (`tests::residue_tests_match_the_tables` checks every byte).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-925
+    const fn is_residue(self, byte: u8) -> bool {
+        match self {
+            Alphabet::Protein => is_protein_letter(byte) | (byte == b'*') | (byte == b'-'),
+            Alphabet::NucleotideGaps => is_nucleotide_letter(byte),
+            Alphabet::Nucleotide => is_nucleotide_letter(byte) | (byte == b'-'),
+        }
+    }
+
+    /// The number of consecutive residues that `s` starts with, matching the residue cases of
+    /// `CFastaReader::ParseDataLine`. Short slices and the first 11 bytes use the action table
+    /// directly so spaced or digit-broken lines exit without extra arithmetic per byte; longer
+    /// runs use [`find_first`].
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:841-936
+    fn residue_run(self, s: &[u8]) -> usize {
+        let actions = self.actions();
+        if s.len() < 28 {
+            return s
+                .iter()
+                .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
+                .unwrap_or(s.len());
+        }
+        for (i, &byte) in s[..11].iter().enumerate() {
+            if actions[byte as usize] < RESIDUE_MIN {
+                return i;
+            }
+        }
+        let rest = &s[11..];
+        let end = match self {
+            Alphabet::Protein => find_first(rest, |byte| !Alphabet::Protein.is_residue(byte)),
+            Alphabet::NucleotideGaps => {
+                find_first(rest, |byte| !Alphabet::NucleotideGaps.is_residue(byte))
+            }
+            Alphabet::Nucleotide => find_first(rest, |byte| !Alphabet::Nucleotide.is_residue(byte)),
+        };
+        11 + end.unwrap_or(rest.len())
+    }
+}
+
+/// The bytes that `extend_upper` converts at once.
+const UPPER_BLOCK: usize = 32;
+
+/// Appends `run` to `out` in upper case (`to_ascii_uppercase` of every byte), matching the
+/// upper-case storage of accepted residues in `CFastaReader::ParseDataLine`. Short runs convert
+/// in a single pass; runs of at least `UPPER_BLOCK` bytes are copied whole and converted in
+/// blocks of `UPPER_BLOCK`, with the final block overlapping the previous one (converting a byte
+/// twice leaves it upper case).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:939-950
+fn extend_upper(out: &mut Vec<u8>, run: &[u8]) {
+    let len = run.len();
+    if len < UPPER_BLOCK {
+        out.extend(run.iter().map(u8::to_ascii_uppercase));
+        return;
+    }
+    let start = out.len();
+    out.extend_from_slice(run);
+    let added = &mut out[start..];
+    for block in added.as_chunks_mut::<UPPER_BLOCK>().0 {
+        block.make_ascii_uppercase();
+    }
+    added[len - UPPER_BLOCK..].as_chunks_mut::<UPPER_BLOCK>().0[0].make_ascii_uppercase();
+}
+
 /// The state of the record being read (`ReadOneSeq` resets it).
 struct RecordState {
     flags: ReaderFlags,
@@ -527,7 +633,14 @@ struct RecordState {
     mask_start: Option<u32>,
     /// `CMaskFromFasta::m_mask`.
     masks: Vec<(u32, u32)>,
+    /// 2^32, the range of NCBI's `TSeqPos`, in which `assemble_seq` and `close_gap` count the
+    /// positions of a record (a smaller power of two in the tests of the wrap:
+    /// `FastaReader::with_seq_pos_modulus`).
+    seq_pos_modulus: u64,
 }
+
+/// The range of NCBI's `TSeqPos` (32 bits).
+const SEQ_POS_MODULUS: u64 = 1 << 32;
 
 /// NCBI's `CFastaReader` over a `CBufferedLineReader`.
 pub(crate) struct FastaReader<R: Read> {
@@ -579,8 +692,23 @@ impl<R: Read> FastaReader<R> {
                 mol: None,
                 mask_start: None,
                 masks: Vec::new(),
+                seq_pos_modulus: SEQ_POS_MODULUS,
             },
         }
+    }
+
+    /// The reader with the positions of a record counted modulo `modulus`, a power of two
+    /// below 2^32, so that a test shows the wrap at 2^32 on a short record.
+    #[cfg(test)]
+    pub(crate) fn with_seq_pos_modulus(mut self, modulus: u64) -> Self {
+        assert!(modulus.is_power_of_two() && modulus <= SEQ_POS_MODULUS);
+        self.state.seq_pos_modulus = modulus;
+        self
+    }
+
+    /// The reader's molecule is protein (`fAssumeProt` with `fForceType`).
+    pub(crate) fn is_protein(&self) -> bool {
+        self.state.flags.molecule == Molecule::Protein
     }
 
     /// The ids of each definition line are parsed (`-parse_seqids`).
@@ -757,6 +885,77 @@ fn is_ambig_nuc(c: u8) -> bool {
     b"URYSWKMBDHVN".contains(&c.to_ascii_uppercase())
 }
 
+/// General counting fallback for [`data_line_counts`] when `checked` contains a non-`ACGT`
+/// nucleotide byte or a non-residue protein byte, following `CFastaReader::CheckDataLine`'s
+/// classification loop and `;` comment stop.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:730-750
+#[cold]
+#[inline(never)]
+fn data_line_counts_slow(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
+    if checked.len() < 32 {
+        let (mut good, mut bad, mut ambig_nuc) = (0usize, 0usize, 0usize);
+        for &c in checked {
+            if c.is_ascii_alphabetic() || c == b'*' {
+                good += 1;
+                if is_nuc && is_ambig_nuc(c) {
+                    ambig_nuc += 1;
+                }
+            } else if c == b'-' {
+                good += 1;
+            } else if is_space(c) || c.is_ascii_digit() {
+            } else if c == b';' {
+                break;
+            } else {
+                bad += 1;
+            }
+        }
+        return (good, bad, ambig_nuc);
+    }
+    fn count(bytes: &[u8], test: impl Fn(u8) -> bool) -> usize {
+        // At most 70 bytes: the count fits a byte.
+        usize::from(
+            bytes
+                .iter()
+                .fold(0u8, |count, &c| count + u8::from(test(c))),
+        )
+    }
+    let checked = &checked[..find_first(checked, |c| c == b';').unwrap_or(checked.len())];
+    let good = |c: u8| c.is_ascii_alphabetic() | (c == b'*') | (c == b'-');
+    let goods = count(checked, good);
+    let bads = count(checked, |c| !(good(c) | is_space(c) | c.is_ascii_digit()));
+    let ambiguous = if is_nuc {
+        count(checked, |c| c.is_ascii_alphabetic() && is_ambig_nuc(c))
+    } else {
+        0
+    };
+    (goods, bads, ambiguous)
+}
+
+/// Counts good bytes (letters, `*`, `-`), bad bytes (neither good, white space, nor digit), and
+/// for nucleotide input ambiguous nucleotide letters over `checked` (at most 70 bytes) up to the
+/// first `;`, following `CFastaReader::CheckDataLine`. A line consisting solely of `A`/`C`/`G`/`T`
+/// (nucleotide, either case) or accepted protein residues returns `(checked.len(), 0, 0)` after
+/// one [`find_first`] scan; any other line uses [`data_line_counts_slow`]
+/// (`tests::data_line_counts_match_the_loop` compares against the byte-by-byte loop).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:719-750
+fn data_line_counts(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
+    debug_assert!(checked.len() <= 70);
+    if is_nuc {
+        let is_acgt = |c: u8| {
+            let u = c & 0xdf;
+            (u == b'A') | (u == b'C') | (u == b'G') | (u == b'T')
+        };
+        if find_first(checked, |c| !is_acgt(c)).is_none() {
+            return (checked.len(), 0, 0);
+        }
+    } else if find_first(checked, |c| !Alphabet::Protein.is_residue(c)).is_none() {
+        return (checked.len(), 0, 0);
+    }
+    data_line_counts_slow(checked, is_nuc)
+}
+
 impl RecordState {
     /// `ParseDefLine`: the title for the reader's checks
     /// (`CFastaDeflineReader::ParseDefline`), the ids (with `-parse_seqids`) or the
@@ -825,9 +1024,7 @@ impl RecordState {
             if title_start < len {
                 let end = title_start
                     + 1
-                    + defline[title_start + 1..]
-                        .iter()
-                        .position(|&byte| byte < b' ')
+                    + find_first(&defline[title_start + 1..], |byte| byte < b' ')
                         .unwrap_or(len - title_start - 1);
                 self.titles.push(LineText {
                     text: defline[title_start..end].to_vec(),
@@ -890,25 +1087,8 @@ impl RecordState {
         if !self.seq_data.is_empty() {
             return Ok(());
         }
-        let is_nuc = self.is_nuc();
-        let (mut good, mut bad, mut ambig_nuc) = (0usize, 0usize, 0usize);
         let len_to_check = s.len().min(70);
-        for &c in &s[..len_to_check] {
-            if c.is_ascii_alphabetic() || c == b'*' {
-                good += 1;
-                if is_nuc && is_ambig_nuc(c) {
-                    ambig_nuc += 1;
-                }
-            } else if c == b'-' {
-                good += 1;
-            } else if is_space(c) || c.is_ascii_digit() {
-                // White space and digits are neutral.
-            } else if c == b';' {
-                break;
-            } else {
-                bad += 1;
-            }
-        }
+        let (good, bad, ambig_nuc) = data_line_counts(&s[..len_to_check], self.is_nuc());
         if bad >= good / 3 && (len_to_check > 3 || good == 0 || bad > good) {
             return Err(ParseError::fasta_error(
                 ErrCode::Format,
@@ -968,13 +1148,14 @@ impl RecordState {
         self.check_data_line(s, line_number, warn)?;
 
         // `fParseGaps` is set only for nucleotide input (`ReaderFlags`).
-        let actions = if !self.is_nuc() {
-            &PROTEIN_ACTIONS
+        let alphabet = if !self.is_nuc() {
+            Alphabet::Protein
         } else if self.flags.parse_gaps {
-            &NUCLEOTIDE_GAP_ACTIONS
+            Alphabet::NucleotideGaps
         } else {
-            &NUCLEOTIDE_ACTIONS
+            Alphabet::Nucleotide
         };
+        let actions = alphabet.actions();
         let seq_data_length = self.seq_data.len() + s.len();
         self.bad_positions.clear();
         let mut pos = 0;
@@ -996,23 +1177,33 @@ impl RecordState {
                     pos += run - 1;
                 }
                 BAD => self.bad_positions.push(pos as u32),
-                _ => {
+                residue => {
                     self.close_gap(pos == 0, seq_data_length, raw_length);
                     // The residues that follow are stored at once (LOSAT's speed: no gap
-                    // is open after the first one).
-                    let run = 1 + s[pos + 1..]
-                        .iter()
-                        .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
-                        .unwrap_or(s.len() - pos - 1);
+                    // is open after the first one). The switch stores a residue in upper case
+                    // (`tests::residue_tests_match_the_tables`).
+                    let run = 1 + alphabet.residue_run(&s[pos + 1..]);
+                    debug_assert!(run >= 1);
                     if MASKS {
                         self.mask_run(&s[pos..pos + run]);
                     }
-                    self.seq_data
-                        .extend(s[pos..pos + run].iter().map(|&byte| actions[byte as usize]));
+                    if run == 1 {
+                        self.seq_data.push(residue);
+                    } else if run < UPPER_BLOCK {
+                        self.seq_data
+                            .extend(s[pos..pos + run].iter().map(|&byte| actions[byte as usize]));
+                    } else {
+                        extend_upper(&mut self.seq_data, &s[pos..pos + run]);
+                    }
                     pos += run - 1;
                 }
             }
             pos += 1;
+        }
+        // NCBI resizes `m_SeqData` to the `TSeqPos` position `m_CurrentPos` (fasta.cpp:985): past
+        // 2^32 residues the string keeps those written since the position last wrapped.
+        if self.seq_data.len() as u64 >= self.seq_pos_modulus {
+            self.wrap_seq_data();
         }
 
         if !self.bad_positions.is_empty() {
@@ -1026,6 +1217,16 @@ impl RecordState {
             );
         }
         Ok(())
+    }
+
+    /// The residues of a record past `seq_pos_modulus` (2^32) of them: those since the count
+    /// last wrapped, the last (count modulo 2^32), as NCBI's `m_SeqData` after a data line.
+    /// `CheckDataLine` then tests the next line again where none are left, as NCBI's does
+    /// for an empty `m_SeqData`.
+    #[cold]
+    fn wrap_seq_data(&mut self) {
+        let kept = (self.seq_data.len() as u64 % self.seq_pos_modulus) as usize;
+        self.seq_data.drain(..self.seq_data.len() - kept);
     }
 
     /// `bIsNuc` of `ParseDataLine` and of `CheckDataLine`: `fAssumeNuc` (with `fForceType`),
@@ -1155,9 +1356,12 @@ impl RecordState {
         }
         let mut len = u64::from(self.current_gap_length);
         let pos = self.seq_data.len();
+        // `l` is the `TSeqPos` of `m_SeqData.length()` and `pos` the wrapped `m_CurrentPos`;
+        // `pos + length()` is a `size_t` sum.
+        let l = seq_data_length as u64 % self.seq_pos_modulus;
+        let pos_wrapped = pos as u64 % self.seq_pos_modulus;
         if len == 1
-            && (seq_data_length == pos
-                || (seq_data_length == pos + line_length && at_start_of_line))
+            && (l == pos_wrapped || (l == pos_wrapped + line_length as u64 && at_start_of_line))
         {
             len = 0;
         }
@@ -1265,8 +1469,8 @@ impl RecordState {
     /// `Seq-data` that the database writer cannot read (`SeqData::Other`).
     ///
     /// The run of `X` or `N` is as long as the `>?` lines say, up to 2,147,483,647 residues
-    /// for a few bytes of input (makeblastdb's limit; the mask reader's is 4,294,967,295,
-    /// past which the record is `SeqInst::PastSeqPos` and nothing is allocated). NCBI
+    /// for a few bytes of input (makeblastdb's limit; the mask reader's is 4,294,967,295, the
+    /// most a wrapped length can be: `substituted`). NCBI
     /// reserves the whole string at once and a failure is a `std::bad_alloc` (makeblastdb:
     /// "BLAST ran out of memory"); here it is the error of this function
     /// (`ReadError::OutOfMemory`), where an allocation that aborts the process would lose
@@ -1284,6 +1488,13 @@ impl RecordState {
     ) -> Result<(SeqInst, bool), ReadError> {
         self.close_gap(false, self.seq_data.len(), 0);
         self.close_mask();
+        // NCBI keeps the positions of a record in `TSeqPos` (`m_CurrentPos`, `SGap::m_uPos`,
+        // `m_TotalGapLength`), which wrap at 2^32 (`RecordState::seq_pos_modulus`); past 2^32
+        // residues `m_SeqData` holds the last (count modulo 2^32), which all that follows
+        // reads (`wrap_seq_data`, after each data line).
+        //
+        // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:816,863-865,985
+        let modulus = self.seq_pos_modulus;
         let is_aa = match self.flags.molecule {
             Molecule::Protein => true,
             Molecule::Nucleotide => false,
@@ -1295,73 +1506,37 @@ impl RecordState {
             self.parse_title(&title.text, warn);
         }
 
-        // `GetCurrentPos` with `ePosWithGaps` is a `TSeqPos`: NCBI's length of the record is
-        // `length` modulo 2^32, and makeblastdb tests that one (`SeqInst::PastSeqPos`).
-        let length = self.seq_data.len() as u64 + self.total_gap_length;
-        let seq_pos_length = u64::from(length as u32);
-        if self.flags.build_db_length_limit && seq_pos_length > i32::MAX as u64 {
-            return Ok((
-                SeqInst::TooLong {
-                    length: seq_pos_length,
-                },
-                is_aa,
-            ));
-        }
-        if length != seq_pos_length {
-            // The gaps stay a delta when they are parsed, or when their sum wraps to 0 (the
-            // test of the substitution below that `m_TotalGapLength` is above 0).
-            let form = match self.gaps.first() {
-                Some(first) if self.flags.parse_gaps || self.total_gap_length as u32 == 0 => {
-                    if first.position == 0 && first.length == 0 {
-                        PastSeqPosForm::DeltaFromNull
-                    } else {
-                        PastSeqPosForm::Delta
-                    }
-                }
-                _ => PastSeqPosForm::Residues,
-            };
-            return Ok((
-                SeqInst::PastSeqPos {
-                    length,
-                    seq_pos_length,
-                    form,
-                },
-                is_aa,
-            ));
-        }
+        // `GetCurrentPos` with `ePosWithGaps`, `m_CurrentPos` plus `m_TotalGapLength`: the record's
+        // length modulo 2^32, which makeblastdb tests and the `Seq-inst` takes.
+        let current = self.seq_data.len() as u64 % modulus;
+        let total_gap_length = self.total_gap_length % modulus;
+        let length = (current + total_gap_length) % modulus;
 
-        if !self.flags.parse_gaps && self.total_gap_length > 0 {
-            let gap_char = if is_aa { b'X' } else { b'N' };
-            let mut new_data = Vec::new();
-            new_data
-                .try_reserve_exact(length as usize)
-                .map_err(|_| ReadError::OutOfMemory)?;
-            let mut pos = 0;
-            for gap in &self.gaps {
-                // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1393-1410
-                if gap.mods {
-                    post_warning(
-                        self.flags.ignored_problems,
-                        Problem::ModifierFoundButNoneExpected,
-                        b"CFastaReader: Gap mods are ignored because gaps are becoming N's or X's in this case.",
-                        warn,
-                    );
-                }
-                if gap.position > pos {
-                    new_data.extend_from_slice(&self.seq_data[pos..gap.position]);
-                    pos = gap.position;
-                }
-                new_data.resize(new_data.len() + gap.length as usize, gap_char);
-            }
-            if self.seq_data.len() > pos {
-                new_data.extend_from_slice(&self.seq_data[pos..]);
-            }
-            self.seq_data = new_data;
+        // The substituted string holds the residues and the runs, never empty; its pieces are
+        // those of its first `length` letters, and none for a length that wrapped to 0. NCBI
+        // substitutes before it packs the data and before makeblastdb tests the length, so the
+        // substitution's warnings and `std::out_of_range` come first, then the packing's crash
+        // (`ReadError::PackOverflow`), which only a nucleotide piece of `modulus - 3` letters
+        // or more can meet. A record that ends at the length keeps no letters here unless its
+        // packing is to be checked.
+        let substituted = !self.flags.parse_gaps && total_gap_length > 0;
+        let packed = if substituted { length } else { current };
+        let check_packing = !is_aa && packed + 3 >= modulus;
+        let too_long = self.flags.build_db_length_limit && length > i32::MAX as u64;
+        if substituted {
+            let keep = if too_long && !check_packing {
+                0
+            } else {
+                length
+            };
+            self.seq_data = self.substituted(keep, is_aa, warn)?;
             self.gaps.clear();
             self.total_gap_length = 0;
         }
-
-        if self.gaps.is_empty() && self.seq_data.is_empty() {
+        if too_long && !check_packing {
+            return Ok((SeqInst::TooLong { length }, is_aa));
+        }
+        if !substituted && self.gaps.is_empty() && self.seq_data.is_empty() {
             if !self.flags.disable_no_residues {
                 return Err(ReadError::Parse(ParseError::fasta_error(
                     ErrCode::NoResidues,
@@ -1371,20 +1546,53 @@ impl RecordState {
             }
             return Ok((SeqInst::Virtual, is_aa));
         }
-        if is_aa {
+        if is_aa && self.gaps.is_empty() && !self.seq_data.is_empty() {
             let seq_data = SeqData::Ncbieaa(std::mem::take(&mut self.seq_data));
             return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
 
-        let mut pieces = Vec::new();
-        let n = self.gaps.len();
-        if n == 0 || self.gaps[0].position > 0 {
-            let end = if n > 0 {
-                self.gaps[0].position
+        // The pieces between the gaps, at the gaps' wrapped positions; a piece is a `TStr` of
+        // `m_SeqData` from its position for its length, which `CTempString` cuts to the residues (empty from a position at or past
+        // their end), and the length after the last gap is a `TSeqPos` difference. The residues
+        // of a protein are one NCBIeaa literal each (gaps stay a protein's only when their sum
+        // wraps to 0).
+        //
+        // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:377-387
+        let size = self.seq_data.len() as u64;
+        let span = |pos: u64, len: u64| -> (usize, usize) {
+            if pos >= size {
+                (0, 0)
             } else {
-                self.seq_data.len()
+                (pos as usize, (pos + len.min(size - pos)) as usize)
+            }
+        };
+        let mut pieces = Vec::new();
+        let add = |pieces: &mut Vec<DeltaSeq>,
+                   residues: &[u8],
+                   (start, end): (usize, usize)|
+         -> Result<(), ReadError> {
+            if is_aa {
+                if end > start {
+                    pieces.push(DeltaSeq::Literal(Segment {
+                        coding: Coding::Ncbieaa,
+                        start: start as u32,
+                        length: (end - start) as u32,
+                    }));
+                }
+                Ok(())
+            } else {
+                add_and_split(pieces, residues, start, end, modulus)
+            }
+        };
+        let gap_pos = |gap: &Gap| gap.position as u64 % modulus;
+        let n = self.gaps.len();
+        if n == 0 || gap_pos(&self.gaps[0]) > 0 {
+            let len = if n > 0 {
+                gap_pos(&self.gaps[0])
+            } else {
+                length
             };
-            add_and_split(&mut pieces, &self.seq_data, 0, end);
+            add(&mut pieces, &self.seq_data, span(0, len))?;
         }
         for i in 0..n {
             let gap = self.gaps[i];
@@ -1394,21 +1602,35 @@ impl RecordState {
                 DeltaSeq::Gap { length: gap.length }
             });
             let next_start = if i == n - 1 {
-                self.seq_data.len()
+                current
             } else {
-                self.gaps[i + 1].position
+                gap_pos(&self.gaps[i + 1])
             };
-            if next_start != gap.position {
-                add_and_split(&mut pieces, &self.seq_data, gap.position, next_start);
+            if next_start != gap_pos(&gap) {
+                let seq_len = (next_start + modulus - gap_pos(&gap)) % modulus;
+                add(&mut pieces, &self.seq_data, span(gap_pos(&gap), seq_len))?;
             }
         }
 
+        if too_long {
+            return Ok((SeqInst::TooLong { length }, is_aa));
+        }
         if let [piece] = pieces[..] {
             let seq_data = match piece {
-                DeltaSeq::Literal(segment) => match segment.coding {
-                    Coding::Ncbi2na => SeqData::Ncbi2na(pack::iupacna_to_ncbi2na(&self.seq_data)),
-                    Coding::Ncbi4na => SeqData::Ncbi4na(pack::iupacna_to_ncbi4na(&self.seq_data)),
-                },
+                DeltaSeq::Literal(segment) => {
+                    debug_assert_eq!(segment.length as usize, self.seq_data.len());
+                    match segment.coding {
+                        Coding::Ncbi2na => {
+                            SeqData::Ncbi2na(pack::iupacna_to_ncbi2na(&self.seq_data))
+                        }
+                        Coding::Ncbi4na => {
+                            SeqData::Ncbi4na(pack::iupacna_to_ncbi4na(&self.seq_data))
+                        }
+                        Coding::Ncbieaa => {
+                            unreachable!("a protein of one literal has no gaps")
+                        }
+                    }
+                }
                 DeltaSeq::LocNull | DeltaSeq::Gap { .. } => SeqData::Other,
             };
             return Ok((SeqInst::Raw { length, seq_data }, is_aa));
@@ -1422,6 +1644,63 @@ impl RecordState {
             },
             is_aa,
         ))
+    }
+
+    /// `AssembleSeq` without `fParseGaps` (protein input, and every input of the mask readers):
+    /// the `>?` gaps become runs of `X` (protein) or `N` (nucleotide), and the record's residues
+    /// are the first `length` letters (`GetCurrentPos` with `ePosWithGaps`) of the string that this
+    /// builds, of which `keep` are stored (`length`, or 0 for a record that ends before its data
+    /// are used). Its letters before a gap are appended where the gap's (wrapped) position is past
+    /// the last one, cut to the residues; an append from a position past them throws
+    /// `std::out_of_range` (`ReadError::OutOfRange`; only past 2^32 residues, two gaps before
+    /// the wrap beyond the residues kept). Only the first `length` letters are stored: NCBI
+    /// reserves `length` and grows the string to all of them, here they are not made (a record
+    /// whose gaps wrap past 2^32 is shorter than its runs).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1386-1424
+    fn substituted(
+        &self,
+        keep: u64,
+        is_aa: bool,
+        warn: ReaderWarn<'_>,
+    ) -> Result<Vec<u8>, ReadError> {
+        let gap_char = if is_aa { b'X' } else { b'N' };
+        let residues = &self.seq_data[..];
+        let size = residues.len() as u64;
+        let mut new_data = Vec::new();
+        new_data
+            .try_reserve_exact(keep as usize)
+            .map_err(|_| ReadError::OutOfMemory)?;
+        let room = |new_data: &Vec<u8>| keep as usize - new_data.len();
+        let mut pos = 0u64;
+        for gap in &self.gaps {
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1393-1410
+            if gap.mods {
+                post_warning(
+                    self.flags.ignored_problems,
+                    Problem::ModifierFoundButNoneExpected,
+                    b"CFastaReader: Gap mods are ignored because gaps are becoming N's or X's in this case.",
+                    warn,
+                );
+            }
+            let gap_pos = gap.position as u64 % self.seq_pos_modulus;
+            if gap_pos > pos {
+                if pos > size {
+                    return Err(ReadError::OutOfRange { pos, size });
+                }
+                let end = gap_pos.min(size) as usize;
+                let take = (end - pos as usize).min(room(&new_data));
+                new_data.extend_from_slice(&residues[pos as usize..pos as usize + take]);
+                pos = gap_pos;
+            }
+            let run = (gap.length as usize).min(room(&new_data));
+            new_data.resize(new_data.len() + run, gap_char);
+        }
+        if size > pos {
+            let take = ((size - pos) as usize).min(room(&new_data));
+            new_data.extend_from_slice(&residues[pos as usize..pos as usize + take]);
+        }
+        Ok(new_data)
     }
 
     /// `ParseTitle`: the reader's warning about residues at the end of a title, and the
@@ -1540,20 +1819,33 @@ pub(crate) fn sequence_type(data: &[u8]) -> Option<bool> {
 }
 
 /// `CDelta_ext::AddAndSplit` of the IUPACna residues `residues[start..end]`: one literal
-/// for each segment of `CSeqConvert::Pack`.
+/// for each segment of `CSeqConvert::Pack`, or `ReadError::PackOverflow` at a segment whose
+/// byte count (`(length + 3) / 4` for NCBI2na, `(length + 1) / 2` for NCBI4na) wraps the
+/// `TSeqPos` (2^32, `modulus`) to 0.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Delta_ext.cpp:141-147,163-164,183-185,201-205
-fn add_and_split(pieces: &mut Vec<DeltaSeq>, residues: &[u8], start: usize, end: usize) {
-    pieces.extend(
-        pack::pack_iupacna(&residues[start..end])
-            .into_iter()
-            .map(|segment| {
-                DeltaSeq::Literal(Segment {
-                    start: segment.start + start as u32,
-                    ..segment
-                })
-            }),
-    );
+fn add_and_split(
+    pieces: &mut Vec<DeltaSeq>,
+    residues: &[u8],
+    start: usize,
+    end: usize,
+    modulus: u64,
+) -> Result<(), ReadError> {
+    for segment in pack::pack_iupacna(&residues[start..end]) {
+        let rounding = match segment.coding {
+            Coding::Ncbi2na => 3,
+            Coding::Ncbi4na => 1,
+            Coding::Ncbieaa => 0,
+        };
+        if u64::from(segment.length) + rounding >= modulus {
+            return Err(ReadError::PackOverflow);
+        }
+        pieces.push(DeltaSeq::Literal(Segment {
+            start: segment.start + start as u32,
+            ..segment
+        }));
+    }
+    Ok(())
 }
 
 /// The warnings of `ParseGapLine` about the modifiers of a `>?` line.
@@ -1668,3 +1960,7 @@ fn gap_mod_warnings(
         && !(evidence.len() == 1 && evidence.contains(&LINKAGE_UNSPECIFIED));
     specified_type || specified_evidence
 }
+
+#[cfg(test)]
+#[path = "reader_tests.rs"]
+mod tests;

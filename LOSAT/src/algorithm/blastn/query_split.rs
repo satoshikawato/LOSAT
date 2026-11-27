@@ -95,11 +95,10 @@ pub struct QueryChunk {
     pub context_offsets: Vec<i32>,
 }
 
-/// The number of query chunks of a batch of `concatenated_query_length` residues, and the
-/// chunk size NCBI then uses.
+/// NCBI's chunk count (`Uint4`) and evened chunk size (`size_t`, 64-bit on every target).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
-pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize) -> (usize, usize) {
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:111-139
+fn num_chunks_and_size(sizes: SplitSizes, concatenated_query_length: usize) -> (u32, u64) {
     let overlap_size = sizes.overlap;
     let length = concatenated_query_length as u64;
     // `num_chunks` is a `Uint4` (split_query_aux_priv.cpp:112).
@@ -108,20 +107,306 @@ pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize)
         num_chunks = (length / (sizes.chunk_size - overlap_size)) as u32;
     }
     if num_chunks <= 1 {
-        return (1, concatenated_query_length);
+        return (1, length);
     }
     let chunks = u64::from(num_chunks);
     let mut chunk_size = length.wrapping_add((chunks - 1).wrapping_mul(overlap_size)) / chunks;
     if chunks < chunk_size.wrapping_sub(overlap_size) {
-        chunk_size += 1;
+        chunk_size = chunk_size.wrapping_add(1);
     }
+    (num_chunks, chunk_size)
+}
+
+/// The number of query chunks of a batch of `concatenated_query_length` residues, and the
+/// chunk size NCBI then uses.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
+pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize) -> (usize, usize) {
+    let (num_chunks, chunk_size) = num_chunks_and_size(sizes, concatenated_query_length);
     (num_chunks as usize, chunk_size as usize)
 }
 
 /// Whether NCBI splits a query batch whose queries have `concatenated_query_length` letters into
 /// chunks (`calculate_num_chunks` gives more than one; `split_query_batch` makes them).
 pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
-    calculate_num_chunks(sizes, concatenated_query_length).0 > 1
+    num_chunks_and_size(sizes, concatenated_query_length).0 > 1
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
+/// LOSAT's refusal of a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE whose wrapped
+/// chunk ranges leave gaps between the chunks of a query batch of `program` (LOSAT's name of it;
+/// decision D13 of PD-LOSAT-NCBI-DEFECTS): NCBI's chunk ranges then wrap, and NCBI searches the
+/// chunks with the hits in the gaps lost (where such a pair leaves a chunk without a query,
+/// `CQuerySplitter::Split` stops first and LOSAT refuses that empty chunk instead). The one text
+/// of BLASTN's, BLASTP's, psiblast's and TBLASTN's gap refusals (BLASTX's chunk size is not evened
+/// again, so its negative pairs always leave chunks without a query).
+pub fn negative_split_refusal(program: &str) -> String {
+    format!(
+        "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s chunk ranges wrapped, which is not supported by LOSAT's {program}"
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:234-249,876-880
+/// LOSAT's refusal of a query chunk that holds no query: `CQuerySplitter::Split` dereferences its
+/// missing query vector (null-pointer `CCoreException`) before any chunk is masked, set up, or
+/// searched. The one text of BLASTN's, BLASTP's, psiblast's and TBLASTN's empty-chunk refusals.
+pub fn empty_chunk_refusal(program: &str) -> String {
+    format!("a query chunk without a query is not supported by LOSAT's {program}")
+}
+
+/// A query chunk of a split batch (`QueryChunk` for BLASTN, `ProteinQueryChunk` for protein
+/// searches): its query parts in query order (`SplitBatchSteps`).
+pub(crate) trait SplitChunk {
+    fn chunk_queries(&self) -> &[ChunkQuery];
+}
+
+impl SplitChunk for QueryChunk {
+    fn chunk_queries(&self) -> &[ChunkQuery] {
+        &self.queries
+    }
+}
+
+/// Whether NCBI's setup of some query chunk would split that chunk again (an overlap close to the
+/// chunk size): each chunk's search builds its own query splitter, and only a debug build asserts
+/// that it does not split; the release build then skips the chunk's lookup table and stops with a
+/// null reference.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
+pub(crate) fn chunk_would_be_split<C: SplitChunk>(chunks: &[C], sizes: SplitSizes) -> bool {
+    chunks.iter().any(|chunk| {
+        let length = chunk
+            .chunk_queries()
+            .iter()
+            .map(|part| part.to - part.from)
+            .sum();
+        num_chunks_and_size(sizes, length).0 > 1
+    })
+}
+
+/// Where the preliminary search of a query chunk first fails to read a `-db` database
+/// (`SplitBatchSteps`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadFails {
+    /// In its setup, before its Karlin-Altschul check: the length of OID 0, which the setup reads
+    /// where the statistics' total is not positive, of volumes without an OID (blast_setup.c:
+    /// 925-937, cited at `SplitBatchSteps`). Any chunk that NCBI does not split again meets it,
+    /// before the setup checks of its batch, as does a batch searched whole.
+    Setup,
+    /// In the search: the first chunk with a valid context that NCBI searches meets it, at the
+    /// first read of a sequence (a sequence file that cannot be opened). TBLASTN also gives this
+    /// kind to the subject-length error of its stores check (not a read), which the chunk's own
+    /// setup checks meet first with the same text.
+    Search,
+}
+
+/// A failed setup check of a split batch (`SplitBatchSteps::new`), as its program makes it: NCBI's
+/// engine error of the setup (the subject length, the hit-saving parameters), which the
+/// traceback's own setup of a batch whose chunks found nothing meets as `Traceback failed`
+/// (`UnmetChecks::TracebackFailed`), or LOSAT's refusal there (a count of 0,
+/// `common::database::check_setup_count`, or BLASTN's greedy setup refusal), which stays the
+/// refusal.
+#[derive(Debug)]
+pub(crate) enum SetupCheckFailure {
+    Engine(anyhow::Error),
+    Refusal(anyhow::Error),
+}
+
+impl SetupCheckFailure {
+    /// The error that the first chunk with a valid context meets (`SplitBatchSteps::before_read`).
+    pub(crate) fn into_error(self) -> anyhow::Error {
+        match self {
+            SetupCheckFailure::Engine(error) | SetupCheckFailure::Refusal(error) => error,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:233-252 (cited at
+// `SplitBatchSteps`)
+/// The setup checks that no chunk with a valid context of a split batch met, as the traceback's
+/// own setup of the batch meets them after the last chunk (`SplitBatchSteps::unmet_checks`).
+#[derive(Debug)]
+pub(crate) enum UnmetChecks {
+    /// NCBI's engine error `Traceback failed` (`blastinput::app::TRACEBACK_FAILED`, exit status 3),
+    /// which the caller makes in its program's form of an engine error of the setup.
+    TracebackFailed,
+    /// LOSAT's refusal of the checks (a count of 0, or BLASTN's greedy setup refusal).
+    Refusal(anyhow::Error),
+}
+
+/// Where a chunk of a split batch goes after `SplitBatchSteps::before_read`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChunkStep {
+    /// The chunk's search reads the subjects.
+    Read,
+    /// The chunk finds nothing: none of its contexts is valid.
+    Skip,
+    /// The stage ends: NCBI's read of the database fails here (`ReadFails`).
+    End,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-290
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171,234-249,876-880
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_search_runner.hpp:71-77
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-982
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1832-1836
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:202-240
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:233-252
+/// What NCBI's search of a split query batch meets before the search of each chunk reads the
+/// subjects, in NCBI's order (2.17.0 probes of line RG items X-short-bat, fix round 3, X-bpgap
+/// and X-chunk): one owner for BLASTN's, BLASTP's, psiblast's and TBLASTN's searches of a split
+/// batch, for the set-up of a batch without its search, and for where the failures of a call's
+/// setup come when a split batch meets them first. Each stop is LOSAT's refusal in the program's
+/// form (`stop`: BLASTN's and TBLASTN's `blastinput::app::ErrorAfterBatchReports`, BLASTP's batch
+/// failure, psiblast's plain error); each error of NCBI's setup is that program's error there.
+/// - `new`: the query splitter makes the query factory of every chunk first and dereferences the
+///   missing query vector of a chunk that no query reaches (a null pointer), before any chunk is
+///   set up. This is where a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE (NCBI's
+///   `size_t` chunk ranges wrap) whose first range covers the batch or whose start reaches the
+///   batch end stops, and a positive pair whose evened chunk size falls below or equals the
+///   overlap at batch length at most the overlap (the start wraps or stops after chunk 0).
+/// - `before_read`, chunk by chunk after the chunk's setup: unless `without_resplit_stop` skips
+///   it for BLASTN (approved exception 1 of PD-LOSAT-NCBI-DEFECTS), the setup of a chunk that
+///   would be split again makes no lookup table, which the chunk's search dereferences whether or
+///   not its contexts are valid, after the chunks before it were searched; then the setup of the
+///   chunk's preliminary search reads the length of OID 0 where the statistics' total is not
+///   positive (`ReadFails::Setup`), checks the Karlin-Altschul blocks (a chunk without a valid
+///   context ends there: NCBI ignores its error), then the subject length, hit-saving parameters
+///   and greedy setup (the batch's setup checks, once: they are the same for every chunk); then
+///   the chunk's search reads the subjects, where a read of the database that fails ends the stage
+///   (`ReadFails::Search`).
+/// - `before_search`, where the chunk's search would read the subjects: the wrapped ranges of a
+///   negative pair that leave no chunk without a query leave gaps between the chunks (a chunk is
+///   then never split again), which NCBI searches on with the hits in the gaps lost, a setting the
+///   maintainer kept refused (PD-LOSAT-NCBI-DEFECTS version 1.1, D13). It is refused at the first
+///   chunk with a valid context with subjects in hand; without one nothing is lost, and the batch
+///   is reported as NCBI's.
+/// - `unmet_checks`, after the last chunk: the setup checks that no chunk with a valid context met
+///   (each chunk without one), which the traceback's own setup of the whole batch meets, NCBI's
+///   `Traceback failed` (exit status 3) after the batch's preliminary search found nothing
+///   (`UnmetChecks`: the one owner of that error of BLASTN's, BLASTP's, psiblast's and TBLASTN's).
+pub(crate) struct SplitBatchSteps<'s> {
+    program: &'static str,
+    sizes: SplitSizes,
+    /// Whether a chunk that NCBI's setup would split again stops the batch (`before_read`): true
+    /// for BLASTP, psiblast and TBLASTN; false for BLASTN (approved exception 1 of
+    /// PD-LOSAT-NCBI-DEFECTS).
+    check_resplit: bool,
+    read_fails: Option<ReadFails>,
+    /// The batch's setup checks, until the first chunk with a valid context meets them.
+    setup_checks: Option<Result<(), SetupCheckFailure>>,
+    stop: &'s dyn Fn(anyhow::Error) -> anyhow::Error,
+}
+
+impl<'s> SplitBatchSteps<'s> {
+    /// The steps of `program`'s batch split into `chunks` by `sizes`, with the database's read
+    /// failure `read_fails`, the batch's setup checks `setup_checks` and the program's form of a
+    /// stop `stop`; a chunk without a query stops the batch here.
+    pub(crate) fn new<C: SplitChunk>(
+        program: &'static str,
+        chunks: &[C],
+        sizes: SplitSizes,
+        read_fails: Option<ReadFails>,
+        setup_checks: Result<(), SetupCheckFailure>,
+        stop: &'s dyn Fn(anyhow::Error) -> anyhow::Error,
+    ) -> anyhow::Result<Self> {
+        // `split_query_batch` / `split_protein_batch` makes no part for a chunk that no query
+        // reaches.
+        if chunks.iter().any(|chunk| chunk.chunk_queries().is_empty()) {
+            return Err(stop(anyhow::Error::msg(empty_chunk_refusal(program))));
+        }
+        Ok(Self {
+            program,
+            sizes,
+            check_resplit: true,
+            read_fails,
+            setup_checks: Some(setup_checks),
+            stop,
+        })
+    }
+
+    /// Skips the re-split stop in `before_read`: BLASTN searches a chunk that NCBI's setup would
+    /// split again once (approved exception 1 of PD-LOSAT-NCBI-DEFECTS).
+    pub(crate) fn without_resplit_stop(mut self) -> Self {
+        self.check_resplit = false;
+        self
+    }
+
+    /// The steps of `chunk` after its setup (`valid`: whether a context of it is valid) and before
+    /// its search reads the subjects.
+    pub(crate) fn before_read<C: SplitChunk>(
+        &mut self,
+        chunk: &C,
+        valid: bool,
+    ) -> anyhow::Result<ChunkStep> {
+        if self.check_resplit && chunk_would_be_split(std::slice::from_ref(chunk), self.sizes) {
+            return Err((self.stop)(anyhow::anyhow!(
+                "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's {}",
+                self.program
+            )));
+        }
+        if self.read_fails == Some(ReadFails::Setup) {
+            return Ok(ChunkStep::End);
+        }
+        if !valid {
+            return Ok(ChunkStep::Skip);
+        }
+        if let Some(checks) = self.setup_checks.take() {
+            checks.map_err(SetupCheckFailure::into_error)?;
+        }
+        if self.read_fails.is_some() {
+            return Ok(ChunkStep::End);
+        }
+        Ok(ChunkStep::Read)
+    }
+
+    /// Whether `before_search` can refuse with subjects in hand (`subjects_in_hand`): only then
+    /// does a caller whose chunks' searches find their own validity need it before the search.
+    pub(crate) fn gap_step_pending(&self, subjects_in_hand: bool) -> bool {
+        subjects_in_hand && self.sizes.negative_chunk_size()
+    }
+
+    /// The step of a chunk that `before_read` reads, where its search would read the subjects
+    /// (`subjects_in_hand`: whether there is one): D13's refusal of the gaps.
+    pub(crate) fn before_search(&self, subjects_in_hand: bool) -> anyhow::Result<()> {
+        if self.gap_step_pending(subjects_in_hand) {
+            return Err((self.stop)(anyhow::Error::msg(negative_split_refusal(
+                self.program,
+            ))));
+        }
+        Ok(())
+    }
+
+    /// After the last chunk: the batch's setup checks that no chunk with a valid context met, which
+    /// the traceback's own setup of the batch meets: NCBI's `Traceback failed` for an engine error
+    /// of the setup, and a refusal (a count of 0, or BLASTN's greedy setup refusal) stays one.
+    pub(crate) fn unmet_checks(&mut self) -> Option<UnmetChecks> {
+        match self.setup_checks.take()? {
+            Ok(()) => None,
+            Err(SetupCheckFailure::Engine(_)) => Some(UnmetChecks::TracebackFailed),
+            Err(SetupCheckFailure::Refusal(refusal)) => Some(UnmetChecks::Refusal(refusal)),
+        }
+    }
+}
+
+/// Whether NCBI's search of a split batch gets to a read of the subjects (`ChunkStep::Read` or
+/// `End`) with the steps `steps` of its chunks `chunks`, `valid` saying whether a context of a
+/// chunk is valid: the set-up of a batch without its search, and where a failure of a call's setup
+/// comes. `false`: every chunk finds nothing (`SplitBatchSteps::unmet_checks` then holds the
+/// traceback's error).
+pub(crate) fn split_batch_reaches_read<C: SplitChunk>(
+    steps: &mut SplitBatchSteps<'_>,
+    chunks: &[C],
+    mut valid: impl FnMut(&C) -> anyhow::Result<bool>,
+) -> anyhow::Result<bool> {
+    for chunk in chunks {
+        let valid = valid(chunk)?;
+        match steps.before_read(chunk, valid)? {
+            ChunkStep::Skip => continue,
+            ChunkStep::Read | ChunkStep::End => return Ok(true),
+        }
+    }
+    Ok(false)
 }
 
 /// The query chunks of a batch with queries of `lengths` residues, or `None` when NCBI
@@ -130,9 +415,11 @@ pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
 /// The chunk ranges on the concatenated queries:
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
-/// A chunk the loop leaves unset keeps the empty range of `SSplitQueryBlkNew`, and has no
-/// query (NCBI then fails to make its query factory, "Empty CBlastQueryVector"); the chunk
-/// size of `calculate_num_chunks` leaves none.
+/// A chunk the loop leaves unset (or gives an empty range at the batch's end) keeps no query,
+/// and NCBI's `CQuerySplitter::Split` then fails to make its query factory with a null-pointer
+/// `CCoreException` before any chunk is set up (an evened chunk size below or equal to a positive
+/// overlap when the batch is no longer than the overlap, or a negative pair whose wrapped range
+/// covers or reaches the batch's end before the last chunk).
 ///
 /// The queries of a chunk, and their parts in it:
 ///
@@ -152,32 +439,43 @@ pub fn split_query_batch(
     strand: QueryStrand,
 ) -> Option<Vec<QueryChunk>> {
     let total_length: usize = lengths.iter().sum();
-    let (num_chunks, chunk_size) = calculate_num_chunks(sizes, total_length);
+    let (num_chunks, chunk_size) = num_chunks_and_size(sizes, total_length);
     if num_chunks <= 1 {
         return None;
     }
-    // A split needs `chunk_size > overlap`, so the overlap is an ordinary `int` value here.
-    let overlap_size = sizes.overlap as usize;
+    let total_length_u64 = total_length as u64;
+    let num_chunks_usize = num_chunks as usize;
+    // NCBI's 64-bit `size_t` overlap: near 2^64 for a negative OVERLAP_CHUNK_SIZE (which splits a
+    // batch only below a negative CHUNK_SIZE). Keeping the loop in `u64` preserves that wrap on
+    // 32-bit targets too.
+    let overlap_size = sizes.overlap;
 
-    let mut chunk_ranges = vec![(0usize, 0usize); num_chunks];
-    let mut chunk_start = 0usize;
+    let mut chunk_ranges = vec![(0u64, 0u64); num_chunks_usize];
+    let mut chunk_start = 0u64;
     for (chunk_num, range) in chunk_ranges.iter_mut().enumerate() {
-        let mut chunk_end = chunk_start + chunk_size;
-        if chunk_end >= total_length || chunk_num + 1 == num_chunks {
-            chunk_end = total_length;
+        let mut chunk_end = chunk_start.wrapping_add(chunk_size);
+        if chunk_end >= total_length_u64 || chunk_num + 1 == num_chunks_usize {
+            chunk_end = total_length_u64;
         }
         *range = (chunk_start, chunk_end);
-        chunk_start += chunk_size - overlap_size;
-        if chunk_start > total_length || chunk_end == total_length {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:166-170
+        // An evened chunk size below a positive overlap wraps the start past the queries' length at
+        // the first chunk (the loop ends, the chunks after it keep no query); an evened chunk size
+        // equal to the overlap with total length equal to the overlap hits `chunk_end == total` and
+        // ends after chunk 0; a negative overlap moves the start by the chunk size plus the
+        // overlap's magnitude (gaps between chunks, or past/at the batch's end leaving empty chunks).
+        chunk_start = chunk_start.wrapping_add(chunk_size.wrapping_sub(overlap_size));
+        if chunk_start > total_length_u64 || chunk_end == total_length_u64 {
             break;
         }
     }
 
     let mut query_ranges = Vec::with_capacity(lengths.len());
-    let mut query_start = 0usize;
+    let mut query_start = 0u64;
     for &length in lengths {
-        query_ranges.push((query_start, query_start + length));
-        query_start += length;
+        let len = length as u64;
+        query_ranges.push((query_start, query_start + len));
+        query_start += len;
     }
 
     let mut chunks: Vec<QueryChunk> = chunk_ranges
@@ -193,9 +491,9 @@ pub fn split_query_batch(
                 let qend = chunk_to as i64 - query_to as i64;
                 let from = qstart.max(0) as usize;
                 let to = if qend >= 0 {
-                    query_to - query_from
+                    (query_to - query_from) as usize
                 } else {
-                    chunk_to - query_from
+                    (chunk_to - query_from) as usize
                 };
                 queries.push(ChunkQuery { query, from, to });
                 let (plus, minus) = strand.searched();
@@ -210,8 +508,9 @@ pub fn split_query_batch(
         })
         .collect();
 
+    let overlap_usize = usize::try_from(overlap_size).unwrap_or(usize::MAX);
     let offsets: Vec<Vec<i32>> = (0..chunks.len())
-        .map(|chunk_num| context_offsets(&chunks, chunk_num, lengths, overlap_size))
+        .map(|chunk_num| context_offsets(&chunks, chunk_num, lengths, overlap_usize))
         .collect();
     for (chunk, offsets) in chunks.iter_mut().zip(offsets) {
         chunk.context_offsets = offsets;

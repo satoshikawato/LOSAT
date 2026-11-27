@@ -14,12 +14,36 @@ fn the_encoders_refusal_gets_no_error_archive() {
     assert!(archive::error_lines(&engine_error, false).is_some());
 }
 
+/// Line RG T3c review 3 N4: an internal error of a formatter carried as an `io::Error`
+/// (`report::query_anchored::internal`) is LOSAT's own error, not NCBI's "BLAST failed to
+/// write output" (exit status 6): that is the report stream's failure alone
+/// (`ReportStream::finish`), which passes through.
+#[test]
+fn only_the_report_streams_failure_is_the_output_error() {
+    let internal = report_error(
+        io::Error::other("LOSAT internal error: a query-anchored segment without a row").into(),
+    );
+    assert!(internal.downcast_ref::<NativeError>().is_none());
+    assert!(internal.downcast_ref::<io::Error>().is_some());
+    let stream =
+        report_error(io::Error::other(crate::report::ostream::ReportWriteFailure::thrown()).into());
+    assert!(stream
+        .downcast_ref::<io::Error>()
+        .is_some_and(crate::report::ostream::is_report_write_failure));
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 (the
 // subjects' `GetAllSeqs` turns `eNoDefline` into a `CInputException`; its text ends with the
 // NUL of `ends`, which the error archive does not keep); a query keeps the reader's error.
 #[test]
 fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
-    let subject = subject_input_error(NoDeflineError(4).into());
+    use crate::blastinput::fasta_reader::{ParseErrorCode, ReadError};
+    let no_defline = |message: &str| ReadError::Parse {
+        code: ParseErrorCode::NoDefline,
+        message: message.to_string(),
+        line: 4,
+    };
+    let subject = no_defline("").into_all_seqs_error();
     let native = subject.downcast_ref::<NativeError>().unwrap();
     assert_eq!(
         (native.exit, native.message.as_slice()),
@@ -44,7 +68,9 @@ fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
             b"Please refer to the LOSAT user manual.".to_vec(),
         ]
     );
-    let query = input_error(NoDeflineError(4).into());
+    let query =
+        no_defline("CFastaReader: Input doesn't start with a defline or comment around line 4")
+            .into_app_error();
     let native = query.downcast_ref::<NativeError>().unwrap();
     assert_eq!(
         (native.exit, native.message.as_slice()),
@@ -56,7 +82,12 @@ fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
         )
     );
     // Every other reader error of the subjects is the reader's (`BLAST query error`).
-    let other = subject_input_error(FastaParseError("CFastaReader: x".into()).into());
+    let other = ReadError::Parse {
+        code: ParseErrorCode::Format,
+        message: "CFastaReader: x".to_string(),
+        line: 1,
+    }
+    .into_all_seqs_error();
     assert_eq!(
         other.downcast_ref::<NativeError>().unwrap().message,
         b"LOSAT query error: CFastaReader: x\n"
@@ -174,12 +205,12 @@ fn the_sorthits_refusal_is_not_a_write_failure() {
     assert_eq!(error.chain().count(), 1);
     // Without `-sorthits` the table is written (the score column takes the total's width).
     assert!(write(None).is_ok());
-    // An error of the output stream stays NCBI's write failure.
-    let failure = report_error(io::Error::other("disk full").into());
-    assert_eq!(
-        failure.downcast_ref::<NativeError>().map(|e| e.exit),
-        Some(6)
-    );
+    // The output stream's failure stays the stream's (NCBI's end, `ReportStream::finish`).
+    let failure =
+        report_error(io::Error::other(crate::report::ostream::ReportWriteFailure::thrown()).into());
+    assert!(failure
+        .downcast_ref::<io::Error>()
+        .is_some_and(crate::report::ostream::is_report_write_failure));
 }
 
 // Line DBID pfoff-1: `CATCH_ALL`'s report of a `CSeqDBException` that an outfmt 13 or 14

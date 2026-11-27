@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::Path;
 
 use super::build_db::VOLUME_EXTENSIONS;
-use super::ofstream::OfStream;
+use super::ofstream::{BasicStream, IoState, OfStream, StreamBuf, IOS_FAILURE_WHAT};
 
 /// `CBlast_db_metadata` (`c++/src/objects/blastdb/blastdb.asn:79-97`) as makeblastdb fills it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,13 +77,15 @@ pub(crate) trait JsonOut {
     fn dec_indent_level(&mut self);
 }
 
-/// The bytes of the serialized object.
+/// The bytes of the serialized object (the tests' view of the document).
+#[cfg(test)]
 #[derive(Debug, Default)]
 pub(crate) struct JsonText {
     pub(crate) bytes: Vec<u8>,
     indent_level: usize,
 }
 
+#[cfg(test)]
 impl JsonOut for JsonText {
     type Error = std::convert::Infallible;
     fn put_char(&mut self, c: u8) -> Result<(), Self::Error> {
@@ -185,6 +187,7 @@ impl DbMetadata {
     }
 
     /// The bytes of the metadata file: the object and the line feed of `NcbiEndl`.
+    #[cfg(test)]
     pub(crate) fn to_json(&self) -> Vec<u8> {
         let mut text = JsonText {
             bytes: Vec::with_capacity(512 + 32 * self.files.len()),
@@ -230,29 +233,29 @@ fn file_length(path: impl AsRef<Path>) -> Option<i64> {
 /// file's name is the bytes of the volume's header (`lmdb_file_names`), which need not be
 /// UTF-8; NCBI finds, counts and lists the files of such a name (line LIB-B).
 pub(crate) fn db_files_metadata(
-    volumes: &[String],
-    alias_files: &[String],
+    volumes: &[Vec<u8>],
+    alias_files: &[Vec<u8>],
     lmdbs: &[std::path::PathBuf],
     is_protein: bool,
-    user_path: &str,
+    user_path: &[u8],
 ) -> (i64, i64, Vec<Vec<u8>>) {
-    use crate::utils::os_bytes::{path_bytes, path_from_bytes};
+    use crate::utils::os_bytes::{path_bytes, path_from_bytes, path_of_bytes};
     let mut db_files = Vec::new();
     let mut disk_bytes = 0i64;
     let mut cached_bytes = 0i64;
-    let listed = |name: &[u8]| [user_path.as_bytes(), file_name(name)].concat();
+    let listed = |name: &[u8]| [user_path, file_name(name)].concat();
     for alias in alias_files {
-        if let Some(length) = file_length(alias) {
-            db_files.push(listed(alias.as_bytes()));
+        if let Some(length) = file_length(path_of_bytes(alias)) {
+            db_files.push(listed(alias));
             disk_bytes += length;
         }
     }
     let mol = if is_protein { 'p' } else { 'n' };
     for path in volumes {
         for ext in VOLUME_EXTENSIONS {
-            let file = format!("{path}.{mol}{ext}");
-            if let Some(length) = file_length(&file) {
-                db_files.push(listed(file.as_bytes()));
+            let file = [path.as_slice(), format!(".{mol}{ext}").as_bytes()].concat();
+            if let Some(length) = file_length(path_of_bytes(&file)) {
+                db_files.push(listed(&file));
                 disk_bytes += length;
                 if ext == "in" || ext == "sq" {
                     cached_bytes += length;
@@ -289,10 +292,11 @@ pub(crate) fn db_files_metadata(
 /// empty without the option. makeblastdb 2.17.0 writes the value before each name of `files`
 /// (`x`, `/data/blast/`, a quote, a backslash, a tab, UTF-8, escaped as the JSON of every
 /// string), and an empty value adds nothing (line RG item D3a probes `P_*`).
-pub(crate) fn metadata_user_path(prefix: Option<&str>) -> String {
-    let mut user_path = prefix.unwrap_or("").to_string();
-    if !user_path.is_empty() && !user_path.ends_with(std::path::MAIN_SEPARATOR) {
-        user_path.push(std::path::MAIN_SEPARATOR);
+pub(crate) fn metadata_user_path(prefix: Option<&[u8]>) -> Vec<u8> {
+    let mut user_path = prefix.unwrap_or_default().to_vec();
+    let separator = std::path::MAIN_SEPARATOR as u8;
+    if !user_path.is_empty() && user_path.last() != Some(&separator) {
+        user_path.push(separator);
     }
     user_path
 }
@@ -313,6 +317,22 @@ pub(crate) struct IoException {
     pub(crate) msg: &'static str,
 }
 
+/// What a call of the serializer's buffer throws: its `CIOException`, or the `ios_base::failure`
+/// of an output stream set to throw on `badbit` (`BasicStream::set_exceptions`, blast_formatter's
+/// `-out`), thrown by the stream's write or flush before the buffer looks at the state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BufferError {
+    Io(IoException),
+    /// `ios_base::failure`, whose `what()` is `IOS_FAILURE_WHAT`.
+    Stream,
+}
+
+impl From<IoException> for BufferError {
+    fn from(exception: IoException) -> Self {
+        BufferError::Io(exception)
+    }
+}
+
 impl IoException {
     /// `GetType()`, then `"::"`, then `GetErrCodeString()`.
     fn type_and_code(&self) -> &'static str {
@@ -324,13 +344,16 @@ impl IoException {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:46,783-795
-// The JSON writer sets no back limit and no cancel callback, and makeblastdb gives it the
-// stream without ownership (`eNoOwnership`). The line count and line length serve the
+// The JSON writer sets no back limit and no cancel callback, and makeblastdb and blastdbcmd give
+// it the stream without ownership (`eNoOwnership`). The line count and line length serve the
 // line positions and the wrapping of other formats; they write nothing here.
-/// `COStreamBuffer` over the metadata file's `ofstream`.
-pub(crate) struct OStreamBuffer<'a> {
+/// `COStreamBuffer` over the stream the metadata goes to: makeblastdb's metadata file
+/// (`OfStream`), blastdbcmd's `-out` file or standard output (`super::cout`); and over
+/// blast_formatter's `-out` (`blast_formatter::archive`, a Seq-annot's bytes through
+/// `write_bytes`).
+pub(crate) struct OStreamBuffer<'a, B: StreamBuf> {
     /// `m_Output`.
-    output: &'a mut OfStream,
+    output: &'a mut BasicStream<B>,
     /// `m_Closed`.
     closed: bool,
     /// `m_Error`.
@@ -345,8 +368,8 @@ pub(crate) struct OStreamBuffer<'a> {
     current: usize,
 }
 
-impl<'a> OStreamBuffer<'a> {
-    pub(crate) fn new(output: &'a mut OfStream) -> Self {
+impl<'a, B: StreamBuf> OStreamBuffer<'a, B> {
+    pub(crate) fn new(output: &'a mut BasicStream<B>) -> Self {
         Self {
             output,
             closed: false,
@@ -359,7 +382,7 @@ impl<'a> OStreamBuffer<'a> {
     }
 
     /// `m_Output`.
-    pub(crate) fn output(&mut self) -> &mut OfStream {
+    pub(crate) fn output(&mut self) -> &mut BasicStream<B> {
         self.output
     }
 
@@ -373,14 +396,14 @@ impl<'a> OStreamBuffer<'a> {
     // NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:283-312
     // `DoSkip` (strbuffer.inl:273-281) is `DoReserve` and the same advance.
     /// `Skip` of `count`: the position of the `count` bytes taken.
-    fn skip(&mut self, count: usize) -> Result<usize, IoException> {
+    fn skip(&mut self, count: usize) -> Result<usize, BufferError> {
         let pos = self.reserve(count)?;
         self.current = pos + count;
         Ok(pos)
     }
 
     /// `Reserve(count)`: the position where `count` bytes fit.
-    fn reserve(&mut self, count: usize) -> Result<usize, IoException> {
+    fn reserve(&mut self, count: usize) -> Result<usize, BufferError> {
         if self.current + count <= self.buffer.len() {
             Ok(self.current)
         } else {
@@ -390,7 +413,7 @@ impl<'a> OStreamBuffer<'a> {
 
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:921-948
     // `BiggerBufferSize` doubles (strbuffer.cpp:48-52).
-    fn do_reserve(&mut self, count: usize) -> Result<usize, IoException> {
+    fn do_reserve(&mut self, count: usize) -> Result<usize, BufferError> {
         self.flush_buffer(false)?;
         let need_size = self.current + count;
         let mut buffer_size = self.buffer.len();
@@ -406,16 +429,20 @@ impl<'a> OStreamBuffer<'a> {
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:871-907
     // With no back limit, both forms write all the buffer holds. A failed write keeps it there.
     /// `FlushBuffer` with `fullBuffer`.
-    fn flush_buffer(&mut self, _full_buffer: bool) -> Result<(), IoException> {
+    fn flush_buffer(&mut self, _full_buffer: bool) -> Result<(), BufferError> {
         let count = self.current;
         if count != 0 {
             self.output.write(&self.buffer[..count]);
+            if self.output.take_thrown() {
+                return Err(BufferError::Stream);
+            }
             if self.output.fail() {
                 self.error = Some("write fault");
                 return Err(IoException {
                     code: IoErrCode::Write,
                     msg: "write fault",
-                });
+                }
+                .into());
             }
             self.current = 0;
             self.buffer_pos += count as u64;
@@ -424,36 +451,76 @@ impl<'a> OStreamBuffer<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:813-837,910-918
-    // `eFlush` sets no `m_Error`.
+    // `eFlush` sets no `m_Error`. The guard's destructor restores the state and catches the
+    // `ios_base::failure` of a stream that throws on it.
     /// `Flush()`.
-    pub(crate) fn flush(&mut self) -> Result<(), IoException> {
+    pub(crate) fn flush(&mut self) -> Result<(), BufferError> {
         let state = self.output.rdstate();
-        self.output.clear(super::ofstream::IoState::GOOD);
+        self.output.clear(IoState::GOOD);
         let result = self.flush_buffer(true).and_then(|()| {
             self.output.flush();
-            if self.output.fail() {
+            if self.output.take_thrown() {
+                Err(BufferError::Stream)
+            } else if self.output.fail() {
                 Err(IoException {
                     code: IoErrCode::Flush,
                     msg: "COStreamBuffer::Flush: failed",
-                })
+                }
+                .into())
             } else {
                 Ok(())
             }
         });
-        self.output.setstate(state);
+        self.restore_state(state);
         result
+    }
+
+    /// The destructor of `STemporarilyClearStreamState`: `setstate` of the state it saved, whose
+    /// `ios_base::failure` it catches.
+    fn restore_state(&mut self, state: IoState) {
+        self.output.setstate(state);
+        let _ = self.output.take_thrown();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1143-1161
+    /// `Write` of the bytes `data`: the buffer filled up and flushed whenever it is full, without
+    /// growing it.
+    pub(crate) fn write_bytes(&mut self, mut data: &[u8]) -> Result<(), BufferError> {
+        while !data.is_empty() {
+            let mut available = self.buffer.len() - self.current;
+            if available == 0 {
+                self.flush_buffer(false)?;
+                available = self.buffer.len() - self.current;
+            }
+            if available >= data.len() {
+                break;
+            }
+            let (now, rest) = data.split_at(available);
+            self.buffer[self.current..self.current + available].copy_from_slice(now);
+            self.current += available;
+            data = rest;
+        }
+        self.buffer[self.current..self.current + data.len()].copy_from_slice(data);
+        self.current += data.len();
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:559-564
+    /// `EndOfWrite`'s `FlushBuffer`: what the buffer holds goes to the stream.
+    pub(crate) fn end_of_write(&mut self) -> Result<(), BufferError> {
+        self.flush_buffer(true)
     }
 
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:843-862
     // `m_Output` as a condition is true while the stream's `fail()` is false.
     /// `Close()`.
-    fn close(&mut self) -> Result<(), IoException> {
+    fn close(&mut self) -> Result<(), BufferError> {
         if !self.closed && !self.output.fail() {
             self.closed = true;
             let state = self.output.rdstate();
-            self.output.clear(super::ofstream::IoState::GOOD);
+            self.output.clear(IoState::GOOD);
             let result = self.flush_buffer(true);
-            self.output.setstate(state);
+            self.restore_state(state);
             result?;
         }
         self.error = None;
@@ -467,19 +534,19 @@ impl<'a> OStreamBuffer<'a> {
 // `IncIndentLevel` and `DecIndentLevel` step by 2 (strbuffer.hpp:244-245). The strings of the
 // metadata object are written byte by byte (`x_WriteString`); `PutString` gets the numbers
 // and the escapes, all shorter than 1024 bytes.
-impl JsonOut for OStreamBuffer<'_> {
-    type Error = IoException;
-    fn put_char(&mut self, c: u8) -> Result<(), IoException> {
+impl<B: StreamBuf> JsonOut for OStreamBuffer<'_, B> {
+    type Error = BufferError;
+    fn put_char(&mut self, c: u8) -> Result<(), BufferError> {
         let pos = self.skip(1)?;
         self.buffer[pos] = c;
         Ok(())
     }
-    fn put_string(&mut self, s: &[u8]) -> Result<(), IoException> {
+    fn put_string(&mut self, s: &[u8]) -> Result<(), BufferError> {
         let pos = self.skip(s.len())?;
         self.buffer[pos..pos + s.len()].copy_from_slice(s);
         Ok(())
     }
-    fn put_eol(&mut self) -> Result<(), IoException> {
+    fn put_eol(&mut self) -> Result<(), BufferError> {
         let pos = self.reserve(1)?;
         self.buffer[pos] = b'\n';
         self.current = pos + 1;
@@ -500,13 +567,23 @@ impl JsonOut for OStreamBuffer<'_> {
 const F_WRITE_ERROR: u32 = 1 << 1;
 const F_NOT_OPEN: u32 = 1 << 7;
 
-/// The parts of `CObjectOStreamJson` (`CObjectOStream`) that act on its stream after the
-/// object is written: the fail flags and the close of its destructor.
-struct ObjectOStream<'a> {
+/// The parts of `CObjectOStream` that act on its stream after the object is written: the fail
+/// flags and the close of its destructor, with the posts of the application's diagnostic prefix
+/// `prefix` (makeblastdb's and blastdbcmd's `[program] `; blast_formatter's posts have none).
+pub(crate) struct ObjectOStream<'a, B: StreamBuf> {
     /// `m_Output`.
-    output: OStreamBuffer<'a>,
+    pub(crate) output: OStreamBuffer<'a, B>,
     /// `m_Fail`.
     fail: u32,
+    /// `SetDiagPostPrefix` of the application.
+    prefix: Option<&'static str>,
+}
+
+/// What `CObjectOStream::Close` throws: the `CSerialException` of its handler, or an exception
+/// that is not a `CException` (the stream's `ios_base::failure`), which its handler lets through.
+enum Closed {
+    Serial(SerialException),
+    Stream,
 }
 
 /// The `CSerialException` that `ThrowError1` throws over the exception it was given.
@@ -516,26 +593,39 @@ struct SerialException {
     predecessor: IoException,
 }
 
-impl ObjectOStream<'_> {
+impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
+    pub(crate) fn new(output: OStreamBuffer<'a, B>, prefix: Option<&'static str>) -> Self {
+        ObjectOStream {
+            output,
+            fail: 0,
+            prefix,
+        }
+    }
+
+    /// The prefix of the posts: `[<prefix>] `, or nothing.
+    fn tag(&self) -> String {
+        self.prefix.map(|p| format!("[{p}] ")).unwrap_or_default()
+    }
+
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384,495-513
     // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-84
     // NCBI reference (598d8ae6): c++/include/serial/error_codes.hpp:46
     // Every call here comes from the close in the destructor: the frames of the object are
     // gone (an exception pops them on its way out), and in a base class's destructor the
     // virtual `GetPosition` is `CObjectOStream`'s, the byte position, not the line position
-    // of `CObjectOStreamJson`. makeblastdb's diagnostics are "Severity: (code.subcode)
-    // [makeblastdb] text".
+    // of `CObjectOStreamJson`. The diagnostics are "Severity: (code.subcode) [program] text"
+    // (blast_formatter's have no prefix).
     /// `SetFailFlags` with `flags` and a message.
     fn set_fail_flags(&mut self, flags: u32, message: &str, err: &mut dyn Write) {
         let old = self.fail;
         self.fail |= flags;
         if old == 0 && flags != 0 {
-            let _ = writeln!(
-                err,
-                "Error: (802.5) [makeblastdb] CObjectOStream: error at byte {}: stack is empty: \
-                 {message}",
+            let line = format!(
+                "Error: (802.5) {}CObjectOStream: error at byte {}: stack is empty: {message}",
+                self.tag(),
                 self.output.stream_pos()
             );
+            self.post(err, &line, false);
         }
     }
 
@@ -572,17 +662,21 @@ impl ObjectOStream<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:327-355
+    // The handler takes `CException`s only: the stream's `ios_base::failure` leaves `Close`.
     /// `Close()`.
-    fn close(&mut self, err: &mut dyn Write) -> Result<(), SerialException> {
+    fn close(&mut self, err: &mut dyn Write) -> Result<(), Closed> {
         if self.fail != F_NOT_OPEN {
             let result = self.output.flush().and_then(|()| {
                 self.fail = F_NOT_OPEN;
                 self.output.close()
             });
-            if let Err(exc) = result {
-                if self.in_good_state(err) {
-                    return Err(self.rethrow_write_error("cannot close output stream", exc, err));
+            match result {
+                Err(BufferError::Io(exc)) if self.in_good_state(err) => {
+                    let exc = self.rethrow_write_error("cannot close output stream", exc, err);
+                    return Err(Closed::Serial(exc));
                 }
+                Err(BufferError::Stream) => return Err(Closed::Stream),
+                _ => {}
             }
         }
         Ok(())
@@ -596,29 +690,32 @@ impl ObjectOStream<'_> {
     // of the report itself ("title" and the newest exception). The predecessor of the
     // `CSerialException` is the `CIOException` of the failed flush, which has no predecessor
     // of its own; neither has extra text (`ReportExtra`).
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:626-633,653-657
+    // `NCBI_CATCH_X` reports any other `std::exception` as "[title] Exception: what()".
     /// `~CObjectOStream`.
-    fn destroy(&mut self, err: &mut dyn Write) {
-        if let Err(exc) = self.close(err) {
-            post(
-                err,
-                &format!(
-                    "Error: ({}) [makeblastdb] {}",
-                    exc.predecessor.type_and_code(),
-                    exc.predecessor.msg
-                ),
-            );
-            post(
-                err,
-                &format!("Error: ({SERIAL_IO_ERROR}) [makeblastdb] {}", exc.msg),
-            );
-            post(
-                err,
-                &format!(
-                    "Error: (802.4) [makeblastdb] Cannot close serializing output stream \
+    pub(crate) fn destroy(&mut self, err: &mut dyn Write) {
+        let tag = self.tag();
+        match self.close(err) {
+            Err(Closed::Serial(exc)) => {
+                let (kind, msg) = (exc.predecessor.type_and_code(), exc.predecessor.msg);
+                self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
+                let line = format!("Error: ({SERIAL_IO_ERROR}) {tag}{}", exc.msg);
+                self.post(err, &line, true);
+                let line = format!(
+                    "Error: (802.4) {tag}Cannot close serializing output stream \
                      ({SERIAL_IO_ERROR}) {}",
                     exc.msg
-                ),
-            );
+                );
+                self.post(err, &line, true);
+            }
+            Err(Closed::Stream) => {
+                let line = format!(
+                    "Error: (802.4) {tag}[Cannot close serializing output stream] Exception: \
+                     {IOS_FAILURE_WHAT}"
+                );
+                self.post(err, &line, true);
+            }
+            Ok(()) => {}
         }
         self.destroy_buffer(err);
     }
@@ -626,35 +723,50 @@ impl ObjectOStream<'_> {
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:797-811
     // NCBI reference (598d8ae6): c++/include/util/error_codes.hpp:48
     // After `CObjectOStream::Close` the buffer is closed, or the stream failed: this `Close`
-    // writes nothing in makeblastdb's sequence; its report is that of `destroy` for an
-    // exception without predecessor.
+    // writes nothing in makeblastdb's and blastdbcmd's sequences; its report is that of
+    // `destroy` for an exception without predecessor.
     /// `~COStreamBuffer` (a member of the object stream, destroyed after its body).
     fn destroy_buffer(&mut self, err: &mut dyn Write) {
-        if let Err(exc) = self.output.close() {
-            post(
-                err,
-                &format!("Error: ({}) [makeblastdb] {}", exc.type_and_code(), exc.msg),
-            );
-            post(
-                err,
-                &format!(
-                    "Error: (205.2) [makeblastdb] ~COStreamBuffer: exception while closing ({}) {}",
-                    exc.type_and_code(),
-                    exc.msg
-                ),
-            );
+        let tag = self.tag();
+        match self.output.close() {
+            Err(BufferError::Io(exc)) => {
+                let (kind, msg) = (exc.type_and_code(), exc.msg);
+                self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
+                let line = format!(
+                    "Error: (205.2) {tag}~COStreamBuffer: exception while closing ({kind}) {msg}"
+                );
+                self.post(err, &line, true);
+            }
+            Err(BufferError::Stream) => {
+                let line = format!(
+                    "Error: (205.2) {tag}[~COStreamBuffer: exception while closing] Exception: \
+                     {IOS_FAILURE_WHAT}"
+                );
+                self.post(err, &line, true);
+            }
+            Ok(()) => {}
         }
+    }
+
+    /// Writes the diagnostic line `line`, in LOSAT's words when `words` (`crate::wording::
+    /// losat_text`: without the exception's class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
+    /// exception 12). Nothing after a write found a closed pipe: SIGPIPE has ended NCBI's
+    /// process there (`StreamBuf::closed_pipe`).
+    fn post(&mut self, err: &mut dyn Write, line: &str, words: bool) {
+        if self.output.output().rdbuf().closed_pipe() {
+            return;
+        }
+        let line = if words {
+            crate::wording::losat_text(line)
+        } else {
+            line.into()
+        };
+        let _ = err.write_all(format!("{line}\n").as_bytes());
     }
 }
 
 /// `GetType()::GetErrCodeString()` of the serial stream's error of a failed close.
 const SERIAL_IO_ERROR: &str = "CSerialException::eIoError";
-
-/// Writes the diagnostic line `line` in LOSAT's words (`crate::wording::losat_text`: without the
-/// exception's class and code, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
-fn post(err: &mut dyn Write, line: &str) {
-    let _ = writeln!(err, "{}", crate::wording::losat_text(line));
-}
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1306-1318
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
@@ -673,33 +785,49 @@ fn post(err: &mut dyn Write, line: &str) {
 /// `err`; `Some(message)` for the `eFlush` exception that ends makeblastdb ("BLAST failed to
 /// write output: message").
 pub(crate) fn write_metadata_file(
-    new_db: &str,
+    new_db: &[u8],
     is_protein: bool,
     metadata: &DbMetadata,
     err: &mut dyn Write,
 ) -> Option<&'static str> {
-    let name = format!("{new_db}.{}", if is_protein { "pjs" } else { "njs" });
-    let mut out = OfStream::create(Path::new(&name));
-    let escaped = {
-        let mut json_out = ObjectOStream {
-            output: OStreamBuffer::new(&mut out),
-            fail: 0,
-        };
-        let result = metadata
-            .write_json(&mut json_out.output)
-            .and_then(|()| json_out.output.flush())
-            .map(|()| {
-                let out = json_out.output.output();
-                out.flush();
-                out.endl();
-            });
-        json_out.destroy(err);
-        result.err()
-    };
-    drop(out);
-    escaped
-        .filter(|exception| exception.code == IoErrCode::Flush)
-        .map(|exception| exception.msg)
+    let extension: &[u8] = if is_protein { b".pjs" } else { b".njs" };
+    let name = [new_db, extension].concat();
+    let mut out = OfStream::create(&crate::utils::os_bytes::path_of_bytes(&name));
+    write_metadata(&mut out, metadata, "makeblastdb", err)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1213-1220
+// blastdbcmd writes the object to its `-out` stream as makeblastdb writes it to its file: the
+// same serializer, `json_out->Flush()`, `out.flush()` and `NcbiEndl`, then the serializer's
+// destructor; its `CATCH_ALL` is the same macro.
+/// `metadata` serialized to `out` as `CObjectOStreamJson` writes it, then the line feed of
+/// `NcbiEndl`, with the serializer's diagnostics (naming `program`) to `err`; `Some(message)` for
+/// the `eFlush` exception that ends the program ("BLAST failed to write output: message", exit
+/// status 6). After a write found a closed pipe (`StreamBuf::closed_pipe`, where SIGPIPE ends
+/// NCBI's process) nothing is posted and `None` is returned.
+pub(crate) fn write_metadata<B: StreamBuf>(
+    out: &mut BasicStream<B>,
+    metadata: &DbMetadata,
+    program: &'static str,
+    err: &mut dyn Write,
+) -> Option<&'static str> {
+    let mut json_out = ObjectOStream::new(OStreamBuffer::new(out), Some(program));
+    let result = metadata
+        .write_json(&mut json_out.output)
+        .and_then(|()| json_out.output.flush())
+        .map(|()| {
+            let out = json_out.output.output();
+            out.flush();
+            out.endl();
+        });
+    json_out.destroy(err);
+    if json_out.output.output().rdbuf().closed_pipe() {
+        return None;
+    }
+    result.err().and_then(|exception| match exception {
+        BufferError::Io(exception) if exception.code == IoErrCode::Flush => Some(exception.msg),
+        _ => None,
+    })
 }
 
 #[cfg(test)]

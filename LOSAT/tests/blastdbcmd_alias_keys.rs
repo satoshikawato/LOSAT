@@ -13,7 +13,10 @@
 //! over the databases of `tests/db_search/idlist` and the lists over `db/pz4`'s header of no
 //! bytes (`db/pzl*`, `make_d1c_blastdbcmd.py`, 2026-11-22; review 1 of D1c-1: string tags of
 //! `PIG` and `BL_ORD_ID` under a list, TI and GI ISAMs NCBI does not initialise, a `SEQIDLIST`
-//! over two volumes, A382-A389). The
+//! over two volumes, A382-A389), and (D1c-1b, 2026-11-23) `-taxids -target_only` over headers
+//! whose lines the list erases (A390-A394, A395), and (D1c-1c-b, 2026-11-24) sequences with lines
+//! without a Seq-id in a database without a list (`idlist/ln`, `lnn`, `lm`: the FASTA headers, and
+//! NCBI's null pointer of a range, a mask, `%a` or `%i` of such a line, A420-A446). The
 //! expected bytes are NCBI BLAST+ 2.17.0 blastdbcmd's (the release build on the developer machine,
 //! 2026-11-12 and 2026-11-13, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py` and
 //! `make_d1a2_blastdbcmd.py`); the alias files are in `tests/blastdbcmd/db/ak/`, the batch files
@@ -25,18 +28,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// `fs::canonicalize` without the `\\\\?\\` prefix that Windows puts on its result (as
-/// `blastdbcmd_retrieve.rs`).
-fn canonical(path: &Path) -> PathBuf {
-    let path = fs::canonicalize(path).unwrap();
-    #[cfg(windows)]
-    if let Some(plain) = path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
-        if plain.as_bytes().get(1) == Some(&b':') {
-            return PathBuf::from(plain);
-        }
-    }
-    path
-}
+use crate::ncbi_windows_paths::{
+    alias_list_path_on_windows, blastdbcmd_bytes_on_platform, canonical,
+};
 
 fn run_dir() -> PathBuf {
     canonical(
@@ -118,10 +112,44 @@ fn placed(text: &[u8]) -> Vec<u8> {
     losat::wording::losat_output_bytes(&placed).into_owned()
 }
 
-/// Whether `text` names a path under the run directory (`{R}`) or the tests directory (`{T}`).
-fn holds_root(text: &[u8]) -> bool {
-    text.windows(3)
-        .any(|window| window == b"{R}" || window == b"{T}")
+/// The cases whose messages quote the path of an alias file's list key: the ids, the directory
+/// NCBI joins the value to and the value (`alias_list_path_on_windows`).
+const LIST_PATHS: &[(&[&str], &str, &str)] = &[
+    (
+        &["A205", "A206", "A207", "A219", "A220"],
+        "{R}/db/ak/or",
+        "/losat-oidlist-fixture-missing/none.msk",
+    ),
+    (
+        &["A234"],
+        "{R}/db/m",
+        "/losat-oidlist-fixture-missing/none.msk",
+    ),
+    (&["A230"], "{R}/db/ak/or", "../zz/none.msk"),
+    (
+        &[
+            "A296", "A298", "A364", "A465", "A466", "A468", "A490", "A494",
+        ],
+        "{T}/db_search/idlist",
+        "/losat-idlist-fixture-missing/none.txt",
+    ),
+    (&["A358"], "{T}/db_search/idlist", "sub/none.txt"),
+];
+
+/// NCBI's bytes `text` of the case `id` with the command line `words`, frozen on Linux, as
+/// NCBI's code writes them on the platform of the run (`blastdbcmd_bytes_on_platform`,
+/// `LIST_PATHS`).
+fn on_platform(text: &[u8], id: &str, words: &[&str]) -> Vec<u8> {
+    let text = blastdbcmd_bytes_on_platform(text, &["{R}", "{T}"], words);
+    let Some(&(_, dir, value)) = LIST_PATHS.iter().find(|(ids, ..)| ids.contains(&id)) else {
+        return text;
+    };
+    match std::str::from_utf8(&text) {
+        Ok(text) if cfg!(windows) && text.contains("must exist") => {
+            alias_list_path_on_windows(text, dir, value).into_bytes()
+        }
+        _ => text,
+    }
 }
 
 /// The cases: id, words, exit status.
@@ -555,6 +583,107 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A387", &["-db", "../db_search/idlist/gd_gi", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 2),
     ("A388", &["-db", "../db_search/idlist/cv_sq", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a"], 0),
     ("A389", &["-db", "../db_search/idlist/cv_sq", "-dbtype", "prot", "-info"], 0),
+    // D1c-1b: -taxids -target_only reads the headers through the list, which erases the lines without a Seq-id
+    // (ln) and those whose taxids are not the lookup files' (lx); a sequence left without a line is not written.
+    ("A390", &["-db", "../db_search/idlist/lx", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A391", &["-db", "../db_search/idlist/lx", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-target_only"], 0),
+    ("A392", &["-db", "../db_search/idlist/lx", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A393", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-taxids", "9606", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A394", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-taxids", "10090", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A420", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all"], 0),
+    ("A421", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-ctrl_a"], 0),
+    ("A422", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-long_seqids"], 0),
+    ("A423", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-target_only"], 0),
+    ("A424", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-outfmt", "%f"], 0),
+    ("A425", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000006.1"], 0),
+    ("A426", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000006.1", "-target_only"], 0),
+    ("A427", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000006.1", "-range", "1-10"], 1),
+    ("A428", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000002.1", "-range", "1-10"], 0),
+    ("A429", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-range", "1-10"], 1),
+    ("A430", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-outfmt", "%a"], 1),
+    ("A431", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-outfmt", "%i"], 1),
+    ("A432", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%t|%g"], 0),
+    ("A433", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-outfmt", "%b"], 0),
+    ("A434", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000002.1", "-outfmt", "%o %a %t"], 1),
+    ("A435", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "NP_000006.1", "-long_seqids"], 0),
+    ("A436", &["-db", "../db_search/idlist/ln", "-dbtype", "prot", "-entry", "all", "-range", "200-300"], 0),
+    ("A437", &["-db", "../db_search/idlist/lnn", "-dbtype", "nucl", "-entry", "all"], 0),
+    ("A438", &["-db", "../db_search/idlist/lnn", "-dbtype", "nucl", "-entry", "all", "-strand", "minus"], 0),
+    ("A439", &["-db", "../db_search/idlist/lnn", "-dbtype", "nucl", "-entry", "all", "-range", "1-10"], 1),
+    ("A440", &["-db", "../db_search/idlist/lnn", "-dbtype", "nucl", "-entry", "all", "-long_seqids"], 0),
+    ("A441", &["-db", "../db_search/idlist/lnn", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%a"], 1),
+    ("A442", &["-db", "../db_search/idlist/lm", "-dbtype", "prot", "-entry", "all", "-mask_sequence_with", "21"], 1),
+    ("A443", &["-db", "../db_search/idlist/lm", "-dbtype", "prot", "-entry", "NP_000006.1", "-mask_sequence_with", "21"], 1),
+    ("A444", &["-db", "../db_search/idlist/lm", "-dbtype", "prot", "-entry", "NP_000006.1", "-mask_sequence_with", "21", "-target_only"], 0),
+    ("A445", &["-db", "../db_search/idlist/lm", "-dbtype", "prot", "-entry", "NP_000002.1", "-mask_sequence_with", "21"], 0),
+    ("A446", &["-db", "../db_search/idlist/lm", "-dbtype", "prot", "-entry", "all", "-mask_sequence_with", "21", "-long_seqids"], 1),
+    // D1c-2: version 5 alias SEQIDLIST and TAXIDLIST through LMDB (A447-A512).
+    ("A447", &["-db", "../db_search/idlist/g_sq", "-info"], 0),
+    ("A448", &["-db", "../db_search/idlist/g_sq", "-info", "-exact_length"], 0),
+    ("A449", &["-db", "../db_search/idlist/g_sq", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A450", &["-db", "../db_search/idlist/g_sq", "-entry", "NP_000101.1", "-outfmt", "%o|%a|%t"], 0),
+    ("A451", &["-db", "../db_search/idlist/g_sq", "-entry", "P10102.1,NP_000103.1", "-outfmt", "%o|%a|%g"], 0),
+    ("A452", &["-db", "../db_search/idlist/g_sq", "-metadata"], 0),
+    ("A453", &["-db", "../db_search/idlist/g_sq", "-tax_info"], 0),
+    ("A454", &["-db", "../db_search/idlist/g_sql", "-info"], 0),
+    ("A455", &["-db", "../db_search/idlist/g_sql", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A456", &["-db", "../db_search/idlist/g_sqb", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A457", &["-db", "../db_search/idlist/g_sqc", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A458", &["-db", "../db_search/idlist/g_sqd", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A459", &["-db", "../db_search/idlist/g_sqver", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A460", &["-db", "../db_search/idlist/g_squnp", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A461", &["-db", "../db_search/idlist/g_sqe", "-info"], 2),
+    ("A462", &["-db", "../db_search/idlist/g_sqe", "-dbtype", "prot", "-info"], 2),
+    ("A463", &["-db", "../db_search/idlist/g_sqbe", "-info"], 0),
+    ("A464", &["-db", "../db_search/idlist/g_sqbe", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A465", &["-db", "../db_search/idlist/g_sqm", "-info"], 255),
+    ("A466", &["-db", "../db_search/idlist/g_sqm", "-dbtype", "prot", "-info"], 255),
+    ("A467", &["-db", "../db_search/idlist/g_sqml", "-info"], 0),
+    ("A468", &["-db", "../db_search/idlist/g_sqml", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 1),
+    ("A469", &["-db", "../db_search/idlist/g_sq_gi", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A470", &["-db", "../db_search/idlist/g_sq_tx", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A471", &["-db", "../db_search/idlist/g_sq_sib", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A472", &["-db", "../db_search/idlist/g_sq_bare", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A473", &["-db", "../db_search/idlist/g_tx", "-info"], 0),
+    ("A474", &["-db", "../db_search/idlist/g_tx", "-info", "-exact_length"], 0),
+    ("A475", &["-db", "../db_search/idlist/g_tx", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A476", &["-db", "../db_search/idlist/g_tx", "-metadata"], 0),
+    ("A477", &["-db", "../db_search/idlist/g_tx", "-tax_info"], 0),
+    ("A478", &["-db", "../db_search/idlist/g_txl", "-info"], 0),
+    ("A479", &["-db", "../db_search/idlist/g_txl", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A480", &["-db", "../db_search/idlist/g_txbig", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A481", &["-db", "../db_search/idlist/g_tx_gr", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A482", &["-db", "../db_search/idlist/g_tx_go", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A483", &["-db", "../db_search/idlist/g_tx_nest", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A484", &["-db", "../db_search/idlist/g_tx_sib", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A485", &["-db", "../db_search/idlist/g_tx_bare", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A486", &["-db", "../db_search/idlist/g_txunk", "-dbtype", "prot", "-info"], 2),
+    ("A487", &["-db", "../db_search/idlist/g_txe", "-dbtype", "prot", "-info"], 2),
+    ("A488", &["-db", "../db_search/idlist/g_txalpha", "-dbtype", "prot", "-info"], 2),
+    ("A489", &["-db", "../db_search/idlist/g_txhash", "-dbtype", "prot", "-info"], 2),
+    ("A490", &["-db", "../db_search/idlist/g_txm", "-dbtype", "prot", "-info"], 255),
+    ("A491", &["-db", "../db_search/idlist/g_txel", "-info"], 0),
+    ("A492", &["-db", "../db_search/idlist/g_txel", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 1),
+    ("A493", &["-db", "../db_search/idlist/g_txml", "-info"], 0),
+    ("A494", &["-db", "../db_search/idlist/g_txml", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 1),
+    ("A495", &["-db", "../db_search/idlist/gm_sq", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A496", &["-db", "../db_search/idlist/gm_sq_v01", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A497", &["-db", "../db_search/idlist/gm_sq_mix", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A498", &["-db", "../db_search/idlist/gm_tx", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A499", &["-db", "../db_search/idlist/gm_tx_mix", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A500", &["-db", "../db_search/idlist/gu_sq", "-dbtype", "prot", "-info"], 2),
+    ("A501", &["-db", "../db_search/idlist/gu_tx", "-dbtype", "prot", "-info"], 2),
+    ("A502", &["-db", "../db_search/idlist/ln_tx", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a|%T|%t"], 1),
+    ("A503", &["-db", "../db_search/idlist/ln_tx", "-dbtype", "prot", "-entry", "all"], 0),
+    ("A504", &["-db", "../db_search/idlist/lx_tx", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o|%a|%T|%t"], 0),
+    ("A505", &["-db", "../db_search/idlist/n_sq", "-dbtype", "nucl", "-info"], 0),
+    ("A506", &["-db", "../db_search/idlist/n_sq", "-dbtype", "nucl", "-info", "-exact_length"], 0),
+    ("A507", &["-db", "../db_search/idlist/n_sq", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A508", &["-db", "../db_search/idlist/n_tx", "-dbtype", "nucl", "-info"], 0),
+    ("A509", &["-db", "../db_search/idlist/n_tx", "-dbtype", "nucl", "-info", "-exact_length"], 0),
+    ("A510", &["-db", "../db_search/idlist/n_tx", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o|%a|%g|%T"], 0),
+    ("A511", &["-db", "../db_search/idlist/g_sq", "-taxids", "9606", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T"], 0),
+    ("A512", &["-db", "../db_search/idlist/g_tx", "-taxids", "10090", "-no_taxid_expansion", "-target_only", "-outfmt", "%o|%a|%T"], 1),
 ];
 
 /// A range outside the bit array of the union of the ranges below it, where NCBI clears bits
@@ -614,21 +743,46 @@ fn ranges_outside_the_bit_array_below_them_are_refused() {
     }
 }
 
+/// A string tag of `BL_ORD_ID` on a line of a volume after the first that a taxid list then erases
+/// (`idlist/lt`, review 2 G1 of line RG D1c-1b): NCBI's header read adjusts the tags of every line
+/// before the taxid test and fails on it (NCBI BLAST+ 2.17.0: its exception of the tag, exit 1).
+/// LOSAT refuses it there, as it refuses such a tag in every read (rows db.ordsl.bp.tagq.6 and
+/// db.il.bp.lt.*.rej.6).
+#[test]
+fn a_string_tag_that_a_taxid_list_erases_is_refused() {
+    let config = TestDir::new("taxid-string-tag");
+    let words = [
+        "-db",
+        "../db_search/idlist/lt",
+        "-dbtype",
+        "prot",
+        "-taxids",
+        "10090",
+        "-no_taxid_expansion",
+        "-target_only",
+        "-outfmt",
+        "%o|%a|%T|%t",
+    ];
+    let (stdout, stderr, code) = blastdbcmd(&words, &config.0);
+    let stderr = String::from_utf8_lossy(&stderr);
+    assert_eq!(stdout, b"", "A395: {stderr}");
+    assert_eq!(code, 1, "A395: {stderr}");
+    assert!(
+        stderr.contains("BL_ORD_ID of sequence 1 has a string tag"),
+        "A395: {stderr}"
+    );
+}
+
 #[test]
 fn alias_keys_are_ncbi_s_bytes() {
     let config = TestDir::new("cases");
     for &(id, words, status) in CASES {
-        let (want_out, want_err) = (
-            frozen(&format!("{id}.stdout")),
-            frozen(&format!("{id}.stderr")),
-        );
         // A path in the lines is written with the platform's separators, and `-metadata` cuts
-        // a name at the platform's separator alone.
-        if cfg!(windows)
-            && (words.contains(&"-metadata") || holds_root(&want_out) || holds_root(&want_err))
-        {
-            continue;
-        }
+        // a name at the platform's separator alone (`blastdbcmd_bytes_on_platform`).
+        let (want_out, want_err) = (
+            on_platform(&frozen(&format!("{id}.stdout")), id, words),
+            on_platform(&frozen(&format!("{id}.stderr")), id, words),
+        );
         let (stdout, stderr, code) = blastdbcmd(words, &config.0);
         assert_eq!(
             String::from_utf8_lossy(&stdout),

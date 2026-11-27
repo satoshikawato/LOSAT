@@ -94,6 +94,7 @@ A line of an `-ids` or `-exclude_ids` file (matched as text, without `-text_matc
 - Counts files on which NCBI's result is undefined, such as an `ascii` file with units of more than 16 letters.
 - `-mk_counts` of an input without a unit of unambiguous letters (all `N`; or, with `-unit`, no sequence, as when `-ids` keeps none): NCBI writes its percentages as its C runtime prints 0/0.
 - `-mk_counts -infmt seqids`: NCBI fetches each sequence from NCBI's servers.
+- A nucleotide FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more (such as 4,294,967,293 letters of `A`, `C`, `G` and `T` in a row), where NCBI crashes. Other records of 4,294,967,296 letters or more are read as NCBI reads them.
 - `-mk_counts` or `-convert` of units of 1 to 3 letters to `oascii` or `obinary` with an `-smem` that is a multiple of 65536: NCBI's result is undefined.
 
 See [What LOSAT refuses](../refusals.md#windowmasker).

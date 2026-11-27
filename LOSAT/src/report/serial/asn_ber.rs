@@ -9,7 +9,12 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:382-386, 418-431
 
-use super::encoder::{Encoder, Replaced, SerialError, Stream, StreamPosition};
+// The first content octet of a REAL: the decimal form (`eDecimal`, the NR form is not selected,
+// CXX-5248) and the special values.
+use super::asn_ber_reader::{
+    REAL_DECIMAL, REAL_MINUS_INFINITY, REAL_NOT_A_NUMBER, REAL_PLUS_INFINITY,
+};
+use super::encoder::{Encoder, Replaced, ReplacedChar, SerialError, Stream, StreamPosition};
 use super::real::double_to_string_posix;
 
 /// `DBL_DIG`: the precision of `WriteDouble` (`WriteDouble2` of `data` with `DBL_DIG`).
@@ -32,9 +37,61 @@ const TAG_NULL: u8 = 0x05;
 const TAG_CONTEXT: u8 = 0xa0;
 /// `eIndefiniteLengthByte`.
 const INDEFINITE_LENGTH: u8 = 0x80;
-/// The first content octet of a REAL written in decimal form (`eDecimal`, the NR form is
-/// not selected, CXX-5248).
-const REAL_DECIMAL: u8 = 0x00;
+
+/// `WriteLength`: one byte up to 127, else the long form: `0x80 + count` and the `count` bytes of
+/// the length, big-endian, `count` the fewest that hold it (`WriteLongLength` counts 1, 2 or 3
+/// up to 0xFFFFFF, and above that drops the leading zero bytes of the bytes of a `size_t`, so
+/// 0x1000000 is `84 01 00 00 00`). The one writer of BER lengths: this encoder's and the database
+/// header records' (`writedb::header`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:393-424
+pub(crate) fn write_length(out: &mut Vec<u8>, length: usize) {
+    if length <= 127 {
+        out.push(length as u8);
+        return;
+    }
+    let bytes = (length as u64).to_be_bytes();
+    let count = bytes.len() - (length as u64).leading_zeros() as usize / 8;
+    out.push(0x80 + count as u8);
+    out.extend_from_slice(&bytes[bytes.len() - count..]);
+}
+
+/// `WriteNumberValue` of an `Int4`: the length (1 to 4) and the two's-complement bytes, the
+/// shortest of the ranges of one, two and three bytes, else four. The one writer of them: this
+/// encoder's and the database header records' (`writedb::header`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:533-554
+pub(crate) fn write_int4_value(out: &mut Vec<u8>, value: i32) {
+    let length = if (-0x80..=0x7f).contains(&value) {
+        1
+    } else if (-0x8000..=0x7fff).contains(&value) {
+        2
+    } else if (-0x80_0000..=0x7f_ffff).contains(&value) {
+        3
+    } else {
+        4
+    };
+    out.push(length as u8);
+    out.extend_from_slice(&value.to_be_bytes()[4 - length..]);
+}
+
+/// `WriteNumberValue` of an `Int8`: the length (1 to 8) and the fewest big-endian two's-complement
+/// bytes of the value. The one writer of them: this encoder's and the database header records'
+/// (`writedb::header`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:556-597
+pub(crate) fn write_int8_value(out: &mut Vec<u8>, value: i64) {
+    let bytes = value.to_be_bytes();
+    let mut start = 0;
+    while start < 7
+        && ((bytes[start] == 0x00 && bytes[start + 1] & 0x80 == 0)
+            || (bytes[start] == 0xff && bytes[start + 1] & 0x80 != 0))
+    {
+        start += 1;
+    }
+    out.push((8 - start) as u8);
+    out.extend_from_slice(&bytes[start..]);
+}
 
 /// The ASN.1 binary encoder, appending one document to `out`.
 pub struct AsnBinaryEncoder<'b> {
@@ -90,47 +147,14 @@ impl<'b> AsnBinaryEncoder<'b> {
         }
     }
 
-    /// `WriteLength`: one byte up to 127, else `0x80 + count` and the `count` bytes of the
-    /// length, big-endian.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:393-416
+    /// `WriteLength` (`write_length`).
     fn length(&mut self, length: usize) {
-        if length <= 127 {
-            self.out.push(length as u8);
-            return;
-        }
-        let bytes = (length as u64).to_be_bytes();
-        let count = if length <= 0xff {
-            1
-        } else if length <= 0xffff {
-            2
-        } else if length <= 0xff_ffff {
-            3
-        } else {
-            // The `sizeof` of `length`: eight bytes on x86-64 Linux, not the shortest four.
-            8
-        };
-        self.out.push(0x80 + count as u8);
-        self.out.extend_from_slice(&bytes[8 - count..]);
+        write_length(self.out, length);
     }
 
-    /// `WriteNumberValue` of an `Int4`: the length (1 to 4) and the two's-complement bytes, the
-    /// shortest of the ranges of one, two and three bytes, else four.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:533-554
+    /// `WriteNumberValue` of an `Int4` (`write_int4_value`).
     fn number(&mut self, value: i32) {
-        let length = if (-0x80..=0x7f).contains(&value) {
-            1
-        } else if (-0x8000..=0x7fff).contains(&value) {
-            2
-        } else if (-0x80_0000..=0x7f_ffff).contains(&value) {
-            3
-        } else {
-            4
-        };
-        self.out.push(length as u8);
-        self.out
-            .extend_from_slice(&value.to_be_bytes()[4 - length..]);
+        write_int4_value(self.out, value);
     }
 
     /// `BeginClassMember` / `BeginChoiceVariant`: the explicit context tag `[tag]` with an
@@ -207,19 +231,10 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.number(value);
     }
 
-    /// `WriteInt8`: INTEGER in the fewest big-endian two's-complement bytes of the value.
+    /// `WriteInt8`: INTEGER (`write_int8_value`).
     fn big_int(&mut self, value: i64) {
-        let bytes = value.to_be_bytes();
-        let mut start = 0;
-        while start < 7
-            && ((bytes[start] == 0x00 && bytes[start + 1] & 0x80 == 0)
-                || (bytes[start] == 0xff && bytes[start + 1] & 0x80 != 0))
-        {
-            start += 1;
-        }
         self.out.push(TAG_INTEGER);
-        self.out.push((8 - start) as u8);
-        self.out.extend_from_slice(&bytes[start..]);
+        write_int8_value(self.out, value);
     }
 
     /// `WriteEnum`: ENUMERATED with the number of the value.
@@ -252,11 +267,8 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.write_string::<true>(value);
     }
 
-    /// `WriteDouble2` of `data` with `DBL_DIG`: `09`, the length, the decimal form byte 0 and the
-    /// digits of `DoubleToStringPosix`. (NCBI marks a NaN or an infinity by another form
-    /// byte, which LOSAT does not write: BLAST reports have none.)
+    /// An OCTET STRING: `04`, the length and the bytes.
     ///
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:797-816
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1704-1708
     fn octets(&mut self, value: &[u8]) {
         self.out.push(TAG_OCTET_STRING);
@@ -276,20 +288,39 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.out.extend_from_slice(&[TAG_NULL, 0]);
     }
 
-    /// The tag of NCBI's UTF8String depends on its parameter `SERIAL_WRITE_UTF8STRING_TAG`
-    /// (objostrasnb.cpp:281-301): no BLAST document that LOSAT writes in ASN.1 binary holds one.
-    fn utf8_str(&mut self, _value: &[u8]) {
+    /// `WriteString` of a UTF8String: the tag of its parameter `SERIAL_WRITE_UTF8STRING_TAG`,
+    /// whose default (false, the one LOSAT writes) is a VisibleString's, the length and the
+    /// bytes as they are (no byte is checked: only a VisibleString's are). NCBI BLAST+ 2.17.0's
+    /// `psiblast -in_pssm d3a_c10_user -outfmt 11` with `ARCHIVE_FORMAT=bin` writes the
+    /// `User-field` string `é\x01` as `1a 03 c3 a9 01` (probe XB of line RG-F3 PR 2, 2026-11-23).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:281-314
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:831-873
+    fn utf8_str(&mut self, value: &[u8]) {
+        self.out.push(TAG_VISIBLE_STRING);
+        self.length(value.len());
+        self.out.extend_from_slice(value);
+    }
+
+    /// The member's tag and length were written (`member`); the bytes of the value follow as
+    /// they were read (`CObjectOStreamAsnBinary::WriteClassMember` of a buffer of its format).
+    // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1458-1500
+    fn delayed(&mut self, bytes: &[u8]) {
+        self.out.extend_from_slice(bytes);
+    }
+
+    fn unread_delayed(&mut self) {
         if self.error.is_none() {
-            self.error = Some(SerialError::Unwritten("a UTF8String"));
+            self.error = Some(SerialError::Unwritten(
+                "a member read into a delay buffer of another format whose value NCBI reads with an \
+                 error or with a message other than a replaced character",
+            ));
         }
     }
 
-    /// NCBI parses a delay buffer read from text before it writes it in binary
-    /// (`CMemberInfoFunctions::WriteLongMember`, member.cpp:1084-1119): no BLAST document that
-    /// LOSAT writes in ASN.1 binary holds one.
-    fn delayed(&mut self, _text: &[u8]) {
-        if self.error.is_none() {
-            self.error = Some(SerialError::Unwritten("a member read into a delay buffer"));
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        if let (None, Some(first)) = (&self.error, posts.first()) {
+            self.error = Some(SerialError::NonVisibleChar(first.byte));
         }
     }
 
@@ -303,11 +334,25 @@ impl Encoder for AsnBinaryEncoder<'_> {
         Ok(())
     }
 
+    /// `WriteDouble2` of `data` with `DBL_DIG`: `09`, the length, the decimal form byte 0 and the
+    /// digits of `DoubleToStringPosix`; a NaN or an infinity is its one special content octet
+    /// (`09 01 42`, `40`, `41`; NCBI's branch for a negative zero is compiled out, so it takes the
+    /// decimal form). NCBI BLAST+ 2.17.0's `psiblast -in_pssm` of a binary PSSM with
+    /// `PLUS-INFINITY` in its frequency ratios, or `MINUS-INFINITY` or `NOT-A-NUMBER` as its
+    /// lambda, `-outfmt 11` with `ARCHIVE_FORMAT=bin` (probe real of line RG-F3 PR 2,
+    /// 2026-11-23).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:738-816
     fn real(&mut self, value: f64) {
         if !value.is_finite() {
-            if self.error.is_none() {
-                self.error = Some(SerialError::NonFiniteReal);
-            }
+            let special = if value.is_nan() {
+                REAL_NOT_A_NUMBER
+            } else if value > 0.0 {
+                REAL_PLUS_INFINITY
+            } else {
+                REAL_MINUS_INFINITY
+            };
+            self.out.extend_from_slice(&[TAG_REAL, 1, special]);
             return;
         }
         let mut digits = Vec::with_capacity(24);
@@ -327,6 +372,18 @@ impl Encoder for AsnBinaryEncoder<'_> {
         sink.write_all(&self.out[..count])?;
         self.out.drain(..count);
         Ok(())
+    }
+
+    /// As `AsnTextEncoder::null_element`.
+    fn null_element(&mut self, _element_type: &str) {
+        if self.error.is_none() {
+            self.error = Some(SerialError::NullElement);
+        }
+    }
+
+    /// `byte N`: the offset in the bytes held (`encoder::Traced` adds those handed on).
+    fn position(&mut self) -> Option<StreamPosition> {
+        Some(StreamPosition::Byte(self.out.len() as u64))
     }
 
     fn error(&self) -> Option<SerialError> {

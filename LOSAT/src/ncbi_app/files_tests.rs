@@ -68,13 +68,18 @@ fn the_standard_input_is_the_reader_given() {
     let mut stdin: &[u8] = b"a\nb\n";
     let mut cin = Cin::new(&mut stdin);
     let mut bytes = Vec::new();
-    open_input_file("in", "-", &mut cin)
+    open_input_file("in", std::ffi::OsStr::new("-"), &mut cin)
         .unwrap()
         .read_to_end(&mut bytes)
         .unwrap();
     assert_eq!(bytes, b"a\nb\n");
     assert_eq!(
-        read_input_file("entry_batch", "-", &mut Cin::new(&mut &b"x\n"[..])).unwrap(),
+        read_input_file(
+            "entry_batch",
+            std::ffi::OsStr::new("-"),
+            &mut Cin::new(&mut &b"x\n"[..])
+        )
+        .unwrap(),
         b"x\n"
     );
 }
@@ -141,8 +146,14 @@ fn a_text_reader_reads_the_text_mode_of_its_platform() {
 fn the_standard_input_reads_nothing_after_its_end() {
     let mut terminal = Terminal(vec![b"1\n", b"", b"2\n"]);
     let mut cin = Cin::new(&mut terminal);
-    assert_eq!(read_input_file("taxidlist", "-", &mut cin).unwrap(), b"1\n");
-    assert_eq!(read_input_file("ipg_batch", "-", &mut cin).unwrap(), b"");
+    assert_eq!(
+        read_input_file("taxidlist", std::ffi::OsStr::new("-"), &mut cin).unwrap(),
+        b"1\n"
+    );
+    assert_eq!(
+        read_input_file("ipg_batch", std::ffi::OsStr::new("-"), &mut cin).unwrap(),
+        b""
+    );
 }
 
 /// A writer that takes `room` bytes, then fails.
@@ -213,7 +224,9 @@ fn a_closed_pipe_ends_the_writes_where_sigpipe_ends_ncbi() {
 fn a_stream_that_does_not_open_is_ncbi_s_exception() {
     let mut empty = std::io::empty();
     let mut cin = Cin::new(&mut empty);
-    let error = open_input_file("in", "", &mut cin).err().unwrap();
+    let error = open_input_file("in", std::ffi::OsStr::new(""), &mut cin)
+        .err()
+        .unwrap();
     assert_eq!(
         error,
         ArgException::new(
@@ -223,7 +236,7 @@ fn a_stream_that_does_not_open_is_ncbi_s_exception() {
     );
     let missing = "no/such/dir/x.fa";
     assert_eq!(
-        open_input_file("in", missing, &mut cin)
+        open_input_file("in", std::ffi::OsStr::new(missing), &mut cin)
             .err()
             .unwrap()
             .message_text(),
@@ -231,14 +244,20 @@ fn a_stream_that_does_not_open_is_ncbi_s_exception() {
     );
     let mut stdout = Vec::new();
     assert!(matches!(
-        open_output_file("out", std::ffi::OsStr::new("-"), &mut stdout),
+        open_output_file(
+            "out",
+            std::ffi::OsStr::new("-"),
+            &mut stdout,
+            &OpenFiles::disk()
+        ),
         Ok(OutputFile::Stdout(_))
     ));
     assert_eq!(
         open_output_file(
             "out",
             std::ffi::OsStr::new("/no/such/dir/x.out"),
-            &mut stdout
+            &mut stdout,
+            &OpenFiles::disk()
         )
         .err()
         .unwrap()

@@ -10,7 +10,7 @@ import { instantiateSerial, RunDirectory, sha256Hex } from 'losat';
 import { WINDOW_MASKER_FLAG } from 'losat/domain';
 import type { EngineRunRequest } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
-import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
+import { Coordinator, isToolRun, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft } from '../../src/application/draft';
 import { buildArgv } from '../../src/domain/argv';
 import { changedFields, formParameters, setField, writtenValue, type EngineOption } from '../../src/domain/parameters';
@@ -158,7 +158,9 @@ describe('the draft and the counts file', () => {
     expect(result.ok).toBe(true);
     expect(requests[0]!.parameters).toEqual([[WINDOW_MASKER_FLAG, 'mg1655_u9.obinary']]);
     expect(requests[0]!.windowMasker).toBe(file);
-    const snapshot = coordinator.state.get().runs[0]!.snapshot;
+    const run0 = coordinator.state.get().runs[0]!;
+    if (isToolRun(run0)) throw new Error('expected search run');
+    const snapshot = run0.snapshot;
     expect(snapshot.argv.slice(-2)).toEqual(['-window_masker_db', 'mg1655_u9.obinary']);
     expect(snapshot.windowMasker).toEqual({ name: 'mg1655_u9.obinary', file, size: 5, lastModified: 1_700_000_000_000 });
   });
@@ -169,6 +171,7 @@ describe('the draft and the counts file', () => {
     await draft.submit();
     for (let i = 0; i < 200 && coordinator.state.get().runs[0]?.status !== 'completed'; i++) await new Promise((r) => setTimeout(r, 5));
     const run = coordinator.state.get().runs[0]!;
+    if (isToolRun(run)) throw new Error('expected search run');
     expect(run.status).toBe('completed');
     expect(run.record.windowMasker).toEqual({
       name: 'mg1655_u9.obinary',
@@ -265,11 +268,11 @@ function fakeAbi(options: { failEnd?: boolean; stopOnBegin?: boolean } = {}) {
     },
     validate: () => {
       calls.push('validate');
-      return { ok: true, dataLoaders: true };
+      return { ok: true, dataLoaders: true, parseDeflines: false };
     },
-    start: () => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
+    start: () => ({ ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
     memoryBytes: () => 1,
-    register: (_program: string, role: number, _dataLoaders: boolean, bytes: Uint8Array) => {
+    register: (_program: string, role: number, _dataLoaders: boolean, _parseDeflines: boolean, bytes: Uint8Array) => {
       calls.push(`register ${role === ROLE_QUERY ? 'query' : 'subject'}`);
       return { handle: ++handle, records: role === ROLE_QUERY ? [{ id: 'q', length: bytes.length }] : [{ id: 's', length: bytes.length }] };
     },
@@ -561,8 +564,8 @@ describe.skipIf(reactors === undefined)('the counts file in the built serial rea
   const subject = readFileSync(resolve(LOSAT, 'tests/fixtures/blastn_regression/inputs/s60k.fa'));
 
   function search(abi: ReactorAbi, argv: readonly string[]): string {
-    const q = abi.register('blastn', ROLE_QUERY, true, query);
-    const s = abi.register('blastn', ROLE_SUBJECT, true, subject);
+    const q = abi.register('blastn', ROLE_QUERY, true, false, query);
+    const s = abi.register('blastn', ROLE_SUBJECT, true, false, subject);
     const chunks: Uint8Array[] = [];
     try {
       abi.run([...argv, '-num_threads', '1'], q.handle, s.handle, (stream, bytes) => {

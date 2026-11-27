@@ -6,7 +6,10 @@
 //! grammar of each type stays with its reader; this module reads what every type is made of:
 //! white space and comments, identifiers and `::=`, blocks and their elements, the members of a
 //! SEQUENCE in the order of the module, INTEGER, BOOLEAN, ENUMERATED, VisibleString, OCTET
-//! STRING and REAL values, and the skipping of one value of any type.
+//! STRING and REAL values. For a hand-written grammar (rpsbproc's archive reader) it also gives
+//! the frames of NCBI's object stack, which the grammar passes down to the values it reads
+//! (`Frame`), and posts the bytes that its VisibleStrings read as `#` as it reads them
+//! (`Reader::string`).
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-243
 //!
@@ -18,6 +21,7 @@
 
 use crate::ncbi_exception::ThrowSite;
 use crate::ncbi_str::{is_space, string_to_double_posix, NCBI_NAN};
+use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
 use crate::rpsbproc::HOST_DEPENDENT_BYTES;
 use std::io::Read;
 use std::ops::Range;
@@ -153,6 +157,84 @@ pub(crate) const NUMBER_OVERFLOW: ThrowSite = ThrowSite {
     kind: "CUtilException::eWrongData",
     function: Some("ncbi::CIStreamBuffer::NumberOverflow"),
 };
+
+/// Why NCBI's input buffer stops in a number ([`buffer_number!`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NumberStop {
+    /// The input ends after the sign (`PeekChar`'s `CEofException`).
+    Eof,
+    /// No digit where the number starts: `BadNumber` ([`BAD_NUMBER`]).
+    Bad,
+    /// A digit that puts the number past its range: `NumberOverflow` ([`NUMBER_OVERFLOW`]).
+    Overflow,
+}
+
+/// `CIStreamBuffer::GetInt4`, `GetUint4` (`signed` false: only `+`; a `-` is "bad number", even
+/// for `-0`) and `GetInt8` after `SkipWs`, from `c`, the first byte that is not C's `isspace`, at
+/// `pos` of the reader `r`'s source: the sign, then the digits checked against `max` (`kMax_I4`,
+/// `kMax_UI4`, `kMax_I8`; one more for a negative number) as NCBI checks them, the digit that
+/// overflows taken before the check. The one port of NCBI's numbers of an input buffer, for the
+/// ASN.1 text reader (`Reader::get_number`) and the XML reader (`xml_reader::XmlReader`), whose
+/// streams read them from the same buffer. The number, with `r.pos` set to the byte after the
+/// bytes taken; where it stops, `r.pos` is set there and the expansion returns from the reader's
+/// function with `r.char_at(pos)`'s error (the input ends after the sign) or `r.number_stop`'s
+/// (no digit, [`NumberStop::Bad`]; past the range, [`NumberStop::Overflow`]). The negation of the
+/// largest magnitude wraps to the least number (2^31 negated as an Int4 is the least Int4,
+/// likewise in 64 bits).
+///
+/// A macro, expanded in each reader's function, rather than a function: inlined from a function
+/// of its own, the parser kept the sign byte past the read of the byte after it, one instruction
+/// more per number of the text reader (callgrind on `-in_pssm` of a text PSSM, line RG-F3 PR 2).
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
+// (`GetUint4`, 672-700, takes only `+`, and `GetInt8`, 703-745, is `GetInt4` in 64 bits.)
+macro_rules! buffer_number {
+    ($r:ident, $pos:expr, $c:expr, $max:expr, $signed:expr) => {{
+        let mut pos: usize = $pos + 1;
+        let mut c: u8 = $c;
+        let max: u64 = $max;
+        let mut negative = false;
+        if ($signed && c == b'-') || c == b'+' {
+            negative = c == b'-';
+            c = $r.char_at(pos)?;
+            pos += 1;
+        }
+        if !c.is_ascii_digit() {
+            $r.pos = pos;
+            return Err($r.number_stop($crate::report::serial::asn_text_reader::NumberStop::Bad));
+        }
+        let mut n = u64::from(c - b'0');
+        let before_mul = max / 10;
+        let limit_add = max % 10 + u64::from(negative);
+        let mut overflow = false;
+        let (end, _) = $r.src.scan(pos, |d| {
+            if !d.is_ascii_digit() {
+                return false;
+            }
+            let d = u64::from(d - b'0');
+            if n > before_mul || (n == before_mul && d > limit_add) {
+                overflow = true;
+                return false;
+            }
+            n = n * 10 + d;
+            true
+        });
+        if overflow {
+            // The digit that overflows is taken before the check.
+            $r.pos = end + 1;
+            return Err(
+                $r.number_stop($crate::report::serial::asn_text_reader::NumberStop::Overflow)
+            );
+        }
+        $r.pos = end;
+        Ok(if negative {
+            (n as i64).wrapping_neg()
+        } else {
+            n as i64
+        })
+    }};
+}
+pub(crate) use buffer_number;
+
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:420-436 (`FillBuffer` at the end of a
 // file: `NCBI_THROW` of a `CEofException` with `eEof` and `m_Error`, the error "end of file")
 /// The `CEofException` of NCBI's input buffer at the end of the input: what `SkipWhiteSpace`
@@ -349,6 +431,15 @@ impl<R: Read> StreamSource<R> {
         self.buf.len()
     }
 
+    /// The text from `pos` on: the bytes the source holds from there, then what `input` gives
+    /// after them (`Close` above: what a reader of one object did not use goes back to the
+    /// stream).
+    pub(crate) fn into_rest(self, pos: usize) -> (Vec<u8>, R) {
+        let mut buf = self.buf;
+        buf.drain(..(pos - self.base).min(buf.len()));
+        (buf, self.input)
+    }
+
     /// Reads blocks until `pos` is in the buffer or the stream ends, after dropping the released
     /// bytes once they are most of a buffer of more than a few blocks (each byte is moved at
     /// most once on average). A read error ends the text, as a failed read ends an `istream` (its
@@ -477,9 +568,23 @@ pub(crate) fn is_first_id_char(c: u8) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:123-127
+/// `IdChar`: a letter, a digit, `_` or `.` ([`ID_CHARS`]).
+#[inline(always)]
 pub(crate) fn is_id_char(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_' || c == b'.'
+    ID_CHARS[usize::from(c)]
 }
+
+/// The bytes of [`is_id_char`], as one load per byte in the scans of identifiers.
+static ID_CHARS: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut c = 0;
+    while c < 256 {
+        let b = c as u8;
+        table[c] = b.is_ascii_alphanumeric() || b == b'_' || b == b'.';
+        c += 1;
+    }
+    table
+};
 
 /// The reader of one ASN.1 text document (or of several from one stream).
 pub(crate) struct Reader<S: AsnSource> {
@@ -492,17 +597,115 @@ pub(crate) struct Reader<S: AsnSource> {
     document: &'static str,
     /// The reader, for the refusals ("... is not supported by LOSAT's PSSM reader").
     reader: &'static str,
-    /// Whether a string with a byte outside the visible range is refused. NCBI replaces such a
-    /// byte by `#` and posts an error with the reader's stack trace (`ReplaceVisibleChar`,
-    /// objistr.cpp:1854-1895, `eFNP_ReplaceAndWarn`, the default of `SERIAL_WRONG_CHARS_READ`),
-    /// which a reader that sets this does not reproduce.
-    visible_only: bool,
-    /// Whether the refusals of the lexical layer (a string that LOSAT does not read, above)
-    /// are noted in `refusal` and the reading goes on (a reader that must know whether NCBI's
-    /// reader would read the whole object before it refuses), rather than returned at once.
-    defer_refusals: bool,
-    /// The first refusal noted (`defer_refusals`).
-    pub(crate) refusal: Option<AsnTextError>,
+    /// The name of the document's type, the first name of the stack traces of a hand grammar's
+    /// posts (`Blast4-archive`, `string`); empty for the other readers.
+    pub(crate) root: &'static str,
+}
+
+/// Where the VisibleStrings of a hand grammar (rpsbproc's archive reader, `rpsbproc::archive`,
+/// with its Seq-ids, `seqid::asn_text`) post a byte that they read as `#`, when they read it
+/// (`Reader::string`): a reader's post sink (`asn_types::read::PostSink`, which gives each to
+/// where all its posts go).
+pub(crate) trait ReplacedSink {
+    fn replaced(&mut self, replaced: ReplacedChar);
+}
+
+/// The post of a byte that a VisibleString of a hand grammar held by the frame `at` read as `#`
+/// (`Reader::string`): its line, the byte and the piece that holds it, with the stack trace of
+/// `at` below the document's type `root`, given to `posts` when it is made, as NCBI posts it. The
+/// trace is made at the string's first post (`trace`), which every post of the string names.
+#[cold]
+#[inline(never)]
+fn post_replaced<K: ReplacedSink + ?Sized>(
+    posts: &mut K,
+    trace: &mut Option<String>,
+    root: &'static str,
+    at: &Frame<'_>,
+    line: usize,
+    byte: u8,
+    piece: &[u8],
+) {
+    let trace = trace.get_or_insert_with(|| object_stack_trace(root, at.steps()));
+    posts.replaced(ReplacedChar {
+        trace: trace.clone(),
+        byte,
+        position: StreamPosition::Line(line as u64),
+        string: piece.into(),
+    });
+}
+
+/// A frame of NCBI's object stack as a hand grammar passes it down to the reader of the value
+/// that it holds: the member of a SEQUENCE being read (`Members::at`), the variant of a CHOICE
+/// (`Reader::choice`) or the element of a SEQUENCE OF or SET OF (`List::at`), each pointing to the
+/// frame that holds it, down to the object's root (`Frame::ROOT`). NCBI reads every value of its
+/// object with its typed reader, whose stack trace (`GetStackTrace()`) names the member or variant
+/// of each frame and `E` for a container's element; the trace of a frame is made only when a post
+/// needs it (`Reader::string`) or the typed reader reads below it (`Frame::steps`,
+/// `asn_types::read::ObjectStream::read_value`). So a member costs only the position of the
+/// member read, which orders the next (the SEQUENCE's frame takes its parent and names once), an
+/// element nothing (its list's frame is made once), and a variant's frame is stored only when a
+/// reader below it is given it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Frame<'a> {
+    /// The frame that holds this one; `None` at the root.
+    parent: Option<&'a Frame<'a>>,
+    /// The names of the SEQUENCE's members or of the CHOICE's variants in module order; none for
+    /// a container's element and the root.
+    names: &'static [&'static str],
+    /// The position in `names` of the member or variant read, plus one (0 before the first
+    /// member).
+    next: usize,
+}
+
+impl Frame<'static> {
+    /// The object's root, the frame of the document's type (`Reader::root`), which names no step.
+    pub(crate) const ROOT: Frame<'static> = Frame {
+        parent: None,
+        names: &[],
+        next: 0,
+    };
+}
+
+impl<'a> Frame<'a> {
+    /// The frame of an element of the list that `at` holds (`E`).
+    #[inline]
+    fn element(at: &'a Frame<'a>) -> Self {
+        Frame {
+            parent: Some(at),
+            names: &[],
+            next: 0,
+        }
+    }
+
+    /// The position of the variant (`Reader::choice`).
+    #[inline]
+    pub(crate) fn index(&self) -> usize {
+        self.next.wrapping_sub(1)
+    }
+
+    /// The name of the member or variant read (`None` for an element, the root, and a SEQUENCE
+    /// before its first member).
+    pub(crate) fn name(&self) -> Option<&'static str> {
+        self.names.get(self.index()).copied()
+    }
+
+    /// The steps from the root to this frame: a member or variant name, or `E` for an element.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn steps(&self) -> Vec<StackStep<'static>> {
+        let mut steps = Vec::new();
+        let mut frame = self;
+        while let Some(parent) = frame.parent {
+            if frame.names.is_empty() {
+                steps.push(StackStep::Element);
+            } else if let Some(name) = frame.name() {
+                steps.push(StackStep::Member(name));
+            }
+            frame = parent;
+        }
+        steps.reverse();
+        steps
+    }
 }
 
 /// What `ReadMemberId` read: a name, or the digits of a tag in brackets (`[3]`).
@@ -538,10 +741,34 @@ pub(crate) enum PointerType {
 }
 
 /// The members of a SEQUENCE as they are read: each name in turn, in the order of the module.
-pub(crate) struct Members {
+pub(crate) struct Members<'a> {
     block_start: bool,
-    /// The position in the module of the last member read.
-    last: Option<usize>,
+    /// The frame of the member being read: the SEQUENCE's member names and the position of the
+    /// last member read, which the next must follow.
+    frame: Frame<'a>,
+}
+
+impl<'a> Members<'a> {
+    /// The frame of the member being read, for the reader of its value.
+    #[inline]
+    pub(crate) fn at(&self) -> &Frame<'a> {
+        &self.frame
+    }
+}
+
+/// The elements of a SEQUENCE OF or SET OF as a hand grammar reads them (`Reader::begin_list`).
+pub(crate) struct List<'a> {
+    block_start: bool,
+    /// The frame of the elements (`E`).
+    frame: Frame<'a>,
+}
+
+impl<'a> List<'a> {
+    /// The frame of the element being read, for the reader of its value.
+    #[inline]
+    pub(crate) fn at(&self) -> &Frame<'a> {
+        &self.frame
+    }
 }
 
 impl<S: AsnSource> Reader<S> {
@@ -554,33 +781,8 @@ impl<S: AsnSource> Reader<S> {
             line: 1,
             document,
             reader,
-            visible_only: false,
-            defer_refusals: false,
-            refusal: None,
+            root: "",
         }
-    }
-
-    /// Note the refusals of the lexical layer in `refusal` and go on (`defer_refusals`).
-    pub(crate) fn defer_refusals(mut self) -> Self {
-        self.defer_refusals = true;
-        self
-    }
-
-    /// `error`, returned, or noted when the refusals are deferred (then `Ok(value)`).
-    fn refuse<T>(&mut self, error: AsnTextError, value: T) -> Result<T> {
-        if !self.defer_refusals {
-            return Err(error);
-        }
-        if self.refusal.is_none() {
-            self.refusal = Some(error);
-        }
-        Ok(value)
-    }
-
-    /// Refuse strings with bytes outside the visible range (`visible_only`).
-    pub(crate) fn refuse_invisible_bytes(mut self) -> Self {
-        self.visible_only = true;
-        self
     }
 
     #[cold]
@@ -1041,12 +1243,29 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// The variant of a CHOICE whose variants are `names` (in module order), as its position;
-    /// a name that is not one of them is an error.
+    /// The variant of a CHOICE whose variants are `names` (in module order), held by the frame
+    /// `at`: the variant's frame, whose `index` is its position (`variant`). (Inlined, so that a
+    /// frame that no reader below it is given is never stored.)
+    #[inline]
+    pub(crate) fn choice<'a>(
+        &mut self,
+        at: &'a Frame<'a>,
+        names: &'static [&'static str],
+    ) -> Result<Frame<'a>> {
+        let index = self.variant(names)?;
+        Ok(Frame {
+            parent: Some(at),
+            names,
+            next: index + 1,
+        })
+    }
+
+    /// The position of the variant of a CHOICE whose variants are `names` (in module order); a
+    /// name that is not one of them is an error.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1436-1475
     // (`NextElement` at the choice's start fails at a `}`, which reads as no id here; the variant
     // names of the modules LOSAT reads are their ASN.1 names, `GetChoiceIndex` (:426-442).)
-    pub(crate) fn choice(&mut self, names: &[&str]) -> Result<usize> {
+    fn variant(&mut self, names: &[&str]) -> Result<usize> {
         let id = self.member_id_range()?;
         if id.is_empty() {
             return Err(self.error("choice variant id expected"));
@@ -1102,21 +1321,28 @@ impl<S: AsnSource> Reader<S> {
         self.expect(b'}')
     }
 
-    pub(crate) fn begin_members(&mut self) -> Result<Members> {
+    /// `StartBlock` of a SEQUENCE of a hand grammar whose members are `names` (in module order),
+    /// held by the frame `at`; `next_member` reads the members.
+    #[inline]
+    pub(crate) fn begin_members<'a>(
+        &mut self,
+        at: &'a Frame<'a>,
+        names: &'static [&'static str],
+    ) -> Result<Members<'a>> {
         Ok(Members {
             block_start: self.start_block()?,
-            last: None,
+            frame: Frame {
+                parent: Some(at),
+                names,
+                next: 0,
+            },
         })
     }
 
-    /// The next member of a SEQUENCE whose members are `names` (in module order), as its
-    /// position; `None` at the end of the SEQUENCE (its `}` taken). A member out of order or not
-    /// in the module is an error.
-    pub(crate) fn next_member(
-        &mut self,
-        members: &mut Members,
-        names: &[&str],
-    ) -> Result<Option<usize>> {
+    /// The next member of the SEQUENCE, as its position (its frame is `members.at()`); `None` at
+    /// the end of the SEQUENCE (its `}` taken). A member out of order or not in the module is an
+    /// error.
+    pub(crate) fn next_member(&mut self, members: &mut Members) -> Result<Option<usize>> {
         let (pos, more) = self.next_element_at(self.pos, &mut members.block_start)?;
         if !more {
             self.pos = self.expect_at(pos, b'}')?;
@@ -1128,78 +1354,63 @@ impl<S: AsnSource> Reader<S> {
             return Err(self.not_supported("a member or variant named by its tag"));
         };
         let text = self.bytes(id);
-        let Some(index) = names.iter().position(|name| name.as_bytes() == text) else {
+        let Some(index) = members
+            .frame
+            .names
+            .iter()
+            .position(|name| name.as_bytes() == text)
+        else {
             let message = format!("unexpected member {}", String::from_utf8_lossy(text));
             return Err(self.error(message));
         };
-        if members.last.is_some_and(|last| index <= last) {
+        if index < members.frame.next {
             let message = format!("member {} out of order", String::from_utf8_lossy(text));
             return Err(self.error(message));
         }
-        members.last = Some(index);
+        members.frame.next = index + 1;
         Ok(Some(index))
     }
 
-    /// The elements of a SEQUENCE OF or SET OF, each read by `element` and kept by it.
-    pub(crate) fn each(&mut self, mut element: impl FnMut(&mut Self) -> Result<()>) -> Result<()> {
-        let mut block_start = self.start_block()?;
-        while self.next_element(&mut block_start)? {
-            element(self)?;
+    /// `StartBlock` of a SEQUENCE OF or SET OF of a hand grammar, held by the frame `at`;
+    /// `next_item` reads the elements.
+    #[inline]
+    pub(crate) fn begin_list<'a>(&mut self, at: &'a Frame<'a>) -> Result<List<'a>> {
+        Ok(List {
+            block_start: self.start_block()?,
+            frame: Frame::element(at),
+        })
+    }
+
+    /// `NextElement` of the list (`next_element`; its frame is `list.at()`).
+    #[inline]
+    pub(crate) fn next_item(&mut self, list: &mut List) -> Result<bool> {
+        self.next_element(&mut list.block_start)
+    }
+
+    /// The elements of a SEQUENCE OF or SET OF held by the frame `at`, each read by `element`
+    /// (given its frame) and kept by it.
+    pub(crate) fn each(
+        &mut self,
+        at: &Frame<'_>,
+        mut element: impl FnMut(&mut Self, &Frame<'_>) -> Result<()>,
+    ) -> Result<()> {
+        let mut list = self.begin_list(at)?;
+        while self.next_item(&mut list)? {
+            element(self, list.at())?;
         }
         self.end_block()
     }
 
-    /// `GetInt4`, `GetUint4` (`signed` false: only `+`, a `-` is "bad number" even for `-0`) and
-    /// `GetInt8` after `SkipWhiteSpace` (`ReadInt4`, `ReadUint4`, `ReadInt8`): the digits checked
-    /// against `max` as NCBI checks them (the digit that overflows is taken first). The one port
-    /// of NCBI's text numbers, for the archive reader and the object streams (`asn_input`).
-    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
-    // (`GetUint4`, 672-700, takes only `+`, and `GetInt8`, 703-745, is `GetInt4` in 64 bits.)
+    /// `GetInt4`, `GetUint4` (`signed` false) and `GetInt8` after `SkipWhiteSpace` (`ReadInt4`,
+    /// `ReadUint4`, `ReadInt8`): [`buffer_number!`] after `SkipWs`, for the archive reader and the
+    /// object streams (`asn_input`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:783-787
     pub(crate) fn get_number(&mut self, max: u64, signed: bool) -> Result<i64> {
         // The position is kept in a local and written once (`white_space_at`).
         let (pos, c) = self.white_space_at(self.pos)?;
         // `SkipWs` then `GetChar`: the first byte that is not C's `isspace`, taken.
-        let (pos, mut c) = self.ws_at(pos, c)?;
-        let mut pos = pos + 1;
-        let mut negative = false;
-        if (signed && c == b'-') || c == b'+' {
-            negative = c == b'-';
-            c = self.char_at(pos)?;
-            pos += 1;
-        }
-        if !c.is_ascii_digit() {
-            self.pos = pos;
-            return Err(self.bad_number());
-        }
-        let mut n = u64::from(c - b'0');
-        let before_mul = max / 10;
-        let limit_add = max % 10 + u64::from(negative);
-        let mut overflow = false;
-        let (end, _) = self.src.scan(pos, |d| {
-            if !d.is_ascii_digit() {
-                return false;
-            }
-            let d = u64::from(d - b'0');
-            if n > before_mul || (n == before_mul && d > limit_add) {
-                overflow = true;
-                return false;
-            }
-            n = n * 10 + d;
-            true
-        });
-        if overflow {
-            // The digit that overflows is taken before the check.
-            self.pos = end + 1;
-            return Err(self.number_overflow());
-        }
-        self.pos = end;
-        // `-Int4(n)` of n = 2^31 is the least Int4 (and likewise in 64 bits).
-        Ok(if negative {
-            (n as i64).wrapping_neg()
-        } else {
-            n as i64
-        })
+        let (pos, c) = self.ws_at(pos, c)?;
+        buffer_number!(self, pos, c, max, signed)
     }
 
     /// `PeekChar()` at `pos`: the end of the text is [`AsnTextErrorKind::Eof`] at `pos`.
@@ -1211,6 +1422,17 @@ impl<S: AsnSource> Reader<S> {
                 self.pos = pos;
                 Err(self.end_of_text())
             }
+        }
+    }
+
+    /// The error of a number that [`buffer_number!`] stops in, at the position it stopped at.
+    #[cold]
+    #[inline(never)]
+    fn number_stop(&self, stop: NumberStop) -> AsnTextError {
+        match stop {
+            NumberStop::Eof => self.end_of_text(),
+            NumberStop::Bad => self.bad_number(),
+            NumberStop::Overflow => self.number_overflow(),
         }
     }
 
@@ -1345,6 +1567,7 @@ impl<S: AsnSource> Reader<S> {
     /// byte there is a lower-case letter, else a number (`ReadInt4`). The one reader of both for
     /// the archive reader and the object streams (`asn_input`), which look it up in their values.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737
+    #[inline(always)]
     pub(crate) fn enum_word(&mut self) -> Result<EnumWord> {
         let (pos, c) = self.white_space_at(self.pos)?;
         if !c.is_ascii_lowercase() {
@@ -1400,82 +1623,37 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// `ReadStringValue`: a quoted string, its lines joined, `""` read as one quote.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:938-986
-    pub(crate) fn string(&mut self) -> Result<Vec<u8>> {
+    /// A VisibleString of a hand grammar (and a StringStore, which the text stream reads as one)
+    /// held by the frame `at`: `visible_string`, each byte outside 0x20..0x7E read as `#` and
+    /// given to `posts` with the stack trace of `at` as it is read (`post_replaced`), as NCBI's
+    /// `ReadString` of the type posts it.
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:988-991
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897 (cited at
+    // `report::serial::encoder::ReplacedChar`)
+    pub(crate) fn string<K: ReplacedSink + ?Sized>(
+        &mut self,
+        at: &Frame<'_>,
+        posts: &mut K,
+    ) -> Result<Vec<u8>> {
         let mut out = Vec::new();
-        self.string_into(&mut out)?;
+        let mut trace = None;
+        self.visible_string(
+            &mut out,
+            true,
+            false,
+            &mut move |root, line, byte, piece| {
+                post_replaced(posts, &mut trace, root, at, line, byte, piece)
+            },
+        )?;
         Ok(out)
     }
 
-    /// A UTF8String: `string` with any byte, as NCBI reads that type (`eFNP_Allow`).
+    /// A UTF8String: its bytes as they are, as NCBI reads that type (`eFNP_Allow`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:988-991
     pub(crate) fn utf8_string(&mut self) -> Result<Vec<u8>> {
-        self.string_as_read()
-    }
-
-    /// A string with its bytes as they are in the text, for a reader that applies NCBI's rule
-    /// for a VisibleString itself.
-    pub(crate) fn string_as_read(&mut self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
-        self.string_value(&mut out, false)?;
+        self.visible_string(&mut out, false, false, &mut |_, _, _, _| {})?;
         Ok(out)
-    }
-
-    /// `string`, appended to `out`.
-    pub(crate) fn string_into(&mut self, out: &mut Vec<u8>) -> Result<()> {
-        self.string_value(out, self.visible_only)
-    }
-
-    /// A string appended to `out`; `visible_only`: a byte outside the visible range is refused.
-    fn string_value(&mut self, out: &mut Vec<u8>, visible_only: bool) -> Result<()> {
-        let mut pos = self.expect_at(self.pos, b'"')?;
-        let mut line = self.line;
-        let start_line = line;
-        loop {
-            // The bytes up to the next one that needs a decision are appended at once.
-            let (end, c) = self.src.scan(pos, |c| {
-                if visible_only {
-                    c != b'"' && (b' '..=b'~').contains(&c)
-                } else {
-                    !matches!(c, b'"' | b'\r' | b'\n')
-                }
-            });
-            out.extend_from_slice(self.src.bytes(pos..end));
-            pos = end;
-            let Some(c) = c else {
-                self.pos = pos;
-                self.line = line;
-                return Err(self.unended_string(start_line));
-            };
-            pos += 1;
-            match c {
-                b'\r' | b'\n' => {
-                    line += 1;
-                    pos = self.end_of_line_at(pos, c);
-                }
-                b'"' => {
-                    if self.src.byte_at(pos) != Some(b'"') {
-                        self.pos = pos;
-                        self.line = line;
-                        return Ok(());
-                    }
-                    out.push(b'"');
-                    pos += 1;
-                }
-                _ => {
-                    // NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:456-459
-                    // (Only `visible_only` stops at such a byte.)
-                    self.pos = pos;
-                    self.line = line;
-                    let error = self.not_supported(&format!(
-                        "a string with the byte 0x{c:x} (NCBI replaces it by '#' and posts an error)"
-                    ));
-                    self.refuse(error, ())?;
-                    out.push(c)
-                }
-            }
-        }
     }
 
     /// The `CEofException` inside a string, which `ReadStringValue` turns into its error
@@ -1490,12 +1668,14 @@ impl<S: AsnSource> Reader<S> {
     /// `ReadStringValue` (`SkipString` when `skip`) of a VisibleString (`visible`) or a
     /// UTF8String: the string's lines joined and `""` read as one quote, appended to `out`
     /// (nothing when skipping). In a VisibleString each byte outside 0x20..0x7E is read as `#`,
-    /// and `bad_char` gets the line, the byte and the piece of the string that NCBI's message
+    /// and `bad_char` gets the document's type (`root`, for a hand grammar's post, `string`), the line,
+    /// the byte and the piece of the string that NCBI's message
     /// quotes (`ReplaceVisibleChar`'s post, `report::serial::encoder::ReplacedChar`): the piece
     /// being appended (`AppendStringData`: up to the end of the line, the quote, or 128 bytes;
     /// after `""` the next piece starts with the second quote), none when skipping. The one
-    /// reader of a VisibleString in ASN.1 text for the readers that post NCBI's messages (the
-    /// PSSM reader, `asn_types::read`, and the mask reader, `writedb::mask_info`).
+    /// reader of a VisibleString in ASN.1 text: the typed reader's (`asn_types::read`, the PSSM
+    /// reader and rpsbproc's), the mask reader's (`writedb::mask_info`) and a hand grammar's
+    /// (`string`, rpsbproc's archive reader).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:877-912 (`AppendStringData`)
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:938-986 (`ReadStringValue`, quoted
     // at `string`; its `catch` of a `CEofException` calls `UnendedString`)
@@ -1507,40 +1687,80 @@ impl<S: AsnSource> Reader<S> {
         out: &mut Vec<u8>,
         visible: bool,
         skip: bool,
-        bad_char: &mut dyn FnMut(usize, u8, &[u8]),
+        bad_char: &mut impl FnMut(&'static str, usize, u8, &[u8]),
     ) -> Result<()> {
-        // `pos` is the start of the piece being read and `i` its bytes so far.
+        // `pos` is the start of the run being read (the bytes up to the next line end or quote,
+        // which NCBI appends in pieces of 128 bytes from its start), `i` its bytes so far (after
+        // `""` the run starts with the second quote).
         let mut pos = self.expect_at(self.pos, b'"')?;
         let mut line = self.line;
         let start_line = line;
         let mut i = 0usize;
         loop {
-            let room = 128 - i;
-            let mut taken = 0usize;
-            let (end, c) = self.src.scan(pos + i, |c| {
-                if taken == room || matches!(c, b'\r' | b'\n' | b'"') {
-                    return false;
+            let run_start = pos;
+            // Whether the run holds a byte that a VisibleString reads as `#`.
+            let mut clean = true;
+            let (end, c) = loop {
+                let rest = self.src.rest(pos + i);
+                if let Some(found) = rest.iter().position(|&c| {
+                    if (b' '..=b'~').contains(&c) {
+                        return c == b'"';
+                    }
+                    if matches!(c, b'\r' | b'\n') {
+                        return true;
+                    }
+                    clean &= !visible;
+                    false
+                }) {
+                    break (pos + i + found, Some(rest[found]));
                 }
-                if skip && visible && !(b' '..=b'~').contains(&c) {
-                    bad_char(line, c, &[]);
+                let scanned = pos + i + rest.len();
+                // Keep a long single-line run bounded in `StreamSource`: flush complete 128-byte
+                // pieces before filling the next block so the stream buffer does not grow with the
+                // run alongside `out`, while keeping piece borders at multiples of 128 from the
+                // run's start (`AppendStringData`).
+                if scanned - pos >= STREAM_BLOCK {
+                    let whole = (scanned - pos) / 128 * 128;
+                    if !clean {
+                        self.append_run(
+                            pos..pos + whole,
+                            pos + whole,
+                            line,
+                            out,
+                            clean,
+                            skip,
+                            bad_char,
+                        );
+                    } else if !skip {
+                        out.extend_from_slice(self.src.bytes(pos..pos + whole));
+                    }
+                    pos += whole;
+                    self.src.release_before(pos);
+                    i = 0;
+                    clean = true;
+                    continue;
                 }
-                taken += 1;
-                true
-            });
-            i = end - pos;
-            if i == 128 {
-                self.append_piece(pos..pos + i, line, out, visible, skip, bad_char);
-                pos += i;
-                i = 0;
-                continue;
-            }
+                i = scanned - pos;
+                if !self.src.fill(scanned) {
+                    break (scanned, None);
+                }
+            };
             let Some(c) = c else {
-                self.pos = pos;
+                // The pieces of 128 bytes before the end of the text were appended; the rest was
+                // not (`PeekChar` throws first).
+                let whole = (end - pos) / 128 * 128;
+                self.append_run(pos..end, pos + whole, line, out, clean, skip, bad_char);
+                self.pos = run_start;
                 self.line = line;
                 return Err(self.unended_string(start_line));
             };
-            self.append_piece(pos..pos + i, line, out, visible, skip, bad_char);
-            pos += i + 1;
+            // A run without such a byte is appended whole (nothing when skipping).
+            if !clean {
+                self.append_run(pos..end, end, line, out, clean, skip, bad_char);
+            } else if !skip {
+                out.extend_from_slice(self.src.bytes(pos..end));
+            }
+            pos = end + 1;
             i = 0;
             if c == b'"' {
                 if self.src.byte_at(pos) != Some(b'"') {
@@ -1548,47 +1768,66 @@ impl<S: AsnSource> Reader<S> {
                     self.line = line;
                     return Ok(());
                 }
-                // `""`: the second quote starts the next piece (`SkipString` takes both).
+                // `""`: the second quote starts the next run (`SkipString` takes both).
                 if skip {
                     pos += 1;
                 } else {
                     i = 1;
                 }
+                self.src.release_before(pos);
             } else {
                 line += 1;
                 pos = self.end_of_line_at(pos, c);
+                self.src.release_before(pos);
             }
         }
     }
 
-    /// `AppendStringData` of the bytes `piece` (on line `line`).
-    fn append_piece(
-        &self,
-        piece: Range<usize>,
+    /// `AppendStringData` of the pieces of the run `run` (on line `line`) up to `appended`: 128
+    /// bytes each from the run's start, the last up to the run's end. `clean`: no byte of the run
+    /// is one that the string reads as `#` (then the run is appended whole). A skipped string
+    /// appends nothing and posts each such byte of the whole run without a piece (`SkipString`).
+    #[allow(clippy::too_many_arguments)]
+    #[cold]
+    #[inline(never)]
+    fn append_run(
+        &mut self,
+        run: Range<usize>,
+        appended: usize,
         line: usize,
         out: &mut Vec<u8>,
-        visible: bool,
+        clean: bool,
         skip: bool,
-        bad_char: &mut dyn FnMut(usize, u8, &[u8]),
+        bad_char: &mut dyn FnMut(&'static str, usize, u8, &[u8]),
     ) {
+        let (src, root) = (&self.src, self.root);
         if skip {
+            if !clean {
+                for &c in src.bytes(run) {
+                    if !(b' '..=b'~').contains(&c) {
+                        bad_char(root, line, c, &[]);
+                    }
+                }
+            }
             return;
         }
-        let data = self.src.bytes(piece);
-        if !visible {
+        let data = src.bytes(run.start..appended);
+        if clean {
             out.extend_from_slice(data);
             return;
         }
-        let mut done = 0;
-        for (i, &c) in data.iter().enumerate() {
-            if !(b' '..=b'~').contains(&c) {
-                out.extend_from_slice(&data[done..i]);
-                bad_char(line, c, data);
-                out.push(b'#');
-                done = i + 1;
+        for piece in data.chunks(128) {
+            let mut done = 0;
+            for (i, &c) in piece.iter().enumerate() {
+                if !(b' '..=b'~').contains(&c) {
+                    out.extend_from_slice(&piece[done..i]);
+                    bad_char(root, line, c, piece);
+                    out.push(b'#');
+                    done = i + 1;
+                }
             }
+            out.extend_from_slice(&piece[done..]);
         }
-        out.extend_from_slice(&data[done..]);
     }
 
     /// An OCTET STRING: `'`, hex digits across lines, `'H`.
@@ -1609,6 +1848,7 @@ impl<S: AsnSource> Reader<S> {
                 b'\'' => break,
                 b'\r' | b'\n' => {
                     self.skip_end_of_line(c);
+                    self.src.release_before(self.pos);
                     continue;
                 }
                 _ => {
@@ -1619,6 +1859,9 @@ impl<S: AsnSource> Reader<S> {
                     ));
                 }
             };
+            if self.pos & 0x3ff == 0 {
+                self.src.release_before(self.pos);
+            }
             match high.take() {
                 Some(h) => out.push((h << 4) | digit),
                 None => high = Some(digit),
@@ -1718,62 +1961,17 @@ impl<S: AsnSource> Reader<S> {
         }
         Ok((read.value, is_negative))
     }
-
-    /// Skips one value of any type: a block with what it holds, a string, an OCTET STRING or
-    /// BIT STRING, or the words and numbers up to the `,` or `}` that ends it (a CHOICE is its
-    /// variant's name and value). It checks the blocks, strings and octet strings of the value
-    /// but not the grammar of its type: a value that NCBI's typed reader refuses can be skipped.
-    pub(crate) fn skip_value(&mut self) -> Result<()> {
-        let mut depth = 0usize;
-        let mut any = false;
-        loop {
-            let c = self.skip_white_space()?;
-            match c {
-                b'{' => {
-                    self.pos += 1;
-                    depth += 1;
-                }
-                b'}' | b',' if depth == 0 => {
-                    if !any {
-                        return Err(self.error("value expected"));
-                    }
-                    return Ok(());
-                }
-                b'}' => {
-                    self.pos += 1;
-                    depth -= 1;
-                }
-                b'"' => {
-                    self.string()?;
-                }
-                b'\'' => {
-                    self.pos += 1;
-                    loop {
-                        let Some(c) = self.src.byte_at(self.pos) else {
-                            return Err(self.end_of_text());
-                        };
-                        self.pos += 1;
-                        match c {
-                            b'\'' => break,
-                            b'\r' | b'\n' => self.skip_end_of_line(c),
-                            _ => {}
-                        }
-                    }
-                    if matches!(self.peek_at(0), b'H' | b'B') {
-                        self.pos += 1;
-                    }
-                }
-                _ => self.pos += 1,
-            }
-            any = true;
-        }
-    }
 }
 
 /// The end of `ReadDouble` (cited at `Reader::real`): the value of the mantissa `mantissa` (read
 /// with its sign; `is_negative` whether it had a `-`), `base` and `exp`; `None` for a base other
 /// than 2 and 10 ("illegal REAL base").
-fn real_of_parts(mut mantissa: f64, is_negative: bool, base: u32, exp: i32) -> Option<f64> {
+pub(crate) fn real_of_parts(
+    mut mantissa: f64,
+    is_negative: bool,
+    base: u32,
+    exp: i32,
+) -> Option<f64> {
     if base != 2 && base != 10 {
         return None;
     }

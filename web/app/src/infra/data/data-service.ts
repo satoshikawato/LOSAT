@@ -35,13 +35,18 @@ import type {
   KeptRun,
   ResultSetRef,
   RunInput,
+  SessionFileRef,
   SourceRef,
   StorageInfo,
   StoredResultsCheck,
+  StoredToolFile,
+  ToolOutputCommand,
+  ToolOutputReply,
+  ToolOutputsSummary,
 } from '../../ports/data';
 import { concatBytes } from '../bytes';
 import { asStorageFull, isStorageFull, isStorageRemoved, type BlockStore, type BlockWriter } from './block-store';
-import { inflateFile } from './inflate';
+import { inflateFile, inflateToWriter } from './inflate';
 import { hasEntryBytes } from './zip-entries';
 
 export interface DataServiceDeps {
@@ -75,7 +80,9 @@ const BLOCK_NAMES: Readonly<Record<OutputStream, string>> = {
   [DIAGNOSTICS_STREAM]: 'diagnostics',
 };
 const LF = 0x0a;
+const CR = 0x0d;
 const NEWLINE = new Uint8Array([LF]);
+const CR_NEWLINE = new Uint8Array([CR]);
 
 /** The bytes of each stream of a run: those of its outputs (`openRun`), the HSP records and the diagnostics. */
 type Lengths = Partial<Record<OutputStream, number>>;
@@ -109,10 +116,48 @@ interface CommittedRun {
   readonly lengths: Readonly<Lengths>;
 }
 
+interface StagedToolFile {
+  readonly key: string;
+  readonly name: string;
+  readonly blockName: string;
+  readonly writer: BlockWriter;
+  length: number;
+  closed: boolean;
+}
+
+interface StagedToolRun {
+  readonly state: 'staged';
+  readonly token: string;
+  readonly port: MessagePort;
+  readonly stdout: BlockWriter;
+  readonly stderr: BlockWriter;
+  stdoutSize: number;
+  stderrSize: number;
+  readonly files: Map<string, StagedToolFile>;
+  readonly fileOrder: string[];
+  failure: Error | undefined;
+}
+
+interface CommittedToolFile extends StoredToolFile {
+  readonly blockName: string;
+}
+
+interface CommittedToolRun {
+  readonly state: 'committed';
+  readonly token: string;
+  readonly stdoutSize: number;
+  readonly stderrSize: number;
+  readonly files: ReadonlyMap<string, CommittedToolFile>;
+}
+
+const TOOL_FILE_KEY = /^file:(\d+)$/;
+
 export class DataService implements DataGateway {
   private readonly sources = new Map<string, File>();
   private readonly revisions = new Map<string, DatasetRevision>();
   private readonly runs = new Map<string, StagedRun | CommittedRun>();
+  private readonly toolRuns = new Map<string, StagedToolRun | CommittedToolRun>();
+  private readonly sessionFiles = new Map<string, { readonly prefix: string; readonly path: string }>();
   private readonly chunkBytes: number;
   private cleanup: CleanupState = { state: 'pending' };
 
@@ -139,7 +184,7 @@ export class DataService implements DataGateway {
     const { records, reader_error: stop } = await this.deps.scanner.scan(reader, readChunks(file, this.chunkBytes));
     checkRecordTable(records, file.size, stop?.offset);
     const hashes = await this.hashRecords(file, records);
-    return this.keep({
+    const revision = this.keep({
       revisionId: this.deps.newToken(),
       sourceId,
       parser,
@@ -147,37 +192,52 @@ export class DataService implements DataGateway {
       excluded: Object.freeze([]),
       ...(stop === undefined ? {} : { readerError: Object.freeze({ offset: stop.offset, defline: stop.defline, message: stop.message }) }),
     });
+    return revision;
   }
 
   async reviseDataset(revisionId: string, excluded: readonly number[]): Promise<DatasetRevision> {
     const base = this.revision(revisionId);
-    return this.keep({
+    const revision = this.keep({
       ...base,
       revisionId: this.deps.newToken(),
       excluded: normalizeExclusion(excluded, base.records.length),
     });
+    return revision;
   }
 
   async buildRunInput(revisionIds: readonly string[]): Promise<RunInput> {
-    const { bytes, records } = await this.runInputBytes(revisionIds);
-    return { bytes, sha256: await this.deps.digest(bytes), records };
+    const { bytes, records, assembled } = await this.assembleRunInput(revisionIds);
+    return {
+      bytes,
+      sha256: await this.deps.digest(bytes),
+      records,
+      ...(assembled ? { assembled: true } : {}),
+    };
   }
 
   /**
-   * The bytes and record keys of a run input, without its SHA-256. A source whose reading ends with
+   * Assembles the bytes of a run input from its dataset revisions. A source whose reading ends with
    * the reader's error (`DatasetRevision.readerError`) keeps the bytes from the error on after its
    * included records, so that the run meets the error as the command line meets it in the file, and
-   * ends the input: the engine reads no record after it (line WQA's D10, 2026-11-19).
+   * ends the input: the engine reads no record after it (line WQA's D10, 2026-11-19). Between parts,
+   * a pure-CR stream stays in CR mode so joining CR files without a trailing CR does not switch
+   * NCBI's line reader to mixed mode (line WQA's D17).
    */
-  private async runInputBytes(revisionIds: readonly string[]): Promise<Omit<RunInput, 'sha256'>> {
+  private async assembleRunInput(
+    revisionIds: readonly string[],
+  ): Promise<{ readonly bytes: Uint8Array; readonly records: readonly RecordKey[]; readonly assembled: boolean }> {
     if (revisionIds.length === 0) throw new Error('a run input needs at least one dataset revision');
     const parts: Uint8Array[] = [];
     const records: RecordKey[] = [];
+    let assembled = revisionIds.length > 1;
+    let hasLf = false;
+    let hasCr = false;
     for (const revisionId of revisionIds) {
       const revision = this.revision(revisionId);
       const file = this.source(revision.sourceId);
       const included = includedRecords(revision);
       const stop = revision.readerError?.offset;
+      if (revision.excluded.length > 0) assembled = true;
       const bytes =
         revision.excluded.length === 0
           ? await readRange(file, 0, file.size)
@@ -186,26 +246,39 @@ export class DataService implements DataGateway {
               ...(stop === undefined ? [] : [[stop, file.size] as const]),
             ]);
       const previous = parts[parts.length - 1];
-      if (bytes.length > 0 && previous !== undefined && previous[previous.length - 1] !== LF) {
-        parts.push(NEWLINE);
+      if (bytes.length > 0 && previous !== undefined) {
+        const last = previous[previous.length - 1];
+        if (last !== LF) {
+          if (!hasLf && hasCr) {
+            if (last !== CR) parts.push(CR_NEWLINE);
+          } else {
+            parts.push(NEWLINE);
+            hasLf = true;
+          }
+        }
       }
-      if (bytes.length > 0) parts.push(bytes);
-      // One by one: spreading a large table into push() overflows the call stack.
+      if (bytes.length > 0) {
+        parts.push(bytes);
+        if (!hasLf && bytes.includes(LF)) hasLf = true;
+        if (!hasCr && bytes.includes(CR)) hasCr = true;
+      }
       for (const record of included) records.push(recordKey(record));
       if (stop !== undefined) break;
     }
-    return { bytes: concatBytes(parts), records: Object.freeze(records) };
+    return { bytes: concatBytes(parts), records: Object.freeze(records), assembled };
   }
 
   async checkInput(reader: FastaReader, revisionIds: readonly string[]): Promise<InputCheck> {
-    const { bytes } = await this.runInputBytes(revisionIds);
+    const { bytes } = await this.assembleRunInput(revisionIds);
     return this.deps.checker.check(reader, bytes);
   }
 
   async dropSource(sourceId: string): Promise<void> {
     this.sources.delete(sourceId);
     for (const [revisionId, revision] of this.revisions) {
-      if (revision.sourceId === sourceId) this.revisions.delete(revisionId);
+      if (revision.sourceId === sourceId) {
+        this.revisions.delete(revisionId);
+      }
     }
   }
 
@@ -371,18 +444,102 @@ export class DataService implements DataGateway {
   async deleteRun(runId: string): Promise<void> {
     const run = this.runs.get(runId);
     if (run !== undefined) await this.drop(runId, run);
+    const tool = this.toolRuns.get(runId);
+    if (tool !== undefined) await this.dropTool(runId, tool);
+  }
+
+  // --- tool runs and OPFS-backed session files (WW3b) -----------------------------------
+
+  async openToolRun(runId: string): Promise<MessagePort> {
+    if (this.runs.has(runId) || this.toolRuns.has(runId)) throw new Error(`run ${runId} already exists`);
+    const token = this.deps.newToken();
+    let stdout: BlockWriter;
+    let stderr: BlockWriter;
+    try {
+      stdout = await this.deps.store.create(toolBlockPath(token, 'stdout'));
+      stderr = await this.deps.store.create(toolBlockPath(token, 'stderr'));
+    } catch (error) {
+      await this.deps.store.removeAll(toolRunPrefix(token)).catch(() => undefined);
+      throw isStorageFull(error) ? asStorageFull(error) : error;
+    }
+    const channel = new MessageChannel();
+    const run: StagedToolRun = {
+      state: 'staged',
+      token,
+      port: channel.port2,
+      stdout,
+      stderr,
+      stdoutSize: 0,
+      stderrSize: 0,
+      files: new Map(),
+      fileOrder: [],
+      failure: undefined,
+    };
+    this.toolRuns.set(runId, run);
+    let chain: Promise<void> = Promise.resolve();
+    channel.port2.onmessage = (event: MessageEvent<ToolOutputCommand>) => {
+      const cmd = event.data;
+      chain = chain.then(() => this.handleToolCommand(runId, run, cmd));
+    };
+    return channel.port1;
+  }
+
+  async readToolOutputRange(runId: string, key: string, start: number, end: number): Promise<Uint8Array> {
+    const { path, size } = this.committedToolOutput(runId, key);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > size) {
+      throw new RangeError(`bytes [${start}, ${end}) are not in output ${key} of run ${runId} (${size} bytes)`);
+    }
+    return this.deps.store.read(path, start, end - start);
+  }
+
+  async getToolOutputFile(runId: string, key: string, fileName: string): Promise<File> {
+    const { path } = this.committedToolOutput(runId, key);
+    return this.deps.store.readFile(path, fileName, 'application/octet-stream');
+  }
+
+  async inflateToSessionFile(file: File): Promise<SessionFileRef> {
+    if (!(file instanceof Blob)) throw new TypeError('an input must be a File');
+    const token = this.deps.newToken();
+    const prefix = sessionFilePrefix(token);
+    const path = `${prefix}/data`;
+    const inflated = await inflateToWriter(file, this.deps.inflater, () => this.deps.store.create(path));
+    if (inflated === undefined) {
+      return { file, name: file.name, size: file.size };
+    }
+    this.sessionFiles.set(token, { prefix, path });
+    const stored = await this.deps.store.readFile(path, inflated.plainName, 'text/plain');
+    return { token, file: stored, name: inflated.plainName, size: inflated.size, inflatedFrom: file.name };
+  }
+
+  async dropSessionFile(token: string): Promise<void> {
+    const entry = this.sessionFiles.get(token);
+    if (entry === undefined) return;
+    this.sessionFiles.delete(token);
+    await this.deps.store.removeAll(entry.prefix).catch(() => undefined);
   }
 
   async checkStoredResults(): Promise<StoredResultsCheck> {
-    const runs = [...this.runs];
-    const outcomes: StoredOutcome[] = runs.map(() => 'kept');
+    type Entry =
+      | { readonly kind: 'search'; readonly runId: string; readonly run: StagedRun | CommittedRun }
+      | { readonly kind: 'tool'; readonly runId: string; readonly run: StagedToolRun | CommittedToolRun };
+    const entries: Entry[] = [
+      ...[...this.runs].map(([runId, run]): Entry => ({ kind: 'search', runId, run })),
+      ...[...this.toolRuns].map(([runId, run]): Entry => ({ kind: 'tool', runId, run })),
+    ];
+    const outcomes: StoredOutcome[] = entries.map(() => 'kept');
     let next = 0;
     // At most STORED_CHECK_READS reads at a time, so that hundreds of runs do not flood the browser with requests.
     const reader = async () => {
-      for (let i = next++; i < runs.length; i = next++) outcomes[i] = await this.checkStored(...runs[i]!);
+      for (let i = next++; i < entries.length; i = next++) {
+        const entry = entries[i]!;
+        outcomes[i] =
+          entry.kind === 'search'
+            ? await this.checkStored(entry.runId, entry.run)
+            : await this.checkStoredTool(entry.runId, entry.run);
+      }
     };
-    await Promise.all(Array.from({ length: Math.min(STORED_CHECK_READS, runs.length) }, reader));
-    const of = (outcome: StoredOutcome) => runs.filter((_, i) => outcomes[i] === outcome).map(([runId]) => runId);
+    await Promise.all(Array.from({ length: Math.min(STORED_CHECK_READS, entries.length) }, reader));
+    const of = (outcome: StoredOutcome) => entries.filter((_, i) => outcomes[i] === outcome).map((entry) => entry.runId);
     return { removed: of('removed'), unreadable: of('unreadable') };
   }
 
@@ -402,6 +559,149 @@ export class DataService implements DataGateway {
     // A run deleted while it was checked is not reported.
     if (failure === undefined || this.runs.get(runId) !== run) return 'kept';
     return isStorageRemoved(failure.error) ? 'removed' : 'unreadable';
+  }
+
+  private async checkStoredTool(runId: string, run: StagedToolRun | CommittedToolRun): Promise<StoredOutcome> {
+    if (run.state !== 'committed') return 'kept';
+    let failure: { readonly error: unknown } | undefined;
+    try {
+      await this.deps.store.read(toolBlockPath(run.token, 'stdout'), 0, Math.min(1, run.stdoutSize));
+    } catch (error) {
+      failure = { error };
+    }
+    if (failure === undefined || this.toolRuns.get(runId) !== run) return 'kept';
+    return isStorageRemoved(failure.error) ? 'removed' : 'unreadable';
+  }
+
+  private async handleToolCommand(runId: string, run: StagedToolRun, cmd: ToolOutputCommand): Promise<void> {
+    const reply = (msg: ToolOutputReply, close = false) => {
+      try {
+        run.port.postMessage(msg);
+      } finally {
+        if (close) run.port.close();
+      }
+    };
+    const removeToolBlocks = () => this.deps.store.removeAll(toolRunPrefix(run.token)).catch(() => undefined);
+    const requireOpenFile = (key: string) => {
+      const file = run.files.get(key);
+      if (file === undefined || file.closed) throw new Error(`tool output ${key} is not open`);
+      return file;
+    };
+    const fail = (error: unknown, close = false) => {
+      const normalized = isStorageFull(error) ? asStorageFull(error) : toError(error);
+      run.failure ??= normalized;
+      void removeToolBlocks();
+      reply({ id: cmd.id, ok: false, error: { name: normalized.name, message: normalized.message } }, close);
+    };
+    if (cmd.op === 'discard') {
+      if (this.toolRuns.get(runId) === run) {
+        this.toolRuns.delete(runId);
+        await removeToolBlocks();
+      }
+      reply({ id: cmd.id, ok: true }, true);
+      return;
+    }
+    if (this.toolRuns.get(runId) !== run) {
+      reply({ id: cmd.id, ok: false, error: { name: 'Error', message: `run ${runId} was discarded` } }, cmd.op === 'commit');
+      return;
+    }
+    if (run.failure !== undefined) {
+      if (cmd.op === 'commit') {
+        this.toolRuns.delete(runId);
+        await removeToolBlocks();
+      }
+      reply({ id: cmd.id, ok: false, error: { name: run.failure.name, message: run.failure.message } }, cmd.op === 'commit');
+      return;
+    }
+    try {
+      if (cmd.op === 'stdout') {
+        run.stdout.append(cmd.bytes);
+        run.stdoutSize += cmd.bytes.length;
+        reply({ id: cmd.id, ok: true });
+      } else if (cmd.op === 'stderr') {
+        run.stderr.append(cmd.bytes);
+        run.stderrSize += cmd.bytes.length;
+        reply({ id: cmd.id, ok: true });
+      } else if (cmd.op === 'open') {
+        const match = TOOL_FILE_KEY.exec(cmd.key);
+        if (match === null) throw new Error(`invalid tool output key ${cmd.key}`);
+        if (run.files.has(cmd.key)) throw new Error(`tool output ${cmd.key} is already open`);
+        const blockName = `f${match[1]}`;
+        const writer = await this.deps.store.create(toolBlockPath(run.token, blockName));
+        if (this.toolRuns.get(runId) !== run) {
+          await removeToolBlocks();
+          reply({ id: cmd.id, ok: false, error: { name: 'Error', message: `run ${runId} was discarded` } });
+          return;
+        }
+        run.files.set(cmd.key, { key: cmd.key, name: cmd.name, blockName, writer, length: 0, closed: false });
+        run.fileOrder.push(cmd.key);
+        reply({ id: cmd.id, ok: true });
+      } else if (cmd.op === 'write') {
+        const file = requireOpenFile(cmd.key);
+        file.writer.writeAt(cmd.offset, cmd.bytes);
+        if (cmd.bytes.length > 0) file.length = Math.max(file.length, cmd.offset + cmd.bytes.length);
+        reply({ id: cmd.id, ok: true });
+      } else if (cmd.op === 'truncate') {
+        const file = requireOpenFile(cmd.key);
+        file.writer.truncate(cmd.length);
+        file.length = cmd.length;
+        reply({ id: cmd.id, ok: true });
+      } else if (cmd.op === 'close') {
+        const file = run.files.get(cmd.key);
+        if (file !== undefined && !file.closed) {
+          file.length = await file.writer.seal();
+          file.closed = true;
+        }
+        reply({ id: cmd.id, ok: true });
+      } else if (cmd.op === 'commit') {
+        const stdoutSize = await run.stdout.seal();
+        const stderrSize = await run.stderr.seal();
+        const committedFiles = new Map<string, CommittedToolFile>();
+        const summaryFiles: StoredToolFile[] = [];
+        for (const key of run.fileOrder) {
+          const file = run.files.get(key)!;
+          if (!file.closed) {
+            file.length = await file.writer.seal();
+            file.closed = true;
+          }
+          committedFiles.set(key, { key: file.key, name: file.name, size: file.length, blockName: file.blockName });
+          summaryFiles.push({ key: file.key, name: file.name, size: file.length });
+        }
+        if (this.toolRuns.get(runId) !== run) {
+          await removeToolBlocks();
+          reply({ id: cmd.id, ok: false, error: { name: 'Error', message: `run ${runId} was discarded` } }, true);
+          return;
+        }
+        this.toolRuns.set(runId, {
+          state: 'committed',
+          token: run.token,
+          stdoutSize,
+          stderrSize,
+          files: committedFiles,
+        });
+        const summary: ToolOutputsSummary = { stdoutSize, stderrSize, files: summaryFiles };
+        reply({ id: cmd.id, ok: true, summary }, true);
+      }
+    } catch (error) {
+      if (cmd.op === 'commit') this.toolRuns.delete(runId);
+      fail(error, cmd.op === 'commit');
+    }
+  }
+
+  private committedToolOutput(runId: string, key: string): { readonly path: string; readonly size: number } {
+    const run = this.toolRuns.get(runId);
+    if (run?.state !== 'committed') throw new Error(`tool run ${runId} has no committed output`);
+    if (key === 'stdout') return { path: toolBlockPath(run.token, 'stdout'), size: run.stdoutSize };
+    if (key === 'stderr') return { path: toolBlockPath(run.token, 'stderr'), size: run.stderrSize };
+    const file = run.files.get(key);
+    if (file === undefined) throw new Error(`tool run ${runId} has no output ${key}`);
+    return { path: toolBlockPath(run.token, file.blockName), size: file.size };
+  }
+
+  private async dropTool(runId: string, run: StagedToolRun | CommittedToolRun): Promise<void> {
+    this.toolRuns.delete(runId);
+    if (run.state === 'staged') run.port.close();
+    await this.deps.store.removeAll(toolRunPrefix(run.token));
   }
 
   async storageInfo(): Promise<StorageInfo> {
@@ -537,6 +837,18 @@ function runPrefix(token: string): string {
 
 function blockPath(token: string, stream: OutputStream): string {
   return `${runPrefix(token)}/${BLOCK_NAMES[stream]}`;
+}
+
+function toolRunPrefix(token: string): string {
+  return `tools/${token}`;
+}
+
+function toolBlockPath(token: string, name: string): string {
+  return `${toolRunPrefix(token)}/${name}`;
+}
+
+function sessionFilePrefix(token: string): string {
+  return `tool-inputs/${token}`;
 }
 
 /**

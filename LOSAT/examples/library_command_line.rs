@@ -10,8 +10,8 @@
 //! `run_to_file` with `-out`, and writes the search's warnings and a failure's message to standard
 //! error, so that a run compares with `losat <program>` with the same arguments
 //! (`tests/db_search_fixtures.py check --library`). `makeblastdb`, `blastdbcmd`, `dustmasker`,
-//! `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` go to their functions, with
-//! the standard streams of this process
+//! `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter` go to
+//! their functions, with the standard streams of this process
 //! (`tests/masker_fixtures.rs`). A failure ends with status 1, whatever the command line's
 //! status for it.
 
@@ -20,9 +20,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use losat::api::{
-    read_input_file, read_input_records, run, run_blastdbcmd, run_convert2blastmask,
-    run_dustmasker, run_makeblastdb, run_makembindex, run_segmasker, run_to_file, run_windowmasker,
-    validate, Error, Inputs, Program, Role,
+    read_input_file, read_input_records, run, run_blast_formatter, run_blastdbcmd,
+    run_convert2blastmask, run_dustmasker, run_makeblastdb, run_makembindex, run_segmasker,
+    run_to_file, run_windowmasker, validate, Error, Inputs, Program, Role,
 };
 
 fn main() -> ExitCode {
@@ -58,9 +58,9 @@ impl Write for Noted {
 }
 
 /// A tool has written its failure to standard error, so `main` adds nothing: the error of its
-/// run, and the parser's refusal of makeblastdb's argv, which the tool writes as the command line
-/// does (`wrote`). The parser's help (`-h`, `-help`), which the tool does not write, is the
-/// error's text, which `main` writes.
+/// run, and NCBI's argument reader's report or LOSAT's refusal of makeblastdb's argv, which the
+/// tool writes as the command line does (`wrote`). A tool writes its help (`-h`, `-help`) to its
+/// output and succeeds, as the command line.
 fn reported(result: Result<(), Error>, wrote: bool) -> Result<(), Error> {
     match result {
         Err(Error::Search(_)) => Err(Error::Search(Vec::new())),
@@ -86,6 +86,7 @@ fn search() -> Result<(), Error> {
         "windowmasker" => run_windowmasker,
         "convert2blastmask" => run_convert2blastmask,
         "makembindex" => run_makembindex,
+        "blast_formatter" => run_blast_formatter,
         _ => return search_program(program, words),
     };
     let (mut stdin, mut stdout) = (std::io::stdin(), std::io::stdout());

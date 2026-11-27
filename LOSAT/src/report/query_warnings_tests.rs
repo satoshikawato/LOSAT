@@ -156,6 +156,8 @@ impl Write for Log {
     }
 }
 
+impl crate::report::ostream::ReportWrite for Log {}
+
 #[test]
 fn the_texts_of_the_reads_follow_the_report_up_to_each_read() {
     let reads: Vec<QueryReads> = vec![
@@ -204,9 +206,9 @@ fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
     let mut sink = log.clone();
     report.write_all(b"{0}\n").unwrap();
     let mut posts = HitPosts::new(false);
-    posts.hit(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
-    posts.hit(2, 2, |_| Ok(())).unwrap();
-    posts.hit(2, 3, |texts| texts.write_all(b"T3\n")).unwrap();
+    posts.mark(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
+    posts.mark(2, 2, |_| Ok(())).unwrap();
+    posts.mark(2, 3, |texts| texts.write_all(b"T3\n")).unwrap();
     posts
         .write(b",\n{1}\n", &mut report, &mut sink, |_, _, _| Ok(()))
         .unwrap();
@@ -220,8 +222,8 @@ fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
     let (mut report, mut sink) = (log.clone(), log.clone());
     let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
     let mut posts = HitPosts::new(warnings.reads_with_texts(0));
-    posts.hit(0, 5, |texts| texts.write_all(b"P5\n")).unwrap();
-    posts.hit(4, 6, |texts| texts.write_all(b"P6\n")).unwrap();
+    posts.mark(0, 5, |texts| texts.write_all(b"P5\n")).unwrap();
+    posts.mark(4, 6, |texts| texts.write_all(b"P6\n")).unwrap();
     write_hit_posts(b"<H5><H6>", &posts, 0, &mut report, Some(&mut warnings)).unwrap();
     drop(warnings);
     let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
@@ -235,7 +237,7 @@ fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
         "{lost}"
     );
     let mut marks = HitPosts::new(true);
-    marks.hit(0, 5, |_| Ok(())).unwrap();
+    marks.mark(0, 5, |_| Ok(())).unwrap();
     let mut alone = Vec::new();
     write_hit_posts(b"<H5><H6>", &marks, 0, &mut alone, None).unwrap();
     assert_eq!(alone, b"<H5><H6>");
@@ -256,7 +258,7 @@ fn the_post_of_a_caught_exception_follows_the_loads_before_it() {
     let (mut report, mut sink) = (log.clone(), log.clone());
     let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
     let mut posts = HitPosts::new(warnings.reads_with_texts(0));
-    posts.hit(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
+    posts.mark(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
     posts.document(crate::report::blast_xml::DocumentPosts {
         cut: true,
         ..Default::default()
@@ -290,6 +292,7 @@ fn loaded(
             lead: 0,
             opening,
             scope_utf8: false,
+            cut_refusal: None,
         }),
     }
 }
@@ -352,7 +355,7 @@ fn a_cut_report_leaves_its_texts_to_the_next_load_that_asks() {
     load.opening = 0;
     assert_eq!(load.place(b"X\n".to_vec()), b"X\nE0\n");
     assert_eq!(load.opening, 0);
-    load.left_out(b"X\nE0\n");
+    load.left_out(b"X\nE0\n").unwrap();
     let next = loaded(&texts, 8, b"", (0, true, 0));
     assert_eq!(next.placed(), b"X\nE0\n");
     texts.clear();
@@ -481,7 +484,7 @@ fn the_texts_left_before_a_batch_are_those_the_writers_leave() {
     let model = std::sync::Arc::new(LoadTexts::default());
     let (reads, prefetch) = shapes(&model);
     let prefetched = |query: usize| (query == 1).then_some(&prefetch);
-    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 3);
+    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 3).unwrap();
     assert_eq!(pending(&left), written);
     assert!(pending(&model) == (Vec::new(), Vec::new()) && !left.is_empty());
     // The stop's load of volume 0 that looks the taxid up writes volume 0's error.
@@ -490,7 +493,7 @@ fn the_texts_left_before_a_batch_are_those_the_writers_leave() {
     assert_eq!(stop.text, b"E0\n");
     assert!(left.is_empty());
     // Up to query 1 only (a stop in query 1's batch): its prefetch is that batch's own.
-    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 1);
+    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 1).unwrap();
     assert_eq!(
         pending(&left),
         (
@@ -499,7 +502,9 @@ fn the_texts_left_before_a_batch_are_those_the_writers_leave() {
         )
     );
     // No cut: nothing left.
-    assert!(LoadTexts::left_before(&reads, &|_| false, &prefetched, 3).is_empty());
+    assert!(LoadTexts::left_before(&reads, &|_| false, &prefetched, 3)
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -573,8 +578,9 @@ fn a_query_without_texts_reads_nothing() {
 }
 
 // Line RG T4a2 fix round 3 (review e S1, N1): a `-html` report's post flushes the report written so
-// far where the post goes to the standard error (NCBI's `cerr`, tied to `cout`); the posts go to the
-// caller's sink of them where it sets one, else to the diagnostics.
+// far first (LOSAT's flush, as every post's: the command line's diagnostics then tie `cout` where the
+// post goes to the standard error, `ostream::cerr_post`); the posts go to the caller's sink of them
+// where it sets one, else to the diagnostics.
 #[test]
 fn a_html_post_flushes_the_report_first_where_it_goes_to_the_standard_error() {
     /// A report that records its bytes and how many of them its last flush wrote.
@@ -608,6 +614,14 @@ fn a_html_post_flushes_the_report_first_where_it_goes_to_the_standard_error() {
     report.bytes.extend_from_slice(b"more\n");
     write_html_post(&mut report, &mut posts, b"").unwrap();
     assert_eq!(report.flushed, 5);
+    // The diagnostics as a writer that flushes the report before each post (BLASTX's posts before
+    // a batch's reports; review 1 of line DBID pf7, H2).
+    let mut after = PostsAfterReport::new(&mut report, &mut posts);
+    after
+        .write_all(b"Warning: [blastx] Error pre-fetching sequence data\n")
+        .unwrap();
+    assert_eq!(report.flushed, 10);
+    assert!(posts.ends_with(b"post\nWarning: [blastx] Error pre-fetching sequence data\n"));
     let (mut apart, mut diagnostics) = (Vec::new(), Vec::new());
     html_posts_sink(
         Some(&mut apart as &mut dyn Write),
@@ -619,4 +633,210 @@ fn a_html_post_flushes_the_report_first_where_it_goes_to_the_standard_error() {
         .write_all(b"d")
         .unwrap();
     assert_eq!((apart, diagnostics), (b"a".to_vec(), b"d".to_vec()));
+}
+
+/// A load that LOSAT's model followed through the slot of the taxonomy cache on a database whose
+/// volume holds the offset error's taxid and another of its slot (`ReadLoad::cut_refusal`) is
+/// LOSAT's refusal where NCBI's XML stream cuts it out: the later loads' texts would follow another
+/// slot. Nothing is left in the ledger.
+#[test]
+fn a_cut_of_a_load_of_the_cache_slot_is_refused() {
+    let texts = std::sync::Arc::new(LoadTexts::default());
+    let mut read = loaded(&texts, 0, b"E0\n", (0, true, 0));
+    read.load.as_mut().unwrap().cut_refusal = Some(std::sync::Arc::from("refused"));
+    let reads = vec![vec![read]];
+    let mut cursor = ReadCursor::in_ledger(&reads, &texts);
+    let error = cursor.cut(0, &mut Vec::new(), &mut Vec::new()).unwrap_err();
+    assert_eq!(error.to_string(), "refused");
+    // LOSAT's refusal, not a failed write (review 1 of item O4b2-5, H2).
+    assert_eq!(CutRefusal::of(&error), Some("refused"));
+    assert_eq!(CutRefusal::of(&io::Error::other("refused")), None);
+    assert!(texts.is_empty());
+}
+
+// Review 2 of D1c-1c-b PR 2b, M1 and L1: before NCBI stops at a row of a batch's last query, each
+// of the batch's queries up to it writes its posts, its formatter's taxonomy database warning and
+// the texts of its subjects' reads; the row's query only those of its rows up to the row.
+#[test]
+fn a_stopped_batch_writes_each_querys_posts_formatter_warning_and_reads_up_to_the_row() {
+    let posts = [
+        Posts::of_lines(b"R\nW0\n".to_vec()),
+        Posts::new(),
+        Posts::of_lines(b"W2\n".to_vec()),
+    ];
+    let reads = vec![
+        vec![
+            SubjectRead::of_text(5, b"T0.5\n"),
+            SubjectRead::of_text(6, b"T0.6\n"),
+        ],
+        Vec::new(),
+        vec![
+            SubjectRead::of_text(7, b"T2.7\n"),
+            SubjectRead::of_text(8, b"T2.8\n"),
+            SubjectRead::of_text(9, b"T2.9\n"),
+        ],
+    ];
+    let mut written = Vec::new();
+    posts_before_stop(&posts, &reads, &[7, 8], Some("F\n"))
+        .write(&mut written, None)
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(written).unwrap(),
+        "R\nW0\nF\nT0.5\nT0.6\nF\nW2\nF\nT2.7\nT2.8\n"
+    );
+    // No formatter warning, no reads: the posts alone.
+    let mut written = Vec::new();
+    posts_before_stop(&posts, &[], &[], None)
+        .write(&mut written, None)
+        .unwrap();
+    assert_eq!(written, b"R\nW0\nW2\n");
+}
+
+/// `QueryWarnings::before_query` flushes `report` before the first diagnostic byte emitted by a
+/// `Post::Request` release (matching NCBI's `cerr.tie(&cout)` for both `803.7` posts and strategy
+/// write failures such as `/dev/full`), while leaving `report` unflushed when a request mark
+/// writes no diagnostic bytes (matching NCBI's `SaveSearchStrategy`, which does not flush `cout`).
+#[test]
+fn request_mark_flushes_report_only_when_writing_diagnostics() {
+    use crate::blastinput::app::Program;
+    use crate::report::archive::bioseq::BioseqInput;
+    use crate::report::archive::options::OptionInputs;
+    use crate::report::archive::strategy::{StrategyExport, StrategySink};
+    use crate::report::archive::writer::{RequestInputs, RequestQueries};
+    use crate::report::archive::{ArchiveHandle, OptionsHandle};
+    use crate::report::ostream::{is_strategy_write_fault, StrategyStream};
+    use crate::report::serial::encoder::BufferPiece;
+
+    #[derive(Clone, Default)]
+    struct MergedLog {
+        merged: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+        buffered: Vec<u8>,
+        flushes: usize,
+    }
+
+    impl Write for MergedLog {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.buffered.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushes += 1;
+            self.merged
+                .lock()
+                .unwrap()
+                .extend_from_slice(&self.buffered);
+            self.buffered.clear();
+            Ok(())
+        }
+    }
+
+    struct ErrWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    impl Write for ErrWriter {
+        fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(data);
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct AlwaysFail;
+    impl Write for AlwaysFail {
+        fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
+            Err(io::ErrorKind::WriteZero.into())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::other("full"))
+        }
+    }
+
+    struct SilentSink;
+    impl StrategySink for SilentSink {
+        fn write_request(
+            &mut self,
+            _bytes: &[u8],
+            _pieces: &[BufferPiece],
+            _posts: &[(u64, Vec<u8>)],
+            _diagnostics: &mut dyn Write,
+            _archive: Option<&ArchiveHandle>,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+        fn write_partial(
+            &mut self,
+            _bytes: &[u8],
+            _posts: &[(u64, Vec<u8>)],
+            _diagnostics: &mut dyn Write,
+            _archive: Option<&ArchiveHandle>,
+        ) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let query = [BioseqInput {
+        id: "Query_1",
+        ids: None,
+        seq_loc: None,
+        defline: std::borrow::Cow::Borrowed(b">q"),
+        title: b"q",
+        letters: b"MKV",
+        protein: true,
+    }];
+    let req = RequestInputs {
+        queries: RequestQueries::Bioseqs(&query),
+        subjects: &[],
+        required: None,
+        lcase_masks: &[],
+    };
+    let opts = OptionInputs::new(Program::Blastp, "blastp");
+
+    // 1. Silent request mark does NOT flush `report`.
+    let silent_export =
+        StrategyExport::new(Box::new(SilentSink), &opts, None, OptionsHandle::default());
+    silent_export.write_request(0..1, &req).unwrap();
+    let before = vec![silent_export.take_all_posts()];
+    let mut report = MergedLog::default();
+    report.write_all(b"PROLOG\n").unwrap();
+    let mut err = ErrWriter(report.merged.clone());
+    let mut warnings = QueryWarnings::of_posts(&before, None, &mut err);
+    warnings.before_query(0, &mut report).unwrap();
+    assert_eq!(report.flushes, 0);
+    assert!(report.merged.lock().unwrap().is_empty());
+
+    // 2. Failing strategy stream (batch 0 Close 4-line chain, batch 1 write fault) flushes
+    // buffered report bytes BEFORE each failure diagnostic reaches the merged stream.
+    let failing_export = StrategyExport::new(
+        Box::new(StrategyStream::new(Box::new(AlwaysFail), "blastp")),
+        &opts,
+        None,
+        OptionsHandle::default(),
+    );
+    failing_export.write_request(0..1, &req).unwrap();
+    failing_export.note_searched(0..1, None).unwrap();
+    failing_export.write_request(1..2, &req).unwrap();
+    let taken: Vec<Posts> = failing_export
+        .take_posts(usize::MAX)
+        .into_iter()
+        .map(|(_, p)| p)
+        .collect();
+    let mut rep = MergedLog::default();
+    let mut diag = ErrWriter(rep.merged.clone());
+    let mut qw = QueryWarnings::of_posts(&taken, None, &mut diag);
+    rep.write_all(b"PROLOG_TAIL\n").unwrap();
+    qw.before_query(0, &mut rep).unwrap();
+    assert_eq!(rep.flushes, 1);
+    rep.write_all(b"FOOTER_0\n").unwrap();
+    let fault = qw.before_query(1, &mut rep).unwrap_err();
+    assert!(is_strategy_write_fault(&fault));
+    assert_eq!(rep.flushes, 2);
+    let text = String::from_utf8(rep.merged.lock().unwrap().clone()).unwrap();
+    let prolog_pos = text.find("PROLOG_TAIL\n").unwrap();
+    let close_pos = text.find("cannot close output stream").unwrap();
+    let footer_pos = text.find("FOOTER_0\n").unwrap();
+    let fault_pos = text.find("stack is empty: write fault").unwrap();
+    assert!(
+        prolog_pos < close_pos && close_pos < footer_pos && footer_pos < fault_pos,
+        "unexpected merged order:\n{text}"
+    );
 }

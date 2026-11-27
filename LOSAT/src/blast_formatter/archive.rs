@@ -32,7 +32,7 @@ use crate::blastinput::app::{
 use crate::blastinput::db_mask::name_mask_error;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::{command_line_argument_error, NativeError};
-use crate::ncbi_app::files::{self, OutputFile};
+use crate::ncbi_app::files::{self, OutputDevice};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::archive::read::options::{archive_request, BuiltOptions};
@@ -197,16 +197,16 @@ impl<'o> Output<'o> {
             .stdout
             .take()
             .expect("the standard output until -out is opened");
-        let file = files::open_output_file("out", value, stdout, self.files)
+        let file = files::open_output_device("out", value, stdout, self.files)
             .map_err(|error| command_line_argument_error(error.message()))?;
         let buf = match file {
-            OutputFile::Stdout(out) => {
+            OutputDevice::Stdout(out) => {
                 OutBuf::Cout(CoutBuf::new(out, crate::cli::NcbiStdio::cout()))
             }
-            OutputFile::File(file) => OutBuf::File(FileBuf::of_file(file)),
+            OutputDevice::File(file) => OutBuf::File(FileBuf::of_file(file)),
             // LOSAT Web's refusal of a name that it does not write, in blastdbcmd's words
-            // (`OutputFile::Refused`); the command line and the library open every name.
-            OutputFile::Refused(reason) => {
+            // (`OutputDevice::Refused`); the command line and the library open every name.
+            OutputDevice::Refused(reason) => {
                 return Err(anyhow::anyhow!(crate::seqmasks_io::run::unsupported(
                     &reason, PROGRAM
                 )))

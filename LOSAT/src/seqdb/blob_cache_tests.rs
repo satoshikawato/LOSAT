@@ -81,3 +81,32 @@ fn batches_before_the_model_leave_any_title_that_does_not_post_unsure() {
     cache.batch(&subjects, true);
     assert_eq!(cache.batch(&[(2, false)], true), vec![Out]);
 }
+
+/// The batch of subjects `ordinals` of a run whose formatter keeps its scope (every title posts).
+fn kept_batch(cache: &mut BlobCache, ordinals: std::ops::Range<u32>) -> Vec<BlobHeld> {
+    let subjects: Vec<(u32, bool)> = ordinals.map(|ordinal| (ordinal, true)).collect();
+    cache.batch_kept(&subjects, false)
+}
+
+#[test]
+fn a_kept_scope_holds_every_subject_loaded_before() {
+    let mut cache = BlobCache::default();
+    assert_eq!(kept_batch(&mut cache, 0..6), vec![Out; 6]);
+    // More than the cache of released blobs holds: the scope still holds them all.
+    assert_eq!(kept_batch(&mut cache, 6..20), vec![Out; 14]);
+    assert_eq!(kept_batch(&mut cache, 0..1), vec![Held]);
+    assert_eq!(kept_batch(&mut cache, 18..22), vec![Held, Held, Out, Out]);
+}
+
+#[test]
+fn a_kept_scope_after_batches_before_the_model_leaves_a_new_title_that_does_not_post_unsure() {
+    let mut cache = BlobCache::default();
+    assert_eq!(
+        cache.batch_kept(&[(0, true), (1, false)], true),
+        vec![Out, Unsure]
+    );
+    assert_eq!(
+        cache.batch_kept(&[(0, true), (1, false), (2, false)], true),
+        vec![Held, Held, Unsure]
+    );
+}

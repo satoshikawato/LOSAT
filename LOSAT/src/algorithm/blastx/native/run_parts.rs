@@ -277,6 +277,7 @@ impl ArchiveBatch<'_> {
                             false,
                             crate::report::tabular::PrintedIds::default(),
                             false,
+                            false,
                             crate::report::db_subject::ReportRead {
                                 one_by_one: false,
                                 batch: Some(queries_before),

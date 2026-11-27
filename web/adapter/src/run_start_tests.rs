@@ -1936,6 +1936,22 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "{typed}"
         );
     }
+    // One name with a `..` after a link (`/var/run` is `/run`) is two files: the log as NCBI reads
+    // `-logfile` (lexically), and the strategy file that the system opens (line RG item F1w-r2's
+    // second fix round; NCBI 2.17.0 blastp makes `/var/tmp/X` and `/tmp/X`). A log file past the
+    // folder of a registered file is named too (`/data` of `/data/q.fa`).
+    assert!(start_json(&[
+        "blastp",
+        "-logfile",
+        "/var/run/../tmp/X",
+        "-export_search_strategy",
+        "/var/run/../tmp/X"
+    ])
+    .unwrap()
+    .contains(r#""log_file_name":"/var/tmp/X","strategy_file":"/tmp/X","#));
+    assert!(start_json(&["blastp", "-logfile", "/data/../tmp/run.log"])
+        .unwrap()
+        .contains(r#""log_file_name":"/tmp/run.log","#));
     // After `--` nothing is the start's.
     assert_eq!(
         start_json(&["blastp", "--", "-dryrun"]).unwrap(),

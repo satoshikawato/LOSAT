@@ -518,6 +518,15 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
         ("/tmp/s.asn", file("/tmp/s.asn")),
         ("/dev/shm/s.asn", file("/dev/shm/s.asn")),
         ("/var/lock/s.asn", file("/var/lock/s.asn")),
+        // A `..` after a link steps back from the link's target (NCBI 2.17.0 blastp makes
+        // `/tmp/s.asn` for `/var/run/../tmp/s.asn`; `/var/run` is `/run`).
+        ("/var/run/../tmp/s.asn", file("/tmp/s.asn")),
+        ("/var/lock/../shm/s.asn", file("/run/shm/s.asn")),
+        ("/proc/self/root/../tmp/s.asn", file("/tmp/s.asn")),
+        (
+            "/proc/self/root/tmp/s.asn",
+            file("/proc/self/root/tmp/s.asn"),
+        ),
         ("/home/me/s.asn", file("/home/me/s.asn")),
         ("/proc/self/cwd/s.asn", file("s.asn")),
         ("/proc/self/cwd/out/s.asn", file("out/s.asn")),
@@ -689,11 +698,54 @@ fn a_strategy_name_sees_registered_and_read_files_outside_the_view() {
     }
 }
 
+/// `-logfile` and `-export_search_strategy` of one name with a `..` after a link are two files, as
+/// on the command line (NCBI 2.17.0 blastp with both `/var/run/../tmp/X`: the log `/var/tmp/X`, as
+/// NCBI reads `-logfile` lexically, and the strategy file `/tmp/X`, which the system opens as
+/// typed, `/var/run` being `/run`): neither is the other's, each under its own name in the run and
+/// in the *start*. Without the link, one name is one file (the strategy file is the log's).
+#[test]
+fn a_log_and_a_strategy_of_one_name_after_a_link_are_two_files() {
+    let files = RunFiles::Receiver(Arc::new(Kept::default()));
+    for (name, log_name, strategy) in [
+        (
+            "/var/run/../tmp/X",
+            "/var/tmp/X",
+            StrategyTarget::File(b"/tmp/X".to_vec()),
+        ),
+        ("/tmp/X", "/tmp/X", StrategyTarget::OtherFile("logfile")),
+    ] {
+        let log = [RunFileName {
+            option: "logfile",
+            name: OsStr::new(name),
+        }];
+        assert_eq!(
+            files.strategy_target(OsStr::new(name), &log),
+            strategy,
+            "{name:?}"
+        );
+        let Ok((DiagTarget::Memory(_), Some(logged))) = files.log_target(Some(OsStr::new(name)))
+        else {
+            panic!("{name:?}: a -logfile file");
+        };
+        assert_eq!(logged, log_name.as_bytes(), "{name:?}");
+        assert_eq!(
+            RunFiles::log_host_name(OsStr::new(name)),
+            Some(logged),
+            "{name:?}"
+        );
+    }
+    assert_eq!(
+        RunFiles::output_host_name(OsStr::new("/var/run/../tmp/X")),
+        Some(b"/tmp/X".to_vec())
+    );
+}
+
 /// One view of the run's files for every name that the run writes (line RG item F1w-r2): for a
-/// name that NCBI's reading of `-logfile` takes as it is typed (no leading space, no final `/`, none
-/// of NCBI's special names), the strategy file, the `-logfile` file and a tool's output are each a
-/// new file of the run, no file (NCBI's error, the messages on the standard error, a tool's open
-/// that fails), or LOSAT Web's refusal of a file of the run, in the same run's files.
+/// name that NCBI's reading of `-logfile` takes as it is typed (no leading space, no final `/`, no
+/// `..` after a link, none of NCBI's special names), the strategy file, the `-logfile` file and a
+/// tool's output are each a new file of the run, no file (NCBI's error, the messages on the
+/// standard error, a tool's open that fails), or LOSAT Web's refusal of a file of the run, in the
+/// same run's files.
 #[test]
 fn a_strategy_name_a_log_name_and_an_output_name_are_one_reading() {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -891,6 +943,13 @@ fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
         ("/home/me/c.counts", "/home/me/c.counts"),
         ("/etc/default/../../tmp/c.counts", "/tmp/c.counts"),
         ("/var/lock/c.counts", "/var/lock/c.counts"),
+        ("/var/run/../tmp/c.counts", "/tmp/c.counts"),
+        ("/var/lock/../shm/c.counts", "/run/shm/c.counts"),
+        ("/proc/self/root/../tmp/c.counts", "/tmp/c.counts"),
+        (
+            "/proc/self/root/tmp/c.counts",
+            "/proc/self/root/tmp/c.counts",
+        ),
     ] {
         match name(given) {
             OutputName::File { name: got, .. } => {
@@ -1038,6 +1097,11 @@ fn log_and_output_names_share_the_runs_files_view() {
         ("logs/run.log", Some("logs/run.log")),
         ("/proc/self/cwd/run.log", Some("run.log")),
         ("/etc/default/../../tmp/run.log", Some("/tmp/run.log")),
+        // NCBI reads `-logfile` lexically (a `..` after a link is not the link's parent).
+        ("/var/run/../tmp/run.log", Some("/var/tmp/run.log")),
+        // A file that a run makes beside a registered `/data/q.fa` (`/data` is no directory of the
+        // model's).
+        ("/data/../tmp/run.log", Some("/tmp/run.log")),
         ("/dev/stdout", Some("/dev/stdout")),
         ("//dev/stdout", Some("/dev/stdout")),
         ("-", None),
@@ -1195,11 +1259,19 @@ fn a_receiver_s_output_file_goes_to_the_receiver_when_the_run_ends() {
         full.write_all(b"x").unwrap_err().kind(),
         io::ErrorKind::StorageFull
     );
-    drop((null, full, files));
+    // A `..` after a link steps back from the link's target: the file is `/tmp/...`.
+    let Ok(Created::File(mut linked)) = files.create("/var/run/../tmp/ww3a-linked.counts") else {
+        panic!("a file in memory");
+    };
+    linked.write_all(b"linked").unwrap();
+    drop((null, full, linked, files));
     assert_eq!(
         *kept.files.lock().unwrap(),
-        vec![(name.as_bytes().to_vec(), b"counts bytes".to_vec())],
-        "one file, none of the devices"
+        vec![
+            (name.as_bytes().to_vec(), b"counts bytes".to_vec()),
+            (b"/tmp/ww3a-linked.counts".to_vec(), b"linked".to_vec()),
+        ],
+        "two files, none of the devices"
     );
     assert!(!std::path::Path::new(name).exists(), "no file on the disk");
     // The command line's and the library's files are the file system's.
@@ -1471,12 +1543,14 @@ fn outside_cwd_registered_files_are_seen_by_log_and_output_names() {
             "create should not open {unopened:?}"
         );
     }
-    // Controls: sibling files in writable outside dirs and cwd open; `/data/run.log` stays
-    // unopened because `/data` is outside `user_makes`.
+    // Controls: sibling files in writable outside dirs and cwd open, also past the folder of a
+    // registered file (`/data/../tmp/run.log`), each under the *start*'s name of it
+    // (`log_host_name`); `/data/run.log` stays unopened because `/data` is outside `user_makes`.
     for (raw, want) in [
         ("/tmp/run.log", "/tmp/run.log"),
         ("../run.log", "../run.log"),
         ("run.log", "run.log"),
+        ("/data/../tmp/run.log", "/tmp/run.log"),
     ] {
         assert!(
             matches!(
@@ -1484,6 +1558,11 @@ fn outside_cwd_registered_files_are_seen_by_log_and_output_names() {
                 Ok((DiagTarget::Memory(_), Some(ref name))) if name == want.as_bytes()
             ),
             "log_target control {raw:?}"
+        );
+        assert_eq!(
+            RunFiles::log_host_name(OsStr::new(raw)).as_deref(),
+            Some(want.as_bytes()),
+            "log_host_name control {raw:?}"
         );
         assert!(
             matches!(open_files.create(raw), Ok(Created::File(_))),

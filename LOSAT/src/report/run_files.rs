@@ -153,14 +153,20 @@ impl RunFiles {
     /// The host file name of the `-logfile` value `name` (what a `Receiver` names the stream 8
     /// entry if the file is made: `run.log` for `./run.log` and ` run.log`, `logs` for `logs/`,
     /// `/tmp/run.log` outside the working directory, `/dev/stdout` for a search's `/dev/stdout`),
-    /// without checking the run's real directory (`losat_web2_start`, which has no run directory
-    /// yet). `None` for NCBI's special names (`-`, `""`, `/dev/null`) and names that never make a
-    /// stream 8 file (`.`, `..`, `/dev/stderr`, `/dev/fd/2`, `/etc/run.log`).
+    /// without the run's files (`losat_web2_start`, which has no run directory yet): read in the
+    /// run's files that make it a file if any do (`made_file`, as `output_host_name`), so that
+    /// every file that a run of the name makes has this name (`/tmp/run.log` for
+    /// `/data/../tmp/run.log`, which a run makes beside a registered `/data/q.fa`). `None` for
+    /// NCBI's special names (`-`, `""`, `/dev/null`) and names that never make a stream 8 file
+    /// (`.`, `..`, `/dev/stderr`, `/dev/fd/2`, `/etc/run.log`).
     pub fn log_host_name(name: &OsStr) -> Option<Vec<u8>> {
         if special_log_target(Some(name)).is_some() {
             return None;
         }
-        match log_name(name.as_encoded_bytes(), None) {
+        let name = name.as_encoded_bytes();
+        let (cwd, file) = log_file(name);
+        let made = made_file(Walk::resolve(&file.path, &cwd));
+        match log_name(name, Some(&made)) {
             LogName::File { name, .. } => Some(name),
             LogName::Stdout => Some(b"/dev/stdout".to_vec()),
             LogName::Unopened | LogName::StandardError | LogName::Nowhere | LogName::Existing => {
@@ -218,19 +224,17 @@ impl RunFiles {
     /// stream 8 entry if the run makes the file (`output_name`'s `File`: `s.asn` for `./s.asn`,
     /// `in/../s.asn` and `/proc/self/cwd/s.asn`, `/tmp/s.asn` outside the working directory),
     /// without the run's files (`losat_web2_start`, which has no run directory yet). The name is
-    /// read in the run's files that make it a file if any do: every folder that the name passes is
-    /// one of them, and its file is none (a registered file makes its folders present outside the
-    /// working directory too, `run_entry`, as `/data` of `/data/q.fa` for `/data/../tmp/s.asn`), so
-    /// that every file that a run of the name makes has this name. `None` for a name that makes no
-    /// file in any run's files (`/dev/null`, `/dev/stdout`, `/etc/s.asn`, `.`, `..`, `s.asn/`).
+    /// read in the run's files that make it a file if any do (`made_file`), so that every file
+    /// that a run of the name makes has this name (`/tmp/s.asn` for `/data/../tmp/s.asn`, which a
+    /// run makes beside a registered `/data/q.fa`). `None` for a name that makes no file in any
+    /// run's files (`/dev/null`, `/dev/stdout`, `/etc/s.asn`, `.`, `..`, `s.asn/`).
     pub fn output_host_name(name: &OsStr) -> Option<Vec<u8>> {
         let name = name.as_encoded_bytes();
         if name.is_empty() || !fits(name) {
             return None;
         }
         let cwd = working_directory(name);
-        let file = Walk::resolve(name, &cwd)?;
-        let made = |path: &[u8], _: &[u8]| (path != file.as_slice()).then_some(Entry::Directory);
+        let made = made_file(Some(Walk::resolve(name, &cwd)?));
         match output_name(name, &made) {
             OutputName::File { name, .. } => Some(name),
             OutputName::Unopened
@@ -798,8 +802,11 @@ fn file_key(path: &[u8], cwd: &[u8]) -> Vec<u8> {
 
 /// The file's name that the host gets (`log_name`, `output_name`): for a file in the working
 /// directory's tree (`in_working_tree`), its path relative to the run's directory (`run.log`,
-/// `logs/run.log`, `logs`, `../x.log`); for a file outside it, `opened` (the path that NCBI or
-/// the tool opens, normalized lexically: `/tmp/run.log`, `/var/lock/run.log`).
+/// `logs/run.log`, `logs`, `../x.log`); for a file outside it, `opened`: for `-logfile` the path
+/// that NCBI opens, which NCBI normalizes lexically (`/tmp/run.log`, `/var/lock/run.log`,
+/// `/var/run/../tmp/run.log` as `/var/tmp/run.log`), and for a file that the system opens as
+/// typed, the name read lexically where it walks to the file, else the file's path
+/// (`output_name`: `/var/lock/s.asn`, `/var/run/../tmp/s.asn` as `/tmp/s.asn`).
 fn host_file_name(path: &[u8], opened: &[u8], cwd: &[u8]) -> Vec<u8> {
     match in_working_tree(path, cwd) {
         Some((up, rest)) => {
@@ -809,6 +816,15 @@ fn host_file_name(path: &[u8], opened: &[u8], cwd: &[u8]) -> Vec<u8> {
         }
         None => opened.to_vec(),
     }
+}
+
+/// The run's files in which a name whose opened path is `file` makes it a new file, if any run's
+/// files do (`RunFiles::output_host_name`, `RunFiles::log_host_name`): every other path that the
+/// name looks up is a folder of them, and `file` is none (a registered file makes its folders
+/// present outside the working directory too, `run_entry`, as `/data` of `/data/q.fa`). Such a
+/// lookup only makes folders present, and a folder that the walk passes is never the opened path.
+fn made_file(file: Option<Vec<u8>>) -> impl Fn(&[u8], &[u8]) -> Option<Entry> {
+    move |path, _| (Some(path) != file.as_deref()).then_some(Entry::Directory)
 }
 
 /// The relative path of `path` strictly inside the working directory `cwd`.
@@ -1064,7 +1080,10 @@ const DISCARDING_DEVICES: [&[u8]; 4] =
 /// (`Special`, but the null device, `/dev/zero` and the random devices, whose writes are lost, and
 /// `/dev/full`, whose writes fail), a queue of `/dev/mqueue` (`Special`), a file of the run's
 /// directory (`Existing`; a folder of it does not open), or a file of that name in the working
-/// directory, in a home or in a directory where every user makes files (`File`).
+/// directory, in a home or in a directory where every user makes files (`File`), named as the
+/// command line's file (`host_file_name`: outside the working directory, the name read lexically
+/// where it walks to the file, else the file's path, as a `..` after a link steps back from the
+/// link's target: `/var/run/../tmp/s.asn` is `/tmp/s.asn`).
 fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     if name.is_empty() || !fits(name) {
         return OutputName::Unopened;
@@ -1137,9 +1156,16 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     if existing {
         return OutputName::Existing;
     }
-    let opened = crate::blastinput::ncbi_environment::PathRules::Unix
+    // The name as typed, read lexically, names the file where it walks to it (`/var/lock/s.asn`);
+    // where a `..` follows a link, the system steps back from the link's target, so the file is
+    // its path (`/var/run/../tmp/s.asn` makes `/tmp/s.asn`, not `/var/tmp/s.asn`).
+    let typed = crate::blastinput::ncbi_environment::PathRules::Unix
         .normalize(name, None)
         .expect("a path normalized without links has no link limit");
+    let opened = match Walk::resolve(&typed, &cwd) {
+        Some(file) if file == path => typed,
+        _ => path.clone(),
+    };
     OutputName::File {
         name: host_file_name(&path, &opened, &cwd),
         key: file_key(&path, &cwd),

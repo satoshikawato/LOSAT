@@ -1368,10 +1368,10 @@ async function checkLogfileNames(engine, native, scratch) {
 // -export_search_strategy (line RG item F1w, review 1 S3): the file of a run of two or more query batches at NCBI's
 // default batch sizes (the browser gives no BATCH_SIZE), for each program, on each engine and its thread counts (the
 // threaded engine's parallel search, -num_threads 4 too), against the CLI's file of the same argv: stream 8 holds the
-// CLI's file under the CLI's name of it (`./s.asn` is `s.asn`, as the *start* names it; line RG item F1w-r2), and the
-// argv's output (outfmt 6, and outfmt 11's archive, whose options handle the strategy shares) is the CLI's. The
-// queries and subjects are seeded letters, written once into `scratch`; each subject is pieces of the queries, so that
-// the searches find hits.
+// CLI's file under the CLI's name of it (`./s.asn` is `s.asn`, `/var/run/../tmp/<id>.asn` is `/tmp/<id>.asn`, as the
+// *start* names it; line RG item F1w-r2), and the argv's output (outfmt 6, and outfmt 11's archive, whose options
+// handle the strategy shares) is the CLI's. The queries and subjects are seeded letters, written once into `scratch`;
+// each subject is pieces of the queries, so that the searches find hits.
 function seededFasta(seed, records, length, letters, prefix) {
   let state = seed >>> 0;
   const next = () => {
@@ -1433,30 +1433,41 @@ async function checkStrategyFiles(reactor, native, scratch, engine, waitForWorke
       return registered.status;
     });
     for (const format of program === "blastp" || program === "blastx" ? [6, 11] : [6]) {
-      const typed = index % 2 === 0 ? "s.asn" : "./s.asn";
-      const argv = [program, "-query", "q.fa", "-subject", "s.fa", ...words, "-outfmt", String(format), "-export_search_strategy", typed];
-      const cli = nativeOnPipes(native, [...argv, "-num_threads", "1", "-out", "o.out"], directory);
-      const label = `${engine.name} ${program} outfmt ${format} ${typed}`;
-      const started = reactor.call("losat_web2_start", argvOf(argv));
-      assert.equal(started.status, 0, `${label}: start: ${started.error}`);
-      assert.equal(JSON.parse(started.streams.get(2).toString()).strategy_file, "s.asn", `${label}: the start names the CLI's file`);
-      assert.equal(cli.status, 0, `${label}: native: ${cli.stderr}`);
-      const file = fs.readFileSync(path.join(directory, "s.asn")), out = fs.readFileSync(path.join(directory, "o.out"));
-      const requests = file.toString().split("Blast4-request ::=").length - 1;
-      assert.ok(requests >= 2, `${label}: the CLI wrote ${requests} request(s), not a run of two or more batches`);
-      for (const threads of engine.threads) {
-        const run = reactor.call("losat_web2_run", argvOf([...argv, "-num_threads", String(threads)]), ...handles);
-        if (waitForWorkers) await waitForWorkers();
-        assert.equal(run.status, 0, `${label} threads ${threads}: ${run.error}`);
-        const sent = run.streams.has(8) ? storedZipEntries(run.streams.get(8)) : [];
-        assert.deepEqual(sent.map(([name, bytes]) => [name, sha256(bytes)]), [["s.asn", sha256(file)]],
-                         `${label} threads ${threads}: the file of the run (stream 8) is the CLI's (${requests} requests)`);
-        const stream = format === 6 ? 6 : CUSTOM_STREAM;
-        assert.equal(sha256(run.streams.get(stream) || Buffer.alloc(0)), sha256(out), `${label} threads ${threads}: outfmt ${format}`);
-        rows++;
+      // [the name typed, the CLI's file, the Web's name of it]. A `..` after a link (`/var/run` is `/run` on the host
+      // that checkLogfileNames requires): the CLI makes `/tmp/<id>.asn`, not the name read lexically
+      // (`/var/tmp/<id>.asn`), and the Web names that file (line RG item F1w-r2's second fix round, 2026-11-28).
+      const id = `losat-v-abi-${process.pid}-${engine.name}-strategy`;
+      const names = [[index % 2 === 0 ? "s.asn" : "./s.asn", path.join(directory, "s.asn"), "s.asn"]];
+      if (index === 0 && format === 6) names.push([`/var/run/../tmp/${id}.asn`, `/tmp/${id}.asn`, `/tmp/${id}.asn`]);
+      for (const [typed, madePath, named] of names) {
+        const argv = [program, "-query", "q.fa", "-subject", "s.fa", ...words, "-outfmt", String(format), "-export_search_strategy", typed];
+        const cli = nativeOnPipes(native, [...argv, "-num_threads", "1", "-out", "o.out"], directory);
+        const label = `${engine.name} ${program} outfmt ${format} ${typed}`;
+        const lexical = typed.startsWith("/") ? path.posix.normalize(typed) : undefined;
+        const lexicalMade = lexical !== undefined && lexical !== madePath && fs.existsSync(lexical);
+        if (lexicalMade) fs.rmSync(lexical);
+        assert.ok(!lexicalMade, `${label}: the CLI made ${lexical}`);
+        const started = reactor.call("losat_web2_start", argvOf(argv));
+        assert.equal(started.status, 0, `${label}: start: ${started.error}`);
+        assert.equal(JSON.parse(started.streams.get(2).toString()).strategy_file, named, `${label}: the start names the CLI's file`);
+        assert.equal(cli.status, 0, `${label}: native: ${cli.stderr}`);
+        const file = fs.readFileSync(madePath), out = fs.readFileSync(path.join(directory, "o.out"));
+        fs.rmSync(madePath);
+        fs.rmSync(path.join(directory, "o.out"));
+        const requests = file.toString().split("Blast4-request ::=").length - 1;
+        assert.ok(requests >= 2, `${label}: the CLI wrote ${requests} request(s), not a run of two or more batches`);
+        for (const threads of engine.threads) {
+          const run = reactor.call("losat_web2_run", argvOf([...argv, "-num_threads", String(threads)]), ...handles);
+          if (waitForWorkers) await waitForWorkers();
+          assert.equal(run.status, 0, `${label} threads ${threads}: ${run.error}`);
+          const sent = run.streams.has(8) ? storedZipEntries(run.streams.get(8)) : [];
+          assert.deepEqual(sent.map(([name, bytes]) => [name, sha256(bytes)]), [[named, sha256(file)]],
+                           `${label} threads ${threads}: the file of the run (stream 8) is the CLI's (${requests} requests)`);
+          const stream = format === 6 ? 6 : CUSTOM_STREAM;
+          assert.equal(sha256(run.streams.get(stream) || Buffer.alloc(0)), sha256(out), `${label} threads ${threads}: outfmt ${format}`);
+          rows++;
+        }
       }
-      fs.rmSync(path.join(directory, "s.asn"));
-      fs.rmSync(path.join(directory, "o.out"));
     }
     for (const handle of handles) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
     fs.rmSync(directory, { recursive: true, force: true });

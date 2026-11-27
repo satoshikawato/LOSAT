@@ -7,9 +7,14 @@
 //!   frozen with the official NCBI BLAST+ 2.17.0 at one thread): `-export_search_strategy -` with the
 //!   report on the same `cout` (`dash`, every program and format), in `-out F` (`dasho`), in
 //!   `-out /dev/stdout` (`revp` on a pipe, `rev` on a file), with `2>&1` and the `803.7` posts before
-//!   and after the first 4,096 B piece (`dashm`, `dashom`), standard output on `/dev/full` (`dashfull`:
+//!   and after the first piece (4,016 B: the 4,096 B `COStreamBuffer` less the 80 B it keeps back;
+//!   `dashm`, `dashom`), standard output on `/dev/full` (`dashfull`:
 //!   exit 6 for outfmt 0, SIGABRT for the formats whose request write throws), and `>>` (`dashapp`,
-//!   `PRE\n` kept); SAM's `@PG CL:` tag (the program's path) is left out on both sides.
+//!   `PRE\n` kept); psiblast's `-in_pssm` and `-in_msa` with rounds (the prolog before the request,
+//!   also with `-html`, `-out_pssm`, `2>&1` and `/dev/stdout`); a report that cannot be written
+//!   (`outfull`: `-out /dev/full`; `outfsz`: `-out F` at its size limit), whose run ends with the
+//!   requests up to the batch whose report failed (`-`, `/dev/stdout` and a file); SAM's `@PG CL:`
+//!   tag (the program's path) is left out on both sides.
 //! - Linux, item F1c-1 (`tests/fixtures/strategy/f1c1_cases.tsv` and `tests/fixtures/strategy/f1c1/`):
 //!   byte-for-byte comparison against frozen official NCBI BLAST+ 2.17.0 outputs (mapped via
 //!   `losat::wording::losat_output_bytes`) at 1 and 4 threads across all 8 programs, covering:
@@ -24,8 +29,8 @@
 //!   - regular-file, `./F`, symlink (`L -> F`), `/dev/stdout` file, and `>>` append (`dsoapp` /
 //!     `bothapp`, where `/dev/stdout` opens `O_TRUNC` and erases pre-existing `PRE\n`, matching
 //!     NCBI's output starting with `Blast4-request ::= {`);
-//!   - `803.7` replaced-byte title interleaving on `2>&1` (both before and after the 4,096 B
-//!     `COStreamBuffer` piece boundary);
+//!   - `803.7` replaced-byte title interleaving on `2>&1` (both before and after the end of the
+//!     first `COStreamBuffer` piece, its 4,096 B buffer less the 80 B it keeps back);
 //!   - stdout redirected to `/dev/full` with `-export_search_strategy /dev/stdout` (`dsofull`:
 //!     exit 6 for outfmt 0, SIGABRT with Close failure chain + `std::__ios_failure` for tabular /
 //!     XML / archive / organism reports).

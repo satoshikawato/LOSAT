@@ -1,6 +1,8 @@
 # Frozen official NCBI BLAST+ 2.17.0 bytes (-num_threads 1) for -export_search_strategy - (line RG item F1c-2):
 # the requests on NCBI's cout, with the report on it, in -out F or in -out /dev/stdout, 2>&1, /dev/full and >>.
 # Left out: psiblast outfmt 15/16 and the rpsblast organism report of an unsearched batch (LOSAT's refusals).
+# Fix round 1 (review 1 B1, S1): psiblast -in_pssm / -in_msa with rounds (the prolog before the request; -, 2>&1,
+# /dev/stdout), and a report that cannot be written (-out /dev/full: the requests up to the failed batch's only).
 # Columns: name, program, env, stdout, fsize, setup, args, rc
 name	program	env	stdout	fsize	setup	args	rc
 dash.blastn.f0	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy -	0
@@ -266,3 +268,22 @@ dashfull.psiblast.f18	psiblast	-	full	-	-	-query tests/fasta/psiblast/ps5_three.
 dashapp.blastp.f6	blastp	BATCH_SIZE=150	append	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy -	0
 dashapp.blastp.f10	blastp	BATCH_SIZE=150	append	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 10 -export_search_strategy -	0
 dashapp.blastp.f18	blastp	BATCH_SIZE=150	append	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 18 -export_search_strategy -	0
+dash.psiblast.pssm2.f0	psiblast	-	pipe	-	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy -	0
+dash.psiblast.pssm2.f3	psiblast	-	pipe	-	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -num_iterations 2 -outfmt 3 -export_search_strategy -	0
+dash.psiblast.msa2.f0	psiblast	-	pipe	-	-	-in_msa tests/fixtures/msa/ps6_b_db_0.aln -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy -	0
+dash.psiblast.outpssm.f0	psiblast	-	pipe	-	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -out_pssm {f} -outfmt 0 -export_search_strategy -	0
+dash.psiblast.pssm2html.f0	psiblast	-	pipe	-	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -num_iterations 2 -html -outfmt 0 -export_search_strategy -	0
+dashm.psiblast.pssm2.f0	psiblast	-	merged	-	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy -	0
+dso.psiblast.pssm2.f0	psiblast	-	pipe	-	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy /dev/stdout	0
+outfull.blastp.dash.f0	blastp	BATCH_SIZE=1	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy - -out /dev/full	6
+outfull.blastp.dash.f7	blastp	BATCH_SIZE=1	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 7 -export_search_strategy - -out /dev/full	sig:6
+outfull.blastp.dash.f11	blastp	BATCH_SIZE=1	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy - -out /dev/full	6
+outfull.blastp.file.f11	blastp	BATCH_SIZE=1	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy {f} -out /dev/full	6
+outfull.blastp.dash.f12	blastp	BATCH_SIZE=1	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 12 -export_search_strategy - -out /dev/full	6
+outfull.tblastn.dash.f7	tblastn	BATCH_SIZE=1	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 7 -export_search_strategy - -out /dev/full	sig:6
+outfull.tblastn.file.f11	tblastn	BATCH_SIZE=1	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 11 -export_search_strategy {f} -out /dev/full	6
+outfull.tblastx.dash.f11	tblastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 11 -export_search_strategy - -out /dev/full	6
+outfull.rpsblast.dash.f11	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 11 -export_search_strategy - -out /dev/full	6
+outfull.rpsblast.dash.f7	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 7 -export_search_strategy - -out /dev/full	sig:6
+outfsz.blastp.dash.f6	blastp	BATCH_SIZE=1	pipe	120	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy - -out {f}	sig:6
+outfsz.blastp.dso.f6	blastp	BATCH_SIZE=1	pipe	120	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout -out {f}	sig:6

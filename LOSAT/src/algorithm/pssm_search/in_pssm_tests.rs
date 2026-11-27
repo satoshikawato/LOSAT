@@ -1,4 +1,5 @@
 use super::*;
+use crate::report::serial::asn_types::table::member;
 use crate::report::serial::asn_types::Value;
 
 /// The text of the stop `abort`: NCBI's report, or LOSAT's refusal.
@@ -642,7 +643,7 @@ fn the_warning_title_is_the_query_sources() {
 #[test]
 fn empty_annotations_give_no_messages() {
     use crate::report::serial::asn_types::{member_index, members, table::named};
-    let data = member_index(named::SEQ_ANNOT, "data");
+    let data = member::seq_annot::DATA.index();
     let kinds = members(named::SEQ_ANNOT)[data].ty;
     let with_annot = |kinds_of_data: &[&str]| {
         let mut pssm = rnd();

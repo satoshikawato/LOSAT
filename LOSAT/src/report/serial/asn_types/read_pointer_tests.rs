@@ -8,8 +8,8 @@
 //! `tests/seqdb/mask_parse`).
 
 use super::read::{read_ber_document, read_document, ReadError};
-use super::table::named;
-use super::{member_index, members, Value};
+use super::table::{member, named};
+use super::{members, Value};
 use crate::report::serial::asn_input::Names;
 use crate::seqid::model::{Date, ParsedSeqId, SEQ_ID_ALTERNATIVES};
 
@@ -85,7 +85,7 @@ fn an_optional_ref_member_reads_null_and_its_own_type() {
     ] {
         assert_eq!(ok(named::PDB_SEQ_ID, text), with, "{text}");
     }
-    let rel = member_index(named::PDB_SEQ_ID, "rel");
+    let rel = member::pdb_seq_id::REL.index();
     assert!(with.member(rel).is_some() && without.member(rel).is_none());
     // ASN.1 binary: `05 00`, and `7f` with the type's name.
     let date = [0xa0, 0x80, 0x1a, 0x01, b'x', 0, 0];
@@ -320,7 +320,7 @@ fn other_class_lookup_is_scoped_to_the_read_root() {
 fn a_mandatory_ref_member_is_read_in_place() {
     let e = serial(read(named::DBTAG, "Dbtag ::= { db \"x\", tag NULL }"));
     assert!(e.contains("tag"), "{e}");
-    let tag = member_index(named::DBTAG, "tag");
+    let tag = member::dbtag::TAG.index();
     assert!(ok(named::DBTAG, "Dbtag ::= { db \"x\", tag id 1 }")
         .member(tag)
         .is_some());
@@ -381,7 +381,7 @@ fn an_element_of_a_list_of_refs_takes_the_pointer_forms() {
         named::BIOSEQ,
         "Bioseq ::= { id { local id 1, NULL }, inst { repr raw, mol aa } }",
     );
-    let id = bioseq.member(member_index(named::BIOSEQ, "id")).cloned();
+    let id = bioseq.member(member::bioseq::ID.index()).cloned();
     assert!(
         matches!(&id, Some(Value::List(ids)) if ids.len() == 2 && ids[1] == Value::Null),
         "{id:?}"
@@ -404,7 +404,7 @@ fn an_element_of_a_list_of_refs_takes_the_pointer_forms() {
 // object.
 #[test]
 fn a_skip_reads_the_pointer_forms_of_every_ref() {
-    let names = member_index(named::AUTH_LIST, "names");
+    let names = member::auth_list::NAMES.index();
     for text in [
         "Auth-list ::= { names std { { name NULL } } }",
         "Auth-list ::= { names std { { name :Person-id str \"x\" } } }",

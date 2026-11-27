@@ -32,6 +32,7 @@ use crate::report::archive::ArchiveEncoding;
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
+use crate::report::serial::asn_types::table::member;
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::write::write_value;
 use crate::report::serial::asn_types::Value;
@@ -43,23 +44,28 @@ use crate::seqid::ParsedSeqId;
 /// `CPsiBlastValidate::Pssm`'s reading of a `results.pssm` (`PssmChecks`): the PSSM search's
 /// archive that `BlastBuildArchive` writes back as `queries pssm`.
 fn pssm_checks(pssm_with_params: V<'_>) -> PssmChecks {
-    let pssm = pssm_with_params.get("pssm");
-    let member = |name: &str| pssm.and_then(|pssm| pssm.get(name));
-    let final_data = member("finalData");
+    let pssm = pssm_with_params.get(member::pssmwithparameters::PSSM);
+    let [final_data, intermediate_data, query, is_protein] = pssm.map_or([None; 4], |pssm| {
+        pssm.pick([
+            member::pssm::FINALDATA,
+            member::pssm::INTERMEDIATEDATA,
+            member::pssm::QUERY,
+            member::pssm::ISPROTEIN,
+        ])
+    });
     PssmChecks {
         has_pssm: pssm.is_some(),
         missing_scores: final_data
-            .and_then(|data| data.get("scores"))
+            .and_then(|data| data.get(member::pssmfinaldata::SCORES))
             .is_none_or(|scores| scores.len() == 0),
-        missing_freq_ratios: member("intermediateData")
-            .and_then(|data| data.get("freqRatios"))
+        missing_freq_ratios: intermediate_data
+            .and_then(|data| data.get(member::pssmintermediatedata::FREQRATIOS))
             .is_none_or(|ratios| ratios.len() == 0),
         scaling_factor: final_data
-            .and_then(|data| data.get("scalingFactor"))
+            .and_then(|data| data.get(member::pssmfinaldata::SCALINGFACTOR))
             .map(|value| value.int()),
-        query_is_seq: member("query").map(|query| query.choice().0 == "seq"),
-        is_protein: member("isProtein")
-            .is_none_or(|value| matches!(value.value, Value::Bool(true))),
+        query_is_seq: query.map(|query| query.choice().0 == "seq"),
+        is_protein: is_protein.is_none_or(|value| matches!(value.value, Value::Bool(true))),
     }
 }
 
@@ -429,7 +435,11 @@ fn build_request_endpoints<'a>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:587-598
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:408-420
     if is_psiblast {
-        if let Some(pssm) = search.results.reply().get("pssm") {
+        if let Some(pssm) = search
+            .results
+            .reply()
+            .get(member::blast4_get_search_results_reply::PSSM)
+        {
             if let Some(error) = validation_error(&pssm_checks(pssm)) {
                 return Err(engine_error(error));
             }

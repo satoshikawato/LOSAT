@@ -1,43 +1,14 @@
 //! Typed access to the generic reader's values (`report::serial::asn_types::Value`) by the
-//! member and variant names of NCBI's ASN.1 modules: what NCBI's C++ getters (`GetLocation()`,
+//! members and variants of NCBI's ASN.1 modules: what NCBI's C++ getters (`GetLocation()`,
 //! `GetSegs().GetDenseg()`, ...) read of a value (the query's annotations of `-in_pssm`, the
-//! Blast4-archive of `blast_formatter -archive`).
+//! Blast4-archive of `blast_formatter -archive`, the objects of makeblastdb's ASN.1 input).
 //!
 //! No NCBI counterpart of its own: the generic value keeps the members of a SEQUENCE by their
 //! position in the module and the variant of a CHOICE by its position (`asn_types::Value`), and
-//! the type table names them (`asn_types::members`).
+//! the table generator names each member by a constant (`table::member`, `asn_types::M`).
 
-use super::{member_index, members, resolved, Kind, Value};
+use super::{members, resolved, Kind, Value, M};
 use crate::seqid::ParsedSeqId;
-
-/// The position of the member `name` of the type `ty` (`member_index`), remembered by the name's
-/// address: a `'static` name keeps its address and its bytes for the whole run, so a member read
-/// by name at one place of the code is looked up once, not by a scan of the type's members on
-/// every read (the object manager's step reads the members of each feature).
-fn member_position(ty: u16, name: &'static str) -> usize {
-    use std::cell::Cell;
-    const SLOTS: usize = 256;
-    thread_local! {
-        /// (address, length, type, position) of the names looked up last, by a hash of the
-        /// address and the type; an empty slot has the address 0, which no name has.
-        static MEMO: [Cell<(usize, usize, u16, u16)>; SLOTS] =
-            const { [const { Cell::new((0, 0, 0, 0)) }; SLOTS] };
-    }
-    let address = name.as_ptr() as usize;
-    let slot = (address ^ (address >> 8) ^ (usize::from(ty) << 3)) % SLOTS;
-    MEMO.with(|memo| {
-        let entry = &memo[slot];
-        let (at, len, of, position) = entry.get();
-        if at == address && len == name.len() && of == ty {
-            return usize::from(position);
-        }
-        let position = member_index(ty, name);
-        if let Ok(short) = u16::try_from(position) {
-            entry.set((address, name.len(), ty, short));
-        }
-        position
-    })
-}
 
 /// A value of the type `ty` of the table.
 #[derive(Clone, Copy, Debug)]
@@ -88,18 +59,51 @@ impl<'a> V<'a> {
         false
     }
 
-    /// The member `name` of the SEQUENCE, when set (`IsSet<Member>()` then `Get<Member>()`).
-    pub(crate) fn get(self, name: &'static str) -> Option<V<'a>> {
-        let index = member_position(self.ty, name);
-        let ty = members(self.ty)[index].ty;
-        self.value.member(index).map(|value| V::new(ty, value))
+    /// The member `m` of the SEQUENCE, when set (`IsSet<Member>()` then `Get<Member>()`).
+    #[inline]
+    pub(crate) fn get(self, m: M) -> Option<V<'a>> {
+        self.has(m);
+        self.value
+            .member(m.index())
+            .map(|value| V::new(m.ty, value))
     }
 
-    /// The mandatory member `name` of the SEQUENCE (`Get<Member>()`), which the reader has set.
-    pub(crate) fn field(self, name: &'static str) -> V<'a> {
-        match self.get(name) {
+    /// The mandatory member `m` of the SEQUENCE (`Get<Member>()`), which the reader has set.
+    #[inline]
+    pub(crate) fn field(self, m: M) -> V<'a> {
+        match self.get(m) {
             Some(value) => value,
             None => not_in_table("a mandatory member", self.value),
+        }
+    }
+
+    /// The members `ms` of the SEQUENCE, each when set (`get`), read in one pass over the members
+    /// set: what a reader of several members of one value (a feature, an interval, a Bioseq)
+    /// takes instead of one scan for each.
+    #[inline]
+    pub(crate) fn pick<const N: usize>(self, ms: [M; N]) -> [Option<V<'a>>; N] {
+        let mut out = [None; N];
+        for m in ms {
+            self.has(m);
+        }
+        if let Value::Sequence(set) = self.value {
+            for (position, value) in set {
+                for (slot, m) in out.iter_mut().zip(ms) {
+                    if m.at == *position {
+                        *slot = Some(V::new(m.ty, value));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Panics unless the value's type has the member `m` (`M::is_of`): a constant of another
+    /// type's module.
+    #[inline]
+    fn has(self, m: M) {
+        if self.ty != m.of && !m.is_of(self.ty) {
+            not_in_table("a member of its type", &(m, resolved(self.ty).name()));
         }
     }
 
@@ -212,6 +216,16 @@ impl<'a> V<'a> {
             Value::SeqId(id) => id,
             other => not_in_table("a Seq-id", other),
         }
+    }
+}
+
+/// A mandatory member of those `V::pick` read (`Get<Member>()`, as `V::field`), which the reader
+/// has set.
+#[inline]
+pub(crate) fn mandatory(member: Option<V<'_>>) -> V<'_> {
+    match member {
+        Some(value) => value,
+        None => not_in_table("a mandatory member", &"a member not set"),
     }
 }
 

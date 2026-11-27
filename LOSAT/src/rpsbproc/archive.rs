@@ -41,7 +41,8 @@ use crate::report::serial::asn_text_reader::{
     AsnTextError, AsnTextErrorKind, Frame, Reader, Result, StreamSource,
 };
 use crate::report::serial::asn_types::read::{ObjectStream, PostSink, ReadError, TypedReader};
-use crate::report::serial::asn_types::{self, table::named};
+use crate::report::serial::asn_types::table::{member, named};
+use crate::report::serial::asn_types::{self};
 use crate::report::serial::pssm::{SEQ_INST_MOL, SEQ_INST_REPR};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 
@@ -524,8 +525,7 @@ const SEQ_ALIGN: [&str; 7] = ["type", "dim", "score", "segs", "bounds", "id", "e
 
 /// The type of `Seq-align.segs` (a CHOICE without a name of its own) in the type table.
 fn seq_align_segs() -> u16 {
-    let members = asn_types::members(named::SEQ_ALIGN);
-    members[asn_types::member_index(named::SEQ_ALIGN, "segs")].ty
+    member::seq_align::SEGS.ty
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:22-29
@@ -1297,11 +1297,9 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
     #[cold]
     #[inline(never)]
     fn bioseq_annot(&mut self, at: &Frame<'_>, is_na: bool) -> Result<AnnotTitle> {
-        let annot_list_ty =
-            asn_types::members(named::BIOSEQ)[asn_types::member_index(named::BIOSEQ, "annot")].ty;
-        let annot_data_idx = asn_types::member_index(named::SEQ_ANNOT, "data");
-        let annot_data_ty = asn_types::members(named::SEQ_ANNOT)[annot_data_idx].ty;
-        let ftable_idx = asn_types::member_index(annot_data_ty, "ftable");
+        let annot_list_ty = member::bioseq::ANNOT.ty;
+        let annot_data_idx = member::seq_annot::DATA.index();
+        let ftable_idx = member::seq_annot::data::FTABLE.index();
         let root = self.r().root;
         let mut found = AnnotTitle::None;
         let read = self.objects.read_typed_member(root, at.steps(), |r| {
@@ -1806,11 +1804,14 @@ fn read_ftable_title<I: Input, P: PostSink>(
     is_na: bool,
     found: &mut AnnotTitle,
 ) -> R<()> {
-    let feat_data_idx = asn_types::member_index(named::SEQ_FEAT, "data");
-    let wanted_feat_idx =
-        asn_types::member_index(named::SEQFEATDATA, if is_na { "gene" } else { "prot" });
-    let gene_desc_idx = asn_types::member_index(named::GENE_REF, "desc");
-    let prot_name_idx = asn_types::member_index(named::PROT_REF, "name");
+    let feat_data_idx = member::seq_feat::DATA.index();
+    let wanted_feat_idx = match is_na {
+        true => member::seqfeatdata::GENE,
+        false => member::seqfeatdata::PROT,
+    }
+    .index();
+    let gene_desc_idx = member::gene_ref::DESC.index();
+    let prot_name_idx = member::prot_ref::NAME.index();
     r.list(ftable_ty, |r, feat_elem| {
         let Some(feat_ty) = feat_elem else {
             if matches!(found, AnnotTitle::None) {

@@ -277,6 +277,2260 @@ pub(crate) mod named {
     pub(crate) const BLAST4_GET_SEARCH_STRATEGY_REPLY: u16 = 460;
 }
 
+/// Each member of a SEQUENCE and each variant of a CHOICE (`asn_types::M`: the type that has it,
+/// its position there, its type): a named type's in the module of its name in lower case, an
+/// anonymous type's in the module of its place of use within its owner's (`seq_annot::data`);
+/// the member's name in upper case with `_` for `-`.
+#[allow(dead_code)]
+pub(crate) mod member {
+
+    /// NCBI-ScoreMat PssmWithParameters (SEQUENCE, type 0).
+    pub(crate) mod pssmwithparameters {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PSSM: M = M { of: 0, at: 0, ty: 1 };
+        pub(crate) const PARAMS: M = M { of: 0, at: 1, ty: 401 };
+    }
+
+    /// NCBI-ScoreMat Pssm (SEQUENCE, type 1).
+    pub(crate) mod pssm {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ISPROTEIN: M = M { of: 1, at: 0, ty: 2 };
+        pub(crate) const IDENTIFIER: M = M { of: 1, at: 1, ty: 3 };
+        pub(crate) const NUMROWS: M = M { of: 1, at: 2, ty: 4 };
+        pub(crate) const NUMCOLUMNS: M = M { of: 1, at: 3, ty: 4 };
+        pub(crate) const ROWLABELS: M = M { of: 1, at: 4, ty: 6 };
+        pub(crate) const BYROW: M = M { of: 1, at: 5, ty: 2 };
+        pub(crate) const QUERY: M = M { of: 1, at: 6, ty: 7 };
+        pub(crate) const INTERMEDIATEDATA: M = M { of: 1, at: 7, ty: 399 };
+        pub(crate) const FINALDATA: M = M { of: 1, at: 8, ty: 400 };
+    }
+
+    /// NCBI-General Object-id (CHOICE, type 3).
+    pub(crate) mod object_id {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ID: M = M { of: 3, at: 0, ty: 4 };
+        pub(crate) const STR: M = M { of: 3, at: 1, ty: 5 };
+    }
+
+    /// NCBI-Seqset Seq-entry (CHOICE, type 7).
+    pub(crate) mod seq_entry {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const SEQ: M = M { of: 7, at: 0, ty: 8 };
+        pub(crate) const SET: M = M { of: 7, at: 1, ty: 396 };
+    }
+
+    /// NCBI-Sequence Bioseq (SEQUENCE, type 8).
+    pub(crate) mod bioseq {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ID: M = M { of: 8, at: 0, ty: 21 };
+        pub(crate) const DESCR: M = M { of: 8, at: 1, ty: 22 };
+        pub(crate) const INST: M = M { of: 8, at: 2, ty: 212 };
+        pub(crate) const ANNOT: M = M { of: 8, at: 3, ty: 395 };
+    }
+
+    /// NCBI-Seqloc Seq-id (CHOICE, type 9).
+    pub(crate) mod seq_id {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const LOCAL: M = M { of: 9, at: 0, ty: 3 };
+        pub(crate) const GIBBSQ: M = M { of: 9, at: 1, ty: 4 };
+        pub(crate) const GIBBMT: M = M { of: 9, at: 2, ty: 4 };
+        pub(crate) const GIIM: M = M { of: 9, at: 3, ty: 10 };
+        pub(crate) const GENBANK: M = M { of: 9, at: 4, ty: 11 };
+        pub(crate) const EMBL: M = M { of: 9, at: 5, ty: 11 };
+        pub(crate) const PIR: M = M { of: 9, at: 6, ty: 11 };
+        pub(crate) const SWISSPROT: M = M { of: 9, at: 7, ty: 11 };
+        pub(crate) const PATENT: M = M { of: 9, at: 8, ty: 12 };
+        pub(crate) const OTHER: M = M { of: 9, at: 9, ty: 11 };
+        pub(crate) const GENERAL: M = M { of: 9, at: 10, ty: 15 };
+        pub(crate) const GI: M = M { of: 9, at: 11, ty: 16 };
+        pub(crate) const DDBJ: M = M { of: 9, at: 12, ty: 11 };
+        pub(crate) const PRF: M = M { of: 9, at: 13, ty: 11 };
+        pub(crate) const PDB: M = M { of: 9, at: 14, ty: 17 };
+        pub(crate) const TPG: M = M { of: 9, at: 15, ty: 11 };
+        pub(crate) const TPE: M = M { of: 9, at: 16, ty: 11 };
+        pub(crate) const TPD: M = M { of: 9, at: 17, ty: 11 };
+        pub(crate) const GPIPE: M = M { of: 9, at: 18, ty: 11 };
+        pub(crate) const NAMED_ANNOT_TRACK: M = M { of: 9, at: 19, ty: 11 };
+    }
+
+    /// NCBI-Seqloc Giimport-id (SEQUENCE, type 10).
+    pub(crate) mod giimport_id {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ID: M = M { of: 10, at: 0, ty: 4 };
+        pub(crate) const DB: M = M { of: 10, at: 1, ty: 5 };
+        pub(crate) const RELEASE: M = M { of: 10, at: 2, ty: 5 };
+    }
+
+    /// NCBI-Seqloc Textseq-id (SEQUENCE, type 11).
+    pub(crate) mod textseq_id {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAME: M = M { of: 11, at: 0, ty: 5 };
+        pub(crate) const ACCESSION: M = M { of: 11, at: 1, ty: 5 };
+        pub(crate) const RELEASE: M = M { of: 11, at: 2, ty: 5 };
+        pub(crate) const VERSION: M = M { of: 11, at: 3, ty: 4 };
+    }
+
+    /// NCBI-Seqloc Patent-seq-id (SEQUENCE, type 12).
+    pub(crate) mod patent_seq_id {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const SEQID: M = M { of: 12, at: 0, ty: 4 };
+        pub(crate) const CIT: M = M { of: 12, at: 1, ty: 13 };
+    }
+
+    /// NCBI-Biblio Id-pat (SEQUENCE, type 13).
+    pub(crate) mod id_pat {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const COUNTRY: M = M { of: 13, at: 0, ty: 5 };
+        pub(crate) const ID: M = M { of: 13, at: 1, ty: 14 };
+        pub(crate) const DOC_TYPE: M = M { of: 13, at: 2, ty: 5 };
+
+        /// Id-pat.id (CHOICE, type 14).
+        pub(crate) mod id {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const NUMBER: M = M { of: 14, at: 0, ty: 5 };
+            pub(crate) const APP_NUMBER: M = M { of: 14, at: 1, ty: 5 };
+        }
+    }
+
+    /// NCBI-General Dbtag (SEQUENCE, type 15).
+    pub(crate) mod dbtag {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DB: M = M { of: 15, at: 0, ty: 5 };
+        pub(crate) const TAG: M = M { of: 15, at: 1, ty: 3 };
+    }
+
+    /// NCBI-Seqloc PDB-seq-id (SEQUENCE, type 17).
+    pub(crate) mod pdb_seq_id {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MOL: M = M { of: 17, at: 0, ty: 18 };
+        pub(crate) const CHAIN: M = M { of: 17, at: 1, ty: 4 };
+        pub(crate) const REL: M = M { of: 17, at: 2, ty: 19 };
+        pub(crate) const CHAIN_ID: M = M { of: 17, at: 3, ty: 5 };
+    }
+
+    /// NCBI-General Date (CHOICE, type 19).
+    pub(crate) mod date {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const STR: M = M { of: 19, at: 0, ty: 5 };
+        pub(crate) const STD: M = M { of: 19, at: 1, ty: 20 };
+    }
+
+    /// NCBI-General Date-std (SEQUENCE, type 20).
+    pub(crate) mod date_std {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const YEAR: M = M { of: 20, at: 0, ty: 4 };
+        pub(crate) const MONTH: M = M { of: 20, at: 1, ty: 4 };
+        pub(crate) const DAY: M = M { of: 20, at: 2, ty: 4 };
+        pub(crate) const SEASON: M = M { of: 20, at: 3, ty: 5 };
+        pub(crate) const HOUR: M = M { of: 20, at: 4, ty: 4 };
+        pub(crate) const MINUTE: M = M { of: 20, at: 5, ty: 4 };
+        pub(crate) const SECOND: M = M { of: 20, at: 6, ty: 4 };
+    }
+
+    /// NCBI-Sequence Seqdesc (CHOICE, type 23).
+    pub(crate) mod seqdesc {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MOL_TYPE: M = M { of: 23, at: 0, ty: 24 };
+        pub(crate) const MODIF: M = M { of: 23, at: 1, ty: 26 };
+        pub(crate) const METHOD: M = M { of: 23, at: 2, ty: 27 };
+        pub(crate) const NAME: M = M { of: 23, at: 3, ty: 5 };
+        pub(crate) const TITLE: M = M { of: 23, at: 4, ty: 5 };
+        pub(crate) const ORG: M = M { of: 23, at: 5, ty: 28 };
+        pub(crate) const COMMENT: M = M { of: 23, at: 6, ty: 5 };
+        pub(crate) const NUM: M = M { of: 23, at: 7, ty: 41 };
+        pub(crate) const MAPLOC: M = M { of: 23, at: 8, ty: 15 };
+        pub(crate) const PIR: M = M { of: 23, at: 9, ty: 112 };
+        pub(crate) const GENBANK: M = M { of: 23, at: 10, ty: 113 };
+        pub(crate) const PUB: M = M { of: 23, at: 11, ty: 114 };
+        pub(crate) const REGION: M = M { of: 23, at: 12, ty: 5 };
+        pub(crate) const USER: M = M { of: 23, at: 13, ty: 91 };
+        pub(crate) const SP: M = M { of: 23, at: 14, ty: 179 };
+        pub(crate) const DBXREF: M = M { of: 23, at: 15, ty: 15 };
+        pub(crate) const EMBL: M = M { of: 23, at: 16, ty: 181 };
+        pub(crate) const CREATE_DATE: M = M { of: 23, at: 17, ty: 19 };
+        pub(crate) const UPDATE_DATE: M = M { of: 23, at: 18, ty: 19 };
+        pub(crate) const PRF: M = M { of: 23, at: 19, ty: 188 };
+        pub(crate) const PDB: M = M { of: 23, at: 20, ty: 190 };
+        pub(crate) const HET: M = M { of: 23, at: 21, ty: 192 };
+        pub(crate) const SOURCE: M = M { of: 23, at: 22, ty: 193 };
+        pub(crate) const MOLINFO: M = M { of: 23, at: 23, ty: 205 };
+        pub(crate) const MODELEV: M = M { of: 23, at: 24, ty: 209 };
+    }
+
+    /// NCBI-Organism Org-ref (SEQUENCE, type 28).
+    pub(crate) mod org_ref {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TAXNAME: M = M { of: 28, at: 0, ty: 5 };
+        pub(crate) const COMMON: M = M { of: 28, at: 1, ty: 5 };
+        pub(crate) const MOD: M = M { of: 28, at: 2, ty: 29 };
+        pub(crate) const DB: M = M { of: 28, at: 3, ty: 30 };
+        pub(crate) const SYN: M = M { of: 28, at: 4, ty: 29 };
+        pub(crate) const ORGNAME: M = M { of: 28, at: 5, ty: 31 };
+    }
+
+    /// NCBI-Organism OrgName (SEQUENCE, type 31).
+    pub(crate) mod orgname {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAME: M = M { of: 31, at: 0, ty: 37 };
+        pub(crate) const ATTRIB: M = M { of: 31, at: 1, ty: 5 };
+        pub(crate) const MOD: M = M { of: 31, at: 2, ty: 40 };
+        pub(crate) const LINEAGE: M = M { of: 31, at: 3, ty: 5 };
+        pub(crate) const GCODE: M = M { of: 31, at: 4, ty: 4 };
+        pub(crate) const MGCODE: M = M { of: 31, at: 5, ty: 4 };
+        pub(crate) const DIV: M = M { of: 31, at: 6, ty: 5 };
+        pub(crate) const PGCODE: M = M { of: 31, at: 7, ty: 4 };
+
+        /// OrgName.name (CHOICE, type 37).
+        pub(crate) mod name {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const BINOMIAL: M = M { of: 37, at: 0, ty: 32 };
+            pub(crate) const VIRUS: M = M { of: 37, at: 1, ty: 5 };
+            pub(crate) const HYBRID: M = M { of: 37, at: 2, ty: 33 };
+            pub(crate) const NAMEDHYBRID: M = M { of: 37, at: 3, ty: 32 };
+            pub(crate) const PARTIAL: M = M { of: 37, at: 4, ty: 34 };
+        }
+    }
+
+    /// NCBI-Organism BinomialOrgName (SEQUENCE, type 32).
+    pub(crate) mod binomialorgname {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const GENUS: M = M { of: 32, at: 0, ty: 5 };
+        pub(crate) const SPECIES: M = M { of: 32, at: 1, ty: 5 };
+        pub(crate) const SUBSPECIES: M = M { of: 32, at: 2, ty: 5 };
+    }
+
+    /// NCBI-Organism TaxElement (SEQUENCE, type 35).
+    pub(crate) mod taxelement {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const FIXED_LEVEL: M = M { of: 35, at: 0, ty: 36 };
+        pub(crate) const LEVEL: M = M { of: 35, at: 1, ty: 5 };
+        pub(crate) const NAME: M = M { of: 35, at: 2, ty: 5 };
+    }
+
+    /// NCBI-Organism OrgMod (SEQUENCE, type 38).
+    pub(crate) mod orgmod {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const SUBTYPE: M = M { of: 38, at: 0, ty: 39 };
+        pub(crate) const SUBNAME: M = M { of: 38, at: 1, ty: 5 };
+        pub(crate) const ATTRIB: M = M { of: 38, at: 2, ty: 5 };
+    }
+
+    /// NCBI-Sequence Numbering (CHOICE, type 41).
+    pub(crate) mod numbering {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const CONT: M = M { of: 41, at: 0, ty: 42 };
+        pub(crate) const ENUM: M = M { of: 41, at: 1, ty: 43 };
+        pub(crate) const REF: M = M { of: 41, at: 2, ty: 45 };
+        pub(crate) const REAL: M = M { of: 41, at: 3, ty: 111 };
+    }
+
+    /// NCBI-Sequence Num-cont (SEQUENCE, type 42).
+    pub(crate) mod num_cont {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const REFNUM: M = M { of: 42, at: 0, ty: 4 };
+        pub(crate) const HAS_ZERO: M = M { of: 42, at: 1, ty: 2 };
+        pub(crate) const ASCENDING: M = M { of: 42, at: 2, ty: 2 };
+    }
+
+    /// NCBI-Sequence Num-enum (SEQUENCE, type 43).
+    pub(crate) mod num_enum {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NUM: M = M { of: 43, at: 0, ty: 44 };
+        pub(crate) const NAMES: M = M { of: 43, at: 1, ty: 6 };
+    }
+
+    /// NCBI-Sequence Num-ref (SEQUENCE, type 45).
+    pub(crate) mod num_ref {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 45, at: 0, ty: 46 };
+        pub(crate) const ALIGNS: M = M { of: 45, at: 1, ty: 47 };
+    }
+
+    /// NCBI-Seqalign Seq-align (SEQUENCE, type 47).
+    pub(crate) mod seq_align {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 47, at: 0, ty: 48 };
+        pub(crate) const DIM: M = M { of: 47, at: 1, ty: 4 };
+        pub(crate) const SCORE: M = M { of: 47, at: 2, ty: 52 };
+        pub(crate) const SEGS: M = M { of: 47, at: 3, ty: 108 };
+        pub(crate) const BOUNDS: M = M { of: 47, at: 4, ty: 109 };
+        pub(crate) const ID: M = M { of: 47, at: 5, ty: 110 };
+        pub(crate) const EXT: M = M { of: 47, at: 6, ty: 98 };
+
+        /// Seq-align.segs (CHOICE, type 108).
+        pub(crate) mod segs {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const DENDIAG: M = M { of: 108, at: 0, ty: 58 };
+            pub(crate) const DENSEG: M = M { of: 108, at: 1, ty: 59 };
+            pub(crate) const STD: M = M { of: 108, at: 2, ty: 78 };
+            pub(crate) const PACKED: M = M { of: 108, at: 3, ty: 79 };
+            pub(crate) const DISC: M = M { of: 108, at: 4, ty: 81 };
+            pub(crate) const SPLICED: M = M { of: 108, at: 5, ty: 82 };
+            pub(crate) const SPARSE: M = M { of: 108, at: 6, ty: 103 };
+        }
+    }
+
+    /// NCBI-Seqalign Score (SEQUENCE, type 49).
+    pub(crate) mod score {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ID: M = M { of: 49, at: 0, ty: 3 };
+        pub(crate) const VALUE: M = M { of: 49, at: 1, ty: 51 };
+
+        /// Score.value (CHOICE, type 51).
+        pub(crate) mod value {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const REAL: M = M { of: 51, at: 0, ty: 50 };
+            pub(crate) const INT: M = M { of: 51, at: 1, ty: 4 };
+        }
+    }
+
+    /// NCBI-Seqalign Dense-diag (SEQUENCE, type 53).
+    pub(crate) mod dense_diag {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DIM: M = M { of: 53, at: 0, ty: 4 };
+        pub(crate) const IDS: M = M { of: 53, at: 1, ty: 54 };
+        pub(crate) const STARTS: M = M { of: 53, at: 2, ty: 55 };
+        pub(crate) const LEN: M = M { of: 53, at: 3, ty: 44 };
+        pub(crate) const STRANDS: M = M { of: 53, at: 4, ty: 57 };
+        pub(crate) const SCORES: M = M { of: 53, at: 5, ty: 52 };
+    }
+
+    /// NCBI-Seqalign Dense-seg (SEQUENCE, type 59).
+    pub(crate) mod dense_seg {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DIM: M = M { of: 59, at: 0, ty: 4 };
+        pub(crate) const NUMSEG: M = M { of: 59, at: 1, ty: 4 };
+        pub(crate) const IDS: M = M { of: 59, at: 2, ty: 54 };
+        pub(crate) const STARTS: M = M { of: 59, at: 3, ty: 60 };
+        pub(crate) const LENS: M = M { of: 59, at: 4, ty: 55 };
+        pub(crate) const STRANDS: M = M { of: 59, at: 5, ty: 57 };
+        pub(crate) const SCORES: M = M { of: 59, at: 6, ty: 61 };
+    }
+
+    /// NCBI-Seqalign Std-seg (SEQUENCE, type 62).
+    pub(crate) mod std_seg {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DIM: M = M { of: 62, at: 0, ty: 4 };
+        pub(crate) const IDS: M = M { of: 62, at: 1, ty: 54 };
+        pub(crate) const LOC: M = M { of: 62, at: 2, ty: 77 };
+        pub(crate) const SCORES: M = M { of: 62, at: 3, ty: 52 };
+    }
+
+    /// NCBI-Seqloc Seq-loc (CHOICE, type 63).
+    pub(crate) mod seq_loc {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NULL: M = M { of: 63, at: 0, ty: 64 };
+        pub(crate) const EMPTY: M = M { of: 63, at: 1, ty: 9 };
+        pub(crate) const WHOLE: M = M { of: 63, at: 2, ty: 9 };
+        pub(crate) const INT: M = M { of: 63, at: 3, ty: 65 };
+        pub(crate) const PACKED_INT: M = M { of: 63, at: 4, ty: 70 };
+        pub(crate) const PNT: M = M { of: 63, at: 5, ty: 71 };
+        pub(crate) const PACKED_PNT: M = M { of: 63, at: 6, ty: 72 };
+        pub(crate) const MIX: M = M { of: 63, at: 7, ty: 73 };
+        pub(crate) const EQUIV: M = M { of: 63, at: 8, ty: 74 };
+        pub(crate) const BOND: M = M { of: 63, at: 9, ty: 75 };
+        pub(crate) const FEAT: M = M { of: 63, at: 10, ty: 76 };
+    }
+
+    /// NCBI-Seqloc Seq-interval (SEQUENCE, type 65).
+    pub(crate) mod seq_interval {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const FROM: M = M { of: 65, at: 0, ty: 44 };
+        pub(crate) const TO: M = M { of: 65, at: 1, ty: 44 };
+        pub(crate) const STRAND: M = M { of: 65, at: 2, ty: 56 };
+        pub(crate) const ID: M = M { of: 65, at: 3, ty: 9 };
+        pub(crate) const FUZZ_FROM: M = M { of: 65, at: 4, ty: 66 };
+        pub(crate) const FUZZ_TO: M = M { of: 65, at: 5, ty: 66 };
+    }
+
+    /// NCBI-General Int-fuzz (CHOICE, type 66).
+    pub(crate) mod int_fuzz {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const P_M: M = M { of: 66, at: 0, ty: 44 };
+        pub(crate) const RANGE: M = M { of: 66, at: 1, ty: 67 };
+        pub(crate) const PCT: M = M { of: 66, at: 2, ty: 4 };
+        pub(crate) const LIM: M = M { of: 66, at: 3, ty: 68 };
+        pub(crate) const ALT: M = M { of: 66, at: 4, ty: 69 };
+
+        /// Int-fuzz.range (SEQUENCE, type 67).
+        pub(crate) mod range {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const MAX: M = M { of: 67, at: 0, ty: 44 };
+            pub(crate) const MIN: M = M { of: 67, at: 1, ty: 44 };
+        }
+    }
+
+    /// NCBI-Seqloc Seq-point (SEQUENCE, type 71).
+    pub(crate) mod seq_point {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const POINT: M = M { of: 71, at: 0, ty: 44 };
+        pub(crate) const STRAND: M = M { of: 71, at: 1, ty: 56 };
+        pub(crate) const ID: M = M { of: 71, at: 2, ty: 9 };
+        pub(crate) const FUZZ: M = M { of: 71, at: 3, ty: 66 };
+    }
+
+    /// NCBI-Seqloc Packed-seqpnt (SEQUENCE, type 72).
+    pub(crate) mod packed_seqpnt {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const STRAND: M = M { of: 72, at: 0, ty: 56 };
+        pub(crate) const ID: M = M { of: 72, at: 1, ty: 9 };
+        pub(crate) const FUZZ: M = M { of: 72, at: 2, ty: 66 };
+        pub(crate) const POINTS: M = M { of: 72, at: 3, ty: 55 };
+    }
+
+    /// NCBI-Seqloc Seq-bond (SEQUENCE, type 75).
+    pub(crate) mod seq_bond {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const A: M = M { of: 75, at: 0, ty: 71 };
+        pub(crate) const B: M = M { of: 75, at: 1, ty: 71 };
+    }
+
+    /// NCBI-Seqfeat Feat-id (CHOICE, type 76).
+    pub(crate) mod feat_id {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const GIBB: M = M { of: 76, at: 0, ty: 4 };
+        pub(crate) const GIIM: M = M { of: 76, at: 1, ty: 10 };
+        pub(crate) const LOCAL: M = M { of: 76, at: 2, ty: 3 };
+        pub(crate) const GENERAL: M = M { of: 76, at: 3, ty: 15 };
+    }
+
+    /// NCBI-Seqalign Packed-seg (SEQUENCE, type 79).
+    pub(crate) mod packed_seg {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DIM: M = M { of: 79, at: 0, ty: 4 };
+        pub(crate) const NUMSEG: M = M { of: 79, at: 1, ty: 4 };
+        pub(crate) const IDS: M = M { of: 79, at: 2, ty: 54 };
+        pub(crate) const STARTS: M = M { of: 79, at: 3, ty: 55 };
+        pub(crate) const PRESENT: M = M { of: 79, at: 4, ty: 80 };
+        pub(crate) const LENS: M = M { of: 79, at: 5, ty: 55 };
+        pub(crate) const STRANDS: M = M { of: 79, at: 6, ty: 57 };
+        pub(crate) const SCORES: M = M { of: 79, at: 7, ty: 61 };
+    }
+
+    /// NCBI-Seqalign Spliced-seg (SEQUENCE, type 82).
+    pub(crate) mod spliced_seg {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PRODUCT_ID: M = M { of: 82, at: 0, ty: 9 };
+        pub(crate) const GENOMIC_ID: M = M { of: 82, at: 1, ty: 9 };
+        pub(crate) const PRODUCT_STRAND: M = M { of: 82, at: 2, ty: 56 };
+        pub(crate) const GENOMIC_STRAND: M = M { of: 82, at: 3, ty: 56 };
+        pub(crate) const PRODUCT_TYPE: M = M { of: 82, at: 4, ty: 83 };
+        pub(crate) const EXONS: M = M { of: 82, at: 5, ty: 100 };
+        pub(crate) const POLY_A: M = M { of: 82, at: 6, ty: 44 };
+        pub(crate) const PRODUCT_LENGTH: M = M { of: 82, at: 7, ty: 44 };
+        pub(crate) const MODIFIERS: M = M { of: 82, at: 8, ty: 102 };
+    }
+
+    /// NCBI-Seqalign Spliced-exon (SEQUENCE, type 84).
+    pub(crate) mod spliced_exon {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PRODUCT_START: M = M { of: 84, at: 0, ty: 85 };
+        pub(crate) const PRODUCT_END: M = M { of: 84, at: 1, ty: 85 };
+        pub(crate) const GENOMIC_START: M = M { of: 84, at: 2, ty: 44 };
+        pub(crate) const GENOMIC_END: M = M { of: 84, at: 3, ty: 44 };
+        pub(crate) const PRODUCT_ID: M = M { of: 84, at: 4, ty: 9 };
+        pub(crate) const GENOMIC_ID: M = M { of: 84, at: 5, ty: 9 };
+        pub(crate) const PRODUCT_STRAND: M = M { of: 84, at: 6, ty: 56 };
+        pub(crate) const GENOMIC_STRAND: M = M { of: 84, at: 7, ty: 56 };
+        pub(crate) const PARTS: M = M { of: 84, at: 8, ty: 88 };
+        pub(crate) const SCORES: M = M { of: 84, at: 9, ty: 89 };
+        pub(crate) const ACCEPTOR_BEFORE_EXON: M = M { of: 84, at: 10, ty: 90 };
+        pub(crate) const DONOR_AFTER_EXON: M = M { of: 84, at: 11, ty: 90 };
+        pub(crate) const PARTIAL: M = M { of: 84, at: 12, ty: 2 };
+        pub(crate) const EXT: M = M { of: 84, at: 13, ty: 98 };
+    }
+
+    /// NCBI-Seqalign Product-pos (CHOICE, type 85).
+    pub(crate) mod product_pos {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NUCPOS: M = M { of: 85, at: 0, ty: 44 };
+        pub(crate) const PROTPOS: M = M { of: 85, at: 1, ty: 86 };
+    }
+
+    /// NCBI-Seqalign Prot-pos (SEQUENCE, type 86).
+    pub(crate) mod prot_pos {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const AMIN: M = M { of: 86, at: 0, ty: 44 };
+        pub(crate) const FRAME: M = M { of: 86, at: 1, ty: 44 };
+    }
+
+    /// NCBI-Seqalign Spliced-exon-chunk (CHOICE, type 87).
+    pub(crate) mod spliced_exon_chunk {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MATCH: M = M { of: 87, at: 0, ty: 44 };
+        pub(crate) const MISMATCH: M = M { of: 87, at: 1, ty: 44 };
+        pub(crate) const DIAG: M = M { of: 87, at: 2, ty: 44 };
+        pub(crate) const PRODUCT_INS: M = M { of: 87, at: 3, ty: 44 };
+        pub(crate) const GENOMIC_INS: M = M { of: 87, at: 4, ty: 44 };
+    }
+
+    /// NCBI-Seqalign Splice-site (SEQUENCE, type 90).
+    pub(crate) mod splice_site {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const BASES: M = M { of: 90, at: 0, ty: 5 };
+    }
+
+    /// NCBI-General User-object (SEQUENCE, type 91).
+    pub(crate) mod user_object {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const CLASS: M = M { of: 91, at: 0, ty: 5 };
+        pub(crate) const TYPE: M = M { of: 91, at: 1, ty: 3 };
+        pub(crate) const DATA: M = M { of: 91, at: 2, ty: 97 };
+    }
+
+    /// NCBI-General User-field (SEQUENCE, type 92).
+    pub(crate) mod user_field {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const LABEL: M = M { of: 92, at: 0, ty: 3 };
+        pub(crate) const NUM: M = M { of: 92, at: 1, ty: 4 };
+        pub(crate) const DATA: M = M { of: 92, at: 2, ty: 99 };
+
+        /// User-field.data (CHOICE, type 99).
+        pub(crate) mod data {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const STR: M = M { of: 99, at: 0, ty: 93 };
+            pub(crate) const INT: M = M { of: 99, at: 1, ty: 4 };
+            pub(crate) const REAL: M = M { of: 99, at: 2, ty: 50 };
+            pub(crate) const BOOL: M = M { of: 99, at: 3, ty: 2 };
+            pub(crate) const OS: M = M { of: 99, at: 4, ty: 80 };
+            pub(crate) const OBJECT: M = M { of: 99, at: 5, ty: 91 };
+            pub(crate) const STRS: M = M { of: 99, at: 6, ty: 94 };
+            pub(crate) const INTS: M = M { of: 99, at: 7, ty: 60 };
+            pub(crate) const REALS: M = M { of: 99, at: 8, ty: 95 };
+            pub(crate) const OSS: M = M { of: 99, at: 9, ty: 96 };
+            pub(crate) const FIELDS: M = M { of: 99, at: 10, ty: 97 };
+            pub(crate) const OBJECTS: M = M { of: 99, at: 11, ty: 98 };
+        }
+    }
+
+    /// NCBI-Seqalign Spliced-seg-modifier (CHOICE, type 101).
+    pub(crate) mod spliced_seg_modifier {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const START_CODON_FOUND: M = M { of: 101, at: 0, ty: 2 };
+        pub(crate) const STOP_CODON_FOUND: M = M { of: 101, at: 1, ty: 2 };
+    }
+
+    /// NCBI-Seqalign Sparse-seg (SEQUENCE, type 103).
+    pub(crate) mod sparse_seg {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MASTER_ID: M = M { of: 103, at: 0, ty: 9 };
+        pub(crate) const ROWS: M = M { of: 103, at: 1, ty: 105 };
+        pub(crate) const ROW_SCORES: M = M { of: 103, at: 2, ty: 52 };
+        pub(crate) const EXT: M = M { of: 103, at: 3, ty: 107 };
+    }
+
+    /// NCBI-Seqalign Sparse-align (SEQUENCE, type 104).
+    pub(crate) mod sparse_align {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const FIRST_ID: M = M { of: 104, at: 0, ty: 9 };
+        pub(crate) const SECOND_ID: M = M { of: 104, at: 1, ty: 9 };
+        pub(crate) const NUMSEG: M = M { of: 104, at: 2, ty: 4 };
+        pub(crate) const FIRST_STARTS: M = M { of: 104, at: 3, ty: 60 };
+        pub(crate) const SECOND_STARTS: M = M { of: 104, at: 4, ty: 60 };
+        pub(crate) const LENS: M = M { of: 104, at: 5, ty: 55 };
+        pub(crate) const SECOND_STRANDS: M = M { of: 104, at: 6, ty: 57 };
+        pub(crate) const SEG_SCORES: M = M { of: 104, at: 7, ty: 52 };
+    }
+
+    /// NCBI-Seqalign Sparse-seg-ext (SEQUENCE, type 106).
+    pub(crate) mod sparse_seg_ext {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const INDEX: M = M { of: 106, at: 0, ty: 4 };
+    }
+
+    /// NCBI-Sequence Num-real (SEQUENCE, type 111).
+    pub(crate) mod num_real {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const A: M = M { of: 111, at: 0, ty: 50 };
+        pub(crate) const B: M = M { of: 111, at: 1, ty: 50 };
+        pub(crate) const UNITS: M = M { of: 111, at: 2, ty: 5 };
+    }
+
+    /// PIR-General PIR-block (SEQUENCE, type 112).
+    pub(crate) mod pir_block {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const HAD_PUNCT: M = M { of: 112, at: 0, ty: 2 };
+        pub(crate) const HOST: M = M { of: 112, at: 1, ty: 5 };
+        pub(crate) const SOURCE: M = M { of: 112, at: 2, ty: 5 };
+        pub(crate) const SUMMARY: M = M { of: 112, at: 3, ty: 5 };
+        pub(crate) const GENETIC: M = M { of: 112, at: 4, ty: 5 };
+        pub(crate) const INCLUDES: M = M { of: 112, at: 5, ty: 5 };
+        pub(crate) const PLACEMENT: M = M { of: 112, at: 6, ty: 5 };
+        pub(crate) const SUPERFAMILY: M = M { of: 112, at: 7, ty: 5 };
+        pub(crate) const KEYWORDS: M = M { of: 112, at: 8, ty: 6 };
+        pub(crate) const CROSS_REFERENCE: M = M { of: 112, at: 9, ty: 5 };
+        pub(crate) const DATE: M = M { of: 112, at: 10, ty: 5 };
+        pub(crate) const SEQ_RAW: M = M { of: 112, at: 11, ty: 5 };
+        pub(crate) const SEQREF: M = M { of: 112, at: 12, ty: 21 };
+    }
+
+    /// GenBank-General GB-block (SEQUENCE, type 113).
+    pub(crate) mod gb_block {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const EXTRA_ACCESSIONS: M = M { of: 113, at: 0, ty: 6 };
+        pub(crate) const SOURCE: M = M { of: 113, at: 1, ty: 5 };
+        pub(crate) const KEYWORDS: M = M { of: 113, at: 2, ty: 6 };
+        pub(crate) const ORIGIN: M = M { of: 113, at: 3, ty: 5 };
+        pub(crate) const DATE: M = M { of: 113, at: 4, ty: 5 };
+        pub(crate) const ENTRY_DATE: M = M { of: 113, at: 5, ty: 19 };
+        pub(crate) const DIV: M = M { of: 113, at: 6, ty: 5 };
+        pub(crate) const TAXONOMY: M = M { of: 113, at: 7, ty: 5 };
+    }
+
+    /// NCBI-Sequence Pubdesc (SEQUENCE, type 114).
+    pub(crate) mod pubdesc {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PUB: M = M { of: 114, at: 0, ty: 115 };
+        pub(crate) const NAME: M = M { of: 114, at: 1, ty: 5 };
+        pub(crate) const FIG: M = M { of: 114, at: 2, ty: 5 };
+        pub(crate) const NUM: M = M { of: 114, at: 3, ty: 41 };
+        pub(crate) const NUMEXC: M = M { of: 114, at: 4, ty: 2 };
+        pub(crate) const POLY_A: M = M { of: 114, at: 5, ty: 2 };
+        pub(crate) const MAPLOC: M = M { of: 114, at: 6, ty: 5 };
+        pub(crate) const SEQ_RAW: M = M { of: 114, at: 7, ty: 177 };
+        pub(crate) const ALIGN_GROUP: M = M { of: 114, at: 8, ty: 4 };
+        pub(crate) const COMMENT: M = M { of: 114, at: 9, ty: 5 };
+        pub(crate) const REFTYPE: M = M { of: 114, at: 10, ty: 178 };
+    }
+
+    /// NCBI-Pub Pub (CHOICE, type 116).
+    pub(crate) mod r#pub {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const GEN: M = M { of: 116, at: 0, ty: 117 };
+        pub(crate) const SUB: M = M { of: 116, at: 1, ty: 131 };
+        pub(crate) const MEDLINE: M = M { of: 116, at: 2, ty: 140 };
+        pub(crate) const MUID: M = M { of: 116, at: 3, ty: 16 };
+        pub(crate) const ARTICLE: M = M { of: 116, at: 4, ty: 141 };
+        pub(crate) const JOURNAL: M = M { of: 116, at: 5, ty: 142 };
+        pub(crate) const BOOK: M = M { of: 116, at: 6, ty: 143 };
+        pub(crate) const PROC: M = M { of: 116, at: 7, ty: 144 };
+        pub(crate) const PATENT: M = M { of: 116, at: 8, ty: 172 };
+        pub(crate) const PAT_ID: M = M { of: 116, at: 9, ty: 13 };
+        pub(crate) const MAN: M = M { of: 116, at: 10, ty: 175 };
+        pub(crate) const EQUIV: M = M { of: 116, at: 11, ty: 115 };
+        pub(crate) const PMID: M = M { of: 116, at: 12, ty: 130 };
+    }
+
+    /// NCBI-Biblio Cit-gen (SEQUENCE, type 117).
+    pub(crate) mod cit_gen {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const CIT: M = M { of: 117, at: 0, ty: 5 };
+        pub(crate) const AUTHORS: M = M { of: 117, at: 1, ty: 118 };
+        pub(crate) const MUID: M = M { of: 117, at: 2, ty: 16 };
+        pub(crate) const JOURNAL: M = M { of: 117, at: 3, ty: 128 };
+        pub(crate) const VOLUME: M = M { of: 117, at: 4, ty: 5 };
+        pub(crate) const ISSUE: M = M { of: 117, at: 5, ty: 5 };
+        pub(crate) const PAGES: M = M { of: 117, at: 6, ty: 5 };
+        pub(crate) const DATE: M = M { of: 117, at: 7, ty: 19 };
+        pub(crate) const SERIAL_NUMBER: M = M { of: 117, at: 8, ty: 4 };
+        pub(crate) const TITLE: M = M { of: 117, at: 9, ty: 5 };
+        pub(crate) const PMID: M = M { of: 117, at: 10, ty: 130 };
+    }
+
+    /// NCBI-Biblio Auth-list (SEQUENCE, type 118).
+    pub(crate) mod auth_list {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAMES: M = M { of: 118, at: 0, ty: 127 };
+        pub(crate) const AFFIL: M = M { of: 118, at: 1, ty: 124 };
+
+        /// Auth-list.names (CHOICE, type 127).
+        pub(crate) mod names {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const STD: M = M { of: 127, at: 0, ty: 126 };
+            pub(crate) const ML: M = M { of: 127, at: 1, ty: 6 };
+            pub(crate) const STR: M = M { of: 127, at: 2, ty: 6 };
+        }
+    }
+
+    /// NCBI-Biblio Author (SEQUENCE, type 119).
+    pub(crate) mod author {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAME: M = M { of: 119, at: 0, ty: 120 };
+        pub(crate) const LEVEL: M = M { of: 119, at: 1, ty: 122 };
+        pub(crate) const ROLE: M = M { of: 119, at: 2, ty: 123 };
+        pub(crate) const AFFIL: M = M { of: 119, at: 3, ty: 124 };
+        pub(crate) const IS_CORR: M = M { of: 119, at: 4, ty: 2 };
+    }
+
+    /// NCBI-General Person-id (CHOICE, type 120).
+    pub(crate) mod person_id {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DBTAG: M = M { of: 120, at: 0, ty: 15 };
+        pub(crate) const NAME: M = M { of: 120, at: 1, ty: 121 };
+        pub(crate) const ML: M = M { of: 120, at: 2, ty: 5 };
+        pub(crate) const STR: M = M { of: 120, at: 3, ty: 5 };
+        pub(crate) const CONSORTIUM: M = M { of: 120, at: 4, ty: 5 };
+    }
+
+    /// NCBI-General Name-std (SEQUENCE, type 121).
+    pub(crate) mod name_std {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const LAST: M = M { of: 121, at: 0, ty: 5 };
+        pub(crate) const FIRST: M = M { of: 121, at: 1, ty: 5 };
+        pub(crate) const MIDDLE: M = M { of: 121, at: 2, ty: 5 };
+        pub(crate) const FULL: M = M { of: 121, at: 3, ty: 5 };
+        pub(crate) const INITIALS: M = M { of: 121, at: 4, ty: 5 };
+        pub(crate) const SUFFIX: M = M { of: 121, at: 5, ty: 5 };
+        pub(crate) const TITLE: M = M { of: 121, at: 6, ty: 5 };
+    }
+
+    /// NCBI-Biblio Affil (CHOICE, type 124).
+    pub(crate) mod affil {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const STR: M = M { of: 124, at: 0, ty: 5 };
+        pub(crate) const STD: M = M { of: 124, at: 1, ty: 125 };
+
+        /// Affil.std (SEQUENCE, type 125).
+        pub(crate) mod std {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const AFFIL: M = M { of: 125, at: 0, ty: 5 };
+            pub(crate) const DIV: M = M { of: 125, at: 1, ty: 5 };
+            pub(crate) const CITY: M = M { of: 125, at: 2, ty: 5 };
+            pub(crate) const SUB: M = M { of: 125, at: 3, ty: 5 };
+            pub(crate) const COUNTRY: M = M { of: 125, at: 4, ty: 5 };
+            pub(crate) const STREET: M = M { of: 125, at: 5, ty: 5 };
+            pub(crate) const EMAIL: M = M { of: 125, at: 6, ty: 5 };
+            pub(crate) const FAX: M = M { of: 125, at: 7, ty: 5 };
+            pub(crate) const PHONE: M = M { of: 125, at: 8, ty: 5 };
+            pub(crate) const POSTAL_CODE: M = M { of: 125, at: 9, ty: 5 };
+        }
+    }
+
+    /// The anonymous types used in `title`.
+    pub(crate) mod title {
+
+        /// Title.E (CHOICE, type 129).
+        pub(crate) mod e {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const NAME: M = M { of: 129, at: 0, ty: 5 };
+            pub(crate) const TSUB: M = M { of: 129, at: 1, ty: 5 };
+            pub(crate) const TRANS: M = M { of: 129, at: 2, ty: 5 };
+            pub(crate) const JTA: M = M { of: 129, at: 3, ty: 5 };
+            pub(crate) const ISO_JTA: M = M { of: 129, at: 4, ty: 5 };
+            pub(crate) const ML_JTA: M = M { of: 129, at: 5, ty: 5 };
+            pub(crate) const CODEN: M = M { of: 129, at: 6, ty: 5 };
+            pub(crate) const ISSN: M = M { of: 129, at: 7, ty: 5 };
+            pub(crate) const ABR: M = M { of: 129, at: 8, ty: 5 };
+            pub(crate) const ISBN: M = M { of: 129, at: 9, ty: 5 };
+        }
+    }
+
+    /// NCBI-Biblio Cit-sub (SEQUENCE, type 131).
+    pub(crate) mod cit_sub {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const AUTHORS: M = M { of: 131, at: 0, ty: 118 };
+        pub(crate) const IMP: M = M { of: 131, at: 1, ty: 132 };
+        pub(crate) const MEDIUM: M = M { of: 131, at: 2, ty: 139 };
+        pub(crate) const DATE: M = M { of: 131, at: 3, ty: 19 };
+        pub(crate) const DESCR: M = M { of: 131, at: 4, ty: 5 };
+    }
+
+    /// NCBI-Biblio Imprint (SEQUENCE, type 132).
+    pub(crate) mod imprint {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DATE: M = M { of: 132, at: 0, ty: 19 };
+        pub(crate) const VOLUME: M = M { of: 132, at: 1, ty: 5 };
+        pub(crate) const ISSUE: M = M { of: 132, at: 2, ty: 5 };
+        pub(crate) const PAGES: M = M { of: 132, at: 3, ty: 5 };
+        pub(crate) const SECTION: M = M { of: 132, at: 4, ty: 5 };
+        pub(crate) const PUB: M = M { of: 132, at: 5, ty: 124 };
+        pub(crate) const CPRT: M = M { of: 132, at: 6, ty: 19 };
+        pub(crate) const PART_SUP: M = M { of: 132, at: 7, ty: 5 };
+        pub(crate) const LANGUAGE: M = M { of: 132, at: 8, ty: 5 };
+        pub(crate) const PREPUB: M = M { of: 132, at: 9, ty: 133 };
+        pub(crate) const PART_SUPI: M = M { of: 132, at: 10, ty: 5 };
+        pub(crate) const RETRACT: M = M { of: 132, at: 11, ty: 134 };
+        pub(crate) const PUBSTATUS: M = M { of: 132, at: 12, ty: 136 };
+        pub(crate) const HISTORY: M = M { of: 132, at: 13, ty: 137 };
+    }
+
+    /// NCBI-Biblio CitRetract (SEQUENCE, type 134).
+    pub(crate) mod citretract {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 134, at: 0, ty: 135 };
+        pub(crate) const EXP: M = M { of: 134, at: 1, ty: 5 };
+    }
+
+    /// NCBI-Biblio PubStatusDate (SEQUENCE, type 138).
+    pub(crate) mod pubstatusdate {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PUBSTATUS: M = M { of: 138, at: 0, ty: 136 };
+        pub(crate) const DATE: M = M { of: 138, at: 1, ty: 19 };
+    }
+
+    /// NCBI-Medline Medline-entry (SEQUENCE, type 140).
+    pub(crate) mod medline_entry {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const UID: M = M { of: 140, at: 0, ty: 16 };
+        pub(crate) const EM: M = M { of: 140, at: 1, ty: 19 };
+        pub(crate) const CIT: M = M { of: 140, at: 2, ty: 141 };
+        pub(crate) const ABSTRACT: M = M { of: 140, at: 3, ty: 5 };
+        pub(crate) const MESH: M = M { of: 140, at: 4, ty: 158 };
+        pub(crate) const SUBSTANCE: M = M { of: 140, at: 5, ty: 161 };
+        pub(crate) const XREF: M = M { of: 140, at: 6, ty: 164 };
+        pub(crate) const IDNUM: M = M { of: 140, at: 7, ty: 29 };
+        pub(crate) const GENE: M = M { of: 140, at: 8, ty: 29 };
+        pub(crate) const PMID: M = M { of: 140, at: 9, ty: 130 };
+        pub(crate) const PUB_TYPE: M = M { of: 140, at: 10, ty: 29 };
+        pub(crate) const MLFIELD: M = M { of: 140, at: 11, ty: 170 };
+        pub(crate) const STATUS: M = M { of: 140, at: 12, ty: 171 };
+    }
+
+    /// NCBI-Biblio Cit-art (SEQUENCE, type 141).
+    pub(crate) mod cit_art {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TITLE: M = M { of: 141, at: 0, ty: 128 };
+        pub(crate) const AUTHORS: M = M { of: 141, at: 1, ty: 118 };
+        pub(crate) const FROM: M = M { of: 141, at: 2, ty: 146 };
+        pub(crate) const IDS: M = M { of: 141, at: 3, ty: 147 };
+
+        /// Cit-art.from (CHOICE, type 146).
+        pub(crate) mod from {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const JOURNAL: M = M { of: 146, at: 0, ty: 142 };
+            pub(crate) const BOOK: M = M { of: 146, at: 1, ty: 143 };
+            pub(crate) const PROC: M = M { of: 146, at: 2, ty: 144 };
+        }
+    }
+
+    /// NCBI-Biblio Cit-jour (SEQUENCE, type 142).
+    pub(crate) mod cit_jour {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TITLE: M = M { of: 142, at: 0, ty: 128 };
+        pub(crate) const IMP: M = M { of: 142, at: 1, ty: 132 };
+    }
+
+    /// NCBI-Biblio Cit-book (SEQUENCE, type 143).
+    pub(crate) mod cit_book {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TITLE: M = M { of: 143, at: 0, ty: 128 };
+        pub(crate) const COLL: M = M { of: 143, at: 1, ty: 128 };
+        pub(crate) const AUTHORS: M = M { of: 143, at: 2, ty: 118 };
+        pub(crate) const IMP: M = M { of: 143, at: 3, ty: 132 };
+    }
+
+    /// NCBI-Biblio Cit-proc (SEQUENCE, type 144).
+    pub(crate) mod cit_proc {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const BOOK: M = M { of: 144, at: 0, ty: 143 };
+        pub(crate) const MEET: M = M { of: 144, at: 1, ty: 145 };
+    }
+
+    /// NCBI-Biblio Meeting (SEQUENCE, type 145).
+    pub(crate) mod meeting {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NUMBER: M = M { of: 145, at: 0, ty: 5 };
+        pub(crate) const DATE: M = M { of: 145, at: 1, ty: 19 };
+        pub(crate) const PLACE: M = M { of: 145, at: 2, ty: 124 };
+    }
+
+    /// NCBI-Biblio ArticleId (CHOICE, type 148).
+    pub(crate) mod articleid {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PUBMED: M = M { of: 148, at: 0, ty: 130 };
+        pub(crate) const MEDLINE: M = M { of: 148, at: 1, ty: 149 };
+        pub(crate) const DOI: M = M { of: 148, at: 2, ty: 150 };
+        pub(crate) const PII: M = M { of: 148, at: 3, ty: 151 };
+        pub(crate) const PMCID: M = M { of: 148, at: 4, ty: 152 };
+        pub(crate) const PMCPID: M = M { of: 148, at: 5, ty: 153 };
+        pub(crate) const PMPID: M = M { of: 148, at: 6, ty: 154 };
+        pub(crate) const OTHER: M = M { of: 148, at: 7, ty: 15 };
+    }
+
+    /// NCBI-Medline Medline-mesh (SEQUENCE, type 155).
+    pub(crate) mod medline_mesh {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MP: M = M { of: 155, at: 0, ty: 2 };
+        pub(crate) const TERM: M = M { of: 155, at: 1, ty: 5 };
+        pub(crate) const QUAL: M = M { of: 155, at: 2, ty: 157 };
+    }
+
+    /// NCBI-Medline Medline-qual (SEQUENCE, type 156).
+    pub(crate) mod medline_qual {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MP: M = M { of: 156, at: 0, ty: 2 };
+        pub(crate) const SUBH: M = M { of: 156, at: 1, ty: 5 };
+    }
+
+    /// NCBI-Medline Medline-rn (SEQUENCE, type 159).
+    pub(crate) mod medline_rn {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 159, at: 0, ty: 160 };
+        pub(crate) const CIT: M = M { of: 159, at: 1, ty: 5 };
+        pub(crate) const NAME: M = M { of: 159, at: 2, ty: 5 };
+    }
+
+    /// NCBI-Medline Medline-si (SEQUENCE, type 162).
+    pub(crate) mod medline_si {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 162, at: 0, ty: 163 };
+        pub(crate) const CIT: M = M { of: 162, at: 1, ty: 5 };
+    }
+
+    /// NCBI-Medline Medline-field (SEQUENCE, type 165).
+    pub(crate) mod medline_field {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 165, at: 0, ty: 166 };
+        pub(crate) const STR: M = M { of: 165, at: 1, ty: 5 };
+        pub(crate) const IDS: M = M { of: 165, at: 2, ty: 169 };
+    }
+
+    /// NCBI-Medline DocRef (SEQUENCE, type 167).
+    pub(crate) mod docref {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 167, at: 0, ty: 168 };
+        pub(crate) const UID: M = M { of: 167, at: 1, ty: 16 };
+    }
+
+    /// NCBI-Biblio Cit-pat (SEQUENCE, type 172).
+    pub(crate) mod cit_pat {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TITLE: M = M { of: 172, at: 0, ty: 5 };
+        pub(crate) const AUTHORS: M = M { of: 172, at: 1, ty: 118 };
+        pub(crate) const COUNTRY: M = M { of: 172, at: 2, ty: 5 };
+        pub(crate) const DOC_TYPE: M = M { of: 172, at: 3, ty: 5 };
+        pub(crate) const NUMBER: M = M { of: 172, at: 4, ty: 5 };
+        pub(crate) const DATE_ISSUE: M = M { of: 172, at: 5, ty: 19 };
+        pub(crate) const CLASS: M = M { of: 172, at: 6, ty: 6 };
+        pub(crate) const APP_NUMBER: M = M { of: 172, at: 7, ty: 5 };
+        pub(crate) const APP_DATE: M = M { of: 172, at: 8, ty: 19 };
+        pub(crate) const APPLICANTS: M = M { of: 172, at: 9, ty: 118 };
+        pub(crate) const ASSIGNEES: M = M { of: 172, at: 10, ty: 118 };
+        pub(crate) const PRIORITY: M = M { of: 172, at: 11, ty: 174 };
+        pub(crate) const ABSTRACT: M = M { of: 172, at: 12, ty: 5 };
+    }
+
+    /// NCBI-Biblio Patent-priority (SEQUENCE, type 173).
+    pub(crate) mod patent_priority {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const COUNTRY: M = M { of: 173, at: 0, ty: 5 };
+        pub(crate) const NUMBER: M = M { of: 173, at: 1, ty: 5 };
+        pub(crate) const DATE: M = M { of: 173, at: 2, ty: 19 };
+    }
+
+    /// NCBI-Biblio Cit-let (SEQUENCE, type 175).
+    pub(crate) mod cit_let {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const CIT: M = M { of: 175, at: 0, ty: 143 };
+        pub(crate) const MAN_ID: M = M { of: 175, at: 1, ty: 5 };
+        pub(crate) const TYPE: M = M { of: 175, at: 2, ty: 176 };
+    }
+
+    /// SP-General SP-block (SEQUENCE, type 179).
+    pub(crate) mod sp_block {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const CLASS: M = M { of: 179, at: 0, ty: 180 };
+        pub(crate) const EXTRA_ACC: M = M { of: 179, at: 1, ty: 29 };
+        pub(crate) const IMETH: M = M { of: 179, at: 2, ty: 2 };
+        pub(crate) const PLASNM: M = M { of: 179, at: 3, ty: 29 };
+        pub(crate) const SEQREF: M = M { of: 179, at: 4, ty: 21 };
+        pub(crate) const DBREF: M = M { of: 179, at: 5, ty: 30 };
+        pub(crate) const KEYWORDS: M = M { of: 179, at: 6, ty: 29 };
+        pub(crate) const CREATED: M = M { of: 179, at: 7, ty: 19 };
+        pub(crate) const SEQUPD: M = M { of: 179, at: 8, ty: 19 };
+        pub(crate) const ANNOTUPD: M = M { of: 179, at: 9, ty: 19 };
+    }
+
+    /// EMBL-General EMBL-block (SEQUENCE, type 181).
+    pub(crate) mod embl_block {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const CLASS: M = M { of: 181, at: 0, ty: 182 };
+        pub(crate) const DIV: M = M { of: 181, at: 1, ty: 183 };
+        pub(crate) const CREATION_DATE: M = M { of: 181, at: 2, ty: 19 };
+        pub(crate) const UPDATE_DATE: M = M { of: 181, at: 3, ty: 19 };
+        pub(crate) const EXTRA_ACC: M = M { of: 181, at: 4, ty: 6 };
+        pub(crate) const KEYWORDS: M = M { of: 181, at: 5, ty: 6 };
+        pub(crate) const XREF: M = M { of: 181, at: 6, ty: 187 };
+    }
+
+    /// EMBL-General EMBL-xref (SEQUENCE, type 184).
+    pub(crate) mod embl_xref {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DBNAME: M = M { of: 184, at: 0, ty: 185 };
+        pub(crate) const ID: M = M { of: 184, at: 1, ty: 110 };
+    }
+
+    /// EMBL-General EMBL-dbname (CHOICE, type 185).
+    pub(crate) mod embl_dbname {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const CODE: M = M { of: 185, at: 0, ty: 186 };
+        pub(crate) const NAME: M = M { of: 185, at: 1, ty: 5 };
+    }
+
+    /// PRF-General PRF-block (SEQUENCE, type 188).
+    pub(crate) mod prf_block {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const EXTRA_SRC: M = M { of: 188, at: 0, ty: 189 };
+        pub(crate) const KEYWORDS: M = M { of: 188, at: 1, ty: 6 };
+    }
+
+    /// PRF-General PRF-ExtraSrc (SEQUENCE, type 189).
+    pub(crate) mod prf_extrasrc {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const HOST: M = M { of: 189, at: 0, ty: 5 };
+        pub(crate) const PART: M = M { of: 189, at: 1, ty: 5 };
+        pub(crate) const STATE: M = M { of: 189, at: 2, ty: 5 };
+        pub(crate) const STRAIN: M = M { of: 189, at: 3, ty: 5 };
+        pub(crate) const TAXON: M = M { of: 189, at: 4, ty: 5 };
+    }
+
+    /// PDB-General PDB-block (SEQUENCE, type 190).
+    pub(crate) mod pdb_block {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DEPOSITION: M = M { of: 190, at: 0, ty: 19 };
+        pub(crate) const CLASS: M = M { of: 190, at: 1, ty: 5 };
+        pub(crate) const COMPOUND: M = M { of: 190, at: 2, ty: 6 };
+        pub(crate) const SOURCE: M = M { of: 190, at: 3, ty: 6 };
+        pub(crate) const EXP_METHOD: M = M { of: 190, at: 4, ty: 5 };
+        pub(crate) const REPLACE: M = M { of: 190, at: 5, ty: 191 };
+    }
+
+    /// PDB-General PDB-replace (SEQUENCE, type 191).
+    pub(crate) mod pdb_replace {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DATE: M = M { of: 191, at: 0, ty: 19 };
+        pub(crate) const IDS: M = M { of: 191, at: 1, ty: 6 };
+    }
+
+    /// NCBI-BioSource BioSource (SEQUENCE, type 193).
+    pub(crate) mod biosource {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const GENOME: M = M { of: 193, at: 0, ty: 194 };
+        pub(crate) const ORIGIN: M = M { of: 193, at: 1, ty: 195 };
+        pub(crate) const ORG: M = M { of: 193, at: 2, ty: 28 };
+        pub(crate) const SUBTYPE: M = M { of: 193, at: 3, ty: 198 };
+        pub(crate) const IS_FOCUS: M = M { of: 193, at: 4, ty: 64 };
+        pub(crate) const PCR_PRIMERS: M = M { of: 193, at: 5, ty: 199 };
+    }
+
+    /// NCBI-BioSource SubSource (SEQUENCE, type 196).
+    pub(crate) mod subsource {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const SUBTYPE: M = M { of: 196, at: 0, ty: 197 };
+        pub(crate) const NAME: M = M { of: 196, at: 1, ty: 5 };
+        pub(crate) const ATTRIB: M = M { of: 196, at: 2, ty: 5 };
+    }
+
+    /// NCBI-BioSource PCRReaction (SEQUENCE, type 200).
+    pub(crate) mod pcrreaction {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const FORWARD: M = M { of: 200, at: 0, ty: 201 };
+        pub(crate) const REVERSE: M = M { of: 200, at: 1, ty: 201 };
+    }
+
+    /// NCBI-BioSource PCRPrimer (SEQUENCE, type 202).
+    pub(crate) mod pcrprimer {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const SEQ: M = M { of: 202, at: 0, ty: 203 };
+        pub(crate) const NAME: M = M { of: 202, at: 1, ty: 204 };
+    }
+
+    /// NCBI-Sequence MolInfo (SEQUENCE, type 205).
+    pub(crate) mod molinfo {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const BIOMOL: M = M { of: 205, at: 0, ty: 206 };
+        pub(crate) const TECH: M = M { of: 205, at: 1, ty: 207 };
+        pub(crate) const TECHEXP: M = M { of: 205, at: 2, ty: 5 };
+        pub(crate) const COMPLETENESS: M = M { of: 205, at: 3, ty: 208 };
+        pub(crate) const GBMOLTYPE: M = M { of: 205, at: 4, ty: 5 };
+    }
+
+    /// NCBI-Seqfeat ModelEvidenceSupport (SEQUENCE, type 209).
+    pub(crate) mod modelevidencesupport {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const METHOD: M = M { of: 209, at: 0, ty: 5 };
+        pub(crate) const MRNA: M = M { of: 209, at: 1, ty: 211 };
+        pub(crate) const EST: M = M { of: 209, at: 2, ty: 211 };
+        pub(crate) const PROTEIN: M = M { of: 209, at: 3, ty: 211 };
+        pub(crate) const IDENTIFICATION: M = M { of: 209, at: 4, ty: 9 };
+        pub(crate) const DBXREF: M = M { of: 209, at: 5, ty: 30 };
+        pub(crate) const EXON_COUNT: M = M { of: 209, at: 6, ty: 4 };
+        pub(crate) const EXON_LENGTH: M = M { of: 209, at: 7, ty: 4 };
+        pub(crate) const FULL_LENGTH: M = M { of: 209, at: 8, ty: 2 };
+        pub(crate) const SUPPORTS_ALL_EXON_COMBO: M = M { of: 209, at: 9, ty: 2 };
+    }
+
+    /// NCBI-Seqfeat ModelEvidenceItem (SEQUENCE, type 210).
+    pub(crate) mod modelevidenceitem {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ID: M = M { of: 210, at: 0, ty: 9 };
+        pub(crate) const EXON_COUNT: M = M { of: 210, at: 1, ty: 4 };
+        pub(crate) const EXON_LENGTH: M = M { of: 210, at: 2, ty: 4 };
+        pub(crate) const FULL_LENGTH: M = M { of: 210, at: 3, ty: 2 };
+        pub(crate) const SUPPORTS_ALL_EXON_COMBO: M = M { of: 210, at: 4, ty: 2 };
+    }
+
+    /// NCBI-Sequence Seq-inst (SEQUENCE, type 212).
+    pub(crate) mod seq_inst {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const REPR: M = M { of: 212, at: 0, ty: 213 };
+        pub(crate) const MOL: M = M { of: 212, at: 1, ty: 214 };
+        pub(crate) const LENGTH: M = M { of: 212, at: 2, ty: 44 };
+        pub(crate) const FUZZ: M = M { of: 212, at: 3, ty: 66 };
+        pub(crate) const TOPOLOGY: M = M { of: 212, at: 4, ty: 215 };
+        pub(crate) const STRAND: M = M { of: 212, at: 5, ty: 216 };
+        pub(crate) const SEQ_DATA: M = M { of: 212, at: 6, ty: 217 };
+        pub(crate) const EXT: M = M { of: 212, at: 7, ty: 234 };
+        pub(crate) const HIST: M = M { of: 212, at: 8, ty: 357 };
+    }
+
+    /// NCBI-Sequence Seq-data (CHOICE, type 217).
+    pub(crate) mod seq_data {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const IUPACNA: M = M { of: 217, at: 0, ty: 218 };
+        pub(crate) const IUPACAA: M = M { of: 217, at: 1, ty: 219 };
+        pub(crate) const NCBI2NA: M = M { of: 217, at: 2, ty: 220 };
+        pub(crate) const NCBI4NA: M = M { of: 217, at: 3, ty: 221 };
+        pub(crate) const NCBI8NA: M = M { of: 217, at: 4, ty: 222 };
+        pub(crate) const NCBIPNA: M = M { of: 217, at: 5, ty: 223 };
+        pub(crate) const NCBI8AA: M = M { of: 217, at: 6, ty: 224 };
+        pub(crate) const NCBIEAA: M = M { of: 217, at: 7, ty: 225 };
+        pub(crate) const NCBIPAA: M = M { of: 217, at: 8, ty: 226 };
+        pub(crate) const NCBISTDAA: M = M { of: 217, at: 9, ty: 227 };
+        pub(crate) const GAP: M = M { of: 217, at: 10, ty: 228 };
+    }
+
+    /// NCBI-Sequence Seq-gap (SEQUENCE, type 228).
+    pub(crate) mod seq_gap {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 228, at: 0, ty: 229 };
+        pub(crate) const LINKAGE: M = M { of: 228, at: 1, ty: 230 };
+        pub(crate) const LINKAGE_EVIDENCE: M = M { of: 228, at: 2, ty: 233 };
+    }
+
+    /// NCBI-Sequence Linkage-evidence (SEQUENCE, type 231).
+    pub(crate) mod linkage_evidence {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 231, at: 0, ty: 232 };
+    }
+
+    /// NCBI-Sequence Seq-ext (CHOICE, type 234).
+    pub(crate) mod seq_ext {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const SEG: M = M { of: 234, at: 0, ty: 235 };
+        pub(crate) const REF: M = M { of: 234, at: 1, ty: 236 };
+        pub(crate) const MAP: M = M { of: 234, at: 2, ty: 237 };
+        pub(crate) const DELTA: M = M { of: 234, at: 3, ty: 355 };
+    }
+
+    /// NCBI-Seqfeat Seq-feat (SEQUENCE, type 238).
+    pub(crate) mod seq_feat {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ID: M = M { of: 238, at: 0, ty: 76 };
+        pub(crate) const DATA: M = M { of: 238, at: 1, ty: 239 };
+        pub(crate) const PARTIAL: M = M { of: 238, at: 2, ty: 2 };
+        pub(crate) const EXCEPT: M = M { of: 238, at: 3, ty: 2 };
+        pub(crate) const COMMENT: M = M { of: 238, at: 4, ty: 5 };
+        pub(crate) const PRODUCT: M = M { of: 238, at: 5, ty: 63 };
+        pub(crate) const LOCATION: M = M { of: 238, at: 6, ty: 63 };
+        pub(crate) const QUAL: M = M { of: 238, at: 7, ty: 328 };
+        pub(crate) const TITLE: M = M { of: 238, at: 8, ty: 5 };
+        pub(crate) const EXT: M = M { of: 238, at: 9, ty: 91 };
+        pub(crate) const CIT: M = M { of: 238, at: 10, ty: 329 };
+        pub(crate) const EXP_EV: M = M { of: 238, at: 11, ty: 337 };
+        pub(crate) const XREF: M = M { of: 238, at: 12, ty: 339 };
+        pub(crate) const DBXREF: M = M { of: 238, at: 13, ty: 30 };
+        pub(crate) const PSEUDO: M = M { of: 238, at: 14, ty: 2 };
+        pub(crate) const EXCEPT_TEXT: M = M { of: 238, at: 15, ty: 5 };
+        pub(crate) const IDS: M = M { of: 238, at: 16, ty: 340 };
+        pub(crate) const EXTS: M = M { of: 238, at: 17, ty: 341 };
+        pub(crate) const SUPPORT: M = M { of: 238, at: 18, ty: 342 };
+    }
+
+    /// NCBI-Seqfeat SeqFeatData (CHOICE, type 239).
+    pub(crate) mod seqfeatdata {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const GENE: M = M { of: 239, at: 0, ty: 240 };
+        pub(crate) const ORG: M = M { of: 239, at: 1, ty: 28 };
+        pub(crate) const CDREGION: M = M { of: 239, at: 2, ty: 243 };
+        pub(crate) const PROT: M = M { of: 239, at: 3, ty: 250 };
+        pub(crate) const RNA: M = M { of: 239, at: 4, ty: 252 };
+        pub(crate) const PUB: M = M { of: 239, at: 5, ty: 114 };
+        pub(crate) const SEQ: M = M { of: 239, at: 6, ty: 63 };
+        pub(crate) const IMP: M = M { of: 239, at: 7, ty: 261 };
+        pub(crate) const REGION: M = M { of: 239, at: 8, ty: 5 };
+        pub(crate) const COMMENT: M = M { of: 239, at: 9, ty: 64 };
+        pub(crate) const BOND: M = M { of: 239, at: 10, ty: 262 };
+        pub(crate) const SITE: M = M { of: 239, at: 11, ty: 263 };
+        pub(crate) const RSITE: M = M { of: 239, at: 12, ty: 264 };
+        pub(crate) const USER: M = M { of: 239, at: 13, ty: 91 };
+        pub(crate) const TXINIT: M = M { of: 239, at: 14, ty: 265 };
+        pub(crate) const NUM: M = M { of: 239, at: 15, ty: 41 };
+        pub(crate) const PSEC_STR: M = M { of: 239, at: 16, ty: 274 };
+        pub(crate) const NON_STD_RESIDUE: M = M { of: 239, at: 17, ty: 5 };
+        pub(crate) const HET: M = M { of: 239, at: 18, ty: 192 };
+        pub(crate) const BIOSRC: M = M { of: 239, at: 19, ty: 193 };
+        pub(crate) const CLONE: M = M { of: 239, at: 20, ty: 275 };
+        pub(crate) const VARIATION: M = M { of: 239, at: 21, ty: 282 };
+    }
+
+    /// NCBI-Gene Gene-ref (SEQUENCE, type 240).
+    pub(crate) mod gene_ref {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const LOCUS: M = M { of: 240, at: 0, ty: 5 };
+        pub(crate) const ALLELE: M = M { of: 240, at: 1, ty: 5 };
+        pub(crate) const DESC: M = M { of: 240, at: 2, ty: 5 };
+        pub(crate) const MAPLOC: M = M { of: 240, at: 3, ty: 5 };
+        pub(crate) const PSEUDO: M = M { of: 240, at: 4, ty: 2 };
+        pub(crate) const DB: M = M { of: 240, at: 5, ty: 30 };
+        pub(crate) const SYN: M = M { of: 240, at: 6, ty: 29 };
+        pub(crate) const LOCUS_TAG: M = M { of: 240, at: 7, ty: 5 };
+        pub(crate) const FORMAL_NAME: M = M { of: 240, at: 8, ty: 241 };
+    }
+
+    /// NCBI-Gene Gene-nomenclature (SEQUENCE, type 241).
+    pub(crate) mod gene_nomenclature {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const STATUS: M = M { of: 241, at: 0, ty: 242 };
+        pub(crate) const SYMBOL: M = M { of: 241, at: 1, ty: 5 };
+        pub(crate) const NAME: M = M { of: 241, at: 2, ty: 5 };
+        pub(crate) const SOURCE: M = M { of: 241, at: 3, ty: 15 };
+    }
+
+    /// NCBI-Seqfeat Cdregion (SEQUENCE, type 243).
+    pub(crate) mod cdregion {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ORF: M = M { of: 243, at: 0, ty: 2 };
+        pub(crate) const FRAME: M = M { of: 243, at: 1, ty: 244 };
+        pub(crate) const CONFLICT: M = M { of: 243, at: 2, ty: 2 };
+        pub(crate) const GAPS: M = M { of: 243, at: 3, ty: 44 };
+        pub(crate) const MISMATCH: M = M { of: 243, at: 4, ty: 44 };
+        pub(crate) const CODE: M = M { of: 243, at: 5, ty: 245 };
+        pub(crate) const CODE_BREAK: M = M { of: 243, at: 6, ty: 249 };
+        pub(crate) const STOPS: M = M { of: 243, at: 7, ty: 44 };
+    }
+
+    /// The anonymous types used in `genetic_code`.
+    pub(crate) mod genetic_code {
+
+        /// Genetic-code.E (CHOICE, type 246).
+        pub(crate) mod e {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const NAME: M = M { of: 246, at: 0, ty: 5 };
+            pub(crate) const ID: M = M { of: 246, at: 1, ty: 4 };
+            pub(crate) const NCBIEAA: M = M { of: 246, at: 2, ty: 5 };
+            pub(crate) const NCBI8AA: M = M { of: 246, at: 3, ty: 80 };
+            pub(crate) const NCBISTDAA: M = M { of: 246, at: 4, ty: 80 };
+            pub(crate) const SNCBIEAA: M = M { of: 246, at: 5, ty: 5 };
+            pub(crate) const SNCBI8AA: M = M { of: 246, at: 6, ty: 80 };
+            pub(crate) const SNCBISTDAA: M = M { of: 246, at: 7, ty: 80 };
+        }
+    }
+
+    /// NCBI-Seqfeat Code-break (SEQUENCE, type 247).
+    pub(crate) mod code_break {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const LOC: M = M { of: 247, at: 0, ty: 63 };
+        pub(crate) const AA: M = M { of: 247, at: 1, ty: 248 };
+
+        /// Code-break.aa (CHOICE, type 248).
+        pub(crate) mod aa {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const NCBIEAA: M = M { of: 248, at: 0, ty: 4 };
+            pub(crate) const NCBI8AA: M = M { of: 248, at: 1, ty: 4 };
+            pub(crate) const NCBISTDAA: M = M { of: 248, at: 2, ty: 4 };
+        }
+    }
+
+    /// NCBI-Protein Prot-ref (SEQUENCE, type 250).
+    pub(crate) mod prot_ref {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAME: M = M { of: 250, at: 0, ty: 29 };
+        pub(crate) const DESC: M = M { of: 250, at: 1, ty: 5 };
+        pub(crate) const EC: M = M { of: 250, at: 2, ty: 29 };
+        pub(crate) const ACTIVITY: M = M { of: 250, at: 3, ty: 29 };
+        pub(crate) const DB: M = M { of: 250, at: 4, ty: 30 };
+        pub(crate) const PROCESSED: M = M { of: 250, at: 5, ty: 251 };
+    }
+
+    /// NCBI-RNA RNA-ref (SEQUENCE, type 252).
+    pub(crate) mod rna_ref {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 252, at: 0, ty: 253 };
+        pub(crate) const PSEUDO: M = M { of: 252, at: 1, ty: 2 };
+        pub(crate) const EXT: M = M { of: 252, at: 2, ty: 260 };
+
+        /// RNA-ref.ext (CHOICE, type 260).
+        pub(crate) mod ext {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const NAME: M = M { of: 260, at: 0, ty: 5 };
+            pub(crate) const TRNA: M = M { of: 260, at: 1, ty: 254 };
+            pub(crate) const GEN: M = M { of: 260, at: 2, ty: 257 };
+        }
+    }
+
+    /// NCBI-RNA Trna-ext (SEQUENCE, type 254).
+    pub(crate) mod trna_ext {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const AA: M = M { of: 254, at: 0, ty: 255 };
+        pub(crate) const CODON: M = M { of: 254, at: 1, ty: 256 };
+        pub(crate) const ANTICODON: M = M { of: 254, at: 2, ty: 63 };
+
+        /// Trna-ext.aa (CHOICE, type 255).
+        pub(crate) mod aa {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const IUPACAA: M = M { of: 255, at: 0, ty: 4 };
+            pub(crate) const NCBIEAA: M = M { of: 255, at: 1, ty: 4 };
+            pub(crate) const NCBI8AA: M = M { of: 255, at: 2, ty: 4 };
+            pub(crate) const NCBISTDAA: M = M { of: 255, at: 3, ty: 4 };
+        }
+    }
+
+    /// NCBI-RNA RNA-gen (SEQUENCE, type 257).
+    pub(crate) mod rna_gen {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const CLASS: M = M { of: 257, at: 0, ty: 5 };
+        pub(crate) const PRODUCT: M = M { of: 257, at: 1, ty: 5 };
+        pub(crate) const QUALS: M = M { of: 257, at: 2, ty: 258 };
+    }
+
+    /// NCBI-RNA RNA-qual (SEQUENCE, type 259).
+    pub(crate) mod rna_qual {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const QUAL: M = M { of: 259, at: 0, ty: 5 };
+        pub(crate) const VAL: M = M { of: 259, at: 1, ty: 5 };
+    }
+
+    /// NCBI-Seqfeat Imp-feat (SEQUENCE, type 261).
+    pub(crate) mod imp_feat {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const KEY: M = M { of: 261, at: 0, ty: 5 };
+        pub(crate) const LOC: M = M { of: 261, at: 1, ty: 5 };
+        pub(crate) const DESCR: M = M { of: 261, at: 2, ty: 5 };
+    }
+
+    /// NCBI-Rsite Rsite-ref (CHOICE, type 264).
+    pub(crate) mod rsite_ref {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const STR: M = M { of: 264, at: 0, ty: 5 };
+        pub(crate) const DB: M = M { of: 264, at: 1, ty: 15 };
+    }
+
+    /// NCBI-TxInit Txinit (SEQUENCE, type 265).
+    pub(crate) mod txinit {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAME: M = M { of: 265, at: 0, ty: 5 };
+        pub(crate) const SYN: M = M { of: 265, at: 1, ty: 6 };
+        pub(crate) const GENE: M = M { of: 265, at: 2, ty: 266 };
+        pub(crate) const PROTEIN: M = M { of: 265, at: 3, ty: 267 };
+        pub(crate) const RNA: M = M { of: 265, at: 4, ty: 6 };
+        pub(crate) const EXPRESSION: M = M { of: 265, at: 5, ty: 5 };
+        pub(crate) const TXSYSTEM: M = M { of: 265, at: 6, ty: 268 };
+        pub(crate) const TXDESCR: M = M { of: 265, at: 7, ty: 5 };
+        pub(crate) const TXORG: M = M { of: 265, at: 8, ty: 28 };
+        pub(crate) const MAPPING_PRECISE: M = M { of: 265, at: 9, ty: 2 };
+        pub(crate) const LOCATION_ACCURATE: M = M { of: 265, at: 10, ty: 2 };
+        pub(crate) const INITTYPE: M = M { of: 265, at: 11, ty: 269 };
+        pub(crate) const EVIDENCE: M = M { of: 265, at: 12, ty: 273 };
+    }
+
+    /// NCBI-TxInit Tx-evidence (SEQUENCE, type 270).
+    pub(crate) mod tx_evidence {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const EXP_CODE: M = M { of: 270, at: 0, ty: 271 };
+        pub(crate) const EXPRESSION_SYSTEM: M = M { of: 270, at: 1, ty: 272 };
+        pub(crate) const LOW_PREC_DATA: M = M { of: 270, at: 2, ty: 2 };
+        pub(crate) const FROM_HOMOLOG: M = M { of: 270, at: 3, ty: 2 };
+    }
+
+    /// NCBI-Seqfeat Clone-ref (SEQUENCE, type 275).
+    pub(crate) mod clone_ref {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAME: M = M { of: 275, at: 0, ty: 5 };
+        pub(crate) const LIBRARY: M = M { of: 275, at: 1, ty: 5 };
+        pub(crate) const CONCORDANT: M = M { of: 275, at: 2, ty: 2 };
+        pub(crate) const UNIQUE: M = M { of: 275, at: 3, ty: 2 };
+        pub(crate) const PLACEMENT_METHOD: M = M { of: 275, at: 4, ty: 276 };
+        pub(crate) const CLONE_SEQ: M = M { of: 275, at: 5, ty: 277 };
+    }
+
+    /// NCBI-Seqfeat Clone-seq (SEQUENCE, type 278).
+    pub(crate) mod clone_seq {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 278, at: 0, ty: 279 };
+        pub(crate) const CONFIDENCE: M = M { of: 278, at: 1, ty: 280 };
+        pub(crate) const LOCATION: M = M { of: 278, at: 2, ty: 63 };
+        pub(crate) const SEQ: M = M { of: 278, at: 3, ty: 63 };
+        pub(crate) const ALIGN_ID: M = M { of: 278, at: 4, ty: 15 };
+        pub(crate) const SUPPORT: M = M { of: 278, at: 5, ty: 281 };
+    }
+
+    /// NCBI-Variation Variation-ref (SEQUENCE, type 282).
+    pub(crate) mod variation_ref {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ID: M = M { of: 282, at: 0, ty: 15 };
+        pub(crate) const PARENT_ID: M = M { of: 282, at: 1, ty: 15 };
+        pub(crate) const SAMPLE_ID: M = M { of: 282, at: 2, ty: 3 };
+        pub(crate) const OTHER_IDS: M = M { of: 282, at: 3, ty: 30 };
+        pub(crate) const NAME: M = M { of: 282, at: 4, ty: 5 };
+        pub(crate) const SYNONYMS: M = M { of: 282, at: 5, ty: 29 };
+        pub(crate) const DESCRIPTION: M = M { of: 282, at: 6, ty: 5 };
+        pub(crate) const PHENOTYPE: M = M { of: 282, at: 7, ty: 285 };
+        pub(crate) const METHOD: M = M { of: 282, at: 8, ty: 287 };
+        pub(crate) const POPULATION_DATA: M = M { of: 282, at: 9, ty: 291 };
+        pub(crate) const VARIANT_PROP: M = M { of: 282, at: 10, ty: 292 };
+        pub(crate) const VALIDATED: M = M { of: 282, at: 11, ty: 2 };
+        pub(crate) const CLINICAL_TEST: M = M { of: 282, at: 12, ty: 30 };
+        pub(crate) const ALLELE_ORIGIN: M = M { of: 282, at: 13, ty: 304 };
+        pub(crate) const ALLELE_STATE: M = M { of: 282, at: 14, ty: 305 };
+        pub(crate) const ALLELE_FREQUENCY: M = M { of: 282, at: 15, ty: 50 };
+        pub(crate) const IS_ANCESTRAL_ALLELE: M = M { of: 282, at: 16, ty: 2 };
+        pub(crate) const PUB: M = M { of: 282, at: 17, ty: 116 };
+        pub(crate) const DATA: M = M { of: 282, at: 18, ty: 317 };
+        pub(crate) const CONSEQUENCE: M = M { of: 282, at: 19, ty: 321 };
+        pub(crate) const LOCATION: M = M { of: 282, at: 20, ty: 63 };
+        pub(crate) const EXT_LOCS: M = M { of: 282, at: 21, ty: 323 };
+        pub(crate) const EXT: M = M { of: 282, at: 22, ty: 91 };
+        pub(crate) const SOMATIC_ORIGIN: M = M { of: 282, at: 23, ty: 326 };
+
+        /// Variation-ref.data (CHOICE, type 317).
+        pub(crate) mod data {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const UNKNOWN: M = M { of: 317, at: 0, ty: 64 };
+            pub(crate) const NOTE: M = M { of: 317, at: 1, ty: 5 };
+            pub(crate) const UNIPARENTAL_DISOMY: M = M { of: 317, at: 2, ty: 64 };
+            pub(crate) const INSTANCE: M = M { of: 317, at: 3, ty: 306 };
+            pub(crate) const SET: M = M { of: 317, at: 4, ty: 316 };
+            pub(crate) const COMPLEX: M = M { of: 317, at: 5, ty: 64 };
+
+            /// Variation-ref.data.set (SEQUENCE, type 316).
+            pub(crate) mod set {
+                use crate::report::serial::asn_types::M;
+                pub(crate) const TYPE: M = M { of: 316, at: 0, ty: 314 };
+                pub(crate) const VARIATIONS: M = M { of: 316, at: 1, ty: 315 };
+                pub(crate) const NAME: M = M { of: 316, at: 2, ty: 5 };
+            }
+        }
+
+        /// The anonymous types used in `consequence`.
+        pub(crate) mod consequence {
+
+            /// Variation-ref.consequence.E (CHOICE, type 320).
+            pub(crate) mod e {
+                use crate::report::serial::asn_types::M;
+                pub(crate) const UNKNOWN: M = M { of: 320, at: 0, ty: 64 };
+                pub(crate) const SPLICING: M = M { of: 320, at: 1, ty: 64 };
+                pub(crate) const NOTE: M = M { of: 320, at: 2, ty: 5 };
+                pub(crate) const VARIATION: M = M { of: 320, at: 3, ty: 282 };
+                pub(crate) const FRAMESHIFT: M = M { of: 320, at: 4, ty: 318 };
+                pub(crate) const LOSS_OF_HETEROZYGOSITY: M = M { of: 320, at: 5, ty: 319 };
+
+                /// Variation-ref.consequence.E.frameshift (SEQUENCE, type 318).
+                pub(crate) mod frameshift {
+                    use crate::report::serial::asn_types::M;
+                    pub(crate) const PHASE: M = M { of: 318, at: 0, ty: 4 };
+                    pub(crate) const X_LENGTH: M = M { of: 318, at: 1, ty: 4 };
+                }
+
+                /// Variation-ref.consequence.E.loss-of-heterozygosity (SEQUENCE, type 319).
+                pub(crate) mod loss_of_heterozygosity {
+                    use crate::report::serial::asn_types::M;
+                    pub(crate) const REFERENCE: M = M { of: 319, at: 0, ty: 5 };
+                    pub(crate) const TEST: M = M { of: 319, at: 1, ty: 5 };
+                }
+            }
+        }
+
+        /// The anonymous types used in `somatic_origin`.
+        pub(crate) mod somatic_origin {
+
+            /// Variation-ref.somatic-origin.E (SEQUENCE, type 325).
+            pub(crate) mod e {
+                use crate::report::serial::asn_types::M;
+                pub(crate) const SOURCE: M = M { of: 325, at: 0, ty: 196 };
+                pub(crate) const CONDITION: M = M { of: 325, at: 1, ty: 324 };
+
+                /// Variation-ref.somatic-origin.E.condition (SEQUENCE, type 324).
+                pub(crate) mod condition {
+                    use crate::report::serial::asn_types::M;
+                    pub(crate) const DESCRIPTION: M = M { of: 324, at: 0, ty: 5 };
+                    pub(crate) const OBJECT_ID: M = M { of: 324, at: 1, ty: 30 };
+                }
+            }
+        }
+    }
+
+    /// NCBI-Variation Phenotype (SEQUENCE, type 283).
+    pub(crate) mod phenotype {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const SOURCE: M = M { of: 283, at: 0, ty: 5 };
+        pub(crate) const TERM: M = M { of: 283, at: 1, ty: 5 };
+        pub(crate) const XREF: M = M { of: 283, at: 2, ty: 30 };
+        pub(crate) const CLINICAL_SIGNIFICANCE: M = M { of: 283, at: 3, ty: 284 };
+    }
+
+    /// NCBI-Variation Population-data (SEQUENCE, type 288).
+    pub(crate) mod population_data {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const POPULATION: M = M { of: 288, at: 0, ty: 5 };
+        pub(crate) const GENOTYPE_FREQUENCY: M = M { of: 288, at: 1, ty: 50 };
+        pub(crate) const CHROMOSOMES_TESTED: M = M { of: 288, at: 2, ty: 4 };
+        pub(crate) const SAMPLE_IDS: M = M { of: 288, at: 3, ty: 289 };
+        pub(crate) const ALLELE_FREQUENCY: M = M { of: 288, at: 4, ty: 50 };
+        pub(crate) const FLAGS: M = M { of: 288, at: 5, ty: 290 };
+    }
+
+    /// NCBI-Variation VariantProperties (SEQUENCE, type 292).
+    pub(crate) mod variantproperties {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const VERSION: M = M { of: 292, at: 0, ty: 4 };
+        pub(crate) const RESOURCE_LINK: M = M { of: 292, at: 1, ty: 293 };
+        pub(crate) const GENE_LOCATION: M = M { of: 292, at: 2, ty: 294 };
+        pub(crate) const EFFECT: M = M { of: 292, at: 3, ty: 295 };
+        pub(crate) const MAPPING: M = M { of: 292, at: 4, ty: 296 };
+        pub(crate) const MAP_WEIGHT: M = M { of: 292, at: 5, ty: 297 };
+        pub(crate) const FREQUENCY_BASED_VALIDATION: M = M { of: 292, at: 6, ty: 298 };
+        pub(crate) const GENOTYPE: M = M { of: 292, at: 7, ty: 299 };
+        pub(crate) const PROJECT_DATA: M = M { of: 292, at: 8, ty: 256 };
+        pub(crate) const QUALITY_CHECK: M = M { of: 292, at: 9, ty: 300 };
+        pub(crate) const CONFIDENCE: M = M { of: 292, at: 10, ty: 301 };
+        pub(crate) const OTHER_VALIDATION: M = M { of: 292, at: 11, ty: 2 };
+        pub(crate) const ALLELE_ORIGIN: M = M { of: 292, at: 12, ty: 302 };
+        pub(crate) const ALLELE_STATE: M = M { of: 292, at: 13, ty: 303 };
+        pub(crate) const ALLELE_FREQUENCY: M = M { of: 292, at: 14, ty: 50 };
+        pub(crate) const IS_ANCESTRAL_ALLELE: M = M { of: 292, at: 15, ty: 2 };
+    }
+
+    /// NCBI-Variation Variation-inst (SEQUENCE, type 306).
+    pub(crate) mod variation_inst {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 306, at: 0, ty: 307 };
+        pub(crate) const DELTA: M = M { of: 306, at: 1, ty: 312 };
+        pub(crate) const OBSERVATION: M = M { of: 306, at: 2, ty: 313 };
+    }
+
+    /// NCBI-Variation Delta-item (SEQUENCE, type 308).
+    pub(crate) mod delta_item {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const SEQ: M = M { of: 308, at: 0, ty: 310 };
+        pub(crate) const MULTIPLIER: M = M { of: 308, at: 1, ty: 4 };
+        pub(crate) const MULTIPLIER_FUZZ: M = M { of: 308, at: 2, ty: 66 };
+        pub(crate) const ACTION: M = M { of: 308, at: 3, ty: 311 };
+
+        /// Delta-item.seq (CHOICE, type 310).
+        pub(crate) mod seq {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const LITERAL: M = M { of: 310, at: 0, ty: 309 };
+            pub(crate) const LOC: M = M { of: 310, at: 1, ty: 63 };
+            pub(crate) const THIS: M = M { of: 310, at: 2, ty: 64 };
+        }
+    }
+
+    /// NCBI-Sequence Seq-literal (SEQUENCE, type 309).
+    pub(crate) mod seq_literal {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const LENGTH: M = M { of: 309, at: 0, ty: 44 };
+        pub(crate) const FUZZ: M = M { of: 309, at: 1, ty: 66 };
+        pub(crate) const SEQ_DATA: M = M { of: 309, at: 2, ty: 217 };
+    }
+
+    /// NCBI-Variation Ext-loc (SEQUENCE, type 322).
+    pub(crate) mod ext_loc {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ID: M = M { of: 322, at: 0, ty: 3 };
+        pub(crate) const LOCATION: M = M { of: 322, at: 1, ty: 63 };
+    }
+
+    /// NCBI-Seqfeat Gb-qual (SEQUENCE, type 327).
+    pub(crate) mod gb_qual {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const QUAL: M = M { of: 327, at: 0, ty: 5 };
+        pub(crate) const VAL: M = M { of: 327, at: 1, ty: 5 };
+    }
+
+    /// NCBI-Pub Pub-set (CHOICE, type 329).
+    pub(crate) mod pub_set {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PUB: M = M { of: 329, at: 0, ty: 330 };
+        pub(crate) const MEDLINE: M = M { of: 329, at: 1, ty: 331 };
+        pub(crate) const ARTICLE: M = M { of: 329, at: 2, ty: 332 };
+        pub(crate) const JOURNAL: M = M { of: 329, at: 3, ty: 333 };
+        pub(crate) const BOOK: M = M { of: 329, at: 4, ty: 334 };
+        pub(crate) const PROC: M = M { of: 329, at: 5, ty: 335 };
+        pub(crate) const PATENT: M = M { of: 329, at: 6, ty: 336 };
+    }
+
+    /// NCBI-Seqfeat SeqFeatXref (SEQUENCE, type 338).
+    pub(crate) mod seqfeatxref {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ID: M = M { of: 338, at: 0, ty: 76 };
+        pub(crate) const DATA: M = M { of: 338, at: 1, ty: 239 };
+    }
+
+    /// NCBI-Seqfeat SeqFeatSupport (SEQUENCE, type 342).
+    pub(crate) mod seqfeatsupport {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const EXPERIMENT: M = M { of: 342, at: 0, ty: 347 };
+        pub(crate) const INFERENCE: M = M { of: 342, at: 1, ty: 353 };
+        pub(crate) const MODEL_EVIDENCE: M = M { of: 342, at: 2, ty: 354 };
+    }
+
+    /// NCBI-Seqfeat ExperimentSupport (SEQUENCE, type 343).
+    pub(crate) mod experimentsupport {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const CATEGORY: M = M { of: 343, at: 0, ty: 344 };
+        pub(crate) const EXPLANATION: M = M { of: 343, at: 1, ty: 5 };
+        pub(crate) const PMIDS: M = M { of: 343, at: 2, ty: 345 };
+        pub(crate) const DOIS: M = M { of: 343, at: 3, ty: 346 };
+    }
+
+    /// NCBI-Seqfeat InferenceSupport (SEQUENCE, type 348).
+    pub(crate) mod inferencesupport {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const CATEGORY: M = M { of: 348, at: 0, ty: 344 };
+        pub(crate) const TYPE: M = M { of: 348, at: 1, ty: 349 };
+        pub(crate) const OTHER_TYPE: M = M { of: 348, at: 2, ty: 5 };
+        pub(crate) const SAME_SPECIES: M = M { of: 348, at: 3, ty: 2 };
+        pub(crate) const BASIS: M = M { of: 348, at: 4, ty: 350 };
+        pub(crate) const PMIDS: M = M { of: 348, at: 5, ty: 345 };
+        pub(crate) const DOIS: M = M { of: 348, at: 6, ty: 346 };
+    }
+
+    /// NCBI-Seqfeat EvidenceBasis (SEQUENCE, type 350).
+    pub(crate) mod evidencebasis {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PROGRAMS: M = M { of: 350, at: 0, ty: 352 };
+        pub(crate) const ACCESSIONS: M = M { of: 350, at: 1, ty: 21 };
+    }
+
+    /// NCBI-Seqfeat Program-id (SEQUENCE, type 351).
+    pub(crate) mod program_id {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAME: M = M { of: 351, at: 0, ty: 5 };
+        pub(crate) const VERSION: M = M { of: 351, at: 1, ty: 5 };
+    }
+
+    /// NCBI-Sequence Delta-seq (CHOICE, type 356).
+    pub(crate) mod delta_seq {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const LOC: M = M { of: 356, at: 0, ty: 63 };
+        pub(crate) const LITERAL: M = M { of: 356, at: 1, ty: 309 };
+    }
+
+    /// NCBI-Sequence Seq-hist (SEQUENCE, type 357).
+    pub(crate) mod seq_hist {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ASSEMBLY: M = M { of: 357, at: 0, ty: 358 };
+        pub(crate) const REPLACES: M = M { of: 357, at: 1, ty: 359 };
+        pub(crate) const REPLACED_BY: M = M { of: 357, at: 2, ty: 359 };
+        pub(crate) const DELETED: M = M { of: 357, at: 3, ty: 360 };
+
+        /// Seq-hist.deleted (CHOICE, type 360).
+        pub(crate) mod deleted {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const BOOL: M = M { of: 360, at: 0, ty: 2 };
+            pub(crate) const DATE: M = M { of: 360, at: 1, ty: 19 };
+        }
+    }
+
+    /// NCBI-Sequence Seq-hist-rec (SEQUENCE, type 359).
+    pub(crate) mod seq_hist_rec {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DATE: M = M { of: 359, at: 0, ty: 19 };
+        pub(crate) const IDS: M = M { of: 359, at: 1, ty: 21 };
+    }
+
+    /// NCBI-Sequence Seq-annot (SEQUENCE, type 361).
+    pub(crate) mod seq_annot {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ID: M = M { of: 361, at: 0, ty: 364 };
+        pub(crate) const DB: M = M { of: 361, at: 1, ty: 365 };
+        pub(crate) const NAME: M = M { of: 361, at: 2, ty: 5 };
+        pub(crate) const DESC: M = M { of: 361, at: 3, ty: 366 };
+        pub(crate) const DATA: M = M { of: 361, at: 4, ty: 394 };
+
+        /// Seq-annot.data (CHOICE, type 394).
+        pub(crate) mod data {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const FTABLE: M = M { of: 394, at: 0, ty: 370 };
+            pub(crate) const ALIGN: M = M { of: 394, at: 1, ty: 358 };
+            pub(crate) const GRAPH: M = M { of: 394, at: 2, ty: 376 };
+            pub(crate) const IDS: M = M { of: 394, at: 3, ty: 21 };
+            pub(crate) const LOCS: M = M { of: 394, at: 4, ty: 109 };
+            pub(crate) const SEQ_TABLE: M = M { of: 394, at: 5, ty: 377 };
+        }
+    }
+
+    /// NCBI-Sequence Annot-id (CHOICE, type 362).
+    pub(crate) mod annot_id {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const LOCAL: M = M { of: 362, at: 0, ty: 3 };
+        pub(crate) const NCBI: M = M { of: 362, at: 1, ty: 16 };
+        pub(crate) const GENERAL: M = M { of: 362, at: 2, ty: 15 };
+        pub(crate) const OTHER: M = M { of: 362, at: 3, ty: 363 };
+    }
+
+    /// NCBI-Sequence Textannot-id (SEQUENCE, type 363).
+    pub(crate) mod textannot_id {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAME: M = M { of: 363, at: 0, ty: 5 };
+        pub(crate) const ACCESSION: M = M { of: 363, at: 1, ty: 5 };
+        pub(crate) const RELEASE: M = M { of: 363, at: 2, ty: 5 };
+        pub(crate) const VERSION: M = M { of: 363, at: 3, ty: 4 };
+    }
+
+    /// NCBI-Sequence Annotdesc (CHOICE, type 367).
+    pub(crate) mod annotdesc {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAME: M = M { of: 367, at: 0, ty: 5 };
+        pub(crate) const TITLE: M = M { of: 367, at: 1, ty: 5 };
+        pub(crate) const COMMENT: M = M { of: 367, at: 2, ty: 5 };
+        pub(crate) const PUB: M = M { of: 367, at: 3, ty: 114 };
+        pub(crate) const USER: M = M { of: 367, at: 4, ty: 91 };
+        pub(crate) const CREATE_DATE: M = M { of: 367, at: 5, ty: 19 };
+        pub(crate) const UPDATE_DATE: M = M { of: 367, at: 6, ty: 19 };
+        pub(crate) const SRC: M = M { of: 367, at: 7, ty: 9 };
+        pub(crate) const ALIGN: M = M { of: 367, at: 8, ty: 368 };
+        pub(crate) const REGION: M = M { of: 367, at: 9, ty: 63 };
+    }
+
+    /// NCBI-Sequence Align-def (SEQUENCE, type 368).
+    pub(crate) mod align_def {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ALIGN_TYPE: M = M { of: 368, at: 0, ty: 369 };
+        pub(crate) const IDS: M = M { of: 368, at: 1, ty: 21 };
+    }
+
+    /// NCBI-Seqres Seq-graph (SEQUENCE, type 371).
+    pub(crate) mod seq_graph {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TITLE: M = M { of: 371, at: 0, ty: 5 };
+        pub(crate) const COMMENT: M = M { of: 371, at: 1, ty: 5 };
+        pub(crate) const LOC: M = M { of: 371, at: 2, ty: 63 };
+        pub(crate) const TITLE_X: M = M { of: 371, at: 3, ty: 5 };
+        pub(crate) const TITLE_Y: M = M { of: 371, at: 4, ty: 5 };
+        pub(crate) const COMP: M = M { of: 371, at: 5, ty: 44 };
+        pub(crate) const A: M = M { of: 371, at: 6, ty: 50 };
+        pub(crate) const B: M = M { of: 371, at: 7, ty: 50 };
+        pub(crate) const NUMVAL: M = M { of: 371, at: 8, ty: 44 };
+        pub(crate) const GRAPH: M = M { of: 371, at: 9, ty: 375 };
+
+        /// Seq-graph.graph (CHOICE, type 375).
+        pub(crate) mod graph {
+            use crate::report::serial::asn_types::M;
+            pub(crate) const REAL: M = M { of: 375, at: 0, ty: 372 };
+            pub(crate) const INT: M = M { of: 375, at: 1, ty: 373 };
+            pub(crate) const BYTE: M = M { of: 375, at: 2, ty: 374 };
+        }
+    }
+
+    /// NCBI-Seqres Real-graph (SEQUENCE, type 372).
+    pub(crate) mod real_graph {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MAX: M = M { of: 372, at: 0, ty: 50 };
+        pub(crate) const MIN: M = M { of: 372, at: 1, ty: 50 };
+        pub(crate) const AXIS: M = M { of: 372, at: 2, ty: 50 };
+        pub(crate) const VALUES: M = M { of: 372, at: 3, ty: 95 };
+    }
+
+    /// NCBI-Seqres Int-graph (SEQUENCE, type 373).
+    pub(crate) mod int_graph {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MAX: M = M { of: 373, at: 0, ty: 4 };
+        pub(crate) const MIN: M = M { of: 373, at: 1, ty: 4 };
+        pub(crate) const AXIS: M = M { of: 373, at: 2, ty: 4 };
+        pub(crate) const VALUES: M = M { of: 373, at: 3, ty: 60 };
+    }
+
+    /// NCBI-Seqres Byte-graph (SEQUENCE, type 374).
+    pub(crate) mod byte_graph {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MAX: M = M { of: 374, at: 0, ty: 4 };
+        pub(crate) const MIN: M = M { of: 374, at: 1, ty: 4 };
+        pub(crate) const AXIS: M = M { of: 374, at: 2, ty: 4 };
+        pub(crate) const VALUES: M = M { of: 374, at: 3, ty: 80 };
+    }
+
+    /// NCBI-SeqTable Seq-table (SEQUENCE, type 377).
+    pub(crate) mod seq_table {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const FEAT_TYPE: M = M { of: 377, at: 0, ty: 4 };
+        pub(crate) const FEAT_SUBTYPE: M = M { of: 377, at: 1, ty: 4 };
+        pub(crate) const NUM_ROWS: M = M { of: 377, at: 2, ty: 4 };
+        pub(crate) const COLUMNS: M = M { of: 377, at: 3, ty: 393 };
+    }
+
+    /// NCBI-SeqTable SeqTable-column (SEQUENCE, type 378).
+    pub(crate) mod seqtable_column {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const HEADER: M = M { of: 378, at: 0, ty: 379 };
+        pub(crate) const DATA: M = M { of: 378, at: 1, ty: 381 };
+        pub(crate) const SPARSE: M = M { of: 378, at: 2, ty: 391 };
+        pub(crate) const DEFAULT: M = M { of: 378, at: 3, ty: 392 };
+        pub(crate) const SPARSE_OTHER: M = M { of: 378, at: 4, ty: 392 };
+    }
+
+    /// NCBI-SeqTable SeqTable-column-info (SEQUENCE, type 379).
+    pub(crate) mod seqtable_column_info {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TITLE: M = M { of: 379, at: 0, ty: 5 };
+        pub(crate) const FIELD_ID: M = M { of: 379, at: 1, ty: 380 };
+        pub(crate) const FIELD_NAME: M = M { of: 379, at: 2, ty: 5 };
+    }
+
+    /// NCBI-SeqTable SeqTable-multi-data (CHOICE, type 381).
+    pub(crate) mod seqtable_multi_data {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const INT: M = M { of: 381, at: 0, ty: 60 };
+        pub(crate) const REAL: M = M { of: 381, at: 1, ty: 95 };
+        pub(crate) const STRING: M = M { of: 381, at: 2, ty: 94 };
+        pub(crate) const BYTES: M = M { of: 381, at: 3, ty: 96 };
+        pub(crate) const COMMON_STRING: M = M { of: 381, at: 4, ty: 382 };
+        pub(crate) const COMMON_BYTES: M = M { of: 381, at: 5, ty: 383 };
+        pub(crate) const BIT: M = M { of: 381, at: 6, ty: 80 };
+        pub(crate) const LOC: M = M { of: 381, at: 7, ty: 77 };
+        pub(crate) const ID: M = M { of: 381, at: 8, ty: 54 };
+        pub(crate) const INTERVAL: M = M { of: 381, at: 9, ty: 384 };
+        pub(crate) const INT_DELTA: M = M { of: 381, at: 10, ty: 381 };
+        pub(crate) const INT_SCALED: M = M { of: 381, at: 11, ty: 385 };
+        pub(crate) const REAL_SCALED: M = M { of: 381, at: 12, ty: 386 };
+        pub(crate) const BIT_BVECTOR: M = M { of: 381, at: 13, ty: 387 };
+        pub(crate) const INT1: M = M { of: 381, at: 14, ty: 80 };
+        pub(crate) const INT2: M = M { of: 381, at: 15, ty: 389 };
+        pub(crate) const INT8: M = M { of: 381, at: 16, ty: 390 };
+    }
+
+    /// NCBI-SeqTable CommonString-table (SEQUENCE, type 382).
+    pub(crate) mod commonstring_table {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const STRINGS: M = M { of: 382, at: 0, ty: 94 };
+        pub(crate) const INDEXES: M = M { of: 382, at: 1, ty: 60 };
+    }
+
+    /// NCBI-SeqTable CommonBytes-table (SEQUENCE, type 383).
+    pub(crate) mod commonbytes_table {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const BYTES: M = M { of: 383, at: 0, ty: 96 };
+        pub(crate) const INDEXES: M = M { of: 383, at: 1, ty: 60 };
+    }
+
+    /// NCBI-SeqTable Scaled-int-multi-data (SEQUENCE, type 385).
+    pub(crate) mod scaled_int_multi_data {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MUL: M = M { of: 385, at: 0, ty: 4 };
+        pub(crate) const ADD: M = M { of: 385, at: 1, ty: 4 };
+        pub(crate) const DATA: M = M { of: 385, at: 2, ty: 381 };
+        pub(crate) const MIN: M = M { of: 385, at: 3, ty: 16 };
+        pub(crate) const MAX: M = M { of: 385, at: 4, ty: 16 };
+    }
+
+    /// NCBI-SeqTable Scaled-real-multi-data (SEQUENCE, type 386).
+    pub(crate) mod scaled_real_multi_data {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MUL: M = M { of: 386, at: 0, ty: 50 };
+        pub(crate) const ADD: M = M { of: 386, at: 1, ty: 50 };
+        pub(crate) const DATA: M = M { of: 386, at: 2, ty: 381 };
+    }
+
+    /// NCBI-SeqTable BVector-data (SEQUENCE, type 387).
+    pub(crate) mod bvector_data {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const SIZE: M = M { of: 387, at: 0, ty: 44 };
+        pub(crate) const DATA: M = M { of: 387, at: 1, ty: 80 };
+    }
+
+    /// NCBI-SeqTable SeqTable-sparse-index (CHOICE, type 391).
+    pub(crate) mod seqtable_sparse_index {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const INDEXES: M = M { of: 391, at: 0, ty: 55 };
+        pub(crate) const BIT_SET: M = M { of: 391, at: 1, ty: 80 };
+        pub(crate) const INDEXES_DELTA: M = M { of: 391, at: 2, ty: 55 };
+        pub(crate) const BIT_SET_BVECTOR: M = M { of: 391, at: 3, ty: 387 };
+    }
+
+    /// NCBI-SeqTable SeqTable-single-data (CHOICE, type 392).
+    pub(crate) mod seqtable_single_data {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const INT: M = M { of: 392, at: 0, ty: 4 };
+        pub(crate) const REAL: M = M { of: 392, at: 1, ty: 50 };
+        pub(crate) const STRING: M = M { of: 392, at: 2, ty: 93 };
+        pub(crate) const BYTES: M = M { of: 392, at: 3, ty: 80 };
+        pub(crate) const BIT: M = M { of: 392, at: 4, ty: 2 };
+        pub(crate) const LOC: M = M { of: 392, at: 5, ty: 63 };
+        pub(crate) const ID: M = M { of: 392, at: 6, ty: 9 };
+        pub(crate) const INTERVAL: M = M { of: 392, at: 7, ty: 65 };
+        pub(crate) const INT8: M = M { of: 392, at: 8, ty: 16 };
+    }
+
+    /// NCBI-Seqset Bioseq-set (SEQUENCE, type 396).
+    pub(crate) mod bioseq_set {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ID: M = M { of: 396, at: 0, ty: 3 };
+        pub(crate) const COLL: M = M { of: 396, at: 1, ty: 15 };
+        pub(crate) const LEVEL: M = M { of: 396, at: 2, ty: 4 };
+        pub(crate) const CLASS: M = M { of: 396, at: 3, ty: 397 };
+        pub(crate) const RELEASE: M = M { of: 396, at: 4, ty: 5 };
+        pub(crate) const DATE: M = M { of: 396, at: 5, ty: 19 };
+        pub(crate) const DESCR: M = M { of: 396, at: 6, ty: 22 };
+        pub(crate) const SEQ_SET: M = M { of: 396, at: 7, ty: 398 };
+        pub(crate) const ANNOT: M = M { of: 396, at: 8, ty: 395 };
+    }
+
+    /// NCBI-ScoreMat PssmIntermediateData (SEQUENCE, type 399).
+    pub(crate) mod pssmintermediatedata {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const RESFREQSPERPOS: M = M { of: 399, at: 0, ty: 60 };
+        pub(crate) const WEIGHTEDRESFREQSPERPOS: M = M { of: 399, at: 1, ty: 95 };
+        pub(crate) const FREQRATIOS: M = M { of: 399, at: 2, ty: 95 };
+        pub(crate) const INFORMATIONCONTENT: M = M { of: 399, at: 3, ty: 95 };
+        pub(crate) const GAPLESSCOLUMNWEIGHTS: M = M { of: 399, at: 4, ty: 95 };
+        pub(crate) const SIGMA: M = M { of: 399, at: 5, ty: 95 };
+        pub(crate) const INTERVALSIZES: M = M { of: 399, at: 6, ty: 60 };
+        pub(crate) const NUMMATCHINGSEQS: M = M { of: 399, at: 7, ty: 60 };
+        pub(crate) const NUMINDEPTOBSR: M = M { of: 399, at: 8, ty: 95 };
+    }
+
+    /// NCBI-ScoreMat PssmFinalData (SEQUENCE, type 400).
+    pub(crate) mod pssmfinaldata {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const SCORES: M = M { of: 400, at: 0, ty: 60 };
+        pub(crate) const LAMBDA: M = M { of: 400, at: 1, ty: 50 };
+        pub(crate) const KAPPA: M = M { of: 400, at: 2, ty: 50 };
+        pub(crate) const H: M = M { of: 400, at: 3, ty: 50 };
+        pub(crate) const SCALINGFACTOR: M = M { of: 400, at: 4, ty: 4 };
+        pub(crate) const LAMBDAUNGAPPED: M = M { of: 400, at: 5, ty: 50 };
+        pub(crate) const KAPPAUNGAPPED: M = M { of: 400, at: 6, ty: 50 };
+        pub(crate) const HUNGAPPED: M = M { of: 400, at: 7, ty: 50 };
+        pub(crate) const WORDSCORETHRESHOLD: M = M { of: 400, at: 8, ty: 50 };
+    }
+
+    /// NCBI-ScoreMat PssmParameters (SEQUENCE, type 401).
+    pub(crate) mod pssmparameters {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PSEUDOCOUNT: M = M { of: 401, at: 0, ty: 4 };
+        pub(crate) const RPSDBPARAMS: M = M { of: 401, at: 1, ty: 402 };
+        pub(crate) const CONSTRAINTS: M = M { of: 401, at: 2, ty: 403 };
+        pub(crate) const BITSCORETHRESH: M = M { of: 401, at: 3, ty: 50 };
+        pub(crate) const BITSCOREREPORTINGTHRESH: M = M { of: 401, at: 4, ty: 50 };
+        pub(crate) const ANNOTATEDSITES: M = M { of: 401, at: 5, ty: 411 };
+    }
+
+    /// NCBI-ScoreMat FormatRpsDbParameters (SEQUENCE, type 402).
+    pub(crate) mod formatrpsdbparameters {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MATRIXNAME: M = M { of: 402, at: 0, ty: 5 };
+        pub(crate) const GAPOPEN: M = M { of: 402, at: 1, ty: 4 };
+        pub(crate) const GAPEXTEND: M = M { of: 402, at: 2, ty: 4 };
+    }
+
+    /// NCBI-ScoreMat CoreDef (SEQUENCE, type 403).
+    pub(crate) mod coredef {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NBLOCKS: M = M { of: 403, at: 0, ty: 4 };
+        pub(crate) const BLOCKS: M = M { of: 403, at: 1, ty: 408 };
+        pub(crate) const LOOPS: M = M { of: 403, at: 2, ty: 410 };
+        pub(crate) const ISDISCONTINUOUS: M = M { of: 403, at: 3, ty: 2 };
+        pub(crate) const INSERTIONS: M = M { of: 403, at: 4, ty: 60 };
+    }
+
+    /// NCBI-ScoreMat CoreBlock (SEQUENCE, type 404).
+    pub(crate) mod coreblock {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const START: M = M { of: 404, at: 0, ty: 4 };
+        pub(crate) const STOP: M = M { of: 404, at: 1, ty: 4 };
+        pub(crate) const MINSTART: M = M { of: 404, at: 2, ty: 4 };
+        pub(crate) const MAXSTOP: M = M { of: 404, at: 3, ty: 4 };
+        pub(crate) const PROPERTY: M = M { of: 404, at: 4, ty: 407 };
+    }
+
+    /// NCBI-ScoreMat BlockProperty (SEQUENCE, type 405).
+    pub(crate) mod blockproperty {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TYPE: M = M { of: 405, at: 0, ty: 406 };
+        pub(crate) const INTVALUE: M = M { of: 405, at: 1, ty: 4 };
+        pub(crate) const TEXTVALUE: M = M { of: 405, at: 2, ty: 5 };
+    }
+
+    /// NCBI-ScoreMat LoopConstraint (SEQUENCE, type 409).
+    pub(crate) mod loopconstraint {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MINLENGTH: M = M { of: 409, at: 0, ty: 4 };
+        pub(crate) const MAXLENGTH: M = M { of: 409, at: 1, ty: 4 };
+    }
+
+    /// NCBI-ScoreMat Site-annot (SEQUENCE, type 412).
+    pub(crate) mod site_annot {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const STARTPOSITION: M = M { of: 412, at: 0, ty: 4 };
+        pub(crate) const STOPPOSITION: M = M { of: 412, at: 1, ty: 4 };
+        pub(crate) const DESCRIPTION: M = M { of: 412, at: 2, ty: 5 };
+        pub(crate) const TYPE: M = M { of: 412, at: 3, ty: 4 };
+        pub(crate) const ALIASES: M = M { of: 412, at: 4, ty: 6 };
+        pub(crate) const MOTIF: M = M { of: 412, at: 5, ty: 5 };
+        pub(crate) const MOTIFUSE: M = M { of: 412, at: 6, ty: 4 };
+    }
+
+    /// NCBI-BlastDL Blast-db-mask-info (SEQUENCE, type 413).
+    pub(crate) mod blast_db_mask_info {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ALGO_ID: M = M { of: 413, at: 0, ty: 4 };
+        pub(crate) const ALGO_PROGRAM: M = M { of: 413, at: 1, ty: 414 };
+        pub(crate) const ALGO_OPTIONS: M = M { of: 413, at: 2, ty: 5 };
+        pub(crate) const MASKS: M = M { of: 413, at: 3, ty: 415 };
+    }
+
+    /// NCBI-BlastDL Blast-mask-list (SEQUENCE, type 415).
+    pub(crate) mod blast_mask_list {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const MASKS: M = M { of: 415, at: 0, ty: 77 };
+        pub(crate) const MORE: M = M { of: 415, at: 1, ty: 2 };
+    }
+
+    /// NCBI-BlastDL Blast-def-line (SEQUENCE, type 417).
+    pub(crate) mod blast_def_line {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const TITLE: M = M { of: 417, at: 0, ty: 5 };
+        pub(crate) const SEQID: M = M { of: 417, at: 1, ty: 54 };
+        pub(crate) const TAXID: M = M { of: 417, at: 2, ty: 4 };
+        pub(crate) const MEMBERSHIPS: M = M { of: 417, at: 3, ty: 60 };
+        pub(crate) const LINKS: M = M { of: 417, at: 4, ty: 60 };
+        pub(crate) const OTHER_INFO: M = M { of: 417, at: 5, ty: 60 };
+    }
+
+    /// NCBI-Blast4 Blast4-archive (SEQUENCE, type 418).
+    pub(crate) mod blast4_archive {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const REQUEST: M = M { of: 418, at: 0, ty: 419 };
+        pub(crate) const RESULTS: M = M { of: 418, at: 1, ty: 447 };
+        pub(crate) const MESSAGES: M = M { of: 418, at: 2, ty: 459 };
+    }
+
+    /// NCBI-Blast4 Blast4-request (SEQUENCE, type 419).
+    pub(crate) mod blast4_request {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const IDENT: M = M { of: 419, at: 0, ty: 5 };
+        pub(crate) const BODY: M = M { of: 419, at: 1, ty: 420 };
+    }
+
+    /// NCBI-Blast4 Blast4-request-body (CHOICE, type 420).
+    pub(crate) mod blast4_request_body {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const FINISH_PARAMS: M = M { of: 420, at: 0, ty: 421 };
+        pub(crate) const GET_DATABASES: M = M { of: 420, at: 1, ty: 64 };
+        pub(crate) const GET_MATRICES: M = M { of: 420, at: 2, ty: 64 };
+        pub(crate) const GET_PARAMETERS: M = M { of: 420, at: 3, ty: 64 };
+        pub(crate) const GET_PARAMSETS: M = M { of: 420, at: 4, ty: 64 };
+        pub(crate) const GET_PROGRAMS: M = M { of: 420, at: 5, ty: 64 };
+        pub(crate) const GET_SEARCH_RESULTS: M = M { of: 420, at: 6, ty: 435 };
+        pub(crate) const GET_SEQUENCES: M = M { of: 420, at: 7, ty: 436 };
+        pub(crate) const QUEUE_SEARCH: M = M { of: 420, at: 8, ty: 439 };
+        pub(crate) const GET_REQUEST_INFO: M = M { of: 420, at: 9, ty: 442 };
+        pub(crate) const GET_SEQUENCE_PARTS: M = M { of: 420, at: 10, ty: 443 };
+        pub(crate) const GET_WINDOWMASKED_TAXIDS: M = M { of: 420, at: 11, ty: 64 };
+        pub(crate) const GET_PROTOCOL_INFO: M = M { of: 420, at: 12, ty: 444 };
+        pub(crate) const GET_SEARCH_INFO: M = M { of: 420, at: 13, ty: 445 };
+        pub(crate) const GET_DATABASES_EX: M = M { of: 420, at: 14, ty: 446 };
+    }
+
+    /// NCBI-Blast4 Blast4-finish-params-request (SEQUENCE, type 421).
+    pub(crate) mod blast4_finish_params_request {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PROGRAM: M = M { of: 421, at: 0, ty: 5 };
+        pub(crate) const SERVICE: M = M { of: 421, at: 1, ty: 5 };
+        pub(crate) const PARAMSET: M = M { of: 421, at: 2, ty: 5 };
+        pub(crate) const PARAMS: M = M { of: 421, at: 3, ty: 422 };
+    }
+
+    /// NCBI-Blast4 Blast4-parameter (SEQUENCE, type 423).
+    pub(crate) mod blast4_parameter {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAME: M = M { of: 423, at: 0, ty: 5 };
+        pub(crate) const VALUE: M = M { of: 423, at: 1, ty: 424 };
+    }
+
+    /// NCBI-Blast4 Blast4-value (CHOICE, type 424).
+    pub(crate) mod blast4_value {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const BIG_INTEGER: M = M { of: 424, at: 0, ty: 16 };
+        pub(crate) const BIOSEQ: M = M { of: 424, at: 1, ty: 8 };
+        pub(crate) const BOOLEAN: M = M { of: 424, at: 2, ty: 2 };
+        pub(crate) const CUTOFF: M = M { of: 424, at: 3, ty: 425 };
+        pub(crate) const INTEGER: M = M { of: 424, at: 4, ty: 4 };
+        pub(crate) const MATRIX: M = M { of: 424, at: 5, ty: 0 };
+        pub(crate) const REAL: M = M { of: 424, at: 6, ty: 50 };
+        pub(crate) const SEQ_ALIGN: M = M { of: 424, at: 7, ty: 47 };
+        pub(crate) const SEQ_ID: M = M { of: 424, at: 8, ty: 9 };
+        pub(crate) const SEQ_LOC: M = M { of: 424, at: 9, ty: 63 };
+        pub(crate) const STRAND_TYPE: M = M { of: 424, at: 10, ty: 426 };
+        pub(crate) const STRING: M = M { of: 424, at: 11, ty: 5 };
+        pub(crate) const BIG_INTEGER_LIST: M = M { of: 424, at: 12, ty: 390 };
+        pub(crate) const BIOSEQ_LIST: M = M { of: 424, at: 13, ty: 427 };
+        pub(crate) const BOOLEAN_LIST: M = M { of: 424, at: 14, ty: 428 };
+        pub(crate) const CUTOFF_LIST: M = M { of: 424, at: 15, ty: 429 };
+        pub(crate) const INTEGER_LIST: M = M { of: 424, at: 16, ty: 60 };
+        pub(crate) const MATRIX_LIST: M = M { of: 424, at: 17, ty: 430 };
+        pub(crate) const REAL_LIST: M = M { of: 424, at: 18, ty: 95 };
+        pub(crate) const SEQ_ALIGN_LIST: M = M { of: 424, at: 19, ty: 431 };
+        pub(crate) const SEQ_ID_LIST: M = M { of: 424, at: 20, ty: 54 };
+        pub(crate) const SEQ_LOC_LIST: M = M { of: 424, at: 21, ty: 77 };
+        pub(crate) const STRAND_TYPE_LIST: M = M { of: 424, at: 22, ty: 432 };
+        pub(crate) const STRING_LIST: M = M { of: 424, at: 23, ty: 6 };
+        pub(crate) const BIOSEQ_SET: M = M { of: 424, at: 24, ty: 396 };
+        pub(crate) const SEQ_ALIGN_SET: M = M { of: 424, at: 25, ty: 81 };
+        pub(crate) const QUERY_MASK: M = M { of: 424, at: 26, ty: 433 };
+    }
+
+    /// NCBI-Blast4 Blast4-cutoff (CHOICE, type 425).
+    pub(crate) mod blast4_cutoff {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const E_VALUE: M = M { of: 425, at: 0, ty: 50 };
+        pub(crate) const RAW_SCORE: M = M { of: 425, at: 1, ty: 4 };
+    }
+
+    /// NCBI-Blast4 Blast4-mask (SEQUENCE, type 433).
+    pub(crate) mod blast4_mask {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const LOCATIONS: M = M { of: 433, at: 0, ty: 77 };
+        pub(crate) const FRAME: M = M { of: 433, at: 1, ty: 434 };
+    }
+
+    /// NCBI-Blast4 Blast4-get-search-results-request (SEQUENCE, type 435).
+    pub(crate) mod blast4_get_search_results_request {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const REQUEST_ID: M = M { of: 435, at: 0, ty: 5 };
+        pub(crate) const RESULT_TYPES: M = M { of: 435, at: 1, ty: 4 };
+    }
+
+    /// NCBI-Blast4 Blast4-get-sequences-request (SEQUENCE, type 436).
+    pub(crate) mod blast4_get_sequences_request {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DATABASE: M = M { of: 436, at: 0, ty: 437 };
+        pub(crate) const SEQ_IDS: M = M { of: 436, at: 1, ty: 54 };
+        pub(crate) const SKIP_SEQ_DATA: M = M { of: 436, at: 2, ty: 2 };
+        pub(crate) const TARGET_ONLY: M = M { of: 436, at: 3, ty: 2 };
+    }
+
+    /// NCBI-Blast4 Blast4-database (SEQUENCE, type 437).
+    pub(crate) mod blast4_database {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NAME: M = M { of: 437, at: 0, ty: 5 };
+        pub(crate) const TYPE: M = M { of: 437, at: 1, ty: 438 };
+    }
+
+    /// NCBI-Blast4 Blast4-queue-search-request (SEQUENCE, type 439).
+    pub(crate) mod blast4_queue_search_request {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PROGRAM: M = M { of: 439, at: 0, ty: 5 };
+        pub(crate) const SERVICE: M = M { of: 439, at: 1, ty: 5 };
+        pub(crate) const QUERIES: M = M { of: 439, at: 2, ty: 440 };
+        pub(crate) const SUBJECT: M = M { of: 439, at: 3, ty: 441 };
+        pub(crate) const PARAMSET: M = M { of: 439, at: 4, ty: 5 };
+        pub(crate) const ALGORITHM_OPTIONS: M = M { of: 439, at: 5, ty: 422 };
+        pub(crate) const PROGRAM_OPTIONS: M = M { of: 439, at: 6, ty: 422 };
+        pub(crate) const FORMAT_OPTIONS: M = M { of: 439, at: 7, ty: 422 };
+    }
+
+    /// NCBI-Blast4 Blast4-queries (CHOICE, type 440).
+    pub(crate) mod blast4_queries {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PSSM: M = M { of: 440, at: 0, ty: 0 };
+        pub(crate) const SEQ_LOC_LIST: M = M { of: 440, at: 1, ty: 77 };
+        pub(crate) const BIOSEQ_SET: M = M { of: 440, at: 2, ty: 396 };
+    }
+
+    /// NCBI-Blast4 Blast4-subject (CHOICE, type 441).
+    pub(crate) mod blast4_subject {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DATABASE: M = M { of: 441, at: 0, ty: 5 };
+        pub(crate) const SEQUENCES: M = M { of: 441, at: 1, ty: 427 };
+        pub(crate) const SEQ_LOC_LIST: M = M { of: 441, at: 2, ty: 77 };
+    }
+
+    /// NCBI-Blast4 Blast4-get-request-info-request (SEQUENCE, type 442).
+    pub(crate) mod blast4_get_request_info_request {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const REQUEST_ID: M = M { of: 442, at: 0, ty: 5 };
+    }
+
+    /// NCBI-Blast4 Blast4-get-seq-parts-request (SEQUENCE, type 443).
+    pub(crate) mod blast4_get_seq_parts_request {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const DATABASE: M = M { of: 443, at: 0, ty: 437 };
+        pub(crate) const SEQ_LOCATIONS: M = M { of: 443, at: 1, ty: 384 };
+    }
+
+    /// NCBI-Blast4 Blast4-get-search-info-request (SEQUENCE, type 445).
+    pub(crate) mod blast4_get_search_info_request {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const REQUEST_ID: M = M { of: 445, at: 0, ty: 5 };
+        pub(crate) const INFO: M = M { of: 445, at: 1, ty: 422 };
+    }
+
+    /// NCBI-Blast4 Blast4-get-databases-ex-request (SEQUENCE, type 446).
+    pub(crate) mod blast4_get_databases_ex_request {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const PARAMS: M = M { of: 446, at: 0, ty: 422 };
+    }
+
+    /// NCBI-Blast4 Blast4-get-search-results-reply (SEQUENCE, type 447).
+    pub(crate) mod blast4_get_search_results_reply {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ALIGNMENTS: M = M { of: 447, at: 0, ty: 81 };
+        pub(crate) const PHI_ALIGNMENTS: M = M { of: 447, at: 1, ty: 448 };
+        pub(crate) const MASKS: M = M { of: 447, at: 2, ty: 449 };
+        pub(crate) const KA_BLOCKS: M = M { of: 447, at: 3, ty: 451 };
+        pub(crate) const SEARCH_STATS: M = M { of: 447, at: 4, ty: 6 };
+        pub(crate) const PSSM: M = M { of: 447, at: 5, ty: 0 };
+        pub(crate) const SIMPLE_RESULTS: M = M { of: 447, at: 6, ty: 452 };
+    }
+
+    /// NCBI-Blast4 Blast4-phi-alignments (SEQUENCE, type 448).
+    pub(crate) mod blast4_phi_alignments {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const NUM_ALIGNMENTS: M = M { of: 448, at: 0, ty: 4 };
+        pub(crate) const SEQ_LOCS: M = M { of: 448, at: 1, ty: 77 };
+    }
+
+    /// NCBI-Blast4 Blast4-ka-block (SEQUENCE, type 450).
+    pub(crate) mod blast4_ka_block {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const LAMBDA: M = M { of: 450, at: 0, ty: 50 };
+        pub(crate) const K: M = M { of: 450, at: 1, ty: 50 };
+        pub(crate) const H: M = M { of: 450, at: 2, ty: 50 };
+        pub(crate) const GAPPED: M = M { of: 450, at: 3, ty: 2 };
+    }
+
+    /// NCBI-Blast4 Blast4-simple-results (SEQUENCE, type 452).
+    pub(crate) mod blast4_simple_results {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const ALL_ALIGNMENTS: M = M { of: 452, at: 0, ty: 457 };
+    }
+
+    /// NCBI-Blast4 Blast4-alignments-for-query (SEQUENCE, type 453).
+    pub(crate) mod blast4_alignments_for_query {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const QUERY_ID: M = M { of: 453, at: 0, ty: 5 };
+        pub(crate) const ALIGNMENTS: M = M { of: 453, at: 1, ty: 456 };
+    }
+
+    /// NCBI-Blast4 Blast4-simple-alignment (SEQUENCE, type 454).
+    pub(crate) mod blast4_simple_alignment {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const SUBJECT_ID: M = M { of: 454, at: 0, ty: 5 };
+        pub(crate) const E_VALUE: M = M { of: 454, at: 1, ty: 50 };
+        pub(crate) const BIT_SCORE: M = M { of: 454, at: 2, ty: 50 };
+        pub(crate) const NUM_IDENTITIES: M = M { of: 454, at: 3, ty: 4 };
+        pub(crate) const NUM_INDELS: M = M { of: 454, at: 4, ty: 4 };
+        pub(crate) const FULL_QUERY_RANGE: M = M { of: 454, at: 5, ty: 455 };
+        pub(crate) const FULL_SUBJECT_RANGE: M = M { of: 454, at: 6, ty: 455 };
+    }
+
+    /// NCBI-Blast4 Blast4-range (SEQUENCE, type 455).
+    pub(crate) mod blast4_range {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const START: M = M { of: 455, at: 0, ty: 4 };
+        pub(crate) const END: M = M { of: 455, at: 1, ty: 4 };
+        pub(crate) const STRAND: M = M { of: 455, at: 2, ty: 4 };
+    }
+
+    /// NCBI-Blast4 Blast4-error (SEQUENCE, type 458).
+    pub(crate) mod blast4_error {
+        use crate::report::serial::asn_types::M;
+        pub(crate) const CODE: M = M { of: 458, at: 0, ty: 4 };
+        pub(crate) const MESSAGE: M = M { of: 458, at: 1, ty: 5 };
+    }
+}
+
 /// Every name of the table, once.
 pub(crate) const NAMES: &str = "PssmWithParametersNCBI-ScoreMatpssmparamsPssmTRUEisProteinidentifiernumRowsnumColumnsrowLabelsFALSEbyRowqueryintermediateDatafinalDataObject-idNCBI-GeneralidstrSeq-entryNCBI-SeqsetseqsetBioseqNCBI-SequencedescrinstannotSeq-idNCBI-Seqloclocalgibbsqgibbmtgiimgenbankemblpirswissprotpatentothergeneralgiddbjprfpdbtpgtpetpdgpipenamed-annot-trackGiimport-iddbreleaseTextseq-idnameaccessionversionPatent-seq-idseqidcitId-patNCBI-Bibliocountrydoc-typenumberapp-numberDbtagtagPDB-seq-idmol32chainrelchain-idPDB-mol-idDatestdDate-stdyearmonthdayseasonhourminutesecondSeq-descrSeqdescmol-typemodifmethodtitleorgcommentnummaplocpubregionuserspdbxrefcreate-dateupdate-datehetsourcemolinfomodelevGIBB-molunknowngenomicpre-mRNAmRNArRNAtRNAsnRNAscRNApeptideother-geneticgenomic-mRNAGIBB-moddnarnaextrachromplasmidmitochondrialchloroplastkinetoplastcyanellesyntheticrecombinantpartialcompletemutagennatmuttransposoninsertion-seqno-leftno-rightmacronuclearproviraleststssurveychromoplastgenemaprestmapphysmapGIBB-methodconcept-transseq-peptbothseq-pept-overlapseq-pept-homolconcept-trans-aOrg-refNCBI-OrganismtaxnamecommonmodsynorgnameOrgNameattriblineagegcodemgcodedivpgcodeBinomialOrgNamegenusspeciessubspeciesMultiOrgNamePartialOrgNameTaxElementfixed-levellevelfamilyorderclassbinomialvirushybridnamedhybridOrgModsubtypesubnamestrainsubstraintypevarietyserotypeserogroupserovarcultivarpathovarchemovarbiovarbiotypegroupsubgroupisolateacronymdosagenat-hostsub-speciesspecimen-voucherauthorityformaforma-specialisecotypesynonymanamorphteleomorphbreedgb-acronymgb-anamorphgb-synonymculture-collectionbio-materialmetagenome-sourcetype-materialnomenclatureold-lineageold-nameNumberingcontenumrefrealNum-cont1refnumhas-zeroascendingNum-enumnamesNum-refalignsnot-setsourcesSeq-alignNCBI-SeqaligndimscoresegsboundsextglobaldiagsdiscScorevalueintDense-diag2idsstartslenstrandsscoresNa-strandplusminusboth-revDense-segnumseglensStd-seglocSeq-locnullemptywholepacked-intpntpacked-pntmixequivbondfeatSeq-intervalfromtostrandfuzz-fromfuzz-toInt-fuzzp-mrangepctlimaltmaxminunkgtlttrtlcirclePacked-seqintSeq-pointpointfuzzPacked-seqpntpointsSeq-loc-mixSeq-loc-equivSeq-bondabFeat-idNCBI-SeqfeatgibbPacked-segpresentSeq-align-setSpliced-segproduct-idgenomic-idproduct-strandgenomic-strandproduct-typeexonspoly-aproduct-lengthmodifierstranscriptproteinSpliced-exonproduct-startproduct-endgenomic-startgenomic-endpartsacceptor-before-exondonor-after-exonProduct-posnucposprotposProt-posamin0frameSpliced-exon-chunkmatchmismatchdiagproduct-insgenomic-insScore-setSplice-sitebasesUser-objectdataUser-fieldlabelboolosobjectstrsintsrealsossfieldsobjectsSpliced-seg-modifierstart-codon-foundstop-codon-foundSparse-segmaster-idrowsrow-scoresSparse-alignfirst-idsecond-idfirst-startssecond-startssecond-strandsseg-scoresSparse-seg-extindexdendiagdensegpackedsplicedsparseNum-realunitsPIR-blockPIR-Generalhad-puncthostsummarygeneticincludesplacementsuperfamilykeywordscross-referencedateseq-rawseqrefGB-blockGenBank-Generalextra-accessionsoriginentry-datetaxonomyPubdescfignumexcalign-groupreftypePub-equivNCBI-PubPubgensubmedlinemuidarticlejournalbookprocpat-idmanpmidCit-genauthorsvolumeissuepagesserial-numberAuth-listaffilAuthorroleis-corrPerson-iddbtagmlconsortiumName-stdlastfirstmiddlefullinitialssuffixprimarysecondarycompilereditorpatent-assigneetranslatorAffilcitystreetemailfaxphonepostal-codeTitletsubtransjtaiso-jtaml-jtacodenissnabrisbnPubMedIdCit-subimpmediumImprintsectioncprtpart-sup\"ENG\"languageprepubpart-supiretractpubstatushistorysubmittedin-pressCitRetractexpretractednoticein-errorerratumPubStatusreceivedacceptedepublishppublishrevisedpmcpmcrpubmedpubmedraheadofprintpremedlinePubStatusDateSetPubStatusDatepapertapefloppyMedline-entryNCBI-Medlineuidemabstractmeshsubstancexrefidnumgenepub-typemlfieldstatusCit-artCit-jourCit-bookcollCit-procmeetMeetingplaceArticleIdSetArticleIddoipiipmcidpmcpidpmpidMedlineUIDDOIPIIPmcIDPmcPidPmPidMedline-meshmptermqualMedline-qualsubhMedline-rnnameonlycasecMedline-sicarbbankhdbhgmlmimmsdprfseqdbpsdgdbMedline-fieldDocRefncbigipublisherCit-patdate-issueapp-dateapplicantsassigneespriorityPatent-priorityCit-letman-idmanuscriptletterthesissitesfeatsno-targetSP-blockSP-Generalextra-accimethplasnmdbrefcreatedsequpdannotupdstandardprelimEMBL-blockEMBL-Generalcreation-dateunannotatedfuninvmamphgplnpriprorodunavrlvrtpatEMBL-xrefdbnameEMBL-dbnamecodegeninfoepdecdtfdflybaseprositeenzymeecoseqhivPRF-blockPRF-Generalextra-srcPRF-ExtraSrcpartstatetaxonPDB-blockPDB-Generaldepositioncompoundexp-methodreplacePDB-replaceHeterogenBioSourceNCBI-BioSourcegenomeis-focuspcr-primersmitochondrionplastidvirionnucleomorphapicoplastleucoplastproplastidendogenous-virushydrogenosomechromosomechromatophoreplasmid-in-mitochondrionplasmid-in-plastidnaturalmutartificialSubSourcemapclonesubclonehaplotypegenotypesexcell-linecell-typetissue-typeclone-libdev-stagefrequencygermlinerearrangedlab-hostpop-varianttissue-libplasmid-nametransposon-nameinsertion-seq-nameplastid-namesegmentendogenous-virus-nametransgenicenvironmental-sampleisolation-sourcelat-loncollection-datecollected-byidentified-byfwd-primer-seqrev-primer-seqfwd-primer-namerev-primer-namemetagenomicmating-typelinkage-grouphaplogroupwhole-repliconphenotypealtitudePCRReactionSetPCRReactionforwardreversePCRPrimerSetPCRPrimerPCRPrimerSeqPCRPrimerNameMolInfobiomoltechtechexpcompletenessgbmoltypepre-RNAcRNAsnoRNAtranscribed-RNAncRNAtmRNAderivedhtgs-1htgs-2htgs-3fli-cdnahtgs-0htcwgsbarcodecomposite-wgs-htgstsatargetedno-endshas-lefthas-rightModelEvidenceSupportmrnaidentificationexon-countexon-lengthfull-lengthsupports-all-exon-comboModelEvidenceItemSeq-instreprlengthlineartopologyseq-datahistvirtualrawsegconstconsendeltaaanacirculartandemssdsmixedSeq-dataiupacnaiupacaancbi2nancbi4nancbi8nancbipnancbi8aancbieaancbipaancbistdaagapIUPACnaIUPACaaNCBI2naNCBI4naNCBI8naNCBIpnaNCBI8aaNCBIeaaNCBIpaaNCBIstdaaSeq-gaplinkagelinkage-evidencefragmentshort-armheterochromatincentromeretelomererepeatcontigscaffoldcontaminationunlinkedlinkedLinkage-evidencepaired-endsalign-genusalign-xgenusalign-trnscptwithin-cloneclone-contigstrobeunspecifiedpcrproximity-ligationSeq-extSeg-extRef-extMap-extSeq-featexceptproductlocationexp-evpseudoexcept-textextssupportSeqFeatDatacdregionprotsitersitetxinitpsec-strnon-std-residuebiosrcvariationGene-refNCBI-Genelocusalleledesclocus-tagformal-nameGene-nomenclaturesymbolofficialinterimCdregionorfconflictgapscode-breakstopsonetwothreeGenetic-codesncbieaasncbi8aasncbistdaaCode-breakProt-refNCBI-Proteinactivityprocessedpreproteinmaturesignal-peptidetransit-peptidepropeptideRNA-refNCBI-RNApremsgmiscRNATrna-extcodonanticodonRNA-genqualsRNA-qual-setRNA-qualvalImp-featkeydisulfidethiolesterxlinkthioetheractivebindingcleavageinhibitmodifiedglycosylationmyristoylationmutagenizedmetal-bindingphosphorylationacetylationamidationmethylationhydroxylationsulfatationoxidative-deaminationpyrrolidone-carboxylic-acidgamma-carboxyglutamic-acidblockedlipid-bindingnp-bindingdna-bindingtransmembrane-regionnitrosylationRsite-refNCBI-RsiteTxinitNCBI-TxInitexpressiontxsystemtxdescrtxorgmapping-preciselocation-accurateinittypeevidencepol1pol2pol3bacterialviralorganellesinglemultipleTx-evidenceexp-codephysiologicalexpression-systemlow-prec-datafrom-homologrna-seqrna-sizenp-mapnp-sizepe-seqcDNA-seqpe-mappe-sizepseudo-seqrev-pe-mapin-vitrooocytetransfectionhelixsheetturnClone-reflibraryconcordantuniqueplacement-methodclone-seqend-seqinsert-alignmentfishfingerprintend-seq-insert-alignmentexternalcuratedClone-seq-setClone-seqconfidencealign-idinsertendnohit-repnohitnorepother-chrmmultiple-repmultiplenorepno-hitprototypesupportingsupports-othernon-supportingVariation-refNCBI-Variationparent-idsample-idother-idssynonymsdescriptionpopulation-datavariant-propvalidatedclinical-testallele-originallele-stateallele-frequencyis-ancestral-alleleconsequenceext-locssomatic-originPhenotypeclinical-significanceuntestednon-pathogenicprobable-non-pathogenicprobable-pathogenicpathogenicdrug-responsehistocompatibilitybac-acghcomputationaldigital-arrayexpression-arrayflanking-sequencemaphmcd-analysismlpaoea-assemblyoligo-acghpaired-endqpcrread-depthromart-pcrsagesequence-alignmentsequencingsnp-arraysnp-genoytypingsouthernwesternoptical-mappingPopulation-datapopulationgenotype-frequencychromosomes-testedsample-idsflagsis-default-populationis-minor-alleleis-rare-alleleVariantPropertiesresource-linkgene-locationeffectmappingmap-weightfrequency-based-validationproject-dataquality-checkother-validationpreservedprovisionalhas3DsubmitterLinkoutclinicalgenotypeKitin-genenear-gene-5near-gene-3introndonoracceptorutr-5utr-3in-start-codonin-stop-codonintergenicconserved-noncodingno-changesynonymousnonsensemissenseframeshiftup-regulatordown-regulatorstop-gainstop-losshas-other-snphas-assembly-conflictis-assembly-specificis-uniquely-placedplaced-twice-on-same-chromplaced-twice-on-diff-chrommany-placementsis-mutationabove-5pct-allabove-5pct-1plusabove-1pct-allabove-1pct-1plusin-haplotype-sethas-genotypescontig-allele-missingwithdrawn-by-submitternon-overlapping-allelesstrain-specificgenotype-conflictlikely-artifactsomaticinheritedpaternalmaternalde-novobiparentaluniparentalnot-testedtested-inconclusivenot-reportedhomozygousheterozygoushemizygousnullizygousVariation-instobservationidentitysnvmnpdelinsdelinsmicrosatellitecnvdirect-copyrev-direct-copyinverted-copyeverted-copytranslocationprot-missenseprot-nonsenseprot-neutralprot-silentprot-otherDelta-itemmultipliermultiplier-fuzzmorphactionSeq-literalliteralthisoffsetdel-atins-beforeassertedreferencevariantproductsmosaicindividualallelespackagevariationsnoteuniparental-disomyinstancecomplexphasex-lengthtestsplicingloss-of-heterozygosityExt-locobject-idconditionGb-qualPub-setexperimentalnot-experimentalSeqFeatXrefSeqFeatSupportexperimentinferencemodel-evidenceExperimentSupportcategoryexplanationpmidsdoisEvidenceCategorycoordinatesexistenceInferenceSupportother-typesame-speciesbasissimilar-to-sequencesimilar-to-aasimilar-to-dnasimilar-to-rnasimilar-to-mrnasimiliar-to-estsimilar-to-other-rnaprofilenucleotide-motifprotein-motifab-initio-predictionalignmentEvidenceBasisprogramsaccessionsProgram-idDelta-extDelta-seqSeq-histassemblyreplacesreplaced-bydeletedSeq-hist-recSeq-annotAnnot-idncbiTextannot-idbboneAnnot-descrAnnotdescsrcalignAlign-defalign-typeblocksSeq-graphNCBI-Seqrestitle-xtitle-ycompnumvalgraphReal-graphaxisvaluesInt-graphByte-graphbyteSeq-tableNCBI-SeqTablefeat-typefeat-subtypenum-rowscolumnsSeqTable-columnheaderdefaultsparse-otherSeqTable-column-infofield-idfield-namelocation-idlocation-gilocation-fromlocation-tolocation-strandlocation-fuzz-from-limlocation-fuzz-to-limproduct-giproduct-fromproduct-toproduct-fuzz-from-limproduct-fuzz-to-limid-localxref-id-localdata-imp-keydata-regiondata-cdregion-frameext-typequal-qualqual-valdbxref-dbdbxref-tagSeqTable-multi-datastringbytescommon-stringcommon-bytesbitintervalint-deltaint-scaledreal-scaledbit-bvectorint1int2int8CommonString-tablestringsindexesCommonBytes-tableScaled-int-multi-datamuladdScaled-real-multi-dataBVector-datasizeSeqTable-sparse-indexbit-setindexes-deltabit-set-bvectorSeqTable-single-dataftablelocsseq-tableBioseq-setseq-setnuc-protsegsetconsetpub-setpdb-entrymut-setpop-setphy-seteco-setgen-prod-setwgs-setnamed-annotnamed-annot-prodread-setpaired-end-readssmall-genome-setPssmIntermediateDataresFreqsPerPosweightedResFreqsPerPosfreqRatiosinformationContentgaplessColumnWeightssigmaintervalSizesnumMatchingSeqsnumIndeptObsrPssmFinalDatalambdakappahscalingFactorlambdaUngappedkappaUngappedhUngappedwordScoreThresholdPssmParameterspseudocountrpsdbparamsconstraintsbitScoreThreshbitScoreReportingThreshannotatedSitesFormatRpsDbParametersmatrixNamegapOpengapExtendCoreDefnblocksloopsisDiscontinuousinsertionsCoreBlockstartstopminstartmaxstoppropertyBlockPropertyintvaluetextvalueunassignedthresholdminscoremaxscoremeanscorevarianceis-optionalLoopConstraintminlength100000maxlengthSite-annot-setSite-annotstartPositionstopPositionaliasesmotifmotifuseBlast-db-mask-infoNCBI-BlastDLalgo-idalgo-programalgo-optionsmasksBlast-filter-programdustwindowmaskerBlast-mask-listmoreBlast-def-line-setBlast-def-linetaxidmembershipslinksother-infoBlast4-archiveNCBI-Blast4requestresultsmessagesBlast4-requestidentbodyBlast4-request-bodyfinish-paramsget-databasesget-matricesget-parametersget-paramsetsget-programsget-search-resultsget-sequencesqueue-searchget-request-infoget-sequence-partsget-windowmasked-taxidsget-protocol-infoget-search-infoget-databases-exBlast4-finish-params-requestprogramserviceparamsetBlast4-parametersBlast4-parameterBlast4-valuebig-integerbioseqbooleancutoffintegermatrixseq-alignseq-idseq-locstrand-typebig-integer-listbioseq-listboolean-listcutoff-listinteger-listmatrix-listreal-listseq-align-listseq-id-listseq-loc-liststrand-type-liststring-listbioseq-setseq-align-setquery-maskBlast4-cutoffe-valueraw-scoreBlast4-strand-typeforward-strandreverse-strandboth-strandsBlast4-masklocationsBlast4-frame-typenotsetplus1plus2plus3minus1minus2minus3Blast4-get-search-results-requestrequest-idresult-typesBlast4-get-sequences-requestdatabaseseq-idsskip-seq-datatarget-onlyBlast4-databaseBlast4-residue-typenucleotideBlast4-queue-search-requestqueriessubjectalgorithm-optionsprogram-optionsformat-optionsBlast4-queriesBlast4-subjectsequencesBlast4-get-request-info-requestBlast4-get-seq-parts-requestseq-locationsBlast4-get-protocol-info-requestBlast4-get-search-info-requestinfoBlast4-get-databases-ex-requestBlast4-get-search-results-replyalignmentsphi-alignmentska-blockssearch-statssimple-resultsBlast4-phi-alignmentsnum-alignmentsseq-locsBlast4-ka-blockkgappedBlast4-simple-resultsall-alignmentsBlast4-alignments-for-queryquery-idBlast4-simple-alignmentsubject-idbit-scorenum-identitiesnum-indelsfull-query-rangefull-subject-rangeBlast4-rangeBlast4-errormessageBlast4-get-search-strategy-reply";
 

@@ -11,8 +11,8 @@ use crate::report::serial::asn_input::{Input, Names, R};
 use crate::report::serial::asn_text_reader::SliceSource;
 use crate::report::serial::asn_types::read::{ObjectStream, TypedReader};
 use crate::report::serial::asn_types::seq_id::read_seq_id;
-use crate::report::serial::asn_types::table::named;
-use crate::report::serial::asn_types::{member_index, members, Post, ReadError, Value};
+use crate::report::serial::asn_types::table::{member, named};
+use crate::report::serial::asn_types::{Post, ReadError, Value, M};
 use crate::report::serial::pssm::Seqdesc;
 use crate::seqid::accguide::{identify_seq_id, parse_flags, F_NUC, F_PROT};
 use crate::seqid::label::content;
@@ -478,14 +478,10 @@ pub(crate) fn bioseq_deflines(ids: &[ParsedSeqId], descr: &[Seqdesc]) -> BioseqD
     }
 }
 
-/// The variant `name` of the `Seqdesc` CHOICE `descriptor`, when it is that variant.
-fn seqdesc_variant<'a>(descriptor: &'a Seqdesc, name: &str) -> Option<&'a Value> {
+/// The variant `variant` of the `Seqdesc` CHOICE `descriptor`, when it is that variant.
+fn seqdesc_variant(descriptor: &Seqdesc, variant: M) -> Option<&Value> {
     match descriptor {
-        Seqdesc::Other(Value::Choice(index, value))
-            if usize::from(*index) == member_index(named::SEQDESC, name) =>
-        {
-            Some(value)
-        }
+        Seqdesc::Other(Value::Choice(index, value)) if *index == variant.at => Some(value),
         _ => None,
     }
 }
@@ -493,12 +489,10 @@ fn seqdesc_variant<'a>(descriptor: &'a Seqdesc, name: &str) -> Option<&'a Value>
 /// The `Object-id` `value`'s `id`, when it is that variant.
 fn object_id_number(value: &Value) -> Option<i64> {
     match value {
-        Value::Choice(index, id) if usize::from(*index) == member_index(named::OBJECT_ID, "id") => {
-            match id.as_ref() {
-                Value::Int(number) => Some(*number),
-                _ => None,
-            }
-        }
+        Value::Choice(index, id) if *index == member::object_id::ID.at => match id.as_ref() {
+            Value::Int(number) => Some(*number),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -506,31 +500,27 @@ fn object_id_number(value: &Value) -> Option<i64> {
 /// The `Object-id` `value`'s `str`, when it is that variant.
 fn object_id_str(value: &Value) -> Option<&[u8]> {
     match value {
-        Value::Choice(index, text)
-            if usize::from(*index) == member_index(named::OBJECT_ID, "str") =>
-        {
-            match text.as_ref() {
-                Value::Str(text) => Some(text),
-                _ => None,
-            }
-        }
+        Value::Choice(index, text) if *index == member::object_id::STR.at => match text.as_ref() {
+            Value::Str(text) => Some(text),
+            _ => None,
+        },
         _ => None,
     }
 }
 
 /// The taxids of the `taxon` Dbtags of the `Org-ref` value `org` whose tag is an `id`, in order.
 fn org_taxids(org: &Value) -> impl Iterator<Item = i32> + '_ {
-    let tags = match org.member(member_index(named::ORG_REF, "db")) {
+    let tags = match org.member(member::org_ref::DB.index()) {
         Some(Value::List(tags)) => tags.as_slice(),
         _ => &[],
     };
     tags.iter().filter_map(|tag| {
-        let db = tag.member(member_index(named::DBTAG, "db"));
+        let db = tag.member(member::dbtag::DB.index());
         if !matches!(db, Some(Value::Str(db)) if db.as_slice() == b"taxon") {
             return None;
         }
         // `CObject_id::TId` is an `int`; the reader keeps the INTEGER of Int4 storage.
-        object_id_number(tag.member(member_index(named::DBTAG, "tag"))?).map(|id| id as i32)
+        object_id_number(tag.member(member::dbtag::TAG.index())?).map(|id| id as i32)
     })
 }
 
@@ -540,8 +530,9 @@ fn org_taxids(org: &Value) -> impl Iterator<Item = i32> + '_ {
 pub(crate) fn descr_taxids(descr: &[Seqdesc]) -> Vec<i32> {
     let mut taxids = Vec::new();
     for descriptor in descr {
-        let org = seqdesc_variant(descriptor, "org").or_else(|| {
-            seqdesc_variant(descriptor, "source")?.member(member_index(named::BIOSOURCE, "org"))
+        let org = seqdesc_variant(descriptor, member::seqdesc::ORG).or_else(|| {
+            seqdesc_variant(descriptor, member::seqdesc::SOURCE)?
+                .member(member::biosource::ORG.index())
         });
         if let Some(org) = org {
             taxids.extend(org_taxids(org));
@@ -561,7 +552,7 @@ pub(crate) fn first_org_taxid(descr: &[Seqdesc]) -> Result<Option<i32>, BioseqDe
         if matches!(descriptor, Seqdesc::Empty) {
             return Err(BioseqDeflinesError::NullDescriptor);
         }
-        if let Some(org) = seqdesc_variant(descriptor, "org") {
+        if let Some(org) = seqdesc_variant(descriptor, member::seqdesc::ORG) {
             return Ok(Some(org_taxids(org).next().unwrap_or(0)));
         }
     }
@@ -577,34 +568,29 @@ const ASN_DEFLINE_OBJ_LABEL: &[u8] = b"ASN1_BlastDefLine";
 /// strings (`oss`); `None` when that string is missing or empty. A descriptor stated as `NULL`
 /// before that object (or anywhere without one) is `NullDescriptor`.
 fn binary_header(descr: &[Seqdesc]) -> Result<Option<&[u8]>, BioseqDeflinesError> {
-    let field_data = members(named::USER_FIELD)[member_index(named::USER_FIELD, "data")].ty;
-    let oss = member_index(field_data, "oss");
     for descriptor in descr {
         if matches!(descriptor, Seqdesc::Empty) {
             return Err(BioseqDeflinesError::NullDescriptor);
         }
-        let Some(object) = seqdesc_variant(descriptor, "user") else {
+        let Some(object) = seqdesc_variant(descriptor, member::seqdesc::USER) else {
             continue;
         };
         let is_label =
             |value: Option<&Value>| value.and_then(object_id_str) == Some(ASN_DEFLINE_OBJ_LABEL);
-        if !is_label(object.member(member_index(named::USER_OBJECT, "type"))) {
+        if !is_label(object.member(member::user_object::TYPE.index())) {
             continue;
         }
-        let Some(Value::List(fields)) = object.member(member_index(named::USER_OBJECT, "data"))
-        else {
+        let Some(Value::List(fields)) = object.member(member::user_object::DATA.index()) else {
             continue;
         };
         let Some(field) = fields.first() else {
             continue;
         };
-        if !is_label(field.member(member_index(named::USER_FIELD, "label"))) {
+        if !is_label(field.member(member::user_field::LABEL.index())) {
             continue;
         }
-        if let Some(Value::Choice(index, data)) =
-            field.member(member_index(named::USER_FIELD, "data"))
-        {
-            if usize::from(*index) == oss {
+        if let Some(Value::Choice(index, data)) = field.member(member::user_field::DATA.index()) {
+            if *index == member::user_field::data::OSS.at {
                 return Ok(match data.as_ref() {
                     Value::List(strings) => match strings.first() {
                         Some(Value::Octets(bytes)) if !bytes.is_empty() => Some(bytes),

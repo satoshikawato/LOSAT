@@ -12,6 +12,7 @@ use super::{Event, Indexer, RefElement, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
 // `ThrowUnassigned`, the getter of a member that is not set: the get check that
 // `SERIAL_VERIFY_DATA_GET` turns off (the refusal of `super::index_entry`).
+use crate::report::serial::asn_types::table::member;
 use crate::report::serial::object_frame::UNASSIGNED_MEMBER as UNASSIGNED;
 use crate::utils::lower_bound::lower_bound_by;
 
@@ -155,25 +156,29 @@ pub(super) struct Column<'a>(V<'a>);
 
 impl<'a> Column<'a> {
     fn header(self) -> V<'a> {
-        self.0.field("header")
+        self.0.field(member::seqtable_column::HEADER)
     }
     fn field_id(self) -> Option<i32> {
-        self.header().get("field-id").map(|id| id.int() as i32)
+        self.header()
+            .get(member::seqtable_column_info::FIELD_ID)
+            .map(|id| id.int() as i32)
     }
     fn field_name(self) -> Option<&'a [u8]> {
-        self.header().get("field-name").map(V::str)
+        self.header()
+            .get(member::seqtable_column_info::FIELD_NAME)
+            .map(V::str)
     }
     fn data(self) -> Option<V<'a>> {
-        self.0.get("data")
+        self.0.get(member::seqtable_column::DATA)
     }
     fn sparse(self) -> Option<V<'a>> {
-        self.0.get("sparse")
+        self.0.get(member::seqtable_column::SPARSE)
     }
     fn default(self) -> Option<V<'a>> {
-        self.0.get("default")
+        self.0.get(member::seqtable_column::DEFAULT)
     }
     fn sparse_other(self) -> Option<V<'a>> {
-        self.0.get("sparse-other")
+        self.0.get(member::seqtable_column::SPARSE_OTHER)
     }
     /// `CSeqTableColumnInfo::IsSingular`: a default and neither data nor a sparse index.
     fn is_singular(self) -> bool {
@@ -370,12 +375,12 @@ pub(super) struct TableInfo<'a> {
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:750-764
 // `e_MaxChoice` is 23 (SeqFeatData_.hpp:174), `eSubtype_max` 106 (SeqFeatData.hpp:237).
 fn is_good_feat_table(table: V<'_>) -> bool {
-    let feat_type = table.field("feat-type").int();
+    let feat_type = table.field(member::seq_table::FEAT_TYPE).int();
     if !(1..23).contains(&feat_type) {
         return false;
     }
     table
-        .get("feat-subtype")
+        .get(member::seq_table::FEAT_SUBTYPE)
         .is_none_or(|subtype| (1..106).contains(&subtype.int()))
 }
 
@@ -392,7 +397,7 @@ impl<'p> Indexer<'p> {
         let is_feat = is_good_feat_table(table);
         let mut info = TableInfo {
             is_feat,
-            num_rows: table.field("num-rows").int() as i32,
+            num_rows: table.field(member::seq_table::NUM_ROWS).int() as i32,
             table_loc: None,
             sorted: false,
             loc: LocColumns::new("loc", 0),
@@ -401,7 +406,7 @@ impl<'p> Indexer<'p> {
             disabled: None,
         };
         let mut sorted_max: u32 = 0;
-        for column in table.field("columns").items() {
+        for column in table.field(member::seq_table::COLUMNS).items() {
             let column = Column(column.deref()?);
             if column.field_name() == Some(b"Seq-table location") {
                 if info.table_loc.is_some() {
@@ -575,7 +580,7 @@ impl<'p> Indexer<'p> {
             // `key.m_Handle` holds the handle (mapped, unless the range is empty) until the table
             // has been indexed.
             let handle = Handle::of(id, &mut self.handles);
-            let mapped = self.x_map(range, Some(handle.clone()));
+            let mapped = self.x_map(range, Some(&handle));
             self.handles.set_key(Some(&handle));
             self.handles.end_object();
             self.handles.end_table();
@@ -610,7 +615,7 @@ impl<'p> Indexer<'p> {
                     }
                 } else {
                     let (id, range) = self.table_key(cols, row)?;
-                    self.x_map(range, id.clone())?;
+                    self.x_map(range, id.as_ref())?;
                     // `SetTableKeyAndIndex` puts the row's handle in `key.m_Handle`.
                     self.handles.set_key(id.as_ref());
                 }
@@ -696,8 +701,8 @@ impl TableInfo<'_> {
         let Some(("int", interval)) = self.table_loc.map(V::choice) else {
             return false;
         };
-        let from = interval.field("from").int() as u32;
-        let to = interval.field("to").int() as u32;
+        let from = interval.field(member::seq_interval::FROM).int() as u32;
+        let to = interval.field(member::seq_interval::TO).int() as u32;
         let length = if to >= from {
             (to - from).wrapping_add(1)
         } else {
@@ -859,9 +864,9 @@ impl Indexer<'_> {
             }
             "int-scaled" => {
                 return Ok(Get::Scaled {
-                    data: value.field("data"),
-                    mul: value.field("mul").int() as i32,
-                    add: value.field("add").int() as i32,
+                    data: value.field(member::scaled_int_multi_data::DATA),
+                    mul: value.field(member::scaled_int_multi_data::MUL).int() as i32,
+                    add: value.field(member::scaled_int_multi_data::ADD).int() as i32,
                 })
             }
             _ => {
@@ -1139,8 +1144,8 @@ impl Indexer<'_> {
             .entry(address(value))
             .or_insert_with(|| {
                 bitmagic::decode(
-                    value.field("size").int() as u32,
-                    value.field("data").octets(),
+                    value.field(member::bvector_data::SIZE).int() as u32,
+                    value.field(member::bvector_data::DATA).octets(),
                 )
             });
         match decoded {
@@ -1171,11 +1176,14 @@ fn query_stop(fail: Fail) -> Stop {
 fn multi_size_step(data: V<'_>) -> Result<u64, V<'_>> {
     let (variant, value) = data.choice();
     Ok(match variant {
-        "common-string" | "common-bytes" => value.field("indexes").len() as u64,
+        "common-string" => value.field(member::commonstring_table::INDEXES).len() as u64,
+        "common-bytes" => value.field(member::commonbytes_table::INDEXES).len() as u64,
         "bit" => value.octets().len() as u64 * 8,
-        "bit-bvector" => value.field("size").int() as u32 as u64,
+        "bit-bvector" => value.field(member::bvector_data::SIZE).int() as u32 as u64,
         "int-delta" => return Err(value),
-        "int-scaled" | "real-scaled" => return Err(value.field("data")),
+        "int-scaled" | "real-scaled" => {
+            return Err(value.field(member::scaled_int_multi_data::DATA))
+        }
         _ => value.len() as u64,
     })
 }
@@ -1192,8 +1200,8 @@ fn int_size_step(data: V<'_>) -> Result<u64, V<'_>> {
         "int2" => 2,
         "int8" => 8,
         "int-scaled" => {
-            let max = value.get("max").map(V::int);
-            let min = value.get("min").map(V::int);
+            let max = value.get(member::scaled_int_multi_data::MAX).map(V::int);
+            let min = value.get(member::scaled_int_multi_data::MIN).map(V::int);
             if max.is_some_and(|max| max > i64::from(i32::MAX))
                 || min.is_some_and(|min| min < i64::from(i32::MIN))
             {

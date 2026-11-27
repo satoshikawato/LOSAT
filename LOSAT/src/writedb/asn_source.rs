@@ -6,7 +6,7 @@
 //! NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:725-1375,2800-3045,3928-4107
 
 use std::io::Read;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use super::bioseq::SeqData;
 use super::deflines::best_non_local_rank;
@@ -22,198 +22,14 @@ use crate::report::serial::asn_ber_reader::BerReader;
 use crate::report::serial::asn_input::{Names, TextInput, Utf8TagOnce};
 use crate::report::serial::asn_text_reader::StreamSource;
 use crate::report::serial::asn_types::read::{ObjectStream, Post, ReadError};
-use crate::report::serial::asn_types::table::named;
+use crate::report::serial::asn_types::table::{member, named};
 use crate::report::serial::asn_types::view::V;
-use crate::report::serial::asn_types::{member_index, members, Value};
+use crate::report::serial::asn_types::Value;
 use crate::report::serial::object_frame::UNASSIGNED_MEMBER;
 use crate::seqid::label;
 use crate::seqid::mask_handle::mask_handle_key;
 use crate::seqid::model::ParsedSeqId;
 use crate::seqid::rank::{best_rank_score, find_best};
-
-/// Cached ASN.1 table member indices used while walking `Seq-entry` / `Bioseq-set` trees.
-struct Schema {
-    seq_inst_repr: usize,
-    seq_inst_mol: usize,
-    seq_inst_length: usize,
-    seq_inst_seq_data: usize,
-    seq_inst_ext: usize,
-    seq_inst_hist: usize,
-    seq_entry_seq: usize,
-    seq_entry_set: usize,
-    bioseq_set_class: usize,
-    bioseq_set_descr: usize,
-    bioseq_set_seq_set: usize,
-    bioseq_set_annot: usize,
-    bioseq_id: usize,
-    bioseq_descr: usize,
-    bioseq_inst: usize,
-    bioseq_annot: usize,
-    seq_annot_data: usize,
-    seq_annot_ftable: usize,
-    seq_feat_data: usize,
-    feat_gene: usize,
-    feat_cdregion: usize,
-    feat_prot: usize,
-    feat_biosrc: usize,
-    seqdesc_title: usize,
-    seqdesc_org: usize,
-    seqdesc_source: usize,
-    seqdesc_molinfo: usize,
-    seqdesc_user: usize,
-    seqdesc_comment: usize,
-    seqdesc_genbank: usize,
-    seqdesc_embl: usize,
-    user_obj_type: usize,
-    user_obj_data: usize,
-    user_field_label: usize,
-    user_field_data: usize,
-    user_field_oss: usize,
-    user_field_str: usize,
-    object_id_id: usize,
-    object_id_str: usize,
-    org_ref_taxname: usize,
-    org_ref_db: usize,
-    org_ref_orgname: usize,
-    dbtag_db: usize,
-    dbtag_tag: usize,
-    biosrc_genome: usize,
-    biosrc_org: usize,
-    biosrc_subtype: usize,
-    subsrc_subtype: usize,
-    subsrc_name: usize,
-    orgname_name: usize,
-    orgname_binomial: usize,
-    orgname_partial: usize,
-    orgname_mod: usize,
-    binomial_genus: usize,
-    binomial_species: usize,
-    taxelem_fixed_level: usize,
-    taxelem_level: usize,
-    taxelem_name: usize,
-    orgmod_subtype: usize,
-    orgmod_subname: usize,
-    molinfo_tech: usize,
-    molinfo_completeness: usize,
-    gb_block_keywords: usize,
-    embl_block_keywords: usize,
-    seq_hist_assembly: usize,
-    seq_align_segs: usize,
-    seq_align_denseg: usize,
-    dense_seg_dim: usize,
-    dense_seg_ids: usize,
-    seq_data_iupacna: usize,
-    seq_data_iupacaa: usize,
-    seq_data_ncbi2na: usize,
-    seq_data_ncbi4na: usize,
-    seq_data_ncbieaa: usize,
-    seq_data_ncbistdaa: usize,
-    seq_data_gap: usize,
-    seq_ext_delta: usize,
-    delta_loc: usize,
-    delta_literal: usize,
-    seq_loc_null: usize,
-    seq_lit_length: usize,
-    seq_lit_data: usize,
-}
-
-fn schema() -> &'static Schema {
-    static CACHE: OnceLock<Schema> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        let seq_annot_data = member_index(named::SEQ_ANNOT, "data");
-        let annot_data_ty = members(named::SEQ_ANNOT)[seq_annot_data].ty;
-        let user_field_data = member_index(named::USER_FIELD, "data");
-        let udata_ty = members(named::USER_FIELD)[user_field_data].ty;
-        let orgname_name = member_index(named::ORGNAME, "name");
-        let on_name_ty = members(named::ORGNAME)[orgname_name].ty;
-        let seq_align_segs = member_index(named::SEQ_ALIGN, "segs");
-        let segs_ty = members(named::SEQ_ALIGN)[seq_align_segs].ty;
-        Schema {
-            seq_inst_repr: member_index(named::SEQ_INST, "repr"),
-            seq_inst_mol: member_index(named::SEQ_INST, "mol"),
-            seq_inst_length: member_index(named::SEQ_INST, "length"),
-            seq_inst_seq_data: member_index(named::SEQ_INST, "seq-data"),
-            seq_inst_ext: member_index(named::SEQ_INST, "ext"),
-            seq_inst_hist: member_index(named::SEQ_INST, "hist"),
-            seq_entry_seq: member_index(named::SEQ_ENTRY, "seq"),
-            seq_entry_set: member_index(named::SEQ_ENTRY, "set"),
-            bioseq_set_class: member_index(named::BIOSEQ_SET, "class"),
-            bioseq_set_descr: member_index(named::BIOSEQ_SET, "descr"),
-            bioseq_set_seq_set: member_index(named::BIOSEQ_SET, "seq-set"),
-            bioseq_set_annot: member_index(named::BIOSEQ_SET, "annot"),
-            bioseq_id: member_index(named::BIOSEQ, "id"),
-            bioseq_descr: member_index(named::BIOSEQ, "descr"),
-            bioseq_inst: member_index(named::BIOSEQ, "inst"),
-            bioseq_annot: member_index(named::BIOSEQ, "annot"),
-            seq_annot_data,
-            seq_annot_ftable: member_index(annot_data_ty, "ftable"),
-            seq_feat_data: member_index(named::SEQ_FEAT, "data"),
-            feat_gene: member_index(named::SEQFEATDATA, "gene"),
-            feat_cdregion: member_index(named::SEQFEATDATA, "cdregion"),
-            feat_prot: member_index(named::SEQFEATDATA, "prot"),
-            feat_biosrc: member_index(named::SEQFEATDATA, "biosrc"),
-            seqdesc_title: member_index(named::SEQDESC, "title"),
-            seqdesc_org: member_index(named::SEQDESC, "org"),
-            seqdesc_source: member_index(named::SEQDESC, "source"),
-            seqdesc_molinfo: member_index(named::SEQDESC, "molinfo"),
-            seqdesc_user: member_index(named::SEQDESC, "user"),
-            seqdesc_comment: member_index(named::SEQDESC, "comment"),
-            seqdesc_genbank: member_index(named::SEQDESC, "genbank"),
-            seqdesc_embl: member_index(named::SEQDESC, "embl"),
-            user_obj_type: member_index(named::USER_OBJECT, "type"),
-            user_obj_data: member_index(named::USER_OBJECT, "data"),
-            user_field_label: member_index(named::USER_FIELD, "label"),
-            user_field_data,
-            user_field_oss: member_index(udata_ty, "oss"),
-            user_field_str: member_index(udata_ty, "str"),
-            object_id_id: member_index(named::OBJECT_ID, "id"),
-            object_id_str: member_index(named::OBJECT_ID, "str"),
-            org_ref_taxname: member_index(named::ORG_REF, "taxname"),
-            org_ref_db: member_index(named::ORG_REF, "db"),
-            org_ref_orgname: member_index(named::ORG_REF, "orgname"),
-            dbtag_db: member_index(named::DBTAG, "db"),
-            dbtag_tag: member_index(named::DBTAG, "tag"),
-            biosrc_genome: member_index(named::BIOSOURCE, "genome"),
-            biosrc_org: member_index(named::BIOSOURCE, "org"),
-            biosrc_subtype: member_index(named::BIOSOURCE, "subtype"),
-            subsrc_subtype: member_index(named::SUBSOURCE, "subtype"),
-            subsrc_name: member_index(named::SUBSOURCE, "name"),
-            orgname_name,
-            orgname_binomial: member_index(on_name_ty, "binomial"),
-            orgname_partial: member_index(on_name_ty, "partial"),
-            orgname_mod: member_index(named::ORGNAME, "mod"),
-            binomial_genus: member_index(named::BINOMIALORGNAME, "genus"),
-            binomial_species: member_index(named::BINOMIALORGNAME, "species"),
-            taxelem_fixed_level: member_index(named::TAXELEMENT, "fixed-level"),
-            taxelem_level: member_index(named::TAXELEMENT, "level"),
-            taxelem_name: member_index(named::TAXELEMENT, "name"),
-            orgmod_subtype: member_index(named::ORGMOD, "subtype"),
-            orgmod_subname: member_index(named::ORGMOD, "subname"),
-            molinfo_tech: member_index(named::MOLINFO, "tech"),
-            molinfo_completeness: member_index(named::MOLINFO, "completeness"),
-            gb_block_keywords: member_index(named::GB_BLOCK, "keywords"),
-            embl_block_keywords: member_index(named::EMBL_BLOCK, "keywords"),
-            seq_hist_assembly: member_index(named::SEQ_HIST, "assembly"),
-            seq_align_segs,
-            seq_align_denseg: member_index(segs_ty, "denseg"),
-            dense_seg_dim: member_index(named::DENSE_SEG, "dim"),
-            dense_seg_ids: member_index(named::DENSE_SEG, "ids"),
-            seq_data_iupacna: member_index(named::SEQ_DATA, "iupacna"),
-            seq_data_iupacaa: member_index(named::SEQ_DATA, "iupacaa"),
-            seq_data_ncbi2na: member_index(named::SEQ_DATA, "ncbi2na"),
-            seq_data_ncbi4na: member_index(named::SEQ_DATA, "ncbi4na"),
-            seq_data_ncbieaa: member_index(named::SEQ_DATA, "ncbieaa"),
-            seq_data_ncbistdaa: member_index(named::SEQ_DATA, "ncbistdaa"),
-            seq_data_gap: member_index(named::SEQ_DATA, "gap"),
-            seq_ext_delta: member_index(named::SEQ_EXT, "delta"),
-            delta_loc: member_index(named::DELTA_SEQ, "loc"),
-            delta_literal: member_index(named::DELTA_SEQ, "literal"),
-            seq_loc_null: member_index(named::SEQ_LOC, "null"),
-            seq_lit_length: member_index(named::SEQ_LITERAL, "length"),
-            seq_lit_data: member_index(named::SEQ_LITERAL, "seq-data"),
-        }
-    })
-}
 
 fn as_choice(val: &Value) -> Option<(usize, &Value)> {
     match val {
@@ -483,22 +299,20 @@ impl SeqEntrySource {
         mut slot: BioseqSlot,
         warn: Warn<'_>,
     ) -> Result<AsnBioseq, WriteDbError> {
-        let s = schema();
-
         // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:729-733
         // `x_SetFlags` calls `bsh.GetInst_Length()` before returning to `AddSequences`, throwing
         // `CUnassignedMember::eGet` whenever `Seq-inst.length` is omitted.
-        let Some(Value::Int(length)) = slot.inst.member(s.seq_inst_length) else {
+        let Some(Value::Int(length)) = slot.inst.member(member::seq_inst::LENGTH.index()) else {
             return Err(WriteDbError::Exception(unassigned_member(
                 "CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length",
             )));
         };
         let length = *length as u64;
-        let repr = match slot.inst.member(s.seq_inst_repr) {
+        let repr = match slot.inst.member(member::seq_inst::REPR.index()) {
             Some(Value::Enum(v)) => *v,
             _ => 0,
         };
-        let mol = match slot.inst.member(s.seq_inst_mol) {
+        let mol = match slot.inst.member(member::seq_inst::MOL.index()) {
             Some(Value::Enum(v)) => *v,
             _ => 0,
         };
@@ -522,7 +336,7 @@ impl SeqEntrySource {
         let mut had_title = false;
         for desc in &mut slot.descr {
             if let Some((idx, inner)) = as_choice_mut(desc) {
-                if idx == s.seqdesc_title {
+                if idx == member::seqdesc::TITLE.index() {
                     *inner = Value::Str(generated_title.clone());
                     had_title = true;
                 }
@@ -530,7 +344,7 @@ impl SeqEntrySource {
         }
         if !had_title {
             slot.descr.push(Value::Choice(
-                s.seqdesc_title as u16,
+                member::seqdesc::TITLE.at,
                 Box::new(Value::Str(generated_title)),
             ));
         }
@@ -558,24 +372,26 @@ impl SeqEntrySource {
             .iter()
             .rev()
             .find_map(|desc| match as_choice(desc) {
-                Some((idx, Value::Str(text))) if idx == s.seqdesc_title => Some(text.clone()),
+                Some((idx, Value::Str(text))) if idx == member::seqdesc::TITLE.index() => {
+                    Some(text.clone())
+                }
                 _ => None,
             })
             .unwrap_or_default();
 
         let hist_old_id = slot
             .inst
-            .member(s.seq_inst_hist)
+            .member(member::seq_inst::HIST.index())
             .and_then(|hist| extract_hist_old_id(hist, &slot.ids));
 
         // Move `Seq-data` / `Delta-ext` buffers out of `Value` without cloning.
         let seq_data = slot
             .inst
-            .take_member(s.seq_inst_seq_data)
+            .take_member(member::seq_inst::SEQ_DATA.index())
             .map(value_to_seq_data);
         let delta = if seq_data.is_none() {
             slot.inst
-                .take_member(s.seq_inst_ext)
+                .take_member(member::seq_inst::EXT.index())
                 .and_then(extract_delta_ext)
         } else {
             None
@@ -630,8 +446,6 @@ fn collect_tree(
         },
     }
 
-    let s = schema();
-
     let mut stack = vec![if is_set {
         Work::Set {
             val: root,
@@ -657,15 +471,17 @@ fn collect_tree(
                     continue;
                 };
                 let inner = inner.take();
-                if choice == s.seq_entry_seq {
+                if choice == member::seq_entry::SEQ.index() {
                     let mut bio = inner;
-                    let ids = extract_bioseq_ids(bio.take_member(s.bioseq_id));
-                    let descr = extract_descr_list(bio.take_member(s.bioseq_descr));
-                    if let Some(annot_val) = bio.member(s.bioseq_annot) {
+                    let ids = extract_bioseq_ids(bio.take_member(member::bioseq::ID.index()));
+                    let descr = extract_descr_list(bio.take_member(member::bioseq::DESCR.index()));
+                    if let Some(annot_val) = bio.member(member::bioseq::ANNOT.index()) {
                         scan_annots(annot_val, annots);
                     }
                     let own_unver = is_unverified_descr(&descr);
-                    let inst = bio.take_member(s.bioseq_inst).unwrap_or(Value::Null);
+                    let inst = bio
+                        .take_member(member::bioseq::INST.index())
+                        .unwrap_or(Value::Null);
                     bioseqs.push(BioseqSlot {
                         parent_set,
                         unverified: inherited_unver || own_unver,
@@ -673,7 +489,7 @@ fn collect_tree(
                         descr,
                         inst,
                     });
-                } else if choice == s.seq_entry_set {
+                } else if choice == member::seq_entry::SET.index() {
                     stack.push(Work::Set {
                         val: inner,
                         parent_set,
@@ -686,12 +502,12 @@ fn collect_tree(
                 parent_set,
                 inherited_unver,
             } => {
-                let class = match val.member(s.bioseq_set_class) {
+                let class = match val.member(member::bioseq_set::CLASS.index()) {
                     Some(Value::Enum(c)) => *c,
                     _ => 0,
                 };
-                let descr = extract_descr_list(val.take_member(s.bioseq_set_descr));
-                if let Some(annot_val) = val.member(s.bioseq_set_annot) {
+                let descr = extract_descr_list(val.take_member(member::bioseq_set::DESCR.index()));
+                if let Some(annot_val) = val.member(member::bioseq_set::ANNOT.index()) {
                     scan_annots(annot_val, annots);
                 }
                 // `CBioseq_set::eClass_nuc_prot` (1): Unverified on a nuc-prot set marks all
@@ -702,7 +518,9 @@ fn collect_tree(
                     parent: parent_set,
                     descr,
                 });
-                if let Some(children) = take_list(val.take_member(s.bioseq_set_seq_set)) {
+                if let Some(children) =
+                    take_list(val.take_member(member::bioseq_set::SEQ_SET.index()))
+                {
                     for child in children.into_iter().rev() {
                         stack.push(Work::Entry {
                             val: child,
@@ -754,8 +572,8 @@ pub(crate) fn null_pointer(muted: bool) -> WriteDbError {
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:466-496
 /// The end of `CSeqEntrySource`'s constructor with `object` (a Bioseq-set when `is_set`, else a
-/// Seq-entry): the walks for `Unverified` and `Parentize` (`walk_reads_null`), then the object
-/// manager's step as the object joins the scope (`AddTopLevelSeqEntry`, `annot_index::index_object`),
+/// Seq-entry): the walks for `Unverified` and `Parentize`, then the object manager's step as the
+/// object joins the scope (`AddTopLevelSeqEntry`), both in `annot_index::index_object`,
 /// whose posts go to `warn` at this place and whose last may leave the main thread's diagnostic
 /// stream failed for the rest of the run (`set_main_diag_failbit`). Its exception ends the run as
 /// NCBI's does, the volumes written so far kept (`WriteDbError::Exception`, `WriteDbError::Std`,
@@ -763,9 +581,6 @@ pub(crate) fn null_pointer(muted: bool) -> WriteDbError {
 /// `WriteDbError::Unsupported`, which leaves no volume (`makeblastdb::is_losat_error`).
 fn join_scope(object: V<'_>, is_set: bool, warn: Warn<'_>) -> Result<(), WriteDbError> {
     let muted = main_diag_failbit();
-    if walk_reads_null(object, is_set) {
-        return Err(null_pointer(muted));
-    }
     let indexed = annot_index::index_object(object, is_set, muted).map_err(refused)?;
     let posts = indexed.posts.text();
     if !posts.is_empty() {
@@ -780,57 +595,6 @@ fn join_scope(object: V<'_>, is_set: bool, warn: Warn<'_>) -> Result<(), WriteDb
         Some(End::Std(what)) => Err(WriteDbError::Std(what.to_string())),
         Some(end) => Err(WriteDbError::Native(end.native())),
     }
-}
-
-/// Whether the constructor's walks of `object` dereference an element stated as NULL before the
-/// object joins the scope: a member of a Bioseq-set (`Parentize`), or a descriptor that
-/// `IsUnverified` reads, of a nuc-prot set or of a Bioseq, before its first `Unverified` user
-/// object (probe D3c-6a y03, y10b; y14: a NULL after it is read when the title is made,
-/// `generate_asn_title`).
-fn walk_reads_null(object: V<'_>, is_set: bool) -> bool {
-    let mut stack = vec![if is_set {
-        ("set", object)
-    } else {
-        object.choice()
-    }];
-    while let Some((kind, value)) = stack.pop() {
-        if kind == "seq" {
-            if unverified_reads_null(value) {
-                return true;
-            }
-            continue;
-        }
-        // `CBioseq_set::eClass_nuc_prot`.
-        if value.get("class").map(V::int) == Some(1) && unverified_reads_null(value) {
-            return true;
-        }
-        for member in value.get("seq-set").into_iter().flat_map(V::items) {
-            if member.is_null() {
-                return true;
-            }
-            stack.push(member.choice());
-        }
-    }
-    false
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:413-435
-/// Whether `IsUnverified` of the descriptors of `object` (a Bioseq or a Bioseq-set) reads one
-/// stated as NULL: it reads them in order up to the first `Unverified` user object.
-fn unverified_reads_null(object: V<'_>) -> bool {
-    for desc in object.get("descr").into_iter().flat_map(V::items) {
-        if desc.is_null() {
-            return true;
-        }
-        if let ("user", user) = desc.choice() {
-            if let Some(("str", name)) = user.get("type").map(V::choice) {
-                if name.str().eq_ignore_ascii_case(b"Unverified") {
-                    return false;
-                }
-            }
-        }
-    }
-    false
 }
 
 fn extract_bioseq_ids(val: Option<Value>) -> Vec<ParsedSeqId> {
@@ -850,7 +614,7 @@ fn extract_bioseq_ids(val: Option<Value>) -> Vec<ParsedSeqId> {
 fn extract_descr_list(val: Option<Value>) -> Vec<Value> {
     // A descriptor stated as NULL stays: makeblastdb reads it when it makes the title
     // (`generate_asn_title`), or, before the first `Unverified` user object, in its walks
-    // (`walk_reads_null`).
+    // (`objmgr::annot_index::index_object`).
     take_list(val).unwrap_or_default()
 }
 
@@ -858,36 +622,47 @@ fn scan_annots(val: &Value, summary: &mut TseAnnotSummary) {
     let Some(annots) = as_list(val) else {
         return;
     };
-    let s = schema();
 
     // The object manager's step stopped at an annotation or a feature stated as NULL
     // (`join_scope`).
     for annot in annots {
-        let Some((choice, inner)) = annot.member(s.seq_annot_data).and_then(as_choice) else {
+        let Some((choice, inner)) = annot
+            .member(member::seq_annot::DATA.index())
+            .and_then(as_choice)
+        else {
             continue;
         };
-        if choice != s.seq_annot_ftable {
+        if choice != member::seq_annot::data::FTABLE.index() {
             continue;
         }
         let Some(feats) = as_list(inner) else {
             continue;
         };
         for feat in feats {
-            let Some((fchoice, fval)) = feat.member(s.seq_feat_data).and_then(as_choice) else {
+            let Some((fchoice, fval)) = feat
+                .member(member::seq_feat::DATA.index())
+                .and_then(as_choice)
+            else {
                 continue;
             };
-            if fchoice == s.feat_prot {
+            if fchoice == member::seqfeatdata::PROT.index() {
                 summary.has_prot = true;
-            } else if fchoice == s.feat_cdregion {
+            } else if fchoice == member::seqfeatdata::CDREGION.index() {
                 summary.has_cdregion = true;
-            } else if fchoice == s.feat_gene {
+            } else if fchoice == member::seqfeatdata::GENE.index() {
                 summary.has_gene = true;
-            } else if fchoice == s.feat_biosrc {
+            } else if fchoice == member::seqfeatdata::BIOSRC.index() {
                 summary.has_biosrc = true;
-                if let Some(subs) = fval.member(s.biosrc_subtype).and_then(as_list) {
+                if let Some(subs) = fval
+                    .member(member::biosource::SUBTYPE.index())
+                    .and_then(as_list)
+                {
                     for sbs in subs {
-                        let is_clone = matches!(sbs.member(s.subsrc_subtype), Some(Value::Enum(3)));
-                        if is_clone && sbs.member(s.subsrc_name).is_some() {
+                        let is_clone = matches!(
+                            sbs.member(member::subsource::SUBTYPE.index()),
+                            Some(Value::Enum(3))
+                        );
+                        if is_clone && sbs.member(member::subsource::NAME.index()).is_some() {
                             summary.has_biosrc_clone = true;
                         }
                     }
@@ -902,11 +677,10 @@ fn scan_annots(val: &Value, summary: &mut TseAnnotSummary) {
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:413-435
 fn is_unverified_descr(descr: &[Value]) -> bool {
-    let s = schema();
     descr.iter().any(|desc| {
         as_choice(desc)
-            .filter(|(c, _)| *c == s.seqdesc_user)
-            .and_then(|(_, inner)| inner.member(s.user_obj_type))
+            .filter(|(c, _)| *c == member::seqdesc::USER.index())
+            .and_then(|(_, inner)| inner.member(member::user_object::TYPE.index()))
             .and_then(object_id_str)
             .is_some_and(|name| name.eq_ignore_ascii_case(b"Unverified"))
     })
@@ -918,17 +692,17 @@ fn unassigned_member(message: &str) -> NcbiException {
 }
 
 fn object_id_str(val: &Value) -> Option<&[u8]> {
-    let s = schema();
     match as_choice(val) {
-        Some((choice, Value::Str(bytes))) if choice == s.object_id_str => Some(bytes),
+        Some((choice, Value::Str(bytes))) if choice == member::object_id::STR.index() => {
+            Some(bytes)
+        }
         _ => None,
     }
 }
 
 fn object_id_int(val: &Value) -> Option<i64> {
-    let s = schema();
     match as_choice(val) {
-        Some((choice, Value::Int(n))) if choice == s.object_id_id => Some(*n),
+        Some((choice, Value::Int(n))) if choice == member::object_id::ID.index() => Some(*n),
         _ => None,
     }
 }
@@ -937,13 +711,15 @@ fn object_id_int(val: &Value) -> Option<i64> {
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqfeat/Org_ref.cpp:71-90
 fn org_taxids(org: &Value) -> impl Iterator<Item = i32> + '_ {
-    let s = schema();
-    let tags = org.member(s.org_ref_db).and_then(as_list).unwrap_or(&[]);
+    let tags = org
+        .member(member::org_ref::DB.index())
+        .and_then(as_list)
+        .unwrap_or(&[]);
     tags.iter().filter_map(move |tag| {
-        if !matches!(tag.member(s.dbtag_db), Some(Value::Str(db)) if db.as_slice() == b"taxon") {
+        if !matches!(tag.member(member::dbtag::DB.index()), Some(Value::Str(db)) if db.as_slice() == b"taxon") {
             return None;
         }
-        object_id_int(tag.member(s.dbtag_tag)?).map(|id| id as i32)
+        object_id_int(tag.member(member::dbtag::TAG.index())?).map(|id| id as i32)
     })
 }
 
@@ -952,17 +728,16 @@ fn org_taxids(org: &Value) -> impl Iterator<Item = i32> + '_ {
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Bioseq.cpp:177-199
 fn bioseq_own_taxid(descr: &[Value]) -> i32 {
-    let s = schema();
     let mut from_source = 0i32;
     let mut from_org = 0i32;
     for desc in descr {
         let Some((choice, inner)) = as_choice(desc) else {
             continue;
         };
-        if choice == s.seqdesc_org {
+        if choice == member::seqdesc::ORG.index() {
             from_org = org_taxids(inner).next().unwrap_or(0);
-        } else if choice == s.seqdesc_source {
-            if let Some(org) = inner.member(s.biosrc_org) {
+        } else if choice == member::seqdesc::SOURCE.index() {
+            if let Some(org) = inner.member(member::biosource::ORG.index()) {
                 from_source = org_taxids(org).next().unwrap_or(0);
             }
         }
@@ -983,16 +758,15 @@ fn bioseq_own_taxid(descr: &[Value]) -> i32 {
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:367-389
 fn s_get_taxid(bio_descr: &[Value], ancestors: Vec<&[Value]>) -> i32 {
-    let s = schema();
     for level in std::iter::once(bio_descr).chain(ancestors) {
         for (tag, inner) in level.iter().filter_map(as_choice) {
-            if tag == s.seqdesc_source {
+            if tag == member::seqdesc::SOURCE.index() {
                 return inner
-                    .member(s.biosrc_org)
+                    .member(member::biosource::ORG.index())
                     .and_then(|org| org_taxids(org).next())
                     .unwrap_or(0);
             }
-            if tag == s.seqdesc_org {
+            if tag == member::seqdesc::ORG.index() {
                 return org_taxids(inner).next().unwrap_or(0);
             }
         }
@@ -1005,13 +779,12 @@ fn s_get_taxid(bio_descr: &[Value], ancestors: Vec<&[Value]>) -> i32 {
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:608-640
 fn collect_descr_taxids(descr: &[Value]) -> Vec<i32> {
-    let s = schema();
     let mut taxids = Vec::new();
     for (choice, inner) in descr.iter().filter_map(as_choice) {
-        let org = if choice == s.seqdesc_org {
+        let org = if choice == member::seqdesc::ORG.index() {
             Some(inner)
-        } else if choice == s.seqdesc_source {
-            inner.member(s.biosrc_org)
+        } else if choice == member::seqdesc::SOURCE.index() {
+            inner.member(member::biosource::ORG.index())
         } else {
             None
         };
@@ -1028,26 +801,36 @@ fn collect_descr_taxids(descr: &[Value]) -> Vec<i32> {
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:441-489
 fn extract_binary_header(descr: &[Value]) -> Option<Vec<u8>> {
     const LABEL: &[u8] = b"ASN1_BlastDefLine";
-    let s = schema();
     for (choice, obj) in descr.iter().filter_map(as_choice) {
-        if choice != s.seqdesc_user {
+        if choice != member::seqdesc::USER.index() {
             continue;
         }
-        if obj.member(s.user_obj_type).and_then(object_id_str) != Some(LABEL) {
+        if obj
+            .member(member::user_object::TYPE.index())
+            .and_then(object_id_str)
+            != Some(LABEL)
+        {
             continue;
         }
         let Some(first) = obj
-            .member(s.user_obj_data)
+            .member(member::user_object::DATA.index())
             .and_then(as_list)
             .and_then(|f| f.first())
         else {
             continue;
         };
-        if first.member(s.user_field_label).and_then(object_id_str) != Some(LABEL) {
+        if first
+            .member(member::user_field::LABEL.index())
+            .and_then(object_id_str)
+            != Some(LABEL)
+        {
             continue;
         }
-        if let Some((fchoice, data)) = first.member(s.user_field_data).and_then(as_choice) {
-            if fchoice == s.user_field_oss {
+        if let Some((fchoice, data)) = first
+            .member(member::user_field::DATA.index())
+            .and_then(as_choice)
+        {
+            if fchoice == member::user_field::data::OSS.index() {
                 if let Some(Value::Octets(bytes)) = as_list(data).and_then(|oss| oss.first()) {
                     if !bytes.is_empty() {
                         return Some(bytes.clone());
@@ -1065,26 +848,37 @@ fn extract_binary_header(descr: &[Value]) -> Option<Vec<u8>> {
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1737-1765
 fn extract_cfastareader_defline(descr: &[Value]) -> Option<Vec<u8>> {
-    let s = schema();
     let mut found = None;
     for (tag, obj) in descr.iter().filter_map(as_choice) {
-        if tag != s.seqdesc_user {
+        if tag != member::seqdesc::USER.index() {
             continue;
         }
-        if obj.member(s.user_obj_type).and_then(object_id_str) != Some(b"CFastaReader") {
+        if obj
+            .member(member::user_object::TYPE.index())
+            .and_then(object_id_str)
+            != Some(b"CFastaReader")
+        {
             continue;
         }
-        let Some(fields) = obj.member(s.user_obj_data).and_then(as_list) else {
+        let Some(fields) = obj
+            .member(member::user_object::DATA.index())
+            .and_then(as_list)
+        else {
             continue;
         };
         for field in fields {
-            if field.member(s.user_field_label).and_then(object_id_str) != Some(b"DefLine") {
+            if field
+                .member(member::user_field::LABEL.index())
+                .and_then(object_id_str)
+                != Some(b"DefLine")
+            {
                 continue;
             }
-            if let Some((fchoice, Value::Str(text))) =
-                field.member(s.user_field_data).and_then(as_choice)
+            if let Some((fchoice, Value::Str(text))) = field
+                .member(member::user_field::DATA.index())
+                .and_then(as_choice)
             {
-                if fchoice == s.user_field_str {
+                if fchoice == member::user_field::data::STR.index() {
                     found = Some(text.clone());
                     break;
                 }
@@ -1103,16 +897,20 @@ fn extract_hist_old_id(hist: &Value, bio_ids: &[ParsedSeqId]) -> Option<ParsedSe
     if !matches!(best_local, ParsedSeqId::Local(_)) {
         return None;
     }
-    let s = schema();
-    let aligns = hist.member(s.seq_hist_assembly).and_then(as_list)?;
+    let aligns = hist
+        .member(member::seq_hist::ASSEMBLY.index())
+        .and_then(as_list)?;
     for align in aligns {
-        let Some((choice, seg)) = align.member(s.seq_align_segs).and_then(as_choice) else {
+        let Some((choice, seg)) = align
+            .member(member::seq_align::SEGS.index())
+            .and_then(as_choice)
+        else {
             continue;
         };
-        if choice != s.seq_align_denseg {
+        if choice != member::seq_align::segs::DENSEG.index() {
             continue;
         }
-        let dim = match seg.member(s.dense_seg_dim) {
+        let dim = match seg.member(member::dense_seg::DIM.index()) {
             Some(Value::Int(d)) => *d,
             None => 2,
             _ => continue,
@@ -1120,7 +918,7 @@ fn extract_hist_old_id(hist: &Value, bio_ids: &[ParsedSeqId]) -> Option<ParsedSe
         if dim != 2 {
             continue;
         }
-        let Some(ids) = seg.member(s.dense_seg_ids).and_then(as_list) else {
+        let Some(ids) = seg.member(member::dense_seg::IDS.index()).and_then(as_list) else {
             continue;
         };
         if ids.len() != 2 {
@@ -1145,26 +943,25 @@ fn extract_hist_old_id(hist: &Value, bio_ids: &[ParsedSeqId]) -> Option<ParsedSe
 
 /// Moves `Seq-data` bytes out of a parsed `Value` without copying.
 fn value_to_seq_data(mut val: Value) -> SeqData {
-    let s = schema();
     let Some((idx, inner)) = as_choice_mut(&mut val) else {
         return SeqData::Other;
     };
-    if idx == s.seq_data_iupacna {
+    if idx == member::seq_data::IUPACNA.index() {
         return take_str(inner).map_or(SeqData::Other, SeqData::Iupacna);
     }
-    if idx == s.seq_data_iupacaa {
+    if idx == member::seq_data::IUPACAA.index() {
         return take_str(inner).map_or(SeqData::Other, SeqData::Iupacaa);
     }
-    if idx == s.seq_data_ncbi2na {
+    if idx == member::seq_data::NCBI2NA.index() {
         return take_octets(inner).map_or(SeqData::Other, SeqData::Ncbi2na);
     }
-    if idx == s.seq_data_ncbi4na {
+    if idx == member::seq_data::NCBI4NA.index() {
         return take_octets(inner).map_or(SeqData::Other, SeqData::Ncbi4na);
     }
-    if idx == s.seq_data_ncbieaa {
+    if idx == member::seq_data::NCBIEAA.index() {
         return take_str(inner).map_or(SeqData::Other, SeqData::Ncbieaa);
     }
-    if idx == s.seq_data_ncbistdaa {
+    if idx == member::seq_data::NCBISTDAA.index() {
         return take_octets(inner).map_or(SeqData::Other, SeqData::Ncbistdaa);
     }
     SeqData::Other
@@ -1172,9 +969,8 @@ fn value_to_seq_data(mut val: Value) -> SeqData {
 
 /// Extracts `Delta-ext` items from `Seq-inst.ext`, moving literal byte buffers out of `Value`.
 fn extract_delta_ext(mut ext: Value) -> Option<Vec<AsnDeltaItem>> {
-    let s = schema();
     let (choice, inner) = as_choice_mut(&mut ext)?;
-    if choice != s.seq_ext_delta {
+    if choice != member::seq_ext::DELTA.index() {
         return None;
     }
     let items = take_list(Some(inner.take()))?;
@@ -1187,31 +983,38 @@ fn extract_delta_ext(mut ext: Value) -> Option<Vec<AsnDeltaItem>> {
         let Some((dchoice, dval)) = as_choice_mut(&mut item) else {
             continue;
         };
-        if dchoice == s.delta_loc {
-            let is_null = matches!(as_choice(dval), Some((lc, _)) if lc == s.seq_loc_null);
+        if dchoice == member::delta_seq::LOC.index() {
+            let is_null =
+                matches!(as_choice(dval), Some((lc, _)) if lc == member::seq_loc::NULL.index());
             out.push(if is_null {
                 AsnDeltaItem::LocNull
             } else {
                 AsnDeltaItem::LocOther
             });
-        } else if dchoice == s.delta_literal {
+        } else if dchoice == member::delta_seq::LITERAL.index() {
             let mut lit = dval.take();
-            let length = match lit.member(s.seq_lit_length) {
+            let length = match lit.member(member::seq_literal::LENGTH.index()) {
                 Some(Value::Int(n)) => Some(*n as u32),
                 _ => None,
             };
-            let entry = match lit.take_member(s.seq_lit_data) {
+            let entry = match lit.take_member(member::seq_literal::SEQ_DATA.index()) {
                 None => AsnDeltaItem::LiteralNoData(length),
                 Some(mut data) => match as_choice_mut(&mut data) {
-                    Some((c, v)) if c == s.seq_data_ncbi2na => match take_octets(v) {
-                        Some(bytes) => AsnDeltaItem::LiteralNcbi2na { length, bytes },
-                        None => AsnDeltaItem::LiteralUnhandled,
-                    },
-                    Some((c, v)) if c == s.seq_data_ncbi4na => match take_octets(v) {
-                        Some(bytes) => AsnDeltaItem::LiteralNcbi4na { length, bytes },
-                        None => AsnDeltaItem::LiteralUnhandled,
-                    },
-                    Some((c, _)) if c == s.seq_data_gap => AsnDeltaItem::LiteralGap { length },
+                    Some((c, v)) if c == member::seq_data::NCBI2NA.index() => {
+                        match take_octets(v) {
+                            Some(bytes) => AsnDeltaItem::LiteralNcbi2na { length, bytes },
+                            None => AsnDeltaItem::LiteralUnhandled,
+                        }
+                    }
+                    Some((c, v)) if c == member::seq_data::NCBI4NA.index() => {
+                        match take_octets(v) {
+                            Some(bytes) => AsnDeltaItem::LiteralNcbi4na { length, bytes },
+                            None => AsnDeltaItem::LiteralUnhandled,
+                        }
+                    }
+                    Some((c, _)) if c == member::seq_data::GAP.index() => {
+                        AsnDeltaItem::LiteralGap { length }
+                    }
                     _ => AsnDeltaItem::LiteralUnhandled,
                 },
             };
@@ -1543,7 +1346,6 @@ fn scan_defline_descriptors(
         ..DeflineFlags::default()
     };
 
-    let s = schema();
     let mut keywords: Option<&[Value]> = None;
     let mut first_sk: Option<&[u8]> = None;
     let mut num_sk = 0usize;
@@ -1555,8 +1357,11 @@ fn scan_defline_descriptors(
     {
         let on_bioseq = level_idx == 0;
         for (choice, inner) in level.iter().filter_map(as_choice) {
-            if choice == s.seqdesc_user {
-                if let Some(ty) = inner.member(s.user_obj_type).and_then(object_id_str) {
+            if choice == member::seqdesc::USER.index() {
+                if let Some(ty) = inner
+                    .member(member::user_object::TYPE.index())
+                    .and_then(object_id_str)
+                {
                     if ty == b"AutodefOptions" {
                         flags.has_autodef = true;
                     }
@@ -1571,12 +1376,12 @@ fn scan_defline_descriptors(
                 }
             } else if needed == 0 {
                 continue;
-            } else if choice == s.seqdesc_molinfo && (needed & F_MOLINFO != 0) {
-                let tech = match inner.member(s.molinfo_tech) {
+            } else if choice == member::seqdesc::MOLINFO.index() && (needed & F_MOLINFO != 0) {
+                let tech = match inner.member(member::molinfo::TECH.index()) {
                     Some(Value::Enum(v)) => *v,
                     _ => 0,
                 };
-                let comp = match inner.member(s.molinfo_completeness) {
+                let comp = match inner.member(member::molinfo::COMPLETENESS.index()) {
                     Some(Value::Enum(v)) => *v,
                     _ => 0,
                 };
@@ -1587,13 +1392,13 @@ fn scan_defline_descriptors(
                     flags.is_complete = false;
                 }
                 needed &= !F_MOLINFO;
-            } else if choice == s.seqdesc_comment && (needed & F_COMMENT != 0) {
+            } else if choice == member::seqdesc::COMMENT.index() && (needed & F_COMMENT != 0) {
                 if let Value::Str(comment) = inner {
                     if contains_bytes(comment, b"[CAUTION] Could be the product of a pseudogene") {
                         flags.is_pseudogene = true;
                     }
                 }
-            } else if choice == s.seqdesc_source {
+            } else if choice == member::seqdesc::SOURCE.index() {
                 if needed & F_SOURCE != 0 {
                     needed &= !F_SOURCE;
                     flags.has_source = true;
@@ -1607,20 +1412,26 @@ fn scan_defline_descriptors(
                     &mut num_sk,
                     &mut sk_diff,
                 );
-            } else if choice == s.seqdesc_title && (needed & F_TITLE != 0) {
+            } else if choice == member::seqdesc::TITLE.index() && (needed & F_TITLE != 0) {
                 if is_pdb || on_bioseq {
                     if let Value::Str(t) = inner {
                         flags.raw_title = t.clone();
                     }
                 }
                 needed &= !F_TITLE;
-            } else if choice == s.seqdesc_genbank && (needed & F_GENBANK != 0) {
-                if let Some(kw) = inner.member(s.gb_block_keywords).and_then(as_list) {
+            } else if choice == member::seqdesc::GENBANK.index() && (needed & F_GENBANK != 0) {
+                if let Some(kw) = inner
+                    .member(member::gb_block::KEYWORDS.index())
+                    .and_then(as_list)
+                {
                     keywords = Some(kw);
                 }
                 needed &= !(F_GENBANK | F_EMBL);
-            } else if choice == s.seqdesc_embl && (needed & F_EMBL != 0) {
-                if let Some(kw) = inner.member(s.embl_block_keywords).and_then(as_list) {
+            } else if choice == member::seqdesc::EMBL.index() && (needed & F_EMBL != 0) {
+                if let Some(kw) = inner
+                    .member(member::embl_block::KEYWORDS.index())
+                    .and_then(as_list)
+                {
                     keywords = Some(kw);
                 }
                 needed &= !F_EMBL;
@@ -1651,49 +1462,54 @@ fn scan_defline_descriptors(
 }
 
 fn inspect_primary_biosource(bsrc: &Value, flags: &mut DeflineFlags) {
-    let s = schema();
-    if let Some(Value::Enum(g)) = bsrc.member(s.biosrc_genome) {
+    if let Some(Value::Enum(g)) = bsrc.member(member::biosource::GENOME.index()) {
         flags.genome = *g;
     }
-    if let Some(subs) = bsrc.member(s.biosrc_subtype).and_then(as_list) {
+    if let Some(subs) = bsrc
+        .member(member::biosource::SUBTYPE.index())
+        .and_then(as_list)
+    {
         for sbs in subs {
-            let Some(Value::Enum(sub)) = sbs.member(s.subsrc_subtype) else {
+            let Some(Value::Enum(sub)) = sbs.member(member::subsource::SUBTYPE.index()) else {
                 continue;
             };
-            let has_name =
-                matches!(sbs.member(s.subsrc_name), Some(Value::Str(v)) if !v.is_empty());
+            let has_name = matches!(sbs.member(member::subsource::NAME.index()), Some(Value::Str(v)) if !v.is_empty());
             if has_name && matches!(*sub, 1 | 2 | 3 | 19 | 24 | 39) {
                 flags.has_biosrc_modifiers = true;
             }
         }
     }
-    let Some(org) = bsrc.member(s.biosrc_org) else {
+    let Some(org) = bsrc.member(member::biosource::ORG.index()) else {
         return;
     };
-    if let Some(Value::Str(taxname)) = org.member(s.org_ref_taxname) {
+    if let Some(Value::Str(taxname)) = org.member(member::org_ref::TAXNAME.index()) {
         flags.taxname = Some(taxname.clone());
     }
-    let Some(orgname) = org.member(s.org_ref_orgname) else {
+    let Some(orgname) = org.member(member::org_ref::ORGNAME.index()) else {
         return;
     };
-    if let Some((choice, inner)) = orgname.member(s.orgname_name).and_then(as_choice) {
-        if choice == s.orgname_binomial {
-            let has_g =
-                matches!(inner.member(s.binomial_genus), Some(Value::Str(v)) if !v.is_empty());
-            let has_sp =
-                matches!(inner.member(s.binomial_species), Some(Value::Str(v)) if !v.is_empty());
+    if let Some((choice, inner)) = orgname
+        .member(member::orgname::NAME.index())
+        .and_then(as_choice)
+    {
+        if choice == member::orgname::name::BINOMIAL.index() {
+            let has_g = matches!(inner.member(member::binomialorgname::GENUS.index()), Some(Value::Str(v)) if !v.is_empty());
+            let has_sp = matches!(inner.member(member::binomialorgname::SPECIES.index()), Some(Value::Str(v)) if !v.is_empty());
             if has_g || has_sp {
                 flags.has_binomial = true;
             }
-        } else if choice == s.orgname_partial {
+        } else if choice == member::orgname::name::PARTIAL.index() {
             if let Some(elems) = as_list(inner) {
                 for te in elems {
-                    let Some(Value::Enum(fl)) = te.member(s.taxelem_fixed_level) else {
+                    let Some(Value::Enum(fl)) = te.member(member::taxelement::FIXED_LEVEL.index())
+                    else {
                         continue;
                     };
                     if *fl > 0 {
                         flags.is_multispecies = true;
-                    } else if let Some(Value::Str(lvl)) = te.member(s.taxelem_level) {
+                    } else if let Some(Value::Str(lvl)) =
+                        te.member(member::taxelement::LEVEL.index())
+                    {
                         if !lvl.eq_ignore_ascii_case(b"species") {
                             flags.is_multispecies = true;
                         }
@@ -1702,13 +1518,15 @@ fn inspect_primary_biosource(bsrc: &Value, flags: &mut DeflineFlags) {
             }
         }
     }
-    if let Some(mods) = orgname.member(s.orgname_mod).and_then(as_list) {
+    if let Some(mods) = orgname
+        .member(member::orgname::MOD.index())
+        .and_then(as_list)
+    {
         for m in mods {
-            let Some(Value::Enum(sub)) = m.member(s.orgmod_subtype) else {
+            let Some(Value::Enum(sub)) = m.member(member::orgmod::SUBTYPE.index()) else {
                 continue;
             };
-            let has_val =
-                matches!(m.member(s.orgmod_subname), Some(Value::Str(v)) if !v.is_empty());
+            let has_val = matches!(m.member(member::orgmod::SUBNAME.index()), Some(Value::Str(v)) if !v.is_empty());
             if has_val && matches!(*sub, 2 | 3 | 10 | 17 | 23 | 31) {
                 flags.has_biosrc_modifiers = true;
             }
@@ -1724,37 +1542,52 @@ fn inspect_any_biosource<'a>(
     num_sk: &mut usize,
     sk_diff: &mut bool,
 ) {
-    let s = schema();
     let Some(orgname) = bsrc
-        .member(s.biosrc_org)
-        .and_then(|o| o.member(s.org_ref_orgname))
+        .member(member::biosource::ORG.index())
+        .and_then(|o| o.member(member::org_ref::ORGNAME.index()))
     else {
         return;
     };
-    if let Some(om_list) = orgname.member(s.orgname_mod).and_then(as_list) {
+    if let Some(om_list) = orgname
+        .member(member::orgname::MOD.index())
+        .and_then(as_list)
+    {
         for m in om_list {
-            let is_mg = matches!(m.member(s.orgmod_subtype), Some(Value::Enum(37)));
-            if is_mg && matches!(m.member(s.orgmod_subname), Some(Value::Str(v)) if !v.is_empty()) {
+            let is_mg = matches!(
+                m.member(member::orgmod::SUBTYPE.index()),
+                Some(Value::Enum(37))
+            );
+            if is_mg
+                && matches!(m.member(member::orgmod::SUBNAME.index()), Some(Value::Str(v)) if !v.is_empty())
+            {
                 flags.has_metagenome_source = true;
             }
         }
     }
     if is_wp {
-        if let Some((choice, partial_val)) = orgname.member(s.orgname_name).and_then(as_choice) {
-            if choice == s.orgname_partial {
+        if let Some((choice, partial_val)) = orgname
+            .member(member::orgname::NAME.index())
+            .and_then(as_choice)
+        {
+            if choice == member::orgname::name::PARTIAL.index() {
                 if let Some(tax_elems) = as_list(partial_val) {
                     for te in tax_elems {
-                        if !matches!(te.member(s.taxelem_fixed_level), Some(Value::Enum(0))) {
+                        if !matches!(
+                            te.member(member::taxelement::FIXED_LEVEL.index()),
+                            Some(Value::Enum(0))
+                        ) {
                             continue;
                         }
-                        let Some(Value::Str(lvl)) = te.member(s.taxelem_level) else {
+                        let Some(Value::Str(lvl)) = te.member(member::taxelement::LEVEL.index())
+                        else {
                             continue;
                         };
                         if !lvl.eq_ignore_ascii_case(b"superkingdom") {
                             continue;
                         }
                         *num_sk += 1;
-                        if let Some(Value::Str(name)) = te.member(s.taxelem_name) {
+                        if let Some(Value::Str(name)) = te.member(member::taxelement::NAME.index())
+                        {
                             match *first_sk {
                                 None => *first_sk = Some(name.as_slice()),
                                 Some(first) if !first.eq_ignore_ascii_case(name) => *sk_diff = true,

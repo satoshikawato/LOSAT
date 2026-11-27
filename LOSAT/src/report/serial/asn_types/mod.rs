@@ -244,6 +244,42 @@ impl Member {
     }
 }
 
+/// A member of a SEQUENCE or a variant of a CHOICE as the generator names it
+/// (`table::member::seq_feat::LOCATION`): what NCBI's generated getter (`GetLocation()`) reads,
+/// fixed at compile time, so that a reader looks no name up while it reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct M {
+    /// The SEQUENCE or CHOICE that has it (its index in `table::TYPES`).
+    pub(crate) of: u16,
+    /// Its position there (`members`).
+    pub(crate) at: u16,
+    /// Its type.
+    pub(crate) ty: u16,
+}
+
+impl M {
+    /// The position, as `member` and `take_member` of `Value` take it.
+    #[inline]
+    pub(crate) fn index(self) -> usize {
+        usize::from(self.at)
+    }
+
+    /// Whether a value of the type `ty` has the member: `ty` is the type that has it, or a named
+    /// alias of that type (`Ref-ext ::= Seq-loc`).
+    #[inline]
+    pub(crate) fn is_of(self, mut ty: u16) -> bool {
+        loop {
+            if ty == self.of {
+                return true;
+            }
+            match type_info(ty).kind {
+                Kind::Alias(target) => ty = target,
+                _ => return false,
+            }
+        }
+    }
+}
+
 /// The C++ storage of an INTEGER (`.def` `_type`), which decides how NCBI reads it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Storage {

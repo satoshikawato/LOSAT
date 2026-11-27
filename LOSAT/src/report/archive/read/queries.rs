@@ -32,6 +32,7 @@ use crate::sequence::stdaa_letters::protein_fasta_letters;
 use crate::sequence::FastaLines;
 
 use super::request::{self, Bioseq};
+use crate::report::serial::asn_types::table::member;
 
 /// Why the queries are not written.
 #[derive(Debug)]
@@ -134,7 +135,7 @@ impl Text {
 /// each entry of the set in turn, into `text`.
 pub fn render_queries(set: V<'_>, mut text: Text) -> Result<Rendered, RenderError> {
     let mut stream = FastaOstream::default();
-    for entry in set.field("seq-set").items() {
+    for entry in set.field(member::bioseq_set::SEQ_SET).items() {
         stream.write_entry(entry, &mut text)?;
     }
     text.finish()
@@ -255,7 +256,7 @@ impl FastaOstream {
     fn write_title<'a>(&mut self, bioseq: Bioseq<'a>) -> Result<Sequence<'a>, RenderError> {
         self.line.clear();
         let ids: Vec<ParsedSeqId> = bioseq.ids().cloned().collect();
-        let inst = bioseq.value().field("inst");
+        let inst = bioseq.value().field(member::bioseq::INST);
         let protein = bioseq.molecule() == MOL_AA;
         self.write_seq_ids(bioseq, &ids, protein)?;
         let Some(length) = bioseq.length() else {
@@ -265,7 +266,12 @@ impl FastaOstream {
             )));
         };
         let title = title_descriptor(bioseq)?;
-        if title.is_none() && matches!(inst.field("repr").int(), REPR_SEG | REPR_MAP) {
+        if title.is_none()
+            && matches!(
+                inst.field(member::seq_inst::REPR).int(),
+                REPR_SEG | REPR_MAP
+            )
+        {
             // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4022-4028
             // The generator's titles of segmented and map Bioseqs (`x_SetTitleFromSegSeq`,
             // `x_SetTitleFromMap`) are not modelled.
@@ -387,19 +393,21 @@ fn entry_bioseqs(entry: V<'_>) -> Result<Vec<Bioseq<'_>>, RenderError> {
     while let Some(entry) = todo.pop() {
         match entry.choice() {
             ("seq", bioseq) => {
-                if bioseq.get("annot").is_some() {
+                if bioseq.get(member::bioseq::ANNOT).is_some() {
                     return Err(RenderError::Unsupported(
                         "a query Bioseq with annotations".into(),
                     ));
                 }
             }
             (_, set) => {
-                if set.get("descr").is_some() || set.get("annot").is_some() {
+                if set.get(member::bioseq_set::DESCR).is_some()
+                    || set.get(member::bioseq_set::ANNOT).is_some()
+                {
                     return Err(RenderError::Unsupported(
                         "a nested Bioseq-set with descriptors or annotations in the queries".into(),
                     ));
                 }
-                todo.extend(set.field("seq-set").items());
+                todo.extend(set.field(member::bioseq_set::SEQ_SET).items());
             }
         }
     }
@@ -496,20 +504,25 @@ fn original_id<'a>(bioseq: Bioseq<'a>, ids: &[ParsedSeqId]) -> Option<&'a [u8]> 
         .descriptors()
         .filter_map(|(variant, user)| (variant == "user").then_some(user))
         .filter(|user| {
-            matches!(user.field("type").choice(), ("str", kind)
+            matches!(user.field(member::user_object::TYPE).choice(), ("str", kind)
                 if is_original_id_type(kind.str()))
         })
         .find_map(|user| {
-            user.field("data").items().find_map(|field| {
-                match (field.field("label").choice(), field.field("data").choice()) {
-                    (("str", label), ("str", text))
-                        if label.str().eq_ignore_ascii_case(b"LocalId") =>
-                    {
-                        Some(text.str())
+            user.field(member::user_object::DATA)
+                .items()
+                .find_map(|field| {
+                    match (
+                        field.field(member::user_field::LABEL).choice(),
+                        field.field(member::user_field::DATA).choice(),
+                    ) {
+                        (("str", label), ("str", text))
+                            if label.str().eq_ignore_ascii_case(b"LocalId") =>
+                        {
+                            Some(text.str())
+                        }
+                        _ => None,
                     }
-                    _ => None,
-                }
-            })
+                })
         })?;
     // `NStr::IsBlank`: `isspace` of every byte, in the C locale.
     (!found
@@ -535,7 +548,7 @@ fn title_descriptor(bioseq: Bioseq<'_>) -> Result<Option<&[u8]>, RenderError> {
     for (variant, desc) in bioseq.descriptors() {
         match variant {
             "user" => {
-                if let ("str", kind) = desc.field("type").choice() {
+                if let ("str", kind) = desc.field(member::user_object::TYPE).choice() {
                     let kind = kind.str();
                     if kind != b"CFastaReader" && !is_original_id_type(kind) {
                         return Err(RenderError::Unsupported(format!(
@@ -677,17 +690,17 @@ fn append_letters(
 /// (`n_seg`, `n_delta_loc`: `Cannot resolve lcl|Other: unknown`), in a message LOSAT does not
 /// reproduce.
 fn sequence_map(inst: V<'_>, length: u32) -> Result<Vec<Piece<'_>>, RenderError> {
-    if let Some(data) = inst.get("seq-data") {
+    if let Some(data) = inst.get(member::seq_inst::SEQ_DATA) {
         return Ok(vec![data_piece(data, length)]);
     }
-    if let Some(ext) = inst.get("ext") {
+    if let Some(ext) = inst.get(member::seq_inst::EXT) {
         return match ext.choice() {
             ("delta", delta) => delta
                 .items()
                 .map(|item| match item.choice() {
                     ("literal", literal) => {
-                        let length = seq_length(literal.field("length").int())?;
-                        Ok(match literal.get("seq-data") {
+                        let length = seq_length(literal.field(member::seq_literal::LENGTH).int())?;
+                        Ok(match literal.get(member::seq_literal::SEQ_DATA) {
                             Some(data) => data_piece(data, length),
                             None => Piece::Gap(length),
                         })
@@ -699,7 +712,7 @@ fn sequence_map(inst: V<'_>, length: u32) -> Result<Vec<Piece<'_>>, RenderError>
             _ => Err(far_pointer()),
         };
     }
-    match inst.field("repr").int() {
+    match inst.field(member::seq_inst::REPR).int() {
         REPR_VIRTUAL | REPR_MAP => Ok(vec![Piece::Gap(length)]),
         REPR_NOT_SET if length == 0 => Ok(vec![Piece::Gap(0)]),
         REPR_NOT_SET => Err(seq_map_error(

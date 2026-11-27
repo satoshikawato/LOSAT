@@ -1,4 +1,5 @@
 use super::*;
+use crate::report::serial::asn_types::members;
 use crate::seqid::model::{ObjectId, TextseqId};
 
 fn parsed(defline: &[u8], ids: Vec<ParsedSeqId>, title: Option<&[u8]>) -> ParsedIds {

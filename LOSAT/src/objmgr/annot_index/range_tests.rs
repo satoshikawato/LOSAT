@@ -497,8 +497,8 @@ fn a_map_iterates_its_seq_ids_by_packed_number() {
     };
     let order: Vec<Vec<usize>> = m
         .ncbi_order()
-        .into_iter()
-        .map(|group| group.into_iter().map(at).collect())
+        .chunk_by(|a, b| a.0 == b.0)
+        .map(|group| group.iter().map(|&(_, entry)| at(entry)).collect())
         .collect();
     assert_eq!(
         order,

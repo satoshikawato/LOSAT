@@ -7,9 +7,9 @@
 
 use super::Stop;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::serial::asn_types::table::named;
+use crate::report::serial::asn_types::table::{member, named};
 use crate::report::serial::asn_types::view::V;
-use crate::report::serial::asn_types::{member_index, members, Value};
+use crate::report::serial::asn_types::{members, Value, M};
 use crate::seqid::rank::{best_rank_score, find_best};
 use crate::seqid::ParsedSeqId;
 
@@ -85,9 +85,9 @@ impl Param {
     }
 }
 
-/// The member `name` of the SEQUENCE `value` of the type `ty`, moved out.
-fn take(value: &mut Value, ty: u16, name: &str) -> Option<Value> {
-    value.take_member(member_index(ty, name))
+/// The member `m` of the SEQUENCE `value`, moved out.
+fn take(value: &mut Value, m: M) -> Option<Value> {
+    value.take_member(m.index())
 }
 
 /// The variant of the CHOICE `value` of the type `ty`: its name and value, moved out.
@@ -145,14 +145,15 @@ impl Request {
     }
 
     fn read(mut request: Value, reader: Reader) -> Result<Option<Request>, Stop> {
-        let ty = named::BLAST4_REQUEST;
         // `ident` (`GetCreatedBy`, the version of the program that wrote the archive) changes no
         // output (probes P8.001-012); NCBI's archive reader stops on a search request without it.
-        let has_ident = take(&mut request, ty, "ident").is_some();
-        let mut body = take(&mut request, ty, "body").expect("the mandatory body");
+        let has_ident = take(&mut request, member::blast4_request::IDENT).is_some();
+        let mut body =
+            take(&mut request, member::blast4_request::BODY).expect("the mandatory body");
         let (variant, mut search) = take_variant(&mut body, named::BLAST4_REQUEST_BODY);
         if reader == Reader::Archive && variant == "get-request-info" {
-            let id = V::new(named::BLAST4_GET_REQUEST_INFO_REQUEST, &search).field("request-id");
+            let id = V::new(named::BLAST4_GET_REQUEST_INFO_REQUEST, &search)
+                .field(member::blast4_get_request_info_request::REQUEST_ID);
             if id.str() == b"Error" {
                 return Ok(None);
             }
@@ -178,36 +179,37 @@ impl Request {
         if V::new(ty, &search).holds_null_element() {
             return Err(Stop::NullElement);
         }
-        let mut text = |name: &str| {
-            let mut value = take(&mut search, ty, name).expect("a mandatory string");
+        use member::blast4_queue_search_request as qs;
+        let mut text = |m: M| {
+            let mut value = take(&mut search, m).expect("a mandatory string");
             take_str(&mut value)
         };
-        let (program, service) = (text("program"), text("service"));
-        let mut queries = take(&mut search, ty, "queries").expect("the mandatory queries");
+        let (program, service) = (text(qs::PROGRAM), text(qs::SERVICE));
+        let mut queries = take(&mut search, qs::QUERIES).expect("the mandatory queries");
         let queries = match take_variant(&mut queries, named::BLAST4_QUERIES) {
             ("pssm", pssm) => Queries::Pssm(pssm),
             ("seq-loc-list", mut locs) => Queries::SeqLocList(take_items(&mut locs)),
             (_, set) => Queries::BioseqSet(set),
         };
-        let mut subject = take(&mut search, ty, "subject").expect("the mandatory subject");
+        let mut subject = take(&mut search, qs::SUBJECT).expect("the mandatory subject");
         let subject = match take_variant(&mut subject, named::BLAST4_SUBJECT) {
             ("database", mut name) => Subject::Database(take_str(&mut name)),
             ("sequences", mut bioseqs) => Subject::Sequences(take_items(&mut bioseqs)),
             _ => Subject::SeqLocList,
         };
         let mut params = Vec::new();
-        for (set, name) in [
-            (ParamSet::Algorithm, "algorithm-options"),
-            (ParamSet::Program, "program-options"),
-            (ParamSet::Format, "format-options"),
+        for (set, m) in [
+            (ParamSet::Algorithm, qs::ALGORITHM_OPTIONS),
+            (ParamSet::Program, qs::PROGRAM_OPTIONS),
+            (ParamSet::Format, qs::FORMAT_OPTIONS),
         ] {
-            let Some(mut list) = take(&mut search, ty, name) else {
+            let Some(mut list) = take(&mut search, m) else {
                 continue;
             };
             params.extend(take_items(&mut list).into_iter().map(|mut param| {
-                let ty = named::BLAST4_PARAMETER;
-                let name = take_str(&mut take(&mut param, ty, "name").expect("the name"));
-                let value = take(&mut param, ty, "value").expect("the value");
+                use member::blast4_parameter as p;
+                let name = take_str(&mut take(&mut param, p::NAME).expect("the name"));
+                let value = take(&mut param, p::VALUE).expect("the value");
                 Param { set, name, value }
             }));
         }
@@ -282,7 +284,9 @@ impl Queries {
         match self {
             Queries::Pssm(_) => 1,
             Queries::SeqLocList(locs) => locs.len(),
-            Queries::BioseqSet(set) => V::new(named::BIOSEQ_SET, set).field("seq-set").len(),
+            Queries::BioseqSet(set) => V::new(named::BIOSEQ_SET, set)
+                .field(member::bioseq_set::SEQ_SET)
+                .len(),
         }
     }
 
@@ -312,8 +316,8 @@ impl Queries {
             Queries::BioseqSet(set) => set_bioseqs(V::new(named::BIOSEQ_SET, set), &mut out),
             Queries::Pssm(pssm) => {
                 if let Some(entry) = V::new(named::PSSMWITHPARAMETERS, pssm)
-                    .field("pssm")
-                    .get("query")
+                    .field(member::pssmwithparameters::PSSM)
+                    .get(member::pssm::QUERY)
                 {
                     entry_bioseqs(entry, &mut out);
                 }
@@ -331,8 +335,8 @@ impl Queries {
     pub(crate) fn query_ids(&self) -> Result<Vec<Option<&ParsedSeqId>>, Stop> {
         if let Queries::Pssm(pssm) = self {
             let query = V::new(named::PSSMWITHPARAMETERS, pssm)
-                .field("pssm")
-                .get("query");
+                .field(member::pssmwithparameters::PSSM)
+                .get(member::pssm::QUERY);
             if query.is_none() {
                 return Err(Stop::Unassigned {
                     type_name: "Pssm",
@@ -368,14 +372,14 @@ impl Subject {
 /// types of the table, a Bioseq is only the `seq` of a `Seq-entry`, and the entries of a set
 /// are its `seq-set`).
 fn set_bioseqs<'a>(set: V<'a>, out: &mut Vec<Bioseq<'a>>) {
-    let mut todo: Vec<V<'a>> = set.field("seq-set").items().collect();
+    let mut todo: Vec<V<'a>> = set.field(member::bioseq_set::SEQ_SET).items().collect();
     todo.reverse();
     while let Some(entry) = todo.pop() {
         match entry.choice() {
             ("seq", bioseq) => out.push(Bioseq(bioseq)),
             (_, set) => {
                 let at = todo.len();
-                todo.extend(set.field("seq-set").items());
+                todo.extend(set.field(member::bioseq_set::SEQ_SET).items());
                 todo[at..].reverse();
             }
         }
@@ -407,7 +411,10 @@ impl<'a> Bioseq<'a> {
 
     /// Its ids (`GetId()`), in order.
     pub(crate) fn ids(self) -> impl Iterator<Item = &'a ParsedSeqId> {
-        self.0.field("id").items().map(|id| id.seq_id())
+        self.0
+            .field(member::bioseq::ID)
+            .items()
+            .map(|id| id.seq_id())
     }
 
     /// `FindBestChoice` of the ids by `CSeq_id::BestRank`: the first id of the best rank, `None`
@@ -419,7 +426,7 @@ impl<'a> Bioseq<'a> {
     /// The descriptors (`descr`) in order.
     pub(super) fn descriptors(self) -> impl Iterator<Item = (&'static str, V<'a>)> {
         self.0
-            .get("descr")
+            .get(member::bioseq::DESCR)
             .into_iter()
             .flat_map(|descr| descr.items())
             .map(|desc| desc.choice())
@@ -439,10 +446,10 @@ impl<'a> Bioseq<'a> {
         self.descriptors()
             .filter(|(variant, _)| *variant == "user")
             .map(|(_, user)| user)
-            .find(|user| matches!(user.field("type").choice(), ("str", kind) if kind.str() == b"CFastaReader"))
+            .find(|user| matches!(user.field(member::user_object::TYPE).choice(), ("str", kind) if kind.str() == b"CFastaReader"))
             .and_then(|user| {
-                user.field("data").items().find_map(|field| {
-                    match (field.field("label").choice(), field.field("data").choice()) {
+                user.field(member::user_object::DATA).items().find_map(|field| {
+                    match (field.field(member::user_field::LABEL).choice(), field.field(member::user_field::DATA).choice()) {
                         (("str", label), ("str", text)) if label.str() == b"DefLine" => {
                             Some(text.str())
                         }
@@ -454,20 +461,25 @@ impl<'a> Bioseq<'a> {
 
     /// `inst.mol` (`Seq-inst.mol`, ENUMERATED: 0 not-set, 1 dna, 2 rna, 3 aa, 4 na, 255 other).
     pub(crate) fn molecule(self) -> i64 {
-        self.0.field("inst").field("mol").int()
+        self.0
+            .field(member::bioseq::INST)
+            .field(member::seq_inst::MOL)
+            .int()
     }
 
     /// `inst.length`, when set.
     pub(crate) fn length(self) -> Option<i64> {
         self.0
-            .field("inst")
-            .get("length")
+            .field(member::bioseq::INST)
+            .get(member::seq_inst::LENGTH)
             .map(|length| length.int())
     }
 
     /// `inst.seq-data` as read (a `Seq-data` CHOICE of any coding).
     #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn seq_data(self) -> Option<V<'a>> {
-        self.0.field("inst").get("seq-data")
+        self.0
+            .field(member::bioseq::INST)
+            .get(member::seq_inst::SEQ_DATA)
     }
 }

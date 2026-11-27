@@ -16,7 +16,7 @@ use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::asn_text_reader::real_of_parts;
 use crate::report::serial::asn_types::read_xml::XmlStyle;
 use crate::report::serial::asn_types::stream::{guess_encoding, text_stream, Encoding};
-use crate::report::serial::asn_types::table::named;
+use crate::report::serial::asn_types::table::{member, named};
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::write::write_document;
 use crate::report::serial::asn_types::{read_document, ReadError, Value};
@@ -774,9 +774,10 @@ fn the_psiblast_archives_are_read() {
     let search = search_of(&archives[0]);
     let queries = &search.request.queries;
     assert_eq!(
-        queries
-            .pssm()
-            .map(|pssm| pssm.field("pssm").field("numColumns").int()),
+        queries.pssm().map(|pssm| pssm
+            .field(member::pssmwithparameters::PSSM)
+            .field(member::pssm::NUMCOLUMNS)
+            .int()),
         Some(30)
     );
     let bioseqs = queries.bioseqs();

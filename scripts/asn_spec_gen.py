@@ -704,6 +704,8 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
         w(f"    pub(crate) const {const}: u16 = {index};")
     w("}")
     w("")
+    emit_members(table, w)
+    w("")
     w("/// Every name of the table, once.")
     w(f"pub(crate) const NAMES: &str = {rust_str(names.text)};")
     w("")
@@ -720,6 +722,81 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     w("];")
     w("")
     return "\n".join(out)
+
+
+RUST_KEYWORDS = {
+    "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if",
+    "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "static",
+    "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while", "async", "await",
+    "dyn", "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof", "unsized",
+    "virtual", "yield", "try", "gen",
+}
+
+
+def module_name(part: str) -> str:
+    """A part of a type's place (`Seq-annot`, `data`, `E`) as a Rust module name."""
+    name = const_name(part).lower()
+    return "r#" + name if name in RUST_KEYWORDS else name
+
+
+def emit_members(table: Table, w) -> None:
+    """`member`: each member of a SEQUENCE and each variant of a CHOICE as a constant (`M`: the
+    type that has it, its position, its type), so that a reader names it once, at compile time,
+    instead of looking its name up while it reads. A named type's constants are in the module of
+    its name; an anonymous type's in the module of its place of use, nested in its owner's
+    (`seq_annot::data` for `Seq-annot.data`)."""
+    tops: dict[str, tuple[str, str]] = {}
+    for module, name in table.named:
+        top = module_name(name)
+        if top in tops and tops[top] != (module, name):
+            raise SystemExit(f"{module} {name}: the member module {top} is taken by {tops[top]}")
+        tops[top] = (module, name)
+    # The module tree: each node is [entry or None, {part: node}], in the table's order.
+    root: list = [None, {}]
+    for e in table.entries:
+        if e.kind not in ("Sequence", "Choice"):
+            continue
+        parts = [e.name] if e.name else e.path.split(".")
+        node = root
+        for part in parts:
+            node = node[1].setdefault(module_name(part), [None, {}])
+        if node[0] is not None:
+            raise SystemExit(f"{e.name or e.path}: the member module is taken")
+        node[0] = e
+
+    def emit_node(name: str, node: list, depth: int) -> None:
+        pad = "    " * depth
+        e = node[0]
+        w("")
+        if e is not None:
+            label = f"{e.module} {e.name}" if e.name else e.path
+            kind = "CHOICE" if e.kind == "Choice" else "SEQUENCE"
+            w(f"{pad}/// {label} ({kind}, type {e.index}).")
+        else:
+            w(f"{pad}/// The anonymous types used in `{name.removeprefix('r#')}`.")
+        w(f"{pad}pub(crate) mod {name} {{")
+        if e is not None:
+            w(f"{pad}    use crate::report::serial::asn_types::M;")
+            consts: set[str] = set()
+            for position, (spec, element, _delayed) in enumerate(e.members):
+                const = const_name(spec.name)
+                if const in consts:
+                    raise SystemExit(f"{e.name or e.path}.{spec.name}: the constant {const} is taken")
+                consts.add(const)
+                w(f"{pad}    pub(crate) const {const}: M = M {{ of: {e.index}, at: {position}, ty: {element} }};")
+        for child, sub in node[1].items():
+            emit_node(child, sub, depth + 1)
+        w(f"{pad}}}")
+
+    w("/// Each member of a SEQUENCE and each variant of a CHOICE (`asn_types::M`: the type that has it,")
+    w("/// its position there, its type): a named type's in the module of its name in lower case, an")
+    w("/// anonymous type's in the module of its place of use within its owner's (`seq_annot::data`);")
+    w("/// the member's name in upper case with `_` for `-`.")
+    w("#[allow(dead_code)]")
+    w("pub(crate) mod member {")
+    for child, sub in root[1].items():
+        emit_node(child, sub, 1)
+    w("}")
 
 
 # The PSSM's root first, then the mask file's: the types they reach keep their indices when roots

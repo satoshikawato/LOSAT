@@ -35,9 +35,9 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_input::Input;
 use crate::report::serial::asn_types::read::ObjectStream;
 use crate::report::serial::asn_types::stream::{BinaryStream, TextStream, XmlStream};
-use crate::report::serial::asn_types::table::named;
+use crate::report::serial::asn_types::table::{member, named};
 use crate::report::serial::asn_types::view::V;
-use crate::report::serial::asn_types::{member_index, Post, ReadError, Value};
+use crate::report::serial::asn_types::{Post, ReadError, Value};
 use crate::seqid::ParsedSeqId;
 
 use request::Request;
@@ -193,10 +193,10 @@ impl Archive {
     /// its body and `ident`, the results after the request.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1700-1705
     pub(crate) fn from_value(mut value: Value) -> Archive {
-        let ty = named::BLAST4_ARCHIVE;
+        use member::blast4_archive::{MESSAGES, REQUEST, RESULTS};
         let messages = value
-            .member(member_index(ty, "messages"))
-            .map(|list| V::new(member_type(ty, "messages"), list));
+            .member(MESSAGES.index())
+            .map(|list| V::new(MESSAGES.ty, list));
         if messages.is_some_and(|list| list.holds_null_element()) {
             return Archive {
                 messages: Vec::new(),
@@ -205,15 +205,13 @@ impl Archive {
         }
         let messages = messages.map(messages_of).unwrap_or_default();
         let request = value
-            .take_member(member_index(ty, "request"))
+            .take_member(REQUEST.index())
             .expect("the mandatory request");
         let results = value
-            .take_member(member_index(ty, "results"))
+            .take_member(RESULTS.index())
             .expect("the mandatory results");
         let search = Request::from_value(request).and_then(|request| match request {
-            Some(_) if V::new(member_type(ty, "results"), &results).holds_null_element() => {
-                Err(Stop::NullElement)
-            }
+            Some(_) if V::new(RESULTS.ty, &results).holds_null_element() => Err(Stop::NullElement),
             request => Ok(request.map(|request| Search {
                 request,
                 results: Results::from_value(results),
@@ -221,11 +219,6 @@ impl Archive {
         });
         Archive { messages, search }
     }
-}
-
-/// The type of the member `name` of `ty`.
-pub(crate) fn member_type(ty: u16, name: &str) -> u16 {
-    crate::report::serial::asn_types::members(ty)[member_index(ty, name)].ty
 }
 
 /// The stored messages as `LoadFromArchive` posts them: each with a `message`, its `code` taken
@@ -236,16 +229,17 @@ pub(crate) fn member_type(ty: u16, name: &str) -> u16 {
 fn messages_of(list: V<'_>) -> Vec<Message> {
     list.items()
         .filter_map(|error| {
-            let text = error.get("message")?.str();
-            let (severity, prefix): (Severity, &[u8]) = match error.field("code").int() {
-                0 => (Severity::Info, b""),
-                1 => (Severity::Warning, b""),
-                2 => (Severity::Error, b""),
-                3 => (Severity::Critical, b""),
-                4 => (Severity::Fatal, b""),
-                5 => (Severity::Trace, b""),
-                _ => (Severity::Error, b"Unknown Error Code: "),
-            };
+            let text = error.get(member::blast4_error::MESSAGE)?.str();
+            let (severity, prefix): (Severity, &[u8]) =
+                match error.field(member::blast4_error::CODE).int() {
+                    0 => (Severity::Info, b""),
+                    1 => (Severity::Warning, b""),
+                    2 => (Severity::Error, b""),
+                    3 => (Severity::Critical, b""),
+                    4 => (Severity::Fatal, b""),
+                    5 => (Severity::Trace, b""),
+                    _ => (Severity::Error, b"Unknown Error Code: "),
+                };
             Some(Message {
                 severity,
                 text: [prefix, text].concat(),
@@ -270,15 +264,25 @@ pub(crate) fn seq_loc_id(loc: V<'_>) -> Option<&ParsedSeqId> {
         let same = match variant {
             "null" => true,
             "empty" | "whole" => update_id(&mut total, value.seq_id()),
-            "int" | "pnt" | "packed-pnt" => update_id(&mut total, value.field("id").seq_id()),
-            "packed-int" => value
-                .items()
-                .all(|interval| update_id(&mut total, interval.field("id").seq_id())),
+            "int" => update_id(&mut total, value.field(member::seq_interval::ID).seq_id()),
+            "pnt" => update_id(&mut total, value.field(member::seq_point::ID).seq_id()),
+            "packed-pnt" => update_id(&mut total, value.field(member::packed_seqpnt::ID).seq_id()),
+            "packed-int" => value.items().all(|interval| {
+                update_id(
+                    &mut total,
+                    interval.field(member::seq_interval::ID).seq_id(),
+                )
+            }),
             "bond" => {
-                update_id(&mut total, value.field("a").field("id").seq_id())
-                    && value
-                        .get("b")
-                        .is_none_or(|b| update_id(&mut total, b.field("id").seq_id()))
+                update_id(
+                    &mut total,
+                    value
+                        .field(member::seq_bond::A)
+                        .field(member::seq_point::ID)
+                        .seq_id(),
+                ) && value
+                    .get(member::seq_bond::B)
+                    .is_none_or(|b| update_id(&mut total, b.field(member::seq_point::ID).seq_id()))
             }
             "mix" | "equiv" => {
                 // The parts in order, the first on top.
@@ -377,9 +381,9 @@ fn align_row_id<'a>(
     row: usize,
     todo: &mut Vec<V<'a>>,
 ) -> Result<Option<&'a ParsedSeqId>, Stop> {
-    let (variant, segs) = align.field("segs").choice();
+    let (variant, segs) = align.field(member::seq_align::SEGS).choice();
     match variant {
-        "denseg" => match segs.field("ids").item(row) {
+        "denseg" => match segs.field(member::dense_seg::IDS).item(row) {
             Some(id) => Ok(Some(id.seq_id())),
             None => Err(seqalign_exception(
                 DENSE_SEG_CPP,
@@ -389,10 +393,14 @@ fn align_row_id<'a>(
             )),
         },
         "sparse" => {
-            let rows = segs.field("rows");
+            let rows = segs.field(member::sparse_seg::ROWS);
             let id = match row {
-                0 => rows.item(0).map(|first| first.field("first-id")),
-                _ => rows.item(row - 1).map(|align| align.field("second-id")),
+                0 => rows
+                    .item(0)
+                    .map(|first| first.field(member::sparse_align::FIRST_ID)),
+                _ => rows
+                    .item(row - 1)
+                    .map(|align| align.field(member::sparse_align::SECOND_ID)),
             };
             match id {
                 Some(id) => Ok(Some(id.seq_id())),
@@ -406,16 +414,17 @@ fn align_row_id<'a>(
         }
         "dendiag" => Ok(segs
             .items()
-            .find_map(|seg| seg.field("ids").item(row))
+            .find_map(|seg| seg.field(member::dense_diag::IDS).item(row))
             .map(|id| id.seq_id())),
-        "std" => {
-            Ok(segs
-                .items()
-                .find_map(|seg| match seg.get("ids").and_then(|ids| ids.item(row)) {
-                    Some(id) => Some(id.seq_id()),
-                    None => seg.field("loc").item(row).and_then(seq_loc_id),
-                }))
-        }
+        "std" => Ok(segs.items().find_map(|seg| {
+            match seg.get(member::std_seg::IDS).and_then(|ids| ids.item(row)) {
+                Some(id) => Some(id.seq_id()),
+                None => seg
+                    .field(member::std_seg::LOC)
+                    .item(row)
+                    .and_then(seq_loc_id),
+            }
+        })),
         "disc" => {
             let at = todo.len();
             todo.extend(segs.items());
@@ -423,8 +432,12 @@ fn align_row_id<'a>(
             Ok(None)
         }
         "spliced" => Ok(match row {
-            0 => segs.get("product-id").map(|id| id.seq_id()),
-            1 => segs.get("genomic-id").map(|id| id.seq_id()),
+            0 => segs
+                .get(member::spliced_seg::PRODUCT_ID)
+                .map(|id| id.seq_id()),
+            1 => segs
+                .get(member::spliced_seg::GENOMIC_ID)
+                .map(|id| id.seq_id()),
             _ => None,
         }),
         _ => Err(seqalign_exception(

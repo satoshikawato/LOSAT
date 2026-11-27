@@ -32,7 +32,11 @@ use view::V;
 use crate::ncbi_exception::{post_line_in, NcbiException, Severity};
 use crate::report::diag_log::Posts;
 use crate::report::serial::asn_types::view;
-use crate::report::serial::asn_types::{resolved, table::named, write::failed_stream_text};
+use crate::report::serial::asn_types::{
+    resolved,
+    table::{member, named},
+    write::failed_stream_text,
+};
 use crate::report::serial::pssm::SeqEntry;
 
 /// What NCBI's object manager made of the query's annotations: its messages in order, each one
@@ -243,14 +247,12 @@ impl RefElement for V<'_> {
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1227-1252 (`x_MapFeatIds`, after
 // the feature's locations are mapped: its `id`, each of its `ids`, a gene's names, then each of
 // its `xref`s)
-/// The elements of the feature `feat` that its index by its ids reads (`x_MapFeatIds`): each of
-/// its `ids` and of its `xref`s, through the reference (`RefElement::deref`). The index by ids
-/// changes no output of LOSAT's.
-fn feature_ids(feat: V<'_>) -> Result<(), Stop> {
-    for name in ["ids", "xref"] {
-        for element in feat.get(name).into_iter().flat_map(V::items) {
-            element.deref()?;
-        }
+/// The elements of a feature that its index by its ids reads (`x_MapFeatIds`): each of its `ids`
+/// and of its `xref`s (the two members, as `V::pick` read them), through the reference
+/// (`RefElement::deref`). The index by ids changes no output of LOSAT's.
+fn feature_ids(ids_and_xrefs: [Option<V<'_>>; 2]) -> Result<(), Stop> {
+    for element in ids_and_xrefs.into_iter().flatten().flat_map(V::items) {
+        element.deref()?;
     }
     Ok(())
 }
@@ -408,16 +410,26 @@ pub(crate) fn index_entry(
 }
 
 /// The object manager's step as an object of makeblastdb's ASN.1 input joins a new scope of its
-/// own (`index_tse`; `CSeqEntrySource`): `object` is the Seq-entry, or the Bioseq-set when
-/// `is_set`, as the reader read it, and `muted` whether an earlier object left the main thread's
-/// diagnostic stream failed. No other sequence is in the scope.
+/// own (`index_tse`; `CSeqEntrySource`), after makeblastdb's walks of it (`Tse::walk_reads_null`):
+/// `object` is the Seq-entry, or the Bioseq-set when `is_set`, as the reader read it, and `muted`
+/// whether an earlier object left the main thread's diagnostic stream failed. No other sequence is
+/// in the scope.
 pub(crate) fn index_object(object: V<'_>, is_set: bool, muted: bool) -> Result<Indexed, Refusal> {
-    index_tse(
-        "makeblastdb",
-        &entry::Tse::of_object(object, is_set),
-        true,
-        muted,
-    )
+    let tse = entry::Tse::of_object(object, is_set);
+    // makeblastdb's walks read an element stated as `NULL` before the object joins the scope:
+    // `CCoreException::eNullPtr` there, a report of memory addresses that LOSAT refuses, or after
+    // the main thread's diagnostic stream failed its line feed alone (`End::NullPointer`).
+    if tse.walk_reads_null {
+        if !muted {
+            return Err(Refusal::NullElement);
+        }
+        return Ok(Indexed {
+            posts: Posts::new(),
+            muted,
+            end: Some(End::NullPointer),
+        });
+    }
+    index_tse("makeblastdb", &tse, true, muted)
 }
 
 /// `index_entry` of a query Bioseq with the Seq-ids `query_ids` and the annotations `annots`.
@@ -462,7 +474,7 @@ impl<'p> Indexer<'p> {
         let annots = &tse.annots;
         let data: Vec<Option<(&'static str, V<'_>)>> = annots
             .iter()
-            .map(|annot| annot.get("data").map(V::choice))
+            .map(|annot| annot.get(member::seq_annot::DATA).map(V::choice))
             .collect();
         // A table's information is boxed: one slot of each annotation is a pointer, not the
         // size of a `TableInfo` (hundreds of bytes per annotation of a feature-rich entry).
@@ -508,7 +520,7 @@ impl<'p> Indexer<'p> {
                 Some(("graph", graphs)) => {
                     for graph in graphs.items() {
                         let graph = graph.deref_raw()?;
-                        let loc = graph.field("loc");
+                        let loc = graph.field(member::seq_graph::LOC);
                         let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles)?;
                         self.refuse_empty(std::slice::from_ref(&map), Event::Graph, graph)?;
                         self.handles.end_object();
@@ -526,7 +538,14 @@ impl<'p> Indexer<'p> {
     // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:426-447 (`x_ProcessFeat`)
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:741-786 (`x_InitFeatKeys`)
     fn index_feature(&mut self, feat: V<'_>) -> Result<(), Stop> {
-        let except = feat.get("except-text").map(V::str).unwrap_or_default();
+        let [except, location, product, ids, xref] = feat.pick([
+            member::seq_feat::EXCEPT_TEXT,
+            member::seq_feat::LOCATION,
+            member::seq_feat::PRODUCT,
+            member::seq_feat::IDS,
+            member::seq_feat::XREF,
+        ]);
+        let except = except.map(V::str).unwrap_or_default();
         let mode = if contains(except, b"trans-splicing") {
             Mode::TransSplicing
         } else if contains(except, b"circular RNA") {
@@ -536,10 +555,7 @@ impl<'p> Indexer<'p> {
         };
         // Both maps are made (`GetMaps`, the dereferences of their parts) before either is mapped.
         let mut maps: [Option<HandleRangeMap>; 2] = [None, None];
-        for (map, loc) in maps
-            .iter_mut()
-            .zip([feat.get("location"), feat.get("product")])
-        {
+        for (map, loc) in maps.iter_mut().zip([location, product]) {
             if let Some(loc) = loc {
                 *map = Some(HandleRangeMap::of_location(loc, mode, &mut self.handles)?);
             }
@@ -547,7 +563,7 @@ impl<'p> Indexer<'p> {
         for map in maps.iter().flatten() {
             self.map_location(map, Event::Feature, feat)?;
         }
-        feature_ids(feat)?;
+        feature_ids([ids, xref])?;
         self.handles.end_object();
         Ok(())
     }
@@ -559,7 +575,7 @@ impl<'p> Indexer<'p> {
     // Seq-ids of one row, and for a discontinuous alignment of all its rows, are one handle as
     // NCBI's trees take them (`Handle`).
     fn index_align(&mut self, align: V<'_>) -> Result<(), Stop> {
-        let segs = align.get("segs").map(V::choice);
+        let segs = align.get(member::seq_align::SEGS).map(V::choice);
         if let Some(("disc", subs)) = segs {
             let mut all = Vec::new();
             for sub in subs.items() {
@@ -599,7 +615,7 @@ impl<'p> Indexer<'p> {
         if locs.len() != 1 {
             return Ok(());
         }
-        let region = annot.get("desc").and_then(|desc| {
+        let region = annot.get(member::seq_annot::DESC).and_then(|desc| {
             desc.items()
                 .map(V::choice)
                 .find(|(variant, _)| *variant == "region")
@@ -704,11 +720,13 @@ impl<'p> Indexer<'p> {
                 && hr.circular
                 && (hr.circular_start().is_empty() || hr.circular_end().is_empty())
         };
-        for group in map.ncbi_order() {
-            if group.iter().any(|(_, hr)| empty(hr)) && group.iter().any(|(_, hr)| fails(hr)) {
+        for group in map.ncbi_order().chunk_by(|a, b| a.0 == b.0) {
+            if group.iter().any(|(_, (_, hr))| empty(hr))
+                && group.iter().any(|(_, (_, hr))| fails(hr))
+            {
                 return Err(Stop::Refuse(Refusal::IdOrder));
             }
-            for (handle, hr) in group {
+            for (_, (handle, hr)) in group {
                 let range = hr.overlapping();
                 if range.is_empty() {
                     if event != Event::Row {
@@ -722,10 +740,10 @@ impl<'p> Indexer<'p> {
                     continue;
                 }
                 if hr.has_gaps() && hr.circular {
-                    self.x_map(hr.circular_start(), Some(handle.clone()))?;
-                    self.x_map(hr.circular_end(), Some(handle.clone()))?;
+                    self.x_map(hr.circular_start(), Some(handle))?;
+                    self.x_map(hr.circular_end(), Some(handle))?;
                 } else {
-                    self.x_map(range, Some(handle.clone()))?;
+                    self.x_map(range, Some(handle))?;
                 }
             }
         }
@@ -737,7 +755,7 @@ impl<'p> Indexer<'p> {
     // main_diag_failbit`). `mapper.Map` of a null handle (a table row without a Seq-id) asks
     // `CSeq_id_Handle::HaveMatchingHandles()` of it: `CCoreException::eNullPtr` (`Stop::NullPointer`).
     /// `x_Map` of `range` and `handle`: `None` is a null handle.
-    fn x_map(&mut self, range: Range, handle: Option<Handle>) -> Result<(), Stop> {
+    fn x_map(&mut self, range: Range, handle: Option<&Handle>) -> Result<(), Stop> {
         if range.is_empty() {
             self.post(Severity::Error, "1204.6", b"Failed to parse location of ");
             self.muted = true;
@@ -746,7 +764,7 @@ impl<'p> Indexer<'p> {
         let Some(handle) = handle else {
             return Err(self.null_pointer());
         };
-        self.handles.mapped(&handle);
+        self.handles.mapped(handle);
         Ok(())
     }
 }

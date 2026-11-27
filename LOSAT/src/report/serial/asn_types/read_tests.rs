@@ -3,7 +3,7 @@
 //! probes `e01`-`e07` of item D3-1 are named where a test takes their case).
 
 use super::read::{read_document, Post, ReadError};
-use super::table::named;
+use super::table::{member, named};
 use super::{member_index, Encoding, Value};
 use crate::ncbi_exception::NCBI_BUILD_ROOT;
 use crate::report::serial::asn_input::Names;
@@ -138,7 +138,7 @@ fn an_int2_out_of_range_is_a_serial_exception() {
     assert_eq!(
         value(named::SEQTABLE_MULTI_DATA, &table("32767, -32768")),
         Value::Choice(
-            member_index(named::SEQTABLE_MULTI_DATA, "int2") as u16,
+            member::seqtable_multi_data::INT2.index() as u16,
             Box::new(Value::Int4s(vec![32767, -32768]))
         )
     );
@@ -169,7 +169,7 @@ fn enumerated_and_named_integers() {
             .contains("bad number in line 4")
     );
     let molinfo = |text: &str| value(named::MOLINFO, &format!("MolInfo ::= {{ {text} }}"));
-    let biomol = member_index(named::MOLINFO, "biomol") as u16;
+    let biomol = member::molinfo::BIOMOL.index() as u16;
     assert_eq!(
         molinfo("biomol 8"),
         Value::Sequence(vec![(biomol, Value::Enum(8))])
@@ -209,7 +209,7 @@ fn enumerated_and_named_integers() {
 #[test]
 fn booleans_and_nulls_are_words() {
     let field = |data: &str| format!("User-field ::= {{ label id 1, data {data} }}");
-    let data = member_index(named::USER_FIELD, "data");
+    let data = member::user_field::DATA.index();
     let read_data = |text: &str| value(named::USER_FIELD, &field(text)).member(data).cloned();
     let variant =
         |name: &str| member_index(super::members(named::USER_FIELD)[data].ty, name) as u16;
@@ -235,7 +235,7 @@ fn visible_strings_replace_their_bad_bytes_with_ncbis_message() {
     assert_eq!(
         title.unwrap(),
         Value::Choice(
-            member_index(named::SEQDESC, "title") as u16,
+            member::seqdesc::TITLE.index() as u16,
             Box::new(Value::Str(b"a#b".to_vec()))
         )
     );
@@ -283,7 +283,7 @@ fn visible_strings_replace_their_bad_bytes_with_ncbis_message() {
     assert_eq!(
         utf8,
         Value::Choice(
-            member_index(named::SEQTABLE_MULTI_DATA, "string") as u16,
+            member::seqtable_multi_data::STRING.index() as u16,
             Box::new(Value::List(vec![Value::Str(
                 "\u{e9}\x01".as_bytes().to_vec()
             )]))
@@ -299,7 +299,7 @@ fn octets_take_an_odd_digit_as_a_high_nibble() {
         named::USER_FIELD,
         "User-field ::= { label id 1, data oss { 'abc'H } }",
     );
-    let data = oss.member(member_index(named::USER_FIELD, "data")).unwrap();
+    let data = oss.member(member::user_field::DATA.index()).unwrap();
     let Value::Choice(_, list) = data else {
         panic!()
     };
@@ -312,7 +312,7 @@ fn octets_take_an_odd_digit_as_a_high_nibble() {
 #[test]
 fn a_real_reads_its_base_as_an_unsigned() {
     let field = |data: &str| format!("User-field ::= {{ label id 1, data {data} }}");
-    let data = member_index(named::USER_FIELD, "data");
+    let data = member::user_field::DATA.index();
     let real = value(named::USER_FIELD, &field("real { 140, 10, -3 }"));
     let Value::Choice(_, real) = real.member(data).unwrap() else {
         panic!()
@@ -332,8 +332,8 @@ fn a_real_reads_its_base_as_an_unsigned() {
 #[test]
 fn members_are_named_or_tagged_in_module_order() {
     let date = |body: &str| format!("Date-std ::= {{ {body} }}");
-    let year = member_index(named::DATE_STD, "year") as u16;
-    let month = member_index(named::DATE_STD, "month") as u16;
+    let year = member::date_std::YEAR.index() as u16;
+    let month = member::date_std::MONTH.index() as u16;
     let both = Value::Sequence(vec![(year, Value::Int(2024)), (month, Value::Int(5))]);
     assert_eq!(value(named::DATE_STD, &date("year 2024, month 5")), both);
     assert_eq!(value(named::DATE_STD, &date("[0] 2024, [1] 5")), both);
@@ -489,7 +489,7 @@ fn comments_are_white_space() {
     assert_eq!(
         items[0],
         Value::Choice(
-            member_index(named::SEQDESC, "title") as u16,
+            member::seqdesc::TITLE.index() as u16,
             Box::new(Value::Str(b"a -- not a comment --".to_vec()))
         )
     );

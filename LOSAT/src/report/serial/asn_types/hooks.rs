@@ -4,8 +4,8 @@
 //! caches only). (The Seq-id is read into LOSAT's Seq-id model by its own reader, `super::seq_id`.)
 
 use super::read::{Frame, Post, PostSink};
-use super::table::named;
-use super::{member_index, Value};
+use super::table::{member, named};
+use super::{Value, M};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_input::{Fail, R, VECTOR_RESERVE_LENGTH_ERROR};
 
@@ -36,24 +36,23 @@ pub(super) fn pre_read_member(ty: u16, member: usize, read: &[(u16, Value)]) -> 
 
 /// `pre_read_member` of a Dense-seg (its reserve hook).
 #[inline(never)]
-fn dense_seg_pre_read_member(member: usize, read: &[(u16, Value)]) -> R<()> {
-    let ty = named::DENSE_SEG;
-    let get = |name: &str| {
-        let index = member_index(named::DENSE_SEG, name);
+fn dense_seg_pre_read_member(position: usize, read: &[(u16, Value)]) -> R<()> {
+    use member::dense_seg::{DIM, LENS, NUMSEG, STARTS, STRANDS};
+    let get = |m: M| {
         read.iter()
-            .find(|(position, _)| usize::from(*position) == index)
+            .find(|(position, _)| *position == m.at)
             .map(|(_, value)| int(value))
     };
     // `GetDim()`: the DEFAULT 2 when the member was not read.
-    let dim = get("dim").unwrap_or(2) as i32 as i64 as u64;
-    let numseg = get("numseg").unwrap_or(0) as i32 as i64 as u64;
+    let dim = get(DIM).unwrap_or(2) as i32 as i64 as u64;
+    let numseg = get(NUMSEG).unwrap_or(0) as i32 as i64 as u64;
     // `max_size()` of a vector of 4-byte and of 1-byte elements.
     const MAX_SIZE_4: u64 = (i64::MAX as u64) / 4;
     const MAX_SIZE_1: u64 = i64::MAX as u64;
-    let (size, max_size) = match super::members(ty)[member].name() {
-        "starts" => (dim.wrapping_mul(numseg), MAX_SIZE_4),
-        "lens" => (numseg, MAX_SIZE_4),
-        "strands" => (dim.wrapping_mul(numseg), MAX_SIZE_1),
+    let (size, max_size) = match position {
+        p if p == STARTS.index() => (dim.wrapping_mul(numseg), MAX_SIZE_4),
+        p if p == LENS.index() => (numseg, MAX_SIZE_4),
+        p if p == STRANDS.index() => (dim.wrapping_mul(numseg), MAX_SIZE_1),
         _ => return Ok(()),
     };
     if size > max_size {
@@ -182,78 +181,75 @@ const SEQ_DESCR_POST_READ: ThrowSite = ThrowSite {
 // `SetVariant_prop()` makes a `VariantProperties` (version 5) when the member is not set. The
 // messages are posted when the class has been read, before the members that follow it.
 fn variation_ref_post_read(mut value: Value, posts: &mut dyn PostSink) -> Value {
-    let member = |name: &str| member_index(named::VARIATION_REF, name);
-    let drop = |value: &mut Value, posts: &mut dyn PostSink, name: &str, message: &'static str| {
-        if value.take_member(member(name)).is_some() {
+    use member::variantproperties as vp;
+    use member::variation_ref as vr;
+    let drop = |value: &mut Value, posts: &mut dyn PostSink, m: M, message: &'static str| {
+        if value.take_member(m.index()).is_some() {
             posts.post(Post::Error(message));
         }
     };
-    let moved = |value: &mut Value,
-                 posts: &mut dyn PostSink,
-                 name: &str,
-                 property: &str,
-                 message: &'static str| {
-        if let Some(moved) = value.take_member(member(name)) {
-            let prop = variant_prop(value);
-            let index = member_index(named::VARIANTPROPERTIES, property);
-            if prop.member(index).is_some() {
-                posts.post(Post::Error(message));
-            } else {
-                prop.set_member(index, moved);
+    let moved =
+        |value: &mut Value, posts: &mut dyn PostSink, m: M, property: M, message: &'static str| {
+            if let Some(moved) = value.take_member(m.index()) {
+                let prop = variant_prop(value);
+                if prop.member(property.index()).is_some() {
+                    posts.post(Post::Error(message));
+                } else {
+                    prop.set_member(property.index(), moved);
+                }
             }
-        }
-    };
+        };
     drop(
         &mut value,
         posts,
-        "population-data",
+        vr::POPULATION_DATA,
         "Variation-ref.population-data is deprecated and will be ignored",
     );
     moved(
         &mut value,
         posts,
-        "validated",
-        "other-validation",
+        vr::VALIDATED,
+        vp::OTHER_VALIDATION,
         "Both Variation-ref.validated and Variation-ref.variant-properties.other-validation are set; ignoring Variation-ref.validated",
     );
     drop(
         &mut value,
         posts,
-        "clinical-test",
+        vr::CLINICAL_TEST,
         "Variation-ref.clinical-test is deprecated and will be ignored",
     );
     moved(
         &mut value,
         posts,
-        "allele-origin",
-        "allele-origin",
+        vr::ALLELE_ORIGIN,
+        vp::ALLELE_ORIGIN,
         "Both Variation-ref.allele-origin and Variation-ref.variant-properties.allele-origin are set; ignoring Variation-ref.validated",
     );
     moved(
         &mut value,
         posts,
-        "allele-state",
-        "allele-state",
+        vr::ALLELE_STATE,
+        vp::ALLELE_STATE,
         "Both Variation-ref.allele-state and Variation-ref.variant-properties.allele-state are set; ignoring Variation-ref.validated",
     );
     moved(
         &mut value,
         posts,
-        "allele-frequency",
-        "allele-frequency",
+        vr::ALLELE_FREQUENCY,
+        vp::ALLELE_FREQUENCY,
         "Both Variation-ref.allele-frequency and Variation-ref.variant-properties.allele-frequency are set; ignoring Variation-ref.validated",
     );
     moved(
         &mut value,
         posts,
-        "is-ancestral-allele",
-        "is-ancestral-allele",
+        vr::IS_ANCESTRAL_ALLELE,
+        vp::IS_ANCESTRAL_ALLELE,
         "Both Variation-ref.is-ancestral-allele and Variation-ref.variant-properties.is-ancestral-allele are set; ignoring Variation-ref.validated",
     );
     drop(
         &mut value,
         posts,
-        "pub",
+        vr::PUB,
         "Variation-ref.pub is deprecated and will be ignored",
     );
     value
@@ -261,12 +257,11 @@ fn variation_ref_post_read(mut value: Value, posts: &mut dyn PostSink) -> Value 
 
 /// `SetVariant_prop()`: the member, made (version 5) when it is not set.
 fn variant_prop(value: &mut Value) -> &mut Value {
-    let index = member_index(named::VARIATION_REF, "variant-prop");
+    let index = member::variation_ref::VARIANT_PROP.index();
     if value.member(index).is_none() {
-        let version = member_index(named::VARIANTPROPERTIES, "version");
         value.set_member(
             index,
-            Value::Sequence(vec![(version as u16, Value::Int(5))]),
+            Value::Sequence(vec![(member::variantproperties::VERSION.at, Value::Int(5))]),
         );
     }
     match value {

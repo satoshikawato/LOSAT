@@ -10,9 +10,9 @@ use std::ops::Range;
 
 use super::request::Queries;
 use super::{seq_align_id, seq_loc_id, Stop};
-use crate::report::serial::asn_types::table::named;
+use crate::report::serial::asn_types::table::{member, named};
 use crate::report::serial::asn_types::view::V;
-use crate::report::serial::asn_types::Value;
+use crate::report::serial::asn_types::{Value, M};
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::ParsedSeqId;
 
@@ -62,7 +62,10 @@ impl Results {
 
     /// The Seq-aligns of `alignments` (`GetAlignments()`), in order.
     pub(crate) fn alignments(&self) -> Vec<V<'_>> {
-        match self.reply().get("alignments") {
+        match self
+            .reply()
+            .get(member::blast4_get_search_results_reply::ALIGNMENTS)
+        {
             Some(set) => set.items().collect(),
             None => Vec::new(),
         }
@@ -125,7 +128,7 @@ impl Results {
         let mut out: Vec<Vec<MaskRange<'_>>> = vec![Vec::new(); num_queries];
         let Some(masks) = self
             .reply()
-            .get("masks")
+            .get(member::blast4_get_search_results_reply::MASKS)
             .filter(|masks| masks.item(0).is_some())
         else {
             return Ok(out);
@@ -134,9 +137,12 @@ impl Results {
         let mut previous: Option<&ParsedSeqId> = None;
         let mut index = 0;
         for mask in masks.items() {
-            let first = mask.field("locations").item(0).ok_or(Stop::Undefined(
-                "GetMasks: front() of a mask without locations",
-            ))?;
+            let first =
+                mask.field(member::blast4_mask::LOCATIONS)
+                    .item(0)
+                    .ok_or(Stop::Undefined(
+                        "GetMasks: front() of a mask without locations",
+                    ))?;
             let current = seq_loc_id(first);
             if previous.is_none() {
                 previous = current;
@@ -159,7 +165,7 @@ impl Results {
                     current: variant,
                 });
             }
-            let frame = mask.field("frame").int();
+            let frame = mask.field(member::blast4_mask::FRAME).int();
             for interval in intervals.items() {
                 let frame = match (translated, frame) {
                     (false, _) => 0,
@@ -172,9 +178,9 @@ impl Results {
                     }
                 };
                 ranges.push(MaskRange {
-                    id: interval.field("id").seq_id(),
-                    from: interval.field("from").int(),
-                    to: interval.field("to").int(),
+                    id: interval.field(member::seq_interval::ID).seq_id(),
+                    from: interval.field(member::seq_interval::FROM).int(),
+                    to: interval.field(member::seq_interval::TO).int(),
                     frame,
                 });
             }
@@ -188,16 +194,26 @@ impl Results {
     pub(crate) fn karlin_blocks(&self) -> KarlinBlocks {
         let mut out = KarlinBlocks::default();
         let (mut gapped, mut ungapped) = (false, false);
-        let Some(blocks) = self.reply().get("ka-blocks") else {
+        let Some(blocks) = self
+            .reply()
+            .get(member::blast4_get_search_results_reply::KA_BLOCKS)
+        else {
             return out;
         };
         for block in blocks.items() {
-            let real = |name: &'static str| match block.field(name).value {
+            let real = |m: M| match block.field(m).value {
                 Value::Real(real) => *real,
                 other => unreachable!("a REAL of the table, not {other:?}"),
             };
-            let params = (real("lambda"), real("k"), real("h"));
-            if matches!(block.field("gapped").value, Value::Bool(true)) {
+            let params = (
+                real(member::blast4_ka_block::LAMBDA),
+                real(member::blast4_ka_block::K),
+                real(member::blast4_ka_block::H),
+            );
+            if matches!(
+                block.field(member::blast4_ka_block::GAPPED).value,
+                Value::Bool(true)
+            ) {
                 out.gapped = params;
                 gapped = true;
             } else {
@@ -219,7 +235,10 @@ impl Results {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2187-2215
     pub(crate) fn search_stats(&self, service: &[u8]) -> SearchStats {
         let mut out = SearchStats::default();
-        let mut stats: Vec<Vec<u8>> = match self.reply().get("search-stats") {
+        let mut stats: Vec<Vec<u8>> = match self
+            .reply()
+            .get(member::blast4_get_search_results_reply::SEARCH_STATS)
+        {
             Some(list) => list.items().map(|text| text.str().to_vec()).collect(),
             None => return out,
         };

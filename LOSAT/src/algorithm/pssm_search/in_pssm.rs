@@ -1215,32 +1215,32 @@ pub(crate) fn psi_search_and_object_of(
 /// 2.17.0 then names the query after its `prot` feature (line RG D3-1 `om/` cases x01-x04, outfmt 5
 /// and 16); LOSAT does not port that lookup (`om/SPEC.md` §1.3) and refuses those reports.
 fn defline_reads_annot(query: &crate::report::serial::pssm::PssmQuery) -> bool {
-    use crate::report::serial::asn_types::{member_index, members, table::named, Value};
+    use crate::report::serial::asn_types::{table::member, Value};
+    use member::seq_annot::data::{FTABLE, SEQ_TABLE};
     if !query.titles().is_empty() {
         return false;
     }
-    let data = member_index(named::SEQ_ANNOT, "data");
-    let kinds = members(members(named::SEQ_ANNOT)[data].ty);
-    query
-        .annot
-        .iter()
-        .flatten()
-        .any(|annot| match annot.member(data) {
-            Some(Value::Choice(variant, value)) => match kinds[usize::from(*variant)].name() {
-                "ftable" => matches!(value.as_ref(), Value::List(feats) if !feats.is_empty()),
-                "seq-table" => {
-                    let feat_type = value
-                        .member(member_index(named::SEQ_TABLE, "feat-type"))
-                        .map_or(0, |value| match value {
-                            Value::Int(n) => *n,
-                            _ => 0,
-                        });
+    query.annot.iter().flatten().any(
+        |annot| match annot.member(member::seq_annot::DATA.index()) {
+            Some(Value::Choice(variant, value)) => match *variant {
+                v if v == FTABLE.at => {
+                    matches!(value.as_ref(), Value::List(feats) if !feats.is_empty())
+                }
+                v if v == SEQ_TABLE.at => {
+                    let feat_type =
+                        value
+                            .member(member::seq_table::FEAT_TYPE.index())
+                            .map_or(0, |value| match value {
+                                Value::Int(n) => *n,
+                                _ => 0,
+                            });
                     (1..23).contains(&feat_type)
                 }
                 _ => false,
             },
             _ => false,
-        })
+        },
+    )
 }
 
 /// The refusal of a report whose query definition NCBI makes from the annotations of a PSSM's

@@ -5,9 +5,10 @@
 use super::range::{
     interval_parts, point_parts, Handle, HandleRangeMap, LiveHandles, Range, Strand, UNKNOWN,
 };
-use super::view::V;
+use super::view::{mandatory, V};
 use super::{Indexer, RefElement, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
+use crate::report::serial::asn_types::table::member;
 
 /// Std-seg's `dim` above which NCBI's rows depend on the machine's memory (`hrmaps.resize`
 /// allocates `dim` maps; line RG D3-1 `om/SPEC.md` §10 Q2).
@@ -54,7 +55,7 @@ pub(super) fn process_align<'v>(
                 sub.deref_raw()?
             }
         };
-        let Some(segs) = align.get("segs") else {
+        let Some(segs) = align.get(member::seq_align::SEGS) else {
             continue;
         };
         let (variant, segs) = segs.choice();
@@ -99,10 +100,15 @@ fn dense_diag(
     rows: &mut Vec<HandleRangeMap>,
     diag: V<'_>,
 ) -> Result<(), Stop> {
-    let mut dim = diag.get("dim").map_or(2, V::int) as i32;
-    let ids = diag.field("ids");
-    let starts = diag.field("starts");
-    let strands = diag.get("strands");
+    let [dim, ids, starts, strands, len] = diag.pick([
+        member::dense_diag::DIM,
+        member::dense_diag::IDS,
+        member::dense_diag::STARTS,
+        member::dense_diag::STRANDS,
+        member::dense_diag::LEN,
+    ]);
+    let mut dim = dim.map_or(2, V::int) as i32;
+    let (ids, starts) = (mandatory(ids), mandatory(starts));
     if dim != ids.len() as i32 {
         ix.post(
             Severity::Warning,
@@ -129,7 +135,7 @@ fn dense_diag(
     }
     let dim = dim.max(0) as usize;
     grow(rows, dim);
-    let len = diag.field("len").int() as u32;
+    let len = mandatory(len).int() as u32;
     let ids: Vec<V<'_>> = ids.items().collect();
     for (row, id) in ids.iter().enumerate().take(dim) {
         let from = at(starts, row) as u32;
@@ -147,12 +153,12 @@ fn dense_diag(
 // 0 at a division is an integer division by zero (SIGFPE, exit status 136 after the warnings
 // posted before it: probes `a07`, `a08`, `k11`): refused.
 fn dense_seg(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -> Result<(), Stop> {
-    let mut dim = seg.get("dim").map_or(2, V::int) as i32 as i64 as u64;
-    let mut numseg = seg.field("numseg").int() as i32 as i64 as u64;
-    let ids = seg.field("ids");
-    let starts = seg.field("starts");
-    let lens = seg.field("lens");
-    let strands = seg.get("strands");
+    let mut dim = seg.get(member::dense_seg::DIM).map_or(2, V::int) as i32 as i64 as u64;
+    let mut numseg = seg.field(member::dense_seg::NUMSEG).int() as i32 as i64 as u64;
+    let ids = seg.field(member::dense_seg::IDS);
+    let starts = seg.field(member::dense_seg::STARTS);
+    let lens = seg.field(member::dense_seg::LENS);
+    let strands = seg.get(member::dense_seg::STRANDS);
     if numseg != lens.len() as u64 {
         ix.post(
             Severity::Warning,
@@ -220,7 +226,7 @@ fn std_seg(
     rows: &mut Vec<HandleRangeMap>,
     seg: V<'_>,
 ) -> Result<(), Stop> {
-    let dim = seg.get("dim").map_or(2, V::int) as i32;
+    let dim = seg.get(member::std_seg::DIM).map_or(2, V::int) as i32;
     if dim < 0 {
         return Err(Stop::std_exception("vector::_M_default_append"));
     }
@@ -230,7 +236,7 @@ fn std_seg(
         }
         grow(rows, dim as usize);
     }
-    for loc in seg.field("loc").items() {
+    for loc in seg.field(member::std_seg::LOC).items() {
         let loc = loc.deref_raw()?;
         // The iterator's ranges are made when it is constructed (`x_ProcessLocation` of the whole
         // location), so a `feat` anywhere stops before any row.
@@ -300,18 +306,23 @@ fn loc_ci_ranges<'a>(
                 }
             }
             "packed-pnt" => {
-                let id = value.field("id").seq_id();
-                let strand = value.get("strand").map_or(UNKNOWN, V::int);
+                let [id, strand, points] = value.pick([
+                    member::packed_seqpnt::ID,
+                    member::packed_seqpnt::STRAND,
+                    member::packed_seqpnt::POINTS,
+                ]);
+                let id = mandatory(id).seq_id();
+                let strand = strand.map_or(UNKNOWN, V::int);
                 lookups.push(id);
-                for point in value.field("points").ints() {
+                for point in mandatory(points).ints() {
                     let point = point as u32;
                     out.push((id, Range::new(point, point), strand));
                 }
             }
             "mix" | "equiv" => sets.push((value, 0)),
             "bond" => {
-                push(point_parts(value.field("a")));
-                if let Some(b) = value.get("b") {
+                push(point_parts(value.field(member::seq_bond::A)));
+                if let Some(b) = value.get(member::seq_bond::B) {
                     push(point_parts(b));
                 }
             }
@@ -335,13 +346,19 @@ fn packed_seg(
     rows: &mut Vec<HandleRangeMap>,
     seg: V<'_>,
 ) -> Result<(), Stop> {
-    let mut dim = seg.get("dim").map_or(2, V::int) as i32 as i64 as u64;
-    let numseg = seg.field("numseg").int() as i32 as i64 as u64;
-    let ids = seg.field("ids");
-    let starts = seg.field("starts");
-    let present = seg.field("present").octets();
-    let lens = seg.field("lens");
-    let strands = seg.get("strands");
+    let [dim, numseg, ids, starts, present, lens, strands] = seg.pick([
+        member::packed_seg::DIM,
+        member::packed_seg::NUMSEG,
+        member::packed_seg::IDS,
+        member::packed_seg::STARTS,
+        member::packed_seg::PRESENT,
+        member::packed_seg::LENS,
+        member::packed_seg::STRANDS,
+    ]);
+    let mut dim = dim.map_or(2, V::int) as i32 as i64 as u64;
+    let numseg = mandatory(numseg).int() as i32 as i64 as u64;
+    let (ids, starts, lens) = (mandatory(ids), mandatory(starts), mandatory(lens));
+    let present = mandatory(present).octets();
     if dim.wrapping_mul(numseg) > starts.len() as u64 {
         dim = starts.len() as u64 / numseg;
     }
@@ -400,32 +417,32 @@ fn spliced_seg(
 ) -> Result<(), Stop> {
     rows.truncate(2);
     grow(rows, 2);
-    let genomic_id = seg.get("genomic-id");
-    let product_id = seg.get("product-id");
+    let genomic_id = seg.get(member::spliced_seg::GENOMIC_ID);
+    let product_id = seg.get(member::spliced_seg::PRODUCT_ID);
     let product_pos = |pos: V<'_>| -> u32 {
         let (variant, value) = pos.choice();
         match variant {
             "nucpos" => value.int() as u32,
-            _ => value.field("amin").int() as u32,
+            _ => value.field(member::prot_pos::AMIN).int() as u32,
         }
     };
-    for exon in seg.field("exons").items() {
+    for exon in seg.field(member::spliced_seg::EXONS).items() {
         let exon = exon.deref_raw()?;
-        if let Some(id) = exon.get("genomic-id").or(genomic_id) {
-            let from = exon.field("genomic-start").int() as u32;
-            let to = exon.field("genomic-end").int() as u32;
+        if let Some(id) = exon.get(member::spliced_exon::GENOMIC_ID).or(genomic_id) {
+            let from = exon.field(member::spliced_exon::GENOMIC_START).int() as u32;
+            let to = exon.field(member::spliced_exon::GENOMIC_END).int() as u32;
             let strand = exon
-                .get("genomic-strand")
-                .or(seg.get("genomic-strand"))
+                .get(member::spliced_exon::GENOMIC_STRAND)
+                .or(seg.get(member::spliced_seg::GENOMIC_STRAND))
                 .map_or(UNKNOWN, V::int);
             row_map(rows, 1).add_range(id.seq_id(), Range::new(from, to), strand, handles);
         }
-        if let Some(id) = exon.get("product-id").or(product_id) {
-            let from = product_pos(exon.field("product-start"));
-            let to = product_pos(exon.field("product-end"));
+        if let Some(id) = exon.get(member::spliced_exon::PRODUCT_ID).or(product_id) {
+            let from = product_pos(exon.field(member::spliced_exon::PRODUCT_START));
+            let to = product_pos(exon.field(member::spliced_exon::PRODUCT_END));
             let strand = exon
-                .get("product-strand")
-                .or(seg.get("product-strand"))
+                .get(member::spliced_exon::PRODUCT_STRAND)
+                .or(seg.get(member::spliced_seg::PRODUCT_STRAND))
                 .map_or(UNKNOWN, V::int);
             row_map(rows, 0).add_range(id.seq_id(), Range::new(from, to), strand, handles);
         }
@@ -442,15 +459,15 @@ fn sparse_seg(
     rows: &mut Vec<HandleRangeMap>,
     seg: V<'_>,
 ) -> Result<(), Stop> {
-    let sparse_rows: Vec<V<'_>> = seg.field("rows").items().collect();
+    let sparse_rows: Vec<V<'_>> = seg.field(member::sparse_seg::ROWS).items().collect();
     grow(rows, sparse_rows.len() + 1);
     for (row, aln) in sparse_rows.iter().enumerate() {
         let aln = aln.deref_raw()?;
-        let mut numseg = aln.field("numseg").int() as i32 as i64 as u64;
-        let first_starts = aln.field("first-starts");
-        let second_starts = aln.field("second-starts");
-        let lens = aln.field("lens");
-        let second_strands = aln.get("second-strands");
+        let mut numseg = aln.field(member::sparse_align::NUMSEG).int() as i32 as i64 as u64;
+        let first_starts = aln.field(member::sparse_align::FIRST_STARTS);
+        let second_starts = aln.field(member::sparse_align::SECOND_STARTS);
+        let lens = aln.field(member::sparse_align::LENS);
+        let second_strands = aln.get(member::sparse_align::SECOND_STRANDS);
         if numseg != first_starts.len() as u64 {
             ix.post(
                 Severity::Warning,
@@ -483,8 +500,8 @@ fn sparse_seg(
             );
             numseg = numseg.min(strands.len() as u64);
         }
-        let first_id = aln.field("first-id").seq_id();
-        let second_id = aln.field("second-id").seq_id();
+        let first_id = aln.field(member::sparse_align::FIRST_ID).seq_id();
+        let second_id = aln.field(member::sparse_align::SECOND_ID).seq_id();
         for seg_index in 0..numseg as usize {
             let len = at(lens, seg_index) as u32;
             let from = at(first_starts, seg_index) as u32;

@@ -21,9 +21,9 @@ use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_text_reader::SliceSource;
 use crate::report::serial::asn_types::read::ObjectStream;
 use crate::report::serial::asn_types::read_xml::XmlStyle;
-use crate::report::serial::asn_types::table::named;
+use crate::report::serial::asn_types::table::{member, named};
 use crate::report::serial::asn_types::{
-    member_index, members, read_ber_document, read_document, resolved, Kind, Post, ReadError, Value,
+    members, read_ber_document, read_document, resolved, Kind, Post, ReadError, Value, M,
 };
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
@@ -105,9 +105,9 @@ pub(crate) fn read_pssm_with_parameters(text: &[u8]) -> Result<PssmWithParameter
 // table's shape (the reader read it under the table), so a mandatory member is there and each
 // member has its type's form.
 
-/// The member `name` of the SEQUENCE `value` of the type `ty`, taken out, when set.
-fn take(value: &mut Value, ty: u16, name: &str) -> Option<Value> {
-    value.take_member(member_index(ty, name))
+/// The member `m` of the SEQUENCE `value`, taken out, when set.
+fn take(value: &mut Value, m: M) -> Option<Value> {
+    value.take_member(m.index())
 }
 
 fn int(value: Value) -> i64 {
@@ -174,11 +174,10 @@ fn choice(mut value: Value) -> (usize, Value) {
 }
 
 /// An ENUMERATED value: its name in the list of the member's type, and its number.
-fn enumerated(value: Value, ty: u16, name: &str) -> (&'static str, i32) {
+fn enumerated(value: Value, m: M) -> (&'static str, i32) {
     let number = enum_number(value);
-    let member_ty = members(ty)[member_index(ty, name)].ty;
-    let Kind::Enumerated { values, .. } = resolved(member_ty).kind else {
-        unreachable!("{name} is an ENUMERATED")
+    let Kind::Enumerated { values, .. } = resolved(m.ty).kind else {
+        unreachable!("{m:?} is an ENUMERATED")
     };
     let name = values
         .values()
@@ -205,26 +204,26 @@ fn object_id(value: Value) -> ObjectId {
 
 /// The model of a `PssmWithParameters` value, or LOSAT's refusal.
 fn pssm_of(mut value: Value) -> Result<PssmWithParameters, PssmReadError> {
-    const T: u16 = named::PSSMWITHPARAMETERS;
+    use member::pssmwithparameters as t;
     Ok(PssmWithParameters {
-        pssm: pssm(take(&mut value, T, "pssm").expect("mandatory"))?,
-        params: take(&mut value, T, "params").map(params),
+        pssm: pssm(take(&mut value, t::PSSM).expect("mandatory"))?,
+        params: take(&mut value, t::PARAMS).map(params),
     })
 }
 
 fn pssm(mut value: Value) -> Result<Pssm, PssmReadError> {
-    const T: u16 = named::PSSM;
-    let mut get = |name: &str| take(&mut value, T, name);
+    use member::pssm as t;
+    let mut get = |m: M| take(&mut value, m);
     Ok(Pssm {
-        is_protein: get("isProtein").map(boolean),
-        identifier: get("identifier").map(object_id),
-        num_rows: get("numRows").map(int4).expect("mandatory"),
-        num_columns: get("numColumns").map(int4).expect("mandatory"),
-        row_labels: get("rowLabels").map(|labels| list(labels).into_iter().map(string).collect()),
-        by_row: get("byRow").map(boolean),
-        query: get("query").map(seq_entry).transpose()?,
-        intermediate_data: get("intermediateData").map(intermediate_data),
-        final_data: get("finalData").map(final_data),
+        is_protein: get(t::ISPROTEIN).map(boolean),
+        identifier: get(t::IDENTIFIER).map(object_id),
+        num_rows: get(t::NUMROWS).map(int4).expect("mandatory"),
+        num_columns: get(t::NUMCOLUMNS).map(int4).expect("mandatory"),
+        row_labels: get(t::ROWLABELS).map(|labels| list(labels).into_iter().map(string).collect()),
+        by_row: get(t::BYROW).map(boolean),
+        query: get(t::QUERY).map(seq_entry).transpose()?,
+        intermediate_data: get(t::INTERMEDIATEDATA).map(intermediate_data),
+        final_data: get(t::FINALDATA).map(final_data),
     })
 }
 
@@ -240,9 +239,9 @@ fn seq_entry(value: Value) -> Result<SeqEntry, PssmReadError> {
     if members(named::SEQ_ENTRY)[variant].name() != "seq" {
         return Ok(SeqEntry::Set(bioseq));
     }
-    const T: u16 = named::BIOSEQ;
-    let mut get = |name: &str| take(&mut bioseq, T, name);
-    let ids = list(get("id").expect("mandatory"))
+    use member::bioseq as t;
+    let mut get = |m: M| take(&mut bioseq, m);
+    let ids = list(get(t::ID).expect("mandatory"))
         .into_iter()
         .map(|id| match id {
             Value::Null => Err(PssmReadError::Refused(NULL_SEQ_ID.to_string())),
@@ -253,7 +252,7 @@ fn seq_entry(value: Value) -> Result<SeqEntry, PssmReadError> {
         .collect::<Result<_, _>>()?;
     Ok(SeqEntry::Seq(Box::new(PssmQuery {
         ids,
-        descr: get("descr").map(|descr| {
+        descr: get(t::DESCR).map(|descr| {
             list(descr)
                 .into_iter()
                 .map(|mut descriptor| {
@@ -271,8 +270,8 @@ fn seq_entry(value: Value) -> Result<SeqEntry, PssmReadError> {
                 })
                 .collect()
         }),
-        inst: seq_inst(get("inst").expect("mandatory")),
-        annot: get("annot").map(list),
+        inst: seq_inst(get(t::INST).expect("mandatory")),
+        annot: get(t::ANNOT).map(list),
     })))
 }
 
@@ -282,9 +281,9 @@ const NULL_SEQ_ID: &str = "an element of PssmWithParameters.pssm.query.seq.id st
      addresses)";
 
 fn seq_inst(mut value: Value) -> SeqInst {
-    const T: u16 = named::SEQ_INST;
-    let mut get = |name: &str| take(&mut value, T, name);
-    let seq_data = match get("seq-data") {
+    use member::seq_inst as t;
+    let mut get = |m: M| take(&mut value, m);
+    let seq_data = match get(t::SEQ_DATA) {
         None => None,
         Some(data) => {
             let (variant, mut value) = choice(data);
@@ -305,69 +304,69 @@ fn seq_inst(mut value: Value) -> SeqInst {
         }
     };
     SeqInst {
-        repr: enumerated(get("repr").expect("mandatory"), T, "repr"),
-        mol: enumerated(get("mol").expect("mandatory"), T, "mol"),
-        length: get("length").map(|length| u32::try_from(int(length)).expect("a Uint4")),
-        fuzz: get("fuzz"),
-        topology: get("topology").map(enum_number),
-        strand: get("strand").map(enum_number),
+        repr: enumerated(get(t::REPR).expect("mandatory"), t::REPR),
+        mol: enumerated(get(t::MOL).expect("mandatory"), t::MOL),
+        length: get(t::LENGTH).map(|length| u32::try_from(int(length)).expect("a Uint4")),
+        fuzz: get(t::FUZZ),
+        topology: get(t::TOPOLOGY).map(enum_number),
+        strand: get(t::STRAND).map(enum_number),
         seq_data,
-        ext: get("ext"),
-        hist: get("hist"),
+        ext: get(t::EXT),
+        hist: get(t::HIST),
     }
 }
 
 fn intermediate_data(mut value: Value) -> PssmIntermediateData {
-    const T: u16 = named::PSSMINTERMEDIATEDATA;
-    let mut get = |name: &str| take(&mut value, T, name);
+    use member::pssmintermediatedata as t;
+    let mut get = |m: M| take(&mut value, m);
     PssmIntermediateData {
-        res_freqs_per_pos: get("resFreqsPerPos").map(int4s),
-        weighted_res_freqs_per_pos: get("weightedResFreqsPerPos").map(reals),
-        freq_ratios: get("freqRatios").map(reals).expect("mandatory"),
-        information_content: get("informationContent").map(reals),
-        gapless_column_weights: get("gaplessColumnWeights").map(reals),
-        sigma: get("sigma").map(reals),
-        interval_sizes: get("intervalSizes").map(int4s),
-        num_matching_seqs: get("numMatchingSeqs").map(int4s),
-        num_indept_obsr: get("numIndeptObsr").map(reals),
+        res_freqs_per_pos: get(t::RESFREQSPERPOS).map(int4s),
+        weighted_res_freqs_per_pos: get(t::WEIGHTEDRESFREQSPERPOS).map(reals),
+        freq_ratios: get(t::FREQRATIOS).map(reals).expect("mandatory"),
+        information_content: get(t::INFORMATIONCONTENT).map(reals),
+        gapless_column_weights: get(t::GAPLESSCOLUMNWEIGHTS).map(reals),
+        sigma: get(t::SIGMA).map(reals),
+        interval_sizes: get(t::INTERVALSIZES).map(int4s),
+        num_matching_seqs: get(t::NUMMATCHINGSEQS).map(int4s),
+        num_indept_obsr: get(t::NUMINDEPTOBSR).map(reals),
     }
 }
 
 fn final_data(mut value: Value) -> PssmFinalData {
-    const T: u16 = named::PSSMFINALDATA;
-    let mut get = |name: &str| take(&mut value, T, name);
+    use member::pssmfinaldata as t;
+    let mut get = |m: M| take(&mut value, m);
     PssmFinalData {
-        scores: get("scores").map(int4s).expect("mandatory"),
-        lambda: get("lambda").map(real).expect("mandatory"),
-        kappa: get("kappa").map(real).expect("mandatory"),
-        h: get("h").map(real).expect("mandatory"),
-        scaling_factor: get("scalingFactor").map(int4),
-        lambda_ungapped: get("lambdaUngapped").map(real),
-        kappa_ungapped: get("kappaUngapped").map(real),
-        h_ungapped: get("hUngapped").map(real),
-        word_score_threshold: get("wordScoreThreshold").map(real),
+        scores: get(t::SCORES).map(int4s).expect("mandatory"),
+        lambda: get(t::LAMBDA).map(real).expect("mandatory"),
+        kappa: get(t::KAPPA).map(real).expect("mandatory"),
+        h: get(t::H).map(real).expect("mandatory"),
+        scaling_factor: get(t::SCALINGFACTOR).map(int4),
+        lambda_ungapped: get(t::LAMBDAUNGAPPED).map(real),
+        kappa_ungapped: get(t::KAPPAUNGAPPED).map(real),
+        h_ungapped: get(t::HUNGAPPED).map(real),
+        word_score_threshold: get(t::WORDSCORETHRESHOLD).map(real),
     }
 }
 
 fn params(mut value: Value) -> PssmParameters {
-    const T: u16 = named::PSSMPARAMETERS;
-    let mut get = |name: &str| take(&mut value, T, name);
+    use member::pssmparameters as t;
+    let mut get = |m: M| take(&mut value, m);
     PssmParameters {
-        pseudocount: get("pseudocount").map(int4),
-        rpsdbparams: get("rpsdbparams").map(|mut rps| {
-            const R: u16 = named::FORMATRPSDBPARAMETERS;
+        pseudocount: get(t::PSEUDOCOUNT).map(int4),
+        rpsdbparams: get(t::RPSDBPARAMS).map(|mut rps| {
+            use member::formatrpsdbparameters as r;
             FormatRpsDbParameters {
-                matrix_name: take(&mut rps, R, "matrixName")
+                matrix_name: take(&mut rps, r::MATRIXNAME)
                     .map(string)
                     .expect("mandatory"),
-                gap_open: take(&mut rps, R, "gapOpen").map(int4),
-                gap_extend: take(&mut rps, R, "gapExtend").map(int4),
+                gap_open: take(&mut rps, r::GAPOPEN).map(int4),
+                gap_extend: take(&mut rps, r::GAPEXTEND).map(int4),
             }
         }),
-        constraints: get("constraints"),
-        bit_score_thresh: get("bitScoreThresh").map(real),
-        bit_score_reporting_thresh: get("bitScoreReportingThresh").map(real),
-        annotated_sites: get("annotatedSites"),
+        constraints: get(t::CONSTRAINTS),
+        bit_score_thresh: get(t::BITSCORETHRESH).map(real),
+        bit_score_reporting_thresh: get(t::BITSCOREREPORTINGTHRESH).map(real),
+        annotated_sites: get(t::ANNOTATEDSITES),
     }
 }
 

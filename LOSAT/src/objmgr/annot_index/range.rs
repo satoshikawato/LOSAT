@@ -3,13 +3,14 @@
 //! (`CHandleRangeMap`, `HandleRangeMap`), which the annotation index asks for each Seq-id's
 //! overlapping range.
 
-use super::view::V;
+use super::view::{mandatory, V};
 use super::{RefElement, Stop};
 use std::collections::HashMap;
 
+use crate::report::serial::asn_types::table::member;
 use crate::seqid::mask_handle::{
-    handle_seq_id, mask_handle_key, mask_handle_order, mask_handle_packed, mask_info_key, GiimTree,
-    TreeHandle,
+    handle_seq_id, mask_handle_key, mask_handle_key_into, mask_handle_order, mask_handle_packed,
+    mask_info_key, GiimTree, TreeHandle,
 };
 use crate::seqid::model::GiimportId;
 use crate::seqid::ParsedSeqId;
@@ -272,12 +273,13 @@ fn next_lookup() -> u64 {
 impl Handle {
     /// `CSeq_id_Handle::GetHandle` of `id`, a `giim` Seq-id found in `giim`.
     pub(super) fn of(id: &ParsedSeqId, handles: &mut LiveHandles<'_>) -> Handle {
-        match mask_handle_key(id) {
-            Ok(Some(key)) => Handle::Key {
-                key,
+        handles.key.clear();
+        match mask_handle_key_into(id, &mut handles.key) {
+            Ok(true) => Handle::Key {
+                key: handles.key.clone(),
                 packed: mask_handle_packed(id),
             },
-            Ok(None) => Handle::Unique(next_lookup()),
+            Ok(false) => Handle::Unique(next_lookup()),
             Err(TreeHandle::Giim { id: number }) => {
                 let ParsedSeqId::Giim(value) = id else {
                     unreachable!("only a giim Seq-id has a tree handle")
@@ -370,6 +372,9 @@ pub(super) struct LiveHandles<'a> {
     /// digit count and version) made it; only a message of the attach asks which
     /// (`as_string`), so no map of the infos is kept for every entry.
     run_ids: Vec<&'a ParsedSeqId>,
+    /// The buffer in which `Handle::of` writes a key (`mask_handle_key_into`) before the handle
+    /// takes a copy of its length.
+    key: Vec<u8>,
 }
 
 /// What holds a live `giim` handle.
@@ -576,6 +581,11 @@ impl HandleRangeMap {
     // The query is a raw Bioseq: its TSE has no master segments (`m_MasterSeq` null).
     fn add(&mut self, handle: Handle, range: Range, strand: Strand, state: &mut AddState<'_, '_>) {
         let at = self.index_of(handle);
+        self.add_at(at, range, strand, state);
+    }
+
+    /// `add` to the entry at `at` of the map.
+    fn add_at(&mut self, at: usize, range: Range, strand: Strand, state: &mut AddState<'_, '_>) {
         if state.mode == Mode::None {
             if let Some(prev) = state.prev.filter(|&prev| prev != at) {
                 if let Some((_, hr)) = self.map.get_mut(prev) {
@@ -671,18 +681,27 @@ impl HandleRangeMap {
                 "pnt" => self.add_point(value, state),
                 "packed-pnt" => {
                     // One handle for all the points (`idh`).
-                    let handle = Handle::of(value.field("id").seq_id(), state.handles);
-                    let strand = value.get("strand").map_or(UNKNOWN, V::int);
-                    for point in value.field("points").ints() {
-                        let point = point as u32;
-                        self.add(handle.clone(), Range::new(point, point), strand, state);
+                    let [id, strand, points] = value.pick([
+                        member::packed_seqpnt::ID,
+                        member::packed_seqpnt::STRAND,
+                        member::packed_seqpnt::POINTS,
+                    ]);
+                    let handle = Handle::of(mandatory(id).seq_id(), state.handles);
+                    let strand = strand.map_or(UNKNOWN, V::int);
+                    let points = mandatory(points);
+                    if points.len() > 0 {
+                        let at = self.index_of(handle);
+                        for point in points.ints() {
+                            let point = point as u32;
+                            self.add_at(at, Range::new(point, point), strand, state);
+                        }
                     }
                 }
                 "mix" => sets.push((value, 0, false)),
                 "equiv" => sets.push((value, 0, true)),
                 "bond" => {
-                    self.add_point(value.field("a"), state);
-                    if let Some(b) = value.get("b") {
+                    self.add_point(value.field(member::seq_bond::A), state);
+                    if let Some(b) = value.get(member::seq_bond::B) {
                         self.add_point(b, state);
                     }
                 }
@@ -707,13 +726,14 @@ impl HandleRangeMap {
     // NCBI reference (598d8ae6): c++/include/objmgr/impl/handle_range_map.hpp:91 (the map's order
     // is `CSeq_id_Handle`'s `operator<`)
     // NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:201-207
-    /// The map's entries in NCBI's order, in groups of one `m_Packed`: the
-    /// groups in NCBI's order, the handles of a group in the order of their infos' addresses,
-    /// which LOSAT does not know (it keeps the order they came in). A gi and the packed accessions
-    /// and `general` tags are ordered by their numbers (`om/` cases `s_o*`); the handles of one
-    /// number, and every unpacked handle (local, PDB, patent, a text Seq-id with a name or a
-    /// release or whose accession does not pack, ...), are one group.
-    pub(super) fn ncbi_order(&self) -> Vec<Vec<&(Handle, HandleRange)>> {
+    /// The map's entries in NCBI's order, each with its place in it (`Handle::order`): those of
+    /// one place (`m_Packed`) are a group (`chunk_by` of the place), the groups in NCBI's order,
+    /// the handles of a group in the order of their infos' addresses, which LOSAT does not know
+    /// (it keeps the order they came in). A gi and the packed accessions and `general` tags are
+    /// ordered by their numbers (`om/` cases `s_o*`); the handles of one number, and every
+    /// unpacked handle (local, PDB, patent, a text Seq-id with a name or a release or whose
+    /// accession does not pack, ...), are one group.
+    pub(super) fn ncbi_order(&self) -> Vec<(u64, &(Handle, HandleRange))> {
         let mut entries: Vec<(u64, &(Handle, HandleRange))> = self
             .map
             .iter()
@@ -721,31 +741,37 @@ impl HandleRangeMap {
             .collect();
         entries.sort_by_key(|&(order, _)| order);
         entries
-            .chunk_by(|a, b| a.0 == b.0)
-            .map(|group| group.iter().map(|&(_, entry)| entry).collect())
-            .collect()
     }
 }
 
 /// A Seq-interval's Seq-id, range (a `CRange` from `from` to `to`) and strand (`unknown` when not
 /// set).
 pub(super) fn interval_parts(interval: V<'_>) -> (&ParsedSeqId, Range, Strand) {
-    let from = interval.field("from").int() as u32;
-    let to = interval.field("to").int() as u32;
+    let [from, to, strand, id] = interval.pick([
+        member::seq_interval::FROM,
+        member::seq_interval::TO,
+        member::seq_interval::STRAND,
+        member::seq_interval::ID,
+    ]);
     (
-        interval.field("id").seq_id(),
-        Range::new(from, to),
-        interval.get("strand").map_or(UNKNOWN, V::int),
+        mandatory(id).seq_id(),
+        Range::new(mandatory(from).int() as u32, mandatory(to).int() as u32),
+        strand.map_or(UNKNOWN, V::int),
     )
 }
 
 /// A Seq-point's Seq-id, range (a `CRange` of `point` alone) and strand.
 pub(super) fn point_parts(point: V<'_>) -> (&ParsedSeqId, Range, Strand) {
-    let at = point.field("point").int() as u32;
+    let [at, strand, id] = point.pick([
+        member::seq_point::POINT,
+        member::seq_point::STRAND,
+        member::seq_point::ID,
+    ]);
+    let at = mandatory(at).int() as u32;
     (
-        point.field("id").seq_id(),
+        mandatory(id).seq_id(),
         Range::new(at, at),
-        point.get("strand").map_or(UNKNOWN, V::int),
+        strand.map_or(UNKNOWN, V::int),
     )
 }
 

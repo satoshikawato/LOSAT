@@ -50,6 +50,7 @@ use crate::report::run_files::{OpenFiles, OpenedFile};
 use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::read_xml::XmlStyle;
 use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, GuessStop};
+use crate::report::serial::asn_types::table::member;
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::write::write_value;
 use crate::report::serial::asn_types::ReadError;
@@ -878,7 +879,7 @@ fn prune_seqalign<'a>(set: &[V<'a>], number: u32) -> Result<Vec<V<'a>>, Stop> {
     let mut previous: Option<&ParsedSeqId> = None;
     let mut count: u32 = 0;
     for &align in set {
-        if align.field("segs").choice().0 == "disc" {
+        if align.field(member::seq_align::SEGS).choice().0 == "disc" {
             count = count.wrapping_add(1);
         } else {
             let subject = seq_align_id(align, 1)?;
@@ -907,14 +908,15 @@ fn prune_seqalign<'a>(set: &[V<'a>], number: u32) -> Result<Vec<V<'a>>, Stop> {
 fn check_queries(queries: &Queries) -> anyhow::Result<()> {
     let count = match queries {
         Queries::Pssm(_) => {
-            let query = queries
-                .pssm()
-                .and_then(|pssm| pssm.field("pssm").get("query"));
+            let query = queries.pssm().and_then(|pssm| {
+                pssm.field(member::pssmwithparameters::PSSM)
+                    .get(member::pssm::QUERY)
+            });
             let Some(query) = query else {
                 return Err(NativeError::std_exception("PSSM has no query").into());
             };
             match query.choice() {
-                ("seq", bioseq) if bioseq.field("id").item(0).is_none() => {
+                ("seq", bioseq) if bioseq.field(member::bioseq::ID).item(0).is_none() => {
                     return Err(Refusal::Undecided(QUERY_WITHOUT_ID).into())
                 }
                 ("seq", _) => 1,

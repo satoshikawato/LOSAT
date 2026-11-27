@@ -66,11 +66,21 @@ pub(crate) enum TreeHandle {
 /// new handle on every call (seq_id_tree.cpp:1187-1198) and so is one handle with no Seq-id,
 /// itself included.
 pub(crate) fn mask_handle_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, TreeHandle> {
-    let mut key = vec![handle_tree(id)];
+    let mut key = Vec::new();
+    Ok(mask_handle_key_into(id, &mut key)?.then_some(key))
+}
+
+/// [`mask_handle_key`] written to the end of `key` (a buffer that its caller keeps, so that a key
+/// costs no allocation of its own): `Ok(false)` where `mask_handle_key` gives `Ok(None)`.
+pub(crate) fn mask_handle_key_into(
+    id: &ParsedSeqId,
+    key: &mut Vec<u8>,
+) -> Result<bool, TreeHandle> {
+    key.push(handle_tree(id));
     match id {
         // CSeq_id_Local_Tree: strings without case, integers exactly, a string never an integer
         // (seq_id_tree.cpp:1998-2011, seq_id_tree.hpp:767-768).
-        ParsedSeqId::Local(tag) => push_object_id(&mut key, tag),
+        ParsedSeqId::Local(tag) => push_object_id(key, tag),
         // CSeq_id_int_Tree: the integer (seq_id_tree.cpp:412-424, 502-527).
         ParsedSeqId::Gibbsq(number) | ParsedSeqId::Gibbmt(number) => {
             key.extend(number.to_le_bytes());
@@ -81,24 +91,24 @@ pub(crate) fn mask_handle_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, TreeH
         // CSeq_id_Patent_Tree: country and number (or application number) without case, the
         // kind of number, the sequence number; doc-type is not indexed (seq_id_tree.cpp:3074-3146).
         ParsedSeqId::Patent(patent) => {
-            push_bytes(&mut key, &patent.cit.country.to_ascii_lowercase());
+            push_lower(key, &patent.cit.country);
             let (kind, number) = match &patent.cit.id {
                 PatentNumber::Number(number) => (b'n', number),
                 PatentNumber::AppNumber(number) => (b'a', number),
             };
             key.push(kind);
-            push_bytes(&mut key, &number.to_ascii_lowercase());
+            push_lower(key, number);
             key.extend(patent.seqid.to_le_bytes());
         }
         // CSeq_id_General_Tree: db without case; a string tag without case, an integer tag exactly,
         // a string never an integer. Packed or plain, the classes are the same
         // (seq_id_tree.cpp:2578-2655, seq_id_tree.hpp:813-818, 918-925).
         ParsedSeqId::General(dbtag) => {
-            push_bytes(&mut key, &dbtag.db.to_ascii_lowercase());
-            push_object_id(&mut key, &dbtag.tag);
+            push_lower(key, &dbtag.db);
+            push_object_id(key, &dbtag.tag);
         }
         // CSeq_id_PDB_Tree: `Equals` of the normalized ids (seq_id_tree.cpp:3408-3464, 3502-3523).
-        ParsedSeqId::Pdb(pdb) => push_pdb_normalized(&mut key, pdb),
+        ParsedSeqId::Pdb(pdb) => push_pdb_normalized(key, pdb),
         _ => {
             let Some(text) = id.textseq() else {
                 unreachable!("the other alternatives are Textseq-ids")
@@ -106,7 +116,7 @@ pub(crate) fn mask_handle_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, TreeH
             return Ok(textseq_key(id, text, key));
         }
     }
-    Ok(Some(key))
+    Ok(true)
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:359-388
@@ -126,7 +136,7 @@ pub(crate) fn mask_info_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, TreeHan
         let (prefix_len, digits) =
             textseq_packed_split(accession).expect("a packed Textseq-id splits");
         let mut key = vec![handle_tree(id), b'I'];
-        push_bytes(&mut key, &accession[..prefix_len].to_ascii_lowercase());
+        push_lower(&mut key, &accession[..prefix_len]);
         key.extend((digits as u32).to_le_bytes());
         push_opt_i32(&mut key, text.version);
         return Ok(Some(key));
@@ -134,10 +144,11 @@ pub(crate) fn mask_info_key(id: &ParsedSeqId) -> Result<Option<Vec<u8>>, TreeHan
     mask_handle_key(id)
 }
 
-/// The key of a Textseq-id (`key` holds its tree).
-fn textseq_key(id: &ParsedSeqId, text: &TextseqId, mut key: Vec<u8>) -> Option<Vec<u8>> {
+/// The key of a Textseq-id written to `key` (which holds its tree): `false` for one with neither
+/// accession nor name.
+fn textseq_key(id: &ParsedSeqId, text: &TextseqId, key: &mut Vec<u8>) -> bool {
     if text.accession.is_none() && text.name.is_none() {
-        return None;
+        return false;
     }
     // Packed (seq_id_tree.cpp:1165-1185): accession only (name and release unset) and `ParseAcc`
     // gives a key: the accession without case and the version; the alternative is not part of the
@@ -146,9 +157,9 @@ fn textseq_key(id: &ParsedSeqId, text: &TextseqId, mut key: Vec<u8>) -> Option<V
         if let Some(accession) = &text.accession {
             if textseq_packed_split(accession).is_some() {
                 key.push(b'P');
-                push_bytes(&mut key, &accession.to_ascii_lowercase());
-                push_opt_i32(&mut key, text.version);
-                return Some(key);
+                push_lower(key, accession);
+                push_opt_i32(key, text.version);
+                return true;
             }
         }
     }
@@ -156,23 +167,11 @@ fn textseq_key(id: &ParsedSeqId, text: &TextseqId, mut key: Vec<u8>) -> Option<V
     // member's presence, accession and name without case, release and version exactly.
     key.push(b'L');
     key.push(id.alternative());
-    push_opt_bytes(
-        &mut key,
-        text.accession
-            .as_ref()
-            .map(|a| a.to_ascii_lowercase())
-            .as_deref(),
-    );
-    push_opt_bytes(
-        &mut key,
-        text.name
-            .as_ref()
-            .map(|n| n.to_ascii_lowercase())
-            .as_deref(),
-    );
-    push_opt_bytes(&mut key, text.release.as_deref());
-    push_opt_i32(&mut key, text.version);
-    Some(key)
+    push_opt_lower(key, text.accession.as_deref());
+    push_opt_lower(key, text.name.as_deref());
+    push_opt_bytes(key, text.release.as_deref());
+    push_opt_i32(key, text.version);
+    true
 }
 
 /// `m_Packed` of the handle (0: the id has an info of its own). `CSeq_id_Handle::operator<` orders
@@ -559,7 +558,7 @@ fn push_object_id(key: &mut Vec<u8>, tag: &ObjectId) {
         }
         ObjectId::Str(text) => {
             key.push(b's');
-            push_bytes(key, &text.to_ascii_lowercase());
+            push_lower(key, text);
         }
     }
 }
@@ -586,6 +585,23 @@ fn push_date(key: &mut Vec<u8>, date: &Date) {
 fn push_bytes(key: &mut Vec<u8>, bytes: &[u8]) {
     key.extend((bytes.len() as u32).to_le_bytes());
     key.extend_from_slice(bytes);
+}
+
+/// `push_bytes` of the bytes in lower case (ASCII).
+fn push_lower(key: &mut Vec<u8>, bytes: &[u8]) {
+    key.extend((bytes.len() as u32).to_le_bytes());
+    key.extend(bytes.iter().map(u8::to_ascii_lowercase));
+}
+
+/// `push_opt_bytes` of the bytes in lower case (ASCII).
+fn push_opt_lower(key: &mut Vec<u8>, bytes: Option<&[u8]>) {
+    match bytes {
+        None => key.push(0),
+        Some(bytes) => {
+            key.push(1);
+            push_lower(key, bytes);
+        }
+    }
 }
 
 fn push_opt_bytes(key: &mut Vec<u8>, bytes: Option<&[u8]>) {

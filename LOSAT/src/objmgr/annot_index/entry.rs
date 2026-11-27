@@ -14,10 +14,10 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use super::range::{Handle, LiveHandles};
-use super::view::V;
+use super::view::{mandatory, V};
 use super::{RefElement, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::serial::asn_types::table::named;
+use crate::report::serial::asn_types::table::{member, named};
 use crate::report::serial::pssm::SeqEntry;
 use crate::seqid::ParsedSeqId;
 
@@ -28,6 +28,12 @@ pub(super) struct Tse<'a> {
     /// What phase C makes, in its order.
     pub(super) construction: Vec<Made>,
     attach: Vec<Attach<'a>>,
+    /// makeblastdb's walks of its object before the object joins the scope (`of_object`) read an
+    /// element stated as `NULL`: a member of a Bioseq-set (`Parentize`), or a descriptor that the
+    /// check for `Unverified` reads (`unverified_reads_null`; probe D3c-6a y03, y10b; y14: one
+    /// after the first `Unverified` user object is read when the title is made,
+    /// `writedb::asn_source`). The object then never joins it.
+    pub(super) walk_reads_null: bool,
 }
 
 /// What phase C makes: a Bioseq's Seq-id handles (`CBioseq_Info::m_Id`, bioseq_info.cpp:300-307),
@@ -66,6 +72,7 @@ impl<'a> Tse<'a> {
             annots: Vec::new(),
             construction: Vec::new(),
             attach: Vec::new(),
+            walk_reads_null: false,
         };
         match entry {
             SeqEntry::Seq(query) => {
@@ -77,19 +84,24 @@ impl<'a> Tse<'a> {
             }
             SeqEntry::Set(set) => {
                 let mut construction = Vec::new();
-                tse.add_set(V::new(named::BIOSEQ_SET, set), &mut construction);
+                tse.add_set(V::new(named::BIOSEQ_SET, set), &mut construction, false);
                 tse.construction = construction;
             }
         }
         tse
     }
 
-    /// The TSE of `object` as a reader read it: a Bioseq-set when `is_set`, else a Seq-entry.
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:413-435, 466-496
+    /// The TSE of `object` as a reader read it (a Bioseq-set when `is_set`, else a Seq-entry), one
+    /// of makeblastdb's input, in one walk with makeblastdb's own walks of it, which come before
+    /// it joins the scope (`CSeqEntrySource`: the check for `Unverified`, `Parentize`;
+    /// `walk_reads_null`).
     pub(super) fn of_object(object: V<'a>, is_set: bool) -> Self {
         let mut tse = Tse {
             annots: Vec::new(),
             construction: Vec::new(),
             attach: Vec::new(),
+            walk_reads_null: false,
         };
         let mut construction = Vec::new();
         match if is_set {
@@ -98,9 +110,9 @@ impl<'a> Tse<'a> {
             object.choice()
         } {
             ("seq", bioseq) => {
-                tse.add_member_bioseq(bioseq, &mut construction);
+                tse.add_member_bioseq(bioseq, &mut construction, true);
             }
-            (_, set) => tse.add_set(set, &mut construction),
+            (_, set) => tse.add_set(set, &mut construction, true),
         }
         tse.construction = construction;
         tse
@@ -143,29 +155,66 @@ impl<'a> Tse<'a> {
     /// then its members); its phase C order (members, each Bioseq's Seq-ids before its
     /// annotations, then the set's own annotations) goes to `construction`, up to the first
     /// element stated as `NULL` that phase C dereferences (`Made::Null`). The sets inside it are
-    /// walked from a list on the heap (`SetWalk`), to any depth the reader read.
-    fn add_set(&mut self, set: V<'a>, construction: &mut Vec<Made>) {
+    /// walked from a list on the heap (`SetWalk`), to any depth the reader read. With `walk`
+    /// (makeblastdb's object), the walk also reads what makeblastdb's walks read, to the end of
+    /// the set where phase C stopped before, and ends at the first element stated as `NULL`
+    /// among them (`walk_reads_null`).
+    fn add_set(&mut self, set: V<'a>, construction: &mut Vec<Made>, walk: bool) {
+        if walk && set_walk_reads_null(set) {
+            self.walk_reads_null = true;
+            return;
+        }
+        // Whether phase C goes on (it stops at an element stated as `NULL`).
+        let mut making = true;
         let mut walks = vec![self.enter_set(set)];
-        while let Some(walk) = walks.last_mut() {
-            let Some(member) = walk.members.and_then(|members| members.item(walk.next)) else {
+        while let Some(walk_set) = walks.last_mut() {
+            let Some(member) = walk_set
+                .members
+                .and_then(|members| members.item(walk_set.next))
+            else {
                 let done = walks.pop().expect("a set");
-                construction.extend(done.own);
+                if making {
+                    construction.extend(done.own);
+                }
                 continue;
             };
-            walk.next += 1;
+            walk_set.next += 1;
             if member.is_null() {
-                construction.push(Made::Null);
+                if making {
+                    construction.push(Made::Null);
+                }
+                self.walk_reads_null = walk;
                 return;
             }
             match member.choice() {
+                ("seq", bioseq) if making => {
+                    if self.add_member_bioseq(bioseq, construction, walk) {
+                        if !walk || self.walk_reads_null {
+                            return;
+                        }
+                        making = false;
+                    }
+                }
                 ("seq", bioseq) => {
-                    if self.add_member_bioseq(bioseq, construction) {
+                    if unverified_reads_null(bioseq.get(member::bioseq::DESCR)) {
+                        self.walk_reads_null = true;
                         return;
                     }
                 }
                 (_, set) => {
-                    let walk = self.enter_set(set);
-                    walks.push(walk);
+                    if walk && set_walk_reads_null(set) {
+                        self.walk_reads_null = true;
+                        return;
+                    }
+                    let entered = match making {
+                        true => self.enter_set(set),
+                        false => SetWalk {
+                            members: set.get(member::bioseq_set::SEQ_SET),
+                            next: 0,
+                            own: Vec::new(),
+                        },
+                    };
+                    walks.push(entered);
                 }
             }
         }
@@ -173,16 +222,31 @@ impl<'a> Tse<'a> {
 
     /// Adds the Bioseq `bioseq` as read (`add_bioseq`): phase C stops at a Seq-id stated as `NULL`
     /// (`Made::Null`) before it makes the Bioseq. Whether an element stated as `NULL` stopped
-    /// phase C.
+    /// phase C. With `walk` (makeblastdb's object), first the check for `Unverified` of its
+    /// descriptors: one stated as `NULL` that it reads adds nothing (`walk_reads_null`).
     // NCBI reference (598d8ae6): c++/src/objmgr/bioseq_info.cpp:300-307
-    fn add_member_bioseq(&mut self, bioseq: V<'a>, construction: &mut Vec<Made>) -> bool {
-        let ids = bioseq.field("id");
+    fn add_member_bioseq(
+        &mut self,
+        bioseq: V<'a>,
+        construction: &mut Vec<Made>,
+        walk: bool,
+    ) -> bool {
+        let [ids, descr, annot] = bioseq.pick([
+            member::bioseq::ID,
+            member::bioseq::DESCR,
+            member::bioseq::ANNOT,
+        ]);
+        if walk && unverified_reads_null(descr) {
+            self.walk_reads_null = true;
+            return true;
+        }
+        let ids = mandatory(ids);
         if ids.items().any(|id| id.is_null()) {
             construction.push(Made::Null);
             return true;
         }
         let ids = ids.items().map(V::seq_id).collect();
-        let annots = bioseq.get("annot").into_iter().flat_map(V::items);
+        let annots = annot.into_iter().flat_map(V::items);
         self.add_bioseq(ids, annots, construction)
     }
 
@@ -191,7 +255,11 @@ impl<'a> Tse<'a> {
     /// `NULL`), its members to walk.
     fn enter_set(&mut self, set: V<'a>) -> SetWalk<'a> {
         let mut own = Vec::new();
-        for annot in set.get("annot").into_iter().flat_map(V::items) {
+        for annot in set
+            .get(member::bioseq_set::ANNOT)
+            .into_iter()
+            .flat_map(V::items)
+        {
             if annot.is_null() {
                 own.push(Made::Null);
                 break;
@@ -200,13 +268,13 @@ impl<'a> Tse<'a> {
             self.attach.push(Attach::Annot(self.annots.len()));
             self.annots.push(annot);
         }
-        if let Some(id) = set.get("id") {
+        if let Some(id) = set.get(member::bioseq_set::ID) {
             if let ("id", number) = id.choice() {
                 self.attach.push(Attach::SetId(number.int()));
             }
         }
         SetWalk {
-            members: set.get("seq-set"),
+            members: set.get(member::bioseq_set::SEQ_SET),
             next: 0,
             own,
         }
@@ -297,6 +365,33 @@ impl<'a> Tse<'a> {
     }
 }
 
+/// Whether makeblastdb's walks read an element stated as `NULL` at the Bioseq-set `set` itself:
+/// the descriptors of a nuc-prot set (`CBioseq_set::eClass_nuc_prot`), which the check for
+/// `Unverified` reads (`unverified_reads_null`).
+fn set_walk_reads_null(set: V<'_>) -> bool {
+    let [class, descr] = set.pick([member::bioseq_set::CLASS, member::bioseq_set::DESCR]);
+    class.map(V::int) == Some(1) && unverified_reads_null(descr)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:413-435
+/// Whether `IsUnverified` of the descriptors `descr` (of a Bioseq or a Bioseq-set) reads one
+/// stated as `NULL`: it reads them in order up to the first `Unverified` user object.
+fn unverified_reads_null(descr: Option<V<'_>>) -> bool {
+    for desc in descr.into_iter().flat_map(V::items) {
+        if desc.is_null() {
+            return true;
+        }
+        if let ("user", user) = desc.choice() {
+            if let ("str", name) = user.field(member::user_object::TYPE).choice() {
+                if name.str().eq_ignore_ascii_case(b"Unverified") {
+                    return false;
+                }
+            }
+        }
+    }
+    false
+}
+
 // NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:891-905
 const BIOSEQ_ID_DUPLICATE: ThrowSite = ThrowSite {
     file: "src/objmgr/tse_info.cpp",
@@ -322,27 +417,36 @@ const SET_ID_DUPLICATE: ThrowSite = ThrowSite {
 /// a zoom level was found) the fields up to the first labelled "ZoomLevel". The name changes no
 /// output of LOSAT's; an element stated as `NULL` there is dereferenced (`RefElement::deref`).
 fn annot_name(annot: V<'_>) -> Result<(), Stop> {
-    for id in annot.get("id").into_iter().flat_map(V::items) {
+    for id in annot
+        .get(member::seq_annot::ID)
+        .into_iter()
+        .flat_map(V::items)
+    {
         if let ("other", text) = id.deref()?.choice() {
-            if text.get("accession").is_some() {
+            if text.get(member::textannot_id::ACCESSION).is_some() {
                 break;
             }
         }
     }
     let mut zoom_level = false;
-    for desc in annot.get("desc").into_iter().flat_map(V::items) {
+    for desc in annot
+        .get(member::seq_annot::DESC)
+        .into_iter()
+        .flat_map(V::items)
+    {
         let ("user", user) = desc.deref()?.choice() else {
             continue;
         };
         if zoom_level
-            || !matches!(user.field("type").choice(), ("str", t) if t.str() == b"AnnotationTrack")
+            || !matches!(user.field(member::user_object::TYPE).choice(), ("str", t) if t.str() == b"AnnotationTrack")
         {
             continue;
         }
-        for field in user.field("data").items() {
+        for field in user.field(member::user_object::DATA).items() {
             let field = field.deref()?;
-            if matches!(field.field("label").choice(), ("str", l) if l.str() == b"ZoomLevel") {
-                if let ("int", level) = field.field("data").choice() {
+            if matches!(field.field(member::user_field::LABEL).choice(), ("str", l) if l.str() == b"ZoomLevel")
+            {
+                if let ("int", level) = field.field(member::user_field::DATA).choice() {
                     zoom_level = level.int() >= 0;
                 }
                 break;

@@ -852,7 +852,7 @@ fn a_failed_write_of_a_blastp_pairwise_format_exits_as_ncbi() {
 // with standard error on `/dev/full` too, `cerr` is bad before the report fails, and a bad
 // `cerr`'s post flushes no tie, so the failure ends as on a file (NCBI BLAST+ 2.17.0 blastn,
 // line RG item T8b, `T/t8b/tools/search_cerr.py`: exit status 0 for outfmt 8, 9, 11 and 12, 6
-// for outfmt 16); with a standard error that takes the warning the post's tie throws
+// for outfmt 15 and 16); with a standard error that takes the warning the post's tie throws
 // (`std::terminate`, SIGABRT) in each of them.
 #[cfg(target_os = "linux")]
 #[test]
@@ -865,7 +865,14 @@ fn a_failed_standard_output_after_a_failed_standard_error_ends_as_ncbi() {
             .open("/dev/full")
             .expect("open /dev/full")
     };
-    for (outfmt, status) in [("8", 0), ("9", 0), ("11", 0), ("12", 0), ("16", 6)] {
+    for (outfmt, status) in [
+        ("8", 0),
+        ("9", 0),
+        ("11", 0),
+        ("12", 0),
+        ("15", 6),
+        ("16", 6),
+    ] {
         for bad_stderr in [true, false] {
             let mut command = clean_losat_command();
             command.args([

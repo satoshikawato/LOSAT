@@ -539,8 +539,8 @@ fn a_serial_object_that_fails_inside_ends_the_run_and_one_that_fails_at_close_go
 fn a_serial_object_on_standard_output_after_a_failed_standard_error_ends_as_on_a_file() {
     // A bad `cerr`'s sentry fails before its tie (`Core::tied_posts`): NCBI BLAST+ 2.17.0 blastn
     // with a warning and both streams on `/dev/full` exits with status 0 for outfmt 8, 9, 11
-    // and 12 and 6 for outfmt 16 (line RG item T8b, `T/t8b/tools/search_cerr.py`), where the
-    // tie of a good `cerr` throws (`std::terminate`).
+    // and 12 and 6 for outfmt 15 and 16 (line RG item T8b, `T/t8b/tools/search_cerr.py`),
+    // where the tie of a good `cerr` throws (`std::terminate`).
     let standard_output = || {
         let stream = ReportStream::new(
             Box::new(FailAt(0)),

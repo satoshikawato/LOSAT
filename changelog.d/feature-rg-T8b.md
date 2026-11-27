@@ -7,7 +7,7 @@
   `Cannot close serializing output stream` and `BLAST failed to write output` with exit status 6 (it exited 0), and a standard
   output on a full device or a closed pipe after a standard error that could not be written exits with status 6 (it aborted).
   Through the library, a writer of yours that fails ends the call with `BLAST failed to write output` (exit status 6) instead of
-  the abort text. The search programs' `-outfmt` 8, 9, 11, 12 and 16 on a full standard output after a failed standard error
-  now exit with NCBI's status (0, or 6 for outfmt 16) instead of aborting.
+  the abort text. The search programs' `-outfmt` 8, 9, 11, 12, 15 and 16 on a full standard output after a failed standard
+  error now exit with NCBI's status (0, or 6 for outfmt 15 and 16) instead of aborting.
 - `losat makeblastdb` with its log on a pipe that closes before the sequences are added leaves the volume's files as NCBI's
   ended process leaves them (empty for a small input): the bytes its file buffers still held are dropped.

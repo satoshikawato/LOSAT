@@ -17,7 +17,15 @@ const NCBI_SPACE = /^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g;
 export function outfmtOption(argv: readonly string[]): { readonly at: number; readonly words: 1 | 2; readonly value: string } | undefined {
   for (let i = 1; i < argv.length; i++) {
     const word = argv[i]!;
-    if (word === '-query' || word === '-subject') {
+    if (
+      word === '-query' ||
+      word === '-subject' ||
+      word === '-db' ||
+      word === '-in_pssm' ||
+      word === '-in_msa' ||
+      word === '-out_pssm' ||
+      word === '-out_ascii_pssm'
+    ) {
       i++;
       continue;
     }

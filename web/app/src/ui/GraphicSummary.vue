@@ -70,8 +70,9 @@ const popoverAt = ref({ left: 0, top: 0 });
 
 const loaded = computed(() => props.state.loaded);
 const subjects = computed(() => props.state.subjects);
+const query = computed(() => props.state.queries.find((q) => q.qIdx === props.state.qIdx));
 const record = computed(() => (loaded.value === undefined ? undefined : runInputRecords(loaded.value.run, 'query')[props.state.qIdx ?? -1]));
-const queryLength = computed(() => Math.max(1, record.value?.length ?? 1));
+const queryLength = computed(() => Math.max(1, record.value?.length ?? query.value?.length ?? 1));
 const drawnSubjects = computed(() => (showAll.value ? subjects.value : subjects.value.slice(0, FIRST_SUBJECTS)));
 
 /**
@@ -128,7 +129,7 @@ const layout = computed<Layout>(() => {
 });
 const selectedIndex = computed(() => {
   const id = props.state.hsp;
-  return id === undefined || id.qIdx !== props.state.qIdx ? -1 : (layout.value.byRank.get(id.rank) ?? -1);
+  return id === undefined || id.qIdx !== props.state.qIdx || id.round !== props.state.round ? -1 : (layout.value.byRank.get(id.rank) ?? -1);
 });
 
 const canvasWidth = computed(() => Math.max(160, Math.min(MAX_WIDTH, areaWidth.value)));
@@ -326,7 +327,7 @@ function draw(): void {
 function idOf(k: number): HspId {
   const table = loaded.value!.index.table;
   const row = layout.value.tableRow[k]!;
-  return { runId: loaded.value!.run.snapshot.runId, qIdx: table.qIdx[row]!, rank: table.rank[row]! };
+  return { runId: loaded.value!.run.snapshot.runId, qIdx: table.qIdx[row]!, round: table.round[row]!, rank: table.rank[row]! };
 }
 
 /** Selects an HSP and asks for its alignment. */

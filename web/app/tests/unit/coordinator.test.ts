@@ -1134,7 +1134,7 @@ describe('Coordinator', () => {
     const realRun = engine.run.bind(engine);
     let sawAssembled: boolean | undefined;
     engine.run = async (req, output, onPhase) => {
-      sawAssembled = req.query.assembled;
+      sawAssembled = req.query?.assembled;
       const info = await realRun(req, output, onPhase);
       return { ...info, readRecords: { query: [{ id: 'q1', length: 120 }] } };
     };

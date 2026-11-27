@@ -91,9 +91,15 @@ impl TblastxDatabase {
     /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
     /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
     /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
-    pub(crate) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+    pub(crate) fn keeping_scope(
+        mut self,
+        keeps: bool,
+        separate_xml2: bool,
+        record_keeps: Option<bool>,
+    ) -> Self {
         self.taxdb.set_keeps_scope(keeps);
         self.taxdb.set_separate_xml2(separate_xml2);
+        self.taxdb.set_record_keeps_scope(record_keeps);
         self
     }
 
@@ -198,12 +204,13 @@ impl TblastxDatabase {
     }
 
     /// Whether a report that names any sequence of the database could be refused by LOSAT
-    /// (`common::database::reports_may_refuse`, with the reports `shown` and the batches'
-    /// prefetch `prefetch`), read in `pool`.
+    /// (`common::database::reports_may_refuse`, with the reports `shown`, the batches' prefetch
+    /// of the taxonomy database `prefetch`, and whether a batch may read its subjects one by one,
+    /// `one_by_one`), read in `pool`.
     pub(crate) fn reports_may_refuse(
         &self,
         shown: ParsedShown,
-        prefetch: bool,
+        prefetch: (bool, bool),
         queries: Option<&crate::blastinput::query_batch::QueryScope>,
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Option<shared::ReportRefusal> {
@@ -441,10 +448,10 @@ pub(crate) fn read_titles(
     database: &TblastxDatabase,
     ordered: &[TblastxHsp],
     first_query: usize,
-    (earlier, one_by_one): (shared::EarlierUtf8, bool),
+    earlier: shared::EarlierUtf8,
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
-    let headers = shared::HeaderReader::new(&database.db, one_by_one);
+    let headers = shared::HeaderReader::new(&database.db, database.taxdb.unrecorded_calls());
     headers.note_earlier(earlier);
     // A subject's HSPs follow each other: one look-up per run of them.
     let mut previous = None;
@@ -620,6 +627,7 @@ pub(crate) fn read_ordinals(
     titles: &DatabaseTitles,
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     loads: &HitLoads,
+    joins_copies: bool,
 ) -> Vec<u32> {
     match pairwise {
         Some(reading) => pairwise_read_order(ordered, titles, reading)
@@ -628,7 +636,16 @@ pub(crate) fn read_ordinals(
             .filter(|&ordinal| loads.reached(ordinal))
             .map(|ordinal| ordinal as u32)
             .collect(),
-        None => shown.iter().map(|hsp| hsp.hit.s_idx).collect(),
+        None => shared::one_by_one_query_reads(
+            shown.iter().map(|hsp| hsp.hit.s_idx as usize),
+            |ordinal| titled_parsed(titles, ordinal),
+            loads,
+            joins_copies,
+            false,
+        )
+        .into_iter()
+        .map(|ordinal| ordinal as u32)
+        .collect(),
     }
 }
 
@@ -686,18 +703,22 @@ fn pairwise_keys(
 /// dropped them, `report_stream`, which records each batch instead: `note_loaded`), as NCBI's
 /// data loader loaded them ([`LoadedBefore`]), read only where the batch stops; the outfmt 5
 /// reports before the batch are the queries' (`shared::PrefetchQueries::after_xml_reports`).
+/// What the prefetch gives for each Seq-align id is the run's one walk's (`run`,
+/// `RunLoads::prefetched`).
 pub(crate) fn batch_prefetch(
-    database: &TblastxDatabase,
+    (database, run): (&TblastxDatabase, &crate::report::db_subject::RunLoads),
     before: LoadedBefore<'_>,
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
     queries: &shared::PrefetchQueries<'_>,
 ) -> Result<crate::report::diag_log::Posts> {
+    let subjects: Vec<shared::PrefetchSubject<'_>> = prefetch_subjects(ordered, titles).collect();
+    let loads = shared::walk_prefetch(&database.taxdb, run, &subjects);
     shared::batch_prefetch(
         &database.db,
         &database.taxdb,
         loaded_subjects(before, titles),
-        prefetch_subjects(ordered, titles),
+        loads,
         PROGRAM,
         queries,
     )
@@ -720,7 +741,7 @@ pub(crate) fn note_loaded(
 ) {
     if database.parsed_seqids() {
         let batch = [queries];
-        database.taxdb.note_loaded(&database.db, start, || {
+        database.taxdb.note_loaded(start, || {
             loaded_subjects(
                 LoadedBefore {
                     hits: ordered,
@@ -798,6 +819,7 @@ fn prefetch_subjects<'s>(
             ordinal,
             parsed,
             flipped,
+            load: None,
         }
     })
 }
@@ -1100,7 +1122,6 @@ pub(crate) fn parsed_shown(
             .first()
             .is_some_and(|format| format.prefetches_subjects())
             && !shared::prefetch_always_off(prefetch_format),
-        one_by_one: shared::prefetch_may_be_off(prefetch_format),
         titles: shared::TitleReads::of_outfmts(
             crate::report::archive::options::RequestKind::Tblastx,
             formats

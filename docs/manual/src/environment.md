@@ -79,7 +79,7 @@ The Web GUI refuses `-window_masker_taxid` other than 0.
 
 These change the output as they change NCBI BLAST+'s output. They are not needed for normal use.
 
-NCBI BLAST+ reads `BATCH_SIZE`, `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` and `PRE_FETCH_SEQS_LIMIT` as whole numbers: an optional `+` or `-` and digits, within the range of a 32-bit integer, without spaces. Where it reads a value that is not such a number (`abc`, `1.5`, ` 5`, `5 `, `2147483648`), the program stops as NCBI BLAST+ stops: exit status 255 and an error message that names the value, and with `-outfmt 11` NCBI's error archive. The table says where each one stops.
+NCBI BLAST+ reads `BATCH_SIZE`, `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` and `PRE_FETCH_SEQS_LIMIT` as whole numbers: an optional `+` or `-` and digits, within the range of a 32-bit integer, without spaces. Where it reads a value that is not such a number (`abc`, `1.5`, ` 5`, `5 `, `2147483648`), the program stops as NCBI BLAST+ stops: exit status 255 and an error message that names the value, and in a search with `-outfmt 11` NCBI's error archive. The table says where each one stops (in `blast_formatter`, after reading an archive object's results).
 
 | Variable | Effect |
 | :--- | :--- |
@@ -89,7 +89,7 @@ NCBI BLAST+ reads `BATCH_SIZE`, `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` and `PRE_FETC
 | `ADAPTIVE_CBS` | Any value, an empty one too, with composition-based statistics: `blastp`, `psiblast`, `rpsblast`, `blastx` and `tblastn` keep a larger preliminary hit list (1,500 subjects, or twice the hit list size and 50 more from a hit list size of 1,000), and with a hit list size (`-max_target_seqs`) below 1,000 all of them but `psiblast` cut that list by E-value before the final alignments, as NCBI BLAST+ does. The reported hits can grow or shrink. |
 | `CTOOLKIT_COMPATIBLE` | Any value: `-outfmt 0` writes `(bits)` in place of `(Bits)` above the hit list. |
 | `OLD_FSC` | Any value, an empty one too: `blastp`, `blastx`, `tblastn`, `psiblast` (every round) and `rpsblast` compute E-values and cutoffs without the finite-size correction, as NCBI BLAST+ does for any `-searchsp`. It changes nothing in `blastn`, `tblastx` or an ungapped `blastx` search. |
-| `PRE_FETCH_SEQS_LIMIT` | With `-db`, an integer is the largest number of alignments of a query batch for which NCBI BLAST+ reads the report's sequences from the database before the report (0: never); LOSAT applies the same rule. A value that is not a number (an empty one too) stops the run after the search of the first query batch, before its report (after the start of the `-outfmt 0` report), except when every format is `-outfmt 11`, which every program but `psiblast` writes without reading the variable. |
+| `PRE_FETCH_SEQS_LIMIT` | With `-db`, an integer is the largest number of alignments of a query batch for which NCBI BLAST+ reads the report's sequences from the database before the report (0: never); LOSAT applies the same rule. A value that is not a number (an empty one too) stops the run after the search of the first query batch, before its report (after the start of the `-outfmt 0` report), except when every format is `-outfmt 11`, which every program but `psiblast` writes without reading the variable. `blast_formatter` also reads `PRE_FETCH_SEQS_LIMIT` after reading an archive object's results, before formatting it: a value that is not a number stops with exit status 255 and NCBI's message, and `2147483647` is refused by LOSAT for `-outfmt` `8`, `9` and `12` (see [blast_formatter](programs/blast_formatter.md#what-losat-refuses)). |
 
 ## makeblastdb
 

@@ -219,25 +219,9 @@ impl DbMaskOption {
             warning(&line)?;
             return Ok(None);
         };
-        let shown = db.name_mask_details(id).map_err(|error| {
-            let error = match &error {
-                NameMaskError::Table(error) => *error,
-                NameMaskError::Details(error) => error,
-                NameMaskError::NotRead => {
-                    return anyhow::anyhow!(
-                        "LOSAT internal error: the database's names were read without their mask algorithms"
-                    )
-                }
-            };
-            match error {
-                SeqDbError::Range(text) => NativeError {
-                    exit: 2,
-                    message: format!("{DATABASE_ERROR} {text}\n").into(),
-                }
-                .into(),
-                error => crate::algorithm::common::database::database_error_of(error, program),
-            }
-        })?;
+        let shown = db
+            .name_mask_details(id)
+            .map_err(|error| name_mask_error(&error, program))?;
         Ok(Some(ResolvedMask {
             kind: self.kind,
             id,
@@ -401,6 +385,32 @@ impl ResolvedMask {
                 ParamValue::Integer(self.kind as i32),
             ),
         ]
+    }
+}
+
+/// The error of `SeqDb::name_mask_details`, as the formatter's `GetBlastDbInfo` ends the run with
+/// it (`CATCH_ALL`, cited at `DbMaskOption::resolve`): NCBI's `Filtering algorithm ID ... is not
+/// supported.` of a name's database that lacks the id, or the error of reading its table, as
+/// `LOSAT database error: <text>` with exit status 2 (`common::database::database_error_of`).
+/// The one mapping of these errors: the search programs' database masking (`resolve`) and
+/// blast_formatter's database of an archive (`blast_formatter::archive`).
+pub(crate) fn name_mask_error(error: &NameMaskError<'_>, program: &str) -> anyhow::Error {
+    let error = match error {
+        NameMaskError::Table(error) => *error,
+        NameMaskError::Details(error) => error,
+        NameMaskError::NotRead => {
+            return anyhow::anyhow!(
+                "LOSAT internal error: the database's names were read without their mask algorithms"
+            )
+        }
+    };
+    match error {
+        SeqDbError::Range(text) => NativeError {
+            exit: 2,
+            message: format!("{DATABASE_ERROR} {text}\n").into(),
+        }
+        .into(),
+        error => crate::algorithm::common::database::database_error_of(error, program),
     }
 }
 

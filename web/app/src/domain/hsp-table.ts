@@ -21,10 +21,12 @@ export interface HspSummary {
   readonly s_end: number;
   readonly query_frame: number | null;
   readonly subject_frame: number | null;
+  readonly query_length?: number | null;
   readonly subject_length?: number | null;
   readonly out6: readonly [number, number] | null;
   readonly out0: readonly [number, number] | null;
   readonly out0_subject: readonly [number, number] | null;
+  readonly round?: number | null;
 }
 
 /**
@@ -47,6 +49,8 @@ export interface HspTable {
   readonly sEnd: Float64Array;
   readonly queryFrame: Int8Array;
   readonly subjectFrame: Int8Array;
+  /** Query sequence length reported by the engine (used for `-in_pssm`/`-in_msa` runs that have no FASTA query records). */
+  readonly queryLength: Float64Array;
   /** Subject sequence length reported by the engine (used for `-db` runs that have no FASTA subject records). */
   readonly subjectLength: Float64Array;
   readonly out6Start: Float64Array;
@@ -55,6 +59,8 @@ export interface HspTable {
   readonly out0End: Float64Array;
   readonly out0SubjectStart: Float64Array;
   readonly out0SubjectEnd: Float64Array;
+  /** 1-based PSI-BLAST iteration round, or 0 for single-round searches. */
+  readonly round: Int32Array;
 }
 
 export function hspTable(records: readonly HspSummary[]): HspTable {
@@ -74,6 +80,7 @@ export function hspTable(records: readonly HspSummary[]): HspTable {
     sEnd: new Float64Array(count),
     queryFrame: new Int8Array(count),
     subjectFrame: new Int8Array(count),
+    queryLength: new Float64Array(count),
     subjectLength: new Float64Array(count),
     out6Start: new Float64Array(count),
     out6End: new Float64Array(count),
@@ -81,6 +88,7 @@ export function hspTable(records: readonly HspSummary[]): HspTable {
     out0End: new Float64Array(count),
     out0SubjectStart: new Float64Array(count),
     out0SubjectEnd: new Float64Array(count),
+    round: new Int32Array(count),
   };
   records.forEach((record, i) => {
     table.index[i] = record.index;
@@ -96,6 +104,7 @@ export function hspTable(records: readonly HspSummary[]): HspTable {
     table.sEnd[i] = record.s_end;
     table.queryFrame[i] = record.query_frame ?? 0;
     table.subjectFrame[i] = record.subject_frame ?? 0;
+    table.queryLength[i] = record.query_length ?? 0;
     table.subjectLength[i] = record.subject_length ?? 0;
     table.out6Start[i] = record.out6?.[0] ?? -1;
     table.out6End[i] = record.out6?.[1] ?? -1;
@@ -103,6 +112,7 @@ export function hspTable(records: readonly HspSummary[]): HspTable {
     table.out0End[i] = record.out0?.[1] ?? -1;
     table.out0SubjectStart[i] = record.out0_subject?.[0] ?? -1;
     table.out0SubjectEnd[i] = record.out0_subject?.[1] ?? -1;
+    table.round[i] = record.round ?? 0;
   });
   return table;
 }

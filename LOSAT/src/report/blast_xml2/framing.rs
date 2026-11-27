@@ -117,11 +117,7 @@ pub fn side_file_open_error() -> anyhow::Error {
 /// outfmt 0 (`BLAST failed to write output`, exit status 6; the side files written before stay,
 /// the master file stays empty).
 pub fn side_file_write_error() -> anyhow::Error {
-    crate::cli::NativeError {
-        exit: 6,
-        message: "BLAST failed to write output\n".into(),
-    }
-    .into()
+    crate::cli::NativeError::write_failure().into()
 }
 
 /// The files of a 13 / 14 run: `create(n)` opens the file of the n-th report (`<base>_<n>.xml` or

@@ -57,11 +57,17 @@ impl SplitChunk for ProteinQueryChunk {
 /// Whether NCBI's query splitter (`CQuerySplitter`) splits the query batches of a search at all
 /// (`split_protein_batch` then decides by a batch's length): never those of an ungapped search
 /// (`gapped` false), of a PSSM query (`pssm_query`: `-in_pssm`, whose query factory is not
-/// `CObjMgr_QueryFactory` and makes one chunk) or against PSSM subjects (`pssm_subjects`:
-/// RPS-BLAST). The one rule of BLASTP's, psiblast's and TBLASTN's searches
+/// `CObjMgr_QueryFactory` and makes one chunk), against PSSM subjects (`pssm_subjects`:
+/// RPS-BLAST) or of PHI-BLAST (`phi_pattern`: psiblast `-phi_pattern`, `Blast_ProgramIsPhiBlast`).
+/// The one rule of BLASTP's, psiblast's and TBLASTN's searches
 /// (`blast_engine::split_steps::splits_batches`, `tblastn::stage_d_pipeline`'s `BatchSplit`).
-pub(crate) fn splits_query_batches(gapped: bool, pssm_query: bool, pssm_subjects: bool) -> bool {
-    gapped && !pssm_query && !pssm_subjects
+pub(crate) fn splits_query_batches(
+    gapped: bool,
+    pssm_query: bool,
+    pssm_subjects: bool,
+    phi_pattern: bool,
+) -> bool {
+    gapped && !pssm_query && !pssm_subjects && !phi_pattern
 }
 
 /// The query chunks of a protein batch with queries of `lengths` residues, or `None` when

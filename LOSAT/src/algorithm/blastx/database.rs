@@ -89,9 +89,15 @@ impl BlastxDatabase {
     /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
     /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
     /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
-    pub(crate) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+    pub(crate) fn keeping_scope(
+        mut self,
+        keeps: bool,
+        separate_xml2: bool,
+        record_keeps: Option<bool>,
+    ) -> Self {
         self.taxdb.set_keeps_scope(keeps);
         self.taxdb.set_separate_xml2(separate_xml2);
+        self.taxdb.set_record_keeps_scope(record_keeps);
         self
     }
 
@@ -615,7 +621,7 @@ impl ReportedSubjects {
         batches: &[BatchResults],
         gapped: bool,
         (pairwise, title_reads): (bool, shared::TitleReads),
-        (earlier, one_by_one): (shared::EarlierUtf8, bool),
+        earlier: shared::EarlierUtf8,
     ) -> Result<BatchTitles> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
@@ -623,7 +629,7 @@ impl ReportedSubjects {
         let mut parsed: BTreeMap<usize, Arc<ParsedSubject>> = BTreeMap::new();
         // The sources of the empty stored titles that NCBI makes from them.
         let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
-        let headers = shared::HeaderReader::new(&database.db, one_by_one);
+        let headers = shared::HeaderReader::new(&database.db, database.taxdb.unrecorded_calls());
         headers.note_earlier(earlier);
         // The first title or shown-source refusal that the reports refuse (`check_reported_title`,
         // `StoredTitle::check_shown_source`), held until the batch's header reads finish so an
@@ -913,11 +919,8 @@ impl ReportedSubjects {
                 if reports && reads {
                     // `handle_load_refusal` is checked in `check_handle_loads` after
                     // `refuse_ids_of_queries` has populated `seen`.
-                    let sought = shared::weak_sought(&database.db, subject, ordinal, one_by_one);
-                    sought
-                        .as_ref()
-                        .unwrap_or(subject)
-                        .fetched_with_scope(taxonomy, one_by_one, loads.load(oid), true)
+                    subject
+                        .fetched_with_scope(taxonomy, loads.load(oid), true)
                         .map_err(|reason| {
                             shared::parsed_refusal(
                                 database.db.oid(ordinal),
@@ -929,6 +932,7 @@ impl ReportedSubjects {
                     shared::check_prefetched_parsed(
                         &database.db,
                         subject,
+                        loads.load(oid),
                         ordinal,
                         subject.load_throws(),
                         database.program,
@@ -1128,7 +1132,7 @@ impl ReportedSubjects {
     ) {
         if database.parsed_seqids() {
             let rows = loads.reported_rows();
-            database.taxdb.note_loaded(&database.db, batch, || {
+            database.taxdb.note_loaded(batch, || {
                 batches
                     .iter()
                     .flat_map(move |batch| {
@@ -1202,13 +1206,15 @@ impl ReportedSubjects {
         places: bool,
         row_lookups: shared::RowLookups,
         pairwise: Option<crate::report::pairwise::PairwiseReading>,
+        (cut, joins_copies, ends_on_throw): (usize, bool, bool),
     ) -> Result<()> {
         if rows == SubjectFetch::Never && shared::prefetch_always_off(format) {
             return Ok(());
         }
         for batch in batches {
-            for (index, lists) in batch.queries.iter().enumerate() {
-                let ranks: Vec<u32> = match pairwise {
+            for index in 0..batch.queries.len() {
+                let lists = batch.cut_lists(index, cut);
+                let ranks: Vec<usize> = match pairwise {
                     Some(reading) => pairwise_read_order(
                         lists,
                         batch.prepared.original_lengths[index],
@@ -1224,26 +1230,22 @@ impl ReportedSubjects {
                     )?
                     .subjects()
                     .into_iter()
-                    .map(|rank| rank as u32)
+                    .filter(|&rank| self.loads.reached(rank))
                     .collect(),
-                    None => lists
-                        .iter()
-                        .filter(|list| super::report::reads_list(list, gapped, rows))
-                        .map(|list| list.oid as u32)
-                        .collect(),
+                    None => shared::one_by_one_query_reads(
+                        lists
+                            .iter()
+                            .filter(|list| super::report::reads_list(list, gapped, rows))
+                            .map(|list| list.oid),
+                        |rank| self.parsed_subject(rank),
+                        &self.loads,
+                        joins_copies,
+                        ends_on_throw,
+                    ),
                 };
-                // Not a subject that no report reaches after one whose load throws
-                // (`HitLoads::reached`).
                 let subjects = ranks
                     .into_iter()
-                    .filter(|&rank| self.loads.reached(rank as usize))
-                    .map(|rank| {
-                        (
-                            rank,
-                            self.ordinals[rank as usize],
-                            self.parsed_subject(rank as usize),
-                        )
-                    });
+                    .map(|rank| (rank as u32, self.ordinals[rank], self.parsed_subject(rank)));
                 let reads = shared::subject_read_texts(
                     &database.db,
                     &database.taxdb,
@@ -1626,6 +1628,7 @@ impl ReportedSubjects {
                     shared::check_prefetched_parsed(
                         &database.db,
                         subject,
+                        crate::report::db_subject::HitLoad::Loaded,
                         ordinal,
                         false,
                         database.program,

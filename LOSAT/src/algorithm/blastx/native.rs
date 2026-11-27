@@ -398,7 +398,13 @@ fn run_inner(
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
-            .keeping_scope(keeps_scope, separate_xml2);
+            .keeping_scope(
+                keeps_scope,
+                separate_xml2,
+                crate::report::db_subject::FormatThrow::record_keeps_scope(std::iter::once(
+                    crate::utils::os_bytes::os_str_bytes(&args.outfmt),
+                )),
+            );
             // RPSTBLASTN: each batch's `EffectiveSearchSpace` option is its last search unit's
             // own (`BatchResults::request_space`), and its units read `-dbsize` themselves
             // (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes a list.
@@ -688,7 +694,7 @@ fn run_inner(
         // archive and of the search strategy hold (`OptionsHandle::pass`): the search for the
         // database knows its volumes' costs and its units' database length.
         if let Some(handle) = handle {
-            handle.set_search_sets(Vec::new(), search.handle_sets())?;
+            handle.set_search_sets(Vec::new(), search.handle_sets(), Vec::new())?;
         }
         options.rpstblastn = Some(search);
     }
@@ -1260,7 +1266,7 @@ pub(super) fn batch_titles(
         results,
         gapped,
         (asks.pairwise, asks.titles),
-        (earlier, asks.one_by_one),
+        earlier,
     );
     super::x_timing::run(XRun::Titles, x_t);
     let utf8 = Utf8Read::post_of(
@@ -1647,6 +1653,14 @@ pub(super) fn reported_batch(
             // The pairwise report (outfmt 0 to 4) reads the subjects that it shows as its writer
             // reads them.
             let pairwise = options.pairwise_reading();
+            let joins_copies = first_report.is_some_and(ReportFormat::joins_adjacent_copies);
+            let ends_on_throw = asks.throw.run().is_some_and(|run| {
+                matches!(
+                    run.after,
+                    crate::report::db_subject::AfterThrow::EndsReport
+                        | crate::report::db_subject::AfterThrow::EndsRun
+                )
+            });
             reported.fetch_by_query(
                 database,
                 results,
@@ -1655,6 +1669,7 @@ pub(super) fn reported_batch(
                 places,
                 row_lookups,
                 pairwise,
+                (options.shown_lists(), joins_copies, ends_on_throw),
             )?;
             if options.outfmt == 5 {
                 diagnostics.write_all(&reported.take_query_fetches())?;

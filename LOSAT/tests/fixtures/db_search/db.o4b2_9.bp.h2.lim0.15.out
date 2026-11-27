@@ -1,0 +1,134 @@
+{
+"BlastOutput2": [
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/o4b2_9_h2 tests/db_search/tm_stop_u"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-05,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "q1",
+          "query_len": 70,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gi|203"
+                }
+              ],
+              "len": 70,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 147.517,
+                  "score": 371,
+                  "evalue": 3.3368e-53,
+                  "identity": 70,
+                  "positive": 70,
+                  "query_from": 1,
+                  "query_to": 70,
+                  "hit_from": 1,
+                  "hit_to": 70,
+                  "align_len": 70,
+                  "gaps": 0,
+                  "qseq": "GEMDSYTHYAALVARGVVQDISGRLVIVFLPRKHVNYGYILLGHTLRQFMWIQIICMMRMGPGCDQCASG",
+                  "hseq": "GEMDSYTHYAALVARGVVQDISGRLVIVFLPRKHVNYGYILLGHTLRQFMWIQIICMMRMGPGCDQCASG",
+                  "midline": "GEMDSYTHYAALVARGVVQDISGRLVIVFLPRKHVNYGYILLGHTLRQFMWIQIICMMRMGPGCDQCASG"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 5,
+            "db_len": 365,
+            "hsp_len": 15,
+            "eff_space": 15950,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/o4b2_9_h2 tests/db_search/tm_stop_u"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-05,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "q2",
+          "query_len": 40,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gi|202"
+                }
+              ],
+              "len": 40,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 86.2705,
+                  "score": 212,
+                  "evalue": 8.86035e-30,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 1,
+                  "query_to": 40,
+                  "hit_from": 1,
+                  "hit_to": 40,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "KWCCCYRAVCFKGTHTGDSRKMKCANTVLAVRNLDKENPS",
+                  "hseq": "KWCCCYRAVCFKGTHTGDSRKMKCANTVLAVRNLDKENPS",
+                  "midline": "KWCCCYRAVCFKGTHTGDSRKMKCANTVLAVRNLDKENPS"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 5,
+            "db_len": 365,
+            "hsp_len": 11,
+            "eff_space": 8990,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

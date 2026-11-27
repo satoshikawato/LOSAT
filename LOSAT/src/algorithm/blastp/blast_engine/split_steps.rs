@@ -32,7 +32,7 @@ use crate::blastinput::seq_range;
 /// batch is never split; an ungapped search splits none (and so builds one compressed lookup table
 /// for each batch, `ncbi_compressed_lookup_tables`); a PSSM search splits only the rounds of a
 /// FASTA query (`PsiSearch::split_setup`), never a PSSM query (`-in_pssm`,
-/// `CObjMgrFree_QueryFactory`).
+/// `CObjMgrFree_QueryFactory`); PHI-BLAST (`-phi_pattern`) splits none.
 pub(super) fn splits_batches(args: &ResolvedBlastpArgs) -> bool {
     splits_query_batches(
         !args.ungapped,
@@ -40,6 +40,7 @@ pub(super) fn splits_batches(args: &ResolvedBlastpArgs) -> bool {
             .as_deref()
             .is_some_and(|psi| psi.split_setup.is_none()),
         args.rps_search.is_some(),
+        args.phi.is_some(),
     )
 }
 

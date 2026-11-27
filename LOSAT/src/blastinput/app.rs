@@ -543,6 +543,16 @@ impl ReportFormat {
                 | CommaSeparatedValuesWithHeader
         )
     }
+
+    /// Whether NCBI's report writer joins adjacent hits whose Seq-align ids match into one `Hit`
+    /// (`Xml`, `Xml2`, `Json`, `Xml2S`, `JsonS`), reading only the first copy's subject Bioseq.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:478-487
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:476-509
+    pub fn joins_adjacent_copies(self) -> bool {
+        use ReportFormat::*;
+        matches!(self, Xml | Xml2 | Json | Xml2S | JsonS)
+    }
 }
 
 /// LOSAT's search programs, for what depends on the program in the reading of `-outfmt`.
@@ -798,8 +808,15 @@ pub fn report_format(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
 pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyhow::Result<()> {
+    formatting_handler_check_with(choice, program.is_sam())
+}
+
+/// `formatting_handler_check` of formatting arguments made with `eIsSAM` (`is_sam`) or without:
+/// the search programs' (`Program::is_sam`) and blast_formatter's, whose formatting arguments
+/// are made for SAM and not for a query (blast_formatter.cpp:131, `blast_formatter::formatting`).
+pub fn formatting_handler_check_with(choice: &FormatChoice, is_sam: bool) -> anyhow::Result<()> {
     match choice.number {
-        SAM if !program.is_sam() => Err(options_error("SAM format is only applicable to blastn")),
+        SAM if !is_sam => Err(options_error("SAM format is only applicable to blastn")),
         AIRR_REARRANGEMENT => Err(options_error(
             "AIRR rearrangement format is only applicable to igblastn",
         )),

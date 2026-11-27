@@ -186,7 +186,7 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             &batches,
             true,
             (false, Default::default()),
-            (Default::default(), true),
+            Default::default(),
         )
         .unwrap();
         let reported = ReportedSubjects::for_batch(
@@ -272,7 +272,7 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
             &batches,
             true,
             (false, Default::default()),
-            (Default::default(), true),
+            Default::default(),
         )
         .unwrap();
         let mut reported = ReportedSubjects::for_batch(
@@ -324,6 +324,7 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
                 false,
                 crate::algorithm::common::database::RowLookups::None,
                 None,
+                (usize::MAX, false, false),
             )
             .unwrap();
         [
@@ -424,7 +425,7 @@ fn read_titles_does_not_let_shown_source_refusal_overtake_earlier_refusal_or_hea
             &batches,
             true,
             (true, shared::TitleReads::Reports),
-            (Default::default(), true),
+            Default::default(),
         )
     };
     // Multi-volume specs sort volumes by path, so locate bare_v4 (length 20) vs tc_dmg_p

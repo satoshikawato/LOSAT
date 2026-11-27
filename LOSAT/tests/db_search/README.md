@@ -150,6 +150,16 @@ FASTA files:
   `x2d_d50r.asn.gz` is `x2d_d50.asn.gz` with its `-` column at 50 on rows 16 to 20 too (title `x2d dash 50 rows
   13-20`; `gzip -9n` of the text PSSM), so that the window's NULLBs past frame -3's NULLB sum above 0.
 
+- The databases under `x2d2/` (rows `db.x2d2.*`, line RG-XS2 item X2d-2; `-blastdb_version 4`, built with
+  `makeblastdb -dbtype nucl -blastdb_version 4`) are single- and two-sequence nucleotide databases of
+  `LOSAT/tests/fasta/x2d2/{a0_r1,a0_r2,a0_r2_m,fm1_r0,fm1_r1,fm1_r2}.fna`, exercising frame +1 and -1 with 0, 1 and 2
+  remainder bases past the frame's last codon for `-in_pssm -window_size 0` NULLB-start reporting.
+  `LOSAT/tests/fixtures/pssm/x2d_w10.asn.gz` is `x2d_d50.asn.gz` with row 10 `W` set to +10 and row 11 `V` to -10 so
+  ungapped NULLB-start alignments (`Sub(2)` / `Sub(1)`) map to an empty alignment under `-subject` (`eBadAlignment`).
+  `LOSAT/tests/fixtures/pssm/x2d_w20.asn.gz` sets row 10 `W` to +20 and row 11 `V` to -20 so negative-frame `-db`
+  NULLB-start alignments whose entire edit script lies in the trailing `Sub(k)` segment leave an empty subject row
+  (`Row is empty` in pairwise/XML/XML2/JSON/prefetch and `Row 1 contains gaps only.` in tabular).
+
 - The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
   `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),
   whose frame +1 is W W W, the last three letters of the query `xs_q.faa` (`MHYWWW`). NCBI BLAST+ translates a subject's
@@ -1102,8 +1112,14 @@ not warn; `zunf.s1`, `zunf.r3` do the same where Y's kept definition line is `lc
 `BLASTDB=tests/seqdb/taxdb/bad_magic` and the prefetch off: NCBI's PSSM read loads the Bioseq and writes the taxonomy
 database's text after the report; a refusal until review 3 of the line). Two `losat-rejection` rows (rc 1, with the `pssm`
 files kind: no PSSM file is written): `wk5.pf0.reject` (the prefetch off, a weakly matching sequence C that NCBI's scope has
-read before: NCBI reads C's letters) and `ah4.reject` (another sequence that also holds A's id: NCBI's result depends on its
-reads and memory layout).
+read before: NCBI reads C's letters) and `ah4.reject` (Z holds `emb|AAA00001.1|` on its second line and both A and Z pack to
+1, so NCBI's bulk prefetch orders them by `CSeq_id_Info` heap addresses; line DBID hr-1 f1 adds the deterministic siblings
+`ids/prd_aha1` (`db.id.prd.aha1`, A packed 1 before Z packed 2: A stays unresolved in the scope and NCBI warns) and
+`ids/prd_ahz1` (`db.id.prd.ahz1.reject`, Z packed 1 before A packed 2: Z registers A's handle in `m_Ids` first and NCBI reads
+Z's letters, refused until hr-2/hr-3); `prd2.pah` is deterministic and frozen as NCBI's output). `ids/lru12x100`, `ids/lru9x100`
+and `ids/lru12x1` (query `ids/lru_q.faa`, built by `make_ids.py --lru-only`; rows `db.hr1.bp.lru*.6t*`) test
+`CBlastDbDataLoader::m_Ids`'s 1,000-entry LRU eviction: 1,202 registrations evict S's registration so T resolves to its own
+record (`lru12x100`), while 902 (`lru9x100`) and 12 (`lru12x1`) stay within 1,000 and keep the hold (refused).
 
 Review 2 of pssmread (rows `db.id.prd2.*`; databases from `ids/prd_*.faa` and `ids/prdn_*.fna` by `make_ids.py
 --pssmread-only`, read through `ids/prd_xg.pal`, `prd_tw.pal`, `prd_tu.pal`, `prd_pah.pal`, `prdn_u.nal` and
@@ -1118,8 +1134,9 @@ the reader's filter does not keep for A's `gb|AAA00001.1|` (`s_SeqDB_SeqIdIn` st
 `Failed to retrieve sequence` and no taxonomy text; `tu.bad.s1` and `tu.lastoff.r1`: A `lcl|777 ^A gi|777` (unfetchable by
 its own ids) after Y (`gi|777|gb|YYY00001.1|`, 20 letters, taxid 99990): the prefetch reads Y and looks its taxid up, and
 the PSSM warns `Failed to retrieve sequence gi|777`; `tu.bad.pf0` (the same with the prefetch off: the PSSM's read loads Y
-first, so NCBI writes the text, then the warning; a refusal until review 3); one `losat-rejection` row, `pah.reject` (C
-`gi|888|gb|CCC00001.1| ^A gi|777` also holds A's `gi|777`: the refusal names database sequence 2). BLASTN (megablast) and TBLASTX with the
+first, so NCBI writes the text, then the warning; a refusal until review 3); `pah` (C
+`gi|888|gb|CCC00001.1| ^A gi|777` also holds A's `gi|777`: NCBI warns `Failed to retrieve sequence gi|777`; a refusal that
+named database sequence 2 until line DBID hr-1). BLASTN (megablast) and TBLASTX with the
 minus-strand query `ids/prdn_qrc.fna` (the prefetch asks the length of a minus-strand Seq-align's subject): `bn.u.rc`,
 `tx.u.rc` (A `lcl|777 ^A gi|777` after Y `gi|777|gb|YYY00001.1|`: the scope gets Y's Bioseq, no warning) and `bn.z.rc`,
 `tx.z.rc` (A `gi|777` after Y `lcl|777 ^A gi|777`, whose kept line `lcl|777` does not hold the id: `Error pre-fetching
@@ -2904,6 +2921,15 @@ Rows `db.html.rps.*` and `db.html.rpstbn.*` (line RG T4c, 2026-11-24; `../db_sea
 quotes, profile 102 under `pdb|1ABC|A` and profile 103 under `gnl|CDD|103` with the entities `&amp;` and `&lt;b&gt;` in its title (`rps/build.sh`; its other
 files are the same as `rps_mini`'s), searched as `rps-gz:rps_mini!phr=hx.phr.gz!pin=hx.pin.gz!pdb=hx.pdb.gz!pos=hx.pos.gz`: the profile titles of an RPS
 database reach the links of NCBI's HTML formatter through a reader of their own.
+
+## `o4b2_9_*`: XML2/JSON damaged-taxdb prefetch remainder (line NP item O4b2-9)
+
+Built with official NCBI BLAST+ 2.17.0 `makeblastdb -dbtype prot -blastdb_version 5 -parse_seqids`:
+
+- `o4b2_9_r1_q.faa` and `o4b2_9_r1_silent_q.faa` (two queries: `q0` has a non-UTF-8 byte `0x80` in its title that triggers XML2's `CStringException` post, and `q1` hits `sN_nz_p` taxid 99990 in `nz_p` or slot-silent `sI_nz_pc` taxid 562 in `nz_pc`); `o4b2_9_r1_q.fna` is the nucleotide analogue for `nz_n` (`sN_nz_n`).
+- `o4b2_9_u8mid`, `o4b2_9_u8_q6.faa`, `o4b2_9_u8tie`, `o4b2_9_u8tie_q2.faa`, and `o4b2_9_r2_q2.faa`: `o4b2_9_u8mid` holds 6 sequences (`gi|2`, `gi|4`, `gi|7` taxid 99990; `gi|3`, `gi|6` taxid 150; dummy `ref|NP_000099.1|` taxid 562 for an accession LMDB table); `o4b2_9_u8_q6.faa` (`t5/hd_q0` first, then 5 queries matching `gi|2..gi|7`) pairs with `t5/pdo5_same` and `t5/pds5` (`gb|DUP00005.1|`, packed 5, UTF8String title `0x0c`) under `-max_target_seqs 1` to interleave `803.10` between slot 150 offset errors in prefetch handle order; `o4b2_9_u8tie` (`gi|1` packed 1 taxid 99990, `gi|9` taxid 150, dummy `ref|NP_000099.1|`) and `o4b2_9_u8tie_q2.faa` pair with `t5/pdo_same` and `t5/pds` (`gb|DUP00001.1|`, packed 1) for the packed-key address-order tie refusal; `o4b2_9_r2_q2.faa` (`q0` matching `gi|2` in `o4b2_9_u8mid`, `q1` matching `gnl|PIG|x001` in `t5/ppig1`) exercises `Error pre-fetching sequence data` alongside a colliding volume.
+- `o4b2_9_prestop1`, `o4b2_9_prestop2`, and `o4b2_9_prestop_q2.faa`: `q0` hits `gi|101` (99990), `gi|102` (150), and in `prestop1` also `gi|103` (99990), leaving 99990 (`prestop1`) or 150 (`prestop2`) in slot 150 at the end of batch 0; `q1` hits `gi|1` (99990), `gi|2` (150), `gi|3` (99990), and `ref|NP_000008.1|` (562), stopping at `tm_stop_u` (no accession table) in batch 1 with `BATCH_SIZE=1`.
+- `o4b2_9_h2` and `o4b2_9_h2_q3.faa`: three queries (`q0` hits `gi|1` taxid 99990, `ref|NP_000008.1|` taxid 562 which throws on `tm_stop_u`, and `gi|3` taxid 150; `q1` hits `gi|2` taxid 99990; `q2` hits `gi|3` taxid 150) checking that one-by-one XML2/JSON reads stop at the throwing `Hit` in `q0` and do not evict slot 150 before `q1`.
 
 Rows `db.html.ps.*` (line RG T4c2; `../db_search_manifest/psiblast.html.tsv`): `-html` in `psiblast` across rounds (`-num_iterations 0` to `3`),
 formats `0` to `4` and `18`, two-part description tables, `-in_pssm` and `-in_msa` queries, `-subject` registry rows, id kinds and special titles,

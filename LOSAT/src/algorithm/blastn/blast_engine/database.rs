@@ -416,9 +416,15 @@ impl BlastnDatabase {
     /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
     /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
     /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
-    pub(super) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+    pub(super) fn keeping_scope(
+        mut self,
+        keeps: bool,
+        separate_xml2: bool,
+        record_keeps: Option<bool>,
+    ) -> Self {
         self.taxdb.set_keeps_scope(keeps);
         self.taxdb.set_separate_xml2(separate_xml2);
+        self.taxdb.set_record_keeps_scope(record_keeps);
         self
     }
 
@@ -635,6 +641,7 @@ impl BlastnDatabase {
         first_query: usize,
         ungapped: bool,
         loads: &HitLoads,
+        joins_copies: bool,
     ) -> Result<crate::report::query_warnings::QueryReads> {
         let parsed = |oid: u32| match titles.get(&oid) {
             Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
@@ -650,19 +657,25 @@ impl BlastnDatabase {
             )
             .subjects()
             .into_iter()
+            .filter(|&oid| loads.reached(oid))
             .map(|oid| oid as u32)
             .collect(),
-            None => hit_lists
-                .iter()
-                .flat_map(shown_lists)
-                .filter(|hsp_list| !hsp_list.hsps.is_empty())
-                .map(|hsp_list| hsp_list.oid)
-                .collect(),
-        };
-        let subjects = ordinals
+            None => shared::one_by_one_query_reads(
+                hit_lists
+                    .iter()
+                    .flat_map(shown_lists)
+                    .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                    .map(|hsp_list| hsp_list.oid as usize),
+                |oid| titled_parsed(titles, oid),
+                loads,
+                joins_copies,
+                false,
+            )
             .into_iter()
-            .filter(|&oid| loads.reached(oid as usize))
-            .map(|oid| (oid, oid, parsed(oid)));
+            .map(|oid| oid as u32)
+            .collect(),
+        };
+        let subjects = ordinals.into_iter().map(|oid| (oid, oid, parsed(oid)));
         shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows, PROGRAM)
     }
 
@@ -680,19 +693,24 @@ impl BlastnDatabase {
     /// and dropped them, LOSAT_X_RPTSTREAM, which records each batch instead: `note_loaded`), as
     /// NCBI's data loader loaded them (`LoadedBefore`), read only where the batch stops; the outfmt
     /// 5 reports before the batch are the queries' (`shared::PrefetchQueries::after_xml_reports`).
+    /// What the prefetch gives for each Seq-align id is the run's one walk's (`run`,
+    /// `RunLoads::prefetched`).
     pub(super) fn batch_prefetch(
         &self,
-        titles: &DatabaseTitles,
+        (titles, run): (&DatabaseTitles, &crate::report::db_subject::RunLoads),
         before: LoadedBefore<'_>,
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<crate::report::diag_log::Posts> {
+        let subjects: Vec<shared::PrefetchSubject<'_>> =
+            Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every).collect();
+        let loads = shared::walk_prefetch(&self.taxdb, run, &subjects);
         shared::batch_prefetch(
             &self.db,
             &self.taxdb,
             Self::loaded_subjects(titles, before, gapped),
-            Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
+            loads,
             PROGRAM,
             queries,
         )
@@ -720,7 +738,7 @@ impl BlastnDatabase {
                 .lock()
                 .expect("the loads before the batch") = self.taxdb.loads_before(Some(start));
             let batch = [0..hit_lists.len()];
-            self.taxdb.note_loaded(&self.db, start, || {
+            self.taxdb.note_loaded(start, || {
                 Self::loaded_subjects(
                     titles,
                     LoadedBefore {
@@ -787,6 +805,7 @@ impl BlastnDatabase {
                     ordinal: hsp_list.oid,
                     parsed,
                     flipped,
+                    load: None,
                 }
             })
     }
@@ -1625,13 +1644,13 @@ impl BlastnDatabase {
     /// `blastinput::app::ErrorAfterBatchReports::title_posts`). The error is `read_titles`'.
     pub(super) fn batch_titles(
         &self,
-        (fetched, one_by_one): (Option<crate::seqdb::SeqLocation>, bool),
+        fetched: Option<crate::seqdb::SeqLocation>,
         hit_lists: &mut [Option<BlastnHitList>],
         (titles, posts): (&mut DatabaseTitles, &mut crate::report::diag_log::Posts),
     ) -> Result<()> {
         let aligned = drop_unaligned(self, hit_lists);
         let earlier = shared::EarlierUtf8::of_batch(0, fetched, aligned);
-        let read = read_titles(self, hit_lists, (earlier, one_by_one), titles);
+        let read = read_titles(self, hit_lists, earlier, titles);
         let first = shared::Utf8Read::of_read(&read, Option::as_ref);
         let warning = shared::Utf8Read::post_of(first, &self.db, &self.taxdb.prefix("blastn"));
         if let Some(warning) = &warning {
@@ -1705,10 +1724,10 @@ pub(super) fn drop_unaligned(
 pub(super) fn read_titles(
     database: &BlastnDatabase,
     hit_lists: &[Option<BlastnHitList>],
-    (earlier, one_by_one): (shared::EarlierUtf8, bool),
+    earlier: shared::EarlierUtf8,
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
-    let headers = shared::HeaderReader::new(&database.db, one_by_one);
+    let headers = shared::HeaderReader::new(&database.db, database.taxdb.unrecorded_calls());
     headers.note_earlier(earlier);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
@@ -1776,7 +1795,6 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .first()
             .is_some_and(|format| format.prefetches_subjects())
             && !shared::prefetch_always_off(prefetch_format(output_formats)),
-        one_by_one: shared::prefetch_may_be_off(prefetch_format(output_formats)),
         titles: shared::TitleReads::of_outfmts(
             crate::report::archive::options::RequestKind::Blastn,
             output_formats
@@ -2038,6 +2056,9 @@ pub(super) struct QueryFetches<'a> {
     /// Whether the first format is a pairwise one, which places the texts in the order of its
     /// reads (`places`).
     pub(super) pairwise_first: bool,
+    /// Whether the first format joins adjacent copies of the same record into one `Hit`
+    /// (`Xml`, `Xml2`, `Json`, `Xml2S`, `JsonS`), reading only the first of the run.
+    pub(super) joins_copies: bool,
     /// Whether each HSP is a Seq-align (`seq_aligns_of`) and the search is gapped (`!ungapped`).
     pub(super) gapped: bool,
     /// The `-query_loc` offsets of the run's queries (for `pairwise_read_order`).
@@ -2118,6 +2139,7 @@ impl QueryFetches<'_> {
                             first + index,
                             !self.gapped,
                             &loads,
+                            self.joins_copies,
                         )?;
                     } else {
                         messages = self

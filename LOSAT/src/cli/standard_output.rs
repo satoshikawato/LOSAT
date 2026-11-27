@@ -9,7 +9,7 @@
 //! descriptor opened only for reading), as NCBI's write gets it.
 //!
 //! What a failed write loses is up to the writer above. The stream states of NCBI
-//! (`crate::writedb::cout`, `crate::ncbi_app::files::Ostream`, rpsbproc's report) drop the
+//! (`crate::writedb::cout`, `crate::ncbi_app::files::OutputFile`, rpsbproc's report) drop the
 //! bytes of the failed write and write nothing after it. Where that cuts the output follows
 //! each writer's own write sizes; NCBI's for the tools' records are item T8a's (line RG-T5).
 //! A `std::io::BufWriter` keeps the bytes. The search programs' report stream

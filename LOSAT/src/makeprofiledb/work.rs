@@ -7,7 +7,7 @@ use std::path::Path;
 
 use crate::blastinput::ncbi_environment::{ApplicationSettings, ReadVerification};
 use crate::ncbi_app::args::Args;
-use crate::ncbi_app::files::{self, Cin, OutputFile};
+use crate::ncbi_app::files::{self, Cin, OutputDevice};
 use crate::ncbi_app::Diag;
 use crate::report::serial::asn_types::{Post, ReadError};
 use crate::report::serial::pssm::{PssmWithParameters, SeqData, SeqEntry};
@@ -292,12 +292,12 @@ fn init<'a>(
     diag: &mut Diag,
 ) -> Result<Params<'a>, InitEnd> {
     let log_file = if args.given("logfile") {
-        match args.output_file("logfile", &mut *out) {
-            Ok(OutputFile::File(file)) => Some(OfStream::of_file(file)),
-            Ok(OutputFile::Stdout(_)) => None,
+        match args.output_device("logfile", &mut *out) {
+            Ok(OutputDevice::File(file)) => Some(OfStream::of_file(file)),
+            Ok(OutputDevice::Stdout(_)) => None,
             // LOSAT Web's refusal of a name that it does not write (`OpenFiles::create`), which
             // the files of the command line and the library never give.
-            Ok(OutputFile::Refused(reason)) => return Err(diag.refuse(&unsupported(&reason))),
+            Ok(OutputDevice::Refused(reason)) => return Err(diag.refuse(&unsupported(&reason))),
             Err(error) => return Err(diag.init_arg_exception(error)),
         }
     } else {

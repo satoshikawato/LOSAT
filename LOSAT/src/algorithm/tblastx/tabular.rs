@@ -37,7 +37,6 @@ use crate::report::tabular::{
 };
 use crate::utils::genetic_code::GeneticCode;
 
-const PROGRAM: &str = "TBLASTX";
 /// The `# TBLASTX 2.17.0+` line of outfmt 7 (`NStr::ToUpper` of `m_Program`, a space and `version`).
 const PROGRAM_VERSION: &str = concat!("TBLASTX ", crate::wording::report_version!());
 
@@ -116,6 +115,8 @@ pub(super) fn write_tblastx_tabular(
 ) -> Result<()> {
     let (spec, run, hits) = (tab.spec, tab.run, tab.hits);
     let args = run.args;
+    // The name in LOSAT's refusals: the running application's.
+    let program = args.app().name();
     let needs = spec.needs();
     let taxdb_found = args.tabular_taxdb.unwrap_or(false);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
@@ -195,7 +196,7 @@ pub(super) fn write_tblastx_tabular(
             run.subjects,
             false,
             names,
-            PROGRAM,
+            program,
             args.app().ncbi_name(),
             &queries,
             writer,
@@ -213,7 +214,7 @@ pub(super) fn write_tblastx_tabular(
                     hsp.hit.q_idx as usize,
                     hsp.hit.s_idx as usize,
                     spec,
-                    PROGRAM,
+                    program,
                 )?;
             }
         }
@@ -319,7 +320,7 @@ pub(super) fn write_tblastx_tabular(
             let group = &query_hits[first..end];
             first = end;
             let s_idx = s_idx as usize;
-            let values = subjects.values_for(q_idx, s_idx, spec, PROGRAM)?;
+            let values = subjects.values_for(q_idx, s_idx, spec, program)?;
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2969-2985
             // The HSPs of one subject are one group of `InsertSubjectScores` (consecutive
             // Seq-aligns of one subject); their query intervals in nucleotides (the Std-seg's
@@ -343,7 +344,7 @@ pub(super) fn write_tblastx_tabular(
             // (`TabularRows::last_found`), made again from its index.
             let kept_values = match rows.last_found() {
                 Some(kept) if table.fails(&subject) => {
-                    Some(subjects.values_for(q_idx, kept, spec, PROGRAM)?)
+                    Some(subjects.values_for(q_idx, kept, spec, program)?)
                 }
                 _ => None,
             };

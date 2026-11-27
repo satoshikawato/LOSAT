@@ -447,7 +447,7 @@ impl SubjectPasses<'_> {
         let excluded = match stage.excluded.as_ref() {
             Some(excluded) => excluded
                 .excludes(ordinal)
-                .map_err(|error| database::fetch_refusal((ordinal, error))),
+                .map_err(|error| database::fetch_refusal(stage.database, (ordinal, error))),
             None => Ok(false),
         };
         let finished = excluded.and_then(|excluded| {
@@ -777,7 +777,7 @@ impl SubjectPasses<'_> {
                     if let Some(excluded) = database::fetch_excluded(database) {
                         let fetched = excluded
                             .retain(&mut listed, |(ordinal, _)| Some(*ordinal))
-                            .map_err(database::fetch_refusal)?;
+                            .map_err(|failed| database::fetch_refusal(database, failed))?;
                         // The traceback fetches every listed sequence (its first read of a
                         // UTF8String header: `FetchedUtf8::traceback_first`).
                         if let Some(ordinal) =

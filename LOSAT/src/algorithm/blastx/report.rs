@@ -130,7 +130,7 @@ pub(super) fn refuse_rps_generated_ids(
                 subject,
                 names.oid(list.oid),
                 scopes.of_query(ordinal),
-                options.program().upper,
+                options.program().refusal,
                 effect,
             )?;
         }
@@ -428,10 +428,12 @@ impl RecordsParsed {
     /// The records of `records`. `pairwise` gets the parsed subjects first, for LOSAT's refusals of
     /// their titles in outfmt 0 to 4 (`db_subject::check_pairwise_records`, each such format's;
     /// their description lines are refused where a report prints them, `write_pairwise`), then
-    /// come the refusals of their tabular ids.
+    /// come the refusals of their tabular ids, which name `program` (the running application's,
+    /// `BlastxArgs::app`).
     pub(crate) fn of(
         records: &[FastaRecord],
         show_gis: bool,
+        program: &str,
         pairwise: impl FnOnce(
             &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
         ) -> Result<()>,
@@ -445,7 +447,7 @@ impl RecordsParsed {
         pairwise(&subjects)?;
         let refused = |subject: &crate::report::db_subject::ParsedSubject, problem: &str| {
             anyhow::anyhow!(
-                "the subject record {} has {problem}, which is not supported by LOSAT's BLASTX",
+                "the subject record {} has {problem}, which is not supported by LOSAT's {program}",
                 String::from_utf8_lossy(&subject.alignment_fasta())
             )
         };
@@ -844,7 +846,7 @@ pub(super) fn render_queries_with(
         && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
     {
         stderr.write_all(&crate::algorithm::common::database::prefetch_warning(
-            options.app_name,
+            options.app_name(),
         ))?;
     }
     if options.pairwise_view().is_some() {
@@ -959,6 +961,15 @@ pub(super) fn render_queries_with(
         writer, stderr, options, spec, queries, subjects, shown, batches, probe, first_hsp,
     )
 }
+
+/// Whether the description lines of the run's subjects are read as protein ones
+/// (`common::database::refuse_described_lines`): BLASTX's subjects are, also where another
+/// application runs a BLASTX strategy. RPSTBLASTN's runs keep the reading they had when the
+/// refusals took it from the program's name, which did not list RPSTBLASTN.
+fn described_protein(options: &ResolvedOptions) -> bool {
+    options.rpstblastn.is_none()
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1420
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1578
 #[allow(clippy::too_many_arguments)]
@@ -1112,7 +1123,8 @@ fn write_pairwise(
                 ))
             },
             records_parsed,
-            options.program().upper,
+            described_protein(options),
+            options.program().refusal,
         )?;
     }
     if let ShownSubjects::Database { reported, .. } = shown {
@@ -1146,7 +1158,8 @@ fn write_pairwise(
             parsed,
             |rank| reported.loads().load(rank as usize),
             |rank| reported.oid(rank as usize),
-            options.program().upper,
+            described_protein(options),
+            options.program().refusal,
         )?;
         let mut reported_ranks: Vec<Vec<u32>> = vec![Vec::new(); queries.len()];
         for hit in hits {
@@ -1178,7 +1191,7 @@ fn write_pairwise(
             |q_idx| scopes.of_query(q_idx),
             scopes.generated(),
             view != crate::report::pairwise::PairwiseView::Pairwise,
-            options.program().upper,
+            options.program().refusal,
         )?;
     }
     let config = PairwiseConfig {
@@ -1670,12 +1683,12 @@ pub(crate) fn write_epilog(
         )?;
     } else if options.outfmt == 5 {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243
-        super::blast_xml::write_xml_epilog(writer, diagnostics, options.app_name, queries, None)?;
+        super::blast_xml::write_xml_epilog(writer, diagnostics, options.app_name(), queries, None)?;
     } else if xml2.is_some() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2219 and
         // :2419-2423, :2440-2445: the report a `-subject` run holds back, then the end of the
         // document.
-        super::blast_xml::write_xml_epilog(writer, diagnostics, options.app_name, queries, xml2)?;
+        super::blast_xml::write_xml_epilog(writer, diagnostics, options.app_name(), queries, xml2)?;
     } else if options.outfmt == 7 {
         // The warning of the epilog's formatter, for a field list that shows a plural name of
         // the taxonomy database without `taxdb.bti` (`tabular::write_epilog_warning`).
@@ -1722,7 +1735,7 @@ pub(super) fn query_warning(
     }
     // The id and the title, cut as every program's query warning (`RecordNames::warning_query_id`).
     let id = query.names().warning_query_id();
-    let mut bytes = format!("Warning: [{}] ", options.app_name).into_bytes();
+    let mut bytes = format!("Warning: [{}] ", options.app_name()).into_bytes();
     bytes.extend_from_slice(&id);
     bytes.extend_from_slice(b": ");
     if search_skipped {

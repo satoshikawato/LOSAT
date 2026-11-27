@@ -334,6 +334,7 @@ pub(super) fn batch_spaces(inputs: &SpaceInputs<'_>) -> Result<BatchSpaces> {
         search_karlin,
         query_eff_searchsp,
     } = inputs;
+    let program = args.app().name();
     let x_statistics = match subjects {
         SubjectSource::Database(database) => Some(database.statistics()),
         SubjectSource::Prepared(_) => None,
@@ -357,7 +358,7 @@ pub(super) fn batch_spaces(inputs: &SpaceInputs<'_>) -> Result<BatchSpaces> {
                             args.options_searchsp(),
                             false,
                             &blocks.gapped,
-                            "BLASTN",
+                            program,
                         )
                     })
                     .collect::<Result<_, _>>()?,
@@ -420,6 +421,9 @@ pub(super) struct CutoffInputs<'a> {
     /// computes the statistics of each subject (`BlastInitialWordParametersUpdate`'s `subj_length`,
     /// blast_setup.c:1018-1021), `None` for the average of the subject set (blast_engine.c:1372-1374).
     pub(super) subject_length: Option<u64>,
+    /// The name in LOSAT's refusals: the running application's (`BlastnArgs::app`), not BLASTN's
+    /// where it runs another program's strategy.
+    pub(super) program: &'static str,
 }
 
 /// The cutoff scores, the hit-saving cutoff scores, the X-dropoffs and the reduced cutoff scores
@@ -447,6 +451,7 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
         matrix_only,
         evalue_threshold,
         subject_length,
+        program,
     } = inputs;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348
     // The word cutoff from the e-value of `BLAST_Cutoffs` (`ungapped::word_cutoff_score`): every
@@ -536,7 +541,7 @@ pub(super) fn batch_cutoffs<const UNGAPPED: bool>(
                 },
                 cutoff_score_max,
             )
-            .map_err(ungapped_cutoff_limit_error)?
+            .map_err(|limit| ungapped_cutoff_limit_error(limit, program))?
         } else {
             cutoff_score_for_ungapped_extension(gap_trigger, cutoff_score_max, 1.0)
         };
@@ -649,7 +654,7 @@ pub(super) fn subject_statistics<'a, const UNGAPPED: bool>(
                     space,
                     false,
                     &blocks.gapped,
-                    "BLASTN",
+                    inputs.program,
                 )?
                 .eff_searchsp)
             })

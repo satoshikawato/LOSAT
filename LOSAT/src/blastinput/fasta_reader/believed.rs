@@ -250,12 +250,15 @@ pub(crate) fn refused_id(
 /// refuse what `refused_id` refuses first. An accession with a version and the same accession without one
 /// count as one id for two subjects, and in BLASTN two queries (`dropin-survey-20261029/DI7/
 /// DECISIONS.md` 11, 12). Adds the keys of the ids. A record of the other role is
-/// `crate::seqid::id_scope::IdScope::add_record`'s.
+/// `crate::seqid::id_scope::IdScope::add_record`'s. `program`: the program whose rules of the
+/// queries' scope apply (BLASTN's, PSIBLAST's); `name`: the name in the refusal (`program`'s, or
+/// the running application's where it runs another program's strategy).
 pub(crate) fn duplicate_id(
     ids: &[ParsedSeqId],
     seen: &mut HashSet<u64>,
     role: &str,
     program: &str,
+    name: &str,
 ) -> Option<anyhow::Error> {
     let fasta = |id: &ParsedSeqId| {
         let mut out = Vec::new();
@@ -289,7 +292,7 @@ pub(crate) fn duplicate_id(
             };
             return Some(anyhow::anyhow!(
                 "two {role} records have the Seq-id {} under -parse_deflines{scope} ({why}); this \
-                 is not supported by LOSAT's {program}",
+                 is not supported by LOSAT's {name}",
                 fasta(id)
             ));
         }
@@ -299,7 +302,7 @@ pub(crate) fn duplicate_id(
                 return Some(anyhow::anyhow!(
                     "two {role} records have the name of {} with and without an accession under \
                      -parse_deflines{scope} (NCBI BLAST+ shows them as one sequence); this is not \
-                     supported by LOSAT's {program}",
+                     supported by LOSAT's {name}",
                     fasta(id)
                 ));
             }
@@ -316,7 +319,7 @@ pub(crate) fn duplicate_id(
                     return Some(anyhow::anyhow!(
                         "two {role} records have the accession of {} with and without a version \
                          under -parse_deflines{scope} ({why}); this is not supported by LOSAT's \
-                         {program}",
+                         {name}",
                         fasta(id)
                     ));
                 }

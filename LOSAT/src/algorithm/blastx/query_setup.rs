@@ -201,7 +201,7 @@ pub(crate) fn matrix_error_message(records: &[FastaRecord], options: &ResolvedOp
         Some(file) => crate::blastinput::ncbi_environment::matrix_file_refusal(
             &options.matrix,
             file,
-            "BLASTX",
+            options.app.name(),
         ),
         None => unknown_matrix_message(records),
     }

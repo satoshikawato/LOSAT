@@ -979,7 +979,7 @@ impl PreliminarySink for Runtime<'_> {
                             crate::algorithm::common::database::FetchExcluded::refusal_at(
                                 excluded.db(),
                                 ordinal,
-                                "BLASTX",
+                                self.options.app.name(),
                             ),
                         );
                     }

@@ -245,7 +245,7 @@ impl QueryStreamSettings {
         file: impl Into<crate::blastinput::input_files::InputFile>,
         keep_defline: bool,
     ) -> QueryStream<crate::blastinput::input_files::InputFile> {
-        let mut config = ReaderConfig::query(self.program.upper, false, self.data_loaders)
+        let mut config = ReaderConfig::query(self.program.refusal, false, self.data_loaders)
             .with_defline(keep_defline)
             .with_parse_deflines(self.parse_deflines);
         config.strand = self.strand;

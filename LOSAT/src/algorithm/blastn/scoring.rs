@@ -131,7 +131,7 @@ fn check_scoring_options_with(
         // extension with dynamic programming's traceback), which LOSAT does not.
         return Err(crate::report::archive::read::import::Start::unported(
             "a search strategy with this pair of gapped extension algorithms",
-            crate::blastinput::app::Program::Blastn.name(),
+            args.app().name(),
         ));
     } else {
         return Ok(());
@@ -158,9 +158,10 @@ pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
     // warnings and no hits), an explicit rejection of PD-LOSAT-NCBI-DEFECTS (version 1.1).
     if spec.reward <= 0 && !super::coordination::matrix_only_scoring(spec.reward, spec.penalty) {
         anyhow::bail!(
-            "a reward of {} with a penalty of {} (NCBI BLAST+'s 16-bit values), for which no query has Karlin-Altschul values, is not supported by LOSAT's BLASTN; reward 0 needs penalty 0 (matrix-only scoring, as -task rmblastn)",
+            "a reward of {} with a penalty of {} (NCBI BLAST+'s 16-bit values), for which no query has Karlin-Altschul values, is not supported by LOSAT's {}; reward 0 needs penalty 0 (matrix-only scoring, as -task rmblastn)",
             spec.reward,
-            spec.penalty
+            spec.penalty,
+            args.app().name()
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1506-1520
@@ -174,7 +175,8 @@ pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
     // scores below these values were compared with NCBI's up to 24000/-30000 (E2g V1).
     if spec.reward >= i32::from(i16::MAX) || spec.penalty <= i32::from(i16::MIN) {
         anyhow::bail!(
-            "a reward of 32767 or a penalty of -32768 (NCBI BLAST+'s BLAST_SCORE_MAX and BLAST_SCORE_MIN, which it leaves out of the score range of its Karlin-Altschul computation) is not supported by LOSAT's BLASTN; reward {} and penalty {} were given",
+            "a reward of 32767 or a penalty of -32768 (NCBI BLAST+'s BLAST_SCORE_MAX and BLAST_SCORE_MIN, which it leaves out of the score range of its Karlin-Altschul computation) is not supported by LOSAT's {}; reward {} and penalty {} were given",
+            args.app().name(),
             spec.reward,
             spec.penalty
         );
@@ -200,7 +202,8 @@ pub fn check_greedy_matrix_only(args: &BlastnArgs, ungapped: bool) -> anyhow::Re
     let zero_gap_costs = spec.gap_open == 0 && spec.gap_extend == 0;
     if greedy && matrix_only && (zero_gap_costs || !ungapped) {
         anyhow::bail!(
-            "reward 0 and penalty 0 (matrix-only scoring) with the greedy extension of -task megablast, where NCBI BLAST+ divides by zero (gap costs 0 and 0, also with -ungapped) or does not end (other gap costs; -no_greedy or -ungapped runs them), is not supported by LOSAT's BLASTN"
+            "reward 0 and penalty 0 (matrix-only scoring) with the greedy extension of -task megablast, where NCBI BLAST+ divides by zero (gap costs 0 and 0, also with -ungapped) or does not end (other gap costs; -no_greedy or -ungapped runs them), is not supported by LOSAT's {}",
+            args.app().name()
         );
     }
     Ok(())
@@ -426,7 +429,8 @@ pub(crate) fn gap_x_dropoffs(
 /// the preliminary one), and the search extends by dynamic programming
 /// (`check_greedy_matrix_only` refuses the greedy extension before). Only the final X-drop is
 /// checked, as in the other DP searches: the preliminary DP caps its X-drop at the HSP's ungapped
-/// score (blast_gapalign.c:2959-2963).
+/// score (blast_gapalign.c:2959-2963). The refusals name `program` (the running application's,
+/// `BlastnArgs::app`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn check_gapped_x_dropoffs(
     use_dp: bool,
@@ -435,6 +439,7 @@ pub(crate) fn check_gapped_x_dropoffs(
     (gapped, finale): (i32, i32),
     (reward, penalty): (i32, i32),
     (gap_open, gap_extend): (i32, i32),
+    program: &str,
 ) -> anyhow::Result<()> {
     // The final X-drop is the larger of its own and the preliminary one: when they are equal,
     // `-xdrop_gap` set it.
@@ -447,13 +452,13 @@ pub(crate) fn check_gapped_x_dropoffs(
         if !crate::core::x_drop::kernel_x_drop_fits(finale, gap_open, gap_extend) {
             if matrix_only {
                 return Err(crate::core::x_drop::kernel_x_drop_value_error(
-                    "BLASTN",
+                    program,
                     final_option,
                     &format!("{final_bits:?} (a raw score with reward 0 and penalty 0)"),
                 ));
             }
             return Err(crate::core::x_drop::kernel_x_drop_error(
-                "BLASTN",
+                program,
                 final_option,
                 final_bits,
             ));
@@ -482,7 +487,7 @@ pub(crate) fn check_gapped_x_dropoffs(
         });
     if let Some(&(option, bits, _)) = culprit {
         anyhow::bail!(
-            "an {option} of {bits:?} bits, whose raw X-drop makes NCBI BLAST+'s greedy alignment (-task megablast) read and write outside its arrays or fail to allocate them, is not supported by LOSAT's BLASTN"
+            "an {option} of {bits:?} bits, whose raw X-drop makes NCBI BLAST+'s greedy alignment (-task megablast) read and write outside its arrays or fail to allocate them, is not supported by LOSAT's {program}"
         );
     }
     Ok(())

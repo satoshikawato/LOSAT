@@ -181,14 +181,16 @@ impl ChunkPlan {
     ///   chunk's lookup table and the first chunk's search stops with a null reference, before its
     ///   setup reads the database (2.17.0 probe of line RG item X-short-bat-2). This also covers a
     ///   loop that ends before `count` chunks (a chunk then holds twice the step).
-    fn stops(&self, sizes: SplitSizes) -> Result<()> {
+    ///
+    /// The refusals name `program` (the running application's, `ResolvedOptions::app`).
+    fn stops(&self, sizes: SplitSizes, program: &str) -> Result<()> {
         if self.count == 1 {
             return Ok(());
         }
         if (self.size as i64) < 0 {
-            return Err(refusal(
-                "a query chunk without a query is not supported by LOSAT's BLASTX",
-            ));
+            return Err(refusal(format!(
+                "a query chunk without a query is not supported by LOSAT's {program}"
+            )));
         }
         if (0..self.count).any(|index| {
             let mut chunk_size = self.size;
@@ -199,9 +201,9 @@ impl ChunkPlan {
                 1,
             ) > 1
         }) {
-            return Err(refusal(
-                "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's BLASTX",
-            ));
+            return Err(refusal(format!(
+                "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's {program}"
+            )));
         }
         Ok(())
     }
@@ -218,7 +220,7 @@ pub fn chunk_stops(
     options: &ResolvedOptions,
     sizes: SplitSizes,
 ) -> Result<()> {
-    chunk_plan(records, full, options, sizes).stops(sizes)
+    chunk_plan(records, full, options, sizes).stops(sizes, options.app.name())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:62-64
@@ -243,8 +245,9 @@ pub fn out_of_frame(
         });
     moved.then(|| {
         refusal(format!(
-            "OVERLAP_CHUNK_SIZE={}, which is not a multiple of 3, splits this query in chunks out of its reading frames (NCBI BLAST+ requires a multiple of 3 for a translated query); this is not supported by LOSAT's BLASTX",
-            sizes.overlap
+            "OVERLAP_CHUNK_SIZE={}, which is not a multiple of 3, splits this query in chunks out of its reading frames (NCBI BLAST+ requires a multiple of 3 for a translated query); this is not supported by LOSAT's {}",
+            sizes.overlap,
+            options.app.name()
         ))
     })
 }
@@ -273,7 +276,7 @@ pub fn split_queries(
             overlap: 0,
         }]);
     }
-    plan.stops(sizes)?;
+    plan.stops(sizes, options.app.name())?;
     let overlap = (sizes.overlap / 3) as i32;
     let range = |index: usize| plan.range(sizes.overlap, index);
     // A chunk's query setup (translation, SEG) reads only its own slice of the query, so the chunks

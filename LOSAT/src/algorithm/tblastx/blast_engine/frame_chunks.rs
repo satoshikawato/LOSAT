@@ -566,7 +566,8 @@ fn add_chunk_result(sums: &mut ChunkSums<'_>, result: TblastxChunkScanResult) {
                 merge.failure.fail(
                     merge.s_idx,
                     crate::algorithm::common::hard_chunk_scan::short_chunk_merge_refusal(
-                        merge.oid, "TBLASTX",
+                        merge.oid,
+                        merge.failure.program(),
                     ),
                 );
                 return;

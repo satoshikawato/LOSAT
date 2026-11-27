@@ -6326,7 +6326,7 @@ fn write_custom_tabular(
             report.subjects.records(),
             false,
             names.as_ref(),
-            "BLASTN",
+            report.app.name(),
             report.app.ncbi_name(),
             &queries,
             writer,
@@ -6383,7 +6383,7 @@ pub fn run(
     // (`app::early_format_choice`).
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
-        "BLASTN",
+        args.app().name(),
     )?;
     let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
     let choice = app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
@@ -6488,7 +6488,7 @@ pub fn run(
     let query_file = match crate::report::archive::read::import::ImportRun::open_query(
         args.import.as_ref(),
         &args.query,
-        "BLASTN",
+        args.app().name(),
     ) {
         Ok(file) => file,
         Err(error) => {
@@ -6656,7 +6656,7 @@ fn read_cli_subjects(
         (Some(text), _) => {
             crate::report::archive::read::import::ImportRun::input_of("subject", text)?
         }
-        (None, Some(path)) => open_input(path, "subject", "BLASTN")?,
+        (None, Some(path)) => open_input(path, "subject", args.app().name())?,
         (None, None) => unreachable!("an error above"),
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
@@ -6668,7 +6668,7 @@ fn read_cli_subjects(
     // record stops the reading there (`read_subjects`).
     let mut subject_source = FastaInputSource::from_file(
         subject_file,
-        ReaderConfig::subject("BLASTN", false, settings.data_loaders)
+        ReaderConfig::subject(args.app().name(), false, settings.data_loaders)
             .with_defline(keep_deflines)
             .with_parse_deflines(args.parse_deflines),
     );
@@ -6736,7 +6736,7 @@ fn open_search_database(
                 list,
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
-                args.app().ncbi_name(),
+                args.app(),
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
@@ -6757,7 +6757,7 @@ fn open_search_database(
                 false,
                 args.searchsp.is_some_and(|space| space != 0),
                 args.dbsize.is_some_and(|size| size > 0),
-                "BLASTN",
+                args.app().name(),
             )?;
             crate::algorithm::common::database::check_formats_report_sums(
                 || database.pairwise_database(),
@@ -6765,7 +6765,7 @@ fn open_search_database(
                     .formats
                     .iter_mut()
                     .map(|format| (format.outfmt, &mut format.refusal)),
-                "BLASTN",
+                args.app().name(),
             )?;
             Some(database)
         }
@@ -6798,11 +6798,7 @@ fn open_search_database(
     // (`report::serial::seqalign::check_database`).
     if let Some(database) = database.as_ref() {
         for serial in output_formats.iter().filter_map(|format| format.serial()) {
-            crate::report::serial::seqalign::check_database(
-                serial,
-                database.name(),
-                Program::Blastn,
-            )?;
+            crate::report::serial::seqalign::check_database(serial, database.name(), args.app())?;
         }
     }
     Ok(database)
@@ -6899,7 +6895,7 @@ fn search_cli(
     }
     .acts();
     let x_store_acts = !x_opening.acts() && x_query_drop::on() && x_store_rule;
-    let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)
+    let query_config = ReaderConfig::query(args.app().name(), false, settings.data_loaders)
         .with_defline(args.archive.is_some() || args.strategy.is_some())
         .with_parse_deflines(args.parse_deflines)
         .with_strand(&args.strand);
@@ -7594,7 +7590,7 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    args.megablast_index_loaded = megablast_index.check()?;
+    args.megablast_index_loaded = megablast_index.check(args.app().name())?;
     if args.megablast_index_loaded.is_some() {
         mb_index::note_index_use(args.archive.as_ref(), args.strategy.as_ref())?;
     }
@@ -7609,7 +7605,10 @@ fn search(
         };
         database.check_mask_limits(mask, scanned_word)?;
     }
-    app::check_search_environment("BLASTN", !matches!(subjects, Subjects::Database(_)))?;
+    app::check_search_environment(
+        args.app().name(),
+        !matches!(subjects, Subjects::Database(_)),
+    )?;
     // The variables' error stops the run after the outfmt 0 prolog (`run_in_pool`).
     let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
@@ -7670,7 +7669,8 @@ fn search(
             .sum();
         if subject_letters > i32::MAX as usize {
             anyhow::bail!(
-                "the subjects have {subject_letters} letters; NCBI BLAST+ reports a total of 2^31 letters or more through a 32-bit int, which is not supported by LOSAT's BLASTN"
+                "the subjects have {subject_letters} letters; NCBI BLAST+ reports a total of 2^31 letters or more through a 32-bit int, which is not supported by LOSAT's {}",
+                args.app().name()
             );
         }
     }
@@ -8119,7 +8119,8 @@ fn ungapped_reap_query_coverage(
 /// LOSAT's refusal of a word cutoff whose arithmetic NCBI does in a way that overflows (memory
 /// "no NCBI UB / overflow"): a context of 2^30 letters or more, or a search space beyond `Int8`.
 /// The word cutoff of an ungapped search and of matrix-only scoring (`batch_setup::batch_cutoffs`).
-fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit) -> anyhow::Error {
+/// `program` names the running application (`BlastnArgs::app`).
+fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit, program: &str) -> anyhow::Error {
     let what = match limit {
         ungapped::CutoffLimit::QueryLength => {
             "a query of 2^30 letters or more, whose doubled length overflows NCBI BLAST+'s 32-bit int in the ungapped word cutoff"
@@ -8129,7 +8130,7 @@ fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit) -> anyhow::Error {
         }
     };
     anyhow::anyhow!(
-        "{what} is not supported by LOSAT's BLASTN with -ungapped or with reward 0 and penalty 0 (matrix-only scoring)"
+        "{what} is not supported by LOSAT's {program} with -ungapped or with reward 0 and penalty 0 (matrix-only scoring)"
     )
 }
 
@@ -8532,6 +8533,7 @@ fn run_in_pool(
         xml,
         "BLASTN",
     )
+    .map(|scopes| scopes.named(args.app().name()))
     .map(|scopes| match &queries {
         x_query_stream::Queries::Records { input, .. } if xml && !subject_records => {
             scopes.with_whole_run_of(input)
@@ -9327,7 +9329,7 @@ fn run_in_pool(
                 database::parsed_shown(&output_formats),
                 &mut query_bioseqs,
                 &run,
-                "BLASTN",
+                args.app().name(),
             );
             if let Err(error) = refused {
                 // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were written with
@@ -10179,7 +10181,7 @@ fn write_reports_untimed(
                     .is_some_and(|m| !m.is_empty())
             },
             args.lcase_masking,
-            "BLASTN",
+            args.app().name(),
         )?;
     }
     let megablast = args.structured_megablast_reference();
@@ -10278,7 +10280,7 @@ fn write_reports_untimed(
         {
             Some(
                 reported.tabular_subject_ids(
-                    database.oid_map(),
+                    database,
                     output_formats
                         .iter()
                         .any(|format| format.tabular_reads_subject()),
@@ -10339,7 +10341,7 @@ fn write_reports_untimed(
                     .check(crate::report::db_subject::check_pairwise_records(
                         &records_parsed,
                         false,
-                        "BLASTN",
+                        args.app().name(),
                     ))?;
             }
         }
@@ -10523,7 +10525,8 @@ fn reborrow_outputs<'o, 'r>(outputs: &'o mut BatchOutputs<'_, 'r>) -> BatchOutpu
 /// letters against a database of `db_len` letters in `db_num_seqs` sequences
 /// (`BLAST_CalcEffLengths`), with the context's gapped Karlin-Altschul block. The search space
 /// is the context's `eff_searchsp` when no `-searchsp` replaces it. The reports compute the
-/// length adjustment again, which the search does not keep.
+/// length adjustment again, which the search does not keep. An overflow of the space is LOSAT's
+/// refusal in the name `program` (the running application's, `BlastnArgs::app`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-846
 fn context_lengths(
@@ -10531,9 +10534,10 @@ fn context_lengths(
     db_len: i64,
     db_num_seqs: i32,
     gapped: &KarlinParams,
+    program: &str,
 ) -> Result<(i64, i64)> {
     let lengths =
-        crate::stats::setup::calc_eff_lengths(query_len, db_len, db_num_seqs, gapped, 0, "BLASTN")?;
+        crate::stats::setup::calc_eff_lengths(query_len, db_len, db_num_seqs, gapped, 0, program)?;
     Ok((i64::from(lengths.length_adjustment), lengths.eff_searchsp))
 }
 
@@ -10548,6 +10552,7 @@ fn window_masker_rejection(
             .as_deref()
             .map_or(b"".as_slice(), |masker| masker.name.as_slice()),
         error,
+        args.app().name(),
     )
 }
 
@@ -10589,7 +10594,11 @@ fn repeat_batch_masks(
         Err(MaskError::Repeats(error)) => {
             match super::super::repeat_filter::batch_error(&error, searched.len()) {
                 Some(failure) => Ok(Err(failure)),
-                None => Err(super::super::repeat_filter::rejection(filter, error)),
+                None => Err(super::super::repeat_filter::rejection(
+                    filter,
+                    error,
+                    args.app().name(),
+                )),
             }
         }
         Err(error) => Err(mask_rejection(args, error)),
@@ -10603,7 +10612,9 @@ fn mask_rejection(args: &BlastnArgs, error: MaskError) -> anyhow::Error {
     match error {
         MaskError::WindowMasker(error) => window_masker_rejection(args, &error),
         MaskError::Repeats(error) => match args.repeat_filter.as_deref() {
-            Some(filter) => super::super::repeat_filter::rejection(filter, error),
+            Some(filter) => {
+                super::super::repeat_filter::rejection(filter, error, args.app().name())
+            }
             None => anyhow::anyhow!("a repeat search without -filtering_db"),
         },
     }
@@ -10628,7 +10639,7 @@ fn check_batch_window(args: &BlastnArgs, records: &[FastaRecord]) -> Result<()> 
     crate::blastinput::app::check_diag_table_window(
         i32::try_from(rooms.saturating_sub(1)).unwrap_or(i32::MAX),
         window,
-        "BLASTN",
+        args.app().name(),
     )
 }
 
@@ -10900,7 +10911,7 @@ fn refused_batch_setup_error(
     let read_fails = context_statistics::split_read_fails(subjects);
     let setup_checks = context_statistics::gap_align_setup_checks(args, subjects, false);
     let steps = SplitBatchSteps::new(
-        "BLASTN",
+        args.app().name(),
         &chunks,
         batching.split,
         read_fails,
@@ -11449,7 +11460,7 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
             && readable(subjects)
         {
             return Err(after_batch_reports(anyhow::Error::msg(
-                crate::algorithm::blastn::query_split::negative_split_refusal("BLASTN"),
+                crate::algorithm::blastn::query_split::negative_split_refusal(args.app().name()),
             )));
         }
     }
@@ -11650,6 +11661,7 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
         matrix_only: config.matrix_only,
         evalue_threshold,
         subject_length: None,
+        program: args.app().name(),
     };
     let batch_setup::BatchCutoffSet {
         batch: x_batch_cutoffs,
@@ -11778,6 +11790,7 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
         db_mask,
         db_oids: subjects.oid_map(),
         db_mask_error: &db_mask_error,
+        program: args.app().name(),
         mb_index: index_seeds.as_ref(),
         encoded_query_concat_nomask,
         search_karlin_ref,
@@ -11922,7 +11935,7 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
     // An index volume that did not read or search is LOSAT's refusal, after the preliminary
     // stage's read errors.
     if let Some(index_seeds) = &index_seeds {
-        index_seeds.check()?;
+        index_seeds.check(args.app().name())?;
     }
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).
@@ -12043,10 +12056,11 @@ fn search_query_chunks(
     // `SplitBatchSteps` owns the empty-chunk stop, OID 0 read, per-chunk setup checks, read
     // failures, D13 negative-pair gap refusal, and post-loop traceback setup checks; BLASTN
     // disables the re-split stop (approved exception 1 of PD-LOSAT-NCBI-DEFECTS).
+    let program = args.app().name();
     let read_fails = context_statistics::split_read_fails(subjects);
     let setup_checks = context_statistics::gap_align_setup_checks(args, subjects, false);
     let mut steps = SplitBatchSteps::new(
-        "BLASTN",
+        program,
         &chunks,
         batching.split,
         read_fails,
@@ -12104,6 +12118,7 @@ fn search_query_chunks(
             context_offsets,
             batching.split.overlap as u32 as i32,
             |ordinal| subjects.subject_oid(ordinal),
+            program,
         )?;
     }
     // A batch with a valid context whose chunks have none (for instance valid letters only in a
@@ -12126,7 +12141,8 @@ fn search_query_chunks(
 /// the chunks before (`merge_prelim_hit_list`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:476-522
-/// The overlap is 100 and gaps are allowed (`CSplitQueryBlk` of a gapped search).
+/// The overlap is 100 and gaps are allowed (`CSplitQueryBlk` of a gapped search). `program`
+/// names the running application in LOSAT's refusal (`BlastnArgs::app`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:527-534
 fn merge_query_chunk(
@@ -12136,6 +12152,7 @@ fn merge_query_chunk(
     context_offsets: &[i32],
     chunk_overlap_size: i32,
     oid_of: impl Fn(u32) -> u32,
+    program: &str,
 ) -> Result<()> {
     for (local_query, hit_list) in chunk_lists.into_iter().enumerate() {
         let Some(mut hit_list) = hit_list else {
@@ -12189,6 +12206,7 @@ fn merge_query_chunk(
             split_points,
             chunk_overlap_size,
             &oid_of,
+            program,
         )?;
     }
     for hit_list in merged.iter_mut().flatten() {
@@ -12203,7 +12221,8 @@ fn merge_query_chunk(
 /// hit list of the chunks before into a new hit list of the same size, subject by subject in
 /// subject order (`Blast_HitListUpdate` keeps the best `prelim_hitlist_size` subjects by
 /// their preliminary e-values). The HSP lists of a subject in both merge with
-/// `Blast_HSPListsMerge` when a split point is positive, else `Blast_HSPListAppend`.
+/// `Blast_HSPListsMerge` when a split point is positive, else `Blast_HSPListAppend`. A merge
+/// that NCBI does not define is LOSAT's refusal in the name `program`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2132-2217
 fn merge_prelim_hit_list(
@@ -12212,6 +12231,7 @@ fn merge_prelim_hit_list(
     split_offsets: [i32; 2],
     chunk_overlap_size: i32,
     oid_of: impl Fn(u32) -> u32,
+    program: &str,
 ) -> Result<()> {
     let Some(mut hitlist2) = combined.take() else {
         *combined = Some(hitlist1);
@@ -12250,7 +12270,7 @@ fn merge_prelim_hit_list(
                     crate::algorithm::common::hard_chunk_scan::chunk_merge_undefined_refusal(
                         oid_of(list2.oid),
                         None,
-                        "BLASTN",
+                        program,
                     )
                 })?;
             } else {

@@ -38,11 +38,6 @@ use crate::report::pairwise::PairwiseDatabase;
 use crate::report::tabular::SubjectFetch;
 use crate::seqdb::{SeqDb, SeqType};
 
-/// The program that LOSAT's refusals name.
-/// The program of the texts of BLASTX's database when the run names none: the database's own
-/// whole check from the stream (`x_db_stream`) and the tests.
-const PROGRAM: &str = "BLASTX";
-
 // The longest subject BLASTX searches in one piece (NCBI's `MAX_DBSEQ_LEN`, blast_gapalign.h:54;
 // the one copy of the macro).
 pub(super) use crate::core::subject_split::MAX_DBSEQ_LEN;
@@ -66,9 +61,13 @@ pub(crate) struct BlastxDatabase {
     taxdb: shared::TaxdbRun,
     /// Whether the database has parsed Seq-ids (`shared::check_seqids`).
     parsed_seqids: bool,
-    /// The program of the run (`args::ProgramName::upper`: BLASTX, or RPSTBLASTN), which the
-    /// database's messages name.
+    /// The program that LOSAT's refusals of the database name (`args::ProgramName::refusal`:
+    /// BLASTX, RPSTBLASTN, or the running application where it runs a BLASTX strategy).
     pub(crate) program: &'static str,
+    /// The running application (`BlastxArgs::app`: BLASTX also for RPSTBLASTN's runs, TBLASTX
+    /// where tblastx runs a BLASTX strategy), whose name the refusals of the database's stream
+    /// and of a subject's length give (`x_db_stream::XStreamDb`, `too_long`).
+    pub(crate) app: crate::blastinput::app::Program,
 }
 
 impl BlastxDatabase {
@@ -117,26 +116,29 @@ impl BlastxDatabase {
             None,
             None,
             &mut std::io::sink(),
-            PROGRAM,
-            "blastx",
+            super::args::ProgramName::BLASTX,
+            crate::blastinput::app::Program::Blastx,
         )
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
     /// line, and with the id of the database mask `mask` checked (`-db_soft_mask`,
     /// `-db_hard_mask`; series NP, M4b) (`shared::restrict_database`, whose warnings go to
-    /// `diagnostics`), for the application `app` (NCBI's lower-case name: the prefix of the
-    /// run's posts, which is not `program`'s where the run is another program's strategy).
+    /// `diagnostics`), for the program `program` of the running application `app`: the run's
+    /// posts have the prefix `ProgramName::app` (NCBI's lower-case name of the running
+    /// application), LOSAT's refusals name `ProgramName::refusal` (`BlastxDatabase::program`) or
+    /// `app` (`BlastxDatabase::app`).
     pub(crate) fn open_restricted(
         name: &[u8],
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
-        program: &'static str,
-        app: &'static str,
+        program: super::args::ProgramName,
+        app: crate::blastinput::app::Program,
     ) -> Result<Self> {
-        let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
+        let (refusal, posts) = (program.refusal, program.app);
+        let mut db = shared::open_database(name, SeqType::Protein, settings, refusal)?;
         // A database with parsed Seq-ids is read (line DBID, ID2a).
         let parsed_seqids = shared::restrict_database(
             &mut db,
@@ -145,15 +147,16 @@ impl BlastxDatabase {
             mask,
             diagnostics,
             settings,
-            program,
-            app,
+            refusal,
+            posts,
         )?;
         Ok(Self {
             db,
             name: name.to_vec(),
-            taxdb: shared::TaxdbRun::running(app),
+            taxdb: shared::TaxdbRun::running(posts),
             parsed_seqids,
-            program,
+            program: refusal,
+            app,
         })
     }
 
@@ -353,7 +356,9 @@ impl BlastxDatabase {
             // search and do not contribute to the searchable longest sequence.
             let lengths = match self.db.x_protein_lengths_i32(first, end) {
                 Ok(lengths) if !lengths.is_empty() => lengths,
-                _ => return x_check_whole_named(&self.db, self.program, allow_long),
+                _ => {
+                    return x_check_whole_named(&self.db, self.program, self.app.name(), allow_long)
+                }
             };
             longest = longest.max(
                 lengths
@@ -373,7 +378,7 @@ impl BlastxDatabase {
 
     /// The whole check of the database (`x_check_whole`).
     pub(crate) fn x_check_stores(&self) -> Result<usize> {
-        x_check_whole_named(&self.db, self.program, false)
+        x_check_whole_named(&self.db, self.program, self.app.name(), false)
     }
 
     /// The opened database.
@@ -388,13 +393,16 @@ impl BlastxDatabase {
 /// first sequence in ordinal order: the error of a database whose longest is above
 /// `MAX_DBSEQ_LEN` (`x_open_stream`), and the error the run reports for a read or a check
 /// that fails during the search (`native::search_error`), whichever sequence the search's
-/// threads read first.
-pub(super) fn x_check_whole(db: &SeqDb, allow_long: bool) -> Result<usize> {
-    x_check_whole_named(db, PROGRAM, allow_long)
+/// threads read first. LOSAT's refusals name the running application `app`
+/// (`BlastxDatabase::app`).
+pub(super) fn x_check_whole(db: &SeqDb, app: &str, allow_long: bool) -> Result<usize> {
+    x_check_whole_named(db, app, app, allow_long)
 }
 
-/// `x_check_whole` of a run of the program `program` (`BlastxDatabase::program`).
-fn x_check_whole_named(db: &SeqDb, program: &str, allow_long: bool) -> Result<usize> {
+/// `x_check_whole` of a run of the program `program` (`BlastxDatabase::program`, the name of the
+/// refusals of a sequence's bytes) and the running application `app` (`BlastxDatabase::app`, the
+/// name of `too_long`'s).
+fn x_check_whole_named(db: &SeqDb, program: &str, app: &str, allow_long: bool) -> Result<usize> {
     if db.first_oid_read_fails() {
         return Err(PreliminaryReadError::from_static("Database memory map file error").into());
     }
@@ -414,6 +422,7 @@ fn x_check_whole_named(db: &SeqDb, program: &str, allow_long: bool) -> Result<us
         return Err(too_long(
             format_args!("database sequence {}", db.oid(ordinal)),
             length,
+            app,
         ));
     }
     Ok(longest)
@@ -434,10 +443,11 @@ impl std::fmt::Display for LongSubjectRefusal {
 impl std::error::Error for LongSubjectRefusal {}
 
 /// LOSAT's refusal of the subject `what` (`database sequence 0`, `subject sequence 1`) of
-/// `length` residues, longer than `MAX_DBSEQ_LEN`.
-pub(super) fn too_long(what: impl std::fmt::Display, length: usize) -> anyhow::Error {
+/// `length` residues, longer than `MAX_DBSEQ_LEN`, by the running application `app`
+/// (`Program::name`: BLASTX also for RPSTBLASTN's runs).
+pub(super) fn too_long(what: impl std::fmt::Display, length: usize, app: &str) -> anyhow::Error {
     LongSubjectRefusal(format!(
-        "{what} has {length} residues; a subject longer than {MAX_DBSEQ_LEN} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX"
+        "{what} has {length} residues; a subject longer than {MAX_DBSEQ_LEN} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's {app}"
     ))
     .into()
 }
@@ -1535,13 +1545,15 @@ impl ReportedSubjects {
     /// from the reader batch, and the query's index), where the reports resolve the subjects'
     /// Seq-align ids (`resolves_subjects`). Where the scope finds a query for the sequence and the
     /// reports show NCBI's bytes for it (`run`), that query is noted in `seen` instead
-    /// (`report::query_bioseq::note_or_refuse`).
+    /// (`report::query_bioseq::note_or_refuse`, whose refusal names the running application
+    /// `app`, `Program::name`).
     pub(crate) fn refuse_ids_of_queries(
         &mut self,
         batches: &[BatchResults],
         gapped: bool,
         scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
         run: &crate::report::query_bioseq::SeenRun<'_, '_>,
+        app: &str,
     ) -> Result<()> {
         if self.parsed.is_empty() || !self.resolves_subjects {
             return Ok(());
@@ -1565,7 +1577,7 @@ impl ReportedSubjects {
                         self.ordinals[list.oid],
                         scopes.run(),
                         run,
-                        PROGRAM,
+                        app,
                     )?;
                 }
             }

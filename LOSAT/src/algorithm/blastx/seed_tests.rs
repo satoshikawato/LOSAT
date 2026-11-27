@@ -172,7 +172,7 @@ fn hard_mask_starts_and_ends_move_the_table() {
 // batches before and is LOSAT's refusal, not an engine error (line RG item X-short-bat-2).
 #[test]
 fn filled_overflow_banks_are_refused_after_the_batches_before() {
-    let error = x_banks_filled(1.0, 5);
+    let error = x_banks_filled(1.0, 5, "BLASTX");
     assert!(error.is::<crate::blastinput::app::ErrorAfterBatchReports>());
     assert!(super::super::native::search_error_as_is(&error));
     assert_eq!(

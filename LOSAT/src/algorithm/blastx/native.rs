@@ -200,7 +200,7 @@ fn run_inner(
             )?)
         }
         (None, Some(path)) => Some(
-            crate::blastinput::input_files::open_input(path, "subject", program.upper)
+            crate::blastinput::input_files::open_input(path, "subject", program.refusal)
                 .map_err(early_archive_error)?,
         ),
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
@@ -279,7 +279,7 @@ fn run_inner(
     let mut query_file = crate::report::archive::read::import::ImportRun::open_query(
         args.import.as_ref(),
         &args.query,
-        program.upper,
+        program.refusal,
     )
     .map_err(early_archive_error)?;
     // BLAST XML (outfmt 5) and the XML2 and JSON documents (outfmt 13 to 16): the output can
@@ -393,8 +393,8 @@ fn run_inner(
                 list.as_ref(),
                 args.db_mask.option().as_ref(),
                 &mut stderr,
-                program.upper,
-                program.app,
+                program,
+                args.app(),
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
@@ -419,7 +419,7 @@ fn run_inner(
                 false,
                 rps || args.searchsp.is_some_and(|space| space != 0),
                 !rps && args.dbsize.is_some_and(|size| size > 0),
-                program.upper,
+                program.refusal,
             )?;
             crate::algorithm::common::database::check_formats_report_sums(
                 || database.pairwise_database(),
@@ -428,7 +428,7 @@ fn run_inner(
                     outfmt_bytes.as_ref(),
                     &mut crate::api::local_blast::FormatRefusal::FailsCall,
                 )],
-                program.upper,
+                program.refusal,
             )?;
             Some(database)
         }
@@ -466,7 +466,7 @@ fn run_inner(
         app::ReportFormat::from_number(choice.number)
             .and_then(crate::report::serial::SerialFormat::of),
     ) {
-        crate::report::serial::seqalign::check_database(serial, database.name(), Program::Blastx)?;
+        crate::report::serial::seqalign::check_database(serial, database.name(), args.app())?;
     }
     // How the search reads the query file (`-parse_deflines`, its ids, `-strand`), which the
     // reads of the file before the search share (`QueryStreamSettings`).
@@ -512,6 +512,7 @@ fn run_inner(
             choice.number == 5,
             program.upper,
         )
+        .map(|scopes| scopes.named(program.refusal))
     };
     let mut read_ahead_scopes = None;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (cited at
@@ -550,7 +551,7 @@ fn run_inner(
                 Some(copy) => copy,
                 None => bail!(
                     "unsupported {} query input for -outfmt {}: use a regular file",
-                    program.upper,
+                    program.refusal,
                     choice.number
                 ),
             };
@@ -680,7 +681,7 @@ fn run_inner(
     if let (Some(database), Some(mask)) = (&database, options.db_mask.as_ref()) {
         database.check_mask_limits(mask, &options)?;
     }
-    app::check_search_environment(program.upper, database.is_none())?;
+    app::check_search_environment(program.refusal, database.is_none())?;
     // RPSTBLASTN's refusals of the database's files and of its options, before the first byte
     // of the reports, as rpsblast refuses them (`args::RpsTblastnSearch::for_database`, once per
     // run).
@@ -708,9 +709,9 @@ fn run_inner(
         .map(|database| database.pairwise_database_masked(options.db_mask.as_ref()));
     let no_reported = ReportedSubjects::default();
     let records_parsed = if args.parse_deflines {
-        report::RecordsParsed::of(&subjects, args.show_gis, |parsed| {
+        report::RecordsParsed::of(&subjects, args.show_gis, args.app().name(), |parsed| {
             if options.pairwise_view().is_some() {
-                crate::report::db_subject::check_pairwise_records(parsed, true, "BLASTX")
+                crate::report::db_subject::check_pairwise_records(parsed, true, args.app().name())
             } else {
                 Ok(())
             }
@@ -777,6 +778,7 @@ fn run_inner(
             database.x_seqdb(),
             longest,
             allow_long,
+            database.app.name(),
         )),
         _ => None,
     };
@@ -1577,7 +1579,13 @@ pub(super) fn reported_batch(
             record: &record,
             protein: false,
         };
-        reported.refuse_ids_of_queries(results, options.gapped, scopes, &run)?;
+        reported.refuse_ids_of_queries(
+            results,
+            options.gapped,
+            scopes,
+            &run,
+            options.app.name(),
+        )?;
     }
     reported.check_handle_loads(database, results, options.gapped)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
@@ -1601,7 +1609,7 @@ pub(super) fn reported_batch(
     let prefetch_format = options.prefetch_format();
     let mut reported = reported;
     if prefetch.fails {
-        diagnostics.write_all(&database.prefetch_warning(options.app_name))?;
+        diagnostics.write_all(&database.prefetch_warning(options.app_name()))?;
     }
     // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning after
     // the taxonomy texts (`ReportedSubjects::batch_prefetch`), with or without `taxdb.bti`.
@@ -1747,7 +1755,7 @@ fn failed_batch_reads(
     // The post's prefix is the running application's (`app_name`: BLASTX's own run names its
     // program, RPSTBLASTN's too).
     if let (Some(read), Some(db)) = (&failure.utf8, subjects.seqdb()) {
-        if let Some(posts) = read.post(db, options.app_name) {
+        if let Some(posts) = read.post(db, options.app_name()) {
             posts.write(diagnostics, None)?;
         }
     }

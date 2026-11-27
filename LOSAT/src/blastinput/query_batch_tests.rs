@@ -1134,16 +1134,16 @@ fn only_another_form_of_a_scope_s_id_may_match_it() {
     let ids = |n: usize| &records[n].believed().unwrap().ids;
     let mut scope = super::QueryScope::default();
     let others: Vec<bool> = (0..records.len())
-        .map(|n| scope.add(ids(n), (n, 3), "BLASTP").unwrap())
+        .map(|n| scope.add(ids(n), (n, 3), "BLASTP", "BLASTP").unwrap())
         .collect();
     assert_eq!(
         others,
         [false, false, true, false, false, true, false, false]
     );
     let mut first = super::QueryScope::default();
-    assert!(!first.add(ids(2), (0, 3), "BLASTP").unwrap());
+    assert!(!first.add(ids(2), (0, 3), "BLASTP", "BLASTP").unwrap());
     let mut first = super::QueryScope::default();
-    first.add(ids(0), (0, 3), "BLASTP").unwrap();
+    first.add(ids(0), (0, 3), "BLASTP", "BLASTP").unwrap();
     let mut whole = super::QueryScope::default();
     whole.extend(&first);
     assert!(whole.add_after_refusal(ids(2), (1, 3)));

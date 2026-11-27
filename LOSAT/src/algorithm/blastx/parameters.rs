@@ -276,7 +276,7 @@ pub fn effective_lengths(
             db_count,
             &ka,
             space,
-            options.program().upper,
+            options.program().refusal,
         )?;
         p.length_adjustment = lengths.length_adjustment;
         p.search_space = lengths.eff_searchsp;
@@ -364,7 +364,7 @@ pub fn subject_parameters(
         db_length,
         db_count,
         gumbel_block_used,
-        "BLASTX",
+        options.app.name(),
     )?;
     let Some(n) = crate::stats::setup::setup_subject_length(
         db_length,
@@ -436,7 +436,7 @@ pub(crate) fn preliminary_spaces(
                 0,
                 false,
                 &ka,
-                options.program().upper,
+                options.program().refusal,
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -546,7 +546,7 @@ pub(crate) fn subject_word_cutoff_min(
             options.effective_search_space,
             false,
             &ungapped,
-            options.program().upper,
+            options.program().refusal,
         )?;
         let lengths = crate::stats::setup::subject_eff_lengths(
             query_length as i64,
@@ -556,7 +556,7 @@ pub(crate) fn subject_word_cutoff_min(
             option_space,
             false,
             &ungapped,
-            options.program().upper,
+            options.program().refusal,
         )?;
         let p = ContextParameters {
             valid,
@@ -662,7 +662,7 @@ pub(crate) fn check_gapped_x_drops(options: &ResolvedOptions) -> Result<()> {
     // The final X-drop reaches the unscaled `ALIGN_EX` only on the ordinary traceback
     // (composition 0, `runtime.rs`).
     crate::core::x_drop::check_gapped_x_dropoffs(
-        "BLASTX",
+        options.app.name(),
         (options.gap_x_dropoff, options.gap_x_dropoff_final),
         gapped_x_drops(options, &gapped_karlin(options)),
         (options.gap_open, options.gap_extend),

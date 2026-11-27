@@ -68,9 +68,6 @@ use crate::seqdb::{SeqDb, SequenceBlock};
 
 use super::database::{too_long, x_check_whole, MAX_DBSEQ_LEN};
 
-/// The program that the reader's errors name (`database::PROGRAM`).
-const PROGRAM: &str = "BLASTX";
-
 /// Sequences whose lengths the sink's cursor reads with one read of the index (64 KiB of offsets).
 const LENGTH_WINDOW: usize = 16_384;
 
@@ -106,14 +103,18 @@ impl std::fmt::Display for XPastHead {
 
 impl std::error::Error for XPastHead {}
 
-/// The reader's error `error` of a read during the search.
-fn read_error(error: crate::seqdb::SeqDbError) -> anyhow::Error {
-    XReadError(search_read_error(error, PROGRAM)).into()
+/// The reader's error `error` of a read during the search of a run of the application `app`
+/// (`XStreamDb::app`).
+fn read_error(error: crate::seqdb::SeqDbError, app: &str) -> anyhow::Error {
+    XReadError(search_read_error(error, app)).into()
 }
 
 /// The database of a search that reads its sequences in blocks.
 pub(crate) struct XStreamDb<'a> {
     db: &'a SeqDb,
+    /// The running application, which LOSAT's refusals of the reads name
+    /// (`database::BlastxDatabase::app`, `Program::name`: BLASTX also for RPSTBLASTN's runs).
+    app: &'static str,
     count: usize,
     /// The residues of the longest sequence (`BlastxDatabase::x_open_stream`).
     longest: usize,
@@ -139,19 +140,25 @@ impl<'a> XStreamDb<'a> {
     /// `x_check_stores`).
     #[cfg(test)]
     pub(crate) fn new(db: &'a SeqDb, longest: usize) -> Self {
-        Self::new_with_long(db, longest, false)
+        Self::new_with_long(db, longest, false, "BLASTX")
     }
 
     /// The database `db` with the longest of `BlastxDatabase::x_open_stream_with_long`, allowing
-    /// subjects longer than `MAX_DBSEQ_LEN` when `allow_long` is true (`-db_hard_mask`).
-    pub(crate) fn new_with_long(db: &'a SeqDb, longest: usize, allow_long: bool) -> Self {
-        Self::with_block_bytes_long(db, longest, BLOCK_BYTES, allow_long)
+    /// subjects longer than `MAX_DBSEQ_LEN` when `allow_long` is true (`-db_hard_mask`), read by
+    /// the running application `app` (`BlastxDatabase::app`).
+    pub(crate) fn new_with_long(
+        db: &'a SeqDb,
+        longest: usize,
+        allow_long: bool,
+        app: &'static str,
+    ) -> Self {
+        Self::with_block_bytes_long(db, longest, BLOCK_BYTES, allow_long, app)
     }
 
     /// As `new`, with blocks of `block_bytes` (the unit tests read blocks of a few sequences).
     #[cfg(test)]
     fn with_block_bytes(db: &'a SeqDb, longest: usize, block_bytes: u64) -> Self {
-        Self::with_block_bytes_long(db, longest, block_bytes, false)
+        Self::with_block_bytes_long(db, longest, block_bytes, false, "BLASTX")
     }
 
     fn with_block_bytes_long(
@@ -159,9 +166,11 @@ impl<'a> XStreamDb<'a> {
         longest: usize,
         block_bytes: u64,
         allow_long: bool,
+        app: &'static str,
     ) -> Self {
         Self {
             db,
+            app,
             count: db.num_seqs() as usize,
             longest,
             allow_long,
@@ -199,13 +208,14 @@ impl<'a> XStreamDb<'a> {
                 continue;
             }
             let ordinal = first + i as u32;
-            check_protein_sequence(with_sentinels, || self.db.oid(ordinal), PROGRAM)
+            check_protein_sequence(with_sentinels, || self.db.oid(ordinal), self.app)
                 .map_err(XReadError)?;
             let length = with_sentinels.len() - 2;
             if !self.allow_long && length > MAX_DBSEQ_LEN {
                 return Err(XReadError(too_long(
                     format_args!("database sequence {}", self.db.oid(ordinal)),
                     length,
+                    self.app,
                 ))
                 .into());
             }
@@ -249,6 +259,11 @@ impl<'a> XStreamDb<'a> {
         self.db
     }
 
+    /// The running application, which LOSAT's refusals of the database's reads name.
+    pub(crate) fn app(&self) -> &'static str {
+        self.app
+    }
+
     /// `GetTotalLength` (`SeqDb::total_length`).
     pub(crate) fn total_length(&self) -> u64 {
         self.db.total_length()
@@ -282,7 +297,7 @@ impl<'a> XStreamDb<'a> {
     pub(crate) fn x_damaged(&self) -> bool {
         *self
             .x_damaged
-            .get_or_init(|| match x_check_whole(self.db, self.allow_long) {
+            .get_or_init(|| match x_check_whole(self.db, self.app, self.allow_long) {
                 Ok(_) => false,
                 Err(error) => {
                     *self
@@ -304,7 +319,7 @@ impl<'a> XStreamDb<'a> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
-        kept.or_else(|| x_check_whole(self.db, self.allow_long).err())
+        kept.or_else(|| x_check_whole(self.db, self.app, self.allow_long).err())
     }
 
     /// `CSeqDB::GetMinLength` (`SeqDb::min_length`).
@@ -322,7 +337,7 @@ impl<'a> XStreamDb<'a> {
         let part = self
             .db
             .read_protein_search_block(range)
-            .map_err(read_error)?;
+            .map_err(|error| read_error(error, self.app))?;
         self.x_check(&part)?;
         Ok(XBlock {
             first: ordinal,
@@ -343,7 +358,7 @@ impl<'a> XStreamDb<'a> {
             let part = self
                 .db
                 .read_protein_search_block(range)
-                .map_err(read_error)?;
+                .map_err(|error| read_error(error, self.app))?;
             self.x_check(&part)?;
             parts.push(part);
             at = range.end_ordinal();
@@ -364,7 +379,7 @@ impl<'a> XStreamDb<'a> {
         self.db
             .x_protein_lengths_i32(first, end)
             .map(|lengths| lengths.into_iter().map(|len| len.max(0) as u32).collect())
-            .map_err(read_error)
+            .map_err(|error| read_error(error, self.app))
     }
 
     /// EXPERIMENT (LOSAT_X_BXTASKRES): `read_lengths`, for the bounds of the subject flow's tasks
@@ -401,7 +416,7 @@ impl<'a> XStreamDb<'a> {
         let block = self
             .db
             .read_protein_search_sequence(u32::try_from(oid)?)
-            .map_err(read_error)?;
+            .map_err(|error| read_error(error, self.app))?;
         self.x_check(&block)?;
         Ok(block.protein(0).to_vec())
     }

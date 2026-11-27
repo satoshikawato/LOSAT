@@ -62,7 +62,7 @@ fn the_window_merges_in_ordinal_order_once() {
             let mut merged: Vec<(u32, u64)> = Vec::new();
             crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
                 x_search_blocks_stream(
-                    db,
+                    &database,
                     pool,
                     block_bytes,
                     &|| {
@@ -132,7 +132,7 @@ fn segments_merge_in_ordinal_order_once() {
             let mut merged = Vec::new();
             let result = crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
                 Ok(stream_blocks(
-                    db,
+                    &database,
                     pool,
                     1,
                     segment,
@@ -188,16 +188,30 @@ fn a_failing_block_in_the_middle_stops_the_window_as_it_stops_the_rounds() {
             let (mut rounds, mut window) = (Vec::new(), Vec::new());
             let (rounds_result, window_result) =
                 crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-                    let rounds_result =
-                        search_rounds(db, pool, block_bytes, 2, &|| (), &kernel, &mut |o, k| {
+                    let rounds_result = search_rounds(
+                        &database,
+                        pool,
+                        block_bytes,
+                        2,
+                        &|| (),
+                        &kernel,
+                        &mut |o, k| {
                             assert_eq!(o, k);
                             rounds.push(o);
-                        });
-                    let window_result =
-                        stream_blocks(db, pool, block_bytes, 3, &|| (), &kernel, &mut |o, k| {
+                        },
+                    );
+                    let window_result = stream_blocks(
+                        &database,
+                        pool,
+                        block_bytes,
+                        3,
+                        &|| (),
+                        &kernel,
+                        &mut |o, k| {
                             assert_eq!(o, k);
                             window.push(o);
-                        });
+                        },
+                    );
                     Ok((rounds_result, window_result))
                 })
                 .unwrap();

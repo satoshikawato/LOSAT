@@ -635,20 +635,26 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
             "{message}"
         );
     }
-    // The reader's refusals name BLASTN.
-    let error = database_error(SeqDbError::Unsupported {
-        path: "/data/db.nal".into(),
-        message: "the alias file filters sequences".to_string(),
-    });
+    // The reader's refusals name the running application.
+    let error = database_error(
+        SeqDbError::Unsupported {
+            path: "/data/db.nal".into(),
+            message: "the alias file filters sequences".to_string(),
+        },
+        "BLASTN",
+    );
     assert!(error.downcast_ref::<NativeError>().is_none());
     assert!(
         format!("{error:#}").ends_with("; this database is not supported by LOSAT's BLASTN"),
         "{error:#}"
     );
-    let read = search_read_error(SeqDbError::Open {
-        path: "/data/db.nsq".into(),
-        source: std::io::Error::from_raw_os_error(13),
-    })
+    let read = search_read_error(
+        SeqDbError::Open {
+            path: "/data/db.nsq".into(),
+            source: std::io::Error::from_raw_os_error(13),
+        },
+        "BLASTN",
+    )
     .downcast::<PreliminaryReadError>()
     .expect("NCBI's error of the search stage");
     assert_eq!(
@@ -1068,7 +1074,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         .all(|letter| !letter.is_ascii_lowercase()));
     assert_eq!(
         reported
-            .tabular_subject_ids(database.db.oid_map(), true)
+            .tabular_subject_ids(&database, true)
             .unwrap()
             .iter()
             .map(|id| id.as_deref())
@@ -1229,6 +1235,7 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
         taxdb: shared::TaxdbRun::default(),
         loaded_before_batch: Default::default(),
         parsed_seqids,
+        program: "BLASTN",
     }
 }
 

@@ -32,8 +32,6 @@ use crate::report::tabular::{
 };
 use crate::utils::lower_bound::lower_bound_by;
 
-const PROGRAM: &str = "BLASTN";
-
 /// What the report needs besides the final hit lists.
 pub(crate) struct BlastnTabular<'a> {
     pub spec: &'a TabularSpec,
@@ -124,7 +122,7 @@ pub(crate) fn write_blastn_tabular(
         for hsp_list in hit_list.iter().flat_map(|hit_list| &hit_list.hsplist_array) {
             if let Some(first) = hsp_list.hsps.first() {
                 tab.subjects
-                    .values_for(q_idx, first.s_idx as usize, spec, PROGRAM)?;
+                    .values_for(q_idx, first.s_idx as usize, spec, tab.app.name())?;
             }
         }
     }
@@ -221,7 +219,9 @@ pub(crate) fn write_blastn_tabular(
                 continue;
             };
             let s_idx = first.s_idx as usize;
-            let values = tab.subjects.values_for(q_idx, s_idx, spec, PROGRAM)?;
+            let values = tab
+                .subjects
+                .values_for(q_idx, s_idx, spec, tab.app.name())?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:595-605
             // The HSPs of one subject are one group of `InsertSubjectScores` (a hit list holds a
             // subject once).
@@ -254,7 +254,7 @@ pub(crate) fn write_blastn_tabular(
             // (`TabularRows::last_found`), made again from its index.
             let kept_values = match rows.last_found() {
                 Some(kept) if table.fails(&subject) => {
-                    Some(tab.subjects.values_for(q_idx, kept, spec, PROGRAM)?)
+                    Some(tab.subjects.values_for(q_idx, kept, spec, tab.app.name())?)
                 }
                 _ => None,
             };

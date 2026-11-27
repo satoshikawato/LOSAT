@@ -13,6 +13,7 @@ fn a_query_without_a_valid_context_has_the_unsearched_statistics() {
         dbsize: None,
         searchsp: None,
         statistics: None,
+        program: "TBLASTX",
     };
     assert_eq!(
         query_stats(&TblastxQueryStats::default(), &numbers),
@@ -35,6 +36,7 @@ fn the_length_adjustment_is_computed_again_from_the_context_and_the_subject_set(
             dbsize,
             searchsp: None,
             statistics: None,
+            program: "TBLASTX",
         };
         let lengths = try_compute_eff_lengths_tblastx(
             130,

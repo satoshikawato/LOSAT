@@ -76,6 +76,7 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Tb
         db,
         name: name.as_bytes().to_vec(),
         taxdb: shared::TaxdbRun::default(),
+        program: "TBLASTX",
     }
 }
 

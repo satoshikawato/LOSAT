@@ -693,7 +693,7 @@ impl BlastnArgs {
                     taxid,
                     registry,
                     &*source,
-                    self.app().ncbi_name(),
+                    self.app(),
                 )?)
             }
             None => database,

@@ -354,15 +354,15 @@ impl<'a> IndexSeeds<'a> {
 
     /// After the preliminary stage: LOSAT's refusal of the search, the first by volume (an index
     /// volume that did not read or search, an index not made from the database, or a later
-    /// search of an old-style index past its sequences).
-    pub(super) fn check(&self) -> anyhow::Result<()> {
+    /// search of an old-style index past its sequences), naming `program`.
+    pub(super) fn check(&self, program: &str) -> anyhow::Result<()> {
         match self
             .error
             .lock()
             .expect("the error cell is not poisoned")
             .take()
         {
-            Some((_, what)) => Err(super::mb_index::refusal(&what)),
+            Some((_, what)) => Err(super::mb_index::refusal(&what, program)),
             None => Ok(()),
         }
     }

@@ -48,9 +48,6 @@ use crate::core::blast_hits::merge_subject_chunk_hsps;
 use crate::core::subject_split::{HardChunk, MAX_DBSEQ_LEN};
 use crate::seqdb::{SeqDb, SeqDbError};
 
-/// The program that the reader's errors name.
-const PROGRAM: &str = "BLASTX";
-
 /// A read error of the masks during the search, as a read error of the sequences
 /// (`x_db_stream::read_error`).
 fn mask_read_error(error: &SeqDbError, program: &str) -> anyhow::Error {
@@ -98,7 +95,13 @@ pub(super) fn compute_masked_subject(
     }
     let mut reader = diagonals.x_db_masks.take().unwrap_or_default();
     let stored = reader
-        .of(db, oid as u32, mask.algo_id, mask_read_error, PROGRAM)
+        .of(
+            db,
+            oid as u32,
+            mask.algo_id,
+            mask_read_error,
+            options.app.name(),
+        )
         .map(<[(u32, u32)]>::to_vec);
     diagonals.x_db_masks = Some(reader);
     let stored = stored?;
@@ -425,7 +428,7 @@ impl Masked<'_> {
                         else {
                             return Err(short_chunk_tree_refusal(
                                 db.oid(oid as u32),
-                                PROGRAM,
+                                options.app.name(),
                                 chunk.length,
                             ));
                         };
@@ -475,7 +478,7 @@ impl Masked<'_> {
             {
                 return Err(last_range_overlap_merge_refusal(
                     db.oid(oid as u32),
-                    PROGRAM,
+                    options.app.name(),
                 ));
             }
             if let Some(end) = chunk_max_end {
@@ -495,7 +498,7 @@ impl Masked<'_> {
                 return Err(chunk_merge_undefined_refusal(
                     db.oid(oid as u32),
                     None,
-                    PROGRAM,
+                    options.app.name(),
                 ));
             }
             if options.subject_besthit {

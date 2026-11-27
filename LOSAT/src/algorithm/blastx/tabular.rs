@@ -439,7 +439,7 @@ pub(super) fn write_blastx_tabular(
             // asks for a plural name of the taxonomy database that it cannot find
             // (tabular.cpp:139-158, `x_CheckTaxDB`).
             write_taxdb_warning(
-                options.app_name,
+                options.app_name(),
                 spec,
                 options.taxdb_found,
                 &mut *writer,
@@ -867,7 +867,7 @@ fn write_blastx_tax_report(
     batches: &[BatchResults],
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, TaxHsp, TaxPlain, TaxQuery};
-    let program = options.program().upper;
+    let program = options.program().refusal;
     let titles: Vec<Vec<u8>> = batches
         .iter()
         .flat_map(|batch| {
@@ -943,7 +943,7 @@ fn write_blastx_tax_report(
     let subject_names = options
         .subject_taxdb
         .as_ref()
-        .map(|taxdb| taxdb.report_names(options.app_name));
+        .map(|taxdb| taxdb.report_names(options.app_name()));
     let names = match shown {
         ShownSubjects::Database { reported, .. } => reported.tabular_names(),
         ShownSubjects::Fasta { .. } => subject_names.as_ref(),
@@ -970,7 +970,7 @@ fn write_blastx_tax_report(
         loads,
         names,
         program,
-        options.app_name,
+        options.app_name(),
         options.is_html,
         Some(&seen),
     )?;

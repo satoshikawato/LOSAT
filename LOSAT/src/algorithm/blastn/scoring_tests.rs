@@ -440,6 +440,7 @@ fn gapped_x_drops_that_ncbis_kernels_cannot_run_are_refused() {
             (gapped, finale),
             (reward, penalty),
             (gap_open, gap_extend),
+            "BLASTN",
         )
     };
     let refusal = |result: anyhow::Result<()>| result.expect_err("refused").to_string();
@@ -486,6 +487,7 @@ fn gapped_x_drops_that_ncbis_kernels_cannot_run_are_refused() {
             (gap_bits as i32, final_bits as i32),
             (1, -3),
             (gap_open, gap_extend),
+            "BLASTN",
         )
     };
     assert!(matrix_only((30.0, 100.0), (5, 2)).is_ok());

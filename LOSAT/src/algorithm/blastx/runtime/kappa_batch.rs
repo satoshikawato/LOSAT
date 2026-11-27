@@ -214,9 +214,11 @@ impl Runtime<'_> {
     #[inline(never)]
     fn fetch_refused(&self, ordinal: u32) -> anyhow::Error {
         match self.subjects.seqdb() {
-            Some(db) => {
-                crate::algorithm::common::database::FetchExcluded::refusal_at(db, ordinal, "BLASTX")
-            }
+            Some(db) => crate::algorithm::common::database::FetchExcluded::refusal_at(
+                db,
+                ordinal,
+                self.options.app.name(),
+            ),
             None => anyhow::anyhow!("a fetch of sequence {ordinal} without a database"),
         }
     }

@@ -326,8 +326,8 @@ pub(crate) fn batch_error(error: &RepeatError, queries: usize) -> Option<crate::
 /// LOSAT's rejection of a repeat search's error that NCBI does not report as `batch_error` does:
 /// LOSAT's own refusals of the search, and an error of the masks of a chunk of a split batch
 /// whose whole queries were masked (NCBI masks each chunk when it searches it, after the batch's
-/// set-up).
-pub(crate) fn rejection(filter: &RepeatFilter, error: RepeatError) -> anyhow::Error {
+/// set-up). `program` names the running application (`BlastnArgs::app`).
+pub(crate) fn rejection(filter: &RepeatFilter, error: RepeatError, program: &str) -> anyhow::Error {
     match error {
         // The text alone: the search's own error (a `NativeError` that the command line would
         // write as NCBI's) is not this run's.
@@ -336,7 +336,7 @@ pub(crate) fn rejection(filter: &RepeatFilter, error: RepeatError) -> anyhow::Er
             filter.database.to_string_lossy()
         ),
         RepeatError::Posted(text) => anyhow::anyhow!(
-            "the repeat search of -filtering_db {} stops with an error ({}) where NCBI BLAST+ reports it otherwise; this is not supported by LOSAT's BLASTN",
+            "the repeat search of -filtering_db {} stops with an error ({}) where NCBI BLAST+ reports it otherwise; this is not supported by LOSAT's {program}",
             filter.database.to_string_lossy(),
             String::from_utf8_lossy(&text)
         ),

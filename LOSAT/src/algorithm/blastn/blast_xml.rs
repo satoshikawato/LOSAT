@@ -61,6 +61,8 @@ pub(crate) struct BlastnXml<'a> {
     /// Under `-parse_deflines`, the scopes of the call's queries, which say how each result is
     /// shown (`query_batch::xml_show_of`); `None` otherwise.
     pub query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
+    /// The running application (`BlastnArgs::app`), which LOSAT's refusals of the document name.
+    pub app: crate::blastinput::app::Program,
 }
 
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
@@ -74,7 +76,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     writer: &mut dyn crate::report::ostream::ReportWrite,
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
-    const PROGRAM: &str = "BLASTN";
+    let program = xml.app.name();
     // A title NCBI crashes on (`names::Refusal`) is refused before the first byte of the
     // document, for the reports that the document writes: a run that stops (this call without the epilog: BLAST
     // XML is never streamed, `x_rpt_stream::Off::Xml`, so the call is the run's last) never
@@ -95,7 +97,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
             .is_some_and(|list| list.hsplist_array.iter().any(|list| !list.hsps.is_empty()))
     };
     let texts = names::query_texts(
-        PROGRAM,
+        program,
         &xml.queries[..reports],
         false,
         &xml.messages,
@@ -115,7 +117,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     for hit_list in hit_lists.iter().take(reports).flatten() {
         for hsp_list in &hit_list.hsplist_array {
             if let Some(hsp) = hsp_list.hsps.first() {
-                subjects.get(hsp.s_idx as usize, PROGRAM)?;
+                subjects.get(hsp.s_idx as usize, program)?;
             }
         }
     }
@@ -190,7 +192,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
             );
             for range in ranges {
                 let s_idx = lists[range.start].hsps[0].s_idx as usize;
-                let subject = subjects.get(s_idx, PROGRAM)?.names()?;
+                let subject = subjects.get(s_idx, program)?.names()?;
                 let hit = XmlHit::of(subject, xml.subjects.length(s_idx));
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.

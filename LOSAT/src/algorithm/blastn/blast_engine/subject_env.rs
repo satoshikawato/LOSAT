@@ -232,6 +232,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
             (x_drop_gapped, x_drop_final),
             (config.reward, config.penalty),
             (config.gap_open, config.gap_extend),
+            args.app().name(),
         )?;
     }
     let scan_range = config.scan_range; // For off-diagonal hit detection

@@ -710,6 +710,7 @@ impl<R: Read> FastaReader<R> {
                         &mut self.believed_keys,
                         self.config.role,
                         self.config.program,
+                        self.config.program,
                     )
                 })
                 .flatten()

@@ -504,7 +504,7 @@ impl import::StrategyArgs for BlastpArgs {
         self.task = task.to_string();
     }
 
-    fn set(&mut self, setter: &Setter) -> Result<bool> {
+    fn set(&mut self, setter: &Setter, _app: Program) -> Result<bool> {
         match setter {
             Setter::EvalueThreshold(v) => self.evalue = Some(*v),
             Setter::WordSize(n) => self.word_size = Some(*n),
@@ -533,8 +533,8 @@ impl import::StrategyArgs for BlastpArgs {
         Ok(true)
     }
 
-    fn finish(&mut self, collected: import::Collected, _run: &import::ImportRun) -> Result<()> {
-        let program = Program::Blastp.name();
+    fn finish(&mut self, collected: import::Collected, run: &import::ImportRun) -> Result<()> {
+        let program = run.app.name();
         collected.no_dust(program)?;
         collected.no_repeat(program)?;
         collected.no_nucleotide_algorithms(program)?;

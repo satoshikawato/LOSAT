@@ -71,7 +71,7 @@ impl RunSetup {
         // that does not parse is left to the formatting handler (`app::early_format_choice`).
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
-            program.upper,
+            program.refusal,
         )?;
         let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt);
         let choice = app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
@@ -182,9 +182,13 @@ pub(super) fn read_subjects(
         Some(subject_file) => {
             let mut source = fasta_reader::FastaInputSource::from_file(
                 subject_file,
-                fasta_reader::ReaderConfig::subject("BLASTX", true, settings.data_loaders)
-                    .with_defline(archive.is_some() || strategy.is_some())
-                    .with_parse_deflines(args.parse_deflines),
+                fasta_reader::ReaderConfig::subject(
+                    args.program().refusal,
+                    true,
+                    settings.data_loaders,
+                )
+                .with_defline(archive.is_some() || strategy.is_some())
+                .with_parse_deflines(args.parse_deflines),
             );
             source.set_id_scope(id_scope.clone());
             fasta_reader::read_subjects_upper(
@@ -293,6 +297,7 @@ impl ArchiveBatch<'_> {
                             options.gapped,
                             scopes.numbered_from(queries_before),
                             &crate::report::query_bioseq::SeenRun::REFUSED,
+                            options.app.name(),
                         )?;
                     }
                     (

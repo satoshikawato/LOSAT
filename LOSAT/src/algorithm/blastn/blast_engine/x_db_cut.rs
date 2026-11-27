@@ -165,18 +165,19 @@ pub(super) fn x_db_cut_block_bytes(db: &SeqDb, pool: &SearchPool<'_>, parallel: 
 // stops at the first block that cannot be read or the first sequence whose length is rejected
 // (`block_subject`); the kernel itself returns no error. The parallel rounds of the same blocks
 // return the same error (the round's first in ordinal order).
-/// The error that the search of `db` with blocks of `BLOCK_BYTES` returns, found by reading those
-/// blocks in order and each sequence's length; `error` (the cut's) when every block and length
-/// reads (an error that does not come back on a second read).
-pub(super) fn x_one_thread_error(db: &SeqDb, error: anyhow::Error) -> anyhow::Error {
+/// The error that the search of `database` with blocks of `BLOCK_BYTES` returns, found by reading
+/// those blocks in order and each sequence's length; `error` (the cut's) when every block and
+/// length reads (an error that does not come back on a second read).
+pub(super) fn x_one_thread_error(database: &BlastnDatabase, error: anyhow::Error) -> anyhow::Error {
+    let (db, program) = (&database.db, database.program);
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, BLOCK_BYTES) {
         let block = match db.read_block(range) {
             Ok(block) => block,
-            Err(first) => return search_read_error(first),
+            Err(first) => return search_read_error(first, program),
         };
         for i in 0..block.len() {
-            if let Err(first) = block_subject(&block, &range, i) {
+            if let Err(first) = block_subject(&block, &range, i, program) {
                 return first;
             }
         }
@@ -217,7 +218,7 @@ where
         if block_bytes == BLOCK_BYTES {
             error
         } else {
-            x_one_thread_error(db, error)
+            x_one_thread_error(database, error)
         }
     };
     search_blocks_of(

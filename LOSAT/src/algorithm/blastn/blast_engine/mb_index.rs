@@ -67,20 +67,21 @@ pub(super) fn note_index_use(
     )
 }
 
-/// LOSAT's refusal `-use_index true with {what}`.
-pub(super) fn refusal(what: &str) -> anyhow::Error {
-    anyhow::anyhow!("-use_index true with {what} is not supported by LOSAT's BLASTN")
+/// LOSAT's refusal `-use_index true with {what}`, naming `program` (the running application's,
+/// `BlastnArgs::app`).
+pub(super) fn refusal(what: &str, program: &str) -> anyhow::Error {
+    anyhow::anyhow!("-use_index true with {what} is not supported by LOSAT's {program}")
 }
 
 impl MegablastIndex {
     /// The index that the search uses, or LOSAT's refusal of a search that NCBI runs with an
     /// index LOSAT does not search with (the loader's refusals). With `-db_hard_mask` the search
     /// places the index's seeds into the hard ranges (`mb_index_seeds::HardSeeds`; item D5b-5,
-    /// the Owner's answer C to Q-HARDIDX).
-    pub(super) fn check(&self) -> Result<Option<Arc<LoadedIndex>>> {
+    /// the Owner's answer C to Q-HARDIDX). The refusal names `program`.
+    pub(super) fn check(&self, program: &str) -> Result<Option<Arc<LoadedIndex>>> {
         match self {
             Self::NotUsed => Ok(None),
-            Self::Refused(what) => Err(refusal(what)),
+            Self::Refused(what) => Err(refusal(what, program)),
             Self::Used(index) => Ok(Some(Arc::clone(index))),
         }
     }

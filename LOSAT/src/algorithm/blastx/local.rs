@@ -183,16 +183,18 @@ fn search_records(
     outputs.xinclude_check(args.out.as_deref())?;
     // The environment of a search of subject records, after the subjects' warnings
     // (`native::run_inner`).
-    app::check_search_environment("BLASTX", true)?;
+    app::check_search_environment(args.app().name(), true)?;
     let records_parsed = if args.parse_deflines {
         // LOSAT's refusals of the records in outfmt 0 to 4, each such format's (`FormatRefusal`).
-        RecordsParsed::of(&subjects, args.show_gis, |parsed| {
+        RecordsParsed::of(&subjects, args.show_gis, args.app().name(), |parsed| {
             for (format, options) in outputs.formats.iter_mut().zip(&resolved) {
                 if options.pairwise_view().is_some() {
                     format
                         .refusal
                         .check(crate::report::db_subject::check_pairwise_records(
-                            parsed, true, "BLASTX",
+                            parsed,
+                            true,
+                            args.app().name(),
                         ))?;
                 }
             }
@@ -344,6 +346,11 @@ fn scan_xml_titles(
         "BLASTX",
     )
     .map(|scopes| {
+        // The refusals name the running application (`ResolvedOptions::app`, every format's).
+        let scopes = match resolved.first() {
+            Some(options) => scopes.named(options.app.name()),
+            None => scopes,
+        };
         scopes
             .with_refusal(scope_refusal.cloned())
             .with_xml_matrix_failure(xml_matrix)
@@ -684,7 +691,14 @@ fn write_run(
             xml,
             "BLASTX",
         )
-        .map(|scopes| scopes.with_refusal(scope_refusal.cloned()))
+        .map(|scopes| {
+            // The refusals name the running application (`ResolvedOptions::app`).
+            match resolved.first() {
+                Some(options) => scopes.named(options.app.name()),
+                None => scopes,
+            }
+            .with_refusal(scope_refusal.cloned())
+        })
     }));
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {
@@ -1044,7 +1058,7 @@ fn write_run(
                             reported.parsed_subject(rank),
                             reported.records()[rank].sequence.len(),
                             true,
-                            "BLASTX",
+                            search_options.app.name(),
                         ));
                         run_subjects.len() - 1
                     });
@@ -1192,8 +1206,8 @@ fn search_database(
         list.as_ref(),
         args.db_mask.option().as_ref(),
         &mut *outputs.diagnostics,
-        super::args::ProgramName::BLASTX.upper,
-        args.app_name(),
+        args.program(),
+        args.app(),
     )?
     .showing_gis(args.show_gis)
     .after_calls(args.first_query_ordinal > 0)
@@ -1214,7 +1228,7 @@ fn search_database(
         false,
         args.searchsp.is_some_and(|space| space != 0),
         args.dbsize.is_some_and(|size| size > 0),
-        "BLASTX",
+        args.app().name(),
     )?;
     crate::algorithm::common::database::check_formats_report_sums(
         || database.pairwise_database(),
@@ -1222,7 +1236,7 @@ fn search_database(
             .formats
             .iter_mut()
             .map(|format| (format.outfmt, &mut format.refusal)),
-        "BLASTX",
+        args.app().name(),
     )?;
     for options in &mut resolved {
         options.query_range = query_range;
@@ -1282,7 +1296,7 @@ fn search_database(
     // NCBI's error of an XInclude format without a file name, where the command line gives it
     // (`native::run_inner`, blastx_app.cpp:251).
     outputs.xinclude_check(args.out.as_deref())?;
-    app::check_search_environment("BLASTX", false)?;
+    app::check_search_environment(args.app().name(), false)?;
     let pairwise = database.pairwise_database_masked(
         resolved
             .first()
@@ -1305,7 +1319,12 @@ fn search_database(
         Err(error) => (None, Some(error)),
     };
     let stream = longest.map(|longest| {
-        super::x_db_stream::XStreamDb::new_with_long(database.x_seqdb(), longest, allow_long)
+        super::x_db_stream::XStreamDb::new_with_long(
+            database.x_seqdb(),
+            longest,
+            allow_long,
+            database.app.name(),
+        )
     });
     let unreadable = std::cell::RefCell::new(unreadable);
     let search_subjects = match &stream {

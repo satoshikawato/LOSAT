@@ -177,6 +177,9 @@ pub(super) struct PrelimBatch<'a> {
     /// refusals (`record_batch_chunk_merge_error`).
     pub(super) db_oids: Option<crate::seqdb::OidMap<'a>>,
     pub(super) db_mask_error: &'a std::sync::Mutex<Option<(u32, anyhow::Error)>>,
+    /// The name in LOSAT's refusals of the batch's search: the running application's
+    /// (`BlastnArgs::app`), not BLASTN's where it runs another program's strategy.
+    pub(super) program: &'static str,
     /// The seeds of the MegaBLAST database index that the batch is searched with (`None`
     /// without one, and for a batch split into query chunks: each chunk has its own), which
     /// replace the scan of every chunk (`mb_index_seeds::index_chunk_hits`).
@@ -1074,11 +1077,12 @@ fn record_chunk_merge_error(
     error_cell: &std::sync::Mutex<Option<(u32, anyhow::Error)>>,
     s_idx: usize,
     oid_of: impl FnOnce(u32) -> u32,
+    program: &str,
 ) {
     let ordinal = s_idx as u32;
     let oid = oid_of(ordinal);
     let error = crate::algorithm::common::hard_chunk_scan::chunk_merge_undefined_refusal(
-        oid, None, "BLASTN",
+        oid, None, program,
     );
     let mut first = error_cell.lock().expect("the error cell is not poisoned");
     if first
@@ -1094,11 +1098,16 @@ fn record_chunk_merge_error(
 #[cold]
 #[inline(never)]
 fn record_batch_chunk_merge_error(batch: &PrelimBatch<'_>, s_idx: usize) {
-    record_chunk_merge_error(batch.db_mask_error, s_idx, |ordinal| {
-        batch
-            .db_oids
-            .map_or(ordinal, |oids| oids.oid(ordinal).get())
-    });
+    record_chunk_merge_error(
+        batch.db_mask_error,
+        s_idx,
+        |ordinal| {
+            batch
+                .db_oids
+                .map_or(ordinal, |oids| oids.oid(ordinal).get())
+        },
+        batch.program,
+    );
 }
 
 /// The preliminary search of one subject's chunks and the merge of their lists: the chunks that

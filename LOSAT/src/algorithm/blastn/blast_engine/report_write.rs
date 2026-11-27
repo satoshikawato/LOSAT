@@ -81,7 +81,8 @@ pub(super) fn refuse_anchored_reports(
                     report.database_parsed,
                     |rank| report.database_loads.load(rank as usize),
                     |rank| oids.oid(ordinals[rank as usize]),
-                    "BLASTN",
+                    false,
+                    report.app.name(),
                 )?;
                 let batches = pairwise_batches.get_or_insert_with(|| {
                     crate::blastinput::query_batch::AnchoredBatchScopes::new(
@@ -102,7 +103,7 @@ pub(super) fn refuse_anchored_reports(
                     |q_idx| batches.of_query(q_idx),
                     batches.generated(),
                     *view != crate::report::pairwise::PairwiseView::Pairwise,
-                    "BLASTN",
+                    report.app.name(),
                 )?;
             }
         }
@@ -150,7 +151,8 @@ pub(super) fn refuse_anchored_reports(
                 )?;
                 if aborts {
                     return Err(crate::report::query_anchored::aborted_section(
-                        record, "BLASTN",
+                        record,
+                        report.app.name(),
                     ));
                 }
             }
@@ -219,7 +221,8 @@ pub(super) fn refuse_described_records(
                     ))
                 },
                 report.database_parsed,
-                "BLASTN",
+                false,
+                report.app.name(),
             ),
         )?;
     }
@@ -517,6 +520,7 @@ pub(super) fn write_structured_xml(
         epilog: report.epilog,
         only_xml2: xml_only_xml2,
         query_scopes: report.query_scopes,
+        app: report.app,
     };
     match xml2_kind {
         None => crate::algorithm::blastn::blast_xml::write_blastn_xml(

@@ -543,8 +543,8 @@ impl import::StrategyArgs for TblastnArgs {
         self.task = task.to_string();
     }
 
-    fn set(&mut self, setter: &Setter) -> Result<bool> {
-        let program = Program::Tblastn.name();
+    fn set(&mut self, setter: &Setter, app: Program) -> Result<bool> {
+        let program = app.name();
         match setter {
             Setter::EvalueThreshold(v) => self.evalue = Some(*v),
             Setter::WordSize(n) => self.word_size = Some(*n),
@@ -576,8 +576,8 @@ impl import::StrategyArgs for TblastnArgs {
         Ok(true)
     }
 
-    fn finish(&mut self, collected: import::Collected, _run: &import::ImportRun) -> Result<()> {
-        let program = Program::Tblastn.name();
+    fn finish(&mut self, collected: import::Collected, run: &import::ImportRun) -> Result<()> {
+        let program = run.app.name();
         collected.no_dust(program)?;
         collected.no_repeat(program)?;
         collected.no_nucleotide_algorithms(program)?;

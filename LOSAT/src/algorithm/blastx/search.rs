@@ -288,9 +288,14 @@ fn x_search_core(
                     super::database::too_long(
                         format_args!("subject sequence {}", index + 1),
                         length,
+                        options.app.name(),
                     )
                 }
-                _ => super::database::too_long("a database sequence", longest_subject),
+                _ => super::database::too_long(
+                    "a database sequence",
+                    longest_subject,
+                    options.app.name(),
+                ),
             });
         }
         if subjects.is_unreadable() {

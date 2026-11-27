@@ -4122,7 +4122,9 @@ pub(crate) fn description_line_refusal(
 /// (`described`, by rank: `pairwise::blastp_described_subjects`, the first `-num_descriptions`); a
 /// sequence below `-num_descriptions` prints no line and is not refused (review 1 of line RG-KB
 /// item 12, R1). Nothing is asked where no sequence has such a line. The `-subject` records go
-/// through the same refusals (`refuse_described_records`).
+/// through the same refusals (`refuse_described_records`). `protein`: whether the lines are those
+/// of a protein program's subjects (`description_line_refusal`); `program`: the name in the
+/// refusal (the running application's, also where it runs another program's strategy).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refuse_described_lines(
     num_queries: usize,
@@ -4131,9 +4133,9 @@ pub(crate) fn refuse_described_lines(
     parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     load_of: impl Fn(u32) -> crate::report::db_subject::HitLoad,
     oid_of: impl Fn(u32) -> crate::seqdb::Oid,
+    protein: bool,
     program: &str,
 ) -> Result<()> {
-    let protein = matches!(program, "BLASTP" | "PSIBLAST" | "BLASTX" | "RPSBLAST");
     match described_refusal(num_queries, reported, described, parsed, load_of, protein)? {
         Some((rank, reason)) => Err(parsed_refusal(oid_of(rank), &reason, program)),
         None => Ok(()),
@@ -4144,12 +4146,14 @@ pub(crate) fn refuse_described_lines(
 /// (`records`, `db_subject::parsed_records`, by subject index: each is its own Bioseq), whose
 /// refusal names the record (`ParsedSubject::record_refusal`); `reported` and `described` give
 /// subject indexes. One owner with the database's sequences: a record whose description line no
-/// report prints is not refused (review 2 of line RG-KB item 12, N2).
+/// report prints is not refused (review 2 of line RG-KB item 12, N2). `protein` and `program` as
+/// `refuse_described_lines` reads them.
 pub(crate) fn refuse_described_records(
     num_queries: usize,
     reported: impl FnMut(usize) -> Vec<u32>,
     described: impl FnMut(usize) -> Result<Vec<u32>>,
     records: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    protein: bool,
     program: &str,
 ) -> Result<()> {
     // A record that the reports show as one read without `-parse_deflines` has its local id there
@@ -4159,7 +4163,6 @@ pub(crate) fn refuse_described_records(
         .map(|record| record.clone().filter(|record| !record.shown_as_record()))
         .collect();
     let loaded = |_| crate::report::db_subject::HitLoad::Loaded;
-    let protein = matches!(program, "BLASTP" | "PSIBLAST" | "BLASTX" | "RPSBLAST");
     match described_refusal(num_queries, reported, described, &shown, loaded, protein)? {
         Some((index, reason)) => Err(shown[index as usize]
             .as_deref()

@@ -79,6 +79,11 @@ fn frozen(name: &str) -> Vec<u8> {
 /// One run of the case from `LOSAT/` without LOSAT's switches and batch variables; standard
 /// input is empty.
 fn run(case: &Case, threads: Option<&str>) -> Output {
+    command(case, threads).output().expect("run losat")
+}
+
+/// The command of [`run`].
+fn command(case: &Case, threads: Option<&str>) -> Command {
     let ss = fixtures().join("ss");
     let ss = ss.to_str().expect("UTF-8 path");
     let mut command = Command::new(BIN);
@@ -100,7 +105,7 @@ fn run(case: &Case, threads: Option<&str>) -> Output {
             command.env_remove(name);
         }
     }
-    command.output().expect("run losat")
+    command
 }
 
 /// The SAM document `document` without the CL tag of its `@PG` line: the bytes from the `\tCL:`
@@ -324,6 +329,83 @@ fn a_refusal_of_another_programs_strategy_names_the_running_application() {
                 && line.matches('\n').count() == 1
         });
         if output.status.code() != Some(case.rc) || !output.stdout.is_empty() || !named {
+            failed.push(format!(
+                "{}: exit {:?}, stdout {} bytes, stderr {stderr:?}",
+                case.name,
+                output.status.code(),
+                output.stdout.len()
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Line RG-F item F2f (review1 N5): LOSAT's other refusals of a run of another program's strategy
+/// name the running application too, never the engine that runs the search. The strategy's values
+/// that LOSAT does not run (the setters of the import, `ss/s3a.*`) and an environment that LOSAT
+/// does not reproduce (`BL2SEQ_LEGACY` with `-subject`, the engines' `check_search_environment`)
+/// are refused in each engine that another application reaches: TBLASTX's under blastn and blastx,
+/// BLASTN's and BLASTX's under tblastx. NCBI never writes these texts; LOSAT exits 1 with nothing
+/// on standard output.
+#[test]
+fn other_refusals_of_another_programs_strategy_name_the_running_application() {
+    const BL2SEQ: &str = "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's";
+    const QUERY_CODE: &str =
+        "a search strategy with this query genetic code is not supported by LOSAT's";
+    let runs: &[(&str, &str, Option<&str>, &str, &str)] = &[
+        ("blastn", "s3a.tblastx_QueryGeneticCode_7", None, QUERY_CODE, "TBLASTX"),
+        ("blastx", "s3a.tblastx_QueryGeneticCode_7", None, QUERY_CODE, "TBLASTX"),
+        ("blastn", "s3a.tblastx_DbGeneticCode_7", None, "a search strategy with this database genetic code is not supported by LOSAT's", "TBLASTX"),
+        ("tblastx", "s3a.blastx_QueryGeneticCode_7", None, QUERY_CODE, "BLASTX"),
+        ("tblastx", "s3a.blastx_WordSize_1", None, "-word_size 1 (the lookup table) is not supported by LOSAT's", "BLASTX"),
+        ("tblastx", "s3a.blastx_EvalueThreshold_inf", None, "is not supported by LOSAT's", "BLASTX"),
+        ("tblastx", "s3a.blastn_GapExtnAlgorithm_0_1", None, "a search strategy with this pair of gapped extension algorithms is not supported by LOSAT's", "BLASTN"),
+        ("tblastx", "s3a.blastn_MatchReward_0", None, "is not supported by LOSAT's", "BLASTN"),
+        ("blastn", "tblastx.db", Some("lone.fna"), BL2SEQ, "TBLASTX"),
+        ("blastx", "tblastx.db", Some("lone.fna"), BL2SEQ, "TBLASTX"),
+        ("tblastx", "blastn.db", Some("lone.fna"), BL2SEQ, "BLASTN"),
+        ("tblastx", "blastx.db", Some("lone.faa"), BL2SEQ, "BLASTX"),
+    ];
+    let mut failed = Vec::new();
+    for (program, strategy, subject, words, engine) in runs {
+        let mut args = vec![
+            "-import_search_strategy".to_string(),
+            format!("{{ss}}/{strategy}.ss"),
+        ];
+        if let Some(subject) = subject {
+            args.extend(
+                [
+                    "-query",
+                    "tests/db_search/t7/nq.fna",
+                    "-subject",
+                    &format!("tests/db_search/t7/{subject}"),
+                ]
+                .map(str::to_string),
+            );
+        }
+        let case = Case {
+            name: format!("{program} running {strategy}"),
+            program: program.to_string(),
+            args,
+            rc: 1,
+            out: "-".to_string(),
+            err: "-".to_string(),
+        };
+        let mut command = command(&case, None);
+        if subject.is_some() {
+            command.env("BL2SEQ_LEGACY", "1");
+        }
+        let output = command.output().expect("run losat");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let app = program.to_ascii_uppercase();
+        let named = stderr
+            .lines()
+            .any(|line| line.ends_with(&format!("{words} {app}")));
+        if output.status.code() != Some(case.rc)
+            || !output.stdout.is_empty()
+            || !named
+            || stderr.contains(&format!("LOSAT's {engine}"))
+        {
             failed.push(format!(
                 "{}: exit {:?}, stdout {} bytes, stderr {stderr:?}",
                 case.name,

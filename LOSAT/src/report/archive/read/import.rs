@@ -1312,7 +1312,9 @@ fn recorded_params(setter: &Setter) -> Vec<Param> {
 /// command line. Everything else of the import is [`apply`]'s, the same for every program and
 /// every caller (the command line, the library API, LOSAT Web).
 pub(crate) trait StrategyArgs: Sized {
-    /// The program, by LOSAT's name in its refusals.
+    /// The program whose engine runs the strategy. LOSAT's refusals of the import name the
+    /// running application (`Start::app`), which is another program where it runs this program's
+    /// strategy.
     const PROGRAM: crate::blastinput::app::Program;
     /// Whether a strategy of `program` is the program's own.
     fn runs(program: EProgram) -> bool;
@@ -1329,10 +1331,11 @@ pub(crate) trait StrategyArgs: Sized {
     /// `-task`.
     fn set_task(&mut self, task: &str);
     /// The program's table: `setter` set on the option of the command line that it stands for,
-    /// `false` for a setter that the program does not take.
-    fn set(&mut self, setter: &Setter) -> Result<bool>;
+    /// `false` for a setter that the program does not take; a refusal names the running
+    /// application `app`.
+    fn set(&mut self, setter: &Setter, app: Program) -> Result<bool>;
     /// The options of the setters that act together (`collected`), after the table, with the
-    /// import's run state (`run`).
+    /// import's run state (`run`, whose `ImportRun::app` the refusals name).
     fn finish(&mut self, collected: Collected, run: &ImportRun) -> Result<()>;
     fn into_command(self) -> Commands;
 }
@@ -1745,7 +1748,10 @@ fn import_as<T: StrategyArgs>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3800-3837
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2565-2572
 fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Commands> {
-    let program = T::PROGRAM.name();
+    // LOSAT's refusals of the import name the running application, also where it runs another
+    // program's strategy with `T`'s engine.
+    let app = start.app;
+    let program = app.name();
     let mut out = T::defaults()?;
     let path = kept.path.clone();
     let parse_deflines = kept.parse_deflines;
@@ -1817,7 +1823,7 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
             // import (`FormattingArgs::hitlist_start_count`).
             Setter::HitlistSize(n) => fields.formatting.hitlist_start = Some(*n),
             other => {
-                if !out.set(other)? {
+                if !out.set(other, app)? {
                     return Err(Start::unported_setter(other, program));
                 }
             }

@@ -521,6 +521,7 @@ fn x_compressed_lookup(
     threshold: f64,
     word: i32,
     parts: usize,
+    program: &str,
 ) -> Result<Lookup> {
     // The build of the word length, as a constant of its instance (`x_bx_build_compressed_lookup`).
     let scaled = x_compressed_scaled_threshold(threshold);
@@ -533,18 +534,19 @@ fn x_compressed_lookup(
     }
     .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
     .map(Lookup::Compressed)
-    .map_err(|_| x_banks_filled(threshold, word))
+    .map_err(|_| x_banks_filled(threshold, word, program))
 }
 
 /// LOSAT's refusal of a query batch whose neighboring words fill NCBI's 1024 overflow banks of the
 /// compressed table, past which NCBI writes and corrupts its heap. NCBI builds the table in the
 /// batch's search, after the reports of the batches before, so the refusal comes after them
 /// (`blastinput::app::ErrorAfterBatchReports`, as TBLASTN's): LOSAT's refusal (exit status 1),
-/// not an error of NCBI's engine (line RG item X-short-bat-2).
+/// not an error of NCBI's engine (line RG item X-short-bat-2). `program` names the running
+/// application (`ResolvedOptions::app`).
 #[cold]
-fn x_banks_filled(threshold: f64, word: impl std::fmt::Display) -> anyhow::Error {
+fn x_banks_filled(threshold: f64, word: impl std::fmt::Display, program: &str) -> anyhow::Error {
     crate::blastinput::app::ErrorAfterBatchReports::new(anyhow::anyhow!(
-        "-threshold {threshold} with the compressed lookup table of -word_size {word} is not supported by LOSAT's BLASTX: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap"
+        "-threshold {threshold} with the compressed lookup table of -word_size {word} is not supported by LOSAT's {program}: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap"
     ))
     .into()
 }
@@ -670,6 +672,7 @@ impl Lookup {
                 options.threshold,
                 options.word_size,
                 parts,
+                options.app.name(),
             )
             .map(BxLookup::Wide);
         }
@@ -774,7 +777,7 @@ impl Lookup {
                     XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
                 }))
             })
-            .map_err(|_| x_banks_filled(options.threshold, word));
+            .map_err(|_| x_banks_filled(options.threshold, word, options.app.name()));
         }
         ensure!(
             (2..=4).contains(&word),

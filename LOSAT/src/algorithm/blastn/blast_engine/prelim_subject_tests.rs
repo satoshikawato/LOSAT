@@ -151,7 +151,7 @@ fn record_chunk_merge_error_names_mapped_oid_and_orders_by_ordinal() {
     let cell: std::sync::Mutex<Option<(u32, anyhow::Error)>> = std::sync::Mutex::new(None);
     let oid_of = |ordinal: u32| ordinal + 100;
 
-    record_chunk_merge_error(&cell, 42, oid_of);
+    record_chunk_merge_error(&cell, 42, oid_of, "BLASTN");
     {
         let guard = cell.lock().unwrap();
         let (key, error) = guard.as_ref().expect("recorded ordinal 42");
@@ -167,7 +167,7 @@ fn record_chunk_merge_error_names_mapped_oid_and_orders_by_ordinal() {
     }
 
     // A later subject (higher ordinal) does not replace an earlier ordinal.
-    record_chunk_merge_error(&cell, 50, oid_of);
+    record_chunk_merge_error(&cell, 50, oid_of, "BLASTN");
     {
         let guard = cell.lock().unwrap();
         let (key, error) = guard.as_ref().expect("kept ordinal 42");
@@ -176,7 +176,7 @@ fn record_chunk_merge_error_names_mapped_oid_and_orders_by_ordinal() {
     }
 
     // An earlier subject (lower ordinal) replaces the higher ordinal and names its mapped OID.
-    record_chunk_merge_error(&cell, 5, oid_of);
+    record_chunk_merge_error(&cell, 5, oid_of, "BLASTN");
     {
         let guard = cell.lock().unwrap();
         let (key, error) = guard.as_ref().expect("replaced with ordinal 5");

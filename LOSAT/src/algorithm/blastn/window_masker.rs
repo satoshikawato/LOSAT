@@ -134,12 +134,14 @@ pub(crate) fn open_taxid(
     taxid: i32,
     registry: &WindowMaskerRegistry,
     source: &dyn CountsSource,
-    app: &'static str,
+    program: crate::blastinput::app::Program,
 ) -> anyhow::Result<WindowMasker> {
+    let app = program.ncbi_name();
     let directory = registry.path.as_deref();
     let file = crate::utils::winmask::taxid_stat_file(directory, taxid, source).map_err(|error| {
         anyhow::anyhow!(
-            "-window_masker_taxid {taxid}: the current directory, where NCBI BLAST+ looks for the counts file, cannot be read ({error}); this is not supported by LOSAT's BLASTN"
+            "-window_masker_taxid {taxid}: the current directory, where NCBI BLAST+ looks for the counts file, cannot be read ({error}); this is not supported by LOSAT's {}",
+            program.name()
         )
     })?;
     let name = match &file {
@@ -153,7 +155,7 @@ pub(crate) fn open_taxid(
     if let Err(error @ (WinMaskError::UnitSize { .. } | WinMaskError::UnsetHashParameter { .. })) =
         &masker
     {
-        return Err(rejection(&name, error));
+        return Err(rejection(&name, error, program.name()));
     }
     let first_load = load_posts(&registry.load_posts, &masker, app);
     let later_loads = if registry.posts_once {
@@ -313,10 +315,11 @@ pub(crate) fn batch_error(
 /// NCBI's result is undefined; `open_taxid` refuses them before any output), a cache bit array of 0 words that NCBI reads past (`WinMaskError::EmptyCacheBitArray`), a
 /// query of 2^32 letters or more, an error of a counts source of LOSAT Web, and an error of the
 /// masks of a chunk of a split batch whose whole queries were masked (NCBI masks each chunk
-/// when it searches it, after the batch's set-up).
-pub(crate) fn rejection(name: &[u8], error: &WinMaskError) -> anyhow::Error {
+/// when it searches it, after the batch's set-up). `program` names the running application
+/// (`BlastnArgs::app`).
+pub(crate) fn rejection(name: &[u8], error: &WinMaskError, program: &str) -> anyhow::Error {
     anyhow::anyhow!(
-        "the windowmasker unit counts {} give an error that LOSAT's BLASTN does not report as NCBI BLAST+ does ({error}); this is not supported by LOSAT's BLASTN",
+        "the windowmasker unit counts {} give an error that LOSAT's {program} does not report as NCBI BLAST+ does ({error}); this is not supported by LOSAT's {program}",
         String::from_utf8_lossy(name)
     )
 }

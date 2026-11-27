@@ -74,7 +74,8 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
         name: name.as_bytes().to_vec(),
         taxdb: shared::TaxdbRun::default(),
         parsed_seqids: false,
-        program: PROGRAM,
+        program: "BLASTX",
+        app: crate::blastinput::app::Program::Blastx,
     }
 }
 
@@ -416,7 +417,8 @@ fn read_titles_does_not_let_shown_source_refusal_overtake_earlier_refusal_or_hea
         name: spec.into_bytes(),
         taxdb: shared::TaxdbRun::default(),
         parsed_seqids: false,
-        program: PROGRAM,
+        program: "BLASTX",
+        app: crate::blastinput::app::Program::Blastx,
     };
     let read = |lists: &[(usize, i32)]| {
         let batches = one_query(lists);

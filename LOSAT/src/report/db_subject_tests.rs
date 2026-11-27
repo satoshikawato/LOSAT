@@ -3059,6 +3059,7 @@ fn a_description_line_is_refused_only_where_a_report_prints_it() {
             &parsed,
             |_| HitLoad::Loaded,
             crate::seqdb::Oid::of_unrestricted,
+            true,
             "BLASTP",
         )
     };
@@ -3076,6 +3077,7 @@ fn a_description_line_is_refused_only_where_a_report_prints_it() {
             |_| vec![1],
             |_| Ok(described.clone()),
             &records,
+            true,
             "BLASTP",
         )
     };

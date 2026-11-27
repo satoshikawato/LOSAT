@@ -834,7 +834,8 @@ impl OneHitChunkMerge<'_> {
         self.failure.fail(
             self.s_idx,
             anyhow::Error::new(ErrorAfterBatchReports::new(anyhow::anyhow!(
-                "TBLASTX -window_size {}: a one-hit ungapped alignment whose length is 0 or less meets another in the overlap of two 5,000,000-letter parts of a subject frame, and their lengths add up to 0 (NCBI BLAST+ divides by that sum when it merges them; its result is undefined), which LOSAT does not support",
+                "{} -window_size {}: a one-hit ungapped alignment whose length is 0 or less meets another in the overlap of two 5,000,000-letter parts of a subject frame, and their lengths add up to 0 (NCBI BLAST+ divides by that sum when it merges them; its result is undefined), which LOSAT does not support",
+                self.failure.program(),
                 self.window
             ))),
         );
@@ -871,7 +872,7 @@ pub fn run(
     // (`app::early_format_choice`).
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
-        "TBLASTX",
+        args.app().name(),
     )?;
     let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
     let choice =
@@ -961,7 +962,7 @@ pub fn run(
     let query_file = match crate::report::archive::read::import::ImportRun::open_query(
         args.import.as_ref(),
         &args.query,
-        "TBLASTX",
+        args.app().name(),
     ) {
         Ok(file) => file,
         Err(error) => {
@@ -1104,7 +1105,9 @@ fn read_subject_set(
         (Some(text), _) => {
             crate::report::archive::read::import::ImportRun::input_of("subject", text)?
         }
-        (None, Some(subject_path)) => input_files::open_input(subject_path, "subject", "TBLASTX")?,
+        (None, Some(subject_path)) => {
+            input_files::open_input(subject_path, "subject", args.app().name())?
+        }
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
@@ -1118,7 +1121,7 @@ fn read_subject_set(
     // is set up (`search`).
     let mut subject_source = FastaInputSource::from_file(
         subject_file,
-        ReaderConfig::subject("TBLASTX", false, settings.data_loaders)
+        ReaderConfig::subject(args.app().name(), false, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
             .with_parse_deflines(args.parse_deflines),
     );
@@ -1148,7 +1151,7 @@ fn read_subject_set(
                 subject_range.as_ref(),
                 &mut warn,
                 args.num_threads,
-                "TBLASTX",
+                args.app().name(),
             )?;
         crate::utils::xreach::x_reach!("LOSAT_X_TBXSTORE", stores.is_some());
         (subjects, placements, stores)
@@ -1359,7 +1362,7 @@ fn open_search_database(
                 list,
                 args.db_mask.option().as_ref(),
                 outputs.diagnostics,
-                args.app().ncbi_name(),
+                args.app(),
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
@@ -1380,7 +1383,7 @@ fn open_search_database(
                 true,
                 args.searchsp.is_some_and(|space| space != 0),
                 args.dbsize.is_some_and(|size| size > 0),
-                "TBLASTX",
+                args.app().name(),
             )?;
             crate::algorithm::common::database::check_formats_report_sums(
                 || database.pairwise_database(),
@@ -1388,7 +1391,7 @@ fn open_search_database(
                     .formats
                     .iter_mut()
                     .map(|format| (format.outfmt, &mut format.refusal)),
-                "TBLASTX",
+                args.app().name(),
             )?;
             Some(database)
         }
@@ -1428,7 +1431,7 @@ fn open_search_database(
                 crate::report::serial::seqalign::check_database(
                     serial,
                     database.name(),
-                    crate::blastinput::app::Program::Tblastx,
+                    args.app(),
                 )?;
             }
         }
@@ -1499,7 +1502,7 @@ fn search_cli(
             .is_some_and(|path| path.as_os_str() == "-");
     let mut query_source = FastaInputSource::from_file(
         query_file,
-        ReaderConfig::query("TBLASTX", false, settings.data_loaders)
+        ReaderConfig::query(args.app().name(), false, settings.data_loaders)
             .with_defline(args.archive.is_some() || args.strategy.is_some())
             .with_parse_deflines(args.parse_deflines)
             .with_strand(&args.strand),
@@ -1839,7 +1842,7 @@ fn search(
         database.check_mask_limits(mask, args.word_size(), args.window())?;
     }
     crate::blastinput::app::check_search_environment(
-        "TBLASTX",
+        args.app().name(),
         !matches!(source, SubjectSource::Database(_)),
     )?;
     // The query range applies to every query record as NCBI's batch reader reads it
@@ -1910,6 +1913,7 @@ fn search(
                     dbsize: args.dbsize,
                     searchsp: args.searchsp,
                     statistics: None,
+                    program: args.app().name(),
                 },
                 shown: ShownSubjects::Fasta {
                     records,
@@ -1925,7 +1929,7 @@ fn search(
         } => (
             RunSubjects {
                 subjects: Subjects::Fasta(records),
-                numbers: SubjectSetNumbers::of_records(records, args.dbsize)
+                numbers: SubjectSetNumbers::of_records(records, args.dbsize, args.app().name())
                     .with_searchsp(args.searchsp),
                 shown: ShownSubjects::Fasta {
                     records,
@@ -2115,7 +2119,7 @@ pub(crate) fn library_batch_sizes(
             None,
             None,
             &mut std::io::sink(),
-            args.app().ncbi_name(),
+            args.app(),
         )
         .map_or(0, |database| database.pairwise_database().total_letters),
         None => i64::from(crate::blastinput::seq_range::subject_letters(
@@ -2317,7 +2321,7 @@ fn write_tblastx_outputs(
                     .is_some_and(|stats| stats.seg_masks.iter().any(|(_, masks)| !masks.is_empty()))
             },
             args.lcase_masking,
-            "TBLASTX",
+            args.app().name(),
         )?;
     }
     // The records of a subject set whose ids `-parse_deflines` read, by subject index.
@@ -2340,7 +2344,7 @@ fn write_tblastx_outputs(
                     .check(crate::report::db_subject::check_pairwise_records(
                         &records_parsed,
                         false,
-                        "TBLASTX",
+                        args.app().name(),
                     ))?;
             }
         }
@@ -2354,6 +2358,7 @@ fn write_tblastx_outputs(
                 output_formats
                     .iter()
                     .any(|format| format.tabular_reads_subject()),
+                run.args.app().name(),
             )?,
             None => tabular_subject_ids(run.subjects),
         }
@@ -3365,7 +3370,7 @@ fn run_in_pool(
         return Err(
             crate::algorithm::tblastx::args::identity_named_matrix_refusal(
                 args.matrix_name().as_bytes(),
-                "TBLASTX",
+                args.app().name(),
             ),
         );
     }
@@ -3377,7 +3382,7 @@ fn run_in_pool(
             crate::blastinput::ncbi_environment::matrix_file_refusal(
                 &args.matrix_name(),
                 file,
-                "TBLASTX"
+                args.app().name()
             )
         );
     }
@@ -3689,7 +3694,7 @@ fn refuse_tblastx_qseq_past_seen_query_len(
                         subject,
                         || oid(ordinal),
                         scopes.of_query(query),
-                        "TBLASTX",
+                        reports.args.app().name(),
                     )?;
                 }
             }
@@ -3736,6 +3741,7 @@ fn run_batch_loop(
         "TBLASTX",
     )
     .map(|scopes| {
+        let scopes = scopes.named(args.app().name());
         if xml && !subject_records {
             scopes.with_whole_run_of(query_runs.input_records)
         } else {
@@ -4194,7 +4200,7 @@ fn run_batch_loop(
                         &database.db,
                         aligned(),
                         utf8.is_some(),
-                        "TBLASTX",
+                        args.app().name(),
                     )?;
                     warnings[start].append(&titled);
                     batch_warnings.append(&titled);
@@ -4212,8 +4218,11 @@ fn run_batch_loop(
                                 &database.db,
                                 args.app().ncbi_name(),
                             );
-                            let titled =
-                                failure.title_posts(&database.db, utf8.is_some(), "TBLASTX")?;
+                            let titled = failure.title_posts(
+                                &database.db,
+                                utf8.is_some(),
+                                args.app().name(),
+                            )?;
                             reports.write_before_failed_batch(outputs, done, &warnings)?;
                             batch_warnings
                                 .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
@@ -4276,7 +4285,7 @@ fn run_batch_loop(
                     super::super::database::parsed_shown(&formats, prefetch_format),
                     &mut reports.seen.borrow_mut(),
                     &run,
-                    "TBLASTX",
+                    args.app().name(),
                 )?;
                 refuse_tblastx_qseq_past_seen_query_len(
                     &formats,
@@ -5402,7 +5411,7 @@ fn search_query_batch<S: TbxScore>(
         db_length_nucl,
         i32::try_from(db_num_seqs).unwrap_or(i32::MAX),
         false,
-        "TBLASTX",
+        args.app().name(),
     )
     .map_err(ErrorAfterBatchReports::new)?;
     // `-db` whose sequences could not be read: this first batch with a valid context fails
@@ -5412,8 +5421,10 @@ fn search_query_batch<S: TbxScore>(
     }
     // `-db`: the read of the database that failed in this batch's search, if one does (a database
     // changed or damaged after the check, an error of the file system): the batch fails with it
-    // once every subject before it is searched (`XReadFailure`).
-    let x_read_failure = crate::algorithm::tblastx::subjects::XReadFailure::new();
+    // once every subject before it is searched (`XReadFailure`, whose refusals name the running
+    // application).
+    let x_read_failure =
+        crate::algorithm::tblastx::subjects::XReadFailure::named(args.app().name());
     // The average subject length check, then the cutoffs, length adjustments and search spaces of
     // every context, the queries' report statistics and the smallest-Lambda block of the linking
     // cutoffs (`context_cutoffs::context_cutoffs`).

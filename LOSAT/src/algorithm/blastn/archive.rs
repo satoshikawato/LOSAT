@@ -643,7 +643,7 @@ impl import::StrategyArgs for BlastnArgs {
         self.task = task.to_string();
     }
 
-    fn set(&mut self, setter: &Setter) -> Result<bool> {
+    fn set(&mut self, setter: &Setter, app: Program) -> Result<bool> {
         match setter {
             Setter::EvalueThreshold(v) => self.evalue = Some(*v),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3832-3835
@@ -680,20 +680,15 @@ impl import::StrategyArgs for BlastnArgs {
                 (3, _) => {}
                 (1, "both" | "plus") => self.strand = "plus".to_string(),
                 (2, "both" | "minus") => self.strand = "minus".to_string(),
-                _ => {
-                    return Err(import::Start::unported_setter(
-                        setter,
-                        Program::Blastn.name(),
-                    ))
-                }
+                _ => return Err(import::Start::unported_setter(setter, app.name())),
             },
             _ => return Ok(false),
         }
         Ok(true)
     }
 
-    fn finish(&mut self, collected: import::Collected, _run: &import::ImportRun) -> Result<()> {
-        let program = Program::Blastn.name();
+    fn finish(&mut self, collected: import::Collected, run: &import::ImportRun) -> Result<()> {
+        let program = run.app.name();
         collected.no_seg(program)?;
         collected.no_composition(program)?;
         if let Some(value) = collected.dust.value() {

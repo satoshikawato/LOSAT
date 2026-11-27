@@ -132,7 +132,7 @@ impl<'a> Subjects<'a> {
         let Subjects::Stream(stream) = self else {
             return None;
         };
-        let error = sequence_file_read_error(stream.db.seqdb(), "BLASTX")?;
+        let error = sequence_file_read_error(stream.db.seqdb(), stream.db.app())?;
         Some(match error.downcast::<PreliminaryReadError>() {
             Ok(read_error) => crate::blastinput::app::engine_error(read_error.as_bytes()),
             Err(refusal) => refusal,
@@ -345,16 +345,16 @@ impl<'a> Subjects<'a> {
         algo_id: i32,
         encoded: Cow<'a, [u8]>,
     ) -> Result<Cow<'a, [u8]>> {
-        let Some(db) = self.seqdb() else {
+        let Subjects::Stream(stream) = self else {
             return Ok(encoded);
         };
         let mut reader = crate::algorithm::common::db_mask_search::SubjectMasks::with_window(1);
         let masks = reader.of(
-            db,
+            stream.db.seqdb(),
             oid as u32,
             algo_id,
             crate::algorithm::common::database::database_error_of,
-            "BLASTX",
+            stream.db.app(),
         )?;
         if masks.is_empty() {
             return Ok(encoded);

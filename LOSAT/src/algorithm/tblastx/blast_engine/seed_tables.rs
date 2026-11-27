@@ -110,7 +110,7 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
         .last()
         .map(|c| c.frame_base + c.aa_len as i32)
         .unwrap_or(0);
-    crate::blastinput::app::check_diag_table_window(query_length, window, "TBLASTX")?;
+    crate::blastinput::app::check_diag_table_window(query_length, window, args.app().name())?;
     let mut diag_array_size: i32 = 1;
     while diag_array_size < (query_length + window) {
         diag_array_size <<= 1;

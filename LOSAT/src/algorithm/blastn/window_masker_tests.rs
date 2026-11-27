@@ -113,7 +113,13 @@ fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
         ..WindowMaskerRegistry::default()
     };
     let root = &root;
-    let found = open_taxid(562, root, &FileCounts, "blastn").unwrap();
+    let found = open_taxid(
+        562,
+        root,
+        &FileCounts,
+        crate::blastinput::app::Program::Blastn,
+    )
+    .unwrap();
     assert_eq!(found.taxid, Some(562));
     assert!(
         found.name.ends_with(b"wmasker.obinary"),
@@ -132,16 +138,33 @@ fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
             posts_once: once,
             ..root.clone()
         };
-        let masker = open_taxid(562, &registry, &FileCounts, "blastn").unwrap();
+        let masker = open_taxid(
+            562,
+            &registry,
+            &FileCounts,
+            crate::blastinput::app::Program::Blastn,
+        )
+        .unwrap();
         assert_eq!(masker.load_posts(true), &posted);
         assert_eq!(masker.load_posts(false), &later);
     }
     // A binary counts file under the optimized binary's name.
-    assert!(open_taxid(7227, root, &FileCounts, "blastn")
-        .unwrap()
-        .build_error()
-        .is_none());
-    let missing = open_taxid(9606, root, &FileCounts, "blastn").unwrap();
+    assert!(open_taxid(
+        7227,
+        root,
+        &FileCounts,
+        crate::blastinput::app::Program::Blastn
+    )
+    .unwrap()
+    .build_error()
+    .is_none());
+    let missing = open_taxid(
+        9606,
+        root,
+        &FileCounts,
+        crate::blastinput::app::Program::Blastn,
+    )
+    .unwrap();
     assert_eq!(missing.name, b"");
     let none = &Posts::new();
     let (warnings, error) =
@@ -160,7 +183,13 @@ fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
         crate::wording::losat_text(&format!("BLAST engine error: {one}{one}\n")).as_bytes()
     );
     // "AAAAAAAAA" is a unit beyond `Uint4` (base 16).
-    let ascii = open_taxid(10, root, &FileCounts, "blastn").unwrap();
+    let ascii = open_taxid(
+        10,
+        root,
+        &FileCounts,
+        crate::blastinput::app::Program::Blastn,
+    )
+    .unwrap();
     let report = ascii.build_error().unwrap().create_report().unwrap();
     let report = String::from_utf8(report).unwrap();
     assert!(
@@ -183,7 +212,13 @@ fn the_file_of_a_taxid_is_the_masker_or_the_empty_name() {
             posts_once: once,
             ..root.clone()
         };
-        let masker = open_taxid(15, &registry, &FileCounts, "blastn").unwrap();
+        let masker = open_taxid(
+            15,
+            &registry,
+            &FileCounts,
+            crate::blastinput::app::Program::Blastn,
+        )
+        .unwrap();
         assert!(masker.build_error().is_none());
         assert_eq!(masker.load_posts(true), &both);
         assert_eq!(masker.load_posts(false), later);

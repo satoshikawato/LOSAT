@@ -286,22 +286,22 @@ impl<'a> QueryBatch<'a> {
     // (PD-LOSAT-NCBI-DEFECTS, rule 3, the Owner's decision of 2026-11-16).
     /// Refuses the search of subject `s_idx` (and so the query batch's search).
     fn refuse(&self, s_idx: usize) {
-        self.failure.fail(s_idx, refusal());
+        self.failure.fail(s_idx, refusal(self.failure.program()));
     }
 }
 
 /// The error of a search that `QueryBatch` refuses: an ungapped extension that scores higher past
 /// the end of its query frame, in the frame next to it in the query batch. It comes after the
 /// reports of the query batches before (`ErrorAfterBatchReports`; the Owner's decision of
-/// 2026-11-16 on line RG's Q-X2c).
-pub(crate) fn refusal() -> anyhow::Error {
+/// 2026-11-16 on line RG's Q-X2c), naming `program` (`XReadFailure::program`).
+pub(crate) fn refusal(program: &str) -> anyhow::Error {
     anyhow::Error::new(
         crate::algorithm::tblastx::blast_engine::ErrorAfterBatchReports::new(anyhow::anyhow!(
             "an ungapped extension that passes the end of a query frame into the frame next to it \
              in the query batch and scores higher there (an -xdrop_ungap of a raw X-drop above \
              32,768, with BLOSUM62 about 15,000 bits or more; NCBI BLAST+ 2.17.0 then keeps an \
              alignment of two frames with query coordinates outside the query's frame and writes \
-             them past the query or drops the alignment) is not supported by LOSAT's TBLASTX"
+             them past the query or drops the alignment) is not supported by LOSAT's {program}"
         )),
     )
 }

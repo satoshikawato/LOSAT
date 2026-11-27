@@ -279,11 +279,13 @@ fn take_stats_lines(run: &mut Run) -> Numbers {
         scan_par: field("scan_par="),
         off: field("off="),
     };
-    run.stderr = text
-        .split_inclusive('\n')
-        .filter(|line| !line.starts_with("[X_STATS] "))
-        .collect::<String>()
-        .into_bytes();
+    // The other lines as bytes: NCBI's posts of a stored title keep its bytes outside UTF-8.
+    run.stderr = run
+        .stderr
+        .split_inclusive(|&byte| byte == b'\n')
+        .filter(|line| !line.starts_with(b"[X_STATS] "))
+        .collect::<Vec<_>>()
+        .concat();
     numbers
 }
 

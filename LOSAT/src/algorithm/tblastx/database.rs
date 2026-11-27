@@ -1068,6 +1068,17 @@ pub(crate) fn prefetch_format(
     )
 }
 
+/// Whether each batch's prefetch loads its subjects where LOSAT writes the run's reads of their
+/// titles (`common::database::TitleReads::Prefetched`, `batch_title_posts`), for the reports
+/// `formats`.
+pub(crate) fn titles_prefetched(formats: &[crate::api::local_blast::FormatOutput<'_>]) -> bool {
+    let shown: Vec<_> = formats
+        .iter()
+        .map(|format| super::report::output_format(format.outfmt))
+        .collect();
+    parsed_shown(&shown, prefetch_format(formats)).titles == shared::TitleReads::Prefetched
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (cited at
 // `common::database::prefetch_may_be_off`: `s_PreFetchSeqs` counts the Seq-aligns of one batch's
 // results against `PRE_FETCH_SEQS_LIMIT`)

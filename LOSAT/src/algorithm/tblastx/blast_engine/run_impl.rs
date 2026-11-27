@@ -3769,17 +3769,8 @@ fn run_batch_loop(
     // The first format, whose prefetch each batch asks (`database::prefetch_format`).
     let prefetch_format = super::super::database::prefetch_format(&outputs.formats);
     // Whether each batch's prefetch loads its subjects where LOSAT writes the run's reads of
-    // their titles (`common::database::TitleReads::Prefetched`, `batch_title_posts`).
-    let title_prefetch = super::super::database::parsed_shown(
-        &outputs
-            .formats
-            .iter()
-            .map(|format| report::output_format(format.outfmt))
-            .collect::<Vec<_>>(),
-        prefetch_format,
-    )
-    .titles
-        == crate::algorithm::common::database::TitleReads::Prefetched;
+    // their titles (`database::titles_prefetched`).
+    let title_prefetch = super::super::database::titles_prefetched(&outputs.formats);
     // The query records that NCBI's scope holds at the prefetch of the batch of the input records
     // `input` (`shared::PrefetchQueries`, made only where the batch stops): those that NCBI's
     // reader added for the batch (the records that `-query_loc` drops included, numbered in the

@@ -18,8 +18,9 @@
 //! are the same too. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
 //! streamed alike. Where LOSAT refuses a tabular row whose lookup fails (a subject's id or a
 //! failed lookup), both paths write the reports of the batches before and then the refusal, as
-//! NCBI does; where LOSAT refuses another sequence that a later batch reports (a stored title,
-//! ambiguity data, a parsed Seq-id, a taxonomy record), the switch writes the reports of the
+//! NCBI does; where LOSAT refuses another sequence that a later batch reports (a stored title
+//! without the prefetch, ambiguity data, a parsed Seq-id, a taxonomy record), the switch writes
+//! the reports of the
 //! batches before and then the same refusal (drop-in DECISIONS 44): those reports begin the
 //! reports of the same search not refused. That the bytes equal NCBI's is the business
 //! of the blastn fixtures.
@@ -49,6 +50,10 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
 const SWITCH: (&str, &str) = ("LOSAT_X_RPTSTREAM", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const TASKS: [&str; 3] = ["megablast", "blastn", "dc-megablast"];
+/// NCBI's message for the second sequence's title of the `title` databases (its fourth byte
+/// 0xE9).
+const TITLE_POST: &[u8] =
+    b"Error: (803.7) [blastn] Blast-def-line-set.E.title\nBad char [0xE9] in string at byte 27\nLC7\xE98874part second\n";
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -269,11 +274,13 @@ fn take_stats_lines(run: &mut Run) -> (u64, String) {
             .to_string()
     };
     let numbers = (field("batches=").parse().unwrap(), field("off="));
-    let rest: Vec<&str> = text
-        .split_inclusive('\n')
-        .filter(|line| !line.starts_with("[X_STATS] "))
+    // The other lines as bytes: NCBI's posts of a stored title keep its bytes outside UTF-8.
+    let rest: Vec<&[u8]> = run
+        .stderr
+        .split_inclusive(|&byte| byte == b'\n')
+        .filter(|line| !line.starts_with(b"[X_STATS] "))
         .collect();
-    run.stderr = rest.concat().into_bytes();
+    run.stderr = rest.concat();
     numbers
 }
 
@@ -640,13 +647,15 @@ fn database(dir: &TempDir, name: &str, patch: impl FnOnce(&str)) -> String {
 }
 
 /// The same database search, intact and refused by LOSAT where a later batch reports a sequence:
-/// the second sequence's title holding a byte outside ' ' ..= '~' in its header file, or its
-/// ambiguity count raised by one in the sequence file. Both are refused when a batch reports the
-/// sequence (its title) or traces it back (its ambiguity data), which only the last batches do:
-/// without the switch the refusal comes before every report, with it after the rows of the
-/// batches before (drop-in DECISIONS 44; nothing is read before the search). The intact database
-/// streams, with its ambiguity data decoded by the traceback, and so do the refused ones for
-/// queries that do not reach the second sequence.
+/// the second sequence's title holding a byte outside ' ' ..= '~' in its header file (refused
+/// without the prefetch, `PRE_FETCH_SEQS_LIMIT=0`), or its ambiguity count raised by one in the
+/// sequence file. Both are refused when a batch reports the sequence (its title) or traces it back
+/// (its ambiguity data), which only the last batches do: without the switch the refusal comes
+/// before every report, with it after the rows of the batches before (drop-in DECISIONS 44;
+/// nothing is read before the search). The intact database streams, with its ambiguity data
+/// decoded by the traceback, and so do the refused ones for queries that do not reach the second
+/// sequence, and the title's with the prefetch (NCBI's `Bad char` messages where the batch loads
+/// the sequence).
 #[test]
 fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
     let dir = TempDir::new("dbrefuse");
@@ -744,18 +753,38 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
             );
         }
     }
-    for (db, refusal) in [
-        (&title, "has a stored title with a byte outside"),
+    // The title with the prefetch: the batch that loads the sequence posts NCBI's messages.
+    for (outfmt, threads) in [("6", 1), ("6", 4), ("17", 1), ("17", 4)] {
+        let (off, (batches, reason)) = run(&query, &title, outfmt, threads);
+        let what = format!("stored title, outfmt {outfmt} threads {threads}");
+        assert_eq!(off.status, Some(0), "{what}: {off:?}");
+        assert!(batches >= 8 && reason == "none", "{what}");
+        assert!(
+            off.stderr
+                .windows(TITLE_POST.len())
+                .any(|w| w == TITLE_POST),
+            "{what}: {}",
+            String::from_utf8_lossy(&off.stderr)
+        );
+    }
+    const NO_PREFETCH: &[(&str, &str)] = &[("PRE_FETCH_SEQS_LIMIT", "0")];
+    for (db, refusal, extra) in [
+        (
+            &title,
+            "has a stored title with a byte outside",
+            NO_PREFETCH,
+        ),
         (
             &ambiguity,
             "the ambiguity data are shorter than their count",
+            &[][..],
         ),
     ] {
         for threads in [1, 4] {
             let what = format!("-db {db} threads {threads}");
             let tabular = args(&query, db, "6");
             let tabular: Vec<&str> = tabular.iter().map(String::as_str).collect();
-            let (off, on, _) = refused_late(&what, &tabular, threads, &[]);
+            let (off, on, _) = refused_late(&what, &tabular, threads, extra);
             assert!(
                 String::from_utf8_lossy(&off.stderr).contains(refusal),
                 "{what}: {}",
@@ -773,7 +802,7 @@ fn a_database_search_refused_in_a_later_batch_writes_the_batches_before() {
                 let sam = args(&query, db, "17");
                 let sam: Vec<&str> = sam.iter().map(String::as_str).collect();
                 let what = format!("{what} outfmt 17");
-                let (off, on, _) = refused_late(&what, &sam, threads, &[]);
+                let (off, on, _) = refused_late(&what, &sam, threads, extra);
                 assert!(
                     off.report.is_empty() && on.report.is_empty(),
                     "{what}: {on:?}"
@@ -1356,9 +1385,10 @@ fn where_the_switch_must_not_act_the_counters_name_why() {
 /// report decodes them, the taxonomy database's lookups and their texts), and on NCBI's errors in
 /// the first batch, where outfmt 20's line of the field names comes as without the switch. A
 /// subject's tabular-id refusal in a later batch comes after the rows of the batches before in
-/// both paths; where a later batch's report is refused otherwise (a stored title, a header or
-/// taxonomy record of a database with parsed Seq-ids) the refusal comes after the rows of the
-/// batches before with the switch (drop-in DECISIONS 44).
+/// both paths; where a later batch's report is refused otherwise (a stored title without the
+/// prefetch, a header or taxonomy record of a database with parsed Seq-ids) the refusal comes
+/// after the rows of the batches before with the switch (drop-in DECISIONS 44). With the prefetch
+/// the stored title's rows stream with NCBI's `Bad char` messages.
 #[test]
 fn custom_tabular_reports_give_the_off_bytes() {
     let dir = TempDir::new("custom");
@@ -1482,7 +1512,17 @@ fn custom_tabular_reports_give_the_off_bytes() {
             .replace(intact.as_str(), title.as_str());
         args[5] = &title;
         let what = format!("-db {title} outfmt {outfmt}");
-        let (off, on, _) = refused_late(&what, &args, threads, &[]);
+        let (posted, (batches, reason)) = same_two(&what, &args, threads, &[], None);
+        streamed(&what, &posted, batches, &reason);
+        assert!(
+            posted
+                .stderr
+                .windows(TITLE_POST.len())
+                .any(|w| w == TITLE_POST),
+            "{what}: {}",
+            String::from_utf8_lossy(&posted.stderr)
+        );
+        let (off, on, _) = refused_late(&what, &args, threads, &[("PRE_FETCH_SEQS_LIMIT", "0")]);
         assert!(off.report.is_empty(), "{what}: off, no row");
         reports_before(
             &what,

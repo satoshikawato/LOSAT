@@ -255,48 +255,12 @@ fn the_error_sites_flush_the_document_with_a_stored_title_that_no_hit_reads() {
     );
 }
 
-/// The stored title of `sn3` is read by the second batch (`q_bt2.fna`: `qn1`, then a part of `sn3`):
-/// LOSAT refuses it there (NCBI prints its `Bad char` messages and writes the document). The first
-/// batch's records are held, not written, so nothing is on standard output; the standard error and
-/// the status are those of the run that makes its reports after the search
-/// (`LOSAT_X_RPTSTREAM=0`), whatever the threads.
+/// The stored title of `sn3` is loaded by the second batch's prefetch (`q_bt2.fna`: `qn1`, then a
+/// part of `sn3`): NCBI prints its `Bad char` messages there and writes the one document at the
+/// end, as LOSAT does whatever the threads.
 #[test]
-fn a_title_refusal_in_a_later_batch_writes_nothing() {
-    let dir = fixtures();
-    for format in ["17", "17 SQ SR"] {
-        for threads in ["1", "4", "8", "16"] {
-            let args = [
-                "blastn",
-                "-query",
-                "q_bt2.fna",
-                "-db",
-                "db/snucl_bt",
-                "-num_threads",
-                threads,
-                "-outfmt",
-                format,
-            ];
-            let mut env = BATCHES.to_vec();
-            env.push(("LOSAT_X_RPTSTREAM", "0"));
-            let off = run_in(&dir, &args, &env);
-            let what = format!("{format} threads {threads}");
-            assert_eq!(off.status.code(), Some(1), "{what}: status");
-            assert!(off.stdout.is_empty(), "{what}: the off path wrote bytes");
-            let message = String::from_utf8_lossy(&off.stderr);
-            assert!(
-                message.contains("database sequence 2 has a stored title"),
-                "{what}: {message}"
-            );
-            let streamed = run_in(&dir, &args, BATCHES);
-            assert_eq!(streamed.status.code(), Some(1), "{what}: status");
-            assert!(streamed.stdout.is_empty(), "{what}: wrote bytes");
-            assert_eq!(
-                String::from_utf8_lossy(&streamed.stderr),
-                message,
-                "{what}: stderr"
-            );
-        }
-    }
+fn a_stored_title_loaded_by_a_later_batch_posts_before_the_document() {
+    equals_frozen_in("bt2", "q_bt2.fna", "db/snucl_bt", &[], BATCHES, 0, &["db"]);
 }
 
 /// A batch of records whose `-query_loc` range starts past their end (here the second query, ten

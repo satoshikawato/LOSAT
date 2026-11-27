@@ -483,7 +483,7 @@ fn short_nucleotide_data_is_found_at_each_boundary() {
     assert_eq!(short(SeqData::Other, 22), None);
 }
 
-// The loop of `ncbi4na_to_binary` before its pairs: every input byte through the loop body.
+// `ncbi4na_to_binary` before its blocks: NCBI's loop, its body written out here, a byte at a time.
 fn ncbi4na_to_binary_byte_by_byte(ncbi4na: &[u8], base_length: u32) -> BinarySequence {
     let inp_bytes = base_length.div_ceil(2) as usize;
     let blast_bytes = (base_length / 4 + 1) as usize;
@@ -491,7 +491,25 @@ fn ncbi4na_to_binary_byte_by_byte(ncbi4na: &[u8], base_length: u32) -> BinarySeq
     let mut ambiguities = AmbigDataBuilder::new(base_length);
     let mut seq = vec![0u8; blast_bytes];
     for (i, &inp) in ncbi4na.iter().enumerate().take(inp_bytes) {
-        ncbi4na_byte_to_binary(&mut seq, &mut ambiguities, i, inp, base_length);
+        let mut b1 = inp >> 4;
+        let mut b2 = inp & 0xF;
+        let c1 = NA4_TO_NA2[usize::from(b1)];
+        let c2 = NA4_TO_NA2[usize::from(b2)];
+        let mut half = 0u8;
+        if (c1 | c2) & 0x80 == 0 {
+            half = (c1 << 2) | c2;
+        } else {
+            if b1 == 0 {
+                b1 = 0xF;
+            }
+            let second = (i as u32) * 2 + 1;
+            if b2 == 0 && second < base_length {
+                b2 = 0xF;
+            }
+            half |= ambiguities.check(b1, second - 1) << 2;
+            half |= ambiguities.check(b2, second);
+        }
+        seq[i / 2] |= if i & 1 == 1 { half } else { half << 4 };
     }
     seq[last_byte] &= 255 - 3;
     seq[last_byte] |= (base_length & 3) as u8;
@@ -501,17 +519,21 @@ fn ncbi4na_to_binary_byte_by_byte(ncbi4na: &[u8], base_length: u32) -> BinarySeq
     }
 }
 
+/// The arithmetic of the blocks is `NA4_TO_NA2` for all sixteen NCBI4na bases: `ambiguity_bits`
+/// is 0 exactly where the table has a code, and `ncbi4na_code` is that code.
 #[test]
 fn ncbi4na_codes_are_the_table() {
     for base in 0..16u8 {
         let code = NA4_TO_NA2[usize::from(base)];
-        assert_eq!(ambig_nibble_bits(base) == 0, code & 0x80 == 0, "{base}");
+        assert_eq!(ambiguity_bits(base) == 0, code & 0x80 == 0, "{base}");
         if code & 0x80 == 0 {
             assert_eq!(ncbi4na_code(base), code, "{base}");
         }
     }
 }
 
+/// `ncbi4na_to_binary` (its blocks, the bytes after them, and a sequence shorter than a block)
+/// gives the bytes and the ambiguity data of NCBI's loop a byte at a time.
 #[test]
 fn ncbi4na_blocks_are_the_byte_by_byte_loop() {
     let check = |ncbi4na: &[u8], base_length: u32| {
@@ -522,9 +544,10 @@ fn ncbi4na_blocks_are_the_byte_by_byte_loop() {
             "{ncbi4na:02x?} of {base_length} bases"
         );
     };
-    // Every byte at every place of the first two blocks of unambiguous bytes, with lengths that
-    // exercise the short path (< NCBI4NA_BLOCK) and the blocked path (ending on, after, and inside
-    // a block and inside the last byte).
+    // Every byte at every place of the first two blocks (and the byte after them) among
+    // unambiguous bytes, with base counts that end before the first block is full, at the end of
+    // a block, after it, inside the last byte, and at the byte changed (its second base then the
+    // half byte past the end of an odd count).
     let clean: Vec<u8> = (0..200)
         .map(|i| [0x12, 0x48, 0x84, 0x21, 0x14][i % 5])
         .collect();
@@ -545,8 +568,9 @@ fn ncbi4na_blocks_are_the_byte_by_byte_loop() {
             }
         }
     }
-    // Lengths of every remainder, with data of the bytes read, fewer and more; bases unambiguous,
-    // each of the sixteen codes now and then, and runs of ambiguity.
+    // Every base count from 1 to 1,500 twice, with data of the bytes read, more and fewer; the
+    // bases unambiguous or, at a density from 1 in 1,024 to every base, any of the sixteen
+    // codes (gaps among them).
     let mut state = 0x9e37_79b9_7f4a_7c15_u64;
     let mut next = move || {
         state ^= state << 13;
@@ -557,13 +581,13 @@ fn ncbi4na_blocks_are_the_byte_by_byte_loop() {
     for round in 0..3000u32 {
         let base_length = round % 1500 + 1;
         let bytes = base_length.div_ceil(2) as usize;
-        let rare = (next() % 5) as u32;
+        let density = [0u32, 1, 4, 16, 64, 256, 1024][(next() % 7) as usize];
         let data: Vec<u8> = (0..bytes + 3)
             .map(|_| {
                 let r = next();
                 let nibble = |shift: u32| {
                     let roll = ((r >> shift) & 0x3FF) as u32;
-                    if roll < rare * rare {
+                    if roll < density {
                         ((r >> (shift + 10)) & 0xF) as u8
                     } else {
                         [1u8, 2, 4, 8][((r >> (shift + 14)) & 3) as usize]

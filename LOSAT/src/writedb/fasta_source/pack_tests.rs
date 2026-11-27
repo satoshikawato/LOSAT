@@ -213,58 +213,54 @@ fn ncbi4na_of_pieces() {
     }
 }
 
-/// The codes without a table are the table's for `A`, `C`, `G`, `T`, `U` and `N` in either case,
-/// and 0 for every other byte, whose code in the table is not 0.
+/// The codes without a table are the table's for every byte whose best coding is NCBI2na (`A`,
+/// `C`, `G`, `T`, `U` in either case), and 0 for every other byte.
 #[test]
-fn the_codes_of_bases_are_the_table() {
+fn the_codes_of_ncbi2na_letters_are_the_table() {
     for byte in 0..=u8::MAX {
-        let code = ncbi4na_code_of_base(byte);
-        if b"ACGTUNacgtun".contains(&byte) {
+        let code = ncbi4na_code_of_ncbi2na_letter(byte);
+        if is_ncbi2na_best(byte) {
             assert_eq!(code, NCBI4NA_CODES[usize::from(byte)], "{byte:#04x}");
         } else {
             assert_eq!(code, 0, "{byte:#04x}");
-            assert_ne!(NCBI4NA_CODES[usize::from(byte)], 0, "{byte:#04x}");
         }
     }
 }
 
-/// The NCBI4na bytes of `iupacna_to_ncbi4na` and of `Ncbi4naBuilder::push_iupacna` (after an
-/// even and an odd count of letters) are those of the loop before the blocks: a pair of table
-/// codes a byte.
+/// The NCBI4na bytes of `Ncbi4naBuilder::push_ncbi2na_letters`, after an even and after an odd
+/// count of letters, are those of `push_iupacna` (a pair of table codes a byte): every letter of
+/// an NCBI2na literal at every place of the first two blocks (and the letter after them), in
+/// lengths that end at that letter, at the end of the second block and after it, and every length
+/// up to 200.
 #[test]
-fn ncbi4na_pairs_are_the_table_of_every_residue() {
-    let table = |src: &[u8]| -> Vec<u8> {
-        let mut chunks = src.chunks_exact(2);
-        let mut dst: Vec<u8> = (&mut chunks)
-            .map(|two| NCBI4NA_CODES[two[0] as usize] << 4 | NCBI4NA_CODES[two[1] as usize])
-            .collect();
-        if let [last] = chunks.remainder() {
-            dst.push(NCBI4NA_CODES[*last as usize] << 4);
-        }
-        dst
-    };
-    let built = |first: &[u8], src: &[u8]| {
+fn ncbi2na_letters_are_the_table_of_every_letter() {
+    let built = |push: &dyn Fn(&mut Ncbi4naBuilder, &[u8]), first: &[u8], src: &[u8]| {
         let mut builder = Ncbi4naBuilder::with_letters(first.len() + src.len()).unwrap();
         builder.push_iupacna(first);
-        builder.push_iupacna(src);
+        push(&mut builder, src);
+        assert_eq!(builder.letters(), first.len() + src.len());
         builder.into_bytes()
     };
     let check = |src: &[u8]| {
-        let expected = table(src);
-        assert_eq!(iupacna_to_ncbi4na(src), expected, "{src:?}");
-        assert_eq!(built(b"", src), expected, "{src:?}");
-        let odd: Vec<u8> = [b'N'].iter().chain(src).copied().collect();
-        assert_eq!(built(b"N", src), table(&odd), "{src:?}");
+        for first in [&b""[..], b"N", b"AC", b"TGA"] {
+            assert_eq!(
+                built(&|b, s| b.push_ncbi2na_letters(s), first, src),
+                built(&|b, s| b.push_iupacna(s), first, src),
+                "{first:?} then {src:?}"
+            );
+        }
     };
-    // Every byte at every place of the first two blocks of mixed-case bases and N, in lengths
-    // that cover the short path (< NCBI4NA_BLOCK) and the blocked path (ending at the byte, at
-    // the end of a block, and after it).
-    let bases: Vec<u8> = (0..200).map(|i| b"ACGTUNacgtun"[i % 12]).collect();
-    for place in 0..2 * NCBI4NA_BLOCK + 1 {
-        for byte in 0..=u8::MAX {
+    let letters = b"ACGTUacgtu";
+    let bases: Vec<u8> = (0..200).map(|i| letters[(i * 7 + i / 10) % 10]).collect();
+    for place in 0..2 * NCBI2NA_LETTER_BLOCK + 1 {
+        for &letter in letters {
             let mut src = bases.clone();
-            src[place] = byte;
-            for length in [place + 1, 2 * NCBI4NA_BLOCK, 2 * NCBI4NA_BLOCK + 3] {
+            src[place] = letter;
+            for length in [
+                place + 1,
+                2 * NCBI2NA_LETTER_BLOCK,
+                2 * NCBI2NA_LETTER_BLOCK + 3,
+            ] {
                 check(&src[..length.max(place + 1)]);
             }
         }

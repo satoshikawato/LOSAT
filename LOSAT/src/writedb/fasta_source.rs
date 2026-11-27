@@ -329,7 +329,14 @@ fn fix_bioseq_deltas(
                     DeltaSeq::Literal(segment) => {
                         let start = segment.start as usize;
                         let run = (segment.length as usize).min(room);
-                        seq4na.push_iupacna(&residues[start..start + run]);
+                        let letters = &residues[start..start + run];
+                        // NCBI converts each literal from its coding (`C2naTo8na`, `C4naTo8na`).
+                        match segment.coding {
+                            pack::Coding::Ncbi2na => seq4na.push_ncbi2na_letters(letters),
+                            pack::Coding::Ncbi4na | pack::Coding::Ncbieaa => {
+                                seq4na.push_iupacna(letters)
+                            }
+                        }
                     }
                 }
             }

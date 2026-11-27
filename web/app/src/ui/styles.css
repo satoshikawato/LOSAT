@@ -2884,9 +2884,17 @@ pre.range-text {
   margin-top: 6px;
 }
 
-/* Format Archive (blast_formatter) tab and OutputsView "Format archive…" action, beside Export. */
+/* Format Archive (blast_formatter) tab and OutputsView "Format archive…" action, beside Export; on narrow
+   screens a primary action fills the row (above), so it goes under Export, at its left edge. */
 .outputs-panel > button + button {
   margin-left: 8px;
+}
+
+@media (max-width: 800px) {
+  .outputs-panel > button + button {
+    margin-left: 0;
+    margin-top: 8px;
+  }
 }
 
 .bf-archive-mode {

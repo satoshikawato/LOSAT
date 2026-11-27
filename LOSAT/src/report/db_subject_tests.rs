@@ -4081,6 +4081,9 @@ fn a_load_by_another_lines_id_makes_that_lines_bioseq() {
     let second = ParsedSubject::of_seq_align_id(set(), Some(&gb("AB000021", 1))).unwrap();
     assert_eq!(second.alignment_id(), &gb("AB000021", 1));
     assert_eq!(second.bioseq_line(), 1);
-    assert_eq!(second.bioseq_defline().title.as_deref(), Some(&b"s1 again"[..]));
+    assert_eq!(
+        second.bioseq_defline().title.as_deref(),
+        Some(&b"s1 again"[..])
+    );
     assert!(!second.unfetchable() && !second.scope_finds_none() && !second.load_throws());
 }

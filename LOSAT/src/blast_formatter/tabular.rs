@@ -1600,15 +1600,14 @@ fn query_load_texts(
     queries
         .iter()
         .take(count)
-        .map(|query| match (&query.loaded, query.sequence, inputs.database) {
-            (Some(subject), QuerySequence::Database(ordinal), Some((_, db))) => prefetch_messages(
-                db,
-                inputs.taxdb,
-                [(ordinal, Some(&**subject))],
-                PROGRAM,
-            ),
-            _ => Ok(Vec::new()),
-        })
+        .map(
+            |query| match (&query.loaded, query.sequence, inputs.database) {
+                (Some(subject), QuerySequence::Database(ordinal), Some((_, db))) => {
+                    prefetch_messages(db, inputs.taxdb, [(ordinal, Some(&**subject))], PROGRAM)
+                }
+                _ => Ok(Vec::new()),
+            },
+        )
         .collect()
 }
 

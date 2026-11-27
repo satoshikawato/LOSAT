@@ -73,7 +73,12 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 15 since `losat_web2_scan_begin` and
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 16 since adding `psiblast` (single- and
+/// multi-round, `-in_pssm`, `-in_msa`, `-out_pssm`, `-out_ascii_pssm`, `-save_each_pssm`,
+/// `-save_pssm_after_last_round`) and `tblastn -in_pssm` (file queries with `query_handle = 0`,
+/// PSSM output files on stream 8, *start* fields `query_file`, `out_pssm`, `out_ascii_pssm`,
+/// `save_each_pssm`, and `query_length` / optional `round` on HSP records; line PS PSW1; 15 on its
+/// branch until line RG-XT item X7-5 merged first); 15 since `losat_web2_scan_begin` and
 /// `losat_web2_register` take `parse_deflines` and *validation* emits `parse_deflines` when the
 /// argv parses so the index scan and the input check read records whose `-parse_deflines` Seq-id
 /// names the other molecule as the engine's reader reads them (line RG-XT item X7-5, 2026-11-25;
@@ -104,7 +109,7 @@ fn words(argv: &str) -> Vec<&str> {
 /// that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    15
+    16
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {

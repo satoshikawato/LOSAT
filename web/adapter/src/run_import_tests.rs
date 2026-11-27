@@ -259,7 +259,7 @@ fn a_strategy_of_a_database_is_a_run_of_db() {
     assert!(crate::run::searches_database(&words));
     assert!(crate::run::start_json(&words)
         .unwrap()
-        .ends_with(",\"database\":true}"));
+        .contains(",\"database\":true,"));
     let streams = run_imported(&words, b"", b"").unwrap();
     assert_eq!(
         streams.get(&0).cloned().unwrap_or_default(),

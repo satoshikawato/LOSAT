@@ -61,7 +61,7 @@ const warningsPlace = computed(() => warningsPlaceParts(props.loaded.messages, p
 const noWarnings = computed(() => warningsPlace.value?.[0]?.text === NO_WARNINGS);
 const inputs = computed(() => {
   const roles: ReadonlyArray<{ readonly key: 'query' | 'subject'; readonly label: string }> = [
-    { key: 'query', label: 'Query' },
+    ...(snapshot.value.queryFile === undefined ? [{ key: 'query' as const, label: 'Query' }] : []),
     ...(snapshot.value.database === undefined ? [{ key: 'subject' as const, label: 'Subject' }] : []),
   ];
   return roles.map(({ key, label }) => {
@@ -92,6 +92,12 @@ const inputs = computed(() => {
         <dd>{{ programById(snapshot.program).label }}</dd>
         <dt>Arguments</dt>
         <dd><code data-testid="run-argv"><CommandText :words="userArgv(snapshot)" :takes-value="takesValue" /></code></dd>
+        <template v-if="searched && snapshot.queryFile">
+          <dt>Query file</dt>
+          <dd data-testid="run-query-file">
+            <code>{{ snapshot.queryFile.flag }} {{ snapshot.queryFile.name }}</code> ({{ formatBytes(snapshot.queryFile.size) }})
+          </dd>
+        </template>
         <template v-for="{ key, role, input, records, readDiff } in searched ? inputs : []" :key="key">
           <dt>{{ role }}</dt>
           <dd :data-testid="`run-input-${key}`">

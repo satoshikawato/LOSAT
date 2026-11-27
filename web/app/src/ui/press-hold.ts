@@ -40,8 +40,11 @@
 // press (a scroll does not change where the element is in the page), nor for an element fixed to the window or to a
 // box that scrolls (position fixed or sticky), which the page's scroll does not move, nor for one that the press may
 // resize (a text box's corner). A scroll of the page's own (AlignmentsView keeping the Range being read in place) waits
-// while a press keeps a control that is in the page (`pressHeld`), and only then: a press on the space between things (a drag that
-// selects text) keeps its element too, but no click is at stake.
+// while a press keeps a control that is in the page (`pressHeld`), and only then. A press on something that is no control (the
+// space between things, a heading's text, a list's scroll bar; a drag that selects text) keeps its element in its place too, and
+// the page's other scrolls go on: when a section comes in above, the element's place moves, the keeping scrolls back by as much
+// first (its observer looks as the document changes), and AlignmentsView's keeping then finds the Range at its place and has
+// nothing to do; when the element does not move (the section comes in below it), AlignmentsView keeps the Range as without a press.
 
 /** The height that `element` has now, without its padding and border unless its box includes them (what min-height sets). */
 function contentHeight(element: HTMLElement): number {
@@ -56,8 +59,13 @@ function contentHeight(element: HTMLElement): number {
 /** How long after its release a press whose click has not come still holds. */
 const UNCLICKED_MS = 1000;
 
-/** What a press can click: the elements that take the focus, or say by their role that a press on them acts. */
-const CONTROLS = 'a[href], button, input, select, textarea, summary, label, [tabindex], [role="button"], [role="tab"], [role="row"], [role="option"], [role="menuitem"], [role="link"]';
+/**
+ * What a press can click: the elements that take the focus by their kind, and those that say by their role that a press on
+ * them acts (a row, a canvas of the plots). Not `[tabindex]`: that also marks boxes that only take the focus from the page's
+ * code (a heading, a list's viewport with its scroll bar, a scrolling text), on which no click is at stake.
+ */
+export const CONTROLS =
+  'a[href], button, input, select, textarea, summary, label, canvas[role="application"], [role="button"], [role="tab"], [role="row"], [role="option"], [role="menuitem"], [role="link"]';
 
 /** The pages in which a press keeps the pressed element in its place now. */
 const keeping = new WeakSet<Document>();

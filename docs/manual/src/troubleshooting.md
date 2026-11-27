@@ -121,7 +121,7 @@ Both `rpsblast` and `rpstblastn` search profile databases (`-db`, such as CDD) o
 
 ## `deltablast`, `rpsblast`, `rpstblastn`, or `rpsbproc` is missing in Python (`pylosat`), Rust (`losat::api`), or LOSAT Web
 
-In v0.2.0, `losat::api`, `pylosat`, the `losat` npm package, and LOSAT Web run the six core search programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`). `losat::api` and `pylosat` wrap the seven tools (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex`), and LOSAT Web includes `windowmasker`. `deltablast`, `rpsblast`, `rpstblastn` and `rpsbproc` run on the command line only (through `losat` or its installed shims).
+In v0.2.0, `losat::api`, `pylosat`, the `losat` npm package, and LOSAT Web run the six core search programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`). `losat::api` and `pylosat` wrap the eight tools (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter`), and the `losat` npm package and LOSAT Web run `windowmasker` and `blast_formatter`. `deltablast`, `rpsblast`, `rpstblastn` and `rpsbproc` run on the command line only (through `losat` or its installed shims).
 
 ## A full-precision E-value on macOS differs in the 15th digit
 

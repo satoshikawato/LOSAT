@@ -8,7 +8,7 @@ You can run LOSAT searches from your own program instead of the command line. Fr
 |:---|:---|:---|
 | Python package `pylosat` | `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, and the tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `blast_formatter` | [Python (`pylosat`)](libraries/python.md) |
 | Rust crate `losat`, module `losat::api` | The same searches and tools | [Rust (`losat`)](libraries/rust.md) |
-| npm package `losat`, for web pages | `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` on FASTA sequences held by the page | [WebAssembly and Browser](libraries/webassembly.md) |
+| npm package `losat`, for web pages | `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast` on FASTA sequences held by the page, and the tools `windowmasker` and `blast_formatter` on the page's files | [WebAssembly and Browser](libraries/webassembly.md) |
 
 `deltablast`, `rpsblast`, `rpstblastn` and `rpsbproc` run only on the command line. The WASI builds of the command line (`losat.wasm`) are on [Platforms and WebAssembly](platforms.md).
 

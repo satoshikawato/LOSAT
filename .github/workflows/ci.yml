@@ -525,8 +525,8 @@ jobs:
   regressions:
     name: fast output regressions
     runs-on: ubuntu-24.04
-    # About twice the longest of 60 passing runs (16.1 min, 2026-11-11).
-    timeout-minutes: 35
+    # About twice the longest of 60 passing runs (34.7 min, 2026-11-27; 16.1 min on 2026-11-11).
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

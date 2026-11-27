@@ -584,7 +584,6 @@ fn round_reports<'r>(
 /// (`deltablast_app.cpp:288`), rather than a LOSAT refusal before any report is written.
 fn is_ncbi_stop(error: &anyhow::Error) -> bool {
     error.is::<crate::cli::NativeError>()
-        || error.is::<crate::algorithm::common::database::ErrorAfterPosts>()
 }
 
 /// The error of a failed round's call (`error`), with what NCBI writes before it. A header file
@@ -638,11 +637,7 @@ fn round_call_error(
     for posts in utf8.iter().chain([&titled]) {
         posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
     }
-    crate::algorithm::common::database::ErrorAfterPosts::written(
-        failure.error,
-        &mut *outputs.diagnostics,
-        args.archive.as_ref(),
-    )
+    Ok(failure.error)
 }
 
 /// Round 1 of a query of a deltablast batch (`search_delta_batch`), for the query's later rounds

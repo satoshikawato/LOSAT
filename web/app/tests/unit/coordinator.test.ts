@@ -16,7 +16,7 @@ import {
   type StartResult,
   type ValidationResult,
 } from 'losat/ports';
-import { Coordinator, isToolRun, type RunView, type SearchRequest } from '../../src/application/coordinator';
+import { Coordinator, isToolRun, type RunView, type SearchRequest, type ToolRequest } from '../../src/application/coordinator';
 import { countsLockName, countsUrl, type CountsOrigin } from '../../src/domain/counts';
 import { webCountsLocks } from '../../src/infra/browser/counts-locks';
 import { OpfsCountsStore } from '../../src/infra/data/counts-store';
@@ -37,6 +37,14 @@ const request: SearchRequest = {
   subject: { text: '>s\nACGT\n' },
   parameters: [],
   requestedThreads: 'auto',
+};
+
+/** A WindowMasker run that the FakeEngine runs (`-mk_counts`). */
+const toolRequest: ToolRequest = {
+  tool: 'windowmasker',
+  stage: 'mk_counts',
+  argv: ['windowmasker', '-mk_counts', '-in', 'a.fa', '-out', 'wmasker.ascii'],
+  directory: [{ name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } }],
 };
 
 function setup(
@@ -78,7 +86,11 @@ const viewOf = (coordinator: Coordinator, runId: string): RunView | undefined =>
   const run = coordinator.state.get().runs.find((entry) => entry.snapshot.runId === runId);
   return run !== undefined && !isToolRun(run) ? run : undefined;
 };
-const statusOf = (coordinator: Coordinator, runId: string): RunStatus | undefined => viewOf(coordinator, runId)?.status;
+/** The status of a search or tool run. */
+const statusOf = (coordinator: Coordinator, runId: string): RunStatus | undefined =>
+  coordinator.state.get().runs.find((entry) => entry.snapshot.runId === runId)?.status;
+/** Lets the promise reactions of what was just done run (a cancel ends a run in them, without the Data worker's answer). */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 function waitFor(coordinator: Coordinator, runId: string, status: RunStatus): Promise<void> {
   return new Promise((resolve) => {
@@ -279,7 +291,7 @@ describe('Coordinator', () => {
     expect(engine.cancelled).toEqual([first]);
   });
 
-  it('a run whose Data worker ended while its outputs were staged starts no search', async () => {
+  it('a run whose Data worker ended while its outputs were staged fails at once and starts no search', async () => {
     const engine = new ManualEngine();
     let end: (error: Error) => void = () => undefined;
     const ended = new Promise<Error>((resolve) => (end = resolve));
@@ -303,8 +315,13 @@ describe('Coordinator', () => {
     await waitFor(coordinator, first, 'preparing');
     end(new UnavailableError('The part of LOSAT that keeps the results stopped'));
     await ended;
+    // At once, before the answer for its outputs (line WQA's D30, 2026-11-27).
+    await tick();
+    expect(statusOf(coordinator, first)).toBe('failed');
+    expect(viewOf(coordinator, first)!.record.error).toBe('The part of LOSAT that keeps the results stopped. Reload the page.');
     stage();
-    await waitFor(coordinator, first, 'failed');
+    await tick();
+    expect(statusOf(coordinator, first)).toBe('failed');
     expect(viewOf(coordinator, first)!.record.error).toBe('The part of LOSAT that keeps the results stopped. Reload the page.');
     expect(engine.started).toEqual([]);
   });
@@ -414,32 +431,151 @@ describe('Coordinator', () => {
     expect(store.usage()).toBe(0);
   });
 
-  it('cancels a run while its outputs are being staged, before the engine starts it (WA-RN-01)', async () => {
-    // ManualEngine ignores a cancel of a run that it has not started, as the Wasm engine does.
-    const engine = new ManualEngine();
+  // Line WQA's D30 (2026-11-27): a Cancel while the Data worker had not answered for the run's outputs changed nothing
+  // until it answered (seconds, behind the index scan of an input; or never), and the queue behind the run waited.
+  for (const late of ['staging', 'answer'] as const) {
+    it(`cancels a run at once while its outputs are being staged (the Data worker's ${late} late); the next run starts, and the outputs staged later are dropped (WA-RN-01)`, async () => {
+      // ManualEngine ignores a cancel of a run that it has not started, as the Wasm engine does.
+      const engine = new ManualEngine();
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => (release = resolve));
+      let dropped!: () => void;
+      const discarded = new Promise<void>((resolve) => (dropped = resolve));
+      /** The first run, whose outputs come late. */
+      let slow: string | undefined;
+      const { coordinator, data, store } = setup(engine, (inner) => {
+        const gateway = Object.create(inner) as DataGateway;
+        // The first run's outputs: staged only when the test lets it (the Data worker is busy), or staged at once and
+        // answered only then. The Data side can drop a run only once it has staged it.
+        gateway.openRun = async (runId, outputs) => {
+          if (slow !== undefined) return inner.openRun(runId, outputs);
+          slow = runId;
+          if (late === 'staging') await released;
+          const port = await inner.openRun(runId, outputs);
+          if (late === 'answer') await released;
+          return port;
+        };
+        gateway.discardRun = async (runId) => {
+          await inner.discardRun(runId);
+          if (runId === slow) dropped();
+        };
+        return gateway;
+      });
+      const first = (await coordinator.enqueue(request)).runId!;
+      await waitFor(coordinator, first, 'preparing');
+      expect(slow).toBe(first);
+      coordinator.cancel(first);
+      await tick();
+      expect(statusOf(coordinator, first)).toBe('cancelled');
+      expect(viewOf(coordinator, first)!.record.error).toBeUndefined();
+      // The next run starts and runs while the Data worker has not answered for the first one.
+      const next = (await coordinator.enqueue(request)).runId!;
+      await waitFor(coordinator, next, 'running');
+      expect(engine.started).toEqual([next]);
+      release();
+      await discarded;
+      // Nothing of the first run is kept or readable, and the Data side holds nothing of it: its outputs can be staged
+      // again (this probe's are dropped).
+      expect(store.usage()).toBe(0);
+      await expect(data.readOutput(first, 6)).rejects.toThrow();
+      (await data.openRun(first)).close();
+      await data.discardRun(first);
+      // The first run's late drop leaves the next run's outputs alone.
+      engine.finish(next);
+      await waitFor(coordinator, next, 'completed');
+      expect(new TextDecoder().decode(await data.readOutput(next, 6))).toBe(`${next}\n`);
+      expect(statusOf(coordinator, first)).toBe('cancelled');
+      expect(engine.started).toEqual([next]);
+    });
+  }
+
+  it('cancels a tool run at once while its outputs are being staged; the outputs staged later are deleted, and the next run starts', async () => {
     let release!: () => void;
-    const staged = new Promise<void>((resolve) => (release = resolve));
-    const { coordinator, data, store } = setup(engine, (inner) => {
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let dropped!: () => void;
+    const deleted = new Promise<void>((resolve) => (dropped = resolve));
+    /** The first tool run, whose outputs come late. */
+    let slow: string | undefined;
+    const { coordinator, data, store } = setup(new FakeEngine(), (inner) => {
       const gateway = Object.create(inner) as DataGateway;
-      gateway.openRun = async (runId) => {
-        const port = await inner.openRun(runId);
-        await staged;
+      // The first tool run's outputs are staged at once; the Data worker's answer comes only when the test lets it.
+      gateway.openToolRun = async (runId) => {
+        const port = await inner.openToolRun(runId);
+        if (slow === undefined) {
+          slow = runId;
+          await released;
+        }
         return port;
+      };
+      gateway.deleteRun = async (runId) => {
+        await inner.deleteRun(runId);
+        if (runId === slow) dropped();
       };
       return gateway;
     });
-    const runId = (await coordinator.enqueue(request)).runId!;
-    await waitFor(coordinator, runId, 'preparing');
-    coordinator.cancel(runId);
+    const first = (await coordinator.enqueueTool(toolRequest)).runId!;
+    await waitFor(coordinator, first, 'preparing');
+    expect(slow).toBe(first);
+    coordinator.cancel(first);
+    await tick();
+    expect(statusOf(coordinator, first)).toBe('cancelled');
     release();
-    await waitFor(coordinator, runId, 'cancelled');
-    expect(engine.started).toEqual([]);
-    await expect(data.readOutput(runId, 6)).rejects.toThrow();
+    await deleted;
     expect(store.usage()).toBe(0);
-    // The next run starts.
+    await expect(data.readToolOutputRange(first, 'stdout', 0, 0)).rejects.toThrow();
+    // The Data side holds nothing of the first run: its outputs can be staged again (this probe's are deleted).
+    (await data.openToolRun(first)).close();
+    await data.deleteRun(first);
+    const next = (await coordinator.enqueueTool(toolRequest)).runId!;
+    await waitFor(coordinator, next, 'completed');
+    expect(statusOf(coordinator, first)).toBe('cancelled');
+  });
+
+  it('cancels a run at once while its outputs are being staged, and ignores the refusal of them that comes later', async () => {
+    const engine = new ManualEngine();
+    let refuse!: (error: Error) => void;
+    let opened = 0;
+    const { coordinator } = setup(engine, (inner) => {
+      const gateway = Object.create(inner) as DataGateway;
+      gateway.openRun = (runId, outputs) =>
+        ++opened === 1 ? new Promise<MessagePort>((_, reject) => (refuse = reject)) : inner.openRun(runId, outputs);
+      return gateway;
+    });
+    const first = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, first, 'preparing');
+    coordinator.cancel(first);
+    await tick();
+    expect(statusOf(coordinator, first)).toBe('cancelled');
+    // The refusal after the cancel changes nothing (and is no unhandled rejection).
+    refuse(new Error('Not enough temporary storage'));
+    await tick();
+    expect(statusOf(coordinator, first)).toBe('cancelled');
+    expect(viewOf(coordinator, first)!.record.error).toBeUndefined();
     const next = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, next, 'running');
     expect(engine.started).toEqual([next]);
+  });
+
+  it('cancels a run whose outputs the Data worker never answers for, and the next run starts and completes', async () => {
+    const engine = new ManualEngine();
+    let opened = 0;
+    const { coordinator, data } = setup(engine, (inner) => {
+      const gateway = Object.create(inner) as DataGateway;
+      gateway.openRun = (runId, outputs) => (++opened === 1 ? new Promise<MessagePort>(() => undefined) : inner.openRun(runId, outputs));
+      return gateway;
+    });
+    const first = (await coordinator.enqueue(request)).runId!;
+    const second = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, first, 'preparing');
+    expect(statusOf(coordinator, second)).toBe('queued');
+    coordinator.cancel(first);
+    await tick();
+    expect(statusOf(coordinator, first)).toBe('cancelled');
+    await waitFor(coordinator, second, 'running');
+    expect(engine.started).toEqual([second]);
+    engine.finish(second);
+    await waitFor(coordinator, second, 'completed');
+    expect(new TextDecoder().decode(await data.readOutput(second, 6))).toBe(`${second}\n`);
   });
 
   it('cancels a FakeEngine run between phases', async () => {

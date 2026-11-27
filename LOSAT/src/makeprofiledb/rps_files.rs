@@ -4,8 +4,8 @@
 //!
 //! Each file is NCBI's `CNcbiOfstream`, the file stream of the database's writer
 //! (`crate::writedb::ofstream::OfStream`), written with NCBI's calls: the header of `.rps` and
-//! `.freq` as one write per integer; for each profile its rows at the end of the file
-//! (`seekp(0, ios_base::end)`), then its offset at its place in the header (`seekp`), the `.aux`
+//! `.freq` as one write per integer; for each profile its rows at the end of the file (a
+//! `seekp` to the end), then its offset at its place in the header (a `seekp` there), the `.aux`
 //! text one value and one newline at a time; the last offset and the table of words at the close.
 //! Where the bytes reach the files is the stream's rule, so a run that ends at a closed pipe
 //! (`crate::writedb::ofstream::end_at_closed_pipe`) leaves the bytes NCBI's process, ended by
@@ -89,7 +89,7 @@ pub(super) struct RpsVolume {
     aux: OfStream,
     /// `freq_file`: the frequency ratios (`.freq`).
     freq: OfStream,
-    /// The end of `.rps` and of `.freq`, where `seekp(0, ios_base::end)` puts the next profile's
+    /// The end of `.rps` and of `.freq`, where NCBI's `seekp` to the end puts the next profile's
     /// rows: their header, then the rows written.
     pssm_end: u64,
     freq_end: u64,
@@ -105,7 +105,7 @@ pub(super) struct RpsVolume {
 }
 
 /// The place of the offset of the profile `seq_index` in `.rps` and `.freq`: after the magic
-/// number and the count (`8 + seq_index * sizeof(Int4)`).
+/// number and the count, four bytes for each profile before it.
 fn offset_place(seq_index: usize) -> u64 {
     8 + 4 * seq_index as u64
 }
@@ -246,7 +246,7 @@ impl RpsVolume {
         self.check()
     }
 
-    /// A line of `.aux`: `aux_file << value << "\n"`, the value and the newline each a write.
+    /// A line of `.aux` as NCBI inserts it: the value, then a newline, each a write of its own.
     fn aux_line(&mut self, value: &[u8]) {
         self.aux.write(value);
         self.aux.write(b"\n");

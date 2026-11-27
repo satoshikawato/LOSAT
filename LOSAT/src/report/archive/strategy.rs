@@ -1053,8 +1053,10 @@ fn write_held_of(open: &[std::sync::Weak<Shared>]) {
 /// The end of a run of a program with `-export_search_strategy` (`strategy`; `None` without
 /// it). The requests encoded (`StrategyExport::write_with`) whose batches' starts the run did not
 /// reach: a run that ends with one of NCBI's errors (`cli::NativeError::caught`, including a
-/// `StrategyWriteFault`) ended before those starts, so those unreached requests are dropped; a
-/// run that ends with `Ok` (or a refusal of LOSAT's) flushes any remaining held requests. A run
+/// `StrategyWriteFault`) or with its report stream's failure (`ostream::ReportWriteFailure`,
+/// NCBI's exception where a write of the report failed) ended before those starts, so those
+/// unreached requests are dropped; a run that ends with `Ok` (or a refusal of LOSAT's) flushes any
+/// remaining held requests. A run
 /// that ends as NCBI's (`Ok` or NCBI's error) has written every `803.7` post of its requests at
 /// its batch's start (`StrategyExport::take_posts`), so a post still waiting is LOSAT's internal
 /// error instead of output that silently lacks it. LOSAT's refusals (any other error) keep their
@@ -1092,7 +1094,14 @@ fn end_export(strategy: &StrategyExport, result: Result<()>) -> Result<()> {
     // `NativeError`, a strategy write fault, or an exception of NCBI's that a report's writer
     // carries (the `-html` links' registry, which NCBI's prolog reads before its first request).
     let native = matches!(&result, Err(error) if crate::cli::NativeError::caught(error).is_some());
-    let ended = if native {
+    // The report stream's failure (`ostream::ends_at_report_failure`), which `ReportStream::finish`
+    // makes NCBI's end of after this: NCBI's exception ended the run where the report's write
+    // threw, after the requests of the batches whose starts the run reached. The requests made
+    // ahead of those starts (a blastp call's batches, `CallRequests`; the next batch's) were never
+    // NCBI's, nor are their posts, which `end_run` drops with them.
+    let report_failed =
+        matches!(&result, Err(error) if crate::report::ostream::ends_at_report_failure(error));
+    let ended = if native || report_failed {
         hook_lock(&strategy.0.held).requests.clear();
         Ok(())
     } else {

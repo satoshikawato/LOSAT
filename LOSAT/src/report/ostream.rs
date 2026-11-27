@@ -156,6 +156,18 @@ pub fn is_report_write_failure(error: &std::io::Error) -> bool {
         .is_some_and(|inner| inner.is::<ReportWriteFailure>())
 }
 
+/// Whether the run's error `error` is the report stream's failure (`ReportWriteFailure`, anywhere
+/// in its chain): NCBI's exception, thrown where a write of the report failed, ends the run there
+/// (`ReportStream::finish` makes NCBI's end of it), so nothing that NCBI does after that point is
+/// made (the search strategy's later requests, `archive::strategy::end_run`).
+pub fn ends_at_report_failure(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(is_report_write_failure)
+    })
+}
+
 /// Whether `error` is the report stream's failure in a region whose exception NCBI's formatter
 /// catches (`ReportWriteFailure::caught`, `Site::XmlIteration`): the formatter stops that part
 /// of the report (its post is made) and goes on.

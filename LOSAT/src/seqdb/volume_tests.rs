@@ -1081,7 +1081,6 @@ fn mt_scan_reads_past_the_range_end_in_a_later_volume() {
     let root: &std::path::Path = &dir;
     let path = SearchPath::new(root, None, None);
     let size = |name: &str| std::fs::metadata(root.join(name)).unwrap().len();
-    let mut amb1 = Vec::new();
     for pad in [0usize, 700, 2000] {
         let mut text = String::new();
         let alias = |range_end: u32, text: &mut String| {
@@ -1094,8 +1093,7 @@ fn mt_scan_reads_past_the_range_end_in_a_later_volume() {
             }
         };
         write_nucleotide_volume(root, "m0", &lens0);
-        let (_, amb) = write_nucleotide_volume(root, "m1", &lens1);
-        amb1 = amb;
+        let (_, amb1) = write_nucleotide_volume(root, "m1", &lens1);
         let mut nal = String::from("TITLE n\nDBLIST m0 m1\n");
         while nal.len() < pad {
             nal.push_str("# padding\n");

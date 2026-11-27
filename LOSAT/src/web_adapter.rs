@@ -86,18 +86,7 @@ pub fn windowmasker_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     crate::windowmasker::read_files(words)
 }
 
-/// The databases of a search whose files [`search_database_read_files`] names.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SearchDatabases<'a> {
-    /// The argv's `-db` values.
-    pub dbs: &'a [&'a str],
-    /// BLASTN's `-filtering_db` values.
-    pub filtering_dbs: &'a [&'a str],
-    /// What an imported strategy makes the run read (`strategy_reads`): its database and the
-    /// repeat filter's, and the type that the run opens the databases as (that of the strategy
-    /// program's subjects, also for `dbs`).
-    pub strategy: Option<&'a StrategyReads>,
-}
+pub use crate::report::log_inputs::SearchDatabases;
 
 /// File names that `seqdb` checks or opens for the databases `databases` of a search
 /// ([`SearchDatabases`]), plus the taxonomy lookup files (`seqdb::taxdb::lookup_files_for_use`)

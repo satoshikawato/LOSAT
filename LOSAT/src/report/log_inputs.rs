@@ -515,6 +515,20 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
     }
 }
 
+/// The databases of a LOSAT Web search whose files `web_adapter::search_database_read_files`
+/// names (line WQA D19b; line RG-F item F2f).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SearchDatabases<'a> {
+    /// The argv's `-db` values.
+    pub dbs: &'a [&'a str],
+    /// BLASTN's `-filtering_db` values.
+    pub filtering_dbs: &'a [&'a str],
+    /// What an imported strategy makes the run read (`import::strategy_reads`): its database and
+    /// the repeat filter's, and the type that the run opens the databases as (that of the
+    /// strategy program's subjects, also for `dbs`).
+    pub strategy: Option<&'a StrategyReads>,
+}
+
 /// The command line's arguments of a run that imports a strategy: the strategy of
 /// `-import_search_strategy` (or the library call's `Supplied::strategy`) of a program whose
 /// command line imports strategies (`import::imports_strategies`, which `strategy_reads` checks),

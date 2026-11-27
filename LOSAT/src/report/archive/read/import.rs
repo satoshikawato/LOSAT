@@ -121,7 +121,7 @@ pub struct StrategyReads {
     pub window_masker_taxid: Option<i32>,
     /// The MegaBLAST index that the strategy forces (`ForceMbIndex` with `MbIndexName`), which
     /// BLASTN opens as the database of that name (a new-style index) or the old-style index
-    /// files of the name, unless the command line names its own ([`MbIndexRequest`]).
+    /// files of the name, unless the command line names its own (`MbIndexRequest::run_index`).
     pub mb_index: Option<String>,
 }
 

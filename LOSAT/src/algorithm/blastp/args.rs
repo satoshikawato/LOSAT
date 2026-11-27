@@ -908,6 +908,12 @@ impl BlastpArgs {
         self.check_options(&mut std::io::sink())
     }
 
+    /// `resolve` without opening `-in_pssm` or `-in_msa` from disk (for web ABI v2's `validate`,
+    /// which checks options alone without the run's working directory).
+    pub(crate) fn resolve_without_files(&self) -> Result<ResolvedBlastpArgs> {
+        self.check_options_with(false, &mut std::io::sink())
+    }
+
     /// NCBI's `CBlastAppArgs::SetOptions` for blastp after the files are opened: the task's
     /// options, each argument handler in the order of `CBlastpAppArgs` (with the warnings
     /// that they post to `diagnostics`), and `Validate`, with NCBI's errors.
@@ -915,6 +921,14 @@ impl BlastpArgs {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
     pub fn check_options(
         &self,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<ResolvedBlastpArgs> {
+        self.check_options_with(true, diagnostics)
+    }
+
+    fn check_options_with(
+        &self,
+        read_files: bool,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<ResolvedBlastpArgs> {
         use crate::blastinput::app::CompositionMode;
@@ -1100,6 +1114,7 @@ impl BlastpArgs {
         let msa_read = match self
             .psiblast_pssm
             .as_ref()
+            .filter(|_| read_files)
             .and_then(|pssm| pssm.in_msa.as_ref())
         {
             Some(input) => Some(crate::algorithm::psiblast::in_msa::read_in_msa(
@@ -1123,6 +1138,7 @@ impl BlastpArgs {
             None => match self
                 .psiblast_pssm
                 .as_ref()
+                .filter(|_| read_files)
                 .and_then(|pssm| pssm.in_pssm.as_deref())
             {
                 Some(path) => Some(crate::algorithm::pssm_search::in_pssm::read_in_pssm(
@@ -1188,7 +1204,12 @@ impl BlastpArgs {
         };
         // A PSSM search runs modes 2 and 3 as 1 (`PsiBlastSetupScoreBlock`), which every later
         // reader of the options sees (`algorithm::psiblast::in_pssm::position_based_mode`).
-        let mode = if psi_search.is_some() {
+        let has_pssm_query = psi_search.is_some()
+            || self
+                .psiblast_pssm
+                .as_ref()
+                .is_some_and(|pssm| pssm.in_pssm.is_some() || pssm.in_msa.is_some());
+        let mode = if has_pssm_query {
             crate::algorithm::psiblast::in_pssm::position_based_mode(mode)
         } else {
             mode
@@ -1197,7 +1218,7 @@ impl BlastpArgs {
         // The PHI-BLAST handler, the last of psiblast's, reads the pattern file
         // (`phi_search::file`); LOSAT compiles it here and keeps the result for the search
         // (`ResolvedBlastpArgs::phi`).
-        let phi = match phi_file {
+        let phi = match phi_file.filter(|_| read_files) {
             Some(path) => {
                 let bytes = crate::algorithm::pssm_search::in_pssm::read_input_argument(
                     "phi_pattern",
@@ -1212,12 +1233,13 @@ impl BlastpArgs {
             }
             None => None,
         };
+        let has_phi = phi_file.is_some();
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:825-880
         // The composition-based statistics handler sets the mode of the programs it lists, and
         // PHI-BLAST is not one of them: round 1 runs without composition-based statistics and
         // without the Smith-Waterman traceback whatever the arguments say (the value is still
         // parsed above, with its errors).
-        let (mode, unified_p) = if phi.is_some() {
+        let (mode, unified_p) = if has_phi {
             (CompositionMode::NoCompositionBasedStats, false)
         } else {
             (mode, unified_p)
@@ -1253,7 +1275,7 @@ impl BlastpArgs {
             evalue: options.evalue,
             psiblast: self.app.is_psi(),
             psi_tblastn: false,
-            phi: phi.is_some(),
+            phi: has_phi,
             // blastp's and psiblast's `-xdrop_ungap`, or rpsblast's (`RpsSearch`).
             x_dropoff: self
                 .xdrop_ungap

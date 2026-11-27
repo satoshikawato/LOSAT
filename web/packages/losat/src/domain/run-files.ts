@@ -41,28 +41,48 @@ export interface RunFile {
 }
 
 /** The options whose files a run makes besides its outputs (stream 8), without the hyphen. */
-export type RunFileOption = 'logfile' | 'export_search_strategy';
+export type RunFileOption = 'logfile' | 'export_search_strategy' | 'out_pssm' | 'out_ascii_pssm';
 
 /** The option that named a file of a run (`RunFile.option`; `logfile` where it is absent). */
 export function runFileOption(file: RunFile): RunFileOption {
   return file.option ?? 'logfile';
 }
 
+function matchesPssmFile(fileName: string, baseName: string | null | undefined, saveEach: boolean): boolean {
+  if (baseName == null) return false;
+  if (!saveEach) return fileName === baseName;
+  return fileName.startsWith(`${baseName}.`) && /^\d+$/.test(fileName.slice(baseName.length + 1));
+}
+
 /**
  * The files of a run (stream 8) with the option that named each, which the engine's *start* of the
- * argv gives (ABI v2 §9: `log_file`, `log_file_name`, `strategy_file`): a file of a name that both
- * give is the file of `-logfile`, as the engine refuses a strategy file that is the file of
- * `-logfile`. A file that neither names is an error of the engine.
+ * argv gives (ABI v2 §9: `log_file`, `log_file_name`, `strategy_file`, `out_pssm`,
+ * `out_ascii_pssm`, `save_each_pssm`). A file that none of them names is an error of the engine.
  */
 export function namedRunFiles(
   files: readonly RunFile[],
-  start: { readonly logFile: string | null; readonly logFileName?: string | null; readonly strategyFile: string | null },
+  start: {
+    readonly logFile: string | null;
+    readonly logFileName?: string | null;
+    readonly strategyFile: string | null;
+    readonly outPssm?: string | null;
+    readonly outAsciiPssm?: string | null;
+    readonly saveEachPssm?: boolean;
+  },
 ): RunFile[] {
+  const saveEach = start.saveEachPssm === true;
   return files.map((file) => {
     if (file.name === start.logFile || (start.logFileName != null && file.name === start.logFileName)) {
       return { name: file.name, bytes: file.bytes };
     }
     if (file.name === start.strategyFile) return { name: file.name, bytes: file.bytes, option: 'export_search_strategy' };
+    const isAscii = matchesPssmFile(file.name, start.outAsciiPssm, saveEach);
+    const isAsn = matchesPssmFile(file.name, start.outPssm, saveEach);
+    // When both options target the same path, NCBI writes ASN.1 then overwrites with ASCII.
+    if (isAscii && (!isAsn || start.outAsciiPssm === start.outPssm)) {
+      return { name: file.name, bytes: file.bytes, option: 'out_ascii_pssm' };
+    }
+    if (isAsn) return { name: file.name, bytes: file.bytes, option: 'out_pssm' };
     throw new Error(`the engine's archive of the run's files (ABI v2 stream 8) has a file that the argv does not name: ${JSON.stringify(file.name)}`);
   });
 }

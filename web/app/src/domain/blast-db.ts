@@ -548,6 +548,8 @@ export function assembleSearchDirectory(parts: {
   readonly subjectDb?: { readonly discovery: BlastDbDiscovery; readonly selectedName: string };
   readonly filterFiles?: Readonly<Record<string, File>>;
   readonly filteringDb?: { readonly discovery: BlastDbDiscovery; readonly selectedName: string };
+  /** File-based query (`-in_pssm` or `-in_msa`) mounted at root by `file.name`. */
+  readonly queryFile?: File;
 }): AssembledSearchDirectory {
   const dir = new RunDirectoryBuilder();
   let blastdbEnv: string | undefined;
@@ -577,6 +579,12 @@ export function assembleSearchDirectory(parts: {
       if (name === undefined) throw new Error(`Invalid file name: "${file.name}".`);
       dir.add(name, file);
     }
+  }
+
+  if (parts.queryFile !== undefined) {
+    const name = normalizeRunPath(parts.queryFile.name);
+    if (name === undefined) throw new Error(`Invalid file name: "${parts.queryFile.name}".`);
+    dir.add(name, parts.queryFile);
   }
 
   const files = dir.build();

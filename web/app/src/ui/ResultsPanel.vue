@@ -357,7 +357,13 @@ async function toAlignments(id: HspId): Promise<void> {
             </template>
             <!-- A run that printed the command line's help or version read no input (line WQA's D20, S3-1, 2026-11-23). -->
             <template v-if="selectedSearch.snapshot.prints === undefined">
-              <template v-if="queryRecords.length === 1">
+              <template v-if="selectedSearch.snapshot.queryFile">
+                <dt>Query file</dt>
+                <dd data-testid="results-query-file">
+                  {{ selectedSearch.snapshot.queryFile.flag }} {{ selectedSearch.snapshot.queryFile.name }}
+                </dd>
+              </template>
+              <template v-else-if="queryRecords.length === 1">
                 <dt>Query ID</dt>
                 <dd data-testid="results-query-id">{{ recordName(queryRecords[0]!.id, 'query', 0, selectedSearch.record.shownIds) }}</dd>
                 <dt>Query Length</dt>
@@ -377,6 +383,23 @@ async function toAlignments(id: HspId): Promise<void> {
                 <dt>Subjects</dt>
                 <dd data-testid="results-subjects">
                   {{ inputLabel(selectedSearch.snapshot.subject) }}, {{ plural(subjectRecords.length, 'record') }}
+                </dd>
+              </template>
+              <template v-if="state.phase === 'ready' && state.rounds.length > 1">
+                <dt>Round</dt>
+                <dd class="results-round">
+                  <label class="results-round-select">
+                    <span class="visually-hidden">Round</span>
+                    <select
+                      :value="state.round"
+                      data-testid="results-round"
+                      @change="results.selectRound(Number(($event.target as HTMLSelectElement).value))"
+                    >
+                      <option v-for="r in state.rounds" :key="r" :value="r" :data-testid="`results-round-${r}`">
+                        Round {{ r }}
+                      </option>
+                    </select>
+                  </label>
                 </dd>
               </template>
             </template>

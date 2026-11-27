@@ -567,7 +567,9 @@ pub(crate) fn toolkit_file_word_refusal(tool: &crate::ncbi_app::Tool, word: &str
 
 /// The programs that LOSAT Web's ABI v2 runs (`web/adapter/src/run.rs` `Program`, whose tests
 /// check this list), whose runs take the toolkit's words (`toolkit_file_word_refusal`).
-pub const WEB_V2_PROGRAMS: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
+pub const WEB_V2_PROGRAMS: &[&str] = &[
+    "blastn", "blastp", "blastx", "psiblast", "tblastn", "tblastx",
+];
 
 /// What LOSAT's library API runs of the command line's `program`.
 enum LibraryPart {

@@ -368,6 +368,7 @@ impl PsiblastArgs {
                     }),
                 versions: self.pssm_versions,
                 check_scope: self.pssm_check,
+                run_files: crate::report::run_files::RunFiles::Disk,
                 phi_pattern: self.phi_pattern,
             }),
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:502

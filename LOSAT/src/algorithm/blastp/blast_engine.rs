@@ -2078,12 +2078,12 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
-    // `-use_sw_tback` (items X4 and X4-c0): BLASTP runs NCBI's Smith-Waterman redo in modes 1 to 3
-    // (`kappa::smith_waterman`) and in mode 0 (`sw_c0`, including `-matrix IDENTITY`'s reset,
-    // `identity_cbs_reset`). With `-ungapped` (allowed only in mode 0), NCBI crashes at the redo's
-    // set-up of every searched batch, and LOSAT refuses there (`redo_run::sw_ungapped_check`).
-    // psiblast keeps its refusal (the position-based Smith-Waterman redo).
-    if args.use_sw_tback && (args.app != BlastpApp::Blastp || args.psi_search.is_some()) {
+    // `-use_sw_tback` (items X4, X4-c0, and line PS-SW): BLASTP and PSIBLAST (round 1 and PSSM
+    // rounds) run NCBI's Smith-Waterman redo in modes 0 to 3 (`kappa::smith_waterman`, `sw_c0`,
+    // and `pssm_search::redo1::smith_waterman`). With `-ungapped` (allowed only in mode 0), NCBI
+    // crashes at the redo's set-up of every searched batch, and LOSAT refuses there
+    // (`redo_run::sw_ungapped_check`).
+    if args.use_sw_tback && args.app == BlastpApp::Rpsblast {
         bail!("{}", crate::cli::run_refusal(program, "use_sw_tback"));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1389-1392
@@ -10412,9 +10412,10 @@ fn run_call(
     ))]
     let x_win_expand = false;
     // `-comp_based_stats 0` without `-use_sw_tback`: the ordinary traceback below reads the
-    // compact lists as they are. With `-use_sw_tback` (item X4-c0), NCBI runs the Smith-Waterman
-    // redo without composition adjustment in batch OID order (`sw_c0`). psiblast `-in_pssm` and
-    // rpsblast take their own paths and leave the redo unused.
+    // compact lists as they are. With `-use_sw_tback` (item X4-c0; psiblast round 1: line PS-SW),
+    // NCBI runs the Smith-Waterman redo without composition adjustment in batch OID order
+    // (`sw_c0`). psiblast `-in_pssm` / rounds 2+ and rpsblast take their own paths and leave the
+    // redo unused.
     let sw_c0_redo = !args.ungapped
         && args.use_sw_tback
         && args.psi_search.is_none()
@@ -10447,8 +10448,12 @@ fn run_call(
         // rpsblast: the RPS engine's final hit lists (`rps_hooks::rps_search`).
         Some(preliminary_hit_lists.iter_mut().map(Option::take).collect())
     } else if ordinary_traceback && args.psi_search.is_some() {
-        // psiblast `-in_pssm`: the PSSM's traceback (`pssm_hooks::pssm_traceback`: mode 0's, or
-        // the position-based redo of modes 1 to 3, `FetchNotes::pssm_redo`).
+        // psiblast `-in_pssm` / rounds 2+: the PSSM's traceback (`pssm_hooks::pssm_traceback`:
+        // mode 0's ordinary traceback, or the position-based redo of modes 1 to 3 and
+        // `-use_sw_tback`, `FetchNotes::pssm_redo`).
+        let fetch_excluded = listed_subjects
+            .as_ref()
+            .map_or(&[][..], |listed| listed.fetch_excluded.as_slice());
         Some(pssm_hooks::pssm_traceback(
             &args,
             &contexts,
@@ -10462,13 +10467,20 @@ fn run_call(
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
             blastp_parallel_pool,
+            fetch_excluded,
+            &fetch_notes,
             &|heaps: &[_]| fetch_notes.pssm_redo(heaps),
             sorts_results,
         )?)
     } else if args.ungapped {
         // `-ungapped`: NCBI skips the traceback (`perform_traceback` is the gapped mode,
         // blast_traceback.c:1526); the lists stay as the preliminary stage made them.
-        redo_run::sw_ungapped_check(args.use_sw_tback, &query_batches, &query_batch_skipped)?;
+        redo_run::sw_ungapped_check(
+            args.app.ncbi_name(),
+            args.use_sw_tback,
+            &query_batches,
+            &query_batch_skipped,
+        )?;
         let finish = traceback::UngappedFinish {
             contexts: &contexts,
             subjects,
@@ -10503,7 +10515,12 @@ fn run_call(
         )?)
     } else {
         if sw_c0_redo {
-            redo_run::sw_matrix_check(args.scoring.matrix, &query_batches, &query_batch_skipped)?;
+            redo_run::sw_matrix_check(
+                args.app.ncbi_name(),
+                args.scoring.matrix,
+                &query_batches,
+                &query_batch_skipped,
+            )?;
         }
         None
     };

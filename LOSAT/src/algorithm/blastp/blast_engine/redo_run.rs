@@ -659,6 +659,8 @@ where
         // The excluded lists of `one_thread_redo`'s Smith-Waterman batches, read with its own
         // reader (`query_fetch_excluded_reached`) when the replay passes each query.
         sw_excluded: fetch_excluded,
+        program: args.app.ncbi_name(),
+        do_link_hsps: args.sum_stats,
     };
     // The parallel paths read the expanded lists of all queries (`plan_redo_and_expand_lists`
     // expands them before the paths), or the windows expand the compact lists as they reach them.
@@ -1081,6 +1083,7 @@ where
 #[cold]
 #[inline(never)]
 pub(super) fn sw_batch_failed_after_oid(
+    program: &str,
     fetch_notes: &super::database::FetchNotes<'_>,
     batch: std::ops::Range<usize>,
     heaps: &[BlastCompoHeap],
@@ -1089,6 +1092,7 @@ pub(super) fn sw_batch_failed_after_oid(
         return refusal;
     }
     sw_batch_failed(
+        program,
         batch.start,
         &heaps[batch.start],
         fetch_notes.fetched_before_failure_oid(heaps, batch.clone(), None),
@@ -1102,6 +1106,8 @@ pub(super) fn sw_batch_failed_after_oid(
 #[cold]
 #[inline(never)]
 pub(super) fn sw_endless_after_oid(
+    program: &str,
+    do_link_hsps: bool,
     fetch_notes: &super::database::FetchNotes<'_>,
     batch: std::ops::Range<usize>,
     heaps: &[BlastCompoHeap],
@@ -1114,6 +1120,8 @@ pub(super) fn sw_endless_after_oid(
         return refusal;
     }
     sw_endless(
+        program,
+        do_link_hsps,
         batch.start,
         fetch_notes.fetched_before_failure_oid(heaps, batch.clone(), Some((ordinal, q_idx))),
     )
@@ -1127,6 +1135,7 @@ pub(super) fn sw_endless_after_oid(
 /// fails the first searched batch with `Traceback failed` (exit 3, even with 0 hits), while a run
 /// whose batches are all skipped (every query invalid) completes with exit 0.
 pub(super) fn sw_matrix_check(
+    program: &str,
     matrix: ScoringMatrix,
     query_batches: &[crate::blastinput::seq_range::RangedBatch],
     query_batch_skipped: &[bool],
@@ -1138,18 +1147,18 @@ pub(super) fn sw_matrix_check(
         .iter()
         .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start])
     {
-        Some(batch) => Err(sw_matrix_failed(batch.searched.start)),
+        Some(batch) => Err(sw_matrix_failed(program, batch.searched.start)),
         None => Ok(()),
     }
 }
 
 #[cold]
 #[inline(never)]
-fn sw_matrix_failed(batch_start: usize) -> anyhow::Error {
+fn sw_matrix_failed(program: &str, batch_start: usize) -> anyhow::Error {
     crate::blastinput::app::ErrorAfterBatchReports::of_batch(
         batch_start,
         crate::core::composition_adjustment::smith_waterman_match::sw_batch_failed_error(
-            "blastp", false,
+            program, false,
         ),
     )
     .into()
@@ -1163,6 +1172,7 @@ fn sw_matrix_failed(batch_start: usize) -> anyhow::Error {
 #[cold]
 #[inline(never)]
 pub(in crate::algorithm::blastp) fn sw_batch_failed_after(
+    program: &str,
     fetch_notes: &super::database::FetchNotes<'_>,
     batch: std::ops::Range<usize>,
     heaps: &[BlastCompoHeap],
@@ -1174,6 +1184,7 @@ pub(in crate::algorithm::blastp) fn sw_batch_failed_after(
         return refusal;
     }
     sw_batch_failed(
+        program,
         batch.start,
         &heaps[batch.start],
         fetch_notes.fetched_before_failure(heaps, batch.clone(), q_idx, usize::MAX),
@@ -1189,6 +1200,8 @@ pub(in crate::algorithm::blastp) fn sw_batch_failed_after(
 #[cold]
 #[inline(never)]
 pub(in crate::algorithm::blastp) fn sw_endless_after(
+    program: &str,
+    do_link_hsps: bool,
     fetch_notes: &super::database::FetchNotes<'_>,
     batch: std::ops::Range<usize>,
     heaps: &[BlastCompoHeap],
@@ -1200,6 +1213,8 @@ pub(in crate::algorithm::blastp) fn sw_endless_after(
         return refusal;
     }
     sw_endless(
+        program,
+        do_link_hsps,
         batch.start,
         fetch_notes.fetched_before_failure(heaps, batch.clone(), q_idx, position),
     )
@@ -1244,12 +1259,13 @@ pub(in crate::algorithm::blastp) fn sw_endless_after(
 #[cold]
 #[inline(never)]
 pub(in crate::algorithm::blastp) fn sw_batch_failed(
+    program: &str,
     batch_start: usize,
     first_query: &BlastCompoHeap,
     utf8: Option<super::database::Utf8Read>,
 ) -> anyhow::Error {
     let error = crate::core::composition_adjustment::smith_waterman_match::sw_batch_failed_error(
-        "blastp",
+        program,
         first_query.n > 0,
     );
     crate::blastinput::app::ErrorAfterBatchReports {
@@ -1273,13 +1289,22 @@ pub(in crate::algorithm::blastp) fn sw_batch_failed(
 #[cold]
 #[inline(never)]
 pub(in crate::algorithm::blastp) fn sw_endless(
+    program: &str,
+    do_link_hsps: bool,
     batch_start: usize,
     utf8: Option<super::database::Utf8Read>,
 ) -> anyhow::Error {
+    let why = if do_link_hsps {
+        "a score of 0 reaches the cutoff score, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"
+    } else {
+        "the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"
+    };
     crate::blastinput::app::ErrorAfterBatchReports {
         query: Some(batch_start),
         utf8,
-        error: crate::core::composition_adjustment::smith_waterman_match::sw_endless_error("blastp", "the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"),
+        error: crate::core::composition_adjustment::smith_waterman_match::sw_endless_error(
+            program, why,
+        ),
         title_reads: Vec::new(),
     }
     .into()
@@ -1297,6 +1322,7 @@ pub(in crate::algorithm::blastp) fn sw_endless(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074
 pub(super) fn sw_ungapped_check(
+    program: &str,
     use_sw_tback: bool,
     query_batches: &[crate::blastinput::seq_range::RangedBatch],
     query_batch_skipped: &[bool],
@@ -1308,7 +1334,7 @@ pub(super) fn sw_ungapped_check(
         .iter()
         .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start])
     {
-        Some(batch) => Err(sw_ungapped_refusal(batch.searched.start)),
+        Some(batch) => Err(sw_ungapped_refusal(program, batch.searched.start)),
         None => Ok(()),
     }
 }
@@ -1316,11 +1342,11 @@ pub(super) fn sw_ungapped_check(
 /// The refusal of [`sw_ungapped_check`] at the batch whose first query is `batch_start`.
 #[cold]
 #[inline(never)]
-fn sw_ungapped_refusal(batch_start: usize) -> anyhow::Error {
+fn sw_ungapped_refusal(program: &str, batch_start: usize) -> anyhow::Error {
     // NCBI crashes at the redo's set-up, before its fetches read a header of the batch.
     crate::blastinput::app::ErrorAfterBatchReports::of_batch(
         batch_start,
-        crate::core::composition_adjustment::smith_waterman_match::sw_ungapped_error("blastp"),
+        crate::core::composition_adjustment::smith_waterman_match::sw_ungapped_error(program),
     )
     .into()
 }
@@ -1468,6 +1494,7 @@ where
         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
             if sw_status.failed() && q_idx + 1 == batch.end {
                 return Err(sw_batch_failed_after(
+                    args.app.ncbi_name(),
                     fetch_notes,
                     batch.clone(),
                     redone_matches,
@@ -1583,6 +1610,8 @@ where
                 );
                 let Some(postprocessed) = sw_status.redone(redone, || {
                     sw_endless_after(
+                        args.app.ncbi_name(),
+                        args.sum_stats,
                         fetch_notes,
                         batch.clone(),
                         redone_matches,
@@ -1641,6 +1670,7 @@ where
         // when the batch's first query holds a redone match (`sw_batch_failed`).
         if sw_status.failed() && q_idx + 1 == batch.end {
             return Err(sw_batch_failed_after(
+                args.app.ncbi_name(),
                 fetch_notes,
                 batch.clone(),
                 redone_matches,

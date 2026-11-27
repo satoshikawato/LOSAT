@@ -142,10 +142,10 @@ fn psi_stats<'a>(
     exact_search_spaces: &[Option<i64>],
 ) -> EvalueStats<'a> {
     match gumbel {
-        // With the block nothing of a psiblast search reads the search space (`e_value` and
-        // `hit_cutoff` do not; `-use_sw_tback`, whose Smith-Waterman redo would, is refused).
-        // A reader that needs it with the block (series PR, item PS11c-3) fills it first.
-        Some(gumbel) => EvalueStats::spouge(gumbel),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1406
+        // Carry the effective search space alongside the Gumbel block: `Blast_RedoOneMatchSmithWaterman`
+        // (`-use_sw_tback`) computes SW e-values using `query_info->eff_search_space`.
+        Some(gumbel) => EvalueStats::new(Some(gumbel), exact_search_spaces[0].unwrap_or(0)),
         None => EvalueStats::new(
             None,
             exact_search_spaces[0]
@@ -573,6 +573,8 @@ pub(super) fn pssm_traceback(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     pool: &crate::utils::threading::SearchPool<'_>,
+    fetch_excluded: &[database::FetchExcludedMatch],
+    fetch_notes: &database::FetchNotes<'_>,
     redone: &dyn Fn(&[crate::algorithm::blastp::hsp::BlastCompoHeap]) -> anyhow::Result<()>,
     sorts_results: bool,
 ) -> Result<Vec<Option<BlastpHitList>>> {
@@ -591,7 +593,16 @@ pub(super) fn pssm_traceback(
     let link_context = args
         .sum_stats
         .then(|| psi_link_context(&karlin, &contexts[0], &search_spaces[0]));
-    if args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
+    // Enter `Blast_RedoAlignmentCore_MT` whenever composition-based statistics are enabled OR
+    // `-use_sw_tback` is requested (including `-comp_based_stats 0`).
+    let compo_adjust = args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats;
+    if compo_adjust || args.use_sw_tback {
+        let scaling_factor = if compo_adjust {
+            redo1::SCALING_FACTOR
+        } else {
+            1.0
+        };
         let link = link_context.map(|context| {
             let (_, cutoff_score_min) = psi_hit_cutoffs(
                 args,
@@ -601,7 +612,7 @@ pub(super) fn pssm_traceback(
                 cutoff_subject_length,
                 prelim_evalue,
             );
-            redo1::RedoLink::new(cutoff_score_min, context)
+            redo1::RedoLink::with_scale(cutoff_score_min, context, scaling_factor)
         });
         return pssm_redo(
             args,
@@ -615,6 +626,8 @@ pub(super) fn pssm_traceback(
             link,
             preliminary_hit_lists,
             compact_hit_lists,
+            fetch_excluded,
+            fetch_notes,
             redone,
         )
         .map(seqalign_scores_of_lists);
@@ -682,6 +695,8 @@ fn pssm_redo(
     link: Option<redo1::RedoLink>,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    fetch_excluded: &[database::FetchExcludedMatch],
+    fetch_notes: &database::FetchNotes<'_>,
     redone: &dyn Fn(&[crate::algorithm::blastp::hsp::BlastCompoHeap]) -> anyhow::Result<()>,
 ) -> Result<Vec<Option<BlastpHitList>>> {
     let has_lists = preliminary_hit_lists
@@ -694,6 +709,16 @@ fn pssm_redo(
     if !has_lists {
         return Ok(preliminary_hit_lists.iter().map(|_| None).collect());
     }
+    let compo_adjust = args.comp_based_stats.mode != BlastpCompositionMode::NoCompositionBasedStats;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3100-3109
+    // Without composition-based statistics (`-comp_based_stats 0 -use_sw_tback`), `localScalingFactor`
+    // is 1.0, while `s_MatrixInfoInit` still calls `s_ScalePosMatrix` with scale factor 1.0, which
+    // updates the gapped Karlin K and logK via `_PSIUpdateLambdaK`.
+    let scaling_factor = if compo_adjust {
+        redo1::SCALING_FACTOR
+    } else {
+        1.0
+    };
     let sbp = crate::algorithm::pssm_search::in_pssm::score_block(
         args.scoring.matrix,
         crate::core::psi::KarlinBlk {
@@ -716,11 +741,40 @@ fn pssm_redo(
         k: karlin.ungapped.k,
         h: karlin.ungapped.h,
     };
-    let Some(info) = PosMatrixInfo::new(query, freq_ratios, &sbp, redo1::SCALING_FACTOR, kbp_psi)
-    else {
+    let Some(info) = PosMatrixInfo::new(query, freq_ratios, &sbp, scaling_factor, kbp_psi) else {
         anyhow::bail!(
             "a PSSM whose position-based scaling for the composition-based statistics gives no Karlin-Altschul parameters (NCBI BLAST+ 2.17.0 goes on with a Lambda of -1) is not supported by LOSAT's PSIBLAST"
         );
+    };
+    let on_query_done = |status_position: Option<usize>,
+                         heaps: &[crate::algorithm::blastp::hsp::BlastCompoHeap],
+                         sw_status: &mut crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus| {
+        super::redo_run::query_fetch_excluded_reached(
+            fetch_excluded,
+            status_position,
+            heaps,
+            sw_status,
+        );
+    };
+    let on_batch_failed = |heaps: &[crate::algorithm::blastp::hsp::BlastCompoHeap]| {
+        super::redo_run::sw_batch_failed_after(
+            args.app.ncbi_name(),
+            fetch_notes,
+            0..heaps.len(),
+            heaps,
+            heaps.len().saturating_sub(1),
+        )
+    };
+    let on_endless = |heaps: &[crate::algorithm::blastp::hsp::BlastCompoHeap], position: usize| {
+        super::redo_run::sw_endless_after(
+            args.app.ncbi_name(),
+            args.sum_stats,
+            fetch_notes,
+            0..heaps.len(),
+            heaps,
+            0,
+            position,
+        )
     };
     redo1::PssmRedo1 {
         pssm: &psi.pssm,
@@ -739,6 +793,12 @@ fn pssm_redo(
         inclusion_ethresh: args.inclusion_ethresh,
         link,
         redone,
+        sw: args.use_sw_tback.then_some(redo1::PssmSwOptions {
+            compo_adjust,
+            on_query_done: &on_query_done,
+            on_batch_failed: &on_batch_failed,
+            on_endless: &on_endless,
+        }),
     }
     .run(preliminary_hit_lists, compact_hit_lists)
 }

@@ -1,0 +1,203 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: nest.faa
+           1 sequences; 380 total letters
+
+Results from round 1
+
+
+Query= f101
+
+Length=190
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+nest_101                                                              394     4e-144
+
+
+>nest_101
+Length=380
+
+ Score = 394 bits (1012),  Expect = 4e-144, Method: Compositional matrix adjust.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  96   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  155
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  156  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  215
+
+Query  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  216  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  275
+
+Query  181  AEMYAAACRD  190
+            AEMYAAACRD
+Sbjct  276  AEMYAAACRD  285
+
+
+ Score = 353 bits (906),  Expect = 5e-128, Method: Compositional matrix adjust.
+ Identities = 190/285 (67%), Positives = 190/285 (67%), Gaps = 0/285 (0%)
+
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  1                                       MQLILSHHLTMAGRVELVTGPMFAG  25
+                                               MQLILSHHLTMAGRVELVTGPMFAG
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIMQLILSHHLTMAGRVELVTGPMFAG  120
+
+Query  26   KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV  85
+            KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV
+Sbjct  121  KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV  180
+
+Query  86   LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV  145
+            LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV
+Sbjct  181  LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV  240
+
+Query  146  KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  190
+            KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD
+Sbjct  241  KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  285
+
+
+ Score = 200 bits (508),  Expect = 6e-68, Method: Compositional matrix adjust.
+ Identities = 94/94 (100%), Positives = 94/94 (100%), Gaps = 0/94 (0%)
+
+Query  97   EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI  156
+            EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI
+Sbjct  287  EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI  346
+
+Query  157  DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  190
+            DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD
+Sbjct  347  DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  380
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.137    0.405    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 58575
+Results from round 2
+
+
+Query= f101
+
+Length=190
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+nest_101                                                              400     1e-146
+
+Sequences not found previously or not previously below threshold:
+
+
+
+>nest_101
+Length=380
+
+ Score = 400 bits (1028),  Expect = 1e-146, Method: Composition-based stats.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  96   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  155
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  156  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  215
+
+Query  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  216  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  275
+
+Query  181  AEMYAAACRD  190
+            AEMYAAACRD
+Sbjct  276  AEMYAAACRD  285
+
+
+ Score = 359 bits (922),  Expect = 2e-130, Method: Composition-based stats.
+ Identities = 190/285 (67%), Positives = 190/285 (67%), Gaps = 0/285 (0%)
+
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  1                                       MQLILSHHLTMAGRVELVTGPMFAG  25
+                                               MQLILSHHLTMAGRVELVTGPMFAG
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIMQLILSHHLTMAGRVELVTGPMFAG  120
+
+Query  26   KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV  85
+            KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV
+Sbjct  121  KSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISV  180
+
+Query  86   LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV  145
+            LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV
+Sbjct  181  LPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIV  240
+
+Query  146  KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  190
+            KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD
+Sbjct  241  KLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  285
+
+
+ Score = 202 bits (513),  Expect = 1e-68, Method: Composition-based stats.
+ Identities = 94/94 (100%), Positives = 94/94 (100%), Gaps = 0/94 (0%)
+
+Query  97   EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI  156
+            EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI
+Sbjct  287  EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI  346
+
+Query  157  DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  190
+            DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD
+Sbjct  347  DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  380
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.147    0.471    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0450    0.140     1.90     42.6     43.6 
+
+Effective search space used: 58575
+
+Search has CONVERGED!
+
+
+  Database: nest.faa
+    Posted date:  Nov 24, 2026  5:03 PM
+  Number of letters in database: 380
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

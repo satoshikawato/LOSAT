@@ -13,8 +13,8 @@
 //! `SubjectSource`, `BatchStage`, `ShownSubjects`, `BatchOutputs`). The functions are statements
 //! of `search_query_batch` moved here in their order; what they read is a struct of references or
 //! `Copy` values, and what they make is what `search_query_batch` then reads under the same names.
-//! An error of the set-up writes the outfmt 0 prolog of a file sink of the first batch through the
-//! batch's outputs before it is returned, as it did in `search_query_batch`.
+//! An error of the set-up writes the prologs that come with the first report (`prolog_with_report`)
+//! through the first batch's outputs before it is returned, as it did in `search_query_batch`.
 
 use super::{
     after_batch_reports, context_lengths, database, database_search_error, prolog_with_report,
@@ -70,8 +70,8 @@ pub(super) struct ContextStatistics {
 }
 
 /// The Karlin-Altschul blocks, the validity and the effective search space of every context of the
-/// batch, after the checks of the set-up; an error writes what NCBI writes before it (the outfmt 0
-/// prolog of a file sink of the first batch) through `outputs`.
+/// batch, after the checks of the set-up; an error writes what NCBI writes before it (the prologs
+/// that come with the first report, `prolog_with_report`, in the first batch) through `outputs`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:455-532
 /// (`BlastSetup_ScoreBlkInit`, which `BLAST_MainSetUp` calls at :652 for
@@ -186,10 +186,11 @@ fn karlin_blocks<const UNGAPPED: bool>(
             if !first_batch {
                 return Err(after_batch_reports(karlin_error(&message, empty_queries)));
             }
-            // The prolog of a file sink (the others were written before the search).
+            // The prologs that come with the first report (outfmt 0 to 4's were written before
+            // the search).
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
             for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
-                if prolog_with_report(format, output_format) {
+                if prolog_with_report(output_format) {
                     let posts = crate::report::query_warnings::html_posts_sink(
                         outputs.html_posts.as_deref_mut(),
                         &mut *outputs.diagnostics,

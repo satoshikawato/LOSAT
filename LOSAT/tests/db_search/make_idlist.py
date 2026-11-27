@@ -91,6 +91,7 @@ The list files and alias files are written below (`LISTS`, `ALIASES`). The rows 
 that use them are db.il.*; the blastdbcmd cases A272 on (D/fixtures/make_d1c_blastdbcmd.py).
 """
 
+import copy
 import shutil
 import struct
 import subprocess
@@ -378,8 +379,8 @@ def ti_isam(base: Path, num_oids: int, pad: int = 0):
     data = b"".join(struct.pack(">II", k, o) for k, o in rows)
     header = struct.pack(">9i", 1, 0, len(data), len(rows), 1, 256, 0, 0, 0)
     index = header + struct.pack(">II", rows[0][0], rows[0][1]) + struct.pack(">Ii", 0xFFFFFFFF, 0)
-    base.with_suffix(".pti").write_bytes(index)
-    base.with_suffix(".ptd").write_bytes(data + bytes(pad))
+    Path(f"{base}.pti").write_bytes(index)
+    Path(f"{base}.ptd").write_bytes(data + bytes(pad))
 
 
 def build_pf7(mk):
@@ -436,13 +437,17 @@ def ber_encode(node):
     return bytes([tag, 0x80 | width]) + len(value).to_bytes(width, "big") + value
 
 
-def drop_seqids(base: Path, lines, kind="p", titles=None):
+def drop_seqids(base: Path, lines, kind="p", titles=None, copies=None):
     """Empties the Seq-id list (member `seqid`, [1]) of the definition lines `lines` ({oid: {line}},
     0-based) of the version 5 volume `base` (.phr, or .nhr with `kind` "n"), with the header offsets of
-    its index (.pin, .nin: the same layout up to them). `titles` ({oid: {line: None or b""}}) removes the
-    title (member `title`, [0]) of those lines or empties it."""
-    pin = bytearray(base.with_suffix(f".{kind}in").read_bytes())
-    phr = base.with_suffix(f".{kind}hr").read_bytes()
+    its index (.pin, .nin: the same layout up to them). `titles` ({oid: {line: None, b"" or a title}})
+    removes the title (member `title`, [0]) of those lines, empties it or puts that title in its place.
+    `copies` ({oid: [(index, line)]}, in turn) first puts a copy of the record's line `line` at `index`
+    (`lines` and `titles` count the lines after the copies; LOSAT/tests/db_search/rps/make_lineless.py).
+    The files are `base` with the extension appended, so a volume name with a dot (`rps_mini3v.00`)
+    keeps it."""
+    pin = bytearray(Path(f"{base}.{kind}in").read_bytes())
+    phr = Path(f"{base}.{kind}hr").read_bytes()
     at = 12  # version, sequence type, volume number
     for _ in range(3):  # title, LMDB name, date
         at += 4 + struct.unpack(">i", pin[at:at + 4])[0]
@@ -453,10 +458,12 @@ def drop_seqids(base: Path, lines, kind="p", titles=None):
     for oid in range(num_oids):
         record = phr[offsets[oid]:offsets[oid + 1]]
         starts.append(len(out))
-        if oid in lines:
+        if oid in lines or oid in (copies or {}):
             node, end = ber_parse(record, 0)
             assert end == len(record)
-            for line in lines[oid]:
+            for index, line in (copies or {}).get(oid, []):
+                node[1].insert(index, copy.deepcopy(node[1][line]))
+            for line in lines.get(oid, ()):
                 members = node[1][line][1]
                 for i, member in enumerate(members):
                     if member[0] == 0xA1:
@@ -470,8 +477,8 @@ def drop_seqids(base: Path, lines, kind="p", titles=None):
     starts.append(len(out))
     for i, start in enumerate(starts):
         pin[at + 4 * i:at + 4 * i + 4] = struct.pack(">i", start)
-    base.with_suffix(f".{kind}hr").write_bytes(bytes(out))
-    base.with_suffix(f".{kind}in").write_bytes(bytes(pin))
+    Path(f"{base}.{kind}hr").write_bytes(bytes(out))
+    Path(f"{base}.{kind}in").write_bytes(bytes(pin))
 
 
 def back_translate(faa: Path, fna: Path):
@@ -596,8 +603,8 @@ def pig_isam(base: Path, rows, pad: int = 0):
     data = b"".join(struct.pack(">II", k, o) for k, o in rows)
     header = struct.pack(">9i", 1, 0, len(data), len(rows), 1, 256, 0, 0, 0)
     index = header + struct.pack(">II", rows[0][0], rows[0][1]) + struct.pack(">Ii", 0xFFFFFFFF, 0)
-    base.with_suffix(".ppi").write_bytes(index)
-    base.with_suffix(".ppd").write_bytes(data + bytes(pad))
+    Path(f"{base}.ppi").write_bytes(index)
+    Path(f"{base}.ppd").write_bytes(data + bytes(pad))
 
 
 def build_d6(mk, common):

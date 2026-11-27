@@ -10,7 +10,7 @@
 
 mod app;
 mod checkdup;
-mod counts;
+pub(crate) mod counts;
 mod ids;
 mod sdust;
 mod work;
@@ -132,76 +132,49 @@ pub(crate) fn check_in(
 
 // No NCBI counterpart: LOSAT Web reads `-logfile` and `-out` against the input names the run
 // opens for reading, so a write name equal to a missing input is refused instead of diverging
-// from the command line, which creates the file and then reads it back (line WQA D19 round R2).
+// from the command line, which creates the file and then reads it back (line WQA D19 round R2,
+// D19b).
 /// The input file names that a `windowmasker` run with `words` opens for reading:
 /// `(for_logfile, for_out)`.
 /// - `for_logfile`: every file that the run opens after the application start opens `-logfile`:
-///   `-in` (unless `-` or `-infmt blastdb`; split on `,` for `-mk_counts` without `-fa_list true`),
-///   `-ustat` (in masking mode), `-ids` and `-exclude_ids` (when not `-convert`).
+///   `-in` (split via `counts::file_list` for `-mk_counts`, including the `-fa_list true` list file
+///   and every entry read from it; for `-infmt blastdb`, the database lookup files from
+///   `seqdb::alias::database_lookup_files`), `-ustat` (in masking mode), `-ids` and `-exclude_ids`
+///   (when not `-convert`).
 /// - `for_out`: the subset that the command line opens and reads after opening `-out` in a way
-///   that changes the run when the file is missing: `-in` (split on `,`, unless `-` or
-///   `-infmt blastdb`) of `-mk_counts` without `-fa_list true`, and `-ustat` of masking.
-pub(crate) fn read_files<S: AsRef<OsStr>>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-    let mut mk_counts = false;
-    let mut convert = false;
-    let mut fa_list = false;
-    let mut infmt_blastdb = false;
-    let mut input: Option<Vec<u8>> = None;
-    let mut ustat: Option<Vec<u8>> = None;
-    let mut ids: Option<Vec<u8>> = None;
-    let mut exclude_ids: Option<Vec<u8>> = None;
-    crate::ncbi_app::args::scan_argv("windowmasker", words, |name, value| match (name, value) {
-        ("mk_counts", None) => mk_counts = true,
-        ("convert", None) => convert = true,
-        ("fa_list", Some(v)) => {
-            fa_list = v
-                .to_str()
-                .and_then(crate::ncbi_str::string_to_bool)
-                .unwrap_or(false);
-        }
-        ("infmt", Some(v)) => infmt_blastdb = v == "blastdb",
-        ("in", Some(v)) => input = Some(v.as_encoded_bytes().to_vec()),
-        ("ustat", Some(v)) => ustat = Some(v.as_encoded_bytes().to_vec()),
-        ("ids", Some(v)) => ids = Some(v.as_encoded_bytes().to_vec()),
-        ("exclude_ids", Some(v)) => exclude_ids = Some(v.as_encoded_bytes().to_vec()),
-        _ => {}
-    });
-    let mut for_log = Vec::new();
-    let mut for_out = Vec::new();
-    let push_in = |out: &mut Vec<Vec<u8>>, bytes: &[u8]| {
-        if !bytes.is_empty() && bytes != b"-" {
-            out.push(bytes.to_vec());
-        }
+///   that changes the run when the file is missing: every input/database entry of `-mk_counts`
+///   (comma-separated or read from `-fa_list true`, FASTA or `-infmt blastdb`), and `-ustat` of
+///   masking.
+pub(crate) fn read_files<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    let (log_paths, out_paths, databases, databases_for_out) =
+        crate::report::log_inputs::windowmasker_read_parts(words);
+    let encode = |paths: Vec<std::path::PathBuf>| -> Vec<Vec<u8>> {
+        paths
+            .into_iter()
+            .map(|p| p.into_os_string().into_encoded_bytes())
+            .collect()
     };
-    let push_path = |out: &mut Vec<Vec<u8>>, bytes: &[u8]| {
-        if !bytes.is_empty() {
-            out.push(bytes.to_vec());
-        }
-    };
-    if let Some(ref raw_in) = input {
-        if !infmt_blastdb {
-            if mk_counts && !convert && !fa_list {
-                for part in raw_in.split(|&b| b == b',') {
-                    push_in(&mut for_log, part);
-                    push_in(&mut for_out, part);
+    let mut for_log = encode(log_paths);
+    let mut for_out = encode(out_paths);
+    if !databases.is_empty() {
+        let blastdb =
+            crate::blastinput::ncbi_environment::ApplicationStart::of_process(PROGRAM, words)
+                .settings()
+                .ok()
+                .and_then(|s| s.blastdb);
+        for db in databases {
+            for path in crate::seqdb::alias::database_lookup_files(
+                &crate::utils::os_bytes::os_str_bytes(&db),
+                crate::seqdb::SeqType::Nucleotide,
+                blastdb.as_deref(),
+            ) {
+                if !path.is_empty() {
+                    if databases_for_out {
+                        for_out.push(path.clone());
+                    }
+                    for_log.push(path);
                 }
-            } else {
-                push_in(&mut for_log, raw_in);
             }
-        }
-    }
-    if !mk_counts && !convert {
-        if let Some(ref u) = ustat {
-            push_path(&mut for_log, u);
-            push_path(&mut for_out, u);
-        }
-    }
-    if !convert {
-        if let Some(ref list) = ids {
-            push_path(&mut for_log, list);
-        }
-        if let Some(ref list) = exclude_ids {
-            push_path(&mut for_log, list);
         }
     }
     (for_log, for_out)

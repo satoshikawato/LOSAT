@@ -15,6 +15,11 @@ use std::path::{Path, PathBuf};
 
 use crate::utils::mapped_file::MappedFile;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:549-575
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:355-363
+/// RPS-BLAST profile database file extensions beyond the protein BLAST volume files.
+pub(crate) const RPS_EXTENSIONS: [&str; 4] = ["rps", "loo", "aux", "freq"];
+
 /// `RPS_MAGIC_NUM`: the files of a 26-letter alphabet.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_rps.h:43-44
@@ -636,12 +641,9 @@ impl RpsVolumeFiles {
         &mut self,
         base: &Path,
         program: &str,
-        database_name: Option<&str>,
+        database_name: Option<&[u8]>,
     ) -> Result<(), RpsOpenError> {
-        let shown = database_name.map_or_else(
-            || canonical_volume_path(base),
-            |name| name.as_bytes().to_vec(),
-        );
+        let shown = database_name.map_or_else(|| canonical_volume_path(base), <[u8]>::to_vec);
         let missing = || {
             RpsOpenError::Ncbi(
                 [

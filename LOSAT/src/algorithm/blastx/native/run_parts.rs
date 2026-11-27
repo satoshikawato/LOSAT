@@ -73,7 +73,8 @@ impl RunSetup {
             args.export_search_strategy.as_deref(),
             program.upper,
         )?;
-        let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+        let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt);
+        let choice = app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
         let format = choice.report_format(Program::Blastx, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -84,7 +85,7 @@ impl RunSetup {
             format == Some(app::ReportFormat::ArchiveFormat),
             &options_handle,
         )
-        .map(|handle| handle.with_outfmt_text(&args.outfmt));
+        .map(|handle| handle.with_outfmt_text(&outfmt_bytes));
         archive_slot.clone_from(&archive);
         // The search strategy's request, with the archive's options handle.
         let strategy = strategy_file.map(|file| {
@@ -246,7 +247,7 @@ impl ArchiveBatch<'_> {
             results,
             crate::algorithm::blastx::empty_rows::SubjectLoc::of_run(database.is_some()),
         );
-        let reported;
+        let mut reported;
         let (subject_names, call_subjects): (_, &[FastaRecord]) =
             match (&database, &pairwise_database) {
                 (Some(database), Some(pairwise)) => {
@@ -255,8 +256,10 @@ impl ArchiveBatch<'_> {
                         search_subjects,
                         results,
                         options.gapped,
-                        ReportedAsks::default(),
-                        &mut *diagnostics,
+                        // The archive reads no title besides the Seq-aligns' (no prefetch;
+                        // RPSTBLASTN still stays `Reports`).
+                        ReportedAsks::of_archive(options),
+                        (&mut *diagnostics, Some(handle)),
                     )? {
                         None => ReportedSubjects::default(),
                         Some(titles) => ReportedSubjects::for_batch(
@@ -289,6 +292,7 @@ impl ArchiveBatch<'_> {
                             results,
                             options.gapped,
                             scopes.numbered_from(queries_before),
+                            &crate::report::query_bioseq::SeenRun::REFUSED,
                         )?;
                     }
                     (

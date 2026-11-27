@@ -91,7 +91,7 @@ impl DiagStruct {
         let mut diag = Self::default();
         diag.set_flag(0);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:101-103
-        diag.set_last_hit(-window);
+        diag.set_last_hit(window.wrapping_neg());
         diag
     }
 }

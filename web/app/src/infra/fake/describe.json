@@ -8,6 +8,11 @@
   ],
   "parameters": [
    {
+    "flag": "-import_search_strategy",
+    "help": "Search strategy to use",
+    "takes_value": true
+   },
+   {
     "flag": "-export_search_strategy",
     "help": "File name to record the search strategy used",
     "takes_value": true
@@ -469,6 +474,11 @@
    7
   ],
   "parameters": [
+   {
+    "flag": "-import_search_strategy",
+    "help": "Search strategy to use",
+    "takes_value": true
+   },
    {
     "flag": "-export_search_strategy",
     "help": "File name to record the search strategy used",
@@ -1100,6 +1110,11 @@
   ],
   "parameters": [
    {
+    "flag": "-import_search_strategy",
+    "help": "Search strategy to use",
+    "takes_value": true
+   },
+   {
     "flag": "-export_search_strategy",
     "help": "File name to record the search strategy used",
     "takes_value": true
@@ -1677,6 +1692,11 @@
   ],
   "parameters": [
    {
+    "flag": "-import_search_strategy",
+    "help": "Search strategy to use",
+    "takes_value": true
+   },
+   {
     "flag": "-export_search_strategy",
     "help": "File name to record the search strategy used",
     "takes_value": true
@@ -1956,6 +1976,11 @@
     "flag": "-use_sw_tback",
     "help": "Compute locally optimal Smith-Waterman alignments?",
     "takes_value": false
+   },
+   {
+    "flag": "-in_pssm",
+    "help": "PSI-TBLASTN checkpoint file",
+    "takes_value": true
    }
   ],
   "subject_gencodes": [
@@ -2249,6 +2274,11 @@
    7
   ],
   "parameters": [
+   {
+    "flag": "-import_search_strategy",
+    "help": "Search strategy to use",
+    "takes_value": true
+   },
    {
     "flag": "-export_search_strategy",
     "help": "File name to record the search strategy used",
@@ -2630,6 +2660,453 @@
      "PAM70": {
       "": {
        "-threshold": "16",
+       "-window_size": "20"
+      }
+     }
+    }
+   },
+   "unless": {
+    "-max_target_seqs": [
+     "-num_descriptions",
+     "-num_alignments"
+    ],
+    "-num_alignments": [
+     "-max_target_seqs"
+    ],
+    "-num_descriptions": [
+     "-max_target_seqs"
+    ]
+   },
+   "given": {
+    "-max_target_seqs": [
+     ""
+    ],
+    "-num_alignments": [
+     ""
+    ],
+    "-num_descriptions": [
+     ""
+    ]
+   }
+  }
+ },
+ "psiblast": {
+  "program": "psiblast",
+  "formats": [
+   0,
+   6,
+   7
+  ],
+  "parameters": [
+   {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
+    "takes_value": true
+   },
+   {
+    "flag": "-db",
+    "help": "BLAST database name",
+    "takes_value": true
+   },
+   {
+    "flag": "-dbsize",
+    "help": "Effective length of the database ",
+    "takes_value": true
+   },
+   {
+    "flag": "-gilist",
+    "help": "Restrict search of database to list of GIs",
+    "takes_value": true
+   },
+   {
+    "flag": "-seqidlist",
+    "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_gilist",
+    "help": "Restrict search of database to everything except the specified GIs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_seqidlist",
+    "help": "Restrict search of database to everything except the specified SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxids",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxids",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants ",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxidlist",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants ",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_taxid_expansion",
+    "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
+    "takes_value": false
+   },
+   {
+    "flag": "-ipglist",
+    "help": "Restrict search of database to list of IPGs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_ipglist",
+    "help": "Restrict search of database to everything except the specified IPGs",
+    "takes_value": true
+   },
+   {
+    "flag": "-subject",
+    "help": "Subject sequence(s) to search",
+    "takes_value": true
+   },
+   {
+    "flag": "-subject_loc",
+    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   },
+   {
+    "flag": "-query",
+    "help": "Input file name",
+    "takes_value": true,
+    "default": "-"
+   },
+   {
+    "flag": "-evalue",
+    "help": "Expectation value (E) threshold for saving hits. Default = 10",
+    "takes_value": true
+   },
+   {
+    "flag": "-word_size",
+    "help": "Word size for wordfinder algorithm",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapopen",
+    "help": "Cost to open a gap",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapextend",
+    "help": "Cost to extend a gap",
+    "takes_value": true
+   },
+   {
+    "flag": "-qcov_hsp_perc",
+    "help": "Percent query coverage per hsp",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_hsps",
+    "help": "Set maximum number of HSPs per subject sequence to save for each query",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment",
+    "takes_value": true
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
+   },
+   {
+    "flag": "-sum_stats",
+    "help": "Use sum statistics",
+    "takes_value": true
+   },
+   {
+    "flag": "-seg",
+    "help": "Filter query sequence with SEG (Format: 'yes', 'window locut hicut', or 'no' to disable)",
+    "takes_value": true,
+    "default": "no"
+   },
+   {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks",
+    "takes_value": true,
+    "default": "false"
+   },
+   {
+    "flag": "-matrix",
+    "help": "Scoring matrix name (normally BLOSUM62)",
+    "takes_value": true
+   },
+   {
+    "flag": "-threshold",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table",
+    "takes_value": true
+   },
+   {
+    "flag": "-culling_limit",
+    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_overhang",
+    "help": "Best Hit algorithm overhang value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_score_edge",
+    "help": "Best Hit algorithm score edge value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-subject_besthit",
+    "help": "Return only the best HSP for each non overlapping query region",
+    "takes_value": false
+   },
+   {
+    "flag": "-window_size",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm",
+    "takes_value": true
+   },
+   {
+    "flag": "-lcase_masking",
+    "help": "Use lower case filtering in query and subject sequence(s)?",
+    "takes_value": false
+   },
+   {
+    "flag": "-query_loc",
+    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false
+   },
+   {
+    "flag": "-num_descriptions",
+    "help": "Number of database sequences to show one-line descriptions for\nNot applicable for outfmt > 4\nDefault = `500'",
+    "takes_value": true
+   },
+   {
+    "flag": "-num_alignments",
+    "help": "Number of database sequences to show alignments for\nDefault = `250'",
+    "takes_value": true
+   },
+   {
+    "flag": "-line_length",
+    "help": "Line length for formatting alignments\nNot applicable for outfmt > 4\nDefault = `60'",
+    "takes_value": true
+   },
+   {
+    "flag": "-html",
+    "help": "Produce HTML output?",
+    "takes_value": false
+   },
+   {
+    "flag": "-sorthits",
+    "help": "Sorting option for hits:\nalignment view options:\n  0 = Sort by evalue,\n  1 = Sort by bit score,\n  2 = Sort by total score,\n  3 = Sort by percent identity,\n  4 = Sort by query coverage\nNot applicable for outfmt > 4\n",
+    "takes_value": true
+   },
+   {
+    "flag": "-sorthsps",
+    "help": "Sorting option for hps:\n  0 = Sort by hsp evalue,\n  1 = Sort by hsp score,\n  2 = Sort by hsp query start,\n  3 = Sort by hsp percent identity,\n  4 = Sort by hsp subject start\nNot applicable for outfmt != 0\n",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_target_seqs",
+    "help": "Maximum number of aligned sequences to keep \n(value of 5 or more is recommended)\nDefault = `500'",
+    "takes_value": true
+   },
+   {
+    "flag": "-comp_based_stats",
+    "help": "Use composition-based statistics:\n    D or d: default (equivalent to 2 )\n    0 or F or f: No composition-based statistics\n    1: Composition-based statistics as in NAR 29:2994-3005, 2001\n    2 or T or t : Composition-based score adjustment as in Bioinformatics 21:902-911,\n    2005, conditioned on sequence properties\n    3: Composition-based score adjustment as in Bioinformatics 21:902-911,\n    2005, unconditionally\n",
+    "takes_value": true,
+    "default": "2"
+   },
+   {
+    "flag": "-use_sw_tback",
+    "help": "Compute locally optimal Smith-Waterman alignments?",
+    "takes_value": false
+   },
+   {
+    "flag": "-gap_trigger",
+    "help": "Number of bits to trigger gapping",
+    "takes_value": true,
+    "default": "22"
+   },
+   {
+    "flag": "-num_iterations",
+    "help": "Number of iterations to perform (0 means run until convergence)",
+    "takes_value": true,
+    "default": "1"
+   },
+   {
+    "flag": "-out_pssm",
+    "help": "File name to store checkpoint file",
+    "takes_value": true
+   },
+   {
+    "flag": "-out_ascii_pssm",
+    "help": "File name to store ASCII version of PSSM",
+    "takes_value": true
+   },
+   {
+    "flag": "-save_pssm_after_last_round",
+    "help": "Save PSSM after the last database search",
+    "takes_value": false
+   },
+   {
+    "flag": "-save_each_pssm",
+    "help": "Save PSSM after each iteration (file name is given in -save_pssm or -save_ascii_pssm options)",
+    "takes_value": false
+   },
+   {
+    "flag": "-in_msa",
+    "help": "File name of multiple sequence alignment to restart PSI-BLAST",
+    "takes_value": true
+   },
+   {
+    "flag": "-msa_master_idx",
+    "help": "Ordinal number (1-based index) of the sequence to use as a master in the multiple sequence alignment. If not provided, the first sequence in the multiple sequence alignment will be used",
+    "takes_value": true
+   },
+   {
+    "flag": "-ignore_msa_master",
+    "help": "Ignore the master sequence when creating PSSM",
+    "takes_value": false
+   },
+   {
+    "flag": "-in_pssm",
+    "help": "PSI-BLAST checkpoint file",
+    "takes_value": true
+   },
+   {
+    "flag": "-pseudocount",
+    "help": "Pseudo-count value used when constructing PSSM",
+    "takes_value": true,
+    "default": "0"
+   },
+   {
+    "flag": "-inclusion_ethresh",
+    "help": "E-value inclusion threshold for pairwise alignments",
+    "takes_value": true,
+    "default": "0.002"
+   }
+  ],
+  "defaults": {
+   "tasks": {
+    "": {
+     "-culling_limit": "0",
+     "-evalue": "10",
+     "-gap_trigger": "22",
+     "-gapextend": "1",
+     "-gapopen": "11",
+     "-inclusion_ethresh": "0.002",
+     "-line_length": "60",
+     "-matrix": "BLOSUM62",
+     "-max_target_seqs": "500",
+     "-num_alignments": "250",
+     "-num_descriptions": "500",
+     "-num_iterations": "1",
+     "-pseudocount": "0",
+     "-seg": "no",
+     "-soft_masking": "false",
+     "-sum_stats": "false",
+     "-threshold": "11",
+     "-window_size": "40",
+     "-word_size": "3",
+     "-xdrop_gap": "15",
+     "-xdrop_gap_final": "25",
+     "-xdrop_ungap": "7"
+    }
+   },
+   "by": {
+    "-matrix": {
+     "BLOSUM45": {
+      "": {
+       "-gapextend": "2",
+       "-gapopen": "14",
+       "-threshold": "14",
+       "-window_size": "60"
+      }
+     },
+     "BLOSUM50": {
+      "": {
+       "-gapextend": "2",
+       "-gapopen": "13",
+       "-threshold": "11",
+       "-window_size": "40"
+      }
+     },
+     "BLOSUM62": {
+      "": {
+       "-gapextend": "1",
+       "-gapopen": "11",
+       "-threshold": "11",
+       "-window_size": "40"
+      }
+     },
+     "BLOSUM80": {
+      "": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "12",
+       "-window_size": "25"
+      }
+     },
+     "BLOSUM90": {
+      "": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "11",
+       "-window_size": "40"
+      }
+     },
+     "PAM250": {
+      "": {
+       "-gapextend": "2",
+       "-gapopen": "15",
+       "-threshold": "11",
+       "-window_size": "40"
+      }
+     },
+     "PAM30": {
+      "": {
+       "-gapextend": "1",
+       "-gapopen": "9",
+       "-threshold": "16",
+       "-window_size": "15"
+      }
+     },
+     "PAM70": {
+      "": {
+       "-gapextend": "1",
+       "-gapopen": "10",
+       "-threshold": "14",
        "-window_size": "20"
       }
      }

@@ -1786,27 +1786,34 @@ fn long_chunk_overlap_merge_matches_ncbi_input_score_and_order() {
             .map(&parse_hsp)
             .collect::<Vec<_>>()
     };
-    let first = merge_subject_chunk_hsps(
-        Vec::new(),
-        for_call("MERGE_IN_HSP", 0),
+    let mut first = Vec::new();
+    let mut first_in = for_call("MERGE_IN_HSP", 0);
+    crate::core::blast_hits::merge_subject_chunk_hsps(
+        &mut first,
+        &mut first_in,
         0,
         0,
         i32::MAX as usize,
         true,
-    );
+        |a, b| compare_gapped_score(&a.1, &b.1),
+    )
+    .unwrap();
     assert_eq!(first, for_call("MERGE_OUT_HSP", 0));
-    let old = for_call("MERGE_OLD_HSP", 1);
+    let mut old = for_call("MERGE_OLD_HSP", 1);
     assert_eq!(first, old);
-    let second = merge_subject_chunk_hsps(
-        old,
-        for_call("MERGE_IN_HSP", 1),
+    let mut second_in = for_call("MERGE_IN_HSP", 1);
+    crate::core::blast_hits::merge_subject_chunk_hsps(
+        &mut old,
+        &mut second_in,
         4_999_900,
         100,
         i32::MAX as usize,
         true,
-    );
-    assert_eq!(second, for_call("MERGE_OUT_HSP", 1));
-    assert_eq!(second[0].1.score, 660);
+        |a, b| compare_gapped_score(&a.1, &b.1),
+    )
+    .unwrap();
+    assert_eq!(old, for_call("MERGE_OUT_HSP", 1));
+    assert_eq!(old[0].1.score, 660);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2762-2864:
@@ -3267,14 +3274,18 @@ fn long_subject_chunk_local_gapped_hsps_match_ncbi() {
     second.s_start += 4_999_900;
     second.s_end += 4_999_900;
     second.s_gapped_start += 4_999_900;
-    let merged = merge_subject_chunk_hsps(
-        vec![(0, actual[0])],
-        vec![(0, second)],
+    let mut merged = vec![(0, actual[0])];
+    let mut second_in = vec![(0, second)];
+    crate::core::blast_hits::merge_subject_chunk_hsps(
+        &mut merged,
+        &mut second_in,
         4_999_900,
         100,
         i32::MAX as usize,
         true,
-    );
+        |a, b| compare_gapped_score(&a.1, &b.1),
+    )
+    .unwrap();
     let merged_expected: Vec<_> = trace
         .lines()
         .filter(|line| line.starts_with("MERGE_OUT_HSP\t1\t"))
@@ -5184,4 +5195,83 @@ fn short_alignment_starting_before_chunk_uses_middle_and_refuses_ncbi_crashes() 
         assert_eq!(mat, want, "matrix ({s_start})");
         assert_eq!(ps, want, "pssm ({s_start})");
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1513-1515,2973-2995
+// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.122 (rule 3): ungapped one-hit chunk merges whose query lengths
+// sum to 0 refuse with a typed `ShortChunkSeedRefusal` naming the subject OID and reading frame.
+#[test]
+fn merge_adjusted_chunk_refuses_zero_length_sum_with_oid_and_frame() {
+    let chunk = TranslatedChunk::new(100, 300);
+    let zero_len = |s_start: i32| {
+        (
+            0usize,
+            GappedHsp {
+                frame: -2,
+                score: 20,
+                q_start: 50,
+                q_end: 50,
+                q_gapped_start: 50,
+                s_start,
+                s_end: s_start,
+                s_gapped_start: s_start,
+            },
+        )
+    };
+    let error = merge_adjusted_chunk(
+        vec![zero_len(120)],
+        vec![zero_len(20)],
+        chunk,
+        i32::MAX as usize,
+        false,
+        17,
+        -2,
+    )
+    .expect_err("zero query-length sum must be refused");
+    assert!(
+        error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>(),
+        "expected ShortChunkSeedRefusal, got {error:?}"
+    );
+    let text = error.to_string();
+    assert!(
+        text.contains("TBLASTN: sequence of OID 17, frame -2"),
+        "{text}"
+    );
+    assert!(text.contains("undefined in NCBI BLAST+"), "{text}");
+
+    // Positive-length + negative-length one-hit pair whose query lengths sum to 0.
+    let pos = (
+        0usize,
+        GappedHsp {
+            frame: 1,
+            score: 25,
+            q_start: 50,
+            q_end: 52,
+            q_gapped_start: 51,
+            s_start: 120,
+            s_end: 122,
+            s_gapped_start: 121,
+        },
+    );
+    let neg = (
+        0usize,
+        GappedHsp {
+            frame: 1,
+            score: 15,
+            q_start: 52,
+            q_end: 50,
+            q_gapped_start: 51,
+            s_start: 22,
+            s_end: 20,
+            s_gapped_start: 21,
+        },
+    );
+    let error = merge_adjusted_chunk(vec![pos], vec![neg], chunk, i32::MAX as usize, false, 9, 1)
+        .expect_err("cancelling positive/negative query lengths must be refused");
+    assert!(error.is::<crate::algorithm::common::hard_chunk_scan::ShortChunkSeedRefusal>());
+    let text = error.to_string();
+    assert!(
+        text.contains("TBLASTN: sequence of OID 9, frame 1"),
+        "{text}"
+    );
 }

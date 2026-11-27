@@ -122,7 +122,7 @@ pub(crate) struct CddData {
 pub(crate) enum DataError {
     /// `CSimpleException` "Data file `<path>` does not exist" (rpsbproc: "Annotation data loading
     /// unsuccessful: ...", exit 2).
-    Missing(String),
+    Missing(Vec<u8>),
     /// A number that NCBI's conversion refuses (rpsbproc: two `Error:` lines, exit 2).
     Conversion(NcbiException),
     /// An exception of the C++ library that leaves `Init` (rpsbproc: one `Error: (106.6)` line
@@ -132,14 +132,14 @@ pub(crate) enum DataError {
     Unsupported(String),
 }
 
-/// The paths of the six files (`LoadData_real`'s arguments).
+/// The paths of the six files (`LoadData_real`'s arguments), as NCBI's `std::string` bytes.
 pub(crate) struct DataFiles {
-    pub(crate) cddids: String,
-    pub(crate) spfeats: String,
-    pub(crate) genfeats: String,
-    pub(crate) bscores: String,
-    pub(crate) cdtrack: String,
-    pub(crate) famlinks: String,
+    pub(crate) cddids: Vec<u8>,
+    pub(crate) spfeats: Vec<u8>,
+    pub(crate) genfeats: Vec<u8>,
+    pub(crate) bscores: Vec<u8>,
+    pub(crate) cdtrack: Vec<u8>,
+    pub(crate) famlinks: Vec<u8>,
 }
 
 /// `std::string::npos`.
@@ -306,10 +306,10 @@ pub(crate) fn compute_pseudo_pssm_id(accession: &[u8]) -> u32 {
 /// Reads the `\n`-separated lines of `path` (`getline` while the stream is good: a last line
 /// without its `\n` is read, and a file that does not open has no lines).
 fn for_each_line(
-    path: &str,
+    path: &[u8],
     mut each: impl FnMut(&[u8]) -> Result<(), DataError>,
 ) -> Result<(), DataError> {
-    let Ok(file) = std::fs::File::open(path) else {
+    let Ok(file) = std::fs::File::open(crate::utils::os_bytes::path_of_bytes(path)) else {
         return Ok(());
     };
     let mut reader = BufReader::with_capacity(1 << 16, file);
@@ -329,8 +329,8 @@ fn for_each_line(
 }
 
 /// `CFile`'s `Exists` on the path: a regular file (links followed).
-fn file_exists(path: &str) -> bool {
-    std::fs::metadata(path).is_ok_and(|meta| meta.is_file())
+fn file_exists(path: &[u8]) -> bool {
+    std::fs::metadata(crate::utils::os_bytes::path_of_bytes(path)).is_ok_and(|meta| meta.is_file())
 }
 
 impl CddData {
@@ -396,9 +396,9 @@ impl CddData {
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.cpp:100-213
     // (`pos1 + 1` of `npos` is 0: a line with fewer tabs than NCBI expects reads its fields from
     // the start again. The definition lines are not kept.)
-    fn load_cddids(&mut self, path: &str) -> Result<(), DataError> {
+    fn load_cddids(&mut self, path: &[u8]) -> Result<(), DataError> {
         if !file_exists(path) {
-            return Err(DataError::Missing(path.to_string()));
+            return Err(DataError::Missing(path.to_vec()));
         }
         const FILE: &str = "cddid.tbl";
         let mut domains = Vec::new();
@@ -553,9 +553,9 @@ impl CddData {
     // N/A`, a line whose root is missing) is refused: its result rests on the undefined read.
     // NCBI's published `cdtrack.txt` (the v3.23 preview, oracle A4-2: LOSAT's bytes and NCBI's
     // agree on it) has no such line; a read past the terminating 0 is refused too.
-    fn load_cdtrack(&mut self, path: &str) -> Result<(), DataError> {
+    fn load_cdtrack(&mut self, path: &[u8]) -> Result<(), DataError> {
         if !file_exists(path) {
-            return Err(DataError::Missing(path.to_string()));
+            return Err(DataError::Missing(path.to_vec()));
         }
         const FILE: &str = "cdtrack.txt";
         for_each_line(path, |raw| {
@@ -619,9 +619,9 @@ impl CddData {
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.cpp:310-386
     // (The domain is looked up by accession: the PSSM-ID column is not read.)
-    fn load_famlinks(&mut self, path: &str) -> Result<(), DataError> {
+    fn load_famlinks(&mut self, path: &[u8]) -> Result<(), DataError> {
         if !file_exists(path) {
-            return Err(DataError::Missing(path.to_string()));
+            return Err(DataError::Missing(path.to_vec()));
         }
         const FILE: &str = "family_superfamily_links";
         for_each_line(path, |raw| {
@@ -666,9 +666,9 @@ impl CddData {
     // standard's `vector::reserve` throws it for a count above `max_size()`; the text is observed:
     // NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed: vector::reserve`
     // and exited 2, PS16a review oracle A4-1 cases `annot10` and `gen10`.)
-    fn load_sites(&mut self, path: &str, specific: bool) -> Result<(), DataError> {
+    fn load_sites(&mut self, path: &[u8], specific: bool) -> Result<(), DataError> {
         if !file_exists(path) {
-            return Err(DataError::Missing(path.to_string()));
+            return Err(DataError::Missing(path.to_vec()));
         }
         let file = if specific {
             "cddannot.dat"
@@ -816,9 +816,9 @@ impl CddData {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.cpp:617-657
-    fn load_bscores(&mut self, path: &str) -> Result<(), DataError> {
+    fn load_bscores(&mut self, path: &[u8]) -> Result<(), DataError> {
         if !file_exists(path) {
-            return Err(DataError::Missing(path.to_string()));
+            return Err(DataError::Missing(path.to_vec()));
         }
         const FILE: &str = "bitscore_specific.txt";
         for_each_line(path, |bytes| {

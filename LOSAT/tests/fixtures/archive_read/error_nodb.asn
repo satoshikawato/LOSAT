@@ -1,0 +1,17 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST Database error: No alias or index file found for
+ nucleotide database [db/no_such_db] in search path [/dev/shm/rgff3/in::].
+ Please verify the spelling of the BLAST database and its molecule type."
+    }
+  }
+}

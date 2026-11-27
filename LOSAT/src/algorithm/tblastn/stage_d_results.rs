@@ -58,6 +58,10 @@ pub(super) struct KappaHspPayload {
     /// and its Seq-align's `hsp_percent_coverage` still count
     /// (`serial::seqalign::MappedScript::query_left_out`); 0 for every other HSP.
     pub query_left_out: usize,
+    /// Report-time state for a TBLASTN `-in_pssm -window_size 0` alignment whose traceback
+    /// started on its frame's trailing NULLB (`nullb_report::prepare_nullb_hsp`); `None` for
+    /// every ordinary HSP.
+    pub nullb: Option<super::nullb_report::NullbReport>,
 }
 
 #[derive(Clone, Debug)]
@@ -196,7 +200,11 @@ impl KappaResultHitList {
     /// (`map_subject_alignments`). A later call leaves the lists as they are
     /// (`in_report_order`): the mapper leaves out a first and a last segment with a gap row once
     /// each, and a sort of the mapped HSPs could order ties otherwise.
-    pub(super) fn put_in_report_order(&mut self, remaps: bool) {
+    pub(super) fn put_in_report_order(
+        &mut self,
+        remaps: bool,
+        subject_len: impl Fn(usize) -> usize,
+    ) {
         if std::mem::replace(&mut self.in_report_order, true) {
             return;
         }
@@ -204,6 +212,14 @@ impl KappaResultHitList {
         self.drop_zero_score_hsps();
         if remaps {
             self.map_subject_alignments();
+        }
+        for list in &mut self.lists {
+            if let Ok(oid) = usize::try_from(list.oid) {
+                let len = subject_len(oid);
+                for (linked, payload) in list.hsps.hsps.iter_mut().zip(&mut list.payloads) {
+                    super::nullb_report::prepare_nullb_hsp(linked, payload, len, remaps);
+                }
+            }
         }
     }
 
@@ -601,10 +617,14 @@ fn query_hsp_lists_merge(
                 let start_diag = candidate.hsp.q_start - candidate.hsp.s_start;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1537
                 if (end_diag - start_diag).abs() < 10
-                    && super::search_gapped::merge_two_chunk_hsps(
+                    && crate::core::blast_hits::merge_two_chunk_hsps(
                         &mut old[index1].hsp,
                         &candidate.hsp,
                         true,
+                    )
+                    .expect(
+                        "gapped split-query protein HSPs have positive length and score bounded by \
+                         length * matrix max (< Int4::MAX)",
                     )
                 {
                     *slot = None;

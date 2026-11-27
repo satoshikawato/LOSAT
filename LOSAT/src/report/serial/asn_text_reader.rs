@@ -431,6 +431,15 @@ impl<R: Read> StreamSource<R> {
         self.buf.len()
     }
 
+    /// The text from `pos` on: the bytes the source holds from there, then what `input` gives
+    /// after them (`Close` above: what a reader of one object did not use goes back to the
+    /// stream).
+    pub(crate) fn into_rest(self, pos: usize) -> (Vec<u8>, R) {
+        let mut buf = self.buf;
+        buf.drain(..(pos - self.base).min(buf.len()));
+        (buf, self.input)
+    }
+
     /// Reads blocks until `pos` is in the buffer or the stream ends, after dropping the released
     /// bytes once they are most of a buffer of more than a few blocks (each byte is moved at
     /// most once on average). A read error ends the text, as a failed read ends an `istream` (its
@@ -1957,7 +1966,12 @@ impl<S: AsnSource> Reader<S> {
 /// The end of `ReadDouble` (cited at `Reader::real`): the value of the mantissa `mantissa` (read
 /// with its sign; `is_negative` whether it had a `-`), `base` and `exp`; `None` for a base other
 /// than 2 and 10 ("illegal REAL base").
-fn real_of_parts(mut mantissa: f64, is_negative: bool, base: u32, exp: i32) -> Option<f64> {
+pub(crate) fn real_of_parts(
+    mut mantissa: f64,
+    is_negative: bool,
+    base: u32,
+    exp: i32,
+) -> Option<f64> {
     if base != 2 && base != 10 {
         return None;
     }

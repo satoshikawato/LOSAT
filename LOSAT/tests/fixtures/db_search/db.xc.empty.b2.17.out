@@ -1,0 +1,7 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:50
+@PG	ID:0	VN:2.17.0+	CL:/home/losatbench/losat-bench/tools/ncbi-official-2.17.0/ncbi-blast-2.17.0+/bin/blastn -db tests/db_search/taxfilter/tfn -query tests/fasta/xchunk/q_under.fna -task blastn -outfmt 17 -num_threads 1 	PN:blastn
+ENST00000251595.11	0	Query_1	1	255	50M526H	*	0	0	*	*	AS:i:100	EV:f:1.16988e-22	NM:i:0	PI:f:100.00	BS:f:91.4547
+ENST00000320868.9	0	Query_1	1	255	50M527H	*	0	0	*	*	AS:i:100	EV:f:1.16988e-22	NM:i:0	PI:f:100.00	BS:f:91.4547
+ENST00000292901.8	0	Query_1	34	255	221H11M429H	*	0	0	*	*	AS:i:22	EV:f:0.173778	NM:i:0	PI:f:100.00	BS:f:21.1234
+ENST00000335295.4	0	Query_1	34	255	46H11M571H	*	0	0	*	*	AS:i:22	EV:f:0.173778	NM:i:0	PI:f:100.00	BS:f:21.1234

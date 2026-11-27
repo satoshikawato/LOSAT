@@ -69,7 +69,7 @@ import {
   type BlastDbDiscovery,
   type DbMaskMode,
 } from '../domain/blast-db';
-import type { DatabaseFilterFileSnapshot, DatabaseSnapshot, InputPart } from '../domain/run';
+import type { DatabaseFilterFileSnapshot, DatabaseSnapshot, InputPart, QueryFileSnapshot } from '../domain/run';
 import { buildArgv, PASTED_NAMES, splitOptions } from '../domain/argv';
 import {
   endsInput,
@@ -83,7 +83,7 @@ import { parseTaxid, type CountsOrigin } from '../domain/counts';
 import type { ExampleId } from '../domain/examples';
 import { inputLead, type InputLead } from '../domain/input-format';
 import { describedSections, formControlOf, formParameters, setFields, type FieldValue, type FormValues } from '../domain/parameters';
-import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/programs';
+import { fastaParser, programById, PROGRAMS, querySourcesOf, sequenceKind, type QuerySource } from '../domain/programs';
 import { regionProblem, regionValue, type RegionText } from '../domain/region';
 import { withUnit } from '../domain/units';
 import type { DataGateway, SourceRef } from '../ports/data';
@@ -98,6 +98,14 @@ import { Store } from './store';
 
 export type InputMode = 'combined' | 'separate';
 export type SubjectSource = 'fasta' | 'database';
+export type { QuerySource };
+
+/** File-based query (`-in_pssm` or `-in_msa`) and MSA-specific options picked in the Query panel. */
+export interface QueryFileDraft {
+  readonly file?: File;
+  readonly msaMasterIdx: string;
+  readonly ignoreMsaMaster: boolean;
+}
 
 /** Local BLAST database folder/files picked in the search form (`-db` or BLASTN `-filtering_db`). */
 export interface DatabasePickDraft {
@@ -239,6 +247,10 @@ export interface SavedCountsFile {
 export interface DraftState {
   readonly program: ProgramId;
   readonly query: RoleDraft;
+  /** Whether Query searches FASTA (`-query`), a PSSM (`-in_pssm`), or an MSA (`-in_msa`). */
+  readonly querySource: QuerySource;
+  /** Chosen PSSM/MSA query file and MSA options, used when `querySource !== 'fasta'`. */
+  readonly queryFile: QueryFileDraft;
   readonly subject: RoleDraft;
   /** Whether Subject searches FASTA sequences (`-subject`) or a local BLAST database (`-db`). */
   readonly subjectSource: SubjectSource;
@@ -288,6 +300,13 @@ export interface DraftState {
    * one): the engine's readers of the sources' index and check have them so (line WQA's D16, 2026-11-20).
    */
   readonly dataLoaders: boolean;
+  /**
+   * Whether the run of the draft's argv reads deflines as parsed Seq-ids (`-parse_deflines`), as the
+   * latest validation that the engine answered says (off before one): the engine's index scan reads
+   * with it so that the record table matches the run's reading of records whose Seq-id names the other
+   * molecule (line RG-XT item X7-5, 2026-11-25).
+   */
+  readonly parseDeflines: boolean;
   /**
    * What the engine's start read of the argv of the latest validation (`EngineGateway.start`): the
    * name of its `-conffile`, for which the form asks for a file; undefined before it, or when the
@@ -383,6 +402,8 @@ export class SearchDraft {
     this.state = new Store<DraftState>({
       program: 'blastn',
       query: emptyRole(),
+      querySource: 'fasta',
+      queryFile: Object.freeze({ msaMasterIdx: '', ignoreMsaMaster: false }),
       subject: emptyRole(),
       subjectSource: rememberedSubject !== undefined ? 'database' : 'fasta',
       database: Object.freeze({
@@ -404,6 +425,7 @@ export class SearchDraft {
       race: {},
       validation: { state: 'idle' },
       dataLoaders: true,
+      parseDeflines: false,
       submitting: false,
     });
     void this.loadDescription('blastn');
@@ -423,9 +445,12 @@ export class SearchDraft {
     const description = this.described.get(program);
     const currentDb = this.state.get().database;
     const nextDatabase = reselectDatabaseForKind(currentDb, next.subject);
+    const currentQuerySource = this.state.get().querySource;
+    const nextQuerySource = querySourcesOf(program).includes(currentQuerySource) ? currentQuerySource : 'fasta';
     // The engine's start of the other program's argv is not this program's (its -conffile row goes until the validation).
     this.set({
       program,
+      querySource: nextQuerySource,
       description,
       database: nextDatabase,
       descriptionError: undefined,
@@ -558,6 +583,58 @@ export class SearchDraft {
       values: { ...values, [program]: Object.freeze(next) },
       files: { ...files, [program]: Object.freeze(nextFiles) },
       ...(resetFiltering ? { filteringDb: Object.freeze({}) } : {}),
+      message: undefined,
+    });
+    this.scheduleValidation();
+  }
+
+  /** Selects an algorithm in BLASTP's Algorithm radiogroup (`psiblast`, or a `blastp` `-task` choice). */
+  selectProteinAlgorithm(choice: string): void {
+    if (choice === 'psiblast') {
+      this.setProgram('psiblast');
+      return;
+    }
+    if (this.state.get().program !== 'blastp') this.setProgram('blastp');
+    this.setField('-task', choice);
+  }
+
+  // --- file-based query (`-in_pssm` and `-in_msa`) ----------------------------------------
+
+  /** Switches Query between FASTA (`-query`), MSA (`-in_msa`), and PSSM (`-in_pssm`). */
+  setQuerySource(querySource: QuerySource): void {
+    const { program, querySource: current } = this.state.get();
+    if (!querySourcesOf(program).includes(querySource) || current === querySource) return;
+    this.set({ querySource, message: undefined });
+    this.scheduleValidation();
+  }
+
+  /** Chooses or clears the PSSM (`-in_pssm`) or MSA (`-in_msa`) query file. */
+  setQueryFile(file: File | undefined): void {
+    const { queryFile } = this.state.get();
+    const { file: _prev, ...rest } = queryFile;
+    void _prev;
+    this.set({
+      queryFile: Object.freeze(file === undefined ? rest : { ...rest, file }),
+      message: undefined,
+    });
+    this.scheduleValidation();
+  }
+
+  /** Sets `-msa_master_idx` for PSI-BLAST `-in_msa` queries. */
+  setMsaMasterIdx(msaMasterIdx: string): void {
+    const { queryFile } = this.state.get();
+    this.set({
+      queryFile: Object.freeze({ ...queryFile, msaMasterIdx }),
+      message: undefined,
+    });
+    this.scheduleValidation();
+  }
+
+  /** Sets `-ignore_msa_master` for PSI-BLAST `-in_msa` queries. */
+  setIgnoreMsaMaster(ignoreMsaMaster: boolean): void {
+    const { queryFile } = this.state.get();
+    this.set({
+      queryFile: Object.freeze({ ...queryFile, ignoreMsaMaster }),
       message: undefined,
     });
     this.scheduleValidation();
@@ -943,7 +1020,7 @@ export class SearchDraft {
     this.forgetSubjectDb();
     const { remembered: _rem, ...restDb } = this.state.get().database;
     void _rem;
-    this.set({ subjectSource: 'fasta', database: Object.freeze(restDb) });
+    this.set({ querySource: 'fasta', subjectSource: 'fasta', database: Object.freeze(restDb) });
     for (const role of ROLES) {
       for (const source of this.role(role).sources) {
         if (source.key !== PASTE_KEY) this.dropSource(role, source.key);
@@ -1236,12 +1313,22 @@ export class SearchDraft {
     return only === undefined ? undefined : `${only.source.key}|${only.source.base!.revisionId}|${only.record.index}`;
   }
 
-  /** The parameters of the argv: the form's, database filters (in Database mode), and the regions'. */
+  /** The parameters of the argv: the form's, MSA options (in MSA mode), database filters (in Database mode), and the regions'. */
   parameters(): Array<readonly [string, string | true]> {
-    const { program, values, description, subjectSource, database } = this.state.get();
+    const { program, values, description, querySource, queryFile, subjectSource, database } = this.state.get();
     const parameters = formParameters(programById(program), values[program], description?.parameters);
+    const described = description === undefined ? undefined : new Set(description.parameters.map((option) => option.flag));
+    if (program === 'psiblast' && querySource === 'msa') {
+      if (queryFile.ignoreMsaMaster && (described === undefined || described.has('-ignore_msa_master'))) {
+        parameters.push(['-ignore_msa_master', true]);
+      } else if (
+        queryFile.msaMasterIdx.trim() !== '' &&
+        (described === undefined || described.has('-msa_master_idx'))
+      ) {
+        parameters.push(['-msa_master_idx', queryFile.msaMasterIdx.trim()]);
+      }
+    }
     if (subjectSource === 'database') {
-      const described = description === undefined ? undefined : new Set(description.parameters.map((option) => option.flag));
       for (const field of ALL_DB_FILTER_FIELDS) {
         if (described !== undefined && !described.has(field.flag)) continue;
         if (field.kind === 'file') {
@@ -1256,6 +1343,7 @@ export class SearchDraft {
       }
     }
     for (const role of ROLES) {
+      if (role === 'query' && querySource !== 'fasta') continue;
       if (role === 'subject' && subjectSource === 'database') continue;
       const region = this.region(role);
       const record = this.regionRecord(role);
@@ -1270,11 +1358,19 @@ export class SearchDraft {
    * option that the form sets (`formControlOf`) or a role's subrange, which are set there.
    */
   extraWords(): readonly string[] {
-    const { program, extra, description, subjectSource } = this.state.get();
+    const { program, extra, description, querySource, subjectSource } = this.state.get();
     const described = description === undefined ? undefined : new Set(description.parameters.map((option) => option.flag));
     const words = splitOptions(extra[program]);
     for (const word of words) {
       const flag = word.split('=', 1)[0]!;
+      if (
+        program === 'psiblast' &&
+        querySource === 'msa' &&
+        (flag === '-msa_master_idx' || flag === '-ignore_msa_master') &&
+        (described === undefined || described.has(flag))
+      ) {
+        throw new Error(`${flag} is set in the form: Query`);
+      }
       if (subjectSource === 'database' && ALL_DB_FILTER_FLAGS.has(flag) && (described === undefined || described.has(flag))) {
         throw new Error(`${flag} is set in the form: Database masking and filters`);
       }
@@ -1304,8 +1400,9 @@ export class SearchDraft {
    */
   runCount(): number {
     if (this.printsKind() !== null) return 1;
-    const queryCount = Math.max(1, this.inputGroups('query').length);
-    const subjectCount = this.state.get().subjectSource === 'database' ? 1 : Math.max(1, this.inputGroups('subject').length);
+    const { querySource, subjectSource } = this.state.get();
+    const queryCount = querySource !== 'fasta' ? 1 : Math.max(1, this.inputGroups('query').length);
+    const subjectCount = subjectSource === 'database' ? 1 : Math.max(1, this.inputGroups('subject').length);
     return queryCount * subjectCount;
   }
 
@@ -1379,7 +1476,7 @@ export class SearchDraft {
       void this.askAgain();
       await this.idle();
     }
-    const { program, threads, title, subjectSource, database, filteringDb } = this.state.get();
+    const { program, threads, title, querySource, queryFile, subjectSource, database, filteringDb } = this.state.get();
     if (this.printsText()) return this.enqueuePrinting();
     for (const role of ROLES) {
       const problem = this.inputProblem(role);
@@ -1389,7 +1486,7 @@ export class SearchDraft {
     if (fileProblem !== undefined) return { ok: false, message: fileProblem };
     // Everything from one state, before any wait.
     const groups = {
-      query: this.inputGroups('query'),
+      query: querySource !== 'fasta' ? [] : this.inputGroups('query'),
       subject: subjectSource === 'database' ? [] : this.inputGroups('subject'),
     };
     // Their sources stay until the runs have their inputs, also when the form lets them go meanwhile.
@@ -1464,43 +1561,52 @@ export class SearchDraft {
       );
     }
 
-    const resolvedQueries = await Promise.all(groups.query.map((sources) => this.resolveGroup(sources)));
+    let queryFileSnapshot: QueryFileSnapshot | undefined;
+    if (querySource !== 'fasta' && queryFile.file !== undefined) {
+      const name = normalizeRunPath(queryFile.file.name);
+      if (name === undefined) return { ok: false, message: `Invalid file name: "${queryFile.file.name}".` };
+      queryFileSnapshot = Object.freeze({
+        flag: querySource === 'pssm' ? ('-in_pssm' as const) : ('-in_msa' as const),
+        name,
+        size: queryFile.file.size,
+      });
+    }
+
+    const common = {
+      program,
+      ...(filteringSnapshot === undefined ? {} : { filteringDb: filteringSnapshot }),
+      ...(runFiles.length === 0 ? {} : { files: runFiles }),
+      parameters,
+      ...(extra.length === 0 ? {} : { extra }),
+      requestedThreads: threads,
+      ...(windowMasker === undefined ? {} : { windowMasker }),
+      ...(kept === undefined ? {} : { windowMaskerOrigin: kept.origin }),
+      ...(conffile === undefined ? {} : { conffile }),
+      ...(title.trim() === '' ? {} : { title }),
+    };
+
     const requests: SearchRequest[] = [];
-    if (dbSnapshot !== undefined) {
-      for (const query of resolvedQueries) {
-        requests.push({
-          program,
-          query: { dataset: query },
-          database: dbSnapshot,
-          ...(filteringSnapshot === undefined ? {} : { filteringDb: filteringSnapshot }),
-          ...(runFiles.length === 0 ? {} : { files: runFiles }),
-          parameters,
-          ...(extra.length === 0 ? {} : { extra }),
-          requestedThreads: threads,
-          ...(windowMasker === undefined ? {} : { windowMasker }),
-          ...(kept === undefined ? {} : { windowMaskerOrigin: kept.origin }),
-          ...(conffile === undefined ? {} : { conffile }),
-          ...(title.trim() === '' ? {} : { title }),
-        });
+    if (queryFileSnapshot !== undefined) {
+      if (dbSnapshot !== undefined) {
+        requests.push({ ...common, queryFile: queryFileSnapshot, database: dbSnapshot });
+      } else {
+        const resolvedSubjects = await Promise.all(groups.subject.map((sources) => this.resolveGroup(sources)));
+        for (const subject of resolvedSubjects) {
+          requests.push({ ...common, queryFile: queryFileSnapshot, subject: { dataset: subject } });
+        }
       }
     } else {
-      const resolvedSubjects = await Promise.all(groups.subject.map((sources) => this.resolveGroup(sources)));
-      for (const query of resolvedQueries) {
-        for (const subject of resolvedSubjects) {
-          requests.push({
-            program,
-            query: { dataset: query },
-            subject: { dataset: subject },
-            ...(filteringSnapshot === undefined ? {} : { filteringDb: filteringSnapshot }),
-            ...(runFiles.length === 0 ? {} : { files: runFiles }),
-            parameters,
-            ...(extra.length === 0 ? {} : { extra }),
-            requestedThreads: threads,
-            ...(windowMasker === undefined ? {} : { windowMasker }),
-            ...(kept === undefined ? {} : { windowMaskerOrigin: kept.origin }),
-            ...(conffile === undefined ? {} : { conffile }),
-            ...(title.trim() === '' ? {} : { title }),
-          });
+      const resolvedQueries = await Promise.all(groups.query.map((sources) => this.resolveGroup(sources)));
+      if (dbSnapshot !== undefined) {
+        for (const query of resolvedQueries) {
+          requests.push({ ...common, query: { dataset: query }, database: dbSnapshot });
+        }
+      } else {
+        const resolvedSubjects = await Promise.all(groups.subject.map((sources) => this.resolveGroup(sources)));
+        for (const query of resolvedQueries) {
+          for (const subject of resolvedSubjects) {
+            requests.push({ ...common, query: { dataset: query }, subject: { dataset: subject } });
+          }
         }
       }
     }
@@ -1643,7 +1749,7 @@ export class SearchDraft {
     activeFilterFiles: Readonly<Record<string, File>>,
     usesFilteringDb: boolean,
   ): AssembledSearchDirectory {
-    const { subjectSource, database, filteringDb } = state;
+    const { querySource, queryFile, subjectSource, database, filteringDb } = state;
     return assembleSearchDirectory({
       ...(subjectSource === 'database' && database.discovery !== undefined && database.selected !== undefined
         ? { subjectDb: { discovery: database.discovery, selectedName: database.selected }, filterFiles: activeFilterFiles }
@@ -1651,11 +1757,13 @@ export class SearchDraft {
       ...(usesFilteringDb && filteringDb.discovery !== undefined && filteringDb.selected !== undefined
         ? { filteringDb: { discovery: filteringDb.discovery, selectedName: filteringDb.selected } }
         : {}),
+      ...(querySource !== 'fasta' && queryFile.file !== undefined ? { queryFile: queryFile.file } : {}),
     });
   }
 
   /** A box of accessions only, fetched or not yet: it is not searched. */
   private accessionProblem(role: InputRole): string | undefined {
+    if (role === 'query' && this.state.get().querySource !== 'fasta') return undefined;
     if (role === 'subject' && this.state.get().subjectSource === 'database') return undefined;
     const accessions = accessionLines(this.role(role).paste);
     if (accessions === undefined) return undefined;
@@ -1668,6 +1776,21 @@ export class SearchDraft {
   }
 
   private problemOf(role: InputRole): { readonly message: string; readonly short: string } | undefined {
+    if (role === 'query' && this.state.get().querySource !== 'fasta') {
+      const { querySource, queryFile } = this.state.get();
+      if (queryFile.file === undefined) {
+        const message =
+          querySource === 'pssm'
+            ? 'Choose a PSSM checkpoint file (-in_pssm).'
+            : 'Choose a multiple sequence alignment file (-in_msa).';
+        return { message, short: message };
+      }
+      if (normalizeRunPath(queryFile.file.name) === undefined) {
+        const message = `Invalid file name: "${queryFile.file.name}".`;
+        return { message, short: message };
+      }
+      return undefined;
+    }
     if (role === 'subject' && this.state.get().subjectSource === 'database') {
       const { database, program } = this.state.get();
       if (database.scanning === true) {
@@ -1869,41 +1992,53 @@ export class SearchDraft {
     return fastaParser(programById(this.state.get().program), role);
   }
 
-  /** The engine's reader of the role's input now: the program's, with the data loaders of the latest validation. */
+  /** The engine's reader of the role's input now: the program's, with the data loaders and `-parse_deflines` of the latest validation. */
   private readerOf(role: InputRole): FastaReader {
-    const { program, dataLoaders } = this.state.get();
-    return { program, role, dataLoaders };
+    const { program, dataLoaders, parseDeflines } = this.state.get();
+    return { program, role, dataLoaders, parseDeflines };
   }
 
   /**
-   * The validation says that the run reads its inputs with the data loaders on or off (`dataLoaders`), as the CLI
-   * reads them under the argv's registry (line WQA's D16, 2026-11-20): where that changes, the sources that the reader
-   * refused are read again (a first line that may be a Seq-id is data with the loaders off), and the rest checked again.
+   * Applies the reader settings (`dataLoaders` and `parseDeflines`) reported by validation. When
+   * `parseDeflines` changes, every source's cached record tables are cleared and every source is
+   * reindexed (record lengths and stops can change for records whose Seq-id names the other
+   * molecule). When only `dataLoaders` changes (line WQA's D16, 2026-11-20), failed sources are
+   * read again and the rest checked again.
    */
-  private setDataLoaders(dataLoaders: boolean): void {
-    if (this.state.get().dataLoaders === dataLoaders) return;
-    this.set({ dataLoaders });
+  private setReaderSettings(dataLoaders: boolean | undefined, parseDeflines: boolean | undefined): void {
+    const current = this.state.get();
+    const loadersChanged = dataLoaders !== undefined && current.dataLoaders !== dataLoaders;
+    const parseChanged = parseDeflines !== undefined && current.parseDeflines !== parseDeflines;
+    if (!loadersChanged && !parseChanged) return;
+    this.set({
+      ...(loadersChanged ? { dataLoaders } : {}),
+      ...(parseChanged ? { parseDeflines } : {}),
+    });
     for (const role of ROLES) {
       for (const source of this.role(role).sources) {
-        if (source.status === 'failed') this.reindex(role, source.key, this.parserOf(role));
+        if (parseChanged) this.reindex(role, source.key, this.parserOf(role), true);
+        else if (source.status === 'failed') this.reindex(role, source.key, this.parserOf(role));
         else this.scheduleCheck(role, source.key, 0);
       }
     }
   }
 
-  /** Reads a source again with `parser`; settles once it is read (or once its table of that kind is back). */
-  private reindex(role: InputRole, key: string, parser: FastaParserKind): Promise<void> {
+  /** Reads a source again with `parser`; settles once it is read (or once its table of that kind is back). When `fresh` is true, cached tables are discarded and the source is rescanned while exclusions stay in the source's `excludedKeys`. */
+  private reindex(role: InputRole, key: string, parser: FastaParserKind, fresh = false): Promise<void> {
     const source = this.role(role).sources.find((s) => s.key === key);
     if (source === undefined) return Promise.resolve();
+    const task = `${role}:${key}`;
     // A pending index of the pasted text would read it again after this one (and drop the exclusions made since).
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
-    // Cache the table of the kind the source leaves; exclusions belong to the source (`excludedKeys`)
-    // so they survive mode changes while newly parsed records enter as included (line WQA's D16, Owner Q2=B).
-    const tables: Partial<Record<FastaParserKind, SourceTable>> = { ...source.tables };
-    if (source.base !== undefined) {
+    // Cache the table of the kind the source leaves unless `fresh` clears all cached tables
+    // (a `-parse_deflines` change invalidates every cached table); exclusions belong to the
+    // source (`excludedKeys`) so they survive mode changes while newly parsed records enter
+    // as included (line WQA's D16, Owner Q2=B).
+    const tables: Partial<Record<FastaParserKind, SourceTable>> = fresh ? {} : { ...source.tables };
+    if (!fresh && source.base !== undefined) {
       tables[source.parser] = { base: source.base, ...(source.indexMs === undefined ? {} : { indexMs: source.indexMs }) };
     }
-    const kept = tables[parser];
+    const kept = fresh ? undefined : tables[parser];
     delete tables[parser];
     this.updateSource(role, key, (s) => {
       const next: DraftSource = {
@@ -1924,7 +2059,7 @@ export class SearchDraft {
     });
     if (kept !== undefined) {
       // An index of the kind that was left, still running, must not replace this table.
-      this.nextGeneration(`${role}:${key}`);
+      this.nextGeneration(task);
       this.scheduleCheck(role, key, 0);
       this.recheckReaderErrors(role, key);
       return Promise.resolve();
@@ -2012,7 +2147,12 @@ export class SearchDraft {
     first: { ref: SourceRef | undefined; sourceId: string | undefined; head: string | undefined; lead: InputLead | undefined },
   ): boolean {
     const inForce = this.readerOf(role);
-    if (inForce.program === reader.program && inForce.dataLoaders === reader.dataLoaders) return false;
+    if (
+      inForce.program === reader.program &&
+      inForce.dataLoaders === reader.dataLoaders &&
+      inForce.parseDeflines === reader.parseDeflines
+    )
+      return false;
     const { ref, sourceId, head, lead } = first;
     this.updateSource(role, key, (source) => ({
       ...source,
@@ -2054,14 +2194,14 @@ export class SearchDraft {
       return;
     }
     const reader = this.readerOf(role);
-    const { program, dataLoaders } = reader;
+    const { program, dataLoaders, parseDeflines } = reader;
     const started = this.deps.now();
     let check: SourceCheck;
     try {
       const revisionId = await this.revisionFor(source);
       // A source removed meanwhile is not checked (nor cached).
       if (source.sourceId === undefined || !this.formSources.has(source.sourceId)) return;
-      const key = `${program}|${role}|${dataLoaders}|${revisionId}`;
+      const key = `${program}|${role}|${dataLoaders}|${parseDeflines}|${revisionId}`;
       let verdict = this.verdicts.get(key);
       if (verdict === undefined) {
         verdict = this.deps.data.checkInput(reader, [revisionId]);
@@ -2081,7 +2221,13 @@ export class SearchDraft {
     } catch (error) {
       check = { state: 'error', message: messageOf(error), ...(isUnavailable(error) ? { unavailable: true as const } : {}) };
     }
-    if (this.generations.get(task) !== generation || this.state.get().program !== program || this.state.get().dataLoaders !== dataLoaders) return;
+    if (
+      this.generations.get(task) !== generation ||
+      this.state.get().program !== program ||
+      this.state.get().dataLoaders !== dataLoaders ||
+      this.state.get().parseDeflines !== parseDeflines
+    )
+      return;
     const checkMs = this.deps.now() - started;
     this.updateSource(role, key, (s) =>
       s.excluded === source.excluded && s.base === source.base ? { ...s, check, checkMs } : s,
@@ -2170,12 +2316,23 @@ export class SearchDraft {
 
   private async validate(): Promise<void> {
     const generation = this.generations.get('validate');
-    const { program, subjectSource, database } = this.state.get();
+    const { program, querySource, queryFile, subjectSource, database } = this.state.get();
     let argv: readonly string[];
     try {
+      const querySpec =
+        querySource !== 'fasta'
+          ? {
+              queryFile: {
+                flag: querySource === 'pssm' ? ('-in_pssm' as const) : ('-in_msa' as const),
+                name:
+                  (queryFile.file === undefined ? undefined : normalizeRunPath(queryFile.file.name)) ??
+                  (querySource === 'pssm' ? 'query.pssm' : 'query.msa'),
+              },
+            }
+          : { queryName: this.inputName('query') };
       argv = buildArgv({
         program,
-        queryName: this.inputName('query'),
+        ...querySpec,
         ...(subjectSource === 'database'
           ? { databaseName: database.selected ?? 'database' }
           : { subjectName: this.inputName('subject') }),
@@ -2191,8 +2348,9 @@ export class SearchDraft {
     let validation: Validation;
     let start: StartInfo | undefined;
     let registry: ChosenRegistryFile | undefined;
-    // The data loaders of the argv's run, where the engine found the argv valid.
+    // The reader settings of the argv's run, where the engine read them.
     let dataLoaders: boolean | undefined;
+    let parseDeflines: boolean | undefined;
     // Whether the engine answered (its start did), whatever the verdict.
     let answered = false;
     try {
@@ -2213,6 +2371,7 @@ export class SearchDraft {
         // Also from a refused argv whose registry the engine read (line WQA's D13 round 3, L1): the setting does not depend
         // on the option that it refuses.
         if (result.dataLoaders !== undefined) dataLoaders = result.dataLoaders;
+        if (result.parseDeflines !== undefined) parseDeflines = result.parseDeflines;
       }
     } catch (error) {
       // The chosen file changed or went after it was chosen: the browser no longer reads it.
@@ -2224,7 +2383,7 @@ export class SearchDraft {
     if (this.generations.get('validate') !== generation) return;
     this.validArgv = validation.state === 'ok' ? argv : undefined;
     this.set({ validation, start });
-    if (dataLoaders !== undefined) this.setDataLoaders(dataLoaders);
+    this.setReaderSettings(dataLoaders, parseDeflines);
     this.prepareEngine();
     if (answered) void this.askOptionsAgain();
   }
@@ -2243,12 +2402,17 @@ export class SearchDraft {
    * that of the largest run.
    */
   private prepareEngine(): void {
-    const { threads, validation, subjectSource, database } = this.state.get();
+    const { threads, validation, querySource, queryFile, subjectSource, database } = this.state.get();
     if (this.deps.engine.prepare === undefined || validation.state !== 'ok') return;
     let inputBytes = 0;
-    const queryGroups = this.inputGroups('query');
-    if (queryGroups.length === 0) return;
-    inputBytes += Math.max(...queryGroups.map((sources) => sources.reduce((sum, source) => sum + source.size, 0)));
+    if (querySource !== 'fasta') {
+      if (queryFile.file === undefined) return;
+      inputBytes += queryFile.file.size;
+    } else {
+      const queryGroups = this.inputGroups('query');
+      if (queryGroups.length === 0) return;
+      inputBytes += Math.max(...queryGroups.map((sources) => sources.reduce((sum, source) => sum + source.size, 0)));
+    }
     if (subjectSource === 'database') {
       if (database.discovery === undefined || database.selected === undefined) return;
       inputBytes += database.discovery.totalBytes;
@@ -2405,6 +2569,7 @@ function reselectDatabaseForKind(database: SubjectDatabaseDraft, kind: SequenceK
 export function holdsInputs(state: DraftState): boolean {
   return (
     ROLES.some((role) => state[role].paste !== '' || state[role].sources.length > 0) ||
+    state.queryFile?.file !== undefined ||
     state.database?.discovery !== undefined ||
     state.filteringDb?.discovery !== undefined
   );

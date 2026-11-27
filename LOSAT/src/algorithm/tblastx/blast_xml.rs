@@ -56,10 +56,12 @@ const GAP_EXTEND: i32 = 1;
 /// The gap costs of the XML's parameters: with `-matrix`, the matrix's best costs.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:257-273
-fn gap_costs(matrix: Option<&str>) -> (i32, i32) {
+fn gap_costs(matrix: Option<&std::ffi::OsStr>) -> (i32, i32) {
     match matrix {
-        Some(name) => crate::stats::protein_options::protein_gap_existence_extend_params(name)
-            .unwrap_or((0, 0)),
+        Some(name) => crate::stats::protein_options::protein_gap_existence_extend_params(
+            crate::utils::os_bytes::os_str_bytes(name),
+        )
+        .unwrap_or((0, 0)),
         None => (GAP_OPEN, GAP_EXTEND),
     }
 }
@@ -162,7 +164,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             database.pairwise.total_letters,
             database.pairwise.total_letters_overflow,
         ),
-        None => ("", 0, 0, false),
+        None => (b"".as_slice(), 0, 0, false),
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2243 (XML2
     // and JSON) and :2242-2243 (BLAST XML)
@@ -170,7 +172,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     // letters (`run_batch_loop`); a run without queries makes no report data, and the document
     // is its header and end.
     let matrix = args.matrix_name();
-    let positives = FormattingMatrix::new(matrix);
+    let positives = FormattingMatrix::new(matrix.as_bytes());
     anyhow::ensure!(
         positives.is_some() || hits.is_empty(),
         "no formatting matrix for {matrix}"
@@ -187,10 +189,11 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     );
     let xml_run = XmlRun {
         program: "tblastx",
+        app: args.app().ncbi_name(),
         version: concat!("TBLASTX ", crate::wording::report_version!()),
         reference: REFERENCE_GAPPED_BLAST,
         db_name,
-        matrix: Some(matrix),
+        matrix: Some(&matrix),
         expect: args.evalue,
         gap_open,
         gap_extend,
@@ -478,7 +481,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
         // query leaves its partial bytes in `buf`, which the error return drops.
         if let Some(post) =
-            crate::report::blast_xml::writer::caught_post(written, &*document, xml_run.program)?
+            crate::report::blast_xml::writer::caught_post(written, &*document, xml_run.app)?
         {
             posts.caught(post);
         }

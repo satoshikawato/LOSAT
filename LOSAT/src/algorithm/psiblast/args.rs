@@ -1,9 +1,11 @@
 //! Command-line arguments for PSIBLAST
 
 use anyhow::{bail, Result};
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs};
+use crate::utils::os_bytes::os_str_bytes;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:58-116
 // psiblast's arguments are blastp's without `-task` (its task is "psiblast"), `-ungapped`
@@ -14,7 +16,8 @@ use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs};
 // query is a PSSM, searched with the PSSM's stages (`in_pssm.rs`, `algorithm::pssm_search`), in
 // rounds and with the PSSM files too (`in_pssm_files.rs`);
 // `-in_msa` makes the PSSM from an alignment (`in_msa.rs`) and searches it as `-in_pssm` does;
-// `-phi_pattern` is refused by name after the reader (its rows of `ncbi_app::args::refusal`).
+// `-phi_pattern` runs round 1 as a PHI-BLAST search (`algorithm::phi_search`; rounds after it are a
+// later item's refusal, `phi_rounds_refusal`).
 // The values are those that NCBI's argument reader read (`ncbi_app::args`, `from_args`); the
 // checks that NCBI makes after reading them are blastp's (`BlastpArgs::check_options`, with
 // psiblast's program).
@@ -28,7 +31,7 @@ pub struct PsiblastArgs {
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
     // NCBI's argument reader reports the exclusion (`cli::reader`).
-    pub db: Option<String>,
+    pub db: Option<OsString>,
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`,
     /// `-negative_seqidlist` and `-no_taxid_expansion`: blastp's (line DI-8), which hold in every
     /// round (NCBI's `CLocalDbAdapter` of the first round searches every later one too).
@@ -101,14 +104,14 @@ pub struct PsiblastArgs {
     // (`ResolvedBlastpArgs::gap_trigger_bits`).
     pub gap_trigger: f64,
     pub window_size: Option<i32>,
-    pub matrix: Option<String>,
+    pub matrix: Option<OsString>,
     pub gap_open: Option<i32>,
     pub gap_extend: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
-    pub comp_based_stats: String,
+    pub comp_based_stats: OsString,
     // NCBI's filtering handler (`blastinput/app.rs` `parse_seg_option`); no filtering when
     // omitted (`CPSIBlastOptionsHandle::SetQueryOptionDefaults`).
-    pub seg: Option<String>,
+    pub seg: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
     // psiblast's filtering handler is blastp's (`CFilteringArgs`, psiblast_args.cpp:70).
     pub soft_masking: Option<bool>,
@@ -117,12 +120,12 @@ pub struct PsiblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
     pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
-    pub query_loc: Option<String>,
+    pub query_loc: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
-    pub subject_loc: Option<String>,
+    pub subject_loc: Option<OsString>,
     // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
-    pub outfmt: String,
+    pub outfmt: OsString,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1147-1152
     pub num_iterations: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1086-1090
@@ -137,25 +140,29 @@ pub struct PsiblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1160
     // The file is opened when a PSSM is written (`pssm.rs` `AsnPssmWriter`, as
     // `CAutoOutputFileReset`), not by the parser.
-    pub out_pssm: Option<String>,
+    pub out_pssm: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1161-1170
     // The file is opened when a PSSM is written (`pssm.rs` `write_ascii_pssm_files`, as
     // `CAutoOutputFileReset`), not by the parser.
-    pub out_ascii_pssm: Option<String>,
+    pub out_ascii_pssm: Option<PathBuf>,
     pub save_pssm_after_last_round: bool,
     pub save_each_pssm: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1231-1247
-    // NCBI's argument reader reports the exclusions (`cli::reader`). The file is opened and read with
-    // the options (`algorithm::psiblast::in_pssm`); `-phi_pattern` is refused by name after the reader (its rows of
-    // `ncbi_app::args::refusal`).
+    // NCBI's argument reader reports the exclusions (`cli::reader`), `-phi_pattern`'s too. The file is
+    // opened and read with the options (`algorithm::psiblast::in_pssm`).
     pub in_pssm: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1184-1229
-    // `msa_exclusions` are `-in_pssm`, `-query`, `-query_loc` and `-phi_pattern`; the last is
-    // refused by name (its rows of `ncbi_app::args::refusal`) after NCBI's argument reader, which reports the
-    // exclusions and requirements (`cli::reader`). The file is read with the options (`algorithm::psiblast::in_msa`).
+    // `msa_exclusions` are `-in_pssm`, `-query`, `-query_loc` and `-phi_pattern`; NCBI's argument
+    // reader reports the exclusions and requirements (`cli::reader`). The file is read with the
+    // options (`algorithm::psiblast::in_msa`).
     pub in_msa: Option<PathBuf>,
     pub msa_master_idx: Option<i32>,
     pub ignore_msa_master: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1366-1380
+    // NCBI's argument reader reports its exclusions (`cli::reader`). The file is read with the
+    // options (`algorithm::phi_search::file`) and its pattern compiled before the search
+    // (`ResolvedBlastpArgs::phi`).
+    pub phi_pattern: Option<PathBuf>,
 
     /// `BlastpArgs::first_query_ordinal`: the number of the first query of the records of a call
     /// that starts there (`api::run_batches`). 0 on the command line.
@@ -240,6 +247,7 @@ impl PsiblastArgs {
             in_msa: args.given_option("in_msa")?,
             msa_master_idx: args.given_option("msa_master_idx")?,
             ignore_msa_master: args.flag("ignore_msa_master"),
+            phi_pattern: args.given_option("phi_pattern")?,
             first_query_ordinal: Default::default(),
             scope_refusal: Default::default(),
             pssm_versions: Default::default(),
@@ -258,9 +266,10 @@ impl PsiblastArgs {
         // the later rounds search the range with the PSSM of the whole record
         // (`PsiSearch::from_engine`, series Q, Q4a).
         Self::check_outfmt(
-            &self.outfmt,
+            os_str_bytes(&self.outfmt),
             self.out.as_deref(),
             self.export_search_strategy.is_some(),
+            self.phi_pattern.is_some(),
         )?;
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (cited at
         // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM of
@@ -328,6 +337,9 @@ impl PsiblastArgs {
             outfmt: self.outfmt,
             archive: None,
             export_search_strategy: self.export_search_strategy,
+            import_search_strategy: None,
+            import: None,
+            given: Default::default(),
             strategy: None,
             request_inputs,
             app: BlastpApp::Psiblast,
@@ -355,6 +367,8 @@ impl PsiblastArgs {
                     }),
                 versions: self.pssm_versions,
                 check_scope: self.pssm_check,
+                run_files: crate::report::run_files::RunFiles::Disk,
+                phi_pattern: self.phi_pattern,
             }),
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:502
             // The line length only: `-sorthits` and `-sorthsps` are read with their warnings
@@ -371,14 +385,30 @@ impl PsiblastArgs {
     /// (`OptionsHandle::set_database_filter`).
     pub(crate) fn option_inputs(&self) -> crate::report::archive::options::OptionInputs {
         use crate::report::archive::options::{seg_filter, OptionInputs, RequestKind};
-        let mut inputs = OptionInputs::new(RequestKind::Psiblast, "blastp");
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:123-131
+        // `-phi_pattern` makes the handle PHI-BLAST's (`RequestKind::Phiblastp`), whose request
+        // records the pattern as read; a file that does not read stops the run at the PHI
+        // handler with NCBI's error (`BlastpArgs::check_options`), after the strategy file is
+        // created and before it is written.
+        let kind = match self.phi_pattern {
+            Some(_) => RequestKind::Phiblastp,
+            None => RequestKind::Psiblast,
+        };
+        let mut inputs = OptionInputs::new(kind, "blastp");
+        inputs.phi_pattern = self
+            .phi_pattern
+            .as_deref()
+            .and_then(crate::algorithm::phi_search::file::pattern_text);
         inputs.dbsize = self.dbsize;
         inputs.searchsp = self.searchsp;
         inputs.sum_stats = self.sum_stats;
         inputs.evalue = self.evalue;
         inputs.gapopen = self.gap_open;
         inputs.gapextend = self.gap_extend;
-        inputs.matrix = self.matrix.clone();
+        inputs.matrix = self
+            .matrix
+            .as_deref()
+            .map(|name| os_str_bytes(name).into_owned());
         // `-xdrop_ungap` is never recorded (`SetXDropoff` has no remote option).
         inputs.xdrop_gap = self.xdrop_gap;
         inputs.xdrop_gap_final = self.xdrop_gap_final;
@@ -395,10 +425,15 @@ impl PsiblastArgs {
             .map(crate::core::blast_util::ncbi_int4_from_double);
         inputs.window_size = self.window_size;
         inputs.soft_masking = self.soft_masking;
-        inputs.seg = self.seg.as_deref().and_then(seg_filter);
-        if let Ok((mode, unified_p)) =
-            crate::blastinput::app::parse_comp_based_stats(&self.comp_based_stats, true, false)
-        {
+        inputs.seg = self
+            .seg
+            .as_deref()
+            .and_then(|seg| seg_filter(os_str_bytes(seg)));
+        if let Ok((mode, unified_p)) = crate::blastinput::app::parse_comp_based_stats(
+            os_str_bytes(&self.comp_based_stats),
+            true,
+            false,
+        ) {
             inputs.comp_based_stats = mode as i32;
             inputs.unified_p = unified_p;
         }
@@ -421,8 +456,15 @@ impl PsiblastArgs {
     /// (`blastp::tabular`), without a custom delimiter, which psiblast's formatter does not get
     /// (psiblast_app.cpp:482-505, `report::tabular::TabularSpec::of_app`). `strategy`: the run
     /// writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
-    /// `-outfmt`.
-    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
+    /// `-outfmt`. `phi`: the run has `-phi_pattern`, whose formats 8, 9 and 12 end with NCBI's
+    /// engine error (`blast_engine/phi_hooks.rs`); its refusal of formats 5 and 11 comes after
+    /// NCBI's errors of the pattern's search (`phi_hooks::phi_limits`).
+    pub fn check_outfmt(
+        outfmt: impl AsRef<[u8]>,
+        out: Option<&std::path::Path>,
+        strategy: bool,
+        phi: bool,
+    ) -> Result<()> {
         use crate::blastinput::app::{Program, ReportFormat};
         // A value not read yet (`EarlyFormat::Deferred`) is the formatting handler's.
         let Some(choice) = crate::blastinput::app::early_format_choice(outfmt, strategy)?
@@ -434,11 +476,21 @@ impl PsiblastArgs {
         if crate::blastinput::app::ncbi_refuses_format(&choice, Program::Blastp, out) {
             return Ok(());
         }
-        if ReportFormat::from_number(choice.number).is_some() && !writes_outfmt(choice.number) {
-            bail!(
-                "output format {} is not supported by LOSAT's PSIBLAST yet",
-                choice.number
-            );
+        if ReportFormat::from_number(choice.number).is_some() {
+            // With a pattern: PHI-BLAST's reports (`report_write::write_phi_report`), formats
+            // 8, 9 and 12 (which reach NCBI's engine error), and 5 and 11 (`phi_limits`).
+            // Without a pattern: `writes_outfmt` (0..=12, 18, 20).
+            let allowed = if phi {
+                matches!(choice.number, 0 | 5..=12 | 20)
+            } else {
+                writes_outfmt(choice.number)
+            };
+            if !allowed {
+                bail!(
+                    "output format {} is not supported by LOSAT's PSIBLAST yet",
+                    choice.number
+                );
+            }
         }
         Ok(())
     }

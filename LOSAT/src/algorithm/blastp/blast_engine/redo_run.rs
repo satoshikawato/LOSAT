@@ -248,8 +248,15 @@ pub(super) struct RedoInputs<'a, P> {
     /// batch whose Smith-Waterman redo fails or does not end comes after NCBI's warning of the
     /// first of them that the batch made before (`FetchNotes::fetched_before_failure`).
     pub(super) fetch_notes: &'a super::database::FetchNotes<'a>,
+    /// Database ordinal ids by listed rank (`ListedSubjects::ordinals`), `None` for `-subject`:
+    /// maps rank back to database ordinal for the OID-ordered stream of `-comp_based_stats 0
+    /// -use_sw_tback` (item X4-c0).
+    pub(super) listed_ordinals: Option<&'a [u32]>,
     pub(super) x_win_expand: bool,
     pub(super) ordinary_traceback: bool,
+    /// Whether this call runs `-comp_based_stats 0 -use_sw_tback` (item X4-c0: OID-ordered
+    /// Smith-Waterman redo without composition adjustment).
+    pub(super) sw_c0_redo: bool,
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -285,6 +292,12 @@ pub(super) enum RedoPath {
     ))]
     QueryParallel(Vec<usize>),
     OneThread,
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    SwC0Windows,
+    SwC0OneThread,
 }
 
 /// The plan of the redo: the path that runs (`RedoPath`), chosen in the order in which the
@@ -312,8 +325,33 @@ pub(super) fn plan_redo_and_expand_lists<P>(
     let RedoInputs {
         x_win_expand,
         ordinary_traceback,
+        sw_c0_redo,
         ..
     } = *redo;
+    if sw_c0_redo {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        {
+            let x_redo_par_switch = x_redo_par::x_bp_redo_par();
+            let x_redo_par_on = x_redo_par_switch
+                && blastp_should_parallelize_stage(
+                    "kappa-redo-par",
+                    redo.args.num_threads,
+                    redo.blastp_num_threads,
+                    redo.subjects.len(),
+                    x_redo_par::x_matches(preliminary_hit_lists, x_compact_hit_lists),
+                );
+            if x_redo_par_switch {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPREDOPAR", x_redo_par_on);
+            }
+            if x_redo_par_on {
+                return RedoPath::SwC0Windows;
+            }
+        }
+        return RedoPath::SwC0OneThread;
+    }
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -490,6 +528,76 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         return RedoPath::QueryParallel(kappa_parallel_query_indices);
     }
     RedoPath::OneThread
+}
+
+/// Plans the redo path (`plan_redo_and_expand_lists`) and runs it.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
+pub(super) fn run_redo<P>(
+    redo: &RedoInputs<'_, P>,
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    redone_matches: &mut [BlastCompoHeap],
+    x_prelim_freed: &mut usize,
+) -> Result<()>
+where
+    P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
+{
+    match plan_redo_and_expand_lists(redo, preliminary_hit_lists, x_compact_hit_lists) {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        RedoPath::Windows => x_windows_redo(
+            redo,
+            preliminary_hit_lists,
+            x_compact_hit_lists,
+            redone_matches,
+            x_prelim_freed,
+        ),
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        RedoPath::MatchParallel(q_idx) => {
+            match_parallel_redo(redo, q_idx, preliminary_hit_lists, redone_matches)
+        }
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        RedoPath::QueryParallel(kappa_parallel_query_indices) => query_parallel_redo(
+            redo,
+            &kappa_parallel_query_indices,
+            preliminary_hit_lists,
+            redone_matches,
+        ),
+        RedoPath::OneThread => one_thread_redo(
+            redo,
+            preliminary_hit_lists,
+            x_compact_hit_lists,
+            redone_matches,
+            x_prelim_freed,
+        ),
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        RedoPath::SwC0Windows => super::sw_c0::sw_c0_windows(
+            redo,
+            preliminary_hit_lists,
+            x_compact_hit_lists,
+            redone_matches,
+            x_prelim_freed,
+        ),
+        RedoPath::SwC0OneThread => super::sw_c0::sw_c0_one_thread(
+            redo,
+            preliminary_hit_lists,
+            x_compact_hit_lists,
+            redone_matches,
+            x_prelim_freed,
+        ),
+    }
 }
 
 /// The redo in windows of `LOSAT_X_BPREDOPAR` (`x_redo_par::x_redo_par_run`, which reads
@@ -966,6 +1074,87 @@ where
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3805
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
+/// `sw_batch_failed_after` for `-comp_based_stats 0 -use_sw_tback` (item X4-c0), where a batch's
+/// stream runs in `(ordinal ASC, query DESC)` order.
+#[cold]
+#[inline(never)]
+pub(super) fn sw_batch_failed_after_oid(
+    fetch_notes: &super::database::FetchNotes<'_>,
+    batch: std::ops::Range<usize>,
+    heaps: &[BlastCompoHeap],
+) -> anyhow::Error {
+    if let Some(refusal) = fetch_notes.refused_before_failure_oid(heaps, batch.clone(), None) {
+        return refusal;
+    }
+    sw_batch_failed(
+        batch.start,
+        &heaps[batch.start],
+        fetch_notes.fetched_before_failure_oid(heaps, batch.clone(), None),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3805
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
+/// `sw_endless_after` for `-comp_based_stats 0 -use_sw_tback` (item X4-c0), where a batch's
+/// stream runs in `(ordinal ASC, query DESC)` order.
+#[cold]
+#[inline(never)]
+pub(super) fn sw_endless_after_oid(
+    fetch_notes: &super::database::FetchNotes<'_>,
+    batch: std::ops::Range<usize>,
+    heaps: &[BlastCompoHeap],
+    ordinal: u32,
+    q_idx: usize,
+) -> anyhow::Error {
+    if let Some(refusal) =
+        fetch_notes.refused_before_failure_oid(heaps, batch.clone(), Some((ordinal, q_idx)))
+    {
+        return refusal;
+    }
+    sw_endless(
+        batch.start,
+        fetch_notes.fetched_before_failure_oid(heaps, batch.clone(), Some((ordinal, q_idx))),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3346-3357
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:657-660
+/// Checks that the scoring matrix has NCBI's composition frequency ratios for `-use_sw_tback`
+/// without composition-based statistics (item X4-c0): NCBI's `s_GetAlignParams` calls
+/// `_PSIMatrixFrequencyRatiosNew` unconditionally before reading any match, so `-matrix IDENTITY`
+/// fails the first searched batch with `Traceback failed` (exit 3, even with 0 hits), while a run
+/// whose batches are all skipped (every query invalid) completes with exit 0.
+pub(super) fn sw_matrix_check(
+    matrix: ScoringMatrix,
+    query_batches: &[crate::blastinput::seq_range::RangedBatch],
+    query_batch_skipped: &[bool],
+) -> Result<()> {
+    if crate::core::composition_adjustment::adjust_scores::compo_matrix_data(matrix).is_some() {
+        return Ok(());
+    }
+    match query_batches
+        .iter()
+        .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start])
+    {
+        Some(batch) => Err(sw_matrix_failed(batch.searched.start)),
+        None => Ok(()),
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn sw_matrix_failed(batch_start: usize) -> anyhow::Error {
+    crate::blastinput::app::ErrorAfterBatchReports::of_batch(
+        batch_start,
+        crate::core::composition_adjustment::smith_waterman_match::sw_batch_failed_error(
+            "blastp", false,
+        ),
+    )
+    .into()
+}
+
 /// The error of the batch `batch` whose Smith-Waterman redo failed at its last redone match
 /// (`sw_batch_failed`), the redo having taken the lists up to query `q_idx`'s with the heaps
 /// `heaps`: LOSAT's refusal instead where a fetch before it read a header that cannot be read,
@@ -1067,6 +1256,7 @@ pub(in crate::algorithm::blastp) fn sw_batch_failed(
         query: Some(batch_start),
         error,
         utf8,
+        title_reads: Vec::new(),
     }
     .into()
 }
@@ -1090,6 +1280,7 @@ pub(in crate::algorithm::blastp) fn sw_endless(
         query: Some(batch_start),
         utf8,
         error: crate::core::composition_adjustment::smith_waterman_match::sw_endless_error("blastp", "the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"),
+        title_reads: Vec::new(),
     }
     .into()
 }
@@ -1373,6 +1564,7 @@ where
                     query_nomask,
                     subject_raw,
                     args.scoring.matrix,
+                    None,
                     gapped_params,
                     gapped_gumbel.as_ref(),
                     &redo_align_params,

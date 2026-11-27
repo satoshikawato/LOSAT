@@ -15,7 +15,7 @@ pub enum WindowMasker<'a> {
     /// `W -t <taxid>;`
     Taxid(i32),
     /// `W -d <database>;`
-    Database(&'a str),
+    Database(&'a [u8]),
 }
 
 /// The filter string of a search: `dust` and `seg` are the options' (level, window, linker)
@@ -25,56 +25,61 @@ pub enum WindowMasker<'a> {
 pub fn filter_string(
     dust: Option<(i32, i32, i32)>,
     seg: Option<(i32, f64, f64)>,
-    repeats: Option<&str>,
+    repeats: Option<&[u8]>,
     window_masker: Option<WindowMasker<'_>>,
     mask_at_hash: bool,
 ) -> Vec<u8> {
-    let mut text = String::new();
+    let mut text = Vec::new();
     if let Some(dust) = dust {
         if dust == DUST_DEFAULTS {
-            text.push_str("L;");
+            text.extend_from_slice(b"L;");
         } else {
             // `buffer` holds 24 bytes: snprintf cuts the text at 23 bytes.
-            text.push_str(&truncated(format!("D {} {} {};", dust.0, dust.1, dust.2)));
+            text.extend_from_slice(
+                truncated(format!("D {} {} {};", dust.0, dust.1, dust.2)).as_bytes(),
+            );
         }
     }
     if let Some(seg) = seg {
         if seg == SEG_DEFAULTS {
-            text.push_str("L;");
+            text.extend_from_slice(b"L;");
         } else {
-            text.push_str(&truncated(format!(
-                "S {} {} {};",
-                seg.0,
-                glibc_fixed1(seg.1),
-                glibc_fixed1(seg.2)
-            )));
+            text.extend_from_slice(
+                truncated(format!(
+                    "S {} {} {};",
+                    seg.0,
+                    glibc_fixed1(seg.1),
+                    glibc_fixed1(seg.2)
+                ))
+                .as_bytes(),
+            );
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:371-388 (the command
     // line always gives the database: `R -d <name>;`, never the plain `R;`.)
     if let Some(database) = repeats {
-        text.push_str("R -d ");
-        text.push_str(database);
-        text.push(';');
+        text.extend_from_slice(b"R -d ");
+        text.extend_from_slice(database);
+        text.push(b';');
     }
     match window_masker {
         Some(WindowMasker::Taxid(taxid)) if taxid != 0 => {
-            text.push_str(&truncated(format!("W -t {taxid};")));
+            text.extend_from_slice(truncated(format!("W -t {taxid};")).as_bytes());
         }
         Some(WindowMasker::Taxid(_)) | None => {}
         Some(WindowMasker::Database(database)) => {
-            text.push_str("W -d ");
-            text.push_str(database);
-            text.push(';');
+            text.extend_from_slice(b"W -d ");
+            text.extend_from_slice(database);
+            text.push(b';');
         }
     }
     if mask_at_hash {
-        text.push_str("m;");
+        text.extend_from_slice(b"m;");
     }
     if text.is_empty() {
-        text.push('F');
+        text.push(b'F');
     }
-    text.into_bytes()
+    text
 }
 
 /// glibc's `%1.1f`: one decimal, the infinities as `inf` and `-inf`, NaN as `nan` or `-nan` by

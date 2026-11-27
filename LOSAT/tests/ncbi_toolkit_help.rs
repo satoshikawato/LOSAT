@@ -45,7 +45,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 }
 
 /// The programs and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 15] = [
+const PROGRAMS: [(&str, &str); 16] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -61,6 +61,7 @@ const PROGRAMS: [(&str, &str); 15] = [
     ("segmasker", "-out"),
     ("windowmasker", "-out"),
     ("makeprofiledb", "-out"),
+    ("blast_formatter", "-out"),
 ];
 
 #[test]
@@ -223,10 +224,15 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                     option.push("-remote");
                 }
                 let subject = if program == "tblastn" { "n.fa" } else { "p.fa" };
-                let contexts = [
-                    vec!["-query", "p.fa", "-db", "x"],
-                    vec!["-query", "p.fa", "-subject", subject],
-                ];
+                let contexts: Vec<Vec<&str>> = if program == "blast_formatter" {
+                    // blast_formatter's `-rid`, refused at the run, where NCBI asks its servers.
+                    vec![vec![]]
+                } else {
+                    vec![
+                        vec!["-query", "p.fa", "-db", "x"],
+                        vec!["-query", "p.fa", "-subject", subject],
+                    ]
+                };
                 let refusal = |message: &str| {
                     message.contains(&format!("-{name} is not supported by LOSAT's"))
                         || message.contains(&format!("-{name} ("))

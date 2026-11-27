@@ -124,6 +124,7 @@ fn hsp(q: (i32, i32), s: (i32, i32), frame: i8, ident: i32, ops: &[GapEditOp]) -
         num_positives: 0,
         comp_adjust: 0,
         ops,
+        std_seg_nullb: None,
     }
 }
 
@@ -556,4 +557,180 @@ fn an_ungapped_record_sums_its_lengths_in_32_bits() {
     );
     // 4 * 2^30 wraps to 0: 100 * 1 / 0 is infinity and `min(99.99, inf)` 99.99.
     assert_eq!(record(4, 1), ("0M".to_string(), "PI:f:99.99".to_string()));
+}
+
+/// A TBLASTX HSP of subject `subject`: the residues `q` and `s` of the frames `frames`.
+fn tbx_hsp(
+    subject: u32,
+    q: (i32, i32),
+    s: (i32, i32),
+    frames: (i8, i8),
+    evalue: f64,
+) -> HspRecord<'static> {
+    HspRecord {
+        subject,
+        q_offset: q.0,
+        q_end: q.1,
+        q_left_out: 0,
+        s_offset: s.0,
+        s_end: s.1,
+        q_frame: frames.0,
+        s_frame: frames.1,
+        score: 40,
+        num: 0,
+        evalue,
+        bit_score: 75.8,
+        num_ident: 12,
+        num_positives: 20,
+        comp_adjust: 0,
+        ops: &[],
+        std_seg_nullb: None,
+    }
+}
+
+fn tbx_run() -> RunRecord<'static> {
+    RunRecord {
+        program: crate::blastinput::app::Program::Tblastx,
+        db_title: None,
+        gapped: false,
+        program_type: None,
+    }
+}
+
+/// The document of one query (600 letters) with `hsps` over the subjects `Subject_1`, `Subject_2`
+/// (700 letters each): the document and the number of Seq-aligns the formatter could not convert.
+fn tbx_document(hsps: &[HspRecord<'_>]) -> (String, usize) {
+    let query = SamSequence {
+        record: SamId::Query(QueryRecord {
+            id: SeqId::Local("Query_1"),
+            searched_length: 600,
+            offset: 0,
+        }),
+        key: 0,
+        index: 0,
+        length: 600,
+    };
+    let subject = |index: usize, id: &'static str| SamSequence {
+        record: SamId::Subject(SubjectRecord {
+            id: SeqId::Local(id),
+            searched_length: 700,
+            offset: 0,
+            use_this_seqid: &[],
+        }),
+        key: index as u64,
+        index,
+        length: 700,
+    };
+    let subjects = [subject(0, "Subject_1"), subject(1, "Subject_2")];
+    let mut document = SamDocument::new(SamSpec::default(), "2.17.0+", None)
+        .for_program(crate::blastinput::app::Program::Tblastx);
+    let failed = document
+        .query(&tbx_run(), &query, &subjects, hsps, &mut NoLetters)
+        .unwrap();
+    let mut out = Vec::new();
+    document.finish(&mut out).unwrap();
+    (String::from_utf8(out).unwrap(), failed)
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:740-900 (`CreateDensegFromStdseg`)
+// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:178-299 (`AddRow`)
+// A TBLASTX subject with one HSP: nucleotide ranges (3 per residue) of the Std-seg, one record with
+// the hard clips of the subject around its range, no score tags (the Seq-align holds none) and
+// `@PG` names the options' program.
+#[test]
+fn a_translated_subject_with_one_hsp_has_one_record_without_score_tags() {
+    let (text, failed) = tbx_document(&[tbx_hsp(0, (10, 40), (20, 50), (1, 1), 1e-9)]);
+    assert_eq!(failed, 0);
+    assert_eq!(
+        text,
+        "@HD\tVN:1.2\tSO:coordinate\tGO:reference\n\
+         @SQ\tSN:Query_1\tLN:600\n\
+         @PG\tID:0\tVN:2.17.0+\tPN:tblastx\n\
+         Subject_1\t0\tQuery_1\t31\t255\t60H90M550H\t*\t0\t0\t*\t*\tNM:i:0\n"
+    );
+}
+
+// The CIGAR's count is the sum of the segments' lengths, not the span: two HSPs of one strand pair
+// are two segments of one M run, and the ranges are their unions.
+#[test]
+fn two_hsps_on_one_strand_add_up_in_one_m_count_over_the_union_of_their_ranges() {
+    let (text, failed) = tbx_document(&[
+        tbx_hsp(0, (10, 40), (20, 50), (1, 1), 1e-9),
+        tbx_hsp(0, (100, 120), (200, 220), (1, 1), 1e-5),
+    ]);
+    assert_eq!(failed, 0);
+    assert!(
+        text.ends_with("Subject_1\t0\tQuery_1\t31\t255\t60H150M40H\t*\t0\t0\t*\t*\tNM:i:0\n"),
+        "{text}"
+    );
+}
+
+// A subject on the other strand of the subject: flag 16 and the clips swapped. The row's starts are
+// those of the frame's interval (`ungapped_interval`).
+#[test]
+fn a_subject_on_the_minus_strand_is_a_reverse_record() {
+    let (text, failed) = tbx_document(&[tbx_hsp(0, (10, 40), (20, 50), (1, -2), 1e-9)]);
+    assert_eq!(failed, 0);
+    assert!(
+        text.ends_with("Subject_1\t16\tQuery_1\t31\t255\t61H90M549H\t*\t0\t0\t*\t*\tNM:i:0\n"),
+        "{text}"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:815-830
+// Std-segs that put a row on different strands cannot be a Dense-seg: no record and no `@SQ` for
+// that Seq-align, which `query` counts; the other subject is written; a document of failures only
+// is empty (`Flush` writes nothing without a record).
+#[test]
+fn a_subject_whose_hsps_change_a_strand_has_no_record_and_is_counted() {
+    let mixed = [
+        tbx_hsp(0, (10, 40), (20, 50), (1, 1), 1e-9),
+        tbx_hsp(0, (100, 120), (200, 220), (1, -1), 1e-5),
+        tbx_hsp(1, (10, 40), (20, 50), (1, 1), 1e-9),
+    ];
+    let (text, failed) = tbx_document(&mixed);
+    assert_eq!(failed, 1);
+    assert!(text.contains("Subject_2\t0\tQuery_1\t31\t255\t"), "{text}");
+    assert!(!text.contains("Subject_1"), "{text}");
+    let (text, failed) = tbx_document(&mixed[..2]);
+    assert_eq!(failed, 1);
+    assert_eq!(text, "");
+    // The query's strand changes too.
+    let (text, failed) = tbx_document(&[
+        tbx_hsp(0, (10, 40), (20, 50), (1, 1), 1e-9),
+        tbx_hsp(0, (100, 120), (200, 220), (-1, 1), 1e-5),
+    ]);
+    assert_eq!((text.as_str(), failed), ("", 1));
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:829-845
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1402-1430
+// The sort reads the lowest query start over the Std-segs, and breaks a tie by the e-value of the
+// FIRST Std-seg (the Seq-align has no scores of its own): Subject_1's first HSP has the greater
+// e-value (its later one is smaller than Subject_2's), so Subject_2 comes first.
+#[test]
+fn a_translated_sort_ties_by_the_first_hsps_evalue() {
+    let (text, failed) = tbx_document(&[
+        tbx_hsp(0, (10, 40), (20, 50), (1, 1), 1e-5),
+        tbx_hsp(0, (100, 120), (200, 220), (1, 1), 1e-30),
+        tbx_hsp(1, (10, 40), (20, 50), (1, 1), 1e-10),
+    ]);
+    assert_eq!(failed, 0);
+    let subjects: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.starts_with('@'))
+        .map(|line| line.split('\t').next().unwrap())
+        .collect();
+    assert_eq!(subjects, ["Subject_2", "Subject_1"]);
+    // A lower start comes before a lower e-value.
+    let (text, _) = tbx_document(&[
+        tbx_hsp(0, (100, 120), (200, 220), (1, 1), 1e-30),
+        tbx_hsp(1, (10, 40), (20, 50), (1, 1), 1.0),
+    ]);
+    let subjects: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.starts_with('@'))
+        .map(|line| line.split('\t').next().unwrap())
+        .collect();
+    assert_eq!(subjects, ["Subject_2", "Subject_1"]);
 }

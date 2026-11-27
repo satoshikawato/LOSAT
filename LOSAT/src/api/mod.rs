@@ -145,12 +145,16 @@
 //!   inputs fails with the parser's message, as the command line does without `-in_msa`).
 //! - The API writes no search strategy file either: every program refuses
 //!   `-export_search_strategy` ([`validate`]); the command line writes it.
+//!   A search strategy file is an input of the API: [`Search::read_strategy`] reads its bytes (the
+//!   command line's `-import_search_strategy FILE`, through the same import), [`Inputs::strategy`]
+//!   gives the queries and the subjects (or the database) that it carries, and
+//!   `-import_search_strategy` in an argv is refused ([`validate`]).
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and
 //!   [`run_dustmasker`] and [`run_segmasker`] the maskers of low-complexity regions (nucleotide,
 //!   protein), [`run_windowmasker`] the masker of over-represented nucleotide regions,
-//!   [`run_convert2blastmask`] the converter of lower case masks and [`run_makembindex`] the
-//!   writer of megablast indices: the command line's words, with the caller's reader and writers
-//!   for its standard streams.
+//!   [`run_convert2blastmask`] the converter of lower case masks, [`run_makembindex`] the
+//!   writer of megablast indices and [`run_blast_formatter`] the formatter of BLAST archives: the
+//!   command line's words, with the caller's reader and writers for its standard streams.
 //!
 //! # Items
 //!
@@ -158,12 +162,13 @@
 //!   [`ValueKind`]
 //! - The inputs: [`read_input_file`], [`read_fasta`], [`read_inputs`], [`read_input_records`],
 //!   [`Role`], [`FastaRecord`], [`Inputs`], [`InputRecords`], [`QueryEnd`], [`QueryError`]
-//! - The options: [`validate`], [`Search`], [`API_OWNED`]
+//! - The options: [`validate`], [`Search`], [`API_OWNED`], [`Strategy`]
 //! - The search: [`run_collect`], [`run`](run()), [`run_to_file`], [`run_batches`]
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`Id`],
 //!   [`QueryStats`], [`QueryRounds`], [`Strand`], [`QueryHits`], [`SubjectHits`]
 //! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`], [`run_segmasker`],
-//!   [`run_windowmasker`], [`run_convert2blastmask`], [`run_makembindex`]
+//!   [`run_windowmasker`], [`run_convert2blastmask`], [`run_makembindex`],
+//!   [`run_blast_formatter`]
 //! - The failures: [`Error`]
 //! - The engine's version: [`VERSION`]
 
@@ -180,6 +185,7 @@ mod program;
 mod run;
 mod search;
 pub(crate) mod start;
+pub(crate) mod strategy;
 mod tools;
 mod view;
 
@@ -198,9 +204,10 @@ pub use run::{
     run, run_collect, run_to_file, HspRecord, Outcome, QueryRounds, QueryStats, Report, Strand,
 };
 pub use search::{validate, Search, API_OWNED};
+pub use strategy::Strategy;
 pub use tools::{
-    run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_makembindex,
-    run_segmasker, run_windowmasker,
+    run_blast_formatter, run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb,
+    run_makembindex, run_segmasker, run_windowmasker,
 };
 pub use view::{QueryHits, SubjectHits};
 

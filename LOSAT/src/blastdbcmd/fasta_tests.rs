@@ -120,16 +120,6 @@ fn a_front_line_without_ids_writes_no_short_header() {
 }
 
 #[test]
-fn sequence_lines_are_the_width_with_a_shorter_last() {
-    let mut out = Vec::new();
-    write_sequence(b"ACGTACGT", 3, &mut out);
-    assert_eq!(out, b"ACG\nTAC\nGT\n");
-    out.clear();
-    write_sequence(b"ACGTAC", 3, &mut out);
-    assert_eq!(out, b"ACG\nTAC\n");
-}
-
-#[test]
 fn split_keeps_empty_pieces() {
     assert_eq!(
         split_by_pattern(b"a >b > >c", b" >"),

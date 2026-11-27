@@ -1,0 +1,91 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_mol/pq.fa).
+           2 sequences; 260 total letters
+
+
+
+Query= TI:12346 trace query (protein letters)
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pq protein query one                                                  90.5    2e-29
+pq2 second query                                                      61.2    3e-18
+
+
+>pq protein query one
+Length=150
+
+ Score = 90.5 bits (223),  Expect = 2e-29, Method: Compositional matrix adjust.
+ Identities = 89/149 (60%), Positives = 92/149 (62%), Gaps = 49/149 (33%)
+
+Query  1    AYTHGMR----CKVKCT-YCM--DNVT-VMVCS-KTD--STHGT-WKHCMWKCWDTS--T  46
+            AYTHGMR     K +CT YCM  DNVT VMVCS KT+  STHGT WKHCMWKCWDTS  T
+Sbjct  1    AYTHGMRFCPKVKQQCTFYCMEQDNVTQVMVCSFKTEDFSTHGTIWKHCMWKCWDTSFPT  60
+
+Query  47   SKSHCVTCTS-------------------SANDW-CRWR--CKGW---NDV--CTKVRVD  79
+            SKSHCVTCTS                   SANDW CRWR   KGW    DV   TKVRVD
+Sbjct  61   SKSHCVTCTSQQQQQQQQQQQQQQQQEQFSANDWFCRWRFCFKGWLINPDVPCPTKVRVD  120
+
+Query  80   TY-NCGCC-VWDK---TSDAN---YHANA  100
+            TY NCGCC VWDK    SDA    + ANA
+Sbjct  121  TYLNCGCCEVWDKEITESDAQNYIHEANA  149
+
+
+>pq2 second query
+Length=110
+
+ Score = 61.2 bits (147),  Expect = 3e-18, Method: Compositional matrix adjust.
+ Identities = 48/89 (54%), Positives = 49/89 (55%), Gaps = 31/89 (35%)
+
+Query  29  STHGT-WKHCMWKCWDTS--TSKSHCVTCTS-------------------SANDW-CRWR  65
+           ST GT WKHCMWKCWDTS  TSKSHC TCTS                   SANDW CRWR
+Sbjct  10  STFGTIWKHCMWKCWDTSFDTSKSHCATCTSEKTLYGDHIILQRIAVSVFSANDWRCRWR  69
+
+Query  66  -------CKGWNDVCTKVRVDTY-NCGCC  86
+                     +    TKVRVDTY NCGCC
+Sbjct  70  FCFKSWLINPYVPCPTKVRVDTYLNCGCC  98
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.129    0.518    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 18758
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_mol/pq.fa).
+    Posted date:  Unknown
+  Number of letters in database: 260
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

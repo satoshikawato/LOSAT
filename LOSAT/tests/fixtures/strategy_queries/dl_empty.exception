@@ -1,0 +1,2 @@
+NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objmgr/seq_vector_ci.cpp", line 713: Error: (CSeqVectorException::eSeqDataError) ncbi::objects::CSeqVector_CI::x_UpdateSeg() - CSeqVector_CI: cannot locate segment at 0

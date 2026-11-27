@@ -74,7 +74,8 @@ export interface WorkerRun {
   readonly argv: readonly string[];
   /** Threads to use; 1 runs the serial module. */
   readonly threads: number;
-  readonly query: WorkerInput;
+  /** None for a run of `-in_pssm` or `-in_msa`, which reads its query from `files` (EngineRunRequest.query). */
+  readonly query?: WorkerInput;
   /** None for a run of `-db`, which searches the database in `files` (EngineRunRequest.subject). */
   readonly subject?: WorkerInput;
   /** The files of the run's working directory (EngineRunRequest.files); Files are shared, not copied. */

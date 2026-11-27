@@ -38,7 +38,7 @@ pub(super) fn run_web_pair(
     // NCBI reference (598d8ae6): c++/include/algo/blast/api/local_blast.hpp:76-78
     // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
     let mut output = Vec::new();
-    let outfmt = args.outfmt.clone();
+    let outfmt = args.outfmt.to_string_lossy().into_owned();
     // Plan TD-1: ABI v1 is frozen except for fail-fast fixes, so its BLASTN keeps the
     // formats that it had (6 and 7) and rejects outfmt 0 with the error that it gave
     // before the engine implemented outfmt 0.

@@ -1843,22 +1843,28 @@ fn a_failed_diagnostic_stream_is_its_own_runs() {
         assert_eq!(warned_text, warning_alone, "muting first {muting_first}");
     }
     // Two threads: both calls start, then each searches on its thread (the muting call first),
-    // with pools of two threads.
+    // with pools of two threads. The threads hand over by channels, not barriers: a thread that
+    // panics drops its senders, the other thread's receive fails, and the test fails instead of
+    // waiting forever.
     let (muting, warning) = (BatchRun::muting(&directory, "2"), BatchRun::warning("2"));
-    let started = std::sync::Barrier::new(2);
-    let muted_done = std::sync::Barrier::new(2);
+    let (muting_run, warning_run) = (&muting, &warning);
+    let (muted_started, muted_started_seen) = std::sync::mpsc::channel::<()>();
+    let (warned_started, warned_started_seen) = std::sync::mpsc::channel::<()>();
+    let (muted_done, muted_done_seen) = std::sync::mpsc::channel::<()>();
     let (muted_text, warned_text) = std::thread::scope(|scope| {
-        let muted = scope.spawn(|| {
-            let batches = run_batches(&muting.search, muting.inputs()).unwrap();
-            started.wait();
+        let muted = scope.spawn(move || {
+            let batches = run_batches(&muting_run.search, muting_run.inputs()).unwrap();
+            let _ = muted_started.send(());
+            warned_started_seen.recv().expect("the other call started");
             let text = BatchRun::diagnostics(batches);
-            muted_done.wait();
+            let _ = muted_done.send(());
             text
         });
-        let warned = scope.spawn(|| {
-            let batches = run_batches(&warning.search, warning.inputs()).unwrap();
-            started.wait();
-            muted_done.wait();
+        let warned = scope.spawn(move || {
+            let batches = run_batches(&warning_run.search, warning_run.inputs()).unwrap();
+            let _ = warned_started.send(());
+            muted_started_seen.recv().expect("the muting call started");
+            muted_done_seen.recv().expect("the muting call searched");
             BatchRun::diagnostics(batches)
         });
         (muted.join().unwrap(), warned.join().unwrap())

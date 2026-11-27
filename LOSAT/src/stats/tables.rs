@@ -336,11 +336,6 @@ impl NuclValues {
         Err(message)
     }
 
-    /// NCBI's message when the gap costs are not supported for these scores.
-    pub fn check_gaps(&self, spec: &NuclScoringSpec) -> Result<(), String> {
-        self.row(spec).map(|_| ())
-    }
-
     /// The gapped Karlin block of a query context, with the alpha and beta of its length
     /// adjustment (NCBI `Blast_KarlinBlkNuclGappedCalc` and `Blast_GetNuclAlphaBeta`).
     /// `ungapped` is the context's ungapped block, which gap costs beyond the table use.

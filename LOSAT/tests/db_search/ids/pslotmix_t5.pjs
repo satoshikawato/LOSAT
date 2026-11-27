@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pslotmix_t5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pslotmix_t5 (parsed Seq-ids, taxids 99990, 9606 and 150)",
+  "number-of-letters": 1560,
+  "number-of-sequences": 13,
+  "last-updated": "2026-11-27T23:23:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 3,
+  "bytes-total": 52566,
+  "bytes-to-cache": 1822,
+  "files": [
+    "pslotmix_t5.pdb",
+    "pslotmix_t5.phr",
+    "pslotmix_t5.pin",
+    "pslotmix_t5.pog",
+    "pslotmix_t5.pos",
+    "pslotmix_t5.pot",
+    "pslotmix_t5.psq",
+    "pslotmix_t5.ptf",
+    "pslotmix_t5.pto"
+  ]
+}

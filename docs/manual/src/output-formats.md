@@ -36,7 +36,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 - `psiblast` writes `0` to `16`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round, and so does each query's report in formats `13` to `16` (one `Search` per round with `-subject`); it writes one query-anchored report, Seq-annot, JSON Seq-align set, archive or organism report per round.
 - `tblastn` with `-in_pssm` writes every format but `11`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck` and `cleanup-blastdb-volumes.py` have their own formats, listed on their pages. `blast_formatter` writes `-outfmt` `8`, `9` and `12` from the `-outfmt 11` archive of a search (see [blast_formatter](programs/blast_formatter.md)).
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck` and `cleanup-blastdb-volumes.py` have their own formats, listed on their pages. `blast_formatter` writes `-outfmt` `8`, `9` and `12` from the `-outfmt 11` archive of a search, and the archive itself again with `-outfmt 11` (see [blast_formatter](programs/blast_formatter.md)).
 
 ## Pairwise and query-anchored text (0 to 4)
 

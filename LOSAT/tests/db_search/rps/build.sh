@@ -60,6 +60,13 @@
 #   2026-11-21 05:07 UTC (FAKE_TIME=1795237620): a rebuild under the same shim gives the committed bytes.
 #   Usage: build.sh NCBI_BIN OUT_DIR odd    (only these sets; then: gzip -9 -n OUT_DIR/rps_odd_*)
 #
+# ln_*, ln3v_*, lntx_* .phr and .pin (line RG, series D, rps-lineless): the committed headers of rps_mini, rps_mini3v.00, .02 and
+#   tx3v00 rewritten with definition lines without a Seq-id, which makeprofiledb never writes (make_lineless.py: a copy of a
+#   line without its Seq-id after or before it, or the only line without it; rows db.il.rps.ln.* and db.il.rtbn.ln.*), and the
+#   queries tests/fasta/rps/ln*.faa and ln*.fna. They read only committed files, so a rebuild gives the committed bytes.
+#   Usage: build.sh - OUT_DIR lineless    (NCBI_BIN unused; then: gzip -9 -n OUT_DIR/ln*.p?? and copy the .gz files here,
+#   OUT_DIR/ln*.faa and ln*.fna to tests/fasta/rps)
+#
 # Usage: build.sh NCBI_BIN OUT_DIR    (then: gzip -9 -n OUT_DIR/rps_mini*.* and copy the .gz files here)
 set -euo pipefail
 N=$1
@@ -82,6 +89,11 @@ build_odd() {
 }
 if [ "${3:-}" = odd ]; then
   build_odd
+  ls -l "$O"
+  exit 0
+fi
+if [ "${3:-}" = lineless ]; then
+  python3 -I "$HERE/make_lineless.py" "$O"
   ls -l "$O"
   exit 0
 fi

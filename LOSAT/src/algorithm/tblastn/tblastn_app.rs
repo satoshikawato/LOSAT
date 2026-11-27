@@ -1667,6 +1667,21 @@ impl FoundCheck<'_, '_> {
     ) -> Result<Option<anyhow::Error>> {
         let (range, batch_input) = batch;
         let database = self.database;
+        // Without `-parse_deflines` (or a PSSM query shown with its ids), only for a batch that
+        // reports a sequence with parsed Seq-ids.
+        if self.scopes.is_none()
+            && !crate::algorithm::common::database::reports_parsed(
+                self.titles,
+                batch_results.iter().flat_map(|hitlist| {
+                    hitlist
+                        .lists()
+                        .iter()
+                        .filter_map(|list| u32::try_from(list.oid).ok())
+                }),
+            )
+        {
+            return Ok(None);
+        }
         // The batch's searched queries (`range`), the scope's span.
         let record = |query: usize| {
             crate::report::query_bioseq::QueryRecordRef::of(

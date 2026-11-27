@@ -4562,6 +4562,13 @@ impl ParsedSubject {
         self.display_defline()?.0.display_id()
     }
 
+    /// Whether the display id (`display_id`) is a local id, as a generated query id `Query_N` is:
+    /// a sequence with another display id never shows such a query
+    /// (`common::database::refuse_display_ids_of_queries`).
+    pub fn display_id_is_local(&self) -> bool {
+        matches!(self.display_id(), Some(ParsedSeqId::Local(_)))
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2380-2384,2451-2471
     // `out` holds the heading of this subject only; the title of a definition line is its own,
     // or the subject Bioseq's generated title when it is empty (`x_FillDispParams`).

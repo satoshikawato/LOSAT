@@ -3554,8 +3554,9 @@ fn x_pipe_plan(
 }
 
 /// The check of line RG item X7 (`common::database::refuse_reported_ids_of_queries`) of the
-/// reported sequences of the batch of the searched queries `start..end` (`queries`, the run's
-/// searched query records; `ranged`: a `-query_loc` range cuts them) whose hits are `ordered`,
+/// reported sequences of the batch of the searched queries `start..end` (`query_records`, the
+/// run's searched query records; `input_records`, its input records, whole; `ranged`: a
+/// `-query_loc` range cuts the searched ones) whose hits are `ordered`,
 /// against the queries that NCBI's scope holds for the batch: under `-parse_deflines` the run's
 /// scopes (`BatchReports::query_scopes`), then `refuse_tblastx_qseq_past_seen_query_len`; else the
 /// generated ids of the batch's input records (`generated`), whose refusal is held (`Ok(Some)`)
@@ -3564,11 +3565,28 @@ fn check_found_queries(
     database: &super::super::database::TblastxDatabase,
     outputs: &[crate::api::local_blast::FormatOutput<'_>],
     reports: &BatchReports<'_>,
-    (start, end, query_records, ranged): (usize, usize, &[FastaRecord], bool),
+    (start, end, query_records, input_records, ranged): (
+        usize,
+        usize,
+        &[FastaRecord],
+        &[FastaRecord],
+        bool,
+    ),
     generated: &dyn Fn() -> crate::blastinput::query_batch::QueryScope,
     ordered: &[super::TblastxHsp],
     prefetch_format: crate::algorithm::common::database::PrefetchFormat,
 ) -> Result<Option<anyhow::Error>> {
+    let query_scopes = reports.query_scopes.borrow();
+    let scopes = query_scopes.as_ref();
+    // Without `-parse_deflines`, only for a batch that reports a sequence with parsed Seq-ids.
+    if scopes.is_none()
+        && !crate::algorithm::common::database::reports_parsed(
+            &reports.titles.borrow(),
+            ordered.iter().map(|hsp| hsp.hit.s_idx),
+        )
+    {
+        return Ok(None);
+    }
     let formats: Vec<report::TblastxOutputFormat> = outputs
         .iter()
         .map(|format| report::output_format(format.outfmt))
@@ -3578,22 +3596,21 @@ fn check_found_queries(
         writers: formats.iter().map(|format| format.found_writer()).collect(),
         search_reads: false,
     };
-    let query_scopes = reports.query_scopes.borrow();
-    let scopes = query_scopes.as_ref();
     // The batch's searched queries (`start..end`), the scope's span.
     let record = |query: usize| {
         crate::report::query_bioseq::QueryRecordRef::of(
             query_records.get(query).filter(|_| query < end)?,
         )
     };
-    // How the found query's record compares with the sequence (`compare_found`): the searched
-    // records are whole without `-query_loc`.
+    // How the found query's record compares with the sequence (`compare_found`): the run's input
+    // record, whole under `-query_loc` too (the searched records are cut), as NCBI's reader adds
+    // the whole record to its scope and searches its range (`blast_fasta_input.cpp:395, 458-460`).
     let found = |subject: &crate::report::db_subject::ParsedSubject,
                  ordinal: u32,
                  ranges: &[std::ops::Range<usize>]| {
-        crate::report::query_bioseq::found_record(subject, query_records)
-            .filter(|_| !ranged)
-            .map_or_else(Default::default, |record| {
+        crate::report::query_bioseq::found_record(subject, input_records).map_or_else(
+            Default::default,
+            |record| {
                 crate::report::query_bioseq::compare_found(
                     &record.sequence,
                     record.sequence.len(),
@@ -3601,7 +3618,8 @@ fn check_found_queries(
                     ordinal,
                     ranges,
                 )
-            })
+            },
+        )
     };
     let run = crate::report::query_bioseq::SeenRun {
         shows: writers.shows_shown() && !ranged && !database.loads_write_texts(),
@@ -4251,7 +4269,13 @@ fn run_batch_loop(
                 database,
                 &outputs.formats,
                 reports,
-                (start, end, query_records, input.placements.ranged()),
+                (
+                    start,
+                    end,
+                    query_records,
+                    query_runs.input_records,
+                    input.placements.ranged(),
+                ),
                 &|| {
                     batch_scope(if xml_scope {
                         0..query_runs.input_records.len()

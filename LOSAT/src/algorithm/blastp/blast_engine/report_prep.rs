@@ -1130,9 +1130,11 @@ pub(super) fn refuse_unreportable(
         let writers = BlastpReport::found_writers(args, format_plans, reports.psi_round);
         let taxdb = database.is_some_and(database::BlastpDatabase::taxdb_found);
         let load_texts = database.is_some_and(database::BlastpDatabase::loads_write_texts);
-        // The found query's record is compared with the sequence where the records are whole
-        // (not cut by `-query_loc`) and a FASTA query's (not the PSSM's of `-in_pssm`).
-        let compares = !ranges.query_input.placements.ranged() && args.psi_search.is_none();
+        // The found query's record is compared with the sequence where it is a FASTA query's (not
+        // the PSSM's of `-in_pssm`): the scope's records are the input records, whole under
+        // `-query_loc` too, as NCBI's reader adds the whole record to its scope and searches its
+        // range (`blast_fasta_input.cpp:395, 458-460`).
+        let compares = args.psi_search.is_none();
         let no_record = |_: usize| None;
         for batch in query_batches {
             let records = prep.scope_records(&batch.searched, true);
@@ -1182,15 +1184,21 @@ pub(super) fn refuse_unreportable(
                 })?;
         }
         if !pairwise_views.is_empty() {
-            let scopes: Vec<(usize, crate::blastinput::query_batch::QueryScope)> = query_batches
+            // Each batch's scope, made where the refusal first asks for it.
+            let scopes: Vec<(
+                &Range<usize>,
+                std::cell::OnceCell<crate::blastinput::query_batch::QueryScope>,
+            )> = query_batches
                 .iter()
-                .map(|batch| (batch.searched.end, prep.batch_scope(&batch.searched, true)))
+                .map(|batch| (&batch.searched, std::cell::OnceCell::new()))
                 .collect();
             let none = crate::blastinput::query_batch::QueryScope::default();
             let scope_of = |query: usize| {
                 scopes
-                    .get(scopes.partition_point(|&(end, _)| end <= query))
-                    .map_or(&none, |(_, scope)| scope)
+                    .get(scopes.partition_point(|(searched, _)| searched.end <= query))
+                    .map_or(&none, |(searched, scope)| {
+                        scope.get_or_init(|| prep.batch_scope(searched, true))
+                    })
             };
             titles
                 .refuse_display_ids(hit_lists, scope_of, true, |q_idx| described(q_idx, false))?;

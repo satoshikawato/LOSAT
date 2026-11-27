@@ -9,7 +9,8 @@
   length differs, or with `SQ` without `SR` its letters inside an alignment; and the `psiblast`
   PSSMs made of such a sequence (the next round's, and the one `-save_pssm_after_last_round`
   saves) where the query's letters differ inside an alignment; also where the taxonomy database
-  is damaged, since NCBI loads nothing of such a sequence. This holds in all eight search
+  is damaged, since NCBI loads nothing of such a sequence. With `-query_loc` the query's whole
+  record is compared, as NCBI finds it. This holds in all eight search
   programs. LOSAT wrote the sequence's own output there, which differed from NCBI's (before: only
   `-outfmt 1` to `4` of five programs and some `rpsblast` and `rpstblastn` formats were refused).
   The other formats and fields still give NCBI's output, among them a copy of the query in the

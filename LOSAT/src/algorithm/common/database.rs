@@ -3779,7 +3779,9 @@ pub(crate) fn refuse_display_id_of_a_query(
 /// `refuse_display_id_of_a_query` of each sequence whose description line its report shows
 /// (`described`, by rank: the description line looks the title up again by that id and NCBI shows
 /// the query's title there). A sequence whose Seq-align id is a query's is refused in every format
-/// that shows it by the batch's check (`report::query_bioseq::check`, line RG item X7-1).
+/// that shows it by the batch's check (`report::query_bioseq::check`, line RG item X7-1). The
+/// scope is asked for only where a reported sequence may be found in it: with `generated`, only
+/// a local display id can be a generated id (`ParsedSubject::display_id_is_local`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refuse_display_ids_of_queries<'s>(
     num_queries: usize,
@@ -3794,15 +3796,24 @@ pub(crate) fn refuse_display_ids_of_queries<'s>(
     if parsed.is_empty() {
         return Ok(());
     }
-    let parsed_of = |rank: u32| parsed.get(rank as usize).and_then(Option::as_deref);
+    let parsed_of = |rank: u32| {
+        parsed
+            .get(rank as usize)
+            .and_then(Option::as_deref)
+            .filter(|subject| !generated || subject.display_id_is_local())
+    };
     for query in 0..num_queries {
-        let scope = scope_of(query);
+        let mut asked = None;
         if !reported(query).iter().any(|&rank| {
-            parsed_of(rank)
-                .is_some_and(|subject| scope.has_key(&subject.query_scope_keys().display))
+            parsed_of(rank).is_some_and(|subject| {
+                asked
+                    .get_or_insert_with(|| scope_of(query))
+                    .has_key(&subject.query_scope_keys().display)
+            })
         }) {
             continue;
         }
+        let scope = *asked.get_or_insert_with(|| scope_of(query));
         for rank in described(query)? {
             if let Some(subject) = parsed_of(rank) {
                 refuse_display_id_of_a_query(subject, oid_of(rank), scope, generated, program)?;
@@ -3810,6 +3821,21 @@ pub(crate) fn refuse_display_ids_of_queries<'s>(
         }
     }
     Ok(())
+}
+
+/// Whether a sequence of `ordinals` (the ordinal ids that a query batch reports, in its order)
+/// has parsed Seq-ids in `titles`: the check of `refuse_reported_ids_of_queries` asks about no
+/// other, so a search of queries without `-parse_deflines` makes that check's inputs (its reports'
+/// writers, `ParsedShown`) only for such a batch.
+pub(crate) fn reports_parsed(
+    titles: &std::collections::BTreeMap<u32, ReportedHeader>,
+    ordinals: impl IntoIterator<Item = u32>,
+) -> bool {
+    let mut previous = None;
+    ordinals.into_iter().any(|ordinal| {
+        previous.replace(ordinal) != Some(ordinal)
+            && matches!(titles.get(&ordinal), Some(ReportedHeader::Parsed(_)))
+    })
 }
 
 /// The check of line RG item X7 (`report::query_bioseq::check` with `run`) of each reported

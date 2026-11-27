@@ -9117,7 +9117,24 @@ fn run_in_pool(
                 _ => batch_records.input(),
             })
         };
-        if let SubjectSource::Database(database) = source {
+        // Without `-parse_deflines`, only for a batch that reports a sequence with parsed Seq-ids
+        // (`reports_parsed`).
+        let found_check = match source {
+            SubjectSource::Database(database)
+                if query_scopes.is_some()
+                    || crate::algorithm::common::database::reports_parsed(
+                        &titles,
+                        batch_hit_lists.iter().flatten().flat_map(|hit_list| {
+                            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                            hit_list.hsplist_array[..count].iter().map(|list| list.oid)
+                        }),
+                    ) =>
+            {
+                Some(database)
+            }
+            _ => None,
+        };
+        if let Some(database) = found_check {
             let searched = batch_records.searched();
             let record = |query: usize| {
                 // `batch_records.batch_queries()` drops `record.sequence` under `LOSAT_X_BNQPACK`,
@@ -9131,19 +9148,20 @@ fn run_in_pool(
             };
             let writers = found_writers(&output_formats);
             // How the found query's record compares with the sequence (`compare_found`): the
-            // batch's input records are whole without `-query_loc`. Their lengths are the input
-            // lengths read before the search: a run whose reports read no query letter drops the
-            // records' letters after the encoding (`x_query_drop`, `reads_query_letters`), and
-            // keeps them where a report reads the found query's letters (the fields of the
-            // letters, SAM's `SQ`).
-            let ranged = query_input.placements.ranged();
+            // batch's input records, whole under `-query_loc` too (its searched records are cut),
+            // as NCBI's reader adds the whole record to its scope and searches its range
+            // (`blast_fasta_input.cpp:395, 458-460`). Their lengths are the input lengths read
+            // before the search: a run whose reports read no query letter drops the records'
+            // letters after the encoding (`x_query_drop`, `reads_query_letters`), and keeps them
+            // where a report reads the found query's letters (the fields of the letters, SAM's
+            // `SQ`).
             let input_records = batch_records.input();
             let found = |subject: &crate::report::db_subject::ParsedSubject,
                          ordinal: u32,
                          ranges: &[std::ops::Range<usize>]| {
-                crate::report::query_bioseq::found_index(subject, input_records)
-                    .filter(|_| !ranged)
-                    .map_or_else(Default::default, |index| {
+                crate::report::query_bioseq::found_index(subject, input_records).map_or_else(
+                    Default::default,
+                    |index| {
                         crate::report::query_bioseq::compare_found(
                             &input_records[index].sequence,
                             query_input.input_lengths[input_start + index],
@@ -9151,7 +9169,8 @@ fn run_in_pool(
                             ordinal,
                             ranges,
                         )
-                    })
+                    },
+                )
             };
             let run = crate::report::query_bioseq::SeenRun {
                 shows: writers.shows_shown()

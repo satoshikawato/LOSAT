@@ -2058,7 +2058,9 @@ impl ListedTitles<'_> {
     /// shows, with the scope `scope_of` of the query whose list reaches it: `described(query)`
     /// gives the subjects (by rank) of the query's description table
     /// (`pairwise::blastp_described_subjects`), asked only for a query whose list holds a subject
-    /// whose display id the scope has (`QueryScopeKeys::display`).
+    /// whose display id the scope has (`QueryScopeKeys::display`). The scope is asked for only
+    /// where such a subject may be found in it (with `generated`, one with a local display id, as
+    /// `common::database::refuse_display_ids_of_queries`).
     pub(super) fn refuse_display_ids<'s>(
         &self,
         hit_lists: &[Option<BlastpHitList>],
@@ -2073,7 +2075,7 @@ impl ListedTitles<'_> {
             let Some(hit_list) = hit_list else {
                 continue;
             };
-            let scope = scope_of(query);
+            let mut asked = None;
             let mut shown: Option<Vec<u32>> = None;
             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
             for hsp_list in &hit_list.hsplist_array[..count] {
@@ -2081,6 +2083,10 @@ impl ListedTitles<'_> {
                 let Some(subject) = &self.parsed[rank] else {
                     continue;
                 };
+                if generated && !subject.display_id_is_local() {
+                    continue;
+                }
+                let scope = *asked.get_or_insert_with(|| scope_of(query));
                 if !scope.has_key(&subject.query_scope_keys().display) {
                     continue;
                 }

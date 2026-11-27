@@ -1579,8 +1579,11 @@ pub(super) fn reported_batch(
     // ids of the reader batch's records, in outfmt 5, whose scope the formatter keeps, those of
     // the run's queries (`run_queries`: the batches before and after this one, which the reader
     // has not read yet; every `Query_N` where the caller has not counted them). A generated id's
-    // refusal is held until after the batch's prefetch (`BatchQueries::held`).
-    let found_refusal = {
+    // refusal is held until after the batch's prefetch (`BatchQueries::held`). Only for a batch
+    // that reports a sequence with parsed Seq-ids (`ReportedSubjects::parsed`).
+    let found_refusal = if reported.parsed().is_empty() {
+        None
+    } else {
         let first = query_scopes.map_or(queries_before, |scopes| scopes.first());
         let record = |query: usize| {
             let record = queries.get(query.checked_sub(first)?)?;

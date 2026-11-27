@@ -583,46 +583,50 @@ impl QueryScope {
 /// that NCBI's formatter adds to its scope for the batch's reports) holds the generated local
 /// ids (`QueryScope::of_generated_ids`) of queries read without `-parse_deflines` (`generated`:
 /// the first query has no `believed` ids), or the ids of the queries that the reports show
-/// (`QueryScope::add_ids_of`: `-parse_deflines`, a PSSM query shown with its ids).
-pub(crate) struct AnchoredBatchScopes {
+/// (`QueryScope::add_ids_of`: `-parse_deflines`, a PSSM query shown with its ids). A batch's scope
+/// is made where a refusal first asks for it (`of_query`): a report whose sequences no query can
+/// match asks for none.
+pub(crate) struct AnchoredBatchScopes<'r> {
     generated: bool,
+    ids: AnchoredIds<'r>,
     spans: Vec<std::ops::Range<usize>>,
-    scopes: Vec<QueryScope>,
+    scopes: Vec<std::cell::OnceCell<QueryScope>>,
     none: QueryScope,
 }
 
-impl AnchoredBatchScopes {
+/// The ids of the query records of `AnchoredBatchScopes`: the records, or their local ids and
+/// `-parse_deflines` Seq-ids (BLASTX's records, which have their own type).
+enum AnchoredIds<'r> {
+    Records(&'r [FastaRecord]),
+    Ids(&'r [(&'r str, Option<&'r BelievedIds>)]),
+}
+
+impl<'r> AnchoredBatchScopes<'r> {
     /// The scopes of the batches `spans` of the query records `records` (`of_ids` of their ids).
-    pub(crate) fn new(records: &[FastaRecord], spans: Vec<std::ops::Range<usize>>) -> Self {
-        let ids: Vec<(&str, Option<&BelievedIds>)> = records
-            .iter()
-            .map(|record| (record.local_id.as_str(), record.believed()))
-            .collect();
-        Self::of_ids(&ids, spans)
+    pub(crate) fn new(records: &'r [FastaRecord], spans: Vec<std::ops::Range<usize>>) -> Self {
+        let generated = records
+            .first()
+            .is_none_or(|record| record.believed().is_none());
+        Self::of(generated, AnchoredIds::Records(records), spans)
     }
 
     /// `new` of the query records whose local ids and `-parse_deflines` Seq-ids are `ids` (BLASTX's
     /// records, which have their own type): a span past the records is cut to them;
     /// `QueryScope::of_shown` of each (every record is read with `-parse_deflines` or none is).
     pub(crate) fn of_ids(
-        ids: &[(&str, Option<&BelievedIds>)],
+        ids: &'r [(&'r str, Option<&'r BelievedIds>)],
         spans: Vec<std::ops::Range<usize>>,
     ) -> Self {
         let generated = ids.first().is_none_or(|(_, believed)| believed.is_none());
-        let scopes = spans
-            .iter()
-            .map(|span| {
-                QueryScope::of_shown(
-                    ids[span.start.min(ids.len())..span.end.min(ids.len())]
-                        .iter()
-                        .copied(),
-                )
-            })
-            .collect();
+        Self::of(generated, AnchoredIds::Ids(ids), spans)
+    }
+
+    fn of(generated: bool, ids: AnchoredIds<'r>, spans: Vec<std::ops::Range<usize>>) -> Self {
         Self {
             generated,
+            ids,
+            scopes: spans.iter().map(|_| std::cell::OnceCell::new()).collect(),
             spans,
-            scopes,
             none: QueryScope::default(),
         }
     }
@@ -630,7 +634,7 @@ impl AnchoredBatchScopes {
     /// The scopes of the batches that start at the query records `starts` (the first batch at 0
     /// whether or not `starts` lists it; each batch ends where the next starts, the last at the
     /// end of `records`).
-    pub(crate) fn of_starts(records: &[FastaRecord], starts: &[usize]) -> Self {
+    pub(crate) fn of_starts(records: &'r [FastaRecord], starts: &[usize]) -> Self {
         let mut starts: Vec<usize> = starts.to_vec();
         if starts.first() != Some(&0) {
             starts.insert(0, 0);
@@ -648,12 +652,27 @@ impl AnchoredBatchScopes {
         self.generated
     }
 
-    /// The scope of the batch that holds the query record `query` (empty past the batches).
+    /// The scope of the batch that holds the query record `query` (empty past the batches), made
+    /// at its first use.
     pub(crate) fn of_query(&self, query: usize) -> &QueryScope {
-        self.spans
-            .iter()
-            .position(|span| span.contains(&query))
-            .map_or(&self.none, |batch| &self.scopes[batch])
+        let Some(batch) = self.spans.iter().position(|span| span.contains(&query)) else {
+            return &self.none;
+        };
+        self.scopes[batch].get_or_init(|| {
+            let span = &self.spans[batch];
+            match self.ids {
+                AnchoredIds::Records(records) => QueryScope::of_shown(
+                    records[span.start.min(records.len())..span.end.min(records.len())]
+                        .iter()
+                        .map(|record| (record.local_id.as_str(), record.believed())),
+                ),
+                AnchoredIds::Ids(ids) => QueryScope::of_shown(
+                    ids[span.start.min(ids.len())..span.end.min(ids.len())]
+                        .iter()
+                        .copied(),
+                ),
+            }
+        })
     }
 }
 

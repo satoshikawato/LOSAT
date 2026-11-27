@@ -544,31 +544,91 @@ fn an_index_file_changed_after_the_open_gives_errors_not_panics() {
             overwrite_entries(&index, arrays, num_oids, array, words);
             let n = num_oids as u32;
             let label = format!("{name}, array {array} set to {:?}..", &words[..2]);
-            let block = volume.read_block(0, n, 0, 0);
-            if array != 0 {
-                let error = block.expect_err(&label).to_string();
-                assert!(error.contains("the file changed"), "{label}: {error}");
+            enum BytesExpect {
+                OkAny,
+                OkExact(u64),
+                FormatErr(&'static str),
+            }
+            fn assert_format<T: std::fmt::Debug>(
+                label: &str,
+                res: Result<T, SeqDbError>,
+                needle: &str,
+                ctx: &str,
+            ) {
+                match res {
+                    Err(SeqDbError::Format { message, .. }) => assert!(
+                        message.contains(needle),
+                        "{label} ({ctx}): expected {needle:?} in {message:?}"
+                    ),
+                    other => panic!("{label} ({ctx}): expected Format({needle:?}), got {other:?}"),
+                }
+            }
+            let is_zeros = words[0] == 0;
+            let (read_err, bytes_expect) = match (seqtype, array, is_zeros) {
+                (_, 0, _) => (None, BytesExpect::OkAny),
+                (SeqType::Protein | SeqType::Nucleotide, 1, false) => (
+                    Some("Sequence offsets"),
+                    BytesExpect::FormatErr("Sequence offsets"),
+                ),
+                (SeqType::Protein, 1, true) => (Some("Sequence offsets"), BytesExpect::OkExact(1)),
+                (SeqType::Nucleotide, 1, true) => {
+                    (Some("Ambiguity offsets"), BytesExpect::OkExact(0))
+                }
+                (SeqType::Nucleotide, 2, _) => (Some("Ambiguity offsets"), BytesExpect::OkAny),
+                other => unreachable!("unexpected test case {other:?}"),
+            };
+            match read_err {
+                None => {
+                    volume.read_block(0, n, 0, 0).expect(&label);
+                }
+                Some(needle) => assert_format(&label, volume.read_block(0, n, 0, 0), needle, "blk"),
             }
             for first in 0..n {
-                let _ = volume.block_end(first, 64);
-                let _ = volume.block_bytes(first, n);
-                let _ = volume.read_block(first, first + 1, first, first);
+                volume.block_end(first, 64).expect(&label);
+                match bytes_expect {
+                    BytesExpect::OkAny => {
+                        volume.block_bytes(first, n).expect(&label);
+                    }
+                    BytesExpect::OkExact(want) => {
+                        assert_eq!(volume.block_bytes(first, n).expect(&label), want, "{label}");
+                    }
+                    BytesExpect::FormatErr(needle) => {
+                        assert_format(&label, volume.block_bytes(first, n), needle, "bytes");
+                    }
+                }
+                let one = volume.read_block(first, first + 1, first, first);
+                match read_err {
+                    None => {
+                        one.expect(&label);
+                    }
+                    Some(needle) => assert_format(&label, one, needle, "one"),
+                }
             }
-            let mut visited = 0;
-            volume.visit_deflines(0, n, 1 << 20, &mut |_, _| {
-                visited += 1;
-                true
-            });
-            assert_eq!(visited, n, "{label}");
             if array == 0 {
-                // Header offsets read again in a range break the order: the range is read one
-                // sequence at a time, and every sequence gets the error of its own read.
-                let error = volume
-                    .index()
-                    .header_offsets(0, n)
-                    .expect_err(&label)
-                    .to_string();
-                assert!(error.contains("the file changed"), "{label}: {error}");
+                // Descending header offsets: header reads yield NCBI's CEofException
+                // (`negative_length_eof`) and `header_offsets` returns the re-read words.
+                let mut visited = 0;
+                volume.visit_deflines(0, n, 1 << 20, &mut |_, res| {
+                    match res {
+                        Err(SeqDbError::Ncbi(err)) => {
+                            assert!(err.is_class("CEofException"), "{label}: {err:?}");
+                        }
+                        other => panic!("{label}: expected CEofException, got {other:?}"),
+                    }
+                    visited += 1;
+                    true
+                });
+                assert_eq!(visited, n, "{label}");
+                let reread = volume.index().header_offsets(0, n).expect(&label);
+                assert_eq!(reread, words, "{label}");
+            }
+            if seqtype == SeqType::Protein && array == 1 {
+                // Descending or zero protein sequence offsets: `read_protein_search_block` skips
+                // non-positive lengths as NCBI's `x_GetSequence` returns <= 0 (`p4_pincut`).
+                let skipped = volume.read_protein_search_block(0, n, 0, 0).expect(&label);
+                for i in 0..n as usize {
+                    assert!(skipped.protein(i).is_empty(), "{label} oid {i}");
+                }
             }
         }
     }

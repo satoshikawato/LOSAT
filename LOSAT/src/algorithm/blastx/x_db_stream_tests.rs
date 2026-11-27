@@ -34,7 +34,7 @@ fn every_read_gives_the_bytes_and_lengths_of_the_files() {
             residues.iter().map(Vec::len).max().unwrap(),
             "{name}"
         );
-        assert_eq!(database.x_open_stream().unwrap(), longest, "{name}");
+        assert_eq!(database.x_open_stream().unwrap(), (longest, n), "{name}");
         let with_sentinel = |oid: usize| [&residues[oid][..], &[0u8][..]].concat();
         // The same bytes with the sentinel before them.
         let with_sentinels = |oid: usize| [&[0u8][..], &with_sentinel(oid)[..]].concat();
@@ -182,7 +182,10 @@ fn the_head_of_the_stream_reads_no_sequence() {
     std::fs::write(&pin, index).unwrap();
     let database =
         BlastxDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default()).unwrap();
-    assert_eq!(database.x_open_stream().unwrap(), longest);
+    assert_eq!(
+        database.x_open_stream().unwrap(),
+        (longest, database.x_seqdb().num_seqs() as usize)
+    );
     let stream = XStreamDb::new(database.x_seqdb(), longest);
     let error = XPass::new(&stream).view(0).map(|_| ()).unwrap_err();
     let XReadError(kept) = error.downcast::<XReadError>().unwrap();
@@ -203,7 +206,7 @@ fn the_reads_check_the_sequences_until_every_one_is_checked() {
     let (dir, path) = copy_of("prot_v5", "check");
     let database =
         BlastxDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default()).unwrap();
-    let longest = database.x_open_stream().unwrap();
+    let (longest, _) = database.x_open_stream().unwrap();
     let n = database.x_seqdb().num_seqs() as usize;
     damage(&dir.join("prot_v5.psq"), 6, 200);
     let want = database.x_check_stores().unwrap_err().to_string();

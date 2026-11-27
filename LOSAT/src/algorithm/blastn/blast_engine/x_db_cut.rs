@@ -171,14 +171,19 @@ pub(super) fn x_db_cut_block_bytes(db: &SeqDb, pool: &SearchPool<'_>, parallel: 
 pub(super) fn x_one_thread_error(db: &SeqDb, error: anyhow::Error) -> anyhow::Error {
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, BLOCK_BYTES) {
-        let block = match db.read_block(range) {
+        let block = match db.read_nucleotide_search_block(range) {
             Ok(block) => block,
             Err(first) => return search_read_error(first),
         };
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+        let stopped = block.stopped_at_negative();
         for i in 0..block.len() {
             if let Err(first) = block_subject(&block, &range, i) {
                 return first;
             }
+        }
+        if stopped {
+            break;
         }
         next_ordinal = range.end_ordinal();
     }

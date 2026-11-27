@@ -909,7 +909,13 @@ fn tag(text: &[u8]) -> Option<(usize, &[u8])> {
         if text[i..f].ends_with(b"::operator") && text[f..].starts_with(b"()") {
             f += 2;
         }
-        if let Some(end) = literal(&text[f..], b"() - ") {
+        let sep = literal(&text[f..], b"() - ").or_else(|| {
+            text[i..f]
+                .ends_with(b"::")
+                .then(|| literal(&text[f..], b" - "))
+                .flatten()
+        });
+        if let Some(end) = sep {
             i = f + end;
         } else if let Some(end) = literal(&text[f..], b"() -") {
             if matches!(text.get(f + end), None | Some(b'\n')) {

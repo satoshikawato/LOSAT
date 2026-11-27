@@ -1026,15 +1026,6 @@ pub(super) fn write_pairwise(
             let phi_query_masks =
                 (!phi_query_masks.iter().all(Vec::is_empty)).then_some(phi_query_masks);
             use crate::report::pairwise::psiblast_round::phi_round;
-            if window.start == 0 && reports.x_prolog {
-                phi_round::write_phi_prolog(
-                    &mut writer,
-                    &pairwise_config,
-                    &pairwise_report,
-                    pairwise_database.as_ref(),
-                )
-                .map_err(crate::cli::NativeError::of_writer)?;
-            }
             for q_idx in window {
                 // A batch's report is headed by its first query (`PhiBatch`).
                 let Some(batch) = phi.call.batch_at(q_idx) else {
@@ -1203,7 +1194,6 @@ pub(super) fn write_pairwise(
                 pairwise_database.as_ref(),
                 probe.as_mut(),
                 warnings.as_mut(),
-                reports.x_prolog,
                 crate::report::pairwise::psiblast_round::ReportRound {
                     number: io.state.number(),
                     found_before: psi_found_before
@@ -1233,7 +1223,6 @@ pub(super) fn write_pairwise(
             pairwise_database.as_ref(),
             probe.as_mut(),
             warnings.as_mut(),
-            reports.x_prolog,
             reports.epilog && !prolog_only,
             x_pool,
             anchored_sequences

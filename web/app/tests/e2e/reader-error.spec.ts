@@ -13,7 +13,7 @@ import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { openFiles, openParameters, openSearch, paste, pickRun, program, submit, waitStatus } from './support/search';
+import { openFiles, openParameters, openSearch, paste, pickRun, program, settled, submit, waitStatus } from './support/search';
 
 test.setTimeout(180_000);
 
@@ -105,6 +105,12 @@ test('under -parse_deflines an error of an earlier query batch comes before the 
   await openParameters(page);
   await page.getByTestId('param-extra').fill('-parse_deflines');
   await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  // The validation of -parse_deflines comes after a pause in typing (the state above is still the earlier argv's), and
+  // the engine then reads both inputs again; the query's check under it finds the reader's error of the last record,
+  // which the card shows (it does not without the option). Run LOSAT is pressed once the page shows that, as a user
+  // sees it: a press while the card's warning came was a press while the button moved (line WQA's D25, 2026-11-27).
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-reader-error', '', { timeout: 30_000 });
+  await settled(page, 'subject');
   const status = await failedRun(page, 1);
   await expect(status).toContainText(message);
   if (NATIVE === undefined) {

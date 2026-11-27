@@ -41,10 +41,13 @@
 //! that is read only for an index below the set's length, after a successful take, and the owner
 //! returns only when every taken index has run (`XSet::wait`).
 
-use std::any::Any;
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
+
+// The item sets and their owner's hold (`utils/xitems.rs`), shared with BLASTX.
+pub(crate) use crate::utils::xitems::{in_item, XTaker};
+use crate::utils::xitems::{Run, XOwned, XSet};
 
 // No NCBI counterpart: the variable is read once per process; it chooses which thread runs which
 // unit and group, not a value NCBI computes.
@@ -55,114 +58,6 @@ pub(crate) fn on() -> bool {
         cfg!(all(feature = "parallel", not(target_arch = "wasm32")))
             && crate::utils::xswitch::on("LOSAT_X_TBXBOARD")
     })
-}
-
-/// What a taker lends the items it runs: the unit path keeps its scratch here, made by the first
-/// unit the taker runs and dropped when the taker stops (as rayon's `map_init` made one per split).
-#[derive(Default)]
-pub(crate) struct XTaker {
-    pub(crate) scratch: Option<Box<dyn Any>>,
-}
-
-type Run<'a> = dyn Fn(usize, &mut XTaker) + Sync + 'a;
-
-/// A set of independent items: a subject's units, or a linking call's groups.
-pub(crate) struct XSet {
-    run: *const Run<'static>,
-    n: usize,
-    next: AtomicUsize,
-    done: Mutex<usize>,
-    all_done: Condvar,
-}
-
-// SAFETY: `run` is a `Sync` closure; it is called only for a taken index below `n`, and its owner
-// does not return before every such call has returned (`XSet::wait`).
-unsafe impl Send for XSet {}
-unsafe impl Sync for XSet {}
-
-impl XSet {
-    fn new(run: &Run<'_>, n: usize) -> Arc<Self> {
-        // SAFETY: the lifetime is erased for the takers; see the type's `Send` / `Sync`.
-        let run: *const Run<'static> = unsafe { std::mem::transmute(run) };
-        Arc::new(Self {
-            run,
-            n,
-            next: AtomicUsize::new(0),
-            done: Mutex::new(0),
-            all_done: Condvar::new(),
-        })
-    }
-
-    /// Takes and runs one item; false when none was left to take.
-    fn run_one(&self, taker: &mut XTaker) -> bool {
-        if self.next.load(Ordering::Acquire) >= self.n {
-            return false;
-        }
-        let i = self.next.fetch_add(1, Ordering::AcqRel);
-        if i >= self.n {
-            return false;
-        }
-        // The item counts as run when it returns or panics, so its owner never waits for it forever.
-        struct Ran<'a>(&'a XSet, bool);
-        impl Drop for Ran<'_> {
-            fn drop(&mut self) {
-                IN_ITEM.with(|flag| flag.set(self.1));
-                let mut done = self.0.done.lock().unwrap_or_else(|e| e.into_inner());
-                *done += 1;
-                if *done == self.0.n {
-                    self.0.all_done.notify_all();
-                }
-            }
-        }
-        let _ran = Ran(self, IN_ITEM.with(|flag| flag.replace(true)));
-        // SAFETY: see the type's `Send` / `Sync`.
-        unsafe { (*self.run)(i, taker) };
-        true
-    }
-
-    /// Every item has been taken.
-    fn taken(&self) -> bool {
-        self.next.load(Ordering::Acquire) >= self.n
-    }
-
-    /// Blocks until every item has run.
-    fn wait(&self) {
-        let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
-        while *done < self.n {
-            done = self.all_done.wait(done).unwrap_or_else(|e| e.into_inner());
-        }
-    }
-
-    /// Blocks until `n` items have run, for an owner that unwinds: an item that ends notifies only
-    /// when it is the set's last (a syscall per unit otherwise), so this wait reads the count again.
-    fn wait_unwinding(&self, n: usize) {
-        let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
-        while *done < n {
-            done = self
-                .all_done
-                .wait_timeout(done, std::time::Duration::from_millis(1))
-                .unwrap_or_else(|e| e.into_inner())
-                .0;
-        }
-    }
-}
-
-/// The owner's hold on its set: if the owner unwinds (a panic in an item it ran), no item is taken
-/// any more and the guard waits for the items others took, which borrow the owner's frame, before
-/// the panic goes on.
-struct XOwned<'a>(&'a XSet);
-
-impl Drop for XOwned<'_> {
-    fn drop(&mut self) {
-        if std::thread::panicking() {
-            let taken = self
-                .0
-                .next
-                .fetch_max(self.0.n, Ordering::AcqRel)
-                .min(self.0.n);
-            self.0.wait_unwinding(taken);
-        }
-    }
 }
 
 /// Where a thread of a subject loop sleeps while no item is left to take and a subject has not yet
@@ -528,16 +423,6 @@ fn x_spawn_group_helper(groups: &Arc<XGroups>) {
         let mut taker = XTaker::default();
         groups.run_one(&mut taker);
     });
-}
-
-thread_local! {
-    // This thread runs a board item: the item's sorts stay on the thread (no pool, no board).
-    static IN_ITEM: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Whether this thread is running a board item (an item makes no pool or board call).
-pub(crate) fn in_item() -> bool {
-    IN_ITEM.with(Cell::get)
 }
 
 thread_local! {

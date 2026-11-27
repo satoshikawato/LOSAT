@@ -313,7 +313,10 @@ pub(super) fn report_converted_stats(
         let mut si = super::search_gapped::window_index(hsp.s_start, base)
             .context("TBLASTN positive subject offset before translation range")?;
         let stats = converted_stats_in_window(converted, report_query, subject, si, matrix)?;
-        let end = si + usize::try_from(hsp.s_end - hsp.s_start)?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4650-4653
+        // A one-hit alignment that starts on the frame's trailing NULLB with a single `Sub(1)`
+        // leaves `found_end` false (`s_end == s_start - 1`); its subject residue is NULLB, not X.
+        let end = si + usize::try_from((hsp.s_end - hsp.s_start).max(0))?;
         if !subject
             .get(si..end)
             .context("TBLASTN report HSP past its translation")?

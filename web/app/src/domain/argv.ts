@@ -26,6 +26,8 @@ function refusedWord(program: ProgramId, word: string): string | undefined {
   const flag = word.split('=', 1)[0]!;
   if (flag === '-num_threads') return '-num_threads is set in the form: Threads';
   if (flag === '-db') return '-db is set in the form: Subject';
+  if (flag === '-in_pssm' && (program === 'psiblast' || program === 'tblastn')) return '-in_pssm is set in the form: Query';
+  if (flag === '-in_msa' && program === 'psiblast') return '-in_msa is set in the form: Query';
   if (RESERVED_FLAGS.includes(flag) || (flag === '-mt_mode' && MT_MODE_PROGRAMS.includes(program))) return `${flag} is managed by LOSAT`;
   return undefined;
 }
@@ -39,7 +41,10 @@ export const PASTED_NAMES = Object.freeze({ query: 'query.fa', subject: 'subject
 
 export interface ArgvInput {
   readonly program: ProgramId;
-  readonly queryName: string;
+  /** Query FASTA name (`-query`). Provide either `queryName` or `queryFile`. */
+  readonly queryName?: string;
+  /** File-based query (`-in_pssm` or `-in_msa`). Takes precedence over `queryName` when present. */
+  readonly queryFile?: { readonly flag: '-in_pssm' | '-in_msa'; readonly name: string };
   /** Subject FASTA name (`-subject`). Provide either `subjectName` or `databaseName`. */
   readonly subjectName?: string;
   /** Local BLAST database name (`-db`). Takes precedence over `subjectName` when present. */
@@ -57,22 +62,29 @@ export interface ArgvInput {
  * D20, 2026-11-23).
  */
 export function userArgv(run: { readonly argv: readonly string[]; readonly prints?: unknown }): readonly string[] {
-  // buildArgv's layout: [program, '-query', name, '-subject' | '-db', name, ...].
+  // buildArgv's layout: [program, '-query'|'-in_pssm'|'-in_msa', name, '-subject' | '-db', name, ...].
   return run.prints === undefined ? run.argv : [run.argv[0]!, ...run.argv.slice(5)];
 }
 
 /**
- * Builds `[program, -query, name, -subject|-db, name, ...parameters]`.
+ * Builds `[program, -query|-in_pssm|-in_msa, name, -subject|-db, name, ...parameters]`.
  * Engine defaults are never written out, so the CLI command stays minimal.
  */
 export function buildArgv(input: ArgvInput): readonly string[] {
-  const argv =
+  const queryPair: readonly [string, string] =
+    input.queryFile !== undefined
+      ? [input.queryFile.flag, input.queryFile.name]
+      : ['-query', input.queryName ?? PASTED_NAMES.query];
+  const subjectPair: readonly [string, string] =
     input.databaseName !== undefined
-      ? [input.program, '-query', input.queryName, '-db', input.databaseName]
-      : [input.program, '-query', input.queryName, '-subject', input.subjectName ?? PASTED_NAMES.subject];
+      ? ['-db', input.databaseName]
+      : ['-subject', input.subjectName ?? PASTED_NAMES.subject];
+  const argv = [input.program, ...queryPair, ...subjectPair];
   for (const [flag, value] of input.parameters) {
     if (!flag.startsWith('-')) throw new Error(`parameter must start with "-": ${flag}`);
-    if (RESERVED_FLAGS.includes(flag) || flag === '-db') throw new Error(`${flag} is managed by LOSAT`);
+    if (RESERVED_FLAGS.includes(flag) || flag === '-db' || flag === '-in_pssm' || flag === '-in_msa') {
+      throw new Error(`${flag} is managed by LOSAT`);
+    }
     argv.push(flag);
     if (value !== true) argv.push(value);
   }
@@ -258,7 +270,12 @@ export function optionNames(
       name &&
       takesValue !== undefined &&
       !word.includes('=') &&
-      (RESERVED_FLAGS.includes(word) || word === '-db' || word === OUTFMT_FLAG || takesValue(word));
+      (RESERVED_FLAGS.includes(word) ||
+        word === '-db' ||
+        word === '-in_pssm' ||
+        word === '-in_msa' ||
+        word === OUTFMT_FLAG ||
+        takesValue(word));
     return { text: shellWord(word), name };
   });
 }

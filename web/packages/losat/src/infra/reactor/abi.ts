@@ -14,7 +14,7 @@ import type { Compression } from '../../ports/inflate.js';
 import { DIAGNOSTICS_STREAM } from '../../ports/run-output.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 15;
+export const ABI_VERSION = 16;
 /** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -192,7 +192,8 @@ export interface RegisteredInput {
  * `-parse_deflines`; ABI v2 §4, §9 *inputs*), and the IDs that its outputs show for their records.
  */
 export interface RegisteredInputs {
-  readonly query: RegisteredInput;
+  /** None for a run of `-in_pssm` or `-in_msa`, whose query is read from `/work` (*inputs* `query` null). */
+  readonly query: RegisteredInput | undefined;
   /** None for a run of `-db`, whose subjects are the database's (*inputs* `subject` null). */
   readonly subject: RegisteredInput | undefined;
   readonly shownIds: ShownIds;
@@ -331,6 +332,10 @@ export class ReactorAbi {
       register_inputs: boolean;
       prints: string | null;
       database: boolean;
+      query_file?: string | null;
+      out_pssm?: string | null;
+      out_ascii_pssm?: string | null;
+      save_each_pssm?: boolean;
     };
     if (json.prints !== null && !isPrintedKind(json.prints)) throw new EngineCallError(`the engine's start says that a run prints ${JSON.stringify(json.prints)}`);
     return {
@@ -344,6 +349,10 @@ export class ReactorAbi {
         registerInputs: json.register_inputs,
         prints: json.prints,
         database: json.database,
+        queryFile: json.query_file ?? null,
+        outPssm: json.out_pssm ?? null,
+        outAsciiPssm: json.out_ascii_pssm ?? null,
+        saveEachPssm: json.save_each_pssm === true,
       },
     };
   }
@@ -409,7 +418,7 @@ export class ReactorAbi {
    */
   registerInputs(argv: readonly string[], query: Uint8Array, subject: Uint8Array): RegisteredInputs {
     this.check(this.call(this.exports.losat_web2_register_inputs, [encoder.encode(argv.join('\0')), query, subject]));
-    const response = this.response() as { query: RecordsResponse; subject: RecordsResponse | null };
+    const response = this.response() as { query: RecordsResponse | null; subject: RecordsResponse | null };
     const handles = [response?.query?.handle, response?.subject?.handle].filter((handle) => typeof handle === 'number');
     try {
       // A record past the reader's error that ends the query's records has no shown ID (`null`): no
@@ -422,11 +431,15 @@ export class ReactorAbi {
             return shown_id;
           }),
         );
+      const queries = response.query;
       const subjects = response.subject;
       return {
-        query: registeredInput(response.query),
+        query: queries === null ? undefined : registeredInput(queries),
         subject: subjects === null ? undefined : registeredInput(subjects),
-        shownIds: Object.freeze({ query: shown(response.query), subject: subjects === null ? Object.freeze([]) : shown(subjects) }),
+        shownIds: Object.freeze({
+          query: queries === null ? Object.freeze([]) : shown(queries),
+          subject: subjects === null ? Object.freeze([]) : shown(subjects),
+        }),
       };
     } catch (error) {
       // Handles whose response cannot be read are not used: give their copies of the inputs back.

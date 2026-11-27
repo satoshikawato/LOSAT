@@ -77,3 +77,5 @@ cannot write yet (Seq-hist replaces ids, alone and second, and assembly; Seq-ext
 that NCBI's `-outfmt 11` stops at the element in its three streams (ASN.1 text, XML, binary). They were made by
 `remaining-gaps-20261112/D/d3/c3c/tools/gen_probeA2.py` (official NCBI BLAST+ 2.17.0 Linux build, `-num_threads 1`,
 probe `c3c/probeA2/`).
+
+`ps7b_allx_ratios.asn`: a 10-residue all-X protein query with frequency ratios only (`intermediateData.freqRatios`, no `finalData`), hand-written for `db.ps7b.inpssm.allx_ratios.B45.6` and `db.ps7b.tbn.allx_ratios.B45.6` (line PS, item PS7b) to test NCBI's ungapped-before-gapped score-block error order in `PsiBlastComputePssmScores` when `-matrix BLOSUM45` does not support 11/1.

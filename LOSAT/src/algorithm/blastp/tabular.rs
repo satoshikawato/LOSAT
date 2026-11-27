@@ -36,7 +36,9 @@ use crate::report::tabular::{
     TabularTaxonomy, TabularWriter,
 };
 
-/// What the report needs besides the final hit lists.
+/// What the report needs besides the final hit lists (`Copy`: PHI-BLAST's report writes one view
+/// of it for each query, `report_write::write_custom_tabular`).
+#[derive(Clone, Copy)]
 pub(super) struct BlastpTabular<'a> {
     pub spec: &'a TabularSpec,
     /// blastp or psiblast: NCBI's messages name it (`ncbi_name`), LOSAT's refusals too (`name`).
@@ -86,6 +88,7 @@ pub(super) struct BlastpTabular<'a> {
 
 /// The subjects as the report shows them, by subject index (a subject set) or rank (the
 /// reported sequences of a database).
+#[derive(Clone, Copy)]
 pub(super) enum TabularSubjects<'a> {
     /// The records of `-subject`: the tabular id of each (`sseqid`, `sacc`, `saccver`; the
     /// default report's), the length of its record, and of the records whose ids `-parse_deflines`

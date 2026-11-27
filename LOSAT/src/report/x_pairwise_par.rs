@@ -197,7 +197,7 @@ impl<'h> QueryGroup<'h> {
                     // before `x_PrintDefLine`, so it neither starts a heading nor increments `m_cur_align`.
                     let shown_hsps = self.subject_hits[&subject]
                         .iter()
-                        .filter(|hit| !hit.query_left_of_record)
+                        .filter(|hit| !hit.query_left_of_record())
                         .count();
                     started += if shown_hsps == 0 {
                         0

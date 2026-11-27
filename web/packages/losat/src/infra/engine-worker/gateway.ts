@@ -411,7 +411,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
     const searched = (request.subject?.bytes.length ?? 0) + (request.files ?? []).reduce((total, { file }) => total + file.size, 0);
     const threads = chooseThreads(
       request.requestedThreads,
-      request.query.bytes.length + searched,
+      (request.query?.bytes.length ?? 0) + searched,
       this.options.hardwareConcurrency ?? navigator.hardwareConcurrency,
     );
     const modules = await this.compiled();
@@ -431,7 +431,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
       program,
       argv: request.argv,
       threads,
-      query: workerInput(program, request.query),
+      ...(request.query === undefined ? {} : { query: workerInput(program, request.query) }),
       ...(request.subject === undefined ? {} : { subject: workerInput(program, request.subject) }),
       ...(request.files === undefined ? {} : { files: request.files }),
       ...(request.windowMasker === undefined ? {} : { windowMasker: workerCounts(request.windowMasker) }),

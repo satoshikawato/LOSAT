@@ -1122,17 +1122,15 @@ fn mask_hard_letters(blastna: &mut [u8], masks: &[(u32, u32)], ranges: &[(usize,
 /// all its sequences (`BlastnDatabase::seq_ranges_into`). The block is lent, not copied: every
 /// sequence of every database search carries it, and a copy of its 24 bytes into each sequence's
 /// reference cost megablast's default path 0.3 % of its instructions (ws, SILVA, ad-M4a-5).
-/// A read error is LOSAT's refusal in `program`'s name where it is not NCBI's
-/// (`search_read_error`).
+/// A read error is returned as the reader gives it; the caller reports it (`search_read_error`,
+/// in the running application's name), so that this function stays as small as dev's, which its
+/// callers inline (an out-of-line call per sequence cost megablast 0.02 % of its instructions).
 fn block_subject<'a>(
     block: &'a SequenceBlock,
     range: &'a BlockRange,
     i: usize,
-    program: &str,
-) -> Result<BlastnSubjectRef<'a>> {
-    let (packed, length) = block
-        .nucleotide_packed_len(i)
-        .map_err(|error| search_read_error(error, program))?;
+) -> std::result::Result<BlastnSubjectRef<'a>, SeqDbError> {
+    let (packed, length) = block.nucleotide_packed_len(i)?;
     Ok(BlastnSubjectRef {
         length,
         packed,
@@ -1287,7 +1285,8 @@ where
                         let mut kept = Vec::new();
                         for i in 0..block.len() {
                             let ordinal = range.first_ordinal + i as u32;
-                            let subject = block_subject(&block, &range, i, program)?;
+                            let subject = block_subject(&block, &range, i)
+                                .map_err(|error| search_read_error(error, program))?;
                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
                             if subject.length == 0 {
                                 continue;
@@ -1391,7 +1390,8 @@ where
         let stopped = block.stopped_at_negative();
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;
-            let subject = block_subject(&block, &range, i, program)?;
+            let subject = block_subject(&block, &range, i)
+                .map_err(|error| search_read_error(error, program))?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
             if subject.length == 0 {
                 continue;

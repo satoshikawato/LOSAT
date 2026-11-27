@@ -263,7 +263,8 @@ where
         let mut kept = Vec::new();
         for j in 0..block.len() {
             let ordinal = range.first_ordinal + j as u32;
-            let subject = block_subject(&block, &range, j, program)?;
+            let subject = block_subject(&block, &range, j)
+                .map_err(|error| search_read_error(error, program))?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
             if subject.length == 0 {
                 continue;

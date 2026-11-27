@@ -105,14 +105,19 @@ pub(crate) struct ProteinFeatInfo {
     pub(crate) first_activity: Option<Vec<u8>>,
 }
 
-/// CDS and linked Gene data returned by `DeflineFeatures::cds_for_product`.
+/// CDS data returned by `DeflineFeatures::cds_for_product`.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CdsForProductInfo {
     pub(crate) has_low_quality_exception: bool,
-    pub(crate) gene_locus: Option<Vec<u8>>,
-    pub(crate) gene_first_syn: Option<Vec<u8>>,
-    pub(crate) gene_desc: Option<Vec<u8>>,
-    pub(crate) gene_locus_tag: Option<Vec<u8>>,
+}
+
+/// Gene data returned by `DeflineFeatures::gene_via_cds`.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct GeneViaCdsInfo {
+    pub(crate) locus: Option<Vec<u8>>,
+    pub(crate) first_syn: Option<Vec<u8>>,
+    pub(crate) desc: Option<Vec<u8>>,
+    pub(crate) locus_tag: Option<Vec<u8>>,
 }
 
 /// Segmented-sequence CDS info returned by `DeflineFeatures::segseq_info_via_cds`.
@@ -148,9 +153,14 @@ pub(crate) trait DeflineFeatures {
         None
     }
 
-    /// For `x_SetTitleFromProtein`: `GetMappedCDSForProduct` plus `x_GetGeneRefViaCDS` and
-    /// `x_CDShasLowQualityException`.
+    /// For `x_SetTitleFromProtein`: `GetMappedCDSForProduct` and `x_CDShasLowQualityException`.
     fn cds_for_product(&self) -> Option<CdsForProductInfo> {
+        None
+    }
+
+    /// For `x_SetTitleFromProtein`: `x_GetGeneRefViaCDS` of the CDS that `cds_for_product`
+    /// finds, read only where the title needs it, as NCBI does.
+    fn gene_via_cds(&self) -> Option<GeneViaCdsInfo> {
         None
     }
 

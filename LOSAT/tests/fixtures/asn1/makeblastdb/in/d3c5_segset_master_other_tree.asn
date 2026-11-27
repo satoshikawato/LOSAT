@@ -1,0 +1,23 @@
+Seq-entry ::= set {
+  class segset,
+  descr { source { org { taxname "Homo sapiens" } }, molinfo { biomol genomic } },
+  seq-set {
+    seq {
+      id { genbank { accession "AB001320", version 1 } },
+      inst { repr seg, mol dna, length 30, ext seg { whole tpg { accession "AB001321", version 1 } } }
+    },
+    set {
+      class parts,
+      seq-set {
+        seq {
+          id { genbank { accession "AB001321", version 1 } },
+          descr { title "part 132" },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, location int { from 0, to 29, id genbank { accession "AB001321", version 1 } }, xref { { data prot { name { "segprot 132" } } }, { data gene { locus "SEGG132" } } } }
+          } } }
+        }
+      }
+    }
+  }
+}

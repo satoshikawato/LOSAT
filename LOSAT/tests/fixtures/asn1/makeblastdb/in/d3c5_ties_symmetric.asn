@@ -1,0 +1,73 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { genbank { accession "AB100100", version 1 } },
+      descr { title "gb 0" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "AB100100", version 1 } },
+      descr { title "ref 0" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { genbank { accession "AB100101", version 1 } },
+      descr { title "gb 1" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "AB100101", version 1 } },
+      descr { title "ref 1" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { genbank { accession "AB100102", version 1 } },
+      descr { title "gb 2" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "AB100102", version 1 } },
+      descr { title "ref 2" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { genbank { accession "AB100103", version 1 } },
+      descr { title "gb 3" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "AB100103", version 1 } },
+      descr { title "ref 3" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { genbank { accession "AB100104", version 1 } },
+      descr { title "gb 4" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "AB100104", version 1 } },
+      descr { title "ref 4" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { genbank { accession "AB100105", version 1 } },
+      descr { title "gb 5" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "AB100105", version 1 } },
+      descr { title "ref 5" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { genbank { accession "BAA00500", version 1 } },
+      descr { molinfo { biomol peptide } },
+      inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+      annot { { data ftable {
+        { data prot { name { "probe protein 500" } }, location whole genbank { accession "BAA00500", version 1 } },
+        { data cdregion { frame one }, product whole genbank { accession "BAA00500", version 1 }, location mix { int { from 0, to 2, id tpg { accession "AB100100" } }, int { from 0, to 2, id tpg { accession "AB100101" } }, int { from 0, to 2, id tpg { accession "AB100102" } }, int { from 0, to 2, id tpg { accession "AB100103" } }, int { from 0, to 2, id tpg { accession "AB100104" } }, int { from 0, to 2, id tpg { accession "AB100105" } } } }
+      } } }
+    }
+  }
+}

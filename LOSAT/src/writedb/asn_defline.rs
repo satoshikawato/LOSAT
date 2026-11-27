@@ -10,7 +10,7 @@
 //! NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1177-1253
 //! NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:219-292,1359-1435
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
@@ -23,7 +23,8 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::defline::flags::{
     apply_keyword_clauses, apply_molinfo_tech, compute_use_pdb_compound, genome, orgmod, seq_repr,
     subsource, topology, unreviewed_prefix_from_unannotated, unverified_prefix_from_types,
-    CdsForProductInfo, DeflineFeatures, DeflineInput, ProteinFeatInfo, SegSeqCdsInfo,
+    CdsForProductInfo, DeflineFeatures, DeflineInput, GeneViaCdsInfo, ProteinFeatInfo,
+    SegSeqCdsInfo,
 };
 use crate::report::defline::titles::cds_except_is_low_quality;
 use crate::report::defline::{classify_seq_ids_full, generate_defline_core};
@@ -85,13 +86,20 @@ struct DeflineSchema {
     seq_inst_ext: usize,
     seq_data_gap: usize,
     seq_ext_seg: usize,
+    seq_ext_ref: usize,
     seq_ext_map: usize,
     seq_ext_delta: usize,
     delta_loc: usize,
     delta_literal: usize,
     seq_lit_data: usize,
     seq_annot_data: usize,
+    seq_annot_desc: usize,
     seq_annot_ftable: usize,
+    seq_annot_graph: usize,
+    seq_annot_locs: usize,
+    seq_annot_ids: usize,
+    annotdesc_region: usize,
+    seq_graph_loc: usize,
     seq_feat_id: usize,
     seq_feat_ids: usize,
     seq_feat_data: usize,
@@ -207,13 +215,20 @@ fn dschema() -> &'static DeflineSchema {
             seq_inst_ext: member_index(named::SEQ_INST, "ext"),
             seq_data_gap: member_index(named::SEQ_DATA, "gap"),
             seq_ext_seg: member_index(named::SEQ_EXT, "seg"),
+            seq_ext_ref: member_index(named::SEQ_EXT, "ref"),
             seq_ext_map: member_index(named::SEQ_EXT, "map"),
             seq_ext_delta: member_index(named::SEQ_EXT, "delta"),
             delta_loc: member_index(named::DELTA_SEQ, "loc"),
             delta_literal: member_index(named::DELTA_SEQ, "literal"),
             seq_lit_data: member_index(named::SEQ_LITERAL, "seq-data"),
             seq_annot_data,
+            seq_annot_desc: member_index(named::SEQ_ANNOT, "desc"),
             seq_annot_ftable: member_index(annot_data_ty, "ftable"),
+            seq_annot_graph: member_index(annot_data_ty, "graph"),
+            seq_annot_locs: member_index(annot_data_ty, "locs"),
+            seq_annot_ids: member_index(annot_data_ty, "ids"),
+            annotdesc_region: member_index(named::ANNOTDESC, "region"),
+            seq_graph_loc: member_index(named::SEQ_GRAPH, "loc"),
             seq_feat_id: member_index(named::SEQ_FEAT, "id"),
             seq_feat_ids: member_index(named::SEQ_FEAT, "ids"),
             seq_feat_data: member_index(named::SEQ_FEAT, "data"),
@@ -756,9 +771,84 @@ pub(crate) struct TseFeatureIndex {
     /// The pick of every tie that a title is made with, and the ties it read (`Scope::bio`).
     tie_state: RefCell<TieState>,
     /// Whether the TSE has Seq-ids that NCBI's object manager holds handles for and LOSAT does
-    /// not intern: locations and products of other features and other `Seq-annot`s, products of
-    /// genes, proteins and sources, and segments (`resolve_ids`).
+    /// not read: those of `Seq-annot`s other than feature tables (`resolve_ids`).
     unindexed_ids: bool,
+    /// The trees and upper-case accessions of the text Seq-ids that are not packed in the
+    /// locations and products of the TSE's features of every kind (`accession_name_match`).
+    feature_text_ids: Vec<(u8, Box<[u8]>)>,
+    /// The same of the segments and references of `seg` and `ref` Bioseqs, by Bioseq, whose
+    /// handles NCBI makes while it makes those Bioseqs' titles (`MapTextId`).
+    map_text_ids: Vec<MapTextId>,
+    /// Per `seg`, `ref` and `delta` Bioseq: the Seq-ids of its `whole` segments in the order of
+    /// its sequence map (`BioseqFeatureView::longest_protein`).
+    map_wholes: HashMap<usize, Box<[IdRef]>>,
+    /// The `pir` and `prf` Seq-ids whose name matches the titles made before decide
+    /// (`DynamicName`), in `ties` order.
+    dynamic: Vec<DynamicName>,
+    /// What the titles made so far did that later titles depend on (`begin_title`, `end_title`).
+    progress: RefCell<Progress>,
+    /// The TSE's segmented-set master when it has `whole` segments (`note_segset_master`).
+    segset_master: Option<usize>,
+}
+
+/// A text Seq-id that is not packed in a segment or the reference of the Bioseq `bio`, by its
+/// tree and upper-case accession; `is_ref` for a `ref` Bioseq. NCBI's scope keeps the handle of
+/// each one it resolves: the references of every `ref` Bioseq whose title it makes, and the
+/// segments of a `seg` Bioseq whose title reads features (all of them when the title comes from
+/// `x_SetTitleFromSegSeq`).
+struct MapTextId {
+    bio: u32,
+    is_ref: bool,
+    /// Whether its range is not empty: an `empty` segment or reference may not make a handle.
+    sure: bool,
+    tree: u8,
+    accession: Box<[u8]>,
+}
+
+/// A `MapTextId` of a tree of a `DynamicName`: the handle of a segment or reference of the
+/// Bioseq `bio` with an accession of its prefix.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct MapEvent {
+    bio: u32,
+    is_ref: bool,
+    sure: bool,
+}
+
+/// A packed `pir` or `prf` accession alone whose name matches (`accession_name_match`) depend on
+/// the handles of segments and references that the titles before make: the scope resolves it
+/// once, at the first title that reads it, and keeps that Bioseq.
+struct DynamicName {
+    /// The Bioseqs the scope finds for it whatever the name matches.
+    cands: Vec<Candidate>,
+    /// The name matches of each tree that no handle the entry starts with blocks, with the
+    /// segments and references (`MapTextId`) of its tree with an accession of its prefix.
+    trees: Vec<(Vec<Candidate>, Vec<MapEvent>)>,
+}
+
+/// What the titles made so far did that later titles depend on.
+#[derive(Default)]
+struct Progress {
+    /// The first Bioseq whose title read features (NCBI's object manager indexes them then).
+    first_feature_title: Option<usize>,
+    /// The `seg` Bioseqs whose titles read features, and whether all their segments were
+    /// resolved (`x_SetTitleFromSegSeq`).
+    seg_titles: Vec<(u32, bool)>,
+    /// The `ref` Bioseqs whose titles were made.
+    ref_titles: Vec<u32>,
+    /// Per `DynamicName`: whether a title has read it, which fixes its picks.
+    fixed: Vec<Fixed>,
+}
+
+/// Whether the scope has resolved a `DynamicName` and keeps what it found.
+#[derive(Clone, Copy, PartialEq)]
+enum Fixed {
+    /// No title has read it.
+    No,
+    /// A title read it at some picks of the ties it read and not at others: the scope may keep
+    /// one of the picks it had then.
+    Maybe,
+    /// A title read it at every pick: the scope keeps one of the picks it had then.
+    Yes,
 }
 
 /// What NCBI's scope finds for a Seq-id that no Bioseq of the TSE has.
@@ -767,19 +857,49 @@ enum Found {
     One(u32),
     /// Any of these (`None`: no Bioseq), by an order or a state LOSAT does not know.
     Picks(Vec<Option<u32>>),
+    /// What the titles before decide (`DynamicName`, by its index).
+    Dynamic(usize),
 }
 
-/// A Seq-id for which NCBI's scope may find any of `picks` (`None`: no Bioseq).
+/// A Seq-id for which NCBI's scope may find any of `picks` (`None`: no Bioseq); for a
+/// `DynamicName`, its index, whose picks are those of the title being made (`TieState`).
 struct Tie {
     id: IdRef,
     picks: Box<[Option<u32>]>,
+    dynamic: Option<usize>,
 }
 
-/// The pick of every tie (an index into its `picks`) and whether the title being made read it.
+/// The pick of every tie (an index into its picks) and whether the title being made read it; the
+/// picks of each `DynamicName` for the title being made, whether the pass being made read it, and
+/// in how many of the title's `passes` (one per combination of picks) it was read.
 #[derive(Default)]
 struct TieState {
     pick: Vec<usize>,
     read: Vec<bool>,
+    dynamic_picks: Vec<Box<[Option<u32>]>>,
+    dynamic_read: Vec<bool>,
+    dynamic_passes: Vec<u32>,
+    passes: u32,
+}
+
+impl TieState {
+    /// The picks of the tie `t`.
+    fn picks<'a>(&'a self, ties: &'a [Tie], t: usize) -> &'a [Option<u32>] {
+        match ties[t].dynamic {
+            None => &ties[t].picks,
+            Some(d) => &self.dynamic_picks[d],
+        }
+    }
+
+    /// Counts the pass just made and the `DynamicName`s it read.
+    fn end_pass(&mut self) {
+        self.passes += 1;
+        for (read, passes) in self.dynamic_read.iter_mut().zip(&mut self.dynamic_passes) {
+            if std::mem::take(read) {
+                *passes += 1;
+            }
+        }
+    }
 }
 
 /// Whether the `GetStrand` with the scope of a location waits for the picks of its ties
@@ -842,6 +962,24 @@ impl<'a> FieldIndex<'a> {
     }
 }
 
+/// The trees and upper-case accessions, sorted, of the text handles that are not packed which NCBI's
+/// object manager holds while it makes the entry's titles: of the Bioseqs, and of the locations
+/// and products of the features `feature_text_ids`.
+fn held_accessions(
+    bioseq_ids: &[&[ParsedSeqId]],
+    feature_text_ids: &[(u8, Box<[u8]>)],
+) -> Vec<(u8, Box<[u8]>)> {
+    let mut held: Vec<(u8, Box<[u8]>)> = bioseq_ids
+        .iter()
+        .flat_map(|ids| ids.iter())
+        .filter_map(unpacked_accession)
+        .chain(feature_text_ids.iter().cloned())
+        .collect();
+    held.sort_unstable();
+    held.dedup();
+    held
+}
+
 fn text_accession(text: &TextseqId) -> Option<&[u8]> {
     text.accession.as_deref()
 }
@@ -867,23 +1005,108 @@ impl TseFeatureIndex {
         }
         self.bioseq_lengths[bio_idx] = length;
         let s = dschema();
-        if let Some((ext_c, ext_v)) = inst.member(s.seq_inst_ext).and_then(as_choice) {
-            if ext_c == s.seq_ext_seg || ext_c == s.seq_ext_delta {
-                self.unindexed_ids = true;
-            }
-            if ext_c == s.seq_ext_seg {
-                if let Some(items) = as_list(ext_v) {
-                    let mut seg_loc = CompactLoc::default();
-                    for item in items {
-                        let sub = extract_loc(item, &mut self.interner);
-                        seg_loc.pieces.extend(sub.pieces);
+        let Some((ext_c, ext_v)) = inst.member(s.seq_inst_ext).and_then(as_choice) else {
+            return;
+        };
+        let bio = u32::try_from(bio_idx).expect("fewer than 2^32 Bioseqs in one TSE");
+        let mut pieces = Vec::new();
+        if ext_c == s.seq_ext_seg || ext_c == s.seq_ext_ref {
+            let is_ref = ext_c == s.seq_ext_ref;
+            let locs = if is_ref {
+                std::slice::from_ref(ext_v)
+            } else {
+                as_list(ext_v).unwrap_or_default()
+            };
+            for loc in locs {
+                for_each_loc_seq_id(loc, &mut |id, empty| {
+                    if let Some((tree, accession)) = unpacked_accession(id) {
+                        self.map_text_ids.push(MapTextId {
+                            bio,
+                            is_ref,
+                            sure: !empty,
+                            tree,
+                            accession,
+                        });
                     }
-                    if !seg_loc.pieces.is_empty() {
-                        self.bioseq_seg_locs.insert(bio_idx, seg_loc);
+                });
+                pieces.extend(extract_loc(loc, &mut self.interner).pieces);
+            }
+        } else if ext_c == s.seq_ext_delta {
+            for item in as_list(ext_v).unwrap_or_default() {
+                if let Some((c, loc)) = as_choice(item) {
+                    if c == s.delta_loc {
+                        pieces.extend(extract_loc(loc, &mut self.interner).pieces);
                     }
                 }
             }
         }
+        let wholes: Box<[IdRef]> = pieces
+            .iter()
+            .filter(|p| p.is_whole)
+            .filter_map(|p| p.id)
+            .collect();
+        if !wholes.is_empty() {
+            self.map_wholes.insert(bio_idx, wholes);
+        }
+        if ext_c == s.seq_ext_seg && !pieces.is_empty() {
+            self.bioseq_seg_locs.insert(
+                bio_idx,
+                CompactLoc {
+                    pieces,
+                    ..CompactLoc::default()
+                },
+            );
+        }
+    }
+
+    /// Notes the TSE's segmented-set master (the first Bioseq of the `segset` that NCBI's
+    /// `GetSegSetMaster` reaches from the top through the first entries) when it has `whole`
+    /// segments, whose lengths NCBI's `CMasterSeqSegments` resolves when the object manager first
+    /// indexes the features (`segset_master_posts`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:783-821
+    /// NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:359-370,428-433
+    pub(crate) fn note_segset_master(&mut self, master: usize) {
+        if self.map_wholes.contains_key(&master) {
+            self.segset_master = Some(master);
+        }
+    }
+
+    /// The posts of NCBI's segmented-set master at the first title that reads features, when
+    /// the entry has no Bioseq for one of its `whole` segments: `CMasterSeqSegments` resolves each
+    /// segment's length in the TSE by its matching Seq-ids, and at the first it cannot find there
+    /// it falls back to an exact lookup without a scope, which throws; the post of the exception
+    /// that catches it gives two lines, in LOSAT's words (`crate::wording::losat_bytes`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:803-817,822-843
+    /// NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:319-332,343-369
+    fn segset_master_posts(&self) -> Vec<Vec<u8>> {
+        let mut posts = Vec::new();
+        if self.progress.borrow().first_feature_title.is_some() {
+            return posts;
+        }
+        let Some(wholes) = self.segset_master.and_then(|m| self.map_wholes.get(&m)) else {
+            return posts;
+        };
+        let Some(&r) = wholes.iter().find(|&&r| self.bio_of(r).is_none()) else {
+            return posts;
+        };
+        const CLASS: &[u8] = b"(CSeqMapException::eNullPointer) ";
+        let mut message = b"Cannot resolve ".to_vec();
+        label::fasta(self.interner.id(r), &mut message);
+        message.extend_from_slice(b": null scope pointer");
+        for line in [
+            [b"Error: ", CLASS, b"[makeblastdb] ", &message].concat(),
+            [
+                b"Error: [makeblastdb] Segment set cannot be initialized: ",
+                CLASS,
+                &message,
+            ]
+            .concat(),
+        ] {
+            posts.push(crate::wording::losat_bytes(&line).into_owned());
+        }
+        posts
     }
 
     /// Scans one `Seq-annot` list and extracts only the four feature types read by
@@ -904,7 +1127,7 @@ impl TseFeatureIndex {
                 continue;
             };
             if choice != s.seq_annot_ftable {
-                self.unindexed_ids = true;
+                self.scan_other_annot(annot, choice, inner);
                 continue;
             }
             let Some(feats) = as_list(inner) else {
@@ -923,22 +1146,71 @@ impl TseFeatureIndex {
         Ok(())
     }
 
+    /// Notes the Seq-ids that NCBI's object manager indexes a `Seq-annot` other than a feature
+    /// table by: each graph's location; the `region` of a `locs` annotation of one location (no
+    /// key otherwise); none for `ids`. LOSAT does not read those of alignments and Seq-tables
+    /// (`unindexed_ids`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:639-668,795-830,940-986
+    /// NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:376-421,449-457
+    fn scan_other_annot(&mut self, annot: &Value, choice: usize, inner: &Value) {
+        let s = dschema();
+        if choice == s.seq_annot_graph {
+            for graph in as_list(inner).unwrap_or_default() {
+                if let Some(loc) = graph.member(s.seq_graph_loc) {
+                    self.note_indexed_ids(loc);
+                }
+            }
+        } else if choice == s.seq_annot_locs {
+            if as_list(inner).is_some_and(|locs| locs.len() == 1) {
+                let region = annot
+                    .member(s.seq_annot_desc)
+                    .and_then(as_list)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(as_choice)
+                    .find(|(c, _)| *c == s.annotdesc_region);
+                if let Some((_, region)) = region {
+                    self.note_indexed_ids(region);
+                }
+            }
+        } else if choice != s.seq_annot_ids {
+            self.unindexed_ids = true;
+        }
+    }
+
+    /// Notes the text Seq-ids of `loc` whose handles NCBI's annotation index keeps: those with a
+    /// range that is not empty there (`for_each_loc_seq_id`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:820-830
+    fn note_indexed_ids(&mut self, loc: &Value) {
+        for_each_loc_seq_id(loc, &mut |id, empty| {
+            if !empty {
+                self.feature_text_ids.extend(unpacked_accession(id));
+            }
+        });
+    }
+
     fn extract_feature(&mut self, feat: &Value) {
         let s = dschema();
         let Some((fchoice, fval)) = feat.member(s.seq_feat_data).and_then(as_choice) else {
             self.unindexed_ids = true;
             return;
         };
+        // NCBI's object manager indexes every feature by the Seq-ids of its location and product.
+        // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:720-760
+        // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:425-445
+        for loc in [s.seq_feat_location, s.seq_feat_product] {
+            if let Some(loc) = feat.member(loc) {
+                self.note_indexed_ids(loc);
+            }
+        }
         if fchoice != s.feat_prot
             && fchoice != s.feat_gene
             && fchoice != s.feat_cdregion
             && fchoice != s.feat_biosrc
         {
-            self.unindexed_ids = true;
             return;
-        }
-        if fchoice != s.feat_cdregion && feat.member(s.seq_feat_product).is_some() {
-            self.unindexed_ids = true;
         }
         let seq_order = self.next_order;
         self.next_order += 1;
@@ -1139,6 +1411,11 @@ impl TseFeatureIndex {
         let mut first_with_key: FxHashMap<&HandleKey, u32> = FxHashMap::default();
         let mut unresolved_key = Vec::with_capacity(n);
         let mut ties = Vec::new();
+        let mut dynamic = Vec::new();
+        let mut blockers: Option<Vec<(u8, Box<[u8]>)>> = None;
+        self.map_text_ids.sort_unstable_by(|a, b| {
+            (a.tree, &a.accession, a.bio).cmp(&(b.tree, &b.accession, b.bio))
+        });
         let mut cands: Vec<Candidate> = Vec::new();
         let mut name_cands: Vec<Candidate> = Vec::new();
         let bio_with_id = |id: &ParsedSeqId| match mask_handle_key(id) {
@@ -1292,13 +1569,24 @@ impl TseFeatureIndex {
                             }
                             match textseq_pack_prefix(text) {
                                 Some(prefix) if !name_cands.is_empty() => {
-                                    let unsure = self.accession_name_match(
-                                        bioseq_ids,
+                                    let blockers = blockers.get_or_insert_with(|| {
+                                        held_accessions(bioseq_ids, &self.feature_text_ids)
+                                    });
+                                    let (unsure, trees) = self.accession_name_match(
+                                        blockers,
                                         prefix,
                                         &mut name_cands,
                                     );
                                     cands.append(&mut name_cands);
-                                    pick_candidate_unsure(&cands, &unsure)
+                                    if trees.is_empty() {
+                                        pick_candidate_unsure(&cands, &unsure)
+                                    } else {
+                                        dynamic.push(DynamicName {
+                                            cands: cands.clone(),
+                                            trees,
+                                        });
+                                        Found::Dynamic(dynamic.len() - 1)
+                                    }
                                 }
                                 _ => {
                                     cands.append(&mut name_cands);
@@ -1317,67 +1605,168 @@ impl TseFeatureIndex {
                     ties.push(Tie {
                         id: r32,
                         picks: picks.into_boxed_slice(),
+                        dynamic: None,
+                    });
+                }
+                Found::Dynamic(d) => {
+                    bio_of.push(None);
+                    ties.push(Tie {
+                        id: r32,
+                        picks: Box::default(),
+                        dynamic: Some(d),
                     });
                 }
             }
         }
         attach_start.push(attach_bios.len() as u32);
-        self.bio_of = bio_of;
         self.attach_start = attach_start;
         self.attach_bios = attach_bios;
         self.unresolved_key = unresolved_key;
+        self.drop_symmetric_ties(&mut ties, &mut bio_of, &dynamic);
+        self.bio_of = bio_of;
         let n_ties = ties.len();
+        let n_dynamic = dynamic.len();
         self.ties = ties;
+        self.dynamic = dynamic;
+        self.progress.get_mut().fixed = vec![Fixed::No; n_dynamic];
+        // Before any title, no segment or reference has a handle: every tree's name matches count.
+        let dynamic_picks = self
+            .dynamic
+            .iter()
+            .map(|d| {
+                let mut all = d.cands.clone();
+                d.trees.iter().for_each(|(c, _)| all.extend_from_slice(c));
+                found_picks(pick_candidate(&all))
+            })
+            .collect();
         self.tie_state = RefCell::new(TieState {
             pick: vec![0; n_ties],
             read: vec![false; n_ties],
+            dynamic_picks,
+            dynamic_read: vec![false; n_dynamic],
+            dynamic_passes: vec![0; n_dynamic],
+            passes: 0,
+        });
+    }
+
+    /// Fixes at its first pick every tie whose picks no title can tell apart: Bioseqs (not
+    /// `None`) of one length that no feature is on (`attached`), that are not segmented, that no
+    /// other Seq-id finds and that no other tie may pick. Swapping two such Bioseqs everywhere
+    /// changes nothing a title reads (their features, lengths, the Bioseqs other Seq-ids find,
+    /// and which Seq-ids find one Bioseq), so every pick of the tie gives the same title.
+    fn drop_symmetric_ties(
+        &self,
+        ties: &mut Vec<Tie>,
+        bio_of: &mut [Option<u32>],
+        dynamic: &[DynamicName],
+    ) {
+        if ties.is_empty() {
+            return;
+        }
+        // How many times each Bioseq may be found: by a Seq-id that is not a tie, or as a pick.
+        let mut uses = vec![0u32; self.n_bioseqs];
+        let mut is_tie = vec![false; bio_of.len()];
+        for t in ties.iter() {
+            is_tie[t.id as usize] = true;
+            for &bio in t.picks.iter().flatten() {
+                uses[bio as usize] += 1;
+            }
+        }
+        for (r, bio) in bio_of.iter().enumerate() {
+            if let (false, Some(bio)) = (is_tie[r], bio) {
+                uses[*bio as usize] += 2;
+            }
+        }
+        for d in dynamic {
+            let named = d.trees.iter().flat_map(|(cands, _)| cands);
+            for c in d.cands.iter().chain(named) {
+                uses[c.bio as usize] += 2;
+            }
+        }
+        let mut featured = vec![false; self.n_bioseqs];
+        for &bio in &self.attach_bios {
+            featured[bio as usize] = true;
+        }
+        let interchangeable = |bio: Option<u32>, length: Option<u64>| {
+            bio.is_some_and(|bio| {
+                let b = bio as usize;
+                uses[b] == 1
+                    && !featured[b]
+                    && !self.bioseq_seg_locs.contains_key(&b)
+                    && !self.map_wholes.contains_key(&b)
+                    && self.bioseq_lengths.get(b).copied().flatten() == length
+            })
+        };
+        ties.retain(|t| {
+            let Some(&Some(first)) = t.picks.first() else {
+                return true;
+            };
+            let length = self.bioseq_lengths.get(first as usize).copied().flatten();
+            if t.dynamic.is_none() && t.picks.iter().all(|&b| interchangeable(b, length)) {
+                bio_of[t.id as usize] = Some(first);
+                false
+            } else {
+                true
+            }
         });
     }
 
     /// Keeps of the name matches `name_cands` of a packed `pir` or `prf` accession with the
     /// prefix `prefix` those that NCBI's `FindMatch` takes: in a tree where no handle has an
     /// accession that is not packed and starts with `prefix` in any letter case (the first such
-    /// accession at or after `prefix` sends the search to the accessions). Moves out and gives
-    /// the name matches that stay unsure: where Seq-ids that LOSAT does not intern may hold such
-    /// an accession (`unindexed_ids`), and all of them where segments are, whose handles NCBI
-    /// makes when it reads the segments.
+    /// accession at or after `prefix` sends the search to the accessions). `held` are the
+    /// accessions of the handles the entry holds from the start (`held_accessions`). Moves out
+    /// and gives the name matches that stay unsure, all of them where Seq-ids LOSAT does not read
+    /// may hold such an accession (`unindexed_ids`), and, by tree, those of the trees where
+    /// segments or references that titles resolve hold one (`MapTextId`, with their Bioseqs and
+    /// whether each is a reference).
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1161-1200,1438-1490
+    #[allow(clippy::type_complexity)]
     fn accession_name_match(
         &self,
-        bioseq_ids: &[&[ParsedSeqId]],
+        held: &[(u8, Box<[u8]>)],
         prefix: &[u8],
         name_cands: &mut Vec<Candidate>,
-    ) -> Vec<Candidate> {
-        if !self.bioseq_seg_locs.is_empty() {
-            return std::mem::take(name_cands);
-        }
-        let blocked = |tree: u8| {
-            bioseq_ids
-                .iter()
-                .flat_map(|ids| ids.iter())
-                .chain(self.interner.ids.iter())
-                .any(|y| {
-                    handle_tree(y) == tree
-                        && y.textseq().is_some_and(|t| {
-                            !textseq_packs(t)
-                                && t.accession.as_deref().is_some_and(|a| {
-                                    a.len() >= prefix.len()
-                                        && a[..prefix.len()].eq_ignore_ascii_case(prefix)
-                                })
-                        })
-                })
+    ) -> (Vec<Candidate>, Vec<(Vec<Candidate>, Vec<MapEvent>)>) {
+        let prefix = prefix.to_ascii_uppercase();
+        let held_in = |tree: u8| {
+            let at = held.partition_point(|(t, a)| (*t, &a[..]) < (tree, &prefix[..]));
+            held.get(at)
+                .is_some_and(|(t, a)| *t == tree && a.starts_with(&prefix))
         };
         let mut open_trees: Vec<u8> = name_cands.iter().map(|c| c.tree).collect();
         open_trees.sort_unstable();
         open_trees.dedup();
-        open_trees.retain(|&tree| !blocked(tree));
+        open_trees.retain(|&tree| !held_in(tree));
         name_cands.retain(|c| open_trees.contains(&c.tree));
         if self.unindexed_ids {
-            std::mem::take(name_cands)
-        } else {
-            Vec::new()
+            return (std::mem::take(name_cands), Vec::new());
         }
+        let map = &self.map_text_ids;
+        let mut trees = Vec::new();
+        for tree in open_trees {
+            let at = map.partition_point(|m| (m.tree, &m.accession[..]) < (tree, &prefix[..]));
+            let mut events: Vec<MapEvent> = map[at..]
+                .iter()
+                .take_while(|m| m.tree == tree && m.accession.starts_with(&prefix))
+                .map(|m| MapEvent {
+                    bio: m.bio,
+                    is_ref: m.is_ref,
+                    sure: m.sure,
+                })
+                .collect();
+            if events.is_empty() {
+                continue;
+            }
+            events.sort_unstable();
+            events.dedup();
+            let (in_tree, rest): (Vec<Candidate>, Vec<Candidate>) =
+                name_cands.drain(..).partition(|c| c.tree == tree);
+            *name_cands = rest;
+            trees.push((in_tree, events));
+        }
+        (Vec::new(), trees)
     }
 
     /// The Bioseqs whose features include a location on the interned Seq-id `r`.
@@ -1419,6 +1808,7 @@ impl TseFeatureIndex {
         };
         set_picks(&[], &[]);
         let first = make();
+        self.tie_state.borrow_mut().end_pass();
         let mut read = newly_read(&[]);
         let mut same = true;
         'restart: while !read.is_empty() {
@@ -1430,14 +1820,17 @@ impl TseFeatureIndex {
                         break 'restart;
                     }
                     digits[k] += 1;
-                    if digits[k] < self.ties[read[k]].picks.len() {
+                    let n_picks = self.tie_state.borrow().picks(&self.ties, read[k]).len();
+                    if digits[k] < n_picks {
                         break;
                     }
                     digits[k] = 0;
                     k += 1;
                 }
                 set_picks(&read, &digits);
-                if make() != first {
+                let title = make();
+                self.tie_state.borrow_mut().end_pass();
+                if title != first {
                     same = false;
                     break 'restart;
                 }
@@ -1450,6 +1843,125 @@ impl TseFeatureIndex {
         }
         set_picks(&[], &[]);
         same.then_some(first)
+    }
+
+    /// Sets the picks of every `DynamicName` for the title of Bioseq `bio_idx`: those of the
+    /// title that first read it at every pick (the scope keeps what it found), else what the
+    /// scope finds now (with those it may have kept, `Fixed::Maybe`).
+    /// In a tree where segments or references hold an accession of its prefix, the name matches
+    /// count while no such handle exists: one does after the title of its `ref` Bioseq, or of
+    /// its `seg` Bioseq when that title read features. Both outcomes are picks where the scope
+    /// may have resolved the Seq-id before the handle (a title read features before it) or the
+    /// handle may or may not exist (the Bioseq's own title, or a `seg` title that did not come
+    /// from its segments).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1161-1200,1438-1490
+    /// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
+    fn begin_title(&self, bio_idx: usize) {
+        if self.dynamic.is_empty() {
+            return;
+        }
+        let k = bio_idx as u32;
+        let mut progress = self.progress.borrow_mut();
+        let has_event = |is_ref: bool| {
+            self.dynamic
+                .iter()
+                .flat_map(|d| d.trees.iter().flat_map(|t| &t.1))
+                .any(|e| e.is_ref == is_ref && e.bio == k)
+        };
+        if has_event(true) {
+            progress.ref_titles.push(k);
+        }
+        let mut state = self.tie_state.borrow_mut();
+        state.passes = 0;
+        state.dynamic_read.fill(false);
+        state.dynamic_passes.fill(0);
+        for (d, name) in self.dynamic.iter().enumerate() {
+            if progress.fixed[d] == Fixed::Yes {
+                continue;
+            }
+            let mut taken = name.cands.clone();
+            let mut unsure = Vec::new();
+            for (cands, events) in &name.trees {
+                let mut certain: Option<u32> = None;
+                let mut maybe = false;
+                for e in events {
+                    let j = e.bio;
+                    if j == k {
+                        maybe = true;
+                        continue;
+                    }
+                    if j > k {
+                        continue;
+                    }
+                    let made = if e.is_ref {
+                        progress.ref_titles.contains(&j).then_some(true)
+                    } else {
+                        progress.seg_titles.iter().find(|s| s.0 == j).map(|s| s.1)
+                    };
+                    match made.map(|m| m && e.sure) {
+                        Some(true) => certain = Some(certain.map_or(j, |c| c.min(j))),
+                        Some(false) => maybe = true,
+                        None => {}
+                    }
+                }
+                let resolved_before =
+                    |j: u32| progress.first_feature_title.is_some_and(|f| f < j as usize);
+                match certain {
+                    Some(j) if !resolved_before(j) => {}
+                    Some(_) => unsure.extend_from_slice(cands),
+                    None if maybe => unsure.extend_from_slice(cands),
+                    None => taken.extend_from_slice(cands),
+                }
+            }
+            let now = found_picks(pick_candidate_unsure(&taken, &unsure));
+            state.dynamic_picks[d] = if progress.fixed[d] == Fixed::Maybe {
+                let mut picks = state.dynamic_picks[d].to_vec();
+                now.iter().for_each(|p| {
+                    if !picks.contains(p) {
+                        picks.push(*p);
+                    }
+                });
+                picks.into_boxed_slice()
+            } else {
+                now
+            };
+        }
+    }
+
+    /// Notes what the title of Bioseq `bio_idx` did that later titles depend on: whether it read
+    /// features (`accessed`) and came from its segments (`segseq`), and the `DynamicName`s it
+    /// read, whose picks the scope keeps. Gives whether it is the first title that read features.
+    fn end_title(&self, bio_idx: usize, accessed: bool, segseq: bool) -> bool {
+        if self.dynamic.is_empty() && self.segset_master.is_none() {
+            return false;
+        }
+        let mut progress = self.progress.borrow_mut();
+        let first = accessed && progress.first_feature_title.is_none();
+        if first {
+            progress.first_feature_title = Some(bio_idx);
+        }
+        let k = bio_idx as u32;
+        let seg_event = self
+            .dynamic
+            .iter()
+            .flat_map(|d| d.trees.iter().flat_map(|t| &t.1))
+            .any(|e| !e.is_ref && e.bio == k);
+        if accessed && seg_event {
+            progress.seg_titles.push((k, segseq));
+        }
+        let state = self.tie_state.borrow();
+        for (d, &read) in state.dynamic_passes.iter().enumerate() {
+            if read == 0 || progress.fixed[d] == Fixed::Yes {
+                continue;
+            }
+            progress.fixed[d] = if read == state.passes {
+                Fixed::Yes
+            } else {
+                Fixed::Maybe
+            };
+        }
+        first
     }
 
     /// The key of the sequence of the interned Seq-id `r` in `TestForOverlap64`'s ranges
@@ -2209,8 +2721,10 @@ fn reverse_loc(loc: &CompactLoc) -> CompactLoc {
             q
         })
         .collect();
-    // Preserve `whole` strand (`both` -> `both`, `FlipStrand` does not alter `whole`).
-    let strand = if loc.pieces.len() == 1 && loc.pieces[0].is_whole {
+    // Preserve `whole` strand (`both` -> `both`, `FlipStrand` does not alter `whole`), also when
+    // the strand waits for the picks of ties (`Scope::strand`).
+    let keeps_strand = loc.pieces.len() == 1 && loc.pieces[0].is_whole;
+    let strand = if keeps_strand {
         loc.strand
     } else {
         reverse_strand(loc.strand)
@@ -2223,6 +2737,7 @@ fn reverse_loc(loc: &CompactLoc) -> CompactLoc {
         first_id: loc.first_id,
         ids: loc.ids.clone(),
         deferred: match loc.deferred {
+            d if keeps_strand => d,
             Deferred::No => Deferred::No,
             Deferred::Strand => Deferred::Reversed,
             Deferred::Reversed => Deferred::Strand,
@@ -2497,7 +3012,10 @@ impl Scope<'_> {
             Some(t) => {
                 let mut state = self.tie_state.borrow_mut();
                 state.read[t] = true;
-                self.ties[t].picks[state.pick[t]]
+                if let Some(d) = self.ties[t].dynamic {
+                    state.dynamic_read[d] = true;
+                }
+                state.picks(self.ties, t)[state.pick[t]]
             }
         }
     }
@@ -2635,6 +3153,16 @@ fn pick_candidate_unsure(cands: &[Candidate], unsure: &[Candidate]) -> Found {
         pick_set(&all, &mut picks);
     }
     Found::from_picks(picks)
+}
+
+/// The picks of `found`, which is not a `DynamicName`.
+fn found_picks(found: Found) -> Box<[Option<u32>]> {
+    match found {
+        Found::None => Box::new([None]),
+        Found::One(bio) => Box::new([Some(bio)]),
+        Found::Picks(picks) => picks.into_boxed_slice(),
+        Found::Dynamic(_) => unreachable!("a DynamicName is found only by resolve_ids"),
+    }
 }
 
 impl Found {
@@ -2811,6 +3339,75 @@ fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
         other => other,
     };
     out
+}
+
+/// Calls `f` with every Seq-id of the `Seq-loc` `loc`, in order, and whether its range there is
+/// empty (`CHandleRangeMap::AddLocation`: an `empty` location, an interval that ends before it
+/// starts, points without any point).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:94-170
+fn for_each_loc_seq_id(loc: &Value, f: &mut impl FnMut(&ParsedSeqId, bool)) {
+    let s = dschema();
+    let mut stack = vec![loc];
+    while let Some(loc) = stack.pop() {
+        let Some((c, inner)) = as_choice(loc) else {
+            continue;
+        };
+        if c == s.seqloc_whole || c == s.seqloc_empty {
+            if let Value::SeqId(sid) = inner {
+                f(sid, c == s.seqloc_empty);
+            }
+            continue;
+        }
+        let mut member = |v: &Value, idx: usize, empty: bool| {
+            if let Some(Value::SeqId(sid)) = v.member(idx) {
+                f(sid, empty);
+            }
+        };
+        let int_empty = |iv: &Value| match (iv.member(s.seqint_from), iv.member(s.seqint_to)) {
+            (Some(Value::Int(from)), Some(Value::Int(to))) => to < from,
+            _ => false,
+        };
+        if c == s.seqloc_int {
+            member(inner, s.seqint_id, int_empty(inner));
+        } else if c == s.seqloc_pnt {
+            member(inner, s.seqpnt_id, false);
+        } else if c == s.seqloc_packed_pnt {
+            let none = inner
+                .member(s.packed_pnt_points)
+                .and_then(as_list)
+                .is_none_or(|points| points.is_empty());
+            member(inner, s.packed_pnt_id, none);
+        } else if c == s.seqloc_packed_int {
+            for iv in as_list(inner).unwrap_or_default() {
+                member(iv, s.seqint_id, int_empty(iv));
+            }
+        } else if c == s.seqloc_bond {
+            for end in [s.seqbond_a, s.seqbond_b] {
+                if let Some(pt) = inner.member(end) {
+                    member(pt, s.seqpnt_id, false);
+                }
+            }
+        } else if c == s.seqloc_mix || c == s.seqloc_equiv {
+            stack.extend(as_list(inner).unwrap_or_default().iter().rev());
+        }
+    }
+}
+
+/// The tree and upper-case accession of a text Seq-id whose handle is not packed and has an
+/// accession, which NCBI's text tree keeps by its accession (`m_ByAcc`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1161-1200
+fn unpacked_accession(id: &ParsedSeqId) -> Option<(u8, Box<[u8]>)> {
+    let text = id.textseq()?;
+    if textseq_packs(text) {
+        return None;
+    }
+    let accession = text.accession.as_deref()?;
+    Some((
+        handle_tree(id),
+        accession.to_ascii_uppercase().into_boxed_slice(),
+    ))
 }
 
 /// Walks a `mix` or `equiv` location depth first in `CSeq_loc_CI` order, adding its pieces and
@@ -3161,6 +3758,12 @@ struct BioseqFeatureView<'a> {
     bio_idx: usize,
     /// The posts of the title, written once the title is (`generate_asn_bioseq_title`).
     posts: RefCell<Vec<Vec<u8>>>,
+    /// Whether the title read features (NCBI's first feature iterator indexes them all).
+    accessed: Cell<bool>,
+    /// Whether the title read the features of the segments (`x_GetSegSeqInfoViaCDS`).
+    segseq: Cell<bool>,
+    /// The message of the exception that ended the title (`map_resolves`).
+    thrown: RefCell<Option<Vec<u8>>>,
 }
 
 impl BioseqFeatureView<'_> {
@@ -3169,10 +3772,49 @@ impl BioseqFeatureView<'_> {
             self.posts.borrow_mut().push(msg.to_vec())
         })
     }
+
+    /// Whether NCBI's feature iterator on the Bioseq walks its sequence map: not when the scope
+    /// finds no Bioseq for a `whole` segment or reference, the first of which makes `CSeqMap`
+    /// throw `eFail`. A throw that the title does not catch ends it (`thrown`); every later
+    /// read gives nothing.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:319-339
+    fn map_resolves(&self, caught: bool) -> bool {
+        self.accessed.set(true);
+        if self.thrown.borrow().is_some() {
+            return false;
+        }
+        let Some(wholes) = self.index.map_wholes.get(&self.bio_idx) else {
+            return true;
+        };
+        let Some(&r) = wholes.iter().find(|&&r| self.index.bio_of(r).is_none()) else {
+            return true;
+        };
+        if !caught {
+            let mut msg = b"Cannot resolve ".to_vec();
+            label::fasta(self.index.interner.id(r), &mut msg);
+            msg.extend_from_slice(b": unknown");
+            *self.thrown.borrow_mut() = Some(msg);
+        }
+        false
+    }
+}
+
+impl BioseqFeatureView<'_> {
+    /// Whether a feature iterator by product (`GetMappedCDSForProduct`) reads: it does not walk
+    /// the sequence map, so it throws nothing; nothing is read after a throw.
+    fn by_product(&self) -> bool {
+        self.accessed.set(true);
+        self.thrown.borrow().is_none()
+    }
 }
 
 impl DeflineFeatures for BioseqFeatureView<'_> {
     fn has_biosrc_clone_feature(&self) -> bool {
+        // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1407-1433
+        if !self.map_resolves(true) {
+            return false;
+        }
         for bi in self.index.target_bioseqs(self.bio_idx) {
             if let Some(ids) = self.index.biosrcs_by_bioseq.get(&bi) {
                 if ids.iter_ids().any(|si| self.index.biosrcs[si].has_clone) {
@@ -3184,6 +3826,9 @@ impl DeflineFeatures for BioseqFeatureView<'_> {
     }
 
     fn nm_single_gene_and_cds(&self) -> Option<(Vec<u8>, Vec<u8>)> {
+        if !self.map_resolves(false) {
+            return None;
+        }
         let targets = self.index.target_bioseqs(self.bio_idx);
         let mut gene_idx = None;
         let mut gene_count = 0usize;
@@ -3224,6 +3869,9 @@ impl DeflineFeatures for BioseqFeatureView<'_> {
     }
 
     fn nr_first_gene_label(&self) -> Option<Vec<u8>> {
+        if !self.map_resolves(false) {
+            return None;
+        }
         let targets = self.index.target_bioseqs(self.bio_idx);
         let mut candidates: Vec<(u64, std::cmp::Reverse<u64>, usize, usize)> = Vec::new();
         let mut seen = Vec::new();
@@ -3247,6 +3895,9 @@ impl DeflineFeatures for BioseqFeatureView<'_> {
     }
 
     fn longest_protein(&self) -> Option<ProteinFeatInfo> {
+        if !self.map_resolves(false) {
+            return None;
+        }
         let targets = self.index.target_bioseqs(self.bio_idx);
         let mut candidates: Vec<(u64, std::cmp::Reverse<u64>, usize, usize)> = Vec::new();
         let mut seen = Vec::new();
@@ -3290,22 +3941,37 @@ impl DeflineFeatures for BioseqFeatureView<'_> {
     }
 
     fn cds_for_product(&self) -> Option<CdsForProductInfo> {
+        if !self.by_product() {
+            return None;
+        }
+        let &ci = self.index.cds_by_product.get(&self.bio_idx)?.first()?;
+        Some(CdsForProductInfo {
+            has_low_quality_exception: self.index.cds[ci].low_quality_except,
+        })
+    }
+
+    fn gene_via_cds(&self) -> Option<GeneViaCdsInfo> {
+        if !self.by_product() {
+            return None;
+        }
         let &ci = self.index.cds_by_product.get(&self.bio_idx)?.first()?;
         let cds = &self.index.cds[ci];
         let gene = cds
             .xref_gene
             .as_ref()
-            .or_else(|| self.index.best_gene_for_cds(cds).map(|g| &g.gene));
-        Some(CdsForProductInfo {
-            has_low_quality_exception: cds.low_quality_except,
-            gene_locus: gene.and_then(|g| g.locus.clone()),
-            gene_first_syn: gene.and_then(|g| g.first_syn.clone()),
-            gene_desc: gene.and_then(|g| g.desc.clone()),
-            gene_locus_tag: gene.and_then(|g| g.locus_tag.clone()),
+            .or_else(|| self.index.best_gene_for_cds(cds).map(|g| &g.gene))?;
+        Some(GeneViaCdsInfo {
+            locus: gene.locus.clone(),
+            first_syn: gene.first_syn.clone(),
+            desc: gene.desc.clone(),
+            locus_tag: gene.locus_tag.clone(),
         })
     }
 
     fn source_taxname_via_cds(&self) -> Option<Vec<u8>> {
+        if !self.by_product() {
+            return None;
+        }
         let &ci = self.index.cds_by_product.get(&self.bio_idx)?.first()?;
         let cds = &self.index.cds[ci];
         let src = self.index.best_biosrc_for_cds(cds)?;
@@ -3313,6 +3979,13 @@ impl DeflineFeatures for BioseqFeatureView<'_> {
     }
 
     fn segseq_info_via_cds(&self) -> Option<SegSeqCdsInfo> {
+        // The features on the segments' locations, read with the scope: no sequence map walk.
+        // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2578-2593
+        self.accessed.set(true);
+        if self.thrown.borrow().is_some() {
+            return None;
+        }
+        self.segseq.set(true);
         let seg_loc = self.index.bioseq_seg_locs.get(&self.bio_idx)?;
         let mut candidates: Vec<(u64, std::cmp::Reverse<u64>, usize, usize)> = Vec::new();
         let mut seen = Vec::new();
@@ -3444,27 +4117,69 @@ pub(crate) fn generate_asn_bioseq_title(
         ));
     }
 
+    index.begin_title(bio_idx);
     let make = || {
         let view = BioseqFeatureView {
             index,
             bio_idx,
             posts: RefCell::new(Vec::new()),
+            accessed: Cell::new(false),
+            segseq: Cell::new(false),
+            thrown: RefCell::new(None),
         };
         let defline = generate_defline_core(&inp, Some(&view))
             .map(|d| (d.text, d.reads_past_end))
             .map_err(|_| ());
-        (defline, view.posts.into_inner())
+        let accessed = view.accessed.get();
+        let segset_posts = if accessed {
+            index.segset_master_posts()
+        } else {
+            Vec::new()
+        };
+        (
+            defline,
+            segset_posts,
+            view.posts.into_inner(),
+            view.thrown.into_inner(),
+            accessed,
+            view.segseq.get(),
+        )
     };
-    let Some((defline, title_posts)) = index.same_at_every_pick(make) else {
+    let Some((defline, segset_posts, title_posts, thrown, accessed, segseq)) =
+        index.same_at_every_pick(make)
+    else {
         return Err(WriteDbError::Unsupported(
             "a title made from the features that changes with the Bioseq NCBI's object manager \
              finds for a location Seq-id, which two Bioseqs of the entry match alike (NCBI picks \
              one by the order of Seq-id handles in memory) or, for a pir or prf accession alone, \
-             by a name where Seq-ids that LOSAT does not read (other annotations, segments) may \
-             hold another accession of its prefix, is not supported by LOSAT's makeblastdb"
+             by a name where Seq-ids that LOSAT does not read (annotations other than feature \
+             tables) or segments and references that earlier titles resolve may hold another \
+             accession of its prefix, is not supported by LOSAT's makeblastdb"
                 .to_string(),
         ));
     };
+    // The posts of NCBI's segmented-set master go out when the first title reads features.
+    if index.end_title(bio_idx, accessed, segseq) {
+        posts.extend(segset_posts);
+    }
+    let mut post_all = |posts: &[Vec<u8>]| {
+        for msg in posts.iter().chain(&title_posts) {
+            warn(&msg[..]);
+        }
+    };
+    if let Some(msg) = thrown {
+        post_all(&posts);
+        // NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:333-336
+        return Err(WriteDbError::Exception(NcbiException::new(
+            ThrowSite {
+                file: "src/objmgr/seq_map.cpp",
+                line: 336,
+                kind: "CSeqMapException::eFail",
+                function: None,
+            },
+            msg,
+        )));
+    }
     match defline {
         Ok((_, true)) => Err(WriteDbError::Unsupported(
             "a title of punctuation that NCBI's x_CleanAndCompress reads past the end of \
@@ -3472,15 +4187,11 @@ pub(crate) fn generate_asn_bioseq_title(
                 .to_string(),
         )),
         Ok((text, false)) => {
-            for msg in posts.iter().chain(&title_posts) {
-                warn(&msg[..]);
-            }
+            post_all(&posts);
             Ok(text)
         }
         Err(()) => {
-            for msg in posts.iter().chain(&title_posts) {
-                warn(&msg[..]);
-            }
+            post_all(&posts);
             // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4530-4533
             Err(WriteDbError::Exception(NcbiException::new(
                 ThrowSite {
@@ -3849,3 +4560,7 @@ fn scan_biosource_for_mag_and_kingdom<'a>(
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
+
+#[cfg(test)]
+#[path = "asn_defline_tests.rs"]
+mod tests;

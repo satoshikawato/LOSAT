@@ -1,0 +1,5 @@
+Seq-entry ::= seq {
+  id { other { accession "NM_000999", version 1 } },
+  descr { molinfo { biomol mRNA }, source { org { taxname "Escherichia coli" } } },
+  inst { repr seg, mol rna, length 10, ext seg { whole genbank { accession "AB009099", version 1 } } }
+}

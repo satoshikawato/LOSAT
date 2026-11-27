@@ -578,6 +578,8 @@ pub(super) fn set_title_from_protein(
 ) -> Vec<u8> {
     let prot = feats.and_then(|f| f.longest_protein());
     let cds = feats.and_then(|f| f.cds_for_product());
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2455-2464,2483-2502,2507-2517
+    let gene = || feats.and_then(|f| f.gene_via_cds());
     let mut main_title = Vec::new();
 
     if let Some(prot) = &prot {
@@ -623,10 +625,10 @@ pub(super) fn set_title_from_protein(
             if main_title.eq_ignore_ascii_case(b"hypothetical protein")
                 || main_title.eq_ignore_ascii_case(b"uncharacterized protein")
             {
-                if let Some(lt) = cds.as_ref().and_then(|c| c.gene_locus_tag.as_deref()) {
+                if let Some(lt) = gene().and_then(|g| g.locus_tag) {
                     if !lt.is_empty() {
                         main_title.push(b' ');
-                        main_title.extend_from_slice(lt);
+                        main_title.extend_from_slice(&lt);
                         main_title.extend_from_slice(comma);
                         main_title.extend_from_slice(&isoform);
                     }
@@ -647,17 +649,17 @@ pub(super) fn set_title_from_protein(
     }
 
     if main_title.is_empty() && !inp.local_annots_only {
-        if let Some(cds) = &cds {
-            if let Some(locus) = &cds.gene_locus {
+        if let Some(gene) = gene() {
+            if let Some(locus) = &gene.locus {
                 main_title.extend_from_slice(locus);
             }
             if main_title.is_empty() {
-                if let Some(syn) = &cds.gene_first_syn {
+                if let Some(syn) = &gene.first_syn {
                     main_title.extend_from_slice(syn);
                 }
             }
             if main_title.is_empty() {
-                if let Some(desc) = &cds.gene_desc {
+                if let Some(desc) = &gene.desc {
                     main_title.extend_from_slice(desc);
                 }
             }
@@ -669,10 +671,10 @@ pub(super) fn set_title_from_protein(
 
     if main_title.is_empty() && !inp.local_annots_only {
         main_title.extend_from_slice(UNNAMED_PROTEIN_PRODUCT);
-        if let Some(lt) = cds.as_ref().and_then(|c| c.gene_locus_tag.as_deref()) {
+        if let Some(lt) = gene().and_then(|g| g.locus_tag) {
             if !lt.is_empty() {
                 main_title.push(b' ');
-                main_title.extend_from_slice(lt);
+                main_title.extend_from_slice(&lt);
             }
         }
     }

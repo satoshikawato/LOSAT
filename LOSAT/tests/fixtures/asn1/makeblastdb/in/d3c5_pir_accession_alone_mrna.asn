@@ -1,0 +1,10 @@
+Seq-entry ::= seq {
+  id { other { accession "NM_000814", version 1 }, pir { name "PIR814" }, gi 900814 },
+  descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+  inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+  annot { { data ftable {
+    { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000814", version 1 } } },
+    { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id gi 900814 }, empty pir { accession "PIR814" } } },
+    { data rna { type mRNA }, location int { from 0, to 29, id gi 900814 } }
+  } } }
+}

@@ -1,0 +1,6 @@
+Seq-entry ::= seq {
+  id { genbank { accession "AB009016", version 1 } },
+  descr { molinfo { biomol peptide }, source { org { taxname "Escherichia coli" } } },
+  inst { repr seg, mol aa, length 10, ext seg { whole genbank { accession "AB009099", version 1 } } },
+  annot { { data ftable { { data prot { name { "own prot" } }, location whole genbank { accession "AB009016", version 1 } } } } }
+}

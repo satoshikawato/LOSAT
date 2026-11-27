@@ -355,8 +355,11 @@ impl SeqEntrySource {
         let mut sets = Vec::new();
         let mut bioseqs = Vec::new();
         let mut features = TseFeatureIndex::default();
-        collect_tree(root, is_set, &mut sets, &mut bioseqs, &mut features)?;
+        let segset_master = collect_tree(root, is_set, &mut sets, &mut bioseqs, &mut features)?;
         check_duplicate_bioseq_ids(&bioseqs, &mut features)?;
+        if let Some(master) = segset_master {
+            features.note_segset_master(master);
+        }
         let bioseq_ids: Vec<&[ParsedSeqId]> = bioseqs.iter().map(|b| b.ids.as_slice()).collect();
         features.build_indices(&bioseq_ids);
         Ok(Self {
@@ -527,39 +530,59 @@ impl SeqEntrySource {
 /// ancestor descriptor chains, `Unverified` flags, and compact TSE defline features.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:466-496
+///
+/// Gives the TSE's segmented-set master (`CTSE_Info::GetSegSetMaster`): down the first entries
+/// from the top, the Bioseq that is the first entry of the first `segset`, unless that entry is
+/// a set.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/tse_info.cpp:782-800
 fn collect_tree(
     root: Value,
     is_set: bool,
     sets: &mut Vec<SetNode>,
     bioseqs: &mut Vec<BioseqSlot>,
     features: &mut TseFeatureIndex,
-) -> Result<(), WriteDbError> {
+) -> Result<Option<usize>, WriteDbError> {
+    /// Where an entry is on the first entries from the top (`GetSegSetMaster`).
+    #[derive(Clone, Copy, PartialEq)]
+    enum Chain {
+        Off,
+        On,
+        SegsetFirst,
+    }
     enum Work {
         Entry {
             val: Value,
             parent_set: Option<usize>,
             inherited_unver: bool,
+            chain: Chain,
         },
         Set {
             val: Value,
             parent_set: Option<usize>,
             inherited_unver: bool,
+            chain: Chain,
         },
     }
+    // `CBioseq_set::eClass_segset`.
+    const SEGSET: i32 = 2;
 
     let s = schema();
+    let mut segset_master = None;
 
     let mut stack = vec![if is_set {
         Work::Set {
             val: root,
             parent_set: None,
             inherited_unver: false,
+            chain: Chain::On,
         }
     } else {
         Work::Entry {
             val: root,
             parent_set: None,
             inherited_unver: false,
+            chain: Chain::On,
         }
     }];
 
@@ -569,6 +592,7 @@ fn collect_tree(
                 mut val,
                 parent_set,
                 inherited_unver,
+                chain,
             } => {
                 if matches!(val, Value::Null) {
                     return Err(null_element_refusal("Bioseq-set.seq-set"));
@@ -587,6 +611,9 @@ fn collect_tree(
                     let own_unver = is_unverified_descr(&descr);
                     let inst = bio.take_member(s.bioseq_inst).unwrap_or(Value::Null);
                     let bio_idx = bioseqs.len();
+                    if chain == Chain::SegsetFirst {
+                        segset_master = Some(bio_idx);
+                    }
                     let inst_len = match inst.member(s.seq_inst_length) {
                         Some(Value::Int(n)) => Some(*n as u64),
                         _ => None,
@@ -604,6 +631,11 @@ fn collect_tree(
                         val: inner,
                         parent_set,
                         inherited_unver,
+                        chain: if chain == Chain::On {
+                            Chain::On
+                        } else {
+                            Chain::Off
+                        },
                     });
                 }
             }
@@ -611,6 +643,7 @@ fn collect_tree(
                 mut val,
                 parent_set,
                 inherited_unver,
+                chain,
             } => {
                 let class = match val.member(s.bioseq_set_class) {
                     Some(Value::Enum(c)) => *c,
@@ -628,19 +661,25 @@ fn collect_tree(
                     parent: parent_set,
                     descr,
                 });
+                let first_chain = match chain {
+                    Chain::On if class == SEGSET => Chain::SegsetFirst,
+                    Chain::On => Chain::On,
+                    _ => Chain::Off,
+                };
                 if let Some(children) = take_list(val.take_member(s.bioseq_set_seq_set)) {
-                    for child in children.into_iter().rev() {
+                    for (i, child) in children.into_iter().enumerate().rev() {
                         stack.push(Work::Entry {
                             val: child,
                             parent_set: Some(set_idx),
                             inherited_unver: inherited_unver || nuc_prot_unver,
+                            chain: if i == 0 { first_chain } else { Chain::Off },
                         });
                     }
                 }
             }
         }
     }
-    Ok(())
+    Ok(segset_master)
 }
 
 fn null_element_refusal(where_in: &str) -> WriteDbError {

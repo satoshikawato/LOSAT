@@ -352,8 +352,9 @@ fn restore_case(to: &mut [&mut Vec<u8>], from: &[&Vec<u8>]) {
     }
 }
 
-/// Whether a Textseq-id packs (`FindOrCreate`, seq_id_tree.cpp:1165-1185): an accession only that
-/// `ParseAcc` takes.
+/// Whether a Textseq-id packs (`FindOrCreate`): an accession only that `ParseAcc` takes.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1165-1185
 pub(crate) fn textseq_packs(text: &TextseqId) -> bool {
     text.name.is_none()
         && text.release.is_none()
@@ -364,7 +365,10 @@ pub(crate) fn textseq_packs(text: &TextseqId) -> bool {
 }
 
 /// The prefix of the accession of `text` when its handle is packed (`textseq_packs`), which
-/// `GoodPrefix` compares other accessions with (seq_id_tree.cpp:824-880, seq_id_tree.hpp:440-442).
+/// `GoodPrefix` compares other accessions with.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:824-880
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:440-442
 pub(crate) fn textseq_pack_prefix(text: &TextseqId) -> Option<&[u8]> {
     if text.name.is_some() || text.release.is_some() {
         return None;

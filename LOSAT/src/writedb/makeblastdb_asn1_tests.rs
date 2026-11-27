@@ -390,8 +390,8 @@ fn all_frozen_ncbi_2_17_0_asn1_cases_match_byte_for_byte() {
         checked += 1;
     }
     assert!(
-        checked >= 131,
-        "expected >= 131 frozen cases, got {checked}"
+        checked >= 168,
+        "expected >= 168 frozen cases, got {checked}"
     );
 }
 
@@ -652,8 +652,8 @@ fn d3c6_autodef_and_ub_cases_are_refused_cleanly() {
 /// refused before any volume is written, with nothing on stderr before the refusal: an accession
 /// without a version that two Bioseqs in two Seq-id trees have with one version, one of them the
 /// Bioseq of the CDS; and a packed `pir` accession alone whose name match NCBI skips when
-/// another Seq-id of the entry (here possibly the `mRNA` feature's) has an accession of its
-/// prefix that is not packed.
+/// another Seq-id of the entry has an accession of its prefix that is not packed, which here
+/// only an alignment annotation (whose Seq-ids LOSAT does not read) may hold.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1438-1510,1564-1572
 /// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
@@ -663,15 +663,17 @@ fn d3c5_scope_order_cases_are_refused_cleanly() {
         skip_unverified: false,
         scan_cfastareader: true,
     };
-    let pir_accession_alone = br#"Seq-entry ::= seq {
+    let pir_accession_with_align_annot = br#"Seq-entry ::= seq {
   id { other { accession "NM_000814", version 1 }, pir { name "PIR814" }, gi 900814 },
   descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
   inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
-  annot { { data ftable {
-    { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000814", version 1 } } },
-    { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id gi 900814 }, empty pir { accession "PIR814" } } },
-    { data rna { type mRNA }, location int { from 0, to 29, id gi 900814 } }
-  } } }
+  annot {
+    { data ftable {
+      { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000814", version 1 } } },
+      { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id gi 900814 }, empty pir { accession "PIR814" } } }
+    } },
+    { data align { { type global, dim 2, segs denseg { dim 2, numseg 1, ids { pir { accession "PIR8140" }, gi 900814 }, starts { 0, 0 }, lens { 10 } } } } }
+  }
 }
 "#;
     let tie_across_trees = br#"Bioseq-set ::= {
@@ -694,7 +696,10 @@ fn d3c5_scope_order_cases_are_refused_cleanly() {
 }
 "#;
     for (label, bytes) in [
-        ("pir_accession_alone", pir_accession_alone.as_slice()),
+        (
+            "pir_accession_with_align_annot",
+            pir_accession_with_align_annot.as_slice(),
+        ),
         ("tie_across_trees", tie_across_trees.as_slice()),
     ] {
         let dir = TempDir::unique(&format!("asn1-refuse-inline-{label}"));

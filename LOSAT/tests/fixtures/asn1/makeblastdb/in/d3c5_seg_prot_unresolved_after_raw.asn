@@ -1,0 +1,14 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { genbank { accession "BAA00130", version 1 } },
+      descr { title "raw protein 130" },
+      inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" }
+    },
+    seq {
+      id { genbank { accession "AB009017", version 1 } },
+      descr { molinfo { biomol peptide } },
+      inst { repr seg, mol aa, length 10, ext seg { whole genbank { accession "AB009099", version 1 } } }
+    }
+  }
+}

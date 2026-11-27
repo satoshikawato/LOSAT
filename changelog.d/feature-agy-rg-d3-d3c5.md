@@ -12,4 +12,7 @@
   remains refused (`D3c-6`), and so is a title made from the features that changes with the
   Bioseq NCBI picks for a location by the order of handles in memory (LOSAT makes the title
   with each possible Bioseq and writes it when they agree). PDB Seq-ids and a `pir` or `prf`
-  accession alone match as in NCBI.
+  accession alone match as in NCBI, with the handles of segments and references that earlier
+  titles resolve. An untitled protein (or `NM`/`NR` sequence) whose segment or reference no
+  input sequence matches ends with NCBI's `Cannot resolve` exception (exit status 255), and a
+  segmented set whose master has such a segment gets NCBI's two `null scope pointer` errors.

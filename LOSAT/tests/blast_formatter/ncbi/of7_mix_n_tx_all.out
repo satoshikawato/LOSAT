@@ -1,0 +1,12 @@
+# BLASTN 2.17.0+
+# Query: q1 query one
+# Database: User specified sequence set (Input: )
+# Fields: query id, query gi, query acc., query acc.ver, query length, subject id, subject ids, subject gi, subject gis, subject acc., subject acc.ver, subject accs., subject length, q. start, q. end, s. start, s. end, query seq, subject seq, evalue, bit score, score, alignment length, % identity, identical, mismatches, positives, gap opens, gaps, % positives, query/sbjct frames, query frame, sbjct frame, BTOP, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject, subject title, subject titles
+# 1 hits found
+q1	0	q1	q1	120	s1	s1	0	0	s1	s1	s1	400	1	120	101	220	CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCACAATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA	CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCACCATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA	1.82e-61	217	117	120	99.167	119	1	119	0	0	99.17	1/1	1	1	60AC59	plus	100	100	100	N/A	N/A
+# BLAST processed 1 queries
+# BLASTN 2.17.0+
+# Query: q1 query one
+# Database: User specified sequence set (Input: )
+# Fields: query id, query gi, query acc., query acc.ver, query length, subject id, subject ids, subject gi, subject gis, subject acc., subject acc.ver, subject accs., subject length, q. start, q. end, s. start, s. end, query seq, subject seq, evalue, bit score, score, alignment length, % identity, identical, mismatches, positives, gap opens, gaps, % positives, query/sbjct frames, query frame, sbjct frame, BTOP, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject, subject title, subject titles
+# 3 hits found

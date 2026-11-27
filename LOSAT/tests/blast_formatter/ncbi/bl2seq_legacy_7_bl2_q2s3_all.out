@@ -1,0 +1,16 @@
+# BLASTN 2.17.0+
+# Query: q1 query one
+# Subject: s1 subject one
+# Fields: query id, query gi, query acc., query acc.ver, query length, subject id, subject ids, subject gi, subject gis, subject acc., subject acc.ver, subject accs., subject length, q. start, q. end, s. start, s. end, query seq, subject seq, evalue, bit score, score, alignment length, % identity, identical, mismatches, positives, gap opens, gaps, % positives, query/sbjct frames, query frame, sbjct frame, BTOP, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject, subject title, subject titles
+# 2 hits found
+q1	0	q1	q1	120	s1	s1	0	0	s1	s1	s1	400	1	120	101	220	CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCACAATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA	CGCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCACCATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA	4.48e-61	217	117	120	99.167	119	1	119	0	0	99.17	1/1	1	1	60AC59	plus	100	100	100	N/A	N/A
+q1	0	q1	q1	120	s2	s2	0	0	s2	s2	s2	400	2	120	102	220	GCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTAGACACGGTCTCGTGCCCACAATATACTGTTATGAGACATTGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA	GCAGTTGGGTATTGTCCGAGCAATCCGCTATCCTTAAGTCGACACGGTCTCGTGCCCACCATATACTGTTATGAGACATAGGATTTGCCAGCAATGTTAAGCGCCGCCATTTCTAGAGA	3.49e-57	204	110	119	97.479	116	3	116	0	0	97.48	1/1	1	1	39AC19AC19TA39	plus	99	99	99	N/A	N/A
+# BLASTN 2.17.0+
+# Query: q2 query two
+# Subject: s2 subject two
+# Fields: query id, query gi, query acc., query acc.ver, query length, subject id, subject ids, subject gi, subject gis, subject acc., subject acc.ver, subject accs., subject length, q. start, q. end, s. start, s. end, query seq, subject seq, evalue, bit score, score, alignment length, % identity, identical, mismatches, positives, gap opens, gaps, % positives, query/sbjct frames, query frame, sbjct frame, BTOP, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject, subject title, subject titles
+# 3 hits found
+q2	0	q2	q2	100	s3	s3	0	0	s3	s3	s3	200	1	100	31	130	AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA	AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA	1.03e-51	185	100	100	100.000	100	0	100	0	0	100.00	1/1	1	1	100	plus	100	100	100	N/A	N/A
+q2	0	q2	q2	100	s1	s1	0	0	s1	s1	s1	400	1	100	231	330	AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA	AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA	1.03e-51	185	100	100	100.000	100	0	100	0	0	100.00	1/1	1	1	100	plus	100	100	100	N/A	N/A
+q2	0	q2	q2	100	s2	s2	0	0	s2	s2	s2	400	1	100	231	330	AGGTGGTGGTCGACGACTGTGGTTAGTCGTGGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGCGGAAACAGATCTCCTCACACCCCGTACCAA	AGGTGGTGGTCGACGACTGTGGTTAGTCGTAGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGCAGAAACAGATCTCCTCACACCCCGTACCAA	2.24e-48	174	94	100	98.000	98	2	98	0	0	98.00	1/1	1	1	30GA39GA29	plus	100	100	100	N/A	N/A
+# BLAST processed 2 queries

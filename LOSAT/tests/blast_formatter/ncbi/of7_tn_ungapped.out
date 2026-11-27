@@ -1,0 +1,12 @@
+# TBLASTN 2.17.0+
+# Query: tq1 tblastn query
+# Database: in/db/s3
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+tq1	s2	97.000	100	3	0	101	200	400	101	8.37e-69	242
+tq1	s2	91.262	103	9	0	1	103	32	340	6.62e-62	219
+tq1	s1	94.175	103	6	0	1	103	32	340	1.45e-65	232
+tq1	s1	91.000	100	9	0	101	200	400	101	4.78e-62	220
+tq1	s3	90.909	66	6	0	101	166	200	3	1.65e-40	148
+tq1	s3	91.304	46	4	0	58	103	3	140	1.52e-28	109
+# BLAST processed 1 queries

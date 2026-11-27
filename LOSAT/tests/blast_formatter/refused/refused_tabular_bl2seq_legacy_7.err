@@ -1,1 +1,0 @@
-Error: the tabular output formats (6, 7, 10 and 20) of a BLAST archive with -subject sequences, BL2SEQ_LEGACY set and outfmt 7, whose lines NCBI BLAST+ writes for each subject are not supported by LOSAT's BLAST_FORMATTER

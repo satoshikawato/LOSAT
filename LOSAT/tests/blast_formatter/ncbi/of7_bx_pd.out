@@ -1,0 +1,28 @@
+# BLASTX 2.17.0+
+# Query: Query_1 qx1 blastx query one
+# Database: ../db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+Query_1	BDT63572.1	23.404	47	34	1	62	196	82	128	0.27	22.7
+Query_1	BDT63517.1	52.941	17	8	0	130	80	182	198	0.36	22.7
+Query_1	BDT63556.1	39.130	23	14	0	117	185	730	752	1.9	20.8
+# BLASTX 2.17.0+
+# Query: Query_2 qx2 no hits
+# Database: ../db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 14 hits found
+Query_2	BDT63522.1	37.500	32	18	1	92	3	759	790	0.073	22.7
+Query_2	BDT63522.1	40.625	32	18	1	47	142	1371	1401	0.079	22.7
+Query_2	BDT63533.1	28.125	32	20	1	59	145	988	1019	0.64	20.4
+Query_2	BDT63508.1	37.931	29	12	1	24	110	971	993	0.83	20.0
+Query_2	BDT63529.1	41.176	17	10	0	108	58	474	490	0.97	19.6
+Query_2	BDT63556.1	54.545	11	5	0	78	46	1822	1832	3.0	18.5
+Query_2	BDT63551.1	40.909	22	11	1	8	73	123	142	4.1	18.1
+Query_2	BDT63552.1	40.909	22	13	0	117	52	67	88	7.4	17.3
+Query_2	BDT63516.1	39.130	23	14	0	73	141	1660	1682	7.7	17.3
+Query_2	BDT63516.1	71.429	7	2	0	55	75	2130	2136	9.7	16.9
+Query_2	BDT63528.1	35.294	17	11	0	87	137	687	703	8.7	17.3
+Query_2	BDT63530.1	33.333	12	8	0	116	81	103	114	9.3	16.9
+Query_2	BDT63523.1	50.000	12	6	0	13	48	381	392	9.5	16.9
+Query_2	BDT63553.1	50.000	8	4	0	95	72	810	817	9.8	16.9
+# BLAST processed 2 queries

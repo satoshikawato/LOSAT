@@ -1,0 +1,32 @@
+Warning: (302.106) [SOCK_gethostbyname]  Failed gethostbyname_r("www.ncbi.nlm.nih.gov") {error=200002,Host name lookup failure}
+Error: (302.22) SSOCK#1000[?]@:443: [SOCK::Connect]  Failed SOCK_gethostbyname("www.ncbi.nlm.nih.gov")
+Error: (303.7) [URL_Connect; https://www.ncbi.nlm.nih.gov/Service/dispd.cgi?service=ID2&address=kawato-ProLiant-DL360-Gen10-Plus(127.0.1.1)&platform=x86_64-conda-linux-gnu]  Failed to connect: Unknown
+Warning: (301.21) [CONN_Flush(HTTP; https://www.ncbi.nlm.nih.gov/Service/dispd.cgi?service=ID2&address=kawato-ProLiant-DL360-Gen10-Plus(127.0.1.1)&platform=x86_64-conda-linux-gnu)]  Failed to flush: Unknown
+Error: (304.5) [ID2]  Unable to create connection to network dispatcher at "https://www.ncbi.nlm.nih.gov/Service/dispd.cgi?service=ID2&address=kawato-ProLiant-DL360-Gen10-Plus(127.0.1.1)&platform=x86_64-conda-linux-gnu": Unknown
+Error: (308.5) [ID2]  Service not found
+Error: (315.2) [CConn_Streambuf::CConn_Streambuf()]  NULL connector: Unknown
+cannot open connection: ID2
+failed to send request: NULL
+CReadDispatcher: Exception: (CLoaderException::eConnectionFailed) failed to send request: NULL
+Warning: (302.106) [SOCK_gethostbyname]  Failed gethostbyname_r("www.ncbi.nlm.nih.gov") {error=200002,Host name lookup failure}
+Error: (302.22) SSOCK#2000[?]@:443: [SOCK::Connect]  Failed SOCK_gethostbyname("www.ncbi.nlm.nih.gov")
+Error: (303.7) [URL_Connect; https://www.ncbi.nlm.nih.gov/Service/dispd.cgi?service=ID2&address=kawato-ProLiant-DL360-Gen10-Plus(127.0.1.1)&platform=x86_64-conda-linux-gnu]  Failed to connect: Unknown
+Warning: (301.21) [CONN_Flush(HTTP; https://www.ncbi.nlm.nih.gov/Service/dispd.cgi?service=ID2&address=kawato-ProLiant-DL360-Gen10-Plus(127.0.1.1)&platform=x86_64-conda-linux-gnu)]  Failed to flush: Unknown
+Error: (304.5) [ID2]  Unable to create connection to network dispatcher at "https://www.ncbi.nlm.nih.gov/Service/dispd.cgi?service=ID2&address=kawato-ProLiant-DL360-Gen10-Plus(127.0.1.1)&platform=x86_64-conda-linux-gnu": Unknown
+Error: (308.5) [ID2]  Service not found
+Error: (315.2) [CConn_Streambuf::CConn_Streambuf()]  NULL connector: Unknown
+cannot open connection: ID2
+failed to send request: NULL
+CReadDispatcher: Exception: (CLoaderException::eConnectionFailed) failed to send request: NULL
+CReader: waiting 1s before new connection
+Warning: (302.106) [SOCK_gethostbyname]  Failed gethostbyname_r("www.ncbi.nlm.nih.gov") {error=200002,Host name lookup failure}
+Error: (302.22) SSOCK#3000[?]@:443: [SOCK::Connect]  Failed SOCK_gethostbyname("www.ncbi.nlm.nih.gov")
+Error: (303.7) [URL_Connect; https://www.ncbi.nlm.nih.gov/Service/dispd.cgi?service=ID2&address=kawato-ProLiant-DL360-Gen10-Plus(127.0.1.1)&platform=x86_64-conda-linux-gnu]  Failed to connect: Unknown
+Warning: (301.21) [CONN_Flush(HTTP; https://www.ncbi.nlm.nih.gov/Service/dispd.cgi?service=ID2&address=kawato-ProLiant-DL360-Gen10-Plus(127.0.1.1)&platform=x86_64-conda-linux-gnu)]  Failed to flush: Unknown
+Error: (304.5) [ID2]  Unable to create connection to network dispatcher at "https://www.ncbi.nlm.nih.gov/Service/dispd.cgi?service=ID2&address=kawato-ProLiant-DL360-Gen10-Plus(127.0.1.1)&platform=x86_64-conda-linux-gnu": Unknown
+Error: (308.5) [ID2]  Service not found
+Error: (315.2) [CConn_Streambuf::CConn_Streambuf()]  NULL connector: Unknown
+Error: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objtools/data_loaders/genbank/id2/reader_id2.cpp", line 253: Error: (CLoaderException::eConnectionFailed) ncbi::objects::CId2Reader::x_ConnectAtSlot() - cannot open connection: ID2
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objtools/data_loaders/genbank/reader_id2_base.cpp", line 2137: Error: (CLoaderException::eConnectionFailed) ncbi::objects::CId2ReaderBase::x_SendID2Packet() - failed to send request: NULL (in GetRecords(gb|AB000011.1|))
+

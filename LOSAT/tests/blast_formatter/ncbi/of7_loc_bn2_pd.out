@@ -1,0 +1,16 @@
+# BLASTN 2.17.0+
+# Query: AB000012.1 s2 in gb
+# Database: in/db/s3gb
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+AB000012.1	AB000011.1	100.000	200	0	0	1	200	1	200	5.56e-107	370
+AB000012.1	AB000012.1	97.500	200	5	0	1	200	1	200	1.21e-98	342
+# BLASTN 2.17.0+
+# Query: AB000011.1 s1 in gb
+# Database: in/db/s3gb
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+AB000011.1	AB000013.2	100.000	100	0	0	1	100	101	200	1.03e-51	185
+AB000011.1	AB000011.1	100.000	100	0	0	1	100	301	400	1.03e-51	185
+AB000011.1	AB000012.1	97.980	99	2	0	2	100	302	400	8.04e-48	172
+# BLAST processed 2 queries

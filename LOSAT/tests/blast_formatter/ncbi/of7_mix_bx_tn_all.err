@@ -1,0 +1,3 @@
+Error: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqfeat/Genetic_code_table.cpp", line 555: Error: (CException::eUnknown) ncbi::objects::CGen_code_table_imp::GetTransTable() - Unable to find genetic code number 0
+

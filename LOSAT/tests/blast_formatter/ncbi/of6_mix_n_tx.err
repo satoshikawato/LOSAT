@@ -1,0 +1,3 @@
+Error: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqalign/Seq_align.cpp", line 827: Error: (CSeqalignException::eInvalidInputAlignment) CreateDensegFromStdseg(): Inconsistent strands!
+

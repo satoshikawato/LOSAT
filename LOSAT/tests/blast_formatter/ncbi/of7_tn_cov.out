@@ -1,0 +1,12 @@
+# TBLASTN 2.17.0+
+# Query: tq1 tblastn query
+# Database: in/db/s3
+# Fields: query id, subject id, evalue, bit score, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 6 hits found
+tq1	s2	7.63e-72	202	100	50	N/A
+tq1	s2	4.06e-64	182	100	52	N/A
+tq1	s1	3.09e-67	190	100	52	N/A
+tq1	s1	2.06e-64	183	100	50	N/A
+tq1	s3	5.07e-41	121	55	33	N/A
+tq1	s3	2.91e-28	89.4	55	23	N/A
+# BLAST processed 1 queries

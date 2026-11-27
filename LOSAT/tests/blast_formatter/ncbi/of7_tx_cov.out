@@ -1,0 +1,50 @@
+# TBLASTX 2.17.0+
+# Query: q1 query one
+# Database: in/db/s3
+# Fields: query id, subject id, evalue, bit score, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 21 hits found
+q1	s1	1.07e-25	96.8	100	33	N/A
+q1	s1	1.07e-25	96.8	100	33	N/A
+q1	s1	1.00e-24	93.6	100	33	N/A
+q1	s1	1.00e-24	93.6	100	33	N/A
+q1	s1	3.56e-24	91.8	100	33	N/A
+q1	s1	8.45e-23	87.2	100	33	N/A
+q1	s1	2.6	12.5	100	13	N/A
+q1	s2	1.36e-24	93.2	100	33	N/A
+q1	s2	9.15e-24	90.4	100	33	N/A
+q1	s2	9.24e-24	90.4	100	33	N/A
+q1	s2	2.40e-23	89.0	100	33	N/A
+q1	s2	3.04e-22	85.4	100	33	N/A
+q1	s2	2.02e-21	82.6	100	33	N/A
+q1	s2	0.28	15.7	100	13	N/A
+q1	s3	0.057	18.0	54	5	N/A
+q1	s3	0.11	17.1	54	5	N/A
+q1	s3	0.11	17.1	54	5	N/A
+q1	s3	0.15	16.6	54	5	N/A
+q1	s3	0.53	14.8	54	5	N/A
+q1	s3	0.72	14.4	54	5	N/A
+q1	s3	2.6	12.5	54	13	N/A
+# TBLASTX 2.17.0+
+# Query: q2 query two
+# Database: in/db/s3
+# Fields: query id, subject id, evalue, bit score, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 18 hits found
+q2	s3	9.77e-24	90.0	100	33	N/A
+q2	s3	3.21e-22	84.9	100	32	N/A
+q2	s3	4.42e-22	84.5	100	33	N/A
+q2	s3	8.33e-22	83.5	100	32	N/A
+q2	s3	2.16e-21	82.2	100	33	N/A
+q2	s3	7.11e-20	77.1	100	33	N/A
+q2	s1	9.77e-24	90.0	100	33	N/A
+q2	s1	3.21e-22	84.9	100	32	N/A
+q2	s1	4.42e-22	84.5	100	33	N/A
+q2	s1	8.33e-22	83.5	100	32	N/A
+q2	s1	2.16e-21	82.2	100	33	N/A
+q2	s1	7.11e-20	77.1	100	33	N/A
+q2	s2	1.24e-22	86.3	100	33	N/A
+q2	s2	1.06e-20	79.9	100	33	N/A
+q2	s2	5.18e-20	77.6	100	33	N/A
+q2	s2	9.77e-20	76.7	100	32	N/A
+q2	s2	9.77e-20	76.7	100	32	N/A
+q2	s2	4.78e-19	74.4	100	33	N/A
+# BLAST processed 2 queries

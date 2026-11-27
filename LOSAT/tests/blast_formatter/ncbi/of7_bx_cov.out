@@ -1,0 +1,28 @@
+# BLASTX 2.17.0+
+# Query: qx1 blastx query one
+# Database: ../db_search/paja
+# Fields: query id, subject id, evalue, bit score, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 3 hits found
+qx1	BDT63572.1	0.27	22.7	46	46	N/A
+qx1	BDT63517.1	0.36	22.7	17	18	N/A
+qx1	BDT63556.1	1.9	20.8	24	24	N/A
+# BLASTX 2.17.0+
+# Query: qx2 no hits
+# Database: ../db_search/paja
+# Fields: query id, subject id, evalue, bit score, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 14 hits found
+qx2	BDT63522.1	0.073	22.7	93	60	N/A
+qx2	BDT63522.1	0.079	22.7	93	64	N/A
+qx2	BDT63533.1	0.64	20.4	58	58	N/A
+qx2	BDT63508.1	0.83	20.0	58	58	N/A
+qx2	BDT63529.1	0.97	19.6	34	34	N/A
+qx2	BDT63556.1	3.0	18.5	22	22	N/A
+qx2	BDT63551.1	4.1	18.1	44	44	N/A
+qx2	BDT63552.1	7.4	17.3	44	44	N/A
+qx2	BDT63516.1	7.7	17.3	58	46	N/A
+qx2	BDT63516.1	9.7	16.9	58	14	N/A
+qx2	BDT63528.1	8.7	17.3	34	34	N/A
+qx2	BDT63530.1	9.3	16.9	24	24	N/A
+qx2	BDT63523.1	9.5	16.9	24	24	N/A
+qx2	BDT63553.1	9.8	16.9	16	16	N/A
+# BLAST processed 2 queries

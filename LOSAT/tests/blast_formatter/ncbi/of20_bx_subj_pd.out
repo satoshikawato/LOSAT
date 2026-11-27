@@ -1,0 +1,7 @@
+qaccver,saccver,pident,length,mismatch,gapopen,qstart,qend,sstart,send,evalue,bitscore
+Query_1,p1,100.000,40,0,0,32,151,1,40,4.88e-28,83.2
+Query_1,p1,80.556,36,7,0,276,169,4,39,1.25e-13,46.6
+Query_1,sp|P0E1A1.1|E1A1_TEST,85.000,40,6,0,32,151,1,40,1.59e-16,53.9
+Query_1,sp|P0E1A1.1|E1A1_TEST,97.222,36,1,0,276,169,4,39,1.63e-15,51.2
+Query_1,p3,100.000,20,0,0,92,151,1,20,6.68e-13,44.3
+Query_1,p3,84.211,19,3,0,225,169,1,19,6.79e-11,39.3

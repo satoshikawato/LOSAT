@@ -1,0 +1,4 @@
+Warning: Error pre-fetching sequence data
+Error: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqalign/Seq_align.cpp", line 227: Error: (CSeqalignException::eInvalidAlignment) CSeq_align::GetSeqRange(): Row is empty
+

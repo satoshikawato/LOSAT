@@ -1,0 +1,8 @@
+# BLASTN 2.17.0+
+# Query: query one
+# Subject: subject one
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+query	subject	99.167	120	1	0	1	120	101	220	4.48e-61	217
+query	AB000001.1	97.479	119	3	0	2	120	102	220	3.49e-57	204
+# BLAST processed 1 queries

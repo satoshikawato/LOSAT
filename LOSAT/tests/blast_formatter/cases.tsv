@@ -5,6 +5,7 @@
 # Rows from of8_delta on (line RG item F3 PR 1, agent C6 of ad-RG-F3-5, 2026-11-23): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC6.py, every NCBI run under unshare -rn. in/delta.asn and in/phi.asn: the first object of in/ps.asn with its service changed to delta_blast and phi (review of PR 1, F3/review/c_tmp/scripts); in/tax_both.asn and in/tx5_both.asn: in/db.asn with a taxid list and a negative taxid list, on in/db/s3 and on in/txdb/t (makeblastdb -in in/s3.fa -dbtype nucl -taxid 9606 -blastdb_version 5, in the review); in/bad1.asn and in/bad2.asn: in/batch.asn with a byte 0x07 in a query title of its first and of its second object (the line of the post counts over the file). in/real_pinf.asn and in/real_nan.asn (tools/fixC6b.py): in/bn.asn with its first e-value PLUS-INFINITY and NOT-A-NUMBER; refused_real_12 is LOSAT's refusal by name of such a value (NCBI stops at it in JSON); NCBI writes it in ASN.1 binary, as LOSAT does since line RG-F3's PR 2 (row real_pinf_9, named refused_real_9 until agent C9 of ad-RG-F3-10, 2026-11-24; NCBI's bytes unchanged).
 # Rows from opt_bho09_8 on (line RG item F3 PR 1, agent C7 of ad-RG-F3-5, 2026-11-24): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC7.py, every NCBI run under unshare -rn. in/opt_<name>.asn is in/bn.asn with one option of its search added or changed to a value that a search program's option check refuses (BestHitOverhang 0.9, BestHitScoreEdge -1, Culling 1 with best hit, Culling -1, MaxHspsPerSubject -1, PercentIdentity 150, QueryCovHspPerc 150, WordSize 3 and -1, an e-value of 0, HitlistSize 0): blast_formatter builds the options of each object without checking them, and only the hit list size changes what it writes.
 # Rows from of6_db on (line RG item F3 PR 3a, agent E1 of ad-RG-F3-10, 2026-11-25): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build, as the first rows; the archives by the official release's search programs), by remaining-gaps-20261112/F/f3/tools/fixE1.py and fixE1b.py (rows of20_prefetch_abc, of7_deltablast_all, refused_tabular_locations), every NCBI run under unshare -rn (refused_tabular_locations under unshare -rnu with the host name rgff3-probe, as NCBI's request names the machine). New inputs: in/s3pd.fa, in/qgnl.fa, in/bp_s.faa, in/qacc.fa (made by fixE1.py and fixE1b.py from in/s3.fa, in/q.fa, in/ps.faa); in/bn_ungapped.asn, dcmb.asn, bnt.asn, bnspd.asn, pdq.asn, bp_db.asn, bp_ungapped.asn, bp_subject.asn, bp_subject_pd.asn, pdq_acc.asn (NCBI's blastn/blastp -outfmt 11; pdq_acc.asn with -parse_deflines holds its query as a seq-loc-list); in/mix_n_p.asn (db.asn then bp_db.asn), in/ps_step_str.asn (ps.asn with its second Web_StepNumber a string).
+# Rows from of6_bx on (line RG item F3 PR 3b, agent 3B of ad-RG-F3-12, 2026-11-27): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build; the archives and in/db/s3gb, in/db/bpgb by the official release's search programs and makeblastdb -parse_seqids), by remaining-gaps-20261112/F/f3/tools/fix3b.py, every NCBI run under unshare -rn. New inputs: in/qx.fna, qxg.fna, tq.faa, s3gb.fa, qgb.fa, qgb2.fa, bpgb.faa, qbpgb.faa, qxgb.fna (made by fix3b.py from in/s3.fa, in/ps.faa, in/bp_s.faa); in/bx.asn, bx_subj.asn, bx_gc2.asn (-query_gencode 2), bx_ungapped.asn, tn.asn, tn_subj.asn, tn_gc4.asn (-db_gencode 4), tn_ungapped.asn, tx.asn, tx_subj.asn, tx_batch.asn (BATCH_SIZE=1), tx_gc.asn (-query_gencode 5 -db_gencode 11), bx_empty.asn and bx_empty_subj.asn (-ungapped -window_size 0 on the inputs of line RG item X2g: HSPs of length 0), bl2_q2s3.asn and bl2_q2s3_b1.asn (blastn -subject, 2 queries x 3 subjects, the second with BATCH_SIZE=1), loc_bn.asn, loc_bn2.asn, loc_tx.asn, loc_bp.asn, loc_tn.asn, loc_bx.asn, tn_gb.asn (-parse_deflines on databases of parsed ids: NCBI's archive keeps the queries as a seq-loc-list); in/mix_n_tx.asn, mix_tx_n.asn, mix_bx_tn.asn, bl2_1_3.asn, bl2_3_1.asn, bl2_3_1_1.asn (archives one after the other). refused_tabular_locations_bx and _tn: queries given as locations that the database does not hold, which NCBI asks its servers for. Rows refused_tabular_rpstblastn and refused_tabular_bl2seq_legacy_7 of PR 3a are rows of6_rtn and bl2seq_legacy_7_bn (the same bytes).
 noargs	
 h	-h
 help	-help
@@ -193,10 +194,8 @@ of7_phi_all	-archive in/phi.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid s
 of20_prefetch_abc	PRE_FETCH_SEQS_LIMIT=abc -archive in/bn.asn -outfmt 20
 of7_deltablast_all	-archive in/delta.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
 refused_of5	-archive in/db.asn -outfmt 5
-refused_tabular_rpstblastn	-archive in/rtn.asn -outfmt 6
 of6_deltablast	-archive in/delta.asn -outfmt 6
 of6_pd_general_query	-archive in/pdq.asn -outfmt 6
-refused_tabular_bl2seq_legacy_7	BL2SEQ_LEGACY=1 -archive in/bn.asn -outfmt 7
 refused_tabular_locations	-archive in/pdq_acc.asn -outfmt 6
 of6_bit_nan	-archive in/bit_nan.asn -outfmt 6
 of6_bit_pinf	-archive in/bit_pinf.asn -outfmt '6 std score'
@@ -223,3 +222,139 @@ of7_self_subj_all	-archive in/self_subj.asn -outfmt '7 qseqid qgi qacc qaccver q
 of6_self_subj_pd	-archive in/self_subj.asn -outfmt '6 std stitle sallseqid staxid sseq' -parse_deflines
 of6_two_ids	-archive in/two_ids.asn -outfmt '6 std sseqid sallseqid stitle qcovs'
 of7_two_ids	-archive in/two_ids.asn -outfmt 7
+of6_bx	-archive in/bx.asn -outfmt 6
+of7_bx	-archive in/bx.asn -outfmt 7
+of10_bx	-archive in/bx.asn -outfmt 10
+of20_bx	-archive in/bx.asn -outfmt 20
+of6_bx_all	-archive in/bx.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_bx_all	-archive in/bx.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_bx_frames	-archive in/bx.asn -outfmt '6 qseqid sseqid qstart qend sstart send qframe sframe frames sstrand qseq sseq btop'
+of6_bx_custom	-archive in/bx.asn -outfmt '6 std qlen slen staxids sscinames stitle qcovs'
+of7_bx_cov	-archive in/bx.asn -outfmt '7 qseqid sseqid evalue bitscore qcovs qcovhsp qcovus'
+of6_tn	-archive in/tn.asn -outfmt 6
+of7_tn	-archive in/tn.asn -outfmt 7
+of10_tn	-archive in/tn.asn -outfmt 10
+of20_tn	-archive in/tn.asn -outfmt 20
+of6_tn_all	-archive in/tn.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_tn_all	-archive in/tn.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_tn_frames	-archive in/tn.asn -outfmt '6 qseqid sseqid qstart qend sstart send qframe sframe frames sstrand qseq sseq btop'
+of6_tn_custom	-archive in/tn.asn -outfmt '6 std qlen slen staxids sscinames stitle qcovs'
+of7_tn_cov	-archive in/tn.asn -outfmt '7 qseqid sseqid evalue bitscore qcovs qcovhsp qcovus'
+of6_tx	-archive in/tx.asn -outfmt 6
+of7_tx	-archive in/tx.asn -outfmt 7
+of10_tx	-archive in/tx.asn -outfmt 10
+of20_tx	-archive in/tx.asn -outfmt 20
+of6_tx_all	-archive in/tx.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_tx_all	-archive in/tx.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_tx_frames	-archive in/tx.asn -outfmt '6 qseqid sseqid qstart qend sstart send qframe sframe frames sstrand qseq sseq btop'
+of6_tx_custom	-archive in/tx.asn -outfmt '6 std qlen slen staxids sscinames stitle qcovs'
+of7_tx_cov	-archive in/tx.asn -outfmt '7 qseqid sseqid evalue bitscore qcovs qcovhsp qcovus'
+of6_rtn	-archive in/rtn.asn -outfmt 6
+of7_rtn	-archive in/rtn.asn -outfmt 7
+of10_rtn	-archive in/rtn.asn -outfmt 10
+of20_rtn	-archive in/rtn.asn -outfmt 20
+of6_rtn_all	-archive in/rtn.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_rtn_all	-archive in/rtn.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_rtn_frames	-archive in/rtn.asn -outfmt '6 qseqid sseqid qstart qend sstart send qframe sframe frames sstrand qseq sseq btop'
+of6_rtn_custom	-archive in/rtn.asn -outfmt '6 std qlen slen staxids sscinames stitle qcovs'
+of7_rtn_cov	-archive in/rtn.asn -outfmt '7 qseqid sseqid evalue bitscore qcovs qcovhsp qcovus'
+of6_bx_tax	-archive in/bx.asn -outfmt '6 qaccver saccver staxid ssciname scomname sblastname sskingdom staxids sscinames scomnames sblastnames sskingdoms'
+of6_bx_mts1	-archive in/bx.asn -outfmt 6 -max_target_seqs 1
+of7_bx_pd	-archive in/bx.asn -outfmt 7 -parse_deflines
+of6_bx_subj	-archive in/bx_subj.asn -outfmt 6
+of7_bx_subj	-archive in/bx_subj.asn -outfmt 7
+of6_bx_subj_all	-archive in/bx_subj.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of20_bx_subj_pd	-archive in/bx_subj.asn -outfmt 20 -parse_deflines
+bl2seq_legacy_7_bx_subj	BL2SEQ_LEGACY=1 -archive in/bx_subj.asn -outfmt 7
+bl2seq_legacy_6_bx_subj	BL2SEQ_LEGACY=1 -archive in/bx_subj.asn -outfmt 6
+of6_tn_tax	-archive in/tn.asn -outfmt '6 qaccver saccver staxid ssciname scomname sblastname sskingdom staxids sscinames scomnames sblastnames sskingdoms'
+of6_tn_mts1	-archive in/tn.asn -outfmt 6 -max_target_seqs 1
+of7_tn_pd	-archive in/tn.asn -outfmt 7 -parse_deflines
+of6_tn_subj	-archive in/tn_subj.asn -outfmt 6
+of7_tn_subj	-archive in/tn_subj.asn -outfmt 7
+of6_tn_subj_all	-archive in/tn_subj.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of20_tn_subj_pd	-archive in/tn_subj.asn -outfmt 20 -parse_deflines
+bl2seq_legacy_7_tn_subj	BL2SEQ_LEGACY=1 -archive in/tn_subj.asn -outfmt 7
+bl2seq_legacy_6_tn_subj	BL2SEQ_LEGACY=1 -archive in/tn_subj.asn -outfmt 6
+of6_tx_tax	-archive in/tx.asn -outfmt '6 qaccver saccver staxid ssciname scomname sblastname sskingdom staxids sscinames scomnames sblastnames sskingdoms'
+of6_tx_mts1	-archive in/tx.asn -outfmt 6 -max_target_seqs 1
+of7_tx_pd	-archive in/tx.asn -outfmt 7 -parse_deflines
+of6_tx_subj	-archive in/tx_subj.asn -outfmt 6
+of7_tx_subj	-archive in/tx_subj.asn -outfmt 7
+of6_tx_subj_all	-archive in/tx_subj.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of20_tx_subj_pd	-archive in/tx_subj.asn -outfmt 20 -parse_deflines
+bl2seq_legacy_7_tx_subj	BL2SEQ_LEGACY=1 -archive in/tx_subj.asn -outfmt 7
+bl2seq_legacy_6_tx_subj	BL2SEQ_LEGACY=1 -archive in/tx_subj.asn -outfmt 6
+of6_bx_gc2_frames	-archive in/bx_gc2.asn -outfmt '6 qseqid sseqid qstart qend sstart send qframe sframe frames sstrand qseq sseq btop'
+of7_bx_gc2_all	-archive in/bx_gc2.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_tn_gc4_frames	-archive in/tn_gc4.asn -outfmt '6 qseqid sseqid qstart qend sstart send qframe sframe frames sstrand qseq sseq btop'
+of7_tn_gc4_all	-archive in/tn_gc4.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_tx_gc_frames	-archive in/tx_gc.asn -outfmt '6 qseqid sseqid qstart qend sstart send qframe sframe frames sstrand qseq sseq btop'
+of7_tx_gc_all	-archive in/tx_gc.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_bx_ungapped	-archive in/bx_ungapped.asn -outfmt 6
+of7_bx_ungapped	-archive in/bx_ungapped.asn -outfmt 7
+of7_bx_ungapped_all	-archive in/bx_ungapped.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_tn_ungapped	-archive in/tn_ungapped.asn -outfmt 6
+of7_tn_ungapped	-archive in/tn_ungapped.asn -outfmt 7
+of7_tn_ungapped_all	-archive in/tn_ungapped.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_tx_batch	-archive in/tx_batch.asn -outfmt 6
+of7_tx_batch	-archive in/tx_batch.asn -outfmt 7
+of7_tx_batch_all	-archive in/tx_batch.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_bx_empty	-archive in/bx_empty.asn -outfmt 6
+of7_bx_empty	-archive in/bx_empty.asn -outfmt 7
+of6_bx_empty_all	-archive in/bx_empty.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_bx_empty_scores	-archive in/bx_empty.asn -outfmt '6 qseqid sseqid evalue bitscore score'
+of6_bx_empty_ids	-archive in/bx_empty.asn -outfmt '6 qseqid qlen sseqid slen evalue'
+of6_bx_empty_qcovs	-archive in/bx_empty.asn -outfmt '6 qseqid sseqid qcovs'
+of6_bx_empty_qcovhsp	-archive in/bx_empty.asn -outfmt '6 qseqid sseqid qcovhsp'
+of6_bx_empty_counts	-archive in/bx_empty.asn -outfmt '6 qseqid sseqid length nident qframe'
+of6_bx_empty_subj	-archive in/bx_empty_subj.asn -outfmt 6
+of7_bx_empty_subj	-archive in/bx_empty_subj.asn -outfmt 7
+of6_bx_empty_subj_all	-archive in/bx_empty_subj.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_bx_empty_subj_scores	-archive in/bx_empty_subj.asn -outfmt '6 qseqid sseqid evalue bitscore score'
+of6_bx_empty_subj_ids	-archive in/bx_empty_subj.asn -outfmt '6 qseqid qlen sseqid slen evalue'
+of6_bx_empty_subj_qcovs	-archive in/bx_empty_subj.asn -outfmt '6 qseqid sseqid qcovs'
+of6_bx_empty_subj_qcovhsp	-archive in/bx_empty_subj.asn -outfmt '6 qseqid sseqid qcovhsp'
+of6_bx_empty_subj_counts	-archive in/bx_empty_subj.asn -outfmt '6 qseqid sseqid length nident qframe'
+of6_mix_n_tx	-archive in/mix_n_tx.asn -outfmt 6
+of7_mix_n_tx_all	-archive in/mix_n_tx.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_mix_tx_n	-archive in/mix_tx_n.asn -outfmt 6
+of7_mix_tx_n_all	-archive in/mix_tx_n.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_mix_bx_tn	-archive in/mix_bx_tn.asn -outfmt 6
+of7_mix_bx_tn_all	-archive in/mix_bx_tn.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+bl2seq_legacy_7_bn	BL2SEQ_LEGACY=1 -archive in/bn.asn -outfmt 7
+bl2seq_legacy_7_bl2_q2s3	BL2SEQ_LEGACY=1 -archive in/bl2_q2s3.asn -outfmt 7
+bl2seq_legacy_7_bl2_q2s3_b1	BL2SEQ_LEGACY=1 -archive in/bl2_q2s3_b1.asn -outfmt 7
+bl2seq_legacy_7_bl2_1_3	BL2SEQ_LEGACY=1 -archive in/bl2_1_3.asn -outfmt 7
+bl2seq_legacy_7_bl2_3_1	BL2SEQ_LEGACY=1 -archive in/bl2_3_1.asn -outfmt 7
+bl2seq_legacy_7_bl2_3_1_1	BL2SEQ_LEGACY=1 -archive in/bl2_3_1_1.asn -outfmt 7
+bl2seq_legacy_7_bl2_q2s3_pd	BL2SEQ_LEGACY=1 -archive in/bl2_q2s3.asn -outfmt 7 -parse_deflines
+bl2seq_legacy_7_bl2_q2s3_all	BL2SEQ_LEGACY=1 -archive in/bl2_q2s3.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+bl2seq_legacy_7_bnspd	BL2SEQ_LEGACY=1 -archive in/bnspd.asn -outfmt 7
+bl2seq_legacy_7_bnspd_pd	BL2SEQ_LEGACY=1 -archive in/bnspd.asn -outfmt 7 -parse_deflines
+bl2seq_legacy_7_bp_subject	BL2SEQ_LEGACY=1 -archive in/bp_subject.asn -outfmt 7
+bl2seq_legacy_7_mts1	BL2SEQ_LEGACY=1 -archive in/bl2_q2s3.asn -outfmt 7 -max_target_seqs 1
+bl2seq_legacy_10_bl2_q2s3	BL2SEQ_LEGACY=1 -archive in/bl2_q2s3.asn -outfmt 10
+bl2seq_legacy_20_bl2_q2s3	BL2SEQ_LEGACY=1 -archive in/bl2_q2s3.asn -outfmt 20
+of6_loc_bn	-archive in/loc_bn.asn -outfmt 6
+of7_loc_bn	-archive in/loc_bn.asn -outfmt 7
+of6_loc_bn_all	-archive in/loc_bn.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_loc_bn_pd	-archive in/loc_bn.asn -outfmt 7 -parse_deflines
+of6_loc_bn2	-archive in/loc_bn2.asn -outfmt 6
+of7_loc_bn2	-archive in/loc_bn2.asn -outfmt 7
+of6_loc_bn2_all	-archive in/loc_bn2.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_loc_bn2_pd	-archive in/loc_bn2.asn -outfmt 7 -parse_deflines
+of6_loc_tx	-archive in/loc_tx.asn -outfmt 6
+of7_loc_tx	-archive in/loc_tx.asn -outfmt 7
+of6_loc_tx_all	-archive in/loc_tx.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_loc_tx_pd	-archive in/loc_tx.asn -outfmt 7 -parse_deflines
+of6_loc_bp	-archive in/loc_bp.asn -outfmt 6
+of7_loc_bp	-archive in/loc_bp.asn -outfmt 7
+of6_loc_bp_all	-archive in/loc_bp.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_loc_bp_pd	-archive in/loc_bp.asn -outfmt 7 -parse_deflines
+refused_tabular_locations_tn	-archive in/loc_tn.asn -outfmt 6
+refused_tabular_locations_bx	-archive in/loc_bx.asn -outfmt 6
+of6_tn_gb	-archive in/tn_gb.asn -outfmt 6
+of7_tn_gb	-archive in/tn_gb.asn -outfmt 7
+of6_tn_gb_all	-archive in/tn_gb.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_tn_gb_pd	-archive in/tn_gb.asn -outfmt 7 -parse_deflines

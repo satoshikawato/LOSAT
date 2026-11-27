@@ -271,6 +271,8 @@ describe('verification table', () => {
       ['makeblastdb', '-in', 'e.asn', '-input_type', 'asn1_txt', '-dbtype', 'nucl', '-title', 'x', '-oid_masks', '1', '-out', 'db'],
       // -gi_mask in several volumes.
       ['makeblastdb', '-in', 'n.fa', '-dbtype', 'nucl', '-parse_seqids', '-title', 't', '-max_file_sz', '400', '-mask_data', 'd.asnb', '-gi_mask', '-gi_mask_name', 'g1'],
+      // -taxid: any taxonomy ID other than 0 is stored as given (the ledgers hold 9606, 562 and 1).
+      ['makeblastdb', '-in', 'e.asn', '-input_type', 'asn1_txt', '-dbtype', 'prot', '-title', 'T', '-taxid', '7227', '-out', 'db'],
       // Names that are not UTF-8: -metadata_output_prefix.
       ['makeblastdb', '-in', 'in.fa', '-dbtype', 'nucl', '-title', 't', '-out', 'db', '-metadata_output_prefix', 'meta/'],
       // The version 5 runs of the Rust tables: -input_type blastdb, -randomize, -oid_masks, volumes.
@@ -294,6 +296,8 @@ describe('verification table', () => {
       ['makeblastdb', '-in', 'n.fa', '-dbtype', 'nucl', '-blastdb_version', '4', '-title', 't', '-mask_data', 'm.asnt', '-mask_id', 'a', '-max_file_sz', '400B'],
       // The source builds of the Rust tables' -input_type blastdb cases (a folder of {D}, not compared).
       ['makeblastdb', '-in', 'raw.fa', '-dbtype', 'nucl', '-parse_seqids', '-taxid_map', 't.map', '-mask_data', 'd.asnb', '-title', 'S', '-out', 's/src'],
+      // -taxid 0 leaves the sequences to -taxid_map, a path no ledger row runs.
+      ['makeblastdb', '-in', 'e.asn', '-input_type', 'asn1_txt', '-dbtype', 'prot', '-title', 'T', '-taxid', '0', '-out', 'db'],
     ]) {
       const badge = mkBadge(argv);
       expect(badge.level, argv.join(' ')).toBe('outside');

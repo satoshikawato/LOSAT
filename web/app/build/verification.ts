@@ -29,7 +29,9 @@ const PROGRAMS = ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx'] as const s
 const DESCRIBE = fileURLToPath(new URL('../src/infra/fake/describe.json', import.meta.url));
 const WINDOWMASKER_XMLHELP = fileURLToPath(new URL('../src/infra/fake/windowmasker-xmlhelp.json', import.meta.url));
 const WINDOWMASKER_CASES_PATH = 'LOSAT/tests/windowmasker/cases.tsv';
-const WINDOWMASKER_SKIP_FLAGS = new Set(['-h', '-help', '-xmlhelp', '-version-full', '-version-full-xml', '-version-full-json', '-dryrun']);
+const BLAST_FORMATTER_XMLHELP = fileURLToPath(new URL('../src/infra/fake/blast_formatter-xmlhelp.json', import.meta.url));
+const BLAST_FORMATTER_CASES_PATH = 'LOSAT/tests/blast_formatter/cases.tsv';
+const TOOL_SKIP_FLAGS = new Set(['-h', '-help', '-xmlhelp', '-version', '-version-full', '-version-full-xml', '-version-full-json', '-dryrun']);
 
 type Program = (typeof PROGRAMS)[number];
 type Source = VerificationTable['sources'][number];
@@ -83,8 +85,10 @@ export function generateVerificationTable(repository: string): VerificationTable
     sources.push({ path, sha256: createHash('sha256').update(bytes).digest('hex'), optionSets: accepted });
   }
 
-  const wm = windowMaskerToolVerification(repository);
+  const wm = casesToolVerification(repository, 'windowmasker', WINDOWMASKER_XMLHELP, WINDOWMASKER_CASES_PATH, 'LOSAT/tests/windowmasker/ncbi');
   sources.push(wm.source);
+  const bf = casesToolVerification(repository, 'blast_formatter', BLAST_FORMATTER_XMLHELP, BLAST_FORMATTER_CASES_PATH, 'LOSAT/tests/blast_formatter/ncbi');
+  sources.push(bf.source);
 
   const browsers = browserVerification(readTable(readFileSync(join(repository, 'docs/web/verification_cells.tsv'), 'utf8')));
   const programs: Partial<Dictionary<ProgramVerification>> = {};
@@ -94,21 +98,35 @@ export function generateVerificationTable(repository: string): VerificationTable
     const browser = browsers.get(program);
     programs[program] = browser === undefined ? { optionSets } : { optionSets, browser };
   }
-  return { ncbi: NCBI_VERSION, sources, programs, tools: { windowmasker: { optionSets: wm.optionSets } } };
+  return {
+    ncbi: NCBI_VERSION,
+    sources,
+    programs,
+    tools: {
+      windowmasker: { optionSets: wm.optionSets },
+      blast_formatter: { optionSets: bf.optionSets },
+    },
+  };
 }
 
 /**
- * Generates the windowmasker option sets from `LOSAT/tests/windowmasker/cases.tsv` and their
- * NCBI-frozen `ncbi/<name>.rc` files (matching `masker_fixtures.rs`: last row per name wins,
+ * Generates a CLI tool's option sets from `casesPath` (`cases.tsv`) and its NCBI-frozen
+ * `ncbi/<name>.rc` files (matching `masker_fixtures.rs`: last row per name wins,
  * shell-word quoting, skipping non-zero exits, environment variables, stdin, help and `-dryrun`).
  */
-function windowMaskerToolVerification(repository: string): { readonly source: Source; readonly optionSets: readonly string[] } {
-  const xmlDoc = JSON.parse(readFileSync(WINDOWMASKER_XMLHELP, 'utf8')) as { xml: string };
+function casesToolVerification(
+  repository: string,
+  tool: 'windowmasker' | 'blast_formatter',
+  xmlhelpPath: string,
+  casesPath: string,
+  ncbiRelDir: string,
+): { readonly source: Source; readonly optionSets: readonly string[] } {
+  const xmlDoc = JSON.parse(readFileSync(xmlhelpPath, 'utf8')) as { xml: string };
   const description = parseToolDescription(xmlDoc.xml);
   const baseGrammar = toolOptionGrammar(description);
   const knownFlags = new Set(['-logfile', '-conffile', ...description.parameters.map((param) => param.flag)]);
 
-  const casesBytes = readFileSync(join(repository, WINDOWMASKER_CASES_PATH));
+  const casesBytes = readFileSync(join(repository, casesPath));
   const cases = new Map<string, string>();
   for (const line of casesBytes.toString('utf8').split(/\r?\n/)) {
     if (line === '' || line.startsWith('#')) continue;
@@ -117,18 +135,19 @@ function windowMaskerToolVerification(repository: string): { readonly source: So
     cases.set(line.slice(0, tab), line.slice(tab + 1));
   }
 
-  const ncbiDir = join(repository, 'LOSAT/tests/windowmasker/ncbi');
+  const ncbiDir = join(repository, ncbiRelDir);
   const keys = new Set<string>();
   let accepted = 0;
 
   for (const [name, args] of cases) {
+    if (name.startsWith('refused_')) continue;
     const rcPath = join(ncbiDir, `${name}.rc`);
     if (!existsSync(rcPath) || readFileSync(rcPath, 'utf8').trim() !== '0') continue;
     const parsed = parseShellWords(args);
     if (parsed === undefined || parsed.stdin !== undefined) continue;
     const words = parsed.words;
     if (words.length === 0 || hasEnvAssignment(words[0]!)) continue;
-    if (words.some((word) => WINDOWMASKER_SKIP_FLAGS.has(word.split('=', 1)[0]!))) continue;
+    if (words.some((word) => TOOL_SKIP_FLAGS.has(word.split('=', 1)[0]!))) continue;
 
     let unknown = false;
     const grammar: ToolOptionGrammar = {
@@ -139,7 +158,7 @@ function windowMaskerToolVerification(repository: string): { readonly source: So
       ...(baseGrammar.isBoolean === undefined ? {} : { isBoolean: baseGrammar.isBoolean }),
       ...(baseGrammar.defaultValue === undefined ? {} : { defaultValue: baseGrammar.defaultValue }),
     };
-    const key = toolOptionKey(['windowmasker', ...words], grammar);
+    const key = toolOptionKey([tool, ...words], grammar);
     if (unknown || key === undefined) continue;
     keys.add(key);
     accepted++;
@@ -147,7 +166,7 @@ function windowMaskerToolVerification(repository: string): { readonly source: So
 
   return {
     source: {
-      path: WINDOWMASKER_CASES_PATH,
+      path: casesPath,
       sha256: createHash('sha256').update(casesBytes).digest('hex'),
       optionSets: accepted,
     },

@@ -1,0 +1,240 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tc_p
+           7 sequences; 520 total letters
+
+
+
+Query= q1 query one
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+a1 alpha#one                                                          127     2e-45
+a2 clean two                                                          120     2e-42
+a3 b#t#a two hsps                                                     115     3e-39
+a4 gamma##                                                            105     8e-37
+#a6 first                                                             94.4    3e-32
+a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  89.7    2e-30
+
+
+>a1 alpha#one
+Length=60
+
+ Score = 127 bits (320),  Expect = 2e-45, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+
+
+>a2 clean two
+Length=60
+
+ Score = 120 bits (300),  Expect = 2e-42, Method: Compositional matrix adjust.
+ Identities = 57/59 (97%), Positives = 58/59 (98%), Gaps = 0/59 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI  177
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGF K+I
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFWKWI  59
+
+
+>a3 b#t#a two hsps
+Length=160
+
+ Score = 115 bits (287),  Expect = 3e-39, Method: Compositional matrix adjust.
+ Identities = 55/59 (93%), Positives = 56/59 (95%), Gaps = 0/59 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI  177
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMF L F K+I
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFWLWFWKWI  59
+
+
+ Score = 107 bits (267),  Expect = 3e-36, Method: Compositional matrix adjust.
+ Identities = 52/59 (88%), Positives = 53/59 (90%), Gaps = 0/59 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI  177
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIG N G F L F K+I
+Sbjct  101  MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGWNWGWFWLWFWKWI  159
+
+
+>a4 gamma##
+Length=60
+
+ Score = 105 bits (263),  Expect = 8e-37, Method: Compositional matrix adjust.
+ Identities = 50/59 (85%), Positives = 52/59 (88%), Gaps = 0/59 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI  177
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQF+D G N G F L F K+I
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFWDWGWNWGWFWLWFWKWI  59
+
+
+>#a6 first
+Length=60
+
+ Score = 94.4 bits (233),  Expect = 3e-32, Method: Compositional matrix adjust.
+ Identities = 46/59 (78%), Positives = 48/59 (81%), Gaps = 0/59 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI  177
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSL G N R F+D G N G F L F K+I
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLWGANWRWFWDWGWNWGWFWLWFWKWI  59
+
+
+>a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+end#
+Length=60
+
+ Score = 89.7 bits (221),  Expect = 2e-30, Method: Compositional matrix adjust.
+ Identities = 44/59 (75%), Positives = 46/59 (78%), Gaps = 0/59 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI  177
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHN P L G N R F+D G N G F L F K+I
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNWPWLWGANWRWFWDWGWNWGWFWLWFWKWI  59
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 17952
+
+
+Query= q2 query two
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+a1 alpha#one                                                          123     8e-44
+a2 clean two                                                          123     9e-44
+a3 b#t#a two hsps                                                     117     6e-40
+a4 gamma##                                                            106     4e-37
+#a6 first                                                             95.1    1e-32
+a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  90.5    1e-30
+
+
+>a1 alpha#one
+Length=60
+
+ Score = 123 bits (309),  Expect = 8e-44, Method: Compositional matrix adjust.
+ Identities = 58/59 (98%), Positives = 59/59 (100%), Gaps = 0/59 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKWI  177
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPK+I
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFI  59
+
+
+>a2 clean two
+Length=60
+
+ Score = 123 bits (308),  Expect = 9e-44, Method: Compositional matrix adjust.
+ Identities = 59/60 (98%), Positives = 59/60 (98%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKWIW  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGF KWIW
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFWKWIW  60
+
+
+>a3 b#t#a two hsps
+Length=160
+
+ Score = 117 bits (292),  Expect = 6e-40, Method: Compositional matrix adjust.
+ Identities = 57/60 (95%), Positives = 57/60 (95%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKWIW  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMF L F KWIW
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFWLWFWKWIW  60
+
+
+ Score = 108 bits (270),  Expect = 1e-36, Method: Compositional matrix adjust.
+ Identities = 54/60 (90%), Positives = 54/60 (90%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKWIW  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIG N G F L F KWIW
+Sbjct  101  MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGWNWGWFWLWFWKWIW  160
+
+
+>a4 gamma##
+Length=60
+
+ Score = 106 bits (265),  Expect = 4e-37, Method: Compositional matrix adjust.
+ Identities = 52/60 (87%), Positives = 53/60 (88%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKWIW  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQF+D G N G F L F KWIW
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFWDWGWNWGWFWLWFWKWIW  60
+
+
+>#a6 first
+Length=60
+
+ Score = 95.1 bits (235),  Expect = 1e-32, Method: Compositional matrix adjust.
+ Identities = 48/60 (80%), Positives = 49/60 (82%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKWIW  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSL G N R F+D G N G F L F KWIW
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLWGANWRWFWDWGWNWGWFWLWFWKWIW  60
+
+
+>a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+end#
+Length=60
+
+ Score = 90.5 bits (223),  Expect = 1e-30, Method: Compositional matrix adjust.
+ Identities = 46/60 (77%), Positives = 47/60 (78%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKWIW  180
+            MDIVWSTFSARIQFAQYVPPKIIRFTWHN P L G N R F+D G N G F L F KWIW
+Sbjct  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNWPWLWGANWRWFWDWGWNWGWFWLWFWKWIW  60
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 17952
+
+
+  Database: tc_p
+    Posted date:  Nov 24, 2026  6:21 AM
+  Number of letters in database: 520
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

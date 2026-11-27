@@ -1,0 +1,118 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tc_n
+           7 sequences; 1,560 total letters
+
+
+
+Query= q1 query one
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+a1 alpha#one                                                          158     8e-44  1
+a2 clean two                                                          148     9e-41  1
+a3 b#t#a two hsps                                                     140     1e-38  1
+a4 gamma##                                                            125     5e-34  1
+#a6 first                                                             108     7e-29  1
+a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  100     1e-26  1
+a5 nohit#                                                             13.9    2.3    1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  180
+0        1    ............................................................  180
+1        1    .......................................................W.W.   177
+2        1    ...................................................W.W.W.W.   177
+2        301  .............................................W.W.W.W.W.W.W.   477
+3        1    .........................................W.W.W.W.W.W.W.W.W.   177
+5        1    .................................W.A.W.W.W.W.W.W.W.W.W.W.W.   177
+6        1    .............................W.W.W.A.W.W.W.W.W.W.W.W.W.W.W.   177
+
+For reading frame +2 of query sequence:
+
+Query_1  2    WILFGLPFLLVFSLLSMFRRKLFVLPGIIIRLWKVGMVVSFMILVKIPVCFVWVFRNLL  178
+0        2    ...........................................................  178
+1        2    .......................................................G.    172
+2        2    ...................................................GCG.G.    172
+2        302  .............................................G.G.G.GCG.G.    472
+3        2    .........................................G.G.G.G.G.GCG.G.    172
+5        2    ................................CG.LIG.G.G.G.G.G.G.GCG.G.    172
+6        2    .............................G.GCG.LIG.G.G.G.G.G.G.GCG.G.    172
+
+For reading frame +3 of query sequence:
+
+Query_1  3    GYCLVYLFCSYSVCSVCSAENYSFYLA*SSVSGRLEWSSVL*YW*KYRYVSSGFSEIYW  179
+0        3    ...........................*.............*..*..............  179
+1        3    ...........................*.............*..*.........L.M    173
+2        3    ...........................*.............*..*.....           152
+2        303  ...........................*.............*..                 434
+3        3    ...........................*.............                    125
+5        3    ...........................*....                             98
+6        3    ...........................*LA.A                             98
+4        78           ..DA..                                               95
+
+For reading frame -1 of query sequence:
+
+Query_1  180  TNKFRKTQTKHTGIFTNIIKLTTIPTFQRRMIMPGKTNNFRRNILSKLNTSRKGRPNNIH  1
+0        180  ............................................................  1
+1        177   .P.P.......................................................  1
+2        177   .P.P.P.P...................................................  1
+2        477   .P.P.P.P.P.P.P.............................................  301
+3        177   .P.P.P.P.P.P.P.P.P.........................................  1
+5        177   .P.P.P.P.P.P.P.P.P.P.P.S.P.................................  1
+6        177   .P.P.P.P.P.P.P.P.P.P.P.S.P.P.P.............................  1
+
+For reading frame -2 of query sequence:
+
+Query_1  179  PINFGKPRRNIPVFSPIS*N*RPFQPSRDG*LCQVKRIIFGGTY*AN*IRAEKVDQTIS  3
+0        179  ..................*.*.........*.............*..*...........  3
+1        176   .H.Q.............*.*.........*.............*..*...........  3
+2        176   .H.QNHSQ.........*.*.........*.............*..*...........  3
+2        476   .H.QNHSQ.Q.Q.Q...*.*.........*.............*..*...........  303
+3        176   .H.QNHSQ.Q.Q.Q.Q.Q.*.........*.............*..*...........  3
+5        176   .H.QNHSQ.Q.Q.Q.Q.Q.Q.QLA.H...*.............*..*...........  3
+6        176   .H.QNHSQ.Q.Q.Q.Q.Q.Q.QLA.HSH.Q.............*..*...........  3
+
+For reading frame -3 of query sequence:
+
+Query_1  178  Q*ISENPDETYRYFHQYHKTDDHSNLPETDDYAR*NE*FSAEHTEQTEYEQKR*TKQYP  2
+0        178  .*................................*..*...............*.....  2
+1        172    ..K.............................*..*...............*.....  2
+2        172    ..KTTAK.........................*..*...............*.....  2
+2        472    ..KTTAK.NPNSN...................*..*...............*.....  302
+3        124                    ................*..*...............*.....  2
+3        142     NS..NPKTDDHSNLPE...YA                                     80
+3        127                            .K...HS                            107
+5        124                    ..NAN*HPT.......*..*...............*.....  2
+6        124                    ..NAN*HPTA.AN...*..*...............*.....  2
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 17952
+
+
+  Database: tc_n
+    Posted date:  Nov 24, 2026  6:21 AM
+  Number of letters in database: 1,560
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

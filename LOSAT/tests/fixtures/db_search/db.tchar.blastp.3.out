@@ -1,0 +1,69 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: tc_p
+           7 sequences; 520 total letters
+
+
+
+Query= q1 query one
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+a1 alpha#one                                                          127     1e-45
+a2 clean two                                                          120     2e-42
+a3 b#t#a two hsps                                                     115     3e-39
+a4 gamma##                                                            105     7e-37
+#a6 first                                                             94.4    3e-32
+a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  89.7    2e-30
+
+
+
+Query_1  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+0        1    ............................................................  60
+1        1    .......................................................W.W.   59
+2        1    ...................................................W.W.W.W.   59
+2        101  .............................................W.W.W.W.W.W.W.   159
+3        1    .........................................W.W.W.W.W.W.W.W.W.   59
+5        1    .................................W.A.W.W.W.W.W.W.W.W.W.W.W.   59
+6        1    .............................W.W.W.A.W.W.W.W.W.W.W.W.W.W.W.   59
+
+
+Lambda      K        H        a         alpha
+   0.328    0.145    0.510    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 17952
+
+
+  Database: tc_p
+    Posted date:  Nov 24, 2026  6:21 AM
+  Number of letters in database: 520
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

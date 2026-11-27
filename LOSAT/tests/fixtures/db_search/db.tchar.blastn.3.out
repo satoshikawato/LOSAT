@@ -1,0 +1,77 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: tc_n
+           7 sequences; 1,560 total letters
+
+
+
+Query= q1 query one
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+a1 alpha#one                                                          333     1e-95
+a2 clean two                                                          307     6e-88
+a3 b#t#a two hsps                                                     291     6e-83
+a4 gamma##                                                            230     1e-64
+#a6 first                                                             183     1e-50
+a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  161     5e-44
+
+
+
+Query_1  1    ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+0        1    ............................................................  60
+1        1    ............................................................  60
+2        1    ............................................................  60
+2        301  ............................................................  360
+3        1    ............................................................  60
+5        1    ............................................................  60
+6        1    ............................................................  60
+
+Query_1  61   AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAG  120
+0        61   ............................................................  120
+1        61   ............................................................  120
+2        61   ............................................................  120
+2        361  ............................................................  420
+3        61   ............................................................  120
+5        61   .......................................                       99
+6        61   ...........................                                   87
+
+Query_1  121  TTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTG-GGTTTTCCGAAATTTATTGG  179
+0        121  .......................................-....................  179
+1        121  .......................................-......TG.....         172
+2        121  .................................T.G...T......G-.....         172
+2        421  ...............                                               435
+3        121  ....                                                          124
+
+Query_1  180  T  180
+0        180  .  180
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 250627
+
+
+  Database: tc_n
+    Posted date:  Nov 24, 2026  6:21 AM
+  Number of letters in database: 1,560
+  Number of sequences in database:  7
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

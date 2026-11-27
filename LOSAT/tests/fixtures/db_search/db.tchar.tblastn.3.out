@@ -1,0 +1,61 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tc_n
+           7 sequences; 1,560 total letters
+
+
+
+Query= q1 query one
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+a1 alpha#one                                                          127     2e-45
+a2 clean two                                                          120     2e-42
+a3 b#t#a two hsps                                                     115     3e-39
+a4 gamma##                                                            105     8e-37
+#a6 first                                                             94.4    3e-32
+a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  89.7    2e-30
+
+
+
+Query_1  1    MDIVWSTFSARIQFAQYVPPKIIRFTWHNHPSLEGWNGRQFYDIGENTGMFRLGFPKFIG  60
+0        1    ............................................................  180
+1        1    .......................................................W.W.   177
+2        1    ...................................................W.W.W.W.   177
+2        301  .............................................W.W.W.W.W.W.W.   477
+3        1    .........................................W.W.W.W.W.W.W.W.W.   177
+5        1    .................................W.A.W.W.W.W.W.W.W.W.W.W.W.   177
+6        1    .............................W.W.W.A.W.W.W.W.W.W.W.W.W.W.W.   177
+
+
+Lambda      K        H        a         alpha
+   0.328    0.145    0.510    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 17952
+
+
+  Database: tc_n
+    Posted date:  Nov 24, 2026  6:21 AM
+  Number of letters in database: 1,560
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

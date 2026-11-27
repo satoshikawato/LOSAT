@@ -1,0 +1,189 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: tc_n
+           7 sequences; 1,560 total letters
+
+
+
+<b>Query=</b> q1 query one
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+a1 alpha#one                                                          <a href=#BL_ORD_ID:0>333</a>     1e-95
+a2 clean two                                                          <a href=#BL_ORD_ID:1>307</a>     6e-88
+a3 b#t#a two hsps                                                     <a href=#BL_ORD_ID:2>291</a>     6e-83
+a4 gamma##                                                            <a href=#BL_ORD_ID:3>230</a>     1e-64
+#a6 first                                                             <a href=#BL_ORD_ID:5>183</a>     1e-50
+a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...  <a href=#BL_ORD_ID:6>161</a>     5e-44
+
+
+><a name=BL_ORD_ID:0></a> a1 alpha#one
+Length=180
+
+ Score = 333 bits (180),  Expect = 1e-95
+ Identities = 180/180 (100%), Gaps = 0/180 (0%)
+ Strand=Plus/Plus
+
+Query  1    ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+
+Query  61   AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAG  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAG  120
+
+Query  121  TTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTCCGAAATTTATTGGT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  TTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTCCGAAATTTATTGGT  180
+
+
+><a name=BL_ORD_ID:1></a> a2 clean two
+Length=180
+
+ Score = 307 bits (166),  Expect = 6e-88
+ Identities = 170/172 (99%), Gaps = 0/172 (0%)
+ Strand=Plus/Plus
+
+Query  1    ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+
+Query  61   AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAG  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAG  120
+
+Query  121  TTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTCCGAAAT  172
+            |||||||||||||||||||||||||||||||||||||||||||||  |||||
+Sbjct  121  TTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTTGGAAAT  172
+
+
+><a name=BL_ORD_ID:2></a> a3 b#t#a two hsps
+Length=480
+
+ Score = 291 bits (157),  Expect = 6e-83
+ Identities = 168/173 (97%), Gaps = 2/173 (1%)
+ Strand=Plus/Plus
+
+Query  1    ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+
+Query  61   AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAG  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAG  120
+
+Query  121  TTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTG-GGTTTTCCGAAAT  172
+            ||||||||||||||||||||||||||||||||| | ||| ||||||  |||||
+Sbjct  121  TTTTATGATATTGGTGAAAATACCGGTATGTTTTGGCTGTGGTTTTG-GAAAT  172
+
+
+ Score = 250 bits (135),  Expect = 1e-70
+ Identities = 135/135 (100%), Gaps = 0/135 (0%)
+ Strand=Plus/Plus
+
+Query  1    ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  301  ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  360
+
+Query  61   AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAG  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  361  AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAG  420
+
+Query  121  TTTTATGATATTGGT  135
+            |||||||||||||||
+Sbjct  421  TTTTATGATATTGGT  435
+
+
+><a name=BL_ORD_ID:3></a> a4 gamma##
+Length=180
+
+ Score = 230 bits (124),  Expect = 1e-64
+ Identities = 124/124 (100%), Gaps = 0/124 (0%)
+ Strand=Plus/Plus
+
+Query  1    ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+
+Query  61   AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAG  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAG  120
+
+Query  121  TTTT  124
+            ||||
+Sbjct  121  TTTT  124
+
+
+><a name=BL_ORD_ID:5></a> #a6 first
+Length=180
+
+ Score = 183 bits (99),  Expect = 1e-50
+ Identities = 99/99 (100%), Gaps = 0/99 (0%)
+ Strand=Plus/Plus
+
+Query  1   ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+           ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1   ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+
+Query  61  AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTG  99
+           |||||||||||||||||||||||||||||||||||||||
+Sbjct  61  AAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTG  99
+
+
+><a name=BL_ORD_ID:6></a> a7 long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+end#
+Length=180
+
+ Score = 161 bits (87),  Expect = 5e-44
+ Identities = 87/87 (100%), Gaps = 0/87 (0%)
+ Strand=Plus/Plus
+
+Query  1   ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+           ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1   ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCG  60
+
+Query  61  AAAATTATTCGTTTTACCTGGCATAAT  87
+           |||||||||||||||||||||||||||
+Sbjct  61  AAAATTATTCGTTTTACCTGGCATAAT  87
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 250627
+
+
+  Database: tc_n
+    Posted date:  Nov 24, 2026  6:21 AM
+  Number of letters in database: 1,560
+  Number of sequences in database:  7
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
+</PRE>
+</BODY>
+</HTML>

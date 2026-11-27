@@ -1127,6 +1127,7 @@ def tool() -> list[dict]:
         add_bf(f"print{word}", word)
     # Errors and refusals.
     add_bf("error.no_args", "", failure=True)
+    # An empty last word on the wire (`blast_formatter\0-rid\0\0`, abi_v2.md §7): the CLI's "Empty RID string specified".
     add_bf("error.rid_empty", "-rid ''", failure=True)
     add_bf("error.rid_refused", "-rid ABCDEFGH01R", failure=True)
     add_bf("error.rid_archive", "-rid ABCDEFGH01R -archive in/bn.asn", failure=True)

@@ -1327,6 +1327,14 @@ describe.skipIf(REACTORS === undefined)('blast_formatter through the host', () =
     expect(ridRun.status).toBe(1);
     expect(await ridRun.stderr.text()).toContain("not supported by LOSAT's BLAST_FORMATTER");
 
+    // An empty last word reaches the engine (encodeArgv ends every word with NUL, the adapter's words() reads it back):
+    // `-rid ''` is the CLI's empty RID, not a -rid without its value.
+    const emptyRid = abi.validateTool(['blast_formatter', '-rid', '']);
+    expect(emptyRid).toEqual({ ok: false, message: 'LOSAT engine error: Empty RID string specified' });
+    const emptyRidRun = await run(['blast_formatter', '-rid', '']);
+    expect(emptyRidRun.status).toBe(3);
+    expect(await emptyRidRun.stderr.text()).toBe('LOSAT engine error: Empty RID string specified\n');
+
     // Overwriting an existing run-directory file with -out or -logfile is refused.
     const overwrite = abi.validateTool(['blast_formatter', '-archive', 'in/bn.asn', '-outfmt', '8', '-out', 'in/bn.asn']);
     expect(overwrite.ok).toBe(false);

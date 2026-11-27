@@ -622,7 +622,7 @@ struct SearchRunFiles {
 fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
     use losat::web_adapter::{
         preparse, scan_program_argv, search_database_read_files, strategy_reads, Preparsed,
-        RegistryFiles as _,
+        RegistryFiles as _, StrategyReads,
     };
     use std::path::Path;
 
@@ -722,7 +722,7 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             }
         }
     }
-    let reads = strategy
+    let reads: Option<StrategyReads> = strategy
         .and_then(|name| crate::files::strategy(Path::new(&name)))
         .and_then(|bytes| strategy_reads(&bytes, override_subject));
     if let Some(taxid) = reads.as_ref().and_then(|reads| reads.window_masker_taxid) {

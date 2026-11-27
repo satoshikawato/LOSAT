@@ -326,7 +326,8 @@ fn a_run_imports_its_strategy_once() {
 /// item F2f: D23's inputs through the search's file receiver, D19b): the lookup files of the
 /// strategy's database, typed by the strategy's program (BLASTX running a TBLASTX strategy reads a
 /// nucleotide database, so its `.pin` is no file of the run), the taxonomy lookup of `-outfmt 15`
-/// against that database, and the repeat filter's database of a BLASTN strategy. The argv's
+/// against that database, and those of the repeat filter's database of a BLASTN strategy (as of
+/// BLASTN's `-filtering_db`). The argv's
 /// `-subject` replaces the strategy's database, and `-logfile run.log` runs.
 #[test]
 fn a_logfile_naming_what_the_strategy_reads_is_refused() {
@@ -357,7 +358,7 @@ fn a_logfile_naming_what_the_strategy_reads_is_refused() {
     }
     let nin = format!("{root}arch_tbx_snucl.nin");
     let pin = format!("{root}arch_sprot.pin");
-    let rpt = format!("{root}rpt_d4.nhr");
+    let rpt = format!("{root}rpt_d4.nin");
     for (program, strategy, more, named) in [
         ("blastx", "f2f_tbx.ss", vec![], nin.as_str()),
         ("blastp", "f2f_bp.ss", vec![], pin.as_str()),
@@ -366,14 +367,14 @@ fn a_logfile_naming_what_the_strategy_reads_is_refused() {
     ] {
         let mut argv = words(program, strategy, &more);
         argv.extend(["-logfile", named]);
-        let want = refusal(program, named);
+        let want = Some(refusal(program, named));
         assert_eq!(
-            crate::run::validate(&argv).unwrap_err(),
+            crate::run::validate(&argv).err(),
             want,
             "{strategy} {more:?}: validate"
         );
         assert_eq!(
-            run_imported(&argv, b"", b"").unwrap_err(),
+            run_imported(&argv, b"", b"").err(),
             want,
             "{strategy} {more:?}: run"
         );

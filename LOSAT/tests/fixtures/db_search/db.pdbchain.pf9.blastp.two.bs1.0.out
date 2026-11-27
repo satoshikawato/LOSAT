@@ -1,0 +1,64 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: pdbdual
+           4 sequences; 880 total letters
+
+
+
+Query= qalt the letters of pdbdual's alt record
+
+Length=220
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB600004.1 alt                                                        465     5e-174
+
+
+>AB600004.1 alt
+Length=220
+
+ Score = 465 bits (1197),  Expect = 5e-174, Method: Compositional matrix adjust.
+ Identities = 220/220 (100%), Positives = 220/220 (100%), Gaps = 0/220 (0%)
+
+Query  1    KKVWIGCDMCPYWISKQPCTNGNTCTPFCREMTNRDEEHYPQGDVPSPQCFQGLIMWMMS  60
+            KKVWIGCDMCPYWISKQPCTNGNTCTPFCREMTNRDEEHYPQGDVPSPQCFQGLIMWMMS
+Sbjct  1    KKVWIGCDMCPYWISKQPCTNGNTCTPFCREMTNRDEEHYPQGDVPSPQCFQGLIMWMMS  60
+
+Query  61   FLQVSAKRVKTYWMMINHLTPVGWLNAWSKPFNHRLATLRKCDHTIYRPRRLLYNNQDDW  120
+            FLQVSAKRVKTYWMMINHLTPVGWLNAWSKPFNHRLATLRKCDHTIYRPRRLLYNNQDDW
+Sbjct  61   FLQVSAKRVKTYWMMINHLTPVGWLNAWSKPFNHRLATLRKCDHTIYRPRRLLYNNQDDW  120
+
+Query  121  PWWNFKRHEDYHAPCFEPNMFWWFANETYRAADQSSLTANTRIHVPGGVDILSHLEDRVA  180
+            PWWNFKRHEDYHAPCFEPNMFWWFANETYRAADQSSLTANTRIHVPGGVDILSHLEDRVA
+Sbjct  121  PWWNFKRHEDYHAPCFEPNMFWWFANETYRAADQSSLTANTRIHVPGGVDILSHLEDRVA  180
+
+Query  181  HTEGKFYDGVCMTQTWFMVAKCYCDTRILYPLWPICWSPM  220
+            HTEGKFYDGVCMTQTWFMVAKCYCDTRILYPLWPICWSPM
+Sbjct  181  HTEGKFYDGVCMTQTWFMVAKCYCDTRILYPLWPICWSPM  220
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.138    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 142884

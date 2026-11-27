@@ -2332,6 +2332,7 @@ impl ListedTitles<'_> {
         batches: &[std::ops::Range<usize>],
         prefetch: &shared::BatchPrefetch,
         ranks: impl Fn(std::ops::Range<usize>) -> I,
+        batch_scope: &dyn Fn(&std::ops::Range<usize>) -> crate::blastinput::query_batch::QueryScope,
     ) -> Option<std::ops::Range<usize>> {
         if self.parsed.is_empty() {
             return None;
@@ -2339,12 +2340,17 @@ impl ListedTitles<'_> {
         batches
             .iter()
             .find(|span| {
-                !span.is_empty()
-                    && prefetch.prefetches(span.start)
-                    && ranks((*span).clone()).into_iter().any(|rank| {
-                        self.parsed_subject(rank)
-                            .is_some_and(|subject| subject.prefetch_stops().is_some())
+                if span.is_empty() || !prefetch.prefetches(span.start) {
+                    return false;
+                }
+                let mut scope: Option<crate::blastinput::query_batch::QueryScope> = None;
+                ranks((*span).clone()).into_iter().any(|rank| {
+                    self.parsed_subject(rank).is_some_and(|subject| {
+                        shared::prefetch_stops_in_scope(subject, &mut || {
+                            scope.get_or_insert_with(|| batch_scope(span)).clone()
+                        })
                     })
+                })
             })
             .cloned()
     }
@@ -2447,12 +2453,15 @@ impl ListedTitles<'_> {
                     ));
                 }
             }
+            let seen_by_scope =
+                subject.load_throws() && scope().has_key(&subject.query_scope_keys().own);
+            if seen_by_scope {
+                continue;
+            }
             if subject.prefetch_fails() || subject.prefetch_stops().is_some() {
                 kept.push(rank);
                 continue;
             }
-            let seen_by_scope =
-                subject.load_throws() && scope().has_key(&subject.query_scope_keys().own);
             // Another sequence's blob that NCBI's places give is refused where its taxonomy texts
             // can differ (`shared::check_prefetched_parsed`).
             if let Some(load @ crate::report::db_subject::HitLoad::Shown(_)) =

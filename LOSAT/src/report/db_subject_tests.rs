@@ -826,7 +826,13 @@ fn the_formats_say_what_loads_after_a_throw() {
             "{rows}"
         );
     }
-    assert_eq!(of("6 qseqid slen"), writes(AfterThrow::EndsRun));
+    assert_eq!(
+        of("6 qseqid slen"),
+        FormatThrow::Writes(RunThrow {
+            bioseq_rows: super::super::tabular::SubjectFetch::Never,
+            ..RunThrow::every_row(AfterThrow::EndsRun)
+        })
+    );
     assert_eq!(of("6 qseqid pident"), writes(AfterThrow::EndsRun));
     // `nident` alone reads the subject only at a row with identities.
     assert_eq!(
@@ -834,13 +840,28 @@ fn the_formats_say_what_loads_after_a_throw() {
         FormatThrow::Writes(RunThrow {
             after: AfterThrow::EndsRun,
             rows: super::super::tabular::SubjectFetch::WithIdentities,
+            bioseq_after: AfterThrow::EndsRun,
+            bioseq_rows: super::super::tabular::SubjectFetch::WithIdentities,
             first_row_ends: false,
             keeps_scope: false,
+            bioseq_mixed: false,
         })
     );
     assert_eq!(of("6 qseqid evalue bitscore"), FormatThrow::Unread);
-    assert_eq!(of("13"), writes(AfterThrow::EndsRun));
-    assert_eq!(of("15"), writes(AfterThrow::EndsReport));
+    assert_eq!(
+        of("13"),
+        FormatThrow::Writes(RunThrow {
+            bioseq_after: AfterThrow::WritesHit,
+            ..RunThrow::every_row(AfterThrow::EndsRun)
+        })
+    );
+    assert_eq!(
+        of("15"),
+        FormatThrow::Writes(RunThrow {
+            bioseq_after: AfterThrow::WritesHit,
+            ..RunThrow::every_row(AfterThrow::EndsReport)
+        })
+    );
     assert_eq!(of("5"), writes(AfterThrow::WritesHit));
     // Only outfmt 5's formatter keeps NCBI's scope for the run (review 2 of line DBID pfoff-4, M1).
     for (outfmt, keeps) in [("5", true), ("6", false), ("15", false), ("0", false)] {
@@ -905,6 +926,7 @@ fn the_formats_say_what_loads_after_a_throw() {
         after(&["5", "6"]),
         Some(RunThrow {
             keeps_scope: true,
+            bioseq_mixed: false,
             ..sacc_rows
         })
     );
@@ -982,27 +1004,37 @@ fn the_formats_say_what_loads_after_a_throw() {
     // Runs that stop at the same place: two that end at the same rows, two whose runs go on.
     assert_eq!(
         after(&["13", "6 qseqid slen"]),
-        Some(RunThrow::every_row(AfterThrow::EndsRun))
+        Some(RunThrow {
+            bioseq_after: AfterThrow::WritesHit,
+            ..RunThrow::every_row(AfterThrow::EndsRun)
+        })
     );
     assert_eq!(
         after(&["6 qseqid nident", "7 qseqid nident"]),
         Some(RunThrow {
             after: AfterThrow::EndsRun,
             rows: super::super::tabular::SubjectFetch::WithIdentities,
+            bioseq_after: AfterThrow::EndsRun,
+            bioseq_rows: super::super::tabular::SubjectFetch::WithIdentities,
             first_row_ends: false,
             keeps_scope: false,
+            bioseq_mixed: false,
         })
     );
     assert_eq!(
         after(&["18", "5", "8"]),
         Some(RunThrow {
             keeps_scope: true,
+            bioseq_mixed: false,
             ..RunThrow::every_row(AfterThrow::WritesRow)
         })
     );
     assert_eq!(
         after(&["15", "16"]),
-        Some(RunThrow::every_row(AfterThrow::EndsReport))
+        Some(RunThrow {
+            bioseq_after: AfterThrow::WritesHit,
+            ..RunThrow::every_row(AfterThrow::EndsReport)
+        })
     );
     assert_eq!(
         after(&["0", "0"]),
@@ -1100,8 +1132,11 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
     let nident = Some(RunThrow {
         after: AfterThrow::EndsRun,
         rows: super::super::tabular::SubjectFetch::WithIdentities,
+        bioseq_after: AfterThrow::EndsRun,
+        bioseq_rows: super::super::tabular::SubjectFetch::WithIdentities,
         first_row_ends: false,
         keeps_scope: false,
+        bioseq_mixed: false,
     });
     // The identities of each report's entries: 1's rows have none, 3's have some.
     let identities = |report: usize, entry: usize| [[5, 0, 7], [2, 4, 0]][report][entry];
@@ -1280,7 +1315,17 @@ fn the_call_refuses_a_throw_over_all_its_searches() {
     };
     let writes = |after| FormatThrow::Writes(RunThrow::every_row(after));
     // One search: its own answer.
-    assert_eq!(search(&["6 qseqid slen"], &[]), writes(AfterThrow::EndsRun));
+    assert_eq!(
+        search(&["6 qseqid slen"], &[]),
+        FormatThrow::Writes(RunThrow {
+            bioseq_rows: super::super::tabular::SubjectFetch::Never,
+            ..RunThrow::every_row(AfterThrow::EndsRun)
+        })
+    );
+    assert_eq!(
+        search(&["6 qseqid pident"], &[]),
+        writes(AfterThrow::EndsRun)
+    );
     assert_eq!(
         search(&["0", "6"], &[]),
         FormatThrow::Refused(ThrowRefusal::Mixed)
@@ -1321,10 +1366,21 @@ fn the_call_refuses_a_throw_over_all_its_searches() {
             ..RunThrow::every_row(AfterThrow::WritesRow)
         })
     );
-    assert_eq!(search(&["15"], &["16"]), writes(AfterThrow::EndsReport));
+    // After a throw of the Bioseq's build alone (line DBID pfoff-9), outfmt 13 to 16 write the
+    // `Hit` and go on (`bioseq_after`).
+    assert_eq!(
+        search(&["15"], &["16"]),
+        FormatThrow::Writes(RunThrow {
+            bioseq_after: AfterThrow::WritesHit,
+            ..RunThrow::every_row(AfterThrow::EndsReport)
+        })
+    );
     assert_eq!(
         search(&["13"], &["6 qseqid slen"]),
-        writes(AfterThrow::EndsRun)
+        FormatThrow::Writes(RunThrow {
+            bioseq_after: AfterThrow::WritesHit,
+            ..RunThrow::every_row(AfterThrow::EndsRun)
+        })
     );
     // Review 2 of line DBID pfoff-4, M3: across the call's searches as within one, a format that
     // reads nothing with outfmt 0, and outfmt 15 (which posts the error) with outfmt 5 (which
@@ -2992,8 +3048,10 @@ fn a_pdb_chain_that_the_handle_changes_finds_no_bioseq() {
     assert_eq!(other_line.fetched(true, HitLoad::Loaded), Ok(()));
     assert!(matches!(other_line.prefetched(), Prefetched::Itself));
     // One line that holds both chains: NCBI's Bioseq reads the line's first pdb id, which is not
-    // the handle's, so its load throws: refused where a format reads the Bioseq or the prefetch
-    // reads it; the Seq-annots and the archive read nothing of it (outfmt 8 is NCBI's bytes).
+    // the handle's, so `GetBioseqNoData` throws `Error: oid headers do not contain target
+    // gi/seq_id.` (line DBID pfoff-9): prefetch stops with exit 2, prefetch-off reports handle it
+    // through `HitLoads` (`HitLoad::Throws` / `HitLoad::Unread`), psiblast's PSSM catches it, and
+    // formats/calls that do not write it (outfmt 17, mixed formats) refuse it.
     let one_line = ParsedSubject::new(DeflineSet {
         deflines: vec![BlastDefline {
             title: Some(b"t".to_vec()),
@@ -3006,19 +3064,165 @@ fn a_pdb_chain_that_the_handle_changes_finds_no_bioseq() {
         utf8: false,
     })
     .unwrap();
+    assert!(one_line.bioseq_load_throws());
+    assert_eq!(
+        one_line.prefetch_stops(),
+        Some(ParsedSubject::OID_HEADERS_MISSING_TARGET)
+    );
+    assert_eq!(
+        one_line.lookup_throws().as_ref().map(|e| e.get_msg()),
+        Some(ParsedSubject::OID_HEADERS_MISSING_TARGET)
+    );
+    assert_eq!(one_line.fetched(false, HitLoad::Throws), Ok(()));
+    assert_eq!(one_line.fetched(false, HitLoad::Unread), Ok(()));
     assert!(one_line
         .fetched(false, HitLoad::Loaded)
         .unwrap_err()
-        .contains("its load throws"));
+        .contains("oid headers do not contain target gi/seq_id."));
+    assert!(one_line
+        .fetched(false, HitLoad::Refused(ThrowRefusal::Format))
+        .unwrap_err()
+        .contains(ThrowRefusal::Format.words()));
     assert!(matches!(
         one_line.prefetched(),
         Prefetched::Failed(reason) if reason.contains("oid headers do not contain target gi/seq_id")
     ));
-    assert!(one_line.pssm_read().is_err());
+    assert_eq!(one_line.pssm_read(), Ok(()));
     assert_eq!(
         description_line_refusal(&one_line, HitLoad::Loaded, true),
         None
     );
+
+    // Line DBID pfoff-9: `HitLoads` and `ScopeWalk` for `bioseq_load_throws`.
+    let normal = lines(vec![vec![pdb_id("1AB2", Some(65), Some("A"))]]);
+    let subjects = [one_line.clone(), normal];
+    let get = |k: usize| subjects.get(k);
+    // Outfmt 15 (XML2/JSON): `bioseq_load_throws` writes the caught `Hit` and goes on (does not
+    // stop the report, so the following subject is loaded).
+    let xml2_loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::none(),
+        FormatThrow::of_outfmt(
+            "15",
+            crate::blastinput::app::Program::Blastp,
+            RequestKind::Blastp,
+            false,
+        ),
+        [(true, vec![Some(0), Some(1)])],
+        get,
+        |_, _| 1,
+    );
+    assert_eq!(xml2_loads.load(0), HitLoad::Throws);
+    assert!(!xml2_loads.stops_report(0));
+    assert_eq!(xml2_loads.load(1), HitLoad::Loaded);
+    // Tabular `6 qseqid slen`: `sequence::GetLength` succeeds without loading the Bioseq.
+    let slen_loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::none(),
+        FormatThrow::of_outfmt(
+            "6 qseqid slen",
+            crate::blastinput::app::Program::Blastp,
+            RequestKind::Blastp,
+            false,
+        ),
+        [(true, vec![Some(0), Some(1)])],
+        get,
+        |_, _| 1,
+    );
+    assert_eq!(slen_loads.load(0), HitLoad::Unread);
+    assert!(slen_loads.thrown(0).is_none());
+    assert_eq!(slen_loads.load(1), HitLoad::Loaded);
+    // Tabular `6 qseqid sseq`: Bioseq load throws and ends the run.
+    let sseq_loads = HitLoads::of(
+        crate::report::db_subject::LoadsBefore::none(),
+        FormatThrow::of_outfmt(
+            "6 qseqid sseq",
+            crate::blastinput::app::Program::Blastp,
+            RequestKind::Blastp,
+            false,
+        ),
+        [(true, vec![Some(0), Some(1)])],
+        get,
+        |_, _| 1,
+    );
+    assert_eq!(sseq_loads.load(0), HitLoad::Throws);
+    assert!(sseq_loads.stops_report(0));
+    assert_eq!(sseq_loads.load(1), HitLoad::Unread);
+    // Precedence: `FoundInstead::Failed` (SeqidToOid failure) supersedes `load_throws`.
+    let both = one_line
+        .clone()
+        .found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
+            "DB contains no accession info.",
+        ))));
+    assert!(!both.bioseq_load_throws());
+    assert_eq!(
+        both.prefetch_stops(),
+        Some(&b"DB contains no accession info."[..])
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-424
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/cached_sequence.cpp:98-110
+// Line DBID pfoff-9 (probe `R/ad39/pf9/probe`): the loader's `m_Ids` after a load whose Bioseq's
+// build throws. The lookup added the handle with the record (`x_GetOid`) before the build, so the
+// next load by it finds the record and throws again, and the run's record holds the handle too
+// (`ScopeRecord::note`); a record whose line holds that id registers it over (`RegisterIds`), and
+// a load by the handle then gives that record. A call whose tables end the run at the same rows
+// after a lookup's throw, but apart after the build's (`slen` never loads the Bioseq), writes the
+// lookup's and refuses the build's (`RunThrow::bioseq_mixed`).
+#[test]
+fn a_load_whose_bioseq_build_throws_adds_its_handle() {
+    use crate::blastinput::app::Program;
+    let dual = sequence(
+        vec![
+            pdb_id("1AB1", Some(321), None),
+            pdb_id("1AB1", Some(65), None),
+        ],
+        1,
+    );
+    assert!(dual.bioseq_load_throws());
+    let handle = dual.id_handle().unwrap();
+    let registered = Held::Present(Registrant::of(DbSequence::of_unrestricted(1)));
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    assert_eq!(walk.load(&dual), HitLoad::Throws);
+    assert_eq!(walk.ids.held(handle), registered);
+    assert_eq!(walk.load(&dual), HitLoad::Throws);
+    let holder = sequence(vec![gb("AAA00010", 1), pdb_id("1AB1", Some(65), None)], 2);
+    assert_eq!(walk.load(&holder), HitLoad::Loaded);
+    assert_eq!(walk.load(&dual), shown(Some(2), ShownBy::Holder));
+    // The next batch's walk starts from the run's record of the throwing load.
+    let mut after = ScopeWalk::new(recorded(Some(0), &[&dual], Some(1), false), Some(false));
+    assert_eq!(after.ids.held(handle), registered);
+    assert_eq!(after.load(&dual), HitLoad::Throws);
+    // `slen` and `sseq`: one answer after a lookup's throw, apart after the build's.
+    let mixed = FormatThrow::of_outfmts(
+        ["6 qseqid slen", "6 qseqid sseq"],
+        Program::Blastp,
+        RequestKind::Blastp,
+        false,
+    );
+    assert_eq!(
+        mixed,
+        FormatThrow::Writes(RunThrow {
+            bioseq_mixed: true,
+            ..RunThrow::every_row(AfterThrow::EndsRun)
+        })
+    );
+    let failing = sequence(vec![gb("AAA00011", 1)], 3).found_instead(Some(FoundInstead::Failed(
+        LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO),
+    )));
+    let subjects = [dual, failing];
+    let loads = HitLoads::of(
+        LoadsBefore::none(),
+        mixed,
+        [(true, vec![Some(0), Some(1)])],
+        |key: usize| subjects.get(key),
+        |_, _| 1,
+    );
+    assert_eq!(loads.load(0), HitLoad::Refused(ThrowRefusal::Mixed));
+    assert!(subjects[0]
+        .fetched(false, loads.load(0))
+        .unwrap_err()
+        .contains(ThrowRefusal::Mixed.words()));
+    assert_eq!(loads.load(1), HitLoad::Throws);
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:886-892

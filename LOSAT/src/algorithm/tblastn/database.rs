@@ -362,7 +362,7 @@ impl TblastnDatabase {
                     continue;
                 }
                 let rank = list.oid as usize;
-                if ends_on_throw && reported.loads.thrown(rank).is_some() {
+                if ends_on_throw && reported.loads.stops_report(rank) {
                     break;
                 }
                 if reported.loads.loaded(rank) {
@@ -962,6 +962,7 @@ pub(super) fn prefetch_stop(
     hitlists: &[KappaResultHitList],
     batches: &[std::ops::Range<usize>],
     (format, gapped, has_pssm): (shared::PrefetchFormat, bool, bool),
+    batch_scope: &dyn Fn(&std::ops::Range<usize>) -> crate::blastinput::query_batch::QueryScope,
 ) -> Option<(
     std::ops::Range<usize>,
     Vec<(u32, Option<Arc<ParsedSubject>>)>,
@@ -1004,12 +1005,15 @@ pub(super) fn prefetch_stop(
                 (ordinal, parsed)
             })
             .collect();
+        let mut scope: Option<crate::blastinput::query_batch::QueryScope> = None;
         subjects
             .iter()
             .any(|(_, parsed)| {
-                parsed
-                    .as_ref()
-                    .is_some_and(|subject| subject.prefetch_stops().is_some())
+                parsed.as_ref().is_some_and(|subject| {
+                    shared::prefetch_stops_in_scope(subject, &mut || {
+                        scope.get_or_insert_with(|| batch_scope(span)).clone()
+                    })
+                })
             })
             .then(|| (span.clone(), subjects))
     })
@@ -1310,14 +1314,6 @@ pub(super) fn reported_subjects(
     );
     ordinals.sort_unstable();
     ordinals.dedup();
-    for hitlist in hitlists.iter_mut() {
-        for list in hitlist.lists_mut() {
-            let rank = ordinals
-                .binary_search(&(list.oid as u32))
-                .expect("every reported subject was listed");
-            list.oid = i32::try_from(rank).context("TBLASTN subject rank out of range")?;
-        }
-    }
     let seen_all: std::collections::HashSet<u32> = if seen.any() {
         ordinals
             .iter()
@@ -1341,6 +1337,14 @@ pub(super) fn reported_subjects(
     } else {
         std::collections::HashSet::new()
     };
+    for hitlist in hitlists.iter_mut() {
+        for list in hitlist.lists_mut() {
+            let rank = ordinals
+                .binary_search(&(list.oid as u32))
+                .expect("every reported subject was listed");
+            list.oid = i32::try_from(rank).context("TBLASTN subject rank out of range")?;
+        }
+    }
     let mut records = Vec::with_capacity(ordinals.len());
     let mut lengths = Vec::with_capacity(ordinals.len());
     let mut kept = Vec::new();

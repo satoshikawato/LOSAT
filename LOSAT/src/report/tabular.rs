@@ -810,10 +810,30 @@ impl TabularSpec {
         program: crate::blastinput::app::Program,
         num_ident: usize,
     ) -> Option<crate::report::db_subject::AfterThrow> {
+        self.row_throw_for(program, num_ident, false)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:833-898
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:312-319
+    /// [`TabularSpec::row_throw`] with `bioseq_only`: where only `GetBioseqNoData` throws while
+    /// `sequence::GetLength` succeeds (`ParsedSubject::bioseq_load_throws`, line DBID pfoff-9),
+    /// `slen` outside the subject block succeeds and only rows that load the Bioseq
+    /// (`subject_fetch`) end the run.
+    pub fn row_throw_for(
+        &self,
+        program: crate::blastinput::app::Program,
+        num_ident: usize,
+        bioseq_only: bool,
+    ) -> Option<crate::report::db_subject::AfterThrow> {
         use crate::report::db_subject::AfterThrow;
+        let rows = if bioseq_only {
+            self.subject_fetch(program)
+        } else {
+            self.throw_rows(program)
+        };
         if self.reads_subject_bioseq() {
             Some(AfterThrow::WritesRow)
-        } else if self.throw_rows(program).reads(num_ident) {
+        } else if rows.reads(num_ident) {
             Some(AfterThrow::EndsRun)
         } else {
             None
@@ -870,6 +890,7 @@ impl TabularSpec {
         } else if self.reads_subject(program) {
             FormatThrow::Writes(RunThrow {
                 rows: self.throw_rows(program),
+                bioseq_rows: self.subject_fetch(program),
                 ..RunThrow::every_row(AfterThrow::EndsRun)
             })
         } else {
@@ -1780,6 +1801,9 @@ pub struct ThrownLookup<'a> {
     pub gi: i64,
     pub accession: &'a [u8],
     pub exception: &'a crate::ncbi_exception::NcbiException,
+    /// Whether only `GetBioseqNoData` throws while `sequence::GetLength` succeeds
+    /// (`ParsedSubject::bioseq_load_throws`, line DBID pfoff-9).
+    pub bioseq_only: bool,
 }
 
 /// Which of NCBI's lookups of a subject throw (`FailedLookup` without its ids): `SetSubjectId`
@@ -2240,7 +2264,9 @@ impl<'a> TabularWriter<'a> {
         let SubjectLookup::Throws(thrown) = subject.lookup else {
             return None;
         };
-        (self.spec.row_throw(program, num_ident)
+        (self
+            .spec
+            .row_throw_for(program, num_ident, thrown.bioseq_only)
             == Some(crate::report::db_subject::AfterThrow::EndsRun))
         .then_some(thrown.exception)
     }

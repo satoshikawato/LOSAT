@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "pdbdual",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "pdbdual",
+  "number-of-letters": 880,
+  "number-of-sequences": 4,
+  "last-updated": "2026-11-27T14:01:00",
+  "number-of-volumes": 1,
+  "bytes-total": 1521,
+  "bytes-to-cache": 989,
+  "files": [
+    "pdbdual.phr",
+    "pdbdual.pin",
+    "pdbdual.pog",
+    "pdbdual.psd",
+    "pdbdual.psi",
+    "pdbdual.psq"
+  ]
+}

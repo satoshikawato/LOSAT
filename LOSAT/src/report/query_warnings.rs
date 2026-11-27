@@ -738,7 +738,7 @@ impl HitPosts {
         subject: u32,
         post: impl FnOnce(&mut Vec<u8>) -> io::Result<()>,
     ) -> io::Result<()> {
-        if hit.lookup_throws.is_some() {
+        if hit.lookup_throws.is_some() || hit.unloaded {
             return Ok(());
         }
         self.mark(at, subject, post)

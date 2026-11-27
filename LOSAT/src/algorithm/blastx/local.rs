@@ -792,8 +792,11 @@ fn write_run(
         database.is_none().then_some(subjects),
     );
     // NCBI's scope of the query records at each batch's prefetch (`native::BatchScopes`).
-    let batch_scopes =
-        super::native::BatchScopes::new(xml, database.as_ref().map(|run| run.database));
+    let batch_scopes = super::native::BatchScopes::new(
+        xml,
+        parse_deflines,
+        database.as_ref().map(|run| run.database),
+    );
     let mut render = |diagnostics: &mut dyn Write,
                       queries: &[FastaRecord],
                       results: &mut Vec<BatchResults>,

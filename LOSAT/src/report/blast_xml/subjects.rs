@@ -157,14 +157,27 @@ impl SubjectNames {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:376-407
-    /// The names of a database sequence whose lookup of its Seq-align id throws where its `Hit`
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:412-417
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:312-319
+    /// The names of a database sequence whose load by its Seq-align id throws where its `Hit`
     /// loads it (`exception`, `db_subject::HitLoad::Throws`): those of NCBI's `catch` of outfmt 5
-    /// (`of_unknown`'s, of the Seq-align id's FASTA form, `ParsedSubject::alignment_fasta`), with
-    /// the exception, which the XML2 and JSON documents raise instead (`lookup_throws`).
+    /// (`of_unknown`'s, of the Seq-align id's FASTA form, `ParsedSubject::alignment_fasta`). Where
+    /// only `GetBioseqNoData` throws while `GetSequenceLength` succeeds
+    /// (`ParsedSubject::bioseq_load_throws`, line DBID pfoff-9), XML2 and JSON catch the load
+    /// throw, succeed in `sequence::GetLength`, and write the `HitDescr` of the id alone with the
+    /// real length and caught HSPs (`unloaded: true`, `lookup_throws: None`), while outfmt 5
+    /// writes `Unknown`, `Hit_len` 0 and caught HSPs; otherwise XML2 and JSON raise `exception`
+    /// (`lookup_throws`).
     pub fn of_thrown(
         subject: &ParsedSubject,
         exception: crate::ncbi_exception::NcbiException,
     ) -> Self {
+        if subject.bioseq_load_throws() {
+            return SubjectNames {
+                unloaded: true,
+                ..Self::of_unknown(subject.alignment_fasta())
+            };
+        }
         SubjectNames {
             defline_thrown: false,
             lookup_throws: Some(exception),

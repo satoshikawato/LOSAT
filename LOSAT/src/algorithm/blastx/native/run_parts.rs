@@ -284,6 +284,7 @@ impl ArchiveBatch<'_> {
                             },
                             usize::MAX,
                             (crate::report::db_subject::FormatThrow::Unread, None),
+                            &crate::blastinput::query_batch::QueryScope::default,
                         )
                         .map_err(reported_error)?,
                     };

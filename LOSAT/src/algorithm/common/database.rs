@@ -7997,7 +7997,7 @@ where
             continue;
         }
         out.push(rank);
-        if ends_on_throw && loads.thrown(rank).is_some() {
+        if ends_on_throw && loads.stops_report(rank) {
             break;
         }
     }
@@ -8672,6 +8672,11 @@ impl<'a> PrefetchQueries<'a> {
     pub(crate) fn after_xml_reports(self, xml_before: Option<&'a XmlReportsBefore<'a>>) -> Self {
         Self { xml_before, ..self }
     }
+
+    /// Builds NCBI's query scope at this batch's prefetch.
+    pub(crate) fn query_scope(&self) -> crate::blastinput::query_batch::QueryScope {
+        (self.scope)()
+    }
 }
 
 /// One reported sequence of a query batch whose prefetch is on ([`batch_prefetch`]).
@@ -8843,7 +8848,15 @@ pub(crate) fn batch_prefetch<'s, 'b>(
     queries: &PrefetchQueries<'_>,
 ) -> Result<crate::report::diag_log::Posts> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
-    if stops(&subjects) {
+    let mut query_scope: Option<crate::blastinput::query_batch::QueryScope> = None;
+    let stops_batch = subjects.iter().any(|subject| {
+        subject.parsed.is_some_and(|parsed| {
+            prefetch_stops_in_scope(parsed, &mut || {
+                query_scope.get_or_insert_with(|| (queries.scope)()).clone()
+            })
+        })
+    });
+    if stops_batch {
         run.keep_loaded(None, before);
         return Err(prefetch_stop(db, run, &subjects, program, queries));
     }
@@ -8853,7 +8866,6 @@ pub(crate) fn batch_prefetch<'s, 'b>(
     let mut uncertain: Option<(u32, String)> = None;
     let mut asked: std::collections::HashSet<u32> = Default::default();
     let mut loaded = Vec::new();
-    let mut query_scope: Option<crate::blastinput::query_batch::QueryScope> = None;
     for prefetched @ PrefetchSubject {
         ordinal,
         parsed,
@@ -9271,14 +9283,20 @@ pub(crate) fn prefetch_warning(app: &str) -> Vec<u8> {
     )
 }
 
-/// Whether one of `subjects` has a lookup that fails on a file with NCBI's exception
-/// (`ParsedSubject::prefetch_stops`): the batch's prefetch stops ([`prefetch_stop`]).
-fn stops(subjects: &[PrefetchSubject<'_>]) -> bool {
-    subjects.iter().any(|subject| {
-        subject
-            .parsed
-            .is_some_and(|parsed| parsed.prefetch_stops().is_some())
-    })
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3288-3297
+/// Whether `subject`'s lookup or Bioseq load stops NCBI's prefetch in `scope`:
+/// `ParsedSubject::prefetch_stops`, except that a subject whose Bioseq load throws
+/// (`ParsedSubject::bioseq_load_throws`, line DBID pfoff-9) whose `own` key is held by a query
+/// in `scope` (`-parse_deflines`, line RG-KB item 12) is resolved to that query Bioseq before
+/// the BLAST database data loader is called and does not stop.
+pub(crate) fn prefetch_stops_in_scope(
+    subject: &crate::report::db_subject::ParsedSubject,
+    scope: &mut impl FnMut() -> crate::blastinput::query_batch::QueryScope,
+) -> bool {
+    if subject.prefetch_stops().is_none() {
+        return false;
+    }
+    !(subject.bioseq_load_throws() && scope().has_key(&subject.query_scope_keys().own))
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3346-3366
@@ -9725,6 +9743,31 @@ fn prefetch_stop(
     program: &str,
     queries: &PrefetchQueries<'_>,
 ) -> anyhow::Error {
+    // A `bioseq_load_throws` subject hidden by a query Bioseq in the batch's scope (`own` key,
+    // `-parse_deflines`, line RG-KB item 12) is resolved by NCBI's scope before the BLAST database
+    // data loader is called: it neither stops nor loads from the database.
+    let filtered: Vec<PrefetchSubject<'_>>;
+    let subjects = if subjects
+        .iter()
+        .any(|subject| subject.parsed.is_some_and(|p| p.bioseq_load_throws()))
+    {
+        let mut scope_cache: Option<crate::blastinput::query_batch::QueryScope> = None;
+        filtered = subjects
+            .iter()
+            .copied()
+            .filter(|subject| {
+                !subject.parsed.is_some_and(|parsed| {
+                    parsed.bioseq_load_throws()
+                        && scope_cache
+                            .get_or_insert_with(|| (queries.scope)())
+                            .has_key(&parsed.query_scope_keys().own)
+                })
+            })
+            .collect();
+        &filtered
+    } else {
+        subjects
+    };
     let stopping = |index: usize| {
         let subject = &subjects[index];
         let parsed = subject
@@ -10407,6 +10450,13 @@ pub(crate) fn scope_bioseq(
         // The loader does not keep the sequence that the lookup gives for the id's handle
         // (`ParsedSubject::scope_finds_none`): no blob is loaded.
         _ if subject.scope_finds_none() => Ok(none),
+        // `GetBioseqNoData` throws before `x_GetTaxonomy` (`ParsedSubject::bioseq_load_throws`,
+        // line DBID pfoff-9).
+        _ if subject.bioseq_load_throws() => Ok(ScopeBioseq {
+            blob: Some(ordinal),
+            bioseq: false,
+            throws: true,
+        }),
         None | Some(FoundInstead::OtherTaxids(_) | FoundInstead::CopyApart(..)) => {
             Ok(ScopeBioseq {
                 blob: Some(ordinal),

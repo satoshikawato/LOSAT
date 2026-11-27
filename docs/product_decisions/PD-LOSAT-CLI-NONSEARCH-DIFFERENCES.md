@@ -288,12 +288,14 @@ BLAST+.
    write its report, it stops with `rpsbproc failed to write output` (exit status 4), where
    NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.
 10. **Closed pipe in blastdbcmd's, dustmasker's, segmasker's, windowmasker's and convert2blastmask's output,
-   in makeblastdb's log, in makembindex's `-show_filters`, `-stat` and index outputs that are named pipes, and in every program's version and help**
+   in makeblastdb's log, in makembindex's `-show_filters`, `-stat` and index outputs that are named pipes, in makeprofiledb's log and
+   standard output, and in every program's version and help**
    (version 1.13, 2026-11-13, Owner-delegated; line RG, item K1, RG DECISIONS K1-8; version 1.14
    the same day, item K1b, K1b-3 and K1b-5; version 1.16 the same day, segmasker, item K2, K2-5;
    version 1.18 the same day, convert2blastmask, item K3; version 1.24, 2026-11-21, windowmasker,
    line NP item M5a; version 1.31, 2026-11-24, makeblastdb's log, the Owner's choice, line
-   RG item KD; version 1.32, 2026-11-25, makembindex, Owner-delegated, line RG item KD). A write of NCBI's blastdbcmd 2.17.0,
+   RG item KD; version 1.32, 2026-11-25, makembindex, Owner-delegated, line RG item KD; version 1.35, 2026-11-26,
+   makeprofiledb, Owner-delegated, line RG item KD). A write of NCBI's blastdbcmd 2.17.0,
    dustmasker 1.0.0, segmasker 1.0.0, windowmasker 1.0.0 or convert2blastmask 2.17.0 to a pipe whose
    reader has closed ends the program by SIGPIPE outside Windows (exit status 141 from the
    shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT

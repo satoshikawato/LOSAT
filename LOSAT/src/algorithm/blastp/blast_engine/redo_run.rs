@@ -1094,8 +1094,13 @@ impl SwErrorText {
         }
     }
 
-    /// BLASTP's without sum statistics (the tests' searches).
-    #[cfg(test)]
+    /// BLASTP's without sum statistics (the parallel redo's tests: `x_redo_par_tests.rs`,
+    /// `FetchNotes::none`).
+    #[cfg(all(
+        test,
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     pub(in crate::algorithm::blastp) const BLASTP: Self = Self {
         program: "blastp",
         do_link_hsps: false,

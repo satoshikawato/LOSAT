@@ -1074,15 +1074,8 @@ impl ReportedSubjects {
         // NCBI's posts of each read of a reported sequence's definition line by a table's rows,
         // by rank (`shared::title_decodes`, `report::query_warnings::ReadCursor::title_read`).
         if reports && tabular_reads {
-            reported.title_decodes = shared::title_decodes(
-                &database.db,
-                reported
-                    .ordinals
-                    .iter()
-                    .enumerate()
-                    .map(|(rank, &ordinal)| (rank as u32, ordinal)),
-                database.program,
-            );
+            reported.title_decodes =
+                shared::title_decodes(&database.db, &reported.ordinals, database.program);
         }
         Ok(reported)
     }

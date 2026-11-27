@@ -1628,22 +1628,14 @@ pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::
 
 impl BlastnDatabase {
     /// NCBI's posts of each read of a reported subject's definition line by a formatter
-    /// (`shared::title_decodes`), by ordinal id (the key of BLASTN's report writers), of the
-    /// subjects of the final `hit_lists`.
+    /// (`shared::title_decodes`), by rank (the key of BLASTN's report writers, which
+    /// `reported_subjects` gives the hit lists), of the reported subjects, whose ordinal ids
+    /// `ordinals` lists by rank (`ReportedSubjects::ordinals`).
     pub(super) fn title_decodes(
         &self,
-        hit_lists: &[Option<BlastnHitList>],
+        ordinals: &[u32],
     ) -> crate::report::query_warnings::TitleDecodes {
-        shared::title_decodes(
-            &self.db,
-            hit_lists.iter().flatten().flat_map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                hit_list.hsplist_array[..count]
-                    .iter()
-                    .map(|hsp_list| (hsp_list.oid, hsp_list.oid))
-            }),
-            PROGRAM,
-        )
+        shared::title_decodes(&self.db, ordinals, PROGRAM)
     }
 
     /// Whether a load of a sequence with a positive taxid can write a text or throw in this run

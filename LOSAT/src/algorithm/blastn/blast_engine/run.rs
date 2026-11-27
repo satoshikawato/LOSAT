@@ -5711,9 +5711,12 @@ fn post_process_hits_and_write(
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         // NCBI's posts of each read of a subject's definition line by a table's rows
         // (`BlastnDatabase::title_decodes`).
-        let title_decodes = match (report.database_reader, output_format.tabular_spec()) {
-            (Some(database), Some(spec)) if spec.reads_defline() => {
-                database.title_decodes(&hit_lists)
+        let title_decodes = match (
+            report.database_reader.zip(report.database_ordinals),
+            output_format.tabular_spec(),
+        ) {
+            (Some((database, ordinals)), Some(spec)) if spec.reads_defline() => {
+                database.title_decodes(ordinals)
             }
             _ => Default::default(),
         };

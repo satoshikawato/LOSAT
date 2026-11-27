@@ -324,25 +324,13 @@ impl TblastnDatabase {
     }
 
     /// NCBI's posts of each read of a reported subject's definition line by a formatter
-    /// (`shared::title_decodes`), by rank (the key of TBLASTN's report writers), of the subjects of
-    /// the final `hitlists`.
+    /// (`shared::title_decodes`), by rank (the key of TBLASTN's report writers), of the subjects
+    /// of `reported`.
     pub(super) fn title_decodes(
         &self,
         reported: &ReportedSubjects,
-        hitlists: &[KappaResultHitList],
     ) -> crate::report::query_warnings::TitleDecodes {
-        shared::title_decodes(
-            &self.db,
-            hitlists
-                .iter()
-                .flat_map(KappaResultHitList::lists)
-                .filter(|list| !list.hsps.hsps.is_empty())
-                .filter_map(|list| {
-                    let rank = u32::try_from(list.oid).ok()?;
-                    Some((rank, *reported.ordinals.get(rank as usize)?))
-                }),
-            PROGRAM,
-        )
+        shared::title_decodes(&self.db, &reported.ordinals, PROGRAM)
     }
 
     /// Whether `taxdb.bti` is on the search path, asked once for the run

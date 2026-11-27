@@ -5165,20 +5165,21 @@ fn prefetch_title_posts(
 }
 
 /// NCBI's posts of each read of the definition lines of the reported database subjects that a
-/// formatter makes ([`FormatterTitleReads`]): `subjects`, each `(key, ordinal)` (the key that the
-/// report's writer gives it, its ordinal id in `db`), as [`crate::report::query_warnings::TitleDecodes`].
-/// Only those whose read posts (a title with a byte outside ' ' ..= '~', in a Bioseq that holds the
-/// stored header: `SeqDb::rewrites_header_at`); none where no reader met such a title
+/// formatter makes ([`FormatterTitleReads`]), as [`crate::report::query_warnings::TitleDecodes`]
+/// by rank, the key of every program's report writers: `ordinals` are the ordinal ids in `db` of
+/// the reported subjects, by rank (the ranks that the final hit lists name them by). Only those
+/// whose read posts (a title with a byte outside ' ' ..= '~', in a Bioseq that holds the stored
+/// header: `SeqDb::rewrites_header_at`); none where no reader met such a title
 /// (`SeqDb::replaced_titles`).
 pub(crate) fn title_decodes(
     db: &SeqDb,
-    subjects: impl IntoIterator<Item = (u32, u32)>,
+    ordinals: &[u32],
     program: &str,
 ) -> crate::report::query_warnings::TitleDecodes {
     if !db.replaced_titles() {
         return Default::default();
     }
-    title_decode_reads(db, &mut subjects.into_iter(), program)
+    title_decode_reads(db, ordinals, program)
 }
 
 /// [`title_decodes`] of a run whose reader met such a title.
@@ -5186,12 +5187,12 @@ pub(crate) fn title_decodes(
 #[inline(never)]
 fn title_decode_reads(
     db: &SeqDb,
-    subjects: &mut dyn Iterator<Item = (u32, u32)>,
+    ordinals: &[u32],
     program: &str,
 ) -> crate::report::query_warnings::TitleDecodes {
     let prefix = program.to_ascii_lowercase();
     let mut decodes = crate::report::query_warnings::TitleDecodes::default();
-    for (key, ordinal) in subjects {
+    for (key, &ordinal) in (0u32..).zip(ordinals) {
         let Some(at) = db.location_of(ordinal) else {
             continue;
         };

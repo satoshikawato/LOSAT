@@ -2831,7 +2831,7 @@ fn search(
                         .iter()
                         .any(crate::report::tabular::TabularSpec::reads_defline) =>
                 {
-                    database.title_decodes(reported, &results)
+                    database.title_decodes(reported)
                 }
                 _ => Default::default(),
             },

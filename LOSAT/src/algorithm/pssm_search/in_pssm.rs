@@ -517,6 +517,7 @@ fn stopped_as_query_joins_scope(
         setup_messages: Vec::new(),
         warning_title: Some(Vec::new()),
         request: None,
+        request_refusal: None,
         archive_pssm: None,
         archive_matrix_name_unwritable: false,
         annot,
@@ -1050,7 +1051,7 @@ pub(crate) fn psi_search_and_object_of(
     // for a request that NCBI writes (a PSSM that NCBI's check refuses writes none; one whose
     // scores the engine cannot compute is written first), with every member it read (the PSSM
     // writer writes them all, `report::serial::pssm`).
-    let request = (super::pssm_request_written(reader.strategy, reader.database)
+    let mut request = (super::pssm_request_written(reader.strategy, reader.database)
         && validation_error.is_none())
     .then(|| PssmQueryRequest {
         pssm: std::sync::Arc::new(pssm.clone()),
@@ -1058,20 +1059,25 @@ pub(crate) fn psi_search_and_object_of(
     // NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
     // That ASN.1 text write reads each delay buffer of another format (`CDelayBuffer::Update`):
     // one whose read fails stops NCBI with its exception after part of the strategy file (rc
-    // 255; line RG-F3, PR 2: probe AR5 SO), refused before any output as `-out_pssm` refuses it
-    // (`algorithm::psiblast::in_pssm_files`).
-    if let Some(request) = &request {
-        let text = crate::report::archive::ArchiveEncoding::Text;
-        // (A list element stated as NULL is written: the strategy's writer throws where NCBI's
-        // stream does, `report::serial::encoder::NullElement`.)
-        if crate::report::archive::pssm_unwritten(text, &request.pssm)
-            == Some(crate::report::archive::PssmGap::ReadAgain)
-        {
-            return Err(reader.refuse(
+    // 255; line RG-F3, PR 2: probe AR5 SO). NCBI starts that write after the outfmt 0 prolog
+    // (NCBI BLAST+ 2.17.0: psiblast's 1,021 bytes and tblastn's 379 of rows
+    // `db.xml.ps.dl_ovf.strat` and `db.xml.tbn.dl_ovf.strat`), where LOSAT refuses the request
+    // (`PssmQueryStop::RequestRefused`) and writes none. (A list element stated as NULL is
+    // written: the strategy's writer throws where NCBI's stream does,
+    // `report::serial::encoder::NullElement`.)
+    let request_refusal = request
+        .take_if(|request| {
+            crate::report::archive::pssm_unwritten(
+                crate::report::archive::ArchiveEncoding::Text,
+                &request.pssm,
+            ) == Some(crate::report::archive::PssmGap::ReadAgain)
+        })
+        .map(|_| {
+            reader.refuse(
                 "-export_search_strategy with a PSSM whose author names (a member read into a delay buffer of another format) NCBI reads again with an error (NCBI BLAST+ writes part of the file and stops with a C++ exception)",
-            ));
-        }
-    }
+            )
+            .to_string()
+        });
     let search = PsiSearch {
         pssm: QueryPssm { rows },
         freq_ratios,
@@ -1085,6 +1091,7 @@ pub(crate) fn psi_search_and_object_of(
         setup_messages: Vec::new(),
         warning_title: Some(warning_title),
         request,
+        request_refusal,
         archive_pssm: None,
         archive_matrix_name_unwritable: false,
         annot,

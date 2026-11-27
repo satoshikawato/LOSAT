@@ -49,7 +49,8 @@ pub(crate) struct AlnScores {
     pub(crate) bit_score: f64,
     pub(crate) evalue: f64,
     pub(crate) num_ident: i64,
-    /// The "sum_n" score: the size of the HSP's linked set (outfmt 0's `Expect(N)`).
+    /// The "sum_n" score: the size of the HSP's linked set (the number in parentheses after
+    /// "Expect" in outfmt 0).
     pub(crate) sum_n: i64,
     /// The "comp_adjustment_method" score (outfmt 0's `Method:`).
     pub(crate) comp_adjustment_method: i64,

@@ -670,8 +670,9 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
             &stop_queries(0),
         );
         assert_eq!(text(alone.unwrap()), warning);
-        // With the other subject, whose load writes the offset error before the failed
-        // lookup or not at all: refused where the taxonomy database writes it.
+        // With the other subject, whose Seq-id handle (packed 92) NCBI's map puts before the
+        // failed lookup's (a text tag, not packed): its load writes the offset error before the
+        // warning (line NP item O4b2-10; LOSAT's refusal before it).
         let both = batch_prefetch(
             &db,
             &run,
@@ -695,13 +696,7 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
         );
         match taxdb {
             None => assert_eq!(text(both.unwrap()), warning),
-            Some(_) => {
-                let refused = both.unwrap_err().to_string();
-                assert!(
-                    refused.contains("in an order that LOSAT does not reproduce"),
-                    "{refused}"
-                );
-            }
+            Some(_) => assert_eq!(text(both.unwrap()), format!("{offset}{warning}")),
         }
         // A later batch of the run, whose lookup of the other subject wrote its text before:
         // nothing to place.
@@ -3496,6 +3491,150 @@ fn a_prefetch_with_a_failed_lookup_refuses_its_loads_of_the_cache_slot() {
         refused.contains("whose lookup in the database fails")
             && refused.contains("may load before or not at all"),
         "{refused}"
+    );
+    std::fs::remove_dir_all(&cwd).unwrap();
+}
+
+/// Line NP item O4b2-10 (`tests/db_search/ids/make_ids.py --pfworder-only`, probe `O4b2/p10` of
+/// NCBI 2.17.0): a lookup that throws on its id ends the prefetch's loads in NCBI's order of the
+/// batch's Seq-id handles. Every sequence has taxid 99990 (the offset error of
+/// `offset_last_past_end`) but the last of `ntagc_t5` and `ptagc_t5` (150, the same slot of a
+/// volume's taxonomy cache: a colliding volume). `ntag_t5`: `gb|FFF00092.1|` (packed 92) loads
+/// before `gnl|BL_ORD_ID|0` (a text tag, not packed); `ntagx_t5`: `gb|FFF00094.1|` (94) after
+/// `gnl|BL_ORD_ID|x002` (packed 2); `ntagc_t5`: `gb|FFF00010.1|` (10) before `gnl|BL_ORD_ID|x050`
+/// (50), `gb|FFF00090.1|` (90, taxid 150) after it; `ptagx_t5` and `ptagc_t5` the same with
+/// x002 and x051. `pshare_t5`: `lcl|555` and the text tag are both unpacked (one key, ordered by
+/// address), `gb|FFF00032.1|` (32) before.
+#[test]
+fn a_failed_lookup_ends_the_prefetchs_loads_in_ncbis_order_of_seq_id_handles() {
+    use LoadBeforeStop::{No, Unknown, Yes};
+    let cwd = empty_cwd("pfworder");
+    let taxdb = variant("offset_last_past_end");
+    let open = |name: &str, kind: SeqType| {
+        let search = SearchPath::new(&cwd, Some(taxdb.as_os_str()), None);
+        let path = root().join("db_search/ids").join(name);
+        SeqDb::open_in(path.to_str().unwrap().as_bytes(), kind, &search).unwrap()
+    };
+    let parsed = |db: &SeqDb| -> Vec<std::sync::Arc<crate::report::db_subject::ParsedSubject>> {
+        let headers = HeaderReader::new(db, false);
+        (0..db.num_seqs())
+            .map(
+                |ordinal| match read_header(&headers, ordinal, 0, "BLASTN").unwrap() {
+                    ReportedHeader::Parsed(subject) => subject,
+                    _ => panic!("{ordinal}: a sequence with parsed Seq-ids"),
+                },
+            )
+            .collect()
+    };
+    let offset =
+        |program: &str| format!("Error: [{program}] Error: Offset error at end of taxdb file.\n");
+    let warning =
+        |program: &str| format!("Warning: [{program}] Error pre-fetching sequence data\n");
+    for (name, kind, program, failed, want, text) in [
+        ("ntag_t5", SeqType::Nucleotide, "blastn", 0, vec![Yes], true),
+        (
+            "ntagx_t5",
+            SeqType::Nucleotide,
+            "blastn",
+            0,
+            vec![No],
+            false,
+        ),
+        (
+            "ntagc_t5",
+            SeqType::Nucleotide,
+            "blastn",
+            1,
+            vec![Yes, No],
+            true,
+        ),
+        ("ptagx_t5", SeqType::Protein, "blastp", 0, vec![No], false),
+        (
+            "ptagc_t5",
+            SeqType::Protein,
+            "blastp",
+            1,
+            vec![Yes, No],
+            true,
+        ),
+    ] {
+        let db = open(name, kind);
+        let parsed = parsed(&db);
+        assert!(parsed[failed as usize].prefetch_fails(), "{name}");
+        let loaded: Vec<(u32, Option<&crate::report::db_subject::ParsedSubject>)> = (0..db
+            .num_seqs())
+            .filter(|&ordinal| ordinal != failed)
+            .map(|ordinal| (ordinal, Some(&*parsed[ordinal as usize])))
+            .collect();
+        let failing = [PrefetchSubject::unflipped(
+            failed,
+            Some(&*parsed[failed as usize]),
+        )];
+        assert_eq!(loads_before_failure(&db, &loaded, &failing), want, "{name}");
+        // The batch in any order: the loads before the failure write the offset error, then the
+        // warning; those after it write nothing (on `*tagc_t5` also no step through the slot).
+        let subjects = failing.iter().copied().chain(
+            loaded
+                .iter()
+                .rev()
+                .map(|&(ordinal, parsed)| PrefetchSubject::unflipped(ordinal, parsed)),
+        );
+        let posts = batch_prefetch(
+            &db,
+            &TaxdbRun::default(),
+            std::iter::empty(),
+            subjects,
+            &program.to_ascii_uppercase(),
+            &stop_queries(0),
+        )
+        .unwrap();
+        let expected = if text {
+            offset(program) + &warning(program)
+        } else {
+            warning(program)
+        };
+        assert_eq!(String::from_utf8(posts.text()).unwrap(), expected, "{name}");
+    }
+    // `pshare_t5`: the load of `lcl|555` may come before the failed lookup or not at all: refused
+    // where it writes the offset error, not where a load before it (`gb|FFF00032.1|`) wrote it.
+    let db = open("pshare_t5", SeqType::Protein);
+    let parsed = parsed(&db);
+    let (local, failed, control) = (0, 2, 3);
+    assert!(parsed[failed].prefetch_fails());
+    let subject =
+        |ordinal: usize| PrefetchSubject::unflipped(ordinal as u32, Some(&*parsed[ordinal]));
+    let pair = [
+        (local as u32, Some(&*parsed[local])),
+        (control as u32, Some(&*parsed[control])),
+    ];
+    assert!(matches!(
+        loads_before_failure(&db, &pair, &[subject(failed)])[..],
+        [Unknown(why), Yes] if why == ADDRESS_ORDER
+    ));
+    let batch = |run: &TaxdbRun, subjects: &[usize]| {
+        batch_prefetch(
+            &db,
+            run,
+            std::iter::empty(),
+            subjects.iter().map(|&ordinal| subject(ordinal)),
+            "BLASTP",
+            &stop_queries(0),
+        )
+        .map(|posts| String::from_utf8(posts.text()).unwrap())
+    };
+    let refused = batch(&TaxdbRun::default(), &[failed, local])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        refused.contains("in an order that LOSAT does not reproduce")
+            && refused
+                .contains("database sequence 0, which the prefetch may load before or not at all")
+            && refused.contains("makes the taxonomy database write a text"),
+        "{refused}"
+    );
+    assert_eq!(
+        batch(&TaxdbRun::default(), &[failed, local, control]).unwrap(),
+        offset("blastp") + &warning("blastp")
     );
     std::fs::remove_dir_all(&cwd).unwrap();
 }

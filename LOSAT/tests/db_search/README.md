@@ -945,14 +945,37 @@ the subjects it loads, then `Warning: [<program>] Error pre-fetching sequence da
 batch's query warnings. A minus-strand Seq-align of `bbs|123` (no ISAM key in version 4, so no Bioseq) fails after every
 load (`ids/pfw_look_fw_rc.fna`, `ids/pfw_look_rc_fw.fna`: `fw70` on the plus strand of `gb|AF000070.1|`, `rc123` on the
 minus strand of `bbs|123`); the lookup of `gnl|BL_ORD_ID|0` with a text tag fails where the loads reach it, in the
-order of NCBI's Seq-id handles (the ids its mapper packs first), which LOSAT does not model, so a batch with it whose
-other subjects' loads write a text is LOSAT's refusal. In psiblast, where the report reads the sequences it shows
+order of NCBI's Seq-id handles (the ids its mapper packs first), which LOSAT follows since line NP item O4b2-10
+(below): a batch with it whose other subjects' loads write a text is LOSAT's refusal only where LOSAT does not know
+whether such a load comes before it (a handle of its key, both unpacked). In psiblast, where the report reads the sequences it shows
 (`pfw_weak_v5` with `pfw_q6.faa`, `-max_target_seqs 3`: the text tag ranks last, beyond the cut), the failed prefetch
 leaves `sp||NAMEY` unloaded and NCBI's formatter reads it one by one, matching `sp|P00042.1|NAMEY` weakly: LOSAT refuses
 there, and where the PSSM (`-out_ascii_pssm`) holds such a sequence (NCBI drops its letters). `pfw_bad/ntag_t5` fails the
 lookup of an accession on its file, which NCBI's prefetch rethrows (exit 2): LOSAT's refusal. With `-ungapped` BLASTN makes one Seq-align of a subject's HSPs, whose strand is its first
 HSP's: `ids/pfw_fwL_rcS.fna` aligns with `bbs|123` on the plus strand first (240 letters) and on the minus strand (60),
 `ids/pfw_fwS_rcL.fna` the other way round. `ids/pfw_ps_q21.faa` holds `pshare_q2.faa` and `pshare_q1.faa`.
+
+The order of a failed prefetch's loads (line NP item O4b2-10; rows `db.o4b2_10.*`, `db.id.pfw.bn.tag.off.6` and `db.id.pfw.bp.tag.bad.6`):
+`make_ids.py --pfworder-only` writes `ids/ntagx_t5` from `ids/nordtagx.fna` (`gnl|BL_ORD_ID|x002`, a text tag that
+NCBI's mapper packs as 2 and whose lookup throws, with `gb|FFF00093.1|`; then `gb|FFF00094.1|`, packed 94),
+`ids/ntagc_t5` from `ids/nordtagc.fna` with `ids/nordtagc.taxid_map` (`gb|FFF00010.1|`, `gnl|BL_ORD_ID|x050`, then
+`gb|FFF00090.1|` with taxid 150, which shares the slot of 99990 in a volume's 256-slot taxonomy cache) and the protein
+copies `ids/ptagx_t5` (`pordtagx.faa`) and `ids/ptagc_t5` (`pordtagc.faa`, `pordtagc.taxid_map`; `x051`), every other
+sequence with taxid 99990 (version 5, official makeblastdb 2.17.0). With `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`
+and the queries `ids/nordtag_q.fna` and `ids/nordtag_q.faa` (qa hits the sequence with the text tag, qb the other ones),
+NCBI's prefetch loads the Seq-id handles below the failing one in its map and ends there: `ntag_t5` writes the offset
+error of `gb|FFF00092.1|` (92, before the unpacked text tag), then the warning; `ntagx_t5` the warning alone (a report
+that reads `gb|FFF00094.1|` loads it then and writes the offset error after the warning); `ntagc_t5` one offset error
+(`gb|FFF00010.1|`), then the warning, and `gb|FFF00090.1|` takes no step through the slot there. NCBI wrote the same
+bytes of every `ncbi` row in four heap layouts. Its default `-outfmt 6` of these databases stops with a null pointer
+exception whose report carries a stack trace with the run's addresses: LOSAT refuses there after NCBI's texts before
+the exception (the `.6.reject` rows, `ncbi-stderr`). `pshare_t5`'s `lcl|555` and the text tag are both unpacked, so
+NCBI's map orders them by address: LOSAT refuses where that load writes the offset error (`ids/pshare_q2.faa`,
+`-max_target_seqs 2`, one query per batch: NCBI wrote 0, 1, 1 and 0 offset errors in four heap layouts) and writes
+NCBI's bytes where the load of a packed id before the failure wrote it first (`ids/pfw_ps_q21.faa`, and
+`db.id.pfw.bp.tag.bad.6` with `bad_magic`). PSIBLAST's `-outfmt 16` and the reports of `pshare_t5` that read its
+subjects are refused for other reasons (LOSAT's PSIBLAST has no outfmt 16; `lcl|555` is held by two sequences) and have
+no row here.
 
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and

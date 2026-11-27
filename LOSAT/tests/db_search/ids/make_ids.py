@@ -115,7 +115,14 @@ sequence data` where it fails): `ntag_t5.*` from `nordtag.fna`, `nlook_t4.*` (ve
 tests/seqdb/taxdb/offset_last_past_end; `pfw_weak_v5.*` from `pfw_weak.faa` (`sp||NAMEY`, `sp|P00042.1|NAMEY`, which
 the query `pfw_q6.faa` matches exactly, `gb|FFF00099.1|` and `gnl|BL_ORD_ID|0` with a text tag, whose hit psiblast ranks
 last); and `pfw_bad/ntag_t5.*`, a copy of `ntag_t5` whose accession table's leaf page (page 6 of the `.ndb`) has its
-flags zeroed, so that the lookup of an accession fails on the file. `--pfwarn-only` builds only these. Line DBID
+flags zeroed, so that the lookup of an accession fails on the file. `--pfwarn-only` builds only these. Line NP
+item O4b2-10 (a lookup that throws on its id ends NCBI's prefetch loads in the order of the batch's Seq-id handles):
+`ntagx_t5.*` from `nordtagx.fna` (`gnl|BL_ORD_ID|x002`, a packed text tag whose lookup fails, with `gb|FFF00093.1|`,
+and `gb|FFF00094.1|`, whose handle comes after it), `ntagc_t5.*` from `nordtagc.fna` (`gb|FFF00010.1|` before
+`gnl|BL_ORD_ID|x050`, `gb|FFF00090.1|` after it) with the taxids of `nordtagc.taxid_map` (99990, and 150 for
+`gb|FFF00090.1|`: the slot of 99990 in a volume's taxonomy cache), and their protein copies `ptagx_t5.*` from
+`pordtagx.faa` and `ptagc_t5.*` from `pordtagc.faa` (`pordtagc.taxid_map`); every other sequence with taxid 99990.
+`--pfworder-only` builds only these. Line DBID
 weakbatch (psiblast's rounds read the sequences before the cut for the next PSSM): `wkb_e3_v5.*` from `wkb_e3.faa`
 (`gb|FFF00043.1|`, `gb|ZZZ00001.1|`, then `gb|FFF00043|`, which the lookup finds as the first) and `wkb_p1_v5.*` from
 `wkb_p1.faa` (the same with `gb|FFF00043|` a weak hit above -inclusion_ethresh and `gb|WWW00001.1|` before it), for the
@@ -306,6 +313,22 @@ def build_pfwarn(args: argparse.Namespace) -> None:
         (bad / path.name).write_bytes(bytes(data))
 
 
+def build_pfworder(args: argparse.Namespace) -> None:
+    for name, fasta, dbtype, taxids in (("ntagx_t5", "nordtagx.fna", "nucl", None),
+                                        ("ntagc_t5", "nordtagc.fna", "nucl", "nordtagc.taxid_map"),
+                                        ("ptagx_t5", "pordtagx.faa", "prot", None),
+                                        ("ptagc_t5", "pordtagc.faa", "prot", "pordtagc.taxid_map")):
+        if taxids is None:
+            taxid_args, title = ["-taxid", "99990"], "taxid 99990"
+        else:
+            taxid_args, title = ["-taxid_map", str(HERE / taxids)], "taxids 99990 and 150"
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-parse_seqids",
+             "-blastdb_version", "5", *taxid_args, "-title", f"{name} (parsed Seq-ids, {title})",
+             "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+
+
 def build_weakbatch(args: argparse.Namespace) -> None:
     for name, fasta in (("wkb_e3_v5", "wkb_e3.faa"), ("wkb_p1_v5", "wkb_p1.faa")):
         subprocess.run(
@@ -443,6 +466,7 @@ def main() -> int:
     ap.add_argument("--tabfields-only", action="store_true", help="build only the database of line DBID tabfields")
     ap.add_argument("--pfbatch-only", action="store_true", help="build only the database of line DBID pfbatch")
     ap.add_argument("--pfwarn-only", action="store_true", help="build only the databases of line DBID pfwarn")
+    ap.add_argument("--pfworder-only", action="store_true", help="build only the databases of line NP item O4b2-10")
     ap.add_argument("--weakbatch-only", action="store_true", help="build only the databases of line DBID weakbatch")
     ap.add_argument("--pssmrows-only", action="store_true", help="build only the databases of line DBID pssmrows")
     ap.add_argument("--pssmread-only", action="store_true", help="build only the databases of line DBID pssmread")
@@ -473,6 +497,9 @@ def main() -> int:
         return 0
     if args.pfwarn_only:
         build_pfwarn(args)
+        return 0
+    if args.pfworder_only:
+        build_pfworder(args)
         return 0
     if args.weakbatch_only:
         build_weakbatch(args)
@@ -620,6 +647,7 @@ def main() -> int:
     build_tabfields(args)
     build_pfbatch(args)
     build_pfwarn(args)
+    build_pfworder(args)
     build_weakbatch(args)
     build_pssmrows(args)
     build_pssmread(args)

@@ -51,6 +51,9 @@ pub struct PsiblastPssmOptions {
     /// Where the run writes its PSSM output files (`RunFiles::Disk` on CLI/library,
     /// `RunFiles::Receiver` in LOSAT Web). No NCBI counterpart: NCBI writes files.
     pub run_files: crate::report::run_files::RunFiles,
+    /// `-phi_pattern`: the pattern file of a PHI-BLAST round 1 (`algorithm::phi_search`), read
+    /// with the options (`BlastpArgs::check_options`).
+    pub phi_pattern: Option<std::path::PathBuf>,
 }
 
 impl PartialEq for PsiblastPssmOptions {
@@ -65,6 +68,7 @@ impl PartialEq for PsiblastPssmOptions {
             && self.versions == other.versions
             && self.check_scope == other.check_scope
             && self.rounds == other.rounds
+            && self.phi_pattern == other.phi_pattern
     }
 }
 
@@ -210,7 +214,11 @@ impl PsiblastPssmOptions {
     // `-out_ascii_pssm` (`SaveCheckpoint`, `SaveAsciiPssm`).
     // With more rounds the driver writes the files (`rounds::RoundFiles`), not the search.
     pub(crate) fn request(&self) -> Option<PssmRequest> {
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:270-310
+        // A PHI-BLAST round makes no PSSM (only a PSI round computes the next one), so one round
+        // saves none.
         if self.rounds.is_some()
+            || self.phi_pattern.is_some()
             || !self.save_pssm_after_last_round
             || (self.out_pssm.is_none() && self.out_ascii_pssm.is_none())
         {

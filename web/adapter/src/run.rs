@@ -1048,6 +1048,7 @@ pub fn validate_with(
             .and_then(|()| {
                 with_own(&mut args.outfmt);
                 let blastp = args.into_blastp_args()?;
+                losat::web_adapter::refuse_psiblast_phi_pattern(&blastp)?;
                 losat::web_adapter::check_blastp_options(&blastp)
             })
             .map_err(|error| format!("{error:#}"))
@@ -2379,6 +2380,8 @@ fn search_all(
             if let Commands::Psiblast(psi) = command {
                 let mut blastp = psi
                     .into_blastp_args()
+                    .map_err(|error| format!("{error:#}"))?;
+                losat::web_adapter::refuse_psiblast_phi_pattern(&blastp)
                     .map_err(|error| format!("{error:#}"))?;
                 let pssm_files = if position == own {
                     run_files.clone()

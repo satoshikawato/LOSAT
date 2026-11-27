@@ -34,6 +34,7 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         check_scope: Default::default(),
         rounds: None,
         run_files: Default::default(),
+        phi_pattern: None,
     }
 }
 

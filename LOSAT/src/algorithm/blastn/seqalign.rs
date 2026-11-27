@@ -109,6 +109,7 @@ pub(crate) fn query_records<'a>(
                 num_positives: 0,
                 comp_adjust: 0,
                 ops: hsp.gap_info.as_deref().unwrap_or(&[]),
+                std_seg_nullb: None,
             });
         }
     }

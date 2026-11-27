@@ -39,6 +39,63 @@ pub(crate) struct XPrelimHsp {
     pub e_value: f64,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:780-794
+/// 0-based position of a preliminary PHI-BLAST HSP in its subject's `PhiSearch::prelim` list.
+///
+/// Carried on `XPrelimHsp` without growing `XPrelimHsp` (64 B) by storing `index + 1` as a
+/// positive `i32` in `BlastpPreliminaryHsp::query_frame` (`0` remains the unset sentinel used by
+/// non-PHI protein HSPs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PhiPrelimOrdinal(usize);
+
+impl PhiPrelimOrdinal {
+    /// Wraps a 0-based index into a subject's preliminary PHI-BLAST HSP list (`Int4` range).
+    #[inline]
+    pub(crate) fn new(index: usize) -> Self {
+        assert!(
+            index < i32::MAX as usize,
+            "PHI preliminary HSP index {index} exceeds Int4 range"
+        );
+        Self(index)
+    }
+
+    /// Returns the 0-based index into the subject's preliminary PHI-BLAST HSP list.
+    #[inline]
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
+
+impl XPrelimHsp {
+    /// Attaches the HSP's position in its subject's `PhiSearch::prelim` list.
+    ///
+    /// Stored in `self.hsp.query_frame` as `ordinal.index() + 1` (positive `i32`) so
+    /// `XPrelimHsp` stays 64 bytes. Safe for PHI-BLAST because:
+    /// - `HitListHsp`, `BlastpHitList`, `PrelimCulling`, `PrelimBestHit`, `exclude_fetched`,
+    ///   `listed_ordinals`, `rename_to_ranks`, and `x_db_keep` never read `query_frame`.
+    /// - Preliminary endpoint purges (`preliminary_hits_share_*_endpoint`) and
+    ///   `query_split::merge_two_hsps` do not read `query_frame` (and never run for PHI-BLAST).
+    /// - `ResolvedBlastpArgs::phi` forces `NoCompositionBasedStats` and disables query splitting,
+    ///   so PHI-BLAST lists never pass through `x_expand_hit_list`, `x_finish_compact_lists`,
+    ///   `kappa`, `x_redo_par`, or ordinary `traceback`; `phi_traceback` consumes
+    ///   `compact_hit_lists` directly and builds final `BlastpHsp`s with `query_frame = 0`.
+    #[inline]
+    pub(crate) fn with_phi_ordinal(mut self, ordinal: PhiPrelimOrdinal) -> Self {
+        self.hsp.query_frame = (ordinal.0 + 1) as i32;
+        self
+    }
+
+    /// Returns the PHI preliminary ordinal previously attached by [`Self::with_phi_ordinal`],
+    /// or `None` when unset (`query_frame <= 0`).
+    #[inline]
+    pub(crate) fn phi_ordinal(&self) -> Option<PhiPrelimOrdinal> {
+        usize::try_from(self.hsp.query_frame)
+            .ok()
+            .and_then(|value| value.checked_sub(1))
+            .map(PhiPrelimOrdinal)
+    }
+}
+
 // No NCBI counterpart: the values `BlastpHsp` holds for the same HSP
 // (`blastp_hsp_from_preliminary`: starts + 1).
 impl HitListHsp for XPrelimHsp {

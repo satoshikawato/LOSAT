@@ -64,6 +64,9 @@ mod x_oid_flow;
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1458:
 // PrintOneResultSet dispatches the retained search result to its output format.
 mod stage_e_report;
+// Reporting of `-in_pssm -window_size 0` alignments whose traceback started on their frame's
+// trailing NULLB sentinel (`search_gapped::x_traceback_start_in_frame`).
+mod nullb_report;
 // The sequences of the query-anchored reports (outfmt 1 to 4).
 mod anchored;
 // TBLASTN's BLAST XML (outfmt 5), once per run, from the final hit lists.

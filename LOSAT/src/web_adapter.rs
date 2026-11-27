@@ -532,7 +532,22 @@ pub fn give_pssm_run_files(args: &mut crate::algorithm::blastp::BlastpArgs, run_
 /// Checks `outfmt` against the output formats that LOSAT's `psiblast` supports
 /// (`PsiblastArgs::check_outfmt`).
 pub fn check_psiblast_outfmt(outfmt: &str, strategy: bool) -> anyhow::Result<()> {
-    crate::algorithm::psiblast::PsiblastArgs::check_outfmt(outfmt, None, strategy)
+    crate::algorithm::psiblast::PsiblastArgs::check_outfmt(outfmt, None, strategy, false)
+}
+
+/// Refuses `-phi_pattern` in LOSAT Web's `psiblast` (PHI-BLAST pattern files are not supported in
+/// the browser host yet; `records_refused_options`).
+pub fn refuse_psiblast_phi_pattern(
+    args: &crate::algorithm::blastp::BlastpArgs,
+) -> anyhow::Result<()> {
+    if args
+        .psiblast_pssm
+        .as_ref()
+        .is_some_and(|pssm| pssm.phi_pattern.is_some())
+    {
+        anyhow::bail!("option -phi_pattern is not supported by LOSAT Web's PSIBLAST yet");
+    }
+    Ok(())
 }
 
 /// How `psiblast`'s formatter of `outfmt` cuts hit lists (`BlastpApp::Psiblast.list_cut`), used
@@ -609,9 +624,13 @@ pub fn described_parameters(program: crate::api::Program) -> Vec<crate::api::Par
 
 /// The options of `program`'s command line that the browser's searches of records do not take.
 /// Since line PS's PSW1, tblastn's `-in_pssm` and psiblast's `-in_pssm`/`-in_msa`/`-out_pssm`/
-/// `-out_ascii_pssm` are supported in the browser; no described option is refused here.
-pub fn records_refused_options(_program: crate::api::Program) -> &'static [&'static str] {
-    &[]
+/// `-out_ascii_pssm` are supported in the browser; psiblast's `-phi_pattern` (item PS8a) is
+/// refused in LOSAT Web until pattern files are wired.
+pub fn records_refused_options(program: crate::api::Program) -> &'static [&'static str] {
+    match program {
+        crate::api::Program::Psiblast => &["phi_pattern"],
+        _ => &[],
+    }
 }
 
 // A search strategy file given as bytes (`-import_search_strategy`, `file_begin` kind 3): the

@@ -1,0 +1,108 @@
+PHIBLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set.
+           1 sequences; 104 total letters
+
+Results from round 1
+
+
+Query= Q
+
+Length=84
+2 occurrence(s) of pattern: 
+C-X(1,2)-C at position(s) 41, 41 of query sequence
+pattern probability=0.000370563
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+S                                                                     172     2e-52
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+S                                                                     168     3e-51
+
+
+
+Significant alignments for pattern occurrence 1 at position 41
+
+> S
+Length=104
+
+ Score = 172 bits (458),  Expect = 2e-52
+ Identities = 84/84 (100%), Positives = 84/84 (100%), Gaps = 0/84 (0%)
+
+pattern                                              ***                 
+Query    1   NGQDEYFPDVIDERREKEYRDFKDQDKDYGMRGYFMYHFICACCPFYEDITYRNSSPMKH  60
+             NGQDEYFPDVIDERREKEYRDFKDQDKDYGMRGYFMYHFICACCPFYEDITYRNSSPMKH
+Sbjct    11  NGQDEYFPDVIDERREKEYRDFKDQDKDYGMRGYFMYHFICACCPFYEDITYRNSSPMKH  70
+
+Query    61  KEMVTNSMEFVRHNGTRDEYNNPT  84
+             KEMVTNSMEFVRHNGTRDEYNNPT
+Sbjct    71  KEMVTNSMEFVRHNGTRDEYNNPT  94
+
+
+
+
+Significant alignments for pattern occurrence 2 at position 41
+
+> S
+Length=104
+
+ Score = 168 bits (449),  Expect = 3e-51
+ Identities = 84/84 (100%), Positives = 84/84 (100%), Gaps = 0/84 (0%)
+
+pattern                                              ****                
+Query    1   NGQDEYFPDVIDERREKEYRDFKDQDKDYGMRGYFMYHFICACCPFYEDITYRNSSPMKH  60
+             NGQDEYFPDVIDERREKEYRDFKDQDKDYGMRGYFMYHFICACCPFYEDITYRNSSPMKH
+Sbjct    11  NGQDEYFPDVIDERREKEYRDFKDQDKDYGMRGYFMYHFICACCPFYEDITYRNSSPMKH  70
+
+Query    61  KEMVTNSMEFVRHNGTRDEYNNPT  84
+             KEMVTNSMEFVRHNGTRDEYNNPT
+Sbjct    71  KEMVTNSMEFVRHNGTRDEYNNPT  94
+
+
+ Score = 164 bits (437),  Expect = 7e-50
+ Identities = 83/85 (98%), Positives = 83/85 (98%), Gaps = 2/85 (2%)
+
+pattern                                              ****                
+Query    1   NGQDEYFPDVIDERREKEYRDFKDQDKDYGMRGYFMYHFICACC-PFYEDITYRNSSPMK  59
+             NGQDEYFPDVIDERREKEYRDFKDQDKDYGMRGYFMYHFICA C PFYEDITYRNSSPMK
+Sbjct    11  NGQDEYFPDVIDERREKEYRDFKDQDKDYGMRGYFMYHFICA-CCPFYEDITYRNSSPMK  69
+
+Query    60  HKEMVTNSMEFVRHNGTRDEYNNPT  84
+             HKEMVTNSMEFVRHNGTRDEYNNPT
+Sbjct    70  HKEMVTNSMEFVRHNGTRDEYNNPT  94
+
+
+
+
+Lambda      K        H        a         alpha
+   0.270   0.0470     1.00     0.00     0.00 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.270   0.0470     1.00     0.00     0.00     0.00 
+
+Effective search space used: 101
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 104
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

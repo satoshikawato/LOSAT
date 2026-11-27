@@ -991,6 +991,8 @@ impl<L: HitListEntry> HitList<L> {
 /// Write BLASTN hit lists to an existing writer. `epilog` is `Some(n)` when NCBI's epilog
 /// (`PrintEpilog`) follows these reports, `n` being the number of queries that the search's
 /// reports formatted (outfmt 7's last line); `None` without it (an error in a later query batch).
+/// `Some` where a row stops where NCBI has no result (`write_query_rows`): the bytes before the
+/// stop are written, and the caller ends the run (`report::tabular::row_stop_end`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 #[allow(clippy::too_many_arguments)]
@@ -1008,7 +1010,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: crate::report::ostream::ReportW
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
-) -> io::Result<()> {
+) -> io::Result<Option<crate::report::tabular::RowStop>> {
     let config = OutputConfig::ncbi_compat();
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
     // The rows are printed in the order of the final HSP list, so a running count is
@@ -1043,29 +1045,39 @@ pub fn write_output_blastn_hitlists_to_writer<W: crate::report::ostream::ReportW
             &mut read,
             left_of_record,
         );
-        if let Err(error) = written {
-            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:124-127
-            // `~CBlastTabularInfo()` flushes the stream as the exception unwinds out of
-            // `CBlastFormat::PrintOneResultSet`, and no later subject is read.
-            if crate::ncbi_exception::NcbiException::of_io_error(&error).is_some() {
-                writer.ncbi_flush()?;
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    warnings.end_run();
+        let stop = match written {
+            Ok(stop) => stop,
+            Err(error) => {
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:124-127
+                // `~CBlastTabularInfo()` flushes the stream as the exception unwinds out of
+                // `CBlastFormat::PrintOneResultSet`, and no later subject is read.
+                if crate::ncbi_exception::NcbiException::of_io_error(&error).is_some() {
+                    writer.ncbi_flush()?;
+                    if let Some(warnings) = warnings.as_deref_mut() {
+                        warnings.end_run();
+                    }
                 }
+                return Err(error);
             }
-            return Err(error);
+        };
+        if let Some(stop) = stop {
+            return Ok(Some(stop));
         }
         // `~CBlastTabularInfo` of the query's report flushes the stream.
         writer.ncbi_flush()?;
     }
-    write_tabular_epilog(writer, output_format, epilog)
+    write_tabular_epilog(writer, output_format, epilog)?;
+    Ok(None)
 }
 
 /// One query's lines of `write_output_blastn_hitlists_to_writer` (outfmt 7's header, then one row
 /// per HSP of its final hit list), without the warnings that come before them. `hsp_index` counts
 /// the rows written so far (the format observer's HSP index). The EXPERIMENT LOSAT_X_BNTABPAR
 /// (`x_tab_par.rs`) formats pieces of queries into buffers with `write_query_header` and
-/// `write_hsp_rows`, the two parts of this function, on the search's pool.
+/// `write_hsp_rows`, the two parts of this function, on the search's pool, where no row can stop.
+/// A row where NCBI has no result (`report::tabular::TabularRows::default_stop`: a subject whose
+/// id fails, or whose load throws at the query's first row) is written up to its stop, and its
+/// `RowStop` returned.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-832
 #[allow(clippy::too_many_arguments)]
@@ -1085,7 +1097,7 @@ pub(crate) fn write_query_rows<W: Write>(
     mut probe: Option<&mut FormatProbe<'_>>,
     read: crate::report::query_warnings::SubjectReadHook<'_, W>,
     left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
-) -> io::Result<()> {
+) -> io::Result<Option<crate::report::tabular::RowStop>> {
     write_query_header(
         writer,
         q_idx,
@@ -1097,7 +1109,7 @@ pub(crate) fn write_query_rows<W: Write>(
     )?;
     let hit_list = match hit_list_opt {
         Some(value) => value,
-        None => return Ok(()),
+        None => return Ok(None),
     };
     // The query's formatter is new: its rows keep no subject before the first one that loads
     // it (`TabularRows`).
@@ -1109,15 +1121,28 @@ pub(crate) fn write_query_rows<W: Write>(
         // The subject's load throws where the query's batch has its prefetch off
         // (`report::db_subject::HitLoads`): each row is written as the catch leaves it
         // (`TabularRows::write_thrown_default`).
-        if loads.thrown(first.s_idx as usize).is_some() {
+        let thrown = loads.thrown(first.s_idx as usize).is_some();
+        // The subject's lookups that fail at its rows' `saccver` (`TabularRows::default_stop`).
+        let failure = crate::algorithm::common::tabular::default_failure(
+            subject_ids,
+            thrown,
+            first.s_idx as usize,
+        );
+        if thrown {
             for hsp in &hsp_list.hsps {
+                let query_id = query_ids
+                    .get(hsp.q_idx as usize)
+                    .map_or(&b"unknown"[..], |id| id.as_ref());
+                if let Some((written, stop)) =
+                    rows.default_stop(query_id, failure, hsp.s_idx as usize)
+                {
+                    writer.write_all(&written)?;
+                    return Ok(Some(stop));
+                }
                 if let Some(probe) = probe.as_mut() {
                     writer.flush()?;
                     probe.begin(*hsp_index);
                 }
-                let query_id = query_ids
-                    .get(hsp.q_idx as usize)
-                    .map_or(&b"unknown"[..], |id| id.as_ref());
                 rows.write_thrown_default(
                     writer,
                     query_id,
@@ -1137,6 +1162,14 @@ pub(crate) fn write_query_rows<W: Write>(
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
         // Every row of BLASTN's tables reads its subject: the first loads it.
         read(hsp_list.oid, writer)?;
+        // A subject whose id fails stops at its first row.
+        let query_id = query_ids
+            .get(first.q_idx as usize)
+            .map_or(&b"unknown"[..], |id| id.as_ref());
+        if let Some((written, stop)) = rows.default_stop(query_id, failure, first.s_idx as usize) {
+            writer.write_all(&written)?;
+            return Ok(Some(stop));
+        }
         rows.found(first.s_idx as usize);
         write_hsp_rows(
             writer,
@@ -1149,7 +1182,7 @@ pub(crate) fn write_query_rows<W: Write>(
             left_of_record,
         )?;
     }
-    Ok(())
+    Ok(None)
 }
 
 /// outfmt 7's header lines of query `q_idx` (nothing for outfmt 6), the first lines of
@@ -1210,7 +1243,7 @@ pub(crate) fn write_hsp_rows<W: Write>(
             .get(hsp.q_idx as usize)
             .map(|id| id.as_ref())
             .unwrap_or(b"unknown");
-        // A failed lookup's rows are refused before (`check_failed_lookups`).
+        // A subject whose lookup fails stops at its first row (`write_query_rows`).
         let subject_id = subject_ids
             .get(hsp.s_idx as usize)
             .map(|id| id.as_deref().unwrap_or_default())

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.123
+- Version: 1.124
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -987,12 +987,34 @@
   2026-09-29, restated 2026-10-07; numbered after 1.121 at the merge of dev cb7044346 that brought
   line RG-KB item 12's 1.121; first 1.113, then 1.114, then 1.115, then 1.116, then 1.117,
   then 1.118, then 1.120, then 1.121);
-  1.123 2026-11-27 (rule 2's explicit rejection of a reported database sequence whose Seq-align
-  id NCBI's scope finds as the generated id `lcl|Query_N` of a query of its batch, or the id of a
-  PSSM query, widened from outfmt 1 to 4 of five programs to every format that shows that query
-  in its place in all eight search programs, and its display id to outfmt 0: 153 outputs that
-  differed from NCBI's without a refusal and 12 where NCBI throws, line RG item X7-1, decisions
-  XT-X7-1a to XT-X7-1f, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  1.123 2026-11-24 (the tabular rows of 1.37, 1.50, 1.114 and 1.121, and `sallacc` of a database
+  sequence with a definition line without a Seq-id, at which NCBI stops with its null pointer or
+  alignment exception or prints an uninitialised taxid: NCBI's bytes before the stop are written,
+  then the refusal of rule 3, in every program, through one owner of the rows' stops; line RG-KB
+  item 18b, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after
+  1.122; first 1.100, then 1.101 at the merge of dev that brought line RG item X-short-tbx-link's
+  1.99 and line RG item KC-11d's 1.100, then 1.104 at the merge of dev of 2026-11-25 that brought
+  line RG item D5c's 1.101, psiblast line item PS10e's 1.102 and line RG item K10a's 1.103, then
+  1.108 at the merge of dev of 2026-11-26 that brought line NP item M4b-T3's 1.104, psiblast line
+  item PS10b's 1.105, line NP item M4b-3c part 2's 1.106 and line NP item M (b)'s 1.107, then
+  1.109 at the merge of dev of 2026-11-26 that brought line RG item X-short-bat-2's 1.108, then
+  1.113 at the merge of dev of 2026-11-26 that brought line RG item D1c-2's 1.109, line RG item
+  X-short-bat-2's 1.110, psiblast line item PS7c's 1.111 and line RG item D3c-4's 1.112, then
+  1.114 at the merge of dev of 2026-11-26 that brought psiblast line item PS14's 1.113, then 1.115
+  at the merge of dev of 2026-11-26 that brought line DBID item pfoff-7's 1.114, then 1.116 at the
+  merge of dev of 2026-11-26 that brought line RG item G1's 1.115, then 1.117 at the merge of dev
+  of 2026-11-26 that brought line RG item X-chunk's 1.116, then 1.118 at the merge of dev of
+  2026-11-26 that brought line WQA item D23's 1.117, then 1.121 at the merge of dev of 2026-11-27
+  that brought line RG item F2's 1.118 and 1.119 and line RG-KB item 9(b)'s 1.120, then 1.122 at
+  the merge of dev of 2026-11-27 that brought line RG-KB item 12's 1.121, then 1.123 at the merge
+  of dev of 2026-11-27 that brought line NP item M4b-3d's 1.122);
+  1.124 2026-11-27 (rule 2's explicit rejection of a reported database sequence whose Seq-align id
+  NCBI's scope finds as the generated id `lcl|Query_N` of a query of its batch, or the id of a PSSM
+  query, widened from outfmt 1 to 4 of five programs to every format that shows that query in its
+  place in all eight search programs, and its display id to outfmt 0: 153 outputs that differed from
+  NCBI's without a refusal and 12 where NCBI throws, line RG item X7-1, decisions XT-X7-1a to
+  XT-X7-1f, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after
+  1.123 at the merge of dev of 2026-11-27 that brought line RG-KB item 18b's 1.123; first 1.123)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3524,9 +3546,19 @@ file would differ, and NCBI's programs still could not open the database).
   `CCoreException::eNullPtr`, `ncbiobj.cpp:1010`), and stops with exit status 255 and a stack trace
   of its build after the row's earlier fields. Also `staxid` of such a row when it is the first row
   of its query's (or round's) report: `m_SubjectTaxId` is printed before any row set it
-  (`tabular.cpp:262-268`; the member is not initialised, a different number in each run). LOSAT
-  refuses (exit 1) before the query batch's report, where it refused every such subject before
-  1.37, so its output is a prefix of NCBI's. A failed lookup does not depend on the other
+  (`tabular.cpp:262-268`; the member is not initialised, a different number in each run), and
+  `sallacc` of a database sequence with a definition line without a Seq-id (`tabular.cpp:257-264`,
+  same null pointer after earlier lines' accessions and `;`). Since
+  version 1.123 (line RG-KB item 18b) LOSAT writes NCBI's bytes up to the stop, in every program:
+  the rows before it and the row's fields before that field, each after its delimiter (`Print`
+  writes the delimiter before each field, `tabular.cpp:1100-1108`; NCBI's stream is flushed as
+  the formatter is destroyed), and then refuses (exit 1): NCBI's stack trace names the paths of
+  its build and install and the addresses of its run, and the uninitialised number differs from
+  run to run, so no program can write either. NCBI's run ends at the null pointer, so no later
+  row, query or batch is written; after the uninitialised number NCBI goes on (exit 0). Before
+  1.123 LOSAT refused before the query batch's report, and before 1.37 every such subject; its
+  output was a prefix of NCBI's then too (probe of line RG-KB item 18b: blastp, psiblast, blastx,
+  tblastn, tblastx and blastn). A failed lookup does not depend on the other
   subjects: one alone, the first, the last or two give the same rows. Since version 1.50 (line
   DBID item pfoff-2) also the first row of a query's report whose subject's load throws where the
   batch's prefetch is off (`DB contains no accession info.`, a version 5 list of databases with
@@ -3541,7 +3573,8 @@ file would differ, and NCBI's programs still could not open the database).
   `CAlignFormatUtil::GetFrame` (`CCoreException::eNullPtr`, `ncbiobj.cpp:1010`) in TBLASTN and
   TBLASTX when a minus-strand subject alignment is reported with `sframe`/`frames`, an
   alignment-block field, and no subject-block field (plus-strand rows compute `(start % 3) + 1`
-  without touching the handle); LOSAT's refusal before the batch's report.
+  without touching the handle); since version 1.123 through the same row-stop path (earlier rows
+  and the stopped row's fields before the stop are emitted before LOSAT's refusal).
 - `-show_gis` with outfmt 0 to 4 over a database sequence whose pdb Seq-align id NCBI's data loader
   serves no sequence for (version 1.121, 2026-11-24, line RG-KB item 12, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07): the description info of the empty Bioseq handle
@@ -5239,7 +5272,7 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   TBLASTX since version 1.39), of a query read with `-parse_deflines` in the query batch that
   reports it (with outfmt 5, in any batch), and with the id `lcl|Query_N` of a query read without
   it (any letter case) or the id of a PSSM query (`-in_pssm`) in the formats that show that query
-  in its place (version 1.123, line RG item X7-1, which widened outfmt 1 to 4 of BLASTP, BLASTN,
+  in its place (version 1.124, line RG item X7-1, which widened outfmt 1 to 4 of BLASTP, BLASTN,
   BLASTX, TBLASTN and TBLASTX to every program with `-db`, `rpsblast` and `rpstblastn` included):
   as the Seq-align id in outfmt 0 to 5 and 13 to 16 (with outfmt 5, whose scope NCBI keeps for
   the run, also the id of a later batch's query, which NCBI then searches as the database

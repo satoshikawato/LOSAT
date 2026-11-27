@@ -341,11 +341,13 @@ pub(crate) fn members(ty: u16) -> &'static [Member] {
     }
 }
 
-/// The position of the member or variant `name` of `ty` (a name the table must hold).
+/// The position of the member or variant `name` of `ty` (a name the table must hold), each
+/// candidate compared in place (`Name::is`: no slice of the names, no call of the C library's
+/// compare per candidate of the same length).
 pub(crate) fn member_index(ty: u16, name: &str) -> usize {
     members(ty)
         .iter()
-        .position(|member| member.name() == name)
+        .position(|member| member.name.is(name.as_bytes()))
         .unwrap_or_else(|| panic!("{} has no member {name}", type_info(ty).name()))
 }
 

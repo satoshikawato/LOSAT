@@ -127,4 +127,7 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   (`tk.faa` with its first 9 letters in lower case: with `-lcase_masking` PHI-BLAST's results carry that mask) and
   `ps15b4_nzp_self.faa`
   (`sM_nz_p` of `tests/db_search/nz_p.faa`: with `-parse_deflines` the database holds the query's Seq-id, which
-  LOSAT refuses in psiblast's outfmt 13 to 16).
+  LOSAT refuses in psiblast's outfmt 13 to 16), `ps15b4_nohit.faa` (a query without hits in the databases of
+  `tests/db_search/multidb`) and `ps15b4_mix_held.faa` (`multidb/pq_1.faa`'s letters under
+  `ref|NP_100001.1|`, which `multidb/hpP` and `pP` hold: with `-parse_deflines` LOSAT refuses it in psiblast's
+  outfmt 13 to 16 against a list with `multidb/pU`, a database without the accession table).

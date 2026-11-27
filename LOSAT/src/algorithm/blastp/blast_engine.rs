@@ -6313,6 +6313,11 @@ fn refuse_found_dropped_queries(
     }
     let program = args.app.name();
     let lookup = database.seqdb().seqid_lookup().ok();
+    let indexed = database
+        .seqdb()
+        .seqid_lookup()
+        .ok()
+        .map(crate::seqdb::lookup::SeqidLookup::in_indexed_files);
     for record in queries {
         let id = match record.believed() {
             Some(ids) => ids.best.clone(),
@@ -6320,7 +6325,12 @@ fn refuse_found_dropped_queries(
                 record.local_id.as_bytes().to_vec(),
             )),
         };
-        crate::report::query_bioseq::refuse_found_dropped_query(&id, lookup.as_ref(), program)?;
+        crate::report::query_bioseq::refuse_found_dropped_query(
+            &id,
+            lookup.as_ref(),
+            indexed.as_ref(),
+            program,
+        )?;
     }
     Ok(())
 }

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>psiblast</program>
+      <version>PSIBLAST 2.17.0+</version>
+      <reference>Alejandro A. Sch&amp;auml;ffer, L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001), &quot;Improving the accuracy of PSI-BLAST protein database searches with composition-based statistics and other refinements&quot;, Nucleic Acids Res. 29:2994-3005.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/multidb/hpP tests/db_search/multidb/pP tests/db_search/multidb/pU</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <iterations>
+            <Iteration>
+              <iter-num>1</iter-num>
+              <search>
+                <Search>
+                  <query-id>lcl|Query_1</query-id>
+                  <query-len>57</query-len>
+                  <hits></hits>
+                  <stat>
+                    <Statistics>
+                      <db-num>6</db-num>
+                      <db-len>840</db-len>
+                      <hsp-len>19</hsp-len>
+                      <eff-space>27588</eff-space>
+                      <kappa>0.041</kappa>
+                      <lambda>0.267</lambda>
+                      <entropy>0.14</entropy>
+                    </Statistics>
+                  </stat>
+                  <message>No hits found</message>
+                </Search>
+              </search>
+            </Iteration>
+          </iterations>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

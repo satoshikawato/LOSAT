@@ -1110,6 +1110,7 @@ fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
                     query_left_out: 0,
+                    nullb: None,
                 }
             })
             .collect();

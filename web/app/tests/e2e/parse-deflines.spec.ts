@@ -13,7 +13,7 @@ import { expect } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { chooseRun, inputNames, openParameters, openSearch, paste, pickRun, program, showOutput, storedOutputs, submit, waitStatus } from './support/search';
+import { chooseRun, inputNames, openFiles, openParameters, openSearch, paste, pickRun, program, showOutput, storedOutputs, submit, waitStatus } from './support/search';
 
 test.setTimeout(180_000);
 test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine reads no ids of the deflines: the engine build runs these tests');
@@ -98,10 +98,15 @@ test('-parse_deflines runs: the outputs are the CLI\'s and the results name the 
 });
 
 // The CLI reads the subjects first, and two subject records of one id stop it under -parse_deflines
-// (LOSAT's refusal: NCBI BLAST+ shows the first for both); the run fails with that message.
-test('an input that the CLI refuses under -parse_deflines fails the run with the CLI\'s message', async ({ page }, testInfo) => {
+// (LOSAT's refusal: NCBI BLAST+ shows the first for both). When both records are in one subject
+// source, the form's input check (losat_web2_register with -parse_deflines) refuses that source with
+// the CLI's message; when they come from two combined sources (each accepted on its own), the run
+// fails with that message.
+test('an input that the CLI refuses under -parse_deflines is refused in the form or fails the run with the CLI\'s message', async ({ page }, testInfo) => {
   const query = `>q1 query\n${DNA}\n`;
-  const subject = `>a one\n${DNA.slice(0, 150)}\n>a two\n${DNA.slice(150)}\n`;
+  const first = `>a one\n${DNA.slice(0, 150)}\n`;
+  const second = `>a two\n${DNA.slice(150)}\n`;
+  const subject = `${first}${second}`;
   const message = "two subject records have the Seq-id lcl|a under -parse_deflines (NCBI BLAST+ shows the first for both); this is not supported by LOSAT's BLASTN";
   await program(page, 'blastn');
   await paste(page, 'query', query);
@@ -109,6 +114,16 @@ test('an input that the CLI refuses under -parse_deflines fails the run with the
   await openParameters(page);
   await page.getByTestId('param-extra').fill('-parse_deflines');
   await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  const singleCheck = page.getByTestId('subject-source-0-check');
+  await expect(singleCheck).toHaveAttribute('data-check', 'refused', { timeout: 30_000 });
+  await expect(singleCheck).toContainText(message);
+  await page.getByTestId('subject-source-0').getByRole('button', { name: 'Remove' }).click();
+  await openFiles(page, 'subject', [
+    { name: 's1.fa', text: first },
+    { name: 's2.fa', text: second },
+  ]);
+  await expect(page.getByTestId('subject-source-0-check')).toHaveAttribute('data-check', 'ok');
+  await expect(page.getByTestId('subject-source-1-check')).toHaveAttribute('data-check', 'ok');
   await submit(page);
   await waitStatus(page, 1, 'failed');
   await pickRun(page, 1);

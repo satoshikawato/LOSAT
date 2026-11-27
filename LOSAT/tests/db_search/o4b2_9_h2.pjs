@@ -1,0 +1,27 @@
+{
+  "version": "1.2",
+  "dbname": "o4b2_9_h2",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "o4b2_9_h2",
+  "number-of-letters": 235,
+  "number-of-sequences": 4,
+  "last-updated": "2026-11-26T20:06:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 3,
+  "bytes-total": 49948,
+  "bytes-to-cache": 368,
+  "files": [
+    "o4b2_9_h2.pdb",
+    "o4b2_9_h2.phr",
+    "o4b2_9_h2.pin",
+    "o4b2_9_h2.pnd",
+    "o4b2_9_h2.pni",
+    "o4b2_9_h2.pog",
+    "o4b2_9_h2.pos",
+    "o4b2_9_h2.pot",
+    "o4b2_9_h2.psq",
+    "o4b2_9_h2.ptf",
+    "o4b2_9_h2.pto"
+  ]
+}

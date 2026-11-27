@@ -153,6 +153,11 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("blastdbcheck") {
         std::process::exit(crate::blastdbcheck::run(&argv[2..], start));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:588-592
+    // `losat blast_formatter` too.
+    if let Some(start) = started("blast_formatter") {
+        std::process::exit(crate::blast_formatter::run(&argv[2..], start));
+    }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before the top level
     // (`cli::top_level`), which has no options of its own.
     if argv
@@ -298,7 +303,7 @@ fn run_main_entry() -> Result<()> {
     // the terminal's standard error (`Error: ` and the text, exit status 1; line RG DECISIONS 32).
     let command = match crate::cli::reader::refusal_after_read(tool, &args) {
         Some(refusal) => Err(refusal),
-        None => crate::cli::reader::options(tool, &args, false),
+        None => crate::cli::reader::options(tool, &args),
     };
     let command = match command {
         Ok(command) => command,
@@ -327,7 +332,12 @@ fn run_main_entry() -> Result<()> {
     // refuses come first, in its own arm below).
     if let Ok(settings) = start.settings() {
         let number = search_outfmt(&cli.command)
-            .and_then(|outfmt| crate::blastinput::app::parse_formatting_string(outfmt).ok())
+            .and_then(|outfmt| {
+                crate::blastinput::app::parse_formatting_string(
+                    crate::utils::os_bytes::os_str_bytes(outfmt),
+                )
+                .ok()
+            })
             .map(|choice| choice.number);
         if let Some(refusal) =
             crate::blastinput::ncbi_environment::WriteVerification::blast_xml_refusal(
@@ -361,7 +371,8 @@ fn run_main_entry() -> Result<()> {
     // `CATCH_ALL` posts it (`cli::post_native_error`).
     crate::cli::post_errors_in_run();
 
-    match cli.command {
+    let command = import_strategy(cli.command, &start)?;
+    match command {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-281
         // Native serial search passes actual final results to the BLASTX formatter.
         Commands::Blastx(args) => {
@@ -404,7 +415,10 @@ fn run_main_entry() -> Result<()> {
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227,252-255
-        Commands::Tblastx(args) => {
+        Commands::Tblastx(mut args) => {
+            // The `@PG` line of SAM (outfmt 17), which a TBLASTX strategy run by BLASTN's
+            // application writes, shows the command line.
+            args.command_line = Some(crate::cli::command_line_bytes());
             // NCBI's application layer reads its environment and registry files before
             // tblastx's own code runs (as for BLASTN); LOSAT rejects the settings that change
             // the output.
@@ -542,13 +556,44 @@ fn run_main_entry() -> Result<()> {
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:606-628
+/// `RecoverSearchStrategy` at the start of a search program's run, after the application's
+/// settings: the arguments of an `-import_search_strategy` become the import's
+/// (`import::apply`, the one import of the command line, the library API and LOSAT Web), which
+/// are another program's where the running program runs another's strategy. Its warnings go to
+/// the standard error; an error ends the run as the running program's errors end it. Other
+/// arguments are returned as they are.
+fn import_strategy(
+    command: Commands,
+    start: &crate::blastinput::ncbi_environment::ApplicationStart,
+) -> Result<Commands> {
+    let blastx = matches!(command, Commands::Blastx(_));
+    let end = |error: anyhow::Error| {
+        if blastx {
+            blastx::native::exit_on_native_error(&error);
+        } else {
+            crate::cli::exit_on_native_error(&error);
+        }
+        error
+    };
+    if !crate::report::archive::read::import::imports(&command) {
+        return Ok(command);
+    }
+    // The application's settings come first, as for any run of the program.
+    let settings = start.settings().map_err(anyhow::Error::msg);
+    if let Err(error) = settings {
+        return Err(if blastx { end(error) } else { error });
+    }
+    crate::report::archive::read::import::apply(command, None, &mut std::io::stderr()).map_err(end)
+}
+
 /// Ends `losat rpsbproc` as its `outcome` says: its own status (`Run`'s or `DryRun`'s
 /// `m_app_status`, or the application layer's for an exception; exit status 0 returns), or
 /// LOSAT's refusal, an error (exit 1) written as `main` writes an error, through
 /// `rpsbproc::write_stderr_bytes` (a closed standard error: exit 4; the message may quote data
 /// bytes).
 /// The `-outfmt` value of a search program's command line; `None` for the other programs.
-fn search_outfmt(command: &Commands) -> Option<&str> {
+fn search_outfmt(command: &Commands) -> Option<&std::ffi::OsStr> {
     match command {
         Commands::Blastx(args) => Some(&args.outfmt),
         Commands::Blastn(args) => Some(&args.outfmt),

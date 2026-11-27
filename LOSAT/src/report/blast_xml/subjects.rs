@@ -96,6 +96,10 @@ pub struct SubjectNames {
     /// `-subject` record, or the walk of a database sequence's definition lines threw at one
     /// without a Seq-id (`of_parsed`). Outfmt 5 writes `Hit_len` 0.
     pub defline_thrown: bool,
+    /// NCBI's scope gets no Bioseq for the database sequence
+    /// (`ParsedSubject::scope_finds_none`): the names are the `catch`'s (`of_unknown`), and so is
+    /// each `Hsp` (`writer::write_caught_hsp`).
+    pub unloaded: bool,
     /// The exception that NCBI's lookup of the database sequence's Seq-align id throws where its
     /// `Hit` loads it (`of_thrown`, `db_subject::HitLoad::Throws`): the writer of each document
     /// decides what the `Hit` is (`XmlHit::lookup_throws`).
@@ -119,6 +123,7 @@ impl SubjectNames {
             descriptions: Vec::new(),
             volume_taxids: Vec::new(),
             defline_thrown: false,
+            unloaded: false,
             lookup_throws: None,
         })
     }
@@ -146,6 +151,7 @@ impl SubjectNames {
             taxonomy: HitTaxonomy::Unnamed,
             volume_taxids: Vec::new(),
             defline_thrown: true,
+            unloaded: false,
             lookup_throws: None,
         }
     }
@@ -208,6 +214,7 @@ impl SubjectNames {
             descriptions,
             volume_taxids: Vec::new(),
             defline_thrown: false,
+            unloaded: false,
             lookup_throws: None,
         })
     }
@@ -230,6 +237,7 @@ impl SubjectNames {
             descriptions: Vec::new(),
             volume_taxids: Vec::new(),
             defline_thrown: false,
+            unloaded: false,
             lookup_throws: None,
         }
     }
@@ -247,6 +255,14 @@ impl SubjectNames {
     /// (`of_unknown`: `Hit_len` 0), with the same XML2 descriptions and the real length there.
     /// A `Hit` whose lookup throws has the names of `of_thrown` (`HitNames::of`).
     pub fn of_parsed(subject: &ParsedSubject, taxonomy: &[HitTaxonomy]) -> Self {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:399-407
+        // An empty Bioseq handle throws at the first read of the `Hit`: the `catch`'s names.
+        if subject.scope_finds_none() {
+            return SubjectNames {
+                unloaded: true,
+                ..Self::of_unknown(subject.alignment_fasta())
+            };
+        }
         let mut descriptions = subject.hit_descriptions();
         let lineless = subject
             .deflines()
@@ -290,6 +306,7 @@ impl SubjectNames {
             descriptions,
             volume_taxids,
             defline_thrown: false,
+            unloaded: false,
             lookup_throws: None,
         }
     }

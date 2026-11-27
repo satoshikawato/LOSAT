@@ -887,6 +887,8 @@ def tool() -> list[dict]:
     # (a fixed generator: the same bytes in every run), which a masked output of more than 1 MiB follows.
     (directory / "falist.txt").write_text("fa/dm2L_3k.fa\n\nfa/multi.fa\n")
     files["falist.txt"] = str(directory / "falist.txt")
+    (directory / "falist_missing.txt").write_text("m_list.fa\n")
+    files["falist_missing.txt"] = str(directory / "falist_missing.txt")
     # A registry file of the run's directory (`-conffile wm.ini`), which the run and its validation read.
     (directory / "wm.ini").write_text("[WINDOW_MASKER]\n")
     files["wm.ini"] = str(directory / "wm.ini")
@@ -1045,6 +1047,8 @@ def tool() -> list[dict]:
     add("d19.t1_folder_slash", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile fa/", failure=True)
     add("d19.t2_input", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile fa/dm2L_3k.fa", failure="refusal")
     add("d19.t2_missing_input", "-mk_counts -in m.fa -logfile m.fa", failure="refusal")
+    add("d19.t2_falist_missing", "-mk_counts -fa_list true -in falist_missing.txt -logfile m_list.fa", failure="refusal")
+    add("d19.t2_blastdb_missing", "-mk_counts -infmt blastdb -in db/none -logfile db/none.nal", failure="refusal")
     add("d19.t3_stdout", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile /dev/stdout", failure=True)
     add("d19.t3_stdout_counts", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -logfile /dev/stdout")
     add("d19.t3_stdout_both", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out /dev/stdout -logfile /dev/stdout")
@@ -1085,6 +1089,8 @@ def tool() -> list[dict]:
             ("shared", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out ./out.counts -logfile out.counts", False),
             ("d19.t2_input", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile fa/dm2L_3k.fa", "refusal"),
             ("d19.t2_missing_input", "-mk_counts -in m.fa -logfile m.fa", "refusal"),
+            ("d19.t2_falist_missing", "-mk_counts -fa_list true -in falist_missing.txt -logfile m_list.fa", "refusal"),
+            ("d19.t2_blastdb_missing", "-mk_counts -infmt blastdb -in db/none -logfile db/none.nal", "refusal"),
             ("d19.t3_stdout", "-in fa/dm2L_3k.fa -logfile /dev/stdout", True)):
         add(f"validate.{case_id}", words, failure, kind="validate")
     return rows

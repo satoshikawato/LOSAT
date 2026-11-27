@@ -1,0 +1,578 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/nz_p"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q0 â‚",
+          "query_len": 60,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 4,
+            "db_len": 326,
+            "hsp_len": 14,
+            "eff_space": 12420,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/nz_p"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "q1",
+          "query_len": 41,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "sM_nz_p",
+                  "accession": "sM_nz_p",
+                  "title": "subject sM",
+                  "taxid": 10090,
+                  "sciname": "Mus musculus"
+                }
+              ],
+              "len": 141,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 47.7506,
+                  "score": 112,
+                  "evalue": 1.01041e-13,
+                  "identity": 41,
+                  "positive": 41,
+                  "query_from": 1,
+                  "query_to": 41,
+                  "hit_from": 1,
+                  "hit_to": 41,
+                  "align_len": 41,
+                  "gaps": 0,
+                  "qseq": "MVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "MVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "MVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 45.4394,
+                  "score": 106,
+                  "evalue": 9.20966e-13,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 4,
+                  "hit_to": 43,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 45.4394,
+                  "score": 106,
+                  "evalue": 9.20966e-13,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 6,
+                  "hit_to": 45,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 45.4394,
+                  "score": 106,
+                  "evalue": 9.20966e-13,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 8,
+                  "hit_to": 47,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 45.4394,
+                  "score": 106,
+                  "evalue": 9.20966e-13,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 10,
+                  "hit_to": 49,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 45.4394,
+                  "score": 106,
+                  "evalue": 9.20966e-13,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 12,
+                  "hit_to": 51,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 7,
+                  "bit_score": 45.4394,
+                  "score": 106,
+                  "evalue": 9.20966e-13,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 14,
+                  "hit_to": 53,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 8,
+                  "bit_score": 45.4394,
+                  "score": 106,
+                  "evalue": 9.20966e-13,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 16,
+                  "hit_to": 55,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 9,
+                  "bit_score": 45.4394,
+                  "score": 106,
+                  "evalue": 9.20966e-13,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 18,
+                  "hit_to": 57,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 10,
+                  "bit_score": 45.4394,
+                  "score": 106,
+                  "evalue": 9.20966e-13,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 20,
+                  "hit_to": 59,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 11,
+                  "bit_score": 45.4394,
+                  "score": 106,
+                  "evalue": 9.20966e-13,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 22,
+                  "hit_to": 61,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "lcl|sN_nz_p"
+                }
+              ],
+              "len": 41,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 44.2838,
+                  "score": 103,
+                  "evalue": 3.7357e-13,
+                  "identity": 41,
+                  "positive": 41,
+                  "query_from": 1,
+                  "query_to": 41,
+                  "hit_from": 1,
+                  "hit_to": 41,
+                  "align_len": 41,
+                  "gaps": 0,
+                  "qseq": "MVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "MVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "MVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "sZ_nz_p",
+                  "accession": "sZ_nz_p",
+                  "title": "subject sZ",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 83,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 42.3578,
+                  "score": 98,
+                  "evalue": 5.45027e-12,
+                  "identity": 41,
+                  "positive": 41,
+                  "query_from": 1,
+                  "query_to": 41,
+                  "hit_from": 1,
+                  "hit_to": 41,
+                  "align_len": 41,
+                  "gaps": 0,
+                  "qseq": "MVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "MVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "MVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 39.6614,
+                  "score": 91,
+                  "evalue": 6.09261e-11,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 4,
+                  "hit_to": 43,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 39.6614,
+                  "score": 91,
+                  "evalue": 6.09261e-11,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 6,
+                  "hit_to": 45,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 39.6614,
+                  "score": 91,
+                  "evalue": 6.09261e-11,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 8,
+                  "hit_to": 47,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 39.6614,
+                  "score": 91,
+                  "evalue": 6.09261e-11,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 10,
+                  "hit_to": 49,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 39.6614,
+                  "score": 91,
+                  "evalue": 6.09261e-11,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 12,
+                  "hit_to": 51,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 7,
+                  "bit_score": 39.6614,
+                  "score": 91,
+                  "evalue": 6.09261e-11,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 14,
+                  "hit_to": 53,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 8,
+                  "bit_score": 39.6614,
+                  "score": 91,
+                  "evalue": 6.09261e-11,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 16,
+                  "hit_to": 55,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 9,
+                  "bit_score": 39.6614,
+                  "score": 91,
+                  "evalue": 6.09261e-11,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 18,
+                  "hit_to": 57,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 10,
+                  "bit_score": 39.6614,
+                  "score": 91,
+                  "evalue": 6.09261e-11,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 20,
+                  "hit_to": 59,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 11,
+                  "bit_score": 39.6614,
+                  "score": 91,
+                  "evalue": 6.09261e-11,
+                  "identity": 40,
+                  "positive": 40,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 22,
+                  "hit_to": 61,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 12,
+                  "bit_score": 35.8094,
+                  "score": 81,
+                  "evalue": 1.66589e-09,
+                  "identity": 38,
+                  "positive": 38,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 30,
+                  "hit_to": 69,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY  VYVYVY"
+                },
+                {
+                  "num": 13,
+                  "bit_score": 35.8094,
+                  "score": 81,
+                  "evalue": 1.66589e-09,
+                  "identity": 38,
+                  "positive": 38,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 34,
+                  "hit_to": 73,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVYVYVY  VYVYVYVYVY"
+                },
+                {
+                  "num": 14,
+                  "bit_score": 35.8094,
+                  "score": 81,
+                  "evalue": 1.66589e-09,
+                  "identity": 38,
+                  "positive": 38,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 38,
+                  "hit_to": 77,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVYVYVY  VYVYVYVYVYVYVY"
+                },
+                {
+                  "num": 15,
+                  "bit_score": 35.8094,
+                  "score": 81,
+                  "evalue": 1.66589e-09,
+                  "identity": 38,
+                  "positive": 38,
+                  "query_from": 2,
+                  "query_to": 41,
+                  "hit_from": 42,
+                  "hit_to": 81,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVY",
+                  "midline": "VYVYVYVYVYVYVYVYVYVY  VYVYVYVYVYVYVYVYVY"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 4,
+            "db_len": 326,
+            "hsp_len": 11,
+            "eff_space": 8460,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

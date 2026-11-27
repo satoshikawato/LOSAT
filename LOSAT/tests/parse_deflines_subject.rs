@@ -137,7 +137,7 @@ fn run_in(
 
 /// Asserts that every program refuses the deflines `queries` and `subjects` with `expected` in its
 /// message, before any byte of outfmt `outfmt`. A protein accession (`NP_`) on nucleotide letters
-/// reads the same as the program's molecule (DECISIONS 7), so one name serves every program.
+/// reads identically across programs, so one name serves every program.
 fn refused(tag: &str, queries: &[&str], subjects: &[&str], outfmt: &str, expected: &str) {
     for (program, query_letters, subject_letters) in PROGRAMS {
         let (status, stdout, stderr) = run(

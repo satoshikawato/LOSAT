@@ -65,8 +65,13 @@ fn convert_error(str_: &[u8], site: ThrowSite, pos: usize) -> DataSizeError {
 }
 
 /// `NStr::StringToUInt8_DataSize` of `text` with default flags (0).
+#[cfg(test)]
 pub fn string_to_uint8_data_size(text: &str) -> Result<u64, DataSizeError> {
-    let str_ = text.as_bytes();
+    string_to_uint8_data_size_bytes(text.as_bytes())
+}
+
+/// `NStr::StringToUInt8_DataSize` of the raw bytes `str_` with default flags (0).
+pub fn string_to_uint8_data_size_bytes(str_: &[u8]) -> Result<u64, DataSizeError> {
     let str_end = str_.len();
     let err = |site: ThrowSite, pos: usize| convert_error(str_, site, pos);
 

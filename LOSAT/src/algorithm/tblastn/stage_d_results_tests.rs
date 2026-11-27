@@ -253,6 +253,7 @@ fn put_in_report_order_maps_subject_records_once() {
             edit_script,
             matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
             query_left_out: 0,
+            nullb: None,
         };
         (linked, payload)
     };
@@ -294,13 +295,13 @@ fn put_in_report_order_maps_subject_records_once() {
         ((0, 12), (8, 18), [12, 2, 1, 0], vec![Ins(2), Sub(10)]),
     ];
     let mut subject = made();
-    subject.put_in_report_order(true);
+    subject.put_in_report_order(true, |_| 100);
     assert_eq!(rows(&subject), mapped);
-    subject.put_in_report_order(true);
+    subject.put_in_report_order(true, |_| 100);
     assert_eq!(rows(&subject), mapped);
 
     let mut db = made();
-    db.put_in_report_order(false);
+    db.put_in_report_order(false, |_| 100);
     assert_eq!(
         rows(&db),
         vec![

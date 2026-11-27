@@ -12,7 +12,10 @@
 //! modules for every type that it descends into (names, order, OPTIONAL and DEFAULT members,
 //! CHOICE variants, ENUMERATED values); the values that rpsbproc does not use are read by the
 //! typed reader of the type table (`ArchiveStream::typed_member`: the request bodies other than
-//! `queue-search`, the `Seqdesc` variants other than `title` and `user`, `Seq-annot`, `Int-fuzz`,
+//! `queue-search`, the `Seqdesc` variants other than `title` and `user`, `Bioseq-set.annot` and
+//! `Bioseq.annot` when a `title` descriptor is set—otherwise `ArchiveStream::bioseq_annot` reads
+//! `Bioseq.annot` through the same typed reader to take `GetDescrTitleFromBioseq`'s feature
+//! title—, `Int-fuzz`,
 //! the `Seq-loc` variants that the grammar does not read, the `Seq-align` members `bounds` and
 //! `ext`, the segments other than `denseg`, `std` and `packed`, the large `Blast4-value`
 //! variants, the `phi-alignments`, `pssm` and `simple-results` of the results, the `Seq-ext`
@@ -33,11 +36,11 @@
 
 use std::io::Read;
 
-use crate::report::serial::asn_input::{Input, Names, TextInput};
+use crate::report::serial::asn_input::{Input, Names, TextInput, R};
 use crate::report::serial::asn_text_reader::{
     AsnTextError, AsnTextErrorKind, Frame, Reader, Result, StreamSource,
 };
-use crate::report::serial::asn_types::read::{ObjectStream, PostSink, ReadError};
+use crate::report::serial::asn_types::read::{ObjectStream, PostSink, ReadError, TypedReader};
 use crate::report::serial::asn_types::{self, table::named};
 use crate::report::serial::pssm::{SEQ_INST_MOL, SEQ_INST_REPR};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
@@ -112,6 +115,21 @@ pub(crate) enum SeqEntry {
     Set,
 }
 
+/// What `GetDescrTitleFromBioseq` finds in a title-less query Bioseq's `annot`.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) enum AnnotTitle {
+    /// No `annot`, a `title` descriptor was already seen, or no matching feature had a title.
+    #[default]
+    None,
+    /// The first matching feature's title (`Gene-ref.desc` when `CBioseq::IsNa`, else the first
+    /// `Prot-ref.name`).
+    Title(Vec<u8>),
+    /// A `NULL` `Seq-annot` or `Seq-feat` reached before any matching feature (NCBI's
+    /// `CRef::operator->` throws `CCoreException::eNullPtr` with a stack trace of memory
+    /// addresses).
+    NullElement(&'static str),
+}
+
 /// A query `Bioseq`, with what `FillSequenceFromBioseq` takes from it.
 #[derive(Debug, Default)]
 pub(crate) struct Query {
@@ -122,9 +140,8 @@ pub(crate) struct Query {
     /// object whose `DefLine` field is not a string (`ObtainUserDeflineFromBioseq` asks for its
     /// string).
     pub(crate) unread_descriptor: Option<&'static str>,
-    /// Whether `annot` is set (`GetDescrTitleFromBioseq` looks there for a title when the
-    /// descriptors have none).
-    pub(crate) has_annot: bool,
+    /// What `GetDescrTitleFromBioseq` takes from `annot` when `title` is `None`.
+    pub(crate) annot_title: AnnotTitle,
     /// `inst.mol`.
     pub(crate) mol: i32,
     /// `inst.length`.
@@ -1254,8 +1271,12 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
                     inst = true;
                 }
                 _ => {
-                    query.has_annot = true;
-                    self.typed_member(named::BIOSEQ, at)?;
+                    if query.title.is_none() {
+                        query.annot_title =
+                            self.bioseq_annot(at, super::query::is_na_mol(query.mol))?;
+                    } else {
+                        self.typed_member(named::BIOSEQ, at)?;
+                    }
                 }
             }
         }
@@ -1263,6 +1284,62 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
             return Err(self.r().error("a mandatory member is missing"));
         }
         Ok(query)
+    }
+
+    /// `Bioseq.annot` when no `title` descriptor was seen: read by the typed reader below `at`
+    /// (preserving all ASN.1 checks, hooks and 803.7 posts), while taking what
+    /// `GetDescrTitleFromBioseq` takes from the first matching feature (`Gene-ref.desc` when
+    /// `is_na`, else the first `Prot-ref.name`), or recording the first `NULL` `Seq-annot` or
+    /// `Seq-feat` reached before a match.
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:319-363
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:460-479
+    // NCBI reference (598d8ae6): c++/src/objects/seqfeat/seqfeat.asn:41-70,1012-1022,1303-1315
+    #[cold]
+    #[inline(never)]
+    fn bioseq_annot(&mut self, at: &Frame<'_>, is_na: bool) -> Result<AnnotTitle> {
+        let annot_list_ty =
+            asn_types::members(named::BIOSEQ)[asn_types::member_index(named::BIOSEQ, "annot")].ty;
+        let annot_data_idx = asn_types::member_index(named::SEQ_ANNOT, "data");
+        let annot_data_ty = asn_types::members(named::SEQ_ANNOT)[annot_data_idx].ty;
+        let ftable_idx = asn_types::member_index(annot_data_ty, "ftable");
+        let root = self.r().root;
+        let mut found = AnnotTitle::None;
+        let read = self.objects.read_typed_member(root, at.steps(), |r| {
+            r.list(annot_list_ty, |r, elem| {
+                let Some(annot_ty) = elem else {
+                    if matches!(found, AnnotTitle::None) {
+                        found = AnnotTitle::NullElement("a NULL Seq-annot in Bioseq.annot");
+                    }
+                    return Ok(());
+                };
+                if !matches!(found, AnnotTitle::None) {
+                    r.value(annot_ty)?;
+                    return Ok(());
+                }
+                r.class(annot_ty, |r, idx, mty| {
+                    if idx != annot_data_idx {
+                        r.value(mty)?;
+                        return Ok(());
+                    }
+                    r.choice(mty, |r, vidx, vty| {
+                        if vidx != ftable_idx {
+                            r.value(vty)?;
+                            return Ok(());
+                        }
+                        read_ftable_title(r, vty, is_na, &mut found)
+                    })
+                })
+            })
+        });
+        match read {
+            Ok(()) => Ok(found),
+            Err(ReadError::Unsupported(what)) => Err(self.r().not_supported(&format!(
+                "an archive value that LOSAT's reader does not read ({what})"
+            ))),
+            // Same as `typed_member`: `next_archive` treats any format error as the end of the
+            // input, as NCBI's rpsbproc catches any exception of its reader.
+            Err(_) => Err(self.r().error("the typed reader failed")),
+        }
     }
 
     /// A `Seq-descr`, its first title and the descriptors LOSAT does not read noted in
@@ -1717,6 +1794,75 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
         }
         Ok(seg)
     }
+}
+
+/// Reads a `Seq-annot.data.ftable` (`SET OF Seq-feat`) under `TypedReader`, recording in `found`
+/// the first matching feature title (`Gene-ref.desc` when `is_na`, else the first `Prot-ref.name`)
+/// or the first `NULL` `Seq-feat` reached while `found` is `AnnotTitle::None`.
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:325-361
+fn read_ftable_title<I: Input, P: PostSink>(
+    r: &mut TypedReader<I, P>,
+    ftable_ty: u16,
+    is_na: bool,
+    found: &mut AnnotTitle,
+) -> R<()> {
+    let feat_data_idx = asn_types::member_index(named::SEQ_FEAT, "data");
+    let wanted_feat_idx =
+        asn_types::member_index(named::SEQFEATDATA, if is_na { "gene" } else { "prot" });
+    let gene_desc_idx = asn_types::member_index(named::GENE_REF, "desc");
+    let prot_name_idx = asn_types::member_index(named::PROT_REF, "name");
+    r.list(ftable_ty, |r, feat_elem| {
+        let Some(feat_ty) = feat_elem else {
+            if matches!(found, AnnotTitle::None) {
+                *found = AnnotTitle::NullElement("a NULL Seq-feat in Seq-annot.data.ftable");
+            }
+            return Ok(());
+        };
+        if !matches!(found, AnnotTitle::None) {
+            r.value(feat_ty)?;
+            return Ok(());
+        }
+        r.class(feat_ty, |r, fidx, fmty| {
+            if fidx != feat_data_idx {
+                r.value(fmty)?;
+                return Ok(());
+            }
+            r.choice(fmty, |r, fvidx, fvty| {
+                if fvidx != wanted_feat_idx {
+                    r.value(fvty)?;
+                    return Ok(());
+                }
+                if is_na {
+                    r.class(fvty, |r, gidx, gmty| {
+                        if gidx == gene_desc_idx {
+                            *found = AnnotTitle::Title(r.text_kept(gmty)?);
+                        } else {
+                            r.value(gmty)?;
+                        }
+                        Ok(())
+                    })
+                } else {
+                    r.class(fvty, |r, pidx, pmty| {
+                        if pidx != prot_name_idx {
+                            r.value(pmty)?;
+                            return Ok(());
+                        }
+                        r.list(pmty, |r, name_elem| {
+                            let Some(nty) = name_elem else {
+                                return Ok(());
+                            };
+                            if matches!(found, AnnotTitle::None) {
+                                *found = AnnotTitle::Title(r.text_kept(nty)?);
+                            } else {
+                                r.value(nty)?;
+                            }
+                            Ok(())
+                        })
+                    })
+                }
+            })
+        })
+    })
 }
 
 #[cfg(test)]

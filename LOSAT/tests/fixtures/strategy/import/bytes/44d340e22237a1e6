@@ -1,0 +1,139 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set.
+           2 sequences; 279 total letters
+
+
+
+Query= lcl|Query_1 qn1 plus strand gene
+
+Length=366
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha                                             204     5e-74
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 204 bits (519),  Expect = 5e-74, Method: Compositional matrix adjust.
+ Identities = 98/108 (91%), Positives = 101/108 (94%), Gaps = 0/108 (0%)
+ Frame = +1
+
+Query  37   MWMEHSVLRAVFAVRRKVMDFPKIRDGPIAVMKGWENHCWPANMSWKVLMKYEFSSDIHP  216
+            MWMEHSVL+AVFAVRRKVMD PKIRDGP+AVMKGWEN+CWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  217  WICWIPKEQQQPGWWKTDTLHMAEMGLWMHKYPKCMCVMVHPGHPSLR  360
+            WICWIPKEQQ PGWWKTDTLHMAEMGLWMHKYPKCMCVMV     SLR
+Sbjct  61   WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLR  108
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 24823
+
+
+Query= lcl|Query_2 qn2 minus strand gene
+
+Length=378
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp2 subject protein beta, distant                                     232     8e-85
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 232 bits (591),  Expect = 8e-85, Method: Compositional matrix adjust.
+ Identities = 111/115 (97%), Positives = 111/115 (97%), Gaps = 0/115 (0%)
+ Frame = -3
+
+Query  370  SWLTADWLQLRKVMDDPKIRDGPMAVMKVWESYCFILTSIANMSAHVLMKYEFQSGIHPC  191
+            S L AD LQLRKVMDDPKIRDGPMAVMKVWESYCFIL SIANMSAHVLMKYEFQSGIHPC
+Sbjct  6    SVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSGIHPC  65
+
+Query  190  NQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI  26
+            NQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI
+Sbjct  66   NQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEI  120
+
+
+ Score = 11.9 bits (19),  Expect = 7.8, Method: Compositional matrix adjust.
+ Identities = 4/6 (67%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+ Frame = +1
+
+Query  67  PGPCDT  84
+           PG C T
+Sbjct  79  PGWCPT  84
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25787
+
+
+Query= lcl|Query_3 qn3 no hits
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp2 subject protein beta, distant                                     11.2    5.5  
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 11.2 bits (17),  Expect = 5.5, Method: Compositional matrix adjust.
+ Identities = 5/19 (26%), Positives = 6/19 (32%), Gaps = 0/19 (0%)
+ Frame = +3
+
+Query  63   PG*ADSPNGS*DLLHCSCF  119
+            P   D P     +    CF
+Sbjct  22   PKIRDGPMAVMKVWESYCF  40
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 9690
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 279
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

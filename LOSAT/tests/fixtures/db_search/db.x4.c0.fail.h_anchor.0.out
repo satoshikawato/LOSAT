@@ -1,0 +1,80 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/x4/sw_subjects_rev.faa).
+           2 sequences; 284 total letters
+
+
+
+Query= qok2 BDT63546.1 with W first, again
+
+Length=124
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sok1 BDT63546.1 of PajaWSV                                            242     9e-71
+
+
+> sok1 BDT63546.1 of PajaWSV
+Length=124
+
+ Score = 242 bits (618),  Expect = 9e-71
+ Identities = 123/123 (100%), Positives = 123/123 (100%), Gaps = 0/123 (0%)
+
+Query  2    ATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALSIGLIVVAIMNLRMGM  61
+            ATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALSIGLIVVAIMNLRMGM
+Sbjct  2    ATAPAALPFGKANAAACGNSNNTFDVLEGLVKRARVVLVFITALSIGLIVVAIMNLRMGM  61
+
+Query  62   GNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYTT  121
+            GNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYTT
+Sbjct  62   GNSAQGVPLLDEHGQPVLDGNDDPQIEEPNNTYPNKTRDYLILMASILSFVIGAASSYTT  121
+
+Query  122  RLK  124
+            RLK
+Sbjct  122  RLK  124
+
+
+
+Lambda      K        H
+   0.319    0.135    0.390 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000
+
+
+Query= qnohit W 87 times: no hit (the subjects have no W)
+
+Length=87
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.331    0.178     1.59 
+
+Gapped
+Lambda      K        H
+   0.267   0.0410    0.140 
+
+Effective search space used: 1000

@@ -1,0 +1,73 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/o4b2_9_u8mid tests/db_search/t5/ppig1"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-05,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q0",
+          "query_len": 60,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gi|2",
+                  "accession": "2",
+                  "title": "u8mid",
+                  "taxid": 99990,
+                  "sciname": "Last entry sp."
+                }
+              ],
+              "len": 60,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 131.339,
+                  "score": 329,
+                  "evalue": 6.09702e-47,
+                  "identity": 60,
+                  "positive": 60,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 1,
+                  "hit_to": 60,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "QWANCGGRKPRCVLDYSSMFNFVNNIYQESEHKMQVEKTQRMEGEQAMYEIPGLDSDTWF",
+                  "hseq": "QWANCGGRKPRCVLDYSSMFNFVNNIYQESEHKMQVEKTQRMEGEQAMYEIPGLDSDTWF",
+                  "midline": "QWANCGGRKPRCVLDYSSMFNFVNNIYQESEHKMQVEKTQRMEGEQAMYEIPGLDSDTWF"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 7,
+            "db_len": 480,
+            "hsp_len": 16,
+            "eff_space": 16192,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+]
+}

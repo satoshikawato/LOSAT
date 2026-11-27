@@ -381,7 +381,7 @@ impl Rows<'_> {
                     query_stored_gaps: Vec::new(),
                     query_case: Default::default(),
                     seqalign_num_ident: hsp.num_ident,
-                    query_left_of_record: true,
+                    edge: crate::report::pairwise::PairwiseEdge::QueryLeftOfRecord,
                 });
                 continue;
             }
@@ -450,7 +450,7 @@ impl Rows<'_> {
                 // The Seq-align's `num_ident` (`seqalign::query_records` writes the same
                 // `hsp.num_ident`): the engine's count, which "Max ident" and the sorts read.
                 seqalign_num_ident: hsp.num_ident,
-                query_left_of_record: false,
+                edge: crate::report::pairwise::PairwiseEdge::Normal,
             });
         }
         Ok(())

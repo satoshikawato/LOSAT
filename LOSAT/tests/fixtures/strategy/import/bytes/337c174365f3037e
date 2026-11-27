@@ -1,0 +1,15 @@
+# BLASTP 2.17.0+
+# Query: lcl|Query_1 qp1 query protein one
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+lcl|Query_1	sp1	89.286	140	12	1	1	140	1	137	5.30e-94	255
+lcl|Query_1	sp2	69.930	143	37	2	2	140	2	142	2.82e-67	188
+# BLASTP 2.17.0+
+# Query: lcl|Query_2 qp2 unrelated protein (no hits expected)
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+lcl|Query_2	sp1	66.667	6	2	0	33	38	35	40	1.5	12.7
+lcl|Query_2	sp1	33.333	9	6	0	24	32	1	9	1.9	12.3
+# BLAST processed 2 queries

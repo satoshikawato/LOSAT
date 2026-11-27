@@ -7,8 +7,10 @@ the closure of the types that the root types reach (by default NCBI-ScoreMat's
 `PssmWithParameters`, the PSSM file of psiblast, tblastn `-in_pssm` and makeprofiledb,
 NCBI-BlastDL's `Blast-db-mask-info`, the mask file of makeblastdb `-mask_data`,
 NCBI-BlastDL's `Blast-def-line-set`, the binary definition lines of makeprofiledb, and
-NCBI-Blast4's `Blast4-archive`, the input of `losat rpsbproc`), and writes the table that
-LOSAT's ASN.1 reader runs on (`report::serial::asn_types`). Its companion check,
+NCBI-Blast4's `Blast4-archive`, `Blast4-request` and `Blast4-get-search-strategy-reply`, the
+BLAST archive of `-outfmt 11`, the input of `losat rpsbproc` and the search strategy files), and
+writes the table that LOSAT's ASN.1 reader runs on (`report::serial::asn_types`). Its companion
+check,
 `asn_spec_check.py`, compares the table with the type information that NCBI's datatool generated
 (`*_.cpp`, `*_.hpp`) and must pass whenever the table is regenerated.
 
@@ -34,7 +36,7 @@ What the table holds, per type (named, or anonymous at its place of use):
 
 The storage of an INTEGER is NCBI's C++ type, from the `.def` files: `TSeqPos` and `unsigned` are
 Uint4, `TSignedSeqPos` and `int` Int4, `TGi`, `TEntrezId`, `TIntId` and `Int8` Int8 (NCBI_INT8_GI,
-corelib/ncbimisc.hpp:981-982), `Int2` Int2.
+corelib/ncbimisc.hpp:981-982), `Int2` Int2; datatool's `BigInt` is an INTEGER of Int8 storage.
 """
 from __future__ import annotations
 
@@ -498,6 +500,14 @@ class Table:
                 raise KeyError(typ.name)
             return self.named_type(target, typ.name)
         if isinstance(typ, Prim):
+            if typ.name == "BigInt":
+                # NCBI reference (598d8ae6): c++/include/serial/serialimpl.hpp:114-116
+                # NCBI reference (598d8ae6): c++/src/serial/stdtypes.cpp:1281-1289
+                # NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:73-77
+                # datatool's 64-bit INTEGER (an `Int8`): its type information reads it as the
+                # INTEGER of an Int8; only the binary writer may tag it otherwise, and not by
+                # default (the C-style big-integer flag starts false).
+                return Entry(-1, "Integer", storage=storage or "Int8")
             kinds = {
                 "INTEGER": ("Integer", ""), "BOOLEAN": ("Boolean", ""), "NULL": ("Null", ""),
                 "REAL": ("Real", ""), "VisibleString": ("String", "Visible"),
@@ -712,11 +722,15 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     return "\n".join(out)
 
 
+# The PSSM's root first, then the mask file's: the types they reach keep their indices when roots
+# are added after them.
 DEFAULT_ROOTS = [
     ("NCBI-ScoreMat", "PssmWithParameters"),
     ("NCBI-BlastDL", "Blast-db-mask-info"),
     ("NCBI-BlastDL", "Blast-def-line-set"),
     ("NCBI-Blast4", "Blast4-archive"),
+    ("NCBI-Blast4", "Blast4-request"),
+    ("NCBI-Blast4", "Blast4-get-search-strategy-reply"),
 ]
 
 

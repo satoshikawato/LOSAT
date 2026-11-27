@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { user { type str "orginalid", data { { label str "localid", data str "orig2" } } }, title "o2" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } }
+      }
+    }

@@ -103,7 +103,7 @@ fn format_g(value: f64) -> String {
 /// The writer of the report (`m_ostream`): NCBI's stream of standard output (`cout`) or of the
 /// `-o` file (its `ofstream`), the tools' stream (`report::ostream::ReportStream::tool_file`,
 /// `tool_standard_output`: NCBI's buffer of the stream, `cli::NcbiBuffer`, and its state), with
-/// the run's diagnostics (`diag`). Each `write` is one insertion of NCBI's (a string or a number;
+/// the run's diagnostics (`diag`). Each `insert` is one insertion of NCBI's (a string or a number;
 /// `put`, a `char`); a line ends with `endl`, its line feed put and the stream flushed, where
 /// NCBI's buffer writes what it holds. `cerr` is tied to `cout`: before a text on standard error
 /// the report on standard output writes what NCBI's buffer holds, a report in the `-o` file makes
@@ -142,24 +142,14 @@ impl Report {
         }
     }
 
-    /// An insertion of a string or a number (`sputn`); bytes that end with a line feed are the
-    /// insertion before it and `endl`. LOSAT writes the report in the pieces of NCBI's
-    /// insertions where a piece can reach a buffer's limit: the strings of the archive and the
-    /// data. NCBI rpsbproc 0.5.1, both builds, on a `SESSION` line cut by an exception after a
-    /// database name of 1,100, 5,000 and 9,000 bytes, with `-o F -logfile F` and with `-logfile
-    /// /dev/stdout` on a pipe: line RG `E/e1c/bufprobe`.
-    fn write(&mut self, bytes: &[u8]) {
-        match bytes.split_last() {
-            Some((b'\n', text)) => {
-                self.insert(text);
-                self.endl();
-            }
-            _ => self.insert(bytes),
-        }
-    }
-
-    /// One insertion of `bytes` (none when empty), without a flush: also the report's header
-    /// (`m_init_msg.str()`, inserted whole before the `DATA` line, rpsbproc_main.cpp:732).
+    /// One insertion of `bytes` (none when empty), a string or a number (`sputn`), without a
+    /// flush: a string of the archive or of the data is inserted as it is, also where it ends with
+    /// a line feed (a line ends with `endl`); also the report's header (`m_init_msg.str()`,
+    /// inserted whole before the `DATA` line, rpsbproc_main.cpp:732). LOSAT writes the report in
+    /// the pieces of NCBI's insertions where a piece can reach a buffer's limit: the strings of
+    /// the archive and the data. NCBI rpsbproc 0.5.1, both builds, on a `SESSION` line cut by an
+    /// exception after a database name of 1,100, 5,000 and 9,000 bytes, with `-o F -logfile F`
+    /// and with `-logfile /dev/stdout` on a pipe: line RG `E/e1c/bufprobe`.
     fn insert(&mut self, bytes: &[u8]) {
         if !bytes.is_empty() {
             ended(std::io::Write::write_all(&mut self.stream, bytes));
@@ -291,10 +281,23 @@ impl Diagnostics {
         self.post_bytes(&line);
     }
 
-    /// Writes `bytes` where the diagnostics go; on standard error as `write_stderr_bytes`
-    /// writes (after `cerr`'s tie; a closed pipe ends the run, `closed_end`).
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6685-6699 (the file's handler
+    // writes each post at once and ignores what the write returns)
+    // NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873 (cited at
+    // `report::ostream::ends_like_sigpipe`: NCBI keeps SIGPIPE's default action)
+    /// Writes `bytes` where the diagnostics go: on standard error as `write_stderr_bytes`
+    /// writes (after `cerr`'s tie), or to the file of `-logfile`, whose failed write is dropped.
+    /// A write that meets a pipe whose reader has closed ends the run there (`closed_end`), as
+    /// NCBI's process is ended by SIGPIPE at that post (NCBI rpsbproc 0.5.1 with `-logfile
+    /// /dev/stdout` on a standard output closed before the start, line RG item T8b fix round 1,
+    /// rows `closed.*.logstdout`).
     fn post_bytes(&mut self, bytes: &[u8]) {
-        self.0.write_text(bytes, &mut Cerr);
+        match self.0.place() {
+            crate::blastinput::ncbi_environment::TextPlace::LogFile => {
+                ended(self.0.try_write_to_file(bytes))
+            }
+            _ => self.0.write_text(bytes, &mut Cerr),
+        }
     }
 }
 
@@ -979,13 +982,13 @@ fn run_sessions<R: Read>(
         };
         session += 1;
         let session_text = session.to_string();
-        report.write(b"SESSION\t");
-        report.write(session_text.as_bytes());
+        report.insert(b"SESSION\t");
+        report.insert(session_text.as_bytes());
         report.put(b'\t');
-        report.write(&search.program);
+        report.insert(&search.program);
         if let Some(ident) = &archive.ident {
             report.put(b'\t');
-            report.write(ident);
+            report.insert(ident);
         }
         // Each choice's tab is written before its getter, which may throw (C++17: the left
         // operand of `<<` is evaluated first; NCBI rpsbproc 0.5.1 on an archive whose subject is
@@ -993,7 +996,7 @@ fn run_sessions<R: Read>(
         report.put(b'\t');
         match &search.subject {
             Subject::Database(database) => {
-                report.write(database);
+                report.insert(database);
             }
             Subject::Other(name) => {
                 return process_failure(
@@ -1009,7 +1012,7 @@ fn run_sessions<R: Read>(
             match &search.matrix_name {
                 None => {}
                 Some(ParamValue::String(name)) => {
-                    report.write(name);
+                    report.insert(name);
                 }
                 Some(other) => {
                     return process_failure(
@@ -1029,7 +1032,7 @@ fn run_sessions<R: Read>(
             match &search.evalue_threshold {
                 None => {}
                 Some(ParamValue::Cutoff(archive::Cutoff::EValue(evalue))) => {
-                    report.write(format_g(*evalue).as_bytes());
+                    report.insert(format_g(*evalue).as_bytes());
                 }
                 Some(ParamValue::Cutoff(archive::Cutoff::RawScore)) => {
                     return process_failure(
@@ -1050,7 +1053,7 @@ fn run_sessions<R: Read>(
                 }
             }
         }
-        report.write(b"\n");
+        report.endl();
         let Queries::BioseqSet(entries) = &search.queries else {
             report.post("Wrong type of request data: CBlast4_queries::e_Bioseq_set expected");
             return Outcome::Exit(E_INPUT_DATA_ERROR);
@@ -1133,13 +1136,13 @@ fn run_xml_sessions<R: Read>(
         report.progress(&format!("RPSBlast session {session} start..."));
         session += 1;
         let session_text = session.to_string();
-        report.write(b"SESSION");
+        report.insert(b"SESSION");
         report.put(b'\t');
-        report.write(session_text.as_bytes());
+        report.insert(session_text.as_bytes());
         report.put(b'\t');
-        report.write(&document.version);
+        report.insert(&document.version);
         report.put(b'\t');
-        report.write(&document.db);
+        report.insert(&document.db);
         report.put(b'\t');
         let Some(matrix) = &document.matrix else {
             return process_failure(
@@ -1147,10 +1150,10 @@ fn run_xml_sessions<R: Read>(
                 unassigned_member("NCBI-BlastOutput", "Parameters", "matrix"),
             );
         };
-        report.write(matrix);
+        report.insert(matrix);
         report.put(b'\t');
-        report.write(format_g(document.expect).as_bytes());
-        report.write(b"\n");
+        report.insert(format_g(document.expect).as_bytes());
+        report.endl();
         report.progress(&format!("RPSBlast session {session} start..."));
         for query in document.queries {
             report.progress("Calculating....");
@@ -1302,10 +1305,10 @@ fn print_protein(
         report.line(&[b"DOMAINS"]);
         for record in &records {
             let align = &query.aligns[record.align];
-            report.write(session.as_bytes());
-            report.write(b"\t");
-            report.write(&query.accession);
-            report.write(b"\t");
+            report.insert(session.as_bytes());
+            report.insert(b"\t");
+            report.insert(&query.accession);
+            report.insert(b"\t");
             let key = (align.region as u32).wrapping_mul(OVERLAPLEADING);
             match mode {
                 DataMode::Rep => {
@@ -1332,18 +1335,18 @@ fn print_protein(
                     }
                 }
             }
-            report.write(b"\n");
+            report.endl();
         }
         report.line(&[b"ENDDOMAINS"]);
         if show_families {
             report.line(&[b"SUPERFAMILIES"]);
             for record in families.values() {
-                report.write(session.as_bytes());
-                report.write(b"\t");
-                report.write(&query.accession);
-                report.write(b"\t");
+                report.insert(session.as_bytes());
+                report.insert(b"\t");
+                report.insert(&query.accession);
+                report.insert(b"\t");
                 print_cluster_line(report, record, query, data);
-                report.write(b"\n");
+                report.endl();
             }
             report.line(&[b"ENDSUPERFAMILIES"]);
         }
@@ -1434,11 +1437,11 @@ struct MotifRecord<'a> {
 /// `INVALIDPSSMID` or more that the data has.
 fn write_source(report: &mut Report, data: &CddData, source: u32) {
     if source < data::INVALID_PSSM_ID {
-        report.write(source.to_string().as_bytes());
+        report.insert(source.to_string().as_bytes());
     } else if let Some(domain) = data.find_domain(source) {
-        report.write(data.text(data.domains[domain].accession));
+        report.insert(data.text(data.domains[domain].accession));
     } else {
-        report.write(source.to_string().as_bytes());
+        report.insert(source.to_string().as_bytes());
     }
 }
 
@@ -1562,20 +1565,20 @@ fn print_features(
                 let (res0, res1) = (featsegs.left(), featsegs.right());
                 // The residues first: a refusal leaves no part of the line.
                 let (letter0, letter1) = (upper_residue(query, res0)?, upper_residue(query, res1)?);
-                report.write(session.as_bytes());
-                report.write(b"\t");
-                report.write(&query.accession);
-                report.write(b"\t");
-                report.write(data.text(motif.site.title));
-                report.write(b"\t");
-                report.write(&[letter0]);
-                report.write(printed_position(res0).to_string().as_bytes());
-                report.write(b"\t");
-                report.write(printed_position(res1).to_string().as_bytes());
-                report.write(&[letter1]);
-                report.write(b"\t");
+                report.insert(session.as_bytes());
+                report.insert(b"\t");
+                report.insert(&query.accession);
+                report.insert(b"\t");
+                report.insert(data.text(motif.site.title));
+                report.insert(b"\t");
+                report.insert(&[letter0]);
+                report.insert(printed_position(res0).to_string().as_bytes());
+                report.insert(b"\t");
+                report.insert(printed_position(res1).to_string().as_bytes());
+                report.insert(&[letter1]);
+                report.insert(b"\t");
                 write_source(report, data, motif.source);
-                report.write(b"\n");
+                report.endl();
             }
         }
         report.line(&[b"ENDMOTIFS"]);
@@ -1618,20 +1621,20 @@ fn print_site(
             residues.push((upper_residue(query, res)?, res));
         }
     }
-    report.write(session.as_bytes());
-    report.write(b"\t");
-    report.write(&query.accession);
-    report.write(b"\t");
-    report.write(kind);
-    report.write(b"\t");
-    report.write(data.text(site.title));
-    report.write(b"\t");
+    report.insert(session.as_bytes());
+    report.insert(b"\t");
+    report.insert(&query.accession);
+    report.insert(b"\t");
+    report.insert(kind);
+    report.insert(b"\t");
+    report.insert(data.text(site.title));
+    report.insert(b"\t");
     let mapped = residues.len();
     let mut delimit: &[u8] = b"";
     for (letter, res) in residues {
-        report.write(delimit);
-        report.write(&[letter]);
-        report.write(printed_position(res).to_string().as_bytes());
+        report.insert(delimit);
+        report.insert(&[letter]);
+        report.insert(printed_position(res).to_string().as_bytes());
         delimit = b",";
     }
     let complete: i64 = data
@@ -1639,12 +1642,12 @@ fn print_site(
         .iter()
         .map(|seg| i64::from(seg[1]) - i64::from(seg[0]) + 1)
         .sum();
-    report.write(format!("\t{complete}\t{mapped}\t").as_bytes());
+    report.insert(format!("\t{complete}\t{mapped}\t").as_bytes());
     match source {
         Some(source) => write_source(report, data, source),
-        None => report.write(b"0"),
+        None => report.insert(b"0"),
     }
-    report.write(b"\n");
+    report.endl();
     Ok(())
 }
 
@@ -1652,15 +1655,15 @@ fn print_site(
 fn print_incomplete(report: &mut Report, n_missing: f64, c_missing: f64) {
     let mut missing = false;
     if n_missing > 0.2 {
-        report.write(b"N");
+        report.insert(b"N");
         missing = true;
     }
     if c_missing > 0.2 {
-        report.write(b"C");
+        report.insert(b"C");
         missing = true;
     }
     if !missing {
-        report.write(b"-");
+        report.insert(b"-");
     }
 }
 
@@ -1689,22 +1692,22 @@ fn print_dom_line(
         format_g(align.e_value),
         format_g(align.bit_score)
     );
-    report.write(kind);
-    report.write(numbers.as_bytes());
-    report.write(data.text(domain.accession));
-    report.write(b"\t");
-    report.write(data.text(domain.short_name));
-    report.write(b"\t");
+    report.insert(kind);
+    report.insert(numbers.as_bytes());
+    report.insert(data.text(domain.accession));
+    report.insert(b"\t");
+    report.insert(data.text(domain.short_name));
+    report.insert(b"\t");
     print_incomplete(report, align.n_missing, align.c_missing);
-    report.write(b"\t");
+    report.insert(b"\t");
     match record.cluster {
-        None => report.write(b"-"),
+        None => report.insert(b"-"),
         Some(cluster) => {
             let cluster = &data.clusters[cluster];
             if cluster.pssm_id >= data::INVALID_PSSM_ID {
-                report.write(data.text(cluster.accession));
+                report.insert(data.text(cluster.accession));
             } else {
-                report.write(cluster.pssm_id.to_string().as_bytes());
+                report.insert(cluster.pssm_id.to_string().as_bytes());
             }
         }
     }
@@ -1723,13 +1726,13 @@ fn print_cluster_line(report: &mut Report, record: &Record, query: &DomQuery, da
         format_g(align.e_value),
         format_g(align.bit_score)
     );
-    report.write(numbers.as_bytes());
-    report.write(data.text(cluster.accession));
-    report.write(b"\t");
-    report.write(data.text(cluster.short_name));
-    report.write(b"\t");
+    report.insert(numbers.as_bytes());
+    report.insert(data.text(cluster.accession));
+    report.insert(b"\t");
+    report.insert(data.text(cluster.short_name));
+    report.insert(b"\t");
     print_incomplete(report, align.n_missing, align.c_missing);
-    report.write(b"\t-");
+    report.insert(b"\t-");
 }
 
 #[cfg(test)]

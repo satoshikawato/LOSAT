@@ -1724,23 +1724,31 @@ impl DiagTarget {
     /// diagnostics have where the caller writes it: the error that ends a run there is the run's
     /// error, as for `cerr` (`api::start::RunLog::post`).
     pub fn write_to_file(&self, text: &[u8]) {
+        let _ = self.try_write_to_file(text);
+    }
+
+    /// `write_to_file`, with the error of the file's write: a program whose process NCBI's write
+    /// to that file can end (SIGPIPE at a pipe whose reader has closed, `losat rpsbproc`'s
+    /// `-logfile /dev/stdout`) reads it; the others drop it.
+    pub fn try_write_to_file(&self, text: &[u8]) -> std::io::Result<()> {
         match self {
             DiagTarget::File(file) => {
                 // `Write for &File`: the one open file, written through a shared reference.
                 let mut file: &std::fs::File = file;
-                let _ = file.write_all(text);
+                file.write_all(text)
             }
-            DiagTarget::Memory(bytes) => bytes
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .extend_from_slice(text),
-            DiagTarget::Stream(writer) => {
-                let _ = writer
+            DiagTarget::Memory(bytes) => {
+                bytes
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .write_all(text);
+                    .extend_from_slice(text);
+                Ok(())
             }
-            DiagTarget::Stderr | DiagTarget::Discard | DiagTarget::StderrFile => {}
+            DiagTarget::Stream(writer) => writer
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .write_all(text),
+            DiagTarget::Stderr | DiagTarget::Discard | DiagTarget::StderrFile => Ok(()),
         }
     }
 

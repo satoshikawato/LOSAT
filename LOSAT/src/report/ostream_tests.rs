@@ -337,6 +337,27 @@ fn the_alignments_post_802_4_in_a_file_and_on_standard_output_at_their_flush() {
     lock(&stream.0).flush().unwrap();
     assert!(lock(&stream.0).sync().is_err());
     assert_eq!(native(stream.finish(Ok(()))).0, -6);
+    // After a failed `cerr` the post flushes no tie (`Core::tied_posts`): it is dropped, and the
+    // run ends at `CATCH_ALL` as on a file (NCBI BLAST+ 2.17.0 blastn outfmt 0 and 3, standard
+    // error on `/dev/full`: exit status 6; line RG item T8b review S1), whose texts the bad `cerr`
+    // drops too (`cerr_post`).
+    let mut stream = ReportStream::new(
+        Box::new(FailAt(5)),
+        Some(NcbiBuffer::new(NcbiStdio::Cout {
+            block: 4096,
+            lines: false,
+        })),
+        true,
+        "blastp",
+        Site::Alignments,
+    );
+    lock(&stream.0).diagnostics = Some((Box::new(FailAt(0)), Cerr::new()));
+    lock(&stream.0).post("Warning: [blastp] w\n").unwrap();
+    assert!(lock(&stream.0).cerr().failed());
+    stream.write_all(b"> subject\n").unwrap();
+    lock(&stream.0).flush().unwrap();
+    assert!(lock(&stream.0).sync().is_err());
+    assert_eq!(native(stream.finish(Ok(()))), (6, post.to_string()));
 }
 
 /// A second stream on the device of `stream` (the test's `NcbiOstream::report` owns it).

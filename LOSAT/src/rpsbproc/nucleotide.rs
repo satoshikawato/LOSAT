@@ -47,12 +47,12 @@ pub(super) fn print_frames(
             let rf = RF_IDS[rfidx].to_string();
             for record in &domain_records(&query.frames[rfidx], &query.aligns, data, mode) {
                 let align = &query.aligns[record.align];
-                report.write(session.as_bytes());
-                report.write(b"\t");
-                report.write(&query.accession);
-                report.write(b"[");
-                report.write(rf.as_bytes());
-                report.write(b"]\t");
+                report.insert(session.as_bytes());
+                report.insert(b"\t");
+                report.insert(&query.accession);
+                report.insert(b"[");
+                report.insert(rf.as_bytes());
+                report.insert(b"]\t");
                 let key = (align.region as u32).wrapping_mul(OVERLAPLEADING) as i32;
                 match mode {
                     DataMode::Rep => {
@@ -79,19 +79,19 @@ pub(super) fn print_frames(
                         }
                     }
                 }
-                report.write(b"\n");
+                report.endl();
             }
         }
         report.line(&[b"ENDDOMAINS"]);
         if show_families {
             report.line(&[b"SUPERFAMILIES"]);
             for record in families.iter().flat_map(|frame| frame.values()) {
-                report.write(session.as_bytes());
-                report.write(b"\t");
-                report.write(&query.accession);
-                report.write(b"\t");
+                report.insert(session.as_bytes());
+                report.insert(b"\t");
+                report.insert(&query.accession);
+                report.insert(b"\t");
                 print_cluster_line(report, record, query, data);
-                report.write(b"\n");
+                report.endl();
             }
             report.line(&[b"ENDSUPERFAMILIES"]);
         }
@@ -316,29 +316,29 @@ fn print_site(
         codons.extend_from_slice(format!("{first}-{last}").as_bytes());
         delimit = b",";
     }
-    report.write(session.as_bytes());
-    report.write(b"\t");
-    report.write(&query.accession);
-    report.write(b"[");
-    report.write(frame.label.as_bytes());
-    report.write(b"]\t");
-    report.write(kind);
-    report.write(b"\t");
-    report.write(data.text(site.title));
-    report.write(b"\t");
-    report.write(&codons);
+    report.insert(session.as_bytes());
+    report.insert(b"\t");
+    report.insert(&query.accession);
+    report.insert(b"[");
+    report.insert(frame.label.as_bytes());
+    report.insert(b"]\t");
+    report.insert(kind);
+    report.insert(b"\t");
+    report.insert(data.text(site.title));
+    report.insert(b"\t");
+    report.insert(&codons);
     let complete: i64 = data
         .site_segs(site)
         .iter()
         .map(|seg| i64::from(seg[1]) - i64::from(seg[0]) + 1)
         .sum();
-    report.write(format!("\t{complete}\t0\t").as_bytes());
+    report.insert(format!("\t{complete}\t0\t").as_bytes());
     match source {
         Source::Lookup(source) => write_source(report, data, source),
-        Source::Raw(source) => report.write(source.to_string().as_bytes()),
-        Source::Zero => report.write(b"0"),
+        Source::Raw(source) => report.insert(source.to_string().as_bytes()),
+        Source::Zero => report.insert(b"0"),
     }
-    report.write(b"\n");
+    report.endl();
     Ok(())
 }
 
@@ -406,14 +406,15 @@ fn print_motifs(
                 continue;
             }
             let (first, last) = motif_ends(&featsegs, align, rfidx);
-            report.write(session.as_bytes());
-            report.write(b"\t");
-            report.write(&query.accession);
-            report.write(b"[");
-            report.write(rf.as_bytes());
-            report.write(b"]\t");
-            report.write(data.text(motif.site.title));
-            report.write(format!("\t{first}\t{last}\t{}\n", motif.source).as_bytes());
+            report.insert(session.as_bytes());
+            report.insert(b"\t");
+            report.insert(&query.accession);
+            report.insert(b"[");
+            report.insert(rf.as_bytes());
+            report.insert(b"]\t");
+            report.insert(data.text(motif.site.title));
+            report.insert(format!("\t{first}\t{last}\t{}", motif.source).as_bytes());
+            report.endl();
         }
     }
     report.line(&[b"ENDMOTIFS"]);

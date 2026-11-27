@@ -949,8 +949,9 @@ fn rpsbproc_refuses_reader_variables() {
 // stream and the run goes on to its exit status. A write that meets a closed pipe ends NCBI's
 // process by SIGPIPE (its frozen `rc` is `-13`, the signal): LOSAT has written what NCBI wrote
 // before it and ends there with exit status 0 and no text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
-// exception 10). The `-o` file `out.txt` and the `-logfile` file `log.txt` are compared as in
-// `compare_rows` (a run that ends before `Init` opens them leaves none).
+// exception 10), also where the write is a post to a `-logfile` on that pipe (`-logfile /dev/stdout`,
+// `-logfile /dev/stderr`). The `-o` file `out.txt` and the `-logfile` file `log.txt` are compared as
+// in `compare_rows` (a run that ends before `Init` opens them leaves none).
 #[cfg(target_os = "linux")]
 #[test]
 fn rpsbproc_gives_ncbis_bytes_on_failed_and_closed_streams() {
@@ -1029,7 +1030,7 @@ fn rpsbproc_gives_ncbis_bytes_on_failed_and_closed_streams() {
         }
         compared += 1;
     }
-    assert_eq!(compared, 20);
+    assert_eq!(compared, 26);
 }
 
 // An error of the command line on a standard error whose reader has closed it: NCBI's rpsbproc

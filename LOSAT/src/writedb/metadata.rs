@@ -310,24 +310,13 @@ pub(crate) enum IoErrCode {
     Flush,
 }
 
-/// A `CIOException` that `COStreamBuffer` throws: its code and message (`GetMsg()`).
+/// A `CIOException` that `COStreamBuffer` throws: its code and message (`GetMsg()`), all that a
+/// call of the serializer's buffer throws (the streams of makeblastdb and blastdbcmd set no
+/// exception mask, so no `ios_base::failure` leaves their writes).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IoException {
     pub(crate) code: IoErrCode,
     pub(crate) msg: &'static str,
-}
-
-/// What a call of the serializer's buffer throws: its `CIOException` (the streams of makeblastdb
-/// and blastdbcmd set no exception mask, so no `ios_base::failure` leaves their writes).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BufferError {
-    Io(IoException),
-}
-
-impl From<IoException> for BufferError {
-    fn from(exception: IoException) -> Self {
-        BufferError::Io(exception)
-    }
 }
 
 impl IoException {
@@ -391,14 +380,14 @@ impl<'a, B: StreamBuf> OStreamBuffer<'a, B> {
     // NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:283-312
     // `DoSkip` (strbuffer.inl:273-281) is `DoReserve` and the same advance.
     /// `Skip` of `count`: the position of the `count` bytes taken.
-    fn skip(&mut self, count: usize) -> Result<usize, BufferError> {
+    fn skip(&mut self, count: usize) -> Result<usize, IoException> {
         let pos = self.reserve(count)?;
         self.current = pos + count;
         Ok(pos)
     }
 
     /// `Reserve(count)`: the position where `count` bytes fit.
-    fn reserve(&mut self, count: usize) -> Result<usize, BufferError> {
+    fn reserve(&mut self, count: usize) -> Result<usize, IoException> {
         if self.current + count <= self.buffer.len() {
             Ok(self.current)
         } else {
@@ -408,7 +397,7 @@ impl<'a, B: StreamBuf> OStreamBuffer<'a, B> {
 
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:921-948
     // `BiggerBufferSize` doubles (strbuffer.cpp:48-52).
-    fn do_reserve(&mut self, count: usize) -> Result<usize, BufferError> {
+    fn do_reserve(&mut self, count: usize) -> Result<usize, IoException> {
         self.flush_buffer(false)?;
         let need_size = self.current + count;
         let mut buffer_size = self.buffer.len();
@@ -424,7 +413,7 @@ impl<'a, B: StreamBuf> OStreamBuffer<'a, B> {
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:871-907
     // With no back limit, both forms write all the buffer holds. A failed write keeps it there.
     /// `FlushBuffer` with `fullBuffer`.
-    fn flush_buffer(&mut self, _full_buffer: bool) -> Result<(), BufferError> {
+    fn flush_buffer(&mut self, _full_buffer: bool) -> Result<(), IoException> {
         let count = self.current;
         if count != 0 {
             self.output.write(&self.buffer[..count]);
@@ -433,8 +422,7 @@ impl<'a, B: StreamBuf> OStreamBuffer<'a, B> {
                 return Err(IoException {
                     code: IoErrCode::Write,
                     msg: "write fault",
-                }
-                .into());
+                });
             }
             self.current = 0;
             self.buffer_pos += count as u64;
@@ -445,7 +433,7 @@ impl<'a, B: StreamBuf> OStreamBuffer<'a, B> {
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:813-837,910-918
     // `eFlush` sets no `m_Error`. The guard's destructor restores the state.
     /// `Flush()`.
-    pub(crate) fn flush(&mut self) -> Result<(), BufferError> {
+    pub(crate) fn flush(&mut self) -> Result<(), IoException> {
         let state = self.output.rdstate();
         self.output.clear(IoState::GOOD);
         let result = self.flush_buffer(true).and_then(|()| {
@@ -454,8 +442,7 @@ impl<'a, B: StreamBuf> OStreamBuffer<'a, B> {
                 Err(IoException {
                     code: IoErrCode::Flush,
                     msg: "COStreamBuffer::Flush: failed",
-                }
-                .into())
+                })
             } else {
                 Ok(())
             }
@@ -472,7 +459,7 @@ impl<'a, B: StreamBuf> OStreamBuffer<'a, B> {
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:843-862
     // `m_Output` as a condition is true while the stream's `fail()` is false.
     /// `Close()`.
-    fn close(&mut self) -> Result<(), BufferError> {
+    fn close(&mut self) -> Result<(), IoException> {
         if !self.closed && !self.output.fail() {
             self.closed = true;
             let state = self.output.rdstate();
@@ -493,18 +480,18 @@ impl<'a, B: StreamBuf> OStreamBuffer<'a, B> {
 // metadata object are written byte by byte (`x_WriteString`); `PutString` gets the numbers
 // and the escapes, all shorter than 1024 bytes.
 impl<B: StreamBuf> JsonOut for OStreamBuffer<'_, B> {
-    type Error = BufferError;
-    fn put_char(&mut self, c: u8) -> Result<(), BufferError> {
+    type Error = IoException;
+    fn put_char(&mut self, c: u8) -> Result<(), IoException> {
         let pos = self.skip(1)?;
         self.buffer[pos] = c;
         Ok(())
     }
-    fn put_string(&mut self, s: &[u8]) -> Result<(), BufferError> {
+    fn put_string(&mut self, s: &[u8]) -> Result<(), IoException> {
         let pos = self.skip(s.len())?;
         self.buffer[pos..pos + s.len()].copy_from_slice(s);
         Ok(())
     }
-    fn put_eol(&mut self) -> Result<(), BufferError> {
+    fn put_eol(&mut self) -> Result<(), IoException> {
         let pos = self.reserve(1)?;
         self.buffer[pos] = b'\n';
         self.current = pos + 1;
@@ -537,12 +524,8 @@ pub(crate) struct ObjectOStream<'a, B: StreamBuf> {
     prefix: Option<&'static str>,
 }
 
-/// What `CObjectOStream::Close` throws: the `CSerialException` of its handler.
-enum Closed {
-    Serial(SerialException),
-}
-
-/// The `CSerialException` that `ThrowError1` throws over the exception it was given.
+/// The `CSerialException` that `ThrowError1` throws over the exception it was given (what
+/// `CObjectOStream::Close` throws: its handler's).
 struct SerialException {
     /// `byte N: <message>`.
     msg: String,
@@ -619,16 +602,16 @@ impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
 
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:327-355
     /// `Close()`.
-    fn close(&mut self, err: &mut dyn Write) -> Result<(), Closed> {
+    fn close(&mut self, err: &mut dyn Write) -> Result<(), SerialException> {
         if self.fail != F_NOT_OPEN {
             let result = self.output.flush().and_then(|()| {
                 self.fail = F_NOT_OPEN;
                 self.output.close()
             });
             match result {
-                Err(BufferError::Io(exc)) if self.in_good_state(err) => {
+                Err(exc) if self.in_good_state(err) => {
                     let exc = self.rethrow_write_error("cannot close output stream", exc, err);
-                    return Err(Closed::Serial(exc));
+                    return Err(exc);
                 }
                 _ => {}
             }
@@ -647,20 +630,17 @@ impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
     /// `~CObjectOStream`.
     pub(crate) fn destroy(&mut self, err: &mut dyn Write) {
         let tag = self.tag();
-        match self.close(err) {
-            Err(Closed::Serial(exc)) => {
-                let (kind, msg) = (exc.predecessor.type_and_code(), exc.predecessor.msg);
-                self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
-                let line = format!("Error: ({SERIAL_IO_ERROR}) {tag}{}", exc.msg);
-                self.post(err, &line, true);
-                let line = format!(
-                    "Error: (802.4) {tag}Cannot close serializing output stream \
-                     ({SERIAL_IO_ERROR}) {}",
-                    exc.msg
-                );
-                self.post(err, &line, true);
-            }
-            Ok(()) => {}
+        if let Err(exc) = self.close(err) {
+            let (kind, msg) = (exc.predecessor.type_and_code(), exc.predecessor.msg);
+            self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
+            let line = format!("Error: ({SERIAL_IO_ERROR}) {tag}{}", exc.msg);
+            self.post(err, &line, true);
+            let line = format!(
+                "Error: (802.4) {tag}Cannot close serializing output stream \
+                 ({SERIAL_IO_ERROR}) {}",
+                exc.msg
+            );
+            self.post(err, &line, true);
         }
         self.destroy_buffer(err);
     }
@@ -673,16 +653,13 @@ impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
     /// `~COStreamBuffer` (a member of the object stream, destroyed after its body).
     fn destroy_buffer(&mut self, err: &mut dyn Write) {
         let tag = self.tag();
-        match self.output.close() {
-            Err(BufferError::Io(exc)) => {
-                let (kind, msg) = (exc.type_and_code(), exc.msg);
-                self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
-                let line = format!(
-                    "Error: (205.2) {tag}~COStreamBuffer: exception while closing ({kind}) {msg}"
-                );
-                self.post(err, &line, true);
-            }
-            Ok(()) => {}
+        if let Err(exc) = self.output.close() {
+            let (kind, msg) = (exc.type_and_code(), exc.msg);
+            self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
+            let line = format!(
+                "Error: (205.2) {tag}~COStreamBuffer: exception while closing ({kind}) {msg}"
+            );
+            self.post(err, &line, true);
         }
     }
 
@@ -762,10 +739,10 @@ pub(crate) fn write_metadata<B: StreamBuf>(
     if json_out.output.output().rdbuf().closed_pipe() {
         return None;
     }
-    result.err().and_then(|exception| match exception {
-        BufferError::Io(exception) if exception.code == IoErrCode::Flush => Some(exception.msg),
-        _ => None,
-    })
+    result
+        .err()
+        .filter(|exception| exception.code == IoErrCode::Flush)
+        .map(|exception| exception.msg)
 }
 
 #[cfg(test)]

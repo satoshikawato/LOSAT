@@ -436,8 +436,14 @@ closed.three.logfile	device	-	-	-i arch/three.asn -d data -t doms -logfile log.t
 closed.mat	device	-	-	-i arch/bad/matrix_integer.asn -d data
 closed.help	device	-	-	-help
 closed.version	device	-	-	-version
+closed.missing.logstdout	device	-	-	-i missing.asn -d data -logfile /dev/stdout
+closed.missing.logstdout.q	device	-	-	-i missing.asn -d data -logfile /dev/stdout -q
+closed.three.logstdout	device	-	-	-i arch/three.asn -d data -t doms -logfile /dev/stdout
+closed.mat.logstdout	device	-	-	-i arch/bad/matrix_integer.asn -d data -logfile /dev/stdout
+closed.nodata.logstdout	device	-	-	-i arch/three.asn -d nodata -logfile /dev/stdout
 errclosed.three	device	-	-	-i arch/three.asn -d data -t doms -o out.txt
 errclosed.three.q	device	-	-	-i arch/three.asn -d data -t doms -o out.txt -q
+errclosed.missing.logstderr	device	-	-	-i missing.asn -d data -logfile /dev/stderr
 errfull.three	device	-	-	-i arch/three.asn -d data -t doms -o out.txt
 errfull.mat	device	-	-	-i arch/bad/matrix_integer.asn -d data -o out.txt
 merged.three	device	-	-	-i arch/three.asn -d data -t doms

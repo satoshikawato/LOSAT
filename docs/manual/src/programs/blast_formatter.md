@@ -40,7 +40,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 
 ## Differences from NCBI BLAST+
 
-None that change the output of a normal run. The options, NCBI's help and usage texts, argument errors, messages and exit statuses are NCBI's, also where the output cannot be written: `-out /dev/full` gives NCBI's messages and exit status, and a standard output on a full device or a closed pipe ends the program as NCBI's does (`terminate called after throwing an instance of 'std::__ios_failure'`, exit status 134), or, after a standard error that could not be written, with exit status 6, as NCBI's. See [Differences from NCBI BLAST+](../differences.md).
+None that change the output of a normal run. The options, NCBI's help and usage texts, argument errors, messages and exit statuses are NCBI's, also where the output cannot be written: `-out /dev/full` gives NCBI's messages and exit status, and a standard output on a full device or a closed pipe ends the program as NCBI's does (`terminate called after throwing an instance of 'std::__ios_failure'`, exit status 134), or, after a full standard error, with exit status 6, as NCBI's. See [Differences from NCBI BLAST+](../differences.md).
 
 ## What LOSAT refuses
 

@@ -19,7 +19,8 @@ pub enum Site {
     /// `CObjectOStream` on the report's stream (`showalign.cpp:1931`), flushes the stream again
     /// in its destructor and posts 802.4 (`objostr.cpp:317-324`), then as `Report`. On standard
     /// output the post's `cerr` flushes the failed `cout` first (the tie, `ncbidiag.cpp:6476-6493`)
-    /// and that throws inside `~CNcbiDiag`: `std::terminate`.
+    /// and that throws inside `~CNcbiDiag`: `std::terminate`; a `cerr` that failed before flushes
+    /// no tie (`Core::tied_posts`), so the post is dropped and the run ends as on a file.
     Alignments,
     /// A `CBlastTabularInfo` lives (outfmt 6, 7, 10; `blast_format.cpp:773-782`, `:2234-2235`):
     /// its destructor flushes the failed stream again (`tabular.cpp:160-163`), the exception
@@ -100,16 +101,22 @@ enum Failure {
 pub const TERMINATE_TEXT: &str = "terminate called after throwing an instance of \
 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n";
 
-// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-324
-/// The post of `~CObjectOStream` whose `Close` flushed the failed report stream of `program`
-/// (`[program]` is the application's name in NCBI's posts; none where the application sets no
-/// prefix, `program` empty: blast_formatter's).
-pub fn cannot_close_post(program: &str) -> String {
-    let tag = if program.is_empty() {
+/// The prefix of the posts of `program`'s report stream: `[program] `, the application's name in
+/// NCBI's posts, or nothing where the application sets no prefix (`program` empty:
+/// blast_formatter's, `ReportStream::formatter_output`).
+fn post_tag(program: &str) -> String {
+    if program.is_empty() {
         String::new()
     } else {
         format!("[{program}] ")
-    };
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-324
+/// The post of `~CObjectOStream` whose `Close` flushed the failed report stream of `program`
+/// (`post_tag`).
+pub fn cannot_close_post(program: &str) -> String {
+    let tag = post_tag(program);
     format!(
         "Error: (802.4) {tag}[Cannot close serializing output stream] Exception: \
          basic_ios::clear: iostream error\n"
@@ -253,7 +260,8 @@ fn strategy_write_fault() -> std::io::Error {
 /// `program` (`std::ios_base::failure` is no `CException`: no `what()` follows the label, which
 /// NCBI writes without its `)`; each call formats one query, `Q(0/1`).
 fn iteration_post(program: &str) -> String {
-    format!("Error: [{program}] Failed s_BlastXMLAddIteration Q(0/1\n")
+    let tag = post_tag(program);
+    format!("Error: {tag}Failed s_BlastXMLAddIteration Q(0/1\n")
 }
 
 /// The command line's report stream (`-out` or standard output) as NCBI's writes it: NCBI's
@@ -925,10 +933,10 @@ impl Core {
         if self.undecided.take().is_none() {
             return Ok(());
         }
-        let program = self.program;
+        let tag = post_tag(self.program);
         self.post(&format!(
-            "Error: (802.5) [{program}] CObjectOStream: error at byte {position}: stack is \
-             empty: write fault\n"
+            "Error: (802.5) {tag}CObjectOStream: error at byte {position}: stack is empty: \
+             write fault\n"
         ))
     }
 
@@ -978,12 +986,16 @@ impl Core {
             // 802.4 there, line RG survey T6 D3), so `out2`'s flush during the unwinding of an
             // insertion's exception, which clears the stream's state first, writes nothing and
             // succeeds: no post. Its own flush at the end of the alignments fails and posts, and
-            // the post's tie throws. A file keeps the bytes it could not write: the second flush
+            // the post's tie throws, where the post flushes the stream (`tied_posts`): a `cerr`
+            // that failed before drops the post without its tie, and the run ends at `CATCH_ALL`
+            // as on a file (NCBI BLAST+ 2.17.0 blastn outfmt 0 and 3 with standard error on
+            // `/dev/full` and standard output a file at its size limit: exit status 6, line RG
+            // item T8b review S1). A file keeps the bytes it could not write: the second flush
             // fails too (the 802.4 of NCBI's `-out` runs).
             Site::Alignments if self.standard_output && !flushing => Failure::Thrown {
                 posts: String::new(),
             },
-            Site::Alignments if self.standard_output => Failure::Terminate,
+            Site::Alignments if self.tied_posts() => Failure::Terminate,
             Site::Alignments => Failure::Thrown {
                 posts: cannot_close_post(self.program),
             },
@@ -1028,9 +1040,9 @@ impl Core {
     fn xml2_caught(&mut self, json: bool) -> std::io::Result<()> {
         let format = if json { "JSON" } else { "XML" };
         self.post(&format!(
-            "{}Error: [{}] {format} format failed\n",
+            "{}Error: {}{format} format failed\n",
             cannot_close_post(self.program),
-            self.program
+            post_tag(self.program)
         ))?;
         Err(caught_failure())
     }

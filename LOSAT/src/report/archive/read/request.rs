@@ -231,7 +231,6 @@ impl Request {
 
     /// `GetParamByName` of the list `set`: its first parameter named `name`.
     // NCBI reference (598d8ae6): c++/src/objects/blast/Blast4_parameters.cpp:186-198
-    #[cfg(test)]
     pub(crate) fn param(&self, set: ParamSet, name: &[u8]) -> Option<&Param> {
         self.params
             .iter()

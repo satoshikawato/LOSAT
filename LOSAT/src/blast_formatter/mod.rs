@@ -6,6 +6,7 @@
 //! servers, is refused (`refusals`), as the search programs refuse `-remote`.
 
 mod archive;
+mod archive_out;
 mod formatting;
 pub(crate) mod refusals;
 mod search_program;

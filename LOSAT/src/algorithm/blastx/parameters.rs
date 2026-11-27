@@ -87,10 +87,13 @@ fn context_blocks(
     on_pool: bool,
     block: impl Fn(&QueryContext) -> ContextParameters + Sync + Send,
 ) -> Vec<ContextParameters> {
+    // The contexts' blocks are taken by this thread in context order and by the pool's idle
+    // threads (`utils::xitems::x_map`): this thread runs no other job of the pool meanwhile.
     #[cfg(feature = "parallel")]
     if on_pool {
-        use rayon::prelude::*;
-        return batch.contexts.par_iter().map(block).collect();
+        return crate::utils::xitems::x_map(batch.contexts.len(), |index| {
+            block(&batch.contexts[index])
+        });
     }
     let _ = on_pool;
     batch.contexts.iter().map(block).collect()

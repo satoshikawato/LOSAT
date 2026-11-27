@@ -1,0 +1,21 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing first -2147483648 and last -2147483648 OIDs.
+
+Testing 1 volume(s).
+ <RUN>/in/p5
+  <RUN>/in/p5 / EndPoints: <testing -2147483648 OIDs at each end>
+  <RUN>/in/p5 / EndPoints:       Status for OID 0: PASS
+  <RUN>/in/p5 / EndPoints:       Status for OID 1: PASS
+  <RUN>/in/p5 / EndPoints:       Status for OID 2: PASS
+  <RUN>/in/p5 / EndPoints:       Status for OID 3: PASS
+  <RUN>/in/p5 / EndPoints:       Status for OID 4: PASS
+  <RUN>/in/p5 / EndPoints:       Status for OID 5: PASS
+  <RUN>/in/p5 / EndPoints:       Status for OID 6: PASS
+  <RUN>/in/p5 / EndPoints:       Status for OID 7: PASS
+  <RUN>/in/p5 / EndPoints:       Status for OID 8: PASS
+ Result=SUCCESS. No errors reported for 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).

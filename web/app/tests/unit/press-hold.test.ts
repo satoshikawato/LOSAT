@@ -148,7 +148,7 @@ describe('a press that ends without a click ends the hold', () => {
  * space that the hold may put above what the main area shows): the window's scroll, its height and the page's, a
  * MutationObserver and frames that the test runs, what the hold set on the styles, and a pointer.
  */
-function laidOut(options: { top: number; scroll: number; window: number; height: number; position?: string; resize?: string }) {
+function laidOut(options: { top: number; scroll: number; window: number; height: number; position?: string; resize?: string; control?: boolean }) {
   const style = () => {
     const values = new Map<string, string>();
     return {
@@ -187,6 +187,8 @@ function laidOut(options: { top: number; scroll: number; window: number; height:
     ...style(),
     offsetParent: main,
     isConnected: true,
+    /** What the page's selector of controls finds around the pressed element: the button, or nothing for a container. */
+    closest: () => (options.control === false ? null : button),
     scrollTop: 0,
     parentElement: main,
     parentNode: main,
@@ -447,6 +449,40 @@ describe('the pressed control stays under the pointer until its click (line WQA,
     p.release();
     expect(p.held()).toBe(true);
     p.click();
+    expect(p.held()).toBe(false);
+  });
+
+  // Review r2 of D27, L1: the element that was pressed left the page (a placeholder that its content took the place of):
+  // nothing is kept any more, and AlignmentsView keeps the Range being read in place again.
+  it('stops keeping the pressed control when it leaves the page, at the next look', () => {
+    const p = laidOut({ top: 1500, scroll: 1000, window: 700, height: 3000 });
+    p.press();
+    expect(p.held()).toBe(true);
+    p.button.isConnected = false;
+    p.moveInFrame(1500);
+    expect(p.held()).toBe(false);
+    expect(p.button.values.has('min-width')).toBe(false);
+    expect(p.body.values.has('overflow-anchor')).toBe(false);
+    expect(p.frames()).toBe(0);
+    expect(p.scrolls).toEqual([]);
+  });
+
+  it('stops keeping the pressed control that leaves the page when the document changes', () => {
+    const p = laidOut({ top: 1500, scroll: 1000, window: 700, height: 3000 });
+    p.press();
+    p.button.isConnected = false;
+    p.move(1500);
+    expect(p.held()).toBe(false);
+  });
+
+  // Review r2 of D27, L2: a press on the space between things keeps that container, whose top does not move, and the
+  // page's own scrolls (AlignmentsView's) were left waiting for as long as the pointer stayed over it.
+  it('says that nothing is held for a press on something that is no control, though it keeps its place', () => {
+    const p = laidOut({ top: 1500, scroll: 1000, window: 700, height: 3000, control: false });
+    p.press();
+    expect(p.held()).toBe(false);
+    p.move(1534);
+    expect(p.scrolls).toEqual([34]);
     expect(p.held()).toBe(false);
   });
 

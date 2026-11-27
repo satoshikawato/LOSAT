@@ -101,16 +101,11 @@ pub(super) fn search_rounds(
     if batches.searched_done == 0 {
         // As `search`: the first batch's stop after the prolog, or the reports of no query.
         if let Some((_, error)) = batches.stop.as_ref() {
-            // The request of a batch that NCBI made a query factory of, before any output; NCBI's
-            // stream that throws while it writes the request (`encoder::NullElement`) ends the
-            // run after the prolog (psiblast_app.cpp:506, 340).
-            if let Err(error) = write_stop_request() {
-                if error.is::<crate::cli::NativeError>() {
-                    write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
-                }
-                return Err(error);
-            }
-            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+            // The prologs of the first report, then the request of a batch that NCBI made a query
+            // factory of; NCBI's stream that throws while it writes the request
+            // (`encoder::NullElement`) ends the run after the prolog (psiblast_app.cpp:506, 340).
+            write_pairwise_prologs(args, subject_source, subject_label, outputs, false)?;
+            write_stop_request()?;
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (cited at
             // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM
             // of `-in_pssm` in round 1)
@@ -355,7 +350,13 @@ fn run_queries(
                         });
                     if let Err(error) = written {
                         if calls == 0 {
-                            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+                            write_pairwise_prologs(
+                                args,
+                                subject_source,
+                                subject_label,
+                                outputs,
+                                false,
+                            )?;
                         }
                         return Err(error);
                     }
@@ -531,7 +532,13 @@ fn run_queries(
                         None => Default::default(),
                     };
                     if calls == 0 {
-                        write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+                        write_pairwise_prologs(
+                            args,
+                            subject_source,
+                            subject_label,
+                            outputs,
+                            false,
+                        )?;
                     }
                     if round == 1 {
                         outputs.diagnostics.write_all(&batches.warnings[query])?;

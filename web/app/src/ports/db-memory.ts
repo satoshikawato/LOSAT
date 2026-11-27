@@ -1,5 +1,5 @@
 // Persistence port for remembering that a previous run/session referenced a local BLAST
-// database folder, so after a page reload the UI can prompt "Choose the folder again."
+// database folder or files, so after a page reload the UI can prompt "Choose the folder or files again."
 // (browsers do not retain directory handles across reloads). Only metadata (name/folder)
 // is remembered — never sequence data.
 

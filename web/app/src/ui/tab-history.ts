@@ -22,7 +22,7 @@
 // restoration, the Search tab's button, which goes back, scrolled the page down to where the form
 // had been left, and the focused tab out of view.
 
-export type MainTab = 'search' | 'results' | 'windowmasker' | 'masking' | 'blast_formatter';
+export type MainTab = 'search' | 'results' | 'windowmasker' | 'masking' | 'makeblastdb' | 'blast_formatter';
 
 type FormTab = Exclude<MainTab, 'results'>;
 

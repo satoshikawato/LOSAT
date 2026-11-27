@@ -9,9 +9,17 @@
 // selection, held by the HSP's identity (application/results.ts).
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
-import { isToolRun, type AnyRunView, type Coordinator, type RunView, type SessionArchiveEntry, type SessionCountsEntry } from '../application/coordinator';
+import {
+  isToolRun,
+  type AnyRunView,
+  type Coordinator,
+  type MadeDatabase,
+  type MaskDataHandover,
+  type RunView,
+  type SessionArchiveEntry,
+  type SessionCountsEntry,
+} from '../application/coordinator';
 import type { CountsLoader } from '../application/counts';
-import type { MaskDataEntry } from '../application/mask-data-handover';
 import { OutputSaver } from '../application/outputs';
 import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
@@ -45,25 +53,20 @@ import VerificationBadge from './VerificationBadge.vue';
 
 export type ResultsView = 'hits' | 'dotplot' | 'details' | 'outputs';
 
-const props = defineProps<{
-  coordinator: Coordinator;
-  results: ResultsBrowser;
-  runs: readonly AnyRunView[];
-  counts?: CountsLoader | undefined;
-  /** Whether a masking-information output can be handed to makeblastdb (MaskDataHandover.available). */
-  maskDataAvailable?: boolean | undefined;
-}>();
+const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly AnyRunView[]; counts?: CountsLoader | undefined }>();
 /**
- * "Run a search" of the empty results page, or tool output actions ("Use in BLASTN", "Mask with these counts",
- * "Use as -mask_data in makeblastdb").
+ * "Run a search" of the empty results page, or tool output actions ("Use in BLASTN", "Mask with these counts", "Use as
+ * Database (-db)", "Use as Repeats database (-filtering_db)", "Use as -mask_data in makeblastdb").
  */
 const emit = defineEmits<{
   search: [];
   'use-in-blastn': [file: File];
   'use-taxid-in-blastn': [taxid: number];
   'mask-with-counts': [entry: SessionCountsEntry];
-  'use-mask-data': [entry: MaskDataEntry];
   'format-archive': [entry: SessionArchiveEntry];
+  'use-as-database': [made: MadeDatabase];
+  'use-as-repeats-database': [made: MadeDatabase];
+  'use-as-mask-data': [data: MaskDataHandover];
 }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
@@ -478,11 +481,12 @@ async function toAlignments(id: HspId): Promise<void> {
         :counts="counts"
         :badge="state.toolBadge"
         :takes-value="state.grammar?.takesValue"
-        :mask-data-available="maskDataAvailable"
         @use-in-blastn="emit('use-in-blastn', $event)"
         @use-taxid-in-blastn="emit('use-taxid-in-blastn', $event)"
         @mask-with-counts="emit('mask-with-counts', $event)"
-        @use-mask-data="emit('use-mask-data', $event)"
+        @use-as-database="emit('use-as-database', $event)"
+        @use-as-repeats-database="emit('use-as-repeats-database', $event)"
+        @use-as-mask-data="emit('use-as-mask-data', $event)"
       />
 
       <template v-if="state.phase === 'ready' && loaded">

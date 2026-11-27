@@ -41,6 +41,7 @@ import DESCRIBE from './describe.json';
 import BLAST_FORMATTER_XMLHELP_DOC from './blast_formatter-xmlhelp.json';
 import CONVERT2BLASTMASK_XMLHELP_DOC from './convert2blastmask-xmlhelp.json';
 import DUSTMASKER_XMLHELP_DOC from './dustmasker-xmlhelp.json';
+import MAKEBLASTDB_XMLHELP_DOC from './makeblastdb-xmlhelp.json';
 import SEGMASKER_XMLHELP_DOC from './segmasker-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from './windowmasker-xmlhelp.json';
 import { fakeReaderError, fakeRecordKeys } from './fake-fasta';
@@ -52,6 +53,7 @@ import { fakeReaderError, fakeRecordKeys } from './fake-fasta';
 const TOOL_XMLHELP: Readonly<Record<string, string>> = {
   windowmasker: WINDOWMASKER_XMLHELP_DOC.xml,
   blast_formatter: BLAST_FORMATTER_XMLHELP_DOC.xml,
+  makeblastdb: MAKEBLASTDB_XMLHELP_DOC.xml,
   dustmasker: DUSTMASKER_XMLHELP_DOC.xml,
   segmasker: SEGMASKER_XMLHELP_DOC.xml,
   convert2blastmask: CONVERT2BLASTMASK_XMLHELP_DOC.xml,
@@ -111,7 +113,9 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     for (let i = 1; i < argv.length; i++) {
       const word = argv[i]!;
       const [flag, inline] = word.split(/=(.*)/s, 2);
-      if (WINDOWMASKER_HELP_FLAGS.has(flag!) || WINDOWMASKER_VERSION_FLAGS.has(flag!)) return { ok: true };
+      if (WINDOWMASKER_HELP_FLAGS.has(flag!) || WINDOWMASKER_VERSION_FLAGS.has(flag!) || (tool === 'makeblastdb' && flag === '-help-full')) {
+        return { ok: true };
+      }
       const param = byFlag.get(flag!);
       const extraValued = flag === '-logfile' || flag === '-conffile' || (tool === 'blast_formatter' && flag === '-rid');
       if (param === undefined && !extraValued) {
@@ -159,6 +163,9 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     }
     if (tool === 'windowmasker' && !seen.has('-mk_counts') && !seen.has('-convert') && !seen.has('-ustat')) {
       return { ok: false, message: 'Argument error: One of -mk_counts, -convert, or -ustat must be specified' };
+    }
+    if (tool === 'makeblastdb' && !seen.has('-dbtype')) {
+      return { ok: false, message: "Command line argument error: Argument \"dbtype\". Mandatory value is missing:  `String, `nucl', `prot'" };
     }
     if (tool === 'blast_formatter') {
       if (seen.has('-rid') && seen.has('-archive')) {
@@ -219,7 +226,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       await writeStdout(TOOL_XMLHELP[toolName] ?? '');
       return finish(0);
     }
-    if (words.some((w) => WINDOWMASKER_HELP_FLAGS.has(w))) {
+    if (words.some((w) => WINDOWMASKER_HELP_FLAGS.has(w) || (toolName === 'makeblastdb' && w === '-help-full'))) {
       await writeStdout(`USAGE\n  ${toolName} ... (${FAKE_MARKER})\n`);
       return finish(0);
     }
@@ -250,6 +257,16 @@ export class FakeEngine implements EngineGateway, ToolEngine {
 
     await pause();
     checkAborted();
+
+    if (toolName === 'makeblastdb') {
+      // The volume's three files under `-out` (or the first name of `-in`), each the marker: no database is made.
+      const db = outName ?? (toolOptionValue(argv, '-in') ?? 'db').split(' ')[0]!.replace(/^"|"$/g, '');
+      const letter = toolOptionValue(argv, '-dbtype') === 'prot' ? 'p' : 'n';
+      for (const ext of ['hr', 'in', 'sq']) await writeFile(`${db}.${letter}${ext}`, [bodyText]);
+      if (logName !== undefined) await writeFile(logName, [logText]);
+      await writeStdout(`\n\nBuilding a new DB, current time: (${FAKE_MARKER})\nNew DB name:   ${db}\n`);
+      return finish(0);
+    }
 
     const sameOutAndLog = outName !== undefined && outName !== '-' && logName !== undefined && outName === logName;
     if (sameOutAndLog) {

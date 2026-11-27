@@ -158,8 +158,8 @@ test('Masking tab: tool switcher, each tool run on the shared input, outputs and
   const dust = await shownOutput(page);
   expect(dust.bytes.length).toBeGreaterThan(0);
   if (!BUILD_HAS_ENGINE) expect(dust.text).toContain(FAKE_MARKER);
-  // No makeblastdb form takes masking information on this page: the hand-over is not offered.
-  await expect(page.getByTestId('tool-use-mask-data')).toHaveCount(0);
+  // DustMasker's -outfmt default (interval) is not masking information: no hand-over to makeblastdb.
+  await expect(page.getByTestId('tool-use-as-mask-data')).toHaveCount(0);
 
   // Run 2: SegMasker on the same input (shared), with an -out file of its own.
   await openMasking(page);
@@ -204,7 +204,14 @@ test('Masking tab: tool switcher, each tool run on the shared input, outputs and
   await page.getByTestId('tool-tab-stdout').click();
   const c2b = await shownOutput(page);
   expect(c2b.bytes.length).toBeGreaterThan(0);
-  await expect(page.getByTestId('tool-use-mask-data')).toHaveCount(0);
+  // convert2blastmask's -outfmt default (maskinfo_asn1_text, from its -xmlhelp) is masking information: its standard
+  // output goes to makeblastdb's -mask_data, named for the run.
+  await expect(page.getByTestId('tool-use-as-mask-data')).toBeVisible();
+  await page.getByTestId('tool-use-as-mask-data').click();
+  await expect(page.getByTestId('mk-panel')).toBeVisible();
+  await expect(page.getByTestId('mk-param-mask_data')).toHaveValue('convert2blastmask-run3.asnt');
+  await expect(page.getByTestId('mk-run-files')).toContainText('convert2blastmask-run3.asnt');
+  await page.getByTestId('tab-results').click();
   await page.getByTestId('results-view-details').click();
   await expect(page.getByTestId('run-snapshot')).toContainText('convert2blastmask');
 

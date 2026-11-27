@@ -1,6 +1,6 @@
 // Single command-line builders for the tools (windowmasker: WW3b DESIGN §2.5, brief §4.4;
-// blast_formatter: RG-F3p7; dustmasker, segmasker, convert2blastmask: WW4c): the same argv array is
-// validated by `validateTool`, run by `runTool`,
+// blast_formatter: RG-F3p7; makeblastdb: line WW WW4b2; dustmasker, segmasker, convert2blastmask: WW4c): the same
+// argv array is validated by `validateTool`, run by `runTool`,
 // displayed beside "Run LOSAT" as `losat windowmasker ...` and shown in Run details. Defaults are
 // omitted; Make counts and Convert counts write `-out wmasker.<sformat>` until the user edits it.
 import type { ToolDescription, ToolParameterDescription } from 'losat/domain';
@@ -14,6 +14,8 @@ import {
   defaultCountsOutName,
   isMaskingTool,
   maskingOptionParameters,
+  makeblastdbOptionParameters,
+  makeblastdbParameters,
   stageOptionParameters,
   toToolParameterField,
   WINDOWMASKER_BLOCK_FLAGS,
@@ -193,6 +195,17 @@ export interface MaskingArgvInput {
   readonly extra?: readonly string[];
 }
 
+export interface MakeblastdbArgvInput {
+  /** The names that `-in` lists (files of the run directory, or a database's name), omitted when empty. */
+  readonly inputNames: readonly string[];
+  /** Option values keyed by `-flag` (`-input_type`, `-dbtype`, `-out`, and the options of the groups). */
+  readonly values: FormValues;
+  /** Parsed `-xmlhelp` description (provides defaults and usage order). */
+  readonly description?: ToolDescription;
+  /** Extra words parsed from "Additional options" (`splitOptions`). */
+  readonly extra?: readonly string[];
+}
+
 /** The words that the Masking builder writes from the blocks (the file names). */
 const MASKING_NAMED_FLAGS: ReadonlySet<string> = new Set(['-in', '-out']);
 
@@ -213,6 +226,29 @@ export function buildMaskingArgv(input: MaskingArgvInput): readonly string[] {
   return Object.freeze(argv);
 }
 
+/**
+ * `-in`'s value for several names, as makeblastdb reads it (`SeqDB_SplitQuoted`) and writes it
+ * (`SeqDB_CombineAndQuote`): the names separated by spaces, a name with a space between double quotes.
+ */
+export function makeblastdbInputList(names: readonly string[]): string {
+  return names.map((name) => (name.includes(' ') ? `"${name}"` : name)).join(' ');
+}
+
+/**
+ * Builds `['makeblastdb', '-in', ..., ...]` for validation, execution and display: `-in` first, then the
+ * options set in the form in NCBI's `-help` usage order, then Additional options.
+ * Throws for a word of `extra` that Additional options refuse (`pushExtraWords`).
+ */
+export function buildMakeblastdbArgv(input: MakeblastdbArgvInput): readonly string[] {
+  const argv: string[] = ['makeblastdb'];
+  const names = input.inputNames.filter((name) => name.trim() !== '');
+  if (names.length > 0) argv.push('-in', makeblastdbInputList(names));
+  const ordered = makeblastdbParameters(input.description).filter((param) => param.flag !== '-in');
+  pushOptionWords(argv, ordered, input.values, MAKEBLASTDB_NAMED_FLAGS);
+  pushExtraWords(argv, input.extra);
+  return Object.freeze(argv);
+}
+
 /** Count of changed options inside the collapsible "<Tool> options" section of the Masking tab (plus Additional options). */
 export function changedMaskingOptionsCount(
   tool: MaskingTool,
@@ -223,30 +259,21 @@ export function changedMaskingOptionsCount(
   return changedOptionsCount(maskingOptionParameters(description, tool), values, extra);
 }
 
-/** The `-outfmt` values of masking information: what makeblastdb's `-mask_data` reads. */
-export const MASK_DATA_OUTFMTS: ReadonlySet<string> = new Set(['maskinfo_asn1_bin', 'maskinfo_asn1_text', 'maskinfo_xml']);
+/** makeblastdb's option whose words the builder writes from the Input block (the input's names). */
+const MAKEBLASTDB_NAMED_FLAGS: ReadonlySet<string> = new Set(['-in']);
 
-/**
- * Whether a run writes masking information (one rule for every masker, WW4c): a run of windowmasker's
- * Mask stage (`-ustat`), dustmasker, segmasker or convert2blastmask whose effective `-outfmt` (the
- * argv's value, else the `-xmlhelp` default: convert2blastmask's is `maskinfo_asn1_text`) is one of
- * `MASK_DATA_OUTFMTS`.
- */
-export function writesMaskData(tool: ToolId, stage: ToolStage, argv: readonly string[], description: ToolDescription | undefined): boolean {
-  if (!isMaskingTool(tool) && !(tool === 'windowmasker' && stage === 'mask')) return false;
-  const outfmt = toolOptionValue(argv, '-outfmt') ?? description?.parameters.find((param) => param.flag === '-outfmt')?.defaultValue;
-  return outfmt !== undefined && MASK_DATA_OUTFMTS.has(outfmt.trim());
+/** Count of changed options inside the collapsible "makeblastdb options" section (plus Additional options). */
+export function changedMakeblastdbOptionsCount(values: FormValues, extra: string, description: ToolDescription | undefined): number {
+  return changedOptionsCount(makeblastdbOptionParameters(description), values, extra);
 }
 
-/** Of a run that writes masking information, whether its standard output holds it: the argv names no `-out` file. */
-export function maskDataOnStdout(argv: readonly string[]): boolean {
-  return namedOutPath(argv) === undefined;
-}
-
-/** Of a run that writes masking information, whether the file `fileName` holds it: the argv's `-out` file. */
-export function isMaskDataFile(argv: readonly string[], fileName: string): boolean {
-  const out = namedOutPath(argv);
-  return out !== undefined && out === normalizeRelName(fileName);
+/** The names of a comma-separated list of files (`-mask_data a.asnb,b.asnb`), without empty entries. */
+export function fileListNames(value: unknown): readonly string[] {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name !== '');
 }
 
 /** The command words as shown beside Run LOSAT and in Run details (`losat windowmasker ...`). */
@@ -307,6 +334,52 @@ export function toolFileOptionLabel(argv: readonly string[], fileName: string): 
 export function isCountsOutputFile(stage: ToolStage, argv: readonly string[], fileName: string, tool: ToolId = 'windowmasker'): boolean {
   if (tool !== 'windowmasker' || (stage !== 'mk_counts' && stage !== 'convert')) return false;
   return namedOutPath(argv) === normalizeRelName(fileName);
+}
+
+/** The `-outfmt` values of the masking tools that write mask data for makeblastdb's `-mask_data`, with an extension for a file of each. */
+const MASK_DATA_FORMATS: Readonly<Record<string, string>> = Object.freeze({
+  maskinfo_asn1_bin: 'asnb',
+  maskinfo_asn1_text: 'asnt',
+  maskinfo_xml: 'xml',
+});
+
+/** The tool runs that mask with a `-outfmt`: WindowMasker's Mask (`-ustat`) and every tool of the Masking tab. */
+function masks(tool: ToolId, stage: ToolStage): boolean {
+  return isMaskingTool(tool) || (tool === 'windowmasker' && stage === 'mask');
+}
+
+/**
+ * The `-outfmt` default that `-xmlhelp` gives a run that masks (`masks`), for the run to record at submit: the argv
+ * names `-outfmt` only to change it, and the run is judged (`maskDataName`) after the description may be gone, as in a
+ * session that is restored. Undefined for another run, or when the description (or its `-outfmt`) is not known.
+ */
+export function maskOutfmtDefault(tool: ToolId, stage: ToolStage, description: ToolDescription | undefined): string | undefined {
+  return masks(tool, stage) ? description?.parameters.find((param) => param.flag === '-outfmt')?.defaultValue : undefined;
+}
+
+/**
+ * The name under which an output of a tool run goes to makeblastdb's `-mask_data` ("Use as -mask_data in makeblastdb"),
+ * or undefined for an output that is not mask data: the `-out` file of a masking run whose effective `-outfmt` writes
+ * mask data (`maskinfo_asn1_bin`, `maskinfo_asn1_text`, `maskinfo_xml`), or its standard output when it has no `-out`,
+ * named for the run (`windowmasker-run3.asnb`, `convert2blastmask-run4.asnt`). The effective `-outfmt` is the argv's
+ * value, else the run's `outfmtDefault` (`maskOutfmtDefault`). The one rule for every masking tool.
+ */
+export function maskDataName(
+  run: {
+    readonly tool: ToolId;
+    readonly stage: ToolStage;
+    readonly argv: readonly string[];
+    readonly number: number;
+    readonly outfmtDefault?: string;
+  },
+  entry: { readonly key: string; readonly name: string },
+): string | undefined {
+  if (!masks(run.tool, run.stage)) return undefined;
+  const extension = MASK_DATA_FORMATS[(toolOptionValue(run.argv, '-outfmt') ?? run.outfmtDefault ?? '').trim()];
+  if (extension === undefined) return undefined;
+  const out = namedOutPath(run.argv);
+  if (out === undefined) return entry.key === 'stdout' ? `${run.tool}-run${run.number}.${extension}` : undefined;
+  return entry.key !== 'stdout' && entry.key !== 'stderr' && normalizeRelName(entry.name) === out ? entry.name : undefined;
 }
 
 /**

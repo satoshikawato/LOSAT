@@ -4,7 +4,7 @@
 // FASTA input (paste, files inflated into session OPFS, Combined or Separate runs, the `-in` name of
 // a BLAST database) is the one that the Masking tab reads too (`FastaToolDraft`).
 import { splitOptions } from '../domain/argv';
-import { duplicateRunFileMessage, normalizeRunPath } from '../domain/blast-db';
+import { normalizeRunPath } from '../domain/blast-db';
 import { countsName } from '../domain/counts';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import { buildWindowMaskerArgv } from '../domain/tool-argv';
@@ -17,7 +17,6 @@ import {
 import type { DataGateway } from '../ports/data';
 import type { ToolDirectoryFile, ToolRequest } from './coordinator';
 import { EMPTY_FASTA_INPUT, FastaToolDraft, type FastaInputState, type FastaToolDraftDeps } from './fasta-tool-draft';
-import type { ToolExtraFile } from './tool-draft-core';
 
 export type { ToolExtraFile } from './tool-draft-core';
 export type { ToolInputFile } from './fasta-tool-draft';
@@ -130,29 +129,6 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
     this.scheduleValidation();
   }
 
-  /** Attaches a file chosen for a file-typed option (`-ids`, `-exclude_ids`) and puts it in Files of the run. */
-  setOptionFile(flag: string, file: File | undefined): void {
-    const state = this.state.get();
-    const kept = state.runFiles.filter((entry) => entry.flag !== flag);
-    if (file === undefined) {
-      this.set({ runFiles: Object.freeze(kept), runFilesError: undefined });
-      this.setField(flag, '');
-      return;
-    }
-    const name = normalizeRunPath(file.name);
-    if (name === undefined) {
-      this.set({ runFilesError: `Invalid file name: "${file.name}".` });
-      return;
-    }
-    if (kept.some((entry) => entry.name === name)) {
-      this.set({ runFilesError: duplicateRunFileMessage(name) });
-      return;
-    }
-    const entry: ToolExtraFile = { key: `rf-${this.nextKey++}`, name, size: file.size, file, flag };
-    this.set({ runFiles: Object.freeze([...kept, entry]), runFilesError: undefined });
-    this.setField(flag, name);
-  }
-
   /** Resets options inside the collapsible "WindowMasker options" section and Additional options for the active stage. */
   resetOptions(): void {
     const state = this.state.get();
@@ -240,16 +216,6 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
     this.scheduleValidation();
   }
 
-  /** Removes a file of the run; a file chosen for an option (`-ids`) also clears that option. */
-  override removeRunFile(key: string): void {
-    const state = this.state.get();
-    const target = state.runFiles.find((entry) => entry.key === key);
-    super.removeRunFile(key);
-    if (target?.flag !== undefined && state.values[state.stage][target.flag] === target.name) {
-      this.setField(target.flag, '');
-    }
-  }
-
   // --- command line & validation ----------------------------------------------------------
 
   /** Whether the active stage currently reads `-in` as FASTA files/paste rather than a named blastdb/seqids/fa_list. */
@@ -289,6 +255,10 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
 
   protected parseExtra(state: ToolDraftState): readonly string[] {
     return splitOptions(state.extra[state.stage]);
+  }
+
+  protected optionValue(state: ToolDraftState, flag: string): FieldValue | undefined {
+    return state.values[state.stage][flag];
   }
 
   /** The argv of the check: the inputs not chosen yet are named `input.fa` and `counts.ascii`. */

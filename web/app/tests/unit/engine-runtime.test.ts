@@ -19,7 +19,7 @@ import {
 import { INFLATED_TOO_LARGE, InputMismatchError } from 'losat/ports';
 import { parseToolDescription } from 'losat/domain';
 import { findReactors } from '../../build/reactors';
-import { BLAST_FORMATTER_USAGE_ORDER, MASKING_USAGE_ORDER, WINDOWMASKER_USAGE_ORDER } from '../../src/domain/tools';
+import { BLAST_FORMATTER_USAGE_ORDER, MAKEBLASTDB_USAGE_ORDER, MASKING_USAGE_ORDER, WINDOWMASKER_USAGE_ORDER } from '../../src/domain/tools';
 import { ABI_VERSION, EngineStoppedError, ReactorAbi, stopMessage, type AbiExports } from '../../../packages/losat/src/infra/reactor/abi';
 import { ABI_EXPORTS, inspectReactor } from '../../../packages/losat/src/infra/reactor/artifact';
 import { inflateFile } from '../../src/infra/data/inflate';
@@ -725,6 +725,22 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
       for (const flag of MASKING_USAGE_ORDER[tool]) expect(flags, flag).toContain(flag);
     });
   }
+
+  it("FakeEngine's makeblastdb-xmlhelp.json is the reactor's makeblastdb -xmlhelp", async () => {
+    const abi = await open();
+    const chunks: Uint8Array[] = [];
+    const status = abi.tool(['makeblastdb', '-xmlhelp'], {
+      stdout: (bytes) => chunks.push(bytes.slice()),
+      stderr: () => undefined,
+      file: () => undefined,
+    });
+    expect(status).toBe(0);
+    const xml = Buffer.concat(chunks).toString('utf8');
+    await expect(`${JSON.stringify({ xml })}\n`).toMatchFileSnapshot('../../src/infra/fake/makeblastdb-xmlhelp.json');
+    const parsed = parseToolDescription(xml);
+    const flags = new Set(parsed.parameters.map((param) => param.flag));
+    for (const flag of MAKEBLASTDB_USAGE_ORDER) expect(flags, flag).toContain(flag);
+  });
 
   it('every field of the search form is an option that the engine describes', async () => {
     const abi = await open();

@@ -660,8 +660,11 @@ export class SearchDraft {
     this.scheduleValidation();
   }
 
-  /** Inspects picked folder/files for valid local BLAST databases (`-db`) without reading binary volumes. */
-  async setSubjectDatabaseFiles(files: readonly File[]): Promise<void> {
+  /**
+   * Inspects picked folder/files for valid local BLAST databases (`-db`) without reading binary volumes; `relativeNames`
+   * gives the files' paths where a picked file's own does not (the files of a makeblastdb run, "Use as Database (-db)").
+   */
+  async setSubjectDatabaseFiles(files: readonly File[], relativeNames?: readonly string[]): Promise<void> {
     if (files.length === 0) return;
     const generation = this.nextGeneration('subject-db');
     this.set({
@@ -669,7 +672,7 @@ export class SearchDraft {
       database: this.subjectDatabaseWith({ scanning: true as const }),
       message: undefined,
     });
-    const work = this.scanDatabaseFiles(files).then((outcome) => {
+    const work = this.scanDatabaseFiles(files, relativeNames).then((outcome) => {
       if (this.generations.get('subject-db') !== generation) return;
       if (!outcome.ok) {
         this.set({
@@ -786,8 +789,8 @@ export class SearchDraft {
     this.setFilteringDbField(this.state.get().filteringDb.selected);
   }
 
-  /** Inspects picked folder/files for a nucleotide repeats database for BLASTN `-filtering_db`. */
-  async setFilteringDbFiles(files: readonly File[]): Promise<void> {
+  /** Inspects picked folder/files for a nucleotide repeats database for BLASTN `-filtering_db` (`relativeNames`: as `setSubjectDatabaseFiles`). */
+  async setFilteringDbFiles(files: readonly File[], relativeNames?: readonly string[]): Promise<void> {
     if (files.length === 0) return;
     const generation = this.nextGeneration('filtering-db');
     this.set({
@@ -795,7 +798,7 @@ export class SearchDraft {
       ...(this.state.get().program === 'blastn' ? { message: undefined } : {}),
     });
     this.setFieldForProgram('blastn', FILTERING_DB_FLAG, true);
-    const scan = this.scanDatabaseFiles(files).then((outcome) => {
+    const scan = this.scanDatabaseFiles(files, relativeNames).then((outcome) => {
       if (this.generations.get('filtering-db') !== generation) return;
       const onBlastn = this.state.get().program === 'blastn';
       if (!outcome.ok) {
@@ -859,8 +862,9 @@ export class SearchDraft {
 
   private scanDatabaseFiles(
     files: readonly File[],
+    relativeNames?: readonly string[],
   ): Promise<{ readonly ok: true; readonly discovery: BlastDbDiscovery } | { readonly ok: false; readonly error: unknown }> {
-    return discoverBlastDatabases(files).then(
+    return discoverBlastDatabases(files, relativeNames).then(
       (discovery) => ({ ok: true as const, discovery }),
       (error: unknown) => ({ ok: false as const, error }),
     );

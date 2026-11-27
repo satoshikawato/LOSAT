@@ -60,12 +60,15 @@ const NOT_OPTIONS = new Set(['-query', '-subject', '-out', '-outfmt', '-num_thre
 /** Flags whose value is a coordinate range of the inputs (S11): a profile has the flag, not the range. */
 const RANGE_OPTIONS = new Set(['-query_loc', '-subject_loc']);
 export const RANGE_VALUE = '<range>';
-/** Placeholder for file-path option values (`-ustat`, `-ids`, `-exclude_ids`) in tool option keys. */
+/** Placeholder for the values of TOOL_FILE_OPTIONS in tool option keys. */
 export const FILE_VALUE = '<file>';
 /** Tool flags that name only input/output/log files and do not change the option set. */
 const TOOL_NOT_OPTIONS = new Set(['-in', '-archive', '-out', '-logfile']);
-/** Tool flags whose values name files in the run directory (the flag stays in the key, the file name does not). */
-const TOOL_FILE_OPTIONS = new Set(['-ustat', '-ids', '-exclude_ids']);
+/**
+ * Tool flags whose values are names: files in the run directory (`-ustat`, `-ids`, `-exclude_ids`, makeblastdb's
+ * `-mask_data` and `-taxid_map`) and makeblastdb's database `-title`. The flag stays in the key, the name does not.
+ */
+const TOOL_FILE_OPTIONS = new Set(['-ustat', '-ids', '-exclude_ids', '-mask_data', '-taxid_map', '-title']);
 
 export interface OptionGrammar {
   /** Whether the flag takes a value (the engine's `describe`). */

@@ -1,24 +1,23 @@
 // Unit tests for the Masking tool tab (WW4c): the domain helpers of dustmasker, segmasker and
 // convert2blastmask (options from -xmlhelp, argv builder, the masking-information rule), MaskingDraft
 // (argv per tool, per-tool values, -out, the shared FASTA input, blastdb, required options, help and
-// version, the mask-data marking), the Coordinator's marking of the output, the makeblastdb hand-over,
-// and the FakeEngine's rows for the three tools.
+// version, the `-outfmt` default that a run records), the one rule for mask data (`maskDataName`) with the
+// Coordinator's and the makeblastdb draft's hand-over, and the FakeEngine's rows for the three tools.
 import { gzipSync } from 'node:zlib';
 import { describe, expect, it, vi } from 'vitest';
 import { sha256Hex } from 'losat';
 import { parseToolDescription } from 'losat/domain';
 import type { ToolEngine } from 'losat/ports';
 import { Coordinator, isToolRun, type EnqueueAllResult, type ToolRequest } from '../../src/application/coordinator';
-import { MaskDataHandover, type MaskDataEntry } from '../../src/application/mask-data-handover';
+import { MakeblastdbDraft } from '../../src/application/makeblastdb-draft';
 import { MaskingDraft } from '../../src/application/masking-draft';
 import { SessionFiles } from '../../src/application/session-files';
 import { ToolDraft } from '../../src/application/tool-draft';
 import {
   buildMaskingArgv,
   changedMaskingOptionsCount,
-  isMaskDataFile,
-  maskDataOnStdout,
-  writesMaskData,
+  maskDataName,
+  maskOutfmtDefault,
 } from '../../src/domain/tool-argv';
 import {
   allMaskingParameters,
@@ -132,26 +131,53 @@ describe('Masking domain helpers', () => {
     expect(changedMaskingOptionsCount('convert2blastmask', { '-masking_algorithm': 'dust' }, '', C2B)).toBe(0);
   });
 
-  it('finds masking information by one rule: the effective -outfmt of a masking run is a maskinfo format', () => {
-    expect(writesMaskData('dustmasker', 'mask', ['dustmasker', '-in', 'a.fa'], DUST)).toBe(false);
-    expect(writesMaskData('dustmasker', 'mask', ['dustmasker', '-in', 'a.fa', '-outfmt', 'maskinfo_asn1_bin'], DUST)).toBe(true);
-    expect(writesMaskData('segmasker', 'mask', ['segmasker', '-outfmt=maskinfo_xml'], SEG)).toBe(true);
-    expect(writesMaskData('segmasker', 'mask', ['segmasker', '-outfmt', 'seqloc_xml'], SEG)).toBe(false);
+  it('records the -outfmt default of the -xmlhelp of a run that masks, and of no other run', () => {
+    expect(maskOutfmtDefault('dustmasker', 'mask', DUST)).toBe('interval');
+    expect(maskOutfmtDefault('segmasker', 'mask', SEG)).toBe('interval');
     // convert2blastmask's default -outfmt is maskinfo_asn1_text.
-    expect(writesMaskData('convert2blastmask', 'mask', ['convert2blastmask', '-in', 'a.fa'], C2B)).toBe(true);
-    expect(writesMaskData('convert2blastmask', 'mask', ['convert2blastmask', '-outfmt', 'interval'], C2B)).toBe(false);
-    expect(writesMaskData('convert2blastmask', 'mask', ['convert2blastmask'], undefined)).toBe(false);
-    // windowmasker's Mask stage writes it too; its counts stages and blast_formatter never do.
-    expect(writesMaskData('windowmasker', 'mask', ['windowmasker', '-ustat', 'c', '-outfmt', 'maskinfo_asn1_text'], WM)).toBe(true);
-    expect(writesMaskData('windowmasker', 'mask', ['windowmasker', '-ustat', 'c'], WM)).toBe(false);
-    expect(writesMaskData('windowmasker', 'mk_counts', ['windowmasker', '-mk_counts', '-outfmt', 'maskinfo_xml'], WM)).toBe(false);
-    expect(writesMaskData('blast_formatter', 'format', ['blast_formatter', '-outfmt', 'maskinfo_xml'], undefined)).toBe(false);
+    expect(maskOutfmtDefault('convert2blastmask', 'mask', C2B)).toBe('maskinfo_asn1_text');
+    expect(maskOutfmtDefault('convert2blastmask', 'mask', undefined)).toBeUndefined();
+    // windowmasker's Mask stage writes masking information too; its counts stages and the other tools never do.
+    expect(maskOutfmtDefault('windowmasker', 'mask', WM)).toBe('interval');
+    expect(maskOutfmtDefault('windowmasker', 'mk_counts', WM)).toBeUndefined();
+    expect(maskOutfmtDefault('blast_formatter', 'format', undefined)).toBeUndefined();
+    expect(maskOutfmtDefault('makeblastdb', 'build', undefined)).toBeUndefined();
+  });
 
-    expect(maskDataOnStdout(['dustmasker', '-in', 'a.fa'])).toBe(true);
-    expect(maskDataOnStdout(['dustmasker', '-out', '-'])).toBe(true);
-    expect(maskDataOnStdout(['dustmasker', '-out', 'm.asnb'])).toBe(false);
-    expect(isMaskDataFile(['dustmasker', '-out', './m.asnb'], 'm.asnb')).toBe(true);
-    expect(isMaskDataFile(['dustmasker', '-out', 'm.asnb', '-logfile', 'run.log'], 'run.log')).toBe(false);
+  it('names the mask data of a masking run by one rule: the effective -outfmt (the argv, else the recorded default) is a maskinfo format', () => {
+    const run = (tool: 'dustmasker' | 'segmasker' | 'convert2blastmask' | 'windowmasker', argv: readonly string[], outfmtDefault?: string) =>
+      ({ tool, stage: 'mask', argv, number: 4, ...(outfmtDefault === undefined ? {} : { outfmtDefault }) }) as const;
+    const stdout = { key: 'stdout', name: 'stdout' };
+    const wrote = (name: string) => ({ key: 'file:0', name });
+    const formats = { maskinfo_asn1_bin: 'asnb', maskinfo_asn1_text: 'asnt', maskinfo_xml: 'xml' } as const;
+    for (const tool of ['dustmasker', 'segmasker', 'convert2blastmask'] as const) {
+      for (const [format, extension] of Object.entries(formats)) {
+        // Standard output, under a name for the run; an -out file, under its own name (and not the standard output).
+        expect(maskDataName(run(tool, [tool, '-outfmt', format], 'interval'), stdout), `${tool} ${format}`).toBe(`${tool}-run4.${extension}`);
+        expect(maskDataName(run(tool, [tool, `-outfmt=${format}`], 'interval'), stdout), `${tool} ${format}=`).toBe(`${tool}-run4.${extension}`);
+        const toFile = run(tool, [tool, '-out', `./m.${extension}`, '-outfmt', format], 'interval');
+        expect(maskDataName(toFile, wrote(`m.${extension}`))).toBe(`m.${extension}`);
+        expect(maskDataName(toFile, stdout)).toBeUndefined();
+        expect(maskDataName(toFile, { key: 'file:1', name: 'run.log' })).toBeUndefined();
+        expect(maskDataName(toFile, { key: 'stderr', name: 'stderr' })).toBeUndefined();
+      }
+      // The other formats are not mask data.
+      for (const format of ['interval', 'fasta', 'acclist', 'seqloc_asn1_bin', 'seqloc_asn1_text', 'seqloc_xml']) {
+        expect(maskDataName(run(tool, [tool, '-outfmt', format], 'maskinfo_asn1_text'), stdout), `${tool} ${format}`).toBeUndefined();
+      }
+    }
+    // With no -outfmt in the argv the recorded default decides: convert2blastmask's is maskinfo_asn1_text.
+    expect(maskDataName(run('convert2blastmask', ['convert2blastmask', '-in', 'a.fa'], 'maskinfo_asn1_text'), stdout)).toBe('convert2blastmask-run4.asnt');
+    expect(maskDataName(run('dustmasker', ['dustmasker', '-in', 'a.fa'], 'interval'), stdout)).toBeUndefined();
+    expect(maskDataName(run('convert2blastmask', ['convert2blastmask', '-in', 'a.fa']), stdout)).toBeUndefined();
+    // windowmasker's Mask stage is unchanged: an -outfmt in the argv, the -out file or the standard output.
+    expect(maskDataName(run('windowmasker', ['windowmasker', '-ustat', 'c', '-outfmt', 'maskinfo_xml'], 'interval'), stdout)).toBe('windowmasker-run4.xml');
+    expect(maskDataName(run('windowmasker', ['windowmasker', '-ustat', 'c'], 'interval'), stdout)).toBeUndefined();
+    expect(maskDataName({ tool: 'windowmasker', stage: 'mk_counts', argv: ['windowmasker', '-mk_counts', '-outfmt', 'maskinfo_xml'], number: 1 }, stdout)).toBeUndefined();
+    expect(maskDataName({ tool: 'blast_formatter', stage: 'format', argv: ['blast_formatter', '-outfmt', 'maskinfo_xml'], number: 1 }, stdout)).toBeUndefined();
+    // A snapshot that went through storage names its output as the live one does.
+    const live = run('convert2blastmask', ['convert2blastmask', '-in', 'a.fa'], 'maskinfo_asn1_text');
+    expect(maskDataName(JSON.parse(JSON.stringify(live)) as typeof live, stdout)).toBe(maskDataName(live, stdout));
   });
 });
 
@@ -239,7 +265,7 @@ describe('MaskingDraft', () => {
     expect(await file.file.text()).toBe('>p\nACGT\n>g\nTTTT\n');
     expect(file.origin).toEqual({ kind: 'combined', parts: ['input.fa', 'g.fa'] });
     expect(combined.sessionTokens).toHaveLength(1);
-    expect(combined.writesMaskData).toBeUndefined();
+    expect(combined.outfmtDefault).toBe('interval');
 
     draft.setFastaMode('separate');
     expect(draft.runCount()).toBe(2);
@@ -294,11 +320,12 @@ describe('MaskingDraft', () => {
     await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
     expect((await draft.submit()).ok).toBe(true);
     expect(queued[0]!.argv).toEqual(['convert2blastmask', '-in', 'input.fa', '-masking_algorithm', 'dust', '-masking_options', 'window=64']);
-    // Its default -outfmt (maskinfo_asn1_text) is masking information.
-    expect(queued[0]!.writesMaskData).toBe(true);
+    // Its default -outfmt (maskinfo_asn1_text) is masking information: the run records it, and its standard output is mask data.
+    expect(queued[0]!.outfmtDefault).toBe('maskinfo_asn1_text');
+    expect(maskDataName({ ...queued[0]!, number: 5 }, { key: 'stdout', name: 'stdout' })).toBe('convert2blastmask-run5.asnt');
   });
 
-  it('marks the runs that write masking information from the argv, else from the -xmlhelp default', async () => {
+  it('records the -xmlhelp default of -outfmt, and the argv decides what the run writes as mask data', async () => {
     const { draft, queued } = setup({ validate: 'ok' });
     draft.ensureLoaded();
     await described(draft, 'dustmasker');
@@ -307,13 +334,15 @@ describe('MaskingDraft', () => {
     draft.setOutName('dust.asnb');
     expect((await draft.submit()).ok).toBe(true);
     expect(queued[0]!.argv).toEqual(['dustmasker', '-in', 'input.fa', '-out', 'dust.asnb', '-outfmt', 'maskinfo_asn1_bin']);
-    expect(queued[0]!.writesMaskData).toBe(true);
+    const file = { key: 'file:0', name: 'dust.asnb' };
+    expect(maskDataName({ ...queued[0]!, number: 1 }, file)).toBe('dust.asnb');
     draft.setField('-outfmt', 'interval');
     expect((await draft.submit()).ok).toBe(true);
-    expect(queued[1]!.writesMaskData).toBeUndefined();
+    expect(queued[1]!.outfmtDefault).toBe('interval');
+    expect(maskDataName({ ...queued[1]!, number: 2 }, file)).toBeUndefined();
     draft.setExtra('-outfmt maskinfo_xml');
     expect((await draft.submit()).ok).toBe(true);
-    expect(queued[2]!.writesMaskData).toBe(true);
+    expect(maskDataName({ ...queued[2]!, number: 3 }, file)).toBe('dust.asnb');
   });
 
   it('runs help and version words of Additional options as print runs, without an input', async () => {
@@ -325,12 +354,12 @@ describe('MaskingDraft', () => {
     await settled(draft);
     expect((await draft.submit()).ok).toBe(true);
     expect(queued[0]).toMatchObject({ tool: 'dustmasker', stage: 'mask', argv: ['dustmasker', '-version-full'], prints: 'version' });
-    expect(queued[0]!.writesMaskData).toBeUndefined();
+    expect(queued[0]!.outfmtDefault).toBeUndefined();
     draft.setTool('convert2blastmask');
     draft.setExtra('-help');
     expect((await draft.submit()).ok).toBe(true);
     expect(queued[1]).toMatchObject({ tool: 'convert2blastmask', argv: ['convert2blastmask', '-help'], prints: 'help' });
-    expect(queued[1]!.writesMaskData).toBeUndefined();
+    expect(queued[1]!.outfmtDefault).toBeUndefined();
   });
 
   it('holds its inflated session files apart from another draft that shares the holder tracker', async () => {
@@ -363,8 +392,8 @@ describe('MaskingDraft', () => {
   });
 });
 
-describe('Coordinator marks the output that holds masking information', () => {
-  async function runMasking(argv: readonly string[], writesMaskData: boolean) {
+describe('Coordinator hands over the output that holds masking information', () => {
+  async function runMasking(argv: readonly string[], outfmtDefault?: string) {
     const data = makeData();
     let id = 0;
     const coordinator = new Coordinator({
@@ -381,7 +410,7 @@ describe('Coordinator marks the output that holds masking information', () => {
         stage: 'mask',
         argv,
         directory: [{ name: 'input.fa', file: new Blob(['>q\nacgtACGT\n']), origin: { kind: 'pasted' } }],
-        ...(writesMaskData ? { writesMaskData: true as const } : {}),
+        ...(outfmtDefault === undefined ? {} : { outfmtDefault }),
       },
     ]);
     expect(result.ok).toBe(true);
@@ -394,43 +423,43 @@ describe('Coordinator marks the output that holds masking information', () => {
     throw new Error('the run did not complete');
   }
 
-  it('marks standard output without -out, the -out file with it, and nothing for a run that writes none', async () => {
-    const stdout = await runMasking(['convert2blastmask', '-in', 'input.fa', '-masking_algorithm', 'dust', '-masking_options', 'o'], true);
-    expect(stdout.run.snapshot.writesMaskData).toBe(true);
+  it('keeps the recorded default on the run, and names standard output and the -out file as maskDataName does', async () => {
+    const stdout = await runMasking(['convert2blastmask', '-in', 'input.fa', '-masking_algorithm', 'dust', '-masking_options', 'o'], 'maskinfo_asn1_text');
+    expect(stdout.run.snapshot.outfmtDefault).toBe('maskinfo_asn1_text');
     expect(stdout.run.snapshot.stage).toBe('mask');
-    expect(stdout.run.record.stdout?.isMaskData).toBe(true);
-    expect(stdout.run.record.stderr?.isMaskData).toBeUndefined();
-    const preview = await stdout.coordinator.readToolOutputPreview(stdout.run.snapshot.runId, 'stdout', 1024);
-    expect(new TextDecoder().decode(preview.bytes)).toContain(FAKE_MARKER);
+    const handed = await stdout.coordinator.maskData(stdout.run.snapshot.runId, 'stdout');
+    expect(handed.name).toBe(`convert2blastmask-run${stdout.run.snapshot.number}.asnt`);
+    expect(handed.origin).toEqual({ kind: 'made', runNumber: stdout.run.snapshot.number });
+    expect(await handed.file.text()).toContain(FAKE_MARKER);
+    await expect(stdout.coordinator.maskData(stdout.run.snapshot.runId, 'stderr')).rejects.toThrow('the output is not mask data');
 
-    const file = await runMasking(['dustmasker', '-in', 'input.fa', '-out', 'm.asnt', '-outfmt', 'maskinfo_asn1_text', '-logfile', 'run.log'], true);
-    expect(file.run.record.stdout?.isMaskData).toBeUndefined();
-    expect(file.run.record.files?.map((entry) => [entry.name, entry.isMaskData === true])).toEqual([
-      ['m.asnt', true],
-      ['run.log', false],
+    const file = await runMasking(['dustmasker', '-in', 'input.fa', '-out', 'm.asnt', '-outfmt', 'maskinfo_asn1_text', '-logfile', 'run.log'], 'interval');
+    expect(file.run.record.stdout).toBeDefined();
+    await expect(file.coordinator.maskData(file.run.snapshot.runId, 'stdout')).rejects.toThrow('the output is not mask data');
+    const made = file.run.record.files!.find((entry) => entry.name === 'm.asnt')!;
+    expect((await file.coordinator.maskData(file.run.snapshot.runId, made.key)).name).toBe('m.asnt');
+    const log = file.run.record.files!.find((entry) => entry.name === 'run.log')!;
+    await expect(file.coordinator.maskData(file.run.snapshot.runId, log.key)).rejects.toThrow('the output is not mask data');
+
+    const none = await runMasking(['dustmasker', '-in', 'input.fa'], 'interval');
+    await expect(none.coordinator.maskData(none.run.snapshot.runId, 'stdout')).rejects.toThrow('the output is not mask data');
+  });
+
+  it("hands a masking run's file to the makeblastdb form's -mask_data", async () => {
+    const { run, coordinator } = await runMasking(['segmasker', '-in', 'input.fa', '-out', 'seg.asnb', '-outfmt', 'maskinfo_asn1_bin'], 'interval');
+    const key = run.record.files!.find((entry) => entry.name === 'seg.asnb')!.key;
+    const handed = await coordinator.maskData(run.snapshot.runId, key);
+    const makeblastdb = new MakeblastdbDraft({
+      engine: new FakeEngine(),
+      enqueueToolAll: async (): Promise<EnqueueAllResult> => ({ ok: true, runIds: [] }),
+      debounceMs: 0,
+    });
+    makeblastdb.addMaskData(handed.file, handed.name, handed.origin);
+    const state = makeblastdb.state.get();
+    expect(state.values['-mask_data']).toBe('seg.asnb');
+    expect(state.runFiles.map((entry) => [entry.name, entry.flag, entry.origin])).toEqual([
+      ['seg.asnb', '-mask_data', { kind: 'made', runNumber: run.snapshot.number }],
     ]);
-
-    const none = await runMasking(['dustmasker', '-in', 'input.fa'], false);
-    expect(none.run.snapshot.writesMaskData).toBeUndefined();
-    expect(none.run.record.stdout?.isMaskData).toBeUndefined();
-  });
-});
-
-describe('MaskDataHandover', () => {
-  const entry: MaskDataEntry = { runId: 'r1', runNumber: 3, key: 'stdout', name: 'stdout', size: 42 };
-
-  it('is not available without a makeblastdb form, and then hands nothing over', () => {
-    const handover = new MaskDataHandover();
-    expect(handover.available()).toBe(false);
-    expect(() => handover.use(entry)).not.toThrow();
-  });
-
-  it('is available with a target, and hands the output over to it', () => {
-    const useMaskData = vi.fn();
-    const handover = new MaskDataHandover({ useMaskData });
-    expect(handover.available()).toBe(true);
-    handover.use(entry);
-    expect(useMaskData).toHaveBeenCalledWith(entry);
   });
 });
 
@@ -442,7 +471,7 @@ describe('FakeEngine rows of the Masking tools', () => {
       expect(description.tool).toBe(tool);
       expect(await fake.describeTool(tool)).toBe(description);
     }
-    await expect(fake.describeTool('makeblastdb')).rejects.toThrow('unknown tool');
+    await expect(fake.describeTool('no_such_tool')).rejects.toThrow('unknown tool');
     expect(await fake.validateTool(['dustmasker', '-in', 'a.fa', '-window', '32'])).toEqual({ ok: true });
     expect(await fake.validateTool(['segmasker', '-outfmt', 'acclist'])).toMatchObject({ ok: false, message: expect.stringMatching(/Invalid value/) });
     expect(await fake.validateTool(['dustmasker', '-masking_algorithm', 'x'])).toMatchObject({ ok: false, message: expect.stringMatching(/Unknown argument/) });

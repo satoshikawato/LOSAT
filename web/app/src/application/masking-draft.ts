@@ -54,6 +54,10 @@ export class MaskingDraft extends FastaToolDraft<MaskingDraftState> {
     this.scheduleValidation();
   }
 
+  protected optionValue(state: MaskingDraftState, flag: string): FieldValue | undefined {
+    return state.values[state.tool][flag];
+  }
+
   setField(flag: string, value: FieldValue): void {
     const { tool, values } = this.state.get();
     const next: Record<string, FieldValue> = { ...values[tool] };

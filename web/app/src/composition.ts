@@ -11,7 +11,7 @@ import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { CountsLoader } from './application/counts';
 import { ExampleLoader } from './application/examples';
-import { MaskDataHandover } from './application/mask-data-handover';
+import { MakeblastdbDraft } from './application/makeblastdb-draft';
 import { MaskingDraft } from './application/masking-draft';
 import { ResultsBrowser } from './application/results';
 import { SessionFiles } from './application/session-files';
@@ -37,13 +37,10 @@ export interface App {
   readonly toolDraft: ToolDraft;
   /** The dustmasker, segmasker or convert2blastmask job being edited on the Masking tab (WW4c). */
   readonly maskingDraft: MaskingDraft;
-  /**
-   * Where "Use as -mask_data in makeblastdb" hands a masking-information output (WW4c): the makeblastdb
-   * form, once there is one on this page; without a target the Results tab does not offer it.
-   */
-  readonly maskData: MaskDataHandover;
   /** The Format Archive (`blast_formatter`) job being edited on the Format Archive tab. */
   readonly blastFormatterDraft: BlastFormatterDraft;
+  /** The makeblastdb job being edited on the makeblastdb tab (line WW, WW4b2). */
+  readonly makeblastdbDraft: MakeblastdbDraft;
   /** The Example sets that load into the draft (line WF-2). */
   readonly examples: ExampleLoader;
   /** The WindowMasker counts of the taxonomy IDs, downloaded when the user asks (line WW2). */
@@ -131,14 +128,18 @@ export function createApp(options: AppOptions = {}): App {
     isBusy: () => coordinator.isBusy(),
     sessionFiles,
   });
-  const maskData = new MaskDataHandover();
   const blastFormatterDraft = new BlastFormatterDraft({
     engine,
     enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
     getSessionArchiveFile: (runId, fileName) => coordinator.getOutputFile(runId, CUSTOM_OUTPUT, fileName),
     isBusy: () => coordinator.isBusy(),
   });
-  const tools = [toolDraft, maskingDraft, blastFormatterDraft];
+  const makeblastdbDraft = new MakeblastdbDraft({
+    engine,
+    enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
+    isBusy: () => coordinator.isBusy(),
+  });
+  const tools = [toolDraft, maskingDraft, blastFormatterDraft, makeblastdbDraft];
   const availability = new Availability({ draft, tools, dataWorkerEnded });
   const examples = new ExampleLoader({
     downloader: new BrowserFileDownloader({ inflater: data }),
@@ -169,8 +170,8 @@ export function createApp(options: AppOptions = {}): App {
     draft,
     toolDraft,
     maskingDraft,
-    maskData,
     blastFormatterDraft,
+    makeblastdbDraft,
     examples,
     counts,
     results,

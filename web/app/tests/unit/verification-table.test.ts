@@ -18,6 +18,7 @@ import BLAST_FORMATTER_XMLHELP_DOC from '../../src/infra/fake/blast_formatter-xm
 import CONVERT2BLASTMASK_XMLHELP_DOC from '../../src/infra/fake/convert2blastmask-xmlhelp.json';
 import DUSTMASKER_XMLHELP_DOC from '../../src/infra/fake/dustmasker-xmlhelp.json';
 import SEGMASKER_XMLHELP_DOC from '../../src/infra/fake/segmasker-xmlhelp.json';
+import MAKEBLASTDB_XMLHELP_DOC from '../../src/infra/fake/makeblastdb-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from '../../src/infra/fake/windowmasker-xmlhelp.json';
 
 const repository = resolve(import.meta.dirname, '../../../..');
@@ -122,6 +123,7 @@ describe('verification table', () => {
       'LOSAT/tests/dustmasker/cases.tsv',
       'LOSAT/tests/segmasker/cases.tsv',
       'LOSAT/tests/convert2blastmask/cases.tsv',
+      'LOSAT/tests/dropin_corpus_manifest.tsv',
     ]);
     for (const source of table.sources) {
       expect(source.sha256, source.path).toMatch(/^[0-9a-f]{64}$/);
@@ -254,5 +256,36 @@ describe('verification table', () => {
     }
     expect(grade('segmasker', SEGMASKER_XMLHELP_DOC.xml, ['segmasker', '-in', 'input.fa', '-window', '9999']).level).toBe('outside');
     expect(grade('convert2blastmask', CONVERT2BLASTMASK_XMLHELP_DOC.xml, ['convert2blastmask', '-in', 'input.fa']).level).toBe('outside');
+  });
+
+  it("generates makeblastdb option sets from the drop-in ledger's byte-frozen rows and grades runs (line WW, WW4b2)", () => {
+    const mk = table.tools?.makeblastdb;
+    expect(mk).toBeDefined();
+    expect([...mk!.optionSets]).toEqual([...mk!.optionSets].sort());
+    for (const key of mk!.optionSets) expect(key).not.toMatch(/"-(in|out|logfile)"/);
+
+    const mkGrammar = toolOptionGrammar(parseToolDescription(MAKEBLASTDB_XMLHELP_DOC.xml));
+    const mkBadge = (argv: readonly string[]) =>
+      toolVerificationBadge({ tool: 'makeblastdb', argv, runtimePath: 'serial', grammar: mkGrammar }, table);
+    for (const argv of [
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'prot', '-out', 'mydb'],
+      ['makeblastdb', '-in', 'a.fa b.fa', '-dbtype', 'nucl', '-parse_seqids', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-parse_seqids', '-taxid_map', 'map.txt', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-title', 'my genome', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-blastdb_version', '5'],
+    ]) {
+      const badge = mkBadge(argv);
+      expect(badge.level, argv.join(' ')).toBe('certified');
+      expect(badge.label, argv.join(' ')).toBe(SUPPORTED_LABEL);
+    }
+    for (const argv of [
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-max_file_sz', '1MB'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'prot', '-mask_data', 'seg.asnb'],
+    ]) {
+      const badge = mkBadge(argv);
+      expect(badge.level, argv.join(' ')).toBe('outside');
+      expect(badge.label, argv.join(' ')).toBe(NOT_SUPPORTED_LABEL);
+    }
   });
 });

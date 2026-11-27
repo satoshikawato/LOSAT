@@ -233,6 +233,11 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
       return;
     }
     const list = TOOL_FILE_LIST_FLAGS.has(flag);
+    if (list && name.includes(',')) {
+      // The command line's list (`-mask_data a.asnb,b.asnb`) cannot carry the name.
+      this.patch({ runFilesError: `A file named "${name}" cannot be in ${flag}: a comma separates its files.` });
+      return;
+    }
     const kept = list ? state.runFiles : state.runFiles.filter((entry) => entry.flag !== flag);
     const names = list ? fileListNames(this.optionValue(state, flag)) : [];
     const value = list ? [...names.filter((entry) => entry !== name), name].join(',') : name;

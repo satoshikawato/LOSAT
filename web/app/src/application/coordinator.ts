@@ -178,8 +178,16 @@ export interface MadeDatabase {
   readonly kind: SequenceKind;
   /** Every file that the run made, as the folder of the database that a search opens. */
   readonly files: readonly File[];
-  /** Each file's path in the run's directory (`db.nin`, `sub/dir/db.nin`). */
+  /**
+   * Each file's path under the folder named for its run (`run2/db.nin`, `run2/sub/dir/db.nin`): the databases of two
+   * runs, as `-db` and as `-filtering_db` of one search, never share a name in its run directory.
+   */
   readonly names: readonly string[];
+}
+
+/** The folder of a search's run directory that holds the database made by run `number` (`run2`). */
+export function madeDatabaseFolder(number: number): string {
+  return `run${number}`;
 }
 
 /** The mask data of a masking run, for makeblastdb's `-mask_data` ("Use as -mask_data in makeblastdb"). */
@@ -752,7 +760,8 @@ export class Coordinator {
     const primary = primaryBlastDb(entries.map((entry) => entry.name));
     if (view?.status !== 'completed' || primary === undefined) throw new Error('the run made no BLAST database');
     const files = await Promise.all(entries.map((entry) => this.deps.data.getToolOutputFile(runId, entry.key, baseName(entry.name))));
-    return { kind: primary.kind, files, names: entries.map((entry) => entry.name) };
+    const folder = madeDatabaseFolder(view.snapshot.number);
+    return { kind: primary.kind, files, names: entries.map((entry) => `${folder}/${entry.name}`) };
   }
 
   /** The mask data of an output of a completed masking run (`maskDataName`), as a file for makeblastdb's `-mask_data`. */

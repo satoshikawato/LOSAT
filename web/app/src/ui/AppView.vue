@@ -177,7 +177,7 @@ async function formatArchiveFromRun(entry: SessionArchiveEntry): Promise<void> {
 async function useAsDatabase(made: MadeDatabase): Promise<void> {
   props.draft.setProgram(made.kind === 'nucleotide' ? 'blastn' : 'blastp');
   tab.value = 'search';
-  await props.draft.setSubjectDatabaseFiles(made.files, made.names);
+  await props.draft.setSubjectDatabaseFiles(made.files, made.names, { made: true });
   await nextTick();
   searchPanel.value?.focusDatabase();
 }
@@ -186,7 +186,7 @@ async function useAsDatabase(made: MadeDatabase): Promise<void> {
 async function useAsRepeatsDatabase(made: MadeDatabase): Promise<void> {
   props.draft.setProgram('blastn');
   tab.value = 'search';
-  await props.draft.setFilteringDbFiles(made.files, made.names);
+  await props.draft.setFilteringDbFiles(made.files, made.names, { made: true });
   await nextTick();
   await searchPanel.value?.focusFilteringDb();
 }

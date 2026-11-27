@@ -12,7 +12,7 @@ import { splitOptions } from '../domain/argv';
 import { duplicateRunFileMessage, normalizeRunPath, primaryBlastDbName } from '../domain/blast-db';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
-import { buildMakeblastdbArgv } from '../domain/tool-argv';
+import { buildMakeblastdbArgv, fileListNames, makeblastdbInputList } from '../domain/tool-argv';
 import { makeblastdbInputType, makeblastdbOptionParameters, toolPrintsKind, type MakeblastdbInputType } from '../domain/tools';
 import type { ToolDirectoryFile, ToolRequest } from './coordinator';
 import { ToolDraftCore, type StatePatch, type ToolDraftCoreDeps, type ToolExtraFile, type ToolFormState } from './tool-draft-core';
@@ -86,10 +86,29 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
   /**
    * "Use as -mask_data in makeblastdb" on a masking run's mask data (WindowMasker's Mask with `-outfmt maskinfo_*`; the
    * masking tools of line WW WW4c the same way): the file joins `-mask_data`'s list, under `name`, as a file of the run.
+   * The mask data of an earlier run handed over under the same name is replaced in its place in the list (as
+   * WindowMasker's "Mask with these counts" replaces the counts chosen). A name that the list cannot carry (a comma
+   * separates its files) or that another file of the run holds is refused in the tab's message, where the user is.
    */
   addMaskData(file: File, name: string, origin: ToolFileOrigin): void {
     this.ensureLoaded();
+    const state = this.state.get();
+    const path = normalizeRunPath(name);
+    const earlier = state.runFiles.find((entry) => entry.name === path && entry.flag === '-mask_data' && entry.origin?.kind === 'made');
+    if (path !== undefined && earlier !== undefined) {
+      const replaced: ToolExtraFile = { ...earlier, key: `rf-${this.nextKey++}`, size: file.size, file, origin };
+      const names = fileListNames(state.values['-mask_data']);
+      this.set({
+        runFiles: Object.freeze(state.runFiles.map((entry) => (entry === earlier ? replaced : entry))),
+        runFilesError: undefined,
+        message: undefined,
+      });
+      this.setField('-mask_data', (names.includes(path) ? names : [...names, path]).join(','));
+      return;
+    }
     this.setOptionFile('-mask_data', file, { name, origin });
+    const error = this.state.get().runFilesError;
+    if (error !== undefined) this.set({ runFilesError: undefined, message: { kind: 'error', text: error } });
   }
 
   // --- the input ------------------------------------------------------------------------------
@@ -133,7 +152,10 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     this.scheduleValidation();
   }
 
-  /** `-in`'s database name for `-input_type blastdb`, as typed. */
+  /**
+   * `-in` for `-input_type blastdb`, as typed: the command line's value (`SeqDB_SplitQuoted` reads a list of names, a
+   * name with a space between double quotes), written as it is.
+   */
   setDbIn(name: string): void {
     this.set({ dbIn: name, dbInEdited: true, message: undefined });
     this.scheduleValidation();
@@ -179,7 +201,7 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
   protected override runFilesAdded(state: MakeblastdbDraftState, runFiles: readonly ToolExtraFile[]): StatePatch<MakeblastdbDraftState> {
     if (state.dbInEdited && state.dbIn.trim() !== '') return {};
     const detected = primaryBlastDbName(runFiles.map((entry) => entry.name));
-    return detected === undefined ? {} : { dbIn: detected };
+    return detected === undefined ? {} : { dbIn: detected, dbInEdited: false };
   }
 
   /**
@@ -188,7 +210,7 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
    */
   protected validationArgv(state: MakeblastdbDraftState, extra: readonly string[]): readonly string[] | undefined {
     const argv = this.argvOf(state, extra);
-    if (this.inputNames(state).length > 0 || toolPrintsKind(argv) !== null) return argv;
+    if (this.inputValue(state) !== '' || toolPrintsKind(argv) !== null) return argv;
     return namesInput(argv) ? argv : undefined;
   }
 
@@ -202,7 +224,7 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     if (prints !== null) {
       return [{ tool: 'makeblastdb', stage: 'build', argv, directory: this.runDirectoryOf(state, []), prints }];
     }
-    if (this.inputNames(state).length === 0 && !namesInput(argv)) throw new Error(MISSING_INPUT[this.inputType(state)]);
+    if (this.inputValue(state) === '' && !namesInput(argv)) throw new Error(MISSING_INPUT[this.inputType(state)]);
     return [{ tool: 'makeblastdb', stage: 'build', argv, directory: this.runDirectoryOf(state, this.inputEntries(state)) }];
   }
 
@@ -210,20 +232,24 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
 
   private argvOf(state: MakeblastdbDraftState, extra: readonly string[]): readonly string[] {
     return buildMakeblastdbArgv({
-      inputNames: this.inputNames(state),
+      input: this.inputValue(state),
       values: state.values,
       ...(state.description === undefined ? {} : { description: state.description }),
       extra,
     });
   }
 
-  /** The names that `-in` lists for the input type chosen. */
-  private inputNames(state: MakeblastdbDraftState): readonly string[] {
+  /**
+   * `-in`'s value for the input type chosen: a database's name as the user typed it (a list of databases, quotes and
+   * all), or the name that the files of the run give, quoted when it holds a space; the files of FASTA and ASN.1 input
+   * as one list.
+   */
+  private inputValue(state: MakeblastdbDraftState): string {
     if (this.inputType(state) === 'blastdb') {
       const name = state.dbIn.trim();
-      return name === '' ? [] : [name];
+      return state.dbInEdited ? name : makeblastdbInputList([name]);
     }
-    return this.inputEntries(state).map((entry) => entry.name);
+    return makeblastdbInputList(this.inputEntries(state).map((entry) => entry.name));
   }
 
   /** The files that `-in` names for FASTA and ASN.1 input: the pasted FASTA (`input.fa`), then the files opened. */

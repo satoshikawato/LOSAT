@@ -558,6 +558,42 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(draft.readiness()).toBe('Found nucleotide database (nucdb/nt), not a protein database for BLASTP.');
   });
 
+  it("searches two makeblastdb runs' databases of one name as -db and -filtering_db, each in its run's folder, and remembers neither (line WW, WW4b2 R1 findings 3 and 5)", async () => {
+    const memory = memoryStore({ subject: { name: 'nucdb/nt', folder: 'nucdb' }, filtering: { name: 'rep/repeats', folder: 'rep' } });
+    const { draft, coordinator, runCalls } = setup(memory);
+    // A made database's files: the File's own name is the base name; the run's folder comes in the names given.
+    const made = (run: number) => ({
+      files: ['nin', 'nhr', 'nsq'].map((ext) => diskFile(`input.fa.${ext}`, `${ext}${run}`)),
+      names: ['nin', 'nhr', 'nsq'].map((ext) => `run${run}/input.fa.${ext}`),
+    });
+    pasteQuery(draft);
+    draft.setSubjectSource('database');
+    const first = made(1);
+    const second = made(2);
+    await draft.setSubjectDatabaseFiles(first.files, first.names, { made: true });
+    draft.setFilteringDbEnabled(true);
+    await draft.setFilteringDbFiles(second.files, second.names, { made: true });
+    await draft.idle();
+    expect(draft.state.get().database.selected).toBe('run1/input.fa');
+    expect(draft.state.get().filteringDb.selected).toBe('run2/input.fa');
+    expect(memory.data).toEqual({});
+    draft.selectSubjectDatabase('run1/input.fa');
+    draft.selectFilteringDb('run2/input.fa');
+    expect(memory.data).toEqual({});
+    expectReady(draft);
+
+    await submitAndWait(draft, coordinator);
+    const req = runCalls[0]!;
+    expect(req.argv).toEqual(expect.arrayContaining(['-db', 'run1/input.fa', FILTERING_DB_FLAG, 'run2/input.fa']));
+    expect(mountedNames(req)).toEqual([...first.names, ...second.names].sort());
+    expect(memory.data).toEqual({});
+
+    // A folder that the user picks is remembered again.
+    await pickNucDb(draft);
+    await draft.idle();
+    expect(memory.data.subject).toEqual({ name: 'nucdb/nt', folder: 'nucdb' });
+  });
+
   it('supports BLASTN -filtering_db with both -subject and -db and clears on resetFields', async () => {
     const { draft, coordinator, runCalls } = setup();
     pasteQuery(draft);

@@ -114,6 +114,13 @@ export interface DatabasePickDraft {
   readonly scanning?: true;
   /** Database remembered across a page reload when folder handles could not be retained. */
   readonly remembered?: RememberedDatabase;
+  /** The files are a makeblastdb run's database (`made`), which a reload cannot open again: never remembered. */
+  readonly made?: true;
+}
+
+/** How files given as a database's folder came: `made` for a makeblastdb run's database ("Use as Database"). */
+export interface DatabaseFilesOptions {
+  readonly made?: boolean;
 }
 
 /** Subject local BLAST database (`-db`) and its database-specific filter values/files. */
@@ -664,7 +671,7 @@ export class SearchDraft {
    * Inspects picked folder/files for valid local BLAST databases (`-db`) without reading binary volumes; `relativeNames`
    * gives the files' paths where a picked file's own does not (the files of a makeblastdb run, "Use as Database (-db)").
    */
-  async setSubjectDatabaseFiles(files: readonly File[], relativeNames?: readonly string[]): Promise<void> {
+  async setSubjectDatabaseFiles(files: readonly File[], relativeNames?: readonly string[], options: DatabaseFilesOptions = {}): Promise<void> {
     if (files.length === 0) return;
     const generation = this.nextGeneration('subject-db');
     this.set({
@@ -686,11 +693,16 @@ export class SearchDraft {
       const { program, subjectSource } = this.state.get();
       const matches = matchingDatabases(discovery, programById(program).subject);
       const selected = matches[0]?.name;
-      if (selected !== undefined && subjectSource === 'database') {
-        this.rememberDb('subject', selected, discovery.folder);
+      if (subjectSource === 'database') {
+        if (options.made === true) this.forgetSubjectDb();
+        else if (selected !== undefined) this.rememberDb('subject', selected, discovery.folder);
       }
       this.set({
-        database: this.subjectDatabaseWith({ discovery, ...(selected === undefined ? {} : { selected }) }),
+        database: this.subjectDatabaseWith({
+          discovery,
+          ...(selected === undefined ? {} : { selected }),
+          ...(options.made === true ? { made: true as const } : {}),
+        }),
         message: undefined,
       });
       this.scheduleValidation();
@@ -705,7 +717,7 @@ export class SearchDraft {
     const { discovery } = database;
     if (discovery === undefined) return;
     if (!matchingDatabases(discovery, programById(program).subject).some((db) => db.name === name)) return;
-    this.rememberDb('subject', name, discovery.folder);
+    if (database.made !== true) this.rememberDb('subject', name, discovery.folder);
     this.set({
       database: Object.freeze({ ...database, selected: name }),
       message: undefined,
@@ -790,7 +802,7 @@ export class SearchDraft {
   }
 
   /** Inspects picked folder/files for a nucleotide repeats database for BLASTN `-filtering_db` (`relativeNames`: as `setSubjectDatabaseFiles`). */
-  async setFilteringDbFiles(files: readonly File[], relativeNames?: readonly string[]): Promise<void> {
+  async setFilteringDbFiles(files: readonly File[], relativeNames?: readonly string[], options: DatabaseFilesOptions = {}): Promise<void> {
     if (files.length === 0) return;
     const generation = this.nextGeneration('filtering-db');
     this.set({
@@ -812,11 +824,13 @@ export class SearchDraft {
       const { discovery } = outcome;
       const matches = matchingDatabases(discovery, 'nucleotide');
       const selected = matches[0]?.name;
-      if (selected !== undefined) this.rememberDb('filtering', selected, discovery.folder);
+      if (options.made === true) this.deps.databaseMemory?.write('filtering', undefined);
+      else if (selected !== undefined) this.rememberDb('filtering', selected, discovery.folder);
       this.set({
         filteringDb: Object.freeze({
           discovery,
           ...(selected === undefined ? {} : { selected }),
+          ...(options.made === true ? { made: true as const } : {}),
         }),
         ...(onBlastn ? { message: undefined } : {}),
       });
@@ -835,7 +849,7 @@ export class SearchDraft {
     const { filteringDb } = this.state.get();
     if (filteringDb.discovery === undefined) return;
     if (!matchingDatabases(filteringDb.discovery, 'nucleotide').some((db) => db.name === name)) return;
-    this.rememberDb('filtering', name, filteringDb.discovery.folder);
+    if (filteringDb.made !== true) this.rememberDb('filtering', name, filteringDb.discovery.folder);
     this.set({ filteringDb: Object.freeze({ ...filteringDb, selected: name }) });
     this.setFieldForProgram('blastn', FILTERING_DB_FLAG, name);
   }
@@ -1542,10 +1556,12 @@ export class SearchDraft {
         ...(assembled.blastdbEnv === undefined ? {} : { blastdbEnv: assembled.blastdbEnv }),
         ...(filterFileSnapshots.length === 0 ? {} : { filterFiles: Object.freeze(filterFileSnapshots) }),
       });
-      this.deps.databaseMemory?.write(
-        'subject',
-        database.discovery.folder === undefined ? { name: database.selected } : { name: database.selected, folder: database.discovery.folder },
-      );
+      if (database.made !== true) {
+        this.deps.databaseMemory?.write(
+          'subject',
+          database.discovery.folder === undefined ? { name: database.selected } : { name: database.selected, folder: database.discovery.folder },
+        );
+      }
     }
     let filteringSnapshot: DatabaseSnapshot | undefined;
     if (usesFilteringDb && filteringDb.discovery !== undefined && filteringDb.selected !== undefined) {
@@ -1559,10 +1575,12 @@ export class SearchDraft {
         taxdb: fTax.taxdb,
         sqlite: fTax.sqlite,
       });
-      this.deps.databaseMemory?.write(
-        'filtering',
-        filteringDb.discovery.folder === undefined ? { name: filteringDb.selected } : { name: filteringDb.selected, folder: filteringDb.discovery.folder },
-      );
+      if (filteringDb.made !== true) {
+        this.deps.databaseMemory?.write(
+          'filtering',
+          filteringDb.discovery.folder === undefined ? { name: filteringDb.selected } : { name: filteringDb.selected, folder: filteringDb.discovery.folder },
+        );
+      }
     }
 
     let queryFileSnapshot: QueryFileSnapshot | undefined;

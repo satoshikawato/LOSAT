@@ -639,26 +639,66 @@ fn database_files_follow_what_the_run_asks_for() {
             assert!(!has(&masked, name), "{option}: {name} in {masked:?}");
         }
     }
-    // An imported search strategy may hold either kind of option, so it asks for both.
+    // An imported search strategy may hold any of the options, so it asks for all of them.
     let imported = files(b"m", SeqType::Nucleotide, with("import_search_strategy"));
-    for name in ["mk.gni", "v.nog", "v.naa", "v.nnd", "v.nos", "v.nto"] {
+    for name in [
+        "mk.gni", "v.nog", "v.naa", "v.nnd", "v.nos", "v.nto", "v.nti",
+    ] {
         assert!(has(&imported, name), "{name} in {imported:?}");
     }
-    // An id list or a taxonomy filter: the lookup files, not the masks.
-    for option in [
-        "gilist",
-        "negative_seqidlist",
-        "taxids",
-        "taxidlist",
-        "negative_taxids",
+    // An id list or a taxonomy filter: the lookup files of its kind, not the masks nor the
+    // lookup files of another kind.
+    for (option, asked, others) in [
+        (
+            "gilist",
+            &["v.nni", "v.nnd"][..],
+            &["v.nos", "v.nto", "v.nti", "v.npi"][..],
+        ),
+        (
+            "negative_gilist",
+            &["v.nni", "v.nnd"],
+            &["v.nos", "v.nto", "v.nti"],
+        ),
+        ("ipglist", &["v.npi", "v.npd"], &["v.nni", "v.nos", "v.nto"]),
+        (
+            "seqidlist",
+            &["v.nos", "v.nti", "v.ntd"],
+            &["v.nni", "v.nnd", "v.nto", "v.ntf"],
+        ),
+        (
+            "negative_seqidlist",
+            &["v.nos", "v.nti", "v.ntd"],
+            &["v.nni", "v.nto"],
+        ),
+        (
+            "taxids",
+            &["v.not", "v.ntf", "v.nto"],
+            &["v.nni", "v.nos", "v.nti"],
+        ),
+        (
+            "negative_taxids",
+            &["v.not", "v.ntf", "v.nto"],
+            &["v.nni", "v.nos"],
+        ),
+        (
+            "taxidlist",
+            &["v.not", "v.ntf", "v.nto"],
+            &["v.nni", "v.nos"],
+        ),
+        (
+            "negative_taxidlist",
+            &["v.not", "v.ntf", "v.nto"],
+            &["v.nni", "v.nos"],
+        ),
     ] {
         let filtered = files(b"m", SeqType::Nucleotide, with(option));
-        for name in [
-            "v.nni", "v.nnd", "v.nos", "v.not", "v.ntf", "v.nto", "v.nti", "v.ntd",
-        ] {
+        for name in asked {
             assert!(has(&filtered, name), "{option}: {name} in {filtered:?}");
         }
-        for name in ["mk.gni", "v.nog", "v.naa", "v.nhd", "v.njs"] {
+        for name in others
+            .iter()
+            .chain(&["mk.gni", "v.nog", "v.naa", "v.nhd", "v.njs"])
+        {
             assert!(!has(&filtered, name), "{option}: {name} in {filtered:?}");
         }
     }

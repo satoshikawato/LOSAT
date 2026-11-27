@@ -232,7 +232,7 @@ fn detects_database_component_files() {
     assert!(check_disk_logfile("tblastx", &words, &tbx_start, Some(shd.as_os_str())).is_ok());
     assert!(check_disk_logfile("tblastx", &words, &tbx_start, Some(idx00.as_os_str())).is_ok());
 
-    // Protein volume: PIG ISAM (.ppi/.ppd, with an id list), mask column (.paa, with a mask
+    // Protein volume: PIG ISAM (.ppi/.ppd, with an IPG list), mask column (.paa, with a mask
     // option), RPS (.rps, for the RPS searches), and bogus .pma allowed.
     let pin = dir.join("protdb.pin");
     let ppi = dir.join("protdb.ppi");
@@ -246,7 +246,7 @@ fn detects_database_component_files() {
         vec!["-db".into(), dir.join("protdb").as_os_str().to_os_string()];
     let bp_start = ApplicationStart::of_process("blastp", &prot_words);
     for (option, refused, program) in [
-        ("-gilist", &ppi, "blastp"),
+        ("-ipglist", &ppi, "blastp"),
         ("-db_hard_mask", &paa, "blastp"),
         ("-db", &rps, "rpsblast"),
     ] {

@@ -11,12 +11,19 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DbUse {
     /// The run is asked for a database mask (`-db_soft_mask`, `-db_hard_mask`, or an imported
-    /// search strategy, which may hold either): the column files of the volumes and the GI-mask
-    /// files.
+    /// search strategy, which may hold either): the column files of the volumes, their GI index
+    /// and the GI-mask files.
     masks: bool,
-    /// The run is asked for an id list or a taxonomy filter (`-gilist`, `-seqidlist`, `-taxids`
-    /// and the others of [`DbUse::note_option`]): the ISAM and LMDB files that look an id up.
-    id_filters: bool,
+    /// `-gilist` or `-negative_gilist`: the numeric ISAM files that look a GI up.
+    gi_lists: bool,
+    /// `-ipglist` or `-negative_ipglist`: the numeric ISAM files that look an IPG up.
+    ipg_lists: bool,
+    /// `-seqidlist` or `-negative_seqidlist`: the LMDB file of the sequence ids and the trace-id
+    /// ISAM files.
+    seqid_lists: bool,
+    /// `-taxids`, `-negative_taxids`, `-taxidlist` or `-negative_taxidlist`: the LMDB files of
+    /// the taxonomy ids.
+    taxids: bool,
     /// The run is an RPS search: the four RPS files of each volume.
     rps: bool,
     /// The run is a tool that is not a search (`blastdbcmd`, `windowmasker`, ...): every file of
@@ -28,7 +35,10 @@ impl DbUse {
     /// The use of a tool that is not a search: the database's files that any tool opens.
     pub(crate) const TOOL: Self = Self {
         masks: true,
-        id_filters: true,
+        gi_lists: true,
+        ipg_lists: true,
+        seqid_lists: true,
+        taxids: true,
         rps: false,
         tool: true,
     };
@@ -38,7 +48,10 @@ impl DbUse {
     pub(crate) fn search(program: &str) -> Self {
         Self {
             masks: false,
-            id_filters: false,
+            gi_lists: false,
+            ipg_lists: false,
+            seqid_lists: false,
+            taxids: false,
             rps: matches!(program, "rpsblast" | "rpstblastn"),
             tool: false,
         }
@@ -49,13 +62,19 @@ impl DbUse {
     pub(crate) fn note_option(&mut self, name: &str) {
         match name {
             "db_soft_mask" | "db_hard_mask" => self.masks = true,
-            "gilist" | "negative_gilist" | "seqidlist" | "negative_seqidlist" | "taxids"
-            | "negative_taxids" | "taxidlist" | "negative_taxidlist" | "ipglist"
-            | "negative_ipglist" => self.id_filters = true,
+            "gilist" | "negative_gilist" => self.gi_lists = true,
+            "ipglist" | "negative_ipglist" => self.ipg_lists = true,
+            "seqidlist" | "negative_seqidlist" => self.seqid_lists = true,
+            "taxids" | "negative_taxids" | "taxidlist" | "negative_taxidlist" => {
+                self.taxids = true;
+            }
             // The strategy file may hold any of the options above.
             "import_search_strategy" => {
                 self.masks = true;
-                self.id_filters = true;
+                self.gi_lists = true;
+                self.ipg_lists = true;
+                self.seqid_lists = true;
+                self.taxids = true;
             }
             _ => {}
         }
@@ -73,11 +92,15 @@ impl DbUse {
     pub(super) fn reads_extension(self, ext: &str) -> bool {
         match ext {
             // Opened by every search of a database: the volume's index, header and sequence
-            // files, the string index of a version 4 database and the LMDB file of a version 5
-            // one, and the alias file.
+            // files, the alias file, and the string index of a version 4 database or the LMDB
+            // file of a version 5 one (which of the two the volume's index file says, so both
+            // are counted).
             "al" | "in" | "hr" | "sq" | "si" | "sd" | "db" => true,
-            // Looked up with an id list or a taxonomy filter.
-            "ni" | "nd" | "pi" | "pd" | "ti" | "td" | "os" | "ot" | "tf" | "to" => self.id_filters,
+            // Looked up with an id list or a taxonomy filter, by kind.
+            "ni" | "nd" => self.gi_lists,
+            "pi" | "pd" => self.ipg_lists,
+            "ti" | "td" | "os" => self.seqid_lists,
+            "ot" | "tf" | "to" => self.taxids,
             // The GI index of a volume, opened with its GI masks.
             "og" => self.masks,
             "aa" | "ab" | "ac" => false,
@@ -86,7 +109,7 @@ impl DbUse {
         }
     }
 
-    /// Whether the run can open the four RPS files of a volume ((`rps::RPS_EXTENSIONS`)).
+    /// Whether the run can open the four RPS files of a volume (`rps::RPS_EXTENSIONS`).
     pub(super) fn reads_rps(self) -> bool {
         self.rps
     }

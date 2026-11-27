@@ -1,0 +1,38 @@
+Bioseq-set ::= {
+  class genbank,
+  seq-set {
+    set {
+      class nuc-prot,
+      seq-set {
+        seq {
+          id { genbank { accession "AB000980", version 1 } },
+          descr { title "nuc 980", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00980", version 1 }, location int { from 0, to 29, id genbank { accession "AB000980", version 1 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { accession "AB000980", version 1 } } },
+            { data gene { locus "stray" }, location int { from 0, to 1, id tpg { accession "AB000981" } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00980", version 1 } },
+          descr { title "probe protein 980 [Homo sapiens]", source { org { taxname "Homo sapiens" } }, molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 980" } }, location whole genbank { accession "BAA00980", version 1 } }
+          } } }
+        }
+      }
+    },
+    seq {
+      id { genbank { accession "AB000981", version 1 } },
+      descr { title "gb one" },
+      inst { repr raw, mol dna, length 10, seq-data iupacna "ACGTACGTAC" }
+    },
+    seq {
+      id { other { accession "AB000981", version 1 } },
+      descr { title "ref one" },
+      inst { repr raw, mol dna, length 10, seq-data iupacna "ACGTACGTAC" }
+    }
+  }
+}

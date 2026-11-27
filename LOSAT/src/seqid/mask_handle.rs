@@ -363,6 +363,16 @@ pub(crate) fn textseq_packs(text: &TextseqId) -> bool {
             .is_some_and(|acc| textseq_packed_split(acc).is_some())
 }
 
+/// The prefix of the accession of `text` when its handle is packed (`textseq_packs`), which
+/// `GoodPrefix` compares other accessions with (seq_id_tree.cpp:824-880, seq_id_tree.hpp:440-442).
+pub(crate) fn textseq_pack_prefix(text: &TextseqId) -> Option<&[u8]> {
+    if text.name.is_some() || text.release.is_some() {
+        return None;
+    }
+    let acc = text.accession.as_deref()?;
+    textseq_packed_split(acc).map(|(prefix_len, _)| &acc[..prefix_len])
+}
+
 /// The handle's tree (`CSeq_id_Which_Tree::Initialize`, seq_id_tree.cpp:244-275): the alternative,
 /// with GenBank, EMBL and DDBJ in the GenBank tree.
 pub(crate) fn handle_tree(id: &ParsedSeqId) -> u8 {
@@ -456,7 +466,7 @@ fn parse_digits(digits: &[u8]) -> i64 {
 /// lower-case letter, `chain_id` from `chain` (as a `char`) and `chain` from `chain_id[0]` (a
 /// signed char) when one of them is set (`chain` only for a 1-character `chain_id`). The tree
 /// compares the results with `Equals` (values and set flags; 3502-3523).
-fn pdb_normalized(pdb: &PdbSeqId) -> Option<PdbSeqId> {
+pub(crate) fn pdb_normalized(pdb: &PdbSeqId) -> Option<PdbSeqId> {
     let date_packs = match &pdb.rel {
         None => true,
         Some(Date::Std(date)) => pdb_date_normalizes(date),

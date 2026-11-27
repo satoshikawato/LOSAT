@@ -1,0 +1,23 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { other { accession "NM_000830", version 1 }, gi 900830 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000830", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id gi 900830 }, empty tpg { accession "AB000831" } } }
+      } } }
+    },
+    seq {
+      id { genbank { accession "AB000831", version 1 } },
+      descr { title "gb one" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "AB000831", version 1 } },
+      descr { title "embl one" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    }
+  }
+}

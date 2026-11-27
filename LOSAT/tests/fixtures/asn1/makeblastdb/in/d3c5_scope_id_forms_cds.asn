@@ -1,0 +1,534 @@
+Bioseq-set ::= {
+  class genbank,
+  seq-set {
+    set {
+      class nuc-prot,
+      descr { comment "emb loc on gb" },
+      seq-set {
+        seq {
+          id { genbank { accession "AB001100", version 1 } },
+          descr { title "nuc 100", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00100", version 1 }, location int { from 2, to 20, id embl { accession "AB001100", version 1 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { accession "AB001100", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00100", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 100" } }, location whole genbank { accession "BAA00100", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "dbj loc on gb" },
+      seq-set {
+        seq {
+          id { genbank { accession "AB001101", version 1 } },
+          descr { title "nuc 101", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00101", version 1 }, location int { from 2, to 20, id ddbj { accession "AB001101", version 1 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { accession "AB001101", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00101", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 101" } }, location whole genbank { accession "BAA00101", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "lower case" },
+      seq-set {
+        seq {
+          id { genbank { accession "AB001102", version 1 } },
+          descr { title "nuc 102", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00102", version 1 }, location int { from 2, to 20, id genbank { accession "ab001102", version 1 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { accession "AB001102", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00102", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 102" } }, location whole genbank { accession "BAA00102", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "no version" },
+      seq-set {
+        seq {
+          id { genbank { accession "AB001103", version 1 } },
+          descr { title "nuc 103", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00103", version 1 }, location int { from 2, to 20, id genbank { accession "AB001103" } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { accession "AB001103", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00103", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 103" } }, location whole genbank { accession "BAA00103", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "name only" },
+      seq-set {
+        seq {
+          id { genbank { name "NAME1104", accession "AB001104", version 1 } },
+          descr { title "nuc 104", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00104", version 1 }, location int { from 2, to 20, id genbank { name "NAME1104" } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { name "NAME1104", accession "AB001104", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00104", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 104" } }, location whole genbank { accession "BAA00104", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "name only lower" },
+      seq-set {
+        seq {
+          id { genbank { name "NAME1105", accession "AB001105", version 1 } },
+          descr { title "nuc 105", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00105", version 1 }, location int { from 2, to 20, id genbank { name "name1105" } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { name "NAME1105", accession "AB001105", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00105", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 105" } }, location whole genbank { accession "BAA00105", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "tpg loc on gb" },
+      seq-set {
+        seq {
+          id { genbank { accession "AB001106", version 1 } },
+          descr { title "nuc 106", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00106", version 1 }, location int { from 2, to 20, id tpg { accession "AB001106", version 1 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { accession "AB001106", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00106", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 106" } }, location whole genbank { accession "BAA00106", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "tpe loc on tpg" },
+      seq-set {
+        seq {
+          id { tpg { accession "AB001107", version 1 } },
+          descr { title "nuc 107", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00107", version 1 }, location int { from 2, to 20, id tpe { accession "AB001107", version 1 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id tpg { accession "AB001107", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00107", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 107" } }, location whole genbank { accession "BAA00107", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "gb loc on ref" },
+      seq-set {
+        seq {
+          id { other { accession "AB001108", version 1 } },
+          descr { title "nuc 108", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00108", version 1 }, location int { from 2, to 20, id genbank { accession "AB001108", version 1 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id other { accession "AB001108", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00108", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 108" } }, location whole genbank { accession "BAA00108", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "gi loc" },
+      seq-set {
+        seq {
+          id { genbank { accession "AB001109", version 1 }, gi 1109 },
+          descr { title "nuc 109", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00109", version 1 }, location int { from 2, to 20, id gi 1109 } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { accession "AB001109", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00109", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 109" } }, location whole genbank { accession "BAA00109", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "local id loc on local str" },
+      seq-set {
+        seq {
+          id { local str "1110" },
+          descr { title "nuc 110", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00110", version 1 }, location int { from 2, to 20, id local id 1110 } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id local str "1110" } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00110", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 110" } }, location whole genbank { accession "BAA00110", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "local str loc on local id" },
+      seq-set {
+        seq {
+          id { local id 1111 },
+          descr { title "nuc 111", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00111", version 1 }, location int { from 2, to 20, id local str "1111" } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id local id 1111 } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00111", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 111" } }, location whole genbank { accession "BAA00111", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "general str on id" },
+      seq-set {
+        seq {
+          id { general { db "DB", tag id 1112 } },
+          descr { title "nuc 112", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00112", version 1 }, location int { from 2, to 20, id general { db "DB", tag str "1112" } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id general { db "DB", tag id 1112 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00112", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 112" } }, location whole genbank { accession "BAA00112", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "general id on str" },
+      seq-set {
+        seq {
+          id { general { db "DB", tag str "1113" } },
+          descr { title "nuc 113", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00113", version 1 }, location int { from 2, to 20, id general { db "DB", tag id 1113 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id general { db "DB", tag str "1113" } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00113", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 113" } }, location whole genbank { accession "BAA00113", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "general id other db case" },
+      seq-set {
+        seq {
+          id { general { db "DB", tag str "1114" } },
+          descr { title "nuc 114", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00114", version 1 }, location int { from 2, to 20, id general { db "db", tag id 1114 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id general { db "DB", tag str "1114" } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00114", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 114" } }, location whole genbank { accession "BAA00114", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "name match, acc ver differ" },
+      seq-set {
+        seq {
+          id { genbank { name "NAME1115", accession "AB001115", version 1 } },
+          descr { title "nuc 115", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00115", version 1 }, location int { from 2, to 20, id genbank { name "NAME1115", accession "AB001115", version 2 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { name "NAME1115", accession "AB001115", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00115", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 115" } }, location whole genbank { accession "BAA00115", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "loc acc+name, bioseq name only" },
+      seq-set {
+        seq {
+          id { genbank { name "NAME1116" } },
+          descr { title "nuc 116", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00116", version 1 }, location int { from 2, to 20, id genbank { name "NAME1116", accession "AB001116", version 1 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { name "NAME1116" } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00116", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 116" } }, location whole genbank { accession "BAA00116", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "pir no version" },
+      seq-set {
+        seq {
+          id { pir { accession "P01117", version 1 } },
+          descr { title "nuc 117", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00117", version 1 }, location int { from 2, to 20, id pir { accession "P01117" } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id pir { accession "P01117", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00117", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 117" } }, location whole genbank { accession "BAA00117", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "pir acc to name (packed?)" },
+      seq-set {
+        seq {
+          id { pir { name "PIRNAME1118" } },
+          descr { title "nuc 118", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00118", version 1 }, location int { from 2, to 20, id pir { accession "PIRNAME1118" } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id pir { name "PIRNAME1118" } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00118", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 118" } }, location whole genbank { accession "BAA00118", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "sp name+rel" },
+      seq-set {
+        seq {
+          id { swissprot { name "N1120_HUMAN", accession "P01120", release "reviewed" } },
+          descr { title "nuc 120", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00120", version 1 }, location int { from 2, to 20, id swissprot { name "N1120_HUMAN", release "reviewed" } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id swissprot { name "N1120_HUMAN", accession "P01120", release "reviewed" } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00120", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 120" } }, location whole genbank { accession "BAA00120", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "sp default rel" },
+      seq-set {
+        seq {
+          id { swissprot { name "N1121_HUMAN", accession "P01121" } },
+          descr { title "nuc 121", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00121", version 1 }, location int { from 2, to 20, id swissprot { name "N1121_HUMAN", release "reviewed" } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id swissprot { name "N1121_HUMAN", accession "P01121" } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00121", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 121" } }, location whole genbank { accession "BAA00121", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "sp other rel" },
+      seq-set {
+        seq {
+          id { swissprot { name "N1122_HUMAN", accession "P01122" } },
+          descr { title "nuc 122", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00122", version 1 }, location int { from 2, to 20, id swissprot { name "N1122_HUMAN", release "other" } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id swissprot { name "N1122_HUMAN", accession "P01122" } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00122", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 122" } }, location whole genbank { accession "BAA00122", version 1 } }
+          } } }
+        }
+      }
+    },
+    set {
+      class nuc-prot,
+      descr { comment "ref loc on gb" },
+      seq-set {
+        seq {
+          id { genbank { accession "AB001123", version 1 } },
+          descr { title "nuc 123", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00123", version 1 }, location int { from 2, to 20, id other { accession "AB001123", version 1 } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id genbank { accession "AB001123", version 1 } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00123", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 123" } }, location whole genbank { accession "BAA00123", version 1 } }
+          } } }
+        }
+      }
+    }
+  }
+}

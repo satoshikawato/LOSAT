@@ -9,5 +9,7 @@
   without a version, a name, another text alternative) to find a location's Bioseq, and the
   reverse matching of a Bioseq's own Seq-ids for the features it has. `AutoDef`
   (`AutodefOptions` on a nucleotide sequence without a title, not TLS and not a RefSeq contig)
-  remains refused (`D3c-6`), and so is a title made from the features where NCBI picks a
-  location's Bioseq by the order of handles in memory.
+  remains refused (`D3c-6`), and so is a title made from the features that changes with the
+  Bioseq NCBI picks for a location by the order of handles in memory (LOSAT makes the title
+  with each possible Bioseq and writes it when they agree). PDB Seq-ids and a `pir` or `prf`
+  accession alone match as in NCBI.

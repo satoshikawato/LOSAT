@@ -390,8 +390,8 @@ fn all_frozen_ncbi_2_17_0_asn1_cases_match_byte_for_byte() {
         checked += 1;
     }
     assert!(
-        checked >= 118,
-        "expected >= 118 frozen cases, got {checked}"
+        checked >= 131,
+        "expected >= 131 frozen cases, got {checked}"
     );
 }
 
@@ -648,10 +648,12 @@ fn d3c6_autodef_and_ub_cases_are_refused_cleanly() {
     }
 }
 
-/// Feature-made titles whose location Seq-id NCBI's scope resolves by state LOSAT cannot know are
-/// refused before any volume is written: a packed `pir` accession alone that matches the Bioseq's
-/// `pir` name, and an accession without a version that two Bioseqs in two Seq-id trees have with
-/// one version.
+/// Feature-made titles that change with the Bioseq NCBI's scope finds for a location Seq-id are
+/// refused before any volume is written, with nothing on stderr before the refusal: an accession
+/// without a version that two Bioseqs in two Seq-id trees have with one version, one of them the
+/// Bioseq of the CDS; and a packed `pir` accession alone whose name match NCBI skips when
+/// another Seq-id of the entry (here possibly the `mRNA` feature's) has an accession of its
+/// prefix that is not packed.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1438-1510,1564-1572
 /// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
@@ -667,25 +669,21 @@ fn d3c5_scope_order_cases_are_refused_cleanly() {
   inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
   annot { { data ftable {
     { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000814", version 1 } } },
-    { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id gi 900814 }, empty pir { accession "PIR814" } } }
+    { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id gi 900814 }, empty pir { accession "PIR814" } } },
+    { data rna { type mRNA }, location int { from 0, to 29, id gi 900814 } }
   } } }
 }
 "#;
     let tie_across_trees = br#"Bioseq-set ::= {
   seq-set {
     seq {
-      id { other { accession "NM_000830", version 1 }, gi 900830 },
+      id { other { accession "NM_000830", version 1 }, gi 900830, genbank { accession "AB000831", version 1 } },
       descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
       inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
       annot { { data ftable {
         { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000830", version 1 } } },
         { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id gi 900830 }, empty tpg { accession "AB000831" } } }
       } } }
-    },
-    seq {
-      id { genbank { accession "AB000831", version 1 } },
-      descr { title "gb one" },
-      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
     },
     seq {
       id { other { accession "AB000831", version 1 } },
@@ -718,7 +716,7 @@ fn d3c5_scope_order_cases_are_refused_cleanly() {
             label,
             rc,
             &stderr,
-            "by the order of Seq-id handles in memory",
+            "changes with the Bioseq NCBI's object manager",
         );
         for entry in std::fs::read_dir(&dir).unwrap() {
             let fname = entry.unwrap().file_name().to_string_lossy().into_owned();

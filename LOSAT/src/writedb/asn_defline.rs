@@ -10,7 +10,7 @@
 //! NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1177-1253
 //! NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:219-292,1359-1435
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hasher;
 use std::sync::OnceLock;
@@ -32,9 +32,10 @@ use crate::report::serial::asn_types::{member_index, members, Value};
 use crate::seqid::defline_set::{compare, object_id_number, Sic};
 use crate::seqid::label;
 use crate::seqid::mask_handle::{
-    handle_tree, mask_handle_key, textseq_packs, GiimTree, TreeHandle,
+    handle_tree, mask_handle_key, pdb_normalized, textseq_pack_prefix, textseq_packs, GiimTree,
+    TreeHandle,
 };
-use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId, TextseqId};
+use crate::seqid::model::{Date, Dbtag, ObjectId, ParsedSeqId, PdbSeqId, TextseqId};
 
 /// Cached ASN.1 table member indices for `CDeflineGenerator` descriptor/feature extraction.
 struct DeflineSchema {
@@ -519,6 +520,8 @@ pub(crate) struct CompactLoc {
     /// The first Seq-id in `CSeq_loc_CI` order, `empty` sub-locations included (`s_GetId`).
     first_id: Option<IdRef>,
     ids: LocIds,
+    /// Whether `strand` waits for the picks of ties (`TseFeatureIndex::loc_strand`).
+    deferred: Deferred,
 }
 
 impl CompactLoc {
@@ -727,20 +730,51 @@ pub(crate) struct TseFeatureIndex {
     attach_bios: Vec<u32>,
     /// Per interned Seq-id: the first Seq-id with its handle (its key when the scope finds none).
     unresolved_key: Vec<u32>,
-    /// Whether some Seq-id is found by NCBI's scope in an order LOSAT cannot know (see
-    /// `resolve_ids`); a title that reads the features then is refused.
-    unknowable: bool,
+    /// The interned Seq-ids for which NCBI's scope may find one of several Bioseqs, or none, by
+    /// Seq-id, with what it may find (`resolve_ids`).
+    ties: Vec<Tie>,
+    /// The pick of every tie that a title is made with, and the ties it read (`Scope::bio`).
+    tie_state: RefCell<TieState>,
+    /// Whether the TSE has Seq-ids that NCBI's object manager holds handles for and LOSAT does
+    /// not intern: locations and products of other features and other `Seq-annot`s, products of
+    /// genes, proteins and sources, and segments (`resolve_ids`).
+    unindexed_ids: bool,
 }
 
-/// The ways NCBI's scope finds a Bioseq for a Seq-id that no Bioseq of the TSE has.
+/// What NCBI's scope finds for a Seq-id that no Bioseq of the TSE has.
 enum Found {
     None,
     One(u32),
-    Unknowable,
+    /// Any of these (`None`: no Bioseq), by an order or a state LOSAT does not know.
+    Picks(Vec<Option<u32>>),
+}
+
+/// A Seq-id for which NCBI's scope may find any of `picks` (`None`: no Bioseq).
+struct Tie {
+    id: IdRef,
+    picks: Box<[Option<u32>]>,
+}
+
+/// The pick of every tie (an index into its `picks`) and whether the title being made read it.
+#[derive(Default)]
+struct TieState {
+    pick: Vec<usize>,
+    read: Vec<bool>,
+}
+
+/// Whether the `GetStrand` with the scope of a location waits for the picks of its ties
+/// (`Scope::apply_strand`), and whether it is then reversed (`reverse_loc`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Deferred {
+    #[default]
+    No,
+    Strand,
+    Reversed,
 }
 
 /// A Bioseq Seq-id that NCBI's scope finds for another Seq-id (`GetMatchingHandles`): its Bioseq,
 /// its tree and its version (`IsBetterVersion` ranks only within one tree).
+#[derive(Clone, Copy)]
 struct Candidate {
     bio: u32,
     tree: u8,
@@ -814,6 +848,9 @@ impl TseFeatureIndex {
         self.bioseq_lengths[bio_idx] = length;
         let s = dschema();
         if let Some((ext_c, ext_v)) = inst.member(s.seq_inst_ext).and_then(as_choice) {
+            if ext_c == s.seq_ext_seg || ext_c == s.seq_ext_delta {
+                self.unindexed_ids = true;
+            }
             if ext_c == s.seq_ext_seg {
                 if let Some(items) = as_list(ext_v) {
                     let mut seg_loc = CompactLoc::default();
@@ -847,6 +884,7 @@ impl TseFeatureIndex {
                 continue;
             };
             if choice != s.seq_annot_ftable {
+                self.unindexed_ids = true;
                 continue;
             }
             let Some(feats) = as_list(inner) else {
@@ -868,6 +906,7 @@ impl TseFeatureIndex {
     fn extract_feature(&mut self, feat: &Value) {
         let s = dschema();
         let Some((fchoice, fval)) = feat.member(s.seq_feat_data).and_then(as_choice) else {
+            self.unindexed_ids = true;
             return;
         };
         if fchoice != s.feat_prot
@@ -875,7 +914,11 @@ impl TseFeatureIndex {
             && fchoice != s.feat_cdregion
             && fchoice != s.feat_biosrc
         {
+            self.unindexed_ids = true;
             return;
+        }
+        if fchoice != s.feat_cdregion && feat.member(s.seq_feat_product).is_some() {
+            self.unindexed_ids = true;
         }
         let seq_order = self.next_order;
         self.next_order += 1;
@@ -1039,23 +1082,27 @@ impl TseFeatureIndex {
     /// version; when X has a name, the Y with that name in any letter case (not when both have an
     /// accession) and, when X has a release, that release (a `swissprot` Y without one also for
     /// `reviewed` and `unreviewed`); when X is a `pir` or `prf` accession alone, the Y that are
-    /// that text as a name alone. Of several Bioseqs, `IsBetter` keeps a Y with a version over one
-    /// without and a higher version, within one tree; other ties go by the order of the handles in
-    /// memory, which LOSAT cannot know (`unknowable`), as do a packed `pir` or `prf` X whose name
-    /// match depends on the accessions NCBI has seen before, and a PDB Seq-id where a Bioseq has
-    /// another handle of its molecule and chain (PDB matching is not ported). A `local` Seq-id
-    /// finds the integer of its number string and the reverse, a `general` one the same within
-    /// its database.
+    /// that text as a name alone, in a tree with no handle of an accession that is not packed and
+    /// starts with the prefix of X when X is packed. A PDB X finds the Y of its molecule and
+    /// chain, those with its release date when X has one. Of several Bioseqs, `IsBetter` keeps a
+    /// Y with a version over one without and a higher version, within one tree; the order of the
+    /// handles in memory decides the rest, so each of those Bioseqs is a pick of a tie (`ties`), as
+    /// are both outcomes of a packed `pir` or `prf` X where Seq-ids LOSAT does not intern could
+    /// hold such an accession (`unindexed_ids`). A `local` Seq-id finds the integer of its number
+    /// string and the reverse, a `general` one the same within its database.
     ///
     /// A feature location on a text Seq-id X is under a Bioseq Seq-id Y of the tree of X with its
-    /// accession in any letter case when X has no version or the version of Y; on another Seq-id,
+    /// accession in any letter case when X has no version or the version of Y; on a PDB Seq-id
+    /// without a release date, under a Y of its molecule and chain with one; on another Seq-id,
     /// under the Bioseq with its handle.
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
     /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_mapper.cpp:186-211,301-311
-    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1245-1295,1355-1394,1438-1510
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1161-1200,1245-1295
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1355-1394,1438-1510
     /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1564-1625,1845-1890,2034-2058
-    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2696-2760,3467-3481,3552-3622
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:2696-2760,3467-3481,3552-3615
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:440-442
     /// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:1019-1056
     fn resolve_ids(&mut self, bioseq_ids: &[&[ParsedSeqId]]) {
         self.n_bioseqs = bioseq_ids.len();
@@ -1065,14 +1112,15 @@ impl TseFeatureIndex {
         }
         let accessions = FieldIndex::new(bioseq_ids, text_accession);
         let mut names: Option<FieldIndex<'_>> = None;
-        let mut pdb_keys: Option<FxHashMap<PdbKey, Vec<Option<HandleKey>>>> = None;
+        let mut pdbs: Option<PdbIndex> = None;
         let mut bio_of = Vec::with_capacity(n);
         let mut attach_start = Vec::with_capacity(n + 1);
         let mut attach_bios = Vec::with_capacity(n);
         let mut first_with_key: FxHashMap<&HandleKey, u32> = FxHashMap::default();
         let mut unresolved_key = Vec::with_capacity(n);
-        let mut unknowable = false;
+        let mut ties = Vec::new();
         let mut cands: Vec<Candidate> = Vec::new();
+        let mut name_cands: Vec<Candidate> = Vec::new();
         let bio_with_id = |id: &ParsedSeqId| match mask_handle_key(id) {
             Ok(Some(key)) => self
                 .id_to_bioseq
@@ -1095,7 +1143,7 @@ impl TseFeatureIndex {
             attach_bios.extend(own);
             cands.clear();
             let found = match id {
-                ParsedSeqId::Local(tag) => own.or_else(|| {
+                ParsedSeqId::Local(tag) => Found::of(own.or_else(|| {
                     let other = match tag {
                         ObjectId::Id(number) => ObjectId::Str(number.to_string().into_bytes()),
                         ObjectId::Str(_) => {
@@ -1103,8 +1151,8 @@ impl TseFeatureIndex {
                         }
                     };
                     bio_with_id(&ParsedSeqId::Local(other))
-                }),
-                ParsedSeqId::General(dbtag) => own.or_else(|| {
+                })),
+                ParsedSeqId::General(dbtag) => Found::of(own.or_else(|| {
                     let other = match &dbtag.tag {
                         ObjectId::Id(number) if *number >= 0 => {
                             ObjectId::Str(number.to_string().into_bytes())
@@ -1116,19 +1164,37 @@ impl TseFeatureIndex {
                         db: dbtag.db.clone(),
                         tag: other,
                     }))
-                }),
+                })),
                 ParsedSeqId::Pdb(pdb) => {
-                    let keys = pdb_keys.get_or_insert_with(|| pdb_key_index(bioseq_ids));
-                    if keys
-                        .get(&pdb_key(pdb))
-                        .is_some_and(|handles| handles.iter().any(|h| h.as_ref() != key))
-                    {
-                        unknowable = true;
+                    let pdbs = pdbs.get_or_insert_with(|| PdbIndex::new(bioseq_ids));
+                    let stored = pdb_stored(pdb);
+                    if stored.rel.is_none() {
+                        for &bio in pdbs.dated.get(&pdb_str_key(&stored)).into_iter().flatten() {
+                            if !attach_bios[start..].contains(&bio) {
+                                attach_bios.push(bio);
+                            }
+                        }
                     }
-                    own
+                    match own {
+                        Some(bio) => Found::One(bio),
+                        None => {
+                            for (bio, rel) in
+                                pdbs.stored.get(&pdb_str_key(pdb)).into_iter().flatten()
+                            {
+                                if pdb.rel.is_none() || (rel.is_some() && *rel == pdb.rel) {
+                                    cands.push(Candidate {
+                                        bio: *bio,
+                                        tree: 0,
+                                        version: None,
+                                    });
+                                }
+                            }
+                            pick_candidate(&cands)
+                        }
+                    }
                 }
                 _ => match id.textseq() {
-                    None => own,
+                    None => Found::of(own),
                     Some(text) => {
                         let tree = handle_tree(id);
                         if let Some(acc) = text.accession.as_deref() {
@@ -1148,8 +1214,8 @@ impl TseFeatureIndex {
                                 });
                             }
                         }
-                        if own.is_some() {
-                            own
+                        if let Some(bio) = own {
+                            Found::One(bio)
                         } else {
                             if let Some(name) = text.name.as_deref() {
                                 let names = names
@@ -1179,6 +1245,7 @@ impl TseFeatureIndex {
                                     });
                                 }
                             }
+                            name_cands.clear();
                             if let (
                                 ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_),
                                 Some(acc),
@@ -1189,44 +1256,108 @@ impl TseFeatureIndex {
                             {
                                 let names = names
                                     .get_or_insert_with(|| FieldIndex::new(bioseq_ids, text_name));
-                                let before = cands.len();
                                 for (bio, y) in names.find(acc, text_name) {
                                     let y_text = y.textseq().expect("a text Seq-id");
                                     if y_text.accession.is_none()
                                         && y_text.version.is_none()
                                         && y_text.release.is_none()
                                     {
-                                        cands.push(Candidate {
+                                        name_cands.push(Candidate {
                                             bio,
                                             tree: handle_tree(y),
                                             version: None,
                                         });
                                     }
                                 }
-                                if cands.len() > before && textseq_packs(text) {
-                                    unknowable = true;
-                                }
                             }
-                            match pick_candidate(&cands) {
-                                Found::None => None,
-                                Found::One(bio) => Some(bio),
-                                Found::Unknowable => {
-                                    unknowable = true;
-                                    None
+                            match textseq_pack_prefix(text) {
+                                Some(prefix) if !name_cands.is_empty() => {
+                                    let unsure = self.accession_name_match(
+                                        bioseq_ids,
+                                        prefix,
+                                        &mut name_cands,
+                                    );
+                                    cands.append(&mut name_cands);
+                                    pick_candidate_unsure(&cands, &unsure)
+                                }
+                                _ => {
+                                    cands.append(&mut name_cands);
+                                    pick_candidate(&cands)
                                 }
                             }
                         }
                     }
                 },
             };
-            bio_of.push(found);
+            match found {
+                Found::None => bio_of.push(None),
+                Found::One(bio) => bio_of.push(Some(bio)),
+                Found::Picks(picks) => {
+                    bio_of.push(picks[0]);
+                    ties.push(Tie {
+                        id: r32,
+                        picks: picks.into_boxed_slice(),
+                    });
+                }
+            }
         }
         attach_start.push(attach_bios.len() as u32);
         self.bio_of = bio_of;
         self.attach_start = attach_start;
         self.attach_bios = attach_bios;
         self.unresolved_key = unresolved_key;
-        self.unknowable = unknowable;
+        let n_ties = ties.len();
+        self.ties = ties;
+        self.tie_state = RefCell::new(TieState {
+            pick: vec![0; n_ties],
+            read: vec![false; n_ties],
+        });
+    }
+
+    /// Keeps of the name matches `name_cands` of a packed `pir` or `prf` accession with the
+    /// prefix `prefix` those that NCBI's `FindMatch` takes: in a tree where no handle has an
+    /// accession that is not packed and starts with `prefix` in any letter case (the first such
+    /// accession at or after `prefix` sends the search to the accessions). Moves out and gives
+    /// the name matches that stay unsure: where Seq-ids that LOSAT does not intern may hold such
+    /// an accession (`unindexed_ids`), and all of them where segments are, whose handles NCBI
+    /// makes when it reads the segments.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1161-1200,1438-1490
+    fn accession_name_match(
+        &self,
+        bioseq_ids: &[&[ParsedSeqId]],
+        prefix: &[u8],
+        name_cands: &mut Vec<Candidate>,
+    ) -> Vec<Candidate> {
+        if !self.bioseq_seg_locs.is_empty() {
+            return std::mem::take(name_cands);
+        }
+        let blocked = |tree: u8| {
+            bioseq_ids
+                .iter()
+                .flat_map(|ids| ids.iter())
+                .chain(self.interner.ids.iter())
+                .any(|y| {
+                    handle_tree(y) == tree
+                        && y.textseq().is_some_and(|t| {
+                            !textseq_packs(t)
+                                && t.accession.as_deref().is_some_and(|a| {
+                                    a.len() >= prefix.len()
+                                        && a[..prefix.len()].eq_ignore_ascii_case(prefix)
+                                })
+                        })
+                })
+        };
+        let mut open_trees: Vec<u8> = name_cands.iter().map(|c| c.tree).collect();
+        open_trees.sort_unstable();
+        open_trees.dedup();
+        open_trees.retain(|&tree| !blocked(tree));
+        name_cands.retain(|c| open_trees.contains(&c.tree));
+        if self.unindexed_ids {
+            std::mem::take(name_cands)
+        } else {
+            Vec::new()
+        }
     }
 
     /// The Bioseqs whose features include a location on the interned Seq-id `r`.
@@ -1235,9 +1366,70 @@ impl TseFeatureIndex {
         &self.attach_bios[self.attach_start[r] as usize..self.attach_start[r + 1] as usize]
     }
 
-    /// The Bioseq the scope finds for the interned Seq-id `r`.
+    /// The Bioseq the scope finds for the interned Seq-id `r` (`Scope::bio`).
     fn bio_of(&self, r: IdRef) -> Option<usize> {
-        self.bio_of[r as usize].map(|b| b as usize)
+        self.scope().bio(r).map(|b| b as usize)
+    }
+
+    /// `GetStrand` of `loc` with the scope (`Scope::strand`).
+    fn loc_strand(&self, loc: &CompactLoc) -> i32 {
+        self.scope().strand(loc)
+    }
+
+    /// Makes a title with `make` at the first pick of every tie and, when it read ties, again at
+    /// every combination of the picks of the ties it read; gives the title when all are the
+    /// same (NCBI makes one of them), `None` when they differ.
+    fn same_at_every_pick<T: PartialEq>(&self, mut make: impl FnMut() -> T) -> Option<T> {
+        if self.ties.is_empty() {
+            return Some(make());
+        }
+        let set_picks = |read: &[usize], digits: &[usize]| {
+            let mut state = self.tie_state.borrow_mut();
+            state.pick.iter_mut().for_each(|p| *p = 0);
+            state.read.iter_mut().for_each(|r| *r = false);
+            for (&t, &d) in read.iter().zip(digits) {
+                state.pick[t] = d;
+            }
+        };
+        let newly_read = |read: &[usize]| -> Vec<usize> {
+            let state = self.tie_state.borrow();
+            (0..state.read.len())
+                .filter(|t| state.read[*t] && !read.contains(t))
+                .collect()
+        };
+        set_picks(&[], &[]);
+        let first = make();
+        let mut read = newly_read(&[]);
+        let mut same = true;
+        'restart: while !read.is_empty() {
+            let mut digits = vec![0usize; read.len()];
+            loop {
+                let mut k = 0;
+                loop {
+                    if k == digits.len() {
+                        break 'restart;
+                    }
+                    digits[k] += 1;
+                    if digits[k] < self.ties[read[k]].picks.len() {
+                        break;
+                    }
+                    digits[k] = 0;
+                    k += 1;
+                }
+                set_picks(&read, &digits);
+                if make() != first {
+                    same = false;
+                    break 'restart;
+                }
+                let new = newly_read(&read);
+                if !new.is_empty() {
+                    read.extend(new);
+                    continue 'restart;
+                }
+            }
+        }
+        set_picks(&[], &[]);
+        same.then_some(first)
     }
 
     /// The key of the sequence of the interned Seq-id `r` in `TestForOverlap64`'s ranges
@@ -1256,6 +1448,8 @@ impl TseFeatureIndex {
         Scope {
             interner: &self.interner,
             bio_of: &self.bio_of,
+            ties: &self.ties,
+            tie_state: &self.tie_state,
         }
     }
 
@@ -1273,6 +1467,8 @@ impl TseFeatureIndex {
         let scope = Scope {
             interner: &self.interner,
             bio_of: &self.bio_of,
+            ties: &self.ties,
+            tie_state: &self.tie_state,
         };
         let locs = self.genes.iter_mut().map(|g| &mut g.loc);
         let locs = locs.chain(self.cds.iter_mut().map(|c| &mut c.loc));
@@ -1669,7 +1865,7 @@ impl TseFeatureIndex {
                         _ => b"frame not set; ",
                     };
                     tlabel.extend_from_slice(frame_str);
-                    let strand_str: &[u8] = match cds.loc.strand {
+                    let strand_str: &[u8] = match self.loc_strand(&cds.loc) {
                         1 => b"positive strand",
                         2 => b"negative strand",
                         3 => b"both strands",
@@ -1718,22 +1914,25 @@ impl TseFeatureIndex {
             if (cds_sflag & handle_range_strands_flag(&g.loc)) == 0 {
                 return;
             }
-            let (neg_quality, diff) = if let Some(d) =
-                self.test_for_overlap_subset(&g.loc, &cds.loc)
-            {
-                (0i8, d)
-            } else if cds.trans_splicing && cds.loc.strand_free() == 255 && g.loc.strand != 255 {
-                let pstrand = if g.loc.strand == 0 { 1 } else { g.loc.strand };
-                let forced = force_loc_strand(&cds.loc, pstrand);
-                let Some(d) = self.test_for_overlap_subset(&g.loc, &forced) else {
+            let (neg_quality, diff) =
+                if let Some(d) = self.test_for_overlap_subset(&g.loc, &cds.loc) {
+                    (0i8, d)
+                } else if cds.trans_splicing
+                    && cds.loc.strand_free() == 255
+                    && self.loc_strand(&g.loc) != 255
+                {
+                    let g_strand = self.loc_strand(&g.loc);
+                    let pstrand = if g_strand == 0 { 1 } else { g_strand };
+                    let forced = force_loc_strand(&cds.loc, pstrand);
+                    let Some(d) = self.test_for_overlap_subset(&g.loc, &forced) else {
+                        return;
+                    };
+                    (1i8, d)
+                } else {
                     return;
                 };
-                (1i8, d)
-            } else {
-                return;
-            };
             let (g_from, g_to) = self.loc_total_range_on(&g.loc, cds_bio).unwrap_or((0, 0));
-            let tie = gene_annot_tie_key(g);
+            let tie = gene_annot_tie_key(g, self.loc_strand(&g.loc));
             let is_better = match &best {
                 None => true,
                 Some((bq, bd, bto, bfrom, btie, _)) => {
@@ -1764,14 +1963,14 @@ impl TseFeatureIndex {
                 None;
             src_index.for_each_covering(cds_from, cds_to, |si| {
                 let src = &self.biosrcs[si];
-                if !cfeat_ci_intervals_strand_match(target, &src.loc) {
+                if !cfeat_ci_intervals_strand_match(self.loc_strand(target), &src.loc) {
                     return;
                 }
                 let Some(diff) = self.test_for_overlap_subset(&src.loc, target) else {
                     return;
                 };
                 let (s_from, s_to) = self.loc_total_range_on(&src.loc, cds_bio).unwrap_or((0, 0));
-                let tie = biosrc_annot_tie_key(src);
+                let tie = biosrc_annot_tie_key(src, self.loc_strand(&src.loc));
                 let is_better = match &best {
                     None => true,
                     Some((bd, bfrom, bto, btie, _)) => {
@@ -1819,7 +2018,7 @@ impl TseFeatureIndex {
                 diff,
                 g_from,
                 std::cmp::Reverse(g_to),
-                gene_annot_tie_key(g),
+                gene_annot_tie_key(g, self.loc_strand(&g.loc)),
                 gi,
             ));
         });
@@ -1858,8 +2057,8 @@ struct GeneAnnotTieKey {
     seq_order: usize,
 }
 
-fn gene_annot_tie_key(g: &GeneFeature) -> GeneAnnotTieKey {
-    let is_rev = is_reverse_strand(g.loc.strand);
+fn gene_annot_tie_key(g: &GeneFeature, strand: i32) -> GeneAnnotTieKey {
+    let is_rev = is_reverse_strand(strand);
     GeneAnnotTieKey {
         is_rev,
         complex_tie: g.loc.is_complex ^ is_rev,
@@ -1893,8 +2092,8 @@ struct BiosrcAnnotTieKey {
     seq_order: usize,
 }
 
-fn biosrc_annot_tie_key(s: &BiosrcFeature) -> BiosrcAnnotTieKey {
-    let is_rev = is_reverse_strand(s.loc.strand);
+fn biosrc_annot_tie_key(s: &BiosrcFeature, strand: i32) -> BiosrcAnnotTieKey {
+    let is_rev = is_reverse_strand(strand);
     BiosrcAnnotTieKey {
         is_rev,
         complex_tie: s.loc.is_complex ^ is_rev,
@@ -1957,8 +2156,7 @@ fn handle_range_strands_flag(loc: &CompactLoc) -> u8 {
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/annot_collector.cpp:2700-2735
 /// NCBI reference (598d8ae6): c++/src/objmgr/handle_range.cpp:219-228
-fn cfeat_ci_intervals_strand_match(query: &CompactLoc, cand: &CompactLoc) -> bool {
-    let q_strand = query.strand;
+fn cfeat_ci_intervals_strand_match(q_strand: i32, cand: &CompactLoc) -> bool {
     if cand.pieces.len() <= 1 {
         let cand_s = match handle_range_strands_flag(cand) {
             1 => 1,
@@ -2002,6 +2200,11 @@ fn reverse_loc(loc: &CompactLoc) -> CompactLoc {
         exact: loc.exact,
         first_id: loc.first_id,
         ids: loc.ids.clone(),
+        deferred: match loc.deferred {
+            Deferred::No => Deferred::No,
+            Deferred::Strand => Deferred::Reversed,
+            Deferred::Reversed => Deferred::Strand,
+        },
     }
 }
 
@@ -2026,6 +2229,7 @@ fn force_loc_strand(loc: &CompactLoc, strand: i32) -> CompactLoc {
         exact: loc.exact,
         first_id: loc.first_id,
         ids: loc.ids.clone(),
+        deferred: Deferred::No,
     }
 }
 
@@ -2258,17 +2462,38 @@ fn extract_qual_comment_fallback(feat: &Value) -> Vec<u8> {
 struct Scope<'a> {
     interner: &'a SeqIdInterner,
     bio_of: &'a [Option<u32>],
+    ties: &'a [Tie],
+    tie_state: &'a RefCell<TieState>,
 }
 
 impl Scope<'_> {
+    /// The Bioseq the scope finds for the interned Seq-id `r`; for a tie, the pick that the title
+    /// is made with, noting that the title read it.
+    fn bio(&self, r: IdRef) -> Option<u32> {
+        match self.tie(r) {
+            None => self.bio_of[r as usize],
+            Some(t) => {
+                let mut state = self.tie_state.borrow_mut();
+                state.read[t] = true;
+                self.ties[t].picks[state.pick[t]]
+            }
+        }
+    }
+
+    fn tie(&self, r: IdRef) -> Option<usize> {
+        if self.ties.is_empty() {
+            return None;
+        }
+        self.ties.binary_search_by_key(&r, |t| t.id).ok()
+    }
+
     /// `IsSameBioseq` with a scope: `CSeq_id::Match`, one handle, or one Bioseq that the scope
     /// finds for both.
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-321
     /// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1880-1893
     fn same(&self, a: IdRef, b: IdRef) -> bool {
-        self.interner.same_free(a, b)
-            || self.bio_of[a as usize].is_some_and(|bio| self.bio_of[b as usize] == Some(bio))
+        self.interner.same_free(a, b) || self.bio(a).is_some_and(|bio| self.bio(b) == Some(bio))
     }
 
     /// `GetId` with the scope: the first Seq-id of `loc` when `s_GetId` finds every Seq-id on its
@@ -2289,39 +2514,117 @@ impl Scope<'_> {
     }
 
     /// `GetStrand` with the scope for a location that is on one Bioseq only through the scope:
-    /// `s_GetStrand` when `IsOneBioseq` holds.
+    /// `s_GetStrand` when `IsOneBioseq` holds. A location on a tie waits for the picks
+    /// (`TseFeatureIndex::loc_strand`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:385-389,481-513
     fn apply_strand(&self, loc: &mut CompactLoc) {
         if let LocIds::Scoped(scoped) = &loc.ids {
-            if !loc.exact && self.loc_id(loc).is_some() {
+            if loc.exact {
+                return;
+            }
+            if loc.first_id.is_some_and(|f| self.tie(f).is_some())
+                || scoped.ids.iter().any(|&x| self.tie(x).is_some())
+            {
+                loc.deferred = Deferred::Strand;
+            } else if self.loc_id(loc).is_some() {
                 loc.strand = scoped.strand;
             }
         }
     }
+
+    /// `GetStrand` with the scope of `loc` (`apply_strand`, at the picks of its ties).
+    fn strand(&self, loc: &CompactLoc) -> i32 {
+        if loc.deferred == Deferred::No {
+            return loc.strand;
+        }
+        let strand = match &loc.ids {
+            LocIds::Scoped(scoped) if self.loc_id(loc).is_some() => scoped.strand,
+            _ => 0,
+        };
+        if loc.deferred == Deferred::Reversed {
+            reverse_strand(strand)
+        } else {
+            strand
+        }
+    }
 }
 
-/// The Bioseq that `x_GetSeqMatch` keeps among the Bioseq Seq-ids `cands` that the scope finds
-/// for a Seq-id (`IsBetter`: within one tree, a version over none and a higher version).
+/// The Bioseqs that `x_GetSeqMatch` may keep among the Bioseq Seq-ids `cands` that the scope
+/// finds for a Seq-id, going through them in the order of their handles (`None` when there are
+/// none): it takes each one unless the one it holds `IsBetter`, which holds only within one tree
+/// for a version over none or a higher version. So within one tree the Bioseqs of the best
+/// version remain; across trees, every one.
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
-/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1564-1572
-fn pick_candidate(cands: &[Candidate]) -> Found {
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_mapper.cpp:301-311
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:99-103,1564-1572
+fn pick_set(cands: &[Candidate], picks: &mut Vec<Option<u32>>) {
     let Some(first) = cands.first() else {
-        return Found::None;
+        if !picks.contains(&None) {
+            picks.push(None);
+        }
+        return;
     };
-    if cands.iter().all(|c| c.bio == first.bio) {
-        return Found::One(first.bio);
-    }
-    if cands.iter().any(|c| c.tree != first.tree) {
-        return Found::Unknowable;
-    }
+    let across = cands.iter().any(|c| c.tree != first.tree);
     let best = cands.iter().map(|c| c.version).max().flatten();
-    let mut tops = cands.iter().filter(|c| c.version == best);
-    let top = tops.next().map(|c| c.bio);
-    match top {
-        Some(bio) if best.is_some() && tops.all(|c| c.bio == bio) => Found::One(bio),
-        _ => Found::Unknowable,
+    for c in cands {
+        if (across || c.version == best) && !picks.contains(&Some(c.bio)) {
+            picks.push(Some(c.bio));
+        }
+    }
+}
+
+/// What the scope finds among `cands` (`pick_set`).
+fn pick_candidate(cands: &[Candidate]) -> Found {
+    match cands {
+        [] => Found::None,
+        [one] => Found::One(one.bio),
+        _ if cands.iter().all(|c| c.bio == cands[0].bio) => Found::One(cands[0].bio),
+        _ => {
+            let mut picks = Vec::new();
+            pick_set(cands, &mut picks);
+            Found::from_picks(picks)
+        }
+    }
+}
+
+/// What the scope finds among `cands` and any of the trees of `unsure` (whose name matches NCBI
+/// may or may not take, `accession_name_match`).
+fn pick_candidate_unsure(cands: &[Candidate], unsure: &[Candidate]) -> Found {
+    if unsure.is_empty() {
+        return pick_candidate(cands);
+    }
+    let mut trees: Vec<u8> = unsure.iter().map(|c| c.tree).collect();
+    trees.sort_unstable();
+    trees.dedup();
+    let mut picks = Vec::new();
+    let mut all: Vec<Candidate> = Vec::with_capacity(cands.len() + unsure.len());
+    for mask in 0u64..(1u64 << trees.len()) {
+        all.clear();
+        all.extend_from_slice(cands);
+        all.extend(unsure.iter().copied().filter(|c| {
+            let at = trees
+                .iter()
+                .position(|&t| t == c.tree)
+                .expect("a tree of unsure");
+            (mask >> at) & 1 == 1
+        }));
+        pick_set(&all, &mut picks);
+    }
+    Found::from_picks(picks)
+}
+
+impl Found {
+    fn of(bio: Option<u32>) -> Self {
+        bio.map_or(Found::None, Found::One)
+    }
+
+    fn from_picks(picks: Vec<Option<u32>>) -> Self {
+        match picks.as_slice() {
+            [one] => Found::of(*one),
+            _ => Found::Picks(picks),
+        }
     }
 }
 
@@ -2338,28 +2641,65 @@ fn canonical_non_negative(text: &[u8]) -> Option<i32> {
     std::str::from_utf8(text).ok()?.parse::<i32>().ok()
 }
 
-/// A PDB Seq-id's molecule in upper case and its chain (`x_IdToStrKey`, a superset of the keys
-/// NCBI's PDB tree matches by).
-type PdbKey = (Vec<u8>, Option<Vec<u8>>);
-
-fn pdb_key(pdb: &crate::seqid::model::PdbSeqId) -> PdbKey {
-    let chain = pdb
-        .chain_id
-        .clone()
-        .or_else(|| pdb.chain.map(|c| vec![c as u8]));
-    (pdb.mol.to_ascii_uppercase(), chain)
+/// The Seq-id that NCBI's PDB tree keeps for the handle of `pdb` (`Normalize`): the normalized
+/// one, without its release date, or `pdb` itself when its date does not normalize.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:3408-3463,3502-3523
+fn pdb_stored(pdb: &PdbSeqId) -> PdbSeqId {
+    pdb_normalized(pdb).unwrap_or_else(|| pdb.clone())
 }
 
-/// The handle keys of the Bioseq PDB Seq-ids by `pdb_key`.
-fn pdb_key_index(bioseq_ids: &[&[ParsedSeqId]]) -> FxHashMap<PdbKey, Vec<Option<HandleKey>>> {
-    let mut out: FxHashMap<PdbKey, Vec<Option<HandleKey>>> = FxHashMap::default();
-    for id in bioseq_ids.iter().flat_map(|ids| ids.iter()) {
-        if let ParsedSeqId::Pdb(pdb) = id {
-            let key = mask_handle_key(id).ok().flatten().map(HandleKey::Bytes);
-            out.entry(pdb_key(pdb)).or_default().push(key);
-        }
+/// `x_IdToStrKey`: the molecule, then `_` and the `chain-id` or else the `chain` as a byte.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:3467-3481
+fn pdb_str_key(pdb: &PdbSeqId) -> Vec<u8> {
+    let mut key = pdb.mol.clone();
+    if let Some(chain_id) = &pdb.chain_id {
+        key.push(b'_');
+        key.extend_from_slice(chain_id);
+    } else if let Some(chain) = pdb.chain {
+        key.push(b'_');
+        key.push(chain as u8);
     }
-    out
+    key
+}
+
+/// The Bioseq PDB Seq-ids of a TSE for `resolve_ids`: by the key of the Seq-id NCBI keeps
+/// (`stored`, with that Seq-id's release date), and those with a release date by their own key
+/// (`dated`, whose reverse matches add the Seq-ids kept without a date, `FindReverseMatch`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:3552-3615
+struct PdbIndex {
+    stored: FxHashMap<Vec<u8>, Vec<(u32, Option<Date>)>>,
+    dated: FxHashMap<Vec<u8>, Vec<u32>>,
+}
+
+impl PdbIndex {
+    fn new(bioseq_ids: &[&[ParsedSeqId]]) -> Self {
+        let mut index = PdbIndex {
+            stored: FxHashMap::default(),
+            dated: FxHashMap::default(),
+        };
+        for (bio, ids) in bioseq_ids.iter().enumerate() {
+            for id in ids.iter() {
+                if let ParsedSeqId::Pdb(pdb) = id {
+                    let stored = pdb_stored(pdb);
+                    index
+                        .stored
+                        .entry(pdb_str_key(&stored))
+                        .or_default()
+                        .push((bio as u32, stored.rel));
+                    if pdb.rel.is_some() {
+                        let list = index.dated.entry(pdb_str_key(pdb)).or_default();
+                        if !list.contains(&(bio as u32)) {
+                            list.push(bio as u32);
+                        }
+                    }
+                }
+            }
+        }
+        index
+    }
 }
 
 /// What `GetStrand` without a scope gives a sub-location, as `s_GetStrand` of a `mix` folds it.
@@ -2794,17 +3134,23 @@ fn extract_map_r_enzyme(inst: &Value) -> Option<&[u8]> {
 }
 
 /// Feature query adapter bridging `TseFeatureIndex` to `report::defline::flags::DeflineFeatures`.
-struct BioseqFeatureView<'a, 'w> {
+struct BioseqFeatureView<'a> {
     index: &'a TseFeatureIndex,
     bio_idx: usize,
-    warn: RefCell<Warn<'w>>,
-    /// Whether the title read the features (`TseFeatureIndex::unknowable`).
-    consulted: Cell<bool>,
+    /// The posts of the title, written once the title is (`generate_asn_bioseq_title`).
+    posts: RefCell<Vec<Vec<u8>>>,
 }
 
-impl DeflineFeatures for BioseqFeatureView<'_, '_> {
+impl BioseqFeatureView<'_> {
+    fn content_label(&self, cds: &CdsFeature) -> Vec<u8> {
+        self.index.cdregion_content_label(cds, &mut |msg: &[u8]| {
+            self.posts.borrow_mut().push(msg.to_vec())
+        })
+    }
+}
+
+impl DeflineFeatures for BioseqFeatureView<'_> {
     fn has_biosrc_clone_feature(&self) -> bool {
-        self.consulted.set(true);
         for bi in self.index.target_bioseqs(self.bio_idx) {
             if let Some(ids) = self.index.biosrcs_by_bioseq.get(&bi) {
                 if ids.iter_ids().any(|si| self.index.biosrcs[si].has_clone) {
@@ -2816,7 +3162,6 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     }
 
     fn nm_single_gene_and_cds(&self) -> Option<(Vec<u8>, Vec<u8>)> {
-        self.consulted.set(true);
         let targets = self.index.target_bioseqs(self.bio_idx);
         let mut gene_idx = None;
         let mut gene_count = 0usize;
@@ -2851,14 +3196,12 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
         }
         let cds = &self.index.cds[cds_idx?];
         let gene = &self.index.genes[gene_idx?];
-        let mut warn = self.warn.borrow_mut();
-        let cds_label = self.index.cdregion_content_label(cds, *warn);
+        let cds_label = self.content_label(cds);
         let gene_label = gene.content_label();
         Some((cds_label, gene_label))
     }
 
     fn nr_first_gene_label(&self) -> Option<Vec<u8>> {
-        self.consulted.set(true);
         let targets = self.index.target_bioseqs(self.bio_idx);
         let mut candidates: Vec<(u64, std::cmp::Reverse<u64>, usize, usize)> = Vec::new();
         let mut seen = Vec::new();
@@ -2882,7 +3225,6 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     }
 
     fn longest_protein(&self) -> Option<ProteinFeatInfo> {
-        self.consulted.set(true);
         let targets = self.index.target_bioseqs(self.bio_idx);
         let mut candidates: Vec<(u64, std::cmp::Reverse<u64>, usize, usize)> = Vec::new();
         let mut seen = Vec::new();
@@ -2926,7 +3268,6 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     }
 
     fn cds_for_product(&self) -> Option<CdsForProductInfo> {
-        self.consulted.set(true);
         let &ci = self.index.cds_by_product.get(&self.bio_idx)?.first()?;
         let cds = &self.index.cds[ci];
         let gene = cds
@@ -2943,7 +3284,6 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     }
 
     fn source_taxname_via_cds(&self) -> Option<Vec<u8>> {
-        self.consulted.set(true);
         let &ci = self.index.cds_by_product.get(&self.bio_idx)?.first()?;
         let cds = &self.index.cds[ci];
         let src = self.index.best_biosrc_for_cds(cds)?;
@@ -2951,7 +3291,6 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
     }
 
     fn segseq_info_via_cds(&self) -> Option<SegSeqCdsInfo> {
-        self.consulted.set(true);
         let seg_loc = self.index.bioseq_seg_locs.get(&self.bio_idx)?;
         let mut candidates: Vec<(u64, std::cmp::Reverse<u64>, usize, usize)> = Vec::new();
         let mut seen = Vec::new();
@@ -2975,8 +3314,7 @@ impl DeflineFeatures for BioseqFeatureView<'_, '_> {
         candidates.sort();
         let &(_, _, _, ci) = candidates.first()?;
         let cds = &self.index.cds[ci];
-        let mut warn = self.warn.borrow_mut();
-        let product = self.index.cdregion_content_label(cds, *warn);
+        let product = self.content_label(cds);
         let mut locus = if let Some(g) = &cds.xref_gene {
             g.locus
                 .clone()
@@ -3025,8 +3363,10 @@ pub(crate) fn generate_asn_bioseq_title(
         _ => topology::LINEAR,
     };
 
+    // The posts are written once the title is; a refusal writes none.
+    let mut posts: Vec<Vec<u8>> = Vec::new();
     let sid = classify_seq_ids_full(ids, is_virtual, &mut |w| {
-        post_seq_id_warning(w, warn);
+        post_seq_id_warning(w, &mut |msg: &[u8]| posts.push(msg.to_vec()));
     });
 
     let mut inp = DeflineInput {
@@ -3082,45 +3422,55 @@ pub(crate) fn generate_asn_bioseq_title(
         ));
     }
 
-    let view = BioseqFeatureView {
-        index,
-        bio_idx,
-        warn: RefCell::new(warn),
-        consulted: Cell::new(false),
+    let make = || {
+        let view = BioseqFeatureView {
+            index,
+            bio_idx,
+            posts: RefCell::new(Vec::new()),
+        };
+        let defline = generate_defline_core(&inp, Some(&view))
+            .map(|d| (d.text, d.reads_past_end))
+            .map_err(|_| ());
+        (defline, view.posts.into_inner())
     };
-
-    let defline = generate_defline_core(&inp, Some(&view)).map_err(|_| {
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4530-4533
-        WriteDbError::Exception(NcbiException::new(
-            ThrowSite {
-                file: "src/corelib/ncbistr.cpp",
-                line: 4531,
-                kind: "CStringException::eBadArgs",
-                function: Some("ncbi::NStr::HtmlDecode"),
-            },
-            "Unable to guess the source string encoding",
-        ))
-    })?;
-
-    if index.unknowable && view.consulted.get() {
+    let Some((defline, title_posts)) = index.same_at_every_pick(make) else {
         return Err(WriteDbError::Unsupported(
-            "a title made from the features of an entry with a location Seq-id whose Bioseq \
-             NCBI's object manager picks by the order of Seq-id handles in memory or by the \
-             Seq-ids it read before (two Bioseqs that match it alike, a pir or prf accession \
-             alone, a PDB Seq-id) is not supported by LOSAT's makeblastdb"
+            "a title made from the features that changes with the Bioseq NCBI's object manager \
+             finds for a location Seq-id, which two Bioseqs of the entry match alike (NCBI picks \
+             one by the order of Seq-id handles in memory) or, for a pir or prf accession alone, \
+             by a name where Seq-ids that LOSAT does not read (other annotations, segments) may \
+             hold another accession of its prefix, is not supported by LOSAT's makeblastdb"
                 .to_string(),
         ));
-    }
-
-    if defline.reads_past_end {
-        return Err(WriteDbError::Unsupported(
+    };
+    match defline {
+        Ok((_, true)) => Err(WriteDbError::Unsupported(
             "a title of punctuation that NCBI's x_CleanAndCompress reads past the end of \
              (NCBI makeblastdb crashes)"
                 .to_string(),
-        ));
+        )),
+        Ok((text, false)) => {
+            for msg in posts.iter().chain(&title_posts) {
+                warn(&msg[..]);
+            }
+            Ok(text)
+        }
+        Err(()) => {
+            for msg in posts.iter().chain(&title_posts) {
+                warn(&msg[..]);
+            }
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4530-4533
+            Err(WriteDbError::Exception(NcbiException::new(
+                ThrowSite {
+                    file: "src/corelib/ncbistr.cpp",
+                    line: 4531,
+                    kind: "CStringException::eBadArgs",
+                    function: Some("ncbi::NStr::HtmlDecode"),
+                },
+                "Unable to guess the source string encoding",
+            )))
+        }
     }
-
-    Ok(defline.text)
 }
 
 /// Populates `inp` from Bioseq and ancestor descriptors in `CSeqdesc_CI` order, returning whether

@@ -14,8 +14,8 @@
 //! size) makes small batches, so that a few queries make several batches and blocks. The same
 //! comparisons run with `-db` on a database of the subject proteome made with `losat makeblastdb`.
 //!
-//! The searches run four of the fixture's 101 queries (`queries`), except the default test's:
-//! blocks of 50,000 letters need all of them. The block plan reads no other size whose outcome the
+//! The searches run four of the fixture's 101 queries (`queries`), except the default test's
+//! (blocks of 50,000 letters need all of them) and the split batch's (five, `queries_with_split`). The block plan reads no other size whose outcome the
 //! four change (it needs more than one block, the `Int8` search space of the database and the
 //! longest query, the diagonal table's window, the batches' split sizes and, for blastp-fast, their
 //! words, `x_word_blocks`, which also closes the blocks on them). Two rules of other default
@@ -70,6 +70,32 @@ fn queries(tag: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("queries.faa");
     std::fs::write(&path, records[first..first + 4].concat()).unwrap();
+    path
+}
+
+/// NCBI's query chunk size for `queries_with_split`: its batch of 3,131 letters is split into two
+/// chunks of 1,616 (`calculate_num_chunks`, overlap 100), which NCBI does not split again.
+const SPLIT: (&str, &str) = ("CHUNK_SIZE", "1500");
+
+/// The queries of `queries` with BDT62547.1 (3,131 letters, rows across both of its chunks) after
+/// BDT62581.1: the batches of `BATCH` are {BDT62581.1}, {BDT62547.1}, {BDT62582.1, BDT62583.1} and
+/// {BDT62584.1}, the second split with `SPLIT`; blocks of `TWO_BLOCKS` letters are {BDT62581.1,
+/// BDT62547.1} and the other three, so the split batch comes after a batch of its block.
+fn queries_with_split(tag: &str) -> PathBuf {
+    let path = queries(tag);
+    let text = std::fs::read_to_string(fixture("MeenMJNV.faa")).unwrap();
+    let long = text
+        .split('>')
+        .find(|record| record.starts_with("BDT62547.1 "))
+        .map(|record| format!(">{record}"))
+        .expect("the record is in the fixture");
+    let four = std::fs::read_to_string(&path).unwrap();
+    let second = four[1..].find('>').expect("four records") + 1;
+    std::fs::write(
+        &path,
+        format!("{}{long}{}", &four[..second], &four[second..]),
+    )
+    .unwrap();
     path
 }
 
@@ -202,6 +228,46 @@ fn blastp_fast_blocks_write_the_rows_of_the_search_of_all_queries() {
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let query = queries("fast");
     assert_block_rows(&query, &subject, &[(FAST, 1, TWO_BLOCKS), (FAST, 4, "1")]);
+    std::fs::remove_dir_all(query.parent().unwrap()).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-283
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
+// A batch that NCBI splits (`CHUNK_SIZE`) inside a block: the block's search searches the batch's
+// chunks, each with its own lookup table, after the block's batch before it; the block's own
+// table holds no word of the split batch and is freed before the chunks (`CallTableWords`). The
+// rows are the rows of the search of all queries, from one search per block. Each lookup table:
+// exact blastp at one thread, blastp-fast at four (whose plan also tests each chunk's words
+// against NCBI's overflow banks, `x_word_blocks`, and which builds the next block's table ahead).
+#[test]
+fn a_split_batch_in_a_block_writes_the_rows_of_the_search_of_all_queries() {
+    let subject = fixture("MejoMJNV.faa");
+    let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    let query = queries_with_split("split");
+    for (task, threads) in [(EXACT, 1), (FAST, 4)] {
+        let what = format!("{task:?} threads {threads}");
+        let (reference, reference_searches, _log) =
+            blastp_against(&query, &subject, threads, &[BATCH, SPLIT, SWITCH_OFF], task);
+        assert!(
+            String::from_utf8_lossy(&reference)
+                .lines()
+                .any(|row| row.starts_with("BDT62547.1\t")),
+            "{what}: the split query has rows"
+        );
+        let (rows, searches, _log) = blastp_against(
+            &query,
+            &subject,
+            threads,
+            &[BATCH, SPLIT, ("LOSAT_X_BPQBLOCK", TWO_BLOCKS)],
+            task,
+        );
+        assert!(rows == reference, "{what}: rows differ");
+        assert_eq!(
+            searches,
+            reference_searches + 1,
+            "{what}: a search per block (two)"
+        );
+    }
     std::fs::remove_dir_all(query.parent().unwrap()).unwrap();
 }
 

@@ -853,9 +853,10 @@ fn xml_titles_that_ncbi_cannot_make_leave_the_search_of_all_queries() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// `-db`: one stored title with a Latin-1 byte, on a subject with hits (refused by outfmt 5, 15 and
-// 16; outfmt 8 writes NCBI's 803.7 posts of its Seq-aligns, line RG-KB 9(b)) and on one without
-// (all complete): the block search is not used, and the run ends as the search of all queries does.
+// `-db`: one stored title with a Latin-1 byte, on a subject with hits (outfmt 5, 15 and 16 write
+// NCBI's 803.7 posts of the prefetch's load and of the Hit's read, line RG-KB 9b-2; outfmt 8 those
+// of its Seq-aligns, 9(b)) and on one without (all complete): the block search is not used, and the
+// run ends as the search of all queries does.
 // One case per path (CI time): with hits outfmt 5 and 8 (one check, `x_titles_read_allow_blocks`)
 // and 15 (the titles with the taxids, `x_titles_taxids_allow_blocks`), without hits 8 and 16; both
 // checks are unit tests at one and four threads (`database.rs`).
@@ -895,7 +896,7 @@ fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries
             &with_hit,
             "cafX",
             "a title on a subject with hits",
-            false,
+            true,
             &[("5", 1), ("15", 1)],
         ),
         (

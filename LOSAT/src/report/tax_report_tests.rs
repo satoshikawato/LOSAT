@@ -529,14 +529,16 @@ fn the_texts_of_a_subjects_read_come_before_its_lookups() {
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997-1019
 #[test]
-fn a_subjects_definition_lines_are_read_twice_before_its_lookups() {
+fn a_subjects_definition_lines_are_read_twice_at_each_seq_align_before_its_lookups() {
     // RG-KB 9b-2 (probe `K/kb/i9b2/probe`, `blastp.base.f18`): each read of a subject (its load,
     // `ExtractBlastDefline`) and the read again at its first line (`GetDisplayIds`) post the title's
-    // replaced bytes, after the load's texts and before the line's lookup; the second HSP of A,
-    // after B's, reads A again.
+    // replaced bytes, after the load's texts and before the line's lookup; A's HSP after B's reads
+    // A again (B is not A); C's titles come before the lookup of its taxid (99990, whose lookup in
+    // `offset_last_past_end` writes the offset error).
     let subjects = Subjects(vec![
         vec![line("AAA00001", "a_title", 9606)],
-        vec![line("BBB00001", "b_title", 99990)],
+        vec![line("BBB00001", "b_title", 9606)],
+        vec![line("CCC00001", "c_title", 99990)],
     ]);
     let names = names(Some("offset_last_past_end"));
     let queries = [TaxQuery {
@@ -546,6 +548,7 @@ fn a_subjects_definition_lines_are_read_twice_before_its_lookups() {
             hsp(0, 3e-171, 461.0),
             hsp(1, 1e-3, 30.0),
             hsp(0, 1e-2, 28.0),
+            hsp(2, 2e-2, 27.0),
         ]),
     }];
     let report = TaxReport::new(&queries, &subjects, lookups(names.as_ref()), false).unwrap();
@@ -556,6 +559,7 @@ fn a_subjects_definition_lines_are_read_twice_before_its_lookups() {
     let mut cursor = ReadCursor::new(&reads).unwrap();
     let mut titles = crate::report::query_warnings::TitleDecodes::default();
     titles.insert(0, b"title A\n".to_vec());
+    titles.insert(2, b"title C\n".to_vec());
     let merged = Merged::default();
     report
         .write_query(
@@ -576,7 +580,7 @@ fn a_subjects_definition_lines_are_read_twice_before_its_lookups() {
         .unwrap();
     assert_eq!(
         &merged[start..end],
-        "read A\ntitle A\ntitle A\nError: [blastp] Error: Offset error at end of taxdb file.\ntitle A\ntitle A\n"
+        "read A\ntitle A\ntitle A\ntitle A\ntitle A\ntitle C\ntitle C\nError: [blastp] Error: Offset error at end of taxdb file.\n"
     );
 }
 

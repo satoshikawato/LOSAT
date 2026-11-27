@@ -1137,7 +1137,7 @@ fn seg_cut_text(cut: f64) -> String {
 /// `Set*` calls `m_Remote->SetValue` with the field of the value it takes): the archive of an
 /// imported run lists them where NCBI's handle does. `StrandOption` (blastn's: the values 1 to 3,
 /// the others are refused) records its `strand-type`.
-fn recorded_params(setter: &Setter) -> Vec<Param> {
+pub(crate) fn recorded_params(setter: &Setter) -> Vec<Param> {
     use crate::report::archive::fields as f;
     use ParamValue::{BigInteger, Boolean, Evalue, Integer, Real, Str};
     let one = |field, value| vec![Param::new(field, value)];

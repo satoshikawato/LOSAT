@@ -19,6 +19,7 @@ use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::Path;
 
+use super::archive_out;
 use super::formatting::{extract_formatting, sam_check};
 use super::refusals::{self, Refusal};
 use super::search_program::{blast_type, program_type};
@@ -36,7 +37,7 @@ use crate::ncbi_app::files::{self, OutputFile};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::archive::read::options::{archive_request, BuiltOptions};
-use crate::report::archive::read::request::{Queries, Subject};
+use crate::report::archive::read::request::{ParamSet, Queries, Subject};
 use crate::report::archive::read::{
     seq_align_id, Archive, ArchiveReader, Message, Search, Severity, Stop,
 };
@@ -85,8 +86,10 @@ pub(crate) fn format_archive(
             formatting: false,
         },
         search_options: None,
+        algorithm_options: None,
         hitlist: 0,
         database: None,
+        psi_step: None,
         opened: None,
         buf: Vec::new(),
     };
@@ -105,14 +108,20 @@ struct Run<'r, 'o> {
     /// The options of the first search object (`m_CBOH`, `m_TaxidList`,
     /// `m_DbFilteringAlgorithmId`, `m_Task`), which every later object is formatted with.
     search_options: Option<BuiltOptions>,
+    /// The remote-options state of `m_CBOH` (`-outfmt 11`), built once on the first search object
+    /// and mutated across objects (`HitlistSize`, RPS `MatrixName`).
+    algorithm_options: Option<archive_out::AlgorithmOptions>,
     /// The options' hit list size: the first object's, then what `ExtractAlgorithmOptions` set
     /// for the last formatted object (`opts.SetHitlistSize` on the kept options).
     hitlist: i32,
     /// `m_Dbs`: the name and residue type of the database of the last database object.
     database: Option<(Vec<u8>, bool)>,
+    /// `Web_StepNumber` of `m_FormatOpts` (`remote_blast.cpp:1733-1737`), updated whenever a
+    /// search object has `service == "psi"`; `Err(())` when the value is not an `integer`.
+    psi_step: Option<Result<i32, ()>>,
     /// The database opened for an earlier object (`opened_database`).
     opened: Option<OpenedDatabase>,
-    /// The encoder's buffer of one Seq-annot.
+    /// The encoder's buffer of one output document.
     buf: Vec<u8>,
 }
 
@@ -120,7 +129,7 @@ struct Run<'r, 'o> {
 /// formatted object), then `cout` or the file's `ofstream` as the release's C++ runtime has them
 /// (`writedb::ofstream`, `writedb::cout`: what they hold, when a write fails, their state and its
 /// exceptions).
-struct Output<'o> {
+pub(super) struct Output<'o> {
     /// The standard output until `-out` is opened.
     stdout: Option<&'o mut dyn Write>,
     /// The run's files, where `-out` is opened (`OpenFiles::create`).
@@ -267,21 +276,17 @@ impl<'o> Output<'o> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:689-698
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:310-323
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:559-564
-    /// The insertion of the Seq-annot of `desc` and `aligns` in `format` into the stream (it
-    /// takes the format, then the Seq-annot): an object stream of its own over the stream
-    /// (`writedb::metadata::ObjectOStream`, no diagnostic prefix) takes the bytes
-    /// (`write_streamed` through `AnnotSink`, then `EndOfWrite`), and its destructor closes it.
-    /// A close that fails posts `802.4` (`ObjectOStream::destroy`); a write that threw then ends
-    /// the run (`BLAST failed to write output`, exit status 6). Where the posts go to `cerr` and
-    /// the stream is `cout`, the post's flush of `cout` (the tie) throws again inside the
+    /// Writes one serialized object (a Seq-annot or a Blast4-archive) into the stream through a
+    /// fresh `ObjectOStream` (`writedb::metadata::ObjectOStream`, no diagnostic prefix): `write`
+    /// receives the buffered sink and diagnostics stream, then `EndOfWrite`, and the destructor
+    /// closes it. A close that fails posts `802.4` (`ObjectOStream::destroy`); a write that threw
+    /// ends the run (`BLAST failed to write output`, exit status 6). Where the posts go to `cerr`
+    /// and the stream is `cout`, the post's flush of `cout` (the tie) throws again inside the
     /// destructor: `std::terminate` (`NativeError::ios_failure_abort`), without the post.
-    fn write_annot(
+    pub(super) fn write_object(
         &mut self,
-        format: SerialFormat,
-        desc: AnnotDesc<'_>,
-        aligns: &[V<'_>],
-        buf: &mut Vec<u8>,
         diag: &mut Diag,
+        write: impl FnOnce(&mut dyn Write, &mut dyn Write) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
         // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
         let tied = diag.is_cerr();
@@ -292,15 +297,7 @@ impl<'o> Output<'o> {
             buffer: &mut object.output,
             tie,
         };
-        let written = write_streamed(
-            format,
-            desc,
-            aligns,
-            buf,
-            &mut sink,
-            &mut DiagWriter(&mut *diag),
-        )
-        .and_then(|()| {
+        let written = write(&mut sink, &mut DiagWriter(&mut *diag)).and_then(|()| {
             object
                 .output
                 .end_of_write()
@@ -320,6 +317,20 @@ impl<'o> Output<'o> {
             } else {
                 error
             }
+        })
+    }
+
+    /// The insertion of the Seq-annot of `desc` and `aligns` in `format` into the stream.
+    fn write_annot(
+        &mut self,
+        format: SerialFormat,
+        desc: AnnotDesc<'_>,
+        aligns: &[V<'_>],
+        buf: &mut Vec<u8>,
+        diag: &mut Diag,
+    ) -> anyhow::Result<()> {
+        self.write_object(diag, |sink, diagnostics| {
+            write_streamed(format, desc, aligns, buf, sink, diagnostics)
         })
     }
 }
@@ -438,9 +449,20 @@ impl<'r, 'o> Run<'r, 'o> {
         if let Subject::Database(name) = &search.request.subject {
             self.database = Some((name.clone(), search.request.db_is_protein()));
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1733-1737
+        if search.request.service == b"psi" {
+            self.psi_step = search
+                .request
+                .param(ParamSet::Format, b"Web_StepNumber")
+                .map(|param| match param.value().choice() {
+                    ("integer", value) => Ok(value.int() as i32),
+                    _ => Err(()),
+                });
+        }
         if self.search_options.is_none() {
             let options = archive_request(&search.request).map_err(|e| exception_error(&e))?;
             self.hitlist = options.hitlist_size();
+            self.algorithm_options = Some(archive_out::AlgorithmOptions::from_built(&options));
             self.search_options = Some(options);
         }
         let printed = self.print(&search, diag);
@@ -502,9 +524,19 @@ impl<'r, 'o> Run<'r, 'o> {
         // posts its warning (`hitlist_size < 5`) as for 0, which the handler reads in its place.
         let formatting = extract_formatting(self.options, self.hitlist.max(0) as usize)?;
         post_line(&mut self.output, diag, &formatting.warnings);
-        if self.hitlist >= 0 || self.options_set_hitlist(formatting.choice.number) {
+        let set_hitlist = self.options_set_hitlist(formatting.choice.number);
+        if self.hitlist >= 0 || set_hitlist {
             self.hitlist = i32::try_from(formatting.counts.hitlist_size)
                 .expect("a hit list size that the handler read from an int");
+        }
+        if let Some(algo) = &mut self.algorithm_options {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2990
+            if formatting.choice.number > output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES
+                || set_hitlist
+                || self.hitlist <= 500
+            {
+                algo.set_hitlist_size(self.hitlist);
+            }
         }
         let search_options = self
             .search_options
@@ -539,6 +571,23 @@ impl<'r, 'o> Run<'r, 'o> {
         xinclude_check_for(&formatting.choice, Some(Path::new(&self.options.out)))?;
         if let Some(refusal) = refusals::output_format(formatting.choice.number) {
             return Err(refusal.into());
+        }
+        if formatting.choice.number == output_format::ARCHIVE_FORMAT {
+            let algo = self
+                .algorithm_options
+                .as_mut()
+                .expect("the options of the first search object");
+            let database = self.database.as_ref().map(|(name, _)| name.as_slice());
+            return archive_out::write_archive(
+                search,
+                search_options,
+                algo,
+                database,
+                self.psi_step,
+                &mut self.output,
+                &mut self.buf,
+                diag,
+            );
         }
         let format = match formatting.choice.number {
             output_format::ASN_TEXT => SerialFormat::AsnText,
@@ -637,7 +686,7 @@ impl SeqAnnotDocument for ArchiveDocument<'_> {
 /// formats keep the last `SPILL_LAG` bytes back (`lag`): a Seq-annot that their plain encoder
 /// stops on is written again through `Traced` behind the `written` bytes (`write_streamed`), and
 /// NCBI's buffer (4096 bytes) had written more than those when it posted the first replaced byte.
-struct Spill<'w> {
+pub(super) struct Spill<'w> {
     out: &'w mut dyn Write,
     lag: usize,
     /// The final bytes held back.
@@ -649,12 +698,26 @@ struct Spill<'w> {
 }
 
 /// The bytes that `Spill` keeps back for the ASN.1 text and binary formats.
-const SPILL_LAG: usize = 2 * crate::writedb::ofstream::BUFSIZ;
+pub(super) const SPILL_LAG: usize = 2 * crate::writedb::ofstream::BUFSIZ;
 
-impl Spill<'_> {
-    /// After an element of the Seq-annot's list: the encoder's final bytes handed on, once it
+impl<'w> Spill<'w> {
+    pub(super) fn new(out: &'w mut dyn Write, lag: usize) -> Self {
+        Spill {
+            out,
+            lag,
+            held: Vec::new(),
+            written: 0,
+            error: None,
+        }
+    }
+
+    pub(super) fn into_parts(self) -> (Vec<u8>, usize, Option<std::io::Error>) {
+        (self.held, self.written, self.error)
+    }
+
+    /// After an element of a long list: the encoder's final bytes handed on, once it
     /// holds `FLUSH_BYTES` and has met no error.
-    fn after_element<E: Encoder>(&mut self, enc: &mut E) {
+    pub(super) fn after_element<E: Encoder>(&mut self, enc: &mut E) {
         if self.error.is_some() || enc.error().is_some() || enc.buffered() < FLUSH_BYTES {
             return;
         }
@@ -700,9 +763,9 @@ impl Write for Counted<'_> {
 }
 
 /// A writer that drops the first `skip` bytes it is given (those that `Spill` handed on).
-struct SkipWriter<'w> {
-    inner: &'w mut dyn Write,
-    skip: usize,
+pub(super) struct SkipWriter<'w> {
+    pub(super) inner: &'w mut dyn Write,
+    pub(super) skip: usize,
 }
 
 impl Write for SkipWriter<'_> {
@@ -1052,7 +1115,7 @@ fn remote_database(error: &SeqDbError, name: &str) -> anyhow::Error {
 /// `Invalid input format for BLAST Archive.`: the `CInputException` that `Run` throws for an
 /// input of another format and for a `CSerialException` of the loop (`BLAST query/options
 /// error`, exit status 1).
-fn invalid_archive() -> anyhow::Error {
+pub(super) fn invalid_archive() -> anyhow::Error {
     options_error_bytes(b"Invalid input format for BLAST Archive.")
 }
 
@@ -1074,7 +1137,7 @@ fn read_error(error: ReadError) -> anyhow::Error {
 /// of a CHOICE or an unset member are `invalid_archive` (the loop's `catch`); an exception is
 /// `exception_error`'s; a null pointer (an element stated as `NULL` in a list too), an `abort`
 /// and a read of memory the input does not decide are refused.
-fn stop_error(stop: Stop) -> anyhow::Error {
+pub(super) fn stop_error(stop: Stop) -> anyhow::Error {
     match stop {
         Stop::Exception(exception) => exception_error(&exception),
         Stop::InvalidSelection { .. } | Stop::Unassigned { .. } => invalid_archive(),

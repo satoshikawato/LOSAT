@@ -540,6 +540,40 @@ mod parsed {
         }
     }
 
+    /// One byte outside ' '..'~' at each position of an otherwise visible text of 1 to 200 bytes
+    /// (every path of `find_first`: under 16 bytes, 16 to 63, and 64-byte windows with an
+    /// overlapping last one, so also a first bad byte past the first window): the diagnostics
+    /// without the record are those of the record, for the text as `defline_set`'s title and as
+    /// the title and a `local` string of a parsed definition line.
+    #[test]
+    fn one_bad_byte_anywhere_is_reported_as_the_record_reports_it() {
+        for len in 1..=200 {
+            for at in 0..len {
+                let mut s = vec![b'a'; len];
+                s[at] = 0x80;
+                let (mut alone, mut written) = (Vec::new(), Vec::new());
+                bad_title_chars(&s, &mut alone);
+                defline_set(&s, 7, 9606, &mut written);
+                assert_eq!(alone, written, "title of {len} bytes, bad byte {at}");
+                assert_eq!(written.len(), 1);
+                let set = DeflineSet {
+                    deflines: vec![BlastDefline {
+                        title: Some(s.clone()),
+                        ids: vec![ParsedSeqId::Local(ObjectId::Str(s.clone()))],
+                        taxid: Some(0),
+                        ..BlastDefline::default()
+                    }],
+                    utf8: false,
+                };
+                let (mut alone, mut written) = (Vec::new(), Vec::new());
+                defline_set_bad_chars(&set, &mut alone);
+                encode_defline_set(&set, &mut written);
+                assert_eq!(alone, written, "parsed, {len} bytes, bad byte {at}");
+                assert_eq!(written.len(), 2);
+            }
+        }
+    }
+
     // Verified against NCBI BLAST+ 2.17.0 makeprofiledb -blastdb_version 4: exact BER stream
     // byte position where CObjectOStreamAsnBinary::WriteContainer stops on a NULL Seq-id.
     #[test]

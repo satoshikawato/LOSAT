@@ -29,8 +29,8 @@ use super::view::{self, QueryHits};
 use crate::algorithm::blastn::blast_engine::QueryBatchSizes;
 use crate::blastinput::app::query_batch_size;
 use crate::blastinput::fasta_reader::FastaRecord;
-use crate::blastinput::query_batch::BatchCount;
 use crate::blastinput::query_batch::ScopeRefusal;
+use crate::blastinput::query_batch::{BatchCount, LoopBatchSizes};
 use crate::blastinput::seq_range::{record_interval, RecordInterval};
 use crate::cli::Commands;
 use crate::report::blast_xml::XmlStats;
@@ -95,39 +95,33 @@ impl Batch {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-272
-/// The size of NCBI's query batches: BLASTN's follows the extensions of the batch before.
-enum BatchSizes {
-    Fixed(u32),
-    Blastn(QueryBatchSizes),
-}
+/// The size of NCBI's query batches: BLASTN's application's follow the extensions of the batch
+/// before (`LoopBatchSizes`).
+type BatchSizes = LoopBatchSizes;
 
-impl BatchSizes {
-    fn current(&self) -> u32 {
-        match self {
-            BatchSizes::Fixed(size) => *size,
-            BatchSizes::Blastn(sizes) => sizes.batch_size(),
-        }
-    }
-}
-
-/// The batch sizes of `command`, as each program's application reads them (`GetQueryBatchSize`);
-/// BLASTN's of a database reads the call's settings (`start`).
+/// The batch sizes of `command`, as its running application reads them (`GetQueryBatchSize`,
+/// `Program::fixed_query_batch_size`), also where it runs another program's strategy; BLASTN's
+/// application's over a database reads the call's settings (`start`).
 fn batch_sizes(
     command: &Commands,
     inputs: Inputs<'_>,
     start: &CallStart,
 ) -> anyhow::Result<BatchSizes> {
     Ok(match command {
-        Commands::Blastn(args) => BatchSizes::Blastn(match args.database_name() {
+        Commands::Blastn(args) => match args.database_name() {
             Some(name) => {
                 let settings = start.settings();
-                QueryBatchSizes::of_database(args, name, &settings)?
+                QueryBatchSizes::of_database(args, &name, &settings)?
             }
-            None => QueryBatchSizes::new(args, inputs.subject)?,
-        }),
+            None => QueryBatchSizes::of_subjects(args, inputs.subject)?,
+        },
         Commands::Blastp(_) => BatchSizes::Fixed(query_batch_size(10000)?),
         Commands::Tblastn(_) => BatchSizes::Fixed(query_batch_size(20000)?),
-        Commands::Tblastx(_) => BatchSizes::Fixed(query_batch_size(10002)?),
+        Commands::Tblastx(args) => crate::algorithm::tblastx::blast_engine::library_batch_sizes(
+            args,
+            inputs.subject,
+            &start.settings(),
+        )?,
         Commands::Blastx(_) => BatchSizes::Fixed(query_batch_size(
             crate::algorithm::blastx::QUERY_BATCH_SIZE as u32,
         )?),
@@ -447,6 +441,7 @@ impl Batches<'_> {
                 args.scope_refusal = scope_refusal;
             }
             Commands::Tblastx(args) => {
+                args.one_query_batch = true;
                 args.first_query_ordinal = range.start;
                 args.scope_refusal = scope_refusal;
             }
@@ -497,7 +492,7 @@ impl Batches<'_> {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut report),
                 }],
@@ -538,10 +533,8 @@ impl Batches<'_> {
             hsp.q_idx += range.start;
         }
         self.hsps_before += hsps.len();
-        if let (BatchSizes::Blastn(sizes), Some(extensions)) =
-            (&mut self.sizes, observer.extensions)
-        {
-            sizes.searched(extensions);
+        if let Some(extensions) = observer.extensions {
+            self.sizes.searched(extensions);
         }
         Ok((
             Batch {

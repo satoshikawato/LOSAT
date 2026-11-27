@@ -36,7 +36,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 - `psiblast` writes `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round; it writes one query-anchored report, Seq-annot, JSON Seq-align set, archive or organism report per round. Formats `13` to `16` are not yet supported.
 - `tblastn` with `-in_pssm` writes every format but `11`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck` and `cleanup-blastdb-volumes.py` have their own formats, listed on their pages.
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck` and `cleanup-blastdb-volumes.py` have their own formats, listed on their pages. `blast_formatter` writes `-outfmt` `8`, `9` and `12` from the `-outfmt 11` archive of a search (see [blast_formatter](programs/blast_formatter.md)).
 
 ## Pairwise and query-anchored text (0 to 4)
 
@@ -117,6 +117,8 @@ That is 50 field names. The GI fields print `0` where a sequence has no GI. The 
 ## SAM (17)
 
 `blastn` writes SAM with `-outfmt 17`. `-outfmt "17 SQ"` adds the target sequence in the SEQ column and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI. With `-ungapped`, each subject has one line that joins all of its alignments with the query, as in NCBI: the CIGAR is the summed length of the alignments as one `M`, the position and clipping span all of them, `AS`, `EV` and `BS` are the best alignment's, and `PI` divides the best alignment's identities by the summed length. The document is NCBI's byte for byte except two things in the `@PG` line: the `CL:` tag holds LOSAT's own command line, and `VN:` reads `LOSAT 0.2.0` where NCBI writes `2.17.0+`. Like NCBI, LOSAT writes the document when the search ends.
+
+`blastn -import_search_strategy` with a `tblastx` strategy writes SAM too, as NCBI's formatter does for translated alignments: one line per subject, whose CIGAR is the summed length of its alignments in bases as one `M`, with the position and clipping spanning all of them, `NM:i:0` as the only tag, and `PN:tblastx` in the `@PG` line. A subject whose alignments lie on different strands of the query or of the subject has no line: NCBI's formatter cannot convert it and posts an exception for it (one post for each such subject, as NCBI writes them), and a search in which that happens to every subject writes no document at all. `tblastx` and `blastx` give NCBI's own error for `-outfmt 17` (`SAM format is only applicable to blastn`).
 
 ## Organism report (18)
 

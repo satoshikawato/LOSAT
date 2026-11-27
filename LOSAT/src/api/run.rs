@@ -476,7 +476,7 @@ pub(super) fn searched_queries(
 }
 
 /// The `-query_loc` of the program's arguments.
-fn query_loc(command: &Commands) -> Option<&str> {
+fn query_loc(command: &Commands) -> Option<&std::ffi::OsStr> {
     match command {
         Commands::Blastp(a) => a.query_loc.as_deref(),
         Commands::Tblastn(a) => a.query_loc.as_deref(),
@@ -491,12 +491,15 @@ fn query_loc(command: &Commands) -> Option<&str> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-/// The `-query_loc` interval of the program's arguments. A value that the search will refuse
-/// has no interval here.
+/// The `-query_loc` interval of the program's arguments, or the query range of the strategy they
+/// import. A value that the search will refuse has no interval here.
 pub(super) fn query_range_of(command: &Commands) -> Option<SequenceRange> {
-    parse_optional_range(query_loc(command), RangeRole::Query)
-        .ok()
-        .flatten()
+    // An imported strategy's range stands for `-query_loc`'s (`strategy::query_range`).
+    super::strategy::query_range(command).or_else(|| {
+        parse_optional_range(query_loc(command), RangeRole::Query)
+            .ok()
+            .flatten()
+    })
 }
 
 /// `-num_threads` of the program's arguments.
@@ -628,16 +631,10 @@ fn taxdb_setting(
     start: &CallStart,
     app: RequestKind,
 ) -> Option<crate::algorithm::common::database::TaxdbSetting> {
-    use crate::blastinput::app::{parse_formatting_string, ReportFormat};
-    let looks_up = outputs.formats.iter().any(|format| {
-        parse_formatting_string(format.outfmt).is_ok_and(|choice| {
-            ReportFormat::from_number(choice.number)
-                .and_then(|report| {
-                    crate::report::tabular::TabularSpec::of_app(report, &choice, app)
-                })
-                .is_some_and(|spec| spec.looks_up_every_taxid())
-        })
-    });
+    let looks_up = crate::algorithm::common::database::outfmts_need_subject_taxdb(
+        outputs.formats.iter().map(|format| format.outfmt),
+        app,
+    );
     looks_up.then(|| crate::algorithm::common::database::TaxdbSetting::of(&start.settings()))
 }
 
@@ -710,11 +707,17 @@ pub(super) fn run_local(
 
 /// The program's entry of a `run_local` call.
 fn run_local_entry(
-    command: Commands,
+    mut command: Commands,
     inputs: Inputs<'_>,
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
 ) -> anyhow::Result<()> {
+    // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own
+    // (`strategy::take_warnings`).
+    if inputs.strategy.is_some() {
+        let warnings = super::strategy::take_warnings(&mut command);
+        outputs.diagnostics.write_all(&warnings)?;
+    }
     let (query, subject) = (inputs.query, inputs.subject);
     // How the reading of the query records ended, which the search meets in its batch
     // (`Inputs::query_end`).
@@ -864,6 +867,7 @@ fn psiblast_args(
             format.outfmt,
             format.side_out(args.out.as_deref()),
             false,
+            false,
         )?;
     }
     args.into_blastp_args()
@@ -1000,7 +1004,7 @@ pub fn run(
                     formats: group
                         .iter()
                         .map(|&position| FormatOutput {
-                            outfmt: formats[position],
+                            outfmt: formats[position].as_bytes(),
                             refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                             sink: OutputSink::Writer(
                                 writers[position].take().expect("one group per format"),
@@ -1081,7 +1085,7 @@ pub fn run_to_file(
     };
     let command = start.command();
     let app = search.program().name();
-    let mut file = OutFile::new(path, out_file_program(search.program()), app, outfmt);
+    let mut file = OutFile::new(path, app, outfmt);
     let posts = file.posts();
     with_run_pool(threads, app, || -> Result<(), Error> {
         let mut sink = log.sink(&mut *diagnostics, true);
@@ -1092,7 +1096,7 @@ pub fn run_to_file(
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Out(&mut file),
                 }],
@@ -1108,19 +1112,6 @@ pub fn run_to_file(
         };
         result.map(drop).map_err(|error| sink.failed(&error))
     })
-}
-
-/// The program whose `-out` file names must be UTF-8, as its command line checks them
-/// (`cli::create_out_file`): every search program but BLASTX.
-fn out_file_program(program: Program) -> Option<&'static str> {
-    match program {
-        Program::Blastn => Some("BLASTN"),
-        Program::Blastp => Some("BLASTP"),
-        Program::Psiblast => Some("PSIBLAST"),
-        Program::Tblastn => Some("TBLASTN"),
-        Program::Tblastx => Some("TBLASTX"),
-        Program::Blastx => None,
-    }
 }
 
 /// What one search of `run_collect` gathered.
@@ -1161,7 +1152,7 @@ fn collect_one(
                 .iter()
                 .zip(writers.iter_mut())
                 .map(|(&position, writer)| FormatOutput {
-                    outfmt: formats[position],
+                    outfmt: formats[position].as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(writer),
                 })

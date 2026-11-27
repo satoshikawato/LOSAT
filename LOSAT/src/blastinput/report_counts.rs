@@ -31,6 +31,10 @@ pub struct FormattingArgs {
     /// `-sorthits` and `-sorthsps` (0 to 4).
     pub sort_hits: Option<u8>,
     pub sort_hsps: Option<u8>,
+    /// The hit list size that the formatting handler starts from (`opt.GetHitlistSize()`, an
+    /// `int`): an imported search strategy's `HitlistSize` as the file gives it, a value below 1
+    /// included, `None` for the default 500.
+    pub hitlist_start: Option<i32>,
 }
 
 impl FormattingArgs {
@@ -47,11 +51,32 @@ impl FormattingArgs {
             line_length: args.given_option("line_length")?,
             sort_hits: args.given_option("sorthits")?,
             sort_hsps: args.given_option("sorthsps")?,
+            hitlist_start: Default::default(),
         })
     }
 }
 
 impl FormattingArgs {
+    /// The hit list size a run's options record (the archive's and the strategy's
+    /// `HitlistSize`) when neither `-max_target_seqs` nor the report counts set it: the start of
+    /// the formatting handler ([`FormattingArgs::hitlist_start`], 500 by default).
+    pub fn recorded_hitlist_start(&self) -> i32 {
+        self.hitlist_start.unwrap_or(BLAST_HITLIST_SIZE as i32)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1511-1517
+    /// The hit list size the formatting handler starts from, as the count of
+    /// [`report_counts_from`]: [`FormattingArgs::hitlist_start`], or 500. A size below 1 counts
+    /// as 0: the handler keeps only a size above 500 ([`kept_hitlist_counts`]), and a size the
+    /// command line does not replace meets only the few-matches warning (below 5) and the
+    /// options' check (below 1, `No hits are being saved`), which take every size below 1 alike.
+    pub fn hitlist_start_count(&self) -> usize {
+        self.hitlist_start.map_or(BLAST_HITLIST_SIZE, |size| {
+            usize::try_from(size).unwrap_or(0)
+        })
+    }
+
     /// The width of the pairwise alignment rows (`m_LineLength`): `-line_length`, or NCBI's
     /// `kDfltLineLength` (`report::pairwise::DEFAULT_LINE_LENGTH`).
     pub fn line_length(&self) -> usize {
@@ -114,7 +139,8 @@ impl Default for ReportCounts {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
 /// (`BLAST_HITLIST_SIZE` is 500, `m_DfltNumDescriptions` 500, `m_DfltNumAlignments` 250; the
-/// import search strategy branch at 2900-2908 does not exist in LOSAT)
+/// branch at 2900-2908 of a hit list size above 500 in the options is `kept_hitlist_counts`,
+/// which the default start never reaches)
 /// Note that `args[kArgNumDescriptions]` is false for an absent option, not for the value 0.
 pub fn report_counts(
     outfmt: i32,
@@ -122,7 +148,59 @@ pub fn report_counts(
     num_descriptions: Option<usize>,
     num_alignments: Option<usize>,
 ) -> ReportCounts {
-    let mut hitlist_size = BLAST_HITLIST_SIZE;
+    report_counts_from(
+        BLAST_HITLIST_SIZE,
+        outfmt,
+        max_target_seqs,
+        num_descriptions,
+        num_alignments,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2908
+/// The counts of options whose hit list size `hitlist_size` is above `BLAST_HITLIST_SIZE` before
+/// the formatting handler reads the command line (an imported search strategy's `HitlistSize`, or
+/// an archive's in blast_formatter), when NCBI keeps it: output format `outfmt` up to 4 and neither
+/// `-num_descriptions` nor `-num_alignments` given: the numbers of descriptions and alignments
+/// become the size and half of it. The handler then returns at once: `-max_target_seqs`,
+/// `-line_length`, `-sorthits` and `-sorthsps` are not read and no warning is written (probes
+/// `Y.*.imp.*`). `None` otherwise ([`report_counts_from`] goes on). The one rule of that return:
+/// the counts here, the formatting options in the import (`import::formatting_early_return`).
+pub fn kept_hitlist_counts(
+    hitlist_size: usize,
+    outfmt: i32,
+    num_descriptions_given: bool,
+    num_alignments_given: bool,
+) -> Option<ReportCounts> {
+    (hitlist_size > BLAST_HITLIST_SIZE
+        && !num_descriptions_given
+        && !num_alignments_given
+        && outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES)
+        .then_some(ReportCounts {
+            hitlist_size,
+            num_descriptions: hitlist_size,
+            num_alignments: hitlist_size / 2,
+        })
+}
+
+/// [`report_counts`] from the hit list size `start` of the options (an imported search
+/// strategy's or an archive's `HitlistSize`), which the handler may keep ([`kept_hitlist_counts`]).
+pub fn report_counts_from(
+    start: usize,
+    outfmt: i32,
+    max_target_seqs: Option<usize>,
+    num_descriptions: Option<usize>,
+    num_alignments: Option<usize>,
+) -> ReportCounts {
+    if let Some(kept) = kept_hitlist_counts(
+        start,
+        outfmt,
+        num_descriptions.is_some(),
+        num_alignments.is_some(),
+    ) {
+        return kept;
+    }
+    let mut hitlist_size = start;
     if outfmt <= output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES {
         let mut counts = ReportCounts::default();
         if let Some(n) = num_descriptions {
@@ -182,31 +260,45 @@ impl ReportCounts {
         num_descriptions_given: bool,
         formatting: &FormattingArgs,
     ) -> Vec<u8> {
+        self.posted_warnings(Some(program), outfmt, num_descriptions_given, formatting)
+    }
+
+    /// `warnings_with` of an application whose posts have the prefix `prefix` (the search
+    /// programs' `[blastn] `; blast_formatter sets none, `blast_formatter::formatting`).
+    pub fn posted_warnings(
+        &self,
+        prefix: Option<&str>,
+        outfmt: i32,
+        num_descriptions_given: bool,
+        formatting: &FormattingArgs,
+    ) -> Vec<u8> {
+        use crate::report::query_warnings::{few_matches_warning, formatting_warning};
         let mut text = Vec::new();
-        let mut warn = |message: &str| {
-            text.extend_from_slice(format!("Warning: [{program}] {message}\n").as_bytes());
-        };
         if outfmt > output_format::FLAT_QUERY_ANCHORED_NO_IDENTITIES {
             if num_descriptions_given {
-                warn("The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output");
+                text.extend(formatting_warning(prefix, "The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output"));
             }
             if formatting.line_length.is_some() {
-                warn("The parameter -line_length is not applicable for output formats > 4 .");
+                text.extend(formatting_warning(
+                    prefix,
+                    "The parameter -line_length is not applicable for output formats > 4 .",
+                ));
             }
             if formatting.sort_hits.is_some() {
-                warn("The parameter -sorthits is ignored for output formats > 4.");
+                text.extend(formatting_warning(
+                    prefix,
+                    "The parameter -sorthits is ignored for output formats > 4.",
+                ));
             }
         }
         if self.hitlist_size < 5 {
-            text.extend_from_slice(&crate::report::query_warnings::few_matches_warning(program));
+            text.extend(few_matches_warning(prefix));
         }
         if formatting.sort_hsps.is_some() && outfmt != output_format::PAIRWISE {
-            text.extend_from_slice(
-                format!(
-                    "Warning: [{program}] The parameter -sorthsps is ignored for output formats != 0.\n"
-                )
-                .as_bytes(),
-            );
+            text.extend(formatting_warning(
+                prefix,
+                "The parameter -sorthsps is ignored for output formats != 0.",
+            ));
         }
         text
     }
@@ -265,7 +357,15 @@ pub fn run_report_counts_with(
 ) -> anyhow::Result<(ReportCounts, Vec<u8>)> {
     let formats: Vec<ReportCounts> = outfmts
         .iter()
-        .map(|&outfmt| report_counts(outfmt, max_target_seqs, num_descriptions, num_alignments))
+        .map(|&outfmt| {
+            report_counts_from(
+                formatting.hitlist_start_count(),
+                outfmt,
+                max_target_seqs,
+                num_descriptions,
+                num_alignments,
+            )
+        })
         .collect();
     let counts = common_report_counts(outfmts, &formats)?;
     let warnings =

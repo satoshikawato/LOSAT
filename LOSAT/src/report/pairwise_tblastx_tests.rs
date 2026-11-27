@@ -79,6 +79,7 @@ fn rows_text(query: &str, subject: &str, q_start: usize, s_start: usize, line: u
         Default::default(),
         None,
         &config,
+        &PlainRows,
     )
     .unwrap();
     String::from_utf8(out).unwrap()
@@ -171,7 +172,7 @@ fn tblastx_hit(sum_n: i32) -> PairwiseHit {
         query_stored_gaps: Vec::new(),
         query_case: Default::default(),
         seqalign_num_ident: 60,
-        query_left_of_record: false,
+        edge: crate::report::pairwise::PairwiseEdge::Normal,
     }
 }
 
@@ -1134,7 +1135,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
             aligned: 2,
         });
     let loads = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         Some(RunThrow::every_row(AfterThrow::SkipsAlignment {
             html: false,
         })),

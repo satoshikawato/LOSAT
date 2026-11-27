@@ -14,7 +14,7 @@
 //! on the error paths that come after the reports of earlier batches (a reader error, a batch of
 //! queries without letters, a header file that cannot be read, a search space overflow), and with
 //! `-db`. Where the switch must not act (scoring options without Karlin-Altschul
-//! values; a negative `CHUNK_SIZE`; the debug output) the `[X_STATS]` line names why and the bytes
+//! values; the debug output) the `[X_STATS]` line names why and the bytes
 //! are the same too. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
 //! streamed alike. Where LOSAT refuses a tabular row whose lookup fails (a subject's id or a
 //! failed lookup), both paths write the reports of the batches before and then the refusal, as
@@ -1127,12 +1127,13 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
         .collect();
     std::fs::write(&renamed, lines.join("\n") + "\n").unwrap();
     let renamed = renamed.to_str().unwrap();
-    for (queries, outfmt, threads) in [
-        (renamed, "6", 4),
-        (renamed, "0", 1),
-        (renamed, "17", 4),
-        (late_reversed, "7", 4),
-        (late_reversed, "0", 1),
+    for (queries, outfmt, threads, refused) in [
+        (renamed, "6", 4, false),
+        (renamed, "0", 1, false),
+        (renamed, "17", 4, false),
+        (late_reversed, "7", 4, false),
+        (late_reversed, "7 qseqid sseqid sseq", 4, true),
+        (late_reversed, "0", 1, true),
     ] {
         let path = ids("nucl_v5");
         let mut args = [
@@ -1150,7 +1151,7 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
         ];
         let what = format!("-parse_deflines {queries} outfmt {outfmt}");
         let extra = [("BATCH_SIZE", "1500")];
-        if queries == late_reversed {
+        if refused {
             let (off, on, (batches, _)) = refused_late(&what, &args, threads, &extra);
             args[3] = nohit;
             let (eight, _) = same_two(&what, &args, threads, &extra, None);
@@ -1255,7 +1256,7 @@ fn a_refused_subject_id_comes_after_the_batches_before(dir: &TempDir, query: &Pa
 /// overflows 64-bit search space (including after an earlier valid batch with hits). A subject
 /// whose tabular id LOSAT refuses streams, its refusal after the rows of the batches before, and so
 /// does a negative `CHUNK_SIZE`, whose refusal comes where a batch is split, after the reports of
-/// the batches before in both paths (line RG item X-short-bat-2).
+/// the batches before in both paths (line RG items X-short-bat-2 and X-chunk).
 #[test]
 fn where_the_switch_must_not_act_the_counters_name_why() {
     let dir = TempDir::new("off");

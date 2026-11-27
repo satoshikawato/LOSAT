@@ -43,9 +43,11 @@
 //! statement-for-statement copy of the two-hit diagonal-array branch of
 //! `extend_offset_pairs` (`run_array`, `seed_stage_array`).
 
+use super::super::x_ctx_o1::{XCtxGet, XNone, XView};
 use super::super::{
     extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, mask_lookup_index,
-    packed_kmer_at_seed_mask, type_of_word, BlastnTiming, DiagHashTable, DiagStruct, UngappedHit,
+    packed_kmer_at_seed_mask, type_of_word, BlastnTiming, DiagHashTable, DiagStruct, QueryContext,
+    QueryContextIndex, UngappedHit,
 };
 use super::latest::{self, DiagLatest, Found};
 use super::{
@@ -124,6 +126,22 @@ fn latest_on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCLATEST"))
 }
 
+/// No NCBI counterpart: reads LOSAT_X_DCEMITHOIST once (a strict-set switch since 2026-11-26: on
+/// unless it is `0`). With it the strips scan of a table laid out as CSR (`scan_strip_disc_csr`,
+/// LOSAT_X_DCCSR) hands each word's run to `DcPairs::run`: the values `seed_of_pair` reads for
+/// every pair read once per strip, the context form chosen once per run, the subject's bound
+/// tested once per word, and a strip's list written into spare capacity when room fits the run
+/// (falling back to `Vec::push` on growth). The same pairs give the same seeds in the same order
+/// (the argument at `DcPairs`), so it does not change any value NCBI computes.
+fn emit_hoist_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCEMITHOIST"))
+}
+
+// No NCBI counterpart: counter of LOSAT_TIMING (the strips scanned through the hoisted CSR emit of
+// LOSAT_X_DCEMITHOIST).
+static EMIT_HOIST_STRIPS: AtomicU64 = AtomicU64::new(0);
+
 /// No NCBI counterpart: reads LOSAT_X_DCFOLDREG once (a strict-set switch since 2026-11-26: on
 /// unless it is `0`). With it the folds on the maps of LOSAT_X_DCLATEST (`fold_two_hit_latest`)
 /// run `fold_reg::fold_two_hit_reg`, which keeps the map in registers and makes each seed's
@@ -133,7 +151,6 @@ fn reg_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCFOLDREG"))
 }
-
 /// No NCBI counterpart: LOSAT_X_REACH for LOSAT_X_DCLATEST, which acts in the strips stage of the
 /// diagonal hash only: `own_path` where it folds into the maps, false where the chunk goes to the
 /// reference fold. Nothing while the switch is off.
@@ -294,7 +311,8 @@ pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
 ) -> Option<Resume> {
     // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains to walk.
     if let Some(csr) = disc.x_csr() {
-        return scan_strip_disc_csr::<O, PIECE>(x, disc, csr, job, from, out);
+        // EXPERIMENT (LOSAT_X_DCEMITHOIST): its runs through `DcPairs::run`.
+        return scan_strip_disc_csr::<O, PIECE>(x, disc, csr, job, from, out, emit_hoist_on());
     }
     let two_stage = x.two_stage;
     // (the presence vector by value: `lookup::XPvView`)
@@ -398,6 +416,14 @@ fn x_disc_word_pairs<O: SeedOut, const PIECE: bool>(
 /// its run), then the same presence test and the cell's run, which lists the chain's offsets in
 /// the chain's order; so the same pairs reach `seed_of_pair` in the same order.
 ///
+/// EXPERIMENT (LOSAT_X_DCEMITHOIST): with `hoist` each word's run goes to `DcPairs::run` instead
+/// of `seed_of_pair` pair by pair (`x_csr_run_ref`): for each word the same seeds in the
+/// same order (`DcPairs`); the same cut of a piece (`Cut::fit`, and `Cut::run_cold` with
+/// `seed_of_pair` itself). A word in the ring has passed the presence test (the scan's closure
+/// lets no other word in, and the ring hands out only the words it took), so the hoisted emit
+/// does not test it again. Passing `hoist` at run time shares one scan-loop monomorphization
+/// between `=1` and `=0`, avoiding duplicating `disc_word_scan_subject_until`.
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
 #[inline(never)]
 fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
@@ -407,19 +433,27 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
     job: &StripJob,
     from: Resume,
     out: &mut O,
+    hoist: bool,
 ) -> Option<Resume> {
     debug_assert!(!disc.two_templates);
+    if hoist {
+        EMIT_HOIST_STRIPS.fetch_add(1, Ordering::Relaxed);
+    }
     let two_stage = x.two_stage;
     // (the presence vector by value: `lookup::XPvView`)
     let pv_view = two_stage.x_pv_view();
     let s_range = job.s_range;
+    // EXPERIMENT (LOSAT_X_DCEMITHOIST): the strip's values of `DcPairs` and the context index's
+    // form, made once
+    let hoist_ctx = hoist.then(|| (DcPairs::new(x, s_range), x.query_context_index.x_view()));
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
     let cut = Cut::new(&from);
     let start = from.s;
     let mut emit = |(s_off, index): (i32, u32)| {
-        if !two_stage.has_hits(u64::from(index)) {
+        if hoist_ctx.is_none() && !two_stage.has_hits(u64::from(index)) {
             return;
         }
+        debug_assert!(two_stage.has_hits(u64::from(index)));
         let kmer_start = s_off as usize;
         let mut run = csr.run(index as usize);
         if PIECE {
@@ -433,8 +467,10 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
                 }
             }
         }
-        for &q_off_1 in run {
-            seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+        if let Some((pairs, form)) = hoist_ctx {
+            pairs.run(form, run, kmer_start, out);
+        } else {
+            x_csr_run_ref(x, run, kmer_start, s_range, out);
         }
     };
     let mut ring: Ring<'_, (i32, u32)> = Ring::new(csr);
@@ -464,6 +500,111 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
         ring.flush(&mut emit);
     }
     cut.stop.get()
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
+/// Reference CSR emit (`LOSAT_X_DCEMITHOIST=0`): one word's run through `seed_of_pair` pair by
+/// pair, out of line so the hoisted scan keeps a single copy of the scan loop.
+#[inline(never)]
+fn x_csr_run_ref<O: SeedOut>(
+    x: &Inputs<'_>,
+    run: &[u32],
+    kmer_start: usize,
+    s_range: usize,
+    out: &mut O,
+) {
+    for &q_off_1 in run {
+        seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+    }
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1106-1144
+/// EXPERIMENT (LOSAT_X_DCEMITHOIST): `seed_of_pair` for the pairs of a strip of a discontiguous
+/// table laid out as CSR, with what it reads for every pair read once per strip. For a pair
+/// (`q_off_1`, `kmer_start`) of the strip it gives `seed_of_pair`'s seed, or none where that drops
+/// the pair:
+/// - `word` is `lut_word_length` and `word_length` at once: both are the template's length for a
+///   table with templates (`TwoStageLookup::lut_word_length`, `word_length`), and the strips scan
+///   only such a table (`x.two_stage.disc()`, whose CSR this is); so `seed_of_pair`'s word extension
+///   (`word_length > lut_word_length`) never runs, and the seed is the pair itself (`q_off0`,
+///   `kmer_start`), as there. `new` checks the two lengths once.
+/// - the bounds test is `seed_of_pair`'s `||` of two tests without side effects; the subject's
+///   (`kmer_start + word > s_len`) depends on the word alone and is made once per word, before any
+///   pair of it (`run`).
+/// - the context is `context_for_offset`'s (`QueryContextIndex::x_context_with` with the form made
+///   once per strip: the same answer for every offset), and `contexts[context]` is read with the
+///   same checked indexing as `seed_of_pair`.
+/// - `s_range as u32` is made once per strip.
+#[derive(Clone, Copy)]
+struct DcPairs<'a> {
+    word: usize,
+    s_len: usize,
+    s_range: u32,
+    contexts: &'a [QueryContext],
+    index: &'a QueryContextIndex,
+}
+
+impl<'a> DcPairs<'a> {
+    /// The values for the pairs of a strip of `x` scanned with `s_range`.
+    fn new(x: &Inputs<'a>, s_range: usize) -> Self {
+        let word = x.two_stage.lut_word_length();
+        assert_eq!(word, x.two_stage.word_length(), "a discontiguous word");
+        DcPairs {
+            word,
+            s_len: x.s_len,
+            s_range: s_range as u32,
+            contexts: x.query_contexts,
+            index: x.query_context_index,
+        }
+    }
+
+    /// The seeds of the pairs `run` of the word at `kmer_start`, in order, into `out` (which has
+    /// room for all of them), with the context form `form` (`QueryContextIndex::x_view`): one
+    /// loop per form, its constants in registers.
+    #[inline(always)]
+    fn run<O: SeedOut>(self, form: Option<XView<'_>>, run: &[u32], kmer_start: usize, out: &mut O) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:730-733
+        // (the subject's half of the bounds test, the same for every pair of the word)
+        if kmer_start + self.word > self.s_len {
+            return;
+        }
+        match form {
+            Some(XView::Div(form)) => self.seeds(&form, run, kmer_start, out),
+            Some(XView::Blocks(form)) => self.seeds(&form, run, kmer_start, out),
+            Some(XView::BlocksRanks(form)) => self.seeds(&form, run, kmer_start, out),
+            None => self.seeds(&XNone, run, kmer_start, out),
+        }
+    }
+
+    /// `run` with the form `form`.
+    #[inline(always)]
+    fn seeds<G: XCtxGet, O: SeedOut>(self, form: &G, run: &[u32], kmer_start: usize, out: &mut O) {
+        let DcPairs {
+            word,
+            s_range,
+            contexts,
+            index,
+            ..
+        } = self;
+        let s = kmer_start as u32;
+        out.x_push_run(run, |q_off_1| {
+            let q_off0 = q_off_1 as usize - 1;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:730-733
+            let context_idx = index.x_context_with(form, q_off0);
+            let ctx = &contexts[context_idx];
+            let q_context_start = ctx.query_offset as usize;
+            let q_context_end = q_context_start + ctx.len;
+            if q_off0 + word > q_context_end {
+                return None;
+            }
+            Some(Seed {
+                context: context_idx as u32,
+                q: q_off0 as u32,
+                s,
+                s_range,
+            })
+        });
+    }
 }
 
 /// No NCBI counterpart (the layout of the table only): where `fold_two_hit_on` keeps the
@@ -2290,6 +2431,12 @@ pub(super) fn summary() {
         if latest_on() {
             eprintln!("[TIMING] x_dc_latest:{}", latest::timing_fields());
         }
+    }
+    if (on() || arr_on()) && std::env::var_os("LOSAT_TIMING").is_some() {
+        eprintln!(
+            "[TIMING] x_dc_emit_hoist: strips={}",
+            load(&EMIT_HOIST_STRIPS)
+        );
     }
     if arr_on() && std::env::var_os("LOSAT_TIMING").is_some() {
         let s = |c: &AtomicU64| c.load(Ordering::Relaxed) as f64 / 1e9;

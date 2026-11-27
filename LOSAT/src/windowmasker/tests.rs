@@ -619,9 +619,9 @@ fn a_receiver_windowmasker_reads_logfile_against_the_runs_files() {
     assert_eq!(
         String::from_utf8(err).unwrap(),
         format!(
-            "Error: a -logfile file '{fasta}' that is a file of the run's directory (the command \
-             line appends its messages to it; LOSAT Web reads the run's files and writes none of \
-             them) is not supported by LOSAT's WINDOWMASKER\n"
+            "Error: a -logfile file '{fasta}' that is a file of the run's directory (LOSAT Web \
+             reads the run's files and writes none of them) is not supported by LOSAT's \
+             WINDOWMASKER\n"
         )
     );
     // Case 3: `-logfile /dev/stdout` writes messages into `out` in chronological order before counts.
@@ -716,4 +716,43 @@ fn a_receiver_windowmasker_reads_logfile_against_the_runs_files() {
     assert!(files
         .iter()
         .any(|(name, bytes)| name == b"d19-new-log" && bytes == b"pass 1\npass 2\n"));
+}
+
+#[test]
+fn read_files_collects_falist_entries_and_blastdb_lookup_files() {
+    let dir = crate::utils::test_dir::TempDir::unique("losat-d19b-wm");
+    let list_path = dir.join("list.txt");
+    std::fs::write(&list_path, b"m.fa\n\nsub/n.fa\n").unwrap();
+    let list_str = list_path.to_str().unwrap();
+
+    // `-fa_list true`: list file is in `for_log` only; listed entries are in both `for_log` and `for_out`.
+    let (for_log, for_out) =
+        super::read_files(&["-mk_counts", "-fa_list", "true", "-in", list_str]);
+    assert!(for_log.iter().any(|p| p == list_str.as_bytes()));
+    assert!(!for_out.iter().any(|p| p == list_str.as_bytes()));
+    assert!(for_log.iter().any(|p| p == b"m.fa"));
+    assert!(for_out.iter().any(|p| p == b"m.fa"));
+    assert!(for_log.iter().any(|p| p == b"sub/n.fa"));
+    assert!(for_out.iter().any(|p| p == b"sub/n.fa"));
+
+    // Missing list file adds only the list file itself to `for_log`.
+    let (for_log_miss, for_out_miss) =
+        super::read_files(&["-mk_counts", "-fa_list", "true", "-in", "no-such-list.txt"]);
+    assert_eq!(for_log_miss, vec![b"no-such-list.txt".to_vec()]);
+    assert!(for_out_miss.is_empty());
+
+    // `-mk_counts -infmt blastdb`: DB lookup files are in both `for_log` and `for_out`.
+    let (bdb_log, bdb_out) = super::read_files(&["-mk_counts", "-infmt", "blastdb", "-in", "x"]);
+    assert!(bdb_log.iter().any(|p| p == b"x.nal"));
+    assert!(bdb_log.iter().any(|p| p == b"x.nin"));
+    assert!(bdb_out.iter().any(|p| p == b"x.nal"));
+    assert!(bdb_out.iter().any(|p| p == b"x.nin"));
+
+    // `-ustat -infmt blastdb`: DB lookup files are in `for_log` only (opened before `-out`).
+    let (mask_log, mask_out) =
+        super::read_files(&["-ustat", "u.counts", "-infmt", "blastdb", "-in", "x"]);
+    assert!(mask_log.iter().any(|p| p == b"x.nal"));
+    assert!(mask_log.iter().any(|p| p == b"x.nin"));
+    assert!(!mask_out.iter().any(|p| p == b"x.nal"));
+    assert!(mask_out.iter().any(|p| p == b"u.counts"));
 }

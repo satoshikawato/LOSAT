@@ -84,6 +84,7 @@ pub(super) fn write_tblastn_seqalign(
         write_query_to(
             format,
             &run,
+            "tblastn",
             &query,
             &subjects,
             &hsps,
@@ -128,11 +129,27 @@ pub(super) fn query_records_of<'a>(
         });
         for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
             let hsp = &linked.hsp;
+            let (q_left_out, std_seg_nullb) = match payload.nullb {
+                Some(nullb) => (
+                    if nullb.scores_invalidated {
+                        0
+                    } else {
+                        nullb.blast_hsp_q_span - (hsp.q_end - hsp.q_start)
+                    },
+                    (nullb.scores_invalidated || nullb.last_seg_fuzz.is_some()).then_some(
+                        crate::report::record::StdSegNullb {
+                            omit_scores: nullb.scores_invalidated,
+                            last_seg_fuzz: nullb.last_seg_fuzz,
+                        },
+                    ),
+                ),
+                None => (i32::try_from(payload.query_left_out)?, None),
+            };
             hsps.push(HspRecord {
                 subject,
                 q_offset: hsp.q_start,
                 q_end: hsp.q_end,
-                q_left_out: i32::try_from(payload.query_left_out)?,
+                q_left_out,
                 s_offset: hsp.s_start,
                 s_end: hsp.s_end,
                 q_frame: 0,
@@ -149,6 +166,7 @@ pub(super) fn query_records_of<'a>(
                     _ => 2,
                 },
                 ops: &payload.edit_script,
+                std_seg_nullb,
             });
         }
     }

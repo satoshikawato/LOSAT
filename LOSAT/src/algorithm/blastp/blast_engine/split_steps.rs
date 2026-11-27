@@ -32,7 +32,7 @@ use crate::blastinput::seq_range;
 /// batch is never split; an ungapped search splits none (and so builds one compressed lookup table
 /// for each batch, `ncbi_compressed_lookup_tables`); a PSSM search splits only the rounds of a
 /// FASTA query (`PsiSearch::split_setup`), never a PSSM query (`-in_pssm`,
-/// `CObjMgrFree_QueryFactory`).
+/// `CObjMgrFree_QueryFactory`); PHI-BLAST (`-phi_pattern`) splits none.
 pub(super) fn splits_batches(args: &ResolvedBlastpArgs) -> bool {
     splits_query_batches(
         !args.ungapped,
@@ -40,6 +40,7 @@ pub(super) fn splits_batches(args: &ResolvedBlastpArgs) -> bool {
             .as_deref()
             .is_some_and(|psi| psi.split_setup.is_none()),
         args.rps_search.is_some(),
+        args.phi.is_some(),
     )
 }
 
@@ -390,11 +391,11 @@ pub(super) fn first_batch_setup<'a>(
     (subject_source, subjects): (BlastpSubjectSource<'a>, &[EncodedProtein]),
     contexts: &[QueryContext],
     batches: CallBatches<'_>,
-    mut setup_error: impl FnMut(&str, &str) -> anyhow::Error,
+    mut setup_error: impl FnMut(&[u8], &str) -> anyhow::Error,
 ) -> Result<(bool, call_setup::BlastpDbExtent<'a>)> {
     let (args, database, skipped) = (call.args, subject_source.database(), batches.1);
     let reads = call_steps(call, subject_source, subjects, contexts, batches)?
-        .reads(|text| setup_error("", text))?;
+        .reads(|text| setup_error(b"", text))?;
     // A database without sequences (makeblastdb builds none; a volume whose index holds
     // no sequence) and without an alias file's LENGTH or STATS_TOTLEN
     // (`SeqDb::first_oid_read_fails`): NCBI opens it, writes the outfmt 0 prolog, reads the
@@ -421,7 +422,7 @@ pub(super) fn first_batch_setup<'a>(
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
     if call_setup::setup_fails(args, &extent, contexts)? {
         return Err(setup_error(
-            "",
+            b"",
             crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,
         ));
     }

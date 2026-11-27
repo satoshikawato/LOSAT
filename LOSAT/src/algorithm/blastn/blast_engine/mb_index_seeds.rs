@@ -147,7 +147,7 @@ impl<'a> IndexSeeds<'a> {
     /// the refusal of its search.
     fn search_volume(&self, at: usize, pool: &SearchPool<'_>) -> Result<VolumeSeeds, String> {
         let path = &self.index.volumes[at].path;
-        IndexVolume::open(std::path::Path::new(path))
+        IndexVolume::open(&crate::utils::os_bytes::path_of_bytes(path))
             .and_then(|volume| {
                 let masks = self.volume_masks(at);
                 search(
@@ -161,7 +161,10 @@ impl<'a> IndexSeeds<'a> {
                 .map_err(|_| "a list or an offset outside its sections".to_string())
             })
             .map_err(|why| {
-                format!("a MegaBLAST index volume that LOSAT does not read ({path}: {why})")
+                format!(
+                    "a MegaBLAST index volume that LOSAT does not read ({}: {why})",
+                    String::from_utf8_lossy(path)
+                )
             })
     }
 
@@ -245,7 +248,7 @@ impl<'a> IndexSeeds<'a> {
             if u64::from(oid) >= sequences
                 && u64::from(oid) < sequences.saturating_mul(u64::from(self.search))
             {
-                let first = &self.index.volumes[0].path;
+                let first = String::from_utf8_lossy(&self.index.volumes[0].path);
                 self.fail(
                     usize::MAX,
                     0,
@@ -272,7 +275,7 @@ impl<'a> IndexSeeds<'a> {
         let (at, subj) = self.locate(ordinal);
         let seeds = self.volume(at)?;
         if seeds.chunk_of_a_later_sequence(subj, chunk) {
-            let path = &self.index.volumes[at].path;
+            let path = String::from_utf8_lossy(&self.index.volumes[at].path);
             self.fail(
                 at,
                 1,
@@ -316,7 +319,7 @@ impl<'a> IndexSeeds<'a> {
         let mut number = 0u32;
         while let Some(chunk) = whole.next_chunk(chunk_overlap) {
             if seeds.chunk_of_a_later_sequence(subj, number) {
-                let path = &self.index.volumes[at].path;
+                let path = String::from_utf8_lossy(&self.index.volumes[at].path);
                 self.fail(
                     at,
                     1,
@@ -330,7 +333,7 @@ impl<'a> IndexSeeds<'a> {
             if let Some(list) = seeds.seeds(subj, number) {
                 for seed in list {
                     if seed.s_off as usize >= chunk.letters() {
-                        let path = &self.index.volumes[at].path;
+                        let path = String::from_utf8_lossy(&self.index.volumes[at].path);
                         self.fail(
                             at,
                             2,
@@ -710,7 +713,7 @@ pub(super) fn index_chunk_hits<const UNGAPPED: bool>(
             )
             .is_err()
         {
-            let path = &index.index.volumes[at].path;
+            let path = String::from_utf8_lossy(&index.index.volumes[at].path);
             index.fail(
                 at,
                 2,

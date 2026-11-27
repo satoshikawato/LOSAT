@@ -101,6 +101,7 @@ pub(crate) fn write_blastp_seqalign(
     write_hit_list_seqaligns(
         format,
         &run,
+        "blastp",
         hit_lists,
         queries,
         writer,
@@ -172,6 +173,7 @@ pub(crate) fn query_records<'a>(
                 num_positives: num_positives as i32,
                 comp_adjust: hsp.comp_adjustment_method,
                 ops: hsp.gap_info.as_deref().unwrap_or(&[]),
+                std_seg_nullb: None,
             });
         }
     }

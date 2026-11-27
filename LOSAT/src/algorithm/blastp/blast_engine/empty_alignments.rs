@@ -115,6 +115,7 @@ pub(super) fn write_exception_prolog(
             probe,
             pairwise_shown,
             rows_of,
+            None,
         ),
         BlastpReport::CustomTabular(spec) => {
             let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;

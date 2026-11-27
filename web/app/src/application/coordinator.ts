@@ -46,6 +46,7 @@ import {
   type DatabaseSnapshot,
   type InputPart,
   type InputSnapshot,
+  type QueryFileSnapshot,
   type RunRecord,
   type RunSnapshot,
   type RunStatus,
@@ -86,7 +87,10 @@ export type SequenceInput =
 
 export interface SearchRequest {
   readonly program: ProgramId;
-  readonly query: SequenceInput;
+  /** FASTA query input (`-query`); omitted when using a PSSM/MSA file query (`queryFile`). */
+  readonly query?: SequenceInput;
+  /** File-based query metadata (`-in_pssm` or `-in_msa`); when present, `query` is omitted and `files` mounts the query file. */
+  readonly queryFile?: QueryFileSnapshot;
   /** FASTA subject input (`-subject`); omitted when searching a local BLAST database (`database`). */
   readonly subject?: SequenceInput;
   /** Local BLAST database metadata (`-db`); when present, `subject` is omitted and `files` mounts the database folder. */
@@ -369,14 +373,21 @@ export class Coordinator {
         // The task of the run's names is the argv's, whatever the names of the inputs: a made input is named after the task is known.
         const probe = buildArgv({
           program: request.program,
-          queryName: 'query.fa',
+          ...(request.queryFile !== undefined
+            ? { queryFile: { flag: request.queryFile.flag, name: request.queryFile.name } }
+            : { queryName: 'query.fa' }),
           ...(request.database !== undefined ? { databaseName: request.database.name } : { subjectName: 'subject.fa' }),
           parameters: request.parameters,
           extra: request.extra ?? [],
         });
         const task = await this.taskOfArgv(request.program, probe, descriptions);
         const run = { number, program: request.program, task, queuedAt };
-        queryName = inputName(request.query, 'query', run);
+        if (request.queryFile !== undefined) {
+          queryName = request.queryFile.name;
+        } else {
+          if (request.query === undefined) throw new Error('the query is missing');
+          queryName = inputName(request.query, 'query', run);
+        }
         if (request.database !== undefined) {
           subjectName = request.database.name;
         } else {
@@ -385,7 +396,9 @@ export class Coordinator {
         }
         argv = buildArgv({
           program: request.program,
-          queryName,
+          ...(request.queryFile !== undefined
+            ? { queryFile: { flag: request.queryFile.flag, name: request.queryFile.name } }
+            : { queryName }),
           ...(request.database !== undefined ? { databaseName: request.database.name } : { subjectName }),
           parameters: request.parameters,
           extra: request.extra ?? [],
@@ -424,7 +437,19 @@ export class Coordinator {
         return { ok: false, reason: 'argv', message: uncheckedOptions(error) };
       }
       if (!validation.ok) return { ok: false, reason: 'argv', message: validation.message };
-      prepared.push({ request, number, queuedAt, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders: validation.dataLoaders });
+      prepared.push({
+        request,
+        number,
+        queuedAt,
+        argv,
+        queryName,
+        subjectName,
+        conffile,
+        dryRun,
+        prints,
+        dataLoaders: validation.dataLoaders,
+        parseDeflines: validation.parseDeflines,
+      });
     }
 
     // The snapshots hold what the runs need: the sources made here from text and files are
@@ -445,15 +470,19 @@ export class Coordinator {
     /** The bytes of the registry file of each snapshot, in their order. */
     const conffiles: Array<Blob | undefined> = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
-    for (const [index, { request, number, queuedAt, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders }] of prepared.entries()) {
+    for (const [index, { request, number, queuedAt, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders, parseDeflines }] of prepared.entries()) {
       let query: InputSnapshot;
       let subject: InputSnapshot;
-      // The engine's readers of the run's inputs, with the data loaders of its registry (line WQA's D16, 2026-11-20).
-      const reader = (role: 'query' | 'subject'): FastaReader => ({ program: request.program, role, dataLoaders });
+      // The engine's readers of the run's inputs, with its registry data loaders and `-parse_deflines` (line WQA's D16; line RG-XT item X7-5).
+      const reader = (role: 'query' | 'subject'): FastaReader => ({ program: request.program, role, dataLoaders, parseDeflines });
       try {
         // A run that prints the command line's help or version reads no input (line WQA's D14, 2026-11-20).
+        // A PSSM/MSA query (`-in_pssm`/`-in_msa`) has no FASTA query input: its file is mounted read-only in `runDirectories`.
         // A database run (`-db`) has no FASTA subject input: its files are mounted read-only in `runDirectories`.
-        query = prints !== null ? await this.noInput(queryName) : await this.snapshotInput('Query', request.query, queryName, reader('query'), made);
+        query =
+          prints !== null || request.queryFile !== undefined
+            ? await this.noInput(queryName)
+            : await this.snapshotInput('Query', request.query!, queryName, reader('query'), made);
         subject =
           prints !== null || request.database !== undefined
             ? await this.noInput(subjectName)
@@ -483,6 +512,7 @@ export class Coordinator {
           ...(title ? { title } : {}),
           argv,
           query,
+          ...(request.queryFile === undefined ? {} : { queryFile: request.queryFile }),
           subject,
           ...(request.database === undefined ? {} : { database: request.database }),
           ...(request.filteringDb === undefined ? {} : { filteringDb: request.filteringDb }),
@@ -893,7 +923,7 @@ export class Coordinator {
         {
           runId,
           argv: snapshot.argv,
-          query: engineInput(snapshot.query),
+          ...(snapshot.queryFile === undefined ? { query: engineInput(snapshot.query) } : {}),
           ...(snapshot.database === undefined ? { subject: engineInput(snapshot.subject) } : {}),
           ...(files === undefined || files.length === 0 ? {} : { files }),
           requestedThreads: snapshot.requestedThreads,
@@ -1157,6 +1187,8 @@ interface Prepared {
   readonly prints: PrintedKind | null;
   /** Whether the run reads its inputs with NCBI's data loaders on (the validation's verdict: `[BLAST] DATA_LOADERS` of its registry). */
   readonly dataLoaders: boolean;
+  /** Whether the run parses Seq-ids from deflines (the validation's verdict: `-parse_deflines`). */
+  readonly parseDeflines: boolean;
 }
 
 /** What one enqueueAll made: sources of text and files, and the cached run inputs of dataset revisions. */

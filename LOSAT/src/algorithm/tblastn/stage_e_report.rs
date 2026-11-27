@@ -41,7 +41,7 @@ pub(super) enum ShownSubjects<'a> {
     /// `-db`: the `-db` value (outfmt 7's `# Database:` line), the database's `Database:`
     /// lines (outfmt 0) and the reported sequences by rank (their tabular ids).
     Database {
-        name: &'a str,
+        name: &'a [u8],
         pairwise: &'a PairwiseDatabase,
         reported: &'a super::database::ReportedSubjects,
         /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
@@ -50,17 +50,32 @@ pub(super) enum ShownSubjects<'a> {
         /// (`XDbStream::read_stage`), and the reports count the stored letters
         /// (`recounts_shown_counts`).
         hard_masked: bool,
+        /// The query Bioseqs that NCBI's scope finds for the reported sequences
+        /// (`report::query_bioseq`), by the run's searched query and the ordinal id.
+        seen: crate::report::query_bioseq::SeenFrom<'a>,
     },
 }
 
 impl ShownSubjects<'_> {
-    /// The name after `# Database: ` (outfmt 7) and in the pairwise report of a subject set.
-    pub(super) fn name(&self) -> String {
+    /// The name in the pairwise report (`report::pairwise::subject_set_definition`: an imported
+    /// strategy's subjects, an empty tag, name no input).
+    pub(super) fn pairwise_name(&self) -> Vec<u8> {
+        match self {
+            Self::Fasta { path, .. } => crate::report::pairwise::subject_set_definition(path),
+            Self::Database { name, .. } => name.to_vec(),
+        }
+    }
+
+    /// The name after `# Database: ` (outfmt 7) of a subject set or a database.
+    pub(super) fn name(&self) -> Vec<u8> {
         match self {
             Self::Fasta { path, .. } => {
-                format!("User specified sequence set (Input: {})", path.display())
+                let mut out = b"User specified sequence set (Input: ".to_vec();
+                out.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(path.as_os_str()));
+                out.push(b')');
+                out
             }
-            Self::Database { name, .. } => name.to_string(),
+            Self::Database { name, .. } => name.to_vec(),
         }
     }
 
@@ -153,21 +168,38 @@ pub(super) const ARCHIVE_FORMAT: i32 = 11;
 
 /// The format number of a checked `-outfmt` value, as NCBI's `ParseFormattingString` reads
 /// it (a custom specification of outfmt 0 is ignored); -1 for a value it does not read.
-pub(super) fn format_number(outfmt: &str) -> i32 {
+pub(super) fn format_number(outfmt: impl AsRef<[u8]>) -> i32 {
     crate::blastinput::app::parse_formatting_string(outfmt).map_or(-1, |choice| choice.number)
 }
 
 /// The XML2 / JSON document of a checked `-outfmt` value (16, 15, 14 or 13; `None` for the
 /// others). Outfmt 13 and 14 write side files next to `-out`, or to the caller's receiver of them
 /// (`OutputSink::Files`); a `run_local` call with neither stops at NCBI's XInclude check.
-pub(super) fn xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
+pub(super) fn xml2_kind(outfmt: impl AsRef<[u8]>) -> Option<crate::report::blast_xml2::Xml2Kind> {
     use crate::blastinput::app::ReportFormat;
     crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(format_number(outfmt))?)
 }
 
+/// Whether the report of a checked `-outfmt` value shows NCBI's bytes for a reported sequence
+/// that the scope finds as a query of its batch (`report::query_bioseq`): a table that reads no
+/// letter of the found Bioseq and the organism report (`query_bioseq::tabular_shows`), the
+/// Seq-annots and the archive (which write the Seq-align id alone).
+pub(super) fn shows_query_bioseqs(outfmt: impl AsRef<[u8]>) -> bool {
+    let outfmt = outfmt.as_ref();
+    match format_number(outfmt) {
+        8 | 9 | 11 | 12 => true,
+        6 | 7 | 10 | 18 | 20 => crate::report::query_bioseq::tabular_shows(
+            super::tabular::tabular_spec(outfmt).as_ref(),
+            crate::blastinput::app::Program::Tblastn,
+        ),
+        _ => false,
+    }
+}
+
 /// Whether a checked `-outfmt` value is a format of the structured XML family that takes the
 /// path of outfmt 5: BLAST XML (5) and the XML2 and JSON documents (16, 15, 14, 13).
-pub(super) fn is_structured_xml(outfmt: &str) -> bool {
+pub(super) fn is_structured_xml(outfmt: impl AsRef<[u8]>) -> bool {
+    let outfmt = outfmt.as_ref();
     format_number(outfmt) == 5 || xml2_kind(outfmt).is_some()
 }
 
@@ -180,10 +212,11 @@ pub(super) fn reads_subject_letters(
     outputs: &ReportOutputs<'_>,
     pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
     hard_masked: bool,
+    has_nullb: bool,
 ) -> bool {
     formats_read_subject_letters(
         outputs.hits.is_some(),
-        recounts_shown_counts(pssm, hard_masked),
+        recounts_shown_counts(pssm, hard_masked) || has_nullb,
         outputs.formats.iter().map(|format| format.outfmt),
     )
 }
@@ -196,21 +229,24 @@ pub(super) fn reads_subject_letters(
 /// then the rows'. The Seq-aligns and the archive (8, 9, 11, 12) and the other tabular reports
 /// (`write_tabular`, the default rows of 6 and 7, has no spec) read the lengths alone: their
 /// counts are the search's. A value that this does not know reads them.
-fn formats_read_subject_letters<'a>(
+fn formats_read_subject_letters<O: AsRef<[u8]>>(
     hits: bool,
     recounted: bool,
-    mut outfmts: impl Iterator<Item = &'a str>,
+    mut outfmts: impl Iterator<Item = O>,
 ) -> bool {
-    hits || outfmts.any(|outfmt| match format_number(outfmt) {
-        8 | 9 | 11 | 12 => false,
-        6 | 7 | 10 | 20 => {
-            recounted
-                || super::tabular::tabular_spec(outfmt)
-                    .is_some_and(|spec| super::tabular::reads_rows(&spec))
+    hits || outfmts.any(|outfmt| {
+        let outfmt = outfmt.as_ref();
+        match format_number(outfmt) {
+            8 | 9 | 11 | 12 => false,
+            6 | 7 | 10 | 20 => {
+                recounted
+                    || super::tabular::tabular_spec(outfmt)
+                        .is_some_and(|spec| super::tabular::reads_rows(&spec))
+            }
+            // The organism report (`report::tax_report`) shows scores and definition lines.
+            18 => false,
+            _ => true,
         }
-        // The organism report (`report::tax_report`) shows scores and definition lines.
-        18 => false,
-        _ => true,
     })
 }
 
@@ -234,42 +270,6 @@ pub(super) fn xml_matrix_failure(
         super::in_pssm::program_type(pssm)
             .is_some_and(crate::report::record::ProgramType::is_iterative),
     )
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4650-4653,
-// c++/src/algo/blast/api/blast_seqalign.cpp:181-182,201-204 and
-// c++/src/objects/seq/seq_align_mapper_base.cpp:1142-1151
-/// The refusal of a reported alignment whose traceback started on its frame's NULLB (TBLASTN
-/// `-in_pssm -window_size 0`, a PSSM whose '-' column scores above BLAST_SCORE_MIN): the only one
-/// whose edit script holds more query letters than its range, as NCBI's ends stop one letter
-/// before the start (the right extension did not run) while the left one holds the start's
-/// column, the NULLB. NCBI's Seq-align, made from the start and the edit script, places that
-/// column past the subject's last base: with `-db` the reports take their ends from it and read
-/// the subject past its end (C++ exceptions where the frame's last codon is not the subject's
-/// last), and with `-subject` the remapping onto the subject's location truncates it and drops
-/// every score of the alignment. LOSAT does not reproduce those reports yet (line RG item X2d-2).
-#[cold]
-#[inline(never)]
-fn x_refuse_a_column_of_the_nullb(hitlists: &[KappaResultHitList]) -> Result<()> {
-    for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
-        for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
-            let query_letters: u64 = payload
-                .edit_script
-                .iter()
-                .map(|op| match *op {
-                    GapEditOp::Sub(n) | GapEditOp::Ins(n) => u64::from(n),
-                    GapEditOp::Del(_) => 0,
-                })
-                .sum();
-            let range = i64::from(linked.hsp.q_end) - i64::from(linked.hsp.q_start);
-            if i64::try_from(query_letters)? != range {
-                bail!(
-                    "TBLASTN -in_pssm with -window_size 0: a reported alignment of a one-hit traceback that starts on the NULLB after its frame (the PSSM's '-' column scores it) holds a column of that NULLB, which NCBI BLAST+ reports past the end of the subject; LOSAT does not support it yet"
-                );
-            }
-        }
-    }
-    Ok(())
 }
 
 /// The ranges of a search as the reports use them: where the searched letters of each
@@ -341,15 +341,43 @@ pub(super) fn render(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
     // Sorts each HSP list by E-value (`Blast_HSPListSortByEvalue`) during Seq-align conversion.
     // `-subject`'s Seq-loc mapper maps the HSPs then, once, before any format reads them.
+    let remaps = matches!(shown, ShownSubjects::Fasta { .. });
     for hitlist in hitlists.iter_mut() {
-        hitlist.put_in_report_order(matches!(shown, ShownSubjects::Fasta { .. }));
+        hitlist.put_in_report_order(remaps, |oid| subject_letters.length(oid));
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270,327
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:2901-2905
+    // When `-subject` remapping leaves a NULLB-start alignment with no aligned segments,
+    // `CSeq_align_Mapper_Base::GetDstAlign` throws `CAnnotMapperException::eBadAlignment` inside
+    // `CPsiBlast::Run` — after `CBlastFormat::PrintProlog` and before any query's report.
+    if super::nullb_report::has_mapped_empty(hitlists) {
+        write_mapped_empty_prologs(
+            outputs,
+            subject_records,
+            subject_letters,
+            shown,
+            subject_set,
+            parameters,
+            scoring,
+            matrix_name,
+            report_counts,
+            formatting,
+            ranges,
+            tabular,
+            pssm,
+            archive,
+        )?;
+        let exc = super::nullb_report::mapped_empty_alignment_exception();
+        return Err(crate::cli::NativeError::exception(&exc).into());
     }
     // A PSSM query's Bioseq letters where they are not its record's, which the reports read; its
     // counts are the rows' where its reports read other letters than its search and a report
     // reads the subjects' letters (`reads_subject_letters`; the Seq-aligns keep the search's).
     let query_bioseq = pssm.and_then(|psi| psi.bioseq_letters.as_deref());
     let hard_masked = shown.hard_masked();
-    if recounts_shown_counts(pssm, hard_masked) && reads_subject_letters(outputs, pssm, hard_masked)
+    let has_nullb = pssm.is_some() && super::nullb_report::hitlists_have_nullb(hitlists);
+    if (recounts_shown_counts(pssm, hard_masked) || has_nullb)
+        && reads_subject_letters(outputs, pssm, hard_masked, has_nullb)
     {
         recount_shown_counts(
             query_records,
@@ -358,13 +386,8 @@ pub(super) fn render(
             hitlists,
             genetic_code,
             hard_masked,
+            has_nullb,
         )?;
-    }
-    // `-in_pssm` with `-window_size 0`: an alignment whose traceback started on its frame's NULLB
-    // (`search_gapped::x_traceback_start_past_frame`) is refused here, where NCBI reports it, and
-    // not where NCBI drops it after its traceback (the hit list, `-max_target_seqs`).
-    if pssm.is_some() {
-        x_refuse_a_column_of_the_nullb(hitlists)?;
     }
     // BLAST XML (outfmt 5, and the XML2 and JSON documents of 15 and 16): its texts are made,
     // and a title that NCBI crashes on (`names::Refusal`) is refused, before any format writes
@@ -469,17 +492,35 @@ pub(super) fn render(
             &subject_ids,
             parsed,
             loads,
+            crate::blastinput::app::Program::Tblastn,
         ) {
+            // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
+            let row = |q_idx: usize, s_idx: usize| match shown {
+                ShownSubjects::Database { reported, seen, .. } => {
+                    seen.row(q_idx, reported.ordinals.get(s_idx).copied(), s_idx)
+                }
+                ShownSubjects::Fasta { .. } => s_idx,
+            };
             let checked = crate::report::tabular::check_failed_lookups(
                 spec.as_ref(),
-                hitlists.iter().map(|hitlist| {
+                hitlists.iter().enumerate().map(|(q_idx, hitlist)| {
                     hitlist
                         .lists()
                         .iter()
                         .filter(|list| !list.hsps.hsps.is_empty())
-                        .map(|list| list.oid as usize)
+                        .map(move |list| crate::report::tabular::CheckedRow {
+                            subject: row(q_idx, list.oid as usize),
+                            minus_subject_frame: list
+                                .hsps
+                                .hsps
+                                .iter()
+                                .any(|linked| linked.hsp.frame < 0),
+                        })
                 }),
                 |s_idx| {
+                    if s_idx == crate::report::query_bioseq::SEEN_ROW {
+                        return None;
+                    }
                     crate::algorithm::common::tabular::subject_lookup_failure(
                         spec.as_ref(),
                         &subject_ids,
@@ -495,6 +536,7 @@ pub(super) fn render(
                         crate::report::tabular::failed_database_subject(
                             oids.oid(reported.ordinals[s_idx]),
                             loads.thrown(s_idx),
+                            parsed.get(s_idx).and_then(Option::as_deref),
                             failure,
                         )
                     }
@@ -503,7 +545,8 @@ pub(super) fn render(
                         subject_records[s_idx].shown_id(),
                     ),
                 },
-                "TBLASTN",
+                crate::blastinput::app::Program::Tblastn,
+                crate::blastinput::app::Program::Tblastn.name(),
                 tabular.taxdb_found,
             );
             if let Err(error) = format.refusal.check(checked) {
@@ -673,57 +716,121 @@ pub(super) fn render(
     {
         hits_sink(std::sync::Arc::clone(pairwise_hits));
     }
-    // The query-anchored formats (outfmt 1 to 4, line RG T3b), before any format of the call is
-    // written: a reported database sequence that NCBI's scope finds as a query of its batch, by
-    // its Seq-align id (a generated `lcl|Query_N`) or, in a description line, by its display id
+    // Before any format of the call is written, the refusals of what the description lines show
+    // (outfmt 0 to 4, `common::database::refuse_described_lines`, line RG-KB item 12 review 1),
+    // and those of the query-anchored formats (outfmt 1 to 4, line RG T3b): a reported database
+    // sequence that NCBI's scope finds as a query of its batch, by its Seq-align id (a generated
+    // `lcl|Query_N`) or, in a description line, by its display id
     // (`common::database::refuse_query_ids_of_anchored_reports`, as BLASTN's): NCBI shows the
     // query in its place (with the protein query's letters translated as nucleotides).
-    let anchored_view = outputs.formats.iter().find_map(|format| {
-        crate::blastinput::app::ReportFormat::from_number(format_number(format.outfmt))
-            .and_then(crate::report::pairwise::PairwiseView::of)
-            .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise)
-    });
-    if let (Some(view), Some(rows)) = (anchored_view, pairwise_hits.as_deref()) {
-        if matches!(shown, ShownSubjects::Database { .. }) {
-            let batches = crate::blastinput::query_batch::AnchoredBatchScopes::of_starts(
-                query_records,
-                batch_starts,
-            );
-            let parsed = shown.parsed_subjects();
+    let pairwise_views: Vec<crate::report::pairwise::PairwiseView> = outputs
+        .formats
+        .iter()
+        .filter_map(|format| {
+            crate::blastinput::app::ReportFormat::from_number(format_number(format.outfmt))
+                .and_then(crate::report::pairwise::PairwiseView::of)
+        })
+        .collect();
+    // The description lines of the `-subject` records whose ids `-parse_deflines` read
+    // (`common::database::refuse_described_records`, review 2 of line RG-KB item 12): each pairwise
+    // format's refusal (`FormatRefusal`), as the refusal of their titles
+    // (`db_subject::check_pairwise_records`). The report joins no hits of `-subject` records.
+    if let (ShownSubjects::Fasta { parsed, .. }, Some(rows)) = (shown, pairwise_hits.as_deref()) {
+        if !parsed.is_empty() {
+            for format in outputs.formats.iter_mut() {
+                let Some(view) =
+                    crate::blastinput::app::ReportFormat::from_number(format_number(format.outfmt))
+                        .and_then(crate::report::pairwise::PairwiseView::of)
+                else {
+                    continue;
+                };
+                format.refusal.check(
+                    crate::algorithm::common::database::refuse_described_records(
+                        query_records.len(),
+                        |q_idx| {
+                            hitlists[q_idx]
+                                .lists()
+                                .iter()
+                                .filter(|list| !list.hsps.hsps.is_empty())
+                                .filter_map(|list| u32::try_from(list.oid).ok())
+                                .collect()
+                        },
+                        |q_idx| {
+                            Ok(crate::report::pairwise::blastp_described_subjects(
+                                view.report_sort(formatting.report_sort()),
+                                None,
+                                report_counts.num_descriptions,
+                                q_idx,
+                                rows,
+                                |_, _| false,
+                            ))
+                        },
+                        parsed,
+                        program,
+                    ),
+                )?;
+            }
+        }
+    }
+    if let (ShownSubjects::Database { reported, .. }, Some(rows)) =
+        (shown, pairwise_hits.as_deref())
+    {
+        let parsed = &reported.parsed;
+        let reported_ranks = |q_idx: usize| -> Vec<u32> {
+            hitlists[q_idx]
+                .lists()
+                .iter()
+                .filter(|list| !list.hsps.hsps.is_empty())
+                .filter_map(|list| u32::try_from(list.oid).ok())
+                .collect()
+        };
+        let described = |view: crate::report::pairwise::PairwiseView, q_idx: usize| {
+            crate::report::pairwise::blastp_described_subjects(
+                view.report_sort(formatting.report_sort()),
+                None,
+                report_counts.num_descriptions,
+                q_idx,
+                rows,
+                |previous, s_idx| {
+                    crate::report::db_subject::rank_joins_as_copy(
+                        parsed,
+                        previous as usize,
+                        s_idx as usize,
+                    )
+                },
+            )
+        };
+        let oid_of = |rank: u32| {
+            shown
+                .oid(rank as usize)
+                .expect("a database search names its sequences by OID")
+        };
+        let mut batches = None;
+        for &view in &pairwise_views {
+            crate::algorithm::common::database::refuse_described_lines(
+                query_records.len(),
+                reported_ranks,
+                |q_idx| Ok(described(view, q_idx)),
+                parsed,
+                |rank| reported.loads.load(rank as usize),
+                oid_of,
+                program,
+            )?;
+            let batches = batches.get_or_insert_with(|| {
+                crate::blastinput::query_batch::AnchoredBatchScopes::of_starts(
+                    query_records,
+                    batch_starts,
+                )
+            });
             crate::algorithm::common::database::refuse_query_ids_of_anchored_reports(
                 query_records.len(),
-                |q_idx| {
-                    hitlists[q_idx]
-                        .lists()
-                        .iter()
-                        .filter(|list| !list.hsps.hsps.is_empty())
-                        .filter_map(|list| u32::try_from(list.oid).ok())
-                        .collect()
-                },
-                |q_idx| {
-                    Ok(crate::report::pairwise::blastp_described_subjects(
-                        view.report_sort(formatting.report_sort()),
-                        None,
-                        report_counts.num_descriptions,
-                        q_idx,
-                        rows,
-                        |previous, s_idx| {
-                            crate::report::db_subject::rank_joins_as_copy(
-                                parsed,
-                                previous as usize,
-                                s_idx as usize,
-                            )
-                        },
-                    ))
-                },
+                reported_ranks,
+                |q_idx| Ok(described(view, q_idx)),
                 parsed,
-                |rank| {
-                    shown
-                        .oid(rank as usize)
-                        .expect("a database search names its sequences by OID")
-                },
+                oid_of,
                 |q_idx| batches.of_query(q_idx),
                 batches.generated(),
+                view != crate::report::pairwise::PairwiseView::Pairwise,
                 program,
             )?;
         }
@@ -1017,7 +1124,10 @@ pub(super) fn render(
                         &mut writer,
                     )?
                 }
-                _ => bail!("unsupported TBLASTN outfmt {}", format.outfmt),
+                _ => bail!(
+                    "unsupported TBLASTN outfmt {}",
+                    String::from_utf8_lossy(format.outfmt)
+                ),
             }
             writer.flush()?;
             Ok(())
@@ -1030,6 +1140,118 @@ pub(super) fn render(
     // again, whichever format came last (as in blastn and blastp).
     if let Some(handle) = archive.map(|render| render.handle) {
         handle.set_muted(false);
+    }
+    Ok(())
+}
+
+/// Writes `CBlastFormat::PrintProlog` for every requested format when `-subject` remapping throws
+/// `CAnnotMapperException::eBadAlignment` (`nullb_report::has_mapped_empty`) before any query's
+/// report runs: outfmt 0–4's banner and database header, outfmt 15/16's XML2/JSON opening, and
+/// outfmt 20's CSV field header; nothing for the remaining formats (outfmt 11's error archive is
+/// written by `tblastn_app::run` when the exception returns).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-442
+/// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270,327
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn write_mapped_empty_prologs(
+    outputs: &mut ReportOutputs<'_>,
+    subject_records: &[FastaRecord],
+    subject_letters: SubjectLetters<'_>,
+    shown: &ShownSubjects<'_>,
+    subject_set: SubjectSetNumbers,
+    parameters: &LocalSubjectParameters,
+    scoring: LocalStageDScoring,
+    matrix_name: &str,
+    report_counts: crate::blastinput::report_counts::ReportCounts,
+    formatting: crate::blastinput::report_counts::FormattingArgs,
+    ranges: &ReportRanges<'_>,
+    tabular: &super::tabular::TabularInputs,
+    pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
+    archive: Option<&super::archive::ArchiveRender<'_>>,
+) -> Result<()> {
+    let empty_ranges = ReportRanges {
+        queries: ranges.queries,
+        subjects: ranges.subjects,
+        epilog: false,
+        query_scopes: ranges.query_scopes,
+    };
+    for (format_index, format) in outputs.formats.iter_mut().enumerate() {
+        if format.refusal.refused() {
+            continue;
+        }
+        let number = format_number(format.outfmt);
+        let report_format = format.report_format();
+        let outfmt = format.outfmt;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
+        match number {
+            0..=4 => {
+                let mut warnings = crate::report::query_warnings::report_posts(
+                    report_format,
+                    tabular.html.is_some(),
+                )
+                .then(|| {
+                    crate::report::query_warnings::QueryWarnings::of_posts(
+                        &[],
+                        archive.map(|render| render.handle),
+                        &mut *outputs.diagnostics,
+                    )
+                    .for_report(format_index)
+                    .with_html_posts(
+                        outputs
+                            .html_posts
+                            .as_deref_mut()
+                            .map(|posts| posts as &mut dyn std::io::Write),
+                    )
+                });
+                write_pairwise(
+                    &mut writer,
+                    &[],
+                    &[],
+                    subject_records,
+                    subject_letters,
+                    shown,
+                    subject_set,
+                    parameters,
+                    &[],
+                    &[],
+                    &[],
+                    scoring,
+                    matrix_name,
+                    report_counts,
+                    formatting,
+                    &empty_ranges,
+                    None,
+                    warnings.as_mut(),
+                    pssm,
+                    crate::report::pairwise::PairwiseView::of(
+                        crate::blastinput::app::ReportFormat::from_number(number)
+                            .expect("a format number 0 to 4"),
+                    )
+                    .expect("a pairwise view of formats 0 to 4"),
+                    None,
+                    tabular.html.as_ref(),
+                    None,
+                )?;
+            }
+            13..=16 => {
+                let kind = xml2_kind(outfmt).expect("a checked XML2 or JSON format");
+                writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+            }
+            20 => {
+                if let Some(spec) = super::tabular::tabular_spec(outfmt) {
+                    super::tabular::write_tabular_prolog(
+                        &spec,
+                        tabular.taxdb_found,
+                        &mut writer,
+                        &mut *outputs.diagnostics,
+                    )?;
+                }
+            }
+            _ => {}
+        }
+        writer.flush()?;
     }
     Ok(())
 }
@@ -1092,7 +1314,9 @@ fn write_tabular(
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
             // The title's bytes (`write_outfmt7_query_line`).
             crate::report::outfmt6::write_outfmt7_query_line(writer, &query.query_line())?;
-            writeln!(writer, "# Database: {}", shown.name())?;
+            writer.write_all(b"# Database: ")?;
+            writer.write_all(&shown.name())?;
+            writer.write_all(b"\n")?;
             if hit_count > 0 {
                 writeln!(writer, "# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score")?;
             }
@@ -1156,6 +1380,26 @@ fn write_tabular(
                     }
                     hsp_index += 1;
                     continue;
+                }
+                if let Some(nullb) = payload.nullb {
+                    let exc = if nullb.std_seg_lengths_inaccurate {
+                        Some(crate::report::serial::seqalign::std_seg_lengths_not_accurate())
+                    } else if nullb.subject_row_empty {
+                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:986
+                        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:240
+                        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:716-733
+                        Some(crate::report::serial::seqalign::aln_vec_row_gaps_only(
+                            1, true,
+                        ))
+                    } else if nullb.translate_na_failure {
+                        Some(crate::report::serial::seqalign::translate_na_to_aa_exception())
+                    } else {
+                        None
+                    };
+                    if let Some(exc) = exc {
+                        writer.flush()?;
+                        return Err(crate::cli::NativeError::exception(&exc).into());
+                    }
                 }
                 let hsp = &linked.hsp;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1087-1105:
@@ -1401,35 +1645,64 @@ fn pairwise_hits(
                 // residue and reverse strand endpoints run in descending order.
                 let (s_start, s_end) = subject_endpoints(hsp, i32::try_from(subject_seq.len())?);
                 let query_letters = QueryLetters::new(query, query_bioseq);
-                let (qseq, sseq) = aligned_sequences(
-                    query_letters,
-                    subject_seq,
-                    &mut x_window,
-                    &code,
-                    &mut translation,
-                    hsp.frame,
-                    hsp.q_start,
-                    hsp.s_start,
-                    hsp.s_end,
-                    &payload.edit_script,
-                )?;
-                // The row holds its masks in lower case; the lists are left to the next row
-                // (`query_anchored::output_seq`), or copied under `-html`.
-                if html_masks.is_some() {
-                    row_masks.clear();
-                }
-                let qseq =
-                    query_row_masks(qseq, &report_masks, hsp.q_start, hsp.q_end, &mut row_masks)?;
+                let edge = match payload.nullb {
+                    Some(nullb) if nullb.subject_row_empty => {
+                        crate::report::pairwise::PairwiseEdge::NullbEmptySubjectRow {
+                            left: nullb.wrapped_minus_tail == 0,
+                        }
+                    }
+                    Some(nullb) if nullb.std_seg_lengths_inaccurate => {
+                        crate::report::pairwise::PairwiseEdge::NullbStdSegLengths
+                    }
+                    Some(nullb) if nullb.translate_na_failure => {
+                        crate::report::pairwise::PairwiseEdge::NullbSkipTranslate
+                    }
+                    _ => crate::report::pairwise::PairwiseEdge::Normal,
+                };
+                let (qseq, sseq, report_positives) =
+                    if edge != crate::report::pairwise::PairwiseEdge::Normal {
+                        if html_masks.is_some() {
+                            row_masks.clear();
+                        }
+                        (String::new(), String::new(), 0)
+                    } else {
+                        let (qseq, sseq) = aligned_sequences(
+                            query_letters,
+                            subject_seq,
+                            &mut x_window,
+                            &code,
+                            &mut translation,
+                            hsp.frame,
+                            hsp.q_start,
+                            hsp.s_start,
+                            hsp.s_end,
+                            &payload.edit_script,
+                            payload.nullb,
+                        )?;
+                        // The row holds its masks in lower case; the lists are left to the next row
+                        // (`query_anchored::output_seq`), or copied under `-html`.
+                        if html_masks.is_some() {
+                            row_masks.clear();
+                        }
+                        let qseq = query_row_masks(
+                            qseq,
+                            &report_masks,
+                            hsp.q_start,
+                            hsp.q_end,
+                            &mut row_masks,
+                        )?;
+                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
+                        let report_positives = crate::report::row_letters::display_positives(
+                            qseq.as_bytes(),
+                            sseq.as_bytes(),
+                            scoring.matrix,
+                            query_letters.case(),
+                        );
+                        (qseq, sseq, report_positives)
+                    };
                 if let Some(table) = html_masks.as_deref_mut() {
                     table.push(row_masks.copy_rows());
                 }
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
-                let report_positives = crate::report::row_letters::display_positives(
-                    qseq.as_bytes(),
-                    sseq.as_bytes(),
-                    scoring.matrix,
-                    query_letters.case(),
-                );
                 // The rows are read from the searched letters; the report prints record
                 // coordinates (`record_coordinates`).
                 let searched = (hsp.q_start + 1, hsp.q_end, s_start, s_end);
@@ -1440,11 +1713,19 @@ fn pairwise_hits(
                 // start and the record's length (the search's frame without
                 // `-subject_loc`).
                 let subject_length = ranges.subjects.length(oid, subject_seq.len());
-                let subject_frame = crate::blastinput::seq_range::record_frame(
-                    frame > 0,
-                    usize::try_from(s_start - 1)?,
-                    subject_length,
-                );
+                let subject_frame = if matches!(
+                    edge,
+                    crate::report::pairwise::PairwiseEdge::NullbEmptySubjectRow { .. }
+                ) && s_start < 1
+                {
+                    frame
+                } else {
+                    crate::blastinput::seq_range::record_frame(
+                        frame > 0,
+                        usize::try_from(s_start - 1)?,
+                        subject_length,
+                    )
+                };
                 let hit = Hit {
                     identity: if payload.align_length > 0 {
                         100.0 * payload.report_num_ident as f64 / payload.align_length as f64
@@ -1508,13 +1789,14 @@ fn pairwise_hits(
                     // SEG-masked letter is a mismatch there and an identity in the rows
                     // (`report_num_ident`).
                     seqalign_num_ident: usize::try_from(payload.num_ident)?,
-                    query_left_of_record: false,
+                    edge,
                 });
                 // The model of the reads sorts by `hsp_scores` without the rows
                 // (`TblastnDatabase::subject_read_texts`): the row's values where the records'
                 // offsets move nothing.
                 debug_assert!(
-                    searched != (q_start, q_end, s_start, s_end)
+                    payload.nullb.is_some()
+                        || searched != (q_start, q_end, s_start, s_end)
                         || hsp_scores(linked, payload, subject_seq.len()).ok()
                             == hits.last().map(crate::report::hit_sort::HspScores::of),
                     "TBLASTN hsp_scores differs from its row"
@@ -1598,7 +1880,7 @@ fn write_pairwise(
     }
     let report = BlastpPairwiseReport {
         version: crate::wording::REPORT_VERSION.into(),
-        database_name: shown.name().into(),
+        database_name: shown.pairwise_name(),
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267
@@ -1656,6 +1938,14 @@ fn write_pairwise(
         .iter()
         .map(|record| Arc::from(record.title()))
         .collect();
+    let subject_oids: Option<Arc<[u32]>> =
+        matches!(shown, ShownSubjects::Database { .. }).then(|| {
+            shown
+                .report_oids()
+                .into_iter()
+                .map(|oid| oid.get())
+                .collect()
+        });
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:263-265
     let config = PairwiseConfig {
         program: "tblastn".into(),
@@ -1671,13 +1961,7 @@ fn write_pairwise(
         // NCBI's alignment display cannot read.
         unreadable_query: pssm.and_then(|psi| psi.query_other_coding).map(|_| {
             crate::report::pairwise::UnreadableQuery {
-                oids: matches!(shown, ShownSubjects::Database { .. }).then(|| {
-                    shown
-                        .report_oids()
-                        .into_iter()
-                        .map(|oid| oid.get())
-                        .collect()
-                }),
+                oids: subject_oids.clone(),
             }
         }),
         ..PairwiseConfig::default()
@@ -1711,6 +1995,7 @@ fn write_pairwise(
             ShownSubjects::Fasta { .. } => &every_loaded,
             ShownSubjects::Database { reported, .. } => &reported.loads,
         },
+        subject_oids.as_deref(),
     )
     // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`); a
     // sort or the description table may stop at a query row that starts with a gap
@@ -1801,12 +2086,14 @@ fn recount_shown_counts(
     hitlists: &mut [KappaResultHitList],
     genetic_code: u8,
     hard_masked: bool,
+    has_nullb: bool,
 ) -> Result<()> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut x_window = Vec::new();
     for (query, hitlist) in query_records.iter().zip(hitlists.iter_mut()) {
         let letters = QueryLetters::new(query.seq(), query_bioseq);
-        if !hard_masked && !letters.shows_other_letters() {
+        let recount_all = hard_masked || letters.shows_other_letters();
+        if !recount_all && !has_nullb {
             continue;
         }
         for list in hitlist.lists_mut() {
@@ -1814,6 +2101,14 @@ fn recount_shown_counts(
             let subject_seq = subject_letters.nt(oid);
             let mut translation = TargetTranslation::of(subject_seq, &code);
             for (linked, payload) in list.hsps.hsps.iter().zip(list.payloads.iter_mut()) {
+                if !recount_all && payload.nullb.is_none() {
+                    continue;
+                }
+                if payload.nullb.is_some_and(|n| {
+                    n.subject_row_empty || n.std_seg_lengths_inaccurate || n.translate_na_failure
+                }) {
+                    continue;
+                }
                 let hsp = &linked.hsp;
                 let (qseq, sseq) = aligned_sequences(
                     letters,
@@ -1826,6 +2121,7 @@ fn recount_shown_counts(
                     hsp.s_start,
                     hsp.s_end,
                     &payload.edit_script,
+                    payload.nullb,
                 )?;
                 let ident = qseq
                     .bytes()
@@ -1863,7 +2159,22 @@ fn aligned_sequences(
     s_start: i32,
     s_end: i32,
     script: &[GapEditOp],
+    nullb: Option<super::nullb_report::NullbReport>,
 ) -> Result<(String, String)> {
+    if let Some(nullb) = nullb.filter(|n| n.trailing_nullb_dash || n.wrapped_minus_tail > 0) {
+        return super::nullb_report::aligned_sequences_nullb(
+            query,
+            subject,
+            window_buffer,
+            code,
+            target,
+            frame,
+            q_start,
+            s_start,
+            script,
+            nullb,
+        );
+    }
     ensure!(!script.is_empty(), "TBLASTN report HSP has no edit script");
     let (translated, _, base) = target.get(frame, s_start, s_end)?;
     let mut q = usize::try_from(q_start)?;
@@ -1973,6 +2284,7 @@ pub(super) fn aligned_sequences_into(
     s_start: i32,
     s_end: i32,
     script: &[GapEditOp],
+    nullb: Option<super::nullb_report::NullbReport>,
     query_string: &mut String,
     subject_string: &mut String,
 ) -> Result<()> {
@@ -1987,6 +2299,7 @@ pub(super) fn aligned_sequences_into(
         s_start,
         s_end,
         script,
+        nullb,
     )?;
     Ok(())
 }

@@ -92,7 +92,7 @@ pub(super) struct PreparedXml {
     matrix_name: String,
     gap_open: i32,
     gap_extend: i32,
-    db_name: String,
+    db_name: Vec<u8>,
     db_num: i64,
     db_len: i64,
     db_len_overflow: bool,
@@ -333,9 +333,9 @@ pub(super) fn prepare(
             i32::try_from(ranges.subjects.length(s_idx, subject_letters.length(s_idx)))?;
     }
     let (db_name, db_num, db_len, db_len_overflow) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
+        ShownSubjects::Fasta { .. } => (Vec::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
-            name.to_string(),
+            name.to_vec(),
             pairwise.num_sequences,
             pairwise.total_letters,
             pairwise.total_letters_overflow,
@@ -472,6 +472,7 @@ impl PreparedXml {
         let version = super::tabular::program_version(self.values.pssm);
         let run = self.positives.as_ref().map(|positives| XmlRun {
             program,
+            app: "tblastn",
             version,
             reference: REFERENCE_GAPPED_BLAST,
             db_name: &self.db_name,
@@ -645,11 +646,24 @@ impl PreparedXml {
                             );
                             let unaligned = list.hsps.hsps.iter().zip(&list.payloads).map(
                                 |(linked, payload)| {
+                                    let invalidated =
+                                        payload.nullb.is_some_and(|n| n.scores_invalidated);
                                     XmlHsp::unaligned(
                                         linked.hsp.score,
                                         payload.bit_score,
-                                        seqalign_evalue_read(linked.evalue),
-                                        read_num_ident(i64::from(payload.num_ident), program_type),
+                                        if invalidated {
+                                            -1.0
+                                        } else {
+                                            seqalign_evalue_read(linked.evalue)
+                                        },
+                                        if invalidated {
+                                            -1
+                                        } else {
+                                            read_num_ident(
+                                                i64::from(payload.num_ident),
+                                                program_type,
+                                            )
+                                        },
                                     )
                                 },
                             );
@@ -684,6 +698,28 @@ impl PreparedXml {
                                 ) {
                                     return Err(CaughtException(row_range_exception(error)).into());
                                 }
+                                if let Some(nullb) = payload.nullb {
+                                    if nullb.subject_row_empty {
+                                        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
+                                        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-229
+                                        return Err(CaughtException(row_range_exception(
+                                            crate::report::serial::seqalign::RowRangeError::Empty,
+                                        ))
+                                        .into());
+                                    }
+                                    if nullb.std_seg_lengths_inaccurate {
+                                        return Err(CaughtException(
+                                            crate::report::serial::seqalign::std_seg_lengths_not_accurate(),
+                                        )
+                                        .into());
+                                    }
+                                    if nullb.translate_na_failure {
+                                        return Err(CaughtException(
+                                            crate::report::serial::seqalign::translate_na_to_aa_exception(),
+                                        )
+                                        .into());
+                                    }
+                                }
                                 let frame = i32::from(hsp.frame);
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1087-1105:
                                 // translated coordinates use three nucleotide letters per
@@ -708,6 +744,7 @@ impl PreparedXml {
                                     hsp.s_start,
                                     hsp.s_end,
                                     &payload.edit_script,
+                                    payload.nullb,
                                     &mut qrow,
                                     &mut srow,
                                 )?;
@@ -721,10 +758,16 @@ impl PreparedXml {
                                 // The Seq-align's endpoints, lower first: the minus frame's
                                 // outfmt 6 order is not the XML's.
                                 let (hit_from, hit_to) = (s_start.min(s_end), s_start.max(s_end));
+                                let invalidated =
+                                    payload.nullb.is_some_and(|n| n.scores_invalidated);
                                 hsps.hsp(&XmlHsp {
                                     score: hsp.score,
                                     bit_score: payload.bit_score,
-                                    evalue: seqalign_evalue_read(linked.evalue),
+                                    evalue: if invalidated {
+                                        -1.0
+                                    } else {
+                                        seqalign_evalue_read(linked.evalue)
+                                    },
                                     query_from: q_start,
                                     query_to: q_end,
                                     hit_from,
@@ -741,10 +784,11 @@ impl PreparedXml {
                                     ops: Some(&payload.edit_script),
                                     query_first: q_start - 1,
                                     query_step: 1,
-                                    alignment_identities: read_num_ident(
-                                        i64::from(payload.num_ident),
-                                        program_type,
-                                    ),
+                                    alignment_identities: if invalidated {
+                                        -1
+                                    } else {
+                                        read_num_ident(i64::from(payload.num_ident), program_type)
+                                    },
                                 })?;
                             }
                         }
@@ -761,7 +805,7 @@ impl PreparedXml {
             // prefix is the application's name, `tblastn` under `-in_pssm` too (whose program is
             // `psitblastn`).
             if let Some(post) =
-                crate::report::blast_xml::writer::caught_post(written, &*document, "tblastn")?
+                crate::report::blast_xml::writer::caught_post(written, &*document, run.app)?
             {
                 posts.caught(post);
             }

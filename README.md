@@ -139,6 +139,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `blastdb_aliastool` | Makes alias files that combine databases or keep a list of their sequences; converts GI and sequence id lists to binary lists | alias files, binary lists | [blastdb_aliastool](docs/manual/src/programs/blastdb_aliastool.md) |
 | `blastdbcheck` | Checks BLAST databases for damage: files, sequences, ISAM indexes, alias files, taxonomy ids | report | [blastdbcheck](docs/manual/src/programs/blastdbcheck.md) |
 | `cleanup-blastdb-volumes.py` | Removes orphaned BLAST database volume files not listed in a database's `.pal` or `.nal` alias file | | [cleanup-blastdb-volumes.py](docs/manual/src/programs/cleanup-blastdb-volumes.md) |
+| `blast_formatter` | Writes the reports of a search again from its `-outfmt 11` BLAST archive, without searching again | `8`, `9`, `12` | [blast_formatter](docs/manual/src/programs/blast_formatter.md) |
 | `rpsbproc` | Annotates conserved domains, sites and motifs from RPS-BLAST results, as NCBI's `rpsbproc` 0.5.1 | domain report | [rpsbproc](docs/manual/src/programs/rpsbproc.md) |
 
 `rpsbproc` reads `-outfmt 11` archives, which LOSAT's `rpsblast` and `rpstblastn` write as NCBI BLAST+'s do: `losat rpsblast -query proteins.faa -db Cdd -outfmt 11 | losat rpsbproc -d cdd_data` ([rpsbproc](docs/manual/src/programs/rpsbproc.md)).
@@ -176,7 +177,7 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
   - [Introduction](docs/manual/src/introduction.md) • [Quick start](docs/manual/src/quick-start.md) • [Common workflows](docs/manual/src/workflows.md) • [Installation](docs/manual/src/installation.md)
   - [Coming from NCBI BLAST+](docs/manual/src/from-ncbi-blast.md) • [Upgrading from LOSAT v0.1](docs/manual/src/from-losat-v0-1.md) • [Threads, speed and memory](docs/manual/src/performance.md)
   - [Differences from NCBI BLAST+](docs/manual/src/differences.md) • [What LOSAT refuses](docs/manual/src/refusals.md) • [Databases](docs/manual/src/databases.md) • [Output formats](docs/manual/src/output-formats.md) • [Environment variables](docs/manual/src/environment.md) • [LOSAT Web](docs/manual/src/web.md)
-- **Not in v0.2.0:** `deltablast`, `makeprofiledb -dbtype cobalt`, `blast_formatter`, and `psiblast -phi_pattern`; options that need NCBI's servers (`-remote`, `-entrez_query`) and `-import_search_strategy`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
+- **Not in v0.2.0:** `deltablast`, `makeprofiledb -dbtype cobalt`, `blast_formatter` formats other than `8`, `9` and `12` (and binary or XML archives), and `psiblast -phi_pattern` beyond its first round (and with `-html`); options that need NCBI's servers (`-remote`, `-entrez_query`) and `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
 - [v0.2.0 release record](docs/release/v0.2.0.md) • [Contributing](CONTRIBUTING.md)
 
 ## Citation & References

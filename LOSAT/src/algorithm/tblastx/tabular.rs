@@ -72,13 +72,14 @@ pub(crate) fn reads_letters(fields: &[TabularField]) -> bool {
 pub(super) fn write_tabular_prolog(
     spec: &TabularSpec,
     taxdb_found: bool,
+    app: &str,
     writer: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     crate::algorithm::common::tabular::write_tabular_prolog(
         spec,
         taxdb_found,
-        "tblastx",
+        app,
         PROGRAM_VERSION,
         writer,
         diagnostics,
@@ -95,7 +96,7 @@ pub(super) struct TblastxTabular<'a, 'r> {
     /// The `# Query:` title of each query.
     pub query_titles: &'a [&'a [u8]],
     /// The `# Database:` name.
-    pub database: &'a str,
+    pub database: &'a [u8],
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
     pub subject_ids: &'a [crate::algorithm::common::tabular::SubjectId],
@@ -161,14 +162,8 @@ pub(super) fn write_tblastx_tabular(
             lengths: &lengths,
             taxonomy: run.tabular_taxonomy,
             loads: &database.reported.loads,
+            seen: database.seen,
         },
-    };
-    // The subjects of the report's rows in report order, each once per run of its HSPs.
-    let reported_ranks = || {
-        hits.iter()
-            .enumerate()
-            .filter(|&(index, hsp)| index == 0 || hits[index - 1].hit.s_idx != hsp.hit.s_idx)
-            .map(|(_, hsp)| hsp.hit.s_idx as usize)
     };
     let names = run.tabular_names;
     // Outfmt 18, the organism report: the `Query=` block shows the query record's length, also
@@ -201,6 +196,7 @@ pub(super) fn write_tblastx_tabular(
             false,
             names,
             PROGRAM,
+            args.app().ncbi_name(),
             &queries,
             writer,
             warnings,
@@ -209,9 +205,17 @@ pub(super) fn write_tblastx_tabular(
     }
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are `ReportedSubjects::tabular_subject_ids`'.
+    // The subjects of the report's rows in report order, each once per run of its HSPs.
     if needs.all_deflines {
-        for rank in reported_ranks() {
-            subjects.values(rank, spec, PROGRAM)?;
+        for (index, hsp) in hits.iter().enumerate() {
+            if index == 0 || hits[index - 1].hit.s_idx != hsp.hit.s_idx {
+                subjects.values_for(
+                    hsp.hit.q_idx as usize,
+                    hsp.hit.s_idx as usize,
+                    spec,
+                    PROGRAM,
+                )?;
+            }
         }
     }
     let query_code = GeneticCode::from_id(args.query_gencode);
@@ -227,7 +231,7 @@ pub(super) fn write_tblastx_tabular(
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-    let taxdb_warning = spec.formatter_warning(taxdb_found, "tblastx");
+    let taxdb_warning = spec.formatter_warning(taxdb_found, args.app().ncbi_name());
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
         if let (Some(line), Some(warnings)) = (taxdb_warning.as_deref(), warnings) {
             writer.flush()?;
@@ -246,7 +250,13 @@ pub(super) fn write_tblastx_tabular(
             Some(warnings) => &mut *warnings.sink,
             None => &mut no_diagnostics,
         };
-        write_tabular_prolog(spec, taxdb_found, writer, diagnostics)?;
+        write_tabular_prolog(
+            spec,
+            taxdb_found,
+            args.app().ncbi_name(),
+            writer,
+            diagnostics,
+        )?;
     }
     // The HSPs of each query in report order, numbered by their place in the final list (the
     // HSP numbers of the format observer, `report::write_tabular`).
@@ -291,7 +301,7 @@ pub(super) fn write_tblastx_tabular(
         table.query_header(
             &mut buf,
             tab.query_titles[q_idx],
-            tab.database.as_bytes(),
+            tab.database,
             (!tab.unsearched[q_idx]).then_some(query_hits.len()),
         )?;
         writer.write_all(&buf)?;
@@ -309,7 +319,7 @@ pub(super) fn write_tblastx_tabular(
             let group = &query_hits[first..end];
             first = end;
             let s_idx = s_idx as usize;
-            let values = subjects.values(s_idx, spec, PROGRAM)?;
+            let values = subjects.values_for(q_idx, s_idx, spec, PROGRAM)?;
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2969-2985
             // The HSPs of one subject are one group of `InsertSubjectScores` (consecutive
             // Seq-aligns of one subject); their query intervals in nucleotides (the Std-seg's
@@ -332,7 +342,9 @@ pub(super) fn write_tblastx_tabular(
             // A subject whose lookups fail shows what the last found subject set
             // (`TabularRows::last_found`), made again from its index.
             let kept_values = match rows.last_found() {
-                Some(kept) if table.fails(&subject) => Some(subjects.values(kept, spec, PROGRAM)?),
+                Some(kept) if table.fails(&subject) => {
+                    Some(subjects.values_for(q_idx, kept, spec, PROGRAM)?)
+                }
                 _ => None,
             };
             let kept = kept_values
@@ -430,12 +442,19 @@ pub(super) fn write_tblastx_tabular(
                     i32::try_from(q_high)?,
                     i32::try_from(query_record_length)?,
                 );
-                let s_frame = translation_frame(
-                    hsp.subject_frame > 0,
-                    i32::try_from(s_low)?,
-                    i32::try_from(s_high)?,
-                    subject_record_length,
-                );
+                let s_frame = match subjects.seen_at(q_idx, hit.s_idx as usize) {
+                    Some(bioseq) => crate::report::query_bioseq::ncbi_frame(
+                        hsp.subject_frame > 0,
+                        i32::try_from(hit.s_start)?,
+                        bioseq.length(),
+                    ),
+                    None => translation_frame(
+                        hsp.subject_frame > 0,
+                        i32::try_from(s_low)?,
+                        i32::try_from(s_high)?,
+                        subject_record_length,
+                    ),
+                };
                 let row = TabularHsp {
                     // The record coordinates of the default row (`shift_to_records`).
                     q_start: i64::try_from(hit.q_start)?,

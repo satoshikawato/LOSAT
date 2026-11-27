@@ -95,6 +95,8 @@ pub(super) struct PrelimRun<'a> {
     pub(super) x_block_call: bool,
     pub(super) lookup: &'a BlastpRuntimeLookup,
     pub(super) contexts: &'a [QueryContext],
+    /// psiblast `-phi_pattern`: the call's PHI-BLAST searches (`phi_hooks::phi_prelim`).
+    pub(super) phi: Option<&'a super::phi_hooks::PhiCall<'a>>,
     // The statistics and the cutoffs.
     pub(super) gapped_params: &'a KarlinParams,
     pub(super) gapped_gumbel: &'a Option<BlastGumbelBlk>,
@@ -289,6 +291,7 @@ where
         total_query_span,
         timing_enabled,
         timing,
+        phi,
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -431,6 +434,47 @@ where
             },
             None => error,
         })?;
+    } else if let Some(phi) = phi {
+        // psiblast `-phi_pattern`: the pattern scan in place of the word lookup
+        // (`phi_hooks::phi_prelim`).
+        let new_scratch = || {
+            BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span)
+        };
+        super::phi_hooks::phi_prelim(
+            phi,
+            contexts,
+            window,
+            &new_scratch,
+            database,
+            subjects,
+            blastp_parallel_pool,
+            prelim_filter.as_mut(),
+            prelim_hitlist_size,
+            x_compact_hit_lists,
+        )
+        .map_err(|error| match database {
+            // A sequence file that cannot be read: NCBI's error of the batch's preliminary
+            // search, as for blastp's database search below.
+            Some(database) => match error.downcast::<database::PreliminaryReadError>() {
+                Ok(read_error) => preliminary_search_error(
+                    args,
+                    query_records,
+                    subject_source,
+                    subject_label,
+                    outputs,
+                    blastp_parallel_pool,
+                    ranges,
+                    reports,
+                    query_batches,
+                    query_batch_skipped,
+                    query_chunk,
+                    database.name(),
+                    &read_error.0,
+                ),
+                Err(other) => other,
+            },
+            None => error,
+        })?;
     } else if database.is_some() && (!reads || !contexts.iter().any(|ctx| ctx.is_valid)) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
         // No query of the call has Karlin-Altschul parameters: NCBI searches none of its
@@ -502,7 +546,7 @@ where
                         query_batches,
                         query_batch_skipped,
                         query_chunk,
-                        database.map_or("", |database| database.name()),
+                        database.map_or(b"".as_slice(), |database| database.name()),
                         read_error.as_bytes(),
                     ),
                     Err(other) => other,

@@ -94,7 +94,7 @@ LOSAT stops with an error for these `blastx` settings instead of running somethi
 - An `-evalue` that is not a finite number.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastx-fast`), and matrix names that only begin with `IDENTITY`.
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
-- `-remote`, `-entrez_query` and `-import_search_strategy`.
+- `-remote` and `-entrez_query`.
 - A protein subject of more than 5,000,000 residues, from `-subject` or from a database.
 - `-db_hard_mask` on a database with a sequence whose overlapping or out-of-order masks LOSAT cannot search as NCBI BLAST+ does. One such sequence refuses the whole database. Other databases whose masks overlap, nest or are stored out of order are searched as NCBI BLAST+ searches them, among them the A. thaliana TAIR10 and UniRef50 databases masked by `segmasker`; where NCBI's rows for a sequence depend on the sequences next to it, LOSAT searches it on its own (see [Differences](../differences.md#-db_hard_mask-with-overlapping-masks-that-reach-a-neighbouring-sequence)). See [What LOSAT refuses](../refusals.md#blastx).
 

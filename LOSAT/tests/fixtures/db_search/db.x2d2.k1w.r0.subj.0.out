@@ -1,0 +1,156 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/x2d2/k1_w_r0.fna).
+           1 sequences; 57 total letters
+
+
+
+Query= x2d dash 50
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+k1_w_r0                                                               35.3    3e-11
+
+
+> k1_w_r0
+Length=57
+
+ Score = -1.0 bits (-1),  Expect = 0.0
+ Identities = 1/5 (20%), Positives = 1/5 (20%), Gaps = 4/5 (80%)
+ Frame = +1
+
+Query  11  WAKAS  15
+           W    
+Sbjct  55  W      57
+
+
+ Score = 35.3 bits (80),  Expect = 3e-11
+ Identities = 4/8 (50%), Positives = 4/8 (50%), Gaps = 3/8 (38%)
+ Frame = -2
+
+Query  26  QILT---A  30
+           Q LT   A
+Sbjct  56  QFLTQ*KA  33
+
+
+ Score = 27.9 bits (61),  Expect = 3e-08
+ Identities = 4/11 (36%), Positives = 5/11 (45%), Gaps = 5/11 (45%)
+ Frame = +1
+
+Query  20  HYFREDQILTA  30
+           H F +D    A
+Sbjct  19  HLF-KD----A  36
+
+
+ Score = 25.6 bits (55),  Expect = 2e-07
+ Identities = 4/11 (36%), Positives = 4/11 (36%), Gaps = 6/11 (55%)
+ Frame = +2
+
+Query  19  MHYFREDQI-L  28
+           M  F    I L
+Sbjct  32  M-LF----IGL  49
+
+
+ Score = 23.7 bits (50),  Expect = 1e-06
+ Identities = 4/16 (25%), Positives = 4/16 (25%), Gaps = 11/16 (69%)
+ Frame = -3
+
+Query  22  FR--E------D---Q  26
+           F   E      D   Q
+Sbjct  52  F*PNEKHL*KDDKEVQ  5
+
+
+ Score = 20.6 bits (42),  Expect = 2e-05
+ Identities = 3/9 (33%), Positives = 3/9 (33%), Gaps = 5/9 (56%)
+ Frame = +2
+
+Query  22  FREDQI--L  28
+           F    I  L
+Sbjct  11  F---FIIFL  28
+
+
+ Score = 16.8 bits (32),  Expect = 6e-04
+ Identities = 2/9 (22%), Positives = 2/9 (22%), Gaps = 7/9 (78%)
+ Frame = -1
+
+Query  19  MHYFREDQI  27
+           M       I
+Sbjct  21  M-------I  16
+
+
+ Score = 14.5 bits (26),  Expect = 0.007
+ Identities = 2/5 (40%), Positives = 2/5 (40%), Gaps = 1/5 (20%)
+ Frame = -1
+
+Query  19  M-HYF  22
+           M   F
+Sbjct  42  MKSIF  28
+
+
+ Score = 14.1 bits (25),  Expect = 0.011
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  28  L  28
+           L
+Sbjct  2   L  4
+
+
+ Score = 14.1 bits (25),  Expect = 0.011
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +2
+
+Query  28  L  28
+           L
+Sbjct  5   L  7
+
+
+ Score = 14.1 bits (25),  Expect = 0.011
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = +3
+
+Query  29  T  29
+           T
+Sbjct  9   T  11
+
+
+ Score = 14.1 bits (25),  Expect = 0.011
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+ Frame = -1
+
+Query  27  I  27
+           I
+Sbjct  33  I  31
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.110    0.312    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0460    0.140     1.90     42.6     43.6 
+
+Effective search space used: 570
+
+
+  Database: User specified sequence set (Input: tests/fasta/x2d2/k1_w_r0.fna).
+    Posted date:  Unknown
+  Number of letters in database: 57
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 1

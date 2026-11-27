@@ -22,12 +22,12 @@ const STAT_FILE_NAME: &str = "wmasker.obinary";
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:389-408
 /// `CFile::Exists` is `IsFile()`, which follows links (ncbifile.hpp:4039-4042).
 pub fn taxid_stat_file(
-    directory: Option<&str>,
+    directory: Option<&[u8]>,
     taxid: i32,
     source: &dyn CountsSource,
 ) -> std::io::Result<Option<PathBuf>> {
     let directory: OsString = match directory.filter(|value| !value.is_empty()) {
-        Some(value) => value.into(),
+        Some(value) => crate::utils::os_bytes::os_string_from_bytes(value.to_vec()),
         None => std::env::current_dir()?.into_os_string(),
     };
     let path = stat_file_path(directory, taxid);

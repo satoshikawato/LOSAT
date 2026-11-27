@@ -1,0 +1,8 @@
+Warning: [blastx] The parameter -sorthits is ignored for output formats > 4.
+Warning: [blastx] mt_mode cannot be overridden when using a search strategy
+Warning: [blastx] seg cannot be overridden when using a search strategy
+Warning: [blastx] soft_masking cannot be overridden when using a search strategy
+Warning: [blastx] soft_masking cannot be overridden when using a search strategy
+Warning: [blastx] sorthits cannot be overridden when using a search strategy
+Warning: [blastx] task cannot be overridden when using a search strategy
+Warning: [blastx] task cannot be overridden when using a search strategy

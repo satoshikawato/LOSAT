@@ -1,0 +1,140 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2d_a0m_s.fna).
+           2 sequences; 129 total letters
+
+
+
+Query= x2d dash 50
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+x2d_motif frame +1 = QPQILRMHYFREDQILTAAQDPIL                         120     2e-44
+x2d_a0_r0 frame +1 = IAELLYHLFKDAFHWVKNS                              31.4    3e-09
+
+
+
+x2dq       11  WAKASAAAMHYFREDQILTA  30
+Subject_2  19          ............  54
+Subject_2  11             .FVCI..    49
+                                \  
+                                |  
+                           FVKIKF
+Subject_2  32              .K*C.     18
+Subject_2  24          ..NL.----.    1
+                         \         
+                         |         
+                        TK
+Subject_2  71              .---.S*.  54
+                                \  
+                                |  
+                                G
+Subject_2  66              .---...   31
+                                 \ 
+                                 | 
+                          SSSKNLIF
+Subject_2  70               ...D.N.  20
+                             \\\ \ 
+                             ||| | 
+                             *|| HEN
+                              ||   
+                            LEQ|
+                               |   
+                             *EF
+Subject_2  62                  ..    67
+Subject_2  48            .S.         62
+                          \        
+                          |        
+                         CC
+Subject_2  34           ...-.        5
+                         \\        
+                         ||        
+                      ENNA|
+                          |        
+                         EE
+Subject_2  18            ...         38
+                          \\       
+                          ||       
+                         AL|
+                           |       
+                          S*
+Subject_2  3                     ..  23
+                                  \
+                                  |
+                              SNSSY
+Subject_2  27                  ..    7
+                                \  
+                                |  
+                            MHTKN
+Subject_2  5                    .    7
+Subject_2  66            .           68
+Subject_1  19           .L.-K.----.  36
+Subject_1  42          .SI.          28
+                        \          
+                        |          
+                        K
+Subject_1  53             .-----...  33
+                                  \
+                                  |
+                                Q*K
+Subject_1  32          .-L.----..    49
+                                \  
+                                |  
+                                G
+Subject_1  52             .*...      5
+                            \\\    
+                            |||    
+                           PN||
+                             ||    
+                        KHL*KD|
+                              |    
+                            KEV
+Subject_1  11             .---F..    28
+                                \  
+                                |  
+                               IF
+Subject_1  43  .---.                 57
+                   \               
+                   |               
+                 VKN
+Subject_1  57              .---.     52
+Subject_1  21          .-------.     16
+Subject_1  2                    .    4
+Subject_1  5                    .    7
+Subject_1  9                     .   11
+Subject_1  33                  .     31
+Subject_1  54             .          56
+
+
+Lambda      K        H        a         alpha
+   0.319    0.110    0.312    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0460    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1290
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2d_a0m_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 129
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 1

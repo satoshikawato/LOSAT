@@ -26,13 +26,15 @@ fn options(save_last: bool, save_each: bool, ascii: Option<&str>) -> PsiblastPss
         save_pssm_after_last_round: save_last,
         save_each_pssm: save_each,
         out_pssm: None,
-        out_ascii_pssm: ascii.map(str::to_string),
+        out_ascii_pssm: ascii.map(std::path::PathBuf::from),
         pseudocount: 0,
         in_pssm: None,
         in_msa: None,
         versions: Default::default(),
         check_scope: Default::default(),
         rounds: None,
+        run_files: Default::default(),
+        phi_pattern: None,
     }
 }
 
@@ -67,7 +69,7 @@ fn saving_a_pssm_needs_a_pssm_file() {
     assert!(options(false, false, Some("a.txt")).check().is_ok());
     // `-out_pssm` satisfies both checks too.
     let asn_only = PsiblastPssmOptions {
-        out_pssm: Some("p.asn".to_string()),
+        out_pssm: Some(std::path::PathBuf::from("p.asn")),
         ..options(true, true, None)
     };
     assert!(asn_only.check().is_ok());
@@ -87,19 +89,23 @@ fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
         request,
         PssmRequest {
             asn_path: None,
-            ascii_path: Some("-".to_string()),
+            ascii_path: Some(std::path::PathBuf::from("-")),
             save_each: true,
             pseudocount: 0,
             versions: Default::default(),
+            run_files: Default::default(),
         }
     );
     assert_eq!(request.diagnostics(), PsiDiagnosticsRequest::new_ex(true));
     let with_asn = PsiblastPssmOptions {
-        out_pssm: Some("p.asn".to_string()),
+        out_pssm: Some(std::path::PathBuf::from("p.asn")),
         ..options(true, false, None)
     };
     let request = with_asn.request().unwrap();
-    assert_eq!(request.asn_path.as_deref(), Some("p.asn"));
+    assert_eq!(
+        request.asn_path.as_deref(),
+        Some(std::path::Path::new("p.asn"))
+    );
     assert_eq!(request.ascii_path, None);
     let diagnostics = request.diagnostics();
     assert!(diagnostics.frequency_ratios);
@@ -107,7 +113,7 @@ fn only_the_last_rounds_pssm_with_a_pssm_file_is_a_request() {
         !diagnostics.information_content && !diagnostics.sigma && !diagnostics.num_matching_seqs
     );
     let no_asn_flag = PsiblastPssmOptions {
-        out_pssm: Some("p.asn".to_string()),
+        out_pssm: Some(std::path::PathBuf::from("p.asn")),
         ..options(false, false, None)
     };
     assert_eq!(no_asn_flag.request(), None);
@@ -541,10 +547,11 @@ const TK_1_40: &[u8] = b"MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGG";
 fn pssm_request(pseudocount: i32) -> PssmRequest {
     PssmRequest {
         asn_path: None,
-        ascii_path: Some("-".to_string()),
+        ascii_path: Some(std::path::PathBuf::from("-")),
         save_each: false,
         pseudocount,
         versions: Default::default(),
+        run_files: Default::default(),
     }
 }
 
@@ -645,11 +652,12 @@ fn a_pssm_query_read_with_parse_deflines_has_its_seq_align_id() {
     let subject = |_: u32| Ok(Some(ncbistdaa_letters(TK_1_40)));
     let alignments = [alignment(0, 1e-20, 0, 0, 40, None)];
     let request = PssmRequest {
-        asn_path: Some("p.asn".to_string()),
+        asn_path: Some(std::path::PathBuf::from("p.asn")),
         ascii_path: None,
         save_each: false,
         pseudocount: 0,
         versions: Default::default(),
+        run_files: Default::default(),
     };
     for (defline, id) in [
         ("gi|123|gb|AAA1.1| t", "        gi 123\n"),
@@ -784,20 +792,22 @@ fn scratch(name: &str) -> crate::utils::test_dir::TempDir {
 fn request(path: &std::path::Path, save_each: bool) -> PssmRequest {
     PssmRequest {
         asn_path: None,
-        ascii_path: Some(path.to_str().unwrap().to_string()),
+        ascii_path: Some(path.to_path_buf()),
         save_each,
         pseudocount: 0,
         versions: Default::default(),
+        run_files: Default::default(),
     }
 }
 
 fn asn_request(path: &std::path::Path, save_each: bool) -> PssmRequest {
     PssmRequest {
-        asn_path: Some(path.to_str().unwrap().to_string()),
+        asn_path: Some(path.to_path_buf()),
         ascii_path: None,
         save_each,
         pseudocount: 0,
         versions: Default::default(),
+        run_files: Default::default(),
     }
 }
 
@@ -848,7 +858,7 @@ fn each_pssm_replaces_the_file_or_gets_a_numbered_one() {
     assert!(!missing.exists());
     // The same name for both files: each query's ASN.1 file, then its ASCII one.
     let both = PssmRequest {
-        asn_path: Some(file.to_str().unwrap().to_string()),
+        asn_path: Some(file.clone()),
         ..request(&file, false)
     };
     write_files(&both, &[b"asn 1\n", b"asn 2\n"], &pssms).unwrap();
@@ -1302,4 +1312,116 @@ fn a_pssm_title_outside_the_visible_range_is_written_with_ncbis_posts() {
     .into_bytes();
     want.extend_from_slice(b"t\xe9tle\n");
     assert_eq!(file_posts("psiblast", &replaced).text(), want);
+}
+
+#[test]
+fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
+    use crate::algorithm::psiblast::rounds::RoundFiles;
+    use crate::report::run_files::{FileReceiver, RunFiles};
+    use std::sync::{Arc, Mutex};
+
+    struct Collector {
+        received: Mutex<Vec<(Vec<u8>, Vec<u8>)>>,
+        registered: Vec<Vec<u8>>,
+    }
+
+    impl FileReceiver for Collector {
+        fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+            self.received
+                .lock()
+                .unwrap()
+                .push((name.to_vec(), bytes.to_vec()));
+            Ok(())
+        }
+
+        fn registered_files(&self) -> &[Vec<u8>] {
+            &self.registered
+        }
+    }
+
+    let collector = Arc::new(Collector {
+        received: Mutex::new(Vec::new()),
+        registered: vec![b"existing.pssm".to_vec()],
+    });
+    let run_files = RunFiles::Receiver(collector.clone());
+
+    let drain = || -> Vec<(String, Vec<u8>)> {
+        collector
+            .received
+            .lock()
+            .unwrap()
+            .drain(..)
+            .map(|(n, b)| (String::from_utf8(n).unwrap(), b))
+            .collect()
+    };
+
+    // Single-round / PssmFiles with -save_each_pssm = false replaces earlier query's ASN.1.
+    let req = PssmRequest {
+        asn_path: Some(std::path::PathBuf::from("./out.pssm")),
+        ascii_path: Some(std::path::PathBuf::from("out.ascii")),
+        save_each: false,
+        pseudocount: 0,
+        versions: Default::default(),
+        run_files: run_files.clone(),
+    };
+    check_pssm_files(&req, 2, None).unwrap();
+    let mut files = PssmFiles::new(&req);
+    files
+        .add(Some(b"asn-1"), Some(b"ascii-1".to_vec()))
+        .unwrap();
+    files
+        .add(Some(b"asn-2"), Some(b"ascii-2".to_vec()))
+        .unwrap();
+    files.commit().unwrap();
+    assert_eq!(
+        drain(),
+        vec![
+            ("out.ascii".to_string(), b"ascii-1".to_vec()),
+            ("out.pssm".to_string(), b"asn-2".to_vec()),
+            ("out.ascii".to_string(), b"ascii-2".to_vec()),
+        ]
+    );
+
+    // RoundFiles with -save_each_pssm = true delivers numbered files.
+    let each_req = PssmRequest {
+        asn_path: Some(std::path::PathBuf::from("iter.pssm")),
+        ascii_path: Some(std::path::PathBuf::from("iter.ascii")),
+        save_each: true,
+        pseudocount: 0,
+        versions: Default::default(),
+        run_files: run_files.clone(),
+    };
+    let mut round_files = RoundFiles::new(&each_req, None);
+    round_files.write(Some(b"r1-asn"), Some(b"r1-asc")).unwrap();
+    round_files.write(Some(b"r2-asn"), Some(b"r2-asc")).unwrap();
+    assert_eq!(
+        drain(),
+        vec![
+            ("iter.pssm.1".to_string(), b"r1-asn".to_vec()),
+            ("iter.ascii.1".to_string(), b"r1-asc".to_vec()),
+            ("iter.pssm.2".to_string(), b"r2-asn".to_vec()),
+            ("iter.ascii.2".to_string(), b"r2-asc".to_vec()),
+        ]
+    );
+
+    // Collision with an existing registered file is refused by check_pssm_files.
+    let collision = PssmRequest {
+        asn_path: Some(std::path::PathBuf::from("existing.pssm")),
+        ascii_path: None,
+        save_each: false,
+        pseudocount: 0,
+        versions: Default::default(),
+        run_files,
+    };
+    assert!(check_pssm_files(&collision, 1, None).is_err());
+
+    // Host name normalization helper matches RunFiles::log_host_name semantics.
+    assert_eq!(
+        RunFiles::pssm_host_name(std::ffi::OsStr::new("./sub/a.pssm")),
+        Some(b"sub/a.pssm".to_vec())
+    );
+    assert_eq!(
+        RunFiles::pssm_host_name(std::ffi::OsStr::new("/dev/null")),
+        None
+    );
 }

@@ -91,6 +91,26 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   so round 2 has no Karlin-Altschul parameters (NCBI 2.17.0 psiblast crashes there, exit 139).
 - `q4c_tk_pol.faa` (line RG, series Q, Q4c): `tk.faa` then `pol.faa`; with `CHUNK_SIZE=1000` NCBI splits only the second
   query (rows `db.ps.it.split.two.*`).
+- `ps8_*.faa` (line PS, PS8a fix round 1; the `db.phi.*` rows of `psiblast.phi.tsv`, with the patterns
+  `tests/fixtures/phi/c2c.pat` `C-x(2)-C`, `x3.pat` `x(3)` and `brknum.pat` `[C1]-x-C`, a digit in a bracket):
+  `ps8_q3.faa`: YP_009220477.1, YP_009220540.1 and YP_009220504.1 of `tests/fasta/WSSV.faa` (a search strategy of
+  three PHI queries); `ps8_e1_q3.faa`: an empty record `e1`, then `ps8_q3.faa` (psiblast's batch of one query takes
+  the empty record with the next protein); `ps8_emptylast.faa`: YP_009220477.1, then an empty last record
+  (`Sequence contains no data`, exit 3); `ps8_x10_p30.faa` and `ps8_p30_x10.faa`: 10 `X` and the first 30 letters of
+  `ps8_c2c.faa`, in both orders (an X-only query is searched); `ps8_s_dneq.faa`: a 63-letter subject rich in D, N,
+  E and Q; `ps8_c2c.faa`: YP_009220489.1 of `tests/fasta/WSSV.faa`; `ps8_s_lc.faa`: its letters with the first 60 in
+  lower case (`-lcase_masking` masks a subject's lower case); `ps8_sid_q.faa` and `ps8_sid_s.faa`: a query and a
+  subject set whose first record has the query's Seq-id `gb|ABC12345.1|` (under `-parse_deflines` NCBI shows them as
+  one sequence; LOSAT's rule refuses it). For the `db.phi.long.*` rows (PS8a dev merge): `ps8_q24k.faa`, one
+  24,334-letter record made of BDT63125.1, BDT61687.1, BDT63580.1 and BDV50172.1 (the wsv360-like proteins of the
+  `tests/fasta/` virus sets, longest first), long enough for blastp's query split, which NCBI never applies to
+  PHI-BLAST; `ps8_x21000p.faa`: 21,000 `X`, then the letters of `ps8_c2c.faa`, in one record; `ps8_s_bdt63125.faa`:
+  BDT63125.1 alone. For the `db.phi.cull.*` and `db.phi.bh.*` rows (PR #1654 R2): `ps8_cull_q.faa` (two-domain
+  synthetic query) and `ps8_cull_s.faa` (three synthetic subjects, with pattern `tests/fixtures/phi/cwh.pat`
+  `C-W-x(2)-H-C`), exercising preliminary culling and best-hit HSP drops under `-max_target_seqs 1`. For the
+  `db.phi.varlen.*` rows (PR #1654 R3): `ps8_varlen_q1.faa` / `ps8_varlen_s1.faa` and `ps8_varlen_q2.faa` /
+  `ps8_varlen_s2.faa` with `tests/fixtures/phi/cx12c.pat` (`C-x(1,2)-C`), exercising variable-length pattern
+  hits starting at the same offset (`CACC`) under `-culling_limit` and `-best_hit_*`.
 - `ps15b2_othr_*.faa` (line PS, PS15b-2 fix 1): subjects of the molecule-`other` PSSM
   `tests/fixtures/pssm/ps15b2_tk_other_stdaa.asn.gz` (rows `db.ps15b2.p.othr.*`), from `tk.faa`: `del100` without
   letter 101 (a query letter against a gap of the subject on a query row of its own: NCBI 2.17.0's merge writes

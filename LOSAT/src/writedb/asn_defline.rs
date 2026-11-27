@@ -12,7 +12,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 
 use rustc_hash::{FxHashMap, FxHasher};
@@ -341,6 +341,9 @@ pub(crate) enum HandleKey {
 /// Index of a Seq-id of the TSE's feature and segment locations in `SeqIdInterner`.
 type IdRef = u32;
 
+/// No `IdRef` (the end of a `SeqIdInterner::same_hash` chain).
+const NO_ID: IdRef = IdRef::MAX;
+
 /// The Seq-ids of the TSE's feature and segment locations with their `CSeq_id_Handle` keys
 /// (`None` for a Textseq-id with neither accession nor name). One entry per distinct Seq-id; a
 /// `giim` id or one without a key gets an entry per occurrence, since every
@@ -350,7 +353,10 @@ pub(crate) struct SeqIdInterner {
     giim: GiimTree,
     ids: Vec<ParsedSeqId>,
     keys: Vec<Option<HandleKey>>,
-    by_id: FxHashMap<ParsedSeqId, IdRef>,
+    /// The latest entry by the hash of its Seq-id, and per entry the one before it with that
+    /// hash (`NO_ID` at the end), so that each Seq-id is held once; cleared in `build_indices`.
+    by_hash: FxHashMap<u64, IdRef>,
+    same_hash: Vec<IdRef>,
     last: Option<IdRef>,
     /// The Seq-ids of the location being extracted, in `CSeq_loc_CI` order (kept for reuse).
     ci: Vec<IdRef>,
@@ -390,17 +396,31 @@ impl SeqIdInterner {
                 return last;
             }
         }
-        if !matches!(id, ParsedSeqId::Giim(_)) {
-            if let Some(&found) = self.by_id.get(id) {
-                self.last = Some(found);
-                return found;
+        let hash = (!matches!(id, ParsedSeqId::Giim(_))).then(|| {
+            let mut hasher = FxHasher::default();
+            id.hash(&mut hasher);
+            hasher.finish()
+        });
+        if let Some(&head) = hash.and_then(|h| self.by_hash.get(&h)) {
+            let mut at = head;
+            while at != NO_ID {
+                if self.ids[at as usize] == *id {
+                    self.last = Some(at);
+                    return at;
+                }
+                at = self.same_hash[at as usize];
             }
         }
         let key = self.key_only(id);
-        let new = IdRef::try_from(self.ids.len()).expect("fewer than 2^32 Seq-ids in one TSE");
-        if matches!(key, Some(HandleKey::Bytes(_))) {
-            self.by_id.insert(id.clone(), new);
-        }
+        let new = IdRef::try_from(self.ids.len())
+            .ok()
+            .filter(|&n| n != NO_ID)
+            .expect("fewer than 2^32 - 1 Seq-ids in one TSE");
+        let before = match (hash, &key) {
+            (Some(h), Some(HandleKey::Bytes(_))) => self.by_hash.insert(h, new).unwrap_or(NO_ID),
+            _ => NO_ID,
+        };
+        self.same_hash.push(before);
         self.ids.push(id.clone());
         self.keys.push(key);
         self.last = Some(new);
@@ -1456,6 +1476,8 @@ impl TseFeatureIndex {
     /// Finalizes inverted indices once all Bioseq IDs are mapped in `id_to_bioseq`; `bioseq_ids`
     /// are the Seq-ids of each Bioseq of the TSE in order.
     pub(crate) fn build_indices(&mut self, bioseq_ids: &[&[ParsedSeqId]]) {
+        self.interner.by_hash = FxHashMap::default();
+        self.interner.same_hash = Vec::new();
         self.resolve_ids(bioseq_ids);
         if self.prots.is_empty()
             && self.genes.is_empty()

@@ -5,12 +5,14 @@
 // is `finalizing` ends the wait for its results, which are deleted if they come later: a Data
 // worker that stopped answering kept such a run "Organizing results" for good, with no Cancel
 // (line WQA's sweep, D2, 2026-11-19). When the Data worker ends, the active run ends at once,
-// with its search: it could not keep its results (the review of D2, L2).
+// with its search: it could not keep its results (the review of D2, L2). A cancel (or that end) while the run's outputs
+// are staged ends it at once too, before the Data worker answers; outputs staged later are dropped (D30, 2026-11-27).
 //
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
 import {
+  CUSTOM_OUTPUT,
   WINDOW_MASKER_FLAG,
   WINDOW_MASKER_TAXID_FLAG,
   type DirectoryFile,
@@ -38,7 +40,7 @@ import {
 } from 'losat/ports';
 import { buildArgv, optionValue, runTask } from '../domain/argv';
 import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
-import { inputFileName, outputFileName, outputMediaType, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
+import { inputFileName, outputFileName, outputMediaType, outputNumber, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
 import {
   isTerminal,
   isToolSnapshot,
@@ -56,7 +58,7 @@ import {
   type ToolRunSnapshot,
 } from '../domain/run';
 import { isCountsOutputFile, toolFileOptionLabel } from '../domain/tool-argv';
-import { toolOutputFileName, type ToolId, type WindowMaskerStage } from '../domain/tools';
+import { toolOutputFileName, type ToolId, type ToolStage } from '../domain/tools';
 import type { CountsLocks } from '../ports/counts';
 import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
@@ -129,7 +131,7 @@ export interface ToolDirectoryFile {
 
 export interface ToolRequest {
   readonly tool: ToolId;
-  readonly stage: WindowMaskerStage;
+  readonly stage: ToolStage;
   readonly argv: readonly string[];
   readonly directory: readonly ToolDirectoryFile[];
   readonly prints?: PrintedKind;
@@ -165,6 +167,23 @@ export interface SessionCountsEntry {
   readonly key: string;
   readonly name: string;
   readonly size: number;
+}
+
+/** A completed `-outfmt 11` BLAST archive output from this session, offered to Format Archive (`blast_formatter`). */
+export interface SessionArchiveEntry {
+  readonly runId: string;
+  readonly runNumber: number;
+  readonly program: ProgramId;
+  readonly name: string;
+}
+
+/** The `-outfmt 11` output of `run` as Format Archive's archive: a completed search whose `-outfmt 11` output was written. */
+export function sessionArchiveOf(run: AnyRunView): SessionArchiveEntry | undefined {
+  if (isToolRun(run) || run.status !== 'completed' || run.result === undefined) return undefined;
+  if (outputNumber(run.snapshot.argv, CUSTOM_OUTPUT) !== 11) return undefined;
+  if (run.result.failed.some((failed) => failed.output === CUSTOM_OUTPUT)) return undefined;
+  const { runId, number, program } = run.snapshot;
+  return { runId, runNumber: number, program, name: `run_${number}_${program}.asn` };
 }
 
 export interface AppState {
@@ -238,8 +257,9 @@ export class Coordinator {
   private readonly countsHolds = new Map<string, () => void>();
   private active: string | undefined;
   /**
-   * Ends the active run's wait for its search or for the commit of its results with an error: a cancel while its results
-   * are organized (cancel), or the end of the Data worker (dataWorkerEnded).
+   * Ends the active run's wait for the staging of its outputs, for its search or for the commit of its results with an
+   * error: a cancel while it is preparing or its results are organized (cancel), or the end of the Data worker
+   * (dataWorkerEnded).
    */
   private stopActive: ((error: Error) => void) | undefined;
   private toolAbort: AbortController | undefined;
@@ -714,6 +734,24 @@ export class Coordinator {
     return entries.reverse();
   }
 
+  /** Completed `-outfmt 11` search outputs from this session, newest first, for Format Archive. */
+  sessionOutfmt11Archives(): readonly SessionArchiveEntry[] {
+    const entries: SessionArchiveEntry[] = [];
+    for (const run of this.state.get().runs) {
+      const entry = sessionArchiveOf(run);
+      if (entry !== undefined) entries.push(entry);
+    }
+    return entries.reverse();
+  }
+
+  /** Reads one compatibility output of a completed search run as a `File` (e.g. `-outfmt 11` archive for `blast_formatter`). */
+  async getOutputFile(runId: string, output: RunOutput, fileName: string): Promise<File> {
+    const view = this.findSearch(runId);
+    if (view?.result === undefined) throw new Error('run has no outputs');
+    const bytes = await this.deps.data.readOutput(runId, output);
+    return new File([bytes.slice()], fileName, { type: outputMediaType(view.snapshot.argv, output) });
+  }
+
   /**
    * Reads the file chosen for `-conffile` once: its bytes as a Blob (a copy that the file's later
    * changes do not reach), the run's input, and their SHA-256.
@@ -912,9 +950,9 @@ export class Coordinator {
     stopped.catch(() => undefined);
     try {
       this.update(runId, { status: 'preparing', record: { startedAt } });
-      const output = await this.deps.data.openRun(runId, runOutputs(snapshot.argv));
+      const output = await stageOutputs(this.deps.data.openRun(runId, runOutputs(snapshot.argv)), stopped, () => this.deps.data.discardRun(runId));
       staged = true;
-      // A stop while the outputs were staged found no search to end: the engine has not started it, and does not.
+      // A stop that came with the port found no search to end: the engine has not started it, and does not.
       if (stop !== undefined) {
         output.close();
         throw stop;
@@ -1026,9 +1064,8 @@ export class Coordinator {
     let sink: ToolStorageSink | undefined;
     try {
       this.updateTool(runId, { status: 'preparing', record: { startedAt, phaseTimes: { preparing: startedAt } } });
-      // Same order as search's openRun: wait for openToolRun instead of racing it so a cancel in
-      // preparing always closes the port and deletes the staged tool run on the Data side.
-      const port = await this.deps.data.openToolRun(runId);
+      // As a search's outputs: a stop ends the wait at once, and a port that comes later is closed and its run deleted.
+      const port = await stageOutputs(this.deps.data.openToolRun(runId), stopped, () => this.deps.data.deleteRun(runId));
       staged = true;
       if (stop !== undefined) {
         port.close();
@@ -1062,7 +1099,7 @@ export class Coordinator {
       const stderr: ToolOutputEntry = Object.freeze({ key: 'stderr', name: 'stderr', size: summary.stderrSize });
       const files: ToolOutputEntry[] = summary.files.map((file) => {
         const option = toolFileOptionLabel(snapshot.argv, file.name);
-        const counts = isCountsOutputFile(snapshot.stage, snapshot.argv, file.name);
+        const counts = isCountsOutputFile(snapshot.stage, snapshot.argv, file.name, snapshot.tool);
         return Object.freeze({
           key: file.key,
           name: file.name,
@@ -1219,6 +1256,25 @@ function engineInput(input: InputSnapshot): EngineInput {
     records: input.records,
     ...(input.assembled === true ? { assembled: true } : {}),
   };
+}
+
+/**
+ * The port of a run's staged outputs (`openRun`, `openToolRun`), unless the run is stopped first (`stopped`: a Cancel, the
+ * end of the Data worker). A stop ends the wait at once: the Data worker may answer seconds later, behind the index scan
+ * of an input, or never, and the run stayed "Preparing" until then with a Cancel that did nothing (line WQA's D30,
+ * 2026-11-27). A port that comes after the stop is closed and its run dropped (`drop`), which the Data worker can do only
+ * once it has staged the run; a refusal that comes after it is ignored.
+ */
+function stageOutputs(open: Promise<MessagePort>, stopped: Promise<never>, drop: () => Promise<void>): Promise<MessagePort> {
+  return Promise.race([open, stopped]).catch((error: unknown) => {
+    void open
+      .then((port) => {
+        port.close();
+        return drop();
+      })
+      .catch(() => undefined);
+    throw error;
+  });
 }
 
 function errorMessage(error: unknown): string {

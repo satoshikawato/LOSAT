@@ -3,10 +3,11 @@
 // as Blobs, `ReactorAbi.tool` and `validateTool` over a fake engine, the Gateway's run with a fake Engine worker (the
 // sinks take the chunks before the run's result), and, with LOSAT_WEB_REACTORS (the folder of
 // web/adapter/tools/build_reactors.py's output, as database.test.ts), `windowmasker` on the serial reactor in Node.
-import { closeSync, openAsBlob, openSync, readFileSync, readSync } from 'node:fs';
+import { closeSync, openAsBlob, openSync, readdirSync, readFileSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
+import { parseToolDescription } from '../src/domain/tool-description.ts';
 import { FRAME_BEGIN, FRAME_BYTES, FRAME_END, FRAME_TRUNCATE, ownedFrame, parseToolFrame, type ToolFrame } from '../src/domain/tool-frames.ts';
 import { RunCancelledError, type EngineGateway, type EngineRunRequest, type ToolFileSink } from '../src/ports/engine.ts';
 import { ABI_VERSION, EngineCallError, ReactorAbi, type AbiExports } from '../src/infra/reactor/abi.ts';
@@ -345,7 +346,12 @@ function fakeEngine(options: { tool?: (emit: Emit, argv: string[]) => number; va
     new Uint8Array(memory.buffer, 100_000, bytes.length).set(bytes);
     ref.abi!.emit(stream, 100_000, bytes.length);
   };
-  const argvOf = (ptr: number, len: number) => text(new Uint8Array(memory.buffer, ptr, len).slice()).split('\0');
+  // The adapter's reading of an argv (web/adapter/src/lib.rs `words`): NUL-separated words, the empty one after the last NUL dropped.
+  const argvOf = (ptr: number, len: number) => {
+    const words = text(new Uint8Array(memory.buffer, ptr, len).slice()).split('\0');
+    if (words.at(-1) === '') words.pop();
+    return words;
+  };
   const exports = {
     memory,
     losat_web2_abi_version: () => ABI_VERSION,
@@ -1232,5 +1238,106 @@ describe.skipIf(REACTORS === undefined)('windowmasker through the host', () => {
     expect(!verdict.ok && verdict.message).toContain(mode);
     // Another program is no tool: the engine's message, before any stream.
     expect(() => abi.tool(['blastp'], { stdout: () => undefined, stderr: () => undefined, file: () => undefined })).toThrow('blastp is not available in the browser (ABI v2)');
+  }, 120_000);
+});
+
+describe.skipIf(REACTORS === undefined)('blast_formatter through the host', () => {
+  it('formats -subject and -db archives in outfmt 8, 9 and 12, writes -out/-logfile, describes options, and validates', async () => {
+    const { module } = await compileReactor(readFileSync(join(REACTORS!, 'losat-web-serial.wasm')));
+    const bfDir = join(LOSAT, 'tests/blast_formatter');
+    const paths = new Map<Blob, string>();
+    const open = async (rel: string) => {
+      const full = join(bfDir, rel);
+      const blob = await openAsBlob(full);
+      paths.set(blob, full);
+      return { name: rel, file: blob };
+    };
+    const entries = [
+      await open('in/bn.asn'),
+      await open('in/db.asn'),
+      await open('in/batch.asn'),
+      ...(await Promise.all(
+        readdirSync(join(bfDir, 'in/db'))
+          .sort()
+          .map((file) => open(`in/db/${file}`)),
+      )),
+    ];
+    const directory = new RunDirectory(undefined, (blob, start, end) => {
+      const full = paths.get(blob);
+      if (full === undefined) throw new Error('unknown blob');
+      const bytes = new Uint8Array(end - start);
+      const descriptor = openSync(full, 'r');
+      try {
+        return bytes.subarray(0, readSync(descriptor, bytes, 0, bytes.length, start));
+      } finally {
+        closeSync(descriptor);
+      }
+    });
+    const { abi } = await instantiateSerial(module, directory);
+    const run = async (argv: string[]) => {
+      const router = new ToolOutputRouter(undefined, (error) => {
+        throw error;
+      });
+      const status = abi.tool(argv, {
+        stdout: (bytes) => router.stdout(bytes.slice()),
+        stderr: (bytes) => router.stderr(bytes.slice()),
+        file: (parsed) => router.frame(ownedFrame(parsed)),
+      });
+      return { status, ...(await router.finish()) };
+    };
+    directory.open(entries);
+
+    // -xmlhelp parses cleanly into a ToolDescription.
+    const xmlRun = await run(['blast_formatter', '-xmlhelp']);
+    expect(xmlRun.status).toBe(0);
+    const parsed = parseToolDescription(await xmlRun.stdout.text());
+    expect(parsed.tool).toBe('blast_formatter');
+    const flags = new Set(parsed.parameters.map((p) => p.flag));
+    expect(flags).toContain('-archive');
+    expect(flags).toContain('-outfmt');
+    expect(flags).toContain('-out');
+    expect(flags).toContain('-max_target_seqs');
+
+    // -subject archive and local -db archive across supported formats (8, 9, 12).
+    for (const archive of ['in/bn.asn', 'in/db.asn']) {
+      for (const outfmt of ['8', '9', '12']) {
+        const words = ['blast_formatter', '-archive', archive, '-outfmt', outfmt];
+        expect(abi.validateTool(words)).toEqual({ ok: true });
+        const res = await run(words);
+        expect(res.status, `${archive} outfmt ${outfmt}`).toBe(0);
+        expect(res.stdout.size, `${archive} outfmt ${outfmt}`).toBeGreaterThan(0);
+        expect(await res.stderr.text()).toBe('');
+
+        // Writing to -out + -logfile produces the exact same bytes on stream 12.
+        const toFile = await run([...words, '-out', 'report.out', '-logfile', 'run.log']);
+        expect(toFile.status).toBe(0);
+        expect(toFile.stdout.size).toBe(0);
+        expect(toFile.files.map((f) => f.name).sort()).toEqual(['report.out', 'run.log']);
+        const fileBytes = Buffer.from(await toFile.files.find((f) => f.name === 'report.out')!.file.arrayBuffer());
+        const stdoutBytes = Buffer.from(await res.stdout.arrayBuffer());
+        expect(fileBytes.equals(stdoutBytes), `${archive} outfmt ${outfmt} file parity`).toBe(true);
+      }
+    }
+
+    // -rid is refused at both validateTool and runTool.
+    const ridVerdict = abi.validateTool(['blast_formatter', '-rid', 'ABCDEFGH01R']);
+    expect(ridVerdict.ok).toBe(false);
+    expect(!ridVerdict.ok && ridVerdict.message).toContain("not supported by LOSAT's BLAST_FORMATTER");
+    const ridRun = await run(['blast_formatter', '-rid', 'ABCDEFGH01R']);
+    expect(ridRun.status).toBe(1);
+    expect(await ridRun.stderr.text()).toContain("not supported by LOSAT's BLAST_FORMATTER");
+
+    // An empty last word reaches the engine (encodeArgv ends every word with NUL, the adapter's words() reads it back):
+    // `-rid ''` is the CLI's empty RID, not a -rid without its value.
+    const emptyRid = abi.validateTool(['blast_formatter', '-rid', '']);
+    expect(emptyRid).toEqual({ ok: false, message: 'LOSAT engine error: Empty RID string specified' });
+    const emptyRidRun = await run(['blast_formatter', '-rid', '']);
+    expect(emptyRidRun.status).toBe(3);
+    expect(await emptyRidRun.stderr.text()).toBe('LOSAT engine error: Empty RID string specified\n');
+
+    // Overwriting an existing run-directory file with -out or -logfile is refused.
+    const overwrite = abi.validateTool(['blast_formatter', '-archive', 'in/bn.asn', '-outfmt', '8', '-out', 'in/bn.asn']);
+    expect(overwrite.ok).toBe(false);
+    expect(!overwrite.ok && overwrite.message).toContain("in/bn.asn");
   }, 120_000);
 });

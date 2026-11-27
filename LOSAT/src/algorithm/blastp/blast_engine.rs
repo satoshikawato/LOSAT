@@ -2318,14 +2318,6 @@ impl BlastpReport {
         }
     }
 
-    /// The field list of a custom tabular report (`None`: the default fields, or no table).
-    fn tabular_spec(self) -> Option<&'static crate::report::tabular::TabularSpec> {
-        match self {
-            BlastpReport::CustomTabular(spec) => Some(spec),
-            _ => None,
-        }
-    }
-
     /// The subject ids that the report prints (`PrintedIds`): none but in a table.
     fn printed_ids(self) -> crate::report::tabular::PrintedIds {
         match self {
@@ -2520,7 +2512,7 @@ fn write_blastp_outfmt7_header<W: Write>(
 /// for `lcl|Subject_...` the first word of `GenerateDefline`, which is `unnamed` for a
 /// protein without a title), as the other programs'; `None` where `GenerateDefline` throws
 /// (`common::tabular::SubjectId`), whose rows NCBI writes with its catch's values
-/// (`report::tabular::SubjectLookup::Failed`) or stops at (`report::tabular::check_failed_lookups`).
+/// (`report::tabular::SubjectLookup::Failed`) or stops at (`report::tabular::row_stop_end`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
 fn tabular_subject_ids(
@@ -2587,8 +2579,8 @@ impl<'a> SubjectIdFields<'a> {
     }
 
     /// The fields of subject `s_idx`: its id among `ids` (empty for none; a failed lookup's
-    /// rows are refused before, `check_failed_lookups`), and its `saccver` among `accessions`
-    /// where it has one.
+    /// row stops before its `saccver`, `report::tabular::TabularRows::default_stop`), and its
+    /// `saccver` among `accessions` where it has one.
     fn of(
         ids: &'a [crate::algorithm::common::tabular::SubjectId],
         accessions: &'a [Option<[Arc<[u8]>; 2]>],
@@ -2629,173 +2621,11 @@ fn blastp_seq_aligns(hit_lists: &[Option<BlastpHitList>], gapped: bool) -> usize
         .sum()
 }
 
-/// The rows of subjects whose lookups fail where NCBI has no result
-/// (`report::tabular::check_failed_lookups`), before any format is written: each tabular
-/// format's refusal is that format's (`FormatRefusal::check`). `parsed`: the subjects' parsed
-/// Seq-ids (a database's listed titles'); `loads`: the reports' loads (`HitLoads::of`), whose
-/// throwing subjects are refused where the first row of a report stops NCBI
-/// (`TabularSpec::may_stop_at_failed_lookup`). NCBI's run stops in the batch of the query whose
-/// row it has no result for, after the reports of the batches before: the caller makes a refusal
-/// that fails the call that batch's failure (`failed_lookup_batch`).
-#[allow(clippy::too_many_arguments)]
-fn check_tabular_lookups(
-    formats: &mut [crate::api::local_blast::FormatOutput<'_>],
-    format_plans: &[BlastpReport],
-    hit_lists: &[Option<BlastpHitList>],
-    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
-    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
-    loads: &crate::report::db_subject::HitLoads,
-    listed_titles: Option<&database::ListedTitles<'_>>,
-    subject_records: &[FastaRecord],
-    (application, taxdb_found): (&str, bool),
-) -> Result<()> {
-    for (format, outfmt) in formats
-        .iter_mut()
-        .zip(format_plans)
-        .filter(|(_, outfmt)| outfmt.is_tabular())
-    {
-        let spec = outfmt.tabular_spec();
-        if !crate::algorithm::common::tabular::checks_failed_lookups(
-            spec,
-            subject_ids,
-            parsed,
-            loads,
-            crate::blastinput::app::Program::Blastp,
-        ) {
-            continue;
-        }
-        // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
-        let checked = crate::report::tabular::check_failed_lookups(
-            spec,
-            hit_lists
-                .iter()
-                .enumerate()
-                .filter_map(|(q_idx, hit_list)| Some((q_idx, hit_list.as_ref()?)))
-                .map(|(q_idx, hit_list)| {
-                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                    hit_list.hsplist_array[..count]
-                        .iter()
-                        .filter_map(|hsp_list| hsp_list.hsps.first())
-                        .map(move |hsp| match listed_titles {
-                            Some(titles) => titles.seen_row(q_idx, hsp.s_idx as usize),
-                            None => hsp.s_idx as usize,
-                        })
-                }),
-            |s_idx| {
-                if s_idx == crate::report::query_bioseq::SEEN_ROW {
-                    return None;
-                }
-                crate::algorithm::common::tabular::subject_lookup_failure(
-                    spec,
-                    subject_ids,
-                    parsed,
-                    loads,
-                    listed_titles.is_some(),
-                    true,
-                    s_idx,
-                )
-            },
-            |s_idx, failure| match listed_titles {
-                Some(titles) => crate::report::tabular::failed_database_subject(
-                    titles.oid(s_idx),
-                    loads.thrown(s_idx),
-                    parsed.get(s_idx).and_then(Option::as_deref),
-                    failure,
-                ),
-                None => crate::report::tabular::failed_record_title(
-                    s_idx,
-                    subject_records[s_idx].shown_id(),
-                ),
-            },
-            crate::blastinput::app::Program::Blastp,
-            application,
-            taxdb_found,
-        );
-        format.refusal.check(checked)?;
-    }
-    Ok(())
-}
-
-/// What the failure of the batch of a query whose tabular row NCBI has no result for needs
-/// (`failed_lookup_batch`), of the call's reports.
-struct LookupStop<'a> {
-    /// The call's hit lists, by query (the result sets of the check are those that are `Some`).
-    hit_lists: &'a [Option<BlastpHitList>],
-    /// The call's query batches.
-    batches: &'a [seq_range::RangedBatch],
-    /// The warning lines of each query (`report_prep::query_warning_lines`), whose first bytes in
-    /// a batch's first query are the batch's reader messages (`reader`, by query).
-    lines: &'a [Vec<u8>],
-    reader: &'a [Vec<u8>],
-    /// The texts of each batch's prefetch, with its first query (`PrefetchedSubjects::posts`).
-    prefetches: &'a [(usize, crate::report::diag_log::Posts)],
-    /// The texts of the subjects that each query's report reads one by one, by query
-    /// (`ReportedPrefetch::subject_reads`; empty where its warning lines hold them).
-    reads: &'a [crate::report::query_warnings::QueryReads],
-    /// The call's first read of a header that holds a UTF8String (`CallTitles::utf8`).
-    utf8: Option<&'a database::Utf8Read>,
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
-/// A refusal of `report::tabular::check_failed_lookups` that fails the call (`FailedLookupRefusal`,
-/// at a result set of `stop.hit_lists`) as the failure of that query's batch
-/// (`ErrorAfterBatchReports`): the call writes the reports of the batches before, then the
-/// batch's reader messages, the posts of its search strategy request and its UTF8String warning
-/// (`utf8`, where the batch's Seq-aligns read the call's first), as NCBI's run does before it
-/// stops (the Owner's form of 2026-11-16 for line RG's Q-X2c), and then what NCBI writes of the
-/// batch's reports up to that row (`database::ErrorAfterPosts`): the batch's prefetch texts, and
-/// for each of its queries up to the row's its own warnings, its formatter's warning and its
-/// subject reads (`FailedLookupRefusal::posts_before_stop`). Any other error stays.
-fn failed_lookup_batch(error: anyhow::Error, stop: &LookupStop<'_>) -> anyhow::Error {
-    let Some(refusal) = error.downcast_ref::<crate::report::tabular::FailedLookupRefusal>() else {
-        return error;
-    };
-    let Some(query) = (0..stop.hit_lists.len())
-        .filter(|&query| stop.hit_lists[query].is_some())
-        .nth(refusal.set())
-    else {
-        return error;
-    };
-    let batch = stop
-        .batches
-        .iter()
-        .map(|batch| batch.searched.clone())
-        .find(|span| span.contains(&query))
-        .unwrap_or(query..query + 1);
-    // The own warnings of the batch's queries up to `query`, after the batch's reader messages.
-    let lines = (batch.start..=query)
-        .map(|query| {
-            let lines = stop.lines.get(query).map_or(&[][..], Vec::as_slice);
-            let reader = stop.reader.get(query).map_or(0, Vec::len).min(lines.len());
-            lines[reader..].to_vec()
-        })
-        .collect();
-    let prefetch = stop
-        .prefetches
-        .iter()
-        .filter(|(first, _)| *first == batch.start)
-        .map(|(_, posts)| (0, posts.clone()))
-        .collect();
-    let posts = refusal.posts_before_stop(
-        &crate::report::query_warnings::query_posts(lines, Vec::new(), prefetch, |_| 0, None),
-        stop.reads.get(batch.start..).unwrap_or_default(),
-        |s_idx| s_idx as u32,
-    );
-    crate::blastinput::app::ErrorAfterBatchReports {
-        query: Some(query),
-        error: anyhow::Error::new(database::ErrorAfterPosts { posts, error }),
-        utf8: stop
-            .utf8
-            .filter(|read| batch.contains(&read.query))
-            .cloned(),
-        title_reads: Vec::new(),
-    }
-    .into()
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 /// The default tabular reports (outfmt 6 and 7 with the `std` fields and a tab), from the final
-/// hit lists; the others are written by `tabular::write_blastp_tabular`.
+/// hit lists; the others are written by `tabular::write_blastp_tabular`. A row where NCBI has no
+/// result (`TabularRows::default_stop`) ends the run with `application`'s refusal, which names
+/// its subject as `stopped` says (`report::tabular::row_stop_end`).
 fn write_blastp_tabular_hit_lists(
     hit_lists: &[Option<BlastpHitList>],
     outfmt: OutputFormat,
@@ -2814,6 +2644,7 @@ fn write_blastp_tabular_hit_lists(
     queries_before: usize,
     iteration: Option<u32>,
     query_other_coding: Option<i32>,
+    (stopped, application): (&dyn Fn(usize) -> String, &str),
 ) -> Result<()> {
     let config = OutputConfig::ncbi_compat();
     // Index of the next HSP in the final hit list (collect_hits_from_hit_lists order).
@@ -2856,6 +2687,14 @@ fn write_blastp_tabular_hit_lists(
                 .hsps
                 .first()
                 .is_some_and(|first| loads.thrown(first.s_idx as usize).is_some());
+            // The subject's lookups that fail at its rows' `saccver` (`TabularRows::default_stop`).
+            let failure = hsp_list.hsps.first().and_then(|first| {
+                crate::algorithm::common::tabular::default_failure(
+                    subject_ids,
+                    thrown,
+                    first.s_idx as usize,
+                )
+            });
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
             // The subject's first row (the default fields read it) loads it where the query's
             // batch did not prefetch it (`QueryWarnings::subject_read`).
@@ -2874,16 +2713,33 @@ fn write_blastp_tabular_hit_lists(
                         coding,
                     ));
                 }
+                // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
+                let query_id = query_ids
+                    .get(hsp.q_idx as usize)
+                    .map_or(&b""[..], |id| id.as_ref());
+                // A row where NCBI has no result ends the run after its bytes before the stop.
+                if let Some((written, stop)) =
+                    rows.default_stop(query_id, failure, hsp.s_idx as usize)
+                {
+                    return Err(crate::report::tabular::row_stop_end(
+                        writer,
+                        &written,
+                        stop,
+                        stopped(stop.subject),
+                        application,
+                        || {
+                            if let Some(warnings) = warnings.as_deref_mut() {
+                                warnings.end_run();
+                            }
+                        },
+                    ));
+                }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // One row per HSP; the probe marks the row without changing its bytes.
                 if let Some(probe) = probe.as_mut() {
                     writer.flush()?;
                     probe.begin(hsp_index);
                 }
-                // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
-                let query_id = query_ids
-                    .get(hsp.q_idx as usize)
-                    .map_or(&b""[..], |id| id.as_ref());
                 if thrown {
                     rows.write_thrown_default(
                         writer,
@@ -7335,11 +7191,7 @@ fn search(
             for posts in utf8.iter().chain([&titled]) {
                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
-            Err(database::ErrorAfterPosts::written(
-                failure.error,
-                &mut *outputs.diagnostics,
-                args.archive.as_ref(),
-            )?)
+            Err(failure.error)
         })?;
     } else if batches.stop.is_some() {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253
@@ -7580,10 +7432,12 @@ fn x_query_block_plan(
     // its buffers, so no prefix is NCBI's); the blocks are taken as for outfmt 0. (The second
     // has parsed Seq-ids, which the block search never takes, `database::x_titles_allow_blocks`:
     // it refuses in the search of all queries, before any byte.)
-    // A subject set whose tabular id lookup fails (`check_failed_lookups`) or, for outfmt 0 to 4,
-    // whose title of punctuation `check_shown_subject_titles` refuses takes the search of all
-    // queries, which refuses before any byte: there LOSAT Web's format that the argv does not ask
-    // for fails alone (`FormatRefusal`), and the block search's outputs fail the call.
+    // A subject set whose tabular id lookup fails (a row at which NCBI stops,
+    // `report::tabular::row_stop_end`) or, for outfmt 0 to 4, whose title of punctuation
+    // `check_shown_subject_titles` refuses takes the search of all queries, which writes NCBI's
+    // bytes before such a row and refuses before any byte of such a title: there LOSAT Web's
+    // format that the argv does not ask for fails alone (`FormatRefusal`), and the block search's
+    // outputs fail the call.
     let tabular = kinds.contains(&XBlockReport::Tabular);
     let pairwise = kinds.contains(&XBlockReport::Pairwise);
     match subject_source {
@@ -11108,42 +10962,6 @@ fn run_call(
         } else {
             Vec::new().into()
         };
-    // The rows of subjects whose lookups fail where NCBI has no result, before any format is
-    // written (`check_tabular_lookups`).
-    let parsed_for_checks: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = listed_titles
-        .as_ref()
-        .map_or(records_parsed.as_slice(), |titles| &titles.parsed);
-    check_tabular_lookups(
-        &mut outputs.formats,
-        format_plans,
-        &hit_lists,
-        &subject_ids,
-        parsed_for_checks,
-        &prefetched.hit_loads,
-        listed_titles.as_ref(),
-        subject_records,
-        (
-            args.app.name(),
-            database.map_or(args.subject_taxdb_found, |database| database.taxdb_found()),
-        ),
-    )
-    .map_err(|error| {
-        let (lines, reader) = (&query_warning_lines, reports.reader_warnings);
-        let (prefetches, utf8) = (&prefetched.posts, reads.utf8());
-        let (hit_lists, batches) = (&hit_lists, &query_batches);
-        failed_lookup_batch(
-            error,
-            &LookupStop {
-                hit_lists,
-                batches,
-                lines,
-                reader,
-                prefetches,
-                reads: prefetched.subject_reads.queries(),
-                utf8,
-            },
-        )
-    })?;
     // The `stitle` text of the custom tabular reports by subject: the stored titles of a
     // database (the first definition line's of a sequence with parsed Seq-ids); none for the
     // records of a subject set, which have no BLAST definition line (`N/A`).

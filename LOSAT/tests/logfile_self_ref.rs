@@ -1119,3 +1119,61 @@ fn a_logfile_naming_what_an_imported_strategy_reads_is_refused() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// Line RG-F item F2f: the library API's inputs that its argv cannot name count as the command
+/// line's do: the database of `Inputs::database` (the command line's `-db`) and what the strategy
+/// of `Inputs::strategy` (`-import_search_strategy`) makes the run read (its import's names). A
+/// `-logfile` naming a file of either database is refused before it is opened, and the file is
+/// unchanged; a log of its own runs.
+#[test]
+fn the_library_apis_inputs_count_as_files_the_run_reads() {
+    use losat::api::{read_inputs, run, validate, Error, Inputs, Program};
+    let dir = fresh_dir("api_inputs");
+    strategy_inputs(&dir, &["blastp.db.ss"], &["arch_sprot"]);
+    let db = dir.join("tests/db_search/arch_sprot");
+    let db_name = db.to_str().unwrap();
+    // The strategy's database, named by the copy's whole path (the test's working directory is
+    // the process's).
+    let text = fs::read_to_string(dir.join("blastp.db.ss")).unwrap();
+    assert!(text.contains("\"tests/db_search/arch_sprot\""));
+    let text = text.replace("\"tests/db_search/arch_sprot\"", &format!("\"{db_name}\""));
+    let run_with = |log: &Path, strategy: bool| -> Result<(), Error> {
+        let search = validate(Program::Blastp, &["-logfile", log.to_str().unwrap()]).unwrap();
+        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+        if strategy {
+            let strategy = search.read_strategy(text.as_bytes())?;
+            run(
+                &search,
+                Inputs::strategy(&strategy),
+                &mut [("6", &mut report)],
+                &mut diagnostics,
+            )
+        } else {
+            let (queries, _) = read_inputs(&search, PROT_FASTA, b"").unwrap();
+            run(
+                &search,
+                Inputs::database(&queries, db_name),
+                &mut [("6", &mut report)],
+                &mut diagnostics,
+            )
+        }
+    };
+    for file in ["arch_sprot.pin", "arch_sprot.psq"] {
+        let log = dir.join("tests/db_search").join(file);
+        let before = snapshot(&log);
+        for strategy in [false, true] {
+            let error = run_with(&log, strategy).unwrap_err();
+            assert!(
+                format!("{error:?}").contains("that is also an input file read by this run"),
+                "{file} strategy {strategy}: {error:?}"
+            );
+            assert_eq!(snapshot(&log), before, "{file} strategy {strategy}");
+        }
+    }
+    for strategy in [false, true] {
+        let log = dir.join(format!("api_{strategy}.log"));
+        run_with(&log, strategy).unwrap();
+        assert!(log.is_file(), "strategy {strategy}");
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

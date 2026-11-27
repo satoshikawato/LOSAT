@@ -24,11 +24,14 @@ NCBI BLAST+ 2.17.0's makeblastdb), the version 4 databases of `tests/db_search/t
   warns once; OID 1 such a byte; OID 2 a UTF8String with such a byte);
 - the queries `tc_q1.faa` (one protein), `tc_q2.faa` (two), `tc_qslot.faa` (eight: OID 0's and OID
   256's letters, which read their slot in both orders, OID 2's, OID 258's and OID 2's again, OID 3's,
-  BIG2's OID 215's and OID 3's again), `tc_qu8.faa` (U8's OID 0, then OID 1), and their
-  back-translations `tc_q1.fna`, `tc_q2.fna`, `tc_qslot.fna`, `tc_qu8.fna`.
+  BIG2's OID 215's and OID 3's again), `tc_qu8.faa` (U8's OID 0, then OID 1), `tc_qkeep.faa`
+  (three: BIG's OID 2's letters, then the letters of its clean OIDs 10 to 20 in one query, eleven
+  subjects whose release pushes OID 2 out of NCBI's cache of 10 released blobs, then OID 2's again),
+  and their back-translations `tc_q1.fna`, `tc_q2.fna`, `tc_qslot.fna`, `tc_qu8.fna`,
+  `tc_qkeep.fna`.
 
 `make_tchar.py NCBI_BIN STEM ...` writes only the databases of those stems (`tc_big`, ...) and the
-queries.
+queries; `write_queries()` writes the queries alone.
 
 makeblastdb stores each byte outside ' '..'~' of a FASTA title as '#', so the databases are made from
 titles with '#' in those places and the stored titles are then rewritten to the raw bytes (the same
@@ -116,6 +119,8 @@ QUERIES = [(b"q1 query one", PROT), (b"q2 query two", mut(PROT, 2))]
 SLOT_QUERIES = [(b"qs%d" % (k + 1), letters)
                 for k, letters in enumerate([mut(PROT, 2), mut(PROT, 6), C, D, C, H, I, H])]
 U8_QUERIES = [(b"qu1 utf8", E), (b"qu2 fam", PROT)]
+KEEP_QUERIES = [(b"qk1 cee", C), (b"qk2 eleven clean", "".join(BIG[i][2] for i in range(10, 21))),
+                (b"qk3 cee again", C)]
 DATABASES = {"tc": SUBJECTS, "tc_b": DBB, "tc_big": BIG, "tc_big2": BIG2, "tc_x": DBX, "tc_dmg": DMG,
              "tc_ps": PS, "tc_u8": U8}
 
@@ -164,15 +169,20 @@ def retag(path, titles, old, new):
     open(path, "wb").write(data)
 
 
-def main():
-    ncbi_bin = sys.argv[1]
-    stems = sys.argv[2:] or list(DATABASES)
+def write_queries():
     os.makedirs(HERE, exist_ok=True)
     for suffix, encode in ((".faa", lambda p: p), (".fna", nuc)):
         open(os.path.join(HERE, "tc_q1" + suffix), "wb").write(fasta([(QUERIES[0][0], encode(QUERIES[0][1]))]))
         open(os.path.join(HERE, "tc_q2" + suffix), "wb").write(fasta([(t, encode(s)) for t, s in QUERIES]))
         open(os.path.join(HERE, "tc_qslot" + suffix), "wb").write(fasta([(t, encode(s)) for t, s in SLOT_QUERIES]))
         open(os.path.join(HERE, "tc_qu8" + suffix), "wb").write(fasta([(t, encode(s)) for t, s in U8_QUERIES]))
+        open(os.path.join(HERE, "tc_qkeep" + suffix), "wb").write(fasta([(t, encode(s)) for t, s in KEEP_QUERIES]))
+
+
+def main():
+    ncbi_bin = sys.argv[1]
+    stems = sys.argv[2:] or list(DATABASES)
+    write_queries()
     for stem in stems:
         subjects = DATABASES[stem]
         for mol, dbtype, encode in (("p", "prot", lambda p: p), ("n", "nucl", nuc)):

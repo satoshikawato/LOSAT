@@ -2949,7 +2949,8 @@ and the stems to write, or none for all) writes the version 4 databases `tc_p`, 
 `tc_x_p`, `tc_dmg_p`, `tc_ps_p`, `tc_u8_p` (proteins) and `tc_n`, `tc_b_n`, `tc_big_n`, `tc_big2_n`, `tc_x_n`,
 `tc_dmg_n`, `tc_ps_n`, `tc_u8_n` (their back-translations), the aliases `tc_alias_p.pal` and `tc_alias_n.nal`
 (`tc_*` then `tc_b_*`), `tc_bigal_p.pal` and `tc_bigal_n.nal` (`tc_big_*` then `tc_big2_*`) and the queries
-`tc_q1`, `tc_q2`, `tc_qslot` and `tc_qu8` (`.faa`, `.fna`). makeblastdb stores each byte outside ' '..'~' of a FASTA
+`tc_q1`, `tc_q2`, `tc_qslot`, `tc_qu8` and `tc_qkeep` (`.faa`, `.fna`; `make_tchar.write_queries()` writes them
+alone). makeblastdb stores each byte outside ' '..'~' of a FASTA
 title as `#`; the script rewrites those stored titles to raw bytes (0x00, 0x01, 0x1B, 0x7F, 0x80, 0xC3 0xA9, 0xE9,
 0xFF; titles of 133, 300 and 1,100 bytes). `tc_big_*` holds 300 sequences, of which the OIDs 0, 1, 2, 3, 256 and 257
 have such bytes and hit the queries with OID 258 (clean): 0 and 256, 1 and 257, 2 and 258 share a slot of NCBI's
@@ -2964,14 +2965,20 @@ posts `Error: (803.7) [<program>] Blast-def-line-set.E.title` / `Bad char [0x..]
 each such byte in order, at each read that the cache does not answer (N is the position after the whole title in its
 record; the bytes before the posted one are already `#`). Outfmt 8, 9, 11 and 12 read the definition line there only
 (`PRE_FETCH_SEQS_LIMIT=2147483647` makes 8, 9 and 12 prefetch). With the prefetch (outfmt 0 to 4, 6, 7, 10, 17 and 20, and
-8, 9 and 12 at `INT_MAX`; rows `0`, `0h`, `3`, `mb.0`, `6`, `6t`, `mb.7t`, `10t`, `big.6t`, `alias.6t`, `17`, `pfmax.8`,
-line RG-KB item 9b-2), each
+8, 9 and 12 at `INT_MAX`, and 5, 13 to 16 and 18; rows `0`, `0h`, `3`, `mb.0`, `6`, `6t`, `mb.7t`, `10t`, `big.6t`,
+`alias.6t`, `17`, `pfmax.8` and those below, line RG-KB item 9b-2), each
 batch's prefetch loads each subject once, in Seq-id handle order (OID 0 last), unless NCBI's cache of 10 released blobs
 still holds it from a batch before: the load reads the header through the volume's cache, then registers the ids of the
 header its Bioseq holds, which posts unless a second volume wrote it again (`alias.6t`); then each table row whose fields
 read the definition line (`sall*` ids, taxonomy, `stitle`, `salltitles`) posts once more, and the pairwise reports
 read it twice at each description line (with `-html` the links' registry between the two) and once at each
-alignment heading. The other formats, the
+alignment heading. BLAST XML, XML2 and JSON (outfmt 5 and 13 to 16; rows `5`, `13`, `14`, `15`, `16`, `mb.5`,
+`mb.16`) read it once at each Hit, after the loads and before its taxonomy lookups, and the organism report
+(outfmt 18; rows `18`, `18h`) twice at each Seq-align, the second time at its first shown definition line, before its
+taxonomy lookup. BLAST XML keeps its scope across the batches, so a subject loaded once is not loaded again
+(`keep.mb.5`: `tc_qkeep` reads `tc_big_*`'s OID 2, then eleven clean subjects, then OID 2 again, a batch each), where
+the other formats reset it after each batch and the release of the eleven pushes OID 2 out of the cache of 10, so
+the third batch loads it again (`keep.mb.16`, `keep.mb.6t`). The
 prefetch off and parsed Seq-ids with the prefetch read it where LOSAT does not model the reads, which LOSAT refuses
 (the `losat-rejection` rows), except in a batch that fails at a header read, which reaches no formatter (`dmg.*`,
 including `psiblast` one-round and multi-round runs and `rpsblast`/`rpstblastn` against `rps_mini` with

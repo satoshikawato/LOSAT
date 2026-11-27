@@ -66,9 +66,22 @@ export const FILE_VALUE = '<file>';
 const TOOL_NOT_OPTIONS = new Set(['-in', '-archive', '-out', '-logfile']);
 /**
  * Tool flags whose values are names: files in the run directory (`-ustat`, `-ids`, `-exclude_ids`, makeblastdb's
- * `-mask_data` and `-taxid_map`) and makeblastdb's database `-title`. The flag stays in the key, the name does not.
+ * `-mask_data` and `-taxid_map`), the names of files that makeblastdb writes (`-gi_mask_name`) or lists in its
+ * metadata file (`-metadata_output_prefix`), and texts that makeblastdb stores in the database as given (the database
+ * `-title`, the masking algorithms' `-mask_id` and `-mask_desc`). The flag stays in the key, the name does not.
  */
-const TOOL_FILE_OPTIONS = new Set(['-ustat', '-ids', '-exclude_ids', '-mask_data', '-taxid_map', '-title']);
+const TOOL_FILE_OPTIONS = new Set([
+  '-ustat',
+  '-ids',
+  '-exclude_ids',
+  '-mask_data',
+  '-taxid_map',
+  '-title',
+  '-gi_mask_name',
+  '-metadata_output_prefix',
+  '-mask_id',
+  '-mask_desc',
+]);
 
 export interface OptionGrammar {
   /** Whether the flag takes a value (the engine's `describe`). */

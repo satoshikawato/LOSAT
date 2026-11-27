@@ -12,6 +12,15 @@ FASTA files:
 - `gapdb.faa`: records 541-570 of the CDS translations (efetch `fasta_cds_aa`) of Salmonella Typhi CT18, AL513382.1;
   four of them start with `-` (rows ORT07 and ORT08).
 
+Masked and compressed inputs (rows MKW, line WW: the option sets of LOSAT Web's makeblastdb tab):
+
+- `mask_nucl.fna`, `mask_dust.asnb`, `mask_prot.faa`, `mask_seg.asnb`: copies of `LOSAT/tests/seqdb/` (NCBI BLAST+ 2.17.0
+  dustmasker and segmasker, `make_mask_fixtures.py`).
+- `mask_dust_ps.asnb`, `mask_seg_ps.asnb`: the same masks with the ids parsed, for `makeblastdb -parse_seqids`, by the
+  official NCBI BLAST+ 2.17.0 release: `dustmasker -in mask_nucl.fna -parse_seqids -outfmt maskinfo_asn1_bin -out
+  mask_dust_ps.asnb` and `segmasker -in mask_prot.faa -parse_seqids -outfmt maskinfo_asn1_bin -out mask_seg_ps.asnb`.
+- `ns.fna.gz`, `ns.fna.bz2`, `ns.fna.zst`: `ns.fna` by `gzip -n -9`, `bzip2 -9` and `zstd -19`.
+
 Lists and maps:
 
 - `n.seqids` (`a_l6k`, `b_p6k`), `t.seqids` (`h_slice`), `p.seqids` (`BDV02158.1`, `BDV02159.1`), `taxids.txt` (`9606`).

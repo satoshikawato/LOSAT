@@ -8,3 +8,8 @@
   Repeats database (-filtering_db)" does the same for a nucleotide database. A WindowMasker run that
   writes mask data (`-outfmt maskinfo_asn1_bin`, `maskinfo_asn1_text` or `maskinfo_xml`) has "Use as
   -mask_data in makeblastdb", which adds its file to the makeblastdb form.
+  A makeblastdb run is marked Supported when its options match a run that LOSAT's tests compare byte for
+  byte with NCBI BLAST+ 2.17.0: masks from `-mask_data` (with or without `-parse_seqids`, `-title`,
+  `-mask_id` and `-mask_desc`), ASN.1 and BLAST database inputs, `-gi_mask` across several volumes,
+  `-oid_masks`, `-randomize`, `-metadata_output_prefix`, `-hash_index`, `-taxid` and `-taxid_map`;
+  compressed FASTA (`.gz`, `.bz2`, `.zst`) is among the compared inputs.

@@ -10,6 +10,35 @@
 use super::{member_index, members, resolved, Kind, Value};
 use crate::seqid::ParsedSeqId;
 
+/// The position of the member `name` of the type `ty` (`member_index`), remembered by the name's
+/// address: a `'static` name keeps its address and its bytes for the whole run, so a member read
+/// by name at one place of the code is looked up once, not by a scan of the type's members on
+/// every read (the object manager's step reads the members of each feature).
+fn member_position(ty: u16, name: &'static str) -> usize {
+    use std::cell::Cell;
+    const SLOTS: usize = 256;
+    thread_local! {
+        /// (address, length, type, position) of the names looked up last, by a hash of the
+        /// address and the type; an empty slot has the address 0, which no name has.
+        static MEMO: [Cell<(usize, usize, u16, u16)>; SLOTS] =
+            const { [const { Cell::new((0, 0, 0, 0)) }; SLOTS] };
+    }
+    let address = name.as_ptr() as usize;
+    let slot = (address ^ (address >> 8) ^ (usize::from(ty) << 3)) % SLOTS;
+    MEMO.with(|memo| {
+        let entry = &memo[slot];
+        let (at, len, of, position) = entry.get();
+        if at == address && len == name.len() && of == ty {
+            return usize::from(position);
+        }
+        let position = member_index(ty, name);
+        if let Ok(short) = u16::try_from(position) {
+            entry.set((address, name.len(), ty, short));
+        }
+        position
+    })
+}
+
 /// A value of the type `ty` of the table.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct V<'a> {
@@ -60,14 +89,14 @@ impl<'a> V<'a> {
     }
 
     /// The member `name` of the SEQUENCE, when set (`IsSet<Member>()` then `Get<Member>()`).
-    pub(crate) fn get(self, name: &str) -> Option<V<'a>> {
-        let index = member_index(self.ty, name);
+    pub(crate) fn get(self, name: &'static str) -> Option<V<'a>> {
+        let index = member_position(self.ty, name);
         let ty = members(self.ty)[index].ty;
         self.value.member(index).map(|value| V::new(ty, value))
     }
 
     /// The mandatory member `name` of the SEQUENCE (`Get<Member>()`), which the reader has set.
-    pub(crate) fn field(self, name: &str) -> V<'a> {
+    pub(crate) fn field(self, name: &'static str) -> V<'a> {
         match self.get(name) {
             Some(value) => value,
             None => not_in_table("a mandatory member", self.value),

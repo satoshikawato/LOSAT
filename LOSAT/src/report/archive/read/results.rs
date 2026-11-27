@@ -195,7 +195,7 @@ impl Results {
             return out;
         };
         for block in blocks.items() {
-            let real = |name: &str| match block.field(name).value {
+            let real = |name: &'static str| match block.field(name).value {
                 Value::Real(real) => *real,
                 other => unreachable!("a REAL of the table, not {other:?}"),
             };

@@ -286,3 +286,8 @@ refused_filter_seg_abc_11	-archive in/fs_ps_Sabc.asn -outfmt 11
 fs_ps_Dabc_11	-archive in/fs_ps_Dabc.asn -outfmt 11
 fs_rps_Lm_11	-archive in/fs_rps_Lm.asn -outfmt 11
 fs_rtn_Lm_11	-archive in/fs_rtn_Lm.asn -outfmt 11
+# Rows real_subnormal_* (agent P6Fb of ad-RG-F3-13, 2026-11-28): in/real_subnormal.asn is in/bn.asn with its first e-value { 145968789957799, 10, -330 }, a subnormal double (the value that NCBI BLAST+ 2.17.0 wrote for the unset SEG locut of row refused_filter_seg_abc_11); NCBI's reader makes it DBL_MIN, which -outfmt 11 writes as { 22250738585072, 10, -321 }. NCBI BLAST+ 2.17.0, the official release build on the local machine, under unshare -rn.
+real_subnormal_11	-archive in/real_subnormal.asn -outfmt 11
+real_subnormal_8	-archive in/real_subnormal.asn -outfmt 8
+real_subnormal_9	-archive in/real_subnormal.asn -outfmt 9
+real_subnormal_12	-archive in/real_subnormal.asn -outfmt 12

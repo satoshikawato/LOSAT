@@ -117,6 +117,15 @@ const BROKEN: [&str; 8] = [
     "blast_formatter/in/fs_bn_Dlate.asn",
 ];
 
+/// The archives with a subnormal real (`{ 145968789957799, 10, -330 }`), which the reader makes
+/// `DBL_MIN` as NCBI's does: written back, it is `{ 22250738585072, 10, -321 }`, as NCBI BLAST+
+/// 2.17.0's `-outfmt 11` writes it (row `real_subnormal_11` of `blast_formatter/cases.tsv`). NCBI
+/// wrote the value for the unset SEG locut of row `refused_filter_seg_abc_11`.
+const CLAMPED: [&str; 2] = [
+    "blast_formatter/in/real_subnormal.asn",
+    "blast_formatter/ncbi/refused_filter_seg_abc_11.out",
+];
+
 /// Whether a fixture holds a placeholder that its test replaces by a path (`@CWD@`, `{db_dir}`: an
 /// upper-case name between `@`, a lower-case one between braces).
 fn has_placeholder(text: &[u8]) -> bool {
@@ -167,7 +176,8 @@ fn unwrapped(text: &[u8]) -> Vec<u8> {
 /// header: NCBI's `-outfmt 11` output and the files that LOSAT's tests freeze as NCBI's) is read
 /// whole, object by object, and its values written back are its bytes. Left out: the malformed
 /// archives of rpsbproc's tests (`fixtures/rpsbproc/arch/bad`) and of blast_formatter's (`BROKEN`),
-/// rpsbproc's copies edited by hand (`EDITED`), the `.merged` files of `archive_replaced` (a run's
+/// rpsbproc's copies edited by hand (`EDITED`), the archives with a subnormal real (`CLAMPED`,
+/// whose rows freeze NCBI's writing of it), the `.merged` files of `archive_replaced` (a run's
 /// stdout and stderr in one file, with NCBI's messages inside the archive's text), and the archives
 /// that their writer cut (`cut_by_its_writer`), whose first object must end with the reader's
 /// error. An archive whose paths the tests replaced by a placeholder (`has_placeholder`) is
@@ -199,6 +209,7 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
             if EDITED
                 .iter()
                 .chain(&BROKEN)
+                .chain(&CLAMPED)
                 .any(|name| path.ends_with(name))
             {
                 continue;

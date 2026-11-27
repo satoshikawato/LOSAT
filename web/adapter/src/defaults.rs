@@ -99,6 +99,36 @@ pub fn resolved(words: &[&str]) -> Result<Values, String> {
             put("-num_descriptions", resolved.num_descriptions.to_string());
             put("-num_alignments", resolved.num_alignments.to_string());
         }
+        Commands::Psiblast(args) => {
+            let num_iterations = args.num_iterations;
+            let pseudocount = args.pseudocount;
+            let blastp = args
+                .into_blastp_args()
+                .map_err(|error| format!("{error:#}"))?;
+            let resolved = blastp.resolve().map_err(|error| format!("{error:#}"))?;
+            put("-evalue", resolved.evalue.to_string());
+            put("-word_size", resolved.word_size.to_string());
+            put("-matrix", resolved.matrix_name.clone());
+            put("-gapopen", resolved.scoring.gap_open.to_string());
+            put("-gapextend", resolved.scoring.gap_extend.to_string());
+            put("-threshold", resolved.threshold.to_string());
+            put("-window_size", resolved.window_size.to_string());
+            put("-xdrop_ungap", resolved.x_drop_ungapped_bits.to_string());
+            put("-xdrop_gap", resolved.x_drop_gapped_bits.to_string());
+            put("-xdrop_gap_final", resolved.x_drop_final_bits.to_string());
+            put("-gap_trigger", resolved.gap_trigger_bits.to_string());
+            put("-sum_stats", bool_text(resolved.sum_stats));
+            put("-seg", resolved.seg.to_ncbi_cli_string());
+            put("-soft_masking", bool_text(resolved.soft_masking));
+            put("-culling_limit", resolved.culling_limit.to_string());
+            put("-line_length", resolved.line_length.to_string());
+            put("-max_target_seqs", resolved.max_target_seqs.to_string());
+            put("-num_descriptions", resolved.num_descriptions.to_string());
+            put("-num_alignments", resolved.num_alignments.to_string());
+            put("-num_iterations", num_iterations.to_string());
+            put("-pseudocount", pseudocount.to_string());
+            put("-inclusion_ethresh", resolved.inclusion_ethresh.to_string());
+        }
         Commands::Tblastn(args) => {
             let resolved = args.resolve().map_err(|error| format!("{error:#}"))?;
             put("-evalue", resolved.evalue.to_string());

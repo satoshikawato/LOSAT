@@ -1,0 +1,193 @@
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: x10
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: x10
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: x10
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: x10
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: x10
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: x10
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: x10
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: x10
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+p30	sdneq	33.333	15	10	0	8	22	10	24	9.8	 6.4
+p30	sdneq	33.333	15	10	0	8	22	22	36	9.8	 6.4
+p30	sdneq	33.333	15	10	0	8	22	34	48	9.8	 6.4
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+p30	sdneq	26.316	19	14	0	11	29	13	31	6.2	 7.1
+p30	sdneq	26.316	19	14	0	11	29	25	43	6.2	 7.1
+p30	sdneq	26.316	19	14	0	11	29	37	55	6.2	 7.1
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+p30	sdneq	26.316	19	14	0	11	29	13	31	6.2	 7.1
+p30	sdneq	26.316	19	14	0	11	29	25	43	6.2	 7.1
+p30	sdneq	26.316	19	14	0	11	29	37	55	6.2	 7.1
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: p30 short
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# BLAST processed 0 queries

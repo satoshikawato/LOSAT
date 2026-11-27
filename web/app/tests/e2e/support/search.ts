@@ -70,6 +70,13 @@ export async function showRecords(page: Page, role: Role, index = 0): Promise<vo
 
 /** Chooses a program, and waits for its describe (`described`). */
 export async function program(page: Page, id: string): Promise<void> {
+  if (id === 'psiblast') {
+    await page.getByTestId('program-blastp').check();
+    await described(page);
+    await page.getByTestId('param-task-psiblast').check();
+    await described(page);
+    return;
+  }
   await page.getByTestId(`program-${id}`).check();
   await described(page);
 }

@@ -824,7 +824,7 @@ impl<'d> AlnMap<'d> {
                 sequences.letters(key, seq_from, seq_to, &mut nucleotides);
             }
             if nucleotides.len() % 3 != 0 {
-                return Err(internal("a translated row's letters are not whole codons"));
+                return Err(io::Error::other(TranslateNaToAa));
             }
             let Some(code) = sequences.genetic_code(row == 0) else {
                 return Err(if row == 0 {
@@ -866,3 +866,26 @@ impl std::fmt::Display for UnknownGeneticCode {
 }
 
 impl std::error::Error for UnknownGeneticCode {}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:895-900
+/// NCBI's `CAlnVec::TranslateNAToAA(): NA size expected to be divisible by 3`, thrown when a
+/// translated row's clamped nucleotide slice is not a multiple of 3 (TBLASTN `-in_pssm
+/// -window_size 0` alignment starting on a frame's NULLB when `rem in {1, 2}`): caught by
+/// `super::write_section` as `DisplaySeqalign`'s `try` does.
+#[derive(Debug)]
+pub(crate) struct TranslateNaToAa;
+
+impl TranslateNaToAa {
+    /// Whether `error` is this one.
+    pub(crate) fn is(error: &io::Error) -> bool {
+        error.get_ref().is_some_and(|inner| inner.is::<Self>())
+    }
+}
+
+impl std::fmt::Display for TranslateNaToAa {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CAlnVec::TranslateNAToAA(): NA size expected to be divisible by 3")
+    }
+}
+
+impl std::error::Error for TranslateNaToAa {}

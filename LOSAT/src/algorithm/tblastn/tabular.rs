@@ -497,7 +497,68 @@ pub(super) fn write_tblastn_tabular(
                 // they are given: where the engine's identities are positive and the report's
                 // are 0, the rows are read and `num_ident` is the engine's.
                 // A row whose subject's load throws prints none of its letters.
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-986,1045-1068
+                // NULLB-start alignments throw inside `CreateDensegFromStdseg`
+                // (`std_seg_lengths_inaccurate`), `CAlnVec::x_GetSeqLeftSeg` /
+                // `x_GetSeqRightSeg` (`subject_row_empty`, when reading rows or subject
+                // endpoints), or `CAlnVec::TranslateNAToAA` (`translate_na_failure`, when
+                // entering the sequence-fetch block).
+                if let Some(nullb) = payload.nullb {
+                    if !subject.throws() {
+                        if nullb.std_seg_lengths_inaccurate
+                            && super::nullb_report::tabular_enters_denseg(spec, engine_ident)
+                        {
+                            writer.flush()?;
+                            return Err(NativeError::exception(
+                                &crate::report::serial::seqalign::std_seg_lengths_not_accurate(),
+                            )
+                            .into());
+                        }
+                        if nullb.subject_row_empty {
+                            if super::nullb_report::tabular_enters_translate(spec, engine_ident) {
+                                writer.flush()?;
+                                return Err(NativeError::exception(
+                                    &crate::report::serial::seqalign::aln_vec_row_gaps_only(
+                                        1, true,
+                                    ),
+                                )
+                                .into());
+                            }
+                            if super::nullb_report::tabular_enters_subject_coords(
+                                spec,
+                                engine_ident,
+                            ) {
+                                // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmap.hpp:665-671
+                                // `rem in {0, 1}` keeps a minus strand so `GetSeqStart` on row 1
+                                // calls `x_GetSeqRightSeg`; `rem == 2` leaves an unknown strand
+                                // so `GetSeqStart` on row 1 calls `x_GetSeqLeftSeg`.
+                                writer.flush()?;
+                                return Err(NativeError::exception(
+                                    &crate::report::serial::seqalign::aln_vec_row_gaps_only(
+                                        1,
+                                        nullb.wrapped_minus_tail == 0,
+                                    ),
+                                )
+                                .into());
+                            }
+                        }
+                        if nullb.translate_na_failure
+                            && super::nullb_report::tabular_enters_translate(spec, engine_ident)
+                        {
+                            writer.flush()?;
+                            return Err(NativeError::exception(
+                                &crate::report::serial::seqalign::translate_na_to_aa_exception(),
+                            )
+                            .into());
+                        }
+                    }
+                }
                 let rows_read = !subject.throws()
+                    && !payload.nullb.is_some_and(|n| {
+                        n.subject_row_empty
+                            || n.std_seg_lengths_inaccurate
+                            || n.translate_na_failure
+                    })
                     && (needs.rows
                         || (nident_alone && engine_ident > 0 && payload.report_num_ident == 0));
                 if rows_read {
@@ -516,6 +577,7 @@ pub(super) fn write_tblastn_tabular(
                         hsp.s_start,
                         hsp.s_end,
                         &payload.edit_script,
+                        payload.nullb,
                         &mut qrow,
                         &mut srow,
                     )?;
@@ -558,11 +620,21 @@ pub(super) fn write_tblastn_tabular(
                     ops: &payload.edit_script,
                     // The protein query's residues, in the HSP's context (with the letters that
                     // `-subject`'s mapper left out, which NCBI's BlastHSP still has) and in the
-                    // Seq-align.
-                    qcovhsp: qcovhsp.of_hsp(
-                        hsp.q_end - hsp.q_start + payload.query_left_out as i32,
-                        hsp.q_end - hsp.q_start,
-                    ),
+                    // Seq-align. For a NULLB-start alignment whose scores were invalidated by
+                    // `-subject` truncation, `hsp_percent_coverage` was dropped so NCBI falls back
+                    // to the mapped Std-seg query span; otherwise it keeps `blast_hsp_q_span`.
+                    qcovhsp: match payload.nullb {
+                        Some(nullb) if nullb.scores_invalidated => {
+                            qcovhsp.of_hsp(hsp.q_end - hsp.q_start, hsp.q_end - hsp.q_start)
+                        }
+                        Some(nullb) => {
+                            qcovhsp.of_hsp(nullb.blast_hsp_q_span, hsp.q_end - hsp.q_start)
+                        }
+                        None => qcovhsp.of_hsp(
+                            hsp.q_end - hsp.q_start + payload.query_left_out as i32,
+                            hsp.q_end - hsp.q_start,
+                        ),
+                    },
                 };
                 // One printed row is one HSP; the probe marks it without changing it.
                 if let Some(probe) = probe.as_deref_mut() {

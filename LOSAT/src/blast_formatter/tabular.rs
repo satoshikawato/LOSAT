@@ -36,7 +36,7 @@ use crate::report::archive::read::options::{BuiltOptions, EProgram, Setter};
 use crate::report::archive::read::queries::{bioseq_letters, RenderError};
 use crate::report::archive::read::request::{Bioseq, Queries, Request};
 use crate::report::archive::read::{seq_align_id, Stop};
-use crate::report::db_subject::ParsedSubject;
+use crate::report::db_subject::{HitLoad, LoadsBefore, ParsedSubject, ScopeWalk};
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::seqalign_read::{read_set, ReadAlign, ReadStop};
 use crate::report::tabular::{
@@ -394,8 +394,8 @@ struct Subjects<'db> {
     by_sequence: HashMap<(u8, usize), usize>,
     /// Index in `keys` of the most recently matched subject id (consecutive HSPs of one subject).
     last: Option<usize>,
-    /// One `SeqidLookup` and `HeaderReader` opened lazily for the whole object.
-    db_readers: Option<(SeqidLookup<'db>, HeaderReader<'db>)>,
+    /// One `SeqidLookup`, `HeaderReader` and `ScopeWalk` opened lazily for the whole object.
+    db_readers: Option<(SeqidLookup<'db>, HeaderReader<'db>, ScopeWalk)>,
     scratch_keys: Vec<u64>,
     scratch_found: Vec<usize>,
 }
@@ -448,10 +448,11 @@ impl<'db> Subjects<'db> {
                             .seqid_lookup()
                             .map_err(|error| database_error(error, PROGRAM))?;
                         let headers = HeaderReader::new(db, false);
-                        self.db_readers = Some((lookup, headers));
+                        let walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+                        self.db_readers = Some((lookup, headers, walk));
                     }
-                    let (lookup, headers) = self.db_readers.as_ref().expect("opened above");
-                    database_subject(name, db, lookup, headers, id)?
+                    let (lookup, headers, walk) = self.db_readers.as_mut().expect("opened above");
+                    database_subject(name, db, lookup, headers, walk, id)?
                 }
             },
         };
@@ -481,13 +482,15 @@ fn holds<'i>(ids: impl IntoIterator<Item = &'i ParsedSeqId>, id: &ParsedSeqId) -
 /// subject id `id`: the first OID of the restricted database's lookup (`seqid_to_oid`), its
 /// header read as the search programs read a reported sequence's (`read_header`). Not found is
 /// NCBI's ask of its servers (`Refusal::Database`); a lookup that throws, a header with a
-/// UTF8String, and a parsed header whose Seq-align id NCBI's lookup may not give as it is
-/// (`ParsedSubject::found`, `unfetchable`, `other_holder`, or an id other than `id`) are refused.
+/// UTF8String, and a parsed header whose Seq-align id NCBI's lookup or scope may not give as it is
+/// (`ParsedSubject::found`, `unfetchable`, `load_throws`, `scope_finds_none`, `ScopeWalk::load`,
+/// or an id other than `id`) are refused.
 fn database_subject(
     name: &[u8],
     db: &SeqDb,
     lookup: &SeqidLookup<'_>,
     headers: &HeaderReader<'_>,
+    walk: &mut ScopeWalk,
     id: &ParsedSeqId,
 ) -> Result<SubjectSource> {
     let oid = match lookup.seqid_to_oid(id) {
@@ -512,7 +515,9 @@ fn database_subject(
     if let ReportedHeader::Parsed(subject) = &header {
         let plain = subject.found().is_none()
             && !subject.unfetchable()
-            && subject.other_holder().is_none()
+            && !subject.load_throws()
+            && !subject.scope_finds_none()
+            && matches!(walk.load(subject), HitLoad::Loaded)
             && compare(id, subject.alignment_id()) == Sic::Yes;
         if !plain {
             return Err(refused(

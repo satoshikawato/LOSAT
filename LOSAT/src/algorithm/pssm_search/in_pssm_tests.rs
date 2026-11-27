@@ -413,11 +413,7 @@ fn the_request_holds_the_pssm_as_read_and_the_engines_errors_come_in_order() {
         program: "TBLASTN",
         matrix_name,
         strategy: request,
-        database: true,
-        archive: None,
-        write_verification: None,
-        out_pssm: false,
-        read_verification: None,
+        ..PssmReader::PSIBLAST
     };
     // A PSSM of frequency ratios only: the request holds it as read (no scores), the search
     // and the file the engine's scores (`with_computed_scores`).
@@ -1157,13 +1153,7 @@ fn a_karlin_altschul_value_that_is_not_finite_is_read_and_searched() {
     use crate::blastinput::pssm_text::{read_pssm, read_pssm_binary};
     let tblastn = PssmReader {
         program: "TBLASTN",
-        matrix_name: "BLOSUM62",
-        strategy: false,
-        database: true,
-        archive: None,
-        write_verification: None,
-        out_pssm: false,
-        read_verification: None,
+        ..PssmReader::PSIBLAST
     };
     let search = |pssm: PssmWithParameters, reader: PssmReader<'static>| {
         psi_search_and_object(pssm, reader)
@@ -1413,5 +1403,63 @@ fn a_null_element_is_refused_where_the_setting_leaves_it_out_of_a_written_file()
     assert_eq!(
         run(descr, off.as_ref(), (false, true, false), "PSIBLAST"),
         Ok(())
+    );
+}
+
+// PS7b: a frequency-ratios-only PSSM computes its scores with 11/1 (`CPsiBlastInputFreqRatios`)
+// while writing the search options' gap costs into `params.rpsdbparams`
+// (`PsiBlastAddAncillaryPssmData`, psiblast_aux_priv.cpp:501-503). When the query is all-X and
+// the matrix does not support 11/1 (e.g. BLOSUM45), NCBI's score block reports the ungapped
+// invalid-query error first (`BlastSetup_ScoreBlkInit`, blast_setup.c:498-520).
+#[test]
+fn ratios_only_pssm_records_search_gap_costs_and_orders_allx_error_first() {
+    let ratios = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
+        "pssm/ps4_tk_ratios.asn.gz",
+    ))
+    .unwrap();
+    let reader = PssmReader {
+        matrix_name: "BLOSUM80",
+        gap_open: 9,
+        gap_extend: 2,
+        ..PssmReader::PSIBLAST
+    };
+    let (search, file) = psi_search_and_object(ratios.clone(), reader).unwrap();
+    assert!(search.scores_error.is_none());
+    assert!(file.valid);
+    let rps = file.object.params.unwrap().rpsdbparams.unwrap();
+    assert_eq!((rps.gap_open, rps.gap_extend), (Some(9), Some(2)));
+    // IDENTITY leaves an inner scores_error rather than bailing out of `read_in_pssm` so
+    // `validate_protein_options` runs after reading and produces NCBI's matrix error.
+    let (search_id, file_id) = psi_search_and_object(
+        ratios,
+        PssmReader {
+            matrix_name: "IDENTITY",
+            ..PssmReader::PSIBLAST
+        },
+    )
+    .unwrap();
+    assert!(search_id.scores_error.is_some());
+    assert!(!file_id.valid);
+    // All-X ratios-only PSSM + BLOSUM45 (no 11/1): ungapped invalid-query error comes first.
+    let allx_bytes = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/pssm/ps7b_allx_ratios.asn"),
+    )
+    .unwrap();
+    let allx = crate::blastinput::pssm_text::read_pssm_with_parameters(&allx_bytes).unwrap();
+    let (search_allx, file_allx) = psi_search_and_object(
+        allx,
+        PssmReader {
+            matrix_name: "BLOSUM45",
+            gap_open: 15,
+            gap_extend: 2,
+            ..PssmReader::PSIBLAST
+        },
+    )
+    .unwrap();
+    assert!(!file_allx.valid);
+    assert_eq!(
+        search_allx.scores_error.as_deref(),
+        Some(crate::report::query_warnings::INVALID_QUERY_MESSAGE)
     );
 }

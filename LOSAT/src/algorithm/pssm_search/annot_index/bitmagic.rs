@@ -1219,7 +1219,7 @@ fn gap_at(gap: &[u16], i: usize) -> Result<u16, Fail> {
     gap.get(i).copied().ok_or(refuse(Rule::Unwritten))
 }
 
-/// The GAP block's last index as its header holds it (`gap_length(buf) - 1`).
+/// The GAP block's last index as its header holds it (`gap_length` less one).
 fn gap_last(gap: &[u16]) -> Result<usize, Fail> {
     Ok(usize::from(gap_at(gap, 0)? >> 3))
 }

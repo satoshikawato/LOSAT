@@ -14,11 +14,22 @@ export interface SubjectGroup {
   readonly rows: readonly number[];
 }
 
+export interface RoundGroup {
+  /** 1-based PSI-BLAST iteration round, or 0 for searches without rounds. */
+  readonly round: number;
+  /** Subjects in the engine's order: the order of their first HSPs in this round. */
+  readonly subjects: readonly SubjectGroup[];
+  readonly hspCount: number;
+}
+
 export interface QueryGroup {
   /** 0-based record index of the query in the run's query input. */
   readonly qIdx: number;
-  /** Subjects in the engine's order: the order of their first HSPs. */
+  /** Rounds of this query in ascending round order (one entry with round 0 for searches without rounds). */
+  readonly rounds: readonly RoundGroup[];
+  /** Subjects of the default (last) round, in the engine's order: the order of their first HSPs. */
   readonly subjects: readonly SubjectGroup[];
+  /** HSP count of the default (last) round. */
   readonly hspCount: number;
 }
 
@@ -28,34 +39,63 @@ export interface ResultIndex {
   readonly queries: ReadonlyMap<number, QueryGroup>;
 }
 
-/** Groups the rows of the table by query, then by subject, in the order of the HSP index. */
+/** Returns the requested round of `query`, or its default (last) round when `round` is omitted. */
+export function queryRound(query: QueryGroup | undefined, round?: number): RoundGroup | undefined {
+  if (query === undefined || query.rounds.length === 0) return undefined;
+  if (round === undefined) return query.rounds[query.rounds.length - 1];
+  return query.rounds.find((entry) => entry.round === round) ?? query.rounds[query.rounds.length - 1];
+}
+
+/** Groups the rows of the table by query, then by round, then by subject, in the order of the HSP index. */
 export function buildResultIndex(table: HspTable): ResultIndex {
   const order = Array.from({ length: table.count }, (_, row) => row).sort((a, b) => table.index[a]! - table.index[b]!);
-  const queries = new Map<number, { qIdx: number; subjects: Map<number, { sIdx: number; rows: number[] }>; hspCount: number }>();
+  const queries = new Map<
+    number,
+    Map<number, { round: number; subjects: Map<number, { sIdx: number; rows: number[] }>; hspCount: number }>
+  >();
   for (const row of order) {
     const qIdx = table.qIdx[row]!;
-    let query = queries.get(qIdx);
-    if (query === undefined) {
-      query = { qIdx, subjects: new Map(), hspCount: 0 };
-      queries.set(qIdx, query);
+    let byRound = queries.get(qIdx);
+    if (byRound === undefined) {
+      byRound = new Map();
+      queries.set(qIdx, byRound);
+    }
+    const round = table.round[row]!;
+    let roundGroup = byRound.get(round);
+    if (roundGroup === undefined) {
+      roundGroup = { round, subjects: new Map(), hspCount: 0 };
+      byRound.set(round, roundGroup);
     }
     const sIdx = table.sIdx[row]!;
-    let subject = query.subjects.get(sIdx);
+    let subject = roundGroup.subjects.get(sIdx);
     if (subject === undefined) {
       subject = { sIdx, rows: [] };
-      query.subjects.set(sIdx, subject);
+      roundGroup.subjects.set(sIdx, subject);
     }
     subject.rows.push(row);
-    query.hspCount++;
+    roundGroup.hspCount++;
   }
   const frozen = new Map<number, QueryGroup>();
-  for (const [qIdx, query] of queries) {
+  for (const [qIdx, byRound] of queries) {
+    const rounds = [...byRound.values()]
+      .sort((a, b) => a.round - b.round)
+      .map((entry) =>
+        Object.freeze({
+          round: entry.round,
+          subjects: Object.freeze(
+            [...entry.subjects.values()].map((s) => Object.freeze({ sIdx: s.sIdx, rows: Object.freeze(s.rows) })),
+          ),
+          hspCount: entry.hspCount,
+        }),
+      );
+    const last = rounds[rounds.length - 1]!;
     frozen.set(
       qIdx,
       Object.freeze({
         qIdx,
-        subjects: Object.freeze([...query.subjects.values()].map((s) => Object.freeze({ sIdx: s.sIdx, rows: Object.freeze(s.rows) }))),
-        hspCount: query.hspCount,
+        rounds: Object.freeze(rounds),
+        subjects: last.subjects,
+        hspCount: last.hspCount,
       }),
     );
   }
@@ -160,7 +200,7 @@ export interface FilteredQuery {
  * `sseqid`.
  */
 export function filterQuery(
-  query: QueryGroup,
+  query: Pick<RoundGroup, 'subjects'>,
   filters: ViewFilters,
   scores: Pick<HspTable, 'eValue' | 'bitScore'>,
   subjectIds: (subject: SubjectGroup) => readonly string[],

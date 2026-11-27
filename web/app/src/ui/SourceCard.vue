@@ -100,7 +100,7 @@ const lineOf = (message: string | undefined) => {
  * letters of BLASTP's queries and one record of PSI-BLAST's, which searches one query at a time, so the records before
  * the error keep their results in PSI-BLAST and, in a query of 10000 letters or fewer, have none in BLASTP. With
  * the error in the first batch outfmt 0 keeps only its prolog (-html its page's head, outfmt 15 the start of its JSON),
- * while outfmt 5, 6 and 7 are empty. The sentence names no size and no program, so it holds for each (review r2 M1 and L1,
+ * while outfmt 5, 6 and 7 are empty. The sentence names no size, so it holds for each program (review r2 M1 and L1,
  * 2026-11-27). It says neither that the run ends with this error nor that it gives no
  * results (line WQA's D28, 2026-11-27): an error that comes before it (a query ID repeated under -parse_deflines in an
  * earlier batch) ends the run first, and an error in a later batch comes after the hits of the batches before. A batch is

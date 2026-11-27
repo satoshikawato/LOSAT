@@ -9031,9 +9031,10 @@ fn run_in_pool(
                 return Err($error);
             }};
         }
-        // LOSAT's refusal of a diagonal table that NCBI never sizes (`check_batch_window`): in the
-        // batch whose concatenated query is too long, after the reports of the batches before (in
-        // both paths of LOSAT_X_RPTSTREAM) and the batch's reader messages.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57
+        // LOSAT's refusal of a diagonal table that NCBI never sizes (`check_batch_window`): in
+        // the batch whose concatenated query is too long, after the reports of the batches
+        // before (in both paths of LOSAT_X_RPTSTREAM) and the batch's reader messages.
         if let Err(error) = check_batch_window(&args, batch_records.batch_queries().records()) {
             fail_batch!(error);
         }

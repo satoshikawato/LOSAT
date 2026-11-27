@@ -1338,7 +1338,39 @@ fn where_the_switch_must_not_act_the_counters_name_why() {
     ]);
     let (off, (batches, reason)) = same_two("scoring", &scoring, 4, &[], None);
     assert_eq!(off.status, Some(3), "NCBI's Karlin-Altschul error");
-    assert_eq!((batches, reason.as_str()), (0, "scoring"));
+    assert_eq!((batches, reason.as_str()), (0, "none"));
+    // The same scoring with a first batch of an invalid query (all N, which NCBI searches
+    // without an error) and a second batch that holds an invalid query and a valid one: LOSAT
+    // refuses the second batch (NCBI goes on without the gapped values and crashes) after the
+    // first batch's report, in both paths.
+    let mut invalid_then_mixed = Vec::new();
+    record(&mut invalid_then_mixed, b"n_first", &[b'N'; 5000]);
+    record(&mut invalid_then_mixed, b"n_second", &[b'N'; 200]);
+    record(&mut invalid_then_mixed, b"q_valid", &subj_seq[..900]);
+    let invalid_then_mixed_q = dir.path("invalid_then_mixed.fa");
+    std::fs::write(&invalid_then_mixed_q, &invalid_then_mixed).expect("write invalid_then_mixed");
+    let mut mixed = scoring.clone();
+    mixed[3] = invalid_then_mixed_q.to_str().unwrap();
+    mixed[7] = "7";
+    let (off, (batches, reason)) = same_two(
+        "scoring, invalid then mixed",
+        &mixed,
+        4,
+        &[("BATCH_SIZE", "1000")],
+        None,
+    );
+    let report = String::from_utf8_lossy(&off.report);
+    assert_eq!(off.status, Some(1), "LOSAT's refusal: {off:?}");
+    assert!(
+        report.contains("# Query: n_first") && !report.contains("# Query: n_second"),
+        "the first batch's report only: {report}"
+    );
+    assert!(
+        String::from_utf8_lossy(&off.stderr).contains("have no Karlin-Altschul values"),
+        "{}",
+        String::from_utf8_lossy(&off.stderr)
+    );
+    assert_eq!((batches, reason.as_str()), (1, "none"));
     let chunks = [("CHUNK_SIZE", "-5"), ("OVERLAP_CHUNK_SIZE", "-10")];
     let (off, (_, reason)) = same_two("CHUNK_SIZE", &plain, 4, &chunks, None);
     assert_ne!(off.status, Some(0), "LOSAT's refusal");

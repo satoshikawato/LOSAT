@@ -155,16 +155,27 @@ fn karlin_blocks<const UNGAPPED: bool>(
             // queries (the error does not depend on the queries, so the first batch with a valid
             // query meets it; NCBI writes the results and warnings of the batches before it).
             // The contexts of a query without letters are invalid from their set-up and put
-            // no message here (`context_ungapped_blocks`).
+            // no message here (`context_ungapped_blocks`). LOSAT's refusal comes where NCBI's
+            // search of the batch would crash: after the reports of the batches before (whose
+            // queries were all invalid) in both paths of LOSAT_X_RPTSTREAM, or in the first
+            // batch after the prologs (`setup_failure`).
             if query_contexts
                 .iter()
                 .zip(context_ungapped)
                 .any(|(context, block)| context.len != 0 && block.is_none())
             {
-                anyhow::bail!(
+                let refusal = anyhow::anyhow!(
                     "these scoring options have no Karlin-Altschul values, and the query batch (up to {} residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not supported by LOSAT's BLASTN",
                     batching.batch_size
                 );
+                return Err(setup_failure(
+                    refusal,
+                    first_batch,
+                    false,
+                    outputs,
+                    intro,
+                    shown,
+                ));
             }
             // A query without letters (also a `-query_loc` interval that holds none) keeps its
             // warning in the error (`karlin_error`).

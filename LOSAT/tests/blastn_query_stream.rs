@@ -748,8 +748,8 @@ fn errors_and_refusals_give_the_off_bytes() {
         let (off, numbers) = same_two(what, &args, 4, &extra, None);
         assert_ne!(off.status, Some(0), "{what}: the refusal");
         // The Subject_ id is refused by the report of the batch that reaches it, after the reports
-        // of the batches before; the other two are refused in the first batch's search, where
-        // LOSAT_X_RPTSTREAM keeps the reports after the loop.
+        // of the batches before; the other two are refused in the first batch's search, before
+        // any report, with the reports per batch too.
         assert_eq!(
             off.report.is_empty(),
             what != "Subject_ id",

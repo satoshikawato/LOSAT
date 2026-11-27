@@ -83,6 +83,8 @@ pub struct Loaded {
     subject_name: String,
     /// Whether `subject_name` is a database.
     database: bool,
+    /// psiblast's PHI-BLAST pattern file, its bytes (`api::Inputs::phi_pattern`).
+    phi_pattern: Option<Vec<u8>>,
 }
 
 impl Loaded {
@@ -91,6 +93,7 @@ impl Loaded {
         argv: &[String],
         query: NamedQuery,
         (subject, subject_name): NamedSubject,
+        phi_pattern: Option<Vec<u8>>,
     ) -> Result<Self, api::Error> {
         let search = checked(program, argv)?;
         let database = subject.is_none();
@@ -112,6 +115,7 @@ impl Loaded {
                 query_name,
                 subject_name,
                 database,
+                phi_pattern,
             });
         }
         // A PSSM or alignment query is read by the search, as the command line's `-in_pssm` and
@@ -137,6 +141,7 @@ impl Loaded {
             query_name,
             subject_name,
             database,
+            phi_pattern,
         })
     }
 
@@ -153,7 +158,11 @@ impl Loaded {
             }
             (false, None) => Inputs::new(&self.query, &self.subject).query_end(&self.query_end),
         };
-        inputs.named(&self.query_name, &self.subject_name)
+        let inputs = inputs.named(&self.query_name, &self.subject_name);
+        match self.phi_pattern.as_deref() {
+            Some(pattern) => inputs.phi_pattern(pattern),
+            None => inputs,
+        }
     }
 }
 
@@ -204,8 +213,10 @@ fn slices<'py>(
 /// `(reports, hsps, query stats, rounds, diagnostics)` of a search, which `_api.py` turns into an
 /// `Outcome`. The reports need one call of the engine (`run_collect`). Without reports the
 /// search runs one query batch at a time, which gives the same records (`run_batches`), and a
-/// signal stops it between two batches.
+/// signal stops it between two batches. `phi_pattern`: psiblast's PHI-BLAST pattern file, its
+/// bytes.
 #[pyfunction]
+#[pyo3(signature = (program, argv, query, subject, formats, phi_pattern=None))]
 pub fn run<'py>(
     py: Python<'py>,
     program: &str,
@@ -213,9 +224,11 @@ pub fn run<'py>(
     query: NamedQuery,
     subject: NamedSubject,
     formats: Vec<String>,
+    phi_pattern: Option<PyBackedBytes>,
 ) -> PyResult<Bound<'py, PyTuple>> {
+    let phi_pattern = phi_pattern.map(|bytes| bytes.to_vec());
     let loaded = py
-        .detach(|| Loaded::read(program, &argv, query, subject))
+        .detach(|| Loaded::read(program, &argv, query, subject, phi_pattern))
         .map_err(exception)?;
     if formats.is_empty() {
         return run_typed(py, &loaded);
@@ -252,8 +265,10 @@ pub fn run<'py>(
 
 /// The report of `outfmt` written to the file `path`, as the command line's `-out` writes it, with
 /// the side files of outfmt 13 and 14 next to it; returns the bytes that the command line writes
-/// to its standard error.
+/// to its standard error. `phi_pattern` as `run`'s.
 #[pyfunction]
+#[pyo3(signature = (program, argv, query, subject, outfmt, path, phi_pattern=None))]
+#[allow(clippy::too_many_arguments)]
 pub fn run_to_file<'py>(
     py: Python<'py>,
     program: &str,
@@ -262,10 +277,12 @@ pub fn run_to_file<'py>(
     subject: NamedSubject,
     outfmt: &str,
     path: PathBuf,
+    phi_pattern: Option<PyBackedBytes>,
 ) -> PyResult<Bound<'py, PyBytes>> {
+    let phi_pattern = phi_pattern.map(|bytes| bytes.to_vec());
     let diagnostics = py
         .detach(|| {
-            let loaded = Loaded::read(program, &argv, query, subject)?;
+            let loaded = Loaded::read(program, &argv, query, subject, phi_pattern)?;
             let mut diagnostics = Vec::new();
             api::run_to_file(
                 &loaded.search,
@@ -457,17 +474,21 @@ pub struct Batches {
 
 #[pymethods]
 impl Batches {
+    /// `phi_pattern` as `run`'s.
     #[new]
+    #[pyo3(signature = (program, argv, query, subject, phi_pattern=None))]
     fn new(
         py: Python<'_>,
         program: &str,
         argv: Vec<String>,
         query: NamedQuery,
         subject: NamedSubject,
+        phi_pattern: Option<PyBackedBytes>,
     ) -> PyResult<Self> {
+        let phi_pattern = phi_pattern.map(|bytes| bytes.to_vec());
         let running = py
             .detach(|| {
-                let loaded = Loaded::read(program, &argv, query, subject)?;
+                let loaded = Loaded::read(program, &argv, query, subject, phi_pattern)?;
                 Running::try_new(loaded, |loaded| {
                     api::run_batches(&loaded.search, loaded.inputs())
                 })

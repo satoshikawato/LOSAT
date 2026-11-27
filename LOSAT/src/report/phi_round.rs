@@ -300,7 +300,7 @@ pub(crate) fn write_phi_round_report(
             }
             if merges && !aligned.is_empty() {
                 display.enter(writer)?;
-                sections.phi_alignments(writer, q_idx, group, pattern)?;
+                sections.phi_alignments(writer, q_idx, group, &pattern)?;
             }
             display.leave(writer)?;
         }

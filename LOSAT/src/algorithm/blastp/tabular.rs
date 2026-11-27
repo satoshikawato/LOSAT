@@ -712,7 +712,7 @@ fn tax_hsps(hit_list: Option<&BlastpHitList>) -> Vec<crate::report::tax_report::
 #[inline(always)]
 #[allow(clippy::type_complexity)]
 fn tax_subjects<'t>(
-    tab: &'t BlastpTabular<'_>,
+    tab: &'t BlastpTabular<'t>,
 ) -> (
     &'t [Option<Arc<ParsedSubject>>],
     impl Fn(usize) -> crate::report::tax_report::TaxPlain<'t> + 't,

@@ -1,0 +1,17 @@
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]
+# Database: tests/db_search/ps8b_qid
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+YP_009220601.1	YP_009220601.1	100.000	181	0	0	1	181	1	181	5.48e-103	341
+YP_009220601.1	XP_000000001.1	27.273	44	29	1	13	53	102	145	0.029	 7.1
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]
+# Database: tests/db_search/ps8b_qid
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+YP_009220601.1	XP_000000001.1	100.000	298	0	0	101	398	1	298	4.14e-175	581
+YP_009220601.1	YP_009220601.1	27.273	44	29	1	202	245	13	53	0.029	 7.1
+# BLAST processed 0 queries

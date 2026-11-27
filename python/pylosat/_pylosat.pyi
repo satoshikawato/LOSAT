@@ -40,6 +40,11 @@ class Hsp:
     def round(self) -> int:
         """psiblast's round that found the HSP (1-based); 1 in a search without rounds."""
     @property
+    def occurrence(self) -> int | None:
+        """psiblast's PHI-BLAST round (`phi_pattern`): the pattern occurrence in the query whose
+        result holds the HSP (1-based, NCBI's `Significant alignments for pattern occurrence N`);
+        `None` in every other search and round."""
+    @property
     def query_id(self) -> str:
         """`qaccver`, as text: its bytes with one U+FFFD per maximal ill-formed subpart, as
         `bytes.decode("utf-8", "replace")` gives; `report.bytes[report.spans[hsp.index]]` holds
@@ -159,6 +164,7 @@ class Batches:
         argv: list[str],
         query: tuple[bytes | str, str] | str | dict[str, str],
         subject: tuple[bytes | str | None, str],
+        phi_pattern: bytes | None = None,
     ) -> Batches: ...
     @property
     def query_count(self) -> int: ...
@@ -185,6 +191,7 @@ def run(
     query: tuple[bytes | str, str] | str | dict[str, str],
     subject: tuple[bytes | str | None, str],
     formats: list[str],
+    phi_pattern: bytes | None = None,
 ) -> tuple[
     list[tuple[str, bytes, list[slice | None], list[slice | None]]],
     HspTable,
@@ -199,6 +206,7 @@ def run_to_file(
     subject: tuple[bytes | str | None, str],
     outfmt: str,
     path: str,
+    phi_pattern: bytes | None = None,
 ) -> bytes: ...
 def makeblastdb(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
 def blastdbcmd(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...

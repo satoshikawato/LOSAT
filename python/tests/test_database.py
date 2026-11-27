@@ -380,3 +380,29 @@ def test_psiblast_is_a_program():
     subject = pylosat.Sequences.from_text(f">s\n{PROTEIN}\n")
     outcome = pylosat.Search("psiblast").run(pylosat.Sequences.from_text(f">q\n{PROTEIN}\n"), subject)
     assert len(outcome.hsps) == 1
+
+
+def test_a_phi_pattern_search_is_the_command_lines(losat):
+    # Line PS item PS8b: psiblast's PHI-BLAST pattern is an input of the search (`phi_pattern`,
+    # its bytes or its path), searched as `-phi_pattern FILE`; round 1's HSPs carry their pattern
+    # occurrence (two in this query), the later rounds' none.
+    query, database = engine_file("fasta/psiblast/tk.faa"), engine_file("db_search/paja")
+    pattern = engine_file("fixtures/phi/ploop.pat")
+    inputs = pylosat.Sequences.from_fasta(query), pylosat.Database(database)
+    for rounds in (1, 3):
+        words = ["-phi_pattern", pattern, "-num_iterations", str(rounds), "-outfmt", "6"]
+        stdout, _ = losat("psiblast", "-query", query, "-db", database, *words)
+        search = pylosat.Search("psiblast", num_iterations=rounds)
+        by_path = search.run(*inputs, outfmt="6", phi_pattern=pattern)
+        by_bytes = search.run(*inputs, outfmt="6", phi_pattern=Path(pattern).read_bytes())
+        assert by_path.reports[0].bytes == stdout
+        assert by_bytes.reports == by_path.reports
+        hsps = by_path.hsps
+        assert {hsp.occurrence for hsp in hsps if hsp.round == 1} == {1, 2}
+        assert all(hsp.occurrence is None for hsp in hsps if hsp.round > 1)
+        # NCBI 2.17.0: the rounds converge after round 2 (probe of.7.it3 of line PS, PS8a).
+        assert {hsp.round for hsp in hsps} == ({1} if rounds == 1 else {1, 2})
+        typed = search.run(*inputs, phi_pattern=pattern).hsps
+        assert [hsp.occurrence for hsp in typed] == [hsp.occurrence for hsp in hsps]
+    with pytest.raises(TypeError, match="phi_pattern"):
+        pylosat.Search("psiblast", phi_pattern=pattern)

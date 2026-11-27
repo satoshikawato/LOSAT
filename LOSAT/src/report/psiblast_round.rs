@@ -380,7 +380,7 @@ impl<'a> RoundSections<'a> {
         writer: &mut W,
         q_idx: usize,
         group: &QueryGroup<'_>,
-        decoration: D,
+        decoration: &D,
     ) -> io::Result<()> {
         let (PairwiseView::QueryAnchored { identity, anchored }, Some(sequences)) =
             (self.config.view, self.anchored)

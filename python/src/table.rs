@@ -138,6 +138,11 @@ pub fn of_records(hsps: &[HspRecord]) -> RecordBatch {
         ("s_idx", ints(hsps, |hsp| hsp.s_idx), false),
         ("rank", ints(hsps, |hsp| hsp.rank), false),
         ("round", ints(hsps, |hsp| hsp.round as usize), false),
+        (
+            "occurrence",
+            optional_ints(hsps, |hsp| hsp.occurrence.map(i64::from)),
+            true,
+        ),
     ])
     .expect("the columns have one length")
 }
@@ -426,6 +431,13 @@ impl Hsp {
     #[getter]
     fn round(&self) -> i64 {
         self.int("round")
+    }
+
+    /// psiblast's PHI-BLAST round (`phi_pattern`): the pattern occurrence in the query whose
+    /// result holds the HSP (1-based); `None` in every other search and round.
+    #[getter]
+    fn occurrence(&self) -> Option<i64> {
+        self.optional_int("occurrence")
     }
 
     /// `qaccver`, as text: its bytes with one U+FFFD per maximal ill-formed subpart, as

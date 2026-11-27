@@ -206,6 +206,14 @@ def _query(query: Sequences | Pssm | Alignment) -> tuple[bytes | str, str] | str
     return _input(query, "query")
 
 
+def _pattern(pattern: bytes | str | os.PathLike[str] | None) -> bytes | None:
+    """The bytes of psiblast's PHI-BLAST pattern file: `pattern` itself, or the file it names."""
+    if pattern is None or isinstance(pattern, bytes):
+        return pattern
+    with open(pattern, "rb") as file:
+        return file.read()
+
+
 def _input(sequences: Sequences, role: str) -> tuple[bytes | str, str]:
     if not isinstance(sequences, Sequences):
         raise TypeError(
@@ -437,10 +445,11 @@ class Search:
     """A program and its options, checked by the command line's argument reader (NCBI's).
 
     Each keyword is an option of the command line without its dash: `evalue=1e-5` is
-    `-evalue 1e-5`. `describe` lists them. `-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and
-    `-outfmt` are not options here: the inputs are `Sequences`, `Database`, `Pssm` (the PSSM query of
+    `-evalue 1e-5`. `describe` lists them. `-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-phi_pattern`,
+    `-out` and `-outfmt` are not options here: the inputs are `Sequences`, `Database`, `Pssm` (the PSSM query of
     psiblast and tblastn) and `Alignment` (the alignment query of psiblast, whose master
-    `msa_master_idx` and `ignore_msa_master` choose); psiblast's PSSM files (`out_pssm`, `out_ascii_pssm`) are written where the
+    `msa_master_idx` and `ignore_msa_master` choose), and psiblast's `-phi_pattern` is the `phi_pattern`
+    argument of a search; psiblast's PSSM files (`out_pssm`, `out_ascii_pssm`) are written where the
     command line writes them. The search itself
     is `run`, `batches` or `run_to_file`. `-logfile`, `-conffile` and
     `-dryrun` work as on the command line (`from_argv`): each search opens the file of `-logfile`
@@ -529,11 +538,13 @@ class Search:
         subject: Sequences | Database,
         *,
         outfmt: str | Sequence[str] = (),
+        phi_pattern: bytes | str | os.PathLike[str] | None = None,
     ) -> Outcome:
         """Runs the search; `outfmt` names the reports, as the values of `-outfmt`.
 
-        The GIL is released. Without reports, Ctrl-C stops the search between two query batches.
-        With reports the engine runs in one call, and Ctrl-C takes effect when it returns.
+        `phi_pattern` is psiblast's PHI-BLAST pattern file (`-phi_pattern`): its bytes, or its
+        path. The GIL is released. Without reports, Ctrl-C stops the search between two query
+        batches. With reports the engine runs in one call, and Ctrl-C takes effect when it returns.
         """
         formats = [outfmt] if isinstance(outfmt, str) else list(outfmt)
         reports, hsps, stats, rounds, diagnostics = _pylosat.run(
@@ -542,6 +553,7 @@ class Search:
             _query(query),
             _subject(subject),
             formats,
+            _pattern(phi_pattern),
         )
         return Outcome(
             [Report(*report) for report in reports], hsps, _stats(stats), _rounds(rounds), diagnostics
@@ -554,11 +566,13 @@ class Search:
         *,
         outfmt: str,
         path: str | os.PathLike[str],
+        phi_pattern: bytes | str | os.PathLike[str] | None = None,
     ) -> FileOutcome:
         """Runs the search and writes the report of `outfmt` to the file `path`, as `-out path`.
 
         Outfmt 13 and 14 come through here: their side files lie next to `path`. Returns what the
-        command line writes to its standard error (`FileOutcome`). The GIL is released.
+        command line writes to its standard error (`FileOutcome`). `phi_pattern` as `run`'s. The
+        GIL is released.
         """
         return FileOutcome(
             _pylosat.run_to_file(
@@ -568,17 +582,26 @@ class Search:
                 _subject(subject),
                 outfmt,
                 os.fspath(path),
+                _pattern(phi_pattern),
             )
         )
 
-    def batches(self, query: Sequences | Pssm | Alignment, subject: Sequences | Database) -> Batches:
-        """The search as an iterator of `Batch`, one of NCBI's query batches at a time."""
+    def batches(
+        self,
+        query: Sequences | Pssm | Alignment,
+        subject: Sequences | Database,
+        *,
+        phi_pattern: bytes | str | os.PathLike[str] | None = None,
+    ) -> Batches:
+        """The search as an iterator of `Batch`, one of NCBI's query batches at a time;
+        `phi_pattern` as `run`'s."""
         return Batches(
             _pylosat.Batches(
                 self._program,
                 list(self._argv),
                 _query(query),
                 _subject(subject),
+                _pattern(phi_pattern),
             )
         )
 

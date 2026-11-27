@@ -217,6 +217,7 @@ FIELDS = {
     "s_idx": "s_idx",
     "rank": "rank",
     "round": "round",
+    "occurrence": "occurrence",
 }
 
 

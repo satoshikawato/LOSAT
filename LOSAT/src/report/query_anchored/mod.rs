@@ -839,7 +839,7 @@ pub(crate) fn write_section<W: Write + ?Sized>(
         line_length,
         hsps,
         sequences,
-        super::pairwise::PlainRows,
+        &super::pairwise::PlainRows,
     )
 }
 
@@ -854,7 +854,7 @@ pub(crate) fn write_decorated_section<W: Write + ?Sized, D: super::pairwise::Row
     line_length: usize,
     hsps: &Hsps,
     sequences: &dyn Sequences,
-    decoration: D,
+    decoration: &D,
 ) -> io::Result<()> {
     if hsps.is_empty() {
         return writer.write_all(b"\n");
@@ -1578,7 +1578,7 @@ fn display_rows<W: Write + ?Sized, D: super::pairwise::RowDecoration>(
     line_length: usize,
     mut rows: RowData,
     sequences: &dyn Sequences,
-    decoration: D,
+    decoration: &D,
 ) -> io::Result<()> {
     let aln_stop = i64::from(map.aln_stop() as i32);
     let mut prev_stop = vec![0i32; map.num_rows()];
@@ -1626,7 +1626,7 @@ fn display_row_data_set<D: super::pairwise::RowDecoration>(
     aln_start: i64,
     prev_stop: &mut [i32],
     sequences: &dyn Sequences,
-    decoration: D,
+    decoration: &D,
 ) -> io::Result<()> {
     let aln_stop = i64::from(map.aln_stop());
     let actual_line_len = if aln_stop - aln_start + 1 < line_length as i64 {

@@ -50,7 +50,7 @@ For development, `maturin develop` builds the extension into the active virtual 
 
 `Search` takes the program and the command line's options, each as a keyword without its dash: `evalue=1e-5` is `-evalue 1e-5`, and `ungapped=True` is `-ungapped`. `pylosat.describe("blastn")` lists them from the engine's own table, and the type stubs list them by program. `Search.from_argv("blastn", ["-evalue", "1e-5"])` takes the words themselves. An unknown keyword, or a value of the wrong Python type, raises `TypeError`; the command line's argument reader (NCBI's) checks the rest, so an option means, and fails, as it does there (`ArgumentError`, with the command line's own error text).
 
-`-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and `-outfmt` are not options here: the inputs and the formats are arguments of `run`. psiblast runs its rounds (`num_iterations`) as on the command line, and its `-out_pssm` and `-out_ascii_pssm` (with `-save_pssm_after_last_round` and `-save_each_pssm`) write the command line's PSSM files under their names.
+`-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-phi_pattern`, `-out` and `-outfmt` are not options here: the inputs and the formats are arguments of `run` (psiblast's pattern file as `phi_pattern=`, its bytes or its path; `hsp.occurrence`, the `occurrence` column, is the pattern occurrence of an HSP of the PHI-BLAST round). psiblast runs its rounds (`num_iterations`) as on the command line, and its `-out_pssm` and `-out_ascii_pssm` (with `-save_pssm_after_last_round` and `-save_each_pssm`) write the command line's PSSM files under their names.
 
 ## Inputs
 
@@ -73,7 +73,7 @@ outcome = search.run(query, pylosat.Database("core_nt"), outfmt="6")
 
 ## Results
 
-`outcome.hsps` is an `HspTable` of 31 columns. Any Arrow consumer reads it without a copy, through the Arrow PyCapsule interface: `polars.DataFrame(hsps)`, `pyarrow.table(hsps)`, `pandas.DataFrame.from_arrow(hsps)`. pylosat itself needs no Arrow library. The columns have the names of `-outfmt`, the default report's first (`qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`), then `score nident positive gaps qlen slen qframe sframe sstrand qseq sseq`, then pylosat's own `query_strand sum_n comp_adjust_method index q_idx s_idx rank round`.
+`outcome.hsps` is an `HspTable` of 32 columns. Any Arrow consumer reads it without a copy, through the Arrow PyCapsule interface: `polars.DataFrame(hsps)`, `pyarrow.table(hsps)`, `pandas.DataFrame.from_arrow(hsps)`. pylosat itself needs no Arrow library. The columns have the names of `-outfmt`, the default report's first (`qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`), then `score nident positive gaps qlen slen qframe sframe sstrand qseq sseq`, then pylosat's own `query_strand sum_n comp_adjust_method index q_idx s_idx rank round occurrence`.
 
 The numbers are the engine's, not rounded. Text to show comes from a report: `report.spans[hsp.index]` is the slice of `report.bytes` that holds the row or section of an HSP. `qframe` and `sframe` are null where the program does not translate that side; the reports print a number there. The ids (`qaccver`, `saccver`, `hsp.query_id`, `hsp.subject_id`) are text, with one U+FFFD per maximal ill-formed subpart of their bytes, as `bytes.decode("utf-8", "replace")` gives; the report's row keeps the bytes (`report.bytes[report.spans[hsp.index]]`).
 

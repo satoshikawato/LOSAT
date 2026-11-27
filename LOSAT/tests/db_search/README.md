@@ -2117,7 +2117,7 @@ only the report sums can make BLASTX's library hold its XML2 start before the re
 - `ps8b_qid` (protein, version 5): `makeblastdb -in tests/fasta/psiblast/ps8b_qid_db.faa -dbtype prot -parse_seqids
   -out tests/db_search/ps8b_qid` (NCBI BLAST+ 2.17.0, run from `LOSAT/`): its first sequence has the Seq-id of the
   query `tests/fasta/psiblast/tk.faa` (`ref|YP_009220601.1|`, the query's first 181 letters), which NCBI's
-  `-parse_deflines` shows as the query in the tables of each pattern occurrence (rows `db.phi.qid.*`).
+  `-parse_deflines` shows as the query in the tables of each pattern occurrence (rows `db.phi.b.qid.*`).
 
 ## psiblast's id options (line RG, series Q, Q1)
 

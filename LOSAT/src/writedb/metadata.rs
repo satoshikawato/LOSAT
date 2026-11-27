@@ -630,20 +630,17 @@ impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
     /// `~CObjectOStream`.
     pub(crate) fn destroy(&mut self, err: &mut dyn Write) {
         let tag = self.tag();
-        match self.close(err) {
-            Err(exc) => {
-                let (kind, msg) = (exc.predecessor.type_and_code(), exc.predecessor.msg);
-                self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
-                let line = format!("Error: ({SERIAL_IO_ERROR}) {tag}{}", exc.msg);
-                self.post(err, &line, true);
-                let line = format!(
-                    "Error: (802.4) {tag}Cannot close serializing output stream \
-                     ({SERIAL_IO_ERROR}) {}",
-                    exc.msg
-                );
-                self.post(err, &line, true);
-            }
-            Ok(()) => {}
+        if let Err(exc) = self.close(err) {
+            let (kind, msg) = (exc.predecessor.type_and_code(), exc.predecessor.msg);
+            self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
+            let line = format!("Error: ({SERIAL_IO_ERROR}) {tag}{}", exc.msg);
+            self.post(err, &line, true);
+            let line = format!(
+                "Error: (802.4) {tag}Cannot close serializing output stream \
+                 ({SERIAL_IO_ERROR}) {}",
+                exc.msg
+            );
+            self.post(err, &line, true);
         }
         self.destroy_buffer(err);
     }
@@ -656,16 +653,13 @@ impl<'a, B: StreamBuf> ObjectOStream<'a, B> {
     /// `~COStreamBuffer` (a member of the object stream, destroyed after its body).
     fn destroy_buffer(&mut self, err: &mut dyn Write) {
         let tag = self.tag();
-        match self.output.close() {
-            Err(exc) => {
-                let (kind, msg) = (exc.type_and_code(), exc.msg);
-                self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
-                let line = format!(
-                    "Error: (205.2) {tag}~COStreamBuffer: exception while closing ({kind}) {msg}"
-                );
-                self.post(err, &line, true);
-            }
-            Ok(()) => {}
+        if let Err(exc) = self.output.close() {
+            let (kind, msg) = (exc.type_and_code(), exc.msg);
+            self.post(err, &format!("Error: ({kind}) {tag}{msg}"), true);
+            let line = format!(
+                "Error: (205.2) {tag}~COStreamBuffer: exception while closing ({kind}) {msg}"
+            );
+            self.post(err, &line, true);
         }
     }
 

@@ -16,7 +16,7 @@
 //! the request's Bioseqs. What LOSAT does not show as NCBI does is refused by name before the
 //! object's first byte (`Refusal::NotCovered`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::ops::Range;
@@ -45,7 +45,7 @@ use crate::report::archive::read::results::{MaskRange, Results};
 use crate::report::archive::read::{seq_align_id, Stop};
 use crate::report::db_subject::{HitLoad, HitLoads, ParsedSubject};
 use crate::report::defline::SourceTaxname;
-use crate::report::ostream::ReportWrite;
+use crate::report::ostream::{ReportWrite, Site};
 use crate::report::pairwise::psiblast_round::{
     write_psiblast_epilog, write_psiblast_round_report, ReportRound,
 };
@@ -633,6 +633,7 @@ pub(super) fn print_object(
     let cell = SinkCell {
         sink: RefCell::new(sink),
         failed: RefCell::new(None),
+        alignments: Cell::new(false),
     };
     let mut out = StreamOut(&cell);
     let mut posts = PostOut(&cell);
@@ -1509,6 +1510,8 @@ fn stored_gap_columns(ds: &PairDenseg, letters: &[u8], row: usize) -> Vec<u32> {
 struct SinkCell<'s> {
     sink: RefCell<&'s mut dyn ReportSink>,
     failed: RefCell<Option<anyhow::Error>>,
+    /// The writer is in the alignments (`Site::Alignments`, declared by the writer).
+    alignments: Cell<bool>,
 }
 
 /// The error of a write that the sink's stream refused.
@@ -1520,6 +1523,17 @@ impl SinkCell<'_> {
             *self.failed.borrow_mut() = Some(error);
             io::Error::other(STREAM_FAILED)
         })
+    }
+
+    /// `keep` of an insertion or (`flushing`) a flush, which in the alignments ends as there.
+    fn keep_written(&self, result: Result<()>, flushing: bool) -> io::Result<()> {
+        match result {
+            Err(error) if self.alignments.get() => {
+                let error = self.sink.borrow_mut().alignments_failed(error, flushing);
+                self.keep(Err(error))
+            }
+            result => self.keep(result),
+        }
     }
 
     /// The run's error of a writer's `error`: the stream's where it failed.
@@ -1538,7 +1552,7 @@ struct StreamOut<'c, 's>(&'c SinkCell<'s>);
 impl Write for StreamOut<'_, '_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let result = self.0.sink.borrow_mut().write(buf);
-        self.0.keep(result)?;
+        self.0.keep_written(result, false)?;
         Ok(buf.len())
     }
 
@@ -1548,9 +1562,14 @@ impl Write for StreamOut<'_, '_> {
 }
 
 impl ReportWrite for StreamOut<'_, '_> {
+    fn site(&mut self, site: Site) -> io::Result<()> {
+        self.0.alignments.set(site == Site::Alignments);
+        Ok(())
+    }
+
     fn ncbi_flush(&mut self) -> io::Result<()> {
         let result = self.0.sink.borrow_mut().flush();
-        self.0.keep(result)
+        self.0.keep_written(result, true)
     }
 
     fn badbit(&mut self) -> io::Result<()> {

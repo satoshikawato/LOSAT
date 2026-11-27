@@ -24,7 +24,9 @@
 //! two queries with one id end with NCBI's `SetupQueries_OMF` error (`CSeqVector_CI: cannot locate
 //! segment at <pos>` / `Sequence contains no data`, exit 3) in every output format when every
 //! searched record of the batch lacks a valid initial context and at least one posts a warning
-//! (line RG-KB item 7b), and with NCBI's XML matrix failure when the failure comes before NCBI
+//! (line RG-KB item 7b; in `blastn` with DUST, its default, or WindowMasker also when any searched
+//! record of the batch passes its earlier record's end: the masks of the batch stop at that record,
+//! and every searched record posts that record's message), and with NCBI's XML matrix failure when the failure comes before NCBI
 //! shows anything that the repeated record's letters decide (the `.pd.xmlmatrix.` rows, line
 //! RG-KB items 7 and 7b: a repeat in the first query's batch, and with held reports a repeat in
 //! any batch up to that of the first query of another id, including when a non-split batch's

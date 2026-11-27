@@ -3,7 +3,11 @@
   the earlier record's end or is empty, alongside any translated query shorter than one codon),
   LOSAT now ends with NCBI's exit-3 setup error (`CSeqVector_CI: cannot locate segment at ...` /
   `Sequence contains no data`) in every output format (except `-export_search_strategy`, and
-  `psiblast` stays refused where NCBI BLAST+ crashes).
+  `psiblast` stays refused where NCBI BLAST+ crashes); in `blastn` with `-filtering_db` and
+  `-dust no`, with NCBI's repeat search's message for each query. In `blastn` with DUST (the
+  default) or WindowMasker filtering, a batch in which any searched query passes its earlier
+  record's end ends so too, with the first such query's message for every searched query of the
+  batch, as NCBI's masking does.
 - `blastp`, `tblastn`, `blastx` and `tblastx` with `-parse_deflines` and an XML, XML2 or JSON
   output format (`-outfmt 5`, `13`, `14`, `15`, `16`) whose `-matrix` name NCBI's XML writer does
   not know: a non-split batch whose queries have no valid Karlin-Altschul context (such as only `X`

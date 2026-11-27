@@ -1233,10 +1233,10 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
         }
         panic!("no refusal")
     };
-    let run = |program: &'static str,
-               range: Option<SequenceRange>,
-               minus: bool,
-               batches: &[&[u8]]| run_masked(program, range, minus, QueryMasks::None, batches);
+    let run =
+        |program: &'static str, range: Option<SequenceRange>, minus: bool, batches: &[&[u8]]| {
+            run_masked(program, range, minus, QueryMasks::None, batches)
+        };
 
     let expect_native = |err: anyhow::Error, expected: &str| {
         let native = err
@@ -1367,7 +1367,7 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
             "BLASTN",
             None,
             false,
-            QueryMasks::Dust,
+            QueryMasks::Reads,
             &[
                 b">q1\nACGTAC\n>q2\nACGTACGT\n",
                 b">q1\nACGTACGTAC\n>q2\nACGTACGTACGT\n",
@@ -1383,7 +1383,7 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
     );
     expect_native(err, &twice);
     let err = refused_batch_error(
-        run_masked("BLASTN", None, false, QueryMasks::Dust, &mixed),
+        run_masked("BLASTN", None, false, QueryMasks::Reads, &mixed),
         false,
         |_| panic!("no set-up"),
     )
@@ -1394,7 +1394,7 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
             "BLASTN",
             None,
             false,
-            QueryMasks::Dust,
+            QueryMasks::Reads,
             &[b">q1\nACGTAC\n", b">q3\n\n>q1\nACGTACGTAC\n"],
         ),
         false,
@@ -1402,20 +1402,65 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
     )
     .unwrap_err();
     expect_native(err, &twice);
-    // Repeat or WindowMasker filtering without DUST, whose reads LOSAT does not follow: refused.
+    // Repeat filtering without DUST (NCBI BLAST+ 2.17.0, probe 2 of line RG-KB item 7b): its
+    // search's set-up of the batch fails with each record's own message, and that failure is the
+    // message of every searched record; where it passes, WindowMasker's read fails as DUST's does,
+    // and without WindowMasker the batch is set up as without filtering.
+    let both: [&[u8]; 2] = [
+        b">q1\nACGTAC\n>q2\nACGTACGT\n",
+        b">q1\nACGTACGTAC\n>q2\nACGTACGTACGT\n",
+    ];
+    let pair = "Warning: CSeqVector_CI: cannot locate segment at 6 \
+                Warning: CSeqVector_CI: cannot locate segment at 8 ";
+    for then_reads in [false, true] {
+        let repeats = QueryMasks::Repeats { then_reads };
+        let err = refused_batch_error(
+            run_masked("BLASTN", None, false, repeats, &both),
+            false,
+            |_| panic!("no set-up"),
+        )
+        .unwrap_err();
+        expect_native(
+            err,
+            &format!("{ENGINE_ERROR} Warning: {pair}  Warning: {pair}  \n"),
+        );
+    }
     let err = refused_batch_error(
         run_masked(
             "BLASTN",
             None,
             false,
-            QueryMasks::Other,
-            &[b">q1\nACGTAC\n", b">q1\nACGTACGTAC\n"],
+            QueryMasks::Repeats { then_reads: true },
+            &mixed,
         ),
         false,
         |_| panic!("no set-up"),
     )
     .unwrap_err();
+    expect_native(err, &twice);
+    let err = refused_batch_error(
+        run_masked(
+            "BLASTN",
+            None,
+            false,
+            QueryMasks::Repeats { then_reads: false },
+            &mixed,
+        ),
+        false,
+        |own| {
+            assert_eq!(own, [false, true]);
+            BatchSetUp::Unknown
+        },
+    )
+    .unwrap_err();
     assert!(ScopeRefusal::of(&err).is_some(), "{err}");
+    assert_eq!(QueryMasks::of_blastn(true, true, true), QueryMasks::Reads);
+    assert_eq!(QueryMasks::of_blastn(false, false, true), QueryMasks::Reads);
+    assert_eq!(
+        QueryMasks::of_blastn(false, true, false),
+        QueryMasks::Repeats { then_reads: false }
+    );
+    assert_eq!(QueryMasks::of_blastn(false, false, false), QueryMasks::None);
 
     // `PSIBLAST` crashes in NCBI 2.17.0 on `PastFirst`: stays refused.
     let err = refused_batch_error(

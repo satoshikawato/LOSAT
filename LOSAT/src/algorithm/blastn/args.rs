@@ -608,14 +608,14 @@ impl BlastnArgs {
     }
 
     /// The filtering that reads each batch's query letters before they are set up
-    /// (`query_batch::QueryMasks`), of arguments whose `-dust` is read (`resolve_dust`): DUST, else
-    /// `-filtering_db` or WindowMasker (`-window_masker_db`, `-window_masker_taxid` other than 0)
-    /// as given.
+    /// (`query_batch::QueryMasks`), of arguments whose `-dust` is read (`resolve_dust`): DUST,
+    /// repeat filtering (`-filtering_db`) and WindowMasker (`-window_masker_db`,
+    /// `-window_masker_taxid` other than 0) as given.
     pub(crate) fn query_masks(&self) -> crate::blastinput::query_batch::QueryMasks {
         crate::blastinput::query_batch::QueryMasks::of_blastn(
             self.dust.is_enabled(),
-            self.filtering_db.is_some()
-                || self.window_masker_db.is_some()
+            self.filtering_db.is_some(),
+            self.window_masker_db.is_some()
                 || self.window_masker_taxid.is_some_and(|taxid| taxid != 0),
         )
     }

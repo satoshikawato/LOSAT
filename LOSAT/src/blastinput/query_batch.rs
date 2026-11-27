@@ -912,36 +912,42 @@ enum SetUpRead {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:176-230
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:164-189
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:307-373
 /// The filtering that reads a batch's letters before its records are set up
-/// (`CBlastQuerySourceOM::x_CalculateMasks`, BLASTN only). Each record's set-up asks for the
-/// batch's masks (`s_GetRestrictedBlastSeqLocs`), and the masks are made for every record of the
-/// batch at once, until a making of them passes: where it fails, at a record whose interval passes
-/// its earlier record's end (`SetUpRead::PastFirst`), every searched record of the batch gets that
-/// failure as its message, and none has a valid context (NCBI BLAST+ 2.17.0, probe 1 of line
-/// RG-KB item 7b: `blastn` with two such records in a batch, `CSeqVector_CI: cannot locate
-/// segment at 90` twice with DUST, at 90 and at 135 with `-dust no`).
+/// (`CBlastQuerySourceOM::x_CalculateMasks`, BLASTN only): DUST, then repeat filtering
+/// (`-filtering_db`), then WindowMasker. Each record's set-up asks for the batch's masks
+/// (`s_GetRestrictedBlastSeqLocs`), and the masks are made for every record of the batch at once,
+/// until a making of them passes, so where it fails every searched record of the batch gets that
+/// failure as its message, and none has a valid context. DUST and WindowMasker read the records in
+/// the batch's order and fail at the first whose interval passes its earlier record's end
+/// (`SetUpRead::PastFirst`). Repeat filtering searches the batch's records in a search of its own
+/// without DUST (`Blast_FindRepeatFilterLoc`), whose set-up fails where the batch's would without
+/// filtering, with the text of that failure (NCBI BLAST+ 2.17.0, probes 1 and 2 of line RG-KB item
+/// 7b: `blastn` with two such records in a batch, `CSeqVector_CI: cannot locate segment at 90`
+/// twice with DUST or WindowMasker, at 90 and at 135 with `-dust no`, and that pair of messages as
+/// the message of each record with `-dust no -filtering_db`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum QueryMasks {
     /// No filtering reads the letters (`-dust no` without repeat or WindowMasker filtering; every
     /// program but BLASTN).
     #[default]
     None,
-    /// DUST (`-dust`, on by default), the first of the masks made: its read of the records in the
-    /// batch's order fails at the first record past its earlier record's end.
-    Dust,
-    /// Repeat (`-filtering_db`) or WindowMasker filtering without DUST, whose reads of such a
-    /// record LOSAT does not follow: a batch with one stays refused.
-    Other,
+    /// DUST (`-dust`, on by default), or WindowMasker without DUST and repeat filtering: the first
+    /// mask made reads the records in the batch's order.
+    Reads,
+    /// Repeat filtering without DUST: its search's set-up comes first, then WindowMasker's read
+    /// where `then_reads`.
+    Repeats { then_reads: bool },
 }
 
 impl QueryMasks {
-    /// BLASTN's filtering of the query letters: DUST (`dust`), else repeat or WindowMasker
-    /// filtering (`other`).
-    pub(crate) fn of_blastn(dust: bool, other: bool) -> Self {
-        match (dust, other) {
-            (true, _) => Self::Dust,
-            (false, true) => Self::Other,
-            (false, false) => Self::None,
+    /// BLASTN's filtering of the query letters: DUST (`dust`), repeat filtering (`repeats`) and
+    /// WindowMasker (`window_masker`).
+    pub(crate) fn of_blastn(dust: bool, repeats: bool, window_masker: bool) -> Self {
+        match (dust, repeats, window_masker) {
+            (true, _, _) | (false, false, true) => Self::Reads,
+            (false, true, then_reads) => Self::Repeats { then_reads },
+            (false, false, false) => Self::None,
         }
     }
 }
@@ -955,8 +961,6 @@ enum SetUpQueries {
     /// No context is valid and a record has a message: NCBI's error, the message of each such
     /// record (`ENGINE_ERROR` and `Warning: <message> ` each; exit 3).
     Fails(String),
-    /// A read that LOSAT does not follow (`QueryMasks::Other`): the refusal.
-    Unfollowed,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:518-652
@@ -972,47 +976,49 @@ enum SetUpQueries {
 /// the messages of the batch (`TSearchMessages::ToString`, each after its severity) with exit 3,
 /// before the batch's `BLAST_MainSetUp` and the subjects' checks.
 fn setup_queries_failure(reads: &[SetUpRead], masks: QueryMasks) -> SetUpQueries {
-    let mut searched = reads.iter().filter(|&&read| read != SetUpRead::Skipped);
-    let past_first = searched.clone().find_map(|&read| match read {
+    let searched = || reads.iter().filter(|&&read| read != SetUpRead::Skipped);
+    let past_first = searched().find_map(|&read| match read {
         SetUpRead::PastFirst { pos } => Some(pos),
         _ => None,
     });
-    let warning = |text: &mut String, message: std::fmt::Arguments<'_>| {
-        use std::fmt::Write as _;
-        let _ = write!(text, "Warning: {message} ");
-    };
-    let mut text = String::new();
-    match (masks, past_first) {
-        (QueryMasks::Other, Some(_)) => return SetUpQueries::Unfollowed,
-        (QueryMasks::Dust, Some(pos)) => {
-            for _ in searched {
-                warning(&mut text, format_args!("{PAST_FIRST_MESSAGE} {pos}"));
-            }
+    // `TSearchMessages::ToString` of one message for each searched record.
+    let each_searched =
+        |message: &str| -> String { searched().map(|_| format!("Warning: {message} ")).collect() };
+    // The set-up without filtering: each record's own message, where no context is valid.
+    let own_messages = || -> Option<String> {
+        if searched().any(|&read| {
+            matches!(
+                read,
+                SetUpRead::Own { has_context: true } | SetUpRead::InFirst { has_context: true }
+            )
+        }) {
+            return None;
         }
-        _ => {
-            if searched.any(|&read| {
-                matches!(
-                    read,
-                    SetUpRead::Own { has_context: true } | SetUpRead::InFirst { has_context: true }
-                )
-            }) {
-                return SetUpQueries::Passes;
-            }
-            for &read in reads {
-                match read {
-                    SetUpRead::Empty => warning(&mut text, format_args!("{NO_DATA_MESSAGE}")),
-                    SetUpRead::PastFirst { pos } => {
-                        warning(&mut text, format_args!("{PAST_FIRST_MESSAGE} {pos}"))
-                    }
-                    SetUpRead::Skipped | SetUpRead::Own { .. } | SetUpRead::InFirst { .. } => {}
+        let text: String = searched()
+            .filter_map(|&read| match read {
+                SetUpRead::Empty => Some(format!("Warning: {NO_DATA_MESSAGE} ")),
+                SetUpRead::PastFirst { pos } => {
+                    Some(format!("Warning: {PAST_FIRST_MESSAGE} {pos} "))
                 }
-            }
-        }
+                SetUpRead::Skipped | SetUpRead::Own { .. } | SetUpRead::InFirst { .. } => None,
+            })
+            .collect();
+        (!text.is_empty()).then_some(text)
+    };
+    let read_failure = |pos: usize| each_searched(&format!("{PAST_FIRST_MESSAGE} {pos}"));
+    let text = match masks {
+        QueryMasks::None => own_messages(),
+        QueryMasks::Reads => past_first.map(read_failure).or_else(own_messages),
+        QueryMasks::Repeats { then_reads } => match own_messages() {
+            // The repeat search's set-up of the batch throws its messages (`CBlastException`).
+            Some(search_failure) => Some(each_searched(&search_failure)),
+            None => past_first.filter(|_| then_reads).map(read_failure),
+        },
+    };
+    match text {
+        Some(text) => SetUpQueries::Fails(format!("{ENGINE_ERROR} {text}\n")),
+        None => SetUpQueries::Passes,
     }
-    if text.is_empty() {
-        return SetUpQueries::Passes;
-    }
-    SetUpQueries::Fails(format!("{ENGINE_ERROR} {text}\n"))
 }
 
 /// LOSAT's refusal of a query record with the id of another query record of its scope
@@ -1581,10 +1587,6 @@ impl QueryScopes {
             .map(|batch_reads| setup_queries_failure(batch_reads, self.query_masks));
         let setup_queries_message = match set_up {
             Some(SetUpQueries::Fails(message)) => Some(message),
-            Some(SetUpQueries::Unfollowed) => {
-                reads = None;
-                None
-            }
             Some(SetUpQueries::Passes) | None => None,
         };
         let xml_takes = setup_queries_message.is_none()

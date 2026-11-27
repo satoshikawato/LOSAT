@@ -9,7 +9,6 @@ use crate::utils::os_bytes::path_from_bytes;
 use super::log::{Log, Stop, BRIEF, DETAILS};
 use super::path::{make_path, FileParts};
 use super::work::{caught, unknown_text};
-use super::PROGRAM;
 
 /// The values of an alias file's keywords that the test checks after its lines; -1 for one that
 /// is absent or not a number, 0 for a list that is present.
@@ -21,83 +20,6 @@ struct Values {
     first_oid: i32,
     last_oid: i32,
     maxoid: i32,
-}
-
-/// The value of an `int` expression of an alias file's values, exact and as the machine's
-/// arithmetic wraps it.
-#[derive(Clone, Copy)]
-struct Both {
-    exact: i128,
-    wrapped: i64,
-}
-
-impl Both {
-    fn int(value: i32) -> Self {
-        Both {
-            exact: value.into(),
-            wrapped: value.into(),
-        }
-    }
-
-    fn int8(value: i64) -> Self {
-        Both {
-            exact: value.into(),
-            wrapped: value,
-        }
-    }
-
-    /// `self + other` in `int` (`int8`: in `Int8`).
-    fn add(self, other: Self, int8: bool) -> Self {
-        Both {
-            exact: self.exact + other.exact,
-            wrapped: wrap(self.wrapped.wrapping_add(other.wrapped), int8),
-        }
-    }
-
-    /// `self - other` in `int`.
-    fn sub(self, other: Self) -> Self {
-        Both {
-            exact: self.exact - other.exact,
-            wrapped: wrap(self.wrapped.wrapping_sub(other.wrapped), false),
-        }
-    }
-
-    /// `self * other` in `int` (`int8`: in `Int8`).
-    fn mul(self, other: Self, int8: bool) -> Self {
-        Both {
-            exact: self.exact * other.exact,
-            wrapped: wrap(self.wrapped.wrapping_mul(other.wrapped), int8),
-        }
-    }
-}
-
-/// `value` cut to `int` (unless `int8`).
-fn wrap(value: i64, int8: bool) -> i64 {
-    if int8 {
-        value
-    } else {
-        i64::from(value as i32)
-    }
-}
-
-// The comparisons NCBI makes in `int` (and in `Int8` for OIDLIST) overflow for large values,
-// whose result C leaves undefined: NCBI's build wraps them (row RG-D2b a_ov1: FIRST_OID 65535
-// and LAST_OID 65535 multiply to 0 in `int`). Whether LOSAT gives the exact result there or the
-// wrapped one is the Owner's question Q-D2b-OV; until then LOSAT refuses an alias file whose
-// result differs between the two, and gives the result where it does not (a_ov3).
-/// The truth of `test` on an expression's value, where the exact and the wrapped values agree;
-/// LOSAT's refusal where they do not (`what` names the check).
-fn decide(value: Both, test: impl Fn(i128) -> bool, name: &[u8], what: &str) -> Result<bool, Stop> {
-    let exact = test(value.exact);
-    if exact == test(value.wrapped.into()) {
-        return Ok(exact);
-    }
-    Err(Stop::Refused(format!(
-        "the alias file {} whose values overflow NCBI's arithmetic in its check of {what} (the \
-         result of the overflow, which C leaves undefined, decides the check), which is not \
-         supported by LOSAT's {PROGRAM}",
-        String::from_utf8_lossy(name)
-    )))
 }
 
 /// The test of the alias file `name`: its faults.
@@ -142,7 +64,7 @@ pub(super) fn alias_file_test(
             break;
         }
     }
-    faults += check_values(log, &prefix, name, &values)?;
+    faults += check_values(log, &prefix, &values)?;
     faults += open(log, &prefix, &file, path)?;
     Ok(faults)
 }
@@ -296,46 +218,32 @@ fn check_files(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:782-805
+// Approved exception (`PD-LOSAT-NCBI-DEFECTS`, Owner Q-D2b-OV=A, 2026-11-25 17:54 JST): widen
+// the alias count products and sums to `i128` so signed-integer overflow in NCBI's 32/64-bit C++
+// expressions does not produce false errors.
 /// The checks of the OID range, the lists and their counts after the lines: its faults.
-fn check_values(
-    log: &mut Log<'_>,
-    prefix: &[u8],
-    name: &[u8],
-    values: &Values,
-) -> Result<u32, Stop> {
-    let one = Both::int(1);
-    let first = Both::int(values.first_oid);
-    let last = Both::int(values.last_oid);
-    let nseq = Both::int(values.nseq);
+fn check_values(log: &mut Log<'_>, prefix: &[u8], values: &Values) -> Result<u32, Stop> {
+    let first = i128::from(values.first_oid);
+    let last = i128::from(values.last_oid);
+    let nseq = i128::from(values.nseq);
     let mut faults = 0;
-    let unpaired = first.add(one, false).mul(last.add(one, false), false);
-    if decide(unpaired, |v| v == 0, name, "FIRST_OID and LAST_OID")? {
-        let sum = first.add(last, false);
-        if decide(sum, |v| v != -2, name, "FIRST_OID and LAST_OID")? {
+    if (first + 1) * (last + 1) == 0 {
+        if first + last != -2 {
             log.line(
                 BRIEF,
                 &[prefix, b"  [ERROR] FIRST_OID not paired with LAST_OID"],
             )?;
             faults += 1;
         }
-    } else {
-        let span = nseq.add(first, false).sub(last).sub(one);
-        let inconsistent = nseq.add(one, false).mul(span, false);
-        if decide(
-            inconsistent,
-            |v| v != 0,
-            name,
-            "NSEQ with FIRST_OID and LAST_OID",
-        )? {
-            log.line(
-                BRIEF,
-                &[
-                    prefix,
-                    b"  [ERROR] (FIRST_OID, LAST_OID) is not consistent with NSEQ",
-                ],
-            )?;
-            faults += 1;
-        }
+    } else if (nseq + 1) * (nseq + first - last - 1) != 0 {
+        log.line(
+            BRIEF,
+            &[
+                prefix,
+                b"  [ERROR] (FIRST_OID, LAST_OID) is not consistent with NSEQ",
+            ],
+        )?;
+        faults += 1;
     }
     if values.oidlist + values.gilist >= 0 {
         log.line(
@@ -348,16 +256,9 @@ fn check_values(
         faults += 1;
     }
     if values.oidlist != -1 {
-        let counts = Both::int(values.maxoid)
-            .add(one, false)
-            .mul(Both::int8(values.length).add(Both::int8(1), true), true)
-            .mul(nseq.add(one, false), true);
-        if decide(
-            counts,
-            |v| v == 0,
-            name,
-            "OIDLIST with MAXOID, LENGTH and NSEQ",
-        )? {
+        let maxoid = i128::from(values.maxoid);
+        let length = i128::from(values.length);
+        if (maxoid + 1) * (length + 1) * (nseq + 1) == 0 {
             log.line(
                 BRIEF,
                 &[

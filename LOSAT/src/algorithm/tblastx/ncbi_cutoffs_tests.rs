@@ -137,6 +137,35 @@ fn test_cutoff_score_from_evalue_uses_ceil() {
     );
 }
 
+// blast_stat.c:4051-4057: a block with a negative Lambda, K or H gives `BLAST_SCORE_MIN`
+// (a PSSM file's block: a negative gapped H once made TBLASTN's hit cutoff a real score).
+#[test]
+fn a_block_with_a_negative_value_gives_the_lowest_score() {
+    let gapped = blosum62_gapped();
+    assert!(cutoff_score_from_evalue(1000.0, 1_000_000, &gapped) > 1);
+    for invalid in [
+        KarlinParams {
+            lambda: -0.267,
+            ..gapped
+        },
+        KarlinParams {
+            k: -0.041,
+            ..gapped
+        },
+        KarlinParams { h: -0.14, ..gapped },
+    ] {
+        assert_eq!(
+            cutoff_score_from_evalue(1000.0, 1_000_000, &invalid),
+            crate::core::blast_util::BLAST_SCORE_MIN
+        );
+    }
+    // A zero H is valid for this check (`H < 0.0`).
+    assert_eq!(
+        cutoff_score_from_evalue(1000.0, 1_000_000, &KarlinParams { h: 0.0, ..gapped }),
+        cutoff_score_from_evalue(1000.0, 1_000_000, &gapped)
+    );
+}
+
 // blast_stat.c:4059-4061 (line PS DECISIONS 28): a quotient `K searchsp / E` past the
 // double takes `ln K + ln searchsp - ln E`; a finite one keeps NCBI's order of operations.
 #[test]

@@ -343,9 +343,14 @@ where
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:462-470
         for (index, (slot, list)) in preliminary_hit_lists.iter_mut().zip(given).enumerate() {
             slot.clone_from(list);
-            // The batch's search numbered its own queries; this call has one query per list.
+            // The batch's search numbered its own queries (lists, HSPs and their contexts, one
+            // context per protein query); this call has one query per list.
             for hsp_list in slot.iter_mut().flat_map(|list| &mut list.hsplist_array) {
                 hsp_list.query_index = index as u32;
+                for hsp in &mut hsp_list.hsps {
+                    hsp.q_idx = index as u32;
+                    hsp.query_context = index as i32;
+                }
             }
         }
         rps_multi_volume = false;

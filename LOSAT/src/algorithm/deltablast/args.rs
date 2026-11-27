@@ -245,14 +245,20 @@ impl DeltablastArgs {
             BlastpApp::Deltablast,
             false,
         )?;
+        let mut domain = Self::domain_search_args(
+            &self.rpsdb,
+            self.domain_inclusion_ethresh,
+            self.lcase_masking,
+        )?;
+        // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:261-283
+        // `-show_domain_hits`: deltablast's formatter, which has `-show_gis`, reports the domain
+        // search's subjects, read from the domain database that the domain search opens
+        // (`BlastpDatabase::showing_gis`); the search itself reads no gi.
+        domain.show_gis = self.show_gis;
         let delta = DeltaOptions {
             domain_inclusion_ethresh: self.domain_inclusion_ethresh,
             show_domain_hits: self.show_domain_hits,
-            domain: Box::new(Self::domain_search_args(
-                &self.rpsdb,
-                self.domain_inclusion_ethresh,
-                self.lcase_masking,
-            )?),
+            domain: Box::new(domain),
         };
         let num_iterations = self.num_iterations;
         let psi = PsiblastArgs {

@@ -5339,10 +5339,11 @@ NCBI writes past its array.
     whether NCBI happened to crash. Fixtures (`ncbi-near` rows: NCBI's run of the range's letters as their own
     query, in the fields that read no query letter, with the PSSM files): `db.dl.ql.dd300.s6`,
     `db.dl.ql.dd300.pssm`, `db.dl.ql.dd933.s6`, `db.dl.ql.serp2.s6`, `db.dl.ql.serp100.s6`, `db.dl.ql.serp10.s6`,
-    `db.dl.ql.serp300.s6`, `db.dl.ql.head701.s6`, `db.dl.ql.m100.s6`, `db.dl.ql.m100.pssm`, `db.dl.ql.three5.s6`,
-    `db.dl.ql.s.serp100.s6`. The test
-    `a_range_past_ncbis_alignment_writes_the_domain_rows_of_the_range_and_the_rows_of_its_letters`
-    (`LOSAT/tests/deltablast_query_loc.rs`) checks the same with `-show_domain_hits`. Code:
+    `db.dl.ql.serp300.s6`, `db.dl.ql.head701.s6`, `db.dl.ql.m100.s6`, `db.dl.ql.m100.pssm`,
+    `db.dl.ql.s.serp100.s6`. The tests of `LOSAT/tests/deltablast_query_loc.rs` check the same with
+    `-show_domain_hits` (`a_range_past_ncbis_alignment_writes_the_domain_rows_of_the_range_and_the_rows_of_its_letters`)
+    and in a batch where one query's cells stay in their rows, which keeps NCBI's placement, NCBI's run of that
+    query alone with the range (`a_batch_of_ranges_keeps_each_querys_placement`). Code:
     `rps_search::cdd_input::build_msa`.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)

@@ -1784,6 +1784,9 @@ show_domain_hits = false
 [deltablast -lcase_masking]
 - lcase_masking = false
 + lcase_masking = true
+[deltablast -query_loc x]
+- query_loc = None
++ query_loc = "x"
 [deltablast -parse_deflines]
 - parse_deflines = false
 + parse_deflines = true
@@ -1850,6 +1853,9 @@ show_domain_hits = false
 [deltablast -rpsdb x]
 - rpsdb = "cdd_delta"
 + rpsdb = "x"
+[deltablast -show_domain_hits]
+- show_domain_hits = false
++ show_domain_hits = true
 [rpsblast]
 query = "-"
 db = None

@@ -224,7 +224,7 @@ of7_self_subj_all	-archive in/self_subj.asn -outfmt '7 qseqid qgi qacc qaccver q
 of6_self_subj_pd	-archive in/self_subj.asn -outfmt '6 std stitle sallseqid staxid sseq' -parse_deflines
 of6_two_ids	-archive in/two_ids.asn -outfmt '6 std sseqid sallseqid stitle qcovs'
 of7_two_ids	-archive in/two_ids.asn -outfmt 7
-# Rows from of7_ver_db on (line RG item F3 PR 3a, review R1, agent E3 of ad-RG-F3-12, 2026-11-27): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build; the archives and databases by the official release's search programs and makeblastdb), by remaining-gaps-20261112/F/f3/tmp/e3/tools/fixE3.py (rows of7_ver_* and *_self_lcl_db*) and fixE3b.py (the others), every NCBI run under unshare -rn. New inputs: in/vq.fa, vs.fa, vq2.fa, vs2.fa, vq3.fa, vs3.fa (accessions with and without a version) and in/vdb, vdb2, vdb3 (makeblastdb -parse_seqids -blastdb_version 4 of in/vs.fa, vs2.fa, vs3.fa); in/ver_db.asn, ver_db2.asn, ver_db3.asn (blastn -query in/vq*.fa -db in/vdb*/v* -parse_deflines -outfmt 11) and in/ver_subj.asn, ver_subj2.asn, ver_subj3.asn (the same with -subject in/vs*.fa); in/m3.faa (in/ps.faa, a copy with a change every 7 residues under a swissprot id, and its residues 6-40 with MKVL) and in/m3db (makeblastdb -parse_seqids -taxid 9606 -blastdb_version 4), in/self_lcl_db.asn (blastp -query in/m3.faa -db in/m3db/m3 -parse_deflines -outfmt 11); in/qlen_huge.asn, qlen_big.asn, qlen_short.asn and in/slen_huge.asn, slen_big.asn, slen_short.asn: in/bn.asn with its query Bioseq's or its -subject Bioseq's length 4294967295, 4294967294 or 1500 (it holds 120 and 400 letters); in/ps_none.asn (psiblast -query in/ps.faa -db ../db_search/paja -num_iterations 2 -evalue 1e-50 -outfmt 11: no hits) and in/ps_none_step_str.asn (its Web_StepNumber a string). The row refused_tabular_slen_huge_legacy keeps NCBI's record of the row of6_slen_huge_legacy of fixE3b.py; the rows of6_qlen_short and of6_slen_short_legacy_sseq were refused_tabular_qlen_short and refused_tabular_slen_short_legacy_sseq until agent E3t of ad-RG-F3-13, 2026-11-27 (NCBI's bytes unchanged).
+# Rows from of7_ver_db on (line RG item F3 PR 3a, review R1, agent E3 of ad-RG-F3-12, 2026-11-27): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build; the archives and databases by the official release's search programs and makeblastdb), by remaining-gaps-20261112/F/f3/tmp/e3/tools/fixE3.py (rows of7_ver_* and *_self_lcl_db*) and fixE3b.py (the others), every NCBI run under unshare -rn. New inputs: in/vq.fa, vs.fa, vq2.fa, vs2.fa, vq3.fa, vs3.fa (accessions with and without a version) and in/vdb, vdb2, vdb3 (makeblastdb -parse_seqids -blastdb_version 4 of in/vs.fa, vs2.fa, vs3.fa); in/ver_db.asn, ver_db2.asn, ver_db3.asn (blastn -query in/vq*.fa -db in/vdb*/v* -parse_deflines -outfmt 11) and in/ver_subj.asn, ver_subj2.asn, ver_subj3.asn (the same with -subject in/vs*.fa); in/m3.faa (in/ps.faa, a copy with a change every 7 residues under a swissprot id, and its residues 6-40 with MKVL) and in/m3db (makeblastdb -parse_seqids -taxid 9606 -blastdb_version 4), in/self_lcl_db.asn (blastp -query in/m3.faa -db in/m3db/m3 -parse_deflines -outfmt 11); in/qlen_huge.asn, qlen_big.asn, qlen_short.asn and in/slen_huge.asn, slen_big.asn, slen_short.asn: in/bn.asn with its query Bioseq's or its -subject Bioseq's length 4294967295, 4294967294 or 1500 (it holds 120 and 400 letters); in/ps_none.asn (psiblast -query in/ps.faa -db ../db_search/paja -num_iterations 2 -evalue 1e-50 -outfmt 11: no hits) and in/ps_none_step_str.asn (its Web_StepNumber a string). The rows of6_qlen_short, of6_slen_short_legacy_sseq and of6_slen_huge_legacy were refused_tabular_qlen_short, refused_tabular_slen_short_legacy_sseq and refused_tabular_slen_huge_legacy until agents E3t (the first two) and E3L (the third) of ad-RG-F3-13, 2026-11-27 (NCBI's bytes of fixE3b.py unchanged).
 of7_ver_db	-archive in/ver_db.asn -outfmt '7 std saccver stitle slen sallseqid sseq'
 of7_ver_db_pd	-archive in/ver_db.asn -outfmt '7 std saccver stitle slen sallseqid sseq' -parse_deflines
 of7_ver_subj	-archive in/ver_subj.asn -outfmt '7 std saccver stitle slen sallseqid sseq'
@@ -268,7 +268,7 @@ of20_ps_none_step_str	-archive in/ps_none_step_str.asn -outfmt 20
 of8_ps_none_step_str	-archive in/ps_none_step_str.asn -outfmt 8
 of6_qlen_short	-archive in/qlen_short.asn -outfmt '6 std qlen qseq'
 of6_slen_short_legacy_sseq	BL2SEQ_LEGACY=1 -archive in/slen_short.asn -outfmt '6 std slen sseq'
-refused_tabular_slen_huge_legacy	BL2SEQ_LEGACY=1 -archive in/slen_huge.asn -outfmt '6 std slen'
+of6_slen_huge_legacy	BL2SEQ_LEGACY=1 -archive in/slen_huge.asn -outfmt '6 std slen'
 of8_db_bin	-archive in/db.asnb -outfmt 8
 of9_db_bin	-archive in/db.asnb -outfmt 9
 of12_db_bin	-archive in/db.asnb -outfmt 12
@@ -380,3 +380,37 @@ of6_e_notitle	-archive in/e_notitle.asn -outfmt '6 std'
 of6_e_nodata	-archive in/e_nodata.asn -outfmt '6 std'
 of6_e_virtual	-archive in/e_virtual.asn -outfmt '6 std'
 of6_e_two	-archive in/e_two.asn -outfmt '6 std sseq'
+# Rows from of6_p_std_slen on (line RG item F3 PR 3a, agent E3L of ad-RG-F3-13, 2026-11-27): NCBI BLAST+ 2.17.0, the official release build on the local machine, every NCBI run under unshare -rn, by remaining-gaps-20261112/F/f3/tmp/e3/tools/probe3.py, probe4.py, probe5.py (agent E3; rows of6_p_*, of10_p_std, of20_p_std, of6_t*) and F/f3/tmp/e3l/tools/probeL1.py (rows of6_l_*): BL2SEQ_LEGACY with -subject Bioseqs that declare 4294967295 letters (in/p_huge.asn: in/bn.asn's Subject_1 so; in/t.asn: blastn -query of two hits -subject of two sequences -outfmt 11, in/t_huge1.asn, t_huge2.asn, t_huge12.asn: its Subject_1, Subject_2 or both raw of 4294967295; in/t_stop1.asn, t_far1.asn: Subject_1 a delta whose second literal declares 4294967295, near and far past its row's range, Subject_2 raw of 4294967295; in/t_dlen.asn: Subject_1 a delta declaring 4294967295 whose literals hold 500; in/t_dlen2.asn, t_huge1x2.asn: t_dlen.asn and t_huge1.asn with their second Seq-align twice; in/t_qdlen.asn: t.asn's query a delta declaring 4294967295 whose literals hold its 420 letters). The prefetch makes the sequence maps of the subjects it reaches (it stops at the first that throws), a row's letters make its Bioseqs' maps, and GetBioseqLength reads a made map: of6_slen_huge_legacy (fixE3b.py, ws env_blast) was refused_tabular_slen_huge_legacy. of6_t_huge2_all of probe4 (staxid of a first row that throws there) is not frozen: NCBI prints an uninitialised number, another in each run (LOSAT refuses it).
+of6_p_std_slen	BL2SEQ_LEGACY=1 -archive in/p_huge.asn -outfmt '6 std slen'
+of6_p_all	BL2SEQ_LEGACY=1 -archive in/p_huge.asn -outfmt '6 qseqid qlen sseqid sacc slen qcovs qcovhsp qcovus length pident nident mismatch positive gaps ppos evalue bitscore score sstrand qstart qend sstart send'
+of6_p_qseq	BL2SEQ_LEGACY=1 -archive in/p_huge.asn -outfmt '6 qseqid evalue qseq'
+of6_p_sseq	BL2SEQ_LEGACY=1 -archive in/p_huge.asn -outfmt '6 qseqid evalue sseq'
+of6_p_noblock	BL2SEQ_LEGACY=1 -archive in/p_huge.asn -outfmt '6 qseqid evalue bitscore length pident'
+of6_p_slen_only	BL2SEQ_LEGACY=1 -archive in/p_huge.asn -outfmt '6 qseqid slen'
+of6_p_sstrand	BL2SEQ_LEGACY=1 -archive in/p_huge.asn -outfmt '6 qseqid sstrand length'
+of6_p_nopf	BL2SEQ_LEGACY=1 PRE_FETCH_SEQS_LIMIT=0 -archive in/p_huge.asn -outfmt '6 std slen'
+of6_p_nopf_sseq	BL2SEQ_LEGACY=1 PRE_FETCH_SEQS_LIMIT=0 -archive in/p_huge.asn -outfmt '6 std slen sseq'
+of10_p_std	BL2SEQ_LEGACY=1 -archive in/p_huge.asn -outfmt '10 std slen'
+of20_p_std	BL2SEQ_LEGACY=1 -archive in/p_huge.asn -outfmt '20 std slen'
+of6_t_huge1	BL2SEQ_LEGACY=1 -archive in/t_huge1.asn -outfmt '6 std slen'
+of6_t_huge1_sseq	BL2SEQ_LEGACY=1 -archive in/t_huge1.asn -outfmt '6 std slen sseq'
+of6_t_huge2	BL2SEQ_LEGACY=1 -archive in/t_huge2.asn -outfmt '6 std slen'
+of6_t_huge2_sseq	BL2SEQ_LEGACY=1 -archive in/t_huge2.asn -outfmt '6 std slen sseq'
+of6_t	BL2SEQ_LEGACY=1 -archive in/t.asn -outfmt '6 std slen'
+of6_t_huge12	BL2SEQ_LEGACY=1 -archive in/t_huge12.asn -outfmt '6 std slen'
+of6_t_huge12_ids	BL2SEQ_LEGACY=1 -archive in/t_huge12.asn -outfmt '6 qseqid sseqid sallseqid slen evalue'
+of6_t_huge1_all	BL2SEQ_LEGACY=1 -archive in/t_huge1.asn -outfmt '6 qseqid sseqid sallseqid sallacc stitle salltitles staxid sscinames slen evalue'
+of6_p_qlen	BL2SEQ_LEGACY=1 -archive in/p_huge.asn -outfmt '6 sseqid qlen slen evalue'
+of6_p_frames	BL2SEQ_LEGACY=1 -archive in/p_huge.asn -outfmt '6 qseqid sframe qframe frames qcovhsp btop sstrand'
+of6_t_stop1	BL2SEQ_LEGACY=1 -archive in/t_stop1.asn -outfmt '6 std slen'
+of6_t_far1	BL2SEQ_LEGACY=1 -archive in/t_far1.asn -outfmt '6 std slen'
+of6_t_dlen	BL2SEQ_LEGACY=1 -archive in/t_dlen.asn -outfmt '6 std slen sseq'
+of6_l_dlen_nopf	BL2SEQ_LEGACY=1 PRE_FETCH_SEQS_LIMIT=0 -archive in/t_dlen.asn -outfmt '6 std slen'
+of6_l_dlen2_nopf_sseq	BL2SEQ_LEGACY=1 PRE_FETCH_SEQS_LIMIT=0 -archive in/t_dlen2.asn -outfmt '6 std slen sseq'
+of6_l_dlen2_nopf	BL2SEQ_LEGACY=1 PRE_FETCH_SEQS_LIMIT=0 -archive in/t_dlen2.asn -outfmt '6 std slen'
+of6_l_huge1x2_ids	BL2SEQ_LEGACY=1 -archive in/t_huge1x2.asn -outfmt '6 qseqid sseqid sallseqid sallacc sallgi slen evalue'
+of6_l_huge1x2_std	BL2SEQ_LEGACY=1 -archive in/t_huge1x2.asn -outfmt '6 std slen'
+of6_l_huge2_names	BL2SEQ_LEGACY=1 -archive in/t_huge2.asn -outfmt '6 qseqid sseqid sallseqid sallacc stitle salltitles sscinames slen evalue'
+of6_l_qdlen_qseq	-archive in/t_qdlen.asn -outfmt '6 qseqid qlen qcovhsp length qseq'
+of6_l_qdlen	-archive in/t_qdlen.asn -outfmt '6 qseqid qlen qcovhsp length'
+of6_l_qdlen_legacy_qseq	BL2SEQ_LEGACY=1 -archive in/t_qdlen.asn -outfmt '6 qseqid qlen qcovhsp length qseq'

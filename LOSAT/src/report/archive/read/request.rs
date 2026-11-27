@@ -404,7 +404,7 @@ pub(crate) struct Bioseq<'a>(V<'a>);
 
 impl<'a> Bioseq<'a> {
     /// The Bioseq of a value of type `Bioseq` (a subject of a request).
-    pub(super) fn of(value: V<'a>) -> Self {
+    pub(crate) fn of(value: V<'a>) -> Self {
         Bioseq(value)
     }
 

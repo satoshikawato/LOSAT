@@ -16,3 +16,7 @@
 - `losat blast_formatter`: in the tabular formats, a query or subject sequence that holds fewer
   letters than it declares (or whose segments end before its length) ends the run with NCBI
   BLAST+'s error at the row that reads past its letters, with the position NCBI's read names.
+- `losat blast_formatter`: in the tabular formats, `-subject` sequences with `BL2SEQ_LEGACY` and a
+  subject (or query) that declares 4294967295 letters give NCBI BLAST+'s rows: the length as NCBI
+  reads it at each row (the declared one, or that of the letters once read), and where NCBI's
+  prefetch of the subjects meets such a subject, its rows with only the ids and the scores.

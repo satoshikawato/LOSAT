@@ -54,21 +54,21 @@ impl<'a> EvalueStats<'a> {
     /// cutoff (`avg_subject_length`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:915-945
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4097-4129
-    /// `BlastKarlinEtoS_simple` is `cutoff_score_from_evalue`; its value is raised to the
-    /// `new_cutoff` of 1 (`-evalue` is above 0: NCBI's options validation refuses the others).
-    /// A block with a negative value keeps the cutoff of 1 (`BLAST_Cutoffs` returns at once for
-    /// a block of -1s, blast_stat.c:4101-4102; `cutoff_score_from_evalue` gives `BLAST_SCORE_MIN`
-    /// for any negative Lambda, K or H, not above the cutoff of 1).
+    /// Without the Gumbel block, `BLAST_Cutoffs` from the `new_cutoff` of 1
+    /// (`stats::cutoffs::cutoff_score`): a block with a negative value keeps the cutoff of 1
+    /// (`BLAST_Cutoffs` returns at once for a block of -1s, and `BlastKarlinEtoS_simple` gives
+    /// `BLAST_SCORE_MIN` for any negative Lambda, K or H), as does an e-value not above 0
+    /// (`-evalue -nan`, which NCBI's option check lets pass).
     pub(crate) fn hit_cutoff(&self, prelim_evalue: f64, kbp: &KarlinParams, m: i32, n: i32) -> i32 {
         match self.gumbel {
             Some(gumbel) => blast_spouge_etos(prelim_evalue, kbp, gumbel, m, n),
-            None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
+            None => crate::stats::cutoffs::cutoff_score(
                 prelim_evalue,
-                self.search_space,
                 kbp,
-            )
-            .max(1),
+                self.search_space,
+                None,
+                crate::stats::cutoffs::CutoffConversion::FiniteQuotient,
+            ),
         }
     }
 }

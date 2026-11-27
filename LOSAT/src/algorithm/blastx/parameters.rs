@@ -3,10 +3,9 @@ use super::{
     args::ResolvedOptions,
     query_setup::{PreparedQueryBatch, QueryContext},
 };
-use crate::algorithm::tblastx::ncbi_cutoffs::{
-    cutoff_score_from_evalue, cutoff_score_sum_stats, gap_trigger_raw_score, x_drop_raw_score,
-};
+use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
+use crate::stats::cutoffs::{cutoff_score, CutoffConversion, SumStatsCutoffs};
 use crate::stats::karlin_calc::{
     apply_check_ideal, compute_aa_composition, compute_karlin_params_ungapped,
     compute_score_freq_profile_for_matrix, compute_std_aa_composition,
@@ -491,10 +490,19 @@ fn gap_decay_rate(options: &ResolvedOptions) -> f64 {
     super::linking::link_parameters(options).map_or(0.0, |link| link.gap_decay_rate)
 }
 
+/// `CUTOFF_E_BLASTX`, the e-value of an ungapped search's word cutoff (`s_GetCutoffEvalue`).
+///
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:78
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:143-144
+const CUTOFF_E_BLASTX: f64 = 1.0;
+
 /// The word cutoff of a valid context of `length` residues (`BlastInitialWordParametersUpdate`,
 /// cited above `SubjectNumbers`): the gap trigger of its ungapped block, below it an ungapped
-/// search's `BLAST_Cutoffs` at the subject length `average`, at most the hit-saving cutoff
-/// `p.hit_cutoff_max`.
+/// search's `BLAST_Cutoffs` for `CUTOFF_E_BLASTX` with the gap decay `decay` in the search space
+/// of the shorter of the context and the subject length `average` times `average`, at most the
+/// hit-saving cutoff `p.hit_cutoff_max`. NCBI casts the two lengths to `Uint8`; both are positive
+/// here (a context's length and a subject length that fit `Int4`), so their `Int8` product is
+/// the same.
 fn word_cutoff(
     options: &ResolvedOptions,
     length: usize,
@@ -506,9 +514,16 @@ fn word_cutoff(
     if options.gapped {
         trigger
     } else {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:143-144 uses CUTOFF_E_BLASTX;
-        // c++/include/algo/blast/core/blast_parameters.h:78:
-        cutoff_score_sum_stats(length as i32, average, decay, &p.ungapped).min(trigger)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:356-363
+        let searchsp = i64::from((length as i32).min(average)) * i64::from(average);
+        cutoff_score(
+            CUTOFF_E_BLASTX,
+            &p.ungapped,
+            searchsp,
+            Some(decay),
+            CutoffConversion::FiniteQuotient,
+        )
+        .min(trigger)
     }
     .min(p.hit_cutoff_max)
 }
@@ -567,12 +582,13 @@ pub(crate) fn subject_word_cutoff_min(
             word_xdrop_init: 0,
             word_xdrop: 0,
             hit_cutoff: 0,
-            hit_cutoff_max: cutoff_score_from_evalue(
+            hit_cutoff_max: cutoff_score(
                 options.evalue,
-                lengths.eff_searchsp,
                 &ungapped,
-            )
-            .max(1),
+                lengths.eff_searchsp,
+                None,
+                CutoffConversion::FiniteQuotient,
+            ),
         };
         let cutoff = word_cutoff(options, query_length, average, decay, &p);
         minimum = Some(minimum.map_or(cutoff, |m| m.min(cutoff)));
@@ -601,6 +617,9 @@ fn context_cutoffs(
     // The average context length is that of the query batch (a reader batch searched in several
     // units has one: `reader_batch.rs`, c++/src/algo/blast/core/blast_parameters.c:954-957).
     let avg_q = i32::try_from(batch.batch_concatenated_length() / batch.batch_context_count())?;
+    // The sum statistics' cutoffs carry their e-value from one valid context to the next
+    // (`stats::cutoffs::SumStatsCutoffs`, blast_parameters.c:949-976).
+    let mut sum_stats = SumStatsCutoffs::new(avg_q, n, decay, CutoffConversion::FiniteQuotient);
     for (c, p) in batch.contexts.iter().zip(parameters) {
         if !p.valid {
             continue;
@@ -619,13 +638,17 @@ fn context_cutoffs(
                 n,
             )
         } else {
-            cutoff_score_from_evalue(options.evalue, p.search_space, &ka).max(1)
+            cutoff_score(
+                options.evalue,
+                &ka,
+                p.search_space,
+                None,
+                CutoffConversion::FiniteQuotient,
+            )
         };
         p.hit_cutoff = p.hit_cutoff_max;
         if options.gapped && decay != 0.0 {
-            p.hit_cutoff = p
-                .hit_cutoff
-                .min(cutoff_score_sum_stats(avg_q, n, decay, &ka));
+            p.hit_cutoff = p.hit_cutoff.min(sum_stats.next_valid_context(&ka));
         }
         p.word_cutoff = word_cutoff(options, c.length, average, decay, p);
         p.word_xdrop_init = x_drop_raw_score(options.x_dropoff, &p.ungapped, 1.0);

@@ -767,12 +767,13 @@ fn blastp_cutoff_score_max(
             subject_length_for_hit_cutoff,
         ),
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:942-944
-        None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
+        None => crate::stats::cutoffs::cutoff_score(
             expect_value,
-            search_space,
             gapped_params,
-        )
-        .max(1),
+            search_space,
+            None,
+            crate::stats::cutoffs::CutoffConversion::FiniteQuotient,
+        ),
     }
 }
 
@@ -1176,32 +1177,43 @@ fn blastp_ungapped_word_cutoff_score_for_context(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976
-/// The sum statistics' cutoff score of a context (`BLAST_Cutoffs` with the gap decay, from an
-/// e-value of 1 in the search space of the average query and subject lengths); `BLAST_Cutoffs`
-/// keeps the `new_cutoff` of 1 when its score is lower (blast_stat.c:4108-4129).
-pub(super) fn sum_stats_hit_cutoff(
+/// The sum statistics' cutoff score of each context (`stats::cutoffs::SumStatsCutoffs`:
+/// `BLAST_Cutoffs` with the gap decay, from a cutoff of 1, in the search space of the average
+/// query and subject lengths, the e-value carried from one valid context to the next), `i32::MAX`
+/// for an invalid context (NCBI skips it).
+pub(super) fn sum_stats_hit_cutoffs(
     contexts: &[QueryContext],
     avg_subject_length: i32,
     gapped_params: &KarlinParams,
-) -> i32 {
+) -> Vec<i32> {
     let concat_qlen = contexts
         .last()
         .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
         .unwrap_or(0);
     let avg_qlen = concat_qlen / contexts.len().max(1) as i32;
-    crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_sum_stats(
+    let mut sum_stats = crate::stats::cutoffs::SumStatsCutoffs::new(
         avg_qlen,
         avg_subject_length,
         crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED,
-        gapped_params,
-    )
+        crate::stats::cutoffs::CutoffConversion::FiniteQuotient,
+    );
+    contexts
+        .iter()
+        .map(|ctx| {
+            if ctx.is_valid {
+                sum_stats.next_valid_context(gapped_params)
+            } else {
+                i32::MAX
+            }
+        })
+        .collect()
 }
 
 /// psiblast's `-sum_stats true` in a search with the matrix (round 1): the lowered cutoff of the
 /// HSPs the search keeps and the linking parameters of the preliminary stage.
 pub(super) struct BlastpSumStats {
-    /// The sum statistics' cutoff (`sum_stats_hit_cutoff`).
-    hit_cutoff: i32,
+    /// The sum statistics' cutoff of each context (`sum_stats_hit_cutoffs`).
+    hit_cutoffs: Vec<i32>,
     /// The preliminary stage's linking parameters (`cutoff_small_gap` = the words' smallest
     /// cutoff, `word_params->cutoff_score_min`).
     pub(super) preliminary: crate::core::link_hsps::EvenGapLinkParams,
@@ -1223,7 +1235,7 @@ impl BlastpSumStats {
             .min()
             .unwrap_or(i32::MAX);
         Self {
-            hit_cutoff: sum_stats_hit_cutoff(contexts, avg_subject_length, gapped_params),
+            hit_cutoffs: sum_stats_hit_cutoffs(contexts, avg_subject_length, gapped_params),
             preliminary: crate::core::link_hsps::EvenGapLinkParams::preliminary(
                 word_cutoff_score_min,
             ),
@@ -1236,9 +1248,10 @@ impl BlastpSumStats {
         contexts: &[QueryContext],
         mut cutoffs: Vec<i32>,
     ) -> Vec<i32> {
-        for (cutoff, ctx) in cutoffs.iter_mut().zip(contexts) {
+        for ((cutoff, ctx), &sum_cutoff) in cutoffs.iter_mut().zip(contexts).zip(&self.hit_cutoffs)
+        {
             if ctx.is_valid {
-                *cutoff = (*cutoff).min(self.hit_cutoff);
+                *cutoff = (*cutoff).min(sum_cutoff);
             }
         }
         cutoffs

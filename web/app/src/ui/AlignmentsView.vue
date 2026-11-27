@@ -76,9 +76,10 @@ const shown = computed(() => ranges.value.slice(win.value.start, win.value.end))
  * Applies a change of the blocks (Ranges added above, a section read) and keeps the first block
  * that starts on the screen where it was (else the one that the screen's top cuts): a block that
  * grows above it, or Ranges added above it, would push the Range being read down. The browsers'
- * own scroll anchoring is off for the blocks (styles.css), as WebKit has none. During a press, the
- * pressed control keeps its place instead (press-hold.ts): a scroll here would move it from under
- * the pointer again, and its click would be lost (line WQA's D27, 2026-11-27).
+ * own scroll anchoring is off for the blocks (styles.css), as WebKit has none. While a press keeps
+ * the pressed control in its place (press-hold.ts: from the press until its click, while the pointer
+ * is on it), that keeps the page instead: a scroll here would move the control from under the
+ * pointer again, and its click would be lost (line WQA's D27, 2026-11-27).
  */
 async function keepInPlace(change: () => void): Promise<void> {
   const blocks = [...(root.value?.querySelectorAll<HTMLElement>('section.range-block') ?? [])];

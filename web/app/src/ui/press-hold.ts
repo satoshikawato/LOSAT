@@ -26,17 +26,21 @@
 // 35 to 175 px and back, and so did the warning that the query card's check adds as it ends; the label "Run LOSAT
 // (2 runs)" lost its count while the inputs were read, and the button became narrower. WebKit has no scroll anchoring,
 // and Chromium's and Firefox's do not act at the page's top, nor for a change between what they keep in place and the
-// control. So from a press until its click, the pressed element also keeps its place in the window and its size: when
-// the page's layout moves it, the page scrolls by as much, and it is at least as wide and as high as at the press. Where
-// the page cannot scroll that far (its end, its top), the held element makes the room until the click: it is longer, or
-// has space above what it shows. The page looks at the element after each change of the document, before the next event
-// (the release is one), and at each frame (a layout that changes with no change of the document). The browsers' own
-// scroll anchoring is off meanwhile, as it would move the page a second time. The page moves for nothing else: not for a
-// press with the keys (the focused control takes it wherever it is), nor between presses, nor for what the click does,
-// nor against a scroll during the press (a scroll does not change where the element is in the page), nor for an element
-// fixed to the window or to a box that scrolls (position fixed or sticky), which the page's scroll does not move, nor
-// for one that the press may resize (a text box's corner). A scroll of the page's own (AlignmentsView keeping the Range
-// being read in place) waits until the press ends (`pressHeld`).
+// control. So from a press until its click, while the pointer is over the pressed element, the page keeps that element
+// where it was in the window and at least as large: when the page's layout moves its top, the page scrolls by as much.
+// Its top, as what it shows below its top stays under the pointer when the element itself grows or shrinks at its end (a
+// warning, a section that comes in it); the top of its box in the layout, as a pressed button is scaled about its middle.
+// Where the page cannot scroll that far (its end, its top), the held element makes the room until the click: it is
+// longer, or has space above what it shows; what came back above takes that space back first. The page looks at the
+// element after each change of the document, before the next event (the release is one), and at each frame (a layout
+// that changes with no change of the document). The browsers' own scroll anchoring is off meanwhile, as it would move
+// the page a second time. The keeping ends as the pointer leaves the element (a move, a scroll, a release elsewhere),
+// where a release would not click it. The page moves for nothing else: not for a press with the keys (the focused
+// control takes it wherever it is), nor between presses, nor for what the click does, nor against a scroll during the
+// press (a scroll does not change where the element is in the page), nor for an element fixed to the window or to a
+// box that scrolls (position fixed or sticky), which the page's scroll does not move, nor for one that the press may
+// resize (a text box's corner). A scroll of the page's own (AlignmentsView keeping the Range being read in place) waits
+// while a press keeps an element (`pressHeld`), and only then.
 
 /** The height that `element` has now, without its padding and border unless its box includes them (what min-height sets). */
 function contentHeight(element: HTMLElement): number {
@@ -51,25 +55,55 @@ function contentHeight(element: HTMLElement): number {
 /** How long after its release a press whose click has not come still holds. */
 const UNCLICKED_MS = 1000;
 
-/** The pages in which a press holds now. */
-const holding = new WeakSet<Document>();
+/** The pages in which a press keeps the pressed element in its place now. */
+const keeping = new WeakSet<Document>();
 
-/** Whether a press holds in `page` now (from the press until its click): the pressed control keeps its place meanwhile. */
+/**
+ * Whether a press keeps the pressed element in its place in `page` now: from the press until its click, while the
+ * pointer is over the element.
+ */
 export function pressHeld(page: Document = document): boolean {
-  return holding.has(page);
+  return keeping.has(page);
+}
+
+/** A point in the window. */
+interface Point {
+  readonly x: number;
+  readonly y: number;
 }
 
 /**
- * Where the middle of `element` is in the page: from the page's top, with the scroll of the window and of every box
- * around it added back, so that only a change of the page's layout moves it, not a scroll. The middle, as a pressed
- * button is scaled about it (scale(0.97)). Undefined when the element is not shown: gone from the page, or hidden.
+ * The box of `element` in the window, as shown (`shown`) and as it is in the layout (`laid`): without the scale of its
+ * transform, which a pressed button has about its middle (scale(0.97)).
+ */
+function boxesOf(element: HTMLElement): { shown: DOMRect; laid: { top: number; bottom: number; left: number; right: number } } {
+  const shown = element.getBoundingClientRect();
+  const scale = /^matrix\(([^,]+),[^,]+,[^,]+,([^,]+),/.exec(getComputedStyle(element).transform ?? '');
+  const width = shown.width / (Math.abs(Number(scale?.[1])) || 1);
+  const height = shown.height / (Math.abs(Number(scale?.[2])) || 1);
+  const x = shown.left + shown.width / 2;
+  const y = shown.top + shown.height / 2;
+  return { shown, laid: { top: y - height / 2, bottom: y + height / 2, left: x - width / 2, right: x + width / 2 } };
+}
+
+/**
+ * Where the top of `element` is in the page: the top of its box in the layout, from the page's top, with the scroll of
+ * the window and of every box around it added back, so that only a change of the page's layout moves it, not a scroll
+ * nor a scale. Undefined when the element is not shown: gone from the page, or hidden.
  */
 function placeOf(element: HTMLElement): number | undefined {
   if (!element.isConnected || element.getClientRects().length === 0) return undefined;
-  const box = element.getBoundingClientRect();
-  let place = box.top + box.height / 2;
+  let place = boxesOf(element).laid.top;
   for (let around = element.parentElement; around !== null; around = around.parentElement) place += around.scrollTop;
   return place;
+}
+
+/** Whether `at` is on `element`, as it is shown or as it is in the layout. */
+function under(element: HTMLElement, at: Point): boolean {
+  const { shown, laid } = boxesOf(element);
+  const inside = (box: { top: number; bottom: number; left: number; right: number }): boolean =>
+    at.x >= box.left && at.x <= box.right && at.y >= box.top && at.y <= box.bottom;
+  return inside(shown) || inside(laid);
 }
 
 /**
@@ -107,8 +141,11 @@ export function holdWhilePressed(
   let held: HTMLElement | undefined;
   let pressing = false;
   let unclicked: ReturnType<typeof setTimeout> | undefined;
-  /** The element pressed, and where it is in the page (`placeOf`) when it is in its place in the window, scrolled as now. */
-  let kept: { element: HTMLElement; place: number } | undefined;
+  /**
+   * The element pressed and kept, where its top is in the page (`placeOf`) when it is in its place in the window,
+   * scrolled as now, the pointer that pressed it, and where that pointer is in the window.
+   */
+  let kept: { element: HTMLElement; place: number; pointer: number; at: Point } | undefined;
   /** The styles that the hold set, besides the held element's height, with the values that they had before. */
   const styles = new Map<CSSStyleDeclaration, Map<string, string>>();
   const set = (style: CSSStyleDeclaration, name: string, value: string): void => {
@@ -117,6 +154,17 @@ export function holdWhilePressed(
     if (!before.has(name)) before.set(name, style.getPropertyValue(name));
     style.setProperty(name, value);
   };
+  /** Gives the styles that the hold set back their values from before: those of `style`, or all. */
+  const restore = (style?: CSSStyleDeclaration): void => {
+    for (const [each, before] of styles) {
+      if (style !== undefined && each !== style) continue;
+      for (const [name, value] of before) {
+        if (value === '') each.removeProperty(name);
+        else each.setProperty(name, value);
+      }
+      styles.delete(each);
+    }
+  };
   /** The space that the hold put above what the held element shows, and the padding that it had there before. */
   let room = 0;
   let padding = 0;
@@ -124,57 +172,81 @@ export function holdWhilePressed(
   /**
    * Takes the pressed element back to its place in the window when the page's layout moved it: the page scrolls by as
    * much. Where it cannot scroll that far, the held element makes the room: longer by what is missing for a scroll down;
-   * for a scroll up past the page's top, space above what it shows, which takes the element down (one inside it).
+   * for a scroll up past the page's top, space above what it shows, which takes the element down (one inside it). What
+   * comes back above the element takes that space back first.
    */
   const keep = (): void => {
     if (kept === undefined || view === null) return;
     const now = placeOf(kept.element);
     if (now === undefined) return;
-    const moved = now - kept.place;
-    if (moved === 0) return;
+    let moved = now - kept.place;
+    // Less than the layout's unit (1/64 px) is no move of the layout, only the arithmetic of a scale.
+    if (Math.abs(moved) < 1 / 64) return;
     const page = target.scrollingElement ?? target.documentElement;
+    // The held element when space above what it shows takes the pressed element down: the pressed element is in it.
+    const around = held !== undefined && held !== kept.element && held.contains(kept.element) ? held : undefined;
+    if (around !== undefined && moved > 0 && room > 0) {
+      const taken = Math.min(room, moved);
+      room -= taken;
+      set(around.style, 'padding-top', `${padding + room}px`);
+      moved -= taken;
+    }
     let added = 0;
     if (held !== undefined && moved > 0) {
-      const missing = moved - (page.scrollHeight - page.clientHeight - page.scrollTop);
+      // How far the page reaches: its scroll height, or where it fits the window (which that height then is), its own.
+      const length = page.scrollHeight > page.clientHeight ? page.scrollHeight : target.documentElement.getBoundingClientRect().height;
+      const missing = moved - (length - page.clientHeight - page.scrollTop);
       if (missing > 0) held.style.minHeight = `${contentHeight(held) + missing}px`;
-    } else if (held !== undefined && held.contains(kept.element)) {
+    } else if (around !== undefined && moved < 0) {
       added = Math.max(0, -moved - page.scrollTop);
       if (added > 0) {
-        if (room === 0) padding = parseFloat(getComputedStyle(held).paddingTop) || 0;
+        if (room === 0) padding = parseFloat(getComputedStyle(around).paddingTop) || 0;
         room += added;
-        set(held.style, 'padding-top', `${padding + room}px`);
+        set(around.style, 'padding-top', `${padding + room}px`);
       }
     }
-    const scrolled = page.scrollTop;
-    view.scrollBy({ top: moved + added, behavior: 'instant' });
-    // What the scroll did not take back (the page could not scroll so far) is taken at the next look.
-    kept.place += page.scrollTop - scrolled;
+    if (moved + added !== 0) {
+      const scrolled = page.scrollTop;
+      view.scrollBy({ top: moved + added, behavior: 'instant' });
+      // What the scroll did not take back (the page could not scroll so far) is taken at the next look.
+      kept.place += page.scrollTop - scrolled;
+    }
+    // The styles set here changed the document: that is no change to look at again.
+    observer?.takeRecords();
   };
   const observer = view?.MutationObserver === undefined ? undefined : new view.MutationObserver(keep);
   const eachFrame = (): void => {
     keep();
     frame = view?.requestAnimationFrame(eachFrame);
   };
-  const release = (): void => {
-    clearTimeout(unclicked);
-    unclicked = undefined;
-    held?.style.removeProperty('min-height');
-    held = undefined;
+  /** Stops keeping the pressed element in its place: its size and the browsers' scroll anchoring are as before. */
+  const unkeep = (): void => {
+    if (kept === undefined) return;
+    restore(kept.element.style);
+    if (target.body) restore(target.body.style);
     kept = undefined;
+    keeping.delete(target);
     observer?.disconnect();
     if (frame !== undefined) view?.cancelAnimationFrame(frame);
     frame = undefined;
-    for (const [style, before] of styles) {
-      for (const [name, value] of before) {
-        if (value === '') style.removeProperty(name);
-        else style.setProperty(name, value);
-      }
-    }
-    styles.clear();
+  };
+  /** The pointer that pressed the kept element is at `at`: the element stays in its place while the pointer is on it. */
+  const follow = (at?: Point): void => {
+    if (kept === undefined) return;
+    if (at !== undefined) kept.at = at;
+    keep();
+    if (!under(kept.element, kept.at)) unkeep();
+  };
+  const release = (): void => {
+    clearTimeout(unclicked);
+    unclicked = undefined;
+    unkeep();
+    held?.style.removeProperty('min-height');
+    held = undefined;
+    restore();
     room = 0;
     if (!pressing) return;
     pressing = false;
-    holding.delete(target);
     pressed(false);
   };
   const onDown = (event: PointerEvent): void => {
@@ -186,7 +258,6 @@ export function holdWhilePressed(
     unclicked = undefined;
     if (!pressing) {
       pressing = true;
-      holding.add(target);
       pressed(true);
     }
     const next = element();
@@ -196,24 +267,29 @@ export function holdWhilePressed(
       next.style.minHeight = `${contentHeight(next)}px`;
       held = next;
     }
-    // The element pressed (the latest press's, of several pointers) keeps its place and its size from here: the size
-    // that its box has in the layout (what min-width and min-height set; its pressed look, scaled, is not in it).
+    // The element pressed (the latest press's, of several pointers) keeps its place and its size from here, while the
+    // pointer is on it: the size that its box has in the layout (what min-width and min-height set; its pressed look,
+    // scaled, is not in it).
+    unkeep();
     const on = pressedElement(event, target);
-    const place = on === undefined ? undefined : placeOf(on);
-    kept = on === undefined || place === undefined ? undefined : { element: on, place };
-    if (kept === undefined || observer === undefined) return;
-    if (kept.element !== held) {
-      const size = getComputedStyle(kept.element);
-      if (size.width.endsWith('px')) set(kept.element.style, 'min-width', size.width);
-      if (size.height.endsWith('px')) set(kept.element.style, 'min-height', size.height);
+    const at = { x: event.clientX, y: event.clientY };
+    const place = on === undefined || !under(on, at) ? undefined : placeOf(on);
+    if (on === undefined || place === undefined || observer === undefined) return;
+    kept = { element: on, place, pointer: event.pointerId, at };
+    keeping.add(target);
+    if (on !== held) {
+      const size = getComputedStyle(on);
+      if (size.width.endsWith('px')) set(on.style, 'min-width', size.width);
+      if (size.height.endsWith('px')) set(on.style, 'min-height', size.height);
     }
-    if (frame !== undefined) return;
     if (target.body) set(target.body.style, 'overflow-anchor', 'none');
     observer.observe(target.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
     frame = view?.requestAnimationFrame(eachFrame);
   };
   const onUp = (event: PointerEvent): void => {
     down.delete(event.pointerId);
+    // Released elsewhere than on the kept element, the press does not click it.
+    if (event.pointerId === kept?.pointer) follow({ x: event.clientX, y: event.clientY });
     if (down.size === 0 && pressing) unclicked = setTimeout(release, UNCLICKED_MS);
   };
   const onCancel = (event: PointerEvent): void => {
@@ -228,7 +304,10 @@ export function holdWhilePressed(
   const onMove = (event: PointerEvent): void => {
     if (event.buttons === 0) down.delete(event.pointerId);
     if (pressing && down.size === 0) release();
+    else if (event.pointerId === kept?.pointer) follow({ x: event.clientX, y: event.clientY });
   };
+  /** The page or a box in it scrolled: the kept element may no longer be under the pointer. */
+  const onScroll = (): void => follow();
   const onKey = (): void => {
     if (down.size === 0) release();
   };
@@ -244,6 +323,7 @@ export function holdWhilePressed(
   target.addEventListener('pointercancel', onCancel, capture);
   target.addEventListener('pointermove', onMove, capture);
   target.addEventListener('keydown', onKey, capture);
+  target.addEventListener('scroll', onScroll, capture);
   view?.addEventListener('click', onClick, capture);
   view?.addEventListener('blur', onBlur, { passive: true });
   return () => {
@@ -252,6 +332,7 @@ export function holdWhilePressed(
     target.removeEventListener('pointercancel', onCancel, capture);
     target.removeEventListener('pointermove', onMove, capture);
     target.removeEventListener('keydown', onKey, capture);
+    target.removeEventListener('scroll', onScroll, capture);
     view?.removeEventListener('click', onClick, capture);
     view?.removeEventListener('blur', onBlur);
     down.clear();

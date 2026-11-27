@@ -152,6 +152,50 @@ for (const width of WIDTHS) {
       await expect(tab).toHaveAttribute('aria-selected', 'true');
     });
 
+    // Review r1 of D27, M1: the page keeps the pressed element's top in place, not its middle, so a block pressed on its
+    // blank space that grows at its end (the query card's warning comes in it) moves nothing, as without the keeping.
+    test('a press on the query block’s blank space does not move the page while the query card’s warning comes in it', async ({ page }) => {
+      await form(page, width);
+      // A window high enough to show the query card with the page at its top.
+      const bottom = await page.getByTestId('query-source-0').evaluate((card) => card.getBoundingClientRect().bottom + window.scrollY);
+      await page.setViewportSize({ width, height: Math.ceil(bottom) + 80 });
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const panel = page.getByTestId('query-panel');
+      // A point in the block's space at its left, beside its card: the press is on the block itself.
+      const y = await page.getByTestId('query-source-0').evaluate((card) => card.getBoundingClientRect().top + card.getBoundingClientRect().height / 2);
+      const at = { x: (await panel.evaluate((element) => element.getBoundingClientRect().left)) + 4, y };
+      expect(await panel.evaluate((element, at) => document.elementFromPoint(at.x, at.y) === element, at)).toBe(true);
+      const top = await panel.evaluate((element) => element.getBoundingClientRect().top);
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down();
+      await warn(page, '[data-testid="query-source-0"]', 'end');
+      expect(await page.evaluate(() => window.scrollY), 'the page does not move').toBe(0);
+      expect(await panel.evaluate((element) => element.getBoundingClientRect().top)).toBe(top);
+      await page.mouse.up();
+    });
+
+    // Review r1 of D27, M2: the space put above at the page's top for a warning that went is taken back when it comes
+    // back, and nothing moves at the click.
+    test('a press at the page’s top is a click, and nothing moves at it, while a warning above goes and comes back', async ({ page }) => {
+      await form(page, width);
+      await warn(page, '[data-testid="query-source-0"]', 'end');
+      const toggle = page.getByTestId('algorithm-parameters-toggle');
+      const bottom = await toggle.evaluate((element) => element.getBoundingClientRect().bottom + window.scrollY);
+      await page.setViewportSize({ width, height: Math.ceil(bottom) + 40 });
+      await page.evaluate(() => window.scrollTo(0, 0));
+      // Its middle, which its pressed look (a scale about its middle) does not move.
+      const middle = () => toggle.evaluate((element) => element.getBoundingClientRect().top + element.getBoundingClientRect().height / 2);
+      const before = await middle();
+      const scroll = await pressWhile(page, toggle, async () => {
+        await unwarn(page);
+        await warn(page, '[data-testid="query-source-0"]', 'end');
+      });
+      expect(scroll).toEqual({ press: 0, release: 0 });
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+      expect(await middle(), 'the control is where it was').toBeCloseTo(before, 1);
+    });
+
     // A press with the keys goes to the focused control wherever it is: the page does not move for it, as it does not
     // when nothing is pressed.
     test('Space on Run LOSAT starts the run while a warning comes above it, and the page does not move', async ({ page }) => {

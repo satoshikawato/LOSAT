@@ -270,6 +270,16 @@ fn existing_output_refusal(name: &OsStr) -> String {
     )
 }
 
+/// LOSAT's refusal reason for a tool's `-out` naming the standard error, a device or a file of
+/// procfs (`OutputName::Special`), whose writes LOSAT Web does not reproduce.
+fn special_output_refusal(name: &OsStr) -> String {
+    format!(
+        "an output file '{}' that is the standard error, a device or a file of \
+         procfs (LOSAT Web writes no such file)",
+        name.display()
+    )
+}
+
 /// The target of the `-logfile` value `name` for a `Receiver` (`RunFiles::log_target`,
 /// `OpenFiles::log_target`): NCBI's special names, then `log_name`'s reading against the run's
 /// real files (`run_entries`, `run_entry`), plus the case-2 refusal when a new file's `file_key`
@@ -523,26 +533,25 @@ impl OpenFiles {
             OutputName::Stdout => Ok(Created::Stdout),
             OutputName::Discard => Ok(Created::File(OpenedFile::Discard)),
             OutputName::Full => Ok(Created::File(OpenedFile::Full)),
-            OutputName::Special => Ok(Created::Refused(format!(
-                "an output file '{}' that is the standard error, a device or a file of \
-                 procfs (LOSAT Web writes no such file)",
-                name.display()
-            ))),
+            OutputName::Special => Ok(Created::Refused(special_output_refusal(name))),
             OutputName::Existing => Ok(Created::Refused(existing_output_refusal(name))),
         }
     }
 
-    /// LOSAT Web's case-2 refusal reason for a tool's `-out` `name` (without opening or creating
-    /// the file, for `windowmasker::app::check` / `validate`): `Some(reason)` when `self` is a
-    /// `Receiver` and `receiver_output_name` resolves `name` to `OutputName::Existing`, else
-    /// `None`. Always `None` on `Disk`.
+    /// LOSAT Web's refusal reason for a tool's `-out` `name` (without opening or creating the
+    /// file, for the checks of `validate`: `windowmasker::app::check`, `blast_formatter`,
+    /// `seqmasks_io::run::check_output`): `Some(reason)` when `self` is a `Receiver` and `create`
+    /// would refuse `name` (`receiver_output_name` resolves it to `OutputName::Existing`, the
+    /// case-2 refusal, or to `OutputName::Special`, the standard error, a device or a file of
+    /// procfs; line NP WW4c, 2026-11-28), with `create`'s reason; else `None`. Always `None` on
+    /// `Disk`.
     pub(crate) fn refused_output(&self, name: &OsStr) -> Option<String> {
         let table = self.table.as_ref()?;
-        matches!(
-            receiver_output_name(table.receiver.as_ref(), name.as_encoded_bytes()),
-            OutputName::Existing
-        )
-        .then(|| existing_output_refusal(name))
+        match receiver_output_name(table.receiver.as_ref(), name.as_encoded_bytes()) {
+            OutputName::Existing => Some(existing_output_refusal(name)),
+            OutputName::Special => Some(special_output_refusal(name)),
+            _ => None,
+        }
     }
 }
 

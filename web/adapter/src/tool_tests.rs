@@ -759,6 +759,25 @@ fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
         let error = validate(&[&[tool, "-in", "m.fa", "-logfile", "m.fa"][..], extra].concat())
             .unwrap_err();
         assert!(error.contains("a -logfile file 'm.fa'"), "{tool}: {error}");
+        // The standard error as -out: the run's refusal, at the check too.
+        let error = validate(&[&[tool, "-in", "x.fa", "-out", "/dev/stderr"][..], extra].concat())
+            .unwrap_err();
+        assert!(
+            error.starts_with("Error: an output file '/dev/stderr' that is the standard error"),
+            "{tool}: {error}"
+        );
+        // dustmasker opens -out before -in: an -out that names its missing -in is refused, as
+        // the command line would make -in empty; segmasker and convert2blastmask read -in first.
+        let same = validate(&[&[tool, "-in", "m.fa", "-out", "m.fa"][..], extra].concat());
+        if tool == "dustmasker" {
+            assert!(
+                same.as_ref()
+                    .is_err_and(|error| error.contains("an output file 'm.fa'")),
+                "{tool}: {same:?}"
+            );
+        } else {
+            assert_eq!(same, Ok(()), "{tool}");
+        }
     }
     let missing = ["-in", "x.fa", "-masking_options", "o"];
     let error = validate(&[&["convert2blastmask"][..], &missing].concat()).unwrap_err();

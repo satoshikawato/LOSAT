@@ -1092,7 +1092,10 @@ def tool() -> list[dict]:
             ("d19.t2_missing_input", "-mk_counts -in m.fa -logfile m.fa", "refusal"),
             ("d19.t2_falist_missing", "-mk_counts -fa_list true -in falist_missing.txt -logfile m_list.fa", "refusal"),
             ("d19.t2_blastdb_missing", "-mk_counts -infmt blastdb -in db/none -logfile db/none.nal", "refusal"),
-            ("d19.t3_stdout", "-in fa/dm2L_3k.fa -logfile /dev/stdout", True)):
+            ("d19.t3_stdout", "-in fa/dm2L_3k.fa -logfile /dev/stdout", True),
+            # The run's refusal of an -out that is the standard error, a device or a file of procfs, at the check too
+            # (line NP WW4c, 2026-11-28).
+            ("refusal.out_dev_stderr", f"{mask} -in fa/dm2L_3k.fa -out /dev/stderr", "refusal")):
         add(f"validate.{case_id}", words, failure, kind="validate")
 
     # blast_formatter (`losat_web2_tool` and `losat_web2_validate`; line RG-F3p7):
@@ -1141,6 +1144,7 @@ def tool() -> list[dict]:
     add_bf("refusal.out_existing", "-archive in/bn.asn -outfmt 8 -out in/bn.asn", failure="refusal")
     add_bf("refusal.logfile_existing", "-archive in/bn.asn -outfmt 8 -logfile in/bn.asn", failure="refusal")
     add_bf("refusal.logfile_missing_archive", "-archive missing.asn -outfmt 8 -logfile missing.asn", failure="refusal")
+    add_bf("refusal.out_dev_stderr", "-archive in/bn.asn -outfmt 8 -out /dev/stderr", failure="refusal")
     # validate
     for case_id, words, failure in (
             ("subject", "-archive in/bn.asn -outfmt 8", False),
@@ -1156,7 +1160,8 @@ def tool() -> list[dict]:
             ("late_of6", "-archive in/bn.asn -outfmt 6", "late_failure"),
             ("refusal.out_existing", "-archive in/bn.asn -outfmt 8 -out in/bn.asn", "refusal"),
             ("refusal.logfile_existing", "-archive in/bn.asn -outfmt 8 -logfile in/bn.asn", "refusal"),
-            ("refusal.logfile_missing_archive", "-archive missing.asn -outfmt 8 -logfile missing.asn", "refusal")):
+            ("refusal.logfile_missing_archive", "-archive missing.asn -outfmt 8 -logfile missing.asn", "refusal"),
+            ("refusal.out_dev_stderr", "-archive in/bn.asn -outfmt 8 -out /dev/stderr", "refusal")):
         add_bf(f"validate.{case_id}", words, failure, kind="validate")
     return rows
 
@@ -1263,6 +1268,7 @@ def masking() -> list[dict]:
                 ("unknown_option.logfile", f"{base} -nosuchopt -logfile run.log", True),
                 ("conffile_missing", f"-conffile none.ini {base}", True),
                 ("refusal.out_existing", f"{base} -out dm/nruns.fa", "refusal"),
+                ("refusal.out_dev_stderr", f"{base} -out /dev/stderr", "refusal"),
                 ("refusal.logfile_input", base.replace(base.split()[1], "dm/ambig.fa", 1) + " -logfile dm/ambig.fa",
                  "refusal"),
                 ("refusal.logfile_missing_input", base.replace(base.split()[1], "m.fa", 1) + " -logfile m.fa",
@@ -1296,6 +1302,19 @@ def masking() -> list[dict]:
     add("segmasker", "blastdb.missing", "-infmt blastdb -in sgdb/none", failure=True)
     add("segmasker", "error.locut_abc", "-in sg/lcr.fa -locut abc", failure=True)
     add("segmasker", "validate.locut_abc", "-in sg/lcr.fa -locut abc", True, kind="validate")
+    # A -logfile, and dustmasker's -out (which it opens before its input), that names a lookup file of a missing
+    # -infmt blastdb database: the command line would read back the file that it made (windowmasker's D19 refusal);
+    # segmasker reads its database before it opens -out, so its run ends at the missing database.
+    for program, alias in (("dustmasker", "none.nal"), ("segmasker", "none.pal")):
+        words = f"-infmt blastdb -in none -logfile {alias}"
+        add(program, "refusal.logfile_blastdb_missing", words, failure="refusal")
+        add(program, "validate.refusal.logfile_blastdb_missing", words, "refusal", kind="validate")
+    add("dustmasker", "refusal.out_blastdb_missing", "-infmt blastdb -in none -out none.nal", failure="refusal")
+    add("dustmasker", "validate.refusal.out_blastdb_missing", "-infmt blastdb -in none -out none.nal", "refusal",
+        kind="validate")
+    add("segmasker", "error.out_blastdb_missing", "-infmt blastdb -in none -out none.pal", failure=True)
+    add("segmasker", "validate.late_failure.out_blastdb_missing", "-infmt blastdb -in none -out none.pal",
+        "late_failure", kind="validate")
     # convert2blastmask's mandatory options, its inputs and its formats.
     add("convert2blastmask", "lc", f"-in c2b/lc.fa {c2b} -outfmt maskinfo_asn1_bin -out out.res")
     add("convert2blastmask", "prot", f"-in c2b/prot.fa {c2b} -outfmt maskinfo_xml")

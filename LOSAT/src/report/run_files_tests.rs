@@ -1323,4 +1323,29 @@ fn read_files_refuse_matching_writes_without_creating_folders() {
         .is_some());
     assert!(matches!(open_files.create("ids.txt"), Ok(Created::File(_))));
     assert!(open_files.refused_output(OsStr::new("ids.txt")).is_none());
+
+    // The check's refusal (`refused_output`) is the run's (`create`) for every name that `create`
+    // refuses: the standard error, a device or a file of procfs too (line NP WW4c, 2026-11-28).
+    for name in ["missing.fa", "/dev/stderr", "/dev/fd/2", "/proc/self/comm"] {
+        let Ok(Created::Refused(reason)) = open_files.create(name) else {
+            panic!("{name}: create refuses it");
+        };
+        assert_eq!(
+            open_files.refused_output(OsStr::new(name)),
+            Some(reason),
+            "{name}"
+        );
+    }
+    for name in [
+        "/dev/stdout",
+        "/dev/null",
+        "/dev/full",
+        "new.out",
+        "missing_sub/x.out",
+    ] {
+        assert!(
+            open_files.refused_output(OsStr::new(name)).is_none(),
+            "{name}"
+        );
+    }
 }

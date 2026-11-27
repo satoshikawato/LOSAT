@@ -6282,13 +6282,22 @@ fn blastp_xml_failing_query(
     })
 }
 
-/// psiblast's XML2 and JSON documents (outfmt 13 to 16) of FASTA queries against a database,
-/// whose reports NCBI makes after it drops each query from its scope
-/// (`blast_xml2::queries_dropped`): LOSAT's refusal of a searched query `queries` whose Seq-id the
-/// database holds (`report::query_bioseq::refuse_found_dropped_query`), before the search.
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2380-2399
+/// psiblast's XML2 and JSON documents (outfmt 13 to 16) against a database, whose reports NCBI
+/// holds (`blast_xml2::reports_held`) and makes at the next query's first result, after that
+/// query's search and prefetch, or at the epilog: LOSAT's refusals before the search.
+///
+/// - A database whose loads write texts or throw (a damaged taxonomy database on the search path,
+///   `BlastpDatabase::loads_write_texts`): NCBI writes the texts of the held report's loads there,
+///   after the next query's (or none, where that query's prefetch stops the run first), while
+///   LOSAT's loads write them where it makes the report (probe corpus `ht` of line PS item
+///   PS15b-4: the lists `multidb/ldl multidb/ldp` with `btd_empty`).
+/// - Of FASTA queries, made after NCBI drops each query from its scope
+///   (`blast_xml2::queries_dropped`): a searched query `queries` whose Seq-id the database holds
+///   (`report::query_bioseq::refuse_found_dropped_query`).
 #[cold]
 #[inline(never)]
-fn refuse_found_dropped_queries(
+fn refuse_held_xml2_reports(
     args: &ResolvedBlastpArgs,
     outputs: &ReportOutputs<'_>,
     database: Option<&database::BlastpDatabase>,
@@ -6306,9 +6315,20 @@ fn refuse_found_dropped_queries(
             .and_then(crate::report::blast_xml2::Xml2Kind::of)
             .is_some()
     });
-    if !xml2
-        || !crate::report::blast_xml2::queries_dropped(false, iterative, args.psi_search.is_none())
-    {
+    if !xml2 || !crate::report::blast_xml2::reports_held(false, iterative) {
+        return Ok(());
+    }
+    if database.loads_write_texts() {
+        anyhow::bail!(
+            "-outfmt 13 to 16 against a database with a damaged taxonomy database on the search \
+             path (its lookups write messages or fail): NCBI BLAST+ makes the XML2 and JSON \
+             report of a query when the next query's first result arrives or at the end of the \
+             run, and writes those messages as it loads the report's sequences there; this is \
+             not supported by LOSAT's {}",
+            args.app.name()
+        );
+    }
+    if !crate::report::blast_xml2::queries_dropped(false, iterative, args.psi_search.is_none()) {
         return Ok(());
     }
     let program = args.app.name();
@@ -6575,10 +6595,10 @@ fn search(
     if !batches.starts.is_empty() {
         validate_requested_blastp_support(&args)?;
         check_identity_compressed_lookup_of(&args)?;
-        // psiblast's XML2 and JSON reports of FASTA queries against a database are made after
-        // NCBI drops each query from its scope (`refuse_found_dropped_queries`).
+        // psiblast's XML2 and JSON reports against a database are held, and those of FASTA
+        // queries made after NCBI drops each query from its scope (`refuse_held_xml2_reports`).
         if args.app == BlastpApp::Psiblast {
-            refuse_found_dropped_queries(
+            refuse_held_xml2_reports(
                 &args,
                 outputs,
                 database,

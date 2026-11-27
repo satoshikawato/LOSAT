@@ -247,6 +247,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
 | `-use_sw_tback` | Refused. |
 | `-outfmt` 13 to 16 with FASTA queries and `-db`, where the database holds the id of a query (`lcl\|Query_1`, or the id that `-parse_deflines` reads) | Refused before the search. NCBI writes these reports once the query has left its scope, and shows that database sequence for the query. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` 13 to 16 with `-db` and a damaged taxonomy database on the search path whose lookups write messages (such as `Offset error at end of taxdb file.`) or fail | Refused before the search. NCBI writes those messages when it makes a query's report, at the next query's first result or at the end of the run, or not at all where the run stops first. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
 | An infinite `-evalue`, or an `-evalue` of 1.7976931348623157e308 with composition-based statistics | Refused, as in `blastp`. |

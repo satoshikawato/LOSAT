@@ -192,10 +192,8 @@ impl Options {
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:499-545
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:879-884
 /// blast_formatter's `Run`: the archive of `-archive` (`-` is the standard input `input`), read
-/// and formatted by `format_archive`; without `-archive`, `-rid`'s value: none is NCBI's error of
-/// the argument without a value (NCBI BLAST+ 2.17.0 `blast_formatter` alone, probe P2.205), the
-/// empty one NCBI's error of `CRemoteBlast` (P2.221), any other LOSAT's refusal where NCBI asks its
-/// servers for the search (`Refusal::Rid`). The errors are `CATCH_ALL`'s (`catch_all`).
+/// and formatted by `format_archive`; without `-archive`, `-rid`'s value (`rid`). The errors are
+/// `CATCH_ALL`'s (`catch_all`).
 fn run_body(
     args: &Args,
     settings: &ApplicationSettings,
@@ -222,29 +220,13 @@ fn run_body(
             diag,
         );
     }
-    let rid = match args.as_bytes("rid") {
-        Ok(rid) => rid,
-        Err(error) => {
-            return catch_all(
-                diag,
-                crate::cli::command_line_argument_error(error.message()),
-            )
-        }
-    };
-    if rid.is_empty() {
-        return catch_all(
-            diag,
-            crate::blastinput::app::engine_error("Empty RID string specified"),
-        );
-    }
-    Refusal::Rid.refuse(diag)
+    rid(args, diag)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:499-545
 /// The checks of `run_body` before opening `-archive` (LOSAT Web's validation, `check_in`):
 /// when `-archive` is given, only checks whether `-out` is a name LOSAT Web refuses to overwrite;
-/// without `-archive`, runs the `-rid` checks (missing value, empty RID, or LOSAT's `-rid`
-/// refusal), which open no files.
+/// without `-archive`, `run_body`'s own `-rid` steps (`rid`), which open no files.
 fn check_body(
     args: &Args,
     _settings: &ApplicationSettings,
@@ -261,6 +243,17 @@ fn check_body(
         }
         return 0;
     }
+    rid(args, diag)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:499-545
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:879-884
+/// `Run` without `-archive` (`run_body`, and `check_body` of LOSAT Web's validation, which opens no
+/// file here either): `-rid`'s value. None is NCBI's error of the argument without a value (NCBI
+/// BLAST+ 2.17.0 `blast_formatter` alone, probe P2.205), the empty one NCBI's error of
+/// `CRemoteBlast` (P2.221), any other LOSAT's refusal where NCBI asks its servers for the search
+/// (`Refusal::Rid`). The errors are `CATCH_ALL`'s (`catch_all`).
+fn rid(args: &Args, diag: &mut Diag) -> i32 {
     let rid = match args.as_bytes("rid") {
         Ok(rid) => rid,
         Err(error) => {

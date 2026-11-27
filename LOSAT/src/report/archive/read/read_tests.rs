@@ -382,9 +382,10 @@ fn the_objects_of_a_stream_end_as_ncbis_did() {
         // UTF-8 BOM before text ASN.1: CFormatGuess answers BinaryASN, whose reader stops at 0xef
         // with CSerialException -> "Invalid input format for BLAST Archive." (P3.085).
         ("UTF-8 BOM", with(b"\xef\xbb\xbf", b""), Ok((0, Serial))),
-        // Binary ASN.1 archives (P3.001-015, P3.102-104, P7.001-032): formatted, 1 when cut at
-        // 50 %, 90 % or missing the last 2 bytes, skipped silently (0, Eof) when missing only the
-        // last byte or with a stray 0x30 after, 1 after object 1 with trailing 00 00.
+        // Binary ASN.1 archives (P3.001-015, P3.102-104, P7.001-032); NCBI's exit status: 0 when
+        // whole, 1 (`Serial`) when cut at 50 %, 90 % or missing the last 2 bytes and after the
+        // archive with trailing 00 00, 0 without a message (`Eof`) when missing only the last
+        // byte or with a stray 0x30 after.
         ("binary", binary.clone(), Ok((1, Data))),
         (
             "binary twice",
@@ -422,8 +423,9 @@ fn the_objects_of_a_stream_end_as_ncbis_did() {
             [&binary[..], &[0x00, 0x00]].concat(),
             Ok((1, Serial)),
         ),
-        // XML archives (P3.001-015, P3.092, P3.105-107): formatted, 1 when cut at 50 % or without
-        // the last 20 bytes, 0 without the trailing newline, 1 after the archive with `<junk/>`.
+        // XML archives (P3.001-015, P3.092, P3.105-107); NCBI's exit status: 0 when whole or
+        // without the trailing newline, 1 (`Serial`) when cut at 50 % or without the last 20
+        // bytes and after the archive with `<junk/>`.
         ("XML", xml.clone(), Ok((1, Data))),
         ("XML twice", [&xml[..], &xml[..]].concat(), Ok((2, Data))),
         ("XML cut at 50 %", xml[..25305].to_vec(), Ok((0, Serial))),

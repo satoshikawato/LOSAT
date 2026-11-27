@@ -46,7 +46,7 @@ LOSAT：CLI の `run` は、NCBI と同じ順に、形式の解析（`hsp.rs` �
 | `setup_factory.cpp:170-172`、`blast_stat.c:2784-2791` | 例外は、最初のメッセージが error のときだけ投げる。無効な context があると、その warning が先に来るので、NCBI は gapped block の無いまま続ける（S07+ の独立監査で、NCBI が segfault することを確かめた） |
 | `blastn_app.cpp:258-261` | outfmt 0 の prolog（program、参照文献、Database の行）は検索の前に出るので、この失敗でも stdout に残る |
 
-LOSAT：`tables.rs` の `NuclValues`（`new`・`check_gaps`・`gapped`）が 3 つの関数の移植、`scoring.rs` の `context_blocks` と `karlin_error`。失敗は、最初の batch の query がすべて有効なら NCBI と同じ文言（繰り返しの回数は最初の batch の query の数）と prolog で終わる。最初の batch に無効な query があれば、NCBI は失敗を報告しない（上の行）ので、LOSAT の文言で明示的に失敗する。
+LOSAT：`tables.rs` の `NuclValues`（`new`・`gapped`）と `scoring.rs` の `context_blocks`・`karlin_error` が 3 つの関数の移植（gap の値の検査は `context_blocks` が持つ。前もっての検査の `NuclValues::check_gaps` は 2026-11-27 に使う所がなくなり消した、line RG series D の stream-off）。失敗は、最初の batch の query がすべて有効なら NCBI と同じ文言（繰り返しの回数は最初の batch の query の数）と prolog で終わる。最初の batch に無効な query があれば、NCBI は失敗を報告しない（上の行）ので、LOSAT の文言で明示的に失敗する（その batch で、前の batch の報告の後に。`context_statistics::setup_failure`）。
 
 **S07+ の前の差（根本原因 2）：** LOSAT は最大公約数で割らず、表に無い組は 1/−2 の値を、表に無い gap は表の最初の行を黙って使い、拒否もしなかった。
 

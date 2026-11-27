@@ -1,0 +1,167 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "rpsblast",
+      "version": "RPSBLAST 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q101",
+          "query_len": 190,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|CDD|101",
+                  "accession": "101",
+                  "title": "f101 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] residues 1-190"
+                },
+                {
+                  "id": "gnl|CDD|101"
+                }
+              ],
+              "len": 190,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 312.471,
+                  "score": 800,
+                  "evalue": 1.68798e-114,
+                  "identity": 190,
+                  "positive": 190,
+                  "query_from": 1,
+                  "query_to": 190,
+                  "hit_from": 1,
+                  "hit_to": 190,
+                  "align_len": 190,
+                  "gaps": 0,
+                  "qseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "hseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "midline": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|CDD|103",
+                  "accession": "103",
+                  "title": "f103 DNA polymerase [White spot syndrome virus] residues 1101-1290"
+                }
+              ],
+              "len": 190,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 14.7232,
+                  "score": 27,
+                  "evalue": 3.35884,
+                  "identity": 5,
+                  "positive": 6,
+                  "query_from": 180,
+                  "query_to": 189,
+                  "hit_from": 149,
+                  "hit_to": 158,
+                  "align_len": 10,
+                  "gaps": 0,
+                  "qseq": "GAEMYAAACR",
+                  "hseq": "GAHITAGKCR",
+                  "midline": "GA + A  CR"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gnl|CDD|102",
+                  "accession": "102",
+                  "title": "f102 ribonucleotide reductase large subunit [White spot syndrome virus] residues 301-480"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 14.3027,
+                  "score": 26,
+                  "evalue": 4.40481,
+                  "identity": 3,
+                  "positive": 4,
+                  "query_from": 87,
+                  "query_to": 93,
+                  "hit_from": 29,
+                  "hit_to": 35,
+                  "align_len": 7,
+                  "gaps": 0,
+                  "qseq": "PEVVDVI",
+                  "hseq": "LDVKDFI",
+                  "midline": " +V D I"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 13.5323,
+                  "score": 24,
+                  "evalue": 6.62193,
+                  "identity": 5,
+                  "positive": 10,
+                  "query_from": 30,
+                  "query_to": 54,
+                  "hit_from": 90,
+                  "hit_to": 110,
+                  "align_len": 25,
+                  "gaps": 4,
+                  "qseq": "LKNIYQQENGGNKHCLFVKHSLETR",
+                  "hseq": "FKALYEKYEAEGK----GKEVVKAR",
+                  "midline": " K +Y++     K     K  ++ R"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 13.5323,
+                  "score": 24,
+                  "evalue": 7.24938,
+                  "identity": 2,
+                  "positive": 6,
+                  "query_from": 169,
+                  "query_to": 177,
+                  "hit_from": 159,
+                  "hit_to": 167,
+                  "align_len": 9,
+                  "gaps": 0,
+                  "qseq": "NDNDNNVIC",
+                  "hseq": "SDSEETAVC",
+                  "midline": "+D++   +C"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 27,
+            "eff_space": 78077,
+            "kappa": 0.051205812,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

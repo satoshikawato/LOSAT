@@ -9,8 +9,9 @@ use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str::matches_mask;
 use crate::seqdb::lookup::SeqidLookup;
+use crate::seqdb::rps::{read_cdd_freqs_header, read_cdd_rps_header, CddFreqsKind, RpsHeaderError};
 use crate::seqdb::taxdb::LazyTaxDb;
-use crate::seqdb::{SeqDb, SeqDbError, SeqLocation, SeqType};
+use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqLocation, SeqType};
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::DeflineSet;
 use crate::utils::os_bytes::{path_bytes, path_from_bytes};
@@ -31,6 +32,17 @@ pub(super) struct Flags {
     pub(super) taxids: bool,
 }
 
+/// State of `CCddDeltaHeadersTest` carried across all volumes of the run (never cleared between
+/// volumes, matching NCBI BLAST+ 2.17.0).
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:1185-1345
+#[derive(Default)]
+pub(super) struct CddDelta {
+    magic_number: i32,
+    num_profiles: i32,
+    offsets: Vec<i32>,
+    num_failures: u32,
+}
+
 /// A test of each volume, in the order the options add them.
 pub(super) enum Test {
     /// `CMetaDataTest`, always first.
@@ -41,6 +53,8 @@ pub(super) enum Test {
     Sample { n: i32, random: NcbiRandom },
     /// `CEndsTest` of `N` OIDs at each end.
     Ends(i32),
+    /// `CCddDeltaHeadersTest` (`-cdd_delta`), checking `.rps`/`.freq`/`.wcounts`/`.obsr` headers.
+    CddDelta(CddDelta),
 }
 
 impl Test {
@@ -51,6 +65,7 @@ impl Test {
             Test::Stride(_) => b"Stride",
             Test::Sample { .. } => b"Sample",
             Test::Ends(_) => b"EndPoints",
+            Test::CddDelta(_) => b"CDD_Headers",
         }
     }
 }
@@ -61,14 +76,17 @@ pub(super) struct Tests {
     list: Vec<Test>,
     flags: Flags,
     taxdb: Arc<LazyTaxDb>,
+    path: SearchPath,
 }
 
 impl Tests {
-    pub(super) fn new(list: Vec<Test>, flags: Flags, taxdb: LazyTaxDb) -> Self {
+    pub(super) fn new(list: Vec<Test>, flags: Flags, path: SearchPath) -> Self {
+        let taxdb = Arc::new(LazyTaxDb::new(path.clone()));
         Tests {
             list,
             flags,
-            taxdb: Arc::new(taxdb),
+            taxdb,
+            path,
         }
     }
 
@@ -89,6 +107,7 @@ impl Tests {
             db,
             name,
             flags: &self.flags,
+            path: &self.path,
             taxdb: &self.taxdb,
             run: TaxdbRun::sequential_with(Arc::clone(&self.taxdb)),
             lookup: None,
@@ -179,6 +198,7 @@ struct Volume<'a, 'd> {
     /// The name the database was opened with (`GetDBNameList`).
     name: &'a [u8],
     flags: &'a Flags,
+    path: &'a SearchPath,
     taxdb: &'a Arc<LazyTaxDb>,
     run: TaxdbRun,
     lookup: Option<SeqidLookup<'a>>,
@@ -207,18 +227,137 @@ impl<'a> Volume<'a, '_> {
             &mut Test::Stride(n) => self.stride(log, &prefix, n, seen),
             Test::Sample { n, random } => self.sample(log, &prefix, *n, random, seen),
             &mut Test::Ends(n) => self.ends(log, &prefix, n, seen),
+            Test::CddDelta(state) => Ok(self.cdd_delta(log, &prefix, state)?),
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:1185-1345
+    /// `CCddDeltaHeadersTest::DoTest`: checks the `.rps` header against `.freq`, `.wcounts`, and
+    /// `.obsr`, preserving `state` (offsets and failure count) across volumes as NCBI does.
+    fn cdd_delta(
+        &self,
+        log: &mut Log<'_>,
+        prefix: &[u8],
+        state: &mut CddDelta,
+    ) -> Result<u32, Stop> {
+        let log_hdr_err = |log: &mut Log<'_>,
+                           state: &mut CddDelta,
+                           err: RpsHeaderError,
+                           parts: &[&[u8]]|
+         -> Result<(), Stop> {
+            match err {
+                RpsHeaderError::Ncbi(exception) => {
+                    log.line(BRIEF, parts)?;
+                    log.what(prefix, Some(&exception.what()), &|| String::new())?;
+                    state.num_failures += 1;
+                    Ok(())
+                }
+                RpsHeaderError::Refused(reason) => Err(Stop::Refused(reason)),
+            }
+        };
+        match read_cdd_rps_header(self.name, self.path, PROGRAM) {
+            Ok(header) => {
+                state.magic_number = header.magic;
+                state.num_profiles = header.num_profiles;
+                state.offsets.extend_from_slice(&header.offsets);
+            }
+            Err(err) => log_hdr_err(
+                log,
+                state,
+                err,
+                &[
+                    prefix,
+                    b"  [ERROR] caught exception while reading rps header ",
+                ],
+            )?,
+        }
+        if state.num_failures != 0 {
+            return Ok(state.num_failures);
+        }
+        for (kind, check_offsets) in [
+            (CddFreqsKind::Freq, true),
+            (CddFreqsKind::Wcounts, true),
+            (CddFreqsKind::Obsr, false),
+        ] {
+            let ext = kind.ext().as_bytes();
+            match read_cdd_freqs_header(self.name, self.path, kind, state.num_profiles, PROGRAM) {
+                Ok(header) => {
+                    if header.magic != state.magic_number {
+                        log.line(
+                            BRIEF,
+                            &[
+                                prefix,
+                                b"  [ERROR] Bad magic number of the  ",
+                                ext,
+                                b" file",
+                            ],
+                        )?;
+                        state.num_failures += 1;
+                    }
+                    if header.num_profiles != state.num_profiles {
+                        let count = header.num_profiles.to_string();
+                        log.line(
+                            BRIEF,
+                            &[
+                                prefix,
+                                b"  [ERROR] Wrong number of profiles in the  ",
+                                ext,
+                                b" file: ",
+                                count.as_bytes(),
+                            ],
+                        )?;
+                        state.num_failures += 1;
+                    }
+                    if check_offsets {
+                        let count = state.num_profiles.max(0) as usize;
+                        for i in 0..count {
+                            if !matches!(
+                                (header.offsets.get(i), state.offsets.get(i)),
+                                (Some(a), Some(b)) if a == b
+                            ) {
+                                log.line(
+                                    BRIEF,
+                                    &[
+                                        prefix,
+                                        b"  [ERROR] Header offsets differ between .rps and ",
+                                        ext,
+                                        b" files",
+                                    ],
+                                )?;
+                                state.num_failures += 1;
+                            }
+                        }
+                    }
+                }
+                Err(err) => log_hdr_err(
+                    log,
+                    state,
+                    err,
+                    &[
+                        prefix,
+                        b"  [ERROR] caught exception while reading ",
+                        ext,
+                        b" freqs header ",
+                    ],
+                )?,
+            }
+        }
+        Ok(state.num_failures)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:272-297
-    /// `CheckOrFindOID` of `oid` (an `int`: a negative one is moved to the first OID).
-    fn check_or_find(&self, oid: &mut i32) -> Result<bool, Escape> {
+    /// `CheckOrFindOID` of `oid` (widened to `i64` per `Q-D2b-OV=A`: a negative one is moved to
+    /// the first OID; one above `u32::MAX` is past every volume).
+    fn check_or_find(&self, oid: &mut i64) -> Result<bool, Escape> {
+        if *oid > i64::from(u32::MAX) {
+            return Ok(false);
+        }
         let mut next = u32::try_from(*oid).unwrap_or(0);
         let found = self
             .db
             .check_or_find_oid(&mut next)
             .map_err(Escape::Thrown)?;
-        *oid = i32::try_from(next).unwrap_or(i32::MAX);
+        *oid = i64::from(next);
         Ok(found)
     }
 
@@ -291,6 +430,7 @@ impl<'a> Volume<'a, '_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:592-603
+    // Widen `oid + n` to `i64` so `oid` does not wrap past `INT_MAX`.
     /// `CStrideTest` of every `n`-th OID: 1 at the first OID that fails. With `n` of 0 or less
     /// NCBI's loop never ends after an OID that passes (`CheckOrFindOID` moves a negative OID to
     /// the first, which then passes as seen): LOSAT's refusal there.
@@ -303,7 +443,7 @@ impl<'a> Volume<'a, '_> {
     ) -> Result<u32, Escape> {
         let text = format!("<testing every {n}th OID>");
         log.line(MINUTIAE, &[prefix, text.as_bytes()])?;
-        let mut oid = 0;
+        let mut oid = 0i64;
         while self.check_or_find(&mut oid)? {
             if !self.test_oid(log, prefix, seen, oid)? {
                 return Ok(1);
@@ -315,7 +455,7 @@ impl<'a> Volume<'a, '_> {
                 ))
                 .into());
             }
-            oid = oid.checked_add(n).ok_or_else(|| overflow("-stride", n))?;
+            oid += i64::from(n);
         }
         Ok(0)
     }
@@ -337,7 +477,7 @@ impl<'a> Volume<'a, '_> {
             log.line(BRIEF, &[prefix, b"  [ERROR] empty volume"])?;
             return Ok(1);
         }
-        let mut first = 0;
+        let mut first = 0i64;
         if n > 0 && !self.check_or_find(&mut first)? {
             return Err(Stop::Refused(format!(
                 "a random sample of a database that includes none of its OIDs (NCBI draws OIDs \
@@ -348,7 +488,7 @@ impl<'a> Volume<'a, '_> {
         let mut oids = BTreeSet::new();
         let mut drawn = 0;
         while drawn < n {
-            let mut oid = random.get_rand_range(0, (max - 1) as u32) as i32;
+            let mut oid = i64::from(random.get_rand_range(0, (max - 1) as u32) as i32);
             if self.check_or_find(&mut oid)? {
                 oids.insert(oid);
                 drawn += 1;
@@ -368,6 +508,9 @@ impl<'a> Volume<'a, '_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:666-682
+    // Approved exception (`PD-LOSAT-NCBI-DEFECTS`, Owner Q-D2b-OV=A): widen `count - n` and
+    // `oid + 1` to `i64` so negative `-ends` near `INT_MIN` jump past the end of the volume as
+    // nearby negative values (`-ends -1`, `-ends -2147483638`) do, rather than wrapping negative.
     /// `CEndsTest` of `n` OIDs at each end: 1 at the first OID that fails. From the `n`-th OID on
     /// the test jumps to the OID `n` before the end (the number of OIDs less `n`) where that is
     /// further, without `CheckOrFindOID`: with `n` of 0 or less past the last OID, which fails.
@@ -380,11 +523,12 @@ impl<'a> Volume<'a, '_> {
     ) -> Result<u32, Escape> {
         let text = format!("<testing {n} OIDs at each end>");
         log.line(MINUTIAE, &[prefix, text.as_bytes()])?;
-        let count = i32::try_from(self.db.num_oids()).unwrap_or(i32::MAX);
-        let mut oid = 0;
+        let count = i64::from(self.db.num_oids());
+        let n = i64::from(n);
+        let mut oid = 0i64;
         while self.check_or_find(&mut oid)? {
             if oid >= n {
-                let end = count.checked_sub(n).ok_or_else(|| overflow("-ends", n))?;
+                let end = count - n;
                 if end > oid {
                     oid = end;
                 }
@@ -392,7 +536,7 @@ impl<'a> Volume<'a, '_> {
             if !self.test_oid(log, prefix, seen, oid)? {
                 return Ok(1);
             }
-            oid = oid.checked_add(1).ok_or_else(|| overflow("-ends", n))?;
+            oid += 1;
         }
         Ok(0)
     }
@@ -405,7 +549,7 @@ impl<'a> Volume<'a, '_> {
         log: &mut Log<'_>,
         prefix: &[u8],
         seen: &mut Seen,
-        oid: i32,
+        oid: i64,
     ) -> Result<bool, Stop> {
         if !seen.insert(oid) {
             return Ok(true);
@@ -432,7 +576,7 @@ impl<'a> Volume<'a, '_> {
     }
 
     /// The steps of `TestOID` on `oid`: the failure of the first that fails.
-    fn oid_checks(&mut self, oid: i32) -> Result<Option<Failure>, Stop> {
+    fn oid_checks(&mut self, oid: i64) -> Result<Option<Failure>, Stop> {
         let mut set = std::mem::take(&mut self.kept_set);
         let result = self.oid_checks_in(oid, &mut set);
         self.kept_set = set;
@@ -440,7 +584,7 @@ impl<'a> Volume<'a, '_> {
     }
 
     /// [`Volume::oid_checks`] reusing `set` as its header buffer.
-    fn oid_checks_in(&mut self, oid: i32, set: &mut DeflineSet) -> Result<Option<Failure>, Stop> {
+    fn oid_checks_in(&mut self, oid: i64, set: &mut DeflineSet) -> Result<Option<Failure>, Stop> {
         // Headers: `GetSeqIDs`, the Seq-ids of every definition line.
         let Some(at) = u32::try_from(oid)
             .ok()
@@ -453,22 +597,34 @@ impl<'a> Volume<'a, '_> {
                 unknown: String::new(),
             }));
         };
-        let has_set = match self.header_set(at, oid, set) {
+        let header = self.header_set(at, oid, set);
+        // NCBI's `CObjectIStreamAsnBinary::FixVisibleChars` posts `Error: (803.7)` while
+        // reading strings, both on valid headers and before a later BER error throws.
+        let need_posts = match &header {
+            Ok(true) => has_replaced_bytes(set),
+            Ok(false) => false,
+            Err(SeqDbError::Ncbi(_)) => true,
+            Err(_) => false,
+        };
+        if need_posts {
+            let posts = self.db.header_replaced_char_posts_at(at);
+            self.diag.post_replaced(&posts);
+        }
+        let has_set = match header {
             Ok(has_set) => has_set,
             Err(error) => return Failure::of("headers", &error).map(Some),
         };
-        if has_set {
-            check_read(oid, set)?;
-        }
-        // Sequence: `GetSequence`, which maps the sequence's bytes.
-        let length = match self.length(at, true) {
+        // Sequence: `GetSequence`, which maps the sequence's bytes. For a protein with
+        // non-ascending offsets, NCBI's `x_GetSequence` returns a negative length (which passes
+        // the zero-length and null-pointer check here and then fails `GetBioseq` with no bioseq).
+        let length = match self.sequence_len(at) {
             Ok(length) => length,
             Err(error) => return Failure::of("sequence", &error).map(Some),
         };
         if length == 0 {
             return Ok(Some(Failure::own("sequence", "sequence data is empty")));
         }
-        // Bioseq: `GetBioseq`, none for no definition line or no letters.
+        // Bioseq: `GetBioseq`, none for no definition line or no letters (`length < 1`).
         if !has_set || set.deflines.is_empty() {
             return Ok(Some(Failure::own("bioseq", "no bioseq")));
         }
@@ -491,7 +647,7 @@ impl<'a> Volume<'a, '_> {
     fn header_set(
         &self,
         at: SeqLocation,
-        oid: i32,
+        oid: i64,
         set: &mut DeflineSet,
     ) -> Result<bool, SeqDbError> {
         if !self.db.header_set_in(at, set)? {
@@ -508,35 +664,38 @@ impl<'a> Volume<'a, '_> {
         Ok(true)
     }
 
-    /// The length of the sequence at `at`, from its bytes (`GetSequence`, `sequence`: a protein's
-    /// bytes are read) or from the index and a nucleotide's last byte (`GetBioseq`'s length).
-    fn length(&self, at: SeqLocation, sequence: bool) -> Result<usize, SeqDbError> {
+    /// The length returned by `GetSequence` for the sequence at `at`: signed 32-bit for protein
+    /// (`x_GetSequence`) and nucleotide (`x_GetSequence` / `GetSeqLengthExact`).
+    fn sequence_len(&self, at: SeqLocation) -> Result<i64, SeqDbError> {
         match self.db.seqtype() {
-            SeqType::Protein if sequence => Ok(self.db.read_sequence_at(at)?.protein(0).len()),
-            SeqType::Protein => Ok(self.db.protein_length_at(at)? as usize),
-            SeqType::Nucleotide => self.db.nucleotide_length_at(at),
+            SeqType::Protein => self.db.protein_sequence_len_at(at).map(i64::from),
+            SeqType::Nucleotide => self.db.nucleotide_length_i32_at(at).map(i64::from),
         }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1306-1473
     /// The rest of `GetBioseq` of the OID at `at` whose definition lines are `set`: its length
-    /// (none for no letters), a nucleotide's letters with its ambiguities, and the taxonomy lookups
-    /// of its sources, whose texts are posted.
+    /// (none for no letters or negative signed 32-bit length), a nucleotide's letters with its
+    /// ambiguities, and the taxonomy lookups of its sources, whose texts are posted.
     fn bioseq(
         &mut self,
         at: SeqLocation,
         oid: u32,
         set: &DeflineSet,
     ) -> Result<Option<Failure>, Stop> {
-        match self.length(at, false) {
-            Ok(0) => return Ok(Some(Failure::own("bioseq", "no bioseq"))),
+        let len = match self.db.seqtype() {
+            SeqType::Protein => self.db.protein_length_i32_at(at).map(i64::from),
+            SeqType::Nucleotide => self.db.nucleotide_length_i32_at(at).map(i64::from),
+        };
+        match len {
+            Ok(n) if n < 1 => return Ok(Some(Failure::own("bioseq", "no bioseq"))),
             Ok(_) => {}
             Err(error) => return Failure::of("bioseq", &error).map(Some),
         }
         if self.db.seqtype() == SeqType::Nucleotide {
             let letters = self
                 .db
-                .read_sequence_at(at)
+                .read_nucleotide_search_sequence_at(at)
                 .and_then(|block| block.nucleotide_seq_data(0).map(|_| ()));
             if let Err(error) = letters {
                 return Failure::of("bioseq", &error).map(Some);
@@ -554,7 +713,7 @@ impl<'a> Volume<'a, '_> {
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:529-548
     /// The lookup of each Seq-id of `set` (`SeqidToOid`), which must give `oid`: the failure of the
     /// first that does not.
-    fn isam_lookups(&mut self, oid: i32, set: &DeflineSet) -> Result<Option<Failure>, Stop> {
+    fn isam_lookups(&mut self, oid: i64, set: &DeflineSet) -> Result<Option<Failure>, Stop> {
         const STEP: &str = "isam lookups";
         if self.lookup.is_none() {
             match self.db.seqid_lookup() {
@@ -570,7 +729,7 @@ impl<'a> Volume<'a, '_> {
             };
             let mut text = match found {
                 None => b"seqid=".to_vec(),
-                Some(found) if i64::from(found) != i64::from(oid) => {
+                Some(found) if i64::from(found) != oid => {
                     format!("oid1={oid} oid2={found} seqid=").into_bytes()
                 }
                 Some(_) => continue,
@@ -615,20 +774,12 @@ fn volume_entries(volume: &[u8]) -> Vec<Vec<u8>> {
         .collect()
 }
 
-/// The refusal of a set whose read NCBI reports: a UTF8String where a VisibleString is expected
-/// (a warning) or bytes NCBI reads as '#' (an error at each read).
-fn check_read(oid: i32, set: &DeflineSet) -> Result<(), Stop> {
-    let replaced = set
-        .deflines
+/// Whether any definition line in `set` holds bytes that NCBI's binary ASN.1 reader replaces with
+/// `#` (and posts `Error: (803.7)` for).
+fn has_replaced_bytes(set: &DeflineSet) -> bool {
+    set.deflines
         .iter()
-        .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0);
-    if set.utf8 || replaced {
-        return Err(Stop::Refused(format!(
-            "OID {oid}: definition lines whose read NCBI reports (a UTF8String title, or bytes it \
-             reads as '#'), which are not supported by LOSAT's {PROGRAM}"
-        )));
-    }
-    Ok(())
+        .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:517-527
@@ -640,7 +791,7 @@ fn check_read(oid: i32, set: &DeflineSet) -> Result<(), Stop> {
 // (`CSeq_id::Match`, `compare`) and that has a taxid: the first line itself where it has one. A
 // first line without Seq-ids makes NCBI read through a null reference.
 /// Whether the sequence `oid` of the definition lines `set` has a taxid (`-must_have_taxids`).
-fn has_taxid(oid: i32, set: &DeflineSet) -> Result<bool, Stop> {
+fn has_taxid(oid: i64, set: &DeflineSet) -> Result<bool, Stop> {
     if set
         .deflines
         .iter()
@@ -666,14 +817,6 @@ fn has_taxid(oid: i32, set: &DeflineSet) -> Result<bool, Stop> {
         }
     }
     Ok(false)
-}
-
-/// LOSAT's refusal of an OID that passes NCBI's `int` in the loop of `option` with `n`.
-fn overflow(option: &str, n: i32) -> Escape {
-    Escape::Stop(Stop::Refused(format!(
-        "{option} {n} (NCBI's loop over the OIDs passes the largest int), which is not supported \
-         by LOSAT's {PROGRAM}"
-    )))
 }
 
 #[cfg(test)]

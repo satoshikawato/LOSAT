@@ -1,0 +1,90 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= q101
+
+Length=190
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 Unknown                                                       312     2e-114
+CDD:102 Unknown                                                       14.3    4.4   
+
+
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:102 no longer exists in database...alignment skipped
+Sequence with id CDD:102 no longer exists in database...alignment skipped
+Sequence with id CDD:102 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.322    0.137    0.405    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0512    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+Query= q102
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 Unknown                                                       341     3e-126
+
+
+Sequence with id CDD:102 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.402    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 74228
+
+
+Query= q103
+
+Length=190
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.134    0.392    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

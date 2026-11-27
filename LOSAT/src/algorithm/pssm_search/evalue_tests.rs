@@ -1,6 +1,7 @@
 use super::*;
 use crate::config::ProteinScoringSpec;
 use crate::stats::lookup_protein_gumbel_params;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 
 /// BLOSUM62 11/1's gapped block (blast_stat.c's table: Lambda 0.267, K 0.041, H 0.14).
 fn blosum62_gapped() -> KarlinParams {

@@ -384,6 +384,7 @@ pub(super) fn write_xml(
     side_sink: &Option<SideFileSink>,
     query_stats: &impl Fn() -> Vec<XmlStats>,
     rows_of: &impl Fn(Range<usize>) -> Result<Vec<PairwiseHit>>,
+    phi: Option<PhiPairwise<'_>>,
 ) -> Result<()> {
     let ReportView {
         args,
@@ -489,7 +490,6 @@ pub(super) fn write_xml(
         }
     };
     let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
-    let xml_stats = query_stats();
     // The messages of each query's result: the same ones the warnings of the other
     // formats write (`query_warning_lines`).
     let xml_messages: Vec<Vec<String>> = query_records
@@ -533,6 +533,27 @@ pub(super) fn write_xml(
                     .collect()
             })
             .collect();
+    // psiblast `-phi_pattern`: the document writes PHI-BLAST's results, one per pattern occurrence
+    // (`phi_xml_results`), in place of the queries' own.
+    let mut phi_results =
+        phi.map(|phi| phi_xml_results(&phi, query_records, query_lengths, &xml_masks));
+    let (xml_stats, xml_messages, xml_masks, xml_searched) = match phi_results.as_mut() {
+        Some(results) => (
+            std::mem::take(&mut results.stats),
+            std::mem::take(&mut results.messages),
+            std::mem::take(&mut results.masks),
+            std::mem::take(&mut results.searched),
+        ),
+        // A query without NCBI's alignment set (`no_alignment_set`: of a batch that the search
+        // skipped, every query in it invalid, but for the merge of several volumes): XML2 and
+        // JSON write no `hits` and add to its message.
+        None => (
+            query_stats(),
+            xml_messages,
+            xml_masks,
+            no_alignment_set.iter().map(|&none| !none).collect(),
+        ),
+    };
     let database_length = |rank: usize| subjects[rank].aa_len;
     // The length of each record itself (`-subject_loc` searches part of it).
     let record_length = |s_idx: usize| {
@@ -576,8 +597,12 @@ pub(super) fn write_xml(
         },
     };
     let query_names = crate::report::record::QueryNames {
-        records: query_records,
-        searched_lengths: query_lengths,
+        records: phi_results
+            .as_ref()
+            .map_or(query_records, |results| &results.records),
+        searched_lengths: phi_results
+            .as_ref()
+            .map_or(query_lengths, |results| &results.lengths),
         placements: &ranges.query_input.placements,
     };
     let db_name = database.map(|database| database.name().to_vec());
@@ -602,7 +627,9 @@ pub(super) fn write_xml(
             program: args.report_program(),
             app: args.app.ncbi_name(),
             version: &version,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:638-656
             reference: match args.app {
+                _ if args.phi.is_some() => crate::report::blast_xml::REFERENCE_PHI_BLAST,
                 BlastpApp::Psiblast => crate::report::blast_xml::REFERENCE_COMP_BASED_STATS,
                 _ => crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
             },
@@ -613,6 +640,11 @@ pub(super) fn write_xml(
             gap_extend: args.scoring.gap_extend,
             reward_penalty: None,
             filter: &filter,
+            pattern: args
+                .phi
+                .as_deref()
+                .and_then(|phi| phi.as_ref().ok())
+                .map(|phi| &phi.as_read[..]),
             db_num: shown_database
                 .as_ref()
                 .map_or(0, |shown| shown.num_sequences),
@@ -631,10 +663,7 @@ pub(super) fn write_xml(
         subjects: xml_subjects,
         taxdb_notes: xml_taxdb_notes,
         masks: xml_masks,
-        // A query without NCBI's alignment set (`no_alignment_set`: of a batch that the search
-        // skipped, every query in it invalid, but for the merge of several volumes): XML2 and
-        // JSON write no `hits` and add to its message.
-        searched: no_alignment_set.iter().map(|&none| !none).collect(),
+        searched: xml_searched,
         program: args.app.name(),
         program_type: args.app.program_type(),
         epilog: reports.epilog,
@@ -646,16 +675,46 @@ pub(super) fn write_xml(
             .and_then(|search| search.query_other_coding),
         query_scopes: reports.query_scopes,
         later_round: reports.psi_round.is_some_and(|io| io.state.number() > 1),
+        results: phi_results.as_ref().map(|results| &results.results[..]),
     };
     // The rows of the queries' HSPs (`query_rows`), one query at a time: the document
     // reads their letters query by query and formats them serially, so a window of
     // several queries would hold more rows for no gain (300 proteins x Swiss-Prot,
     // 8 threads: 46.0 MB with windows, 39.6 MB a query at a time, the same time).
-    let mut xml_rows = query_rows::QueryRows::new(
-        (0..hit_lists.len()).map(|q_idx| q_idx..q_idx + 1).collect(),
-        pairwise_hits.as_deref().map(Vec::as_slice),
-        rows_of,
-    );
+    // PHI-BLAST's: a result's rows are made from its batch's searched query, then carry the
+    // result's index (as in `write_custom_tabular`).
+    let phi_rows = |window: Range<usize>| -> Result<Vec<PairwiseHit>> {
+        let (Some(phi), Some(results)) = (phi.as_ref(), phi_results.as_ref()) else {
+            return Ok(Vec::new());
+        };
+        let mut all = Vec::new();
+        for index in window {
+            let mut rows = (phi.rows_of_lists)(
+                std::slice::from_ref(&results.lists[index]),
+                results.searched_queries[index],
+            )?;
+            for row in &mut rows {
+                row.hit.q_idx = index as u32;
+            }
+            all.extend(rows);
+        }
+        Ok(all)
+    };
+    let hit_lists = phi_results
+        .as_ref()
+        .map_or(hit_lists, |results| &results.lists[..]);
+    let mut xml_rows = match phi_results.as_ref() {
+        Some(_) => query_rows::QueryRows::new(
+            (0..hit_lists.len()).map(|index| index..index + 1).collect(),
+            None,
+            &phi_rows,
+        ),
+        None => query_rows::QueryRows::new(
+            (0..hit_lists.len()).map(|q_idx| q_idx..q_idx + 1).collect(),
+            pairwise_hits.as_deref().map(Vec::as_slice),
+            rows_of,
+        ),
+    };
     match xml2_kind {
         None => blast_xml::write_blastp_xml(
             &xml,
@@ -786,6 +845,95 @@ pub(super) fn write_xml2_round_end(
     Ok(())
 }
 
+/// PHI-BLAST's results as the XML2 and JSON documents write them (`phi_xml_results`), by result.
+#[derive(Default)]
+struct PhiXmlResults {
+    results: Vec<blast_xml::XmlResult>,
+    /// The record, length and masks of the query each result shows (its batch's first).
+    records: Vec<FastaRecord>,
+    lengths: Vec<usize>,
+    masks: Vec<Vec<crate::report::blast_xml::QueryMask>>,
+    /// The result's hit list (`PhiCall::occurrence_lists`; none for a result without a Seq-align
+    /// set) and the batch's searched query, whose values make its rows (`PhiBatch::searched`).
+    lists: Vec<Option<BlastpHitList>>,
+    searched_queries: Vec<usize>,
+    stats: Vec<XmlStats>,
+    messages: Vec<Vec<String>>,
+    /// Whether the result has a Seq-align set (`BlastpXml::searched`).
+    searched: Vec<bool>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:263-281
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:303-360
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:72-115
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:546-549
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1112-1115
+/// psiblast `-phi_pattern` with outfmt 13 to 16 (item PS15b-4): the results of PHI-BLAST's call
+/// `phi` as the formatter takes them, a batch after another (`PhiCall::result_queries`): one per
+/// pattern occurrence of the batch's searched query, each shown as the batch's first query (its
+/// record `query_records`, length `query_lengths` and masks `masks`: NCBI gives every result the
+/// masks of the batch's first), or, where nothing is searched (`PhiCall::no_statistics`), one per
+/// query without a Seq-align set. Result `i` carries the messages of the batch's query `i`
+/// (`PhiPairwise::messages`). Every result's statistics are those of the batch's context 0: the
+/// pattern's least match length (NCBI keeps it as the context's length adjustment, `hsp-len`), the
+/// pattern's search space and the table's Karlin block (`kappa`, `lambda`, `entropy`); the -1
+/// blocks and zeros where that context is not valid (a first query without letters,
+/// `PhiBatch::shows_gaps`) or nothing is searched.
+#[cold]
+#[inline(never)]
+fn phi_xml_results(
+    phi: &PhiPairwise<'_>,
+    query_records: &[FastaRecord],
+    query_lengths: &[usize],
+    masks: &[Vec<crate::report::blast_xml::QueryMask>],
+) -> PhiXmlResults {
+    let call = phi.call;
+    let mut out = PhiXmlResults::default();
+    for batch in &call.batches {
+        let search = call.search_of(batch);
+        let lists = match search {
+            Some(_) => call.occurrence_lists(batch.searched),
+            None => &[][..],
+        };
+        let stats = match search {
+            Some(search) if !batch.shows_gaps() => XmlStats {
+                // A searched query holds the pattern, so its least match length is below the
+                // query's letters (`phi_search::engine`): an `Int4`.
+                hsp_len: i32::try_from(search.pattern.min_match_length).unwrap_or(i32::MAX),
+                eff_space: search.search_space,
+                kappa: search.karlin.k,
+                lambda: search.karlin.lambda,
+                entropy: search.karlin.h,
+            },
+            _ => XmlStats::NONE,
+        };
+        let first = batch.first();
+        for (index, query) in call.result_queries(batch).into_iter().enumerate() {
+            out.results.push(blast_xml::XmlResult {
+                query,
+                warned: batch.queries.end,
+            });
+            out.records.push(query_records[query].clone());
+            out.lengths.push(query_lengths[query]);
+            out.masks.push(masks[first].clone());
+            out.lists.push(lists.get(index).cloned().flatten());
+            out.searched_queries.push(batch.searched);
+            out.stats.push(stats);
+            out.messages.push(
+                batch
+                    .queries
+                    .clone()
+                    .nth(index)
+                    .and_then(|message_query| phi.messages.get(message_query))
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+            out.searched.push(search.is_some());
+        }
+    }
+    out
+}
+
 /// PHI-BLAST's outfmt 0 (`write_pairwise`): the call's searches and the rows of a query's hit
 /// lists (`rows_of_lists` of `run_call`), which it makes for each occurrence.
 #[derive(Clone, Copy)]
@@ -797,47 +945,67 @@ pub(super) struct PhiPairwise<'a> {
     /// Each query's messages as PHI-BLAST's report writes them before the query's report
     /// (`report_prep::phi_result_warnings`).
     pub(super) result_warnings: &'a [Vec<u8>],
+    /// Each query's messages (`report_prep::phi_query_messages`), which the XML2 and JSON
+    /// documents write in its result's `message` (`phi_xml_results`).
+    pub(super) messages: &'a [Vec<String>],
 }
 
 impl<'a> PhiPairwise<'a> {
     /// The reports of PHI-BLAST's call `call` (`None` without a pattern) with its queries'
-    /// messages `result_warnings` (`None` likewise).
+    /// messages `messages` and their warnings `result_warnings` (`None` likewise).
     #[allow(clippy::type_complexity)]
     pub(super) fn of(
         call: Option<&'a super::phi_hooks::PhiCall<'a>>,
         rows_of_lists: &'a dyn Fn(&[Option<BlastpHitList>], usize) -> Result<Vec<PairwiseHit>>,
-        result_warnings: Option<&'a [Vec<u8>]>,
+        (messages, result_warnings): (Option<&'a [Vec<String>]>, Option<&'a [Vec<u8>]>),
     ) -> Option<Self> {
-        call.zip(result_warnings)
-            .map(|(call, result_warnings)| Self {
+        call.zip(messages.zip(result_warnings))
+            .map(|(call, (messages, result_warnings))| Self {
                 call,
                 rows_of_lists,
                 result_warnings,
+                messages,
             })
     }
 }
 
 /// psiblast `-phi_pattern` (item PS8a): the report of format `outfmt` of PHI-BLAST's call
 /// `phi`: outfmt 0 (`write_pairwise`), the custom tabular reports (`write_custom_tabular`), outfmt 6
-/// and 7 (`write_phi_text`), and NCBI's engine error of outfmt 8, 9 and 12, whose Seq-annot writer
-/// does not take the program (`ProgramNameToEnum`), at the first result with an alignment; a call
-/// without one (no hit, or without NCBI's Karlin block, `PhiCall::no_statistics`) writes nothing,
-/// and no error. LOSAT refuses the other formats with a pattern (`phi_hooks::phi_limits`).
+/// and 7 (`write_phi_text`), the XML2 and JSON documents of outfmt 13 to 16 (`write_xml` of the
+/// call's results, `phi_xml_results`; item PS15b-4), and NCBI's engine error of outfmt 8, 9 and 12,
+/// whose Seq-annot writer does not take the program (`ProgramNameToEnum`), at the first result
+/// with an alignment; a call without one (no hit, or without NCBI's Karlin block,
+/// `PhiCall::no_statistics`) writes nothing, and no error. LOSAT refuses the other formats with a
+/// pattern (`phi_hooks::phi_limits`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1658-1664
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-706
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_phi_report(
     view: &ReportView<'_>,
-    outfmt: BlastpReport,
+    (outfmt, format_index): (BlastpReport, usize),
     phi: PhiPairwise<'_>,
     format: &mut FormatOutput<'_>,
-    warnings: &mut Option<QueryWarnings<'_>>,
-    probe: &mut Option<FormatProbe<'_>>,
-    pairwise_shown: &Option<BTreeSet<usize>>,
+    (warnings, probe, pairwise_shown, side_sink): (
+        &mut Option<QueryWarnings<'_>>,
+        &mut Option<FormatProbe<'_>>,
+        &Option<BTreeSet<usize>>,
+        &Option<SideFileSink>,
+    ),
+    query_stats: &impl Fn() -> Vec<XmlStats>,
     rows_of: &impl Fn(Range<usize>) -> Result<Vec<PairwiseHit>>,
 ) -> Result<()> {
     match outfmt {
+        BlastpReport::Xml2(_) => write_xml(
+            view,
+            (outfmt, format_index),
+            format,
+            warnings,
+            side_sink,
+            query_stats,
+            rows_of,
+            Some(phi),
+        ),
         BlastpReport::Pairwise(pairwise) => write_pairwise(
             view,
             pairwise,
@@ -874,7 +1042,7 @@ pub(super) fn write_phi_report(
                 )),
             }
         }
-        BlastpReport::Xml | BlastpReport::Xml2(_) | BlastpReport::Archive => Err(anyhow::anyhow!(
+        BlastpReport::Xml | BlastpReport::Archive => Err(anyhow::anyhow!(
             "LOSAT internal error: a PHI-BLAST report of a format that LOSAT refuses with -phi_pattern"
         )),
     }

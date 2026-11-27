@@ -44,7 +44,8 @@ impl Xml2Encoder for JsonEncoder<'_> {
 
 /// `Parameters` (`s_SetBlastXMLParameters`, blastxml2_format.cpp:514-555), members in the order
 /// of blastxml2.asn: the matrix, `expect`, the nucleotide scores, the gap costs of a gapped
-/// search, the filter, the composition-based statistics and the genetic codes.
+/// search, the filter, PHI-BLAST's pattern, the composition-based statistics and the genetic
+/// codes.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:531-535
 fn write_parameters<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, params: &Xml2Run) {
@@ -68,6 +69,11 @@ fn write_parameters<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, params: &Xml2Run)
     }
     if !run.filter.is_empty() {
         string_member(enc, "filter", 7, run.filter);
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:535-536
+    // (`pattern` follows `filter` in blastxml2.asn's order.)
+    if let Some(pattern) = run.pattern {
+        string_member(enc, "pattern", 8, pattern);
     }
     if params.cbs != 0 {
         int_member(enc, "cbs", 10, params.cbs);
@@ -509,6 +515,7 @@ pub(crate) fn is_string_element(tag: &[u8]) -> bool {
             | b"subjects"
             | b"matrix"
             | b"filter"
+            | b"pattern"
             | b"query-id"
             | b"query-title"
             | b"id"

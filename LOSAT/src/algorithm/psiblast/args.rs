@@ -481,7 +481,7 @@ impl PsiblastArgs {
             // 8, 9 and 12 (which reach NCBI's engine error), and 5 and 11 (`phi_limits`).
             // Without a pattern: `writes_outfmt` (0..=16, 18, 20).
             let allowed = if phi {
-                matches!(choice.number, 0 | 5..=12 | 20)
+                matches!(choice.number, 0 | 5..=16 | 20)
             } else {
                 writes_outfmt(choice.number)
             };

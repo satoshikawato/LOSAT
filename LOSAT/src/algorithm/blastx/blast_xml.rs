@@ -1522,6 +1522,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         gap_extend: options.gap_extend,
         reward_penalty: None,
         filter: &filter,
+        pattern: None,
         db_num,
         db_len,
         db_len_overflow,

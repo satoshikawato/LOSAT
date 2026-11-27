@@ -11080,13 +11080,16 @@ fn run_call(
     };
     let (mut query_warning_lines, kept) = report_prep::query_warning_lines(&prep);
     // PHI-BLAST's reports (`report_write::write_phi_report`) with each query's messages.
-    let phi_result_warnings = phi_call
+    let phi_messages = phi_call
         .as_ref()
-        .map(|call| report_prep::phi_result_warnings(&prep, call.no_statistics.as_deref()));
+        .map(|call| report_prep::phi_query_messages(&prep, call.no_statistics.as_deref()));
+    let phi_result_warnings = phi_messages
+        .as_deref()
+        .map(|messages| report_prep::phi_result_warnings(&prep, messages));
     let phi_reports = report_write::PhiPairwise::of(
         phi_call.as_ref(),
         &rows_of_lists,
-        phi_result_warnings.as_deref(),
+        (phi_messages.as_deref(), phi_result_warnings.as_deref()),
     );
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
@@ -11642,12 +11645,11 @@ fn write_format_report(
         // psiblast `-phi_pattern` (item PS8a): PHI-BLAST's reports.
         _ if phi_reports.is_some() => report_write::write_phi_report(
             report_view,
-            outfmt,
+            (outfmt, format_index),
             phi_reports.expect("a PHI-BLAST call"),
             format,
-            warnings,
-            probe,
-            pairwise_shown,
+            (warnings, probe, pairwise_shown, side_sink),
+            query_stats,
             rows_of,
         ),
         BlastpReport::Seqalign(serial) => {
@@ -11664,6 +11666,7 @@ fn write_format_report(
             side_sink,
             query_stats,
             rows_of,
+            None,
         ),
         BlastpReport::Pairwise(view) => report_write::write_pairwise(
             report_view,

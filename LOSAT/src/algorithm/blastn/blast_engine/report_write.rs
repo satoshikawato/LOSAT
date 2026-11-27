@@ -495,6 +495,7 @@ pub(super) fn write_structured_xml(
             gap_extend: report.gap_extend,
             reward_penalty: Some((report.reward, report.penalty)),
             filter: &filter,
+            pattern: None,
             db_num: report.database.map_or(0, |database| database.num_sequences),
             db_len: report.database.map_or(0, |database| database.total_letters),
             db_len_overflow: report

@@ -139,6 +139,7 @@ fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static str) -> XmlRu
         gap_extend: 1,
         reward_penalty: None,
         filter: b"F",
+        pattern: None,
         db_num: 4,
         db_len: 5000,
         db_len_overflow: false,

@@ -68,6 +68,45 @@ pub(crate) struct BlastpXml<'a> {
     /// one Seq-id (blast_format.cpp:2362-2389; the XML2 and JSON documents of an iterative
     /// search hold each query's report, `Xml2Run::holds_back`).
     pub later_round: bool,
+    /// PHI-BLAST's results (`report_write::phi_xml_results`), one per pattern occurrence of a
+    /// batch's query: the lists, statistics, messages, masks and records of the document are the
+    /// results' then, each shown as its batch's first query; `None`: one result per query.
+    pub results: Option<&'a [XmlResult]>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:303-360
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389
+/// A result of PHI-BLAST's call that the document writes (`BlastpXml::results`): NCBI makes one
+/// per pattern occurrence of a batch's query, each with the batch's first query
+/// (`BlastBuildSearchResultSet`), and the formatter takes them one by one: a database search
+/// writes each as its own report, a `-subject` search holds the results of one Seq-id and writes
+/// them as one report (`XmlQuery::joins_held`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct XmlResult {
+    /// The call's query whose result it is (its batch's first, `phi_hooks::PhiBatch::first`):
+    /// the run's scopes (`BlastpXml::query_scopes`), its warnings and its reads are that query's.
+    pub query: usize,
+    /// The end of the call's queries whose warnings come before the result: its batch's end.
+    pub warned: usize,
+}
+
+/// How NCBI shows result `index` of `results` (`BlastpXml::results`): its query's show under the
+/// run's scopes (`query_batch::xml_show_of`), its label made the first result of that query, and
+/// joining the held report of the result before it of the same query (NCBI holds the results of
+/// one Seq-id).
+fn result_show(
+    scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
+    results: &[XmlResult],
+    index: usize,
+) -> crate::blastinput::query_batch::XmlShow {
+    let query = results[index].query;
+    let show = crate::blastinput::query_batch::xml_show_of(scopes, query);
+    crate::blastinput::query_batch::XmlShow {
+        label: show
+            .label
+            .and_then(|label| results.iter().position(|result| result.query == label)),
+        joins_held: show.joins_held || (index > 0 && results[index - 1].query == query),
+    }
 }
 
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
@@ -88,14 +127,27 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     // names of the subjects with hits. A run that stops never writes the
     // `-subject` report of its last query, which NCBI holds back, unless another format of the
     // call (outfmt 5) writes it (`written_queries`).
-    let shows = |q_idx: usize| crate::blastinput::query_batch::xml_show_of(xml.query_scopes, q_idx);
+    let shows = |q_idx: usize| match xml.results {
+        None => crate::blastinput::query_batch::xml_show_of(xml.query_scopes, q_idx),
+        Some(results) => result_show(xml.query_scopes, results, q_idx),
+    };
+    // The call's query of result `q_idx` (its own without `results`), and the call's queries.
+    let query_of = |q_idx: usize| xml.results.map_or(q_idx, |results| results[q_idx].query);
+    let queries = xml.results.map_or(hit_lists.len(), |results| {
+        results.last().map_or(0, |last| last.warned)
+    });
     let holds_back = xml.only_xml2 && document.holds_back();
-    let reports = written_queries(
-        hit_lists.len(),
-        xml.stops,
-        holds_back,
-        crate::blastinput::query_batch::held_start_of(xml.query_scopes, hit_lists.len()),
-    );
+    let held_start = match xml.results {
+        None => crate::blastinput::query_batch::held_start_of(xml.query_scopes, hit_lists.len()),
+        Some(_) => {
+            let mut start = hit_lists.len().saturating_sub(1);
+            while start > 0 && shows(start).joins_held {
+                start -= 1;
+            }
+            start
+        }
+    };
+    let reports = written_queries(hit_lists.len(), xml.stops, holds_back, held_start);
     let has_hits = |q_idx: usize| {
         hit_lists[q_idx].as_ref().is_some_and(|list| {
             list.hsplist_array
@@ -124,9 +176,13 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             |q_idx| {
                 crate::blastinput::query_batch::names_unshown_in(
                     xml.query_scopes,
-                    reports,
+                    if reports < hit_lists.len() {
+                        query_of(reports)
+                    } else {
+                        queries
+                    },
                     holds_back,
-                    q_idx,
+                    query_of(q_idx),
                 )
             },
         )?
@@ -148,11 +204,20 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     document.start((reports > 0).then_some(&xml.run), &mut buf)?;
     writer.write_all(&buf)?;
     buf.clear();
+    // The queries whose warnings are written.
+    let mut warned = 0usize;
     for (q_idx, hit_list) in hit_lists.iter().enumerate() {
-        // The query's warnings come before its document (`QueryWarnings`).
+        // The query's warnings come before its document (`QueryWarnings`); those of the queries of
+        // a PHI-BLAST result's batch before the batch's first result (`XmlResult::warned`).
+        let warned_end = xml
+            .results
+            .map_or(q_idx + 1, |results| results[q_idx].warned);
         if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
+            for query in warned..warned_end {
+                warnings.before_query(query, &mut *writer)?;
+            }
         }
+        warned = warned.max(warned_end);
         let show = shows(q_idx);
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
@@ -168,7 +233,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             // Queries whose results join the unwritten held report were still read, exported and
             // searched before the stopping batch, so their warnings and requests follow.
             if let Some(warnings) = warnings.as_deref_mut() {
-                for later in (q_idx + 1)..hit_lists.len() {
+                for later in warned..queries {
                     warnings.before_query(later, &mut *writer)?;
                 }
             }
@@ -199,7 +264,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         let mut posts = crate::report::query_warnings::HitPosts::new(
             warnings
                 .as_deref()
-                .is_some_and(|warnings| warnings.reads_with_texts(q_idx)),
+                .is_some_and(|warnings| warnings.reads_with_texts(query_of(q_idx))),
         );
         let posting = warnings.is_some();
         let written = document.query(&xml.run, &query, &mut buf, |sink| {
@@ -295,7 +360,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         crate::report::query_warnings::write_hit_posts(
             &buf,
             &posts,
-            q_idx,
+            query_of(q_idx),
             writer,
             warnings.as_deref_mut(),
         )?;

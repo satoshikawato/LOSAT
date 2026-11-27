@@ -37,6 +37,9 @@ pub struct XmlRun<'a> {
     pub reward_penalty: Option<(i32, i32)>,
     /// `Parameters_filter` (`filter::filter_string`).
     pub filter: &'a [u8],
+    /// `Parameters_pattern`: psiblast's `-phi_pattern` as read from its file (NCBI's options keep
+    /// the text before the compiler upper-cases it, `PhiPattern::as_read`); `None` otherwise.
+    pub pattern: Option<&'a [u8]>,
     /// `Statistics_db-num` and `Statistics_db-len`: the database's sequences and letters (the
     /// sums over the names of the `-db` list, `PairwiseDatabase`); 0 and 0 for `-subject`. The
     /// number is the `Int8` sum that XML2 and JSON write (data4xml2format.hpp:215-217); BLAST

@@ -60,6 +60,10 @@ fn write_parameters<E: Encoder>(enc: &mut E, run: &XmlRun<'_>) {
     if !run.filter.is_empty() {
         string_member(enc, "filter", 7, run.filter);
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:617-618
+    if let Some(pattern) = run.pattern {
+        string_member(enc, "pattern", 8, pattern);
+    }
     enc.end_sequence();
     enc.end_member();
 }

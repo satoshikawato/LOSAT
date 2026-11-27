@@ -484,6 +484,7 @@ impl PreparedXml {
             gap_extend: self.gap_extend,
             reward_penalty: None,
             filter: &self.filter,
+            pattern: None,
             db_num: self.db_num,
             db_len: self.db_len,
             db_len_overflow: self.db_len_overflow,

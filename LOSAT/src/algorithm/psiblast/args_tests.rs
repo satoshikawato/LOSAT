@@ -190,9 +190,10 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             .into_blastp_args()
             .is_ok());
     }
-    // With `-phi_pattern` (item PS8a): PHI-BLAST's reports run, formats 8, 9 and 12 go on to
-    // NCBI's engine error, and BLAST XML and the archive go on to the search's setup, whose NCBI
-    // errors come before their refusal (`phi_hooks::phi_limits`).
+    // With `-phi_pattern` (item PS8a): PHI-BLAST's reports run (the XML2 and JSON documents of
+    // 13 to 16 too, item PS15b-4), formats 8, 9 and 12 go on to NCBI's engine error, and BLAST XML
+    // and the archive go on to the search's setup, whose NCBI errors come before their refusal
+    // (`phi_hooks::phi_limits`).
     let with_pattern = |format: &str| {
         parse(&["-phi_pattern", "p.pat", "-outfmt", format])
             .unwrap()
@@ -211,10 +212,14 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
         "12",
         "5",
         "11",
+        "13",
+        "14",
+        "15",
+        "16",
     ] {
         assert_eq!(with_pattern(format), Ok(()), "outfmt {format}");
     }
-    for format in ["1", "2", "3", "4", "15", "16", "18"] {
+    for format in ["1", "2", "3", "4", "18"] {
         assert_eq!(
             with_pattern(format),
             Err(format!(

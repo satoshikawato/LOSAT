@@ -201,3 +201,88 @@ out_full_db_11	-archive in/db.asn -outfmt 11 -out /dev/full
 out_full_batch_11	-archive in/batch.asn -outfmt 11 -out /dev/full
 out_full_bin_11	ARCHIVE_FORMAT=bin -archive in/bn.asn -outfmt 11 -out /dev/full
 out_full_xml_11	ARCHIVE_FORMAT=xml -archive in/bn.asn -outfmt 11 -out /dev/full
+# Rows from of11_db_from_bin on (line RG item F3 PR 6 after review R6, agent P6Fb of ad-RG-F3-13, 2026-11-27): NCBI BLAST+ 2.17.0, the official release build on the local machine (/home/kawato/tools/ncbi-blast-oracle), by remaining-gaps-20261112/F/f3/tools/fixP6F.py, every NCBI run under unshare -rn: -outfmt 11 of the binary (BER) and XML archives of #1680, their cuts and junk, the text edge archives, the formatter's options, and in/fs_<name>.asn: an archive of in/ with a FilterString setter first in each object's algorithm options (fixP6F.py inputs); refused_filter_* are LOSAT's refusals by name of a FilterString number that NCBI's sscanf does not store, where NCBI then writes a variable it never set (ncbi/<name>.* keeps those bytes).
+of11_db_from_bin	-archive in/db.asnb -outfmt 11
+of11_subject_from_bin	-archive in/bn.asnb -outfmt 11
+of11_batch_from_bin	-archive in/batch.asnb -outfmt 11
+of11_error_object_from_bin	-archive in/err.asnb -outfmt 11
+of11_rpsblast_from_bin	-archive in/rps.asnb -outfmt 11
+bad_title_2_11_from_bin	-archive in/bad2.asnb -outfmt 11
+of11_bin_cut1	-archive in/bin_cut1.asnb -outfmt 11
+of11_bin_cut2	-archive in/bin_cut2.asnb -outfmt 11
+of11_bin_plus30	-archive in/bin_plus30.asnb -outfmt 11
+of11_bin_plus00	-archive in/bin_plus00.asnb -outfmt 11
+of11_batch_bin_cut1	-archive in/batch_bin_cut1.asnb -outfmt 11
+of11_db_from_xml	-archive in/db.xml -outfmt 11
+of11_subject_from_xml	-archive in/bn.xml -outfmt 11
+of11_batch_from_xml	-archive in/batch.xml -outfmt 11
+of11_error_object_from_xml	-archive in/err.xml -outfmt 11
+of11_rpsblast_from_xml	-archive in/rps.xml -outfmt 11
+bad_title_2_11_from_xml	-archive in/bad2.xml -outfmt 11
+of11_xml_cut1	-archive in/xml_cut1.xml -outfmt 11
+of11_xml_cut2	-archive in/xml_cut2.xml -outfmt 11
+of11_xml_cut20	-archive in/xml_cut20.xml -outfmt 11
+of11_xml_junk	-archive in/xml_junk.xml -outfmt 11
+of11_bin_db_from_bin	ARCHIVE_FORMAT=bin -archive in/db.asnb -outfmt 11
+of11_bin_subject_from_xml	ARCHIVE_FORMAT=bin -archive in/bn.xml -outfmt 11
+of11_xml_subject_from_bin	ARCHIVE_FORMAT=xml -archive in/bn.asnb -outfmt 11
+bad_title_2_11_xml_from_bin	ARCHIVE_FORMAT=xml -archive in/bad2.asnb -outfmt 11
+refused_database_11	-archive in/nodb.asn -outfmt 11
+refused_fatal_message_11	-archive in/fatal.asn -outfmt 11
+of11_garbage	-archive in/garbage.asn -outfmt 11
+of11_cut2	-archive in/cut2.asn -outfmt 11
+of11_empty	-archive in/empty.asn -outfmt 11
+of11_bom	-archive in/bom.asn -outfmt 11
+of11_messages	-archive in/warn.asn -outfmt 11
+of11_rpstblastn_mts1	-archive in/rtn.asn -outfmt 11 -max_target_seqs 1
+of11_xml_rpsblast	ARCHIVE_FORMAT=xml -archive in/rps.asn -outfmt 11
+of11_bin_psiblast	ARCHIVE_FORMAT=bin -archive in/ps.asn -outfmt 11
+of11_prefetch_max	PRE_FETCH_SEQS_LIMIT=2147483647 -archive in/db.asn -outfmt 11
+of11_nd3	-archive in/db.asn -outfmt 11 -num_descriptions 3
+of11_ll40	-archive in/db.asn -outfmt 11 -line_length 40
+of11_sorthits	-archive in/db.asn -outfmt 11 -sorthits 1
+of11_sorthsps	-archive in/db.asn -outfmt 11 -sorthsps 1
+of11_html	-archive in/db.asn -outfmt 11 -html
+of11_show_gis	-archive in/db.asn -outfmt 11 -show_gis
+of11_mts0	-archive in/db.asn -outfmt 11 -max_target_seqs 0
+of11_mts600	-archive in/db.asn -outfmt 11 -max_target_seqs 600
+of11_na3_nd2	-archive in/batch.asn -outfmt 11 -num_alignments 3 -num_descriptions 2
+of11_fields	-archive in/db.asn -outfmt "11 qseqid"
+opt_bho09_11	-archive in/opt_bho09.asn -outfmt 11
+opt_bhse_neg_11	-archive in/opt_bhse_neg.asn -outfmt 11
+opt_cull_neg_11	-archive in/opt_cull_neg.asn -outfmt 11
+opt_maxhsps_neg_11	-archive in/opt_maxhsps_neg.asn -outfmt 11
+opt_pident150_11	-archive in/opt_pident150.asn -outfmt 11
+opt_qcov150_11	-archive in/opt_qcov150.asn -outfmt 11
+opt_word3_11	-archive in/opt_word3.asn -outfmt 11
+opt_word_neg_11	-archive in/opt_word_neg.asn -outfmt 11
+opt_evalue0_11	-archive in/opt_evalue0.asn -outfmt 11
+fs_bn_Lm_11	-archive in/fs_bn_Lm.asn -outfmt 11
+fs_bn_D3_11	-archive in/fs_bn_D3.asn -outfmt 11
+fs_bn_Ddefault_11	-archive in/fs_bn_Ddefault.asn -outfmt 11
+fs_bn_D2err_11	-archive in/fs_bn_D2err.asn -outfmt 11
+fs_bn_R_11	-archive in/fs_bn_R.asn -outfmt 11
+fs_bn_Dbig_11	-archive in/fs_bn_Dbig.asn -outfmt 11
+fs_bn_Dneg_11	-archive in/fs_bn_Dneg.asn -outfmt 11
+fs_bn_F_11	-archive in/fs_bn_F.asn -outfmt 11
+fs_bn_W_11	-archive in/fs_bn_W.asn -outfmt 11
+fs_bn_mold_11	-archive in/fs_bn_mold.asn -outfmt 11
+fs_bn_Sabc_11	-archive in/fs_bn_Sabc.asn -outfmt 11
+refused_filter_dust_abc_11	-archive in/fs_bn_Dabc.asn -outfmt 11
+fs_bn_Rlong_11	-archive in/fs_bn_Rlong.asn -outfmt 11
+fs_bn_Dlate_11	-archive in/fs_bn_Dlate.asn -outfmt 11
+fs_db_Lm_11	-archive in/fs_db_Lm.asn -outfmt 11
+fs_ps_S_11	-archive in/fs_ps_S.asn -outfmt 11
+fs_ps_L_11	-archive in/fs_ps_L.asn -outfmt 11
+fs_ps_S2err_11	-archive in/fs_ps_S2err.asn -outfmt 11
+fs_ps_Snan_11	-archive in/fs_ps_Snan.asn -outfmt 11
+fs_ps_Snegnan_11	-archive in/fs_ps_Snegnan.asn -outfmt 11
+fs_ps_Snanp_11	-archive in/fs_ps_Snanp.asn -outfmt 11
+fs_ps_Shex_11	-archive in/fs_ps_Shex.asn -outfmt 11
+fs_ps_Sinf_11	-archive in/fs_ps_Sinf.asn -outfmt 11
+fs_ps_Sbig_11	-archive in/fs_ps_Sbig.asn -outfmt 11
+fs_ps_Smix_11	-archive in/fs_ps_Smix.asn -outfmt 11
+refused_filter_seg_abc_11	-archive in/fs_ps_Sabc.asn -outfmt 11
+fs_ps_Dabc_11	-archive in/fs_ps_Dabc.asn -outfmt 11
+fs_rps_Lm_11	-archive in/fs_rps_Lm.asn -outfmt 11
+fs_rtn_Lm_11	-archive in/fs_rtn_Lm.asn -outfmt 11

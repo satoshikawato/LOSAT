@@ -534,7 +534,8 @@ fn a_query_of_an_unsearched_batch_lists_no_masks() {
 /// no other: a `taxdb.bti` of the search path whose record of the database's taxid (9606) NCBI
 /// reads from unmapped memory (`btd_empty`, NCBI BLAST+ crashes) changes no byte of outfmt 8 and
 /// adds no line to standard error, while the other formats refuse it (rc 1, DBID DECISIONS 13 (3))
-/// at 1, 4, 8 and 16 threads. BLASTP writes nothing to standard output then.
+/// at 1, 4, 8 and 16 threads. BLASTP writes nothing to standard output then but outfmt 0's prolog,
+/// which it writes before its first batch, as NCBI does (line RG item T4b-f).
 #[test]
 fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -571,7 +572,16 @@ fn the_taxdb_is_read_by_the_prefetching_formats_only() {
             assert_eq!(with.status.code(), Some(1), "{case}");
             let stderr = String::from_utf8_lossy(&with.stderr);
             assert!(stderr.contains(refusal), "{case}: {stderr}");
-            assert!(with.stdout.is_empty(), "{case}");
+            if format == "0" {
+                assert!(
+                    !with.stdout.is_empty()
+                        && without.stdout.starts_with(&with.stdout)
+                        && !String::from_utf8_lossy(&with.stdout).contains("Query="),
+                    "{case}: the prolog"
+                );
+            } else {
+                assert!(with.stdout.is_empty(), "{case}");
+            }
         }
     }
     for format in ["15", "16"] {

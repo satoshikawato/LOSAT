@@ -20,6 +20,7 @@ const INDEFINITE_LENGTH_BYTE: u8 = 0x80;
 
 // The BER lengths and integer values are the ASN.1 binary encoder's, their one writer.
 use crate::report::serial::asn_ber::{write_int4_value, write_int8_value, write_length};
+use crate::report::serial::out_buffer::Stream;
 use crate::seqid::model::{Date, ObjectId, ParsedSeqId, PatentNumber, TextseqId};
 use crate::seqid::DeflineSet;
 use crate::utils::byte_search::find_first;
@@ -88,11 +89,12 @@ fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleCh
     write_visible_string_bytes(out, text, bad);
 }
 
-/// Whether `write_visible_string` writes `byte` as `#` (a byte outside ' '..'~').
+/// Whether `write_visible_string` writes `byte` as `#` (a byte outside ' '..'~'): the rule of the
+/// ASN.1 binary stream, read from its one owner (`Stream::replaces`).
 ///
 /// NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459
 fn is_bad_visible(byte: u8) -> bool {
-    !(b' '..=b'~').contains(&byte)
+    Stream::AsnBinary.replaces(byte)
 }
 
 /// The bytes of `text` that `write_visible_string` writes as `#` and the stream offsets that it

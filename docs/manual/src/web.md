@@ -13,12 +13,13 @@ LOSAT Web is an in-browser graphical interface for local sequence searches built
 
 ## What runs in LOSAT Web
 
-- **Programs:** `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`, plus the `windowmasker` tool tab (`-mk_counts`, `-convert`, `-ustat`).
+- **Programs:** `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`, plus the `windowmasker` (`-mk_counts`, `-convert`, `-ustat`) and **Format Archive** (`blast_formatter`, `-archive`) tool tabs.
+- **Format Archive (`blast_formatter`):** re-formats `-outfmt 11` BLAST archives from a local file, pasted ASN.1 text, or a completed `-outfmt 11` search output in the current session (via the `"Format archive…"` button on `outfmt 11` outputs) into every output format that LOSAT's `blast_formatter` writes (`8`, `9`, `12` in v0.2.0; custom `-outfmt` strings are also accepted and passed straight to the engine). Optional local BLAST database folders/files can be attached to the run directory so `-db` archives format locally in the browser; `-rid` is refused.
 - **Subjects:** FASTA subjects (`-subject`) and local BLAST databases (`-db`) opened from a folder (with multi-file fallback). Database searches auto-discover valid `.nal`/`.pal`, `.nin`/`.pin` and multi-volume databases matching the selected program's molecule type, mount optional `taxdb.*` and `taxonomy4blast.sqlite3` files in the folder, and expose grouped database masking and filter controls: mutually exclusive database masking (`-db_soft_mask` or `-db_hard_mask`, by algorithm ID or name), taxonomy filtering (`-taxids`, `-negative_taxids`, `-taxidlist`, `-negative_taxidlist`, `-no_taxid_expansion`), and ID list files (`-seqidlist`, `-negative_seqidlist`, `-gilist`, `-negative_gilist`, plus `-ipglist`/`-negative_ipglist` for protein databases). After a page reload, browsers do not keep folder handles, so LOSAT Web asks you to choose the folder again.
 - **Repeats filtering in BLASTN:** local nucleotide repeats databases (`-filtering_db`), WindowMasker counts files (`-window_masker_db`), and downloaded or browser-made taxonomy ID counts (`-window_masker_taxid`), with both `-subject` and `-db` searches. When `-no_taxid_expansion` is enabled on a database search, LOSAT Web guides WindowMasker to a counts file (`-window_masker_db`) and highlights the NCBI incompatibility if `-window_masker_taxid` is also set.
 - **Not available in LOSAT Web:**
-  - Remote NCBI options (`-remote`, `-entrez_query`);
-  - PSI-BLAST (`psiblast`), RPS programs (`rpsblast`, `rpstblastn`), `rpsbproc`, `blast_formatter`, and database tools other than `windowmasker` (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck`);
+  - Remote NCBI options (`-remote`, `-entrez_query`, `blast_formatter -rid`);
+  - PSI-BLAST (`psiblast`), RPS programs (`rpsblast`, `rpstblastn`), `rpsbproc`, and database tools other than `windowmasker` and `blast_formatter` (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck`);
   - `tblastn -in_pssm`.
 
 ## Threads in the browser

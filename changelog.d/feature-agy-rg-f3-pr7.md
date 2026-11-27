@@ -1,0 +1,2 @@
+- Expose `blast_formatter` in LOSAT Web (WebAssembly ABI v2 `losat_web2_tool` and `losat_web2_validate`, `losat` npm package `runTool`/`validateTool`/`describeTool`, and the **Format Archive** browser tab with `-subject` and local `-db` archive support plus a `"Format archive…"` shortcut on completed `-outfmt 11` search outputs).
+- Add byte-parity tests for `blast_formatter` across WebAssembly V-ABI, the `losat` npm package, LOSAT Web Playwright E2E, and `pylosat.blast_formatter`.

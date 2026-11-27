@@ -2,7 +2,7 @@
 
 `losat blast_formatter` writes the reports of a search again from its BLAST archive, without running the search again. Use it when you saved a search with `-outfmt 11` and want its tabular report or its Seq-aligns later.
 
-It writes the same bytes as NCBI's `blast_formatter` 2.17.0, the Seq-aligns and the tabular formats, for archives of every search program (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `deltablast`, PHI-BLAST of a protein query, `rpsblast`, `rpstblastn`) with `-subject` or `-db`.
+It writes the same bytes as NCBI's `blast_formatter` 2.17.0, the Seq-aligns and the tabular formats, for archives of every search program (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `deltablast`, PHI-BLAST of a protein query, `rpsblast`, `rpstblastn`, and PSI-TBLASTN as NCBI BLAST+'s `blast_formatter -rid` saves it) with `-subject` or `-db`.
 
 ## Synopsis
 

@@ -902,14 +902,8 @@ fn search_delta_batch(
     let one_round = plan.num_iterations == 1;
     let sections = usize::from(domain_reports.is_some());
     let per_query = sections + results.count;
-    let domain_formatted = |index: usize| -> usize {
-        *calls
-            + if one_round {
-                index * per_query
-            } else {
-                index
-            }
-    };
+    let domain_formatted =
+        |index: usize| -> usize { *calls + if one_round { index * per_query } else { index } };
     let round_formatted = |index: usize, result_index: usize| -> usize {
         *calls
             + if one_round {
@@ -1904,9 +1898,9 @@ fn write_round_epilogs(
     rounds: usize,
 ) -> Result<()> {
     let (num_sequences, total_letters) = subject_source.shown_totals();
-    let pairwise_database = subject_source.database().map(|database| {
-        super::with_domain_database(args, database.pairwise_database())
-    });
+    let pairwise_database = subject_source
+        .database()
+        .map(|database| super::with_domain_database(args, database.pairwise_database()));
     let taxdb_found = match subject_source.database() {
         Some(database) => database.taxdb_found(),
         None => args.subject_taxdb_found,

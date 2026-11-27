@@ -4149,9 +4149,10 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         // `itr.GetIterationNumber()`, psiblast_app.cpp:283-285); LOSAT's psiblast runs its
         // first round only here. deltablast's domain search section carries its own heading
         // (`PairwiseConfig::section`).
-        let section = self.config.section.or_else(|| {
-            (self.config.program == "psiblast").then_some(SectionHeading::Round(1))
-        });
+        let section = self
+            .config
+            .section
+            .or_else(|| (self.config.program == "psiblast").then_some(SectionHeading::Round(1)));
         if let Some(section) = section {
             section.write(writer)?;
         }

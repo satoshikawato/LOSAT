@@ -225,13 +225,16 @@ fn a_cell_at_the_arrays_end_places_every_hit_at_the_ranges_coordinates() {
 
 #[test]
 fn a_segment_of_negative_length_is_still_refused() {
-    let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/delta/deltatest");
+    let base =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/delta/deltatest");
     let files = CdProfileFiles::open(&base, "DELTABLAST").expect("the fixture's profile files");
     let mut negative = hit(1, 1e-5, &[(0, 0, 3)]);
     negative.segments[0].query.to = negative.segments[0].query.from - 1;
     let error = build_msa(&[1; 10], &[negative], &files, 0).expect_err("refused");
     assert!(
-        error.to_string().contains("has a segment of negative length or start"),
+        error
+            .to_string()
+            .contains("has a segment of negative length or start"),
         "{error}"
     );
     // A segment past the searched letters is placed at NCBI's index (here in the next hit's row),

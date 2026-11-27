@@ -10,7 +10,8 @@ use std::path::Path;
 use std::process::Command;
 
 /// The fields of the rows: none reads a query letter.
-const FIELDS: &str = "6 qseqid sseqid length gapopen gaps qstart qend sstart send evalue bitscore score";
+const FIELDS: &str =
+    "6 qseqid sseqid length gapopen gaps qstart qend sstart send evalue bitscore score";
 
 #[test]
 fn a_range_past_ncbis_alignment_writes_the_domain_rows_of_the_range_and_the_rows_of_its_letters() {
@@ -39,8 +40,9 @@ fn a_range_past_ncbis_alignment_writes_the_domain_rows_of_the_range_and_the_rows
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let oracle = std::fs::read_to_string(root.join("tests/fixtures/db_search/db.dl.ql.or.dd300.sh.s6.out"))
-        .expect("the frozen run of the range's letters");
+    let oracle =
+        std::fs::read_to_string(root.join("tests/fixtures/db_search/db.dl.ql.or.dd300.sh.s6.out"))
+            .expect("the frozen run of the range's letters");
     // The domain rows (subjects `gnl|CDD|`) in the record's coordinates: the range starts at 300.
     let mut domain_rows = 0;
     let expected: String = oracle

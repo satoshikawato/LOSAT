@@ -174,7 +174,10 @@ impl Report {
     /// `bytes`: the bytes before the last `held` ones (which NCBI's buffer holds) go to the file
     /// from `pending` and from `bytes` where they are, in one write as the block's `write_all` was
     /// (`report::ostream::write_device2`), and only the held ones are kept, so a long string of the
-    /// input (a title of many megabytes) is not copied into the report as well.
+    /// input (a title of many megabytes) is not copied into the report as well. (A write of a
+    /// block, once in 64 KiB of the report, stays out of the insertion's own code.)
+    #[cold]
+    #[inline(never)]
     fn write_through(&mut self, bytes: &[u8], held: usize) {
         let held_of_bytes = held.min(bytes.len());
         let (written, kept) = bytes.split_at(bytes.len() - held_of_bytes);

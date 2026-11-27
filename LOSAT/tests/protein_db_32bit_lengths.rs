@@ -705,8 +705,19 @@ fn blastp_blastx_psiblast_skip_non_positive_32bit_proteins() {
         assert_rc_err(&out, 3, "LOSAT engine error: Unknown error code 1\n", db);
     }
 
-    // Combined & single-volume mixed DBs find hits on `small` identically at 1 and 2 threads
+    // Combined & single-volume mixed DBs: verified against official NCBI BLAST+ 2.17.0.
+    // At 1 thread all 4 skip the non-positive OID and find hits on `small`. At 2 threads
+    // (DB-split), NCBI's `CSeqDBImpl::x_FillSeqBuffer` (`seqdbimpl.cpp:699-700`) stops at the
+    // first negative-length OID, so `dba` and `db_mix1` (OID 0 = -2147483648) return rc=0 with
+    // empty stdout/stderr for both `blastp` and `blastx` (gapped and ungapped), while `db_mix2`
+    // (OID 0 = 400) matches its 1-thread output byte for byte.
+    // On `dba0` (whose volume 0 has length 0) NCBI 2.17.0 aborts at 2 or more threads (exit 134,
+    // `CSeqDBException` `Sequence not returned.`); LOSAT skips OID 0 and prints the 1-thread
+    // output (PD-LOSAT-NCBI-DEFECTS approved exception 36, Owner 2026-11-27 09:25 JST). The test
+    // `a_protein_of_length_0_keeps_the_one_thread_output_at_any_thread_count` checks those bytes
+    // against NCBI's.
     for db in COMBINED_DBS {
+        let mt_stops_before_small = matches!(db, "dba" | "db_mix1");
         for base in [
             vec![
                 "blastp",
@@ -758,11 +769,15 @@ fn blastp_blastx_psiblast_skip_non_positive_32bit_proteins() {
             let r1 = fx.run(&a1);
             let r2 = fx.run(&a2);
             assert_eq!(r1.status.code(), Some(0), "{a1:?}: {r1:?}");
-            assert_eq!(
-                (r1.status.code(), &r1.stdout, &r1.stderr),
-                (r2.status.code(), &r2.stdout, &r2.stderr),
-                "mt {base:?}"
-            );
+            if mt_stops_before_small {
+                assert_ok_empty(&r2, &a2);
+            } else {
+                assert_eq!(
+                    (r1.status.code(), &r1.stdout, &r1.stderr),
+                    (r2.status.code(), &r2.stdout, &r2.stderr),
+                    "mt {base:?}"
+                );
+            }
             let hits = out_str(&r1.stdout);
             assert!(hits.contains("\tsmall\t100.000\t60\t"), "{base:?}: {hits}");
         }
@@ -782,6 +797,66 @@ fn blastp_blastx_psiblast_skip_non_positive_32bit_proteins() {
             out_str(&psi.stdout).contains("\tsmall\t100.000\t60\t"),
             "psi {db}"
         );
+    }
+}
+
+/// PD-LOSAT-NCBI-DEFECTS approved exception 36 (Owner 2026-11-27 09:25 JST, Q-DBA0-MT=KEEP): on a
+/// protein database with a sequence of length 0, NCBI BLAST+ 2.17.0 aborts at 2 or more threads
+/// (exit 134, `Sequence not returned.`) and LOSAT prints NCBI's `-num_threads 1` output at any
+/// thread count. `tests/fixtures/zero_length_mt` holds NCBI's `-num_threads 1` bytes on `dba0`
+/// (`docs/evidence/zero_length_protein_mt/`).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:656-681
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:378
+#[test]
+fn a_protein_of_length_0_keeps_the_one_thread_output_at_any_thread_count() {
+    let dir = TempDir::new("zero-mt");
+    let big = AA_PATTERN.repeat(15);
+    let small = format!(
+        "{}{}{}",
+        AA_PATTERN.repeat(15),
+        "Q".repeat(40),
+        AA_PATTERN.repeat(3)
+    );
+    let query = AA_PATTERN.repeat(3);
+    fs::write(dir.0.join("q.fa"), format!(">q\n{query}\n")).unwrap();
+    fs::write(
+        dir.0.join("qn.fa"),
+        format!(">qn\n{}\n", dna_for_protein(&query)),
+    )
+    .unwrap();
+    make_prot_db(&dir.0, "db0", &format!(">big\n{big}\n"));
+    assert!(patch_single_prot_db(&dir.0, "db0", 0, &[]));
+    make_prot_db(&dir.0, "dbs", &format!(">small\n{small}\n"));
+    fs::write(dir.0.join("dba0.pal"), "TITLE dba0\nDBLIST db0 dbs\n").unwrap();
+
+    let frozen = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/zero_length_mt");
+    let ungapped = ["-ungapped", "-comp_based_stats", "0"];
+    for (name, prog, query, extra) in [
+        ("blastp", "blastp", "q.fa", &[][..]),
+        ("blastp_ug", "blastp", "q.fa", &ungapped[..]),
+        ("blastx", "blastx", "qn.fa", &[][..]),
+        ("blastx_ug", "blastx", "qn.fa", &ungapped[..]),
+        (
+            "psiblast",
+            "psiblast",
+            "q.fa",
+            &["-num_iterations", "2"][..],
+        ),
+    ] {
+        let expected = fs::read(frozen.join(format!("{name}.dba0.out"))).unwrap();
+        let expected_err = fs::read(frozen.join(format!("{name}.dba0.err"))).unwrap();
+        for threads in ["1", "2", "4"] {
+            let mut args = vec![prog, "-query", query, "-db", "dba0"];
+            args.extend_from_slice(extra);
+            args.extend(["-num_threads", threads, "-outfmt", "6 std slen"]);
+            let out = losat(&dir.0, &args);
+            assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+            assert_eq!(
+                (out_str(&out.stdout), out_str(&out.stderr)),
+                (out_str(&expected), out_str(&expected_err)),
+                "{args:?}: NCBI's -num_threads 1 bytes"
+            );
+        }
     }
 }
 

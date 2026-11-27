@@ -84,7 +84,7 @@ Strategy files:
 ## blastn
 
 - `-outfmt 1` to `4` with `-parse_deflines` and a query record that is also a subject (one record) is refused in one case, shared with `blastp`. The first of the longest aligned segments of the query's alignments (in their order) is then in an ungapped HSP of the record with itself that is not its first.
-- NCBI leaves the record's subject rows out of its merged alignment, writes past its vectors and aborts (`double free or corruption`). LOSAT stops before the first byte of the report. For `blastn` it writes the prolog first, as NCBI does.
+- NCBI leaves the record's subject rows out of its merged alignment, writes past its vectors and aborts (`double free or corruption`). LOSAT writes the start of the report first, as NCBI does, and stops before the rest of the report.
 - In a run of many queries that LOSAT searches in blocks, it stops before the first byte of the block that holds the query, after the reports of the blocks before.
 - A final gapped X-drop of dynamic programming (`-task blastn`, `blastn-short`, `dc-megablast`, `-no_greedy`) is refused when its raw score divided by the gap extension reaches 1,073,741,721. NCBI's arithmetic overflows there.
 - A gapped X-drop of greedy extension (`-task megablast`) is refused where NCBI's greedy alignment reads or writes outside its arrays. NCBI then corrupts its heap, reads memory it did not write, crashes, or stops with `BLAST engine error: Unknown error code -1`.

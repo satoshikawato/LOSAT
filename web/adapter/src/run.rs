@@ -831,10 +831,10 @@ impl losat::web_adapter::FileReceiver for NoFiles {
 /// gives it on `STREAM_RUN_FILES` too, as `out_pssm`; none for an argv that the parser rejects),
 /// whether the run is a dry run, whether the run takes its inputs from
 /// `losat_web2_register_inputs` (`inputs_together`: an argv with `-parse_deflines`), whether it
-/// prints a text in place of a search (`prints`:
-/// `"help"` or `"version"`, `STREAM_PRINTED`), which needs no inputs, and whether it searches the
-/// database of `-db` (`searches_database`: its `run` takes no subject handle, and the engine opens
-/// the database from the run's files, line WQA D12a). An unknown program is an error.
+/// prints a text in place of a search (`prints`: `"help"` or `"version"`, `STREAM_PRINTED`), which
+/// needs no inputs, and whether it searches the database of `-db` (`searches_database`: its `run`
+/// takes no subject handle, and the engine opens the database from the run's files, line WQA
+/// D12a). An unknown program is an error.
 pub fn start_json(words: &[&str]) -> Result<String, String> {
     use losat::web_adapter::Preparsed;
     Program::parse(words.first().copied().unwrap_or(""))?;
@@ -885,9 +885,9 @@ pub fn start_json(words: &[&str]) -> Result<String, String> {
 /// under which a run gives the file if it makes it (`losat::web_adapter::open_strategy_file`,
 /// `run_files::StrategyTarget::File`): the command line's file name (`RunFiles::output_host_name`,
 /// as for `-out_pssm`; `s.asn` for `./s.asn`, `in/../s.asn` and `/proc/self/cwd/s.asn`; line RG
-/// item F1w-r2). `None` without the option, for a name that makes no file (`/dev/null`, `/dev/stdout`, `/etc/s.asn`),
-/// for a name that is not UTF-8 (which the run refuses) and for an argv that the parser rejects or
-/// that prints a text.
+/// item F1w-r2). `None` without the option, for a name that makes no file (`/dev/null`,
+/// `/dev/stdout`, `/etc/s.asn`), for a name that is not UTF-8 (which the run refuses) and for an
+/// argv that the parser rejects or that prints a text.
 fn strategy_file(words: &[&str]) -> Option<String> {
     let (_, command) = parse_words(words).ok()?;
     losat::web_adapter::export_search_strategy_of(&command)

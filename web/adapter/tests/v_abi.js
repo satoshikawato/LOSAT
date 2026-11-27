@@ -1369,8 +1369,9 @@ async function checkLogfileNames(engine, native, scratch) {
 // default batch sizes (the browser gives no BATCH_SIZE), for each program, on each engine and its thread counts (the
 // threaded engine's parallel search, -num_threads 4 too), against the CLI's file of the same argv: stream 8 holds the
 // CLI's file under the CLI's name of it (`./s.asn` is `s.asn`, as the *start* names it; line RG item F1w-r2), and the
-// argv's output (outfmt 6, and outfmt 11's archive, whose options handle the strategy shares) is the CLI's. The queries and subjects are seeded letters, written once into `scratch`; each
-// subject is pieces of the queries, so that the searches find hits.
+// argv's output (outfmt 6, and outfmt 11's archive, whose options handle the strategy shares) is the CLI's. The
+// queries and subjects are seeded letters, written once into `scratch`; each subject is pieces of the queries, so that
+// the searches find hits.
 function seededFasta(seed, records, length, letters, prefix) {
   let state = seed >>> 0;
   const next = () => {

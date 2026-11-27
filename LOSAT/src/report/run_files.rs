@@ -1798,8 +1798,8 @@ pub enum StrategyTarget {
     /// file of procfs or of a message queue (LOSAT Web's refusal).
     System,
     /// The file of another option of the run, whose bytes the command line's strategy file
-    /// replaces or mixes with its own (LOSAT Web's refusal): `-query`, `-subject`, `-logfile` or
-    /// `-window_masker_db`.
+    /// replaces or mixes with its own (LOSAT Web's refusal): `-query`, `-subject`, a PSSM file
+    /// (`-in_pssm`, `-in_msa`, `-out_pssm`, `-out_ascii_pssm`), `-logfile` or `-window_masker_db`.
     OtherFile(&'static str),
     /// Any other file of the run's files (`RunView`: `run_entries`, `run_directory_entry`), or a
     /// file that the search reads (`FileReceiver::read_files`), which the command line's strategy

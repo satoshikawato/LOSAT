@@ -424,16 +424,16 @@ fn not_in_the_browser(path: &Path, what: &str) -> String {
 /// directory (`RunFiles::strategy_target`, read against the run's files as `-logfile` and a tool's
 /// output are), in the run's file in memory (`ReceivedFile`) under the command line's file name
 /// (`s.asn` for `./s.asn` and `in/../s.asn`; line RG item F1w-r2), with the command line's error
-/// and refusals: NCBI's error at once for a name that the command line cannot
-/// open (a folder that the run's files do not have, a folder of them, a name in a directory of
-/// root's); `-` and the standard output (`/dev/stdout`) refused at NCBI's first request; no file
-/// for the null device (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a name
-/// whose command line run writes where the run has no file: the standard error, a device whose
-/// writes fail or wait for a reader, a file of the system (procfs, a message queue), the file of
-/// another option of the run (`others`: `-query`, `-subject`, `-logfile`, `-window_masker_db`,
-/// the files that the search reads from the run's folder, `web_adapter::open_strategy_file`),
-/// whose bytes the command line's strategy file replaces or mixes with its own, and any other file
-/// of the run's files or file that the search reads, which LOSAT Web does not write.
+/// and refusals: NCBI's error at once for a name that the command line cannot open (a folder that
+/// the run's files do not have, a folder of them, a name in a directory of root's); `-` and the
+/// standard output (`/dev/stdout`) refused at NCBI's first request; no file for the null device
+/// (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a name whose command line
+/// run writes where the run has no file: the standard error, a device whose writes fail or wait
+/// for a reader, a file of the system (procfs, a message queue), the file of another option of the
+/// run (`others`: `-query`, `-subject`, the PSSM files, `-logfile`, `-window_masker_db`, the files
+/// that the search reads from the run's folder, `web_adapter::open_strategy_file`), whose bytes
+/// the command line's strategy file replaces or mixes with its own, and any other file of the
+/// run's files or file that the search reads, which LOSAT Web does not write.
 pub fn create_strategy_file_in(
     files: &RunFiles,
     path: &Path,

@@ -466,8 +466,8 @@ pub enum ReportPlace {
 /// far (`x_pairwise_par::at_place`, or a writer's own marks).
 pub type ReportHook<'r, W> = &'r mut dyn FnMut(ReportPlace, &mut W) -> io::Result<()>;
 
-/// A [`ReportHook`] that writes nothing: of a writer without `-html` that reads no subject
-/// through it (psiblast's headings), and of the tests of the writers.
+/// A [`ReportHook`] that writes nothing, for the tests of the writers.
+#[cfg(test)]
 pub fn no_places<W>(_place: ReportPlace, _writer: &mut W) -> io::Result<()> {
     Ok(())
 }
@@ -769,6 +769,7 @@ impl HitPosts {
             posts,
             cut,
             ends_run,
+            caught_at: _,
             cuts,
         } = posts;
         if self.document.is_empty() {
@@ -846,6 +847,32 @@ pub fn write_document_posts(
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let mut hits = HitPosts::default();
+    hits.document(posts);
+    write_hit_posts(report, &hits, 0, writer, warnings)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2230
+/// Writes `report`, the end of a structured document or a held report written there
+/// (`StructuredXml::finish`, `StructuredXml::unwritten`), whose writing returned `written`, as
+/// `write_document_posts`; where the held report raised an exception that NCBI's report function
+/// catches (`CaughtException`: the stream forms 15 and 16 leave the report out), the post of it
+/// by `program` (`blast_xml::writer::caught_post`) before the document's end where the epilog
+/// marks it (`DocumentPosts::caught_at`), else after the other posts. Any other error is
+/// returned and `report` is not written.
+pub fn write_document_end<D: crate::report::blast_xml::writer::StructuredXml + ?Sized>(
+    written: Result<()>,
+    report: &[u8],
+    document: &mut D,
+    program: &str,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> Result<()> {
+    let mut hits = HitPosts::default();
+    let caught = crate::report::blast_xml::writer::caught_post(written, &*document, program)?;
+    let mut posts = document.take_posts();
+    if let Some(post) = caught.and_then(|post| posts.place_caught(post)) {
+        hits.caught(post);
+    }
     hits.document(posts);
     write_hit_posts(report, &hits, 0, writer, warnings)
 }
@@ -1039,6 +1066,35 @@ pub(crate) fn write_html_post<R: Write + ?Sized>(
     write_after(report, posts, text)
 }
 
+/// The run's diagnostics (`posts`) as a writer that flushes the report written so far (`report`)
+/// before each write ([`write_html_post`]): the posts that a program writes to its diagnostics
+/// between the report's bytes without a writer's place for them (BLASTX's reads of a batch's
+/// titles and its prefetch, before the batch's reports), which NCBI posts to `cerr`, tied to
+/// `cout`: after the report written before, the prolog that `-html` keeps in `cout`'s buffer too
+/// (`pairwise::flushes_after_prolog`; review 1 of line DBID pf7, H2).
+pub(crate) struct PostsAfterReport<'w> {
+    report: &'w mut dyn Write,
+    posts: &'w mut dyn Write,
+}
+
+impl<'w> PostsAfterReport<'w> {
+    /// The diagnostics `posts` after the report `report`.
+    pub(crate) fn new(report: &'w mut dyn Write, posts: &'w mut dyn Write) -> Self {
+        Self { report, posts }
+    }
+}
+
+impl Write for PostsAfterReport<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        write_html_post(self.report, self.posts, buf)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.posts.flush()
+    }
+}
+
 impl Drop for QueryWarnings<'_> {
     /// The texts of the reads that the report did not place (a writer that stopped early, or a
     /// read no writer marks) are written when the warnings end, so that standard error keeps
@@ -1215,6 +1271,17 @@ impl<'a> QueryWarnings<'a> {
     /// is flushed; a failed flush returns before them. Then the query's later lines go to the
     /// format's receiver (`with_later`), without a flush: they are no part of the diagnostics.
     pub fn before_query(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
+        let result = self.before_query_inner(index, report);
+        if result.is_err() {
+            // A failed write (report failure or strategy write fault) ends NCBI's run before any
+            // later query's reads happen: keep `Drop` from dumping unread `ReadCursor` texts.
+            self.end_run();
+        }
+        result
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
+    fn before_query_inner(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
         let placed = before_report(
             self.reads.as_mut(),
             self.before.get(index),
@@ -1222,16 +1289,22 @@ impl<'a> QueryWarnings<'a> {
             report,
             &mut *self.sink,
         )?;
-        match placed {
-            Some(posts) if posts.has_text() => {
-                report.flush()?;
-                posts.write(&mut *self.sink, self.archive)?;
-                self.sink.flush()
+        if let Some(posts) = placed {
+            // Flush `report` once before the first non-empty diagnostic byte written to
+            // `self.sink` (matching NCBI's `cerr.tie(&cout)`): ordinary warnings, `803.7`
+            // replaced-byte posts, and strategy write-failure diagnostics flush `report` before
+            // writing, while a silent `Post::Request` leaves `report` unflushed (NCBI's
+            // `SaveSearchStrategy` does not flush `cout`).
+            let mut tied = TiedDiagnostics {
+                report,
+                sink: &mut *self.sink,
+                flushed: false,
+            };
+            posts.write(&mut tied, self.archive)?;
+            if tied.flushed {
+                tied.sink.flush()?;
             }
-            // A search strategy request's mark alone shows nothing (`Posts::request`).
-            Some(posts) => posts.write(&mut *self.sink, self.archive),
-            None => Ok(()),
-        }?;
+        }
         // The query's result warnings of a format after a structured first one (`with_later`).
         if let Some((posts, receiver)) = self.later.as_mut() {
             if let Some(posts) = posts.get(index) {
@@ -1240,23 +1313,37 @@ impl<'a> QueryWarnings<'a> {
         }
         Ok(())
     }
+}
 
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:756-772 (cited at
-    // `common::database::TaxdbPrinter::batch_texts`)
-    /// Lines that NCBI writes where it prefetches the batch whose first query's report comes next,
-    /// after the posts written before that report (`before_query`): the XML2 and JSON formats'
-    /// taxonomy texts of the batch's prefetch (`TaxdbPrinter::batch_texts`), after the report
-    /// written so far is flushed. Nothing where `lines` is empty.
-    pub(crate) fn prefetch_lines(
-        &mut self,
-        report: &mut dyn Write,
-        lines: Vec<u8>,
-    ) -> io::Result<()> {
-        if lines.is_empty() {
-            return Ok(());
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
+/// Diagnostics writer that flushes `report` once before the first non-empty write to `sink`,
+/// matching NCBI's `cerr.tie(&cout)` so bytes still held in a formatter's buffer reach the report
+/// stream before any diagnostic (`803.7`, strategy write failure, or query warning) is written,
+/// while leaving `report` unflushed when a request mark writes no diagnostics.
+struct TiedDiagnostics<'a> {
+    report: &'a mut dyn Write,
+    sink: &'a mut dyn Write,
+    flushed: bool,
+}
+
+impl Write for TiedDiagnostics<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if !buf.is_empty() && !self.flushed {
+            self.report.flush()?;
+            self.flushed = true;
         }
-        report.flush()?;
-        Posts::of_lines(lines).write(&mut *self.sink, self.archive)?;
+        self.sink.write(buf)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        if !buf.is_empty() && !self.flushed {
+            self.report.flush()?;
+            self.flushed = true;
+        }
+        self.sink.write_all(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
         self.sink.flush()
     }
 }
@@ -1285,6 +1372,42 @@ fn before_report(
         None => None,
     };
     Ok(posts.map(|posts| posts.placed_in(ledger)))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
+/// What NCBI writes to the standard error of a query batch's reports before it stops at a row
+/// of its last query's report (a `report::tabular::FailedLookupRefusal`), the one owner of that
+/// rule for the programs' refusals: for each of the batch's queries up to the row's (`posts`,
+/// from the batch's first query; `reads` the same way, shorter where the rest read nothing) the
+/// posts before its report (`QueryWarnings::before_query`), the warning of its report's formatter
+/// (`formatter`, `FailedLookupRefusal::formatter_warning`), then the texts of the subjects that
+/// its rows read one by one (`QueryWarnings::subject_read`, where the batch's prefetch is off);
+/// of the row's query only those that its rows up to the row read (`rows`: their subjects, as
+/// `reads` names them), which NCBI reads before the row fails.
+pub fn posts_before_stop(
+    posts: &[Posts],
+    reads: &[QueryReads],
+    rows: &[u32],
+    formatter: Option<&str>,
+) -> Posts {
+    let mut before = Posts::new();
+    let last = posts.len().saturating_sub(1);
+    for (query, query_posts) in posts.iter().enumerate() {
+        before.append(query_posts);
+        if let Some(line) = formatter {
+            before.lines(line.as_bytes());
+        }
+        let query_reads = reads.get(query).map_or(&[][..], Vec::as_slice);
+        before.loads(
+            query_reads
+                .iter()
+                .filter(|read| query < last || rows.contains(&read.subject))
+                .cloned()
+                .collect(),
+        );
+    }
+    before
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262
@@ -1461,6 +1584,32 @@ fn warning_line(program: &str, query_id: &[u8], messages: &[String]) -> Vec<u8> 
     )
 }
 
+/// psiblast `-phi_pattern`: the messages of query `index` (`query_warning`'s id and messages) as
+/// PHI-BLAST's report writes them on its output before the query's report, in place of the
+/// warning on standard error: a line feed, the query's id, `: `, each message followed by a
+/// space, a line feed; empty without a message.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2039-2047
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:277-292
+pub fn phi_result_warning<R: InputRecord>(index: usize, query: &R, messages: &[String]) -> Vec<u8> {
+    if messages.is_empty() {
+        return Vec::new();
+    }
+    let local_id = format!("Query_{}", index + 1);
+    let mut text = vec![b'\n'];
+    text.extend(warning_query_id(
+        query.believed_warning_id().unwrap_or(local_id.as_bytes()),
+        &query.title_bytes(),
+    ));
+    text.extend_from_slice(b": ");
+    for message in sorted_query_messages(messages) {
+        text.extend_from_slice(message.as_bytes());
+        text.push(b' ');
+    }
+    text.push(b'\n');
+    text
+}
+
 /// `query_warning` for a query whose Seq-id is its own rather than the `Query_N` that NCBI's
 /// FASTA reader makes: psiblast's PSSM query (`-in_pssm`), whose warnings start with the PSSM's
 /// Seq-id, `seq_id` (`GetSeqIdString()`: a `local str` as written, a `local id` in decimal; the
@@ -1547,6 +1696,17 @@ pub fn null_descriptor_error() -> String {
     setup_error(crate::ncbi_exception::NULL_POINTER)
 }
 
+/// The set-up's error of a query whose Seq-inst has no `length`: NCBI's
+/// `CBlastQuerySourceBioseqSet::GetBlastSequence` throws `"Cannot get sequence length"`, which
+/// `SetupQueries_OMF` catches as a warning of the query and invalidates its contexts, as
+/// `invalid_residues_error`'s.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:317-321
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:609-652
+pub fn missing_length_error() -> String {
+    setup_error("Cannot get sequence length")
+}
+
 /// The text of the set-up's error of one query whose one message is `message`: its severity
 /// (`Warning`) and a space after it (`TSearchMessages::ToString`, cited at
 /// `invalid_residues_error`).
@@ -1573,8 +1733,23 @@ fn residue_positions(positions: &[usize]) -> Option<String> {
 /// The warning for a hit list size below 5.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
-pub fn few_matches_warning(program: &str) -> Vec<u8> {
-    format!("Warning: [{program}] Examining 5 or more matches is recommended\n").into_bytes()
+/// The warning of a hit list size below 5. `prefix` is the application's prefix of its posts
+/// (`SetDiagPostPrefix`: the search programs' `[blastn] `; blast_formatter sets none).
+pub fn few_matches_warning(prefix: Option<&str>) -> Vec<u8> {
+    formatting_warning(prefix, "Examining 5 or more matches is recommended")
+}
+
+/// The formatting handler's post of a message at the level `Warning` (`blastinput::report_counts`)
+/// in an application whose posts have the prefix `prefix` (none: no `[...] `): the post's line
+/// (`ncbi_exception::post_line_in`) with its message, which these warnings always keep.
+pub fn formatting_warning(prefix: Option<&str>, message: &str) -> Vec<u8> {
+    crate::ncbi_exception::post_line_in(
+        crate::ncbi_exception::Severity::Warning,
+        None,
+        prefix,
+        message.as_bytes(),
+        false,
+    )
 }
 
 #[cfg(test)]

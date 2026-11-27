@@ -9,9 +9,11 @@
 //! RPSTBLASTN's Smith-Waterman redo (`-use_sw_tback`, series PR item PS12d) can start with a gap in
 //! the profile's row, whose range they cannot take either (`row_range`). This module is the one
 //! owner of what those writers share: the predicates of an empty row and of a row's range, the
-//! Seq-loc mapper's rows of `-subject`, and NCBI's exceptions.
+//! Seq-loc mapper's rows of `-subject`, and NCBI's exceptions (`Seq_align.cpp`'s,
+//! `report::serial::seqalign::row_range_exception` and `std_seg_lengths_not_accurate`, and the
+//! pairwise writer's stops, `report::pairwise::empty_rows_stop`, which TBLASTN's writers share).
 
-use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::pairwise::EmptyRowsRefusal;
 use crate::report::serial::seqalign::{AlignRow, RowRangeError};
 
 use super::preliminary::PreliminaryHsp;
@@ -29,77 +31,40 @@ pub(crate) fn rows_empty(hsp: &super::results::Hsp) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
-/// What `CSeq_align::GetSeqRange` of the row finds on the Std-segs of the reported HSP `hsp`
-/// (`serial::seqalign::std_seg_row_range`, the one predicate of the writers): the empty rows of an
-/// HSP of length 0 (`rows_empty`), or the row that a gapped HSP's edit script starts with a gap in,
-/// as the engine made them (`-db`; `-subject`'s Seq-loc mapper rewrites some, `SubjectLoc`).
+/// What `CSeq_align::GetSeqRange` of the row finds on the reported (already `-subject`-mapped)
+/// Std-segs of `hsp` (`serial::seqalign::reported_std_seg_row_range`, the one predicate of the
+/// writers): the empty rows of an HSP of length 0 (`rows_empty`, unless `empty_query_rewritten`
+/// holds for `AlignRow::Query`), or a leading gap left in a gapped HSP's reported edit script.
 #[inline]
-pub(crate) fn row_range(hsp: &super::results::Hsp, row: AlignRow) -> Option<RowRangeError> {
-    crate::report::serial::seqalign::std_seg_row_range(
+pub(crate) fn reported_row_range(
+    hsp: &super::results::Hsp,
+    row: AlignRow,
+    empty_query_rewritten: bool,
+) -> Option<RowRangeError> {
+    crate::report::serial::seqalign::reported_std_seg_row_range(
         i64::from(hsp.hsp.q_start),
         i64::from(hsp.seqalign_ends().0),
         &hsp.edit_script,
         row,
+        empty_query_rewritten,
     )
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2907-2930
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
-/// What a formatter that reads the query's range of `hsp`'s Seq-align and then the subject's finds
-/// (`row_range`): the first exception, `None` where both are taken. The description table of
-/// outfmt 0 to 4 (`s_ProcessAlignSet`) and BLAST XML (`s_SeqAlignToXMLHsp`) read them so; an HSP of
-/// length 0 has both rows empty, a gapped one at most one row that starts with a gap.
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
+/// What a formatter that reads the query's range of `hsp`'s reported Seq-align and then the
+/// subject's finds (`serial::seqalign::reported_std_seg_rows_range`): the first exception, `None`
+/// where both are taken.
 #[inline]
-pub(crate) fn rows_range(hsp: &super::results::Hsp) -> Option<RowRangeError> {
-    row_range(hsp, AlignRow::Query).or_else(|| row_range(hsp, AlignRow::Subject))
-}
-
-/// The `__FILE__` of `Seq_align.cpp` in BLAST+'s build (the `seq` library compiles it from
-/// `src/objects/seq`), as NCBI's reports name it.
-const SEQ_ALIGN_CPP: &str = "src/objects/seq/../seqalign/Seq_align.cpp";
-
-/// `CSeq_align::GetSeqRange`'s exception `error` (`RowRangeError`) where a formatter asks for the
-/// range of such a row: `Row is empty` (Seq_align.cpp:227; the deflines of outfmt 0, `qcovs`, BLAST
-/// XML with `-db`), `Row seqids not consistent. Cannot determine range.` (Seq_align.cpp:186; the
-/// same readers of a row that starts with a gap, and the prefetch).
-pub(crate) fn row_range_exception(error: RowRangeError) -> NcbiException {
-    let (line, kind, message) = match error {
-        RowRangeError::Empty => (
-            227,
-            "CSeqalignException::eInvalidAlignment",
-            "CSeq_align::GetSeqRange(): Row is empty",
-        ),
-        RowRangeError::SeqidsNotConsistent => (
-            186,
-            "CSeqalignException::eInvalidRowNumber",
-            "CSeq_align::GetSeqRange(): Row seqids not consistent. Cannot determine range.",
-        ),
-    };
-    NcbiException::new(
-        ThrowSite {
-            file: SEQ_ALIGN_CPP,
-            line,
-            kind,
-            function: None,
-        },
-        message,
-    )
-}
-
-// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:788-803
-/// `CreateDensegFromStdseg(): Std-seg segment lengths not accurate!` (Seq_align.cpp:801): the
-/// Std-seg of `-subject` that the Seq-loc mapper rewrote, a query row of one
-/// nucleotide and an empty subject row (0 is neither 3 nor a third of 1, nor 1), where a formatter
-/// makes a Dense-seg of it (the tabular rows' alignment block, BLAST XML).
-pub(crate) fn std_seg_lengths_not_accurate() -> NcbiException {
-    NcbiException::new(
-        ThrowSite {
-            file: SEQ_ALIGN_CPP,
-            line: 801,
-            kind: "CSeqalignException::eInvalidInputAlignment",
-            function: None,
-        },
-        "CreateDensegFromStdseg(): Std-seg segment lengths not accurate!",
+pub(crate) fn reported_rows_range(
+    hsp: &super::results::Hsp,
+    empty_query_rewritten: bool,
+) -> Option<RowRangeError> {
+    crate::report::serial::seqalign::reported_std_seg_rows_range(
+        i64::from(hsp.hsp.q_start),
+        i64::from(hsp.seqalign_ends().0),
+        &hsp.edit_script,
+        empty_query_rewritten,
     )
 }
 
@@ -121,9 +86,19 @@ pub(crate) enum SubjectLoc {
 impl SubjectLoc {
     /// The subjects of the report `shown`.
     pub(crate) fn of(shown: &super::report::ShownSubjects<'_>) -> Self {
-        match shown {
-            super::report::ShownSubjects::Fasta { .. } => SubjectLoc::Interval,
-            super::report::ShownSubjects::Database { .. } => SubjectLoc::Whole,
+        Self::of_run(matches!(
+            shown,
+            super::report::ShownSubjects::Database { .. }
+        ))
+    }
+
+    /// The subjects of a run that searches a database (`-db`), or `-subject`'s records: the one
+    /// test of whether the run's Seq-aligns are mapped (`BatchResults::put_in_report_order`).
+    pub(crate) fn of_run(database: bool) -> Self {
+        if database {
+            SubjectLoc::Whole
+        } else {
+            SubjectLoc::Interval
         }
     }
 
@@ -184,7 +159,7 @@ pub(crate) enum TabularEmptyRow {
     /// `-subject` with a field of the alignment block, a subject with two or more shown HSPs (or
     /// the mapped rows of a subject's only HSP whose query row wraps, `MappedRows::QueryRowWraps`,
     /// without a query field): `CreateDensegFromStdseg` on the mapped Std-seg
-    /// (`std_seg_lengths_not_accurate`), after the rows before it.
+    /// (`serial::seqalign::std_seg_lengths_not_accurate`), after the rows before it.
     Throws,
     /// `-db` (and `-subject`'s Seq-aligns as made, `SubjectLoc::of_list`), a subject whose only
     /// shown HSP it is, with a query field (or `-subject`'s mapped
@@ -302,7 +277,7 @@ pub(crate) enum MappedRows {
     /// A minus strand's row that would start before the record's first nucleotide: its start, an
     /// unsigned `TSeqPos`, wraps, so NCBI's formatters find the query row empty as `-db`'s
     /// (`row_range_exception` where they read its range: `qcovs`, the query's fields), and its length
-    /// not the subject row's (`std_seg_lengths_not_accurate` where they make a Dense-seg of it).
+    /// not the subject row's (`serial::seqalign::std_seg_lengths_not_accurate` where they make a Dense-seg of it).
     /// Probes: `fix3_oob.py`'s minus-strand pairs.
     QueryRowWraps,
 }
@@ -406,19 +381,6 @@ pub(crate) fn subject_mapped_rows(
     MappedRows::of(&only.hsp, query, subject)
 }
 
-/// LOSAT's refusal of a report of an ungapped HSP of length 0 whose form LOSAT does not
-/// reproduce: not an error of NCBI's engine or formatters.
-#[derive(Debug)]
-pub(crate) struct EmptyRowsRefusal(pub(crate) String);
-
-impl std::fmt::Display for EmptyRowsRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for EmptyRowsRefusal {}
-
 /// The query's fields of a row that NCBI's formatter makes from the Seq-align's query id
 /// (`GetSeq_id` of row 0 of the alignment, after the query's Bioseq failed it): the record's local id (`Query_N`)
 /// without `-parse_deflines`, else the id of its Seq-aligns (`BelievedIds::best`), as
@@ -471,23 +433,6 @@ pub(crate) const UNPORTED_SUBJECT_START: &str = "BLASTX -ungapped -window_size 0
 /// rewrites one (`mapper_wraps_empty_row`).
 pub(crate) const UNPORTED_SUBJECT_ALL_EMPTY: &str = "BLASTX -ungapped -window_size 0 with -subject: a subject among the hits to report whose every one-hit ungapped alignment has length 0, one at the first or second letter of its subject's searched part, of which NCBI BLAST+'s Seq-loc mapper, finding no sequence type in its rows, makes alignments without scores of nucleotides against the rest of the subject's letters (rows with an E-value of 0.0 and a bit score of -1.0, or, for two or more such alignments, more rows, an exception or an out-of-memory stop), which LOSAT does not support where the report reads the alignment";
 
-// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:598-606 (cited at
-// `report::query_anchored::aln_mix::Mix::place`), c++/src/objtools/alnmgr/alnsegments.cpp:
-// 310-327 (cited at `report::query_anchored::aln_mix::Mix::fill_unaligned_regions`)
-/// The refusal of a query-anchored report (outfmt 1 to 4) whose section NCBI's merge frees a
-/// segment in (`report::pairwise::EmptyRowsStop::MergeFreesSegment`,
-/// `report::query_anchored::aln_mix::MixError::NcbiFreesSegment`): the Dense-seg of an HSP of
-/// length 0 has no widths, so `DisplaySeqalign` merges it with the HSPs of the query's frame +1
-/// (`report::query_anchored::HspStrands::no_widths`), as a segment of length 0 of a query row.
-/// One whose query row starts at a codon of one of those HSPs splits that HSP's segment at a
-/// length of 0, which replaces every reference to the segment while the merge still walks it
-/// (`Mix::place`). One that its query row's next segment does not follow at once is where
-/// `FillUnalignedRegions` starts to fill the row, which replaces the row's reference to its
-/// segment: the last one unless the segment is the last that the merge made (`x_Merge`'s local
-/// `CRef`), so the segment is freed while `m_Segments` still lists it and `x_CreateDenseg`
-/// reads it (`Mix::fill_unaligned_regions`). PD-LOSAT-NCBI-DEFECTS rule 3.
-pub(crate) const UNPORTED_ANCHORED_FREE: &str = "BLASTX -ungapped -window_size 0 with -outfmt 1 to 4: a one-hit ungapped alignment of length 0 among the alignments shown where NCBI BLAST+'s merge of the query-anchored alignments frees memory that it still reads (it crashed in our runs): one whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1, whose segment the merge splits at a length of 0, or one followed on its query row by unaligned letters, whose segment of length 0 the merge's FillUnalignedRegions replaces, unless it is the last segment the merge made, which LOSAT does not support";
-
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:422-427,499-503
 /// Whether every Std-seg of the Seq-align of the hit list `list` (one for each HSP with a Seq-align,
 /// `report::has_seqalign`, of an ungapped search) has empty rows (`rows_empty`), and there is one:
@@ -510,15 +455,16 @@ pub(crate) fn subject_rows_all_empty(list: &super::results::HspList, gapped: boo
 /// Whether NCBI's prefetch of the query batch `batches` of a report of `loc`'s subjects (where it
 /// reads the Seq-aligns, `common::database::prefetch_reads_seq_aligns`) throws before it loads
 /// anything: `s_ExtractSeqidsAndRanges` asks for the subject row's range of every Seq-align
-/// (`row_range`), which throws on an empty one, of a subject whose every HSP of an ungapped search
-/// has length 0 (`subject_rows_all_empty`, and with `-subject` one that the mapper leaves so,
-/// `SubjectLoc::of_list`; the prefetch runs with `-subject` too, blastx_app.cpp:286-287), and on
-/// one that starts with a gap, of a gapped HSP as the engine made it (`-db`: RPSTBLASTN's
+/// (`reported_row_range`), which throws on an empty one, of a subject whose every HSP of an
+/// ungapped search has length 0 (`subject_rows_all_empty`, and with `-subject` one that the mapper
+/// leaves so, `SubjectLoc::of_list`; the prefetch runs with `-subject` too, blastx_app.cpp:286-287),
+/// and on one that starts with a gap, of a gapped HSP as reported (`-db`: RPSTBLASTN's
 /// Smith-Waterman redo, also among the HSPs that left its lists past the formatter's cut,
-/// `BatchResults::unlisted_subject_row_throws`; `-subject`'s mapper leaves out a first segment
-/// with a gap row, `serial::seqalign::std_seg_kept`). The prefetch catches it with its warning
-/// (`common::database::prefetch_warning`) and has read no subject, as a batch whose prefetch is
-/// off: the reports then read the subjects one by one (`-subject`'s are in the scope already).
+/// `BatchResults::unlisted_subject_row_throws`; `-subject`'s mapper drops at most one end segment,
+/// `serial::seqalign::mapped_script`, so a remaining leading subject gap throws too). The prefetch
+/// catches it with its warning (`common::database::prefetch_warning`) and has read no subject, as a
+/// batch whose prefetch is off: the reports then read the subjects one by one (`-subject`'s are in
+/// the scope already).
 pub(crate) fn prefetch_reads_unranged_row(
     batches: &[super::runtime::BatchResults],
     gapped: bool,
@@ -528,11 +474,15 @@ pub(crate) fn prefetch_reads_unranged_row(
         (loc == SubjectLoc::Whole && batch.unlisted_subject_row_throws)
             || batch.queries.iter().flatten().any(|list| {
                 if gapped {
-                    loc == SubjectLoc::Whole
-                        && list.hsps.iter().any(|hsp| {
-                            super::report::has_seqalign(hsp, gapped)
-                                && row_range(hsp, AlignRow::Subject).is_some()
-                        })
+                    list.hsps.iter().any(|hsp| {
+                        super::report::has_seqalign(hsp, gapped)
+                            && reported_row_range(
+                                hsp,
+                                AlignRow::Subject,
+                                loc == SubjectLoc::Interval,
+                            )
+                            .is_some()
+                    })
                 } else {
                     subject_rows_all_empty(list, gapped)
                         && loc.of_list(list, gapped) == SubjectLoc::Whole
@@ -555,12 +505,13 @@ pub(crate) fn prefetch_reads_unranged_row(
 /// nucleotide) and the first letter of the longest subject. NCBI's scope holds the whole record.
 /// 0 where no row is mapped: a query searched whole, and a search that reports no HSP of length
 /// 0 (gapped, or the two-hit word finder of a `-window_size` above 0: `s_BlastAaExtendOneHit`
-/// alone makes them, aa_ungapped.c:1054).
+/// alone makes them, aa_ungapped.c:1054; a negative window, a search strategy's, is the one-hit
+/// word finder too).
 pub(crate) fn query_letters_around(
     options: &super::args::ResolvedOptions,
     subjects: &[super::input::FastaRecord],
 ) -> usize {
-    if options.query_range.is_none() || options.gapped || options.window_size != 0 {
+    if options.query_range.is_none() || options.gapped || options.window_size > 0 {
         return 0;
     }
     subjects

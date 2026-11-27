@@ -2,8 +2,9 @@
 //! every program (line RG item E3), against NCBI BLAST+ 2.17.0, the official Linux x64 release and
 //! bioconda's build for rpstblastn, dustmasker and segmasker, and NCBI's rpsbproc 0.5.1 (probes of
 //! 2026-11-13, `remaining-gaps-20261112/E/SURVEY_E3.md`, run with `env -i` in a fresh directory;
-//! convert2blastmask, which line RG item K3 added during E3, and blastdb_aliastool, row RG-D2a's
-//! probe of 2026-11-24, on the official release's binary):
+//! convert2blastmask, which line RG item K3 added during E3, blastdb_aliastool, row RG-D2a's
+//! probe of 2026-11-24, and blastdbcheck, row RG-D2b's probe of 2026-11-24, on the official
+//! release's binary):
 //! the application prints the first version word before `--` (in an option's value too, before
 //! the configuration is loaded and the arguments are read) and exits 0. The forms are NCBI's, the
 //! values LOSAT's (`ncbi_version::print`, RG DECISIONS E3-1; the Owner, 2026-11-21): LOSAT's first line
@@ -60,7 +61,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 /// NCBI's is `<program>: 2.17.0+` (rpsbproc
 /// `0.5.1`, the maskers `1.0.0`, makembindex `2.17.0`), probes `vf`, and its XML and JSON
 /// `version_info` have NCBI's numbers; LOSAT's have LOSAT's), and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 18] = [
+const PROGRAMS: [(&str, &str); 20] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -79,6 +80,8 @@ const PROGRAMS: [(&str, &str); 18] = [
     ("makembindex", "-input"),
     ("makeprofiledb", "-out"),
     ("blastdb_aliastool", "-out"),
+    ("blastdbcheck", "-db"),
+    ("blast_formatter", "-out"),
 ];
 
 /// LOSAT's package: its version, and its numbers in the XML and JSON.
@@ -293,7 +296,7 @@ fn the_full_versions_come_before_the_configuration() {
 }
 
 /// The library's tools (`api::run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`,
-/// `run_segmasker`, `run_windowmasker`, `run_convert2blastmask`, `run_makembindex`) run NCBI's
+/// `run_segmasker`, `run_windowmasker`, `run_convert2blastmask`, `run_makembindex`, `run_blast_formatter`) run NCBI's
 /// application start as the command line does: they print the versions to their output (line RG item E1w-2 for makeblastdb). The search
 /// programs of the library return reports, and refuse the words (`cli::version_word_refusal`), which
 /// name the Web engine's ABI v2 among the places that print them where it runs the program (line
@@ -326,6 +329,7 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
                 | "windowmasker"
                 | "convert2blastmask"
                 | "makembindex"
+                | "blast_formatter"
         );
         for word in [
             "-version",
@@ -358,14 +362,19 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
                     );
                 } else if matches!(
                     program,
-                    "rpsblast" | "rpstblastn" | "rpsbproc" | "makeprofiledb" | "blastdb_aliastool"
+                    "rpsblast"
+                        | "rpstblastn"
+                        | "rpsbproc"
+                        | "makeprofiledb"
+                        | "blastdb_aliastool"
+                        | "blastdbcheck"
                 ) {
                     // Not in the library.
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     assert_eq!(output.status.code(), Some(1), "{program} {words:?}");
                     let upper = program.to_ascii_uppercase();
-                    let refusal = match matches!(program, "blastn" | "blastp" | "blastx" | "tblastn" | "tblastx") {
+                    let refusal = match losat::web_adapter::WEB_V2_PROGRAMS.contains(&program) {
                         true => format!("the option {word} runs on the command line and in LOSAT Web of LOSAT's {upper} only: the library API does not write NCBI's version text"),
                         false => format!("the option {word} runs on the command line of LOSAT's {upper} only: the library API and the Web engine do not write NCBI's version text"),
                     };

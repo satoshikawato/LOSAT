@@ -24,7 +24,7 @@ use crate::report::blast_xml::{
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::QueryNames;
-use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
+use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue_read};
 
 /// What the BLASTP document needs besides the final hit lists.
 pub(crate) struct BlastpXml<'a> {
@@ -60,6 +60,9 @@ pub(crate) struct BlastpXml<'a> {
     /// psiblast's PSSM query of the molecule `other` (`PsiSearch::query_other_coding`): the
     /// first `Hsp`'s rows throw (`report::tabular::query_sequence_exception`).
     pub query_other_coding: Option<i32>,
+    /// Under `-parse_deflines`, the run's scopes of the call's queries: how NCBI shows each
+    /// query's result (`query_batch::QueryScopesFrom::xml_show`).
+    pub query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
 }
 
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
@@ -80,10 +83,13 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     // names of the subjects with hits. A run that stops never writes the
     // `-subject` report of its last query, which NCBI holds back, unless another format of the
     // call (outfmt 5) writes it (`written_queries`).
+    let shows = |q_idx: usize| crate::blastinput::query_batch::xml_show_of(xml.query_scopes, q_idx);
+    let holds_back = xml.only_xml2 && document.holds_back();
     let reports = written_queries(
         hit_lists.len(),
         xml.stops,
-        xml.only_xml2 && document.holds_back(),
+        holds_back,
+        crate::blastinput::query_batch::held_start_of(xml.query_scopes, hit_lists.len()),
     );
     let has_hits = |q_idx: usize| {
         hit_lists[q_idx].as_ref().is_some_and(|list| {
@@ -99,6 +105,14 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         true,
         &xml.messages,
         has_hits,
+        |q_idx| {
+            crate::blastinput::query_batch::names_unshown_in(
+                xml.query_scopes,
+                reports,
+                holds_back,
+                q_idx,
+            )
+        },
     )?;
     // The names of the subjects with hits in the written reports, made once each; a title NCBI
     // crashes on is refused here, before the first byte.
@@ -121,14 +135,11 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
-            // NCBI's prefetch of the query's batch, where it begins (`TaxdbPrinter::batch_texts`).
-            if q_idx < reports {
-                warnings.prefetch_lines(&mut *writer, taxdb_printer.batch_texts(q_idx))?;
-            }
         }
+        let show = shows(q_idx);
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
-            document.unwritten(&mut buf)?;
+            document.unwritten(&mut buf, show.joins_held)?;
             crate::report::query_warnings::write_document_posts(
                 &buf,
                 document.take_posts(),
@@ -136,18 +147,28 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                 warnings.as_deref_mut(),
             )?;
             buf.clear();
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+            // Queries whose results join the unwritten held report were still read, exported and
+            // searched before the stopping batch, so their warnings and requests follow.
+            if let Some(warnings) = warnings.as_deref_mut() {
+                for later in (q_idx + 1)..hit_lists.len() {
+                    warnings.before_query(later, &mut *writer)?;
+                }
+            }
             break;
         }
-        let record = &xml.queries.records[q_idx];
-        let text = &texts[q_idx];
+        // The query whose id, title and length the result shows (`XmlShow::label`).
+        let label = show.label.unwrap_or(q_idx);
+        let text = &texts[label];
         let query = XmlQuery {
-            id: text.query_id(record.local_id.as_bytes()),
+            id: text.query_id(xml.queries.records[label].local_id.as_bytes()),
             title: &text.title,
-            len: xml.queries.searched_lengths[q_idx] as i32,
+            len: xml.queries.searched_lengths[label] as i32,
             stats: xml.stats[q_idx],
-            message: text.message.as_deref(),
+            message: texts[q_idx].message.as_deref(),
             searched: xml.searched[q_idx],
             masks: &xml.masks[q_idx],
+            joins_held: show.joins_held,
         };
         let hit_rows: &[PairwiseHit] = match hit_list {
             Some(_) => rows.query(q_idx)?,
@@ -184,7 +205,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
                 posts.hit(sink.position(), &hit, s_idx as u32, |texts| {
                     if posting {
-                        taxdb_printer.at_names((q_idx, s_idx), subject, texts)
+                        taxdb_printer.at_names(subject, texts)
                     } else {
                         Ok(())
                     }
@@ -209,7 +230,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                         if hsps.unaligned([XmlHsp::unaligned(
                             hsp.raw_score,
                             hsp.bit_score,
-                            seqalign_evalue(hsp.e_value),
+                            seqalign_evalue_read(hsp.e_value),
                             identities,
                         )])? {
                             continue;
@@ -220,7 +241,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                         hsps.hsp(&XmlHsp {
                             score: hsp.raw_score,
                             bit_score: hsp.bit_score,
-                            evalue: seqalign_evalue(hsp.e_value),
+                            evalue: seqalign_evalue_read(hsp.e_value),
                             query_from: hsp.q_start as i32,
                             query_to: hsp.q_end as i32,
                             hit_from: hsp.s_start as i32,
@@ -245,7 +266,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
         // JSON documents leave its report out (`Xml2Document::report`), and the post of the
         // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
         // query leaves its partial bytes in `buf`, which the error return drops.
-        match crate::report::blast_xml::writer::caught_post(written, &*document, xml.run.program) {
+        match crate::report::blast_xml::writer::caught_post(written, &*document, xml.run.app) {
             Ok(Some(post)) => posts.caught(post),
             Ok(None) => {}
             Err(error) => {

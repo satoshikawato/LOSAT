@@ -60,3 +60,27 @@ fn each_chunk_starts_its_own_scan() {
         (vec![(0, 4_999_900)], vec![4_999_900])
     );
 }
+
+#[test]
+fn cut_chunk_soft_ranges_saturates_when_first_chunk_is_masked() {
+    let ranges = [(5_000_100, 5_000_500)];
+    let mut sm_index = 0usize;
+    let mut out = Vec::new();
+    assert!(!cut_chunk_soft_ranges(
+        &ranges,
+        &mut sm_index,
+        0,
+        MAX_DBSEQ_LEN as i32,
+        &mut out
+    ));
+    assert_eq!(sm_index, 0);
+    assert!(out.is_empty());
+    assert!(cut_chunk_soft_ranges(
+        &ranges,
+        &mut sm_index,
+        4_999_900,
+        600,
+        &mut out
+    ));
+    assert_eq!(out, [(200, 600)]);
+}

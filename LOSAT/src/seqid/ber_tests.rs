@@ -1,5 +1,6 @@
 use super::{
-    decode_full_set, fix_visible_chars, read_std_signed, replaced_bytes, Reader, StdSignedError,
+    decode_full_set, fix_visible_chars, read_std_signed, title_replaced_chars, Reader,
+    StdSignedError,
 };
 use crate::seqdb::header::decode_deflines_as;
 use std::path::Path;
@@ -276,10 +277,96 @@ fn read_std_signed_stops_where_ncbis_throws() {
     assert_eq!(read(&[0x25], 2, 4), (Err("end"), 2));
 }
 
-/// `replaced_bytes` counts the bytes that `fix_visible_chars` replaces, for strings of every
-/// byte value and of lengths about its pieces of 255 bytes, every byte replaced included.
+/// One definition line as makeblastdb writes it without parsed Seq-ids (`record_with`), with
+/// the title `title` (its length in the short form, or in one or two bytes after `0x81`, `0x82`).
+fn titled_defline(title: &[u8]) -> Vec<u8> {
+    let mut defline = vec![0x30, 0x80, 0xa0, 0x80, 0x1a];
+    match title.len() {
+        length @ 0..128 => defline.push(length as u8),
+        length @ 128..256 => defline.extend_from_slice(&[0x81, length as u8]),
+        length => defline.extend_from_slice(&[0x82, (length >> 8) as u8, length as u8]),
+    }
+    defline.extend_from_slice(title);
+    defline.extend_from_slice(&[
+        0, 0, 0xa1, 0x80, 0x30, 0x80, 0xaa, 0x80, 0x30, 0x80, 0xa0, 0x80,
+    ]);
+    defline.extend_from_slice(&[0x1a, 0x09]);
+    defline.extend_from_slice(b"BL_ORD_ID");
+    defline.extend_from_slice(&[0, 0, 0xa1, 0x80, 0xa0, 0x80, 0x02, 0x01, 0x00]);
+    defline.extend_from_slice(&[0; 14]);
+    defline
+}
+
+/// A `Blast-def-line-set` of the definition lines with the titles `titles`.
+fn titled_set(titles: &[&[u8]]) -> Vec<u8> {
+    let mut record = vec![0x30, 0x80];
+    for title in titles {
+        record.extend(titled_defline(title));
+    }
+    record.extend_from_slice(&[0, 0]);
+    record
+}
+
+// Probe RG-KB 9(b) (remaining-gaps-20261112/K/kb/i9b): NCBI BLAST+ 2.17.0 posts one 803.7 per
+// byte outside ' ' ..= '~' of a title it reads, in order, at the position after the whole string
+// (8 + length for the first title of 127 bytes or fewer, 9 + for 128 to 255, 10 + from 256), with
+// the string as it then is: the bytes before already '#', this one and those after as stored.
 #[test]
-fn replaced_bytes_counts_the_replaced_bytes() {
+fn title_posts_give_each_byte_with_the_string_as_ncbi_holds_it() {
+    let record = titled_set(&[b"a\xe9b\x01c"]);
+    assert_eq!(
+        decode_full_set(&record).unwrap().deflines[0]
+            .title
+            .as_deref(),
+        Some(&b"a#b#c"[..])
+    );
+    let posts: Vec<Vec<u8>> = title_replaced_chars(&record)
+        .iter()
+        .map(|replaced| replaced.post(Some("blastp")))
+        .collect();
+    assert_eq!(
+        posts,
+        [
+            &b"Error: (803.7) [blastp] Blast-def-line-set.E.title\nBad char [0xE9] in string at \
+               byte 13\na\xe9b\x01c\n"[..],
+            b"Error: (803.7) [blastp] Blast-def-line-set.E.title\nBad char [0x1] in string at \
+              byte 13\na#b\x01c\n",
+        ]
+    );
+    // A NUL is `0x0`; the position counts the length bytes of longer titles.
+    let at = |title: &[u8]| {
+        let replaced = title_replaced_chars(&titled_set(&[title]));
+        assert_eq!(replaced.len(), 1);
+        (replaced[0].byte, replaced[0].position.to_string())
+    };
+    assert_eq!(at(b"x\0y"), (0, "byte 11".to_string()));
+    assert_eq!(
+        at(&[[0x7f].as_slice(), &[b'y'; 199]].concat()),
+        (0x7f, "byte 209".to_string())
+    );
+    assert_eq!(
+        at(&[[0x80].as_slice(), &[b'y'; 299]].concat()),
+        (0x80, "byte 310".to_string())
+    );
+    // A later definition line: the position is the stream's, after the earlier lines.
+    let record = titled_set(&[b"clean", b"z\xff"]);
+    let first = titled_defline(b"clean").len() + 2;
+    let replaced = title_replaced_chars(&record);
+    assert_eq!(replaced.len(), 1);
+    assert_eq!(
+        replaced[0].position.to_string(),
+        format!("byte {}", first + 6 + 2)
+    );
+    assert_eq!(&*replaced[0].string, b"z\xff");
+    // A clean record: nothing.
+    assert!(title_replaced_chars(&titled_set(&[b"clean"])).is_empty());
+}
+
+/// `fix_visible_chars` makes each byte outside ' ' ..= '~' '#' and counts them, for strings of
+/// every byte value and of lengths about its steps of 16 bytes and its blocks of 255 steps,
+/// every byte replaced included, written over a buffer shorter or longer than the string.
+#[test]
+fn fix_visible_chars_replaces_and_counts() {
     let mut state = 0x9e37_79b9_7f4a_7c15u64;
     let mut next = || {
         state ^= state << 13;
@@ -288,7 +375,8 @@ fn replaced_bytes_counts_the_replaced_bytes() {
         state
     };
     for len in [
-        0, 1, 31, 32, 254, 255, 256, 509, 510, 511, 765, 766, 1_000, 4_097,
+        0, 1, 15, 16, 17, 31, 32, 254, 255, 256, 509, 510, 511, 765, 766, 1_000, 4_079, 4_080,
+        4_081, 4_097, 8_161,
     ] {
         let random: Vec<u8> = (0..len).map(|_| next() as u8).collect();
         let mixed: Vec<u8> = (0..len)
@@ -301,12 +389,16 @@ fn replaced_bytes_counts_the_replaced_bytes() {
             vec![b'~'; len],
             vec![0x1f; len],
         ] {
-            let replaced = fix_visible_chars(&value)
+            let want: Vec<u8> = value
                 .iter()
-                .zip(&value)
-                .filter(|(fixed, stored)| fixed != stored)
-                .count();
-            assert_eq!(replaced_bytes(&value), replaced, "length {len}");
+                .map(|&c| if (b' '..=b'~').contains(&c) { c } else { b'#' })
+                .collect();
+            let replaced = want.iter().zip(&value).filter(|(w, v)| w != v).count();
+            for kept in [Vec::new(), vec![b'x'; len / 2], vec![b'y'; len + 17]] {
+                let mut fixed = kept;
+                let count = fix_visible_chars(&value, &mut fixed);
+                assert_eq!((fixed, count), (want.clone(), replaced), "length {len}");
+            }
         }
     }
 }

@@ -42,19 +42,20 @@ impl DustSpec {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:195-198
 /// `NStr::Split` keeps the empty fields between adjacent spaces; `NStr::StringToInt` (flags 0)
 /// is `ncbi_str::string_to_int`.
-pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
+pub fn parse_dust_filtering(value: impl AsRef<[u8]>) -> Result<DustSpec, String> {
+    let value = value.as_ref();
     match value {
-        "no" => return Ok(DustSpec::No),
-        "yes" => return Ok(DustSpec::Yes),
+        b"no" => return Ok(DustSpec::No),
+        b"yes" => return Ok(DustSpec::Yes),
         _ => {}
     }
-    let tokens: Vec<_> = value.split(' ').collect();
+    let tokens: Vec<&[u8]> = value.split(|&b| b == b' ').collect();
     if tokens.len() != 3 {
         return Err("Invalid number of arguments to filtering option".into());
     }
     // `NStr::StringToInt` of each token, flags 0.
-    let number = |token: &str| {
-        crate::ncbi_str::string_to_int(token.as_bytes(), 0)
+    let number = |token: &[u8]| {
+        crate::ncbi_str::string_to_int(token, 0)
             .map_err(|_| "Invalid input for filtering parameters".to_string())
     };
     let (level, window, linker) = (number(tokens[0])?, number(tokens[1])?, number(tokens[2])?);
@@ -142,7 +143,7 @@ impl SegSpec {
 /// The values are used as NCBI's query filter uses them (`SegSpec::params`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub fn parse_seg_filtering(value: &str) -> Result<SegSpec, String> {
     match value {
         "no" => return Ok(SegSpec::No),
@@ -169,7 +170,7 @@ pub fn parse_seg_filtering(value: &str) -> Result<SegSpec, String> {
 
 /// The TBLASTX `-outfmt` value of web ABI v1, which is frozen (plan TD-1): it keeps the
 /// only format that it accepted before TBLASTX outfmt 0 and 7 were ported (session S08).
-#[cfg(target_arch = "wasm32")]
+#[cfg(losat_web_abi_v1)]
 pub fn tblastx_v1_outfmt(value: &str) -> Result<String, String> {
     if value.trim() != "6" {
         return Err(

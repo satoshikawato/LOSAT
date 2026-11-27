@@ -17,7 +17,15 @@ const NCBI_SPACE = /^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g;
 export function outfmtOption(argv: readonly string[]): { readonly at: number; readonly words: 1 | 2; readonly value: string } | undefined {
   for (let i = 1; i < argv.length; i++) {
     const word = argv[i]!;
-    if (word === '-query' || word === '-subject') {
+    if (
+      word === '-query' ||
+      word === '-subject' ||
+      word === '-db' ||
+      word === '-in_pssm' ||
+      word === '-in_msa' ||
+      word === '-out_pssm' ||
+      word === '-out_ascii_pssm'
+    ) {
       i++;
       continue;
     }
@@ -205,18 +213,17 @@ export function printedFileName(run: ExportedRun, kind: PrintedKind, bytes: Uint
 }
 
 /**
- * The file name of a file that a run made besides its outputs (the file of `-logfile NAME`; line RG
+ * The file name of a file that a run made besides its outputs (the file of `-logfile NAME`, line RG
  * E1w-3b; and of `-export_search_strategy NAME`, line RG F1w): the run's start of the names of its
  * outputs, the option that named the file (`option`: `logfile`, `export_search_strategy`), then the
  * file's own name (`losat-run3-tblastx-20261104T111530Z.logfile.run.log`), so that the files of two
  * runs get other names, and no file of a run gets the name of one of its outputs (`-logfile
- * outfmt6.txt`) or of its other file. A name with a directory (`logs/run.log`, `/tmp/run.log`) is
- * saved with each `/` as `_` (`…logfile.logs_run.log`): a saved file has a name and no directory,
- * and the page names it the same in every browser, where browsers would each replace the `/` in
- * their own way (line WQA's sweep, D11, 2026-11-20). The `/`s at the end go first: the command line
- * makes the file `logs` for `-logfile logs/`, as NCBI reads the name (its round 2), so it is saved
- * as `…logfile.logs` (a strategy file's name never ends in `/`: the command line cannot open it).
+ * outfmt6.txt`) or of its other file. The engine gives the command line's file name (`logs` for
+ * `-logfile logs/`, `run.log` for `-logfile ./run.log`). A name with a directory (`logs/run.log`,
+ * `/tmp/run.log`) is saved with each `/` as `_` (`…logfile.logs_run.log`): a saved file has a name
+ * and no directory, and the page names it the same in every browser, where browsers would each
+ * replace the `/` in their own way.
  */
 export function runFileName(run: ExportedRun, name: string, option: RunFileOption = 'logfile'): string {
-  return `${exportPrefix(run)}.${option}.${name.replace(/\/+$/, '').replaceAll('/', '_')}`;
+  return `${exportPrefix(run)}.${option}.${name.replaceAll('/', '_')}`;
 }

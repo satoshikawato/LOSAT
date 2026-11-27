@@ -129,6 +129,7 @@ fn html_posts_child() {
         (Program::Blastx, 1),
         (Program::Tblastn, 1),
         (Program::Tblastx, 1),
+        (Program::Psiblast, 3),
     ] {
         let (query, subject) = self_pair(program);
         let inputs = Inputs::new(&query, &subject);
@@ -284,6 +285,7 @@ fn later_formats_child() {
         Program::Blastx,
         Program::Tblastn,
         Program::Tblastx,
+        Program::Psiblast,
     ] {
         let (query, subject) = self_pair(program);
         std::fs::write("query.fa", fasta(&query)).unwrap();

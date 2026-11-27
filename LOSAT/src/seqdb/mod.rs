@@ -41,6 +41,7 @@ pub mod column;
 pub mod date;
 pub mod file;
 pub mod filter;
+pub(crate) mod find;
 pub mod gi_mask;
 pub mod header;
 pub(crate) mod id_list;
@@ -59,7 +60,7 @@ pub mod tax_sqlite;
 pub mod taxdb;
 pub mod volume;
 
-pub use filter::{DbList, ListWarning, SeqidList, TaxidList};
+pub use filter::{DbList, GiList, ListWarning, PigList, SeqidList, TaxidList};
 pub(crate) use filter::{DbSequence, Oid, OidMap};
 
 #[cfg(test)]
@@ -86,6 +87,7 @@ pub use alias::SearchPath;
 pub use column::ColumnBlock;
 pub use header::Defline;
 pub use mask::{BlockMasks, MaskAlgorithm, MaskAlgorithms, MaskBlock, MaskRanges, NameMaskError};
+pub(crate) use volume::ncbi_protein_length;
 pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader};
 #[cfg(test)]
 pub use volume::{BLASTNA_SENTINEL, FENCE_SENTRY};
@@ -219,6 +221,14 @@ pub enum SeqDbError {
     },
     /// A file is not a valid database file.
     Format { path: PathBuf, message: String },
+    /// A list of volumes of both version 4 and version 5 (`CSeqDBLMDBSet`): NCBI's text
+    /// [`MIXED_VERSIONS`], from one of two throws, which the volume `path`, the first whose
+    /// version is not the first volume's, chooses: a version 4 volume after version 5 ones
+    /// (`version4_after_version5`), or a version 5 volume after version 4 ones.
+    MixedVersions {
+        path: PathBuf,
+        version4_after_version5: bool,
+    },
     /// A file fails one of the integrity checks of NCBI's reader (`SEQDB_FILE_ASSERT`, a
     /// `CSeqDBException` whose text names a line of NCBI's source): LOSAT's words, and NCBI's
     /// text where NCBI's search replaces it ([`SeqDbError::ncbi_search_message`]).
@@ -269,6 +279,11 @@ pub enum SeqDbError {
         reason: String,
         exception: Box<crate::ncbi_exception::NcbiException>,
     },
+    /// A header record that fails a check of NCBI's reader that the run's settings turn off,
+    /// after which NCBI reads on (`SeqDb::refuse_unchecked_reads`): what LOSAT refuses, a noun
+    /// phrase (`ReadVerification::refused`), which the program's refusal names
+    /// (`algorithm::common::database::losat_reader_error`).
+    Setting(String),
 }
 
 impl std::fmt::Display for SeqDbError {
@@ -278,6 +293,7 @@ impl std::fmt::Display for SeqDbError {
                 f.write_str(&String::from_utf8_lossy(message))
             }
             SeqDbError::Range(message) | SeqDbError::Internal(message) => f.write_str(message),
+            SeqDbError::Setting(refused) => write!(f, "{refused} is not supported by LOSAT"),
             SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
             }
@@ -287,9 +303,16 @@ impl std::fmt::Display for SeqDbError {
             SeqDbError::Format { path, message } | SeqDbError::Integrity { path, message } => {
                 write!(f, "{}: {}", path.display(), message)
             }
+            SeqDbError::MixedVersions { path, .. } => {
+                write!(f, "{}: {MIXED_VERSIONS}", path.display())
+            }
             SeqDbError::Unsupported { path, message }
             | SeqDbError::NcbiThrows { path, message } => {
-                write!(f, "{}: unsupported database: {}", path.display(), message)
+                if path.as_os_str().is_empty() {
+                    write!(f, "unsupported database: {message}")
+                } else {
+                    write!(f, "{}: unsupported database: {}", path.display(), message)
+                }
             }
             SeqDbError::NcbiCrashes { path, message } => write!(
                 f,
@@ -343,6 +366,13 @@ impl SeqDbError {
                 path: path.clone(),
                 message: message.clone(),
             },
+            SeqDbError::MixedVersions {
+                path,
+                version4_after_version5,
+            } => SeqDbError::MixedVersions {
+                path: path.clone(),
+                version4_after_version5: *version4_after_version5,
+            },
             SeqDbError::Integrity { path, message } => SeqDbError::Integrity {
                 path: path.clone(),
                 message: message.clone(),
@@ -361,6 +391,7 @@ impl SeqDbError {
             },
             SeqDbError::Range(message) => SeqDbError::Range(message.clone()),
             SeqDbError::Internal(message) => SeqDbError::Internal(message.clone()),
+            SeqDbError::Setting(refused) => SeqDbError::Setting(refused.clone()),
             SeqDbError::Ncbi(exception) => SeqDbError::Ncbi(exception.clone()),
             SeqDbError::TaxdbThrows {
                 path,
@@ -438,13 +469,11 @@ impl std::error::Error for SeqDbError {
 /// The texts of `SeqDbError::Format` that are NCBI's own: the errors NCBI
 /// raises for the same file with the same words. Every other format error is
 /// LOSAT's (a damaged file that NCBI reads past the end of its mapping).
-const NCBI_FORMAT_MESSAGES: [&str; 16] = [
+const NCBI_FORMAT_MESSAGES: [&str; 15] = [
     // seqdbfile.cpp:181-185
     "Error: Not a valid version 4 or 5 database.",
     // seqdbfile.cpp:222-226
     "Error: requested sequence type does not match DB.",
-    // seqdblmdbset.cpp:224, 231
-    "DB list contains both Version 4 and Version 5 dbs",
     // seqdbalias.cpp:810-814
     "Illegal configuration: DB alias files are mutually recursive.",
     // seqdbcol.cpp:220-238
@@ -469,6 +498,10 @@ const NCBI_FORMAT_MESSAGES: [&str; 16] = [
     // seqdbgimask.cpp:213-217
     "Gi-mask file uses unknown format_version.",
 ];
+
+/// seqdblmdbset.cpp:224, 231: NCBI's text of a list of volumes of both versions
+/// ([`SeqDbError::MixedVersions`]).
+pub(crate) const MIXED_VERSIONS: &str = "DB list contains both Version 4 and Version 5 dbs";
 
 /// seqdbvol.cpp:3365-3382 (the title or the counts follow). The duplicate of seqdbimpl.cpp:2456-2459,
 /// whose text holds the volume's path, is a [`SeqDbError::NotFound`] of its bytes (`mask.rs`).
@@ -529,6 +562,7 @@ impl SeqDbError {
                     .iter()
                     .any(|prefix| message.starts_with(prefix)))
             .then(|| message.clone().into_bytes()),
+            SeqDbError::MixedVersions { .. } => Some(MIXED_VERSIONS.as_bytes().to_vec()),
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-197
             SeqDbError::MemoryMap(_) | SeqDbError::Open { .. } | SeqDbError::Map { .. } => {
                 let message = self.memory_map_message()?;
@@ -547,7 +581,8 @@ impl SeqDbError {
             | SeqDbError::Range(_)
             | SeqDbError::Internal(_)
             | SeqDbError::Ncbi(_)
-            | SeqDbError::TaxdbThrows { .. } => None,
+            | SeqDbError::TaxdbThrows { .. }
+            | SeqDbError::Setting(_) => None,
         }
     }
 
@@ -637,6 +672,23 @@ impl SeqDbError {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:241-256
+    // `CLocalBlast::Run` catches `CSeqDBException` into `Database memory map file error` (or
+    // `Too many open files`), and catches any other `std::exception` (such as `CMemoryFile`'s
+    // `CFileException` on a lazy alias `SEQIDLIST`/`TAXIDLIST` or `CSeqIdException`) into a
+    // `CBlastException` with code `eSystem` carrying its `what` text: engine error, exit status 3.
+    /// The bytes after `BLAST engine error: ` when this error is raised during `CLocalBlast`'s
+    /// preliminary stage: [`Self::ncbi_search_message`], or `what()` of a known NCBI exception
+    /// ([`Self::ncbi_exception`]). `None`: the error is LOSAT's.
+    pub fn ncbi_preliminary_message(&self) -> Option<std::borrow::Cow<'static, [u8]>> {
+        if let Some(text) = self.ncbi_search_message() {
+            return Some(std::borrow::Cow::Borrowed(text.as_bytes()));
+        }
+        self.ncbi_exception()
+            .filter(|exception| exception.places_known())
+            .map(|exception| std::borrow::Cow::Owned(exception.what()))
+    }
+
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:709-719
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5893-5943
     // A file that NCBI cannot map is one exception of `CSeqDBFileMemMap::Init`, whose message is
@@ -715,8 +767,58 @@ impl SeqDbError {
 // (The OID list file of an alias file's `OIDLIST` that is not a file, `SeqDbError::MemoryMap`:
 // segmasker 2.17.0 names the line 718 of the official build and the function without a module,
 // probe mk of line RG D1b.)
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:178-182
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:218-226
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:861-864
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:78-96
+// (An index file of another format version, an index of the other molecule type, an empty binary
+// list file, and the LMDB file of a version 5 volume that is missing or not an LMDB file:
+// blastdbcheck 2.17.0 names these lines and functions, rows pp_p4_ver7, d_p4_pin_nucl_prot,
+// a_gizero, d_n5_no_ndb and pp_p5_pdb_cut of row RG-D2b. The missing
+// LMDB file's text starts with its path: `LMDB_MISSING_TAIL`.)
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:879-885
+// (`SetMemBit` throws in the inline header without a function name in NCBI's report; blastdbcheck
+// 2.17.0 at verbosity 3/4 reports `include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp`, line
+// 881, with no function prefix.)
 /// The places of NCBI's throws of a database error of the reader, by the start of its text.
-const DATABASE_ERROR_SITES: [(&str, ThrowSite); 7] = [
+const DATABASE_ERROR_SITES: [(&str, ThrowSite); 12] = [
+    (
+        "MEMB_BIT error: conflicting bit found.",
+        ThrowSite {
+            file: "include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp",
+            line: 881,
+            kind: "CSeqDBException::eInvalid",
+            function: None,
+        },
+    ),
+    (
+        "Error: requested sequence type does not match DB.",
+        seqdb_site(
+            "src/objtools/blast/seqdb_reader/seqdbfile.cpp",
+            223,
+            "BLASTDB::ncbi::CSeqDBIdxFile::CSeqDBIdxFile",
+        ),
+    ),
+    (
+        "Error: Not a valid version 4 or 5 database.",
+        seqdb_site(
+            "src/objtools/blast/seqdb_reader/seqdbfile.cpp",
+            182,
+            "BLASTDB::ncbi::CSeqDBIdxFile::CSeqDBIdxFile",
+        ),
+    ),
+    (
+        "Specified file is empty.",
+        seqdb_site(
+            "src/objtools/blast/seqdb_reader/seqdbcommon.cpp",
+            864,
+            "BLASTDB::ncbi::s_SeqDB_IsBinaryNumericList",
+        ),
+    ),
+    (
+        "LMDB runtime error: ",
+        seqdb_site(SEQDB_LMDB, 95, LMDB_ENV_OPEN),
+    ),
     (
         "No alias or index file found for ",
         seqdb_site(
@@ -767,6 +869,31 @@ const DATABASE_ERROR_SITES: [(&str, ThrowSite); 7] = [
     ),
 ];
 
+/// NCBI's reader of the LMDB files of version 5 volumes.
+const SEQDB_LMDB: &str = "src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp";
+
+/// The function that opens a version 5 volume's LMDB file for reading.
+const LMDB_ENV_OPEN: &str = "BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::CBlastEnv";
+
+/// The end of the text of a version 5 volume's missing LMDB file, after `File <path>`.
+const LMDB_MISSING_TAIL: &str = " not found. If you renamed any BLAST database files, please use \
+original file names, and makeblastdb to rename the database. If you deleted any BLAST database \
+files, you need to recreate the database.";
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:84-89
+/// NCBI's error of a version 5 volume's LMDB file `path` that is not there (`CBlastEnv`): the one
+/// producer of its text, which `throw_site` places.
+pub(crate) fn missing_lmdb_file(path: &Path) -> SeqDbError {
+    SeqDbError::NotFound(
+        [
+            b"File ".as_slice(),
+            &crate::utils::os_bytes::path_bytes(path),
+            LMDB_MISSING_TAIL.as_bytes(),
+        ]
+        .concat(),
+    )
+}
+
 /// NCBI's header of the memory-mapped files of the reader.
 const SEQDBATLAS: &str = "include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp";
 
@@ -806,10 +933,38 @@ pub(crate) fn throw_site(message: &[u8]) -> Option<ThrowSite> {
     if too_many_open_files(message) {
         return None;
     }
+    if message.starts_with(b"File ") && message.ends_with(LMDB_MISSING_TAIL.as_bytes()) {
+        return Some(seqdb_site(SEQDB_LMDB, 88, LMDB_ENV_OPEN));
+    }
     DATABASE_ERROR_SITES
         .iter()
         .find(|(start, _)| message.starts_with(start.as_bytes()))
         .map(|&(_, site)| site)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:213-233
+// (A version 4 volume after version 5 ones throws on line 225, a version 5 volume after version 4
+// ones on line 232: blastdbcheck 2.17.0 names these lines, rows mix45_v4 and mix45_v5 of row
+// RG-D2b.)
+impl SeqDbError {
+    /// The place in NCBI's database reader that throws this error's `CSeqDBException`, where
+    /// LOSAT knows it: the throw that [`SeqDbError::MixedVersions`] names, else the place of its
+    /// text ([`throw_site`]).
+    pub(crate) fn throw_site(&self) -> Option<ThrowSite> {
+        if let SeqDbError::MixedVersions {
+            version4_after_version5,
+            ..
+        } = self
+        {
+            let line = if *version4_after_version5 { 225 } else { 232 };
+            return Some(seqdb_site(
+                "src/objtools/blast/seqdb_reader/seqdblmdbset.cpp",
+                line,
+                "BLASTDB::ncbi::CSeqDBLMDBSet::CSeqDBLMDBSet",
+            ));
+        }
+        throw_site(&self.ncbi_request_message()?)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:167-172
@@ -832,8 +987,16 @@ pub(crate) fn lookup_throw_site(message: &[u8]) -> Option<ThrowSite> {
 /// The database name that a BLAST program hands to the reader for the value
 /// of its `-db` argument: the value without the white space at its ends.
 /// A search program passes the result to [`SeqDb::open_in`].
+#[cfg(test)]
 pub fn db_argument_name(value: &str) -> &str {
     crate::ncbi_str::truncate_spaces_str(value)
+}
+
+/// The `-db` value without ASCII `isspace` bytes at its ends, as NCBI trims it (`NStr::TruncateSpaces`).
+///
+/// A search program passes the result to [`SeqDb::open_in`].
+pub fn db_argument_name_bytes(value: &[u8]) -> &[u8] {
+    crate::ncbi_str::truncate_spaces(value)
 }
 
 /// A contiguous range of sequences inside one volume, as planned by
@@ -909,7 +1072,7 @@ pub(crate) struct LocatedDatabase {
 #[derive(Debug)]
 pub struct NameRecord {
     /// The name as the reports take it (`alias::report_names`): `GetDBNameList`.
-    pub name: String,
+    pub name: Vec<u8>,
     /// The title of the database (`GetTitle`), empty when it has none.
     pub title: Vec<u8>,
     /// `GetDate`.
@@ -1020,7 +1183,7 @@ pub struct SeqDb {
     included_length: OnceLock<u64>,
     /// The length of OID 0 of the volumes, which the statistics read when their total length
     /// is not positive (`statistics_numbers`); `None` when it is.
-    first_oid_length: Option<u64>,
+    first_oid_length: Option<i64>,
     /// The walks of the alias tree, with the exception of each one whose value does not
     /// convert (`check_alias_values`).
     alias_totals: alias::AliasTotals,
@@ -1069,6 +1232,8 @@ pub struct SeqDb {
     positive_list: bool,
     /// `SeqDb::list_taxids`.
     list_taxids: Vec<i32>,
+    /// `SeqDb::list_gis`.
+    list_gis: Vec<i64>,
     /// `SeqDb::name_records`.
     name_records: Vec<NameRecord>,
     /// The LMDB files of a version 5 database for `SeqDb::seqid_lookup`, opened at its first use.
@@ -1090,7 +1255,23 @@ pub struct SeqDb {
     utf8_claimed: AtomicBool,
     /// Whether the loads modelled now are not NCBI's (`SeqDb::without_scope_utf8_loads`).
     scope_utf8_held: AtomicBool,
+    /// Whether a reader read the title of a reported sequence that holds a byte outside
+    /// ' ' ..= '~' (`SeqDb::note_replaced_title`): only then are the reads of NCBI's cache of
+    /// header records modelled (`header_cache`).
+    replaced_titles: AtomicBool,
+    /// The model of NCBI's cache of read header records (`SeqDb::read_header_record`), from the
+    /// first read of such a title on.
+    header_cache: std::sync::Mutex<HeaderCache>,
 }
+
+/// NCBI's cache of the header records that a volume read (`CSeqDBVol::m_DeflineCache`): by volume,
+/// 256 slots, the slot of a record that of its OID in the volume modulo 256, holding the OID of
+/// the record read last there (`None`: none yet). Allocated at its first read.
+#[derive(Debug, Default)]
+struct HeaderCache(std::collections::HashMap<usize, Box<[Option<u32>; HEADER_CACHE_SLOTS]>>);
+
+/// The slots of NCBI's cache of a volume's header records (`m_DeflineCache`, made with 256).
+const HEADER_CACHE_SLOTS: usize = 256;
 
 /// NCBI's counts of a database (`CSeqDBImpl::m_NumSeqs`, `m_TotalLength`, `m_MaxLength`,
 /// `m_MinLength`).
@@ -1137,9 +1318,9 @@ fn check_lmdb_names(volumes: &[(PathBuf, Option<&[u8]>)]) -> Result<(), SeqDbErr
             .iter()
             .find(|(_, name)| names_lmdb(name) != version5)
         {
-            return Err(SeqDbError::Format {
+            return Err(SeqDbError::MixedVersions {
                 path: other.clone(),
-                message: "DB list contains both Version 4 and Version 5 dbs".to_string(),
+                version4_after_version5: version5,
             });
         }
     }
@@ -1152,19 +1333,40 @@ fn check_lmdb_names(volumes: &[(PathBuf, Option<&[u8]>)]) -> Result<(), SeqDbErr
         let lmdb_name = name.unwrap_or_default();
         let lmdb_path = base.with_file_name(crate::utils::os_bytes::path_from_bytes(lmdb_name));
         if !std::fs::metadata(&lmdb_path).is_ok_and(|meta| meta.is_file()) {
-            return Err(SeqDbError::NotFound(
-                [
-                    b"File ".as_slice(),
-                    &crate::utils::os_bytes::path_bytes(&lmdb_path),
-                    b" not found. If you renamed any BLAST database files, please use \
-                      original file names, and makeblastdb to rename the database. If you \
-                      deleted any BLAST database files, you need to recreate the database.",
-                ]
-                .concat(),
-            ));
+            return Err(missing_lmdb_file(&lmdb_path));
         }
     }
     Ok(())
+}
+
+/// Resolved volume bases and file paths that reading a BLAST database can open
+/// ([`SeqDb::read_paths`]).
+#[derive(Debug, Default)]
+pub(crate) struct DbReadPaths {
+    /// Resolved volume paths without extension, in NCBI's `FindVolumePaths` order.
+    pub(crate) volumes: Vec<Vec<u8>>,
+    /// All files that reading the database can open: alias files, alias filter list files
+    /// (`OIDLIST`, `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`), `MASKLIST` GI-mask files,
+    /// volume component files (`VOLUME_EXTENSIONS`, `LMDB_EXTENSIONS`), and for protein databases,
+    /// RPS files (`rps::RPS_EXTENSIONS`).
+    pub(crate) files: Vec<Vec<u8>>,
+}
+
+fn push_mol_extensions(
+    out: &mut std::collections::BTreeSet<Vec<u8>>,
+    base: &[u8],
+    mol: &[u8],
+    extensions: &[&str],
+) {
+    for ext in extensions {
+        out.insert([base, b".", mol, ext.as_bytes()].concat());
+    }
+}
+
+fn strip_ascii_suffix<'a>(bytes: &'a [u8], suffix: &[u8]) -> Option<&'a [u8]> {
+    let len = bytes.len().checked_sub(suffix.len())?;
+    let (head, tail) = bytes.split_at(len);
+    tail.eq_ignore_ascii_case(suffix).then_some(head)
 }
 
 impl SeqDb {
@@ -1234,10 +1436,10 @@ impl SeqDb {
     /// `masks` (a search with `-db_soft_mask` or `-db_hard_mask`) each record also keeps its
     /// database's filtering algorithms (`NameRecord::mask_algorithms`): the one opening of each
     /// name of the formatter (`GetBlastDbInfo`).
-    pub fn read_name_records(&mut self, name: &str, masks: bool) -> Result<(), SeqDbError> {
+    pub fn read_name_records(&mut self, name: &[u8], masks: bool) -> Result<(), SeqDbError> {
         let names = alias::report_names(name);
         self.name_records = match names.as_slice() {
-            [one] if one == name => {
+            [one] if one.as_slice() == name => {
                 // The reports' database is this one opened again without the list: after a
                 // list, its walks of the counts meet their errors here (`check_alias_values`),
                 // unless its alias files make it scan the totals too, where the build of its OID
@@ -1260,7 +1462,7 @@ impl SeqDb {
                 };
                 let mut records = Vec::with_capacity(names.len());
                 for one in &names {
-                    let mut alone = Self::open_in(one.as_bytes(), self.seqtype, &path)?;
+                    let mut alone = Self::open_in(one, self.seqtype, &path)?;
                     alone.read_name_records(one, masks)?;
                     records.append(&mut alone.name_records);
                 }
@@ -1272,9 +1474,9 @@ impl SeqDb {
 
     /// What the reports read of this database under the name `name`, before any list; with
     /// `masks`, its filtering algorithms too ([`SeqDb::mask_algorithms`], a copy of the table).
-    fn name_record(&self, name: &str, masks: bool) -> NameRecord {
+    fn name_record(&self, name: &[u8], masks: bool) -> NameRecord {
         NameRecord {
-            name: name.to_string(),
+            name: name.to_vec(),
             title: self.title.clone(),
             date: self.date.clone(),
             num_seqs: self.printed_num_seqs(),
@@ -1295,7 +1497,7 @@ impl SeqDb {
     pub fn taxdb_found(&self) -> bool {
         self.search_path
             .as_ref()
-            .is_some_and(|path| path.resolve_file(b"taxdb.bti").is_some())
+            .is_some_and(|path| path.resolve_file(taxdb::INDEX_FILE.as_bytes()).is_some())
     }
 
     /// Whether the reports of the search show the headers it reads with `-show_gis`.
@@ -1317,12 +1519,21 @@ impl SeqDb {
     }
 
     /// The taxids of the search's list object after the volumes opened, ascending, which the
-    /// BLAST archive writes (`DbFilterArgs::archive_parameter`): of a positive list those the
+    /// BLAST archive writes (`DbFilterArgs::archive_parameters`): of a positive list those the
     /// database holds (`CSeqDBLMDBSet::TaxIdsToOids`, `tax_ids.swap` with `rv_tax_ids`), of a
     /// negative list all (`CSearchDatabase::x_InitializeDb` opens the database with a copy of
     /// it). Empty without a taxid list.
     pub fn list_taxids(&self) -> &[i32] {
         &self.list_taxids
+    }
+
+    /// The GIs of the search's list object after the volumes opened, which the BLAST archive and
+    /// search strategy write (`DbFilterArgs::archive_parameters`): sorted ascending (with
+    /// duplicates) for a positive `-gilist` (`InsureOrder` ran when the database opened), in file
+    /// order (with duplicates) for `-negative_gilist` (`CSearchDatabase::x_InitializeDb` opened
+    /// the database with a `CSeqDBIdSet` copy). Empty without a GI list or for a 0-GI file.
+    pub fn list_gis(&self) -> &[i64] {
+        &self.list_gis
     }
 
     /// The search path the database was opened with (`open_in`), none for a database opened
@@ -1381,14 +1592,70 @@ impl SeqDb {
         let volumes: std::collections::BTreeSet<Vec<u8>> = tree.volumes.into_iter().collect();
         let mut alias_files = std::collections::BTreeSet::new();
         alias::collect_alias_files(&tree.root, &mut alias_files);
+        Ok((
+            Self::sort_volume_set(volumes),
+            Self::sort_volume_set(alias_files),
+        ))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-966
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2629-2668
+    /// Single owner of the files that reading the BLAST database `name` (`seqtype`, `path`) can
+    /// open: calls `alias::resolve_in` once and collects every alias file, every alias filter list
+    /// (`OIDLIST`, `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`), every `MASKLIST` GI-mask file,
+    /// and every volume component file (`VOLUME_EXTENSIONS`, `LMDB_EXTENSIONS`, and for protein
+    /// databases, `rps::RPS_EXTENSIONS`), along with the resolved volume bases in NCBI order.
+    pub(crate) fn read_paths(
+        name: &[u8],
+        seqtype: SeqType,
+        path: &SearchPath,
+    ) -> Result<DbReadPaths, SeqDbError> {
+        use crate::writedb::build_db::{LMDB_EXTENSIONS, VOLUME_EXTENSIONS};
+        let tree = alias::resolve_in(name, seqtype, path)?;
+        let volumes = Self::sort_volume_set(tree.volumes.into_iter().collect());
+        let mut alias_files = std::collections::BTreeSet::new();
+        alias::collect_alias_files(&tree.root, &mut alias_files);
+
+        let mut files = std::collections::BTreeSet::new();
+        let mol = seqtype.letter().as_bytes();
+        let alias_suffix = match seqtype {
+            SeqType::Nucleotide => b".nal".as_slice(),
+            SeqType::Protein => b".pal".as_slice(),
+        };
+        for alias in &alias_files {
+            files.insert(alias.clone());
+            if let Some(stem) = strip_ascii_suffix(alias, alias_suffix) {
+                push_mol_extensions(&mut files, stem, mol, &LMDB_EXTENSIONS);
+                files.insert([stem, b".", mol, b"js"].concat());
+            }
+        }
+        alias::collect_alias_list_files(&tree.root, &mut files);
+        if let Some(gi_masks) = &tree.gi_masks {
+            for mask_name in gi_masks {
+                gi_mask::read_paths(mask_name, path, &mut files);
+            }
+        }
+        for volume in &volumes {
+            push_mol_extensions(&mut files, volume, mol, &VOLUME_EXTENSIONS);
+            push_mol_extensions(&mut files, volume, mol, &LMDB_EXTENSIONS);
+            if seqtype == SeqType::Protein {
+                for ext in rps::RPS_EXTENSIONS {
+                    files.insert([volume.as_slice(), b".", ext.as_bytes()].concat());
+                }
+            }
+        }
+        Ok(DbReadPaths {
+            volumes,
+            files: files.into_iter().collect(),
+        })
+    }
+
+    fn sort_volume_set(set: std::collections::BTreeSet<Vec<u8>>) -> Vec<Vec<u8>> {
         // `std::sort` of the set's (distinct) members: no two compare equal, so the order is
         // that of the comparison alone.
-        let sorted = |set: std::collections::BTreeSet<Vec<u8>>| {
-            let mut paths: Vec<Vec<u8>> = set.into_iter().collect();
-            paths.sort_by(|a, b| Self::compare_volume_names(a, b));
-            paths
-        };
-        Ok((sorted(volumes), sorted(alias_files)))
+        let mut paths: Vec<Vec<u8>> = set.into_iter().collect();
+        paths.sort_by(|a, b| Self::compare_volume_names(a, b));
+        paths
     }
 
     /// The order in which NCBI searches and numbers the volumes of a database
@@ -1547,6 +1814,7 @@ impl SeqDb {
         let mut num_oids: u64 = 0;
         let mut total_length: u64 = 0;
         let mut max_length: u32 = 0;
+        let mut protein_max_length: i32 = 0;
         for volume_name in &tree.volumes {
             let volume = Volume::open(&path_of_bytes(volume_name), seqtype)?;
             volume_starts.push(num_oids as u32);
@@ -1566,7 +1834,22 @@ impl SeqDb {
                     path: volume.base().to_path_buf(),
                     message: "the total length of the volumes overflows".to_string(),
                 })?;
-            max_length = max_length.max(volume.index().max_length);
+            // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:557-560
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvolset.hpp:514-523
+            // Each volume's `GetMaxLength()` returns `m_MaxLen` as a signed `int`, and the volume
+            // set starts its maximum at `0`, so a protein volume whose longest sequence wraps
+            // negative (`>= 2^31`) contributes `0` rather than its unsigned length. Nucleotide
+            // volumes keep the widened length.
+            match seqtype {
+                SeqType::Protein => {
+                    protein_max_length =
+                        protein_max_length.max(ncbi_protein_length(volume.index().max_length));
+                    max_length = protein_max_length as u32;
+                }
+                SeqType::Nucleotide => {
+                    max_length = max_length.max(volume.index().max_length);
+                }
+            }
             volumes.push(volume);
         }
         volume_starts.push(num_oids as u32);
@@ -1643,6 +1926,7 @@ impl SeqDb {
             reports_show_gis: false,
             positive_list: false,
             list_taxids: Vec::new(),
+            list_gis: Vec::new(),
             name_records: Vec::new(),
             lookup_files: OnceLock::new(),
             lookup_isams: OnceLock::new(),
@@ -1652,6 +1936,8 @@ impl SeqDb {
             scope_utf8_ended: AtomicBool::new(false),
             utf8_claimed: AtomicBool::new(false),
             scope_utf8_held: AtomicBool::new(false),
+            replaced_titles: AtomicBool::new(false),
+            header_cache: Default::default(),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -1689,12 +1975,9 @@ impl SeqDb {
         names: Vec<Vec<u8>>,
     ) -> Result<(), SeqDbError> {
         alias::compute_masks(&mut root)?;
-        if self.is_version5() {
-            alias::refuse_v5_lists(&root)?;
-        }
         let tree = ListedTree { root, names };
         let read = self.read_listed_tree(&tree);
-        if alias::reads_id_lists(&tree.root) {
+        if alias::reads_id_lists(&tree.root, self.is_version5()) {
             self.listed_tree = Some(Box::new(tree));
         }
         read
@@ -1715,7 +1998,7 @@ impl SeqDb {
         });
         let num_oids = self.num_oids();
         let scan = alias::needs_totals_scan(root);
-        let oids = match self.tree_oids(tree, alias::UserList::None) {
+        let oids = match self.tree_oids(tree, alias::UserList::None, None) {
             Ok(oids) => oids,
             Err(failure) => {
                 self.oid_list_error = Some(failure);
@@ -1724,6 +2007,7 @@ impl SeqDb {
                     words: None,
                     all_bits_special_set: false,
                     mask_types: Vec::new(),
+                    memb_bits: Vec::new(),
                     lists: Vec::new(),
                 }
             }
@@ -1766,11 +2050,12 @@ impl SeqDb {
     }
 
     /// NCBI's OID list of the alias tree `tree` ([`alias::alias_oids`]) under the search's
-    /// positive list `user`.
+    /// Pass 1 positive list `user` and Pass 2 rule `user_rule`.
     fn tree_oids(
         &self,
         tree: &ListedTree,
-        user: alias::UserList,
+        user: alias::UserList<'_>,
+        user_rule: Option<&filter::DeflineRule>,
     ) -> Result<alias::AliasOids, oid_list::OidListError> {
         let volumes: Vec<alias::TreeVolume<'_>> = tree
             .names
@@ -1789,42 +2074,51 @@ impl SeqDb {
             self.seqtype,
             self.is_version5(),
             user,
+            user_rule,
+            &|| self.lmdb_entries(),
         )
     }
 
-    /// Gives the volumes their `OID_MASK_TYPE` and the id lists of `oids`, and the database the
-    /// shape of NCBI's bit set; returns `oids` without them.
+    /// Gives the volumes their `OID_MASK_TYPE`, `MEMB_BIT` and the id lists of `oids`, and the
+    /// database the shape of NCBI's bit set; returns `oids` without them.
     fn set_tree_oids(&mut self, mut oids: alias::AliasOids) -> alias::AliasOids {
         for (volume, &mask_type) in self.volumes.iter_mut().zip(&oids.mask_types) {
             volume.set_oid_mask_type(mask_type);
         }
+        for (volume, &memb_bit) in self.volumes.iter_mut().zip(&oids.memb_bits) {
+            volume.set_memb_bit(memb_bit);
+        }
         for (at, lists) in std::mem::take(&mut oids.lists).into_iter().enumerate() {
-            if !lists.is_empty() {
-                let start = self.volume_starts[at];
-                self.volumes[at].set_alias_lists(lists, start);
-            }
+            let start = self.volume_starts[at];
+            self.volumes[at].set_alias_lists(lists, start);
         }
         self.all_bits_special_set = oids.all_bits_special_set;
         oids
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:394-466
-    // NCBI's `CSeqDB` opened with a positive list translates the alias files' id lists under it
-    // (`alias::UserList`), when its constructor builds the OID list to scan the totals, after the
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:578-716
+    // NCBI's `CSeqDB` opened with a list translates the alias files' id lists under it
+    // (positive lists in Pass 1; both positive and negative seqid/taxid lists in version 5 Pass 2),
+    // when its constructor builds the OID list to scan the totals, after the
     // list's own resolution: the alias files' OID list is made again under the list. Its failure
     // is the constructor's (`build_oid_list`); the failure without the list stays the reports'
     // where their database scans the totals (`unlisted_oid_list_error`).
-    /// Makes the alias files' OID list again under the search's positive list `user` of a
-    /// database whose alias tree names id lists (`listed_tree`): the alias files' bits and
-    /// iteration range (`filter`), the volumes' id lists and the shape of NCBI's bit set, or the
-    /// failure (`oid_list_error`). Nothing changes for any other database.
-    fn translate_alias_lists(&mut self, user: alias::UserList) {
+    /// Makes the alias files' OID list again under the search's Pass 1 list `user` and Pass 2 rule
+    /// `user_rule` of a database whose alias tree names id lists (`listed_tree`): the alias files'
+    /// bits and iteration range (`filter`), the volumes' id lists and the shape of NCBI's bit set,
+    /// or the failure (`oid_list_error`). Nothing changes for any other database.
+    fn translate_alias_lists(
+        &mut self,
+        user: alias::UserList<'_>,
+        user_rule: Option<&filter::DeflineRule>,
+    ) {
         let Some(tree) = self.listed_tree.take() else {
             return;
         };
         let unlisted = self.oid_list_error.take();
         self.unlisted_oid_list_error = unlisted.filter(|_| self.oid_list_fails_scan);
-        match self.tree_oids(&tree, user) {
+        match self.tree_oids(&tree, user, user_rule) {
             Ok(oids) => {
                 let oids = self.set_tree_oids(oids);
                 if let Some(words) = oids.words {
@@ -1853,8 +2147,18 @@ impl SeqDb {
         // OID 0 is the first OID of the first volume that has any.
         if let Some(volume) = self.volumes.iter().find(|volume| volume.num_oids() > 0) {
             self.first_oid_length = Some(match self.seqtype {
-                SeqType::Protein => u64::from(volume.protein_length(0)?),
-                SeqType::Nucleotide => volume.nucleotide_length(0, 0)? as u64,
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:932-938
+                // `BlastSeqSrcGetSeqLen` returns NCBI's signed 32-bit `GetSeqLengthProt`; any
+                // negative length becomes `-1`.
+                SeqType::Protein => {
+                    let len = volume.protein_length_i32(0)?;
+                    if len < 0 {
+                        -1
+                    } else {
+                        i64::from(len)
+                    }
+                }
+                SeqType::Nucleotide => volume.nucleotide_length(0, 0)? as i64,
             });
         }
         Ok(())
@@ -1994,6 +2298,13 @@ impl SeqDb {
         self.counts.total_length
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:872-876
+    /// `CSeqDB::GetVolumeLength`: the total length of the volumes, whatever the alias files and a
+    /// list include (blastdbcheck's metadata test).
+    pub fn volume_length(&self) -> u64 {
+        self.volume_set_length
+    }
+
     /// `CSeqDB::GetMaxLength`: the longest length of the volumes (an alias file's
     /// `MAX_SEQ_LENGTH` is never read), with a list of NCBI's scan as `total_length`.
     pub fn max_length(&self) -> u32 {
@@ -2073,8 +2384,7 @@ impl SeqDb {
             (total, request_count)
         } else {
             match self.first_oid_length {
-                // A length of OID 0 is below 2^32 (a volume's `Uint4`).
-                Some(length) => (length as i64, 1),
+                Some(length) => (length, 1),
                 None => (0, 0),
             }
         };
@@ -2387,6 +2697,23 @@ impl SeqDb {
         self.volumes[range.volume].x_protein_lengths(range.first, range.end)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+    /// [`Self::x_protein_lengths`] as NCBI's signed 32-bit `GetSeqLengthProt` lengths
+    /// (`Volume::x_protein_lengths_i32`).
+    pub fn x_protein_lengths_i32(
+        &self,
+        first_ordinal: u32,
+        end_ordinal: u32,
+    ) -> Result<Vec<i32>, SeqDbError> {
+        let Some(range) = self.x_block_range(first_ordinal, end_ordinal) else {
+            return Err(SeqDbError::Range(format!(
+                "ordinal ids {first_ordinal}..{end_ordinal} are not a non-empty range of the database ({} sequences)",
+                self.num_seqs()
+            )));
+        };
+        self.volumes[range.volume].x_protein_lengths_i32(range.first, range.end)
+    }
+
     /// Reads the sequences of `range` with one positioned read.
     pub fn read_block(&self, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
         let Some(volume) = self.volumes.get(range.volume) else {
@@ -2401,6 +2728,40 @@ impl SeqDb {
             range.end,
             range.first_ordinal,
             self.volume_starts[range.volume] + range.first,
+        )
+    }
+
+    fn volume_and_first_oid(&self, range: BlockRange) -> Result<(&Volume, u32), SeqDbError> {
+        let Some(volume) = self.volumes.get(range.volume) else {
+            return Err(SeqDbError::Range(format!(
+                "volume {} is outside the database ({} volumes)",
+                range.volume,
+                self.volumes.len()
+            )));
+        };
+        Ok((volume, self.volume_starts[range.volume] + range.first))
+    }
+
+    /// Reads the protein sequences of `range` for a search (`Volume::read_protein_search_block`),
+    /// validating `.psq` ranges without allocating bytes for proteins whose NCBI 32-bit length is
+    /// not positive (`<= 0`).
+    pub fn read_protein_search_block(
+        &self,
+        range: BlockRange,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let (volume, first_oid) = self.volume_and_first_oid(range)?;
+        volume.read_protein_search_block(range.first, range.end, range.first_ordinal, first_oid)
+    }
+
+    /// Reads the one protein sequence `ordinal` for a search, skipping byte reads when its NCBI
+    /// 32-bit length is not positive (`Volume::read_protein_search_block`).
+    pub fn read_protein_search_sequence(&self, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
+        let at = self.find_volume(ordinal)?;
+        self.volumes[at.volume].read_protein_search_block(
+            at.vol_oid,
+            at.vol_oid + 1,
+            at.id,
+            self.location_oid(&at),
         )
     }
 
@@ -2453,6 +2814,40 @@ impl SeqDb {
         self.volumes[at.volume].protein_length(at.vol_oid)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+    /// The signed 32-bit length of protein `ordinal` as NCBI's `GetSeqLengthProt` returns it
+    /// (`Volume::protein_length_i32`).
+    pub fn protein_length_i32(&self, ordinal: u32) -> Result<i32, SeqDbError> {
+        self.protein_length_i32_at(self.find_volume(ordinal)?)
+    }
+
+    /// [`SeqDb::protein_length_i32`] of the protein at `at`.
+    pub fn protein_length_i32_at(&self, at: SeqLocation) -> Result<i32, SeqDbError> {
+        self.volumes[at.volume].protein_length_i32(at.vol_oid)
+    }
+
+    /// Validates that the sequence file opens and covers protein `ordinal` without reading its
+    /// bytes (`Volume::check_protein_range`).
+    pub fn check_protein_range(&self, ordinal: u32) -> Result<(), SeqDbError> {
+        self.check_protein_range_at(self.find_volume(ordinal)?)
+    }
+
+    /// [`SeqDb::check_protein_range`] of the protein at `at`.
+    pub fn check_protein_range_at(&self, at: SeqLocation) -> Result<(), SeqDbError> {
+        self.volumes[at.volume].check_protein_range(at.vol_oid)
+    }
+
+    /// Reads `len` NCBIstdaa bytes from residue `offset` of the protein at `at` without reading
+    /// the whole sequence (`Volume::read_protein_slice`).
+    pub fn read_protein_slice_at(
+        &self,
+        at: SeqLocation,
+        offset: u64,
+        len: usize,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        self.volumes[at.volume].read_protein_slice(at.vol_oid, offset, len)
+    }
+
     /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_block` with the bytes in the
     /// buffer that a worker keeps from one block to the next, `kept` (`Volume::x_read_block_into`;
     /// a block of 1 MiB or more that `kept` does not hold, in a buffer of `utils::x_mapped::X_BYTES`);
@@ -2474,6 +2869,23 @@ impl SeqDb {
             range.end,
             range.first_ordinal,
             self.volume_starts[range.volume] + range.first,
+            kept,
+        )
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): [`Self::read_protein_search_block`] into
+    /// the worker's buffer `kept` (`Volume::x_read_protein_search_block_into`).
+    pub fn x_read_protein_search_block_into(
+        &self,
+        range: BlockRange,
+        kept: &mut Vec<u8>,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let (volume, first_oid) = self.volume_and_first_oid(range)?;
+        volume.x_read_protein_search_block_into(
+            range.first,
+            range.end,
+            range.first_ordinal,
+            first_oid,
             kept,
         )
     }
@@ -2635,6 +3047,14 @@ impl SeqDb {
         self.defline_set_at(self.find_volume(ordinal)?)
     }
 
+    /// [`SeqDb::defline_set`] written over `set`, whose buffers are kept from one sequence to the
+    /// next (`seqid::ber::decode_full_set_in`: sequential readers such as `seqmasks_io`).
+    pub fn defline_set_in(&self, ordinal: u32, set: &mut DeflineSet) -> Result<(), SeqDbError> {
+        let at = self.find_volume(ordinal)?;
+        self.header_set_in(at, set)?;
+        Ok(())
+    }
+
     /// The member that NCBI's warning of a UTF8String read where a VisibleString is expected
     /// names (`seqid::ber::utf8_string_path`) for the header of `ordinal`: where NCBI's read of
     /// the record meets one before any failure. `None` also where the record cannot be read.
@@ -2682,6 +3102,80 @@ impl SeqDb {
             .store(false, std::sync::atomic::Ordering::Relaxed);
         self.scope_utf8_ended
             .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Notes that a reader read a title that holds a byte outside ' ' ..= '~' (a reported
+    /// sequence's, `algorithm::common::database::HeaderReader`; a failed read's,
+    /// `ErrorAfterBatchReports::title_posts`; any sequence's in the check before a search,
+    /// `reports_may_refuse`): the reads of NCBI's cache of header records are modelled from here
+    /// on (`read_header_record`).
+    #[cold]
+    #[inline(never)]
+    pub fn note_replaced_title(&self) {
+        self.replaced_titles
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether a reader read such a title (`note_replaced_title`).
+    pub fn replaced_titles(&self) -> bool {
+        self.replaced_titles
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1979-1988
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2071-2080
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbgeneral.hpp:1184-1195
+    /// NCBI's read of the header record of the sequence at `at` through its volume's cache
+    /// (`x_GetFilteredHeader` on the main thread, where NCBI makes the Seq-aligns of a search's
+    /// results): whether it reads the record (`true`; the slot held another record, or none),
+    /// which then holds the slot, or finds it there. The model starts at the first read of a title
+    /// with a byte outside ' ' ..= '~' (`note_replaced_title`): every read after it leaves its
+    /// record in its slot, whether it was there or not, and that title's own first read is a read
+    /// of the record in any case, so the slots read before do not change an answer that matters.
+    #[cold]
+    #[inline(never)]
+    pub fn read_header_record(&self, at: SeqLocation) -> bool {
+        let mut cache = self
+            .header_cache
+            .lock()
+            .expect("the header cache is not poisoned");
+        let slots = cache
+            .0
+            .entry(at.volume)
+            .or_insert_with(|| Box::new([None; HEADER_CACHE_SLOTS]));
+        let slot = &mut slots[at.vol_oid as usize % HEADER_CACHE_SLOTS];
+        let read = *slot != Some(at.vol_oid);
+        *slot = Some(at.vol_oid);
+        read
+    }
+
+    /// The model of NCBI's cache of header records (`read_header_record`) back to a run's start,
+    /// for a search again of batches whose reads NCBI made once (BLASTP's batches before a failed
+    /// one).
+    #[cold]
+    #[inline(never)]
+    pub fn restart_header_reads(&self) {
+        self.header_cache
+            .lock()
+            .expect("the header cache is not poisoned")
+            .0
+            .clear();
+    }
+
+    /// What NCBI's read of the header record of the sequence at `at` posts for the bytes outside
+    /// ' ' ..= '~' of its titles (`seqid::ber::title_replaced_chars`), one text for each post,
+    /// with the post prefix `prefix` (`blastp`); none where the record cannot be read (its reader
+    /// fails elsewhere).
+    #[cold]
+    #[inline(never)]
+    pub fn title_posts_at(&self, at: SeqLocation, prefix: &str) -> Vec<Vec<u8>> {
+        let Ok(record) = self.volumes[at.volume].header_bytes(at.vol_oid) else {
+            return Vec::new();
+        };
+        crate::seqid::ber::title_replaced_chars(&record)
+            .iter()
+            .map(|replaced| replaced.post(Some(prefix)))
+            .collect()
     }
 
     /// Notes that a reader met a reported sequence whose Seq-align id the lookup gives first to
@@ -2779,24 +3273,32 @@ impl SeqDb {
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:907-922
     /// Whether NCBI's header read of the sequence at `at` filters the set it read
     /// (`x_GetFilteredHeader`): the database is restricted by a list or the alias files attached
-    /// an id list to the volume (`x_HaveIdFilter`, a list attached even where it kept nothing), or
-    /// the volume has an `OID_MASK_TYPE`. `MEMB_BIT`, the third case, is refused
-    /// (`alias::UNSUPPORTED_KEYS`). The filter needs a set: a stored header of no bytes, no set,
-    /// makes NCBI's read throw there (`Source::null_set` of blastdbcmd).
+    /// an id list to the volume (`x_HaveIdFilter`, a list attached even where it kept nothing),
+    /// the volume has a non-zero `MEMB_BIT`, or the volume has an `OID_MASK_TYPE`. The filter
+    /// needs a set: a stored header of no bytes, no set, makes NCBI's read throw there
+    /// (`Source::null_set` of blastdbcmd).
     pub fn filters_header_sets(&self, at: SeqLocation) -> bool {
         let volume = &self.volumes[at.volume];
-        self.is_restricted() || volume.has_alias_lists() || volume.has_oid_mask_type()
+        self.is_restricted()
+            || volume.has_alias_lists()
+            || volume.has_memb_bit()
+            || volume.has_oid_mask_type()
     }
 
-    /// [`SeqDb::defline_set_at`] as NCBI's `GetHdr` gives it: `None` where the stored header has
-    /// no bytes, which `defline_set_at` gives as a set of no lines (`Volume::header_set`).
-    pub fn header_set_at(&self, at: SeqLocation) -> Result<Option<DeflineSet>, SeqDbError> {
-        match self.volumes[at.volume].header_set(at.vol_oid)? {
-            Some(set) => self
-                .ordinal_set(at.volume, self.location_oid(&at), set)
-                .map(Some),
-            None => Ok(None),
+    /// [`SeqDb::defline_set_at`] as NCBI's `GetHdr` gives it, written over `set`, whose buffers
+    /// are kept from one sequence to the next (`seqid::ber::decode_full_set_in`: blastdbcmd
+    /// reads the header of one sequence after another): false where the stored header has no
+    /// bytes, which `defline_set_at` gives as a set of no lines (`Volume::header_set_in`).
+    pub fn header_set_in(&self, at: SeqLocation, set: &mut DeflineSet) -> Result<bool, SeqDbError> {
+        let volume = at.volume;
+        if self.volumes[volume]
+            .header_set_in(at.vol_oid, set, None)?
+            .is_none()
+        {
+            return Ok(false);
         }
+        self.adjust_ordinals(volume, self.location_oid(&at), set)?;
+        Ok(true)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2319-2346
@@ -2807,22 +3309,25 @@ impl SeqDb {
     /// changed it: a `general` id `BL_ORD_ID` of a volume after the first, whose tag the read made
     /// the OID in the database (`x_GetHdrAsn1`), or a line that the definition-line rule dropped
     /// (`x_GetFilteredHeader`). `None` where the stored header has no bytes: NCBI's `GetHdr` gives
-    /// no set there (`Volume::defline_set_with_record`).
-    pub fn defline_set_with_header_at(
+    /// no set there (`Volume::header_set_in`). The set is written over `set`, as
+    /// [`SeqDb::header_set_in`] writes it.
+    pub fn defline_set_with_header_in(
         &self,
         at: SeqLocation,
-    ) -> Result<Option<(DeflineSet, Vec<u8>)>, SeqDbError> {
+        set: &mut DeflineSet,
+    ) -> Result<Option<Vec<u8>>, SeqDbError> {
         let volume = at.volume;
-        let Some((mut set, record)) = self.volumes[volume].defline_set_with_record(at.vol_oid)?
+        let mut record = Vec::new();
+        let Some(dropped) =
+            self.volumes[volume].header_set_in(at.vol_oid, set, Some(&mut record))?
         else {
             return Ok(None);
         };
-        let adjusted = self.adjust_ordinals(volume, self.location_oid(&at), &mut set)?;
-        let header = match record {
-            Some(record) if !adjusted => record,
-            _ => crate::writedb::header::encode_defline_set(&set, &mut Vec::new()),
-        };
-        Ok(Some((set, header)))
+        let adjusted = self.adjust_ordinals(volume, self.location_oid(&at), set)?;
+        if dropped || adjusted {
+            record = crate::writedb::header::encode_defline_set(set, &mut Vec::new());
+        }
+        Ok(Some(record))
     }
 
     /// `set`, the definition lines of the sequence `oid` (its OID, which the messages name) in

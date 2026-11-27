@@ -61,3 +61,39 @@ So the titles and names inside index, alias and metadata files are compared too 
 `d\xe9` over an existing database (`Deleted existing ... named` with the byte, the old volume's
 extra files gone), and rpsblast and rpstblastn on a profile database found through `BLASTDB` of
 `d\xe9` without its `.aux` (NCBI's engine error names the path with the byte).
+
+The `K10d_*` cases (line RG item K10d, frozen on 2026-11-25 01:56 JST with the same command, and
+again at 02:06 with the same bytes) are the values of blastdb_aliastool with the byte 0xE9 (and 0xFF
+in a title, an output name and a `-vdblist_file` line), in each of its modes, on the databases and
+lists of `LOSAT/tests/fixtures/blastdb_aliastool/in`: `-dblist` (one name, two, a missing one),
+`-dblist_file` (its name, its lines, a missing file), `-db` with `-gilist` (a text list converted to
+`<out>.p.gil`, a binary one, a missing one, an output directory that does not exist), `-seqidlist`,
+`-taxidlist` and `-oid_masks` (existing and missing), the default title `<db> limited by <list>`,
+`-title`, `-out`, `-num_volumes`, `-vdblist` and `-vdblist_file` (a new `.nvl`, and the line added to
+a `-dblist` alias file), `-gi_file_in` and `-gi_file_out` (the default name `<in>.bgl`, a directory
+that does not exist, and a name of 256 bytes that cannot be written: NCBI's `... not written`),
+`-seqid_file_in`, `-seqid_file_out`, `-seqid_title` (the default title is the input's name without its
+directory), `-seqid_db` (in a directory, and a version 5 database renamed `p\xe9` whose `.pin` and
+LMDB file were patched to the new name: `patch`), `-seqid_file_info` (of `ids_db_e9.bsl`, which NCBI
+2.17.0 wrote on 2026-11-25 with `-seqid_db` of that renamed database, so its `DB Vols:` line holds the
+byte), `-logfile`, and constrained values (`-dbtype`, `-seqid_dbtype`) and numbers (`-num_volumes`,
+`-oid_masks`, added and frozen at 04:0x after review F3) that NCBI's reader refuses with the bytes.
+With them the date of a binary seqid list (`.bsl`: its date and the date's length byte) is masked
+too (`undated`), and its 8-byte size, which counts the date, is zeroed when it holds the length of
+the file, so a wrong size still differs (review F1; `undated_seqid_list` of `tests/temp_support`).
+
+The `K10c_*` cases (line RG item K10c, frozen on 2026-11-26 with `make_fixtures.py --ncbi-bin
+"$NCBI_BIN" --rpsbproc-bin "$RPSBPROC_BIN"`) cover the remaining non-UTF-8 paths, keys, and
+option values across all eight search programs (`blastn`, `blastp`, `blastx`, `tblastn`,
+`tblastx`, `psiblast`, `rpsblast`, `rpstblastn`), `makeblastdb`, and `rpsbproc`: `-query`,
+`-subject`, `-out`, `-db`, `-export_search_strategy`, `-filtering_db`, `-window_masker_db`,
+`-window_masker_taxid` (`WINDOW_MASKER_PATH` in the environment, `[WINDOW_MASKER]` in `.ncbirc`,
+and current working directory), `-use_index true` (new-style and old-style `-index_name`),
+`-seqidlist`, `-gilist`, `-taxidlist`, `-ipglist`, `-db_soft_mask`, `-out_pssm`,
+`-out_ascii_pssm`, `-in_pssm`, `-in_msa`, `-outfmt` (`0`, `5`, `6`, `7`, `11`, `15`, `16`, custom
+`delim=\xe9`, and invalid non-UTF-8 formats), non-path text options (`-dust`, `-seg`, `-matrix`,
+`-query_loc`, `-comp_based_stats`), `makeblastdb` (`-in`, `-out`, `-title`,
+`-metadata_output_prefix`, `-taxid_map`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`,
+`-gi_mask_name`, `-max_file_sz`, `-logfile`), and `rpsbproc` (`-i`, `-o`, `-d`, existing and
+missing). `make_fixtures.py` and `non_utf8_names.rs` also mask makeblastdb's time and elapsed
+seconds in `.log` files (`undated`) and clear `WINDOW_MASKER_PATH`.

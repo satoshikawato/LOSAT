@@ -44,7 +44,7 @@ For development, `maturin develop` builds the extension into the active virtual 
 
 ## Programs
 
-`pylosat.PROGRAMS` names the search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` are functions of their own (below). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the command line.
+`pylosat.PROGRAMS` names the search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter` are functions of their own (below). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the command line.
 
 ## Options
 
@@ -107,9 +107,10 @@ print(pylosat.dustmasker("-outfmt", "fasta", input=nucleotide_fasta).text)
 print(pylosat.segmasker("-outfmt", "fasta", input=protein_fasta).text)
 print(pylosat.convert2blastmask("-masking_algorithm", "other", "-masking_options", "mine",
                                 input=lowercase_masked_fasta).text)
+print(pylosat.blast_formatter("-archive", "results.asn", "-outfmt", "8").text)
 ```
 
-`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`bytes`, `text`) and to standard error (`diagnostics_bytes`, `diagnostics`). `input` is what the command line reads as standard input, so a database can be built from FASTA in memory (with `-title`, which makeblastdb needs for standard input), ids given to `blastdbcmd -entry_batch -`, sequences in memory masked, and the lower case letters of FASTA in memory turned into masking information.
+`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `blast_formatter` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`bytes`, `text`) and to standard error (`diagnostics_bytes`, `diagnostics`). `input` is what the command line reads as standard input, so a database can be built from FASTA in memory (with `-title`, which makeblastdb needs for standard input), ids given to `blastdbcmd -entry_batch -`, sequences in memory masked, and the lower case letters of FASTA in memory turned into masking information, and the reports of a BLAST archive (`-outfmt 11`) written again.
 
 ## Errors
 

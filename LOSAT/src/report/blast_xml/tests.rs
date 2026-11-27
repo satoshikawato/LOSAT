@@ -10,9 +10,10 @@ use crate::report::serial::xml::XmlEncoder;
 fn run<'a>(matrix: &'a FormattingMatrix) -> XmlRun<'a> {
     XmlRun {
         program: "blastp",
+        app: "blastp",
         version: "BLASTP 2.17.0+",
         reference: REFERENCE_GAPPED_BLAST,
-        db_name: "",
+        db_name: b"",
         matrix: Some("BLOSUM62"),
         expect: 10.0,
         gap_open: 11,
@@ -164,6 +165,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
         message: Some(b"No hits found"),
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     writer.query(&run, &first, out, |_| Ok(())).unwrap();
     let second = XmlQuery {
@@ -174,6 +176,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
         message: None,
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     writer
         .query(&run, &second, out, |sink| {
@@ -187,6 +190,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
                     descriptions: &[],
                     defline_thrown: false,
+                    unloaded: false,
                     lookup_throws: None,
                 },
                 |hsps| {
@@ -257,6 +261,7 @@ fn a_later_call_continues_the_document() {
         message: None,
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
     let text = String::from_utf8(out.clone()).unwrap();
@@ -287,6 +292,7 @@ fn blastn_parameters_and_the_statistics_without_a_valid_context() {
         message: Some(b"x"),
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -313,6 +319,7 @@ fn a_db_len_of_minus_two_to_the_63_is_written_as_its_digits() {
         message: Some(b"x"),
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     BlastXmlWriter::new(0)
         .query(&run, &query, &mut out, |_| Ok(()))
@@ -327,9 +334,10 @@ fn a_db_len_of_minus_two_to_the_63_is_written_as_its_digits() {
 fn run_blastn() -> XmlRun<'static> {
     XmlRun {
         program: "blastn",
+        app: "blastn",
         version: "BLASTN 2.17.0+",
         reference: REFERENCE_MEGABLAST,
-        db_name: "db/snucl",
+        db_name: b"db/snucl",
         matrix: None,
         expect: 0.001,
         gap_open: 0,
@@ -541,6 +549,7 @@ fn a_header_exception_comes_back_after_its_posts() {
         message: None,
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     let mut writer = BlastXmlWriter::new(0);
     let mut out = Vec::new();
@@ -595,6 +604,72 @@ fn a_header_exception_comes_back_after_its_posts() {
     assert!(posts.cut && posts.ends_run.is_none() && posts.posts.len() == 1);
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:126
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:100
+/// A run of another program's search strategy writes the program of the strategy into its
+/// document (`BlastOutput_program`) and the running application's name into its posts: the
+/// 803.7 post of a header string and the post of an exception that a report raised
+/// (`caught_post`), both written by the application's process.
+#[test]
+fn the_posts_of_a_cross_program_run_name_the_running_application() {
+    use crate::ncbi_exception::{NcbiException, ThrowSite};
+    let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
+    let run = XmlRun {
+        program: "tblastx",
+        app: "blastn",
+        ..run(&matrix)
+    };
+    let query = XmlQuery {
+        id: b"Query_1",
+        title: b"q\x01 caf\xe9",
+        len: 32,
+        stats: STATS,
+        message: None,
+        searched: true,
+        masks: &[],
+        joins_held: false,
+    };
+    let mut writer = BlastXmlWriter::new(0);
+    let mut out = Vec::new();
+    writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
+    let mut posts = crate::report::query_warnings::HitPosts::default();
+    posts.document(writer.take_posts());
+    let mut diagnostics = Vec::new();
+    crate::report::query_warnings::write_posts_to(
+        &out,
+        &posts,
+        0,
+        &mut Vec::new(),
+        &mut diagnostics,
+        None,
+    )
+    .unwrap_err();
+    let diagnostics = String::from_utf8_lossy(&diagnostics);
+    assert!(
+        diagnostics.starts_with("Error: (803.7) [blastn] BlastOutput.query-def\n"),
+        "{diagnostics}"
+    );
+    let exception = NcbiException::new(
+        ThrowSite {
+            file: "src/objects/seq/../seqalign/Seq_align.cpp",
+            line: 227,
+            kind: "CSeqalignException::eInvalidAlignment",
+            function: None,
+        },
+        "CSeq_align::GetSeqRange(): Row is empty",
+    );
+    let post = super::writer::caught_post(Err(CaughtException(exception).into()), &writer, run.app)
+        .unwrap()
+        .expect("the post of a caught exception");
+    assert!(post.starts_with(b"Error: [blastn] "), "{post:?}");
+    // Without an exception that the report function catches there is no post, and another error
+    // goes back to the caller.
+    assert!(super::writer::caught_post(Ok(()), &writer, run.app)
+        .unwrap()
+        .is_none());
+    assert!(super::writer::caught_post(Err(anyhow::anyhow!("other")), &writer, run.app).is_err());
+}
+
 // Line DBID pfoff-4 (DECISIONS 62 (15); NCBI 2.17.0, probe `R/pfoff/p4`, `bp.U2.b1.dflt.5`): the
 // `Hit` of a database sequence whose lookup throws where its batch's prefetch is off is NCBI's
 // `catch`: the Seq-align id's FASTA form, `Unknown`, `Hit_len` 0, and each HSP with its number, the
@@ -618,6 +693,7 @@ fn a_hit_whose_lookup_throws_is_ncbis_catch() {
         taxonomy: crate::report::blast_xml::records::UNNAMED,
         descriptions: &[],
         defline_thrown: false,
+        unloaded: false,
         lookup_throws: Some(&exception),
     };
     let query = XmlQuery {
@@ -628,6 +704,7 @@ fn a_hit_whose_lookup_throws_is_ncbis_catch() {
         message: None,
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     let mut writer = BlastXmlWriter::new(1);
     let mut out = Vec::new();
@@ -711,6 +788,7 @@ fn a_hit_whose_lookup_throws_is_ncbis_catch() {
                 cbs: 2,
                 query_gencode: None,
                 db_gencode: None,
+                program_type: None,
             },
         );
         let error = document

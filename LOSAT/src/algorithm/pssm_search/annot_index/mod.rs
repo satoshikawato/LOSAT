@@ -22,13 +22,13 @@ mod bitmagic;
 mod entry;
 mod range;
 mod table;
-mod view;
 
 use range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use view::V;
 
 use crate::ncbi_exception::{post_line_in, NcbiException, Severity};
 use crate::report::diag_log::Posts;
+use crate::report::serial::asn_types::view;
 use crate::report::serial::asn_types::{resolved, table::named, write::failed_stream_text};
 use crate::report::serial::pssm::SeqEntry;
 
@@ -124,8 +124,8 @@ pub(crate) enum Refusal {
     /// A Std-seg `dim` above `align::STD_DIM_LIMIT`.
     StdDim,
     /// An element stated as `NULL` of a list that NCBI's object manager reads through the
-    /// reference before the stream failed (`view::V::deref`), or through a pointer it took from
-    /// the list or inside an alignment (`view::V::deref_raw`).
+    /// reference before the stream failed (`RefElement::deref`), or through a pointer it took
+    /// from the list or inside an alignment (`RefElement::deref_raw`).
     NullElement,
     /// A Seq-id handle twice in the query's entry of a search whose scope holds other sequences
     /// first (`-subject`), when a Seq-id of NCBI's message may be written as a subject spelled it
@@ -179,12 +179,49 @@ impl Stop {
     }
 }
 
+/// How NCBI's object manager takes an element of a list of `CRef<>`s of the query's entry: the
+/// generic typed access (`asn_types::view::V`, whose `is_null` tells an element stated as `NULL`)
+/// with the index's stops for such an element (`Refusal::NullElement`).
+pub(super) trait RefElement: Sized {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1014
+    /// The element of a list of `CRef<>`s that NCBI's code dereferences here through the
+    /// reference (`CCoreException::eNullPtr` for one stated as `NULL`: a report of memory
+    /// addresses, or of nothing after the stream failed, `Stop::NullPointer`; probe D3c-3b
+    /// `probe7`: the parts of a `mix` location, a feature's `ids` and `xref`, an annotation's `id`
+    /// and `desc`).
+    fn deref(self) -> Result<Self, Stop>;
+
+    /// The element of a list of `CRef<>`s that NCBI's code reads here through a pointer it took
+    /// from the list (a crash for one stated as `NULL`: an alignment or a graph of an annotation,
+    /// probe D3c-3b `probe7`), or inside an alignment, where LOSAT does not follow which reads
+    /// throw and which crash: refused (`Refusal::NullElement`), also after the stream failed.
+    fn deref_raw(self) -> Result<Self, Stop>;
+}
+
+impl RefElement for V<'_> {
+    fn deref(self) -> Result<Self, Stop> {
+        if self.is_null() {
+            Err(Stop::NullPointer(Refusal::NullElement))
+        } else {
+            Ok(self)
+        }
+    }
+
+    fn deref_raw(self) -> Result<Self, Stop> {
+        if self.is_null() {
+            Err(Stop::Refuse(Refusal::NullElement))
+        } else {
+            Ok(self)
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:1227-1252 (`x_MapFeatIds`, after
 // the feature's locations are mapped: its `id`, each of its `ids`, a gene's names, then each of
 // its `xref`s)
 /// The elements of the feature `feat` that its index by its ids reads (`x_MapFeatIds`): each of
-/// its `ids` and of its `xref`s, through the reference (`V::deref`). The index by ids changes no
-/// output of LOSAT's.
+/// its `ids` and of its `xref`s, through the reference (`RefElement::deref`). The index by ids
+/// changes no output of LOSAT's.
 fn feature_ids(feat: V<'_>) -> Result<(), Stop> {
     for name in ["ids", "xref"] {
         for element in feat.get(name).into_iter().flat_map(V::items) {
@@ -227,11 +264,14 @@ pub(super) struct Indexer<'p> {
 /// (`psiblast`, `tblastn`: the diagnostic prefix) joins the scope (`entry::Tse`: phase C, the
 /// attach of its Bioseq-sets' and Bioseqs' ids, phase I), or LOSAT's refusal. `ids_known`: no other
 /// sequence is in NCBI's scope before it (a search of `-db`), so the attach's messages name the
-/// entry's own Seq-ids.
+/// entry's own Seq-ids. `refusal` is LOSAT's refusal of an exception that a check of the data
+/// throws where the run's settings turn the check off (`ncbi_environment::ReadVerification`): the
+/// run stops there in LOSAT's words, as at a `Refusal`.
 pub(crate) fn index_entry(
     program: &str,
     entry: &SeqEntry,
     ids_known: bool,
+    refusal: &dyn Fn(&NcbiException) -> Option<String>,
 ) -> Result<AnnotOutcome, Refusal> {
     let tse = entry::Tse::of(entry);
     let mut ix = Indexer {
@@ -244,7 +284,10 @@ pub(crate) fn index_entry(
     let error = match ix.run(&tse, ids_known) {
         Ok(()) => None,
         Err(Stop::Refuse(refusal)) => return Err(refusal),
-        Err(Stop::Exception(e)) => Some(crate::cli::NativeError::exception(&e)),
+        Err(Stop::Exception(e)) => match refusal(&e) {
+            Some(text) => return Ok(AnnotOutcome::refused(text)),
+            None => Some(crate::cli::NativeError::exception(&e)),
+        },
         Err(Stop::Std(what)) => Some(crate::cli::NativeError::std_exception(what)),
         Err(Stop::NullPointer(_)) if ix.muted => Some(crate::cli::NativeError {
             exit: 255,
@@ -291,7 +334,7 @@ pub(crate) fn index_annots(
         inst: SeqInst::new(("raw", 2), ("aa", 3), None, None),
         annot: Some(annots.to_vec()),
     };
-    index_entry(program, &SeqEntry::Seq(Box::new(query)), true)
+    index_entry(program, &SeqEntry::Seq(Box::new(query)), true, &|_| None)
 }
 
 impl Indexer<'_> {

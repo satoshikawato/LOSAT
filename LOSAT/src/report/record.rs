@@ -39,6 +39,21 @@ impl ReportNeeds {
     }
 }
 
+/// Overrides on a translated gapped Std-seg Seq-align produced when `-subject`'s Seq-loc mapper
+/// truncates a TBLASTN `-in_pssm -window_size 0` alignment that started on its frame's NULLB.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1565,3083-3094
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StdSegNullb {
+    /// `x_InvalidateScores`: omit the `score` member of the `Seq-align`.
+    pub omit_scores: bool,
+    /// Last Std-seg override `(subject_fuzz_to_in_searched_coords, query_to_decrement)`:
+    /// writes an alternative `fuzz-to` at `subject_fuzz_to` shifted by the subject offset on the
+    /// last subject interval and subtracts `query_to_decrement` (1 when the trailing substitution
+    /// has at least two residues, 0 when it has one) from the last query interval's `to`.
+    pub last_seg_fuzz: Option<(u32, i32)>,
+}
+
 /// One HSP of a query's final hit list, as NCBI's `BlastHSP` holds it when the Seq-aligns
 /// are made (`BlastHitList2SeqAlign_OMF`).
 #[derive(Clone, Copy, Debug)]
@@ -51,6 +66,10 @@ pub struct HspRecord<'a> {
     /// translated query), in the searched letters.
     pub q_offset: i32,
     pub q_end: i32,
+    /// The query letters that `-subject`'s Seq-loc mapper left out of the HSP (the records of
+    /// BLASTX and TBLASTN come mapped, `serial::seqalign::mapped_script`: an end `Ins`), which its
+    /// `hsp_percent_coverage` still counts (`MappedScript::query_left_out`); 0 for every other HSP.
+    pub q_left_out: i32,
     /// `subject.offset` and `subject.end` (exclusive), likewise for the subject.
     pub s_offset: i32,
     pub s_end: i32,
@@ -73,6 +92,9 @@ pub struct HspRecord<'a> {
     /// `gap_info`: the edit script, in the context's direction. An empty script stands
     /// for one substitution over the query's extent.
     pub ops: &'a [GapEditOp],
+    /// Optional `-subject` mapper override for TBLASTN NULLB-start alignments (`None` for all
+    /// ordinary HSPs).
+    pub std_seg_nullb: Option<StdSegNullb>,
 }
 
 /// A query of the search, as the Seq-aligns name and measure it.
@@ -160,6 +182,16 @@ impl ProgramType {
             ProgramType::RpsBlast => "rpsblast",
             ProgramType::RpsTblastn => "rpstblastn",
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:861-871
+    /// Whether a search of the program is an iterative one (`IsIterativeSearch`, the formatter's
+    /// `m_IsIterative`): psiblast and PSI-TBLASTN (tblastn `-in_pssm`); NCBI's third, DELTA-BLAST,
+    /// is not a LOSAT program. The one owner of this fact for every report: the XML2 and JSON
+    /// documents of such a search are held (`blast_xml2::reports_held`) and list a database
+    /// search's results as its rounds.
+    pub fn is_iterative(self) -> bool {
+        matches!(self, ProgramType::PsiBlast | ProgramType::PsiTblastn)
     }
 }
 

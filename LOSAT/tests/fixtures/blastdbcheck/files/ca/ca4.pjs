@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "ca4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "ca.faa",
+  "number-of-letters": 84,
+  "number-of-sequences": 2,
+  "last-updated": "2023-11-14T22:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 558,
+  "bytes-to-cache": 175,
+  "files": [
+    "ca4.phr",
+    "ca4.pin",
+    "ca4.pog",
+    "ca4.psd",
+    "ca4.psi",
+    "ca4.psq"
+  ]
+}

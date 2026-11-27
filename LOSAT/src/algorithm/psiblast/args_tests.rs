@@ -147,9 +147,10 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             "the rounds of a masked query run ({masks:?})"
         );
     }
-    // Item PS15b-1: BLAST XML, the Seq-annots and the archive run; the formats of PS15b-2 are
-    // refused.
-    for format in ["5", "8", "9", "11"] {
+    // Items PS15b-1 and PS15b-2: BLAST XML, the Seq-annots, the archive, the query-anchored
+    // reports, the JSON Seq-aligns and the organism report run; the XML2 and JSON documents (the
+    // second part of PS15b-2) are refused.
+    for format in ["1", "2", "3", "4", "5", "8", "9", "11", "12", "18"] {
         assert!(
             parse(&["-outfmt", format])
                 .unwrap()
@@ -158,7 +159,7 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             "outfmt {format}"
         );
     }
-    for format in ["1", "3", "4", "12", "15", "16", "18"] {
+    for format in ["15", "16"] {
         let error = parse(&["-outfmt", format])
             .unwrap()
             .into_blastp_args()
@@ -202,6 +203,39 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             .into_blastp_args()
             .is_ok());
     }
+    // With `-phi_pattern` (item PS8a): PHI-BLAST's reports run, formats 8, 9 and 12 go on to
+    // NCBI's engine error, and BLAST XML and the archive go on to the search's setup, whose NCBI
+    // errors come before their refusal (`phi_hooks::phi_limits`).
+    let with_pattern = |format: &str| {
+        parse(&["-phi_pattern", "p.pat", "-outfmt", format])
+            .unwrap()
+            .into_blastp_args()
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    };
+    for format in [
+        "0",
+        "6",
+        "7",
+        "10",
+        "20 qseqid sseqid",
+        "8",
+        "9",
+        "12",
+        "5",
+        "11",
+    ] {
+        assert_eq!(with_pattern(format), Ok(()), "outfmt {format}");
+    }
+    for format in ["1", "2", "3", "4", "15", "16", "18"] {
+        assert_eq!(
+            with_pattern(format),
+            Err(format!(
+                "output format {format} is not supported by LOSAT's PSIBLAST yet"
+            )),
+            "phi outfmt {format}"
+        );
+    }
     // NCBI's own error of the format string comes first (NCBI 2.17.0 `psiblast -outfmt 99`:
     // "Error: Formatting choice is out of range", exit 255).
     assert!(parse(&["-outfmt", "99"])
@@ -236,13 +270,16 @@ fn blastps_database_filters_and_id_options_reach_the_search() {
         "3",
     ])
     .unwrap();
-    assert_eq!(blastp.db_filter.taxids.as_deref(), Some("9606"));
+    assert_eq!(
+        blastp.db_filter.taxids.as_deref(),
+        Some(std::ffi::OsStr::new("9606"))
+    );
     assert!(blastp.db_filter.no_taxid_expansion);
     assert!(blastp.show_gis && blastp.parse_deflines && blastp.lcase_masking);
     let blastp = db(&["-negative_seqidlist", "l.txt"]).unwrap();
     assert_eq!(
         blastp.db_filter.negative_seqidlist.as_deref(),
-        Some("l.txt")
+        Some(std::ffi::OsStr::new("l.txt"))
     );
     let blastp = db(&[]).unwrap();
     assert!(!blastp.show_gis && !blastp.parse_deflines && !blastp.lcase_masking);
@@ -305,20 +342,20 @@ fn the_x_drops_gap_trigger_culling_and_sum_stats_reach_blastps_search() {
 
 #[test]
 fn psiblasts_arguments_that_losat_does_not_run_are_named() {
-    for (option, value) in [("-phi_pattern", Some("x")), ("-html", None)] {
-        let mut extra = vec![option];
-        extra.extend(value);
-        let error = parse(&extra).unwrap_err();
-        assert!(
-            error.contains(&format!(
-                "the NCBI BLAST+ option {option} is not supported by LOSAT's PSIBLAST"
-            )),
-            "{option}: {error}"
-        );
-    }
+    // `-html` (line RG item T4c2) is accepted and forwarded to blastp's search.
+    assert!(!parse(&[]).unwrap().into_blastp_args().unwrap().html);
+    assert!(parse(&["-html"]).unwrap().into_blastp_args().unwrap().html);
     // `-in_pssm` (PS4a) is an argument: with `-query` it is NCBI's reader's exclusion
     // (blast_args.cpp:1240-1247).
     let error = parse(&["-in_pssm", "x"]).unwrap_err();
+    assert!(error.contains("Incompatible with argument:  `"), "{error}");
+    // `-phi_pattern` (PS8a) is an argument; `-in_msa` excludes it (blast_args.cpp:1173-1192).
+    let args = parse(&["-phi_pattern", "p.pat"]).unwrap();
+    assert_eq!(
+        args.phi_pattern.as_deref(),
+        Some(std::path::Path::new("p.pat"))
+    );
+    let error = parse(&["-phi_pattern", "p.pat", "-in_msa", "a.aln"]).unwrap_err();
     assert!(error.contains("Incompatible with argument:  `"), "{error}");
     // Arguments that psiblast does not have are unknown, as in NCBI's reader.
     for option in ["-task", "-ungapped", "-db_soft_mask", "-mt_mode"] {

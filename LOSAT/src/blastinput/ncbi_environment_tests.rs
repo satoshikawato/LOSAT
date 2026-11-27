@@ -265,7 +265,7 @@ fn matrix_files_are_found_where_ncbi_looks() {
             blastmat: blastmat.map(OsString::from),
         };
     let find = |name: &str, search: &MatrixSearch| {
-        find_matrix_file(name, search, &is_file, &is_dir).unwrap()
+        find_matrix_file(name.as_bytes(), search, &is_file, &is_dir).unwrap()
     };
     let none = search(None, None, None);
     // NCBI_DATA_PATH's directories (empty parts dropped), then [NCBI] Data, each with a
@@ -301,8 +301,234 @@ fn matrix_files_are_found_where_ncbi_looks() {
         ..none.clone()
     };
     assert_eq!(
-        find_matrix_file("mymat", &unreadable, &is_file, &is_dir),
+        find_matrix_file(b"mymat", &unreadable, &is_file, &is_dir),
         Err("reason".to_string())
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:106-116,413-430,455-462,508-523
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1385
+// NCBI reference (598d8ae6): c++/src/util/util_misc.cpp:139-179
+#[test]
+fn path_rules_handle_trailing_separators_and_joins() {
+    let check_cases = |rules: PathRules, label: &str, cases: &[(&[u8], &[u8], &[u8])]| {
+        for &(dir, expected_trailing, expected_made) in cases {
+            assert_eq!(
+                rules.add_trailing_separator(dir),
+                expected_trailing,
+                "{label} trailing {dir:?}"
+            );
+            assert_eq!(
+                rules.make_path(dir, b"MYMAT"),
+                expected_made,
+                "{label} make_path {dir:?}"
+            );
+            let dir_str = std::str::from_utf8(dir).unwrap();
+            let made_str = std::str::from_utf8(expected_made).unwrap();
+            assert_eq!(
+                rules
+                    .make_path_os(OsStr::new(dir_str), OsStr::new("MYMAT"))
+                    .as_os_str(),
+                OsStr::new(made_str),
+                "{label} make_path_os {dir:?}"
+            );
+        }
+    };
+
+    // Unix: only `/` is a separator (`\` and `:` are ordinary filename bytes).
+    check_cases(
+        PathRules::Unix,
+        "unix",
+        &[
+            (b"", b"", b"MYMAT"),
+            (b"/", b"/", b"/MYMAT"),
+            (b"dp", b"dp/", b"dp/MYMAT"),
+            (b"dp/", b"dp/", b"dp/MYMAT"),
+            (b"dp\\", b"dp\\/", b"dp\\/MYMAT"),
+            (b"C:", b"C:/", b"C:/MYMAT"),
+        ],
+    );
+
+    // Windows: `/`, `\` and `:` are all separators; `DIR_SEPARATOR` is `\`.
+    check_cases(
+        PathRules::Windows,
+        "win",
+        &[
+            (b"", b"", b"MYMAT"),
+            (b"\\", b"\\", b"\\MYMAT"),
+            (b"/", b"/", b"/MYMAT"),
+            (b"C:", b"C:", b"C:MYMAT"),
+            (b"C:\\", b"C:\\", b"C:\\MYMAT"),
+            (b"C:/", b"C:/", b"C:/MYMAT"),
+            (b"C:\\dp", b"C:\\dp\\", b"C:\\dp\\MYMAT"),
+            (b"C:/dp", b"C:/dp\\", b"C:/dp\\MYMAT"),
+            (b"C:\\dp\\", b"C:\\dp\\", b"C:\\dp\\MYMAT"),
+            (b"C:/dp/", b"C:/dp/", b"C:/dp/MYMAT"),
+        ],
+    );
+
+    // `join_os` always inserts `DIR_SEPARATOR` between parts (matching `BlastFindMatrixPath`).
+    assert_eq!(
+        PathRules::Unix
+            .join_os(&[OsStr::new("bm/"), OsStr::new("MYMAT")])
+            .as_os_str(),
+        OsStr::new("bm//MYMAT")
+    );
+    assert_eq!(
+        PathRules::Windows
+            .join_os(&[OsStr::new("bm\\"), OsStr::new("nt"), OsStr::new("NTMAT")])
+            .as_os_str(),
+        OsStr::new("bm\\\\nt\\NTMAT")
+    );
+}
+
+#[test]
+fn find_matrix_file_with_rules_covers_unix_and_windows_edge_cases() {
+    let search =
+        |data_path: Option<&str>, data: Option<&str>, blastmat: Option<&str>| MatrixSearch {
+            data_path: data_path.map(OsString::from),
+            data: Ok(data.map(OsString::from)),
+            blastmat: blastmat.map(OsString::from),
+        };
+
+    // Windows rules: `;` delimiter, trailing `/`, `\` and `:`, mixed separators, absolute disk/UNC.
+    let win_files = [
+        OsStr::new("C:MAT_DRIVE"),
+        OsStr::new("C:/mixed\\MAT_MIX"),
+        OsStr::new("D:\\trailing\\MAT_TR"),
+        OsStr::new("E:/slash/MAT_SL"),
+        OsStr::new("C:\\ABS\\MAT"),
+        OsStr::new("\\\\SRV\\SHARE\\UNC"),
+        OsStr::new("bm\\nt\\NTMAT"),
+        OsStr::new("data\\LOCAL"),
+    ];
+    let win_dirs = [OsStr::new("bm")];
+    let win_is_file = |p: &Path| win_files.contains(&p.as_os_str());
+    let win_is_dir = |p: &Path| win_dirs.contains(&p.as_os_str());
+    let find_win = |name: &str, s: &MatrixSearch| {
+        find_matrix_file_with_rules(
+            PathRules::Windows,
+            name.as_bytes(),
+            s,
+            &win_is_file,
+            &win_is_dir,
+        )
+        .unwrap()
+        .map(PathBuf::into_os_string)
+    };
+
+    let win_dp = ";C:;C:/mixed;;D:\\trailing\\;E:/slash/;";
+    assert_eq!(
+        find_win("mat_drive", &search(Some(win_dp), None, None)),
+        Some(OsString::from("C:MAT_DRIVE"))
+    );
+    assert_eq!(
+        find_win("mat_mix", &search(Some(win_dp), None, None)),
+        Some(OsString::from("C:/mixed\\MAT_MIX"))
+    );
+    assert_eq!(
+        find_win("mat_tr", &search(Some(win_dp), None, None)),
+        Some(OsString::from("D:\\trailing\\MAT_TR"))
+    );
+    assert_eq!(
+        find_win("mat_sl", &search(Some(win_dp), None, None)),
+        Some(OsString::from("E:/slash/MAT_SL"))
+    );
+    // Absolute Windows paths bypass NCBI_DATA_PATH and [NCBI] Data.
+    assert_eq!(
+        find_win("c:\\abs\\mat", &search(Some(win_dp), Some("X:"), None)),
+        Some(OsString::from("C:\\ABS\\MAT"))
+    );
+    assert_eq!(
+        find_win("\\\\srv\\share\\unc", &search(Some(win_dp), None, None)),
+        Some(OsString::from("\\\\SRV\\SHARE\\UNC"))
+    );
+    assert_eq!(
+        find_win("ntmat", &search(None, None, Some("bm"))),
+        Some(OsString::from("bm\\nt\\NTMAT"))
+    );
+    assert_eq!(
+        find_win("local", &search(None, None, None)),
+        Some(OsString::from("data\\LOCAL"))
+    );
+
+    // Unix rules: `:` delimiter, trailing `\` is NOT a separator, absolute `/` path bypasses dirs.
+    let unix_files = [
+        OsStr::new("dir\\/MAT_BS"),
+        OsStr::new("/ABS/MAT"),
+        OsStr::new("bm//MAT_BM"),
+    ];
+    let unix_dirs = [OsStr::new("bm/")];
+    let unix_is_file = |p: &Path| unix_files.contains(&p.as_os_str());
+    let unix_is_dir = |p: &Path| unix_dirs.contains(&p.as_os_str());
+    let find_unix = |name: &str, s: &MatrixSearch| {
+        find_matrix_file_with_rules(
+            PathRules::Unix,
+            name.as_bytes(),
+            s,
+            &unix_is_file,
+            &unix_is_dir,
+        )
+        .unwrap()
+        .map(PathBuf::into_os_string)
+    };
+    assert_eq!(
+        find_unix("mat_bs", &search(Some("dir\\"), None, None)),
+        Some(OsString::from("dir\\/MAT_BS"))
+    );
+    assert_eq!(
+        find_unix("/abs/mat", &search(Some("unused"), None, None)),
+        Some(OsString::from("/ABS/MAT"))
+    );
+    assert_eq!(
+        find_unix("mat_bm", &search(None, None, Some("bm/"))),
+        Some(OsString::from("bm//MAT_BM"))
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn find_matrix_file_preserves_non_utf8_os_paths_on_unix() {
+    use crate::utils::os_bytes::{os_string_from_bytes, path_from_bytes};
+
+    let dp_raw = os_string_from_bytes(b"/d\xFF:/e\xFE/".to_vec());
+    let data_raw = os_string_from_bytes(b"/data\xFD".to_vec());
+    let bm_raw = os_string_from_bytes(b"/bm\xFC".to_vec());
+
+    let expected_dp1 = path_from_bytes(b"/d\xFF/MAT1".to_vec());
+    let expected_dp2 = path_from_bytes(b"/e\xFE/MAT2".to_vec());
+    let expected_data = path_from_bytes(b"/data\xFD/MAT3".to_vec());
+    let expected_bm = path_from_bytes(b"/bm\xFC/nt/MAT4".to_vec());
+    let files = [
+        expected_dp1.clone(),
+        expected_dp2.clone(),
+        expected_data.clone(),
+        expected_bm.clone(),
+    ];
+    let dirs = [PathBuf::from(&bm_raw)];
+    let is_file = |p: &Path| files.iter().any(|f| f.as_os_str() == p.as_os_str());
+    let is_dir = |p: &Path| dirs.iter().any(|d| d.as_os_str() == p.as_os_str());
+
+    let search = MatrixSearch {
+        data_path: Some(dp_raw),
+        data: Ok(Some(data_raw)),
+        blastmat: Some(bm_raw),
+    };
+    assert_eq!(
+        find_matrix_file_with_rules(PathRules::Unix, b"mat1", &search, &is_file, &is_dir).unwrap(),
+        Some(expected_dp1)
+    );
+    assert_eq!(
+        find_matrix_file_with_rules(PathRules::Unix, b"mat2", &search, &is_file, &is_dir).unwrap(),
+        Some(expected_dp2)
+    );
+    assert_eq!(
+        find_matrix_file_with_rules(PathRules::Unix, b"mat3", &search, &is_file, &is_dir).unwrap(),
+        Some(expected_data)
+    );
+    assert_eq!(
+        find_matrix_file_with_rules(PathRules::Unix, b"mat4", &search, &is_file, &is_dir).unwrap(),
+        Some(expected_bm)
     );
 }
 
@@ -804,7 +1030,7 @@ fn the_window_masker_directory_is_ncbis() {
             .unwrap_or_else(|reason| panic!("{id}: {reason}"))
             .path
             .filter(|value| !value.is_empty());
-        let expected = (row[7] != "<cwd>").then(|| place(&row[7]));
+        let expected = (row[7] != "<cwd>").then(|| place(&row[7]).into_bytes());
         assert_eq!(used, expected, "{id}");
         cases += 1;
     }
@@ -820,9 +1046,9 @@ fn the_window_masker_directory_is_ncbis() {
 /// off for the application and when a variable gives the directory (NCBI reads the file
 /// before it asks for the entry). A one-byte file whose stream fails is posted by that
 /// registry's first load only where no read with its flags came before (NCBI BLAST+ 2.17.0 on
-/// 2026-11-12, line NP M3c). `[NCBI] .Inherits` and a value that is not UTF-8 are refused for
-/// `-window_masker_taxid`. A malformed file is posted and the start goes on, in LOSAT's library
-/// too (`api::start`, line RG item E1w-2).
+/// 2026-11-12, line NP M3c). `[NCBI] .Inherits` is refused for `-window_masker_taxid`, while a
+/// non-UTF-8 `WINDOW_MASKER_PATH` value is kept verbatim as raw bytes. A malformed file is posted
+/// and the start goes on, in LOSAT's library too (`api::start`, line RG item E1w-2).
 #[test]
 fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
     let dir = crate::utils::test_dir::temp_dir().join(format!(
@@ -842,6 +1068,7 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
         application_start(
             program,
             None,
+            false,
             all.iter()
                 .map(|(n, v)| (OsString::from(n), OsString::from(v))),
             &env,
@@ -856,7 +1083,7 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
     };
     let registry = |extra: &[(&str, &str)]| registry_of("blastn", extra).unwrap();
     let path_of = |path: &str| WindowMaskerRegistry {
-        path: Some(path.to_string()),
+        path: Some(path.as_bytes().to_vec()),
         ..WindowMaskerRegistry::default()
     };
     let ncbirc = dir.join(SYSTEM_WIDE_REGISTRY);
@@ -889,7 +1116,11 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
         let settings = start.settings.unwrap();
         assert_eq!(settings.blastdb, Some(b"/dbs".to_vec()), "{program}");
         let registry = settings.window_masker_registry.unwrap();
-        assert_eq!(registry.path.as_deref(), Some("/w"), "{program}");
+        assert_eq!(
+            registry.path.as_deref(),
+            Some(b"/w".as_slice()),
+            "{program}"
+        );
         let mut posts = Posts::new();
         posts.post(
             CRITICAL,
@@ -946,7 +1177,7 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
     assert_eq!(
         registry(&[("BLAST_USAGE_REPORT", "0")]),
         WindowMaskerRegistry {
-            path: Some("/w".to_string()),
+            path: Some(b"/w".to_vec()),
             load_posts: posts.clone(),
             posts_once: true,
         }
@@ -956,7 +1187,7 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
     std::fs::write(&ncbirc, format!("{twice}[my blast]\n")).unwrap();
     for extra in [&[][..], &[("BLAST_USAGE_REPORT", "0")][..]] {
         let registry = registry(extra);
-        assert_eq!(registry.path.as_deref(), Some("/w"));
+        assert_eq!(registry.path.as_deref(), Some(b"/w".as_slice()));
         assert!(!registry.posts_once);
         let mut expected = posts.clone();
         expected.post(
@@ -1018,7 +1249,11 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
             (&[("WINDOW_MASKER_PATH", "/v")][..], Some("/v")),
         ] {
             let registry = registry(extra);
-            assert_eq!(registry.path.as_deref(), path, "{text:?} {extra:?}");
+            assert_eq!(
+                registry.path.as_deref(),
+                path.map(str::as_bytes),
+                "{text:?} {extra:?}"
+            );
             assert!(
                 registry.load_posts.text().starts_with(
                     // NCBI's `... file: NCBI C++ Exception:\n    T0 ...` in LOSAT's words
@@ -1036,10 +1271,9 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
         let reason = registry_of("blastn", extra).unwrap_err();
         assert!(reason.contains(".Inherits"), "{reason}");
     }
-    // A byte that is not UTF-8 in the value.
+    // A byte that is not UTF-8 in the value is kept verbatim as raw bytes.
     std::fs::write(&ncbirc, b"[WINDOW_MASKER]\nWINDOW_MASKER_PATH = /w\xff\n").unwrap();
-    let reason = registry_of("blastn", &[]).unwrap_err();
-    assert!(reason.contains("UTF-8"), "{reason}");
+    assert_eq!(registry(&[]).path.as_deref(), Some(b"/w\xff".as_slice()));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -1450,6 +1684,7 @@ fn start_of(program: &str, u: &str, config: ConfigLoad) -> ApplicationStart {
         usage_report: Ok(u.to_string()),
         config: Ok(config),
         settings: Ok(ApplicationSettings::default()),
+        registry_inputs: Vec::new(),
     }
 }
 
@@ -1562,6 +1797,7 @@ fn rpsbproc_starts_without_the_usage_report() {
         application_start(
             "rpsbproc",
             None,
+            false,
             all.iter()
                 .map(|(n, v)| (OsString::from(n), OsString::from(v))),
             &env,
@@ -1619,6 +1855,7 @@ fn dustmasker_starts_without_the_usage_report() {
         application_start(
             "dustmasker",
             None,
+            false,
             all.iter()
                 .map(|(n, v)| (OsString::from(n), OsString::from(v))),
             &env,
@@ -1663,6 +1900,7 @@ fn the_start_reads_the_files_as_ncbi_reads_them() {
         application_start(
             "blastn",
             None,
+            false,
             all.iter()
                 .map(|(n, v)| (OsString::from(n), OsString::from(v))),
             &env,
@@ -2090,4 +2328,103 @@ fn write_verification_is_read_as_ncbi_reads_its_variable() {
     for value in ["NO", "NEVER", "DEFVALUE", "YES"] {
         assert_eq!(refusal(value, &[5]), None, "{value}");
     }
+}
+
+// D3c-3d: `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` as NCBI BLAST+ 2.17.0 reads them
+// (probe D3c-3d A: the values YES yes ALWAYS NO no NEVER DEFVALUE DefValue_Always maybe and empty
+// on each variable; only the four words, in any case, turn a check off).
+#[test]
+fn read_verification_is_read_as_ncbi_reads_its_variables() {
+    for off in [
+        "NO",
+        "no",
+        "NEVER",
+        "Never",
+        "DEFVALUE",
+        "DEFVALUE_ALWAYS",
+        "DefValue_Always",
+    ] {
+        assert!(verification_off(off), "{off}");
+    }
+    for on in ["YES", "yes", "ALWAYS", "", "maybe", " NO", "NO ", "N"] {
+        assert!(!verification_off(on), "{on:?}");
+    }
+    let of = |read: Option<&str>, get: Option<&str>| {
+        ReadVerification::of(read.map(OsStr::new), get.map(OsStr::new))
+    };
+    assert_eq!(of(None, None), ReadVerification::default());
+    assert_eq!(of(Some("YES"), Some("ALWAYS")), ReadVerification::default());
+    assert_eq!(of(Some(""), Some("maybe")), ReadVerification::default());
+
+    use crate::ncbi_exception::{NcbiException, ThrowSite};
+    use crate::report::serial::object_frame::{EXPECTED_MEMBER, UNASSIGNED_MEMBER};
+    let format_error = ThrowSite::generated("CSerialException::eFormatError");
+    let read = NcbiException::new(EXPECTED_MEMBER, "member numRows expected");
+    let get = NcbiException::new(UNASSIGNED_MEMBER, "C_E_Field_name::Get(): unassigned");
+    let other = NcbiException::new(format_error, "another error");
+    let refused =
+        |setting: &ReadVerification, exception: &NcbiException| setting.refused(exception, "X");
+    let read_off = of(Some("never"), None);
+    assert_eq!(
+        refused(&read_off, &read).as_deref(),
+        Some(
+            "the environment variable SERIAL_VERIFY_DATA_READ=never with X that lacks a mandatory member"
+        )
+    );
+    // The first throw decides: a rethrow of the check is the check's.
+    let rethrown = NcbiException::new(EXPECTED_MEMBER, "member seqid expected")
+        .rethrow(format_error, "at byte 34");
+    assert!(refused(&read_off, &rethrown).is_some());
+    let other_first = other
+        .clone()
+        .rethrow(EXPECTED_MEMBER, "member seqid expected");
+    assert_eq!(refused(&read_off, &other_first), None);
+    assert_eq!(refused(&read_off, &get), None);
+    assert_eq!(refused(&read_off, &other), None);
+    let get_off = of(Some("YES"), Some("DEFVALUE"));
+    assert_eq!(
+        refused(&get_off, &get).as_deref(),
+        Some(
+            "the environment variable SERIAL_VERIFY_DATA_GET=DEFVALUE with X of which NCBI BLAST+ gets a member that is not set"
+        )
+    );
+    assert_eq!(refused(&get_off, &read), None);
+    assert_eq!(refused(&ReadVerification::default(), &read), None);
+    assert_eq!(refused(&ReadVerification::default(), &get), None);
+
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-ncbi-environment-verify-read-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let settings = |pairs: &[(&str, &str)]| {
+        let mut all = vec![("NCBI_CONFIG_PATH".to_string(), dir.display().to_string())];
+        all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+        let env = |name: &str| {
+            all.iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| OsString::from(value))
+        };
+        application_settings(
+            "psiblast",
+            all.iter()
+                .map(|(n, v)| (OsString::from(n), OsString::from(v))),
+            &env,
+            &NO_PROCESS,
+        )
+        .map(|settings| settings.read_verification)
+    };
+    assert_eq!(settings(&[]), Ok(ReadVerification::default()));
+    assert_eq!(
+        settings(&[
+            ("SERIAL_VERIFY_DATA_READ", "no"),
+            ("SERIAL_VERIFY_DATA_GET", "yes")
+        ]),
+        Ok(of(Some("no"), None))
+    );
+    assert_eq!(
+        settings(&[("SERIAL_VERIFY_DATA_GET", "DEFVALUE_ALWAYS")]),
+        Ok(of(None, Some("DEFVALUE_ALWAYS")))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

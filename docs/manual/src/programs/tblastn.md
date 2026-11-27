@@ -26,7 +26,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 - **Query.** `-query` takes a protein FASTA file with one or more records. The default is the standard input, so `-query -` and no `-query` at all read the standard input. A name ending in `.gz`, `.bz2` or `.zst` is decompressed for you. To search with a profile instead, see [Searching with a PSSM](#searching-with-a-pssm).
 - **Subject.** `-subject` takes a nucleotide FASTA file in the same forms. LOSAT translates each record in six frames and compares your query with every frame.
 - **Database.** `-db` searches a nucleotide BLAST database written by `makeblastdb` or `losat makeblastdb`, or one of NCBI's downloaded nucleotide databases. Name several databases in one string (`-db "a b"`). `-db` and `-subject` cannot be used together. See [BLAST databases](../databases.md).
-- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants). `-db_soft_mask` and `-db_hard_mask` use the masks stored in a database that was built with `makeblastdb -mask_data`, or its GI-indexed masks (`makeblastdb -gi_mask`, ids 0, 1, ... or the names of its alias file's `MASKLIST`; see [Masks](../databases.md#masks)).
+- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-gilist` and `-negative_gilist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants). `-db_soft_mask` and `-db_hard_mask` use the masks stored in a database that was built with `makeblastdb -mask_data`, or its GI-indexed masks (`makeblastdb -gi_mask`, ids 0, 1, ... or the names of its alias file's `MASKLIST`; see [Masks](../databases.md#masks)).
 - **Genetic code.** `-db_gencode` (default 1) selects the code that translates the subject. See [Genetic code of the subject](#genetic-code-of-the-subject).
 - **Locations.** `-query_loc START-STOP` searches part of the query (in residues), and `-subject_loc START-STOP` part of the subject (in nucleotides, with `-subject` only). Positions are 1-based and inclusive.
 - **Masking.** SEG is on by default (`12 2.2 2.5`; `-seg no` turns it off). `-lcase_masking` treats lower-case letters of the query as masked.
@@ -48,9 +48,10 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 
 - The file is a PSSM in NCBI's ASN.1 text form (`PssmWithParameters`), such as `psiblast -out_pssm` writes, in its ASN.1 binary form, or in NCBI's XML form. [psiblast](psiblast.md) describes what it accepts. A compressed file is refused.
 - The PSSM's scores replace the matrix, and its Karlin-Altschul values set the cutoffs, E-values and bit scores.
+  - Values that are negative, infinite (`PLUS-INFINITY`) or not a number (`NOT-A-NUMBER`) are used as NCBI BLAST+ uses them (E-values `0.0`, bit scores `inf` or `-1.0`). A query whose Seq-inst omits `length` stops with NCBI BLAST+'s query set-up error (`Warning: Cannot get sequence length `, exit status 3). A query whose Seq-inst `length` is one less than its letters is searched as its first `length` letters. A PSSM of frequency ratios only whose `length` is one less than its letters or more stops with NCBI BLAST+'s PSSM engine error (exit status 3). With a gapped Lambda so small that NCBI BLAST+'s search for the hit-saving cutoff passes 32-bit integers (such as 1e-9), or a gapped Lambda below 0, the report has no hits (see [Differences from NCBI BLAST+](../differences.md#-in_pssm-with-a-very-small-or-negative-gapped-lambda)).
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.
-- The report formats are 0 to 10 and 20. Formats 12 to 16 and 18 are not yet supported.
+- Every report format but 11 is written. A PSSM whose query has the molecule `other` is searched as a protein, as in NCBI; NCBI's alignment display cannot read its letters, so LOSAT writes what NCBI writes: the line `Sequence with id ... no longer exists in database...alignment skipped` for each alignment of `-outfmt 0`, empty query-anchored sections, BLAST XML that ends at the query's first alignment with NCBI's error, XML2 and JSON documents without the query's report and with NCBI's error (outfmt 15 and 16; outfmt 13 and 14 leave their files empty and exit with status 255), and tabular reports that stop at the first row whose fields read the query's letters (the default fields among them) with NCBI's exception and exit status 255.
 - Also refused with `-in_pssm`:
   - `-ungapped`;
   - `-use_sw_tback` on a search that finds an alignment, where NCBI fails, crashes, never finishes or writes rows that change from one run to the next (a search that finds nothing runs);
@@ -106,7 +107,7 @@ For every option: `losat tblastn -help`.
 | 18 | Organism report |
 | 20 | Comma-separated values with header lines |
 
-With `-in_pssm`, 0 to 10 and 20 work.
+With `-in_pssm`, every format but 11 works.
 
 Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`. A custom list changes them, for example `-outfmt "6 qseqid sseqid pident sframe evalue"`; `delim=` sets the separator. [Output formats](../output-formats.md) describes each format.
 
@@ -129,7 +130,7 @@ LOSAT stops with an error for these `tblastn` settings instead of running someth
 - An infinite `-evalue` (`+inf`, `1e999`), and an `-evalue` of 1.7976931348623157e308 with composition-based statistics (`-comp_based_stats` 1 to 3).
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
-- `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
+- `-remote` and `-entrez_query`.
 - A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation).
 - The `-in_pssm` settings listed [above](#searching-with-a-pssm).
 

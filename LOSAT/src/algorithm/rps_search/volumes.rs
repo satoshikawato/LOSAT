@@ -136,7 +136,9 @@ impl RpsUnit {
         let (setup_total, setup_count) = if total > 0 {
             (total, count)
         } else if volume.num_oids() > 0 {
-            (i64::from(volume.protein_length(0)?), 1)
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:932-938
+            let len = volume.protein_length_i32(0)?;
+            (if len < 0 { -1 } else { i64::from(len) }, 1)
         } else {
             (0, 0)
         };
@@ -486,29 +488,30 @@ pub(crate) fn search_sets(
     db_length: Option<i64>,
     costs: Option<(String, i32, i32)>,
 ) -> Vec<crate::report::archive::options::Param> {
+    use crate::report::archive::fields;
     use crate::report::archive::options::{Param, ParamValue};
     let mut sets = Vec::new();
     if let Some(db_length) = db_length {
         // `SetDbLength` of `D` as an `Int8`, whatever its sign (0 too; probes p6_3v_l0#3,
         // p6_3v_l2p63p1#3 of line RG D1a-4).
-        sets.push(Param {
-            name: "DbLength",
-            value: ParamValue::BigInteger(db_length),
-        });
+        sets.push(Param::new(
+            fields::DB_LENGTH,
+            ParamValue::BigInteger(db_length),
+        ));
     }
     if let Some((matrix, gap_open, gap_extend)) = costs {
-        sets.push(Param {
-            name: "MatrixName",
-            value: ParamValue::Str(matrix),
-        });
-        sets.push(Param {
-            name: "GapOpeningCost",
-            value: ParamValue::Integer(gap_open),
-        });
-        sets.push(Param {
-            name: "GapExtensionCost",
-            value: ParamValue::Integer(gap_extend),
-        });
+        sets.push(Param::new(
+            fields::MATRIX_NAME,
+            ParamValue::Str(matrix.into_bytes()),
+        ));
+        sets.push(Param::new(
+            fields::GAP_OPENING_COST,
+            ParamValue::Integer(gap_open),
+        ));
+        sets.push(Param::new(
+            fields::GAP_EXTENSION_COST,
+            ParamValue::Integer(gap_extend),
+        ));
     }
     sets
 }
@@ -631,7 +634,7 @@ pub(crate) fn report_ordinal_ids(
                     }
                     Ok(true) if reported => {
                         failed = Some(anyhow::anyhow!(
-                            "a hit of the profile of OID {} whose definition lines the RPS-BLAST database's alias files remove (their OID_MASK_TYPE, GILIST, TILIST or SEQIDLIST), in a database of several volumes (NCBI BLAST+ 2.17.0 searches the volumes without the alias files, and its report does not find the profile: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
+                            "a hit of the profile of OID {} whose definition lines the RPS-BLAST database's alias files remove (their OID_MASK_TYPE, GILIST, TILIST, SEQIDLIST, TAXIDLIST or MEMB_BIT), in a database of several volumes (NCBI BLAST+ 2.17.0 searches the volumes without the alias files, and its report does not find the profile: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
                             hsp_list.oid
                         ));
                         return true;
@@ -913,7 +916,7 @@ pub(crate) struct RpsVolumeSetup {
     regrouped: std::collections::BTreeSet<Vec<u8>>,
     /// The `-db` value of a database of one volume, which NCBI's error of a missing `.freq`
     /// names (`with_database`); `None`: each volume's path.
-    database_name: Option<String>,
+    database_name: Option<Vec<u8>>,
 }
 
 impl RpsVolumeSetup {
@@ -931,8 +934,8 @@ impl RpsVolumeSetup {
     /// error of a missing `.freq` names it as given, and each volume of several by its path.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:341-346, 380-386
-    pub(crate) fn with_database(mut self, name: &str, num_volumes: usize) -> Self {
-        self.database_name = (num_volumes == 1).then(|| name.to_string());
+    pub(crate) fn with_database(mut self, name: &[u8], num_volumes: usize) -> Self {
+        self.database_name = (num_volumes == 1).then(|| name.to_vec());
         self
     }
 

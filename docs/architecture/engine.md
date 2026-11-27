@@ -40,7 +40,7 @@ flowchart LR
   lib["library users<br/>python/, LOSAT/examples"] --> api["api<br/>(run, run_batches, ...)"]
   api --> lb["api::local_blast"]
   adapter["web/adapter<br/>(Web ABI v2)"] --> lb
-  webapi["web_api<br/>(Web ABI v1, wasm32)"] -->|"blastn, blastp, tblastx"| local
+  webapi["web_api<br/>(Web ABI v1, wasm32 but the WASI command)"] -->|"blastn, blastp, tblastx"| local
   webapi -->|"blastx, tblastn"| pair["blastx::web::run_pair<br/>tblastn::web::run_pair"]
   pair --> engine
   lb --> local["&lt;program&gt;::run_local<br/>&lt;program&gt;::run_local_database"]
@@ -62,7 +62,8 @@ flowchart LR
   records, validates a command line and runs it through `api::local_blast`, which re-exports the
   programs' `run_local*` functions. A library search writes nothing to the process's standard
   output or error and never ends the process (`api/mod.rs`).
-- The Web: Web ABI v1 is the `extern "C"` exports of `web_api` (built only for `wasm32`), which
+- The Web: Web ABI v1 is the `extern "C"` exports of `web_api` (built only for `wasm32`, and not
+  for the WASI command line, which selects the feature `no-web-abi-v1`), which
   call `run_local` for blastn, blastp and tblastx and `web::run_pair` for blastx and tblastn; Web
   ABI v2 is the separate crate `web/adapter`, which calls `run_local*` like the library.
 
@@ -93,7 +94,7 @@ number (the Web adapter and the tests name them); the `losat` binary calls one h
 | `config` | scoring specifications, a compatibility mode (`CompatMode`) and configuration structs (`SeedConfig`, ..., `BlastnConfig`, `TblastxConfig`) | none |
 | `common` (the file `common.rs`) | `Hit`, `GapEditOp`, the HSP sort comparisons and the `write_output*` writers | `core/blast_hits.c`, `gapinfo.h` |
 | `sequence` | packed letters and packed subjects | via `core/blast_encoding.c` |
-| `web_api` | Web ABI v1 exports (`wasm32` only) | none |
+| `web_api` | Web ABI v1 exports (`wasm32` only, but not the WASI command line: `no-web-abi-v1`) | none |
 | `record` | the type `api::FastaRecord` | `CBlastFastaInputSource` |
 
 Four names are used more than once: the file `common.rs` and the directory `algorithm/common/` are
@@ -147,7 +148,7 @@ the diagram leaves out also close the cycle: `core` → `common` (`GapEditOp`), 
 | :--- | :--- | :--- | :--- |
 | `blastn` | `blast_engine::run` | `run_local`, `run_local_database` | megablast, blastn, dc-megablast, blastn-short, rmblastn; `blast_engine/run.rs` holds the search |
 | `blastp` | `blast_engine::run` | `run_local`, `run_local_database` | also the driver of psiblast and rpsblast (`args::BlastpApp`) |
-| `blastx` | `BlastxArgs::run` → `native::run` | `local::run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | its own FASTA reader in `input.rs` |
+| `blastx` | `BlastxArgs::run` → `native::run` | `local::run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | reads FASTA with `blastinput::fasta_reader`; `input_source.rs` gives each record BLASTX's form and cuts the reader batches of the command line, the library and the Web |
 | `tblastn` | `TblastnArgs::run` | `run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | |
 | `tblastx` | `blast_engine::run` | `run_local`, `run_local_database` | `lookup/` is the protein word lookup that the other protein programs also use |
 | `psiblast` | `psiblast::run` → `blastp::run` | through `api` as `Program::Psiblast` | PSSM build and files, rounds, `-in_pssm` |
@@ -226,10 +227,10 @@ rpsblast yet.
 | FASTA reader | `blastinput::fasta_reader` (makeblastdb reuses it) |
 | errors | `cli::NativeError` |
 
-Known copies that remain: blastx keeps its own FASTA reader types in `blastx/input.rs`
-(`FastaRecord`, `EolStyle`, `PushbackBuffer`, `FastaStream`) next to the shared ones in
-`blastinput/fasta_reader`; each program has its own function that purges HSPs with common
-endpoints, written for its own HSP type; blastx has its own port of `hspfilter_culling.c`
+Known copies that remain: blastx keeps its own record type (`blastx/input.rs`, `FastaRecord`),
+made from the shared reader's record by `blastx/input_source.rs`, which also cuts the reader
+batches of the command line and of the library; each program has its own function that purges
+HSPs with common endpoints, written for its own HSP type; blastx has its own port of `hspfilter_culling.c`
 (`blastx/culling.rs`) instead of `core::hspfilter_culling`; and each of the five programs keeps its own report glue
 (`tabular.rs`, `blast_xml.rs`, `seqalign.rs`, `archive.rs`) in front of `report`.
 

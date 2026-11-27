@@ -48,6 +48,8 @@ export interface WorkerInput {
    * one the worker holds is not registered again (plan §4.6 R1).
    */
   readonly key: string;
+  /** Whether `bytes` was assembled from parts (`EngineInput.assembled`, line WQA's D17). */
+  readonly assembled?: boolean;
 }
 
 /**
@@ -72,7 +74,8 @@ export interface WorkerRun {
   readonly argv: readonly string[];
   /** Threads to use; 1 runs the serial module. */
   readonly threads: number;
-  readonly query: WorkerInput;
+  /** None for a run of `-in_pssm` or `-in_msa`, which reads its query from `files` (EngineRunRequest.query). */
+  readonly query?: WorkerInput;
   /** None for a run of `-db`, which searches the database in `files` (EngineRunRequest.subject). */
   readonly subject?: WorkerInput;
   /** The files of the run's working directory (EngineRunRequest.files); Files are shared, not copied. */
@@ -185,6 +188,11 @@ export interface WorkerRunResult {
   readonly runFiles?: readonly RunFile[];
   /** The text that the run printed in place of a search (stream 11; `RuntimeInfo.printed`). */
   readonly printed?: Uint8Array;
+  /** Records read at `register` for an assembled input when they differ from the per-file table (`RuntimeInfo.readRecords`). */
+  readonly readRecords?: {
+    readonly query?: readonly RecordKey[];
+    readonly subject?: readonly RecordKey[];
+  };
 }
 
 /** The end of a tool run that the engine ran to its exit status (`tool-done`). */

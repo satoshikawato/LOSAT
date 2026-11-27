@@ -10,12 +10,12 @@
 
 mod app;
 mod checkdup;
-mod counts;
+pub(crate) mod counts;
 mod ids;
 mod sdust;
 mod work;
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 
 use crate::ncbi_app::Tool;
@@ -118,15 +118,66 @@ pub(crate) fn run_in(
 pub(crate) fn check_in(
     words: &[OsString],
     files: &crate::report::run_files::RunFiles,
+    out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
     crate::ncbi_app::run_in(
         &TOOL,
         words,
         files,
-        (&mut std::io::empty(), &mut std::io::sink(), err),
+        (&mut std::io::empty(), out, err),
         app::check,
     )
+}
+
+// No NCBI counterpart: LOSAT Web reads `-logfile` and `-out` against the input names the run
+// opens for reading, so a write name equal to a missing input is refused instead of diverging
+// from the command line, which creates the file and then reads it back (line WQA D19 round R2,
+// D19b).
+/// The input file names that a `windowmasker` run with `words` opens for reading:
+/// `(for_logfile, for_out)`.
+/// - `for_logfile`: every file that the run opens after the application start opens `-logfile`:
+///   `-in` (split via `counts::file_list` for `-mk_counts`, including the `-fa_list true` list file
+///   and every entry read from it; for `-infmt blastdb`, the database lookup files from
+///   `seqdb::alias::database_lookup_files`), `-ustat` (in masking mode), `-ids` and `-exclude_ids`
+///   (when not `-convert`).
+/// - `for_out`: the subset that the command line opens and reads after opening `-out` in a way
+///   that changes the run when the file is missing: every input/database entry of `-mk_counts`
+///   (comma-separated or read from `-fa_list true`, FASTA or `-infmt blastdb`), and `-ustat` of
+///   masking.
+pub(crate) fn read_files<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    let (log_paths, out_paths, databases, databases_for_out) =
+        crate::report::log_inputs::windowmasker_read_parts(words);
+    let encode = |paths: Vec<std::path::PathBuf>| -> Vec<Vec<u8>> {
+        paths
+            .into_iter()
+            .map(|p| p.into_os_string().into_encoded_bytes())
+            .collect()
+    };
+    let mut for_log = encode(log_paths);
+    let mut for_out = encode(out_paths);
+    if !databases.is_empty() {
+        let blastdb =
+            crate::blastinput::ncbi_environment::ApplicationStart::of_process(PROGRAM, words)
+                .settings()
+                .ok()
+                .and_then(|s| s.blastdb);
+        for db in databases {
+            for path in crate::seqdb::alias::database_lookup_files(
+                &crate::utils::os_bytes::os_str_bytes(&db),
+                crate::seqdb::SeqType::Nucleotide,
+                blastdb.as_deref(),
+            ) {
+                if !path.is_empty() {
+                    if databases_for_out {
+                        for_out.push(path.clone());
+                    }
+                    for_log.push(path);
+                }
+            }
+        }
+    }
+    (for_log, for_out)
 }
 
 #[cfg(test)]

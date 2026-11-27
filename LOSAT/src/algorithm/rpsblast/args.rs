@@ -1,11 +1,13 @@
 //! Command-line arguments for RPS-BLAST (`losat rpsblast`).
 
 use anyhow::Result;
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs};
 use crate::algorithm::rps_search::engine::RpsSearch;
 use crate::blastinput::report_counts::FormattingArgs;
+use crate::utils::os_bytes::os_str_bytes;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:70-131
 // rpsblast's arguments: blastp's search, filtering, query, formatting and composition-based
@@ -15,13 +17,13 @@ use crate::blastinput::report_counts::FormattingArgs;
 // Composition-based statistics (modes 1 to 3, the default 1) run the redo of `rps_search::redo`
 // with the database's frequency ratios, or without them where the database has none (NCBI then
 // searches with mode 0), and with `-use_sw_tback` NCBI's Smith-Waterman redo (PS11c-3); the
-// argument that LOSAT does not run yet (`-html`, PS15a) is refused by the parser (its row of
+// remote options and `-import_search_strategy` are refused by the parser (their rows of
 // `ncbi_app::args::refusal`).
 #[derive(Debug, Clone)]
 pub struct RpsblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     pub query: PathBuf,
-    pub db: Option<String>,
+    pub db: Option<OsString>,
     pub out: Option<PathBuf>,
     /// The search strategy file (`-export_search_strategy`, cited at
     /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
@@ -39,9 +41,12 @@ pub struct RpsblastArgs {
     /// search space (`rps_hooks::rps_search`).
     pub searchsp: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
-    pub comp_based_stats: String,
-    pub outfmt: String,
+    pub comp_based_stats: OsString,
+    pub outfmt: OsString,
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224), for `-outfmt` 0 to 4 and 18.
+    pub html: bool,
     pub num_descriptions: Option<usize>,
     pub num_alignments: Option<usize>,
     // `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
@@ -74,12 +79,12 @@ pub struct RpsblastArgs {
     /// and count identities on the letters as read; soft masking keeps the letters (it only
     /// leaves words out of a query lookup table, which an RPS search does not build), so it
     /// changes the outfmt 0 display alone.
-    pub seg: Option<String>,
+    pub seg: Option<OsString>,
     pub soft_masking: Option<bool>,
     pub window_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1939-1942
     pub lcase_masking: bool,
-    pub query_loc: Option<String>,
+    pub query_loc: Option<OsString>,
     pub parse_deflines: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:48-66
     /// `-num_threads`: LOSAT's pool size (0: the number of volumes, NCBI's "auto"); the output
@@ -111,6 +116,7 @@ impl RpsblastArgs {
             comp_based_stats: args.option_or_default("comp_based_stats")?,
             outfmt: args.option_or_default("outfmt")?,
             show_gis: args.flag("show_gis"),
+            html: args.flag("html"),
             num_descriptions: args.given_option("num_descriptions")?,
             num_alignments: args.given_option("num_alignments")?,
             formatting: FormattingArgs::from_args(args)?,
@@ -138,8 +144,8 @@ impl RpsblastArgs {
 /// its first letter only, `D`/`d` and any unknown letter as 0, `T`/`t` as 1.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:836-865
-pub(crate) fn rps_composition_mode(value: &str) -> u8 {
-    match value.as_bytes().first() {
+pub(crate) fn rps_composition_mode(value: impl AsRef<[u8]>) -> u8 {
+    match value.as_ref().first() {
         Some(b'1' | b'T' | b't') => 1,
         Some(b'2') => 2,
         Some(b'3') => 3,
@@ -150,8 +156,11 @@ pub(crate) fn rps_composition_mode(value: &str) -> u8 {
 impl RpsblastArgs {
     /// blastp's arguments of the RPS-BLAST search, after NCBI's reading of `-outfmt`.
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
-        Self::check_outfmt(&self.outfmt, self.export_search_strategy.is_some())?;
-        let requested_cbs = rps_composition_mode(&self.comp_based_stats);
+        Self::check_outfmt(
+            os_str_bytes(&self.outfmt),
+            self.export_search_strategy.is_some(),
+        )?;
+        let requested_cbs = rps_composition_mode(os_str_bytes(&self.comp_based_stats));
         let request_inputs = Some(Box::new(self.option_inputs()));
         Ok(BlastpArgs {
             query: self.query,
@@ -162,8 +171,7 @@ impl RpsblastArgs {
             db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
-            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::reader::named_refusal`).
-            html: false,
+            html: self.html,
             parse_deflines: self.parse_deflines,
             id_scope: None,
             searchsp: self.searchsp,
@@ -202,7 +210,7 @@ impl RpsblastArgs {
             gap_extend: None,
             // The requested mode; `rps_hooks::check_freq_ratio_file` sets it to 0 where the
             // database has no frequency ratios.
-            comp_based_stats: requested_cbs.to_string(),
+            comp_based_stats: OsString::from(requested_cbs.to_string()),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:68-73
             // The query masks are blastp's (`blastp_query_frames`, the SEG of the filtering
             // handler and the lower-case letters of the query reader), applied before the score
@@ -217,12 +225,16 @@ impl RpsblastArgs {
             outfmt: self.outfmt,
             archive: None,
             export_search_strategy: self.export_search_strategy,
+            import_search_strategy: None,
+            import: None,
+            given: Default::default(),
             strategy: None,
             request_inputs,
             app: BlastpApp::Rpsblast,
             taxdb_setting: None,
             matrix_search: None,
             write_verification: None,
+            read_verification: Default::default(),
             inclusion_ethresh: None,
             gap_trigger: None,
             sum_stats: false,
@@ -261,15 +273,19 @@ impl RpsblastArgs {
         inputs.sum_stats = self.sum_stats;
         inputs.window_size = self.window_size;
         inputs.soft_masking = self.soft_masking;
-        inputs.seg = self.seg.as_deref().and_then(seg_filter);
-        inputs.comp_based_stats = i32::from(rps_composition_mode(&self.comp_based_stats));
+        inputs.seg = self
+            .seg
+            .as_deref()
+            .and_then(|seg| seg_filter(os_str_bytes(seg)));
+        inputs.comp_based_stats =
+            i32::from(rps_composition_mode(os_str_bytes(&self.comp_based_stats)));
         inputs.use_sw_tback = self.use_sw_tback;
         inputs
     }
 
     /// NCBI reads `-outfmt` before the option handlers, with its own errors (`check_rps_outfmt`;
     /// `strategy`: the run writes a search strategy file).
-    pub fn check_outfmt(outfmt: &str, strategy: bool) -> Result<()> {
+    pub fn check_outfmt(outfmt: impl AsRef<[u8]>, strategy: bool) -> Result<()> {
         check_rps_outfmt(outfmt, strategy)
     }
 }
@@ -284,7 +300,7 @@ impl RpsblastArgs {
 /// uses, outfmt 13 and 14 without a file name in `-out`) goes on to NCBI's error at its place,
 /// after the arguments' own errors and before the database is opened (line RG F/d36 probes
 /// rps.conf20, rps.conf20.q, rps.conf20.nodb, rpst.conf20, rps.o14, rpst.o14).
-pub(crate) fn check_rps_outfmt(outfmt: &str, strategy: bool) -> Result<()> {
+pub(crate) fn check_rps_outfmt(outfmt: impl AsRef<[u8]>, strategy: bool) -> Result<()> {
     crate::blastinput::app::early_format_choice(outfmt, strategy)?;
     Ok(())
 }

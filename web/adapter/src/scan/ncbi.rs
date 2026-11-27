@@ -29,8 +29,8 @@
 //! inputs that the command line reads.
 
 use losat::web_adapter::{
-    gap_line_letters, record_too_long, FastaInputSource, ReadError, ReaderConfig,
-    MAX_RECORD_LETTERS,
+    defline_named_molecule, gap_line_letters, record_too_long, DataLineAlphabet, FastaInputSource,
+    ReadError, ReaderConfig, MAX_RECORD_LETTERS,
 };
 
 use super::{ScanError, ScanRecord};
@@ -48,42 +48,66 @@ const STEP_BACK_MAX: usize = (MIN_BUF_SIZE >> 4) as usize;
 /// `CheckDataLine`'s window.
 const CHECK_WINDOW: usize = 70;
 
-/// What a byte of a data line is (`ParseDataLine`'s character types for the flags).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CharType {
-    Residue,
-    Comment,
-    Other,
-}
+/// Sentinel values in the per-byte residue mapping tables (`residue_table`): non-residue bytes
+/// map to `BYTE_OTHER` (`0`), `;` maps to `BYTE_COMMENT` (`1`), and every valid residue maps
+/// directly to its stored upper-case ASCII byte (`b'A'..=b'Z'` or `b'*'`, all `> 1`).
+const BYTE_OTHER: u8 = 0;
+const BYTE_COMMENT: u8 = 1;
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:854-935
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1448
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:392-457
 // `bIsNuc` is `fAssumeNuc`; `bAllowLetterGaps` is false (no `fParseGaps`); `-`, white space
-// and bad bytes are not stored (`fHyphensIgnoreAndWarn`), so they are `Other` here.
-const fn char_types(protein: bool) -> [CharType; 256] {
-    let mut table = [CharType::Other; 256];
+// and bad bytes are not stored (`fHyphensIgnoreAndWarn`), so they map to `BYTE_OTHER`.
+// When `program_protein` is false: `U`/`u` maps to `b'T'`, and if `parse_protein` is true
+// (`CFastaReader::xSetSeqMol` named protein), non-IUPACna protein letters map to `b'N'`
+// (`pack_protein_read_nucleotide`). When `program_protein` is true, kept letters are stored
+// upper-cased (`U` stays `b'U'`).
+const fn residue_table(parse_protein: bool, program_protein: bool) -> [u8; 256] {
+    let mut table = [BYTE_OTHER; 256];
     let nucleotide = b"ABCDGHKMRSTUVWYN";
     let mut index = 0;
     while index < nucleotide.len() {
-        table[nucleotide[index] as usize] = CharType::Residue;
-        table[nucleotide[index].to_ascii_lowercase() as usize] = CharType::Residue;
+        let upper = nucleotide[index];
+        let stored = if !program_protein && upper == b'U' {
+            b'T'
+        } else {
+            upper
+        };
+        table[upper as usize] = stored;
+        table[upper.to_ascii_lowercase() as usize] = stored;
         index += 1;
     }
-    if protein {
+    if parse_protein {
         let protein_only = b"EFIJLOPQZX";
         let mut index = 0;
         while index < protein_only.len() {
-            table[protein_only[index] as usize] = CharType::Residue;
-            table[protein_only[index].to_ascii_lowercase() as usize] = CharType::Residue;
+            let upper = protein_only[index];
+            let stored = if program_protein { upper } else { b'N' };
+            table[upper as usize] = stored;
+            table[upper.to_ascii_lowercase() as usize] = stored;
             index += 1;
         }
-        table[b'*' as usize] = CharType::Residue;
+        table[b'*' as usize] = if program_protein { b'*' } else { b'N' };
     }
-    table[b';' as usize] = CharType::Comment;
+    table[b';' as usize] = BYTE_COMMENT;
     table
 }
 
-const NUCLEOTIDE_TYPES: [CharType; 256] = char_types(false);
-const PROTEIN_TYPES: [CharType; 256] = char_types(true);
+const NUC_FOR_NUC: [u8; 256] = residue_table(false, false);
+const PROT_FOR_NUC: [u8; 256] = residue_table(true, false);
+const NUC_FOR_PROT: [u8; 256] = residue_table(false, true);
+const PROT_FOR_PROT: [u8; 256] = residue_table(true, true);
+
+#[inline]
+const fn select_residue_table(parse_protein: bool, program_protein: bool) -> &'static [u8; 256] {
+    match (parse_protein, program_protein) {
+        (false, false) => &NUC_FOR_NUC,
+        (true, false) => &PROT_FOR_NUC,
+        (false, true) => &NUC_FOR_PROT,
+        (true, true) => &PROT_FOR_PROT,
+    }
+}
 
 /// `isspace` of the C locale (`TruncateSpaces_Unsafe`, `ParseDefline`); CR and LF never
 /// reach a line's content.
@@ -576,7 +600,9 @@ impl Builder {
 struct Records {
     /// The reader of the program's input whose records these are.
     config: ReaderConfig,
-    types: &'static [CharType; 256],
+    /// Residue mapping table for the current record, decided once at `Records::new` for the
+    /// default path and updated once per record at defline end when `-parse_deflines` is active.
+    residues: &'static [u8; 256],
     line_number: u64,
     in_line: bool,
     line_start: u64,
@@ -600,11 +626,7 @@ impl Records {
     fn new(config: ReaderConfig) -> Self {
         Self {
             config,
-            types: if config.protein {
-                &PROTEIN_TYPES
-            } else {
-                &NUCLEOTIDE_TYPES
-            },
+            residues: select_residue_table(config.protein, config.protein),
             line_number: 0,
             in_line: false,
             line_start: 0,
@@ -808,11 +830,14 @@ impl Records {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:809-814
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:938-950
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:970-973
-    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1447
-    /// A byte of a data line's data: a residue is stored upper-cased (the engine stores a
-    /// nucleotide `U` as `T`; the lowercase mask only changes case); `;` ends the data.
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1448
+    /// A byte of a data line's data: looked up once in the current record's precomputed
+    /// `self.residues` table (which encodes the record's alphabet, upper-casing, `U`→`T`, and
+    /// nucleotide packing for protein-named records); `;` ends the data.
+    #[inline]
     fn residue(&mut self, byte: u8) {
         let LineState::Data { semicolon, .. } = &mut self.state else {
             return;
@@ -820,20 +845,15 @@ impl Records {
         if *semicolon {
             return;
         }
-        match self.types[byte as usize] {
-            CharType::Residue => {}
-            CharType::Comment => {
+        let mapped = self.residues[byte as usize];
+        if mapped <= BYTE_COMMENT {
+            if mapped == BYTE_COMMENT {
                 *semicolon = true;
-                return;
             }
-            CharType::Other => return,
-        }
-        let mut residue = byte.to_ascii_uppercase();
-        if !self.config.protein && residue == b'U' {
-            residue = b'T';
+            return;
         }
         if let Some(current) = self.current.as_mut() {
-            current.store(residue);
+            current.store(mapped);
         }
     }
 
@@ -876,7 +896,20 @@ impl Records {
             state => self.state = state,
         }
         match std::mem::replace(&mut self.state, LineState::Fresh) {
-            LineState::Title(_) => self.awaiting_sequence = true,
+            LineState::Title(_) => {
+                if self.config.parse_deflines {
+                    if let Some(current) = self.current.as_ref() {
+                        let mut defline = Vec::with_capacity(1 + current.id.len());
+                        defline.push(b'>');
+                        defline.extend_from_slice(&current.id);
+                        let named = defline_named_molecule(&defline, self.config.protein);
+                        let parse_protein =
+                            DataLineAlphabet::new(named, self.config.protein).is_protein();
+                        self.residues = select_residue_table(parse_protein, self.config.protein);
+                    }
+                }
+                self.awaiting_sequence = true;
+            }
             LineState::Data {
                 check: Some(check), ..
             } if !check.plausible() => {

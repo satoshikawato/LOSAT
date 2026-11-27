@@ -9,49 +9,26 @@ import { FILES_OUT, isFilesOutput, OUTFMT_FLAG, outfmtOption } from './output-fo
  */
 export const RESERVED_FLAGS: readonly string[] = Object.freeze(['-query', '-subject', '-out', '-num_threads']);
 
-/** The CLI's database options: `-db` and the filters of a database search. */
-export const DATABASE_FLAGS: readonly string[] = Object.freeze([
-  '-db',
-  '-seqidlist',
-  '-negative_seqidlist',
-  '-taxids',
-  '-taxidlist',
-  '-negative_taxids',
-  '-negative_taxidlist',
-  '-no_taxid_expansion',
-]);
-
-/**
- * The database masks (`-db_soft_mask`, `-db_hard_mask`): filters of a database search that the
- * CLI of the modes of DATABASE_MASK_PROGRAMS has.
- */
-export const DATABASE_MASK_FLAGS: readonly string[] = Object.freeze(['-db_soft_mask', '-db_hard_mask']);
-
-/** The modes whose CLI has the database masks (BLASTN; BLASTP, BLASTX, TBLASTN and TBLASTX, series NP M4b). */
-export const DATABASE_MASK_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']);
-
 /** The modes whose CLI has -mt_mode, which needs -num_threads (TBLASTX's has none). */
 const MT_MODE_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastn', 'blastp', 'blastx', 'tblastn']);
 
 /**
  * Why a word of "Additional options" is refused before the engine reads it: options that the
- * application manages, and the CLI's options that a search in the browser cannot have, whose
- * CLI message would name what the user cannot change here (`-subject`, `-num_threads`; WA-FM-04);
- * undefined for the other words. The words of the CLI's help and version (`-h`, `-help`,
- * `-help-full`, `-xmlhelp`, `-version` and its full forms) are not refused: the engine
- * prints the command line's text for them and searches nothing (*start*'s `prints`; line WQA's D14,
- * 2026-11-20, in place of WA-FM-05's refusal).
+ * application manages, and `-db` which is chosen in the Subject panel. The words of the CLI's
+ * help and version (`-h`, `-help`, `-help-full`, `-xmlhelp`, `-version` and its full forms) are
+ * not refused: the engine prints the command line's text for them and searches nothing (*start*'s
+ * `prints`; line WQA's D14, 2026-11-20). Database filters (`-seqidlist`, `-taxids`, `-db_soft_mask`,
+ * etc.) and BLASTN's `-filtering_db` are no longer refused here (WQA D12b + RG-D4 W2); `-remote`
+ * and `-entrez_query` remain refused by the engine.
  */
 function refusedWord(program: ProgramId, word: string): string | undefined {
   // -flag=value is the command line's form of -flag value too.
   const flag = word.split('=', 1)[0]!;
   if (flag === '-num_threads') return '-num_threads is set in the form: Threads';
+  if (flag === '-db') return '-db is set in the form: Subject';
+  if (flag === '-in_pssm' && (program === 'psiblast' || program === 'tblastn')) return '-in_pssm is set in the form: Query';
+  if (flag === '-in_msa' && program === 'psiblast') return '-in_msa is set in the form: Query';
   if (RESERVED_FLAGS.includes(flag) || (flag === '-mt_mode' && MT_MODE_PROGRAMS.includes(program))) return `${flag} is managed by LOSAT`;
-  if (flag === '-db') return '-db (a database search) is not supported in the browser yet';
-  if (program === 'blastn' && flag === '-filtering_db') return '-filtering_db (a BLAST database of repeats) is not supported in the browser yet';
-  if (DATABASE_FLAGS.includes(flag) || (DATABASE_MASK_PROGRAMS.includes(program) && DATABASE_MASK_FLAGS.includes(flag))) {
-    return `${flag} (a database search filter) is not supported in the browser yet`;
-  }
   return undefined;
 }
 
@@ -64,8 +41,14 @@ export const PASTED_NAMES = Object.freeze({ query: 'query.fa', subject: 'subject
 
 export interface ArgvInput {
   readonly program: ProgramId;
-  readonly queryName: string;
-  readonly subjectName: string;
+  /** Query FASTA name (`-query`). Provide either `queryName` or `queryFile`. */
+  readonly queryName?: string;
+  /** File-based query (`-in_pssm` or `-in_msa`). Takes precedence over `queryName` when present. */
+  readonly queryFile?: { readonly flag: '-in_pssm' | '-in_msa'; readonly name: string };
+  /** Subject FASTA name (`-subject`). Provide either `subjectName` or `databaseName`. */
+  readonly subjectName?: string;
+  /** Local BLAST database name (`-db`). Takes precedence over `subjectName` when present. */
+  readonly databaseName?: string;
   /** Parameters the user set explicitly, in display order. `true` means a bare flag. */
   readonly parameters: ReadonlyArray<readonly [flag: string, value: string | true]>;
   /** Words of other options, as on a command line ("Additional options", `splitOptions`), after the parameters. */
@@ -79,19 +62,29 @@ export interface ArgvInput {
  * D20, 2026-11-23).
  */
 export function userArgv(run: { readonly argv: readonly string[]; readonly prints?: unknown }): readonly string[] {
-  // buildArgv's layout: [program, '-query', name, '-subject', name, ...].
+  // buildArgv's layout: [program, '-query'|'-in_pssm'|'-in_msa', name, '-subject' | '-db', name, ...].
   return run.prints === undefined ? run.argv : [run.argv[0]!, ...run.argv.slice(5)];
 }
 
 /**
- * Builds `[program, -query, name, -subject, name, ...parameters]`.
+ * Builds `[program, -query|-in_pssm|-in_msa, name, -subject|-db, name, ...parameters]`.
  * Engine defaults are never written out, so the CLI command stays minimal.
  */
 export function buildArgv(input: ArgvInput): readonly string[] {
-  const argv = [input.program, '-query', input.queryName, '-subject', input.subjectName];
+  const queryPair: readonly [string, string] =
+    input.queryFile !== undefined
+      ? [input.queryFile.flag, input.queryFile.name]
+      : ['-query', input.queryName ?? PASTED_NAMES.query];
+  const subjectPair: readonly [string, string] =
+    input.databaseName !== undefined
+      ? ['-db', input.databaseName]
+      : ['-subject', input.subjectName ?? PASTED_NAMES.subject];
+  const argv = [input.program, ...queryPair, ...subjectPair];
   for (const [flag, value] of input.parameters) {
     if (!flag.startsWith('-')) throw new Error(`parameter must start with "-": ${flag}`);
-    if (RESERVED_FLAGS.includes(flag)) throw new Error(`${flag} is managed by LOSAT`);
+    if (RESERVED_FLAGS.includes(flag) || flag === '-db' || flag === '-in_pssm' || flag === '-in_msa') {
+      throw new Error(`${flag} is managed by LOSAT`);
+    }
     argv.push(flag);
     if (value !== true) argv.push(value);
   }
@@ -211,6 +204,12 @@ export function refusedFields(message: string, extra: string): { readonly extra:
   };
 }
 
+/** Environment variables that a CLI reproduction command sets before `losat`. */
+export interface CommandEnv {
+  /** Relative folder for `BLASTDB=<dir>` when a folder-picked `-db` has auxiliary taxonomy files. */
+  readonly blastdb?: string;
+}
+
 /**
  * Renders the CLI command that reproduces one output of a run, as a copyable POSIX shell
  * command. `-outfmt` is always written: several programs reject their CLI default format, so a
@@ -218,21 +217,33 @@ export function refusedFields(message: string, extra: string): { readonly extra:
  * format's -outfmt in place of the argv's; that of the argv's own -outfmt is the argv, with
  * `-out results` for 13 and 14, which the CLI writes as files (the files of the archive).
  */
-export function toShellCommand(argv: readonly string[], output: RunOutput): string {
-  return shellWords(commandWords(argv, output));
+export function toShellCommand(argv: readonly string[], output: RunOutput, env?: CommandEnv): string {
+  return shellWords(commandWords(argv, output, env));
 }
 
 /** The words of `toShellCommand`'s command. */
-export function commandWords(argv: readonly string[], output: RunOutput): readonly string[] {
-  if (output === CUSTOM_OUTPUT) return isFilesOutput(argv, output) ? ['losat', ...argv, '-out', FILES_OUT] : ['losat', ...argv];
+export function commandWords(argv: readonly string[], output: RunOutput, env?: CommandEnv): readonly string[] {
+  const prefix = env?.blastdb !== undefined && env.blastdb !== '' ? [`BLASTDB=${env.blastdb}`] : [];
+  if (output === CUSTOM_OUTPUT) {
+    return isFilesOutput(argv, output) ? [...prefix, 'losat', ...argv, '-out', FILES_OUT] : [...prefix, 'losat', ...argv];
+  }
   const option = outfmtOption(argv);
   const words = option === undefined ? argv : [...argv.slice(0, option.at), ...argv.slice(option.at + option.words)];
-  return ['losat', ...words, '-outfmt', String(output)];
+  return [...prefix, 'losat', ...words, '-outfmt', String(output)];
 }
+
+const SAFE_SHELL_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+const ENV_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s;
 
 /** A word as a POSIX shell reads it back (`splitOptions`): quoted only where it needs it. */
 export function shellWord(word: string): string {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
+  if (SAFE_SHELL_WORD.test(word)) return word;
+  const env = ENV_ASSIGNMENT.exec(word);
+  if (env !== null) {
+    const [, name, value] = env;
+    return `${name}=${SAFE_SHELL_WORD.test(value!) ? value! : `'${value!.replaceAll("'", "'\\''")}'`}`;
+  }
+  return `'${word.replaceAll("'", "'\\''")}'`;
 }
 
 /** Words as a POSIX shell reads them back (`splitOptions`): quoted only where they need it. */
@@ -255,7 +266,16 @@ export function optionNames(
   return words.map((word) => {
     const name = !value && word.startsWith('-');
     // -flag=value carries its value.
-    value = name && takesValue !== undefined && !word.includes('=') && (RESERVED_FLAGS.includes(word) || word === OUTFMT_FLAG || takesValue(word));
+    value =
+      name &&
+      takesValue !== undefined &&
+      !word.includes('=') &&
+      (RESERVED_FLAGS.includes(word) ||
+        word === '-db' ||
+        word === '-in_pssm' ||
+        word === '-in_msa' ||
+        word === OUTFMT_FLAG ||
+        takesValue(word));
     return { text: shellWord(word), name };
   });
 }

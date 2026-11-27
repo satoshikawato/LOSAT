@@ -192,10 +192,21 @@ impl<'h> QueryGroup<'h> {
                 .iter()
                 .map(|&subject| {
                     let rank = started + 1;
-                    started += match starts(subject) {
-                        HeadingStarts::Once => 1,
-                        HeadingStarts::EachAlignment => self.subject_hits[&subject].len(),
-                        HeadingStarts::Never => 0,
+                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1950-1982,3965-3972
+                    // An HSP whose query row starts left of its record throws in `x_PrepareRowData`
+                    // before `x_PrintDefLine`, so it neither starts a heading nor increments `m_cur_align`.
+                    let shown_hsps = self.subject_hits[&subject]
+                        .iter()
+                        .filter(|hit| !hit.query_left_of_record())
+                        .count();
+                    started += if shown_hsps == 0 {
+                        0
+                    } else {
+                        match starts(subject) {
+                            HeadingStarts::Once => 1,
+                            HeadingStarts::EachAlignment => shown_hsps,
+                            HeadingStarts::Never => 0,
+                        }
                     };
                     (subject, rank)
                 })

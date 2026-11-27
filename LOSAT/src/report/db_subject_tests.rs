@@ -255,6 +255,55 @@ fn gb(accession: &str, version: i32) -> ParsedSeqId {
     })
 }
 
+fn gb_unversioned(accession: &str) -> ParsedSeqId {
+    ParsedSeqId::Genbank(crate::seqid::model::TextseqId {
+        accession: Some(accession.as_bytes().to_vec()),
+        ..Default::default()
+    })
+}
+
+fn emb(accession: &str, version: i32) -> ParsedSeqId {
+    ParsedSeqId::Embl(crate::seqid::model::TextseqId {
+        accession: Some(accession.as_bytes().to_vec()),
+        version: Some(version),
+        ..Default::default()
+    })
+}
+
+/// The subject of one definition line of `ids` as the database sequence `ordinal`, by which a
+/// run's loads name it ([`ScopeWalk`]).
+fn sequence(ids: Vec<ParsedSeqId>, ordinal: u32) -> ParsedSubject {
+    ParsedSubject::new(one_defline(ids))
+        .unwrap()
+        .in_database(DbSequence::of_unrestricted(ordinal))
+}
+
+/// The loads before reports of the query batch `batch`: a run's record of the loads `loads` of
+/// the query batch `noted` ([`ScopeRecord::note`]), after calls of which no record holds anything
+/// where `unrecorded`.
+fn recorded(
+    noted: Option<usize>,
+    loads: &[&ParsedSubject],
+    batch: Option<usize>,
+    unrecorded: bool,
+) -> LoadsBefore {
+    let mut record = ScopeRecord::default();
+    record.note(noted, loads.iter().copied());
+    LoadsBefore::new(
+        &std::sync::Arc::new(std::sync::RwLock::new(record)),
+        batch,
+        unrecorded,
+    )
+}
+
+/// The answer of a load that gives another sequence, `holder`, as `by` came to it.
+fn shown(holder: Option<u32>, by: ShownBy) -> HitLoad {
+    HitLoad::Shown(ShownInstead {
+        holder: holder.map(DbSequence::of_unrestricted),
+        by,
+    })
+}
+
 fn lines(lines: Vec<Vec<ParsedSeqId>>) -> ParsedSubject {
     let deflines = lines
         .into_iter()
@@ -458,7 +507,7 @@ fn the_kind_of_a_seq_align_id_refuses_nothing_before_its_lookup() {
     ] {
         let subject = ParsedSubject::new(one_defline(vec![id])).unwrap();
         assert!(!subject.unfetchable(), "{subject:?}");
-        assert!(subject.fetched(false, true, HitLoad::Loaded).is_ok());
+        assert!(subject.fetched(false, HitLoad::Loaded).is_ok());
     }
     // A local id that alone decides the definition line of the Bioseq: no lookup finds it.
     let shown = lines(vec![
@@ -466,7 +515,7 @@ fn the_kind_of_a_seq_align_id_refuses_nothing_before_its_lookup() {
         vec![ParsedSeqId::Gi(777)],
     ]);
     assert!(shown.unfetchable());
-    let error = shown.fetched(false, true, HitLoad::Loaded).unwrap_err();
+    let error = shown.fetched(false, HitLoad::Loaded).unwrap_err();
     assert!(
         error.contains("Seq-align id gi|777, by which NCBI BLAST+'s formatters do not find"),
         "{error}"
@@ -475,17 +524,23 @@ fn the_kind_of_a_seq_align_id_refuses_nothing_before_its_lookup() {
     let with_gi = one_defline(vec![ParsedSeqId::Gibbsq(123), ParsedSeqId::Gi(7)]);
     assert!(ParsedSubject::new(with_gi)
         .unwrap()
-        .fetched(false, true, HitLoad::Loaded)
+        .fetched(false, HitLoad::Loaded)
         .is_ok());
-    let replaced = DeflineSet {
+    // A stored title with a byte outside ' ' ..= '~' is read (its posts are the Seq-aligns',
+    // `ParsedSubject::replaced_title_bytes`); such a byte of a stored Seq-id is refused.
+    let replaced = |title, id| DeflineSet {
         deflines: vec![BlastDefline {
             ids: vec![ParsedSeqId::Gi(7)],
-            replaced_title_bytes: 1,
+            replaced_title_bytes: title,
+            replaced_id_bytes: id,
             ..BlastDefline::default()
         }],
         utf8: false,
     };
-    assert!(ParsedSubject::new(replaced).is_err());
+    assert!(ParsedSubject::new(replaced(1, 0))
+        .unwrap()
+        .replaced_title_bytes());
+    assert!(ParsedSubject::new(replaced(0, 1)).is_err());
     assert!(ParsedSubject::new(DeflineSet::default()).is_err());
 }
 
@@ -495,12 +550,12 @@ fn a_seq_align_id_by_which_ncbi_finds_another_sequence_or_none() {
     assert!(subject
         .clone()
         .found_instead(None)
-        .fetched(false, true, HitLoad::Loaded)
+        .fetched(false, HitLoad::Loaded)
         .is_ok());
     let error = subject
         .clone()
         .found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(4))))
-        .fetched(false, true, HitLoad::Loaded)
+        .fetched(false, HitLoad::Loaded)
         .unwrap_err();
     assert!(
         error.contains("lookup gives database sequence 4 first"),
@@ -509,14 +564,14 @@ fn a_seq_align_id_by_which_ncbi_finds_another_sequence_or_none() {
     let error = subject
         .clone()
         .found_instead(Some(FoundInstead::Nothing))
-        .fetched(false, true, HitLoad::Loaded)
+        .fetched(false, HitLoad::Loaded)
         .unwrap_err();
     assert!(error.contains("do not find the sequence"), "{error}");
     let error = subject
         .found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
             "DB contains no accession info.",
         ))))
-        .fetched(false, true, HitLoad::Loaded)
+        .fetched(false, HitLoad::Loaded)
         .unwrap_err();
     assert!(
         error.contains("whose lookup in the database fails (DB contains no accession info.;"),
@@ -534,11 +589,9 @@ fn a_utf8string_header_that_the_scope_reads_is_no_refusal() {
     assert_eq!(subject.scope_utf8_read(), None);
     let read = subject.scope_utf8(Some(DbSequence::of_unrestricted(3)));
     assert_eq!(read.scope_utf8_read(), Some(DbSequence::of_unrestricted(3)));
-    for one_by_one in [false, true] {
-        assert_eq!(read.fetched(true, one_by_one, HitLoad::Loaded), Ok(()));
-        assert_eq!(read.fetched(false, one_by_one, HitLoad::Loaded), Ok(()));
-        assert_eq!(read.pssm_read(one_by_one), Ok(()));
-    }
+    assert_eq!(read.fetched(true, HitLoad::Loaded), Ok(()));
+    assert_eq!(read.fetched(false, HitLoad::Loaded), Ok(()));
+    assert_eq!(read.pssm_read(), Ok(()));
 }
 
 // Line DBID pfoff-1 (DECISIONS 62): where a batch's prefetch is off, the XML2 and JSON `Hit`
@@ -604,7 +657,7 @@ fn the_hits_after_one_whose_lookup_throws_load_nothing() {
     let subject = |key: usize| parsed[key].as_ref();
     let none = |_: usize, _: usize| 0;
     let loads = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         Some(RunThrow::every_row(AfterThrow::EndsReport)),
         [
             // Read one by one: 1 loads, 0 throws, the copies 2 and 3, 4 and 6 load nothing.
@@ -645,7 +698,7 @@ fn the_hits_after_one_whose_lookup_throws_load_nothing() {
         (None, true),
     ] {
         let every = HitLoads::of(
-            crate::report::db_subject::LoadsBefore::NONE,
+            crate::report::db_subject::LoadsBefore::none(),
             after,
             [(one_by_one, vec![Some(0), Some(1)])],
             subject,
@@ -657,21 +710,31 @@ fn the_hits_after_one_whose_lookup_throws_load_nothing() {
     // finds, a subject that no report loads not at all, every other one as before (a lookup
     // that fails on a file too).
     let thrown = subject(0).unwrap();
-    assert!(thrown.fetched(true, true, HitLoad::Throws).is_ok());
-    assert!(thrown.fetched(true, true, HitLoad::Unread).is_ok());
-    let error = thrown.fetched(false, true, HitLoad::Loaded).unwrap_err();
+    assert!(thrown.fetched(true, HitLoad::Throws).is_ok());
+    assert!(thrown.fetched(true, HitLoad::Unread).is_ok());
+    let error = thrown.fetched(false, HitLoad::Loaded).unwrap_err();
     assert!(
         error.contains("whose lookup in the database fails (DB contains no accession info.;"),
         "{error}"
     );
     let nothing = plain("AAA00007").found_instead(Some(FoundInstead::Nothing));
-    assert!(nothing.fetched(false, true, HitLoad::Loaded).is_err());
-    assert!(nothing.fetched(false, true, HitLoad::Unread).is_ok());
-    // A weak match is refused where the `Hit` throws too (NCBI's scope may find it first).
-    let weak = thrown
-        .clone()
-        .weak_match(Some(WeakMatch::Held(DbSequence::of_unrestricted(5))));
-    assert!(weak.fetched(false, true, HitLoad::Throws).is_err());
+    assert!(nothing.fetched(false, HitLoad::Loaded).is_err());
+    assert!(nothing.fetched(false, HitLoad::Unread).is_ok());
+    // A weak match is refused where the lookup throws too: read one by one after a sequence that
+    // its Seq-align id matches weakly, NCBI's scope finds that sequence before the lookup
+    // (`ScopeWalk::load`).
+    let holder = sequence(vec![gb("AAA00009", 1)], 5);
+    let weak = sequence(vec![gb_unversioned("AAA00009")], 8).found_instead(throws());
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    assert_eq!(walk.load(&weak), HitLoad::Throws);
+    assert_eq!(walk.load(&holder), HitLoad::Loaded);
+    let load = walk.load(&weak);
+    assert_eq!(load, shown(Some(5), ShownBy::Weak));
+    let error = weak.fetched(false, load).unwrap_err();
+    assert!(
+        error.contains("which can match an id of database sequence 5 weakly"),
+        "{error}"
+    );
 }
 
 // Line DBID pfoff-2 (DECISIONS 62 (12), probe `R/pfoff/p2`): what the tables load after a
@@ -707,7 +770,7 @@ fn the_formats_say_what_loads_after_a_throw() {
     let every = |after| Some(RunThrow::every_row(after));
     let none = |_: usize, _: usize| 0;
     let rows = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         every(AfterThrow::WritesRow),
         reports(),
         subject,
@@ -718,7 +781,7 @@ fn the_formats_say_what_loads_after_a_throw() {
     assert_eq!(rows.load(3), HitLoad::Throws);
     assert!(rows.any_throws());
     let run = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         every(AfterThrow::EndsRun),
         reports(),
         subject,
@@ -731,7 +794,7 @@ fn the_formats_say_what_loads_after_a_throw() {
         assert_eq!(run.load(unread), HitLoad::Unread, "{unread}");
     }
     let report = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         every(AfterThrow::EndsReport),
         reports(),
         subject,
@@ -974,7 +1037,7 @@ fn each_hit_of_blast_xml_looks_its_own_subject_up() {
     let subject = |key: usize| parsed.get(key);
     let none = |_: usize, _: usize| 0;
     let loads = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         Some(RunThrow::every_row(AfterThrow::WritesHit)),
         [
             (true, vec![Some(0), Some(1), None, Some(2), Some(3)]),
@@ -997,7 +1060,7 @@ fn each_hit_of_blast_xml_looks_its_own_subject_up() {
     // With a table of a field of the subject block, each row looks its subject up: the copy 1
     // throws on its own.
     let rows = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesHit)).and(FormatThrow::Writes(
             RunThrow::every_row(AfterThrow::WritesRow),
         )),
@@ -1007,8 +1070,8 @@ fn each_hit_of_blast_xml_looks_its_own_subject_up() {
     );
     assert_eq!(rows.load(1), HitLoad::Throws);
     // The refusals let both through.
-    assert!(parsed[0].fetched(false, true, HitLoad::Throws).is_ok());
-    assert!(parsed[1].fetched(false, true, HitLoad::Unread).is_ok());
+    assert!(parsed[0].fetched(false, HitLoad::Throws).is_ok());
+    assert!(parsed[1].fetched(false, HitLoad::Unread).is_ok());
 }
 
 // Review 2 of line DBID pfoff-2, M1 and L1 (probe `R/pfoff/p2/review2`, `zP`): where `nident`
@@ -1049,7 +1112,7 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
         ]
     };
     let loads = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         nident,
         reports(),
         subject,
@@ -1062,7 +1125,7 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
     assert_eq!(loads.load(4), HitLoad::Unread);
     // Every row reads the subject: 1 throws and ends the run.
     let every = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         Some(RunThrow::every_row(AfterThrow::EndsRun)),
         reports(),
         subject,
@@ -1073,18 +1136,18 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
     // The reports made apart, one call each, carry the end of the run.
     let run = RunLoads::new(nident);
     let [first, second] = reports();
-    let first = run.loads(LoadsBefore::NONE, [first], subject, |_, entry| {
+    let first = run.loads(LoadsBefore::none(), [first], subject, |_, entry| {
         [5, 0, 7][entry]
     });
     assert!(!run.ended());
     assert_eq!(first.load(1), HitLoad::Unread);
-    let second = run.loads(LoadsBefore::NONE, [second], subject, |_, entry| {
+    let second = run.loads(LoadsBefore::none(), [second], subject, |_, entry| {
         [2, 4][entry]
     });
     assert!(run.ended());
     assert_eq!(second.load(3), HitLoad::Throws);
     let later = run.loads(
-        LoadsBefore::NONE,
+        LoadsBefore::none(),
         [(true, vec![Some(0), Some(2)])],
         subject,
         |_, _| 9,
@@ -1094,7 +1157,7 @@ fn a_throw_ends_the_run_only_at_a_row_that_reads_the_subject() {
     // A run without a throw's answer loads every subject and never ends.
     let none = RunLoads::new(None);
     assert!(none
-        .loads(LoadsBefore::NONE, reports(), subject, identities)
+        .loads(LoadsBefore::none(), reports(), subject, identities)
         .loaded(3));
     assert!(!none.ended());
 }
@@ -1131,7 +1194,7 @@ fn the_run_reaches_no_report_after_the_one_that_ends_it() {
         ]
     };
     let ended = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         every(AfterThrow::EndsRun),
         reports(),
         subject,
@@ -1143,28 +1206,28 @@ fn the_run_reaches_no_report_after_the_one_that_ends_it() {
     // whose formats read nothing: every report runs.
     for loads in [
         HitLoads::of(
-            crate::report::db_subject::LoadsBefore::NONE,
+            crate::report::db_subject::LoadsBefore::none(),
             every(AfterThrow::WritesRow),
             reports(),
             subject,
             none,
         ),
         HitLoads::of(
-            crate::report::db_subject::LoadsBefore::NONE,
+            crate::report::db_subject::LoadsBefore::none(),
             every(AfterThrow::EndsReport),
             reports(),
             subject,
             none,
         ),
         HitLoads::of(
-            crate::report::db_subject::LoadsBefore::NONE,
+            crate::report::db_subject::LoadsBefore::none(),
             FormatThrow::Refused(ThrowRefusal::Mixed),
             reports(),
             subject,
             none,
         ),
         HitLoads::of(
-            crate::report::db_subject::LoadsBefore::NONE,
+            crate::report::db_subject::LoadsBefore::none(),
             FormatThrow::Unread,
             reports(),
             subject,
@@ -1175,7 +1238,7 @@ fn the_run_reaches_no_report_after_the_one_that_ends_it() {
     }
     // The last report ends the run: every report runs, none after it.
     let last = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         every(AfterThrow::EndsRun),
         [(true, vec![Some(0)]), (true, vec![Some(1)])],
         subject,
@@ -1185,13 +1248,13 @@ fn the_run_reaches_no_report_after_the_one_that_ends_it() {
     // The reports made apart, one call each: a call after the end reaches none of its reports.
     let run = RunLoads::new(every(AfterThrow::EndsRun));
     let first = run.loads(
-        LoadsBefore::NONE,
+        LoadsBefore::none(),
         [(true, vec![Some(0), Some(1)])],
         subject,
         none,
     );
     assert!(first.reaches(0) && !first.reaches(1));
-    let later = run.loads(LoadsBefore::NONE, [(true, vec![Some(2)])], subject, none);
+    let later = run.loads(LoadsBefore::none(), [(true, vec![Some(2)])], subject, none);
     assert!(!later.reaches(0));
     // The keys renamed keep the reports reached.
     assert!(!later.renamed(Some).reaches(0));
@@ -1294,7 +1357,7 @@ fn a_refused_throw_gives_the_reason_of_its_situation() {
         .found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
             crate::seqdb::tax_files::NO_ACCESSION_INFO,
         ))));
-    let reason = |load| thrown.fetched(false, true, load).unwrap_err();
+    let reason = |load| thrown.fetched(false, load).unwrap_err();
     let format = reason(HitLoad::Refused(ThrowRefusal::Format));
     assert!(format.contains(LookupFailure::NCBI_THROWS), "{format}");
     assert!(format.contains(ThrowRefusal::Format.words()), "{format}");
@@ -1303,10 +1366,10 @@ fn a_refused_throw_gives_the_reason_of_its_situation() {
     assert!(mixed.contains(ThrowRefusal::Mixed.words()), "{mixed}");
     assert!(!mixed.contains(ThrowRefusal::Format.words()), "{mixed}");
     // A throw that the formats write as NCBI does is not refused for what the lookup finds.
-    assert!(thrown.fetched(false, true, HitLoad::Throws).is_ok());
+    assert!(thrown.fetched(false, HitLoad::Throws).is_ok());
     // The loads of a run whose formats refuse give each subject the reason.
     let loads = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         FormatThrow::Refused(ThrowRefusal::Format),
         [(true, vec![Some(0)])],
         |_| Some(&thrown),
@@ -1341,7 +1404,7 @@ fn the_names_of_the_tables_take_only_the_loaded_subjects() {
         Some(std::sync::Arc::new(with_taxid("XM_000002", 99990))),
     ];
     let loads = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         Some(RunThrow::every_row(AfterThrow::WritesRow)),
         [(true, vec![Some(0), Some(1)])],
         |rank| parsed[rank].as_deref(),
@@ -1380,8 +1443,8 @@ fn the_names_of_the_tables_take_only_the_loaded_subjects() {
         crate::blastinput::app::ReportFormat::Tabular,
         &crate::blastinput::app::FormatChoice {
             number: 6,
-            spec: "qseqid sseqid ssciname".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid sseqid ssciname".to_vec(),
+            delimiter: Vec::new(),
         },
         RequestKind::Blastp,
     )
@@ -1408,67 +1471,68 @@ fn the_names_of_the_tables_take_only_the_loaded_subjects() {
 #[test]
 fn the_pssm_refuses_reads_that_losat_does_not_make_as_ncbi() {
     let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
-    let read = |subject: &ParsedSubject| subject.pssm_read(false);
+    let read = |subject: &ParsedSubject| subject.pssm_read();
     assert_eq!(read(&subject), Ok(()));
     assert!(subject.bioseq_holds_alignment_id());
-    assert_eq!(subject.other_holder(), None);
     let other = subject
         .clone()
         .found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(4))));
     assert_eq!(read(&other), Ok(()));
     for found in [
         FoundInstead::Nothing,
-        FoundInstead::ThrowsOnId("Error: ... is not a valid ordinal id".into()),
+        FoundInstead::ThrowsOnId(crate::ncbi_exception::NcbiException::new(
+            crate::seqdb::isam::OBJECT_ID_GET_ID,
+            "Error: ... is not a valid ordinal id",
+        )),
         FoundInstead::OtherTaxids(DbSequence::of_unrestricted(2)),
+        FoundInstead::CopyApart(DbSequence::of_unrestricted(2), CopyApart::Title),
     ] {
         assert_eq!(read(&subject.clone().found_instead(Some(found))), Ok(()));
     }
-    // Refused: another holder besides what the lookup gives, a lookup failing on a file, the
-    // subject first with another holder.
-    let held = other
-        .clone()
-        .also_held(Some(DbSequence::of_unrestricted(6)));
-    assert_eq!(held.other_holder(), Some(DbSequence::of_unrestricted(6)));
-    assert!(read(&held)
-        .unwrap_err()
-        .contains("which database sequence 6 also holds"));
-    let none_held = subject
-        .clone()
-        .found_instead(Some(FoundInstead::Nothing))
-        .also_held(Some(DbSequence::of_unrestricted(6)));
-    assert!(read(&none_held).is_err());
+    // Refused: a lookup failing on a file, and the same record whose read writes other taxonomy
+    // texts.
     for found in [
-        FoundInstead::AlsoHeld(DbSequence::of_unrestricted(6)),
         FoundInstead::Failed(LookupFailure::ncbi("DB contains no accession info.")),
+        FoundInstead::CopyApart(DbSequence::of_unrestricted(2), CopyApart::TaxonomyTexts),
     ] {
         assert!(read(&subject.clone().found_instead(Some(found))).is_err());
     }
-    // A weak match refuses where the batch reads one by one, whatever the lookup gives.
-    let weak = other
-        .clone()
-        .weak_match(Some(WeakMatch::Held(DbSequence::of_unrestricted(7))));
-    assert_eq!(weak.pssm_read(false), Ok(()));
-    assert!(weak.pssm_read(true).is_err());
+    // Another holder besides what the lookup gives is the walk's (`ListedTitles::
+    // check_pssm_holds` of BLASTP): a sequence loaded before whose definition line holds the
+    // Seq-align id gives its blob for the subject's load, refused with its words.
+    let holder = sequence(vec![gb("AAA00006", 1), gb("AAA00001", 0)], 6);
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    assert_eq!(walk.load(&holder), HitLoad::Loaded);
+    let held = other.clone().in_database(DbSequence::of_unrestricted(1));
+    let load = walk.load(&held);
+    assert_eq!(load, shown(Some(6), ShownBy::Holder));
+    assert!(held
+        .fetched(false, load)
+        .unwrap_err()
+        .contains("which database sequence 6 also holds"));
+    // Where that sequence is the one the lookup gives first (a copy of its record), the load is
+    // the subject's own.
+    let copy = held.lookup_gives(Some(DbSequence::of_unrestricted(6)));
+    assert_eq!(walk.load(&copy), HitLoad::Loaded);
     // A definition line that the formatters do not find: its Bioseq does not hold the id, and
-    // the reasons are what the lookup finds (review 2, M2).
-    let shown = lines(vec![
+    // the reasons are what the lookup finds, or the holder's words (review 2, M2).
+    let shown_line = lines(vec![
         vec![ParsedSeqId::Local(ObjectId::Id(777))],
         vec![ParsedSeqId::Gi(777)],
     ]);
-    assert!(shown.unfetchable());
-    assert!(!shown.bioseq_holds_alignment_id());
-    assert_eq!(read(&shown), Ok(()));
-    let also = shown
-        .clone()
-        .found_instead(Some(FoundInstead::AlsoHeld(DbSequence::of_unrestricted(2))));
-    assert_eq!(also.other_holder(), Some(DbSequence::of_unrestricted(2)));
-    let error = read(&also).unwrap_err();
+    assert!(shown_line.unfetchable());
+    assert!(!shown_line.bioseq_holds_alignment_id());
+    assert_eq!(read(&shown_line), Ok(()));
+    let error = shown_line.shown_reason(ShownInstead {
+        holder: Some(DbSequence::of_unrestricted(2)),
+        by: ShownBy::Holder,
+    });
     assert!(
         error.contains("which database sequence 2 also holds"),
         "{error}"
     );
     assert!(!error.contains("formatters do not find"), "{error}");
-    let failed = shown.found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
+    let failed = shown_line.found_instead(Some(FoundInstead::Failed(LookupFailure::ncbi(
         "no accession info",
     ))));
     assert!(read(&failed)
@@ -1481,40 +1545,44 @@ fn the_pssm_refuses_reads_that_losat_does_not_make_as_ncbi() {
 // subject by its own id.
 #[test]
 fn a_weak_match_is_refused_only_where_the_batch_reads_one_by_one() {
-    let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 0)])).unwrap();
-    for weak in [
-        WeakMatch::Held(DbSequence::of_unrestricted(4)),
-        WeakMatch::Unlisted,
-        WeakMatch::Failed("no accession info".into()),
-    ] {
-        let subject = subject.clone().weak_match(Some(weak.clone()));
-        assert!(
-            subject.fetched(true, false, HitLoad::Loaded).is_ok(),
-            "{weak:?}"
-        );
-        let error = subject.fetched(false, true, HitLoad::Loaded).unwrap_err();
-        assert!(
-            error.contains("in a batch whose prefetch is off (PRE_FETCH_SEQS_LIMIT, or a format"),
-            "{error}"
-        );
-        assert_eq!(subject.prefetched(), Prefetched::Itself, "{weak:?}");
-        // What the lookup finds is refused whatever the batch: a copy with other taxids in
-        // the reports of taxids, before the weak match.
-        let copy = subject.found_instead(Some(FoundInstead::OtherTaxids(
-            DbSequence::of_unrestricted(2),
-        )));
-        assert!(copy.fetched(false, false, HitLoad::Loaded).is_ok());
-        assert!(copy
-            .fetched(true, false, HitLoad::Loaded)
-            .unwrap_err()
-            .contains("other taxids"));
-        assert!(copy
-            .fetched(false, true, HitLoad::Loaded)
-            .unwrap_err()
-            .contains("weakly"));
-    }
-    let other = subject.found_instead(Some(FoundInstead::AlsoHeld(DbSequence::of_unrestricted(4))));
-    assert!(other.fetched(false, false, HitLoad::Loaded).is_err());
+    // `gb|AAA00001|`, which matches the holder `gb|AAA00001.1|` weakly.
+    let weak = sequence(vec![gb_unversioned("AAA00001")], 0);
+    let holder = sequence(vec![gb("AAA00001", 1)], 4);
+    // Read one by one after the holder: the scope's index gives the holder (`ScopeWalk::load`).
+    let after_holder = |subject: &ParsedSubject| {
+        let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+        assert_eq!(walk.load(&holder), HitLoad::Loaded);
+        walk.load(subject)
+    };
+    let load = after_holder(&weak);
+    assert_eq!(load, shown(Some(4), ShownBy::Weak));
+    let error = weak.fetched(true, load).unwrap_err();
+    assert!(
+        error.contains("in a batch whose prefetch is off (PRE_FETCH_SEQS_LIMIT, or a format"),
+        "{error}"
+    );
+    // Read before the holder, or by the prefetch's bulk load of both: each by its own id.
+    let mut first = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    assert_eq!(first.load(&weak), HitLoad::Loaded);
+    assert_eq!(first.load(&holder), HitLoad::Loaded);
+    let bulk = ScopeWalk::new(LoadsBefore::none(), Some(false)).bulk([(0, &holder), (1, &weak)]);
+    assert_eq!((bulk[&0], bulk[&1]), (HitLoad::Loaded, HitLoad::Loaded));
+    assert!(weak.fetched(true, HitLoad::Loaded).is_ok());
+    assert_eq!(weak.prefetched(), Prefetched::Itself);
+    // What the lookup finds is refused whatever the batch: a copy with other taxids in the
+    // reports of taxids; read one by one after the holder, the weak match's words.
+    let copy = weak.found_instead(Some(FoundInstead::OtherTaxids(
+        DbSequence::of_unrestricted(2),
+    )));
+    assert!(copy.fetched(false, HitLoad::Loaded).is_ok());
+    assert!(copy
+        .fetched(true, HitLoad::Loaded)
+        .unwrap_err()
+        .contains("other taxids"));
+    assert!(copy
+        .fetched(false, after_holder(&copy))
+        .unwrap_err()
+        .contains("weakly"));
 }
 
 // Line DBID P1: what NCBI's prefetch reads for a subject that no report shows (psiblast's
@@ -1540,7 +1608,12 @@ fn the_prefetch_of_an_unshown_subject_reads_what_the_lookup_finds() {
         prefetched(Some(FoundInstead::Failed(LookupFailure::ncbi("no accession info")))),
         Prefetched::Failed(reason) if reason.contains("prefetch stops with a BLAST Database error")
     ));
-    let throws = Some(FoundInstead::ThrowsOnId("Invalid choice selection".into()));
+    let throws = Some(FoundInstead::ThrowsOnId(
+        crate::ncbi_exception::NcbiException::new(
+            crate::seqdb::isam::OBJECT_ID_GET_ID,
+            "Invalid choice selection",
+        ),
+    ));
     assert!(matches!(
         prefetched(throws.clone()),
         Prefetched::Failed(reason) if reason.contains("writes Error pre-fetching sequence data")
@@ -1556,15 +1629,6 @@ fn the_prefetch_of_an_unshown_subject_reads_what_the_lookup_finds() {
         prefetched(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(4)))),
         Prefetched::Another {
             other: Some(other),
-            or_itself: false,
-            ..
-        } if other == DbSequence::of_unrestricted(4)
-    ));
-    assert!(matches!(
-        prefetched(Some(FoundInstead::AlsoHeld(DbSequence::of_unrestricted(4)))),
-        Prefetched::Another {
-            other: Some(other),
-            or_itself: true,
             ..
         } if other == DbSequence::of_unrestricted(4)
     ));
@@ -1575,27 +1639,8 @@ fn the_prefetch_of_an_unshown_subject_reads_what_the_lookup_finds() {
         ))),
         Prefetched::Another { other: None, .. }
     ));
-    // Other holders that LOSAT cannot list (line DBID v4late): what the lookup gives, or
-    // nothing where such a holder's Bioseq read before stands for it.
-    assert!(matches!(
-        prefetched(Some(FoundInstead::HoldersUnknown {
-            instead: Some(DbSequence::of_unrestricted(4)),
-            why: String::new(),
-        })),
-        Prefetched::Another {
-            other: Some(other),
-            or_itself: false,
-            or_none: true,
-            ..
-        } if other == DbSequence::of_unrestricted(4)
-    ));
-    assert!(matches!(
-        prefetched(Some(FoundInstead::HoldersUnknown {
-            instead: None,
-            why: String::new(),
-        })),
-        Prefetched::ItselfOrNothing { .. }
-    ));
+    // Another sequence that NCBI's places give for the id without the lookup is the walk's
+    // (`ScopeWalk::bulk`, line DBID hr-1), not the lookup's answer here.
     // A subject whose definition line the formatters do not find: what its lookup gives, as
     // any other (review 2 of line DBID pssmread, H3).
     let shown = lines(vec![
@@ -1605,7 +1650,7 @@ fn the_prefetch_of_an_unshown_subject_reads_what_the_lookup_finds() {
     assert_eq!(shown.prefetched(), Prefetched::Itself);
     assert!(matches!(
         shown.clone().found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(3)))).prefetched(),
-        Prefetched::Another { other: Some(other), or_itself: false, or_none: false, reason }
+        Prefetched::Another { other: Some(other), reason }
             if other == DbSequence::of_unrestricted(3) && reason.contains("gives database sequence 3 first")
     ));
     assert_eq!(
@@ -1629,8 +1674,8 @@ fn a_title_made_from_a_copy_s_taxids_is_refused_where_a_generated_title_is_shown
     let subject = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
         .unwrap()
         .found_instead(title_apart.clone());
-    assert!(subject.fetched(false, true, HitLoad::Loaded).is_ok());
-    let error = subject.fetched(true, true, HitLoad::Loaded).unwrap_err();
+    assert!(subject.fetched(false, HitLoad::Loaded).is_ok());
+    let error = subject.fetched(true, HitLoad::Loaded).unwrap_err();
     assert!(error.contains("database sequence 3 also holds"), "{error}");
     assert!(error.contains("taxids and their names for it"), "{error}");
     assert!(subject.check_tabular_ids(true).is_ok());
@@ -1764,14 +1809,14 @@ fn a_title_made_from_a_copy_s_taxids_is_refused_where_a_generated_title_is_shown
             DbSequence::of_unrestricted(3),
             CopyApart::TaxonomyTexts,
         )));
-    assert!(texts.fetched(false, true, HitLoad::Loaded).is_err());
+    assert!(texts.fetched(false, HitLoad::Loaded).is_err());
     assert!(texts.generated_title_fetched().is_ok());
     let taxids = ParsedSubject::new(one_defline(vec![gb("AAA00001", 1)]))
         .unwrap()
         .found_instead(Some(FoundInstead::OtherTaxids(
             DbSequence::of_unrestricted(3),
         )));
-    assert!(taxids.fetched(false, true, HitLoad::Loaded).is_ok());
+    assert!(taxids.fetched(false, HitLoad::Loaded).is_ok());
     assert!(taxids.generated_title_fetched().is_ok());
 }
 
@@ -1984,26 +2029,53 @@ fn copies_of_one_record_are_joined_and_other_matching_ids_are_not() {
 
 #[test]
 fn refseq_accessions_whose_empty_titles_come_from_the_source() {
-    use RefseqKind::{ChromosomeOrNcrna, Mrna};
-    for (accession, kind) in [
-        ("NC_000001", Some(ChromosomeOrNcrna)),
-        ("AC_000001", Some(ChromosomeOrNcrna)),
-        ("NM_000001", Some(Mrna)),
-        ("NM_000000001", Some(Mrna)),
-        ("XM_000000001", Some(Mrna)),
-        ("NR_000001", Some(ChromosomeOrNcrna)),
-        ("NR_000000001", None),
-        ("NC_0000001", None),
-        ("NP_000001", None),
-        ("WP_000000001", None),
-        ("XR_000001", None),
+    use crate::seqid::model::{PdbSeqId, TextseqId};
+    let flags_of = |accession: &str| {
+        let id = ParsedSeqId::Other(TextseqId {
+            accession: Some(accession.as_bytes().to_vec()),
+            ..TextseqId::default()
+        });
+        let f = bioseq_facts(&[id]);
+        (
+            f.refseq_chromosome_or_ncrna,
+            f.refseq_mrna,
+            f.refseq_contig,
+            f.refseq_unique_prot,
+        )
+    };
+    for (accession, expected) in [
+        ("NC_000001", (true, false, false, false)),
+        ("AC_000001", (true, false, false, false)),
+        ("NM_000001", (false, true, false, false)),
+        ("NM_000000001", (false, true, false, false)),
+        ("XM_000000001", (false, true, false, false)),
+        ("NR_000001", (true, false, false, false)),
+        ("NR_000000001", (false, false, false, false)),
+        ("NC_0000001", (false, false, false, false)),
+        ("NP_000001", (false, false, false, false)),
+        ("NT_000001", (false, false, true, false)),
+        ("NZ_AA000001", (false, false, true, false)),
+        ("WP_000000001", (false, false, false, true)),
+        ("XR_000001", (false, false, false, false)),
     ] {
-        assert_eq!(
-            refseq_accession_kind(accession.as_bytes()),
-            kind,
-            "{accession}"
-        );
+        assert_eq!(flags_of(accession), expected, "{accession}");
     }
+    // NCBI keeps m_PDBChainID set when a later PDB Seq-id sets only m_PDBChain.
+    let pdb_facts = bioseq_facts(&[
+        ParsedSeqId::Pdb(PdbSeqId {
+            mol: b"1ABC".to_vec(),
+            chain: None,
+            chain_id: Some(b"AA".to_vec()),
+            rel: None,
+        }),
+        ParsedSeqId::Pdb(PdbSeqId {
+            mol: b"1ABC".to_vec(),
+            chain: Some(b'B' as i32),
+            chain_id: None,
+            rel: None,
+        }),
+    ]);
+    assert_eq!(pdb_facts.pdb, Some((b"AA".to_vec(), b'B' as i32)));
 }
 /// The subject of a `-subject` record read with `-parse_deflines` (`ParsedSubject::of_record`).
 fn record_subject(defline: &str, protein: bool) -> ParsedSubject {
@@ -2044,6 +2116,8 @@ fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
             subject_id: true,
             all_ids: false,
             bioseq: false,
+            length: false,
+            lineless: false,
         })
     );
     assert_eq!(
@@ -2396,7 +2470,7 @@ fn the_model_and_the_writer_end_the_run_at_the_same_alignment() {
         );
         let run = RunLoads::new(Some(RunThrow::every_row(after)));
         let loads = run.loads(
-            LoadsBefore::NONE,
+            LoadsBefore::none(),
             [(true, ReportKeys::Pairwise(reads))],
             |key| parsed.get(key),
             |_, _| 0,
@@ -2539,7 +2613,7 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
     };
     let loads = |run, reports: Vec<(bool, ReportKeys)>| {
         let loads = HitLoads::of(
-            crate::report::db_subject::LoadsBefore::NONE,
+            crate::report::db_subject::LoadsBefore::none(),
             run,
             reports,
             subject,
@@ -2669,7 +2743,7 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
     // A later call's reports read nothing after the end (`RunLoads`).
     let calls = RunLoads::new(run(AfterThrow::SkipsAlignment { html: false }));
     let first = calls.loads(
-        LoadsBefore::NONE,
+        LoadsBefore::none(),
         [report(true, &[3, 4], every, every)],
         subject,
         none,
@@ -2677,7 +2751,7 @@ fn a_pairwise_report_loads_its_descriptions_then_its_alignments() {
     assert_eq!(first.load(3), HitLoad::Throws);
     assert!(calls.ended());
     let later = calls.loads(
-        LoadsBefore::NONE,
+        LoadsBefore::none(),
         [report(true, &[5], every, every)],
         subject,
         none,
@@ -2728,7 +2802,7 @@ fn an_html_description_line_whose_load_throws_ends_the_run() {
         });
         let second = ReportKeys::Entries(vec![Some(4), Some(5)]);
         let loads = HitLoads::of(
-            LoadsBefore::NONE,
+            LoadsBefore::none(),
             Some(RunThrow::every_row(after)),
             [(true, first), (false, second)],
             subject,
@@ -2819,6 +2893,239 @@ fn a_thrown_description_is_the_alignment_id_and_unknown() {
     }
 }
 
+fn pdb_id(mol: &str, chain: Option<i32>, chain_id: Option<&str>) -> ParsedSeqId {
+    ParsedSeqId::Pdb(PdbSeqId {
+        mol: mol.as_bytes().to_vec(),
+        chain,
+        rel: None,
+        chain_id: chain_id.map(|c| c.as_bytes().to_vec()),
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:386-431
+// The data loader looks up the Seq-id of the Seq-align id's handle and keeps the sequence only
+// where one of its ids compares equal to it: a record whose only id is `pdb` with chain 321
+// (`char` 65 for the handle) is not served, and NCBI BLAST+ 2.17.0 writes the `catch` of each
+// read (line RG-KB item 12, `i12/ncbi`: `1AB1_A Unknown`, `Sequence with id 1AB1_A no longer
+// exists in database...alignment skipped`).
+#[test]
+fn a_pdb_chain_that_the_handle_changes_finds_no_bioseq() {
+    let unserved = lines(vec![vec![pdb_id("1AB1", Some(321), None)]]);
+    assert!(unserved.scope_finds_none());
+    assert_eq!(
+        unserved.loader_id().into_owned(),
+        pdb_id("1AB1", Some(65), None)
+    );
+    let (start, title, caught) = unserved.description_line(true);
+    assert_eq!(
+        (text(&start), text(&title.text), caught),
+        ("1AB1_A ", "Unknown", true)
+    );
+    assert_eq!(
+        unserved.heading(true, false, None).unwrap(),
+        Err(b"1AB1_A".to_vec())
+    );
+    assert_eq!(
+        unserved.heading_skipped_id(true, false).as_deref(),
+        Some(&b"1AB1_A"[..])
+    );
+    assert!(matches!(unserved.prefetched(), Prefetched::Nothing));
+    // The record is not refused for what the lookup finds: the formats write the `catch`.
+    assert_eq!(unserved.fetched(true, HitLoad::Loaded), Ok(()));
+    // Chains that the handle keeps, and a second id that the handle's Seq-id matches, are served.
+    for served in [
+        lines(vec![vec![pdb_id("1AB1", Some(65), None)]]),
+        lines(vec![vec![pdb_id("1AB1", Some(-5), None)]]),
+        lines(vec![vec![pdb_id("1AB1", None, None)]]),
+        lines(vec![vec![pdb_id("1AB1", Some(66), Some("A"))]]),
+        lines(vec![vec![
+            gb("AB600001", 1),
+            pdb_id("1AB1", Some(321), None),
+        ]]),
+    ] {
+        assert!(!served.scope_finds_none(), "{:?}", served.alignment_id());
+        assert!(!served.description_line(true).2);
+    }
+    // Where the handle's Seq-id is held by another definition line than the Seq-align id's, the
+    // Bioseq NCBI builds is made of that line: the description line, the organism report and the
+    // heading's title of an untitled line show its title; the heading lists the sequence's own
+    // lines (review 2 of line RG-KB item 12, N3: probes `e15_twoline`, `e15nt`).
+    use crate::algorithm::common::database::description_line_refusal;
+    let two_lines = |first: Option<&[u8]>| {
+        ParsedSubject::new(DeflineSet {
+            deflines: vec![
+                BlastDefline {
+                    title: first.map(<[u8]>::to_vec),
+                    ids: vec![pdb_id("1AB1", Some(321), None)],
+                    ..BlastDefline::default()
+                },
+                BlastDefline {
+                    title: Some(b"u".to_vec()),
+                    ids: vec![pdb_id("1AB1", Some(65), Some("A"))],
+                    ..BlastDefline::default()
+                },
+            ],
+            utf8: false,
+        })
+        .unwrap()
+    };
+    let other_line = two_lines(Some(b"t"));
+    assert!(!other_line.scope_finds_none());
+    assert_eq!(
+        description_line_refusal(&other_line, HitLoad::Loaded, true),
+        None
+    );
+    let (start, title, caught) = other_line.description_line(true);
+    assert_eq!(
+        (text(&start), text(&title.text), caught),
+        ("1AB1_A ", "u", false)
+    );
+    assert_eq!(
+        text(&other_line.heading(true, false, None).unwrap().unwrap()),
+        ">1AB1_A t\n 1AB1_A u\n"
+    );
+    let untitled = two_lines(None);
+    assert_eq!(
+        text(&untitled.heading(true, false, None).unwrap().unwrap()),
+        ">1AB1_A u\n 1AB1_A u\n"
+    );
+    assert_eq!(other_line.fetched(true, HitLoad::Loaded), Ok(()));
+    assert!(matches!(other_line.prefetched(), Prefetched::Itself));
+    // One line that holds both chains: NCBI's Bioseq reads the line's first pdb id, which is not
+    // the handle's, so its load throws: refused where a format reads the Bioseq or the prefetch
+    // reads it; the Seq-annots and the archive read nothing of it (outfmt 8 is NCBI's bytes).
+    let one_line = ParsedSubject::new(DeflineSet {
+        deflines: vec![BlastDefline {
+            title: Some(b"t".to_vec()),
+            ids: vec![
+                pdb_id("1AB1", Some(321), None),
+                pdb_id("1AB1", Some(65), None),
+            ],
+            ..BlastDefline::default()
+        }],
+        utf8: false,
+    })
+    .unwrap();
+    assert!(one_line
+        .fetched(false, HitLoad::Loaded)
+        .unwrap_err()
+        .contains("its load throws"));
+    assert!(matches!(
+        one_line.prefetched(),
+        Prefetched::Failed(reason) if reason.contains("oid headers do not contain target gi/seq_id")
+    ));
+    assert!(one_line.pssm_read().is_err());
+    assert_eq!(
+        description_line_refusal(&one_line, HitLoad::Loaded, true),
+        None
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:886-892
+// The description line of a sequence whose Bioseq the scope does not get prints, with
+// `-show_gis`, a GI that NCBI never sets; a description id longer than 65 bytes pads the line
+// without end. Both are refused only for a sequence whose line a report prints (the first
+// `-num_descriptions`; review 1 of line RG-KB item 12, R1).
+#[test]
+fn a_description_line_is_refused_only_where_a_report_prints_it() {
+    use crate::algorithm::common::database::{
+        description_line_refusal, refuse_described_lines, refuse_described_records,
+    };
+    let unserved = lines(vec![vec![pdb_id("1AB1", Some(321), None)]]);
+    assert_eq!(
+        description_line_refusal(&unserved, HitLoad::Loaded, true),
+        None
+    );
+    let unserved = unserved.showing_gis(true);
+    assert!(description_line_refusal(&unserved, HitLoad::Loaded, true)
+        .unwrap()
+        .contains("prints a GI that NCBI BLAST+ 2.17.0 never sets"));
+    let long = lines(vec![vec![ParsedSeqId::Local(ObjectId::Str(
+        "x".repeat(70).into_bytes(),
+    ))]]);
+    assert!(description_line_refusal(&long, HitLoad::Loaded, true)
+        .unwrap()
+        .contains("longer than 65 bytes"));
+    let served = lines(vec![vec![pdb_id("1AB4", Some(65), None)]]);
+    let parsed = vec![
+        Some(std::sync::Arc::new(served)),
+        Some(std::sync::Arc::new(unserved)),
+    ];
+    let refuse = |described: Vec<u32>| {
+        refuse_described_lines(
+            1,
+            |_| vec![0, 1],
+            |_| Ok(described.clone()),
+            &parsed,
+            |_| HitLoad::Loaded,
+            crate::seqdb::Oid::of_unrestricted,
+            "BLASTP",
+        )
+    };
+    // `-num_descriptions 1`: rank 1 prints no line.
+    assert!(refuse(vec![0]).is_ok());
+    assert!(refuse(vec![]).is_ok());
+    let error = refuse(vec![0, 1]).unwrap_err().to_string();
+    assert!(error.contains("never sets"), "{error}");
+    // The `-subject` records whose ids `-parse_deflines` read, by subject index: the same rule
+    // (review 2 of line RG-KB item 12, N2; `-num_descriptions 0` prints no line).
+    let records = vec![None, Some(std::sync::Arc::new(long))];
+    let refuse_records = |described: Vec<u32>| {
+        refuse_described_records(
+            1,
+            |_| vec![1],
+            |_| Ok(described.clone()),
+            &records,
+            "BLASTP",
+        )
+    };
+    assert!(refuse_records(vec![]).is_ok());
+    let error = refuse_records(vec![1]).unwrap_err().to_string();
+    assert!(
+        error.contains("subject record") && error.contains("longer than 65 bytes"),
+        "{error}"
+    );
+}
+
+#[test]
+fn the_scope_keys_of_a_pdb_id_are_its_handle() {
+    // `chain` 321 and 65, with or without the `chain-id` "A", are one handle; "B" is another.
+    let keys = |id: &ParsedSeqId| {
+        let mut keys = Vec::new();
+        crate::seqid::defline_set::scope_keys(id, &mut keys);
+        keys
+    };
+    let a = keys(&pdb_id("1AB1", Some(65), Some("A")));
+    assert_eq!(keys(&pdb_id("1AB1", Some(321), None)), a);
+    assert_eq!(keys(&pdb_id("1AB1", Some(65), None)), a);
+    assert_eq!(keys(&pdb_id("1ab1", Some(65), Some("A"))), a);
+    assert_ne!(keys(&pdb_id("1AB1", Some(66), Some("B"))), a);
+    assert_ne!(keys(&pdb_id("1AB1", Some(200), None)), a);
+}
+
+// RG-KB 9(b) review 1 (F2): a database with parsed Seq-ids (`tests/db_search/tchar/tc_ps_p`,
+// makeblastdb -parse_seqids) whose stored title holds 0xE9 is a subject, read as '#', whose
+// Seq-aligns NCBI makes as of the others (`db.tchar.*.ps.8`); a byte of a stored Seq-id is
+// refused.
+#[test]
+fn a_parsed_subject_with_a_replaced_title_byte_is_read() {
+    let base =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/tchar/tc_ps_p");
+    let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+    let replaced = ParsedSubject::new(db.defline_set(0).unwrap()).unwrap();
+    assert!(replaced.replaced_title_bytes());
+    assert_eq!(replaced.first_title(), b"fam#one");
+    let clean = ParsedSubject::new(db.defline_set(1).unwrap()).unwrap();
+    assert!(!clean.replaced_title_bytes());
+    let mut set = db.defline_set(1).unwrap();
+    set.deflines[0].replaced_id_bytes = 1;
+    let refusal = ParsedSubject::new(set).unwrap_err().to_string();
+    assert!(
+        refusal.contains("stored Seq-id with a byte outside"),
+        "{refusal}"
+    );
+}
+
 // Review 1 of line DBID pfoff-4, H1 and H2 (`R/pfoff/p4/review1`, cases `*.scope.*` and
 // `*.scopef.*`): a subject whose lookup fails on a file is held where the run loaded another
 // sequence that holds its Seq-align id before the subject's load, in NCBI's order (the reports
@@ -2832,16 +3139,12 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
             crate::seqdb::tax_files::NO_ACCESSION_INFO,
         )))
     };
-    let plain = |accession: &str, ordinal: u32| {
-        ParsedSubject::new(one_defline(vec![gb(accession, 1)]))
-            .unwrap()
-            .in_database(DbSequence::of_unrestricted(ordinal))
-    };
     let holder = DbSequence::of_unrestricted(10);
     // 0: the holder (its own lookup does not fail; another record, as `gi|5001|ref|NP_100001.1|`
-    // is for `ref|NP_100001.1|`: an id of its own handle, so both places hold it); 1: a failing
-    // lookup that 0 holds; 2: one that no other sequence holds; 3: one whose holders LOSAT cannot
-    // list; 4: another subject.
+    // is for `ref|NP_100001.1|`: an id of its own handle in its line, so both places hold it); 1:
+    // a failing lookup that 0 holds; 2: one that no other sequence holds; 3: one whose holders
+    // LOSAT cannot list after calls before of which it has no record (`ScopeHolders`); 4: another
+    // subject.
     let exact = ScopeHolders {
         loader: Holders::Listed(vec![holder]),
         scope: Holders::Listed(vec![holder]),
@@ -2851,18 +3154,17 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
         scope: Holders::Unknown("its holders".to_owned()),
     };
     let parsed: Vec<ParsedSubject> = vec![
-        plain("AAA00009", 10),
-        plain("AAA00001", 11)
+        sequence(vec![gb("AAA00009", 1), gb("AAA00001", 1)], 10),
+        sequence(vec![gb("AAA00001", 1)], 11)
             .found_instead(failure())
-            .scope_holders(exact),
-        plain("AAA00002", 12)
+            .unrecorded_holders(exact),
+        sequence(vec![gb("AAA00002", 1)], 12).found_instead(failure()),
+        sequence(vec![gb("AAA00003", 1)], 13)
             .found_instead(failure())
-            .scope_holders(ScopeHolders::default()),
-        plain("AAA00003", 13)
-            .found_instead(failure())
-            .scope_holders(unknown),
-        plain("AAA00004", 14),
+            .unrecorded_holders(unknown),
+        sequence(vec![gb("AAA00004", 1)], 14),
     ];
+    assert_eq!(parsed[0].alignment_fasta(), b"gb|AAA00009.1|");
     let subject = |key: usize| parsed.get(key);
     let none = |_: usize, _: usize| 0;
     let loads = |before: LoadsBefore, after, reports: Vec<(bool, ReportKeys)>| {
@@ -2881,7 +3183,8 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
             ReportKeys::Entries(keys.iter().map(|&key| Some(key)).collect()),
         )
     };
-    use HitLoad::{Held as H, Loaded as L, Throws as T, Unread as U};
+    use HitLoad::{Loaded as L, Throws as T, Unread as U};
+    let held = shown(Some(10), ShownBy::Holder);
     for after in [
         AfterThrow::WritesHit,
         AfterThrow::WritesRow,
@@ -2889,59 +3192,68 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
     ] {
         // The holder after the throw in the report: NCBI looks the id up and it throws (and
         // the holder is not read where the report ends there).
-        let holder_after = if after == AfterThrow::EndsReport {
+        let after_throw = if after == AfterThrow::EndsReport {
             U
         } else {
             L
         };
         assert_eq!(
-            loads(LoadsBefore::NONE, after, vec![entries(&[1, 0])]),
-            [holder_after, T, L, L, L],
+            loads(LoadsBefore::none(), after, vec![entries(&[1, 0])]),
+            [after_throw, T, L, L, L],
             "{after:?}"
         );
-        // In a later report (H1's query 2): held, and a held subject ends nothing.
+        // In a later report (H1's query 2): held, and a held subject ends nothing; 3, whose
+        // holders the walk knows here (none loaded), throws.
+        let after_throw = if after == AfterThrow::EndsReport {
+            U
+        } else {
+            T
+        };
         assert_eq!(
             loads(
-                LoadsBefore::NONE,
+                LoadsBefore::none(),
                 after,
                 vec![entries(&[0]), entries(&[1, 3, 2])]
             )[..4],
-            [L, H(Some(holder)), T, H(None)],
+            [L, held, after_throw, T],
             "{after:?}"
         );
     }
     // The holder loaded after the throw in the first report, then the subject in the next.
     assert_eq!(
         loads(
-            LoadsBefore::NONE,
+            LoadsBefore::none(),
             AfterThrow::WritesRow,
             vec![entries(&[1, 0]), entries(&[1, 2])]
         )[..3],
-        [L, H(Some(holder)), T]
+        [L, held, T]
     );
     // Outfmt 5's next `Hit` after the holder's.
     assert_eq!(
         loads(
-            LoadsBefore::NONE,
+            LoadsBefore::none(),
             AfterThrow::WritesHit,
             vec![entries(&[0, 1, 4])]
         ),
-        [L, H(Some(holder)), L, L, L]
+        [L, held, L, L, L]
     );
-    // Nothing loaded before: a list that LOSAT cannot make leaves it thrown.
+    // Nothing loaded before: thrown.
     assert_eq!(
         loads(
-            LoadsBefore::NONE,
+            LoadsBefore::none(),
             AfterThrow::WritesRow,
             vec![entries(&[3, 4])]
         )[3],
         T
     );
     // The run's record of the batches and rounds before, and calls before of which nothing here
-    // holds a record.
-    for before in [
-        LoadsBefore::new(vec![10], (None, Vec::new()), false),
-        LoadsBefore::after_calls(true),
+    // holds a record (the holders listed from the database, `ScopeHolders`).
+    for (before, want) in [
+        (recorded(None, &[&parsed[0]], None, false), held),
+        (
+            LoadsBefore::after_calls(true),
+            shown(Some(10), ShownBy::Calls),
+        ),
     ] {
         assert_eq!(
             loads(
@@ -2949,27 +3261,35 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
                 AfterThrow::WritesRow,
                 vec![entries(&[1, 2])]
             )[1],
-            H(Some(holder)),
+            want,
             "{before:?}"
         );
     }
     assert_eq!(
         loads(
-            LoadsBefore::new(vec![12], (None, Vec::new()), false),
+            recorded(None, &[&parsed[4]], None, false),
             AfterThrow::WritesRow,
             vec![entries(&[1])]
         )[1],
         T
     );
+    assert_eq!(
+        loads(
+            LoadsBefore::after_calls(true),
+            AfterThrow::WritesRow,
+            vec![entries(&[3])]
+        )[3],
+        shown(None, ShownBy::Calls)
+    );
     // A held subject ends nothing: the run goes on after it (outfmt 13 and 14).
     let held_first = HitLoads::of(
-        LoadsBefore::NONE,
+        LoadsBefore::none(),
         Some(RunThrow::every_row(AfterThrow::EndsRun)),
         [entries(&[0, 1]), entries(&[4])],
         subject,
         none,
     );
-    assert_eq!(held_first.load(1), H(Some(holder)));
+    assert_eq!(held_first.load(1), held);
     assert!(held_first.reaches(1) && held_first.loaded(4) && held_first.thrown(1).is_none());
     // It reads nothing of its own (the taxonomy texts' reads leave it to `fetched`).
     assert!(!held_first.loaded(1));
@@ -2981,7 +3301,7 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
         ..RunThrow::every_row(AfterThrow::WritesRow)
     };
     let first_row = HitLoads::of(
-        LoadsBefore::NONE,
+        LoadsBefore::none(),
         Some(sacc),
         [entries(&[1, 0]), entries(&[1])],
         subject,
@@ -2990,15 +3310,15 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
     assert_eq!(first_row.load(1), T);
     assert!(first_row.reaches(0) && !first_row.reaches(1));
     let later_row = HitLoads::of(
-        LoadsBefore::NONE,
+        LoadsBefore::none(),
         Some(sacc),
         [entries(&[4, 1, 0]), entries(&[1])],
         subject,
         none,
     );
-    assert_eq!(later_row.load(1), H(Some(holder)));
+    assert_eq!(later_row.load(1), held);
     let thrown_first = HitLoads::of(
-        LoadsBefore::NONE,
+        LoadsBefore::none(),
         Some(RunThrow::every_row(AfterThrow::EndsRun)),
         [entries(&[1, 0]), entries(&[4])],
         subject,
@@ -3023,44 +3343,34 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
         AfterThrow::EndsAtAlignment { html: false },
     ] {
         assert_eq!(
-            loads(LoadsBefore::NONE, after, pairwise(vec![0, 1, 2], 3)),
-            [L, H(Some(holder)), L, L, L],
+            loads(LoadsBefore::none(), after, pairwise(vec![0, 1, 2], 3)),
+            [L, held, L, L, L],
             "{after:?}"
         );
         // Without description lines, the first alignment throws and ends the run.
         assert_eq!(
-            loads(LoadsBefore::NONE, after, pairwise(Vec::new(), 3))[..2],
-            [HitLoad::Unread, T],
+            loads(LoadsBefore::none(), after, pairwise(Vec::new(), 3))[..2],
+            [U, T],
             "{after:?}"
         );
         // The description line alone throws (no alignments).
         assert_eq!(
-            loads(LoadsBefore::NONE, after, pairwise(vec![0, 1], 0))[..2],
+            loads(LoadsBefore::none(), after, pairwise(vec![0, 1], 0))[..2],
             [L, T],
             "{after:?}"
         );
     }
     // The refusal: the words of another sequence that holds the Seq-align id, as for a lookup that
     // does not fail; of holders that LOSAT cannot list.
-    let error = parsed[1].fetched(false, true, H(Some(holder))).unwrap_err();
+    let error = parsed[1].fetched(false, held).unwrap_err();
     assert!(
         error.contains(&format!("which database sequence {holder} also holds")),
         "{error}"
     );
-    let error = parsed[3].fetched(false, true, H(None)).unwrap_err();
+    let error = parsed[3]
+        .fetched(false, shown(None, ShownBy::Calls))
+        .unwrap_err();
     assert!(error.contains("LOSAT cannot list its holders"), "{error}");
-    // `held_before` asks only a lookup that fails on a file, the loader's holders first.
-    let never = (|_: DbSequence| false, true);
-    let every = (|_: DbSequence| true, true);
-    assert_eq!(parsed[0].held_before(every, every), None);
-    assert_eq!(parsed[1].held_before(never, never), None);
-    assert_eq!(parsed[1].held_before(every, never), Some(Some(holder)));
-    assert_eq!(parsed[1].held_before(never, every), Some(Some(holder)));
-    assert_eq!(parsed[3].held_before(never, (|_| false, false)), Some(None));
-    assert_eq!(
-        parsed[3].held_before((|_| false, false), (|_| false, false)),
-        None
-    );
 }
 
 // Review 2 of line DBID pfoff-4, H1 and M1 (`R/pfoff/p4/review2`, cases `w.*`, `v.*`): NCBI
@@ -3077,39 +3387,48 @@ fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_ba
             crate::seqdb::tax_files::NO_ACCESSION_INFO,
         )))
     };
-    let plain = |accession: &str, ordinal: u32| {
-        ParsedSubject::new(one_defline(vec![gb(accession, 1)]))
-            .unwrap()
-            .in_database(DbSequence::of_unrestricted(ordinal))
+    let listed = |loader: &[u32], scope: &[u32]| {
+        let list = |ordinals: &[u32]| {
+            Holders::Listed(
+                ordinals
+                    .iter()
+                    .map(|&ordinal| DbSequence::of_unrestricted(ordinal))
+                    .collect(),
+            )
+        };
+        ScopeHolders {
+            loader: list(loader),
+            scope: list(scope),
+        }
     };
-    let exact = DbSequence::of_unrestricted(10);
-    let weak = DbSequence::of_unrestricted(11);
-    // 0: a holder of the failing id's own handle; 1: a holder in the scope alone (`emb|X.1|` for
-    // `ref|X.1|`, `ref|X.1|` for `ref|X|`); 2: the failing lookup that 0 holds; 3: the one that 1
-    // holds; 4: one whose weak matches LOSAT cannot list (a name, version 5); 5: another subject.
+    // 0: a holder of the failing id's own handle (`gb|AAA00012.1|` in its line); 1: a holder in
+    // the scope alone (`emb|NP_100013.1|` for `ref|NP_100013.1|`); 2: the failing lookup that 0
+    // holds; 3: the one that 1 holds; 4: one that 0's line matches weakly (`gb|AAA00012|`), whose
+    // handle no blob registers; 5: another subject. The holders listed from the database are the
+    // walk's only after calls of which it has no record.
     let parsed: Vec<ParsedSubject> = vec![
-        plain("AAA00010", 10),
-        plain("AAA00011", 11),
-        plain("AAA00012", 12)
+        sequence(vec![gb("AAA00010", 1), gb("AAA00012", 1)], 10),
+        sequence(vec![gb("AAA00011", 1), emb("NP_100013", 1)], 11),
+        sequence(vec![gb("AAA00012", 1)], 12)
             .found_instead(failure())
-            .scope_holders(ScopeHolders {
-                loader: Holders::Listed(vec![exact]),
-                scope: Holders::Listed(vec![exact]),
-            }),
-        plain("AAA00013", 13)
+            .unrecorded_holders(listed(&[10], &[10])),
+        sequence(
+            vec![ParsedSeqId::Other(crate::seqid::model::TextseqId {
+                accession: Some(b"NP_100013".to_vec()),
+                version: Some(1),
+                ..Default::default()
+            })],
+            13,
+        )
+        .found_instead(failure())
+        .unrecorded_holders(listed(&[], &[11])),
+        sequence(vec![gb_unversioned("AAA00012")], 14)
             .found_instead(failure())
-            .scope_holders(ScopeHolders {
-                loader: Holders::Listed(Vec::new()),
-                scope: Holders::Listed(vec![weak]),
-            }),
-        plain("AAA00014", 14)
-            .found_instead(failure())
-            .scope_holders(ScopeHolders {
-                loader: Holders::Listed(Vec::new()),
-                scope: Holders::Unknown("its weak matches".to_owned()),
-            }),
-        plain("AAA00015", 15),
+            .unrecorded_holders(listed(&[], &[10])),
+        sequence(vec![gb("AAA00015", 1)], 15),
     ];
+    assert_eq!(parsed[0].alignment_fasta(), b"gb|AAA00010.1|");
+    assert_eq!(parsed[1].alignment_fasta(), b"gb|AAA00011.1|");
     let subject = |key: usize| parsed.get(key);
     let none = |_: usize, _: usize| 0;
     let report = |batch: usize, keys: &[usize]| {
@@ -3117,6 +3436,7 @@ fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_ba
             ReportRead {
                 one_by_one: true,
                 batch: Some(batch),
+                prefetch_fails: false,
             },
             ReportKeys::Entries(keys.iter().map(|&key| Some(key)).collect()),
         )
@@ -3131,102 +3451,606 @@ fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_ba
         );
         (0..6).map(|key| loads.load(key)).collect::<Vec<_>>()
     };
-    use HitLoad::{Held as H, Throws as T};
+    use HitLoad::Throws as T;
+    // Every check, so that one run shows each answer that differs.
+    let differ = std::cell::RefCell::new(Vec::<String>::new());
+    let check = |what: &str, got: &[HitLoad], want: &[HitLoad]| {
+        if got != want {
+            differ
+                .borrow_mut()
+                .push(format!("{what}: {got:?}, want {want:?}"));
+        }
+    };
+    let exact = shown(Some(10), ShownBy::Holder);
+    let scope = shown(Some(11), ShownBy::Holder);
+    let weak = shown(Some(10), ShownBy::Weak);
     // The holders in an earlier batch: the loader's hold for the run, the scope's only in outfmt 5.
-    // The loader's answer puts its holder into the batch's scope, where it may match 4 weakly.
+    // The loader's answer puts its holder into the batch's scope, where it matches 4 weakly.
     let earlier = || vec![report(0, &[0, 1, 5]), report(1, &[2, 3, 4])];
-    assert_eq!(
-        loads(LoadsBefore::NONE, AfterThrow::WritesRow, earlier())[2..5],
-        [H(Some(exact)), T, H(None)]
+    check(
+        "earlier batch",
+        &loads(LoadsBefore::none(), AfterThrow::WritesRow, earlier())[2..5],
+        &[exact, T, weak],
     );
-    assert_eq!(
-        loads(
-            LoadsBefore::NONE,
+    check(
+        "earlier batch, no loader's answer",
+        &loads(
+            LoadsBefore::none(),
             AfterThrow::WritesRow,
-            vec![report(0, &[0, 1, 5]), report(1, &[3, 4])]
+            vec![report(0, &[0, 1, 5]), report(1, &[3, 4])],
         )[3..5],
-        [T, T]
+        &[T, T],
     );
-    assert_eq!(
-        loads(LoadsBefore::NONE, AfterThrow::WritesHit, earlier())[2..5],
-        [H(Some(exact)), H(Some(weak)), H(None)]
+    check(
+        "earlier batch, outfmt 5",
+        &loads(LoadsBefore::none(), AfterThrow::WritesHit, earlier())[2..5],
+        &[exact, scope, weak],
     );
     // In the same batch, an earlier report: both places hold.
     for after in [AfterThrow::WritesRow, AfterThrow::EndsReport] {
-        assert_eq!(
-            loads(
-                LoadsBefore::NONE,
+        check(
+            &format!("same batch {after:?}"),
+            &loads(
+                LoadsBefore::none(),
                 after,
-                vec![report(3, &[0, 1, 5]), report(3, &[2, 3, 4])]
+                vec![report(3, &[0, 1, 5]), report(3, &[2, 3, 4])],
             )[2..5],
-            [H(Some(exact)), H(Some(weak)), H(None)],
-            "{after:?}"
+            &[exact, scope, weak],
         );
     }
     // A report without a batch name stays in the scope of the one before.
-    assert_eq!(
-        loads(
-            LoadsBefore::NONE,
+    check(
+        "no batch name",
+        &loads(
+            LoadsBefore::none(),
             AfterThrow::WritesRow,
             vec![
                 report(0, &[1]),
-                (true.into(), ReportKeys::Entries(vec![Some(3)]))
-            ]
-        )[3],
-        H(Some(weak))
+                (true.into(), ReportKeys::Entries(vec![Some(3)])),
+            ],
+        )[3..4],
+        &[scope],
     );
     // The run's record: its loads of the batch named, which share the scope (psiblast's rounds
     // before), and of other batches, which hold only in the loader.
-    let recorded = |batch| LoadsBefore::new(vec![10, 11], (Some(batch), vec![10, 11]), false);
-    assert_eq!(
-        loads(recorded(2), AfterThrow::WritesRow, vec![report(2, &[2, 3])])[2..4],
-        [H(Some(exact)), H(Some(weak))]
+    let holders = [&parsed[0], &parsed[1]];
+    let before = |noted| recorded(Some(noted), &holders, Some(2), false);
+    check(
+        "record, same batch",
+        &loads(before(2), AfterThrow::WritesRow, vec![report(2, &[2, 3])])[2..4],
+        &[exact, scope],
     );
-    assert_eq!(
-        loads(recorded(1), AfterThrow::WritesRow, vec![report(2, &[2, 3])])[2..4],
-        [H(Some(exact)), T]
+    check(
+        "record, other batch",
+        &loads(before(1), AfterThrow::WritesRow, vec![report(2, &[2, 3])])[2..4],
+        &[exact, T],
     );
-    assert_eq!(
-        loads(recorded(1), AfterThrow::WritesHit, vec![report(2, &[2, 3])])[2..4],
-        [H(Some(exact)), H(Some(weak))]
+    check(
+        "record, other batch, outfmt 5",
+        &loads(before(1), AfterThrow::WritesHit, vec![report(2, &[2, 3])])[2..4],
+        &[exact, scope],
     );
-    // Calls before of which nothing here holds a record: each was a batch of its own.
-    assert_eq!(
-        loads(
+    // Calls before of which nothing here holds a record: each was a batch of its own, whose
+    // scope outfmt 5 keeps for the run.
+    let calls = shown(Some(10), ShownBy::Calls);
+    check(
+        "calls before",
+        &loads(
             LoadsBefore::after_calls(true),
             AfterThrow::WritesRow,
-            vec![report(0, &[3, 4, 2])]
+            vec![report(0, &[3, 4, 2])],
         )[2..5],
-        [H(Some(exact)), T, T]
+        &[calls, T, T],
     );
-    assert_eq!(
-        loads(
-            LoadsBefore::after_calls(true),
-            AfterThrow::WritesHit,
-            vec![report(0, &[2, 3, 4])]
-        )[2..5],
-        [H(Some(exact)), H(Some(weak)), H(None)]
+    let kept = loads(
+        LoadsBefore::after_calls(true),
+        AfterThrow::WritesHit,
+        vec![report(0, &[2, 3, 4])],
     );
+    check("calls before, outfmt 5", &kept[2..3], &[calls]);
+    for key in [3, 4] {
+        if !matches!(kept[key], HitLoad::Shown(_)) {
+            differ.borrow_mut().push(format!(
+                "calls before, outfmt 5, {key}: {:?}, want the scope's holder of the calls before",
+                kept[key]
+            ));
+        }
+    }
     // A walk of a run's reports one at a time (`RunLoads`) keeps both places across its calls.
-    for (after, held) in [
-        (AfterThrow::WritesRow, T),
-        (AfterThrow::WritesHit, H(Some(weak))),
-    ] {
+    for (after, held) in [(AfterThrow::WritesRow, T), (AfterThrow::WritesHit, scope)] {
         let run = RunLoads::new(FormatThrow::Writes(RunThrow::every_row(after)));
-        let first = run.loads(LoadsBefore::NONE, [report(0, &[0, 1])], subject, none);
+        let first = run.loads(LoadsBefore::none(), [report(0, &[0, 1])], subject, none);
         assert!(first.loaded(0) && first.loaded(1));
-        let next = run.loads(LoadsBefore::NONE, [report(4, &[2, 3])], subject, none);
-        assert_eq!(
-            [next.load(2), next.load(3)],
-            [H(Some(exact)), held],
-            "{after:?}"
+        let next = run.loads(LoadsBefore::none(), [report(4, &[2, 3])], subject, none);
+        check(
+            &format!("RunLoads, next call {after:?}"),
+            &[next.load(2), next.load(3)],
+            &[exact, held],
         );
         let same = run.loads(
-            LoadsBefore::NONE,
+            LoadsBefore::none(),
             [report(4, &[1]), report(4, &[3])],
             subject,
             none,
         );
-        assert_eq!(same.load(3), H(Some(weak)), "{after:?}");
+        check(
+            &format!("RunLoads, same batch {after:?}"),
+            &[same.load(3)],
+            &[scope],
+        );
     }
+    let differ = differ.into_inner();
+    assert!(differ.is_empty(), "{}", differ.join("\n"));
+}
+
+// NCBI reference (598d8ae6): c++/include/util/limited_size_map.hpp:233-280 (cited at
+// `LoaderIds`)
+#[test]
+fn the_loaders_ids_keep_the_1000_most_recently_used_handles() {
+    let a = DbSequence::of_unrestricted(1);
+    let b = DbSequence::of_unrestricted(2);
+    // A handle registered, then 999 others: still held; one more drops it (review 1 of line DBID
+    // holdrec, M1: lru9x100 holds, lru12x100 is NCBI's own record).
+    let mut ids = LoaderIds::default();
+    ids.register([7], a);
+    ids.register(1000..1999, b);
+    assert_eq!(ids.held(7), Held::Present(Registrant::of(a)));
+    ids.register([1999], b);
+    assert_eq!(ids.held(7), Held::Absent);
+    // A use moves it to the end; uses of the same few handles count once each.
+    let mut ids = LoaderIds::default();
+    ids.register([7], a);
+    ids.register(1000..1900, b);
+    ids.use_now(7, Registrant::of(a));
+    ids.register(1900..2800, b);
+    for _ in 0..30 {
+        ids.register(5000..5010, b);
+    }
+    assert_eq!(ids.held(7), Held::Present(Registrant::of(a)));
+    // Uses in an order that LOSAT does not know (a note of the record): a handle among 1,000
+    // others may be gone; one registered by two of them is not sure.
+    let mut ids = LoaderIds::default();
+    let mut note: Vec<(HandleKey, Registrant)> = (1000..2000)
+        .map(|handle| (handle, Registrant::of(b)))
+        .collect();
+    note.push((7, Registrant::of(a)));
+    note.push((1000, Registrant::of(a)));
+    ids.use_unordered(&note);
+    assert_eq!(ids.held(7), Held::Maybe(Registrant::of(a)));
+    let Held::Maybe(registrant) = ids.held(1000) else {
+        panic!("1000 is in the note");
+    };
+    assert!(!registrant.sure);
+    // After 1,000 surely used later, it is surely gone, and the map stays small.
+    ids.register(3000..4000, b);
+    assert_eq!(ids.held(7), Held::Absent);
+    ids.register(10_000..20_000, b);
+    assert!(
+        ids.entries.len() <= 2 * LOADER_IDS + 1,
+        "{}",
+        ids.entries.len()
+    );
+    // A use that may not have happened: maybe held, by that sequence.
+    let mut ids = LoaderIds::default();
+    ids.maybe_use(7, Registrant::of(a));
+    assert_eq!(ids.held(7), Held::Maybe(Registrant::of(a)));
+    ids.register([7], b);
+    assert_eq!(ids.held(7), Held::Present(Registrant::of(b)));
+}
+
+#[test]
+fn an_id_that_resolved_to_nothing_stays_unresolved_in_its_scope() {
+    // Review 1 of line DBID holdrec, `ahA1`: A's lookup gives Y, whose line does not hold A's
+    // Seq-align id (no blob), before Z, whose second line holds it, registers the handle.
+    let a = sequence(vec![gb("AAA00001", 1)], 1)
+        .found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(0))));
+    let z = lines(vec![vec![gb("ZZZ00002", 1)], vec![gb("AAA00001", 1)]])
+        .in_database(DbSequence::of_unrestricted(2));
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    assert_eq!(walk.load(&a), HitLoad::Loaded);
+    assert_eq!(walk.load(&z), HitLoad::Loaded);
+    // The scope keeps A's id unresolved: the read after gets nothing, not Z (NCBI warns).
+    assert_eq!(walk.load(&a), HitLoad::Loaded);
+    // Z first: its line registers the handle, and A's load gives Z.
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    assert_eq!(walk.load(&z), HitLoad::Loaded);
+    assert_eq!(walk.load(&a), shown(Some(2), ShownBy::Holder));
+    // A record: a note of A alone keeps it unresolved for the batch's scope (psiblast's rounds
+    // of a query), not for another batch's.
+    let before = recorded(Some(0), &[&a], Some(0), false);
+    let mut walk = ScopeWalk::new(before, Some(false));
+    assert_eq!(walk.load(&z), HitLoad::Loaded);
+    assert_eq!(walk.load(&a), HitLoad::Loaded);
+    let before = recorded(Some(0), &[&a], Some(1), false);
+    let mut walk = ScopeWalk::new(before, Some(false));
+    walk.enter(Some(1));
+    assert_eq!(walk.load(&z), HitLoad::Loaded);
+    assert_eq!(walk.load(&a), shown(Some(2), ShownBy::Holder));
+    // A note where Z registers the handle too: the order of the note's loads decides, which
+    // LOSAT does not know, so the later read asks the loader (`m_Ids` holds Z).
+    let before = recorded(Some(0), &[&a, &z], Some(0), false);
+    let mut walk = ScopeWalk::new(before, Some(false));
+    assert_ne!(walk.load(&a), HitLoad::Loaded);
+}
+
+#[test]
+fn a_failed_prefetch_load_is_uncertain_against_weak_and_loader_matches() {
+    let sp = |acc: Option<&str>, ver: Option<i32>, name: Option<&str>| {
+        ParsedSeqId::Swissprot(crate::seqid::model::TextseqId {
+            name: name.map(|s| s.as_bytes().to_vec()),
+            accession: acc.map(|s| s.as_bytes().to_vec()),
+            release: None,
+            version: ver,
+        })
+    };
+    // `db.id.pfw.ps.weak.6.reject`: a failed prefetch may or may not have loaded `sp||NAMEY`
+    // (OID 0) or `sp|P00042.1|NAMEY` (OID 1) before throwing; unrelated `gb|FFF00099.1|` (OID 2)
+    // still loads, while each mutually weakly matching Swiss-Prot id must be refused.
+    let s0 = sequence(vec![sp(None, None, Some("NAMEY"))], 0);
+    let s1 = sequence(vec![sp(Some("P00042"), Some(1), Some("NAMEY"))], 1);
+    let s2 = sequence(vec![gb("FFF00099", 1)], 2);
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.failed_prefetch([(1, &s1), (2, &s2), (0, &s0)]);
+    assert_eq!(walk.load(&s2), HitLoad::Loaded);
+    assert_eq!(walk.load(&s1), shown(None, ShownBy::Order));
+    assert_eq!(walk.load(&s0), shown(Some(1), ShownBy::Order));
+
+    // A single-subject failed prefetch is still uncertain (`end == start + 1`): a definite load
+    // of versioned `gb|AAA00001.1|` (OID 1, which does not weakly match unversioned `gb|AAA00001|`)
+    // succeeds, and then reading `gb|AAA00001|` (OID 0) refuses because a miss on OID 0's maybe
+    // load falls through to OID 1's weak match.
+    let u0 = sequence(vec![gb_unversioned("AAA00001")], 0);
+    let u1 = sequence(vec![gb("AAA00001", 1)], 1);
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.failed_prefetch([(0, &u0)]);
+    assert_eq!(walk.load(&u1), HitLoad::Loaded);
+    assert_eq!(walk.load(&u0), shown(None, ShownBy::Order));
+
+    // A failed prefetch where another subject's second line registers S's exact handle in `m_Ids`:
+    // S's maybe exact load in the scope must still check the loader and refuse (`ShownBy::Order`).
+    let s = sequence(vec![gb("AAA00001", 1)], 0);
+    let t = lines(vec![vec![gb("TTT00002", 1)], vec![gb("AAA00001", 1)]])
+        .in_database(DbSequence::of_unrestricted(1));
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.failed_prefetch([(0, &s), (1, &t)]);
+    assert_eq!(walk.load(&s), shown(Some(1), ShownBy::Order));
+}
+
+#[test]
+fn scope_record_drops_earlier_batches_when_not_keeping_scope() {
+    let pdb = |mol: &str, chain: &str| {
+        ParsedSeqId::Pdb(crate::seqid::model::PdbSeqId {
+            mol: mol.as_bytes().to_vec(),
+            chain: None,
+            rel: None,
+            chain_id: Some(chain.as_bytes().to_vec()),
+        })
+    };
+    let mut record = ScopeRecord::default();
+    record.set_keeps_scope(Some(false));
+    // Note 30 batches of 100 distinct sequences each: `current_batch` keeps only the latest batch,
+    // `all_scope` stays `None`, and `loader_blobs` stays bounded to active `LoaderIds` registrants
+    // (evicting earlier batches once >= 1,000 newer handles are recorded).
+    let mut seqs: Vec<ParsedSubject> = Vec::new();
+    for b in 0..30usize {
+        let mut batch_seqs = Vec::new();
+        for i in 0..100u32 {
+            let ord = (b as u32) * 100 + i;
+            let acc = format!("AAA{:06}", ord + 1);
+            batch_seqs.push(sequence(vec![gb(&acc, 1)], ord));
+        }
+        record.note(Some(b), batch_seqs.iter());
+        assert!(record.all_scope.is_none());
+        let current = record.current_batch.as_ref().expect("current batch");
+        assert_eq!(current.batch, b);
+        assert_eq!(current.places.loads.len(), 100);
+        // Compact `loader_blobs` holds at most the sequences still referenced by `LoaderIds`.
+        assert!(
+            record.loader_blobs.len() <= 2 * LOADER_IDS,
+            "batch {b}: loader_blobs grew to {}",
+            record.loader_blobs.len()
+        );
+        if b == 0 {
+            seqs = batch_seqs;
+        }
+    }
+    // Blob ids stay tracked across the whole run (3,000 distinct blobs).
+    assert_eq!(record.blob_ids.len(), 3000);
+    // Earliest batch's handles have been evicted from `m_Ids` and `loader_blobs`.
+    assert!(!record.loader_blobs.contains_key(&0));
+    let shared: SharedRecord = std::sync::Arc::new(std::sync::RwLock::new(record));
+    let before = LoadsBefore::new(&shared, Some(30), false);
+    assert!(before.batch_scope.is_none());
+    assert!(before.registrants_of(&seqs[0]).is_empty());
+
+    // With `keeps_scope = Some(true)` (outfmt 5), earlier batches stay in `all_scope` and
+    // `current_batch` is not duplicated.
+    let mut kept = ScopeRecord::default();
+    kept.set_keeps_scope(Some(true));
+    let s0 = sequence(vec![pdb("1ABC", "A")], 0);
+    let s1 = sequence(vec![pdb("1DEF", "A")], 1);
+    kept.note(Some(0), [&s0]);
+    kept.note(Some(1), [&s1]);
+    assert!(kept.current_batch.is_none());
+    assert_eq!(kept.all_scope.as_ref().unwrap().places.loads.len(), 2);
+}
+
+#[test]
+fn bulk_ties_resolves_unpacked_group_without_quadratic_clones_and_prunes_batches() {
+    let pdb = |mol: &str, chain: &str| {
+        ParsedSeqId::Pdb(crate::seqid::model::PdbSeqId {
+            mol: mol.as_bytes().to_vec(),
+            chain: None,
+            rel: None,
+            chain_id: Some(chain.as_bytes().to_vec()),
+        })
+    };
+    // Unpacked PDB ids all share `order = u64::MAX` (`bulk_ties`).
+    // Sequence 0 (`pdb|1AAA|A`) and sequence 1 (`pdb|1BBB|A` with second line `pdb|1AAA|A`):
+    // their relative order in `bulk_ties` decides what sequence 0 gets (`ShownBy::Order`).
+    let s0 = sequence(vec![pdb("1AAA", "A")], 0);
+    let s1 = lines(vec![vec![pdb("1BBB", "A")], vec![pdb("1AAA", "A")]])
+        .in_database(DbSequence::of_unrestricted(1));
+    // Sequence 2 (`pdb|1CCC|A`) resolves to nothing alone, while sequence 3 (`pdb|1DDD|A` ^A
+    // `pdb|1CCC|A`) may register it first -> `ShownBy::Order`, and `1CCC|A` must NOT be cached
+    // as `Resolved::Nothing` so a later load sees sequence 3 in `m_Ids`.
+    let s2 = sequence(vec![pdb("1CCC", "A")], 2).found_instead(Some(FoundInstead::Sequence(
+        DbSequence::of_unrestricted(99),
+    )));
+    let s3 = lines(vec![vec![pdb("1DDD", "A")], vec![pdb("1CCC", "A")]])
+        .in_database(DbSequence::of_unrestricted(3));
+
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.enter(Some(0));
+    let answers = walk.bulk([(0, &s0), (1, &s1), (2, &s2), (3, &s3)]);
+    assert_eq!(answers[&0], shown(Some(1), ShownBy::Order));
+    assert_eq!(answers[&1], HitLoad::Loaded);
+    assert_eq!(answers[&2], shown(Some(3), ShownBy::Order));
+    assert_eq!(answers[&3], HitLoad::Loaded);
+    // `s2` was NOT cached as `Resolved::Nothing`; a later load sees `s3` in `m_Ids`.
+    assert_eq!(walk.load(&s2), shown(Some(3), ShownBy::Holder));
+
+    // A later batch of 1,100 fresh unpacked PDB ids evicts batch 0 from `m_Ids` and prunes
+    // `blobs` / `scope_handles` on `enter(Some(1))`.
+    let batch1: Vec<ParsedSubject> = (10..1110u32)
+        .map(|i| sequence(vec![pdb(&format!("{:04X}", i), "A")], i))
+        .collect();
+    walk.enter(Some(1));
+    assert!(walk.scope_handles.is_empty());
+    let ans1 = walk.bulk(batch1.iter().enumerate());
+    assert!(ans1.values().all(|&a| a == HitLoad::Loaded));
+    assert!(!walk.ids.has_sequence(0));
+    assert!(!walk.blobs.contains_key(&0));
+}
+
+// Line RG D1c-1c-b PR 2b (NCBI BLAST+ 2.17.0 probes `D/logs/d1c1cb/probe`, rows db.il.*.x1.*,
+// db.il.bp.xw.*): a definition line without a Seq-id beside lines with them. Each format's walk of
+// the lines takes the line's best id, null there, and its `catch` decides what is written.
+fn titled(lines: Vec<(Vec<ParsedSeqId>, Option<&str>)>) -> ParsedSubject {
+    let deflines = lines
+        .into_iter()
+        .map(|(ids, title)| BlastDefline {
+            title: title.map(|title| title.as_bytes().to_vec()),
+            ids,
+            ..BlastDefline::default()
+        })
+        .collect();
+    ParsedSubject::new(DeflineSet {
+        deflines,
+        utf8: false,
+    })
+    .unwrap()
+}
+
+// The description walk adds ` >`, the FASTA label and a space before each later title, and stops
+// only once the text passes 4096 bytes: a text of 4095 or 4096 bytes walks on to the line without
+// a Seq-id (NCBI's `catch`: the Seq-align id and `Unknown`), one of 4097 stops before it (rows
+// db.il.bp.xw.q0.0 and db.il.bp.xw.q1.0).
+#[test]
+fn the_description_walk_meets_a_line_without_a_seq_id_until_it_passes_4096_bytes() {
+    let second = gb("B00002", 1);
+    let mut label = Vec::new();
+    label::fasta(&second, &mut label);
+    let fixed = "s".len() + " >".len() + label.len() + " ".len();
+    for (total, caught) in [(4095, true), (4096, true), (4097, false)] {
+        let long = "w".repeat(total - fixed);
+        let subject = titled(vec![
+            (vec![gb("A00001", 1)], Some("s")),
+            (vec![second.clone()], Some(&long)),
+            (vec![], Some("tail")),
+        ]);
+        let (start, line, thrown) = subject.description_line(true);
+        assert_eq!(thrown, caught, "a text of {total} bytes");
+        if caught {
+            assert_eq!(text(&line.text), "Unknown");
+            assert_eq!(start, subject.thrown_description().0);
+        } else {
+            assert!(line.text.starts_with(b"s"), "{total}");
+        }
+    }
+}
+
+// `GetDisplayIds` labels each line up to the display line's, so a line without a Seq-id before it
+// throws whatever the lengths; the walk labels a line before it looks at its title, so an untitled
+// one throws there too (x1 OIDs 3 and 4).
+#[test]
+fn a_line_without_a_seq_id_before_the_display_line_or_without_a_title_is_met() {
+    let a = || vec![gb("A00001", 1)];
+    for (lines, caught) in [
+        (vec![(vec![], Some("zero")), (a(), Some("a"))], true),
+        (vec![(vec![], None), (a(), Some("a"))], true),
+        (vec![(a(), Some("a")), (vec![], None)], true),
+        (vec![(a(), Some("a")), (vec![], Some(""))], true),
+        (
+            vec![(a(), Some("a")), (vec![gb("B00002", 1)], Some("b"))],
+            false,
+        ),
+    ] {
+        let shown = format!("{lines:?}");
+        assert_eq!(titled(lines).description_line(true).2, caught, "{shown}");
+    }
+}
+
+// `x_FillAlnDispParams` labels every line first: each HSP's heading is the skipped id.
+#[test]
+fn every_heading_of_a_subject_with_a_line_without_a_seq_id_is_the_skipped_id() {
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let skipped = subject.skipped_id().to_vec();
+    assert_eq!(
+        subject.heading(true, false, None).unwrap(),
+        Err(skipped.clone())
+    );
+    assert_eq!(
+        subject.heading(true, true, None).unwrap(),
+        Err(skipped.clone())
+    );
+    assert_eq!(subject.heading_skipped_id(true, false), Some(skipped));
+}
+
+// Outfmt 5 takes the id string of the first titled line (no throw for an empty list there) and
+// throws only at a titled line without a Seq-id after it (an empty title counts): the `Hit`'s
+// `catch` (`xml_hit` gives `None`).
+#[test]
+fn outfmt_5_catches_a_titled_line_without_a_seq_id_after_the_first_titled_line() {
+    let a = || vec![gb("A00001", 1)];
+    let no_id = Vec::new;
+    for (lines, named) in [
+        (vec![(a(), Some("a")), (no_id(), Some("b"))], false),
+        (vec![(a(), Some("a")), (no_id(), Some(""))], false),
+        (vec![(a(), Some("a")), (no_id(), None)], true),
+        (vec![(no_id(), Some("z")), (a(), Some("a"))], true),
+        (vec![(no_id(), None), (a(), Some("a"))], true),
+        (
+            vec![(no_id(), None), (a(), Some("a")), (no_id(), Some("c"))],
+            false,
+        ),
+    ] {
+        let shown = format!("{lines:?}");
+        assert_eq!(titled(lines).xml_hit().is_some(), named, "{shown}");
+    }
+}
+
+// The tabular ids of a line without a Seq-id: `Unknown` and GI 0 (`sallseqid`, `sallgi`); its
+// `sallacc` is NCBI's null pointer (`LookupFailure::lineless`, refused by `failed_lookup_stop`).
+#[test]
+fn a_line_without_a_seq_id_is_unknown_in_the_tabular_ids_and_its_sallacc_stops() {
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let all = subject.all_tabular_ids(true).unwrap();
+    assert!(!all.failed);
+    assert_eq!(text(&all.ids[1].id), "Unknown");
+    assert_eq!(all.ids[1].gi, 0);
+    assert_eq!(
+        subject.lookup_failure(true).unwrap(),
+        Some(crate::report::tabular::LookupFailure {
+            lineless: true,
+            ..Default::default()
+        })
+    );
+    let plain = titled(vec![(vec![gb("A00001", 1)], Some("a"))]);
+    assert_eq!(plain.lookup_failure(true).unwrap(), None);
+}
+
+// The organism report stops at the line without a Seq-id (Owner question Q-D1c1cb-18): refused
+// there, the lines before it as always; a set with no Seq-id at all gets no Seq-align (PR 2a) and
+// is an internal error here.
+#[test]
+fn the_organism_report_refuses_a_line_without_a_seq_id_and_a_set_without_any_is_internal() {
+    use crate::report::tax_report::TaxTitle;
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let lines = subject.tax_deflines(true);
+    assert!(matches!(&lines[0].title, TaxTitle::Text(title) if title == b"a"));
+    assert!(matches!(
+        &lines[1].title,
+        TaxTitle::Refused { reason, shown_only: false } if reason == LINELESS_TAX_REPORT
+    ));
+    let none = DeflineSet {
+        deflines: vec![BlastDefline {
+            title: Some(b"t".to_vec()),
+            ..BlastDefline::default()
+        }],
+        utf8: false,
+    };
+    assert!(ParsedSubject::new(none)
+        .unwrap_err()
+        .contains("internal error"));
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1586-1600
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:895-917
+// When a subject's description title throws (`UnknownEncoding`), NCBI's catch puts the Seq-align
+// id on the description line and pads/wraps using that id rather than the display id. The 65-byte
+// length check in `description_line_refusal` must measure the Seq-align id for both protein and
+// nucleotide databases (display <= 65 & alignment > 65 refuses; display > 65 & alignment <= 65
+// passes), and must also cover an empty nucleotide title whose source name throws.
+#[test]
+fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
+    use crate::algorithm::common::database::description_line_refusal;
+    use crate::report::defline::SourceTaxname;
+    let long_acc = "X".repeat(66);
+    let long_local = ParsedSeqId::Local(ObjectId::Str(vec![b'a'; 66]));
+
+    let make = |ids: Vec<ParsedSeqId>, title: Option<&[u8]>, taxid: Option<i32>| {
+        ParsedSubject::new(DeflineSet {
+            deflines: vec![BlastDefline {
+                ids,
+                title: title.map(|bytes| bytes.to_vec()),
+                taxid,
+                ..BlastDefline::default()
+            }],
+            utf8: false,
+        })
+        .unwrap()
+    };
+
+    let assert_long_id = |subject: &ParsedSubject, protein: bool, program: &str| {
+        let err = description_line_refusal(subject, HitLoad::Loaded, protein)
+            .unwrap_or_else(|| panic!("{program}: expected 65-byte description-line refusal"));
+        assert!(err.contains("longer than 65 bytes"), "{program}: {err}");
+    };
+    let long_align_ids = vec![long_local.clone(), gb("NP_000001", 1)];
+    let long_display_ids = vec![ParsedSeqId::Gi(777), gb(&long_acc, 1)];
+
+    for (protein, program) in [(true, "BLASTP"), (false, "BLASTN")] {
+        // Case 1: display id <= 65 (`NP_000001.1`), Seq-align id > 65 (`lcl|aaaa...`).
+        let long_align_throwing = make(long_align_ids.clone(), Some(b"bad\x81"), None);
+        assert!(long_align_throwing.description_start().len() <= 65);
+        assert!(long_align_throwing.description_line(protein).0.len() > 65);
+        assert_long_id(&long_align_throwing, protein, program);
+
+        let long_align_ok = make(long_align_ids.clone(), Some(b"ok"), None);
+        assert_eq!(
+            description_line_refusal(&long_align_ok, HitLoad::Loaded, protein),
+            None
+        );
+
+        // Case 2: display id > 65 (`XXXX...`), Seq-align id <= 65 (`gi|777`).
+        let long_display_throwing = make(long_display_ids.clone(), Some(b"bad\x81"), None);
+        assert!(long_display_throwing.description_start().len() > 65);
+        assert!(long_display_throwing.description_line(protein).0.len() <= 65);
+        assert_eq!(
+            description_line_refusal(&long_display_throwing, HitLoad::Loaded, protein),
+            None,
+            "{program}: throwing title uses short Seq-align id"
+        );
+
+        let long_display_ok = make(long_display_ids.clone(), Some(b"ok"), None);
+        assert_long_id(&long_display_ok, protein, program);
+    }
+
+    // Empty nucleotide title whose source name throws `UnknownEncoding`: same rule.
+    let nucl_source_throwing = make(vec![long_local, gb("NM_000001", 1)], Some(b""), Some(9606))
+        .with_source(false, |_| {
+            SourceTaxname::Named(std::sync::Arc::from(&b"bad\x81"[..]))
+        });
+    assert!(nucl_source_throwing.description_may_throw());
+    assert_long_id(&nucl_source_throwing, false, "BLASTN");
 }

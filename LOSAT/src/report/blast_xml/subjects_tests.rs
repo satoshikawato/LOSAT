@@ -32,7 +32,7 @@ fn the_hit_of_a_subject_whose_lookup_throws_has_the_catch_names_and_the_exceptio
     let parsed = vec![Some(Arc::new(thrown)), found("AAA00002"), found("AAA00003")];
     // One report read one by one: rank 1, then rank 0 (whose lookup throws), then rank 2.
     let loads = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         Some(crate::report::db_subject::RunThrow::every_row(
             crate::report::db_subject::AfterThrow::EndsReport,
         )),
@@ -81,7 +81,7 @@ fn the_hit_of_a_subject_whose_lookup_throws_has_the_catch_names_and_the_exceptio
     assert!(HitNames::of(&loads, 0, None, refused).is_err());
     // Where the run writes another format, every subject is loaded and named.
     let every = HitLoads::of(
-        crate::report::db_subject::LoadsBefore::NONE,
+        crate::report::db_subject::LoadsBefore::none(),
         None,
         [(true, vec![Some(0), Some(2)])],
         |rank: usize| parsed[rank].as_deref(),
@@ -114,4 +114,61 @@ fn lists_of_joined_subjects_make_one_hit() {
         [0..2, 3..4, 4..5, 6..7, 7..8]
     );
     assert!(hit_ranges(&[None::<usize>], |list| *list, joins).is_empty());
+}
+
+// Line RG D1c-1c-b PR 2b (NCBI BLAST+ 2.17.0 probe `D/logs/d1c1cb/probe`, rows db.il.bp.x1.*.15):
+// XML2 and JSON stop at the first definition line without a Seq-id, whose `GetHandle` of the null
+// best id throws before its accession, title, taxid and taxonomy: the descriptions before it stay
+// and the Seq-align id alone follows them (the `catch`), or the description of a taxid that the
+// taxonomy database does not know before it ends them first. Outfmt 5's `Hit` is the `catch`'s
+// (`defline_thrown`, `Hit_len` 0) only where a titled line without a Seq-id follows the first
+// titled line.
+#[test]
+fn xml2_descriptions_stop_at_a_definition_line_without_a_seq_id() {
+    use crate::seqid::{BlastDefline, DeflineSet, ParsedSeqId};
+    let gb = |accession: &str| {
+        vec![ParsedSeqId::Genbank(crate::seqid::model::TextseqId {
+            accession: Some(accession.as_bytes().to_vec()),
+            version: Some(1),
+            ..Default::default()
+        })]
+    };
+    let line = |ids: Vec<ParsedSeqId>, title: Option<&str>, taxid: i32| BlastDefline {
+        title: title.map(|title| title.as_bytes().to_vec()),
+        ids,
+        taxid: Some(taxid),
+        ..Default::default()
+    };
+    let subject = |third: Option<&str>| {
+        ParsedSubject::new(DeflineSet {
+            deflines: vec![
+                line(gb("A00001"), Some("a"), 9606),
+                line(gb("B00002"), Some("b"), 10090),
+                line(vec![], third, 9606),
+                line(gb("D00004"), Some("d"), 9606),
+            ],
+            utf8: false,
+        })
+        .unwrap()
+    };
+    let named = |name: &str| HitTaxonomy::Named(name.as_bytes().to_vec());
+    let titled = subject(Some("c"));
+    let names = SubjectNames::of_parsed(&titled, &[named("Homo sapiens"), named("Mus musculus")]);
+    assert_eq!(names.descriptions.len(), 3);
+    assert_eq!(names.descriptions[0].taxonomy, named("Homo sapiens"));
+    assert_eq!(names.descriptions[1].taxonomy, named("Mus musculus"));
+    let caught = &names.descriptions[2];
+    assert_eq!(caught.id, titled.alignment_fasta());
+    assert!(caught.accession.is_empty() && caught.title.is_none() && caught.taxid == 0);
+    assert_eq!(caught.taxonomy, HitTaxonomy::Unnamed);
+    assert!(names.defline_thrown);
+    let missing = HitTaxonomy::NotFound(vec!["not found".to_owned()]);
+    let names = SubjectNames::of_parsed(&titled, &[named("Homo sapiens"), missing.clone()]);
+    assert_eq!(names.descriptions.len(), 2);
+    assert_eq!(names.descriptions[1].id, titled.alignment_fasta());
+    assert_eq!(names.descriptions[1].taxonomy, missing);
+    let untitled = subject(None);
+    let names = SubjectNames::of_parsed(&untitled, &[named("Homo sapiens"), named("Mus musculus")]);
+    assert_eq!(names.descriptions.len(), 3, "untitled lineless line");
+    assert!(!names.defline_thrown);
 }

@@ -8,6 +8,7 @@ import {
   parseToolDescription,
   recordMismatch,
   type ProgramId,
+  type RecordKey,
   type RunOutput,
   type ToolDescription,
 } from 'losat/domain';
@@ -31,6 +32,7 @@ import {
   type ToolValidation,
   type ValidationResult,
 } from 'losat/ports';
+import { optionValue } from '../../domain/argv';
 import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
 import { PROGRAMS } from '../../domain/programs';
 import { toolOptionValue } from '../../domain/tool-argv';
@@ -218,8 +220,36 @@ export class FakeEngine implements EngineGateway, ToolEngine {
    * inputs read together (a run of `-parse_deflines` reads its records as one without it), and no help
    * or version printed (`validate` refuses their words, which `describe` does not list either).
    */
-  async start(): Promise<StartResult> {
-    return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
+  async start(argv: readonly string[] = []): Promise<StartResult> {
+    const database = argv.some((word) => word === '-db' || word.startsWith('-db='));
+    const valueOf = (flag: string): string | null => {
+      for (let i = argv.length - 1; i >= 1; i--) {
+        const w = argv[i]!;
+        if (w === flag) return argv[i + 1] ?? null;
+        if (w.startsWith(`${flag}=`)) return w.slice(flag.length + 1);
+      }
+      return null;
+    };
+    const queryFile = valueOf('-in_pssm') ?? valueOf('-in_msa');
+    const outPssm = valueOf('-out_pssm');
+    const outAsciiPssm = valueOf('-out_ascii_pssm');
+    const saveEachPssm = argv.includes('-save_each_pssm');
+    return {
+      ok: true,
+      start: {
+        conffile: null,
+        logFile: null,
+        strategyFile: null,
+        dryRun: false,
+        registerInputs: false,
+        prints: null,
+        database,
+        queryFile,
+        outPssm,
+        outAsciiPssm,
+        saveEachPssm,
+      },
+    };
   }
 
   /**
@@ -243,19 +273,20 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       if (option === undefined) return { ok: false, message: unknownArgument(program as ProgramId, word) };
       if (option.takesValue && value === undefined) i++;
     }
-    // The fake reads no registry: its runs have the data loaders on, as the CLI's without one.
-    return { ok: true, dataLoaders: true };
+    // The fake reads no registry and parses no deflines: its runs have data loaders on and parseDeflines off.
+    return { ok: true, dataLoaders: true, parseDeflines: false };
   }
 
   async run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
     const { runId } = request;
+    let readRecords: RuntimeInfo['readRecords'];
     for (const phase of ['preparing', 'running', 'finalizing'] as const) {
       await this.pause();
       if (this.cancelled.delete(runId)) throw new RunCancelledError(runId);
       onPhase(phase);
-      if (phase === 'preparing') this.register(request);
+      if (phase === 'preparing') readRecords = this.register(request);
     }
-    if (request.query.bytes.length === 0 || request.subject?.bytes.length === 0) {
+    if ((request.query !== undefined && request.query.bytes.length === 0) || request.subject?.bytes.length === 0) {
       // A failed run keeps the warnings written before its error, as the engine's does (stream 3,
       // then `fail`; line WQA's sweep, D3, 2026-11-19), and the output that the CLI leaves before its error, the
       // argv's own, with the others dropped (line WQA's sweep, D15, 2026-11-20): here marked lines.
@@ -277,8 +308,17 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     const writer = new RunOutputWriter(output);
     this.writeOutputs(request, writer);
     writer.end();
+    const runFiles = fakePssmRunFiles(request.argv);
     // Its warning goes to the diagnostics (stream 3), as without -logfile.
-    return { path: 'fake', threads: 1, engineBuild: 'fake-engine', messages: 'diagnostics', ...(windowMasker === undefined ? {} : { windowMasker }) };
+    return {
+      path: 'fake',
+      threads: 1,
+      engineBuild: 'fake-engine',
+      messages: 'diagnostics',
+      ...(windowMasker === undefined ? {} : { windowMasker }),
+      ...(readRecords === undefined ? {} : { readRecords }),
+      ...(runFiles.length === 0 ? {} : { runFiles }),
+    };
   }
 
   cancel(runId: string): void {
@@ -286,18 +326,32 @@ export class FakeEngine implements EngineGateway, ToolEngine {
   }
 
   /** Reads the inputs as the Engine worker's `register` does and checks the record tables. */
-  private register(request: EngineRunRequest): void {
+  private register(request: EngineRunRequest): RuntimeInfo['readRecords'] {
+    let query: readonly RecordKey[] | undefined;
+    let subject: readonly RecordKey[] | undefined;
     for (const role of ['query', 'subject'] as const) {
       const input = request[role];
       // A run of -db has no subject.
       if (input === undefined) continue;
-      const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes, programOf(request), role));
-      if (mismatch !== undefined) throw new InputMismatchError(role, mismatch);
+      const actual = fakeRecordKeys(input.bytes, programOf(request), role);
+      const mismatch = recordMismatch(input.records, actual);
+      if (mismatch !== undefined) {
+        if (input.assembled === true) {
+          if (role === 'query') query = actual;
+          else subject = actual;
+        } else {
+          throw new InputMismatchError(role, mismatch);
+        }
+      }
     }
     // A reader's error ends the run, as the engine's run does after the query batches before it
     // (line WQA's D10, 2026-11-19): the fake writes nothing first.
-    const readerError = fakeReaderError(request.query.bytes, programOf(request), 'query');
-    if (readerError !== undefined) throw new Error(readerError);
+    if (request.query !== undefined) {
+      const readerError = fakeReaderError(request.query.bytes, programOf(request), 'query');
+      if (readerError !== undefined) throw new Error(readerError);
+    }
+    if (query === undefined && subject === undefined) return undefined;
+    return { ...(query === undefined ? {} : { query }), ...(subject === undefined ? {} : { subject }) };
   }
 
   /**
@@ -310,8 +364,17 @@ export class FakeEngine implements EngineGateway, ToolEngine {
   private writeOutputs(request: EngineRunRequest, writer: RunOutputWriter): void {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
-    const queries = fakeRecordKeys(request.query.bytes, programOf(request), 'query').slice(0, 200);
-    const subjects = fakeRecordKeys(request.subject?.bytes ?? new Uint8Array(0), programOf(request), 'subject').slice(0, 3);
+    const queries =
+      request.query !== undefined
+        ? fakeRecordKeys(request.query.bytes, programOf(request), 'query').slice(0, 200)
+        : [{ id: fakeQueryFileId(request.argv), length: 120 }];
+    const subjects =
+      request.subject !== undefined
+        ? fakeRecordKeys(request.subject.bytes, programOf(request), 'subject').slice(0, 3)
+        : [
+            { id: 'db_seq_1', length: 500 },
+            { id: 'db_seq_2', length: 320 },
+          ];
     const nucleotide = { query: ['blastn', 'blastx', 'tblastx'].includes(program), subject: ['blastn', 'tblastn', 'tblastx'].includes(program) };
     const translated = { query: program === 'blastx' || program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
     let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;
@@ -320,6 +383,10 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     let out6 = `# ${FAKE_MARKER}\n`;
     let out7 = `# ${FAKE_MARKER}\n`;
     let hits = '';
+    const iterations =
+      program === 'psiblast'
+        ? Math.max(1, Math.min(5, Number.parseInt(optionValue(request.argv, '-num_iterations') ?? '1', 10) || 1))
+        : 1;
     let index = 0;
     const length = (text: string) => encoder.encode(text).length;
     queries.forEach((query, qIdx) => {
@@ -328,54 +395,59 @@ export class FakeEngine implements EngineGateway, ToolEngine {
         out0 += '\n***** No hits found ***** (FAKE)\n';
         return;
       }
-      let rank = 0;
-      subjects.forEach((subject, sIdx) => {
-        const shown = sIdx < 2;
-        const heading = `> ${subject.id}\nLength=${subject.length}\n\n`;
-        const headingStart = length(out0);
-        if (shown) out0 += heading;
-        const count = 1 + ((qIdx + sIdx) % 2);
-        for (let j = 0; j < count; j++) {
-          const single = program === 'blastn' && qIdx === 2 && sIdx === 0 && j === 0;
-          const span = (total: number) => (single ? 1 : Math.max(1, Math.floor(total / 2)));
-          const qStart = 1 + j;
-          const qEnd = Math.min(query.length, qStart + span(query.length) - 1);
-          const reverse = nucleotide.subject && j === 1;
-          const sFrom = 1 + j;
-          const sTo = Math.min(subject.length, sFrom + span(subject.length) - 1);
-          const [sStart, sEnd] = reverse ? [sTo, sFrom] : [sFrom, sTo];
-          const row = [query.id, subject.id, 'FAKE', String(qEnd - qStart + 1), '0', '0', qStart, qEnd, sStart, sEnd, 'FAKE', 'FAKE'].join('\t') + '\n';
-          const out6Start = length(out6);
-          out6 += row;
-          out7 += row;
-          const sectionStart = length(out0);
-          if (shown) out0 += ` Score = FAKE, Expect = FAKE (${FAKE_MARKER})\n Strand=Plus/${reverse ? 'Minus' : 'Plus'}\n\n`;
-          const hit: HspRecord = {
-            index,
-            q_idx: qIdx,
-            s_idx: sIdx,
-            rank,
-            raw_score: 100 - index,
-            bit_score: 50 - index / 2,
-            e_value: index * 1e-5,
-            q_start: qStart,
-            q_end: qEnd,
-            s_start: sStart,
-            s_end: sEnd,
-            query_frame: translated.query ? 1 : null,
-            subject_frame: translated.subject ? (reverse ? -1 : 1) : null,
-            subject_length: subject.length,
-            query_aligned: null,
-            subject_aligned: null,
-            out6: [out6Start, length(out6)],
-            out0: shown ? [sectionStart, length(out0)] : null,
-            out0_subject: shown ? [headingStart, headingStart + length(heading)] : null,
-          };
-          hits += `${JSON.stringify(hit)}\n`;
-          index++;
-          rank++;
-        }
-      });
+      for (let round = 1; round <= iterations; round++) {
+        if (program === 'psiblast' && iterations > 1) out0 += `\nResults from round ${round}\n`;
+        let rank = 0;
+        subjects.forEach((subject, sIdx) => {
+          const shown = sIdx < 2;
+          const heading = `> ${subject.id}\nLength=${subject.length}\n\n`;
+          const headingStart = length(out0);
+          if (shown) out0 += heading;
+          const count = 1 + ((qIdx + sIdx) % 2);
+          for (let j = 0; j < count; j++) {
+            const single = program === 'blastn' && qIdx === 2 && sIdx === 0 && j === 0;
+            const span = (total: number) => (single ? 1 : Math.max(1, Math.floor(total / 2)));
+            const qStart = 1 + j;
+            const qEnd = Math.min(query.length, qStart + span(query.length) - 1);
+            const reverse = nucleotide.subject && j === 1;
+            const sFrom = 1 + j;
+            const sTo = Math.min(subject.length, sFrom + span(subject.length) - 1);
+            const [sStart, sEnd] = reverse ? [sTo, sFrom] : [sFrom, sTo];
+            const row = [query.id, subject.id, 'FAKE', String(qEnd - qStart + 1), '0', '0', qStart, qEnd, sStart, sEnd, 'FAKE', 'FAKE'].join('\t') + '\n';
+            const out6Start = length(out6);
+            out6 += row;
+            out7 += row;
+            const sectionStart = length(out0);
+            if (shown) out0 += ` Score = FAKE, Expect = FAKE (${FAKE_MARKER})\n Strand=Plus/${reverse ? 'Minus' : 'Plus'}\n\n`;
+            const hit: HspRecord = {
+              index,
+              q_idx: qIdx,
+              s_idx: sIdx,
+              rank,
+              raw_score: 100 - index,
+              bit_score: 50 - index / 2,
+              e_value: index * 1e-5,
+              q_start: qStart,
+              q_end: qEnd,
+              s_start: sStart,
+              s_end: sEnd,
+              query_frame: translated.query ? 1 : null,
+              subject_frame: translated.subject ? (reverse ? -1 : 1) : null,
+              query_length: query.length,
+              subject_length: subject.length,
+              query_aligned: null,
+              subject_aligned: null,
+              out6: [out6Start, length(out6)],
+              out0: shown ? [sectionStart, length(out0)] : null,
+              out0_subject: shown ? [headingStart, headingStart + length(heading)] : null,
+              ...(program === 'psiblast' ? { round } : {}),
+            };
+            hits += `${JSON.stringify(hit)}\n`;
+            index++;
+            rank++;
+          }
+        });
+      }
     });
     writer.write(0, encoder.encode(out0));
     writer.write(6, encoder.encode(out6));
@@ -448,4 +520,31 @@ function ownOutput(argv: readonly string[]): RunOutput {
 /** The program of a run: the first word of its argv. */
 function programOf(request: EngineRunRequest): ProgramId {
   return request.argv[0] as ProgramId;
+}
+
+function fakeArgValue(argv: readonly string[], flag: string): string | undefined {
+  for (let i = argv.length - 1; i >= 1; i--) {
+    const word = argv[i]!;
+    if (word === flag) return argv[i + 1];
+    if (word.startsWith(`${flag}=`)) return word.slice(flag.length + 1);
+  }
+  return undefined;
+}
+
+function fakeQueryFileId(argv: readonly string[]): string {
+  return fakeArgValue(argv, '-in_pssm') ?? fakeArgValue(argv, '-in_msa') ?? 'query_pssm';
+}
+
+function fakePssmRunFiles(argv: readonly string[]): readonly { readonly name: string; readonly bytes: Uint8Array; readonly option: 'out_pssm' | 'out_ascii_pssm' }[] {
+  const encoder = new TextEncoder();
+  const files: { readonly name: string; readonly bytes: Uint8Array; readonly option: 'out_pssm' | 'out_ascii_pssm' }[] = [];
+  const outPssm = fakeArgValue(argv, '-out_pssm');
+  if (outPssm !== undefined && outPssm !== '') {
+    files.push({ name: outPssm, bytes: encoder.encode(`PssmWithParameters ::= {\n  -- ${FAKE_MARKER}\n}\n`), option: 'out_pssm' });
+  }
+  const outAscii = fakeArgValue(argv, '-out_ascii_pssm');
+  if (outAscii !== undefined && outAscii !== '') {
+    files.push({ name: outAscii, bytes: encoder.encode(`Last position-specific scoring matrix computed (${FAKE_MARKER})\n`), option: 'out_ascii_pssm' });
+  }
+  return files;
 }

@@ -314,8 +314,12 @@ export class EngineRuntime {
       // reads no file for it (ABI v2 §4): nothing is registered, and the run takes the handles 0 (line WQA's D14).
       const prints = started.start.prints !== null;
       // A search of -db searches the database of its directory: it has no subject, and the engine takes subject handle 0
-      // (ABI v2 §4). Any other search has one.
+      // (ABI v2 §4). A search of -in_pssm or -in_msa reads its query from its directory: it has no FASTA query, and the
+      // engine takes query handle 0 (ABI v2 §4, version 16).
       const database = started.start.database;
+      const fileQuery = started.start.queryFile != null;
+      if (!prints && fileQuery && request.query !== undefined) throw new EngineCallError('a run of -in_pssm or -in_msa has no query: give no query');
+      if (!prints && !fileQuery && request.query === undefined) throw new EngineCallError('this run needs a query (or -in_pssm / -in_msa)');
       if (!prints && database && request.subject !== undefined) throw new EngineCallError('a run of -db has no subject: give no subject');
       if (!prints && !database && request.subject === undefined) throw new EngineCallError('this run needs a subject (or -db)');
       // -parse_deflines (line WQA's sweep, D7, 2026-11-19): the CLI reads the subjects and then the
@@ -323,29 +327,46 @@ export class EngineRuntime {
       // the two handles are this search's alone. The retained subject, read without the IDs, is
       // released first: the instance does not hold two copies of the subject.
       let together: RegisteredInputs | undefined;
-      if (!prints && started.start.registerInputs) {
+      if (!prints && started.start.registerInputs && !(database && fileQuery)) {
         if (!database) this.releaseRetained(loaded);
-        together = abi.registerInputs(argv, request.query.bytes, request.subject?.bytes ?? new Uint8Array(0));
+        together = abi.registerInputs(argv, request.query?.bytes ?? new Uint8Array(0), request.subject?.bytes ?? new Uint8Array(0));
         ownSubject = together.subject?.handle;
       }
       let handles: readonly [number, number] = [0, 0];
       let subjectRetained = false;
+      let readQuery: readonly RecordKey[] | undefined;
+      let readSubject: readonly RecordKey[] | undefined;
       if (!prints) {
-        const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, dataLoaders, request.query.bytes);
-        query = registered.handle;
-        const queryMismatch = recordMismatch(request.query.records, registered.records);
-        if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
+        let queryHandle = 0;
+        const givenQuery = request.query;
+        if (givenQuery !== undefined) {
+          const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, dataLoaders, false, givenQuery.bytes);
+          query = registered.handle;
+          const queryMismatch = recordMismatch(givenQuery.records, registered.records);
+          if (queryMismatch !== undefined) {
+            if (givenQuery.assembled === true) readQuery = registered.records;
+            else throw new InputMismatchError('query', queryMismatch);
+          }
+          queryHandle = registered.handle;
+        }
         const given = request.subject;
         subjectRetained = given !== undefined && together === undefined && this.retains(loaded, given, dataLoaders);
         let subjectHandle = 0;
         if (given !== undefined) {
           const subject = together?.subject ?? this.subject(loaded, given, request.program, dataLoaders);
           const subjectMismatch = recordMismatch(given.records, subject.records);
-          if (subjectMismatch !== undefined) throw new InputMismatchError('subject', subjectMismatch);
+          if (subjectMismatch !== undefined) {
+            if (given.assembled === true) readSubject = subject.records;
+            else throw new InputMismatchError('subject', subjectMismatch);
+          }
           subjectHandle = subject.handle;
         }
-        handles = [registered.handle, subjectHandle];
+        handles = [queryHandle, subjectHandle];
       }
+      const readRecords =
+        readQuery === undefined && readSubject === undefined
+          ? undefined
+          : { ...(readQuery === undefined ? {} : { query: readQuery }), ...(readSubject === undefined ? {} : { subject: readSubject }) };
       const shownIds = together?.shownIds;
 
       const writer = new RunOutputWriter(request.output);
@@ -400,6 +421,7 @@ export class EngineRuntime {
         ...(loaded.counts === undefined ? {} : { countsBytes: loaded.counts.info.size }),
         ...(runFiles.length === 0 ? {} : { runFiles }),
         ...(prints ? { printed: joined(printed) } : {}),
+        ...(readRecords === undefined ? {} : { readRecords }),
       };
     } finally {
       if (abi.stoppedBy === undefined) {
@@ -542,7 +564,7 @@ export class EngineRuntime {
     const abi = loaded.instance.abi;
     if (this.retains(loaded, given, dataLoaders)) return loaded.retained!;
     this.releaseRetained(loaded);
-    const registered = abi.register(program, ROLE_SUBJECT, dataLoaders, given.bytes);
+    const registered = abi.register(program, ROLE_SUBJECT, dataLoaders, false, given.bytes);
     loaded.retained = { key: given.key, dataLoaders, handle: registered.handle, records: registered.records };
     return loaded.retained;
   }

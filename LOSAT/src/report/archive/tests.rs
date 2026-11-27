@@ -94,8 +94,8 @@ fn archive_format_is_read_like_print_archive() {
 fn a_request_tells_whether_its_strings_are_written_as_they_are() {
     let as_is = |encoding, path: Option<&str>, db: Option<&str>| {
         let mut inputs = OptionInputs::new(Program::Blastn, "megablast");
-        inputs.window_masker_db = path.map(str::to_string);
-        ArchiveRequest::for_inputs(&inputs, db).written_as_is(encoding)
+        inputs.window_masker_db = path.map(|s| s.as_bytes().to_vec());
+        ArchiveRequest::for_inputs(&inputs, db.map(str::as_bytes)).written_as_is(encoding)
     };
     for encoding in [
         ArchiveEncoding::Text,
@@ -195,7 +195,10 @@ fn the_search_space_option_carries_over_unsearched_batches() {
             },
             OptionsHandle::default(),
         );
-        handle.options().set_database_filter(None, length).unwrap();
+        handle
+            .options()
+            .set_database_filter(Vec::new(), length)
+            .unwrap();
         handle
     };
     assert_eq!(
@@ -224,7 +227,7 @@ fn the_search_space_option_carries_over_unsearched_batches() {
 /// The `EffectiveSearchSpace` option among a request's sets.
 pub(super) fn search_space(sets: &[options::Param]) -> Option<i64> {
     sets.iter()
-        .find(|param| param.name == "EffectiveSearchSpace")
+        .find(|param| param.name() == "EffectiveSearchSpace")
         .map(|param| match param.value {
             options::ParamValue::BigInteger(space) => space,
             ref other => panic!("EffectiveSearchSpace {other:?}"),
@@ -240,29 +243,26 @@ fn the_handle_sets_fold_in_ncbis_order() {
     let handle = OptionsHandle::default();
     handle
         .set_search_sets(
-            vec![Param {
-                name: "CompositionBasedStats",
-                value: ParamValue::Integer(0),
-            }],
+            vec![Param::new(
+                fields::COMPOSITION_BASED_STATS,
+                ParamValue::Integer(0),
+            )],
             vec![
-                Param {
-                    name: "DbLength",
-                    value: ParamValue::BigInteger(560),
-                },
-                Param {
-                    name: "MatrixName",
-                    value: ParamValue::Str("BLOSUM62".to_string()),
-                },
+                Param::new(fields::DB_LENGTH, ParamValue::BigInteger(560)),
+                Param::new(fields::MATRIX_NAME, ParamValue::Str(b"BLOSUM62".to_vec())),
             ],
+            Vec::new(),
         )
         .unwrap();
-    assert!(handle.set_search_sets(Vec::new(), Vec::new()).is_err());
+    assert!(handle
+        .set_search_sets(Vec::new(), Vec::new(), Vec::new())
+        .is_err());
     let mut carry = HandleCarry::default();
     let names = |carry: &HandleCarry| -> Vec<&'static str> {
         handle
             .request_sets(carry)
             .iter()
-            .map(|param| param.name)
+            .map(|param| param.name())
             .collect()
     };
     assert_eq!(names(&carry), ["CompositionBasedStats"]);
@@ -289,6 +289,56 @@ fn the_handle_sets_fold_in_ncbis_order() {
         ]
     );
     assert_eq!(search_space(&handle.request_sets(&carry)), Some(96_628));
+}
+
+// psiblast `-phi_pattern` (PS8a fix round 1): psiblast resets the composition-based statistics
+// after each batch, which PHI-BLAST's options never set: the reset comes after the batch's search
+// space and stays there (NCBI BLAST+ 2.17.0 `st.multi`: requests 2 and 3 hold
+// `EffectiveSearchSpace`, then `CompositionBasedStats 0`; `st.multi.p250`, a batch NCBI does not
+// search, only the latter).
+#[test]
+fn the_after_batch_sets_follow_the_search_space() {
+    use options::{Param, ParamValue};
+    let handle = OptionsHandle::default();
+    handle
+        .set_search_sets(
+            Vec::new(),
+            Vec::new(),
+            vec![Param::new(
+                fields::COMPOSITION_BASED_STATS,
+                ParamValue::Integer(0),
+            )],
+        )
+        .unwrap();
+    let names = |carry: &HandleCarry| -> Vec<&'static str> {
+        handle
+            .request_sets(carry)
+            .iter()
+            .map(|param| param.name())
+            .collect()
+    };
+    let mut carry = HandleCarry::default();
+    assert!(names(&carry).is_empty());
+    let searched = |space| {
+        Some(writer::SearchedContext0 {
+            space,
+            query_length: 104,
+        })
+    };
+    handle.pass(&mut carry, searched(338_444));
+    assert_eq!(
+        names(&carry),
+        ["EffectiveSearchSpace", "CompositionBasedStats"]
+    );
+    handle.pass(&mut carry, searched(338_000));
+    assert_eq!(
+        names(&carry),
+        ["EffectiveSearchSpace", "CompositionBasedStats"]
+    );
+    assert_eq!(search_space(&handle.request_sets(&carry)), Some(338_000));
+    let mut unsearched = HandleCarry::default();
+    handle.pass(&mut unsearched, None);
+    assert_eq!(names(&unsearched), ["CompositionBasedStats"]);
 }
 
 #[test]
@@ -413,7 +463,7 @@ fn an_archive_of_a_dbsize_of_minus_two_to_the_63_writes_its_digits() {
     ] {
         let handle = ArchiveHandle::new(
             encoding,
-            ArchiveRequest::for_inputs(&inputs, Some("in/db/bp")),
+            ArchiveRequest::for_inputs(&inputs, Some(b"in/db/bp")),
             OptionsHandle::default(),
         );
         let batch = BatchArchive {
@@ -495,7 +545,7 @@ fn a_psiblast_round_writes_its_step_and_composition_mode() {
     let archive = |database: Option<&str>, round: Option<writer::ArchiveRound>| {
         let handle = ArchiveHandle::new(
             ArchiveEncoding::Text,
-            ArchiveRequest::for_inputs(&inputs, database),
+            ArchiveRequest::for_inputs(&inputs, database.map(str::as_bytes)),
             OptionsHandle::default(),
         );
         let batch = BatchArchive {
@@ -639,6 +689,32 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
     assert!(!pssm_holds_null_element(&fixture_pssm(
         "db_search/db.ps.asn.rnd.6.asn"
     )));
+}
+
+// Line PS item PS7c: the archive block of a Lambda the results do not keep (`stats::tables::ancillary_kept`).
+#[test]
+fn a_block_of_a_lambda_below_zero_or_not_a_number_is_the_missing_one() {
+    let params = |lambda| KarlinParams {
+        lambda,
+        k: 0.041,
+        h: 0.14,
+        alpha: 0.0,
+        beta: 0.0,
+    };
+    for lambda in [f64::NAN, f64::NEG_INFINITY, -0.5] {
+        let block = ka_block(&params(lambda), true);
+        assert_eq!(
+            (block.lambda, block.k, block.h, block.gapped),
+            (-1.0, -1.0, -1.0, true)
+        );
+    }
+    let block = ka_block(&params(0.267), false);
+    assert_eq!(
+        (block.lambda, block.k, block.h, block.gapped),
+        (0.267, 0.041, 0.14, false)
+    );
+    // +inf is kept, as NCBI's test keeps it.
+    assert_eq!(ka_block(&params(f64::INFINITY), true).lambda, f64::INFINITY);
 }
 
 /// A delayed member of another format whose read posts a replaced byte is written through

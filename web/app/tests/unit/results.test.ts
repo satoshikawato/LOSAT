@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagePlace } from 'losat/domain';
 import type { HspRecord, ProgramDescription } from 'losat/ports';
-import type { AppState, RunView } from '../../src/application/coordinator';
+import type { AppState, RunView, ToolRunView } from '../../src/application/coordinator';
 import { keptOutputs, noHspReason, ResultsBrowser, type ResultsDeps } from '../../src/application/results';
 import { Store } from '../../src/application/store';
 import { hspTable, out0Range, out6Range, frame, subjectSpan } from '../../src/domain/hsp-table';
@@ -24,12 +24,15 @@ import {
 import {
   approvedExceptions,
   optionKey,
+  toolOptionGrammar,
+  toolOptionKey,
   verificationBadge,
   RANGE_VALUE,
   type BadgeInput,
   type VerificationTable,
 } from '../../src/domain/verification';
 import type { RunRecord, RunSnapshot } from '../../src/domain/run';
+import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import type { FailedOutput } from '../../src/ports/data';
 import { NO_HSP_TEXT } from '../../src/ui/no-hsp-text';
 import { NO_WARNINGS, placeParts, placeText, warningsPlaceParts, warningsPlaceText } from '../../src/ui/message-place-text';
@@ -39,6 +42,7 @@ import { NO_WARNINGS, placeParts, placeText, warningsPlaceParts, warningsPlaceTe
 interface Spec {
   readonly q: number;
   readonly s: number;
+  readonly round?: number;
   readonly bits: number;
   readonly e: number;
   readonly coords: readonly [number, number, number, number];
@@ -61,7 +65,7 @@ function makeRun(specs: readonly Spec[] = SPECS) {
   let out6 = '';
   let out0 = 'header\n';
   const records: HspRecord[] = [];
-  const ranks = new Map<number, number>();
+  const ranks = new Map<string, number>();
   const headings = new Map<string, [number, number]>();
   specs.forEach((spec, index) => {
     const [qs, qe, ss, se] = spec.coords;
@@ -69,7 +73,8 @@ function makeRun(specs: readonly Spec[] = SPECS) {
     const out6Start = out6.length;
     out6 += row;
     const shown = spec.shown ?? true;
-    const key = `${spec.q}:${spec.s}`;
+    const round = spec.round ?? 0;
+    const key = `${spec.q}:${round}:${spec.s}`;
     if (shown && !headings.has(key)) {
       const heading = spec.out0?.heading ?? `> s${spec.s} subject number ${spec.s}\nLength=500\n\n`;
       headings.set(key, [out0.length, out0.length + heading.length]);
@@ -77,8 +82,9 @@ function makeRun(specs: readonly Spec[] = SPECS) {
     }
     const sectionStart = out0.length;
     if (shown) out0 += spec.out0?.section ?? ` Score = ${spec.bits} bits\n\nQuery  ${qs}  ACGT  ${qe}\n`;
-    const rank = ranks.get(spec.q) ?? 0;
-    ranks.set(spec.q, rank + 1);
+    const rankKey = `${spec.q}:${round}`;
+    const rank = ranks.get(rankKey) ?? 0;
+    ranks.set(rankKey, rank + 1);
     records.push({
       index,
       q_idx: spec.q,
@@ -99,6 +105,7 @@ function makeRun(specs: readonly Spec[] = SPECS) {
       out6: [out6Start, out6.length],
       out0: shown ? [sectionStart, out0.length] : null,
       out0_subject: shown ? headings.get(key)! : null,
+      ...(spec.round === undefined ? {} : { round: spec.round }),
     });
   });
   return { records, out6: new TextEncoder().encode(out6), out0: new TextEncoder().encode(out0) };
@@ -521,6 +528,38 @@ function setup(
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('ResultsBrowser', () => {
+  it('uses RunRecord.readRecords for query and subject metadata when an assembled input read differently (D17)', async () => {
+    const { results } = setup({
+      record: {
+        readRecords: {
+          query: [
+            { id: 'q0', length: 120 },
+            { id: 'q1', length: 180 },
+            { id: 'q2', length: 90 },
+          ],
+          subject: [
+            { id: 's0', length: 300 },
+            { id: 's1', length: 310 },
+            { id: 's2', length: 320 },
+          ],
+        },
+      },
+    });
+    await results.open('r1');
+    await settle();
+    const state = results.state.get();
+    expect(state.queries.map((q) => [q.id, q.length])).toEqual([
+      ['q0', 120],
+      ['q1', 180],
+      ['q2', 90],
+    ]);
+    expect(state.subjects.map((s) => [s.recordId, s.length])).toEqual([
+      ['s1', 310],
+      ['s0', 300],
+      ['s2', 320],
+    ]);
+  });
+
   it('opens a run on its first query with hits, its first subject and HSP, and reads the HSP as written', async () => {
     const { results } = setup();
     await results.open('r1');
@@ -536,7 +575,7 @@ describe('ResultsBrowser', () => {
       [0, 's0', '70', 1, true],
       [2, 's2', '70', 1, false],
     ]);
-    expect(state.hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 0 });
+    expect(state.hsp).toEqual({ runId: 'r1', qIdx: 0, round: 0, rank: 0 });
     expect(state.hsps.map((h) => [h.id.rank, h.orientation])).toEqual([
       [0, 'forward'],
       [1, 'reverse'],
@@ -552,7 +591,7 @@ describe('ResultsBrowser', () => {
   it('follows an HSP of another subject, and shows a query without hits', async () => {
     const { results } = setup();
     await results.open('r1');
-    results.selectHsp({ runId: 'r1', qIdx: 0, rank: 3 });
+    results.selectHsp({ runId: 'r1', qIdx: 0, round: 0, rank: 3 });
     await settle();
     let state = results.state.get();
     expect(state.sIdx).toBe(2);
@@ -571,14 +610,14 @@ describe('ResultsBrowser', () => {
     await results.open('r1');
     await settle();
     hold(true);
-    results.selectHsp({ runId: 'r1', qIdx: 0, rank: 1 });
-    results.selectHsp({ runId: 'r1', qIdx: 0, rank: 2 });
+    results.selectHsp({ runId: 'r1', qIdx: 0, round: 0, rank: 1 });
+    results.selectHsp({ runId: 'r1', qIdx: 0, round: 0, rank: 2 });
     // The reads for rank 2 answer first: rank 1's detail arrives last, and is dropped.
     release(true);
     await settle();
     hold(false);
     const { detail, hsp } = results.state.get();
-    expect(hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 2 });
+    expect(hsp).toEqual({ runId: 'r1', qIdx: 0, round: 0, rank: 2 });
     expect(detail!.id).toEqual(hsp);
     expect(detail!.section).toBe(' Score = 70 bits\n\nQuery  5  ACGT  45\n');
   });
@@ -613,11 +652,11 @@ describe('ResultsBrowser', () => {
   it('keeps the selected HSP through a filter that shows it, and moves off one that hides it', async () => {
     const { results } = setup();
     await results.open('r1');
-    results.selectHsp({ runId: 'r1', qIdx: 0, rank: 1 });
+    results.selectHsp({ runId: 'r1', qIdx: 0, round: 0, rank: 1 });
     results.setFilters({ maxEValue: 1e-4 });
-    expect(results.state.get().hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 1 });
+    expect(results.state.get().hsp).toEqual({ runId: 'r1', qIdx: 0, round: 0, rank: 1 });
     results.setFilters({ maxEValue: 1e-10 });
-    expect(results.state.get().hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 0 });
+    expect(results.state.get().hsp).toEqual({ runId: 'r1', qIdx: 0, round: 0, rank: 0 });
     expect(results.state.get().hidden).toEqual({ subjects: 0, hsps: 1 });
     results.setFilters({ minBitScore: 1000 });
     const state = results.state.get();
@@ -636,7 +675,7 @@ describe('ResultsBrowser', () => {
     let state = results.state.get();
     expect(state.queries.map((q) => q.id)).toEqual(['q0']);
     expect(state.qIdx).toBe(0);
-    expect(state.hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 0 });
+    expect(state.hsp).toEqual({ runId: 'r1', qIdx: 0, round: 0, rank: 0 });
     expect(state.queryTotals).toEqual({ subjects: 3, hsps: 4 });
 
     results.setFilters({ queryText: 'none' });
@@ -1023,22 +1062,24 @@ describe('ResultsBrowser', () => {
     await settle();
     // The selected HSP's detail has read its section: the Range reads none.
     const reads = rangeReads();
-    expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 0 })).toBe(' Score = 90 bits\n\nQuery  1  ACGT  50\n');
+    expect(await results.readSection({ runId: 'r1', qIdx: 0, round: 0, rank: 0 })).toBe(' Score = 90 bits\n\nQuery  1  ACGT  50\n');
     expect(rangeReads()).toBe(reads);
-    expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 1 })).toBe(' Score = 40 bits\n\nQuery  60  ACGT  80\n');
-    expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 1 })).toBe(' Score = 40 bits\n\nQuery  60  ACGT  80\n');
+    const secondHsp = { runId: 'r1', qIdx: 0, round: 0, rank: 1 };
+    for (let i = 0; i < 2; i++) {
+      expect(await results.readSection(secondHsp)).toBe(' Score = 40 bits\n\nQuery  60  ACGT  80\n');
+    }
     expect(rangeReads()).toBe(reads + 1);
-    expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 3 })).toBeUndefined();
-    expect(await results.readSection({ runId: 'r2', qIdx: 0, rank: 1 })).toBeUndefined();
+    expect(await results.readSection({ runId: 'r1', qIdx: 0, round: 0, rank: 3 })).toBeUndefined();
+    expect(await results.readSection({ runId: 'r2', qIdx: 0, round: 0, rank: 1 })).toBeUndefined();
     expect(rangeReads()).toBe(reads + 1);
     // Another run reads its own sections.
     await results.open('r2');
     await settle();
     const before = rangeReads();
     failRanges(true);
-    await expect(results.readSection({ runId: 'r2', qIdx: 0, rank: 2 })).rejects.toThrow('the stored output is gone');
+    await expect(results.readSection({ runId: 'r2', qIdx: 0, round: 0, rank: 2 })).rejects.toThrow('the stored output is gone');
     failRanges(false);
-    expect(await results.readSection({ runId: 'r2', qIdx: 0, rank: 2 })).toBe(' Score = 70 bits\n\nQuery  5  ACGT  45\n');
+    expect(await results.readSection({ runId: 'r2', qIdx: 0, round: 0, rank: 2 })).toBe(' Score = 70 bits\n\nQuery  5  ACGT  45\n');
     expect(rangeReads()).toBe(before + 2);
   });
 
@@ -1053,18 +1094,64 @@ describe('ResultsBrowser', () => {
     expect([...results.state.get().headings]).toEqual([[1, '> s1 subject number 1\nLength=500\n\n']]);
     expect(rangeReads()).toBe(2);
     // Another HSP of the subject reads only its section.
-    results.selectHsp({ runId: 'r1', qIdx: 0, rank: 1 });
+    results.selectHsp({ runId: 'r1', qIdx: 0, round: 0, rank: 1 });
     await settle();
     expect(results.state.get().detail).toMatchObject({ state: 'ready', heading: '> s1 subject number 1\nLength=500\n\n' });
     expect(rangeReads()).toBe(3);
     // An HSP of another subject: its query's rank finds its row.
-    results.selectHsp({ runId: 'r1', qIdx: 0, rank: 2 });
+    results.selectHsp({ runId: 'r1', qIdx: 0, round: 0, rank: 2 });
     await settle();
     expect(results.state.get()).toMatchObject({ sIdx: 0, detail: { state: 'ready', heading: '> s0 subject number 0\nLength=500\n\n' } });
     // A rank that the query does not have selects nothing.
-    results.selectHsp({ runId: 'r1', qIdx: 0, rank: 9 });
-    results.selectHsp({ runId: 'r1', qIdx: 1, rank: 0 });
-    expect(results.state.get().hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 2 });
+    results.selectHsp({ runId: 'r1', qIdx: 0, round: 0, rank: 9 });
+    results.selectHsp({ runId: 'r1', qIdx: 1, round: 0, rank: 0 });
+    expect(results.state.get().hsp).toEqual({ runId: 'r1', qIdx: 0, round: 0, rank: 2 });
+  });
+
+  it('separates multi-round PSI-BLAST HSPs by round, defaults to the last round, and switches rounds cleanly', async () => {
+    const multiRoundSpecs: readonly Spec[] = [
+      // Round 1: s0 is top hit (e=1.35e-19), s1 is second (e=2.76e-18)
+      { q: 0, s: 0, round: 1, bits: 63.9, e: 1.35e-19, coords: [1, 30, 1, 30], text: { e: '1.35e-19', bits: '63.9' }, out0: { section: ' Score = 63.9 bits (R1 s0)\n' } },
+      { q: 0, s: 1, round: 1, bits: 60.5, e: 2.76e-18, coords: [1, 30, 1, 30], text: { e: '2.76e-18', bits: '60.5' }, out0: { section: ' Score = 60.5 bits (R1 s1)\n' } },
+      // Round 2: s1 becomes top hit (e=5.59e-18), s0 is second (e=8.24e-18)
+      { q: 0, s: 1, round: 2, bits: 59.7, e: 5.59e-18, coords: [1, 30, 1, 30], text: { e: '5.59e-18', bits: '59.7' }, out0: { section: ' Score = 59.7 bits (R2 s1)\n' } },
+      { q: 0, s: 0, round: 2, bits: 59.3, e: 8.24e-18, coords: [1, 30, 1, 30], text: { e: '8.24e-18', bits: '59.3' }, out0: { section: ' Score = 59.3 bits (R2 s0)\n' } },
+    ];
+    const index = buildResultIndex(hspTable(makeRun(multiRoundSpecs).records));
+    const q0 = index.queries.get(0)!;
+    expect(q0.rounds.map((r) => [r.round, r.subjects.map((s) => s.sIdx), r.hspCount])).toEqual([
+      [1, [0, 1], 2],
+      [2, [1, 0], 2],
+    ]);
+    expect(q0.subjects.map((s) => s.sIdx)).toEqual([1, 0]);
+    expect(q0.hspCount).toBe(2);
+
+    const expectRound = (
+      round: number,
+      subjects: [number, number, string][],
+      section: string,
+    ) => {
+      const state = results.state.get();
+      expect(state.round).toBe(round);
+      expect(state.queryTotals).toEqual({ subjects: 2, hsps: 2 });
+      expect(state.subjects.map((s) => [s.sIdx, s.hspCount, s.first.evalue])).toEqual(subjects);
+      expect(state.hsp).toEqual({ runId: 'r1', qIdx: 0, round, rank: 0 });
+      expect(state.detail?.section).toBe(section);
+    };
+
+    const { results } = setup({ specs: multiRoundSpecs, argv: ['psiblast', '-query', 'q.fa', '-subject', 's.fa', '-num_iterations', '2'] });
+    await results.open('r1');
+    await settle();
+    expect(results.state.get().rounds).toEqual([1, 2]);
+    expectRound(2, [[1, 1, '5.59e-18'], [0, 1, '8.24e-18']], ' Score = 59.7 bits (R2 s1)\n');
+
+    results.selectRound(1);
+    await settle();
+    expectRound(1, [[0, 1, '1.35e-19'], [1, 1, '2.76e-18']], ' Score = 63.9 bits (R1 s0)\n');
+    expect(await Promise.all([
+      results.readSection({ runId: 'r1', qIdx: 0, round: 2, rank: 0 }),
+      results.readSection({ runId: 'r1', qIdx: 0, round: 1, rank: 0 }),
+    ])).toEqual([' Score = 59.7 bits (R2 s1)\n', ' Score = 63.9 bits (R1 s0)\n']);
   });
 
   describe('outfmt 0 of a run made with -html', () => {
@@ -1085,7 +1172,7 @@ describe('ResultsBrowser', () => {
       expect(state.detail!.section).toBe(' Score = 90 bits\n\nQuery  1  acgt  50\n');
       // The subject list's title and the readers of the Alignments: one decoding for all of them.
       expect(headingTitle(state.detail!.heading!)).toBe('s1 subject <one> &lt; "q"');
-      expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 0 })).toBe(' Score = 90 bits\n\nQuery  1  acgt  50\n');
+      expect(await results.readSection({ runId: 'r1', qIdx: 0, round: 0, rank: 0 })).toBe(' Score = 90 bits\n\nQuery  1  acgt  50\n');
       results.requestHeadings([1]);
       await expect.poll(() => results.state.get().headings.get(1)).toBe(PLAIN_HEADING);
     });
@@ -1110,5 +1197,77 @@ describe('ResultsBrowser', () => {
     const given = setup({ argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-task', 'blastn'] });
     await given.results.open('r1');
     expect(given.results.state.get().loaded!.task).toBe('blastn');
+  });
+
+  it('gives no tool badge when describeTool rejects or is absent, and shows Supported once describeTool succeeds', async () => {
+    // cases.tsv k_obinary_file argv: Supported with -xmlhelp grammar, no key with fallback grammar.
+    const argv = ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-unit', '5', '-sformat', 'obinary', '-out', 'c.counts'];
+    const description = await new FakeEngine().describeTool('windowmasker');
+    const key = toolOptionKey(argv, toolOptionGrammar(description))!;
+    const toolRun: ToolRunView = {
+      snapshot: {
+        kind: 'tool',
+        runId: 't1',
+        number: 1,
+        tool: 'windowmasker',
+        stage: 'mk_counts',
+        argv,
+        directory: [{ name: 'genome.fa', size: 100, origin: { kind: 'pasted' } }],
+        queuedAt: 0,
+      },
+      status: 'completed',
+      record: { runtimePath: 'serial', exitStatus: 0 },
+    };
+    const runs = new Store<AppState>({ runs: [toolRun] });
+    const verification: VerificationTable = {
+      ncbi: '2.17.0',
+      sources: [],
+      programs: {},
+      tools: { windowmasker: { optionSets: [key] } },
+    };
+    const data: ResultsDeps['data'] = {
+      readHitTable: async () => hspTable([]),
+      readOutput: async () => new Uint8Array(),
+      readOutputRange: async () => new Uint8Array(),
+      readDiagnostics: async () => '',
+    };
+
+    let describeCalls = 0;
+    const results = new ResultsBrowser({
+      data,
+      describe: async () => DESCRIPTION,
+      describeTool: async () => {
+        describeCalls++;
+        if (describeCalls === 1) throw new Error('engine busy');
+        return description;
+      },
+      runs,
+      verification,
+    });
+
+    // Rejected describeTool: fallback grammar formats CommandText, but no badge is shown and the rejection is not cached.
+    await results.open('t1');
+    await settle();
+    expect(results.state.get().phase).toBe('ready');
+    expect(results.state.get().grammar).toBeDefined();
+    expect(results.state.get().toolBadge).toBeUndefined();
+
+    // Opening again asks describeTool again; once it resolves with -xmlhelp, the badge is Supported.
+    await results.open('t1');
+    await settle();
+    expect(describeCalls).toBe(2);
+    expect(results.state.get().toolBadge).toMatchObject({ level: 'certified', label: 'Supported' });
+
+    // Without describeTool at all, no badge is shown either.
+    const noDescribe = new ResultsBrowser({
+      data,
+      describe: async () => DESCRIPTION,
+      runs,
+      verification,
+    });
+    await noDescribe.open('t1');
+    await settle();
+    expect(noDescribe.state.get().grammar).toBeDefined();
+    expect(noDescribe.state.get().toolBadge).toBeUndefined();
   });
 });

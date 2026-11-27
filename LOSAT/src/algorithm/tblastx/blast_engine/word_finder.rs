@@ -1,5 +1,6 @@
 //! The word finder of TBLASTX's frame loop: `scan_chunk` scans one chunk of a subject frame with
-//! `scan_chunk_one_hit` (`-window_size 0`), `scan_chunk_plain` (the port of NCBI's two-hit loop) or
+//! `scan_chunk_one_hit` (`-window_size 0`, or a negative window, which only an imported search
+//! strategy can carry: `WideOffset`), `scan_chunk_plain` (the port of NCBI's two-hit loop) or
 //! `scan_chunk_bucketed` (SEEDBUCKET's order of the same hits). Each starts the chunk with
 //! `begin_chunk_scan` and ends it with `finish_chunk_scan`; the two two-hit scans scan with
 //! `scan_next_hits` and run the two-hit test and extension of each hit with `two_hit_one_hit`. They
@@ -39,6 +40,7 @@ use crate::algorithm::tblastx::blast_aascan::{
 use crate::algorithm::tblastx::extension::OneHitAlone;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use crate::algorithm::tblastx::subjects::XReadFailure;
+use std::sync::atomic::AtomicI64;
 
 /// The values the word finder reads, made once per batch by `search_query_batch` under the names
 /// the frame loop read them by: the diagonal table's window and the word size, the table's mask
@@ -84,6 +86,89 @@ pub(super) struct WordFinderCx<'a> {
     /// `-subject_besthit`: each subject frame's list is filtered after each merge of a chunk
     /// (`frame_chunks::add_chunk_result`).
     pub(super) subject_besthit: bool,
+    /// NCBI's count of the batch's successful initial extensions (`good_init_extends`), which
+    /// each chunk's scan adds its saved ones to (`finish_chunk_scan`), where the running
+    /// application sizes its batches by it (BLASTN's, running a TBLASTX strategy); `None`
+    /// elsewhere.
+    pub(super) extensions: Option<&'a AtomicU64>,
+    /// A negative `-window_size` (an imported strategy's): the offset of the batch's diagonal
+    /// table, which NCBI carries from one call of the word finder to the next
+    /// (`WideOffset`); `None` for a window of 0 or more.
+    pub(super) wide_offset: Option<&'a WideOffset>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:42-65
+// (`s_BlastDiagTableNew`: the offset starts at the window), :90-106 (`s_BlastDiagClear`) and
+// :162-185 (`Blast_ExtendWordExit`: the offset, or the clear of the table once it reaches
+// a quarter of `INT4_MAX`); c++/src/algo/blast/core/aa_ungapped.c:742 (the offset, read once per call)
+// and :778-800 (what the one-hit word finder does with it).
+/// The diagonal table's offset of a batch whose window is negative (`-window_size`, which is `>= 0`
+/// on the command line; a hand-edited search strategy carries any `Int4`), as NCBI keeps it in
+/// `diag->offset`: it starts at the window, `exit` moves it after each call of the word finder (a
+/// chunk of a subject frame) by that call's subject length plus the window, which for a negative
+/// window can be less than 0, and a table that is not cleared keeps its cells from one call to the
+/// next (the search takes one worker for such a batch, in NCBI's order of calls: the state is NCBI's
+/// `-num_threads 1` one). With a window of 0 or more the cells of the call before are older than
+/// the window and never block a word of the next call, so each subject of such a batch gets a
+/// fresh table; with a negative window they do, and the table lives for the batch.
+///
+/// NCBI computes offset, cell and difference in `Int4`, which overflows (undefined) for a window
+/// far below 0: this offset is an `i64`, so that the values are those the sums have, and the
+/// comparisons that NCBI's defined arithmetic gives are `admits`'s. The cells are NCBI's 31-bit
+/// ones (`DiagStruct`).
+pub(super) struct WideOffset(AtomicI64);
+
+impl WideOffset {
+    /// The offset of a new table (`s_BlastDiagTableNew`): the window.
+    pub(super) fn new(window: i32) -> Self {
+        Self(AtomicI64::new(i64::from(window)))
+    }
+
+    /// The offset a call of the word finder reads.
+    pub(super) fn get(&self) -> i64 {
+        self.0.load(AtomicOrdering::Relaxed)
+    }
+
+    /// `Blast_ExtendWordExit` after a call over `subject_length` letters (signed `Int4`, negative
+    /// between overlapping hard masks): the offset moves on, or, from a quarter of `INT4_MAX`,
+    /// goes back to the window with every cell cleared to `-window` (the 31 low bits of it, as
+    /// NCBI's bit-field stores it).
+    pub(super) fn exit(&self, window: i32, diag_array: &mut [DiagStruct], subject_length: i32) {
+        let offset = self.get();
+        if offset >= i64::from(i32::MAX / 4) {
+            self.0.store(i64::from(window), AtomicOrdering::Relaxed);
+            let mut cleared = DiagStruct::default();
+            cleared.set_last_hit((-i64::from(window)) as i32);
+            diag_array.fill(cleared);
+        } else {
+            self.0.store(
+                offset + i64::from(subject_length) + i64::from(window),
+                AtomicOrdering::Relaxed,
+            );
+        }
+    }
+
+    /// Whether the one-hit word finder extends a word at `subject_offset` on a diagonal whose cell
+    /// holds `last_hit`: NCBI's `diff = subject_offset - (last_hit - diag_offset)` is `>= 0`. The
+    /// `Uint4` difference of NCBI's defined arithmetic is wrapped into an `Int4` as there; where
+    /// `last_hit - diag_offset` itself overflows `Int4` (undefined) the difference is exact, of the
+    /// word's offset as an `Int4` (below 0 for a word before the chunk, of masks stored out of
+    /// order).
+    #[inline(always)]
+    pub(super) fn admits(offset: i64, last_hit: i32, subject_offset: u32) -> bool {
+        let behind = i64::from(last_hit) - offset;
+        match i32::try_from(behind) {
+            Ok(behind) => (subject_offset.wrapping_sub(behind as u32) as i32) >= 0,
+            Err(_) => i64::from(subject_offset as i32) - behind >= 0,
+        }
+    }
+
+    /// What the one-hit word finder stores in the cell after an extension that ended at
+    /// `s_last_off`: `s_last_off - (wordsize - 1) + diag_offset`, whose 31 low bits the cell keeps.
+    #[inline(always)]
+    pub(super) fn last_hit(offset: i64, s_last_off: i32, wordsize: i32) -> i32 {
+        (i64::from(s_last_off) - i64::from(wordsize - 1) + offset) as i32
+    }
 }
 
 /// The subject's and the subject frame's values the word finder reads, made per frame by the
@@ -120,6 +205,9 @@ pub(super) struct FrameCx<'a> {
     pub(super) subject_full: &'a [u8],
     pub(super) subject_all: &'a [u8],
     pub(super) x_soft_calls: Option<&'a [(TranslatedChunk, Vec<(i32, i32)>)]>,
+    /// Whether this `-db_hard_mask` subject uses the overlapping-mask walk (`SubjectScan::
+    /// x_hard_start`), so two-hit chunks shorter than the word go through `OneWord`.
+    pub(super) x_hard_start: bool,
 }
 
 /// The chunk's values a hit reads, made once per chunk by each two-hit scan before its scan: the
@@ -198,17 +286,18 @@ pub(super) fn begin_chunk_scan<'s>(
             chunk.length,
         );
 
-    if subject.len() < wordsize as usize {
+    if chunk.ncbi_length < wordsize || subject.len() < wordsize as usize {
         // NCBI still advances the diagonal table offset even when no hits can be found.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:499-500 (two-hit: the clamp
         // of the empty scan range; one-hit: the loop is not entered, :762-766) and :614 (two-hit)
         // or :807 (one-hit) (the advance),
         // c++/src/algo/blast/core/blast_extend.c:167-173
-        advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
+        advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.ncbi_length);
         return Err(TblastxChunkScanResult {
             chunk,
             hits: Vec::new(),
             stats,
+            exited: true,
         });
     }
     Ok(ChunkStart {
@@ -411,7 +500,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
     // Flag is clear: test against the prior hit on this diagonal.
     else {
         // Recover the previous hit's subject offset relative to `diag_offset`.
-        let last_hit = diag_entry.last_hit() - diag_offset;
+        let last_hit = diag_entry.last_hit().wrapping_sub(diag_offset);
         // NCBI uses Uint4 for subject_offset; compute with unsigned wrap.
         // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:141-150
         //             c++/src/algo/blast/core/aa_ungapped.c:535-536
@@ -513,7 +602,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         // starts its diagonal (the cells of the chunks and subjects before lie a window or more
         // behind it), and every later word of the chunk starts at least a word before the chunk's
         // end, before it on that diagonal.
-        let s_left_off = last_hit + wordsize;
+        let s_left_off = last_hit.wrapping_add(wordsize);
         debug_assert!(
             subject_offset as i32 + wordsize <= chunk.length as i32,
             "a word past the chunk's last letter is never a second hit"
@@ -537,7 +626,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
                     query,
                     in_batch,
                     subject,
-                    (last_hit + wordsize) as usize,
+                    s_left_off as usize,
                     subject_offset as usize,
                     q_raw,
                     x_dropoff,
@@ -565,7 +654,7 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
                     query_full,
                     in_batch,
                     subject_full,
-                    (last_hit + wordsize) as usize,
+                    s_left_off as usize,
                     subject_offset as usize,
                     q_raw,
                     x_dropoff,
@@ -619,7 +708,11 @@ pub(super) fn two_hit_one_hit<S: TbxScore>(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:596-606
         if right_extend {
             diag_entry.set_flag(1);
-            diag_entry.set_last_hit(s_last_off - (wordsize - 1) + diag_offset);
+            diag_entry.set_last_hit(
+                s_last_off
+                    .wrapping_sub(wordsize - 1)
+                    .wrapping_add(diag_offset),
+            );
             if cx.diag_enabled {
                 cx.diagnostics
                     .base
@@ -768,6 +861,7 @@ where
     let &WordFinderCx {
         window,
         contexts_ref,
+        extensions,
         ..
     } = cx;
     let &FrameCx {
@@ -775,7 +869,14 @@ where
     } = frame;
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:614
-    advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.length);
+    advance_tblastx_diag_offset(diag_offset, diag_array, window, chunk.ncbi_length);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:616-617 (two-hit; one-hit :809-810)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_diagnostics.c:102-115
+    // The word finder adds the chunk's saved extensions (`ungapped_hsps->total`) to the batch's
+    // `good_init_extends` (each thread's, summed after the search, blast_diagnostics.c:133-134).
+    if let Some(extensions) = extensions.filter(|_| !init_hsps.is_empty()) {
+        extensions.fetch_add(init_hsps.len() as u64, AtomicOrdering::Relaxed);
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234-235
     // BlastAaWordFinder sorts the chunk's init hit list by
@@ -791,7 +892,12 @@ where
         hsp_list(init_hsps, contexts_ref, s_frames_listed)
     };
     adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
-    TblastxChunkScanResult { chunk, hits, stats }
+    TblastxChunkScanResult {
+        chunk,
+        hits,
+        stats,
+        exited: true,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
@@ -851,6 +957,7 @@ fn scan_chunk_plain<S: TbxScore>(
             chunk,
             hits: Vec::new(),
             stats,
+            exited: false,
         };
     }
     let x_soft = x_soft.flatten();
@@ -1233,10 +1340,18 @@ fn one_hit_in_batch<S: TbxScore>(
 // unit path and `scan_chunk_bucketed` are two-hit only: a batch of window 0 is a
 // `reference_loop` one for `x_pair_par::decide`, and `scan_chunk` takes this function
 // for every chunk.
-/// Scans `chunk` of the frame with NCBI's one-hit word finder (`-window_size 0`) and returns the
-/// chunk's HSP list. `AROUND`: the chunk's scan reads letters before it (`x_soft_scan_letters`),
-/// so its words can lie before it.
-fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
+//
+// A negative window (`-window_size` of an imported strategy; `WIDE`) takes the same word finder
+// (`BlastAaWordFinder` takes the one-hit one for any window of 0 or less: `multiple_hits` is
+// `window_size > 0`, blast_extend.c:137) on a table that lives for the batch, with the offset of
+// `WideOffset`. The scan is the one written here: the three places that read or move NCBI's
+// `diag_offset` are the cell test, the cell store and the exit, and each of them has its `WIDE`
+// form, so that the code of a window of 0 is the code it was.
+/// Scans `chunk` of the frame with NCBI's one-hit word finder (`-window_size 0`, or with `WIDE` a
+/// negative window, whose offset is `WordFinderCx::wide_offset`: `diag_offset` is then not read)
+/// and returns the chunk's HSP list. `AROUND`: the chunk's scan reads letters before it
+/// (`x_soft_scan_letters`), so its words can lie before it.
+fn scan_chunk_one_hit<S: TbxScore, const WIDE: bool, const AROUND: bool>(
     frame: &FrameCx<'_>,
     chunk: SubjectChunk,
     offset_pairs: &mut [OffsetPair],
@@ -1249,6 +1364,7 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
     // subject's own `cutoff_scores`, `WordFinderCx`).
     let cx = frame.cx;
     let &WordFinderCx {
+        window,
         wordsize,
         diag_mask,
         contexts_ref,
@@ -1257,6 +1373,7 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
         x_scan_bf,
         offset_array_size,
         x_read_failure,
+        wide_offset,
         ..
     } = cx;
     let &FrameCx {
@@ -1269,6 +1386,14 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
         x_soft_calls,
         ..
     } = frame;
+    // A negative window's offset (`WideOffset`), read once per call as NCBI reads `diag->offset`
+    // (aa_ungapped.c:742); the window of 0's `diag_offset` is the caller's.
+    let wide: Option<&WideOffset> = if WIDE {
+        Some(wide_offset.expect("a batch of a negative window has its table's offset"))
+    } else {
+        None
+    };
+    let wide_now: i64 = wide.map_or(0, WideOffset::get);
     // The chunk's letters and its empty lists; a chunk shorter than a word ends here
     // (`begin_chunk_scan`, as in `scan_chunk_plain`: aa_ungapped.c:762-766, `scan_range[2] <
     // scan_range[1]`, no scan; blast_extend.c:167-173). The one-hit extension takes no sentinel
@@ -1280,7 +1405,13 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
         ..
     } = match begin_chunk_scan(cx, frame, chunk, diag_array, diag_offset, false) {
         Ok(start) => start,
-        Err(short) => return short,
+        Err(short) => {
+            // The exit of the call that scanned nothing (`Blast_ExtendWordExit`, :807).
+            if let Some(wide) = wide {
+                wide.exit(window, diag_array, chunk.ncbi_length);
+            }
+            return short;
+        }
     };
     // The scan ranges of `scan_chunk_plain` (masksubj.inl:43-58; `-lcase_masking`:
     // `x_soft_chunk`, and a chunk without ranges is not searched).
@@ -1291,6 +1422,7 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
             chunk,
             hits: Vec::new(),
             stats,
+            exited: false,
         };
     }
     let x_soft = x_soft.flatten();
@@ -1361,12 +1493,19 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
                 let diag_entry = &mut diag_array[diag_coord];
                 // Compute distance from the diagonal's last-hit position to `subject_offset`.
                 // (Uint4 minus Int4 in unsigned arithmetic, read as the Int4 `diff`.)
-                let diff = subject_offset
-                    .wrapping_sub(diag_entry.last_hit().wrapping_sub(*diag_offset) as u32)
-                    as i32;
-                // Skip hits that fall before the diagonal's last extended position.
-                if diff < 0 {
-                    continue;
+                // Skip hits that fall before the diagonal's last extended position (a negative
+                // window's test: `WideOffset::admits`).
+                if WIDE {
+                    if !WideOffset::admits(wide_now, diag_entry.last_hit(), subject_offset) {
+                        continue;
+                    }
+                } else {
+                    let diff = subject_offset
+                        .wrapping_sub(diag_entry.last_hit().wrapping_sub(*diag_offset) as u32)
+                        as i32;
+                    if diff < 0 {
+                        continue;
+                    }
                 }
                 // Locate the query context for `query_offset` (NCBI `BSearchContextInfo`).
                 let ctx_idx = lookup_ref.get_context_idx(query_offset as i32);
@@ -1386,11 +1525,10 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
                         // -threshold allows it) gives a length of 0 or less, saved as any
                         // other: its ends are at or before its starts, and below 0 near a
                         // frame's start. NCBI links it with the others and its
-                        // re-evaluation deletes it; LOSAT keeps its `Int4` ends up to the
-                        // first linking call and drops it there, or without sum statistics
-                        // before the re-evaluation (`chaining.rs`, the impl of
-                        // `UngappedHit`; `subject_link::link_subject_hits_int4`,
-                        // `subject_link::drop_unread_without_linking`).
+                        // re-evaluation deletes it; LOSAT keeps it with its `Int4` ends up to
+                        // the re-evaluation's fetch of the subject and drops it there
+                        // (`chaining.rs`, the impl of `UngappedHit`;
+                        // `subject_link::drop_unread_int4_inverted`).
                         let hsp_q_absolute = ctx.frame_base + hit.q_start;
                         init_hsps.push(InitHSP {
                             q_start_absolute: hsp_q_absolute,
@@ -1410,8 +1548,21 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
                             s_orig_len: s_len,
                         });
                     }
-                    // Set `last_hit` to `s_last_off - (wordsize - 1)` (the extension end less `wordsize - 1`), biased by `diag_offset`.
-                    diag_entry.set_last_hit(hit.s_last_off - (wordsize - 1) + *diag_offset);
+                    // Set `last_hit` to the extension end less wordsize minus 1, biased by
+                    // `diag_offset` (a negative window's: `WideOffset::last_hit`).
+                    if WIDE {
+                        diag_entry.set_last_hit(WideOffset::last_hit(
+                            wide_now,
+                            hit.s_last_off,
+                            wordsize,
+                        ));
+                    } else {
+                        diag_entry.set_last_hit(
+                            hit.s_last_off
+                                .wrapping_sub(wordsize - 1)
+                                .wrapping_add(*diag_offset),
+                        );
+                    }
                 };
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-790 and
                 // :1020-1083
@@ -1482,6 +1633,9 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
     // `scan_chunk_plain` (blast_engine.c:561-584; `finish_chunk_scan`).
     // The list keeps NCBI's `Int4` ends of an HSP of length 0 or less
     // (`get_ungapped_hsp_list_int4`, `adjust_tblastx_chunk_subject_offsets`).
+    if let Some(wide) = wide {
+        wide.exit(window, diag_array, chunk.ncbi_length);
+    }
     finish_chunk_scan(
         cx,
         frame,
@@ -1494,6 +1648,123 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-614
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:561-584
+// A hard chunk shorter than the word in a two-hit search scans the single word starting at the
+// chunk's offset (past the chunk, into the mask after it), tests its hits against the diagonal
+// table with `OneWord`, and saves any seeds above cutoff as the chunk's ungapped HSP list before
+// advancing `diag_offset` by the chunk's signed `Int4` length.
+#[cold]
+#[inline(never)]
+fn scan_chunk_one_word<S: TbxScore>(
+    frame: &FrameCx<'_>,
+    chunk: SubjectChunk,
+    offset_pairs: &mut [OffsetPair],
+    diag_array: &mut [DiagStruct],
+    diag_offset: &mut i32,
+    sc: S,
+) -> TblastxChunkScanResult {
+    use crate::algorithm::common::diag_entry::DiagRing;
+    use crate::algorithm::common::hard_chunk_scan::{OneWord, OneWordSeed, WordContext};
+
+    let cx = frame.cx;
+    let word = usize::try_from(cx.wordsize).unwrap_or(0);
+    let mut word_letters = vec![0u8; word + 1];
+    let start = chunk.offset.min(frame.subject_all.len());
+    let end = chunk
+        .offset
+        .saturating_add(word)
+        .min(frame.subject_all.len());
+    let stored = &frame.subject_all[start..end];
+    word_letters[..stored.len()].copy_from_slice(stored);
+
+    let mut hits: Vec<i32> = Vec::new();
+    let mut scan_range = [-1, 0, -1];
+    let seq_ranges = [(0, cx.wordsize)];
+    let n_hits = crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject(
+        frame.lookup_ref,
+        &word_letters,
+        &seq_ranges,
+        offset_pairs,
+        offset_pairs.len() as i32,
+        &mut scan_range,
+    );
+    hits.extend(
+        offset_pairs[..n_hits.max(0) as usize]
+            .iter()
+            .map(|pair| pair.q_off as i32),
+    );
+
+    let total_query_len = cx
+        .contexts_ref
+        .last()
+        .map_or(0, |ctx| ctx.frame_base + ctx.aa_len as i32);
+    let test = OneWord {
+        query: &[],
+        letters: &word_letters[..word],
+        length: chunk.ncbi_length,
+        word: cx.wordsize,
+        window: cx.window,
+        scores: crate::utils::matrix::protein_score_rows(sc.matrix()),
+    };
+    let ctx_of = |q: i32| frame.lookup_ref.get_context_idx(q);
+    let mut init_hsps: Vec<InitHSP> = Vec::new();
+    test.test_on_with(
+        &mut DiagRing {
+            entries: diag_array,
+            mask: cx.diag_mask,
+        },
+        &hits,
+        *diag_offset,
+        total_query_len,
+        |q, s_letter| {
+            let ctx = &cx.contexts_ref[ctx_of(q)];
+            let local = (q - ctx.frame_base) as usize;
+            let q_letter = ctx.aa_seq.get(1 + local).copied().unwrap_or(0);
+            sc.score(q_letter, s_letter)
+        },
+        |q| {
+            let i = ctx_of(q);
+            WordContext {
+                start: cx.contexts_ref[i].frame_base,
+                x_drop: cx.x_dropoff_per_context[i],
+                cutoff: cx.cutoff_scores[i],
+            }
+        },
+        |q, seed: OneWordSeed| {
+            let ctx_idx = ctx_of(q);
+            let ctx = &cx.contexts_ref[ctx_idx];
+            init_hsps.push(InitHSP {
+                q_start_absolute: seed.q_start,
+                q_end_absolute: seed.q_start + seed.length,
+                s_start: seed.s_start,
+                s_end: seed.s_start + seed.length,
+                q_seed_absolute: q,
+                s_seed: 0,
+                score: seed.score,
+                ctx_idx,
+                s_f_idx: frame.s_f_idx,
+                q_idx: ctx.q_idx,
+                s_idx: frame.s_idx as u32,
+                q_frame: ctx.frame,
+                s_frame: frame.s_frame.frame,
+                q_orig_len: ctx.orig_len,
+                s_orig_len: frame.s_len,
+            });
+        },
+    );
+    finish_chunk_scan(
+        cx,
+        frame,
+        chunk,
+        init_hsps,
+        TblastxChunkScanStats::default(),
+        diag_array,
+        diag_offset,
+        get_ungapped_hsp_list,
+    )
+}
+
 // EXPERIMENT (SEEDBUCKET): the scan order (`scan_chunk_plain`) or the bucketed order
 // (`scan_chunk_bucketed`, only for tables of at least LOSAT_X_SEEDBUCKET_MIN_CELLS
 // cells).
@@ -1503,7 +1774,8 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
 // `scan_chunk_bucketed` for a table of at least the minimum cells. A traced or debugged
 // run always uses `scan_chunk_plain`.
 /// Scans `chunk` of the frame with the search's word finder and returns the chunk's HSP list: the
-/// one-hit one for `-window_size 0`, else the two-hit one in the scan order or SEEDBUCKET's.
+/// one-hit one for `-window_size 0` or a negative window, else the two-hit one in the scan order or
+/// SEEDBUCKET's.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-236 (`BlastAaWordFinder`,
 /// called as `aux_struct->WordFinder`, c++/src/algo/blast/core/blast_engine.c:494-498)
@@ -1525,9 +1797,10 @@ pub(super) fn scan_chunk<S: TbxScore>(
         ..
     } = cx;
     let &FrameCx { x_soft_calls, .. } = frame;
-    // The one-hit word finder (`-window_size 0`) has a loop of its own, compiled out of
-    // line (`x_out_of_line`) so that this function keeps the two-hit scan's code.
-    if window == 0 {
+    // The one-hit word finder (`-window_size 0`, and a negative window) has a loop of its own,
+    // compiled out of line (`x_out_of_line`) so that this function keeps the two-hit scan's code.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137
+    if window <= 0 {
         return x_out_of_line(|| {
             // A chunk whose ranges start before it (masks stored out of order,
             // `common::translated_chunks::scan_lead`) is the only one whose words can lie before
@@ -1539,8 +1812,34 @@ pub(super) fn scan_chunk<S: TbxScore>(
                 .is_some_and(|ranges| {
                     crate::algorithm::common::translated_chunks::scan_lead(ranges) > 0
                 });
-            if around {
-                scan_chunk_one_hit::<S, true>(
+            if window < 0 {
+                // A negative window keeps its offset in `WordFinderCx::wide_offset`: the
+                // worker's `Int4` `diag_offset` is not NCBI's there (its sum can overflow), and
+                // this one, which the scan's begin and end still move, is discarded.
+                let mut unused_offset = 0;
+                if around {
+                    scan_chunk_one_hit::<S, true, true>(
+                        frame,
+                        chunk,
+                        offset_pairs,
+                        diag_array,
+                        &mut unused_offset,
+                        scan_chunk_size,
+                        sc,
+                    )
+                } else {
+                    scan_chunk_one_hit::<S, true, false>(
+                        frame,
+                        chunk,
+                        offset_pairs,
+                        diag_array,
+                        &mut unused_offset,
+                        scan_chunk_size,
+                        sc,
+                    )
+                }
+            } else if around {
+                scan_chunk_one_hit::<S, false, true>(
                     frame,
                     chunk,
                     offset_pairs,
@@ -1550,7 +1849,7 @@ pub(super) fn scan_chunk<S: TbxScore>(
                     sc,
                 )
             } else {
-                scan_chunk_one_hit::<S, false>(
+                scan_chunk_one_hit::<S, false, false>(
                     frame,
                     chunk,
                     offset_pairs,
@@ -1561,6 +1860,9 @@ pub(super) fn scan_chunk<S: TbxScore>(
                 )
             }
         });
+    }
+    if frame.x_hard_start && chunk.ncbi_length < cx.wordsize {
+        return scan_chunk_one_word(frame, chunk, offset_pairs, diag_array, diag_offset, sc);
     }
     // The debug/trace paths exist only in the reference loop.
     let x_debugging = scan_debug_range.is_some() || trace_hsp_target().is_some();

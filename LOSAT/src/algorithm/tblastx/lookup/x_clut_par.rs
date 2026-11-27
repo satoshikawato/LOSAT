@@ -55,8 +55,9 @@
 //!   exactly when it passes it at its end), once, and refuses when no segment comes before the
 //!   table or the table's own appends fill the banks (`x_table_fills_banks`); the outcome does not
 //!   depend on where the test is made. Here, after the stripes, each table's cells at its end are
-//!   tested by the same rule, so the build refuses exactly when the serial one does (any table that
-//!   refuses makes the outcome `Refused`; the table made is dropped).
+//!   tested by the same rule, in the tables' order, so the build refuses exactly when the serial one
+//!   does and names the same table (the first that refuses, `Refused(BanksFilled(i))`; the table
+//!   made is dropped).
 //! - a packed append holds the cell's index in its stripe (below 2^16) and the offset less the chunk's
 //!   first offset (a chunk's offsets lie within 2^16 of it): nothing is lost.
 //! - `TooLarge` (the reference builder runs) when the appends pass `x_max_appends`, as the serial
@@ -2555,7 +2556,7 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
                 )
             };
             if refused {
-                return Some(XFlatBuild::Refused);
+                return Some(XFlatBuild::Refused(x_table_of_range(range_index)));
             }
         }
     }

@@ -22,7 +22,7 @@ import { runCases, type CaseResult } from '../../contract/contract';
 import { ENGINE_INPUT_CASES } from '../../contract/engine-input.contract';
 import { RUN_OUTPUT_CASES, type RemoteWriter } from '../../contract/run-output.contract';
 import { answerLink } from '../../../../packages/losat/src/infra/engine-worker/link';
-import type { HighMemoryEvent, HighMemoryRequest, HighMemoryResult, HighMemorySearch } from './protocol';
+import type { HighMemoryEvent, HighMemoryRequest, HighMemoryResult, HighMemorySearch, StrategySearch, StrategySearchEvent, StrategySearchResult } from './protocol';
 
 export interface SearchInput {
   /** Where the harness fetches the bytes (the test serves them). */
@@ -411,12 +411,13 @@ export async function retention(
   const input = (search: SearchCase, role: InputRole) => {
     const which = search[role];
     const parser = fastaParser(programById(search.program), role);
-    const key = JSON.stringify([which.url, which.name, parser]);
+    const parseDeflines = search.options.includes('-parse_deflines');
+    const key = JSON.stringify([which.url, which.name, parser, parseDeflines]);
     let cached = inputs.get(key);
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true });
+        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true, parseDeflines });
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();
@@ -499,12 +500,13 @@ export async function timed(list: readonly SearchCase[], options: TimedOptions =
   const input = (search: SearchCase, role: InputRole) => {
     const which = search[role];
     const parser = fastaParser(programById(search.program), role);
-    const key = JSON.stringify([which.url, which.name, parser]);
+    const parseDeflines = search.options.includes('-parse_deflines');
+    const key = JSON.stringify([which.url, which.name, parser, parseDeflines]);
     let cached = options.reindex === true ? undefined : inputs.get(key);
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true });
+        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true, parseDeflines });
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();
@@ -622,7 +624,7 @@ export async function databaseSearches(list: readonly DatabaseSearch[], picked?:
     try {
       const source = await data.addSource(await file(search.query));
       // The rows have no registry file: the query is read with the data loaders on, as the CLI reads it (ABI v2 §9).
-      const revision = await data.indexSource(source.sourceId, { program: search.program, role: 'query', dataLoaders: true });
+      const revision = await data.indexSource(source.sourceId, { program: search.program, role: 'query', dataLoaders: true, parseDeflines: search.argv.includes('-parse_deflines') });
       const run = await data.buildRunInput([revision.revisionId]);
       const query: EngineInput = { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       const directory = await Promise.all(search.files.map(async (name) => ({ name, file: await file(name) })));
@@ -743,6 +745,20 @@ export function recordScanner(): Promise<CaseResult[]> {
       resolve(event.data.results!);
     };
     worker.postMessage('start');
+  });
+}
+
+/** A search strategy file (kind 3) run by the serial reactor in a worker of its own (strategy-worker.ts). */
+export function strategySearch(search: StrategySearch): Promise<StrategySearchResult> {
+  const worker = new Worker(new URL('./strategy-worker.ts', import.meta.url), { type: 'module' });
+  return new Promise((resolve, reject) => {
+    worker.onerror = (event) => reject(new Error(`the strategy worker failed: ${event.message}`));
+    worker.onmessage = (event: MessageEvent<StrategySearchEvent>) => {
+      worker.terminate();
+      if (event.data.type === 'result') resolve(event.data.result);
+      else reject(new Error(event.data.message));
+    };
+    worker.postMessage(search);
   });
 }
 

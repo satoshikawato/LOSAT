@@ -124,6 +124,16 @@ enum Refused {
 /// argument is deleting its row. The build checks that each row names an argument of its program's
 /// XML, once.
 const REFUSED: &[(&str, &str, Refused)] = &[
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:123-129
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:530-545
+    // blast_formatter's `-rid` fetches the results of a search from NCBI's servers (line RG
+    // DECISIONS F3-5): refused where NCBI asks for them, after NCBI's errors of the argument without
+    // a value and of the empty value (`blast_formatter::refusals::Refusal::Rid`).
+    (
+        "blast_formatter",
+        "rid",
+        Refused::Run("the results of a search on NCBI's servers"),
+    ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:63-70
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
     // `-db` and `-dbsize` are implemented (`blastn/args.rs`), as are the X-drops,
@@ -132,53 +142,26 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // (`algorithm::blastn::repeat_filter`, line RG item D4) and `-best_hit_overhang` /
     // `-best_hit_score_edge` (series NP O6a).
     ("blastn", "entrez_query", Refused::Read(None)),
-    ("blastn", "gilist", Refused::Read(None)),
-    ("blastn", "import_search_strategy", Refused::Read(None)),
-    ("blastn", "negative_gilist", Refused::Read(None)),
     ("blastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-2, psiblast's
     // too).
     ("blastp", "entrez_query", Refused::Read(None)),
-    ("blastp", "gilist", Refused::Read(None)),
-    ("blastp", "import_search_strategy", Refused::Read(None)),
-    ("blastp", "ipglist", Refused::Read(None)),
-    ("blastp", "negative_gilist", Refused::Read(None)),
-    ("blastp", "negative_ipglist", Refused::Read(None)),
     ("blastp", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
     // `-use_sw_tback` (line RG item X4b-2, #1500).
-    ("blastx", "gilist", Refused::Read(None)),
-    ("blastx", "negative_gilist", Refused::Read(None)),
     ("blastx", "entrez_query", Refused::Read(None)),
-    ("blastx", "ipglist", Refused::Read(None)),
-    ("blastx", "negative_ipglist", Refused::Read(None)),
-    ("blastx", "import_search_strategy", Refused::Read(None)),
     ("blastx", "remote", Refused::Read(None)),
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:398-400,503
-    // The PSSM files in ASN.1 binary (psiblast line item PS10b) are refused where the run starts,
-    // after makeprofiledb's `Init` (`makeprofiledb::work::run`).
-    (
-        "makeprofiledb",
-        "binary",
-        Refused::Run("PSSM files in ASN.1 binary"),
-    ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
-    // PHI-BLAST (PS8; the ASCII and ASN.1 PSSM files are PS2's and PS3's,
-    // `algorithm::psiblast::pssm`, `-in_pssm` PS4's, `algorithm::psiblast::in_pssm`, the MSA
-    // inputs PS6's, `algorithm::psiblast::in_msa`), and the arguments that blastp's engine does
-    // not run either (blastp's rows; psiblast has no database masks, NCBI's unknown arguments of
-    // its parser, and no `-mt_mode`). The search strategy file is written, of a FASTA query and of
-    // `-in_pssm` (items F1b-1 and F1b-2 of line RG).
-    ("psiblast", "phi_pattern", Refused::Read(None)),
+    // The arguments that blastp's engine does not run either (blastp's rows; psiblast has no
+    // database masks, NCBI's unknown arguments of its parser, and no `-mt_mode`). The ASCII and
+    // ASN.1 PSSM files are PS2's and PS3's (`algorithm::psiblast::pssm`), `-in_pssm` PS4's
+    // (`algorithm::psiblast::in_pssm`), the MSA inputs PS6's (`algorithm::psiblast::in_msa`) and
+    // `-phi_pattern` PS8a's (`algorithm::phi_search`). The search strategy file is written, of a
+    // FASTA query and of `-in_pssm` (items F1b-1 and F1b-2 of line RG).
     ("psiblast", "entrez_query", Refused::Read(None)),
-    ("psiblast", "gilist", Refused::Read(None)),
-    ("psiblast", "html", Refused::Read(None)),
     ("psiblast", "import_search_strategy", Refused::Read(None)),
-    ("psiblast", "ipglist", Refused::Read(None)),
-    ("psiblast", "negative_gilist", Refused::Read(None)),
-    ("psiblast", "negative_ipglist", Refused::Read(None)),
     ("psiblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (cited at
     // blastp's check, `validate_requested_blastp_support`)
@@ -189,18 +172,17 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
     // `algorithm::rpsblast::args`)
-    // `-html` (PS15a) and the remote options and `-import_search_strategy` of every program.
+    // The remote options and `-import_search_strategy` (which the five search programs run, line
+    // RG item F2).
     ("rpsblast", "entrez_query", Refused::Read(None)),
-    ("rpsblast", "html", Refused::Read(None)),
     ("rpsblast", "import_search_strategy", Refused::Read(None)),
     ("rpsblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (cited
     // at `algorithm::rpstblastn::args`)
-    // `-html` (PS15a) and the remote options and `-import_search_strategy` of every program. The
-    // composition-based statistics of a later item are refused once per run
+    // The remote options and `-import_search_strategy` (which the five search programs run, line
+    // RG item F2). The composition-based statistics of a later item are refused once per run
     // (`rpstblastn::search::TranslatedRpsSearch::check_options`).
     ("rpstblastn", "entrez_query", Refused::Read(None)),
-    ("rpstblastn", "html", Refused::Read(None)),
     ("rpstblastn", "import_search_strategy", Refused::Read(None)),
     ("rpstblastn", "remote", Refused::Read(None)),
     (
@@ -212,16 +194,10 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
     // `-use_sw_tback` (line RG item X4b-1, #1481).
     ("tblastn", "entrez_query", Refused::Read(None)),
-    ("tblastn", "gilist", Refused::Read(None)),
-    ("tblastn", "import_search_strategy", Refused::Read(None)),
-    ("tblastn", "negative_gilist", Refused::Read(None)),
     ("tblastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
     ("tblastx", "entrez_query", Refused::Read(None)),
-    ("tblastx", "gilist", Refused::Read(None)),
-    ("tblastx", "import_search_strategy", Refused::Read(None)),
-    ("tblastx", "negative_gilist", Refused::Read(None)),
     ("tblastx", "remote", Refused::Read(None)),
 ];
 

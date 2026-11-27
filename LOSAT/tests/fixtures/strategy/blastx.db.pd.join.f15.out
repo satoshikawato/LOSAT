@@ -1,0 +1,153 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/arch_sprot"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "NM_000001.1",
+          "query_title": "first",
+          "query_len": 150,
+          "query_masking": [
+            {
+              "from": 2,
+              "to": 44
+            }
+          ],
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 2,
+            "db_len": 279,
+            "hsp_len": 12,
+            "eff_space": 9690,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/arch_sprot"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "NM_000001.1",
+          "query_title": "first",
+          "query_len": 150,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "sp1 subject protein alpha"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 16.1642,
+                  "score": 30,
+                  "evalue": 0.117012,
+                  "identity": 5,
+                  "positive": 8,
+                  "query_from": 89,
+                  "query_to": 133,
+                  "query_frame": 2,
+                  "hit_from": 107,
+                  "hit_to": 121,
+                  "align_len": 15,
+                  "gaps": 0,
+                  "qseq": "IRLWKVGMVVNFMIL",
+                  "hseq": "LRHWEINTDANFEKL",
+                  "midline": "+R W++    NF  L"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 14.2382,
+                  "score": 25,
+                  "evalue": 0.56277,
+                  "identity": 6,
+                  "positive": 10,
+                  "query_from": 98,
+                  "query_to": 157,
+                  "query_frame": 2,
+                  "hit_from": 46,
+                  "hit_to": 65,
+                  "align_len": 20,
+                  "gaps": 0,
+                  "qseq": "WKVGMVVNFMILVKIPVCFV",
+                  "hseq": "WKVLMKYEFSSDIHPWICWI",
+                  "midline": "WKV M   F   +   +C++"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 11.927,
+                  "score": 19,
+                  "evalue": 4.52132,
+                  "identity": 5,
+                  "positive": 6,
+                  "query_from": 138,
+                  "query_to": 179,
+                  "query_frame": 3,
+                  "hit_from": 51,
+                  "hit_to": 64,
+                  "align_len": 14,
+                  "gaps": 0,
+                  "qseq": "KYRYVSSGFSEIYW",
+                  "hseq": "KYEFSSDIHPWICW",
+                  "midline": "KY + S     I W"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 2,
+            "db_len": 279,
+            "hsp_len": 13,
+            "eff_space": 11891,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

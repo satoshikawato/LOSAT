@@ -111,6 +111,22 @@ fn the_exit_of_a_chunk_moves_or_clears_every_ring() {
 }
 
 #[test]
+fn fresh_tables_allocate_on_first_hit_and_clear_for_negative_window() {
+    let mut tables = QueryBatchTables::new(&LAYOUT, -40);
+    assert_eq!(tables.offset, -40);
+    assert_eq!(tables.made(), [0, 0]);
+    let entry = tables.one_hit_entry(66, 2);
+    assert_eq!(*entry, DiagStruct::default());
+    entry.set_last_hit(99);
+    assert_eq!(tables.made(), [0, 256]);
+    tables.clear_table(-40);
+    assert_eq!(tables.offset, -40);
+    assert_eq!(tables.made(), [0, 0]);
+    assert_eq!(*tables.one_hit_entry(66, 2), DiagStruct::clear(-40));
+    assert_eq!(*tables.one_hit_entry(3, 0), DiagStruct::clear(-40));
+}
+
+#[test]
 fn the_context_test_reads_the_batchs_offsets() {
     // A distance whose offset less it falls before the batch's start passes NCBI's test of the
     // batch (its offset less the distance lies below 0): it becomes one past the offset.

@@ -8,7 +8,9 @@
 //! of files and databases, `BLASTDB` of the environment and of `.ncbirc`, and words that name a
 //! format, an algorithm, an entry or a range; the names of an alias file's `MASKLIST`, which
 //! blastdbcmd, the searches, makeblastdb's copy and makembindex read; the path of a profile
-//! database that rpsblast and rpstblastn name in their errors). NCBI BLAST+ 2.17.0 keeps such a name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
+//! database that rpsblast and rpstblastn name in their errors); and every value of
+//! blastdb_aliastool that names a file, a database or a title (`K10d_*`, line RG item K10d: each
+//! mode, existing and missing names). NCBI BLAST+ 2.17.0 keeps such a name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
 //! nothing or failed before. The expected bytes are NCBI's, frozen by `non_utf8_names/make_fixtures.py`
 //! (`non_utf8_names/README.md`) from the cases of `non_utf8_names/cases.tsv`, which this test runs
 //! the same way: `{D}` in them is the case's directory, and the time of makeblastdb's line
@@ -29,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod temp_support;
-use temp_support::{expected_losat_bytes, home_and_worker_log, unique_dir};
+use temp_support::{expected_losat_bytes, home_and_worker_log, undated_seqid_list, unique_dir};
 
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
@@ -96,6 +98,17 @@ fn set_up(setup: &str, d: &Path) -> PathBuf {
             "copy" => {
                 std::fs::copy(losat.join(parts[1]), path_in(d, words(parts[2], db))).unwrap();
             }
+            "copydir" => {
+                let source = losat.join(parts[1]);
+                let target = path_in(d, words(parts[2], db));
+                std::fs::create_dir_all(&target).unwrap();
+                for entry in std::fs::read_dir(&source).unwrap() {
+                    let entry = entry.unwrap();
+                    if entry.file_type().unwrap().is_file() {
+                        std::fs::copy(entry.path(), target.join(entry.file_name())).unwrap();
+                    }
+                }
+            }
             "copydb" => {
                 let source = losat.join(parts[1]);
                 let prefix = format!("{}.", source.file_name().unwrap().to_str().unwrap());
@@ -136,6 +149,20 @@ fn set_up(setup: &str, d: &Path) -> PathBuf {
             "cwd" => {
                 cwd = path_in(d, words(parts[1], db));
                 std::fs::create_dir(&cwd).unwrap();
+            }
+            "mkidx" => {
+                let mut cmd = Command::new(BIN);
+                cmd.current_dir(&cwd).arg("makembindex");
+                for word in &parts[1..] {
+                    cmd.arg(OsString::from_vec(words(word, db)));
+                }
+                let _files = home_and_worker_log(&mut cmd, "non_utf8_mkidx");
+                let out = cmd.output().expect("run LOSAT makembindex");
+                assert!(
+                    out.status.success(),
+                    "mkidx failed: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
             }
             other => panic!("unknown step {other}"),
         }
@@ -214,6 +241,19 @@ fn snapshot(d: &Path) -> BTreeMap<Vec<u8>, Option<Vec<u8>>> {
 /// (`make_fixtures.py`'s `INDEX`).
 const INDEX: [&str; 2] = [".nin", ".pin"];
 
+/// Alias files, whose header holds `# Alias file created: <date>` whose length varies with the
+/// date (`make_fixtures.py`'s `ALIAS`).
+const ALIAS: [&str; 2] = [".nal", ".pal"];
+
+/// The length of the date text after `# Alias file created: ` in an alias file, or `None`.
+fn alias_date_len(data: &[u8]) -> Option<usize> {
+    let prefix = b"# Alias file created: ";
+    let at = data.windows(prefix.len()).position(|w| w == prefix)?;
+    let rest = &data[at + prefix.len()..];
+    let end = rest.iter().position(|&b| b == b'\n').unwrap_or(rest.len());
+    Some(end)
+}
+
 /// The span of the date field of an index file's header (its 4-byte length and its bytes with
 /// their padding: after the version, the type, in version 5 the volume, the title and in version
 /// 5 the LMDB file's name), or `None` for a file without such a header (`make_fixtures.py`'s
@@ -254,9 +294,15 @@ fn starts_with_date_text(data: &[u8]) -> bool {
 /// `data`, the bytes of the file `path` below `d`, with the build's dates as `<DATE>`: the date
 /// field of an index file (`index_date`) and every date text (`starts_with_date_text`); in a
 /// metadata file (`.njs`, `.pjs`) `bytes-total` counts the index files it lists without their
-/// date fields, whose length changes with the date (`make_fixtures.py`'s `undated`).
+/// date fields, whose length changes with the date; in a binary seqid list (`.bsl`) its date
+/// (`temp_support::undated_seqid_list`) (`make_fixtures.py`'s `undated`).
 fn undated(d: &Path, path: &[u8], data: &[u8]) -> Vec<u8> {
     let mut data = data.to_vec();
+    if path.ends_with(b".bsl") {
+        if let Some(undated) = undated_seqid_list(&data) {
+            data = undated;
+        }
+    }
     if INDEX.iter().any(|end| path.ends_with(end.as_bytes())) {
         if let Some((start, end)) = index_date(&data) {
             data = [&data[..start], b"<DATE>", &data[end..]].concat();
@@ -270,30 +316,52 @@ fn undated(d: &Path, path: &[u8], data: &[u8]) -> Vec<u8> {
             .map(|at| &data[at + key.len()..])
             .and_then(|rest| rest.split(|&b| b == b']').next())
             .unwrap_or_default();
-        let mut dates = 0;
+        let mut index_dates = 0;
+        let mut alias_dates = 0;
         for name in listed.split(|&b| b == b'"').skip(1).step_by(2) {
-            if INDEX.iter().any(|end| name.ends_with(end.as_bytes())) {
-                let index =
-                    std::fs::read(directory.join(OsString::from_vec(name.to_vec()))).unwrap();
-                let (start, end) = index_date(&index).unwrap();
-                dates += end - start;
+            let is_index = INDEX.iter().any(|end| name.ends_with(end.as_bytes()));
+            let is_alias = ALIAS.iter().any(|end| name.ends_with(end.as_bytes()));
+            if is_index || is_alias {
+                let candidate = directory.join(OsString::from_vec(name.to_vec()));
+                let item = if candidate.exists() {
+                    std::fs::read(&candidate).unwrap()
+                } else {
+                    let base = name.rsplit(|&b| b == b'/').next().unwrap_or(name);
+                    std::fs::read(directory.join(OsString::from_vec(base.to_vec()))).unwrap()
+                };
+                if is_index {
+                    let (start, end) = index_date(&item).unwrap();
+                    index_dates += end - start;
+                } else if let Some(len) = alias_date_len(&item) {
+                    alias_dates += len;
+                }
             }
         }
-        let key = b"\"bytes-total\": ";
-        if let Some(at) = data.windows(key.len()).position(|w| w == key) {
-            let start = at + key.len();
-            let end = start
-                + data[start..]
-                    .iter()
-                    .take_while(|b| b.is_ascii_digit())
-                    .count();
-            let total: usize = std::str::from_utf8(&data[start..end])
-                .unwrap()
-                .parse()
-                .unwrap();
-            let total = (total - dates).to_string();
-            data = [&data[..start], total.as_bytes(), &data[end..]].concat();
+        for (key, delta) in [
+            (b"\"bytes-total\": ".as_slice(), index_dates + alias_dates),
+            (b"\"bytes-to-cache\": ", index_dates),
+        ] {
+            if let Some(at) = data.windows(key.len()).position(|w| w == key) {
+                let start = at + key.len();
+                let end = start
+                    + data[start..]
+                        .iter()
+                        .take_while(|b| b.is_ascii_digit())
+                        .count();
+                let total: usize = std::str::from_utf8(&data[start..end])
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                let total = (total - delta).to_string();
+                data = [&data[..start], total.as_bytes(), &data[end..]].concat();
+            }
         }
+    }
+    if path.ends_with(b".log") {
+        data = without_time(&data);
+    }
+    if path.ends_with(b".nal") || path.ends_with(b".pal") {
+        data = masked(&data, b"# Alias file created: ", b"\n", b"<DATE>");
     }
     let mut out = Vec::with_capacity(data.len());
     let mut i = 0;
@@ -382,6 +450,7 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             "NCBI_CONFIG_PATH",
             "NCBI_DONT_USE_LOCAL_CONFIG",
             "NCBI",
+            "WINDOW_MASKER_PATH",
         ] {
             command.env_remove(name);
         }
@@ -392,33 +461,51 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
         let _files = home_and_worker_log(&mut command, &format!("non_utf8_{case}"));
         let before = snapshot(&d);
         let output = command.output().expect("run LOSAT");
-        let made = made(&d, &before, &snapshot(&d));
+        let after = snapshot(&d);
+        let made = made(&d, &before, &after);
         ran += 1;
         let rc: i32 = std::fs::read_to_string(fixtures().join(format!("expected/{case}.rc")))
             .unwrap()
             .trim()
             .parse()
             .unwrap();
+        let expected_files =
+            std::fs::read(fixtures().join(format!("expected/{case}.files"))).unwrap();
         let ok = match kind {
             "ncbi" => {
                 output.status.code() == Some(rc)
                     && without_time(&output.stdout) == expected(case, "stdout", &db)
                     && output.stderr == expected(case, "stderr", &db)
-                    && made
-                        == std::fs::read(fixtures().join(format!("expected/{case}.files"))).unwrap()
+                    && made == expected_files
             }
             other => panic!("kind {other}"),
         };
         if !ok {
+            let mut extra = String::new();
+            if made != expected_files {
+                for (path, data) in &after {
+                    if let Some(data) = data {
+                        if path.ends_with(b".njs") || path.ends_with(b".pjs") {
+                            let body = replace(&undated(&d, path, data), &db, b"{D}");
+                            extra.push_str(&format!(
+                                "\nundated {}: {}",
+                                String::from_utf8_lossy(path),
+                                String::from_utf8_lossy(&body)
+                            ));
+                        }
+                    }
+                }
+            }
             failures.push(format!(
-                "{case}: rc {:?} (NCBI {rc})\nstdout {:?}\nstderr {:?}\nmade {:?}",
+                "{case}: rc {:?} (NCBI {rc})\nstdout {:?}\nstderr {:?}\nmade {:?}\nwant_made {:?}{extra}",
                 output.status.code(),
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr),
-                String::from_utf8_lossy(&made)
+                String::from_utf8_lossy(&made),
+                String::from_utf8_lossy(&expected_files)
             ));
         }
     }
-    assert_eq!(ran, 109, "the cases of cases.tsv");
+    assert_eq!(ran, 216, "the cases of cases.tsv");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

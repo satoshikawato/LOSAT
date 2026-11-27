@@ -474,7 +474,7 @@ fn a_run_of_losat_web_writes_the_files_of_the_command_line() {
             .unwrap()
             .map(|entry| {
                 let path = entry.unwrap().path();
-                let name = format!("./{}", path.file_name().unwrap().to_str().unwrap());
+                let name = path.file_name().unwrap().to_str().unwrap().to_string();
                 let bytes = std::fs::read(&path).unwrap();
                 std::fs::remove_file(&path).unwrap();
                 (name.into_bytes(), bytes)
@@ -524,8 +524,14 @@ fn the_checks_of_each_mode_read_names_by_their_bytes() {
             words.push(OsString::from(key));
             words.push(OsString::from_vec(value.to_vec()));
         }
+        let mut out = Vec::new();
         let mut err = Vec::new();
-        let status = check_in(&words, &crate::report::run_files::RunFiles::Disk, &mut err);
+        let status = check_in(
+            &words,
+            &crate::report::run_files::RunFiles::Disk,
+            &mut out,
+            &mut err,
+        );
         (status, String::from_utf8_lossy(&err).into_owned())
     };
     let name: &[u8] = b"l\xe9";
@@ -552,4 +558,201 @@ fn the_checks_of_each_mode_read_names_by_their_bytes() {
         check(&["-in", "missing.fa"], &[("-ustat", name), ("-meta", name)]).0,
         0
     );
+}
+
+/// A `windowmasker` receiver run reads `-logfile` against the run's real files (D19): missing
+/// folders and existing folders keep diagnostics on stderr with no file; an existing file is
+/// refused (exit 1); `/dev/stdout` writes diagnostic messages into `out` in chronological order;
+/// and normalized file names are delivered (` run.log` -> `run.log`, `logs/` -> `logs`).
+#[test]
+fn a_receiver_windowmasker_reads_logfile_against_the_runs_files() {
+    use crate::report::run_files::{FileReceiver, RunFiles};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct Kept(Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
+    impl FileReceiver for Kept {
+        fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+            self.0.lock().unwrap().push((name.to_vec(), bytes.to_vec()));
+            Ok(())
+        }
+    }
+    let fasta = "tests/winmask/fasta/dm2L_3k.fa";
+    let run_web = |words: &[&str]| {
+        let kept = Arc::new(Kept::default());
+        let args: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let status = run_in(
+            &args,
+            &RunFiles::Receiver(kept.clone()),
+            &mut std::io::empty(),
+            &mut out,
+            &mut err,
+        );
+        let files = kept.0.lock().unwrap().clone();
+        (status, out, err, files)
+    };
+    // Case 0 & 1: missing folder and existing folder (`src`) keep messages on stderr, no file.
+    for log in ["d19-no-such-folder/run.log", "src", "src/"] {
+        let (status, out, err, files) = run_web(&[
+            "-mk_counts",
+            "-in",
+            fasta,
+            "-unit",
+            "5",
+            "-out",
+            "c.out",
+            "-logfile",
+            log,
+        ]);
+        assert_eq!(status, 0, "{log}");
+        assert!(out.is_empty(), "{log}");
+        assert_eq!(String::from_utf8(err).unwrap(), "pass 1\npass 2\n", "{log}");
+        assert_eq!(files.len(), 1, "{log}: only -out file");
+        assert_eq!(files[0].0, b"c.out", "{log}");
+    }
+    // Case 2: existing file of the run's directory is refused, exit status 1.
+    let (status, out, err, files) = run_web(&["-mk_counts", "-in", fasta, "-logfile", fasta]);
+    assert_eq!(status, 1);
+    assert!(out.is_empty());
+    assert!(files.is_empty());
+    assert_eq!(
+        String::from_utf8(err).unwrap(),
+        format!(
+            "Error: a -logfile file '{fasta}' that is a file of the run's directory (LOSAT Web \
+             reads the run's files and writes none of them) is not supported by LOSAT's \
+             WINDOWMASKER\n"
+        )
+    );
+    // Case 3: `-logfile /dev/stdout` writes messages into `out` in chronological order before counts.
+    let (status_plain, out_plain, err_plain, _) =
+        run_web(&["-mk_counts", "-in", fasta, "-unit", "5"]);
+    assert_eq!(status_plain, 0);
+    assert_eq!(err_plain, b"pass 1\npass 2\n");
+    for extra in [&[][..], &["-out", "/dev/stdout"][..]] {
+        let mut words = vec!["-mk_counts", "-in", fasta, "-unit", "5"];
+        words.extend_from_slice(extra);
+        words.extend(["-logfile", "/dev/stdout"]);
+        let (status, out, err, files) = run_web(&words);
+        assert_eq!(status, 0, "{extra:?}");
+        assert!(err.is_empty(), "{extra:?}");
+        assert!(files.is_empty(), "{extra:?}");
+        let mut want = b"pass 1\npass 2\n".to_vec();
+        want.extend_from_slice(&out_plain);
+        assert_eq!(out, want, "{extra:?}");
+    }
+    // Case 3 with binary `-out -` prefix before `pass 1\n`: prefix comes first, then messages, then counts.
+    let (s_bin, out_bin, _, _) = run_web(&[
+        "-mk_counts",
+        "-in",
+        fasta,
+        "-unit",
+        "5",
+        "-sformat",
+        "binary",
+        "-out",
+        "-",
+    ]);
+    assert_eq!(s_bin, 0);
+    let (s_both, out_both, err_both, files_both) = run_web(&[
+        "-mk_counts",
+        "-in",
+        fasta,
+        "-unit",
+        "5",
+        "-sformat",
+        "binary",
+        "-out",
+        "-",
+        "-logfile",
+        "/dev/stdout",
+    ]);
+    assert_eq!(s_both, 0);
+    assert!(err_both.is_empty());
+    assert!(files_both.is_empty());
+    let prefix = crate::utils::winmask::CountsFormat::Binary.stream_prefix();
+    assert!(!prefix.is_empty());
+    assert!(out_both.starts_with(prefix));
+    assert!(out_both[prefix.len()..].starts_with(b"pass 1\npass 2\n"));
+    let mut expected_both = prefix.to_vec();
+    expected_both.extend_from_slice(b"pass 1\npass 2\n");
+    expected_both.extend_from_slice(&out_bin[prefix.len()..]);
+    assert_eq!(out_both, expected_both);
+    // Case 4: normalized file names for both `-logfile` and `-out`.
+    let (status, _, err, mut files) = run_web(&[
+        "-mk_counts",
+        "-in",
+        fasta,
+        "-unit",
+        "5",
+        "-out",
+        "./x.counts",
+        "-logfile",
+        " run.log",
+    ]);
+    assert_eq!(status, 0);
+    assert!(err.is_empty());
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        files
+            .iter()
+            .map(|(name, _)| name.as_slice())
+            .collect::<Vec<_>>(),
+        vec![b"run.log".as_slice(), b"x.counts".as_slice()]
+    );
+    let (status, _, err, files) = run_web(&[
+        "-mk_counts",
+        "-in",
+        fasta,
+        "-unit",
+        "5",
+        "-out",
+        "x.counts",
+        "-logfile",
+        "d19-new-log/",
+    ]);
+    assert_eq!(status, 0);
+    assert!(err.is_empty());
+    assert!(files
+        .iter()
+        .any(|(name, bytes)| name == b"d19-new-log" && bytes == b"pass 1\npass 2\n"));
+}
+
+#[test]
+fn read_files_collects_falist_entries_and_blastdb_lookup_files() {
+    let dir = crate::utils::test_dir::TempDir::unique("losat-d19b-wm");
+    let list_path = dir.join("list.txt");
+    std::fs::write(&list_path, b"m.fa\n\nsub/n.fa\n").unwrap();
+    let list_str = list_path.to_str().unwrap();
+
+    // `-fa_list true`: list file is in `for_log` only; listed entries are in both `for_log` and `for_out`.
+    let (for_log, for_out) =
+        super::read_files(&["-mk_counts", "-fa_list", "true", "-in", list_str]);
+    assert!(for_log.iter().any(|p| p == list_str.as_bytes()));
+    assert!(!for_out.iter().any(|p| p == list_str.as_bytes()));
+    assert!(for_log.iter().any(|p| p == b"m.fa"));
+    assert!(for_out.iter().any(|p| p == b"m.fa"));
+    assert!(for_log.iter().any(|p| p == b"sub/n.fa"));
+    assert!(for_out.iter().any(|p| p == b"sub/n.fa"));
+
+    // Missing list file adds only the list file itself to `for_log`.
+    let (for_log_miss, for_out_miss) =
+        super::read_files(&["-mk_counts", "-fa_list", "true", "-in", "no-such-list.txt"]);
+    assert_eq!(for_log_miss, vec![b"no-such-list.txt".to_vec()]);
+    assert!(for_out_miss.is_empty());
+
+    // `-mk_counts -infmt blastdb`: DB lookup files are in both `for_log` and `for_out`.
+    let (bdb_log, bdb_out) = super::read_files(&["-mk_counts", "-infmt", "blastdb", "-in", "x"]);
+    assert!(bdb_log.iter().any(|p| p == b"x.nal"));
+    assert!(bdb_log.iter().any(|p| p == b"x.nin"));
+    assert!(bdb_out.iter().any(|p| p == b"x.nal"));
+    assert!(bdb_out.iter().any(|p| p == b"x.nin"));
+
+    // `-ustat -infmt blastdb`: DB lookup files are in `for_log` only (opened before `-out`).
+    let (mask_log, mask_out) =
+        super::read_files(&["-ustat", "u.counts", "-infmt", "blastdb", "-in", "x"]);
+    assert!(mask_log.iter().any(|p| p == b"x.nal"));
+    assert!(mask_log.iter().any(|p| p == b"x.nin"));
+    assert!(!mask_out.iter().any(|p| p == b"x.nal"));
+    assert!(mask_out.iter().any(|p| p == b"u.counts"));
 }

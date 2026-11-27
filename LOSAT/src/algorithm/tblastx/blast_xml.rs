@@ -56,10 +56,12 @@ const GAP_EXTEND: i32 = 1;
 /// The gap costs of the XML's parameters: with `-matrix`, the matrix's best costs.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:257-273
-fn gap_costs(matrix: Option<&str>) -> (i32, i32) {
+fn gap_costs(matrix: Option<&std::ffi::OsStr>) -> (i32, i32) {
     match matrix {
-        Some(name) => crate::stats::protein_options::protein_gap_existence_extend_params(name)
-            .unwrap_or((0, 0)),
+        Some(name) => crate::stats::protein_options::protein_gap_existence_extend_params(
+            crate::utils::os_bytes::os_str_bytes(name),
+        )
+        .unwrap_or((0, 0)),
         None => (GAP_OPEN, GAP_EXTEND),
     }
 }
@@ -130,6 +132,7 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
         cbs: 0,
         query_gencode: Some(i32::from(run.args.query_gencode)),
         db_gencode: Some(i32::from(run.args.db_gencode)),
+        program_type: None,
     }
 }
 
@@ -161,7 +164,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             database.pairwise.total_letters,
             database.pairwise.total_letters_overflow,
         ),
-        None => ("", 0, 0, false),
+        None => (b"".as_slice(), 0, 0, false),
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2243 (XML2
     // and JSON) and :2242-2243 (BLAST XML)
@@ -169,7 +172,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     // letters (`run_batch_loop`); a run without queries makes no report data, and the document
     // is its header and end.
     let matrix = args.matrix_name();
-    let positives = FormattingMatrix::new(matrix);
+    let positives = FormattingMatrix::new(matrix.as_bytes());
     anyhow::ensure!(
         positives.is_some() || hits.is_empty(),
         "no formatting matrix for {matrix}"
@@ -186,10 +189,11 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     );
     let xml_run = XmlRun {
         program: "tblastx",
+        app: args.app().ncbi_name(),
         version: concat!("TBLASTX ", crate::wording::report_version!()),
         reference: REFERENCE_GAPPED_BLAST,
         db_name,
-        matrix: Some(matrix),
+        matrix: Some(&matrix),
         expect: args.evalue,
         gap_open,
         gap_extend,
@@ -221,15 +225,34 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     // `report_stream`) never writes the `-subject` report of its last query, which NCBI holds
     // back, unless another format of the call (outfmt 5) writes it (`written_queries`; `only_xml2`:
     // every structured format of the call is XML2 or JSON).
+    let shows = |q_idx: usize| crate::blastinput::query_batch::xml_show_of(run.query_scopes, q_idx);
+    let holds_back = only_xml2 && document.holds_back();
     let reports = written_queries(
         queries.len(),
         !run.epilog,
-        only_xml2 && document.holds_back(),
+        holds_back,
+        crate::blastinput::query_batch::held_start_of(run.query_scopes, queries.len()),
     );
     let texts = queries[..reports]
         .iter()
         .enumerate()
         .map(|(q_idx, query)| {
+            let messages = query_messages(query, run.searched[q_idx], run.filtered_empty);
+            let has_hits = !query_hits[q_idx].is_empty();
+            // A query whose names no written result shows (`names_unshown_in`) has its message.
+            if crate::blastinput::query_batch::names_unshown_in(
+                run.query_scopes,
+                reports,
+                holds_back,
+                q_idx,
+            ) {
+                return Ok(names::labelled_query_text(
+                    query.warning_id(),
+                    query.title(),
+                    &messages,
+                    has_hits,
+                ));
+            }
             names::query_text(
                 PROGRAM,
                 query.local_id.as_bytes(),
@@ -237,8 +260,8 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 query.believed(),
                 query.title(),
                 false,
-                &query_messages(query, run.searched[q_idx], run.filtered_empty),
-                !query_hits[q_idx].is_empty(),
+                &messages,
+                has_hits,
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -290,14 +313,11 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         // The query's warnings come before its document (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
-            // NCBI's prefetch of the query's batch, where it begins (`TaxdbPrinter::batch_texts`).
-            if q_idx < reports {
-                warnings.prefetch_lines(&mut *writer, taxdb_printer.batch_texts(q_idx))?;
-            }
         }
+        let show = shows(q_idx);
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
-            document.unwritten(&mut buf)?;
+            document.unwritten(&mut buf, show.joins_held)?;
             crate::report::query_warnings::write_document_posts(
                 &buf,
                 document.take_posts(),
@@ -305,6 +325,14 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 warnings.as_deref_mut(),
             )?;
             buf.clear();
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+            // Queries whose results join the unwritten held report were still read, exported and
+            // searched before the stopping batch, so their warnings and requests follow.
+            if let Some(warnings) = warnings.as_deref_mut() {
+                for later in (q_idx + 1)..queries.len() {
+                    warnings.before_query(later, &mut *writer)?;
+                }
+            }
             break;
         }
         let text = &texts[q_idx];
@@ -323,15 +351,18 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 &mut masks,
             );
         }
+        // The query whose id, title and length the result shows (`XmlShow::label`).
+        let label = show.label.unwrap_or(q_idx);
         let xml_query = XmlQuery {
-            id: text.query_id(query.local_id.as_bytes()),
-            title: &text.title,
-            len: i32::try_from(searched_length)?,
+            id: texts[label].query_id(queries[label].local_id.as_bytes()),
+            title: &texts[label].title,
+            len: i32::try_from(queries[label].seq().len())?,
             stats: query_stats(&run.query_stats[q_idx], run.numbers),
             message: text.message.as_deref(),
             // Read by XML2 alone.
             searched: run.searched[q_idx],
             masks: &masks,
+            joins_held: show.joins_held,
         };
         // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): the texts of the
         // subjects that the query's report reads one by one (`QueryWarnings::subject_read`) and
@@ -365,7 +396,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 // (nothing for the other formats).
                 posts.hit(sink.position(), &hit, s_idx, |texts| {
                     if posting {
-                        taxdb_printer.at_names((q_idx, s_idx as usize), subject, texts)
+                        taxdb_printer.at_names(subject, texts)
                     } else {
                         Ok(())
                     }
@@ -450,7 +481,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
         // query leaves its partial bytes in `buf`, which the error return drops.
         if let Some(post) =
-            crate::report::blast_xml::writer::caught_post(written, &*document, xml_run.program)?
+            crate::report::blast_xml::writer::caught_post(written, &*document, xml_run.app)?
         {
             posts.caught(post);
         }

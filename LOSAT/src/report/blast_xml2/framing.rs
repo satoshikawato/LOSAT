@@ -16,6 +16,10 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2385, :2383-2389
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2219
+//!
+//! A result whose query's Seq-id matches that of the held report's first result joins the held
+//! report (`XmlQuery::joins_held`): NCBI accumulates it, and writes the results of one Seq-id as
+//! one report whose `bl2seq` list has a `Search` for each (`Xml2Writer`'s join, `HeldSearches`).
 
 use std::io::{self, Write};
 use std::path::Path;
@@ -113,11 +117,7 @@ pub fn side_file_open_error() -> anyhow::Error {
 /// outfmt 0 (`BLAST failed to write output`, exit status 6; the side files written before stay,
 /// the master file stays empty).
 pub fn side_file_write_error() -> anyhow::Error {
-    crate::cli::NativeError {
-        exit: 6,
-        message: "BLAST failed to write output\n".into(),
-    }
-    .into()
+    crate::cli::NativeError::write_failure().into()
 }
 
 /// The files of a 13 / 14 run: `create(n)` opens the file of the n-th report (`<base>_<n>.xml` or
@@ -214,6 +214,33 @@ pub fn prolog_bytes(kind: Xml2Kind) -> Vec<u8> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:95-110
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:579-612
+/// What the held report of a `-subject` run keeps for the results that join it
+/// (`XmlQuery::joins_held`, `Xml2Writer`): where its last `Search` ends, the id, title and length
+/// that its first `Search` shows and the masks that it lists and applies (NCBI's report shows
+/// every `Search` with its query `m_Query` and the masks of its first result), and whether its
+/// stream threw (no later `Search` is written). The buffers are reused from report to report.
+#[derive(Clone, Debug, Default)]
+pub struct HeldSearches {
+    pub(super) end: usize,
+    pub(super) id: Vec<u8>,
+    pub(super) title: Vec<u8>,
+    pub(super) len: i32,
+    pub(super) masks: Vec<crate::report::blast_xml::QueryMask>,
+    pub(super) cut: bool,
+}
+
+/// The held report of a `-subject` run as a result that joins it changes it
+/// (`Xml2Document::held_report`): its bytes, what its writer handed with them, the exception of
+/// its making, and its `Search`es.
+pub(super) struct HeldReport<'d> {
+    pub(super) report: &'d mut Vec<u8>,
+    pub(super) made: &'d mut MadeReport,
+    pub(super) failure: &'d mut Option<crate::ncbi_exception::NcbiException>,
+    pub(super) searches: &'d mut HeldSearches,
+}
+
 /// The document of one run: the reports of the formatted queries and the state that the
 /// framing needs (the count of reports, the held report of a `-subject` run).
 pub struct Xml2Document<F: SideFiles = NoSideFiles> {
@@ -233,6 +260,8 @@ pub struct Xml2Document<F: SideFiles = NoSideFiles> {
     /// The held report of a `-subject` run failed with this exception (`CaughtException`): NCBI
     /// makes it, and fails, when it writes it.
     pending_failure: Option<crate::ncbi_exception::NcbiException>,
+    /// The `Search`es of the held report (`HeldSearches`).
+    held: HeldSearches,
     files: F,
     /// The posts of the reports written to the output buffers since `take_posts`, and the
     /// exception of a 14 side file that ends the run after them.
@@ -274,6 +303,7 @@ pub struct Xml2Carry {
     pending_made: MadeReport,
     has_pending: bool,
     pending_failure: Option<crate::ncbi_exception::NcbiException>,
+    held: HeldSearches,
 }
 
 impl<F: SideFiles> Xml2Document<F> {
@@ -287,6 +317,7 @@ impl<F: SideFiles> Xml2Document<F> {
             pending_made: std::mem::take(&mut self.pending_made),
             has_pending: std::mem::take(&mut self.has_pending),
             pending_failure: self.pending_failure.take(),
+            held: std::mem::take(&mut self.held),
         }
     }
 
@@ -300,6 +331,7 @@ impl<F: SideFiles> Xml2Document<F> {
         self.pending_made = carry.pending_made;
         self.has_pending = carry.has_pending;
         self.pending_failure = carry.pending_failure;
+        self.held = carry.held;
     }
 
     /// The posts of the reports written since the last call, at offsets of the output buffers of
@@ -319,6 +351,7 @@ impl<F: SideFiles> Xml2Document<F> {
             pending_made: MadeReport::default(),
             has_pending: false,
             pending_failure: None,
+            held: HeldSearches::default(),
             files,
             posts: DocumentPosts::default(),
         }
@@ -439,13 +472,32 @@ impl<F: SideFiles> Xml2Document<F> {
         self.delayed
     }
 
+    /// The `Search`es of the report that the next report call holds (`HeldSearches`), which its
+    /// writer sets for the report it makes.
+    pub(super) fn held_searches_mut(&mut self) -> &mut HeldSearches {
+        &mut self.held
+    }
+
+    /// The held report of a `-subject` run, for a result that joins it (`HeldReport`); `None`
+    /// where no report is held.
+    pub(super) fn held_report(&mut self) -> Option<HeldReport<'_>> {
+        (self.delayed && self.has_pending).then_some(HeldReport {
+            report: &mut self.pending,
+            made: &mut self.pending_made,
+            failure: &mut self.pending_failure,
+            searches: &mut self.held,
+        })
+    }
+
     /// The arrival of the report of the last query of a `-subject` run that stops, which NCBI
     /// holds back and never writes: the report is not made, and the one held before it is
-    /// written now, as `report` would write it.
-    pub fn unwritten(&mut self, out: &mut Vec<u8>) -> Result<()> {
+    /// written now, as `report` would write it, unless the result joins it (`joins_held`,
+    /// `XmlQuery::joins_held`): NCBI accumulates the result, and the held report is never written
+    /// either.
+    pub fn unwritten(&mut self, out: &mut Vec<u8>, joins_held: bool) -> Result<()> {
         debug_assert!(self.delayed, "only a held report is never written");
         self.prolog(out);
-        if !std::mem::replace(&mut self.has_pending, false) {
+        if !std::mem::replace(&mut self.has_pending, false) || joins_held {
             return Ok(());
         }
         let pending = std::mem::take(&mut self.pending);
@@ -537,6 +589,11 @@ impl<F: SideFiles> Xml2Document<F> {
             if self.posts.ends_run.is_some() {
                 return Ok(());
             }
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2230
+        // The held report's post comes before the document's end (`DocumentPosts::caught_at`).
+        if caught.is_some() {
+            self.posts.caught_at = Some(out.len());
         }
         match self.kind {
             Xml2Kind::Single16 => out.extend_from_slice(TAIL16),

@@ -1,50 +1,60 @@
-//! The list options of a database search (line DI-8): `-taxids`, `-taxidlist`,
-//! `-negative_taxids`, `-negative_taxidlist` and `-no_taxid_expansion` (DI-8a), `-seqidlist`
-//! and `-negative_seqidlist` (DI-8b) of BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX. The list
-//! is read as NCBI's handler of the database arguments reads it (`s_GetTaxIDList`,
-//! `CSeqDBFileGiList`), and the search's database is restricted to it
+//! The list options of a database search: `-taxids`, `-taxidlist`, `-negative_taxids`,
+//! `-negative_taxidlist` and `-no_taxid_expansion` (DI-8a), `-seqidlist` and `-negative_seqidlist`
+//! (DI-8b), `-gilist` and `-negative_gilist` across all six database search programs, and
+//! `-ipglist` and `-negative_ipglist` on protein-database search programs (`blastp`, `blastx`,
+//! `psiblast`). The list is read as NCBI's handler of the database arguments reads it
+//! (`s_GetTaxIDList`, `CSeqDBFileGiList`), and the search's database is restricted to it
 //! (`seqdb::SeqDb::restrict`).
-//!
-//! `-gilist` and `-negative_gilist` stay refused; NCBI's exclusions with them are therefore
-//! not declared here.
 
 use crate::wording::DATABASE_ERROR;
 use std::collections::BTreeSet;
+use std::ffi::{OsStr, OsString};
 use std::io::Write;
 
 use anyhow::Result;
 
-use crate::blastinput::app::options_error;
+use crate::blastinput::app::{options_error, options_error_bytes};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
 use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
 use crate::seqdb::file::DbFile;
 use crate::seqdb::lmdb_read::ReadError;
 use crate::seqdb::tax_sqlite::{QueryReadFailure, TaxonomySqlite};
-use crate::seqdb::{seqidlist, DbList, SearchPath, SeqidList, TaxidList};
+use crate::seqdb::{id_list, seqidlist, DbList, GiList, PigList, SearchPath, SeqidList, TaxidList};
+use crate::utils::os_bytes::os_str_bytes;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2257-2299
-// The exclusions of the four lists with one another, with `-subject` and (on the
-// programs' `-subject_loc`) with `-subject_loc` are NCBI's argument reader's (`cli::reader`:
-// its usage, `Incompatible with argument`, exit status 1).
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2245-2259
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2257-2326
+// The exclusions among the list options, with `-subject` and (on the programs' `-subject_loc`)
+// with `-subject_loc` are NCBI's argument reader's (`cli::reader`: its usage,
+// `Incompatible with argument`, exit status 1). Note that `-ipglist` and `-negative_ipglist` are
+// not in NCBI's `kBlastDBFilteringOptions`, so they can be passed alongside another list option
+// and `ExtractAlgorithmOptions`'s branch order decides which one takes effect.
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2211-2259
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2282-2289
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2302-2319
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2302-2326
 /// The list options of a search program's command line.
 #[derive(Debug, Clone, Default)]
 pub struct DbFilterArgs {
+    /// `-gilist`: a file of GIs (text or binary).
+    pub gilist: Option<OsString>,
+    /// `-negative_gilist`: a file of GIs to leave out.
+    pub negative_gilist: Option<OsString>,
     /// `-seqidlist`: a file of Seq-ids (text, or binary from `blastdb_aliastool`).
-    pub seqidlist: Option<String>,
+    pub seqidlist: Option<OsString>,
     /// `-negative_seqidlist`: a file of Seq-ids to leave out.
-    pub negative_seqidlist: Option<String>,
+    pub negative_seqidlist: Option<OsString>,
     /// `-taxids`: taxids separated by commas.
-    pub taxids: Option<String>,
+    pub taxids: Option<OsString>,
     /// `-taxidlist`: a file of taxids, one per line.
-    pub taxidlist: Option<String>,
+    pub taxidlist: Option<OsString>,
     /// `-negative_taxids`: taxids separated by commas.
-    pub negative_taxids: Option<String>,
+    pub negative_taxids: Option<OsString>,
     /// `-negative_taxidlist`: a file of taxids, one per line.
-    pub negative_taxidlist: Option<String>,
+    pub negative_taxidlist: Option<OsString>,
+    /// `-ipglist`: a file of IPGs/PIGs (text or binary; protein databases only).
+    pub ipglist: Option<OsString>,
+    /// `-negative_ipglist`: a file of IPGs/PIGs to leave out (protein databases only).
+    pub negative_ipglist: Option<OsString>,
     /// `-no_taxid_expansion`: the taxids alone, without their descendants.
     pub no_taxid_expansion: bool,
 }
@@ -52,28 +62,58 @@ pub struct DbFilterArgs {
 impl DbFilterArgs {
     // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
     // (line RG DECISIONS K4i-3-1).
-    /// The options of `args`, the arguments as NCBI's argument reader read them
-    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
-    /// has one, each flag whether it was given, and the run's state, which the run fills in at
-    /// its start.
+    /// The options of `args` for a nucleotide-database search program (`blastn`, `tblastn`,
+    /// `tblastx`), which has no `-ipglist` or `-negative_ipglist`.
     pub(crate) fn from_args(
         args: &crate::ncbi_app::args::Args,
     ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Self::from_args_inner(args, false)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:63
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:64
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:59
+    /// The options of `args` for a protein-database search program (`blastp`, `blastx`,
+    /// `psiblast`), which enables `-ipglist` and `-negative_ipglist` via
+    /// `SetIPGFilteringSupport`.
+    pub(crate) fn from_args_with_ipg(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Self::from_args_inner(args, true)
+    }
+
+    fn from_args_inner(
+        args: &crate::ncbi_app::args::Args,
+        with_ipg: bool,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
         Ok(DbFilterArgs {
+            gilist: args.given_option("gilist")?,
+            negative_gilist: args.given_option("negative_gilist")?,
             seqidlist: args.given_option("seqidlist")?,
             negative_seqidlist: args.given_option("negative_seqidlist")?,
             taxids: args.given_option("taxids")?,
             taxidlist: args.given_option("taxidlist")?,
             negative_taxids: args.given_option("negative_taxids")?,
             negative_taxidlist: args.given_option("negative_taxidlist")?,
+            ipglist: if with_ipg {
+                args.given_option("ipglist")?
+            } else {
+                None
+            },
+            negative_ipglist: if with_ipg {
+                args.given_option("negative_ipglist")?
+            } else {
+                None
+            },
             no_taxid_expansion: args.flag("no_taxid_expansion"),
         })
     }
 }
 
-/// The names of the options of `DbFilterArgs`, for the `-subject_loc` exclusions of LOSAT Web's
-/// ABI v1, which keeps its own parser (`web_v1_argv`; the other readers are NCBI's).
-#[cfg(any(target_arch = "wasm32", test))]
+/// The frozen set of `DbFilterArgs` options from LOSAT Web's ABI v1 (which keeps its own parser
+/// `web_v1_argv` and does not accept `-gilist`, `-negative_gilist`, `-ipglist`, or
+/// `-negative_ipglist`), used for v1 `-subject_loc` exclusions.
+#[cfg(any(losat_web_abi_v1, test))]
 pub const DB_FILTER_OPTIONS: [&str; 7] = [
     "seqidlist",
     "negative_seqidlist",
@@ -93,37 +133,95 @@ pub(crate) const NO_TAXONOMY_WARNING: &str =
 /// NCBI's default name of the taxonomy file (`kDefaultName`, c++/src/objtools/blast/seqdb_reader/tax4blastsqlite.cpp).
 pub(crate) const TAXONOMY_FILE: &str = "taxonomy4blast.sqlite3";
 
+/// Which list option of `DbFilterArgs` wins NCBI's `ExtractAlgorithmOptions` branch chain.
+#[derive(Clone, Copy)]
+enum SelectedList<'a> {
+    Gi {
+        value: &'a OsStr,
+        negative: bool,
+    },
+    Seqid {
+        value: &'a OsStr,
+        negative: bool,
+    },
+    Taxid {
+        value: &'a OsStr,
+        is_file: bool,
+        negative: bool,
+    },
+    Pig {
+        value: &'a OsStr,
+        negative: bool,
+    },
+}
+
 impl DbFilterArgs {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2486-2503
-    /// Whether the command line gives one of the six lists.
-    pub fn given(&self) -> bool {
-        self.seqid_list().is_some() || self.list().is_some()
-    }
-
-    /// The seqid list option that NCBI reads (before the taxid lists): `(file, is negative)`.
-    fn seqid_list(&self) -> Option<(&str, bool)> {
-        if let Some(value) = &self.seqidlist {
-            Some((value, false))
-        } else {
-            self.negative_seqidlist
-                .as_deref()
-                .map(|value| (value, true))
-        }
-    }
-
-    /// The taxid list option that NCBI reads: `(value, is a file, is negative)`.
-    fn list(&self) -> Option<(&str, bool, bool)> {
-        if let Some(value) = &self.taxids {
-            Some((value, false, false))
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2478-2511
+    /// The first given list option in NCBI's `ExtractAlgorithmOptions` order.
+    fn selected(&self) -> Option<SelectedList<'_>> {
+        if let Some(value) = &self.gilist {
+            Some(SelectedList::Gi {
+                value,
+                negative: false,
+            })
+        } else if let Some(value) = &self.negative_gilist {
+            Some(SelectedList::Gi {
+                value,
+                negative: true,
+            })
+        } else if let Some(value) = &self.seqidlist {
+            Some(SelectedList::Seqid {
+                value,
+                negative: false,
+            })
+        } else if let Some(value) = &self.negative_seqidlist {
+            Some(SelectedList::Seqid {
+                value,
+                negative: true,
+            })
+        } else if let Some(value) = &self.taxids {
+            Some(SelectedList::Taxid {
+                value,
+                is_file: false,
+                negative: false,
+            })
         } else if let Some(value) = &self.taxidlist {
-            Some((value, true, false))
+            Some(SelectedList::Taxid {
+                value,
+                is_file: true,
+                negative: false,
+            })
         } else if let Some(value) = &self.negative_taxids {
-            Some((value, false, true))
+            Some(SelectedList::Taxid {
+                value,
+                is_file: false,
+                negative: true,
+            })
+        } else if let Some(value) = &self.negative_taxidlist {
+            Some(SelectedList::Taxid {
+                value,
+                is_file: true,
+                negative: true,
+            })
+        } else if let Some(value) = &self.ipglist {
+            Some(SelectedList::Pig {
+                value,
+                negative: false,
+            })
         } else {
-            self.negative_taxidlist
+            self.negative_ipglist
                 .as_deref()
-                .map(|value| (value, true, true))
+                .map(|value| SelectedList::Pig {
+                    value,
+                    negative: true,
+                })
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2478-2511
+    /// Whether the command line gives one of the database list options.
+    pub fn given(&self) -> bool {
+        self.selected().is_some()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2403-2459
@@ -132,28 +230,50 @@ impl DbFilterArgs {
     // 2026-10-29). A taxid whose descendants loop back to it (taxid 1, whose parent is 1)
     // never ends NCBI's recursive query; LOSAT visits each taxid once and ends with every
     // taxid below it (DECISIONS 10, `TaxonomySqlite::descendants`).
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:458-469
-    /// The `program-options` parameter of the BLAST archive for the list option of the command
-    /// line: NCBI's list object is there for each option, so the parameter is written also when
-    /// no id came of it, or the list is a seqid list, without ids. `taxids` are the ids of NCBI's
-    /// `set` after the database opened (`SeqDb::list_taxids`), ascending.
-    pub fn archive_parameter(
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:444-498
+    /// The `program-options` parameters of the BLAST archive and search strategy for the list
+    /// option of the command line: for a GI list with at least one GI, `GiList` or
+    /// `NegativeGiList` (`BigIntegerList`) followed by an empty `TaxidList` or
+    /// `NegativeTaxidList`; for every other list (including a 0-GI file, seqid, taxid, or IPG
+    /// list), `TaxidList` or `NegativeTaxidList` alone. `gis` are the GIs of NCBI's list object
+    /// after the database opened (`SeqDb::list_gis`), `taxids` are its taxids
+    /// (`SeqDb::list_taxids`).
+    pub fn archive_parameters(
         &self,
+        gis: &[i64],
         taxids: &[i32],
-    ) -> Option<crate::report::archive::options::Param> {
+    ) -> Vec<crate::report::archive::options::Param> {
+        use crate::report::archive::fields;
         use crate::report::archive::options::{Param, ParamValue};
-        let negative = match (self.seqid_list(), self.list()) {
-            (Some((_, negative)), _) | (None, Some((_, _, negative))) => negative,
-            (None, None) => return None,
+        let Some(selected) = self.selected() else {
+            return Vec::new();
         };
-        Some(Param {
-            name: if negative {
-                "NegativeTaxidList"
+        let (is_gi, negative) = match selected {
+            SelectedList::Gi { negative, .. } => (true, negative),
+            SelectedList::Seqid { negative, .. }
+            | SelectedList::Taxid { negative, .. }
+            | SelectedList::Pig { negative, .. } => (false, negative),
+        };
+        let mut params = Vec::with_capacity(2);
+        if is_gi && !gis.is_empty() {
+            params.push(Param::new(
+                if negative {
+                    fields::NEGATIVE_GI_LIST_INT8
+                } else {
+                    fields::GI_LIST_INT8
+                },
+                ParamValue::BigIntegerList(gis.to_vec()),
+            ));
+        }
+        params.push(Param::new(
+            if negative {
+                fields::NEGATIVE_TAXID_LIST
             } else {
-                "TaxidList"
+                fields::TAXID_LIST
             },
-            value: ParamValue::IntegerList(taxids.to_vec()),
-        })
+            ParamValue::IntegerList(taxids.to_vec()),
+        ));
+        params
     }
 
     /// The list of the command line, read (and a taxid list expanded) as NCBI reads it, with
@@ -167,26 +287,41 @@ impl DbFilterArgs {
         program: &str,
         warnings: &mut dyn Write,
     ) -> Result<Option<DbList>> {
-        if self.seqid_list().is_none() && self.list().is_none() {
-            return Ok(None);
-        }
-        let path = SearchPath::from_environment(settings.blastdb.as_deref());
-        if let Some((value, negative)) = self.seqid_list() {
-            return self.resolve_seqid_list(value, negative, &path, warnings);
-        }
-        let Some((value, is_file, negative)) = self.list() else {
+        let Some(selected) = self.selected() else {
             return Ok(None);
         };
+        let path = SearchPath::from_environment(settings.blastdb.as_deref());
+        let (value, is_file, negative) = match selected {
+            SelectedList::Gi { value, negative } => {
+                return self.resolve_gi_list(value, negative, &path);
+            }
+            SelectedList::Seqid { value, negative } => {
+                return self.resolve_seqid_list(value, negative, &path, warnings);
+            }
+            SelectedList::Pig { value, negative } => {
+                return self.resolve_pig_list(value, negative, &path);
+            }
+            SelectedList::Taxid {
+                value,
+                is_file,
+                negative,
+            } => (value, is_file, negative),
+        };
+        let value = os_str_bytes(value);
         let ids: Vec<Vec<u8>> = if is_file {
-            let Some(file) = path.resolve_file(value.as_bytes()) else {
-                return Err(options_error(&format!("File is not acessible: {value}")));
+            let not_accessible = || {
+                options_error_bytes(
+                    &[b"File is not acessible: ".as_slice(), value.as_ref()].concat(),
+                )
+            };
+            let Some(file) = path.resolve_file(&value) else {
+                return Err(not_accessible());
             };
             let bytes = std::fs::read(crate::utils::os_bytes::path_of_bytes(&file))
-                .map_err(|_| options_error(&format!("File is not acessible: {value}")))?;
+                .map_err(|_| not_accessible())?;
             stream_lines(&bytes)
         } else {
             value
-                .as_bytes()
                 .split(|&byte| byte == b',')
                 .filter(|token| !token.is_empty())
                 .map(<[u8]>::to_vec)
@@ -262,21 +397,60 @@ impl DbFilterArgs {
     // `Error: <what>` with exit status 255 (`BLAST_UNKNOWN_ERROR`), as is `CMemoryFile`'s exception
     // of a file there that does not open. The reader's own errors (an empty file, a damaged binary
     // list) are `BLAST Database error: ...`, exit status 2.
+    /// Reads a resolved list file (`SeqDB_ResolveDbPath`) with NCBI's `CFileException` mapping.
+    fn read_list_file(value: &OsStr, path: &SearchPath) -> Result<Vec<u8>> {
+        let value = os_str_bytes(value);
+        seqidlist::read_resolved(&value, path).map_err(|error| match error.ncbi_exception() {
+            Some(exception) => anyhow::Error::from(NativeError::exception(exception)),
+            None => anyhow::Error::msg(error.to_string()),
+        })
+    }
+
+    /// `CSeqDBFileGiList(fn, eGiList)` of the `-gilist` / `-negative_gilist` file.
+    fn resolve_gi_list(
+        &self,
+        value: &OsStr,
+        negative: bool,
+        path: &SearchPath,
+    ) -> Result<Option<DbList>> {
+        let bytes = Self::read_list_file(value, path)?;
+        let gis = id_list::read_gi_list(&bytes).map_err(|text| NativeError {
+            exit: 2,
+            message: format!("{DATABASE_ERROR} {text}\n").into(),
+        })?;
+        if gis.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(DbList::Gis(GiList { negative, gis })))
+    }
+
+    /// `CSeqDBFileGiList(fn, ePigList)` of the `-ipglist` / `-negative_ipglist` file.
+    fn resolve_pig_list(
+        &self,
+        value: &OsStr,
+        negative: bool,
+        path: &SearchPath,
+    ) -> Result<Option<DbList>> {
+        let bytes = Self::read_list_file(value, path)?;
+        let pigs = id_list::read_pig_list(&bytes).map_err(|text| NativeError {
+            exit: 2,
+            message: format!("{DATABASE_ERROR} {text}\n").into(),
+        })?;
+        if pigs.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(DbList::Pigs(PigList { negative, pigs })))
+    }
+
     /// `CSeqDBFileGiList(fn, eSiList)` of the `-seqidlist` / `-negative_seqidlist` file.
     fn resolve_seqid_list(
         &self,
-        value: &str,
+        value: &OsStr,
         negative: bool,
         path: &SearchPath,
         warnings: &mut dyn Write,
     ) -> Result<Option<DbList>> {
-        let bytes =
-            seqidlist::read_resolved(value.as_bytes(), path).map_err(|error| {
-                match error.ncbi_exception() {
-                    Some(exception) => anyhow::Error::from(NativeError::exception(exception)),
-                    None => anyhow::Error::msg(error.to_string()),
-                }
-            })?;
+        let bytes = Self::read_list_file(value, path)?;
         let mut cerr = Vec::new();
         let file = seqidlist::read_si_list(&bytes, &mut cerr).map_err(|text| NativeError {
             exit: 2,

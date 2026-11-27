@@ -1,0 +1,2 @@
+Seq-entry ::= seq { id { local str "g1" }, descr { title "garbage after" }, inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } }
+hello world

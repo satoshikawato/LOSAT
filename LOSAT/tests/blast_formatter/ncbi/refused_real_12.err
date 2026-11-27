@@ -1,0 +1,3 @@
+Error: (802.5) CObjectOStream: error at line 83: Seq-annot.data.align.E.score.E.value.real: invalid double: not a number
+BLAST query/options error: Invalid input format for BLAST Archive.
+Please refer to the BLAST+ user manual.

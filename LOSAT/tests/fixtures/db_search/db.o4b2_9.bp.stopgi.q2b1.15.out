@@ -1,0 +1,70 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/tm_stop_gi tests/db_search/tm_stop_u"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "qp2 query beta",
+          "query_len": 130,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|11",
+                  "accession": "11",
+                  "title": "u1 unparsed beta",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 278.485,
+                  "score": 711,
+                  "evalue": 1.2468e-102,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "ACDEFGHIKLMNPQRSTVWYVTSRQPNMLKIHGFEDCAACDEGGHHIIKKLLMMNNPPQQRRSSSTTTVVVWWWYYYAAADDDEEEFFFGGGHHHIIIKKKLLLPPQQRRSSSTTTVVVWWWYYYAAADD",
+                  "hseq": "ACDEFGHIKLMNPQRSTVWYVTSRQPNMLKIHGFEDCAACDEGGHHIIKKLLMMNNPPQQRRSSSTTTVVVWWWYYYAAADDDEEEFFFGGGHHHIIIKKKLLLPPQQRRSSSTTTVVVWWWYYYAAADD",
+                  "midline": "ACDEFGHIKLMNPQRSTVWYVTSRQPNMLKIHGFEDCAACDEGGHHIIKKLLMMNNPPQQRRSSSTTTVVVWWWYYYAAADDDEEEFFFGGGHHHIIIKKKLLLPPQQRRSSSTTTVVVWWWYYYAAADD"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 12,
+            "db_len": 1560,
+            "hsp_len": 30,
+            "eff_space": 120000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }

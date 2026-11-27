@@ -198,7 +198,7 @@ fn run(
             args.2,
             format,
             args.3,
-            "User specified sequence set (Input: subject.fa)",
+            b"User specified sequence set (Input: subject.fa)",
             args.4,
             epilog,
             Some(&mut warnings),
@@ -211,11 +211,12 @@ fn run(
             &crate::report::db_subject::HitLoads::default(),
             format,
             args.3,
-            "User specified sequence set (Input: subject.fa)",
+            b"User specified sequence set (Input: subject.fa)",
             args.4,
             epilog,
             None,
             Some(&mut warnings),
+            None,
         ),
     }
     .unwrap();
@@ -408,10 +409,11 @@ fn a_format_observer_keeps_the_serial_writer() {
             &crate::report::db_subject::HitLoads::default(),
             BlastnOutputFormat::Tabular,
             &case.query_titles,
-            "subject",
+            b"subject",
             &case.unsearched,
             None,
             probe.as_mut(),
+            None,
             None,
         )
         .unwrap();

@@ -512,3 +512,450 @@ fn a_tool_run_runs_windowmasker_alone() {
     }
     assert!(emitted().is_empty());
 }
+
+/// Tool runs and tool validation read `-logfile` against the run's real files (line WQA D19):
+/// missing/existing folders keep diagnostics on stream 3 with no log file; existing files are
+/// refused (exit status 1 in `run`, `Err` in `validate`); `/dev/stdout` writes diagnostics into
+/// stream 11 in chronological order; and stream 12 carries normalized host file names for both
+/// `-logfile` and `-out`.
+#[test]
+fn a_tool_run_reads_logfile_against_the_runs_files() {
+    emitted();
+    let fasta = fixture("winmask/fasta/dm2L_3k.fa");
+    // Case 0 & 1: missing folder and existing folder (`src`) keep diagnostics on stream 3.
+    for log in ["d19-no-such-folder/run.log", "src", "src/"] {
+        run(&[
+            "windowmasker",
+            "-mk_counts",
+            "-in",
+            &fasta,
+            "-unit",
+            "5",
+            "-out",
+            "d19-tool.counts",
+            "-logfile",
+            log,
+        ])
+        .unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":0}".to_vec()),
+            "{log}"
+        );
+        assert_eq!(
+            joined(&calls, STREAM_DIAGNOSTICS),
+            b"pass 1\npass 2\n",
+            "{log}"
+        );
+        assert_eq!(
+            files(&frames(&calls))
+                .iter()
+                .map(|(n, _)| n.as_slice())
+                .collect::<Vec<_>>(),
+            vec![b"d19-tool.counts".as_slice()],
+            "{log}"
+        );
+    }
+    // Case 2: existing file of the run's directory (`Cargo.toml` in `web/adapter`) is refused by
+    // both `run` (status 1, stream 3) and `validate`.
+    let expected_refusal = "Error: a -logfile file 'Cargo.toml' that is a file of the run's \
+         directory (LOSAT Web reads the run's files and writes none of them) is not supported by \
+         LOSAT's WINDOWMASKER";
+    assert_eq!(
+        validate(&[
+            "windowmasker",
+            "-mk_counts",
+            "-in",
+            &fasta,
+            "-logfile",
+            "Cargo.toml"
+        ]),
+        Err(expected_refusal.to_string())
+    );
+    run(&[
+        "windowmasker",
+        "-mk_counts",
+        "-in",
+        &fasta,
+        "-logfile",
+        "Cargo.toml",
+    ])
+    .unwrap();
+    let calls = emitted();
+    assert_eq!(
+        calls.last().unwrap(),
+        &(STREAM_RESPONSE, b"{\"status\":1}".to_vec())
+    );
+    assert_eq!(
+        joined(&calls, STREAM_DIAGNOSTICS),
+        format!("{expected_refusal}\n").as_bytes()
+    );
+    assert!(joined(&calls, STREAM_PRINTED).is_empty());
+    assert!(frames(&calls).is_empty());
+    // Case 3: `-logfile /dev/stdout` writes diagnostic messages into stream 11 before counts.
+    run(&["windowmasker", "-mk_counts", "-in", &fasta, "-unit", "5"]).unwrap();
+    let plain_calls = emitted();
+    let plain_out = joined(&plain_calls, STREAM_PRINTED);
+    assert_eq!(
+        joined(&plain_calls, STREAM_DIAGNOSTICS),
+        b"pass 1\npass 2\n"
+    );
+    for extra in [&[][..], &["-out", "/dev/stdout"][..]] {
+        let mut words = vec!["windowmasker", "-mk_counts", "-in", &fasta, "-unit", "5"];
+        words.extend_from_slice(extra);
+        words.extend(["-logfile", "/dev/stdout"]);
+        run(&words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":0}".to_vec())
+        );
+        assert!(joined(&calls, STREAM_DIAGNOSTICS).is_empty(), "{extra:?}");
+        assert!(frames(&calls).is_empty(), "{extra:?}");
+        let mut want = b"pass 1\npass 2\n".to_vec();
+        want.extend_from_slice(&plain_out);
+        assert_eq!(joined(&calls, STREAM_PRINTED), want, "{extra:?}");
+    }
+    // Case 4: normalized file names on stream 12 (` run.log` -> `run.log`, `./x.counts` -> `x.counts`,
+    // `d19-slash/` -> `d19-slash`).
+    let file_names = |calls: &[(u32, Vec<u8>)]| {
+        files(&frames(calls))
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect::<Vec<_>>()
+    };
+    run(&[
+        "windowmasker",
+        "-mk_counts",
+        "-in",
+        &fasta,
+        "-unit",
+        "5",
+        "-out",
+        "./x.counts",
+        "-logfile",
+        " run.log",
+    ])
+    .unwrap();
+    let calls = emitted();
+    assert!(joined(&calls, STREAM_DIAGNOSTICS).is_empty(), "run.log");
+    let got = files(&frames(&calls));
+    assert_eq!(
+        file_names(&calls),
+        vec![b"run.log".to_vec(), b"x.counts".to_vec()]
+    );
+    assert_eq!(got[0].1, b"pass 1\npass 2\n");
+    run(&[
+        "windowmasker",
+        "-mk_counts",
+        "-in",
+        &fasta,
+        "-unit",
+        "5",
+        "-out",
+        "./x.counts",
+        "-logfile",
+        "d19-slash/",
+    ])
+    .unwrap();
+    let calls = emitted();
+    assert_eq!(
+        file_names(&calls),
+        vec![b"d19-slash".to_vec(), b"x.counts".to_vec()]
+    );
+
+    // Round R2 finding 2: `-logfile` or `-out` naming a missing input the CLI reads back is
+    // refused by both `validate` and `run` (status 1, same sentence, no file).
+    let log_refusal = |name: &str| {
+        format!(
+            "Error: a -logfile file '{name}' that is a file of the run's directory (LOSAT Web \
+             reads the run's files and writes none of them) is not supported by LOSAT's \
+             WINDOWMASKER"
+        )
+    };
+    let out_refusal = |name: &str| {
+        format!(
+            "Error: an output file '{name}' that is a file of the run's directory (the command \
+             line empties it; LOSAT Web reads the run's files and writes none of them) is not \
+             supported by LOSAT's WINDOWMASKER"
+        )
+    };
+    for (label, words, want) in [
+        (
+            "mk_counts -in missing -logfile same",
+            vec![
+                "windowmasker",
+                "-mk_counts",
+                "-in",
+                "d19-r2-missing.fa",
+                "-logfile",
+                "d19-r2-missing.fa",
+                "-out",
+                "d19-r2.counts",
+            ],
+            log_refusal("d19-r2-missing.fa"),
+        ),
+        (
+            "ustat missing -logfile same",
+            vec![
+                "windowmasker",
+                "-ustat",
+                "d19-r2-missing.counts",
+                "-in",
+                &fasta,
+                "-logfile",
+                "d19-r2-missing.counts",
+                "-out",
+                "d19-r2.mask",
+            ],
+            log_refusal("d19-r2-missing.counts"),
+        ),
+        (
+            "mk_counts -in missing -out same",
+            vec![
+                "windowmasker",
+                "-mk_counts",
+                "-in",
+                "d19-r2-missing-x.fa",
+                "-out",
+                "d19-r2-missing-x.fa",
+            ],
+            out_refusal("d19-r2-missing-x.fa"),
+        ),
+        (
+            "ustat missing -out same",
+            vec![
+                "windowmasker",
+                "-ustat",
+                "d19-r2-missing.counts",
+                "-in",
+                &fasta,
+                "-out",
+                "d19-r2-missing.counts",
+            ],
+            out_refusal("d19-r2-missing.counts"),
+        ),
+    ] {
+        assert_eq!(validate(&words), Err(want.clone()), "{label}: validate");
+        run(&words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":1}".to_vec()),
+            "{label}: status"
+        );
+        assert_eq!(
+            joined(&calls, STREAM_DIAGNOSTICS),
+            format!("{want}\n").as_bytes(),
+            "{label}: diag"
+        );
+        assert!(joined(&calls, STREAM_PRINTED).is_empty(), "{label}: stdout");
+        assert!(frames(&calls).is_empty(), "{label}: no files");
+    }
+    // Controls: `-mk_counts -in x.fa` (missing, no write name) stays status 3 with `Read error`,
+    // and a missing input's parent folder must NOT become present (`-in sub/x.fa -logfile
+    // sub/run.log` without `sub` keeps diagnostics on stream 3 with no file).
+    for (label, words) in [
+        (
+            "missing input control",
+            &["windowmasker", "-mk_counts", "-in", "d19-r2-missing-x.fa"][..],
+        ),
+        (
+            "missing input parent folder",
+            &[
+                "windowmasker",
+                "-mk_counts",
+                "-in",
+                "d19-r2-nosub/x.fa",
+                "-logfile",
+                "d19-r2-nosub/run.log",
+            ][..],
+        ),
+    ] {
+        assert_eq!(validate(words), Ok(()), "{label}: validate");
+        run(words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":3}".to_vec()),
+            "{label}: status"
+        );
+        assert!(
+            String::from_utf8_lossy(&joined(&calls, STREAM_DIAGNOSTICS)).contains("Read error"),
+            "{label}: Read error"
+        );
+        assert!(frames(&calls).is_empty(), "{label}: no stream 12 files");
+    }
+
+    // D19b (item 1): `-fa_list true` listed file named by `-logfile` or `-out` is refused by
+    // both `validate` and `run` (status 1, same sentence, no file), while control without
+    // `-logfile`/`-out` collision stays status 3 (`Read error`) and a listed file in a missing
+    // subfolder does not make that subfolder present.
+    let list_dir = std::env::temp_dir().join(format!("losat-d19b-falist-{}", std::process::id()));
+    std::fs::create_dir_all(&list_dir).unwrap();
+    let list_path = list_dir.join("list.txt");
+    let list_missing_sub = list_dir.join("list_sub.txt");
+    std::fs::write(&list_path, b"d19b-listed-missing.fa\n").unwrap();
+    std::fs::write(&list_missing_sub, b"d19b-nosub/m.fa\n").unwrap();
+    let list_str = list_path.to_str().unwrap().to_string();
+    let list_sub_str = list_missing_sub.to_str().unwrap().to_string();
+    for (label, words, want) in [
+        (
+            "fa_list listed missing -logfile same",
+            vec![
+                "windowmasker",
+                "-mk_counts",
+                "-fa_list",
+                "true",
+                "-in",
+                &list_str,
+                "-out",
+                "d19b.counts",
+                "-logfile",
+                "d19b-listed-missing.fa",
+            ],
+            log_refusal("d19b-listed-missing.fa"),
+        ),
+        (
+            "fa_list listed missing -out same",
+            vec![
+                "windowmasker",
+                "-mk_counts",
+                "-fa_list",
+                "true",
+                "-in",
+                &list_str,
+                "-out",
+                "d19b-listed-missing.fa",
+            ],
+            out_refusal("d19b-listed-missing.fa"),
+        ),
+        // D19b (item 3): `-infmt blastdb` missing database's `.nin`/`.nal` named by `-logfile` or
+        // `-mk_counts -out` is refused by both `validate` and `run`.
+        (
+            "mk_counts blastdb missing -logfile .nin",
+            vec![
+                "windowmasker",
+                "-mk_counts",
+                "-infmt",
+                "blastdb",
+                "-in",
+                "d19b-missing-db",
+                "-logfile",
+                "d19b-missing-db.nin",
+            ],
+            log_refusal("d19b-missing-db.nin"),
+        ),
+        (
+            "mk_counts blastdb missing -logfile .nal",
+            vec![
+                "windowmasker",
+                "-mk_counts",
+                "-infmt",
+                "blastdb",
+                "-in",
+                "d19b-missing-db",
+                "-logfile",
+                "d19b-missing-db.nal",
+            ],
+            log_refusal("d19b-missing-db.nal"),
+        ),
+        (
+            "mk_counts blastdb missing -out .nal",
+            vec![
+                "windowmasker",
+                "-mk_counts",
+                "-infmt",
+                "blastdb",
+                "-in",
+                "d19b-missing-db",
+                "-out",
+                "d19b-missing-db.nal",
+            ],
+            out_refusal("d19b-missing-db.nal"),
+        ),
+        (
+            "mk_counts blastdb missing -out .nin",
+            vec![
+                "windowmasker",
+                "-mk_counts",
+                "-infmt",
+                "blastdb",
+                "-in",
+                "d19b-missing-db",
+                "-out",
+                "d19b-missing-db.nin",
+            ],
+            out_refusal("d19b-missing-db.nin"),
+        ),
+        (
+            "ustat blastdb missing -logfile .nal",
+            vec![
+                "windowmasker",
+                "-ustat",
+                "d19b-u.counts",
+                "-infmt",
+                "blastdb",
+                "-in",
+                "d19b-missing-db",
+                "-logfile",
+                "d19b-missing-db.nal",
+            ],
+            log_refusal("d19b-missing-db.nal"),
+        ),
+    ] {
+        assert_eq!(validate(&words), Err(want.clone()), "{label}: validate");
+        run(&words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":1}".to_vec()),
+            "{label}: status"
+        );
+        assert_eq!(
+            joined(&calls, STREAM_DIAGNOSTICS),
+            format!("{want}\n").as_bytes(),
+            "{label}: diag"
+        );
+        assert!(joined(&calls, STREAM_PRINTED).is_empty(), "{label}: stdout");
+        assert!(frames(&calls).is_empty(), "{label}: no files");
+    }
+    // Control for item 1: `-fa_list true` with no `-logfile` stays status 3 (`Read error`).
+    let status_3 = (STREAM_RESPONSE, b"{\"status\":3}".to_vec());
+    let falist_ctrl = [
+        "windowmasker",
+        "-mk_counts",
+        "-fa_list",
+        "true",
+        "-in",
+        &list_str,
+        "-out",
+        "d19b.counts",
+    ];
+    assert_eq!(validate(&falist_ctrl), Ok(()), "fa_list ctrl: validate");
+    run(&falist_ctrl).unwrap();
+    let calls = emitted();
+    assert_eq!(calls.last().unwrap(), &status_3, "fa_list ctrl: status");
+    assert!(
+        String::from_utf8_lossy(&joined(&calls, STREAM_DIAGNOSTICS)).contains("Read error"),
+        "fa_list ctrl: Read error"
+    );
+    // Listed file in a missing subfolder must NOT make that subfolder present.
+    let falist_nosub = [
+        "windowmasker",
+        "-mk_counts",
+        "-fa_list",
+        "true",
+        "-in",
+        &list_sub_str,
+        "-logfile",
+        "d19b-nosub/run.log",
+    ];
+    assert_eq!(validate(&falist_nosub), Ok(()), "fa_list nosub: validate");
+    run(&falist_nosub).unwrap();
+    let calls = emitted();
+    assert_eq!(calls.last().unwrap(), &status_3, "fa_list nosub: status");
+    assert!(frames(&calls).is_empty(), "fa_list nosub: no log file");
+    let _ = std::fs::remove_dir_all(&list_dir);
+}

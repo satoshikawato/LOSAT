@@ -38,6 +38,7 @@
 //! shuffle (`crate::utils::std_shuffle`).
 
 pub(crate) mod alias_file;
+pub(crate) mod asn_source;
 pub(crate) mod binary_list;
 pub mod bioseq;
 pub mod build_db;
@@ -100,6 +101,10 @@ pub enum WriteDbError {
     /// NCBI's `std::invalid_argument` with its `what()`: `BuildLMDBFileName` of an empty
     /// database name (`writer::build_lmdb_file_name`).
     InvalidArgument(&'static str),
+    /// NCBI's `std::length_error` with its `what()`: `CWriteDB_Impl::AddSequence` assigning a
+    /// protein sequence whose signed 32-bit `GetRawSeqAndAmbig` length wrapped negative
+    /// (`>= 2^31` residues) to `std::string`.
+    LengthError(&'static str),
     /// LOSAT's refusal of given definition lines whose first line has no Seq-id in a database
     /// without parsed Seq-ids: NCBI's writer puts the `gnl|BL_ORD_ID` id past the end of the
     /// empty list (undefined behaviour). makeprofiledb gives such lines (a query without ids);
@@ -108,6 +113,9 @@ pub enum WriteDbError {
     /// NCBI's `CInvalidDataException`: the text makeblastdb prints after
     /// "BLAST options error: ".
     Options(String),
+    /// `Options` whose text holds bytes that are not UTF-8 (a file name of `-in`), which
+    /// makeblastdb prints as they are.
+    OptionsBytes(Vec<u8>),
     /// An exception of NCBI's C++ Toolkit that makeblastdb reports through the `CException`
     /// clause of its general handler: "Error: " and the exception's report
     /// (`CException::what()`), exit status 255.
@@ -141,6 +149,11 @@ pub enum WriteDbError {
         path: PathBuf,
         source: std::io::Error,
     },
+    /// A line of the log found the pipe closed where SIGPIPE ends NCBI's process
+    /// (`build_db::endl`): makeblastdb ends at once with exit status 0 and no message, and
+    /// nothing more is read, written, removed or reported (no `EndBuild`, no close of the
+    /// writer, no message of `~CBuildDatabase`; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+    ClosedPipe,
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-259
@@ -152,6 +165,11 @@ pub enum WriteDbError {
 // with the path and the system's message; they are not errors of the database's contents
 // ("BLAST Database creation error").
 impl WriteDbError {
+    /// Whether this is the end at a closed pipe ([`WriteDbError::ClosedPipe`]).
+    pub(crate) fn is_closed_pipe(&self) -> bool {
+        matches!(self, WriteDbError::ClosedPipe)
+    }
+
     /// A creation error with the message `message`, whose bytes are kept when they are not UTF-8.
     pub(crate) fn creation(message: Vec<u8>) -> Self {
         match String::from_utf8(message) {
@@ -174,13 +192,16 @@ impl WriteDbError {
                 DATABASE_CREATION_ERROR,
                 &writer::gi_only_between_keys_message(*oid, name),
             ),
-            WriteDbError::InvalidArgument(what) => text("Error: ", what.as_bytes()),
+            WriteDbError::InvalidArgument(what) | WriteDbError::LengthError(what) => {
+                text("Error: ", what.as_bytes())
+            }
             WriteDbError::OrdinalIdWithoutIds => text(
                 "losat makeblastdb: ",
                 b"a first definition line without a Seq-id, whose gnl|BL_ORD_ID id NCBI's writer \
                   puts past the end of the empty list",
             ),
             WriteDbError::Options(message) => losat(OPTIONS_ERROR, message.as_bytes()),
+            WriteDbError::OptionsBytes(message) => losat(OPTIONS_ERROR, message),
             WriteDbError::Database(message) => losat(DATABASE_ERROR, message.as_bytes()),
             // `what()` ends with a line feed and the message gets one more: the report ends
             // with an empty line.
@@ -194,6 +215,8 @@ impl WriteDbError {
                 format!(": {source}").as_bytes(),
             ]
             .concat(),
+            // Never printed: the run ends without a message (`makeblastdb::finish`).
+            WriteDbError::ClosedPipe => Vec::new(),
         }
     }
 }

@@ -82,6 +82,10 @@ fn check_scoring_options_with(
         // a caller of `run_local` sets the field itself.
         "Invalid discontiguous template parameters: template length must be 16, 18, or 21"
             .to_string()
+    } else if template_length > 0 && args.strategy_template_type.is_some() {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1271-1277
+        // A search strategy's type above 2 (`MBTemplateType`; the command line names the three).
+        "Invalid discontiguous template parameters: template type must be 0, 1, or 2".to_string()
     } else if template_length > 0 && !mb_lookup_options {
         "Invalid lookup table type for discontiguous Mega BLAST".to_string()
     } else if args.limit_lookup && word_size < 16 {
@@ -104,8 +108,31 @@ fn check_scoring_options_with(
         && args.min_raw_gapped_score.unwrap_or(0) <= 0
     {
         "expect value or cutoff score must be greater than zero".to_string()
-    } else if spec.gap_open == 0 && spec.gap_extend == 0 && !greedy {
+    } else if let Some(message) = crate::blastinput::app::hsp_filtering_error(
+        args.culling_limit,
+        args.best_hit_overhang,
+        args.best_hit_score_edge,
+    ) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1543-1548 (the HSP
+        // filtering options, the last check of the hit saving options)
+        message.to_string()
+    } else if spec.gap_open == 0
+        && spec.gap_extend == 0
+        && match args.strategy_algorithms {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1700-1712
+            // A search strategy's pair: greedy where either algorithm is.
+            Some((extension, traceback)) => extension != 1 && traceback != 1,
+            None => !greedy,
+        }
+    {
         "Greedy extension must be used if gap existence and extension options are zero".to_string()
+    } else if args.strategy_algorithms.is_some() {
+        // NCBI's checks pass: NCBI runs the pair (its jumper, Smith-Waterman or a greedy
+        // extension with dynamic programming's traceback), which LOSAT does not.
+        return Err(crate::report::archive::read::import::Start::unported(
+            "a search strategy with this pair of gapped extension algorithms",
+            crate::blastinput::app::Program::Blastn.name(),
+        ));
     } else {
         return Ok(());
     };
@@ -123,8 +150,7 @@ fn check_scoring_options_with(
 /// computation the range limit bounds): a reward of 0 or less with a penalty that is not 0
 /// (no valid query; reward 0 with penalty 0 is matrix-only scoring, which runs) and a reward of
 /// `BLAST_SCORE_MAX` or a penalty of `BLAST_SCORE_MIN` (the 16-bit values after NCBI's
-/// conversion). The limit on greedy gap costs follows the table check
-/// (`check_greedy_gap_costs`).
+/// conversion).
 pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     // Reward 0 with penalty 0 is matrix-only scoring (`coordination::engine_scoring_pair`).
@@ -156,21 +182,8 @@ pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// LOSAT's limit on gap costs with greedy extension (`-task megablast`), for scoring that
-/// NCBI's Karlin-Altschul tables accept: NCBI sizes the greedy distances in 32-bit
-/// integers (`blast_gapalign.c:233-236`), which larger costs can overflow.
-pub fn check_greedy_gap_costs(args: &BlastnArgs) -> anyhow::Result<()> {
-    let spec = scoring_spec(args);
-    if args.task == "megablast" && spec.gap_open.max(spec.gap_extend) > MAX_GREEDY_GAP_COST {
-        anyhow::bail!(
-            "gap costs above {MAX_GREEDY_GAP_COST} with greedy extension (-task megablast) are not supported by LOSAT's BLASTN"
-        );
-    }
-    Ok(())
-}
-
 /// LOSAT's refusal of matrix-only scoring (reward 0 and penalty 0) with the greedy extension of
-/// `-task megablast`, checked where `check_greedy_gap_costs` is (a batch with a valid query).
+/// `-task megablast`, checked in the greedy set-up of a batch or chunk with a valid query.
 /// NCBI sets up the greedy alignment with the option reward and penalty: with gap costs 0 and 0
 /// (megablast's own, also in an ungapped search, which sets it up too) it divides by their sum,
 /// 0 (SIGFPE, exit 136); with other gap costs the set-up passes, and the alignment divides by the
@@ -179,8 +192,7 @@ pub fn check_greedy_gap_costs(args: &BlastnArgs) -> anyhow::Result<()> {
 /// dynamic programming: both run (`TaskConfig::matrix_only`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:183,191-193,208-209
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:979-981 (`match_score_half`
-/// is `match_score / 2`, :837)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:837,979-981
 pub fn check_greedy_matrix_only(args: &BlastnArgs, ungapped: bool) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     let greedy = args.task == "megablast" && !args.no_greedy;
@@ -196,9 +208,6 @@ pub fn check_greedy_matrix_only(args: &BlastnArgs, ungapped: bool) -> anyhow::Re
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:192
 use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
-
-/// The largest gap cost that LOSAT's BLASTN accepts with greedy extension.
-const MAX_GREEDY_GAP_COST: i32 = 32767;
 
 /// NCBI's error for scores or gap costs without Karlin-Altschul values, raised when the
 /// first batch with a valid query is set up: every query of that batch gets the message,
@@ -251,7 +260,7 @@ pub(crate) fn report_counts_of(
     outfmts: &[i32],
 ) -> anyhow::Result<(ReportCounts, Vec<u8>)> {
     run_report_counts_with(
-        "blastn",
+        args.app().ncbi_name(),
         outfmts,
         args.max_target_seqs,
         args.num_descriptions,

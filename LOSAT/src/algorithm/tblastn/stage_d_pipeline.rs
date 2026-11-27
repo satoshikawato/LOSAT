@@ -1218,7 +1218,7 @@ fn preliminary_setup_checks(
         "TBLASTN",
     )
     .map_err(|refusal| {
-        anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(refusal))
+        anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(refusal))
     })?;
     match min_subject_length {
         None => Err(SetupEngineError::SUBJECT_LENGTH_INVALID.into()),
@@ -1517,19 +1517,22 @@ fn run_local_search_with_redo<R: MatchRedo>(
                         "TBLASTN",
                     )
                 })
-                .collect::<Result<_, _>>()?,
+                .collect::<Result<_, _>>()
+                .map_err(search_space_overflow)?,
         ),
         _ => None,
     };
     let preliminary_parameters = match (&option_spaces, profile.subject_set.database) {
-        (Some(spaces), Some(database)) if database.gumbel_db_length <= 0 => recipe.parameters(
-            stats_nt,
-            Some(spaces),
-            LocalParameterCall::Initial {
-                min_subject_length: min_subject_length.unwrap_or(0),
-                composition_based_stats: compo_adjust_mode.ncbi_value(),
-            },
-        )?,
+        (Some(spaces), Some(database)) if database.gumbel_db_length <= 0 => recipe
+            .parameters(
+                stats_nt,
+                Some(spaces),
+                LocalParameterCall::Initial {
+                    min_subject_length: min_subject_length.unwrap_or(0),
+                    composition_based_stats: compo_adjust_mode.ncbi_value(),
+                },
+            )
+            .map_err(search_space_overflow)?,
         _ => parameters.clone(),
     };
     let link = preliminary_parameters.link;
@@ -1675,8 +1678,10 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // A refusal fails the batch after the reports of the batches before (`ErrorAfterBatchReports`),
     // where NCBI's search ends.
     let fetch_refusal = |failed| -> anyhow::Error {
-        crate::blastinput::app::ErrorAfterBatchReports(FetchExcluded::refusal(failed, "TBLASTN"))
-            .into()
+        crate::blastinput::app::ErrorAfterBatchReports::new(FetchExcluded::refusal(
+            failed, "TBLASTN",
+        ))
+        .into()
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1527
     // An ungapped search has no traceback fetch: its re-evaluation's fetch excluded the subjects
@@ -2001,6 +2006,8 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     gap_letters,
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
+                    query_left_out: 0,
+                    nullb: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -2328,7 +2335,7 @@ impl<'a> RedoFetchNotes<'a> {
     fn refusal_of(&self, ordinal: u32) -> Option<anyhow::Error> {
         let fetches = self.fetches?;
         Some(
-            crate::blastinput::app::ErrorAfterBatchReports(FetchExcluded::refusal_at(
+            crate::blastinput::app::ErrorAfterBatchReports::new(FetchExcluded::refusal_at(
                 fetches.excluded.db(),
                 ordinal,
                 "TBLASTN",
@@ -2755,7 +2762,7 @@ fn preliminary_profile<'a>(
         gap_xdrop: crate::core::x_drop::gapped_x_dropoffs(
             scoring.gap_xdrop_bits,
             scoring.final_xdrop_bits,
-            gapped.lambda,
+            crate::core::x_drop::extension_lambda(&gapped),
         )
         .0,
         gapped_cutoff: &cutoffs.hit_cutoff,
@@ -2769,7 +2776,7 @@ fn preliminary_profile<'a>(
 /// the batches before (the form of PD-LOSAT-NCBI-DEFECTS 1.40 for a refusal in the middle of a
 /// run).
 fn split_batch_stop(refusal: anyhow::Error) -> anyhow::Error {
-    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(refusal))
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(refusal))
 }
 
 /// The setup checks of a split batch (`preliminary_setup_checks`) as its chunks meet them
@@ -2847,7 +2854,7 @@ impl BatchSplit {
             Some(records) => records.iter().map(|&(length, _)| length).collect(),
             None => queries.iter().map(Vec::len).collect(),
         };
-        let chunks = splits_query_batches(gapped, profile.pssm.is_some(), false)
+        let chunks = splits_query_batches(gapped, profile.pssm.is_some(), false, false)
             .then(|| split_protein_batch(&lengths, sizes))
             .flatten();
         Ok(Self { sizes, chunks })
@@ -2869,8 +2876,9 @@ impl BatchSplit {
     /// which the caller runs first (NCBI's `BLAST_CalcEffLengths`, blast_setup.c:946-951, before
     /// the division at :975), refuses first where NCBI's search space overflows: with a count of 0
     /// as well, that LOSAT refusal takes the place of this one for a run that NCBI does not
-    /// finish. It is not a batch failure, so it comes before the reports of the batches before,
-    /// which NCBI writes before it crashes (line RG D1a-6, review A F2). The setup's read of OID 0
+    /// finish, and fails the batch after the reports of the batches before
+    /// (`search_space_overflow`, `ErrorAfterBatchReports`), matching NCBI's partial output before
+    /// the batch stops (line RG D1a-6, review A F2). The setup's read of OID 0
     /// (`read_fails` of `ReadFails::Setup`) comes before these checks: a batch searched whole on
     /// such a database fails with that read's error (`tblastn_app::search`), with `-searchsp` or
     /// `OLD_FSC` too (NCBI 2.17.0, rows `db.ak.tbn.e0nseq.sp.6`, `.fsc.6`; line RG item X-short-bat
@@ -3242,9 +3250,22 @@ impl LocalParameterRecipe<'_> {
 #[cold]
 #[inline(never)]
 fn x_masked_pssm_query() -> anyhow::Error {
-    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(anyhow::anyhow!(
         "a PSSM query whose letters give no Karlin-Altschul parameters (one that -seg masks completely), with which NCBI BLAST+ 2.17.0's tblastn crashes, is not supported by LOSAT's TBLASTN"
     )))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:946-951,1001-1014
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-302
+/// Wraps a batch's search space overflow (`SearchSpaceOverflow`) so that it fails the batch after
+/// the reports of the batches before (`ErrorAfterBatchReports`), matching NCBI's partial output
+/// before the batch stops.
+#[cold]
+#[inline(never)]
+fn search_space_overflow(overflow: crate::stats::setup::SearchSpaceOverflow) -> anyhow::Error {
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(
+        overflow.into(),
+    ))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-654,964-1024:
@@ -3529,7 +3550,9 @@ fn query_set_setup<'a>(
             }
         }
     };
-    let parameters = recipe.parameters(inputs.total_nt, eff_searchsp_override, call)?;
+    let parameters = recipe
+        .parameters(inputs.total_nt, eff_searchsp_override, call)
+        .map_err(search_space_overflow)?;
     let gapped_by_context = recipe.gapped.clone();
     Ok(QuerySetSetup {
         working_frames,
@@ -3716,7 +3739,12 @@ fn run_preliminary_subjects_into(
     // subjects; otherwise the units of the single subject use it. Scheduling only.
     // Each subject keeps the NCBI search-to-link-to-reap order. Indexed
     // collection finishes before the OID-ordered shared collector below.
-    let parallel_selected = pool.is_some_and(SearchPool::enabled) && subjects.count() > 1;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
+    // A window below 0 carries one diagonal table through the subjects of the batch, in NCBI's
+    // order of one search thread: its subjects are searched one after another on this thread,
+    // whatever the thread count (`NegDiagonals`, `-num_threads 1`'s result).
+    let parallel_selected =
+        pool.is_some_and(SearchPool::enabled) && subjects.count() > 1 && inputs.search.window >= 0;
     let unit_pool = if parallel_selected { None } else { pool };
     // Graduated 2026-10-22 (was `LOSAT_X_TBNOIDCHUNK`): the bases one chunk may hold, from the
     // size of the sequence file of the subjects (x_oid_chunk_bases); none when the subjects are
@@ -3824,13 +3852,16 @@ fn run_preliminary_subjects_into(
         let x_inputs;
         let inputs = match inputs.update {
             Some(update) if subject.len() >= update.min_length => {
-                x_update = update.recipe.parameters(
-                    update.dbsize_nt.unwrap_or(subject.len() as i64),
-                    Some(update.option_spaces),
-                    LocalParameterCall::Update {
-                        subject_length: i32::try_from(subject.len())?,
-                    },
-                )?;
+                x_update = update
+                    .recipe
+                    .parameters(
+                        update.dbsize_nt.unwrap_or(subject.len() as i64),
+                        Some(update.option_spaces),
+                        LocalParameterCall::Update {
+                            subject_length: i32::try_from(subject.len())?,
+                        },
+                    )
+                    .map_err(search_space_overflow)?;
                 x_arrays = ContextCutoffArrays::of(&x_update);
                 x_inputs = PreliminaryInputs {
                     search: PreliminaryProfile {
@@ -4326,7 +4357,16 @@ fn ungapped_subject_steps(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1162-1164,1234-1235
     // A subject of fewer than 12 bases has no translation, which NCBI reads at NULL + 1
     // (`TargetTranslation::get`).
-    if crate::core::blast_hits::target_translation_never_made(subject.len()) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687-699
+    // The read is the re-evaluation's loop over the HSP's letters, which does not run for an HSP
+    // of length 0 or less (the one-hit word finder's, `-window_size 0`; skipped below): a list of
+    // only such HSPs is deleted unread, and NCBI's search goes on.
+    if crate::core::blast_hits::target_translation_never_made(subject.len())
+        && linked
+            .hsps
+            .iter()
+            .any(|linked| linked.hsp.q_end > linked.hsp.q_start)
+    {
         return Err(crate::core::blast_hits::x_untranslated_frame_refusal(
             "TBLASTN",
             "the ungapped re-evaluation",
@@ -4466,6 +4506,8 @@ fn finish_local_ungapped(
                     gap_letters,
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
+                    query_left_out: 0,
+                    nullb: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -4552,7 +4594,7 @@ fn finish_local_mode0_no_sum_stats(
         let final_xdrop = local_extension_final_xdrop(
             scoring.gap_xdrop_bits,
             scoring.final_xdrop_bits,
-            gapped_params[context].lambda,
+            crate::core::x_drop::extension_lambda(&gapped_params[context]),
         )?;
         // Dispatch point: the scores of the batch's PSSM query (`-in_pssm`, the same for every
         // list), else the matrix's.
@@ -4660,6 +4702,8 @@ fn finish_local_mode0_no_sum_stats(
                     gap_letters,
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
+                    query_left_out: 0,
+                    nullb: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?;

@@ -28,12 +28,12 @@ use crate::seqid::ParsedSeqId;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
 
 /// psiblast's PSSM options as given on the command line.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct PsiblastPssmOptions {
     pub save_pssm_after_last_round: bool,
     pub save_each_pssm: bool,
-    pub out_pssm: Option<String>,
-    pub out_ascii_pssm: Option<String>,
+    pub out_pssm: Option<std::path::PathBuf>,
+    pub out_ascii_pssm: Option<std::path::PathBuf>,
     pub pseudocount: i32,
     /// `-in_pssm`: the query as a PSSM file (`algorithm::psiblast::in_pssm`).
     pub in_pssm: Option<std::path::PathBuf>,
@@ -48,22 +48,61 @@ pub struct PsiblastPssmOptions {
     /// when it is not 1 (0: until convergence), or 1 with `-in_pssm` and a PSSM file (the input
     /// PSSM is written before round 1); `None` for the one search of today's call.
     pub rounds: Option<u32>,
+    /// Where the run writes its PSSM output files (`RunFiles::Disk` on CLI/library,
+    /// `RunFiles::Receiver` in LOSAT Web). No NCBI counterpart: NCBI writes files.
+    pub run_files: crate::report::run_files::RunFiles,
+    /// `-phi_pattern`: the pattern file of a PHI-BLAST round 1 (`algorithm::phi_search`), read
+    /// with the options (`BlastpArgs::check_options`).
+    pub phi_pattern: Option<std::path::PathBuf>,
 }
 
+impl PartialEq for PsiblastPssmOptions {
+    fn eq(&self, other: &Self) -> bool {
+        self.save_pssm_after_last_round == other.save_pssm_after_last_round
+            && self.save_each_pssm == other.save_each_pssm
+            && self.out_pssm == other.out_pssm
+            && self.out_ascii_pssm == other.out_ascii_pssm
+            && self.pseudocount == other.pseudocount
+            && self.in_pssm == other.in_pssm
+            && self.in_msa == other.in_msa
+            && self.versions == other.versions
+            && self.check_scope == other.check_scope
+            && self.rounds == other.rounds
+            && self.phi_pattern == other.phi_pattern
+    }
+}
+
+impl Eq for PsiblastPssmOptions {}
+
 /// A run that writes the PSSM of each query whose round-1 results have alignments.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct PssmRequest {
     /// `-out_pssm`, as given: the ASN.1 text PSSM (`SaveCheckpoint`).
-    pub asn_path: Option<String>,
+    pub asn_path: Option<std::path::PathBuf>,
     /// `-out_ascii_pssm`, as given (`SaveAsciiPssm`).
-    pub ascii_path: Option<String>,
+    pub ascii_path: Option<std::path::PathBuf>,
     /// `-save_each_pssm`: the files are `F.1`, `F.2`, ... (`CAutoOutputFileReset` with versions).
     pub save_each: bool,
     /// `-pseudocount` (`PSIBlastOptions::pseudo_count`).
     pub pseudocount: i32,
     /// The run's numbers of the files of `-save_each_pssm` (`PssmVersions`).
     pub versions: PssmVersions,
+    /// Where the run writes its PSSM output files (`RunFiles::Disk` on CLI/library,
+    /// `RunFiles::Receiver` in LOSAT Web). No NCBI counterpart: NCBI writes files.
+    pub run_files: crate::report::run_files::RunFiles,
 }
+
+impl PartialEq for PssmRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.asn_path == other.asn_path
+            && self.ascii_path == other.ascii_path
+            && self.save_each == other.save_each
+            && self.pseudocount == other.pseudocount
+            && self.versions == other.versions
+    }
+}
+
+impl Eq for PssmRequest {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1304-1318
 /// The next number of each of a run's two PSSM streams under `-save_each_pssm`
@@ -134,7 +173,7 @@ impl PssmRequest {
     /// where it is requested: with `-save_each_pssm` they number their files with the run's
     /// numbers (`versions`).
     pub(crate) fn streams(&self) -> [Option<OutputFileReset>; 2] {
-        let stream = |path: Option<&str>, version: &Version| {
+        let stream = |path: Option<&std::path::Path>, version: &Version| {
             path.map(|path| OutputFileReset::new(path, self.save_each.then(|| version.clone())))
         };
         [
@@ -175,7 +214,11 @@ impl PsiblastPssmOptions {
     // `-out_ascii_pssm` (`SaveCheckpoint`, `SaveAsciiPssm`).
     // With more rounds the driver writes the files (`rounds::RoundFiles`), not the search.
     pub(crate) fn request(&self) -> Option<PssmRequest> {
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:270-310
+        // A PHI-BLAST round makes no PSSM (only a PSI round computes the next one), so one round
+        // saves none.
         if self.rounds.is_some()
+            || self.phi_pattern.is_some()
             || !self.save_pssm_after_last_round
             || (self.out_pssm.is_none() && self.out_ascii_pssm.is_none())
         {
@@ -187,6 +230,7 @@ impl PsiblastPssmOptions {
             save_each: self.save_each_pssm,
             pseudocount: self.pseudocount,
             versions: self.versions.clone(),
+            run_files: self.run_files.clone(),
         })
     }
 
@@ -241,6 +285,22 @@ pub(crate) struct PssmAlignment<'a> {
     pub(crate) s_start: usize,
     pub(crate) q_length: usize,
     pub(crate) ops: Option<&'a [GapEditOp]>,
+}
+
+/// The E-value that the PSSM reads of an HSP (`GetLowestEvalue`: the lowest `e_value` or `sum_e`
+/// score of the Seq-align, at most `BLAST_EXPECT_VALUE` 10, and 10 where it has none,
+/// `seqalign_evalue_absent`); any other value of 1e-180 or less, a negative one of a database
+/// with a negative size too, is 0 in it. The one owner of the inclusion test of a round
+/// (`psi_round::included`) and of the PSSM's multiple alignment (`input_msa`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:512-545
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:158
+pub(crate) fn seqalign_pssm_evalue(e_value: f64) -> f64 {
+    const BLAST_EXPECT_VALUE: f64 = 10.0;
+    if crate::report::serial::seqalign::seqalign_evalue_absent(e_value) {
+        return BLAST_EXPECT_VALUE;
+    }
+    crate::report::serial::seqalign::seqalign_evalue(e_value).min(BLAST_EXPECT_VALUE)
 }
 
 impl<'a> PssmAlignment<'a> {
@@ -609,18 +669,9 @@ fn input_msa(
     inclusion_ethresh: f64,
     unread: &mut Vec<u32>,
 ) -> Result<PsiMsa> {
-    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:158
-    const BLAST_EXPECT_VALUE: f64 = 10.0;
-    let lowest_evalue = |e_value: f64| {
-        if e_value < BLAST_EXPECT_VALUE {
-            e_value
-        } else {
-            BLAST_EXPECT_VALUE
-        }
-    };
     let qualifying: std::collections::BTreeSet<SetKey> = alignments
         .iter()
-        .filter(|alignment| lowest_evalue(alignment.e_value) < inclusion_ethresh)
+        .filter(|alignment| seqalign_pssm_evalue(alignment.e_value) < inclusion_ethresh)
         .map(|alignment| key(alignment.subject))
         .collect();
     let mut msa = PsiMsa::new(query.len(), qualifying.len());
@@ -634,7 +685,7 @@ fn input_msa(
     let mut last_sid: Option<SetKey> = None;
     for alignment in alignments {
         let current_sid = key(alignment.subject);
-        if lowest_evalue(alignment.e_value) < inclusion_ethresh {
+        if seqalign_pssm_evalue(alignment.e_value) < inclusion_ethresh {
             if last_sid
                 .as_ref()
                 .is_some_and(|last| !current_sid.matches(last))
@@ -795,13 +846,25 @@ pub(crate) fn print_ascii_pssm(pssm: &PsiPssm, query: &[u8], ancillary: PssmAnci
                 .as_ref()
                 .expect(REQUESTED),
         }),
-        &[
-            ("Standard Ungapped    ", ancillary.ungapped),
-            ("Standard Gapped      ", ancillary.gapped),
-            ("PSI Ungapped         ", ancillary.psi_ungapped),
-            ("PSI Gapped           ", ancillary.psi_gapped),
-        ],
+        &ancillary_blocks(&ancillary),
     )
+}
+
+/// The blocks that the footer of a computed PSSM prints: each of the round's ancillary blocks that
+/// the results keep (`stats::tables::ancillary_kept`, for all four). The input PSSM's footer of
+/// round 1 (`in_pssm_files`) prints its two PSI blocks as the file holds them: NCBI makes that
+/// ancillary data from the PSSM's values without the check (`ExtractPssmAncillaryData`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:296-326
+fn ancillary_blocks(ancillary: &PssmAncillary) -> Vec<(&'static str, KarlinBlk)> {
+    [
+        ("Standard Ungapped    ", ancillary.ungapped),
+        ("Standard Gapped      ", ancillary.gapped),
+        ("PSI Ungapped         ", ancillary.psi_ungapped),
+        ("PSI Gapped           ", ancillary.psi_gapped),
+    ]
+    .into_iter()
+    .filter(|(_, block)| crate::stats::tables::ancillary_kept(block.lambda))
+    .collect()
 }
 
 /// The columns that the long form of `PrintAsciiPssm` prints (a PSSM with its information
@@ -933,16 +996,16 @@ pub(crate) fn file_posts(application: &str, replaced: &[ReplacedChar]) -> Posts 
 // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:54-55
 #[derive(Debug)]
 pub(crate) struct OutputFileReset {
-    file_name: String,
+    file_name: std::path::PathBuf,
     /// `m_Version`: `None` for version 0 (no `-save_each_pssm`), else the run's number of the
     /// stream (`PssmVersions`).
     version: Option<Version>,
 }
 
 impl OutputFileReset {
-    fn new(file_name: &str, version: Option<Version>) -> Self {
+    fn new(file_name: &std::path::Path, version: Option<Version>) -> Self {
         Self {
-            file_name: file_name.to_string(),
+            file_name: file_name.to_path_buf(),
             version,
         }
     }
@@ -951,16 +1014,22 @@ impl OutputFileReset {
     pub(crate) fn next_file(&mut self) -> PssmFile {
         let Some(version) = self.version.as_ref() else {
             return PssmFile {
-                path: std::path::PathBuf::from(&self.file_name),
+                path: self.file_name.clone(),
                 replaced: true,
             };
         };
         let number = version.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         PssmFile {
-            path: std::path::PathBuf::from(format!("{}.{number}", self.file_name)),
+            path: numbered_pssm_path(&self.file_name, number),
             replaced: false,
         }
     }
+}
+
+fn numbered_pssm_path(base: &std::path::Path, number: u32) -> std::path::PathBuf {
+    let mut name = base.as_os_str().to_os_string();
+    name.push(format!(".{number}"));
+    std::path::PathBuf::from(name)
 }
 
 /// One file of `CAutoOutputFileReset::GetStream`.
@@ -1153,6 +1222,7 @@ fn owner(_metadata: &std::fs::Metadata) -> u32 {
 pub(crate) struct PssmFiles {
     asn: Option<OutputFileReset>,
     ascii: Option<OutputFileReset>,
+    run_files: crate::report::run_files::RunFiles,
     pending: Vec<PendingPssm>,
     /// The entry whose staging file holds the last version-0 ASN.1 PSSM, which the next one
     /// replaces: of NCBI's writes of one name only the last one's bytes stay, made or truncated
@@ -1239,6 +1309,8 @@ enum Staged {
     InPlace(Vec<u8>),
     /// The bytes for a character device.
     Device(Vec<u8>),
+    /// The host file name and bytes for `RunFiles::Receiver` (LOSAT Web).
+    Receiver(Vec<u8>, Vec<u8>),
     /// Nothing: the target is `/dev/null`.
     Null,
     /// Written, or replaced by a later query's file of the same name.
@@ -1251,6 +1323,7 @@ impl PssmFiles {
         Self {
             asn,
             ascii,
+            run_files: request.run_files.clone(),
             pending: Vec::new(),
             last_replaced: None,
             staging_count: 0,
@@ -1336,7 +1409,7 @@ impl PssmFiles {
             }
             _ => None,
         };
-        if let Some((file, Staged::File(_) | Staged::InPlace(_))) = &asn {
+        if let Some((file, Staged::File(_) | Staged::InPlace(_) | Staged::Receiver(_, _))) = &asn {
             if file.replaced {
                 if let Some(previous) = self.last_replaced.replace(self.pending.len()) {
                     if let Some((_, staged)) = self.pending[previous].asn.as_mut() {
@@ -1360,6 +1433,24 @@ impl PssmFiles {
                 path.display()
             )
         };
+        if matches!(
+            self.run_files,
+            crate::report::run_files::RunFiles::Receiver(_)
+        ) {
+            use crate::report::run_files::PssmTarget;
+            return match self.run_files.pssm_target("-out_pssm", path.as_os_str()) {
+                PssmTarget::File(host_name) => Ok(Staged::Receiver(host_name, asn.to_vec())),
+                PssmTarget::Discard => Ok(Staged::Null),
+                PssmTarget::Full => Err(cannot_write(std::io::Error::from(
+                    std::io::ErrorKind::StorageFull,
+                ))),
+                PssmTarget::Unopened => Err(cannot_write(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "cannot open file",
+                ))),
+                PssmTarget::Refused(reason) => Err(anyhow::anyhow!("{reason}")),
+            };
+        }
         let existing = match target_kind(path) {
             TargetKind::Absent => false,
             TargetKind::Regular => true,
@@ -1449,31 +1540,56 @@ impl PssmFiles {
     pub(crate) fn commit(mut self) -> Result<()> {
         for index in 0..self.pending.len() {
             if let Some((file, staged)) = self.pending[index].asn.as_mut() {
-                let bytes = match std::mem::replace(staged, Staged::Done) {
-                    Staged::File(staging) => {
-                        let bytes = std::fs::read(&staging);
-                        let _ = std::fs::remove_file(&staging);
-                        Some(bytes)
-                    }
-                    Staged::InPlace(bytes) | Staged::Device(bytes) => Some(Ok(bytes)),
-                    Staged::Null | Staged::Done => None,
+                let commit_err = |error: std::io::Error| {
+                    anyhow::anyhow!(
+                        "a -out_pssm file that could not be written after the reports ({}: {error}), although LOSAT found it writable before them, is not supported by LOSAT's PSIBLAST",
+                        file.path.display()
+                    )
                 };
-                if let Some(bytes) = bytes {
-                    bytes
-                        .and_then(|bytes| file.open()?.write_all(&bytes))
-                        .map_err(|error| {
-                            anyhow::anyhow!(
-                                "a -out_pssm file that could not be written after the reports ({}: {error}), although LOSAT found it writable before them, is not supported by LOSAT's PSIBLAST",
-                                file.path.display()
-                            )
-                        })?;
+                match std::mem::replace(staged, Staged::Done) {
+                    Staged::Receiver(host_name, bytes) => {
+                        if let crate::report::run_files::RunFiles::Receiver(receiver) =
+                            &self.run_files
+                        {
+                            receiver.receive(&host_name, &bytes).map_err(commit_err)?;
+                        }
+                    }
+                    other => {
+                        let bytes = match other {
+                            Staged::File(staging) => {
+                                let bytes = std::fs::read(&staging);
+                                let _ = std::fs::remove_file(&staging);
+                                Some(bytes)
+                            }
+                            Staged::InPlace(bytes) | Staged::Device(bytes) => Some(Ok(bytes)),
+                            Staged::Receiver(_, _) | Staged::Null | Staged::Done => None,
+                        };
+                        if let Some(bytes) = bytes {
+                            bytes
+                                .and_then(|bytes| file.open()?.write_all(&bytes))
+                                .map_err(commit_err)?;
+                        }
+                    }
                 }
             }
             if let (Some(stream), Some(ascii)) =
                 (self.ascii.as_mut(), self.pending[index].ascii.take())
             {
-                if let Ok(mut out) = stream.next_file().open() {
-                    let _ = out.write_all(&ascii);
+                let file = stream.next_file();
+                match &self.run_files {
+                    crate::report::run_files::RunFiles::Receiver(receiver) => {
+                        if let crate::report::run_files::PssmTarget::File(host_name) = self
+                            .run_files
+                            .pssm_target("-out_ascii_pssm", file.path.as_os_str())
+                        {
+                            let _ = receiver.receive(&host_name, &ascii);
+                        }
+                    }
+                    crate::report::run_files::RunFiles::Disk => {
+                        if let Ok(mut out) = file.open() {
+                            let _ = out.write_all(&ascii);
+                        }
+                    }
                 }
             }
         }
@@ -1534,7 +1650,11 @@ pub(crate) fn check_pssm_files(
     queries: usize,
     out: Option<&std::path::Path>,
 ) -> Result<()> {
-    let check = PssmFileCheck::new(out);
+    let is_receiver = matches!(
+        request.run_files,
+        crate::report::run_files::RunFiles::Receiver(_)
+    );
+    let check = (!is_receiver).then(|| PssmFileCheck::new(out));
     for ((option, path), first) in [
         ("-out_pssm", request.asn_path.as_deref()),
         ("-out_ascii_pssm", request.ascii_path.as_deref()),
@@ -1547,13 +1667,19 @@ pub(crate) fn check_pssm_files(
         };
         let names: Vec<std::path::PathBuf> = if request.save_each {
             (first..first.saturating_add(u32::try_from(queries).unwrap_or(u32::MAX)))
-                .map(|n| std::path::PathBuf::from(format!("{path}.{n}")))
+                .map(|n| numbered_pssm_path(path, n))
                 .collect()
         } else {
-            vec![std::path::PathBuf::from(path)]
+            vec![path.to_path_buf()]
         };
         for name in &names {
-            check.check(option, name)?;
+            if let Some(check) = &check {
+                check.check(option, name)?;
+            } else if let crate::report::run_files::PssmTarget::Refused(reason) =
+                request.run_files.pssm_target(option, name.as_os_str())
+            {
+                anyhow::bail!("{reason}");
+            }
         }
     }
     Ok(())

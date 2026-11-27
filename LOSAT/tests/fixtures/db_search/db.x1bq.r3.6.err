@@ -1,0 +1,3 @@
+Error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/alnmgr/alnmap.cpp", line 753: Error: (CAlnException::eInvalidDenseg) CAlnVec::x_GetSeqRightSeg(): Invalid Dense-seg: Row 0 contains gaps only.
+

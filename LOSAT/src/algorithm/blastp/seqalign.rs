@@ -101,6 +101,7 @@ pub(crate) fn write_blastp_seqalign(
     write_hit_list_seqaligns(
         format,
         &run,
+        "blastp",
         hit_lists,
         queries,
         writer,
@@ -159,6 +160,7 @@ pub(crate) fn query_records<'a>(
                 subject,
                 q_offset: hsp.q_start as i32 - 1 - q_shift,
                 q_end: hsp.q_end as i32 - q_shift,
+                q_left_out: 0,
                 s_offset: hsp.s_start as i32 - 1 - s_shift,
                 s_end: hsp.s_end as i32 - s_shift,
                 q_frame: 0,
@@ -171,6 +173,7 @@ pub(crate) fn query_records<'a>(
                 num_positives: num_positives as i32,
                 comp_adjust: hsp.comp_adjustment_method,
                 ops: hsp.gap_info.as_deref().unwrap_or(&[]),
+                std_seg_nullb: None,
             });
         }
     }

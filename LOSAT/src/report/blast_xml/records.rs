@@ -12,13 +12,20 @@ use super::subjects::SubjectNames;
 pub struct XmlRun<'a> {
     /// `BlastOutput_program`: `Blast_ProgramNameFromType` (`blastn`, `blastp`, ...).
     pub program: &'static str,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:126
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:128
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:100
+    /// The running application's name in lower case (`blastn`, ...), which every post of the
+    /// run's diagnostics names (`SetDiagPostPrefix`, set once per process by the application):
+    /// `program` where the search runs the application's own program, and the application's where
+    /// an imported search strategy of another program runs (`Program::ncbi_name`).
+    pub app: &'static str,
     /// `BlastOutput_version`: `BLASTP 2.17.0+`.
     pub version: &'a str,
     /// `BlastOutput_reference`, before the XML escapes (`Sch&auml;ffer` stands as written).
     pub reference: &'static str,
-    /// `BlastOutput_db`: the `-db` value (UTF-8: LOSAT refuses another file name when it reads the
-    /// command line); empty for `-subject`.
-    pub db_name: &'a str,
+    /// `BlastOutput_db`: the `-db` value; empty for `-subject`.
+    pub db_name: &'a [u8],
     /// `Parameters_matrix`; none for BLASTN.
     pub matrix: Option<&'a str>,
     /// `Parameters_expect`.
@@ -108,6 +115,14 @@ pub struct XmlQuery<'a> {
     /// region of a plus frame in `Search_query-masking` and masks with the regions of frame 0
     /// or the HSP's translated frame.
     pub masks: &'a [QueryMask],
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2363-2389
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:95-110
+    /// Whether the result joins the held report of the queries before it where the XML2 and JSON
+    /// documents hold their reports (`blast_xml2::Xml2Document::holds_back`; the one owner's
+    /// answer, `query_batch::XmlShow::joins_held`): NCBI adds the result's `Search` to that
+    /// report, shown with the id, title and length of the report's first `Search` and masked by
+    /// its masks. Read by no other document.
+    pub joins_held: bool,
 }
 
 /// A subject with HSPs (a `Hit`).
@@ -131,6 +146,10 @@ pub struct XmlHit<'a> {
     /// `GenerateDefline` threw for the `-subject` record (`SubjectNames::defline_thrown`):
     /// outfmt 5's `Hit_len` is 0.
     pub defline_thrown: bool,
+    /// NCBI's scope gets no Bioseq for the subject (`SubjectNames::unloaded`): outfmt 5 writes the
+    /// `catch`'s `Hit` and HSPs as for `lookup_throws` (`writer::write_caught_hsp`), XML2 and JSON
+    /// the `catch`'s HSPs under the Seq-align id's `HitDescr`.
+    pub unloaded: bool,
     /// The exception that the lookup of the database sequence's Seq-align id throws where the
     /// `Hit` loads it (`SubjectNames::lookup_throws`; the names are those of NCBI's `catch`,
     /// `SubjectNames::of_thrown`): outfmt 5 writes the `catch`'s `Hit` and HSPs
@@ -150,6 +169,7 @@ impl<'a> XmlHit<'a> {
             taxonomy: &names.taxonomy,
             descriptions: &names.descriptions,
             defline_thrown: names.defline_thrown,
+            unloaded: names.unloaded,
             lookup_throws: names.lookup_throws.as_ref(),
         }
     }
@@ -221,7 +241,9 @@ pub struct XmlHsp<'a> {
     /// The Seq-align's `num_ident` as `GetAlnScores` reads it: the engine's identities, -1 where
     /// the Seq-align has no `num_ident` score (psiblast's HSP of 0 identities, whose count NCBI
     /// sets to -1 before it writes the Seq-align). Outfmt 5 writes it in the `catch` of an HSP
-    /// whose subject's lookup throws; every other HSP counts its identities again from the rows.
+    /// whose subject's lookup throws, and outfmt 5, XML2 and JSON in that of a subject whose
+    /// Bioseq NCBI's scope does not get (`XmlHit::unloaded`, `writer::write_caught_hsp`); every
+    /// other HSP counts its identities again from the rows.
     pub alignment_identities: i32,
 }
 

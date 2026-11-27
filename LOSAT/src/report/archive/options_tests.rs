@@ -3,7 +3,7 @@ use super::*;
 fn names(inputs: &OptionInputs) -> Vec<String> {
     algorithm_options(inputs)
         .iter()
-        .map(|param| param.name.to_string())
+        .map(|param| param.name().to_string())
         .collect()
 }
 
@@ -12,10 +12,10 @@ fn names(inputs: &OptionInputs) -> Vec<String> {
 #[test]
 fn the_window_masker_database_follows_the_dust_options() {
     let mut inputs = OptionInputs::new(Program::Blastn, "blastn");
-    inputs.window_masker_db = Some("counts.obinary".to_string());
+    inputs.window_masker_db = Some(b"counts.obinary".to_vec());
     inputs.dust = Some(Filter::No);
     let params = algorithm_options(&inputs);
-    let listed: Vec<&str> = params.iter().map(|param| param.name).collect();
+    let listed: Vec<&str> = params.iter().map(|param| param.name()).collect();
     let at = listed
         .iter()
         .position(|&name| name == "WindowMaskerDatabase")
@@ -23,10 +23,10 @@ fn the_window_masker_database_follows_the_dust_options() {
     assert_eq!(&listed[at - 2..at], ["MaskAtHash", "DustFiltering"]);
     assert_eq!(
         params[at].value,
-        ParamValue::Str("counts.obinary".to_string())
+        ParamValue::Str(b"counts.obinary".to_vec())
     );
     let mut short = OptionInputs::new(Program::Blastn, "blastn-short");
-    short.window_masker_db = Some("counts.obinary".to_string());
+    short.window_masker_db = Some(b"counts.obinary".to_vec());
     let listed = names(&short);
     let at = listed
         .iter()
@@ -44,7 +44,7 @@ fn the_window_masker_taxid_is_a_parameter_unless_it_is_0() {
     let mut inputs = OptionInputs::new(Program::Blastn, "blastn");
     inputs.window_masker_taxid = Some(562);
     let params = algorithm_options(&inputs);
-    let listed: Vec<&str> = params.iter().map(|param| param.name).collect();
+    let listed: Vec<&str> = params.iter().map(|param| param.name()).collect();
     let at = listed
         .iter()
         .position(|&name| name == "WindowMaskerTaxId")
@@ -76,11 +76,13 @@ fn a_parameter_set_again_keeps_its_place() {
     let mut inputs = OptionInputs::new(Program::Blastn, "blastn-short");
     inputs.evalue = Some(1e-5);
     let list = algorithm_options(&inputs);
-    assert_eq!(list[0].name, "EvalueThreshold");
+    assert_eq!(list[0].name(), "EvalueThreshold");
     assert_eq!(list[0].value, ParamValue::Evalue(1e-5));
-    assert_eq!(list[1].name, "MatchReward");
+    assert_eq!(list[1].name(), "MatchReward");
     assert_eq!(
-        list.iter().filter(|p| p.name == "EvalueThreshold").count(),
+        list.iter()
+            .filter(|p| p.name() == "EvalueThreshold")
+            .count(),
         1
     );
 }
@@ -98,7 +100,7 @@ fn matrix_gaps_are_the_default_rows_of_the_matrices() {
         // A matrix that NCBI does not know: both costs stay 0.
         ("BLOSUM99", (0, 0)),
     ] {
-        assert_eq!(matrix_gaps(matrix), want, "{matrix}");
+        assert_eq!(matrix_gaps(matrix.as_bytes()), want, "{matrix}");
     }
 }
 
@@ -116,11 +118,15 @@ fn the_matrix_suggestions_ignore_the_case_of_the_name() {
         ("pam30", 16, 15),
         ("Pam70", 14, 20),
     ] {
-        assert_eq!(suggested_threshold(matrix), threshold, "{matrix}");
-        assert_eq!(suggested_window(matrix), window, "{matrix}");
+        assert_eq!(
+            suggested_threshold(matrix.as_bytes()),
+            threshold,
+            "{matrix}"
+        );
+        assert_eq!(suggested_window(matrix.as_bytes()), window, "{matrix}");
     }
-    assert_eq!(suggested_threshold("Identity"), 27);
-    assert_eq!(suggested_threshold("blosum62_20"), 100);
+    assert_eq!(suggested_threshold(b"Identity"), 27);
+    assert_eq!(suggested_threshold(b"blosum62_20"), 100);
 }
 
 #[test]
@@ -202,7 +208,7 @@ fn the_applications_lists_are_their_handles_and_classes() {
     let params = algorithm_options(&psi_tblastn);
     let listed: Vec<String> = params
         .iter()
-        .map(|param| format!("{}={:?}", param.name, param.value))
+        .map(|param| format!("{}={:?}", param.name(), param.value))
         .collect();
     assert_eq!(
         listed,
@@ -238,6 +244,25 @@ fn the_applications_lists_are_their_handles_and_classes() {
     }
 }
 
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blastsetup_unit_test.cpp:225-238 SubjectIsNucleotide
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
+#[test]
+fn subject_is_nucleotide_follows_ncbi_program_types() {
+    for (kind, nucleotide) in [
+        (RequestKind::Blastn, true),
+        (RequestKind::Blastp, false),
+        (RequestKind::Blastx, false),
+        (RequestKind::Tblastn, true),
+        (RequestKind::Tblastx, true),
+        (RequestKind::Psiblast, false),
+        (RequestKind::PsiTblastn, true),
+        (RequestKind::Rpsblast, false),
+        (RequestKind::Rpstblastn, false),
+    ] {
+        assert_eq!(kind.subject_is_nucleotide(), nucleotide, "{kind:?}");
+    }
+}
+
 // NCBI BLAST+ 2.17.0 (probe 9): psiblast's given options in place (`p9.ps.q.db.opts2.f6`) or
 // where their class sets them (`p9.ps.q.db.opts1.f6`, `opts3`, `p9.ps.three.db.it2.ssp.f6`);
 // rpsblast's window only when given (`p9.rps.q40.opts.f6`).
@@ -249,11 +274,11 @@ fn the_applications_options_take_their_places() {
     inputs.gap_trigger = 20.0;
     inputs.xdrop_gap = Some(16.0);
     inputs.searchsp = Some(1_000_000);
-    inputs.matrix = Some("BLOSUM62".to_string());
+    inputs.matrix = Some(b"BLOSUM62".to_vec());
     inputs.culling_limit = Some(2);
     inputs.sum_stats = Some(true);
     let params = algorithm_options(&inputs);
-    let listed: Vec<&str> = params.iter().map(|param| param.name).collect();
+    let listed: Vec<&str> = params.iter().map(|param| param.name()).collect();
     assert_eq!(
         listed[..9],
         [

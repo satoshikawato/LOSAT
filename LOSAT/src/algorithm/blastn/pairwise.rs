@@ -69,6 +69,15 @@ impl<'a> QueryRecords<'a> {
         self.searched
     }
 
+    /// These records cut to the first `queries` searched queries (the reports of the query
+    /// batches before a batch at which a call stops).
+    pub(crate) fn head(self, queries: usize) -> Self {
+        Self {
+            searched: &self.searched[..queries.min(self.searched.len())],
+            ..self
+        }
+    }
+
     /// The record of searched query `q_idx` (`None` for a query the call does not hold).
     pub(crate) fn record(&self, q_idx: usize) -> Option<QueryRecord<'a>> {
         let searched = self.searched.get(q_idx)?;
@@ -112,6 +121,7 @@ impl<'a> Rows<'a> {
         queries: QueryRecords<'a>,
         subjects: SubjectLetters<'a>,
         masks: &DisplayMasks<'_>,
+        ungapped: bool,
     ) -> Self {
         let query_masks: Vec<Vec<MaskedInterval>> = masks
             .query
@@ -139,6 +149,7 @@ impl<'a> Rows<'a> {
             subjects,
             query_masks,
             subject_masks,
+            ungapped,
         }
     }
 }
@@ -280,6 +291,8 @@ pub(crate) struct Rows<'a> {
     /// database sequence with `-db_soft_mask`, its stored masks as stored
     /// (`DisplayMasks::database`).
     subject_masks: Option<Vec<Vec<MaskedInterval>>>,
+    /// Whether the search is ungapped (`-ungapped`, Dense-diag Seq-aligns).
+    ungapped: bool,
 }
 
 impl Rows<'_> {
@@ -330,6 +343,48 @@ impl Rows<'_> {
                 .get(s_idx)
                 .context("BLASTN HSP of an unknown subject")?;
             let subject_length = subjects.len(s_idx);
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1950-1982
+            // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:365-377
+            // A BLASTN `-db` HSP whose Seq-align query start lies below 0 in record coordinates
+            // throws in `x_PrepareRowData` (outfmt 0 skips it) and in `CAlnMixMerger::x_Merge`
+            // (outfmt 1-4). Keep its exact record query start and length without building rows.
+            if hsp.starts_left_of_record(query.offset, self.ungapped) {
+                if let Some(table) = html_masks.as_deref_mut() {
+                    table.push(crate::report::query_anchored::HspMasks::default());
+                }
+                let start = hsp.record_query_start(query.offset, self.ungapped) as i32;
+                let query_len = (hsp.internal_q_end_0 - hsp.internal_q_offset_0) as u32;
+                let gaps = hsp.gap_info.as_deref().map_or(0, |ops| {
+                    ops.iter()
+                        .filter(|op| !matches!(op, GapEditOp::Sub(_)))
+                        .map(|op| op.num() as usize)
+                        .sum()
+                });
+                let mut hit = hsp.clone().into_hit();
+                hit.sort_query_offset = (start as u32) as usize;
+                hit.sort_query_end = query_len as usize;
+                hits.push(PairwiseHit {
+                    hit,
+                    query_seq: None,
+                    subject_seq: None,
+                    query_frame: None,
+                    subject_frame: None,
+                    positives: None,
+                    gaps: Some(gaps),
+                    subject_length: Some(subject_length),
+                    subject_title: crate::blastinput::fasta_reader::hit_subject_title(
+                        &subject.title,
+                    ),
+                    comp_adjust_method: None,
+                    sum_n: None,
+                    subject_stored_gaps: Vec::new(),
+                    query_stored_gaps: Vec::new(),
+                    query_case: Default::default(),
+                    seqalign_num_ident: hsp.num_ident,
+                    edge: crate::report::pairwise::PairwiseEdge::QueryLeftOfRecord,
+                });
+                continue;
+            }
             let (mut query_row, mut subject_row) =
                 displayed_rows(hsp, query, subject_length, |from, to| {
                     subjects.upper_letters(s_idx, from, to)
@@ -395,6 +450,7 @@ impl Rows<'_> {
                 // The Seq-align's `num_ident` (`seqalign::query_records` writes the same
                 // `hsp.num_ident`): the engine's count, which "Max ident" and the sorts read.
                 seqalign_num_ident: hsp.num_ident,
+                edge: crate::report::pairwise::PairwiseEdge::Normal,
             });
         }
         Ok(())

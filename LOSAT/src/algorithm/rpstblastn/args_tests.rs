@@ -104,7 +104,11 @@ fn composition_modes_run() {
             .unwrap()
             .into_blastx_args()
             .unwrap();
-        assert_eq!(args.comp_based_stats, mode.to_string(), "{value}");
+        assert_eq!(
+            args.comp_based_stats,
+            std::ffi::OsStr::new(&mode.to_string()),
+            "{value}"
+        );
         let search = search(&["-comp_based_stats", value]);
         assert_eq!(search.search.requested_cbs, mode, "{value}");
         assert!(search.check_options().is_ok(), "{value}");
@@ -196,11 +200,17 @@ fn options_of_later_items_are_refused() {
         .unwrap()
         .into_blastx_args()
         .is_ok());
+    // `-html` reaches BLASTX's arguments (line RG T4c1).
+    let plain = parse(&[]).unwrap();
+    assert!(!plain.html);
+    assert!(!plain.into_blastx_args().unwrap().html);
+    let html = parse(&["-html"]).unwrap();
+    assert!(html.html);
+    assert!(html.into_blastx_args().unwrap().html);
     // The flags take no value; `-entrez_query` goes with `-remote` (NCBI's reader), and the first
     // refused name in the words is the one named.
     for (name, words) in [
-        ("html", &["-html"][..]),
-        ("remote", &["-remote"]),
+        ("remote", &["-remote"][..]),
         ("entrez_query", &["-entrez_query", "x", "-remote"]),
         ("import_search_strategy", &["-import_search_strategy", "x"]),
     ] {
@@ -307,10 +317,13 @@ fn the_search_is_blastxs_with_the_rps_search() {
             args.query_gencode,
             args.query_loc.as_deref()
         ),
-        ("minus", 4, Some("10-500"))
+        ("minus", 4, Some(std::ffi::OsStr::new("10-500")))
     );
     assert!(args.lcase_masking);
-    assert_eq!((args.seg.as_str(), args.soft_masking), ("no", false));
+    assert_eq!(
+        (args.seg.as_os_str(), args.soft_masking),
+        (std::ffi::OsStr::new("no"), false)
+    );
     assert_eq!((args.max_hsps, args.qcov_hsp_perc), (None, None));
     assert_eq!((args.max_target_seqs, args.evalue), (Some(7), 0.5));
     assert_eq!((args.num_threads, args.window_size), (1, Some(0)));
@@ -340,6 +353,7 @@ fn the_search_is_blastxs_with_the_rps_search() {
             line_length: Some(70),
             sort_hits: Some(1),
             sort_hsps: None,
+            hitlist_start: None,
         }
     );
     let resolved = args.resolve().unwrap();

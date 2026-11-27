@@ -45,7 +45,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 }
 
 /// The programs and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 15] = [
+const PROGRAMS: [(&str, &str); 16] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -61,6 +61,7 @@ const PROGRAMS: [(&str, &str); 15] = [
     ("segmasker", "-out"),
     ("windowmasker", "-out"),
     ("makeprofiledb", "-out"),
+    ("blast_formatter", "-out"),
 ];
 
 #[test]
@@ -168,6 +169,7 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
         ("convert2blastmask", "-out"),
         ("makembindex", "-input"),
         ("blastdb_aliastool", "-out"),
+        ("blastdbcheck", "-db"),
     ]) {
         let xml = run_in(&dir, program, &["-xmlhelp"]);
         assert_eq!(xml.status.code(), Some(0), "{program}");
@@ -181,7 +183,9 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                 | "windowmasker"
                 | "convert2blastmask"
                 | "makembindex"
+                | "makeprofiledb"
                 | "blastdb_aliastool"
+                | "blastdbcheck"
         ) {
             assert_eq!(xml.stdout, ncbi, "{program}");
         } else {
@@ -200,8 +204,7 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
             // Each argument left out is refused by name: after NCBI's reader took the command
             // line (a search's words with `-db x`, line RG item K4i-2b; `-entrez_query` with the
             // `-remote` it requires), or by the run (psiblast's `-use_sw_tback`, with `-subject`;
-            // makeprofiledb's `-binary`, where its run starts; rpstblastn's `-ungapped`, which
-            // needs a database, is a run refusal of
+            // rpstblastn's `-ungapped`, which needs a database, is a run refusal of
             // LOSAT's table of refusals with it, `REFUSED` of `build/ncbi_args.rs`). The arguments
             // left in are read (`ncbi_xmlhelp_tests`; blastp's `-use_sw_tback` runs with
             // composition-based statistics, line RG item X4, tblastn's in every mode, item X4b,
@@ -221,9 +224,9 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                     option.push("-remote");
                 }
                 let subject = if program == "tblastn" { "n.fa" } else { "p.fa" };
-                let contexts: Vec<Vec<&str>> = if program == "makeprofiledb" {
-                    // makeprofiledb's `-binary`, refused where its run starts (after `Init`).
-                    vec![vec!["-in", "p.fa", "-out", "db"]]
+                let contexts: Vec<Vec<&str>> = if program == "blast_formatter" {
+                    // blast_formatter's `-rid`, refused at the run, where NCBI asks its servers.
+                    vec![vec![]]
                 } else {
                     vec![
                         vec!["-query", "p.fa", "-db", "x"],

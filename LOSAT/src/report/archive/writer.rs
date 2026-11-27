@@ -20,6 +20,7 @@ use std::io::Write;
 use anyhow::Result;
 
 use super::bioseq::{write_bioseq, write_seq_loc, BioseqInput};
+use super::fields;
 use super::masks::{write_mask, MaskEntry};
 use super::options::{Param, ParamValue};
 use super::{ArchiveEncoding, ArchiveHandle};
@@ -30,8 +31,9 @@ use crate::report::serial::encoder::{Encoder, ReplacedChar, Traced};
 use crate::report::serial::pssm::PssmWithParameters;
 use crate::report::serial::xml::XmlEncoder;
 
-/// The bytes that an encoder holds before its buffer is handed to the sink.
-const FLUSH_BYTES: usize = 32 * 1024;
+/// The bytes that an encoder holds before its buffer is handed to the sink (also
+/// blast_formatter's Seq-annots, `blast_formatter::archive`).
+pub(crate) const FLUSH_BYTES: usize = 32 * 1024;
 
 /// A Karlin-Altschul block of the results (`Blast4-ka-block`); `-1` three times is the block
 /// that does not exist.
@@ -227,26 +229,6 @@ impl<'s, E: Encoder> ArchiveOut<'s, E> {
     }
 }
 
-impl<E: Encoder> ArchiveOut<'_, Traced<E>> {
-    /// `finish` of a document written through `Traced` without a post function (the search
-    /// strategy's, whose file is apart from the output): `collect` gets all the bytes that its
-    /// stream replaced, whose posts the run writes where the request's batch starts
-    /// (`strategy::StrategyExport::take_posts`), so nothing here waits for the sink. Another
-    /// error of the encoder gives nothing.
-    fn finish_collecting(
-        mut self,
-        collect: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
-    ) -> Result<()> {
-        if self.enc.error().is_none() {
-            let replaced = self.enc.take_replaced_chars();
-            if !replaced.is_empty() {
-                collect(&replaced)?;
-            }
-        }
-        self.finish()
-    }
-}
-
 impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> ArchiveOut<'_, Traced<E, P>> {
     /// `finish` of a document whose stream threw (`encoder::NullElement`, the application
     /// `application`): the sink gets the bytes that NCBI's stream flushed (with a post function,
@@ -294,42 +276,45 @@ fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
     enc.element();
     enc.begin_sequence("Blast4-parameter");
     enc.member("name", 0);
-    enc.visible_str(param.name.as_bytes());
+    enc.visible_str(param.name().as_bytes());
     enc.end_member();
     enc.member("value", 1);
+    let value_type = param.value.value_type();
+    enc.variant("Blast4-value", value_type.variant(), value_type.tag());
     match &param.value {
         ParamValue::Evalue(value) => {
-            enc.variant("Blast4-value", "cutoff", 3);
             enc.variant("Blast4-cutoff", "e-value", 0);
             enc.real(*value);
             enc.end_variant();
         }
-        ParamValue::Integer(value) => {
-            enc.variant("Blast4-value", "integer", 4);
-            enc.int(*value);
-        }
-        ParamValue::BigInteger(value) => {
-            enc.variant("Blast4-value", "big-integer", 0);
-            enc.big_int(*value);
-        }
-        ParamValue::Boolean(value) => {
-            enc.variant("Blast4-value", "boolean", 2);
-            enc.boolean(*value);
-        }
-        ParamValue::Real(value) => {
-            enc.variant("Blast4-value", "real", 6);
-            enc.real(*value);
-        }
-        ParamValue::Str(value) => {
-            enc.variant("Blast4-value", "string", 11);
-            enc.visible_str(value.as_bytes());
-        }
+        ParamValue::Integer(value) => enc.int(*value),
+        ParamValue::BigInteger(value) => enc.big_int(*value),
+        ParamValue::Boolean(value) => enc.boolean(*value),
+        ParamValue::Real(value) => enc.real(*value),
+        ParamValue::Str(value) => enc.visible_str(value),
         ParamValue::IntegerList(values) => {
-            enc.variant("Blast4-value", "integer-list", 16);
             enc.begin_list(false);
             for &value in values {
                 enc.element();
                 enc.int(value);
+            }
+            enc.end_list();
+        }
+        // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:493-497
+        ParamValue::StrandType(value) => enc.enumerated(
+            match value {
+                1 => "forward-strand",
+                2 => "reverse-strand",
+                _ => "both-strands",
+            },
+            *value,
+        ),
+        // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512
+        ParamValue::BigIntegerList(values) => {
+            enc.begin_list(false);
+            for &value in values {
+                enc.element();
+                enc.big_int(value);
             }
             enc.end_list();
         }
@@ -488,15 +473,15 @@ fn write_request_options<E: Encoder>(
     out.enc.member("algorithm-options", 5);
     out.enc.begin_named("Blast4-parameters");
     out.enc.begin_list(false);
-    let set = |name: &str| sets.iter().find(|param| param.name == name);
+    let set = |name: &str| sets.iter().find(|param| param.name() == name);
     for param in &request.algorithm {
-        write_param(&mut out.enc, set(param.name).unwrap_or(param));
+        write_param(&mut out.enc, set(param.name()).unwrap_or(param));
     }
     for param in sets.iter().filter(|param| {
         !request
             .algorithm
             .iter()
-            .any(|recorded| recorded.name == param.name)
+            .any(|recorded| recorded.name() == param.name())
     }) {
         write_param(&mut out.enc, param);
     }
@@ -509,24 +494,20 @@ fn write_request_options<E: Encoder>(
         out.enc.begin_named("Blast4-parameters");
         out.enc.begin_list(false);
         if let Some((start, end)) = batch.required {
-            for (name, value) in [("RequiredStart", start), ("RequiredEnd", end)] {
-                write_param(
-                    &mut out.enc,
-                    &Param {
-                        name,
-                        value: ParamValue::Integer(value),
-                    },
-                );
+            for (field, value) in [(fields::REQUIRED_START, start), (fields::REQUIRED_END, end)] {
+                write_param(&mut out.enc, &Param::new(field, ParamValue::Integer(value)));
             }
         }
         for mask in batch.lcase_masks {
             out.enc.element();
             out.enc.begin_sequence("Blast4-parameter");
             out.enc.member("name", 0);
-            out.enc.visible_str(b"LCaseMask");
+            out.enc.visible_str(fields::L_CASE_MASK.name().as_bytes());
             out.enc.end_member();
             out.enc.member("value", 1);
-            out.enc.variant("Blast4-value", "query-mask", 26);
+            let value_type = fields::L_CASE_MASK.value_type();
+            out.enc
+                .variant("Blast4-value", value_type.variant(), value_type.tag());
             write_mask(&mut out.enc, mask);
             out.enc.end_variant();
             out.enc.end_member();
@@ -550,10 +531,7 @@ fn write_request_options<E: Encoder>(
         out.enc.begin_list(false);
         write_param(
             &mut out.enc,
-            &Param {
-                name: "Web_StepNumber",
-                value: ParamValue::Integer(step),
-            },
+            &Param::new(fields::WEB_STEP_NUMBER, ParamValue::Integer(step)),
         );
         out.enc.end_list();
         out.enc.end_named();
@@ -672,32 +650,74 @@ fn request_written_as_is(
         && encoding.writes_params(database_params)
 }
 
-/// Writes the search strategy's request of one query batch (`write_strategy_document`) to `sink`
-/// in ASN.1 text (the strategy file is always ASN.1 text), through `Traced` when ASN.1 text does
-/// not write one of its strings as it is (`request_written_as_is`): `collect` then gets the bytes
-/// that it replaced.
-pub(super) fn write_strategy_request(
-    sink: &mut dyn Write,
+// No NCBI counterpart: carries an encoded `Blast4-request` together with its `COStreamBuffer`
+// `BufferPiece` writes and `803.7` posts from batch encoding to `ostream::StrategyStream`.
+/// One encoded `Blast4-request` of `-export_search_strategy` (`encode_strategy_request`):
+/// the ASN.1 text bytes, NCBI's `COStreamBuffer` pieces (`BufferPiece`), NCBI's `803.7` posts
+/// paired with the bytes `COStreamBuffer` had written before each post, and any `NullElement`
+/// exception raised before the document completed.
+pub(super) struct EncodedStrategyRequest {
+    pub(super) bytes: Vec<u8>,
+    pub(super) pieces: Vec<crate::report::serial::encoder::BufferPiece>,
+    pub(super) posts: Vec<(u64, Vec<u8>)>,
+    pub(super) thrown: Option<crate::cli::NativeError>,
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:635-651
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:366-369
+/// Encodes the search strategy's `Blast4-request` of one query batch (`write_strategy_document`)
+/// in ASN.1 text through `Traced`, recording NCBI's `COStreamBuffer` pieces (`BufferPiece`) and
+/// `803.7` posts (`Traced::take_posted`) so `ostream::StrategyStream` can feed each piece into
+/// NCBI's 8,191-byte file buffer at the batch's start.
+pub(super) fn encode_strategy_request(
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
     sets: &[Param],
     database_params: &[Param],
-    collect: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
-) -> Result<()> {
+) -> Result<EncodedStrategyRequest> {
+    let mut bytes = Vec::new();
     let mut buf = Vec::new();
-    let encoding = ArchiveEncoding::Text;
-    if request_written_as_is(encoding, request, batch, sets, database_params) {
-        let mut out = ArchiveOut::new(AsnTextEncoder::new(&mut buf), sink);
+    let (pieces, posts, thrown) = {
+        let mut out = ArchiveOut::new(Traced::new(AsnTextEncoder::new(&mut buf), 0), &mut bytes);
         write_strategy_document(&mut out, request, batch, sets, database_params);
-        out.finish()
-    } else {
-        let mut out = ArchiveOut::new(Traced::new(AsnTextEncoder::new(&mut buf), 0), sink);
-        write_strategy_document(&mut out, request, batch, sets, database_params);
-        match out.enc.take_thrown() {
-            Some(thrown) => out.finish_thrown(collect, request.application, &thrown),
-            None => out.finish_collecting(collect),
+        let thrown = out.enc.take_thrown();
+        if thrown.is_some() {
+            out.enc.flush_to(out.sink, true)?;
+        } else if let Some(error) = out.enc.error() {
+            return Err(error.into());
         }
-    }
+        let posts = out
+            .enc
+            .take_posted()
+            .into_iter()
+            .map(|posted| {
+                (
+                    posted.written,
+                    posted.replaced.post(Some(request.application)),
+                )
+            })
+            .collect();
+        if let Some(thrown) = thrown {
+            (
+                Vec::new(),
+                posts,
+                Some(crate::cli::NativeError::null_element(
+                    request.application,
+                    &thrown,
+                )),
+            )
+        } else {
+            let pieces = out.enc.pieces().to_vec();
+            out.finish()?;
+            (pieces, posts, None)
+        }
+    };
+    Ok(EncodedStrategyRequest {
+        bytes,
+        pieces,
+        posts,
+        thrown,
+    })
 }
 
 fn write_error_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, messages: &[Message]) {
@@ -811,8 +831,7 @@ fn archive_pieces<A: AlignSource>(
                 aligns,
             )?
             .enc
-            .pieces()
-            .to_vec(),
+            .piece_sizes(),
         ArchiveEncoding::Text => write
             .to(
                 Traced::new(AsnTextEncoder::new(&mut buf), 0),
@@ -820,8 +839,7 @@ fn archive_pieces<A: AlignSource>(
                 aligns,
             )?
             .enc
-            .pieces()
-            .to_vec(),
+            .piece_sizes(),
         ArchiveEncoding::Binary => write
             .to(
                 Traced::new(AsnBinaryEncoder::new(&mut buf), 0),
@@ -829,8 +847,7 @@ fn archive_pieces<A: AlignSource>(
                 aligns,
             )?
             .enc
-            .pieces()
-            .to_vec(),
+            .piece_sizes(),
     })
 }
 
@@ -848,11 +865,11 @@ fn write_archive_object<A: AlignSource>(
     let request = match batch.round {
         Some(round) => {
             if let Some(mode) = round.comp_based_stats {
-                sets.retain(|param| param.name != "CompositionBasedStats");
-                sets.push(Param {
-                    name: "CompositionBasedStats",
-                    value: ParamValue::Integer(mode),
-                });
+                sets.retain(|param| param.field() != fields::COMPOSITION_BASED_STATS);
+                sets.push(Param::new(
+                    fields::COMPOSITION_BASED_STATS,
+                    ParamValue::Integer(mode),
+                ));
             }
             let request = handle.request();
             round_request = super::ArchiveRequest {

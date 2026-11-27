@@ -1,6 +1,7 @@
 //! Command-line arguments for RPSTBLASTN (`losat rpstblastn`).
 
 use anyhow::Result;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -9,6 +10,7 @@ use crate::algorithm::blastx::BlastxArgs;
 use crate::algorithm::rps_search::engine::RpsSearch;
 use crate::algorithm::rpsblast::args::{check_rps_outfmt, rps_composition_mode};
 use crate::blastinput::report_counts::FormattingArgs;
+use crate::utils::os_bytes::os_str_bytes;
 
 /// The text of `rpstblastn -help` (NCBI 2.17.0's, `CArgDescriptions::PrintUsage`), frozen as NCBI
 /// writes it: its `Tool`'s help (`cli::reader`), which `-h` shortens as NCBI does.
@@ -20,17 +22,17 @@ pub const HELP: &str = include_str!("help.txt");
 // rpsblast's copied, not flattened: a flattened group would change the order of the options).
 // The search runs with BLASTX's driver and the RPS engine (`into_blastx_args`), composition-based
 // statistics 0 to 3 included (the default 1, item PS12b), with `-use_sw_tback` NCBI's
-// Smith-Waterman redo of the frames (item PS12c); `-html`, the remote options and
-// `-import_search_strategy` are refused by the parser (their rows of `ncbi_app::args::refusal`).
+// Smith-Waterman redo of the frames (item PS12c); the remote options and `-import_search_strategy`
+// are refused by the parser (their rows of `ncbi_app::args::refusal`).
 #[derive(Debug, Clone)]
 pub struct RpstblastnArgs {
     // *** Input query options
     pub query: PathBuf,
     pub query_gencode: u8,
-    pub query_loc: Option<String>,
+    pub query_loc: Option<OsString>,
     pub strand: String,
     // *** General search options
-    pub db: Option<String>,
+    pub db: Option<OsString>,
     pub out: Option<PathBuf>,
     /// The search strategy file (`-export_search_strategy`, cited at
     /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
@@ -39,10 +41,13 @@ pub struct RpstblastnArgs {
     pub evalue: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
     /// Read as RPS-BLAST reads it (`rpsblast::args::rps_composition_mode`).
-    pub comp_based_stats: String,
+    pub comp_based_stats: OsString,
     // *** Formatting options
-    pub outfmt: String,
+    pub outfmt: OsString,
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224), for `-outfmt` 0 to 4 and 18.
+    pub html: bool,
     pub num_descriptions: Option<usize>,
     pub num_alignments: Option<usize>,
     /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler, `FormattingArgs`),
@@ -51,7 +56,7 @@ pub struct RpstblastnArgs {
     /// rpstblastn hands its formatter the line length only, as rpsblast's).
     pub formatting: FormattingArgs,
     // *** Query filtering options
-    pub seg: Option<String>,
+    pub seg: Option<OsString>,
     pub soft_masking: Option<bool>,
     pub lcase_masking: bool,
     // *** Restrict search or results
@@ -111,6 +116,7 @@ impl RpstblastnArgs {
             comp_based_stats: args.option_or_default("comp_based_stats")?,
             outfmt: args.option_or_default("outfmt")?,
             show_gis: args.flag("show_gis"),
+            html: args.flag("html"),
             num_descriptions: args.given_option("num_descriptions")?,
             num_alignments: args.given_option("num_alignments")?,
             formatting: FormattingArgs::from_args(args)?,
@@ -144,8 +150,11 @@ impl RpstblastnArgs {
     pub(crate) fn rps_search(&self) -> Result<TranslatedRpsSearch> {
         // NCBI reads `-outfmt` before the option handlers (`rpsblast::args::check_rps_outfmt`);
         // outfmt 13 and 14 to the standard output get NCBI's own error (BLASTX's).
-        check_rps_outfmt(&self.outfmt, self.export_search_strategy.is_some())?;
-        let requested_cbs = rps_composition_mode(&self.comp_based_stats);
+        check_rps_outfmt(
+            os_str_bytes(&self.outfmt),
+            self.export_search_strategy.is_some(),
+        )?;
+        let requested_cbs = rps_composition_mode(os_str_bytes(&self.comp_based_stats));
         Ok(TranslatedRpsSearch {
             search: RpsSearch {
                 max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
@@ -187,8 +196,7 @@ impl RpstblastnArgs {
             // hit cutoff (`rps_search::engine`), per volume with `-dbsize` on several volumes.
             dbsize: self.dbsize,
             show_gis: self.show_gis,
-            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::reader::named_refusal`).
-            html: false,
+            html: self.html,
             parse_deflines: self.parse_deflines,
             searchsp: self.searchsp,
             // `-xdrop_ungap` reaches NCBI's options check in BLASTX's resolve ("x_dropoff must be
@@ -199,6 +207,9 @@ impl RpstblastnArgs {
             xdrop_gap_final: None,
             out: self.out,
             export_search_strategy: self.export_search_strategy,
+            import_search_strategy: None,
+            import: None,
+            given: Default::default(),
             task: "blastx".to_string(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-67
             // The word size, the threshold, the matrix and the gap costs are the profile
@@ -218,7 +229,7 @@ impl RpstblastnArgs {
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpstblastn_options.cpp:60-64
             // No SEG by default (`kFilterByDefault`); the query masks are BLASTX's, on the
             // translated frames.
-            seg: self.seg.unwrap_or_else(|| "no".to_string()),
+            seg: self.seg.unwrap_or_else(|| OsString::from("no")),
             soft_masking: self.soft_masking.unwrap_or(false),
             matrix: None,
             threshold: None,
@@ -248,7 +259,7 @@ impl RpstblastnArgs {
             mt_mode: None,
             // The mode as BLASTX's handler reads a digit, so that NCBI's error of an ungapped
             // search with composition-based statistics is BLASTX's (`resolve`).
-            comp_based_stats: requested_cbs.to_string(),
+            comp_based_stats: OsString::from(requested_cbs.to_string()),
             rpstblastn: Some(Arc::new(search)),
             request_inputs,
             taxdb_setting: None,
@@ -280,11 +291,15 @@ impl RpstblastnArgs {
         inputs.query_gencode = i32::from(self.query_gencode);
         inputs.window_size = self.window_size;
         inputs.soft_masking = self.soft_masking;
-        inputs.seg = self.seg.as_deref().and_then(seg_filter);
+        inputs.seg = self
+            .seg
+            .as_deref()
+            .and_then(|seg| seg_filter(os_str_bytes(seg)));
         inputs.ungapped = self.ungapped;
-        inputs.comp_based_stats = i32::from(
-            crate::algorithm::rpsblast::args::rps_composition_mode(&self.comp_based_stats),
-        );
+        inputs.comp_based_stats =
+            i32::from(crate::algorithm::rpsblast::args::rps_composition_mode(
+                os_str_bytes(&self.comp_based_stats),
+            ));
         inputs.use_sw_tback = self.use_sw_tback;
         inputs
     }

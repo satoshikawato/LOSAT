@@ -56,6 +56,11 @@ impl<'b> JsonEncoder<'b> {
         encoder
     }
 
+    /// The length of the output written so far (`XmlEncoder::written`).
+    pub fn written(&self) -> usize {
+        self.out.len()
+    }
+
     /// `COStreamBuffer::PutEol` with its flag true (`asn_text::AsnTextEncoder::eol`).
     fn eol(&mut self) {
         self.out.push(b'\n');
@@ -296,6 +301,18 @@ impl Encoder for JsonEncoder<'_> {
                 self.error = Some(SerialError::JsonDouble(error));
             }
         }
+    }
+
+    fn buffered(&self) -> usize {
+        self.out.len()
+    }
+
+    /// The JSON stream never looks back at what it wrote: every byte is final, and all of them
+    /// go (with what preceded the document in `out`).
+    fn flush_to(&mut self, sink: &mut dyn std::io::Write, _all: bool) -> std::io::Result<()> {
+        sink.write_all(self.out)?;
+        self.out.clear();
+        Ok(())
     }
 
     fn error(&self) -> Option<SerialError> {

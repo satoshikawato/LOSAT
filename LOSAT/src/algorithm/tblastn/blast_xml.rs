@@ -41,12 +41,14 @@ use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
 use crate::report::blast_xml::subjects::{HitNames, SubjectNames};
 use crate::report::blast_xml::{
-    filter, hit_ranges, written_queries, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery,
-    XmlRun, XmlStats, REFERENCE_GAPPED_BLAST,
+    filter, hit_ranges, written_queries, CaughtException, QueryMask, StructuredXml, XmlHit, XmlHsp,
+    XmlQuery, XmlRun, XmlStats, REFERENCE_GAPPED_BLAST,
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{query_messages, QueryWarnings};
-use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
+use crate::report::serial::seqalign::{
+    read_num_ident, reported_std_seg_rows_range, row_range_exception, seqalign_evalue_read,
+};
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegParams;
@@ -90,7 +92,7 @@ pub(super) struct PreparedXml {
     matrix_name: String,
     gap_open: i32,
     gap_extend: i32,
-    db_name: String,
+    db_name: Vec<u8>,
     db_num: i64,
     db_len: i64,
     db_len_overflow: bool,
@@ -122,6 +124,9 @@ pub(super) struct PreparedXml {
     /// (`PsiSearch::bioseq_letters`), which the rows show and the counts compare as they are
     /// (`row_letters::QueryLetters`); a run of such a query has no other.
     query_bioseq: Option<std::sync::Arc<[u8]>>,
+    /// A PSSM query of the molecule `other` (`PsiSearch::query_other_coding`): the first `Hsp`'s
+    /// rows throw (`report::tabular::query_sequence_exception`).
+    query_other_coding: Option<i32>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89,101-103
@@ -157,7 +162,12 @@ pub(super) fn query_stats(
         .enumerate()
         .map(|(q_idx, &valid)| match parameters.lengths.get(q_idx) {
             Some(length) if valid => {
-                let karlin = gapped.unwrap_or(ungapped_karlin[q_idx]);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:236-251
+                // A gapped block that the ancillary data does not keep (a PSSM file's,
+                // `stats::tables::ancillary_kept`): the XML takes the query's ungapped block.
+                let karlin = gapped
+                    .filter(|karlin| crate::stats::tables::ancillary_kept(karlin.lambda))
+                    .unwrap_or(ungapped_karlin[q_idx]);
                 XmlStats {
                     hsp_len: length.length_adjustment as i32,
                     eff_space: length.eff_searchsp,
@@ -214,10 +224,17 @@ pub(super) fn prepare(
     // The reports that the documents write (the one report call, so a run that stops is one
     // without the epilog): a run that stops never writes the `-subject` report of its last query
     // when every document of the call holds it back (`written_queries`; outfmt 5 writes it).
+    let scopes = ranges.query_scopes.map(|scopes| scopes.numbered_from(0));
+    let holds_back = only_xml2
+        && crate::report::blast_xml2::reports_held(
+            matches!(target, Xml2Target::Subjects(_)),
+            values.pssm,
+        );
     let reports = written_queries(
         query_records.len(),
         !ranges.epilog,
-        only_xml2 && target.holds_back(),
+        holds_back,
+        crate::blastinput::query_batch::held_start_of(scopes, query_records.len()),
     );
     let texts = query_records[..reports]
         .iter()
@@ -225,6 +242,22 @@ pub(super) fn prepare(
         .zip(query_validity)
         .enumerate()
         .map(|(q_idx, ((query, hitlist), &valid))| {
+            let messages = query_messages(
+                query.seq(),
+                valid,
+                q_idx < values.identity_warned,
+                values.filtered_empty && !query_batch_skipped[q_idx],
+            );
+            // A query whose names no written result shows (`names_unshown_in`) has its message.
+            if crate::blastinput::query_batch::names_unshown_in(scopes, reports, holds_back, q_idx)
+            {
+                return Ok(names::labelled_query_text(
+                    query.warning_id(),
+                    query.title(),
+                    &messages,
+                    has_hits(hitlist),
+                ));
+            }
             names::query_text(
                 PROGRAM,
                 query.local_id.as_bytes(),
@@ -232,12 +265,7 @@ pub(super) fn prepare(
                 query.believed(),
                 query.title(),
                 true,
-                &query_messages(
-                    query.seq(),
-                    valid,
-                    q_idx < values.identity_warned,
-                    values.filtered_empty && !query_batch_skipped[q_idx],
-                ),
+                &messages,
                 has_hits(hitlist),
             )
         })
@@ -305,9 +333,9 @@ pub(super) fn prepare(
             i32::try_from(ranges.subjects.length(s_idx, subject_letters.length(s_idx)))?;
     }
     let (db_name, db_num, db_len, db_len_overflow) = match shown {
-        ShownSubjects::Fasta { .. } => (String::new(), 0, 0, false),
+        ShownSubjects::Fasta { .. } => (Vec::new(), 0, 0, false),
         ShownSubjects::Database { name, pairwise, .. } => (
-            name.to_string(),
+            name.to_vec(),
             pairwise.num_sequences,
             pairwise.total_letters,
             pairwise.total_letters_overflow,
@@ -325,6 +353,8 @@ pub(super) fn prepare(
         cbs: values.cbs,
         query_gencode: None,
         db_gencode: Some(values.db_gencode),
+        // PSI-TBLASTN is an iterative search (`ProgramType::is_iterative`): one round.
+        program_type: super::in_pssm::program_type(values.pssm),
     };
     Ok(PreparedXml {
         values,
@@ -356,6 +386,7 @@ pub(super) fn prepare(
         xml2: xml2_run,
         taxa_notes: taxa.notes,
         query_bioseq: pssm.and_then(|psi| psi.bioseq_letters.clone()),
+        query_other_coding: pssm.and_then(|psi| psi.query_other_coding),
     })
 }
 
@@ -441,6 +472,7 @@ impl PreparedXml {
         let version = super::tabular::program_version(self.values.pssm);
         let run = self.positives.as_ref().map(|positives| XmlRun {
             program,
+            app: "tblastn",
             version,
             reference: REFERENCE_GAPPED_BLAST,
             db_name: &self.db_name,
@@ -490,21 +522,34 @@ impl PreparedXml {
             // The query's warnings come before its document (`QueryWarnings`).
             if let Some(warnings) = warnings.as_deref_mut() {
                 warnings.before_query(q_idx, &mut *writer)?;
-                // NCBI's prefetch of the query's batch, where it begins (`TaxdbPrinter::batch_texts`).
-                if q_idx < self.texts.len() {
-                    warnings.prefetch_lines(&mut *writer, taxdb_printer.batch_texts(q_idx))?;
-                }
             }
+            // How NCBI shows the query's result (`query_batch::XmlShow`).
+            let show = crate::blastinput::query_batch::xml_show_of(
+                ranges.query_scopes.map(|scopes| scopes.numbered_from(0)),
+                q_idx,
+            );
             if q_idx == self.texts.len() {
-                // The held report that is never written (`prepare`, `written_queries`).
-                document.unwritten(&mut buf)?;
-                crate::report::query_warnings::write_document_posts(
+                // The held report that is never written (`prepare`, `written_queries`); the one
+                // held before it is written, or fails (`CaughtException`: its post follows),
+                // unless this result joins it (`XmlShow::joins_held`).
+                let written = document.unwritten(&mut buf, show.joins_held);
+                crate::report::query_warnings::write_document_end(
+                    written,
                     &buf,
-                    document.take_posts(),
+                    &mut *document,
+                    "tblastn",
                     writer,
                     warnings.as_deref_mut(),
                 )?;
                 buf.clear();
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+                // Queries whose results join the unwritten held report were still read, exported
+                // and searched before the stopping batch, so their warnings and requests follow.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    for later in (q_idx + 1)..query_records.len().min(hitlists.len()) {
+                        warnings.before_query(later, &mut *writer)?;
+                    }
+                }
                 break;
             }
             let text = &self.texts[q_idx];
@@ -532,15 +577,18 @@ impl PreparedXml {
                     &mut masks,
                 );
             }
+            // The query whose id, title and length the result shows (`XmlShow::label`).
+            let label = show.label.unwrap_or(q_idx);
             let xml_query = XmlQuery {
-                id: text.query_id(query.local_id.as_bytes()),
-                title: &text.title,
-                len: i32::try_from(query_letters.len())?,
+                id: self.texts[label].query_id(query_records[label].local_id.as_bytes()),
+                title: &self.texts[label].title,
+                len: i32::try_from(query_records[label].seq().len())?,
                 stats: self.stats[q_idx],
                 message: text.message.as_deref(),
                 // Read by XML2 alone.
                 searched: self.searched[q_idx],
                 masks: &masks,
+                joins_held: show.joins_held,
             };
             // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): the texts of
             // the subjects that the query's report reads one by one
@@ -580,7 +628,7 @@ impl PreparedXml {
                     // time (nothing for the other formats).
                     posts.hit(sink.position(), &hit, first as u32, |texts| {
                         if posting {
-                            taxdb_printer.at_names((q_idx, first), names, texts)
+                            taxdb_printer.at_names(names, texts)
                         } else {
                             Ok(())
                         }
@@ -598,11 +646,24 @@ impl PreparedXml {
                             );
                             let unaligned = list.hsps.hsps.iter().zip(&list.payloads).map(
                                 |(linked, payload)| {
+                                    let invalidated =
+                                        payload.nullb.is_some_and(|n| n.scores_invalidated);
                                     XmlHsp::unaligned(
                                         linked.hsp.score,
                                         payload.bit_score,
-                                        seqalign_evalue(linked.evalue),
-                                        read_num_ident(i64::from(payload.num_ident), program_type),
+                                        if invalidated {
+                                            -1.0
+                                        } else {
+                                            seqalign_evalue_read(linked.evalue)
+                                        },
+                                        if invalidated {
+                                            -1
+                                        } else {
+                                            read_num_ident(
+                                                i64::from(payload.num_ident),
+                                                program_type,
+                                            )
+                                        },
                                     )
                                 },
                             );
@@ -613,7 +674,52 @@ impl PreparedXml {
                             let subject_seq = subject_letters.nt(oid);
                             let mut translation = TargetTranslation::of(subject_seq, &code);
                             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:280-300
+                                // The rows read the query's letters, which throw for a query of
+                                // the molecule `other`; `s_BlastXMLAddIteration` catches it.
+                                if let Some(coding) = self.query_other_coding {
+                                    return Err(crate::report::blast_xml::CaughtException(
+                                        crate::report::tabular::query_sequence_exception(coding),
+                                    )
+                                    .into());
+                                }
                                 let hsp = &linked.hsp;
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
+                                // The start of a row whose range the XML cannot take, the query's
+                                // first: a row that starts with a gap (`-subject`'s mapping drops
+                                // at most one end segment, `KappaResultHitList::put_in_report_order`,
+                                // so any remaining leading gap still throws). NCBI catches it in
+                                // `s_BlastXMLAddIteration` (`CaughtException`).
+                                if let Some(error) = reported_std_seg_rows_range(
+                                    i64::from(hsp.q_start),
+                                    i64::from(hsp.q_end),
+                                    &payload.edit_script,
+                                    false,
+                                ) {
+                                    return Err(CaughtException(row_range_exception(error)).into());
+                                }
+                                if let Some(nullb) = payload.nullb {
+                                    if nullb.subject_row_empty {
+                                        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
+                                        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-229
+                                        return Err(CaughtException(row_range_exception(
+                                            crate::report::serial::seqalign::RowRangeError::Empty,
+                                        ))
+                                        .into());
+                                    }
+                                    if nullb.std_seg_lengths_inaccurate {
+                                        return Err(CaughtException(
+                                            crate::report::serial::seqalign::std_seg_lengths_not_accurate(),
+                                        )
+                                        .into());
+                                    }
+                                    if nullb.translate_na_failure {
+                                        return Err(CaughtException(
+                                            crate::report::serial::seqalign::translate_na_to_aa_exception(),
+                                        )
+                                        .into());
+                                    }
+                                }
                                 let frame = i32::from(hsp.frame);
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1087-1105:
                                 // translated coordinates use three nucleotide letters per
@@ -638,6 +744,7 @@ impl PreparedXml {
                                     hsp.s_start,
                                     hsp.s_end,
                                     &payload.edit_script,
+                                    payload.nullb,
                                     &mut qrow,
                                     &mut srow,
                                 )?;
@@ -651,10 +758,16 @@ impl PreparedXml {
                                 // The Seq-align's endpoints, lower first: the minus frame's
                                 // outfmt 6 order is not the XML's.
                                 let (hit_from, hit_to) = (s_start.min(s_end), s_start.max(s_end));
+                                let invalidated =
+                                    payload.nullb.is_some_and(|n| n.scores_invalidated);
                                 hsps.hsp(&XmlHsp {
                                     score: hsp.score,
                                     bit_score: payload.bit_score,
-                                    evalue: seqalign_evalue(linked.evalue),
+                                    evalue: if invalidated {
+                                        -1.0
+                                    } else {
+                                        seqalign_evalue_read(linked.evalue)
+                                    },
                                     query_from: q_start,
                                     query_to: q_end,
                                     hit_from,
@@ -671,10 +784,11 @@ impl PreparedXml {
                                     ops: Some(&payload.edit_script),
                                     query_first: q_start - 1,
                                     query_step: 1,
-                                    alignment_identities: read_num_ident(
-                                        i64::from(payload.num_ident),
-                                        program_type,
-                                    ),
+                                    alignment_identities: if invalidated {
+                                        -1
+                                    } else {
+                                        read_num_ident(i64::from(payload.num_ident), program_type)
+                                    },
                                 })?;
                             }
                         }
@@ -687,9 +801,11 @@ impl PreparedXml {
             // (`CaughtException`: the `Hit` of a subject whose lookup throws, `HitNames`): the XML2 and
             // JSON documents leave its report out (`Xml2Document::report`), and the post of the
             // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
-            // query leaves its partial bytes in `buf`, which the error return drops.
+            // query leaves its partial bytes in `buf`, which the error return drops. The post's
+            // prefix is the application's name, `tblastn` under `-in_pssm` too (whose program is
+            // `psitblastn`).
             if let Some(post) =
-                crate::report::blast_xml::writer::caught_post(written, &*document, run.program)?
+                crate::report::blast_xml::writer::caught_post(written, &*document, run.app)?
             {
                 posts.caught(post);
             }
@@ -704,10 +820,16 @@ impl PreparedXml {
             buf.clear();
         }
         if ranges.epilog {
-            document.finish(&mut buf)?;
-            crate::report::query_warnings::write_document_posts(
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2230
+            // The held report of a `-subject` or `-in_pssm` run (`Xml2Run::holds_back`) is
+            // written here, or fails (`CaughtException`: post before the document's closing bytes,
+            // then write the epilog and return Ok).
+            let written = document.finish(&mut buf);
+            crate::report::query_warnings::write_document_end(
+                written,
                 &buf,
-                document.take_posts(),
+                &mut *document,
+                "tblastn",
                 writer,
                 warnings,
             )?;

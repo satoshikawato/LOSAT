@@ -693,3 +693,29 @@ fn test_containment_respects_query_context_and_diag_separation() {
     assert!(tree.contains_hsp(&same_context_close_diag, 1001, 50));
     assert!(!tree.contains_hsp(&different_context, 0, 0));
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:822-831
+/// An initial alignment starting before its chunk (`subject_offset < 0`) is never contained by
+/// any gapped alignment stored in the chunk's tree (every stored HSP starts at `>= 0`), in both
+/// the indexed grid path and the tree-walk path.
+#[test]
+fn test_contains_hsp_with_negative_subject_start_is_false() {
+    let mut indexed = BlastIntervalTree::new(0, 1001, 0, 5001);
+    let mut walk = BlastIntervalTree::new(0, 1001, 0, 5001);
+    walk.x.usable = false;
+    let saved = make_tree_hsp(0, 500, 0, 500, 200, 1);
+    indexed.add_hsp(saved, 0, IndexMethod::QueryAndSubject);
+    walk.add_hsp(saved, 0, IndexMethod::QueryAndSubject);
+
+    for (s_off, s_end) in [(-4, 7), (-5, 6), (-1, 10), (-30, -19), (-1, -1)] {
+        let candidate = make_tree_hsp(10, 21, s_off, s_end, 50, 1);
+        assert!(
+            !indexed.contains_hsp(&candidate, 0, 0),
+            "indexed must not contain ({s_off}, {s_end})"
+        );
+        assert!(
+            !walk.contains_hsp(&candidate, 0, 0),
+            "walk must not contain ({s_off}, {s_end})"
+        );
+    }
+}

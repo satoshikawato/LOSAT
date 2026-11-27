@@ -14,6 +14,7 @@ use crate::seqid::model::Dbtag;
 use crate::seqid::parse::parse_ids;
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{DeflineSet, ParsedSeqId};
+use crate::sequence::write_fasta_lines;
 
 use super::bioseq::DbBioseq;
 use super::letters::{apply_masks, reverse_complement};
@@ -111,7 +112,7 @@ impl FastaFormatter {
         if config.strand_minus {
             reverse_complement(&mut letters);
         }
-        write_sequence(&letters, self.width, &mut text);
+        write_fasta_lines(&letters, self.width, &mut text);
         // `out` writes to an `ncbi_app::files::Ostream` (`retrieve::process`): a failed write
         // does nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
         let written = out.write_all(&text).map_err(Stop::write);
@@ -365,7 +366,7 @@ fn generated_title(
     title: &[u8],
 ) -> Result<Vec<u8>, Stop> {
     let ids = &set.deflines[0].ids;
-    let mut bioseq_facts = crate::report::db_subject::bioseq_facts(ids);
+    let mut bioseq_facts = crate::report::defline::bioseq_facts(ids);
     bioseq_facts.local_annots_only = true;
     bioseq_facts.has_source = source_taxid.is_some();
     let from_source = bioseq_title_from_source(title, || bioseq_facts.clone());
@@ -387,18 +388,6 @@ fn generated_title(
         )));
     }
     Ok(defline.text)
-}
-
-// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3295-3317
-/// The sequence lines of `CFastaOstream::x_WriteSequence`: lines of `width` letters, the
-/// last one shorter, each ended by a line feed.
-fn write_sequence(letters: &[u8], width: u32, out: &mut Vec<u8>) {
-    let width = width.max(1) as usize;
-    out.reserve(letters.len() + letters.len().div_ceil(width));
-    for line in letters.chunks(width) {
-        out.extend_from_slice(line);
-        out.push(b'\n');
-    }
 }
 
 /// `ObjectId` of a `BL_ORD_ID` tag, for tests.

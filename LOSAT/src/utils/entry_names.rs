@@ -4,7 +4,7 @@ use std::ffi::{OsStr, OsString};
 
 /// The names that run a program without its subcommand word (`entry_argv`), as `losat
 /// --install-shims` links them. No NCBI counterpart: NCBI has one executable per program.
-pub const ENTRY_NAMES: [&str; 18] = [
+pub const ENTRY_NAMES: [&str; 21] = [
     "blastn",
     "blastp",
     "blastx",
@@ -23,23 +23,23 @@ pub const ENTRY_NAMES: [&str; 18] = [
     "makeprofiledb",
     "rpsbproc",
     "blastdb_aliastool",
+    "blastdbcheck",
+    "cleanup-blastdb-volumes.py",
+    "blast_formatter",
 ];
 
 /// The program of an executable called `argv0`: its file name without `.exe`, when that is one
 /// of `ENTRY_NAMES`.
 fn entry_program(argv0: &OsStr) -> Option<&'static str> {
-    let path = std::path::Path::new(argv0);
-    if !path
-        .extension()
-        .is_none_or(|extension| extension.eq_ignore_ascii_case("exe"))
-    {
-        return None;
-    }
-    let stem = path.file_stem()?.to_str()?;
+    let file_name = std::path::Path::new(argv0).file_name()?.to_str()?;
+    let base = match file_name.rsplit_once('.') {
+        Some((head, ext)) if ext.eq_ignore_ascii_case("exe") => head,
+        _ => file_name,
+    };
     // Windows finds `blastn.exe` for the word `BLASTN`, which is then `argv[0]`.
     #[cfg(windows)]
-    let stem = stem.to_ascii_lowercase();
-    ENTRY_NAMES.into_iter().find(|name| *name == stem)
+    let base = base.to_ascii_lowercase();
+    ENTRY_NAMES.into_iter().find(|name| *name == base)
 }
 
 /// The words of the command line as `losat PROGRAM ...` reads them: an executable called by the

@@ -1,0 +1,2 @@
+Seq-entry ::= seq { id { local str "dp" }, descr { title "delta prot" },
+  inst { repr delta, mol aa, length 3, ext delta { literal { length 3, seq-data iupacaa "MKV" } } } }

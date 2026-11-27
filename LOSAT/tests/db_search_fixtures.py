@@ -42,10 +42,10 @@ every machine: NCBI writes the `-db` text into the `[LOCAL_ID] TOOL_URL` link (`
 put the checkout's path into the frozen bytes. Not taken: absolute paths (bytes of one machine); paths relative to
 DIR in the cells (every path of a row is relative to LOSAT/, and every reader of the cells counts on it); a temporary
 directory with copies of the files (absolute paths again); a new column (a new header for every file and every
-reader). A `cwd=` row whose query is a PSSM (`pssm:`, `pssm-gz:`) or standard input (`stdin:`), whose `db` cell is
-`rps-gz:`, whose `files` column is set, or whose `extra_args` names a file under `tests/` (an argument that would
-not be rebased) is refused (`run_dir`; such rows are not needed, and the mechanism stays small). `freeze` and `check`
-refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter would read it in every row).
+reader). A `cwd=` row whose query is a PSSM (`pssm:`, `pssm-gz:`) or standard input (`stdin:`), whose `files` column
+is set, or whose `extra_args` names a file under `tests/` (an argument that would not be rebased) is refused
+(`run_dir`; such rows are not needed, and the mechanism stays small). An `rps-gz:` db cell is taken: its names are
+databases of the inflated directory, not paths. `freeze` and `check` refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter would read it in every row).
 
 - kind `ncbi`: the expectation is NCBI's stdout, stderr and exit status (`rc`) of a run with
   `-num_threads 1`, every byte, nothing normalised. The frozen bytes are
@@ -63,7 +63,9 @@ refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter woul
   array of a batch's heaps, with the near input that follows each query batch by queries without a hit, where
   they add no byte: outfmt 6, or a batch that fails and writes nothing; exception 29: `-db_hard_mask` with
   overlapping masks after which NCBI's word hits reach diagonal entries of another subject, with the near database
-  that holds a spacer of `X` between the two subjects under an alias with the database's statistics). The row has no
+  that holds a spacer of `X` between the two subjects under an alias with the database's statistics; exception 31:
+  a PSSM file's gapped Lambda for which NCBI's search for the hit-saving cutoff never ends, with the near Lambda
+  8e-9 whose search stays inside Int4, in outfmt 7, which prints neither Lambda). The row has no
   frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row`). ROW_ID is
   an `ncbi` row of the same outfmt without a near row of its own, and an `ncbi` row takes all of its bytes.
 - a `ncbi` row whose `covers` cell has a part ` | ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind
@@ -152,7 +154,11 @@ refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter woul
   stops where the crash cuts it, which its heap and the environment move (the same official 2.17.0 binary
   wrote 349 bytes of db.x2g.bx.of.p0127.nd0.1 when it was frozen and 17 in later runs): no expectation.
   `freeze` stops on such a run before it writes a file (`refuse_signal`); the row takes its stdout from a near
-  row, or has empty stdout cells where LOSAT writes nothing before it refuses.
+  row, or has empty stdout cells where LOSAT writes nothing before it refuses. A rejection row whose `covers` cell
+  has a part ` | ncbi-stderr` checks its whole stderr too: LOSAT's minus its last line (the refusal) must be
+  NCBI's stderr of the row's own command up to its exception report (`Error: NCBI C++ Exception:`), which
+  `freeze` runs and writes as <row_id>.err with `stderr_sha256` (`ncbi_stderr`; a run without that report
+  stops it).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -190,7 +196,8 @@ the rows of rpsblast and rpstblastn (the library API has no such program), those
 `-query` and `-in_pssm` (the library's query is one or the other), those that give `-in_msa` with either of them,
 those with `-msa_master_idx` or `-ignore_msa_master` and no `-in_msa` (the library takes the options with the
 alignment, `Inputs::msa`), those that write the search strategy file (`-export_search_strategy`, which the
-library refuses), those that read the query from
+library refuses), those with a PHI-BLAST pattern (`-phi_pattern`, which the library refuses until line PS item
+PS8b), those that read the query from
 standard input (the library's query is records), and those that set NCBI's settings of the process for its
 formatter, a `cwd=` token or a token of `PROCESS_SETTINGS` (FMTCFG, NCBI, GETURL_DEBUG, NCBI_DONT_USE_NCBIRC;
 `process_settings`), are `library-skip`. The library API's contract names what a call reads of its process
@@ -376,9 +383,10 @@ def is_cwd_token(token: str) -> bool:
 
 def run_dir(row: dict[str, str]) -> str | None:
     """DIR of the row's token `cwd=DIR` (relative to LOSAT/), or None: the row runs in LOSAT/. Refuses a second
-    token, an empty or absolute DIR, and the rows the mechanism does not take: a PSSM, alignment, standard-input or `none:` query, an
-    `rps-gz:` db cell, a `files` column, an argument of `extra_args` that names a file under `tests/` (it would
-    reach the program relative to LOSAT/ from DIR)."""
+    token, an empty or absolute DIR, and the rows the mechanism does not take: a PSSM, alignment, standard-input or `none:` query, a
+    `files` column, an argument of `extra_args` that names a file under `tests/` (it would
+    reach the program relative to LOSAT/ from DIR). An `rps-gz:` db cell is taken: its names are databases of the
+    inflated directory (`rps_env`), not paths."""
     tokens = extra_tokens(row)
     dirs = [token.removeprefix(CWD_TOKEN) for token in tokens if is_cwd_token(token)]
     if not dirs:
@@ -386,8 +394,7 @@ def run_dir(row: dict[str, str]) -> str | None:
     where = row.get("row_id", "?")
     if len(dirs) > 1 or not dirs[0] or os.path.isabs(dirs[0]):
         raise SystemExit(f"{where}: one token cwd=DIR, DIR relative to LOSAT/ (got {dirs})")
-    if row["query"].startswith(("pssm:", "pssm-gz:", "msa:", "none:", *STDIN_PREFIXES)) \
-            or rps_cell(row["db"]) is not None or row.get("files"):
+    if row["query"].startswith(("pssm:", "pssm-gz:", "msa:", "none:", *STDIN_PREFIXES)) or row.get("files"):
         raise SystemExit(f"{where}: a cwd= row has a query file, a db or subject: cell and no files column")
     named = [token for token in tokens if token.startswith("tests/")]
     if named:
@@ -716,6 +723,16 @@ def near_cut(row: dict[str, str]) -> int | None:
     """The N of `ncbi-near: ROW_ID first N bytes` (`near_row`), or None: all the bytes, or no near row."""
     near = near_row(row)
     return near[1] if near else None
+
+
+# What starts NCBI's report of the exception at which it stops (`ncbi_stderr`).
+EXCEPTION_REPORT = b"Error: NCBI C++ Exception:"
+
+
+def ncbi_stderr(row: dict[str, str]) -> bool:
+    """Whether a `losat-rejection` row's stderr before its refusal is NCBI's up to its exception report (a
+    ` | ncbi-stderr` part of its covers cell), frozen as <row_id>.err."""
+    return any(part.strip() == "ncbi-stderr" for part in row["covers"].split(" | ")[1:])
 
 
 def under_valgrind(row: dict[str, str]) -> bool:
@@ -1223,8 +1240,10 @@ def freeze(args: argparse.Namespace) -> int:
         if not selected(row, args):
             continue
         command = [str(ncbi_bin / row["program"]), *search_argv(row), "-num_threads", "1"]
-        if row["kind"] == "losat-rejection" and row["stdout_bytes"] and not near_row_id(row):
-            # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too.
+        own_stdout = bool(row["stdout_bytes"]) and not near_row_id(row)
+        if row["kind"] == "losat-rejection" and (own_stdout or ncbi_stderr(row)):
+            # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too, or its stderr up
+            # to its exception report (`ncbi_stderr`).
             if xinclude.wants_pssm(row):
                 run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=row_cwd(row),
                                              timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row)).run
@@ -1241,10 +1260,22 @@ def freeze(args: argparse.Namespace) -> int:
                 run = run_search(command, row, cwd=row_cwd(row), timeout=TIMEOUT, env=row_env(row, env),
                                  preexec_fn=ncbi_stack(row))
             refuse_signal(row, run.returncode)
-            out = frozen_stdout(row, run.stdout)
-            (FROZEN / f"{row['row_id']}.out").write_bytes(out)
-            row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
-            print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(out)} (rejection row: stdout only)")
+            if ncbi_stderr(row):
+                cut = run.stderr.find(EXCEPTION_REPORT)
+                if cut < 0:
+                    raise SystemExit(f"{row['row_id']}: ncbi-stderr, but NCBI wrote no exception report")
+                err, err_path = run.stderr[:cut], FROZEN / f"{row['row_id']}.err"
+                if err:
+                    err_path.write_bytes(err)
+                else:
+                    err_path.unlink(missing_ok=True)
+                row.update(stderr_sha256=sha256(err) if err else "")
+                print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstderr before the exception={len(err)}")
+            if own_stdout:
+                out = frozen_stdout(row, run.stdout)
+                (FROZEN / f"{row['row_id']}.out").write_bytes(out)
+                row.update(stdout_sha256=sha256(out), stdout_bytes=str(len(out)))
+                print(f"{row['row_id']}\tncbi_rc={run.returncode}\tstdout={len(out)} (rejection row: stdout only)")
             continue
         if row["kind"] != "ncbi" or near_row_id(row):
             continue
@@ -1397,7 +1428,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # (`xinclude.ALIGNMENT_OPTIONS`) without `-in_msa` (`Inputs::msa` is the library's alignment
     # query, line LIB item 1.6), nor a row that writes the search strategy file
     # (`-export_search_strategy`: the library writes none and refuses it, `api::search::STRATEGY_FILES`,
-    # line RG item F1b-1).
+    # line RG item F1b-1), nor a row with a PHI-BLAST pattern (`-phi_pattern`: the library refuses its
+    # `phi_pattern`, `api::search`, until line PS item PS8b).
     # A row that sets NCBI's settings of the process for its formatter (`process_settings`: the run directory's
     # `.ncbirc` and FMTCFG file, `$NCBI`, GETURL_DEBUG) is not a library call either: the API's contract
     # (LOSAT/src/api/mod.rs:78-86) does not name them among what a call reads of its process, and the library's
@@ -1410,6 +1442,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                     or ("-in_msa" not in argv
                         and any(word in xinclude.ALIGNMENT_OPTIONS for word in argv))
                     or "-export_search_strategy" in argv
+                    or "-phi_pattern" in argv
                     or query_stdin(row) or process_settings(row)
                     or device_mode(row)):
         return "library-skip", ""
@@ -1475,10 +1508,20 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
                 problems.append("frozen .out does not match the manifest")
-            if run.stdout != in_losat_words(out):
-                problems.append("stdout " + first_difference(in_losat_words(out), run.stdout))
+            expected_out, observed_out = in_losat_words(out), run.stdout
+            if is_sam_outfmt(row["outfmt"]):
+                expected_out, observed_out = strip_sam_cl(expected_out), strip_sam_cl(observed_out)
+            if observed_out != expected_out:
+                problems.append("stdout " + first_difference(expected_out, observed_out))
         elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
+        if ncbi_stderr(row):
+            err = (FROZEN / f"{row['row_id']}.err").read_bytes() if row["stderr_sha256"] else b""
+            if (sha256(err) if err else "") != row["stderr_sha256"]:
+                problems.append("frozen .err does not match the manifest")
+            before = b"".join(run.stderr.splitlines(keepends=True)[:-1])
+            if before != in_losat_words(err):
+                problems.append("stderr before the refusal " + first_difference(in_losat_words(err), before))
         expected = expected_text(row, library)
         if expected.encode() not in run.stderr:
             problems.append(f"stderr lacks {expected!r}: {run.stderr.decode(errors='replace').strip()[:150]!r}")

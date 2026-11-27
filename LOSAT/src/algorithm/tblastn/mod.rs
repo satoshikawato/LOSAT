@@ -64,6 +64,9 @@ mod x_oid_flow;
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1458:
 // PrintOneResultSet dispatches the retained search result to its output format.
 mod stage_e_report;
+// Reporting of `-in_pssm -window_size 0` alignments whose traceback started on their frame's
+// trailing NULLB sentinel (`search_gapped::x_traceback_start_in_frame`).
+mod nullb_report;
 // The sequences of the query-anchored reports (outfmt 1 to 4).
 mod anchored;
 // TBLASTN's BLAST XML (outfmt 5), once per run, from the final hit lists.
@@ -82,9 +85,9 @@ mod seqalign;
 // nucleotide database (`-db`): its sequences, numbers and titles.
 mod database;
 // Web ABI v1's TBLASTN (`web_api::run_pair`): the CLI's parser and run over the call's bytes.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub(crate) mod web;
-pub use args::{check_options, refuse_browser_pssm_query, TblastnArgs};
+pub use args::{check_options, TblastnArgs};
 pub use tblastn_app::{run_local, run_local_database};
 // The summary lines `main` prints at exit (`LOSAT_X_TBNXLATESIMD`, `LOSAT_X_TBNUNITXLATE`).
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
@@ -105,3 +108,6 @@ pub use crate::algorithm::tblastx::lookup::x_tbn_lut_print_summary as x_lut_lean
 // prints counters and changes no value NCBI computes.
 pub use stage_d_linking::x_link_ctx_print_summary;
 pub use stage_d_linking::x_link_window_print_summary;
+
+#[cfg(test)]
+pub(crate) mod mapped_row_range_tests;

@@ -1,0 +1,2 @@
+NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objmgr/seq_map.cpp", line 286: Error: (CSeqMapException::eSeqDataError) ncbi::objects::CSeqMap::CSeqMap() - CSeq_inst.length of sequence without data should be 0

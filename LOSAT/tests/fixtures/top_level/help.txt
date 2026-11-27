@@ -24,14 +24,17 @@ Options:
 
 
 Other programs (losat <program> -help shows each one's options):
-  blastdbcmd         BLAST database client
-  dustmasker         Low complexity region masker based on Symmetric DUST algorithm
-  segmasker          Low complexity region masker based on the SEG algorithm
-  windowmasker       Window based sequence masker
-  convert2blastmask  Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb
-  makembindex        Create a BLAST database index.
-  makeprofiledb      Application to create databases for rpsblast, cobalt and deltablast
-  blastdb_aliastool  Application to create BLAST database aliases
+  blastdbcmd                  BLAST database client
+  dustmasker                  Low complexity region masker based on Symmetric DUST algorithm
+  segmasker                   Low complexity region masker based on the SEG algorithm
+  windowmasker                Window based sequence masker
+  convert2blastmask           Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb
+  makembindex                 Create a BLAST database index.
+  makeprofiledb               Application to create databases for rpsblast, cobalt and deltablast
+  blastdb_aliastool           Application to create BLAST database aliases
+  blastdbcheck                BLAST database integrity and validity checking application
+  cleanup-blastdb-volumes.py  Remove needless BLAST database volumes.
+  blast_formatter             Stand-alone BLAST formatter client, version LOSAT 0.2.0
 
 To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:
   losat -install-shims [DIR]   (default: the directory of this executable)

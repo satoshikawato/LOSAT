@@ -29,7 +29,14 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 LOSAT = HERE.parent.parent
-CLEARED = ("BLASTDB", "NCBI_CONFIG_PATH", "NCBI_DONT_USE_LOCAL_CONFIG", "NCBI", "BATCH_SIZE")
+CLEARED = (
+    "BLASTDB",
+    "NCBI_CONFIG_PATH",
+    "NCBI_DONT_USE_LOCAL_CONFIG",
+    "NCBI",
+    "BATCH_SIZE",
+    "WINDOW_MASKER_PATH",
+)
 
 
 def words(text: str, d: bytes) -> bytes:
@@ -61,13 +68,20 @@ def cases():
         yield case, kind, env, setup, argv
 
 
-def set_up(setup: str, d: bytes) -> bytes:
+def set_up(setup: str, d: bytes, makembindex_bin: str) -> bytes:
     """Runs the setup steps in `d`; the directory where the program runs."""
     cwd = d
     for step in setup.split(" ; "):
         op, *args = step.split(" ")
         if op == "copy":
             shutil.copyfile(LOSAT / args[0], os.path.join(d, words(args[1], d)))
+        elif op == "copydir":
+            src = LOSAT / args[0]
+            dst = os.path.join(d, words(args[1], d))
+            os.makedirs(dst, exist_ok=True)
+            for f in sorted(src.iterdir()):
+                if f.is_file():
+                    shutil.copyfile(f, os.path.join(dst, f.name.encode()))
         elif op == "copydb":
             src = LOSAT / args[0]
             for f in sorted(src.parent.glob(src.name + ".*")):
@@ -89,6 +103,9 @@ def set_up(setup: str, d: bytes) -> bytes:
         elif op == "cwd":
             cwd = os.path.join(d, words(args[0], d))
             os.mkdir(cwd)
+        elif op == "mkidx":
+            cmd = [os.fsencode(makembindex_bin)] + [words(w, d) for w in args]
+            subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, timeout=60)
         else:
             raise SystemExit(f"unknown step {step!r}")
     return cwd
@@ -112,6 +129,15 @@ DATE_TEXTS = re.compile(rb"\d\d/\d\d/\d{4} \d\d:\d\d:\d\d|\d{4}-\d\d-\d\dT\d\d:\
 
 # A database's index files, whose header holds the build's date in a field of its own length.
 INDEX = (b".nin", b".pin")
+# Alias files, whose header holds `# Alias file created: <date>` whose length varies with the date.
+ALIAS = (b".nal", b".pal")
+
+
+def alias_date_len(data: bytes):
+    """The length of the date text after `# Alias file created: ` on the header line of an alias
+    file, or None if absent."""
+    m = re.search(rb"# Alias file created: ([^\n]*)", data)
+    return len(m.group(1)) if m else None
 
 
 def index_date(data: bytes):
@@ -141,7 +167,14 @@ def undated(d: bytes, path: bytes, data: bytes) -> bytes:
     """`data`, the bytes of the file `path` below `d`, with the build's dates as `<DATE>`: the
     date field of an index file (`index_date`) and every text of `DATE_TEXTS`; in a metadata file
     (`.njs`, `.pjs`) `bytes-total` counts the index files it lists without their date fields,
-    whose length changes with the date."""
+    whose length changes with the date; in a binary seqid list (`.bsl`) its date with the date's
+    length byte, and its 8-byte size, which counts the date, as zeros when it holds the length of
+    the file (a wrong size stays: `undated_seqid_list` of tests/temp_support)."""
+    if path.endswith(b".bsl") and len(data) > 21 and data[0] == 0:
+        date = 21 + int.from_bytes(data[17:21], "little")
+        if date < len(data):
+            size = bytes(8) if int.from_bytes(data[1:9], "little") == len(data) else data[1:9]
+            data = data[:1] + size + data[9:date] + b"<DATE>" + data[date + 1 + data[date] :]
     if path.endswith(INDEX):
         span = index_date(data)
         if span:
@@ -149,15 +182,37 @@ def undated(d: bytes, path: bytes, data: bytes) -> bytes:
     elif path.endswith((b".njs", b".pjs")):
         directory = os.path.dirname(os.path.join(d, path))
         listed = re.search(rb'"files": \[(.*?)\]', data, re.S)
-        dates = 0
+        index_dates = 0
+        alias_dates = 0
         for name in re.findall(rb'"([^"]*)"', listed.group(1)) if listed else []:
-            if name.endswith(INDEX):
-                with open(os.path.join(directory, name), "rb") as index:
-                    span = index_date(index.read())
-                dates += span[1] - span[0]
-        data = re.sub(
-            rb'"bytes-total": (\d+)', lambda m: b'"bytes-total": %d' % (int(m.group(1)) - dates), data, count=1
-        )
+            if name.endswith(INDEX) or name.endswith(ALIAS):
+                item_path = os.path.join(directory, name)
+                if not os.path.exists(item_path):
+                    item_path = os.path.join(directory, os.path.basename(name))
+                with open(item_path, "rb") as item:
+                    item_bytes = item.read()
+                if name.endswith(INDEX):
+                    span = index_date(item_bytes)
+                    index_dates += span[1] - span[0]
+                else:
+                    alen = alias_date_len(item_bytes)
+                    if alen is not None:
+                        alias_dates += alen
+        for key, delta in (
+            (b"bytes-total", index_dates + alias_dates),
+            (b"bytes-to-cache", index_dates),
+        ):
+            data = re.sub(
+                rb'"' + key + rb'": (\d+)',
+                lambda m, k=key, dlt=delta: b'"' + k + b'": %d' % (int(m.group(1)) - dlt),
+                data,
+                count=1,
+            )
+    if path.endswith(b".log"):
+        data = re.sub(rb"(Building a new DB, current time: )[^\n]*", rb"\1{TIME}", data, count=1)
+        data = re.sub(rb"( sequences in )[^ ]*( seconds\.)", rb"\1{SECONDS}\2", data, count=1)
+    if path.endswith((b".nal", b".pal")):
+        data = re.sub(rb"(# Alias file created: )[^\n]*", rb"\1<DATE>", data, count=1)
     return DATE_TEXTS.sub(b"<DATE>", data)
 
 
@@ -206,9 +261,12 @@ def made(d: bytes, before: dict, after: dict) -> bytes:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ncbi-bin", default=os.environ.get("NCBI_BIN", ""))
+    parser.add_argument("--rpsbproc-bin", default=os.environ.get("RPSBPROC_BIN", ""))
+    parser.add_argument("--makembindex-bin", default=os.environ.get("MAKEMBINDEX_BIN", ""))
     parser.add_argument("--work", default=os.path.join(os.environ.get("TMPDIR", "/tmp"), "non_utf8_names"))
     parser.add_argument("only", nargs="*")
     args = parser.parse_args()
+    makembindex_bin = args.makembindex_bin or os.path.join(args.ncbi_bin, "makembindex")
     work = pathlib.Path(args.work).resolve()
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
@@ -221,7 +279,7 @@ def main() -> int:
         os.mkdir(d)
         home = work / f"{case}_home"
         home.mkdir()
-        cwd = set_up(setup, d)
+        cwd = set_up(setup, d, makembindex_bin)
         run_env = {k: v for k, v in os.environ.items() if k not in CLEARED and not k.startswith("LOSAT_")}
         run_env.update(HOME=str(home), BLAST_USAGE_REPORT="false")
         run_env = {os.fsencode(k): os.fsencode(v) for k, v in run_env.items()}
@@ -229,9 +287,12 @@ def main() -> int:
             name, value = env.split("=", 1)
             run_env[name.encode()] = words(value, d)
         program, *rest = argv.split(" ")
-        command = [os.fsencode(os.path.join(args.ncbi_bin, program))] + [words(w, d) for w in rest]
+        exe = args.rpsbproc_bin if (program == "rpsbproc" and args.rpsbproc_bin) else os.path.join(args.ncbi_bin, program)
+        command = [os.fsencode(exe)] + [words(w, d) for w in rest]
         before = snapshot(d)
-        done = subprocess.run(command, cwd=cwd, env=run_env, capture_output=True, timeout=60)
+        done = subprocess.run(
+            command, cwd=cwd, env=run_env, stdin=subprocess.DEVNULL, capture_output=True, timeout=60
+        )
         (HERE / "expected" / f"{case}.files").write_bytes(made(d, before, snapshot(d)))
         for name, data in (("stdout", done.stdout), ("stderr", done.stderr)):
             (HERE / "expected" / f"{case}.{name}").write_bytes(data.replace(d, b"{D}"))

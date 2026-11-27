@@ -31,12 +31,14 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, taxdb_warning_line, union_length, DeflineIds, QueryCoveragePerHsp,
-    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows,
-    TabularSpec, TabularSubject, TabularTaxonomy, TabularWriter,
+    coverage_percent, union_length, DeflineIds, QueryCoveragePerHsp, SubjectLookup, TabularField,
+    TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularSubject,
+    TabularTaxonomy, TabularWriter,
 };
 
-/// What the report needs besides the final hit lists.
+/// What the report needs besides the final hit lists (`Copy`: PHI-BLAST's report writes one view
+/// of it for each query, `report_write::write_custom_tabular`).
+#[derive(Clone, Copy)]
 pub(super) struct BlastpTabular<'a> {
     pub spec: &'a TabularSpec,
     /// blastp or psiblast: NCBI's messages name it (`ncbi_name`), LOSAT's refusals too (`name`).
@@ -60,7 +62,7 @@ pub(super) struct BlastpTabular<'a> {
     /// `report::tabular::QueryCoveragePerHsp`).
     pub ungapped: bool,
     /// Outfmt 7's `# Database:` text.
-    pub database: &'a str,
+    pub database: &'a [u8],
     pub subjects: TabularSubjects<'a>,
     /// By query: whether NCBI did not search its batch (outfmt 7's lines without a count).
     pub unsearched: &'a [bool],
@@ -86,6 +88,7 @@ pub(super) struct BlastpTabular<'a> {
 
 /// The subjects as the report shows them, by subject index (a subject set) or rank (the
 /// reported sequences of a database).
+#[derive(Clone, Copy)]
 pub(super) enum TabularSubjects<'a> {
     /// The records of `-subject`: the tabular id of each (`sseqid`, `sacc`, `saccver`; the
     /// default report's), the length of its record, and of the records whose ids `-parse_deflines`
@@ -118,6 +121,10 @@ pub(super) enum TabularSubjects<'a> {
         /// subject whose load throws writes its rows as NCBI's `catch` leaves them
         /// (`report::tabular::SubjectLookup::Throws`).
         loads: &'a crate::report::db_subject::HitLoads,
+        /// The queries whose Bioseqs NCBI's scope finds for reported sequences, by the call's
+        /// query and the ordinal id (`report::query_bioseq`): such a row shows the query's
+        /// (`TabularSubjects::values_for`).
+        seen: crate::report::query_bioseq::SeenFrom<'a>,
     },
 }
 
@@ -136,6 +143,30 @@ struct SubjectValues<'a> {
 }
 
 impl<'a> SubjectValues<'a> {
+    /// The values of the query Bioseq `bioseq` that NCBI's scope finds for a reported sequence
+    /// (`common::tabular::SubjectValues::of_query_bioseq`).
+    fn of_query_bioseq(
+        bioseq: &'a crate::report::query_bioseq::QueryBioseq,
+        all_deflines: bool,
+    ) -> Self {
+        let [id, accession, accession_version] = bioseq.tabular_ids();
+        SubjectValues {
+            id: id.as_slice(),
+            accession: accession.as_slice(),
+            accession_version: accession_version.as_slice(),
+            gi: bioseq.gi(),
+            all_ids: if all_deflines {
+                bioseq.all_ids().to_vec()
+            } else {
+                Vec::new()
+            },
+            titles: None,
+            length: bioseq.length(),
+            taxonomy: Cow::Owned(bioseq.taxonomy()),
+            failed: None,
+        }
+    }
+
     /// The values of the database sequence `subject` whose load throws with `exception`
     /// (`common::tabular::SubjectValues::thrown`): its rows print none of its own values, and
     /// NCBI reads none of its ids, titles or taxonomy.
@@ -194,6 +225,42 @@ impl SubjectValues<'_> {
 }
 
 impl<'a> TabularSubjects<'a> {
+    /// The query Bioseq that NCBI's scope finds for subject `s_idx` in the report of the call's
+    /// query `q_idx` (`report::query_bioseq::SeenFrom::of`; none for a subject set).
+    pub(super) fn seen_at(
+        &self,
+        q_idx: usize,
+        s_idx: usize,
+    ) -> Option<&'a crate::report::query_bioseq::QueryBioseq> {
+        match *self {
+            TabularSubjects::Records { .. } => None,
+            TabularSubjects::Database { ordinals, seen, .. } => {
+                if !seen.any() {
+                    return None;
+                }
+                seen.of(q_idx, *ordinals.get(s_idx)?)
+            }
+        }
+    }
+
+    /// `values` of subject `s_idx` in the report of the call's query `q_idx`: the values of the
+    /// query Bioseq that NCBI's scope finds for it there (`seen_at`), else its own.
+    fn values_for(
+        &self,
+        q_idx: usize,
+        s_idx: usize,
+        spec: &TabularSpec,
+        app: BlastpApp,
+    ) -> Result<SubjectValues<'a>> {
+        match self.seen_at(q_idx, s_idx) {
+            Some(bioseq) => Ok(SubjectValues::of_query_bioseq(
+                bioseq,
+                spec.needs().all_deflines,
+            )),
+            None => self.values(s_idx, spec, app),
+        }
+    }
+
     /// The values of subject `s_idx` that the fields of `spec` show.
     fn values(
         &self,
@@ -267,6 +334,7 @@ impl<'a> TabularSubjects<'a> {
                             subject_id: true,
                             all_ids: false,
                             thrown: None,
+                            empty_handle: false,
                         })
                     }
                     _ => None,
@@ -370,6 +438,7 @@ impl<'a> TabularSubjects<'a> {
                                 subject_id: true,
                                 all_ids: true,
                                 thrown: None,
+                                empty_handle: false,
                             }
                         }),
                     }),
@@ -406,7 +475,10 @@ pub(super) fn needs_rows(rows: bool, spec: &TabularSpec, app: BlastpApp) -> bool
 /// writes it (`TabularSpec::of_app`: psiblast's and rpsblast's without the custom delimiter);
 /// `None` for the other formats and for the default outfmt 6 and 7. Every report of the blastp
 /// engine reads its spec here, from the value of the command line or the library's as given.
-pub(super) fn custom_tabular_spec(outfmt: &str, app: BlastpApp) -> Option<&'static TabularSpec> {
+pub(super) fn custom_tabular_spec(
+    outfmt: impl AsRef<[u8]>,
+    app: BlastpApp,
+) -> Option<&'static TabularSpec> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     let format = crate::blastinput::app::ReportFormat::from_number(choice.number)?;
     TabularSpec::of_app(format, &choice, app.request_kind()).map(TabularSpec::intern)
@@ -425,8 +497,11 @@ pub(super) fn write_tabular_prolog_warning(
     program: &str,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
-    if spec.kind == TabularKind::CsvWithHeader && spec.checks_taxdb() && !taxdb_found {
-        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+    if let Some(line) = spec
+        .formatter_warning(taxdb_found, program)
+        .filter(|_| spec.kind == TabularKind::CsvWithHeader)
+    {
+        diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
     Ok(())
@@ -452,9 +527,9 @@ pub(super) fn write_tabular_without_queries(
 ) -> Result<()> {
     write_tabular_prolog(spec, writer)?;
     if spec.kind == TabularKind::Commented {
-        if spec.checks_taxdb() && !taxdb_found {
+        if let Some(line) = spec.formatter_warning(taxdb_found, program) {
             writer.flush()?;
-            diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+            diagnostics.write_all(line.as_bytes())?;
             diagnostics.flush()?;
         }
         TabularWriter::new(spec, "", None).epilog(writer, 0)?;
@@ -482,9 +557,9 @@ pub(super) fn write_tabular_round_epilog(
     if spec.kind != TabularKind::Commented {
         return Ok(());
     }
-    if spec.checks_taxdb() && !taxdb_found {
+    if let Some(line) = spec.formatter_warning(taxdb_found, program) {
         writer.flush()?;
-        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+        diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
     TabularWriter::new(spec, "", None).epilog(writer, rounds)?;
@@ -579,6 +654,7 @@ pub(super) fn write_blastp_tax_report(
         TabularSubjects::Records { .. } => None,
         TabularSubjects::Database { loads, .. } => Some(*loads),
     };
+    let seen = |q_idx: usize, s_idx: usize| tab.subjects.seen_at(q_idx, s_idx);
     let report = report_batch(
         &queries,
         parsed,
@@ -587,7 +663,9 @@ pub(super) fn write_blastp_tax_report(
         loads,
         tab.names,
         tab.app.name(),
+        tab.app.ncbi_name(),
         html,
+        Some(&seen),
     )?;
     write_report(writer, warnings, &queries, &report)?;
     Ok(())
@@ -631,10 +709,11 @@ fn write_tabular_rows<const RPS: bool>(
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are made with them (`tabular_subject_ids`).
     if needs.all_deflines {
-        for hit_list in hit_lists.iter().flatten() {
-            for hsp_list in reported(hit_list) {
+        for (q_idx, hit_list) in hit_lists.iter().enumerate() {
+            for hsp_list in hit_list.iter().flat_map(reported) {
                 if let Some(first) = hsp_list.hsps.first() {
-                    tab.subjects.values(first.s_idx as usize, spec, tab.app)?;
+                    tab.subjects
+                        .values_for(q_idx, first.s_idx as usize, spec, tab.app)?;
                 }
             }
         }
@@ -653,8 +732,7 @@ fn write_tabular_rows<const RPS: bool>(
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-    let taxdb_warning =
-        (spec.checks_taxdb() && !tab.taxdb_found).then(|| taxdb_warning_line(tab.app.ncbi_name()));
+    let taxdb_warning = spec.formatter_warning(tab.taxdb_found, tab.app.ncbi_name());
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
         if let (Some(line), Some(warnings)) = (taxdb_warning.as_deref(), warnings) {
             writer.flush()?;
@@ -705,7 +783,7 @@ fn write_tabular_rows<const RPS: bool>(
             tab.query_titles
                 .get(q_idx)
                 .map_or(&b""[..], |title| title.as_ref()),
-            tab.database.as_bytes(),
+            tab.database,
             num_hits,
         )?;
         writer.write_all(&buf)?;
@@ -729,7 +807,7 @@ fn write_tabular_rows<const RPS: bool>(
                 continue;
             };
             let s_idx = first.s_idx as usize;
-            let values = tab.subjects.values(s_idx, spec, tab.app)?;
+            let values = tab.subjects.values_for(q_idx, s_idx, spec, tab.app)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:595-605
             // The HSPs of one subject are one group of `InsertSubjectScores` (a hit list holds a
             // subject once); `qcovus` is blastn's only (blast_format.cpp:818-820).
@@ -752,7 +830,7 @@ fn write_tabular_rows<const RPS: bool>(
             // (`TabularRows::last_found`), made again from its index.
             let kept_values = match table_rows.last_found() {
                 Some(kept) if table.fails(&subject) => {
-                    Some(tab.subjects.values(kept, spec, tab.app)?)
+                    Some(tab.subjects.values_for(q_idx, kept, spec, tab.app)?)
                 }
                 _ => None,
             };
@@ -828,10 +906,7 @@ fn write_tabular_rows<const RPS: bool>(
                     None => None,
                 };
                 row_index += 1;
-                let mut row = tabular_hsp(hsp, qcovhsp, rows.map(|(rows, _)| rows));
-                if let Some((_, stored_gaps)) = rows {
-                    row.stored_gaps = stored_gaps;
-                }
+                let mut row = tabular_hsp(hsp, qcovhsp, rows);
                 // Outside NCBI's alignment block `nident` is the 0 of `x_ResetFields`: with
                 // `nident` the block stays closed only on a Seq-align count of 0, which is that 0.
                 if !spec.opens_counts(&seqalign_num_ident) {
@@ -882,24 +957,18 @@ fn reported(hit_list: &BlastpHitList) -> impl Iterator<Item = &super::hsp::Blast
 }
 
 /// The rows of the HSP `hsp` (the `index`-th of its query's final list, whose rows are `rows`):
-/// its rendered alignment, and the columns of its rows whose `-` is a residue
-/// (`TabularHsp::stored_gaps`).
-#[allow(clippy::type_complexity)]
+/// its rendered alignment, whose end gaps the table reads from the HSP's script
+/// (`TabularHsp::ops`).
 fn hsp_rows<'r>(
     rows: &'r [PairwiseHit],
     index: HspIndex,
     hsp: &BlastpHsp,
-) -> Result<((&'r [u8], &'r [u8]), [&'r [u32]; 2])> {
+) -> Result<(&'r [u8], &'r [u8])> {
     let rendered = rows
         .get(index)
         .filter(|row| row.hit.q_idx == hsp.q_idx && row.hit.s_idx == hsp.s_idx);
-    match rendered
-        .and_then(|row| Some((row.query_seq.as_deref()?, row.subject_seq.as_deref()?, row)))
-    {
-        Some((query, subject, row)) => Ok((
-            (query.as_bytes(), subject.as_bytes()),
-            [&row.query_stored_gaps, &row.subject_stored_gaps],
-        )),
+    match rendered.and_then(|row| Some((row.query_seq.as_deref()?, row.subject_seq.as_deref()?))) {
+        Some((query, subject)) => Ok((query.as_bytes(), subject.as_bytes())),
         None => anyhow::bail!("unimplemented BLASTP tabular rows of a final HSP"),
     }
 }
@@ -908,13 +977,11 @@ fn hsp_rows<'r>(
 /// its `qcovhsp` by its subject's rule `coverage`, `rows` when a field shows them.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1071-1094
-/// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478
-/// The gaps are the alignment's columns that are neither identities nor mismatches, as the
-/// default report's mismatches are the columns of neither (`Hit::gap_letters`); the gap
-/// openings and the identities are the default row's. A protein HSP runs forward on both
-/// sequences: the frames are 1.
+/// The gaps are the alignment's columns that are neither identities nor mismatches
+/// (`BlastpHsp::gap_letters`); the gap openings and the identities are the default row's. A
+/// protein HSP runs forward on both sequences: the frames are 1.
 fn tabular_hsp<'r>(
-    hsp: &BlastpHsp,
+    hsp: &'r BlastpHsp,
     coverage: QueryCoveragePerHsp,
     rows: Option<(&'r [u8], &'r [u8])>,
 ) -> TabularHsp<'r> {
@@ -928,13 +995,12 @@ fn tabular_hsp<'r>(
         score: hsp.raw_score,
         length: hsp.length,
         gap_opens: hsp.gapopen,
-        gaps: usize::try_from(hsp.length as i64 - hsp.num_ident as i64 - hsp.mismatch).unwrap_or(0),
+        gaps: hsp.gap_letters(),
         num_ident: hsp.num_ident,
         q_frame: 1,
         s_frame: 1,
         rows,
-        end_gaps: true,
-        stored_gaps: [&[], &[]],
+        ops: hsp.gap_info.as_deref().unwrap_or_default(),
         // The HSP's query letters, in its context and in its Seq-align.
         qcovhsp: {
             let span = (hsp.q_end + 1 - hsp.q_start) as i32;

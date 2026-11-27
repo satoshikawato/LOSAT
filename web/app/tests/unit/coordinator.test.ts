@@ -17,13 +17,18 @@ import {
   type ValidationResult,
 } from 'losat/ports';
 import { Coordinator, isToolRun, type RunView, type SearchRequest } from '../../src/application/coordinator';
+import { countsLockName, countsUrl, type CountsOrigin } from '../../src/domain/counts';
+import { webCountsLocks } from '../../src/infra/browser/counts-locks';
+import { OpfsCountsStore } from '../../src/infra/data/counts-store';
 import type { RunStatus } from '../../src/domain/run';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine, FAKE_MARKER } from '../../src/infra/fake/fake-engine';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
+import { COUNTS_IN_USE, type CountsLocks } from '../../src/ports/counts';
 import type { DataGateway } from '../../src/ports/data';
 import type { Downloader } from '../../src/ports/download';
+import { MemoryOpfs } from './support/memory-opfs';
 import { NodeInflater } from './support/node-inflater';
 
 const request: SearchRequest = {
@@ -38,6 +43,7 @@ function setup(
   engine: EngineGateway = new FakeEngine(),
   wrap: (data: DataService) => DataGateway = (d) => d,
   dataWorkerEnded?: Promise<Error>,
+  countsLocks?: CountsLocks,
 ) {
   const store = new MemoryBlockStore();
   let token = 0;
@@ -63,6 +69,7 @@ function setup(
     newRunId: () => `run-${++id}`,
     digest: sha256Hex,
     ...(dataWorkerEnded === undefined ? {} : { dataWorkerEnded }),
+    ...(countsLocks === undefined ? {} : { countsLocks }),
   });
   return { coordinator, data, store, saved };
 }
@@ -117,7 +124,7 @@ class ManualEngine implements EngineGateway {
   }
   async validate(_argv?: readonly string[], registry?: RegistryFile): Promise<ValidationResult> {
     this.registries.push(registry);
-    return { ok: true, dataLoaders: true };
+    return { ok: true, dataLoaders: true, parseDeflines: false };
   }
   run(req: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
     this.started.push(req.runId);
@@ -309,6 +316,7 @@ describe('Coordinator', () => {
     const { coordinator } = setup(engine);
     expect(await coordinator.enqueue(request)).toEqual({
       ok: false,
+      reason: 'argv',
       message: 'LOSAT could not download its engine file /engine/serial.wasm (network error). Reload the page.',
     });
     const reading = new ManualEngine();
@@ -317,6 +325,7 @@ describe('Coordinator', () => {
     );
     expect(await other.enqueue(request)).toEqual({
       ok: false,
+      reason: 'argv',
       message: 'LOSAT could not download its engine file /engine/serial.wasm (network error). Reload the page.',
     });
   });
@@ -372,6 +381,7 @@ describe('Coordinator', () => {
     const { coordinator } = setup(new ManualEngine());
     expect(await coordinator.enqueue({ ...request, query: { text: '>q\n>?2147483647\nA\n' } })).toEqual({
       ok: false,
+      reason: 'argv',
       message: "Query FASTA: a query record longer than 2147483647 letters is not supported by LOSAT's BLASTN",
     });
     expect(coordinator.state.get().runs).toHaveLength(0);
@@ -512,7 +522,7 @@ describe('Coordinator', () => {
     const engine = new ManualEngine();
     engine.validate = async () => ({ ok: false, message: 'bad option' });
     const { coordinator } = setup(engine);
-    expect(await coordinator.enqueue(request)).toEqual({ ok: false, message: 'bad option' });
+    expect(await coordinator.enqueue(request)).toEqual({ ok: false, reason: 'argv', message: 'bad option' });
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
 
@@ -631,6 +641,7 @@ describe('Coordinator', () => {
       Promise.reject(new DOMException('The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.', 'NotReadableError'));
     expect(await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen })).toEqual({
       ok: false,
+      reason: 'argv',
       message:
         'The file chosen for -conffile settings.ini (my settings.ini) could not be read: The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired. Choose it again.',
     });
@@ -643,7 +654,11 @@ describe('Coordinator', () => {
     const engine = new ManualEngine();
     engine.startResult = { ok: false, message: 'the engine cannot start this argv' };
     const { coordinator } = setup(engine);
-    expect(await coordinator.enqueue({ ...request, extra: ['-unstartable'] })).toEqual({ ok: false, message: 'the engine cannot start this argv' });
+    expect(await coordinator.enqueue({ ...request, extra: ['-unstartable'] })).toEqual({
+      ok: false,
+      reason: 'argv',
+      message: 'the engine cannot start this argv',
+    });
     expect(engine.registries).toEqual([]);
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
@@ -967,10 +982,10 @@ describe('Coordinator', () => {
   it('queues nothing of a group when one request is invalid, and keeps the numbering', async () => {
     const engine = new ManualEngine();
     engine.validate = async (argv?: readonly string[]): Promise<ValidationResult> =>
-      argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true, dataLoaders: true };
+      argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true, dataLoaders: true, parseDeflines: false };
     const { coordinator } = setup(engine);
     const bad = { ...request, parameters: [['-word_size', '1']] as const };
-    expect(await coordinator.enqueueAll([request, bad])).toEqual({ ok: false, message: 'bad word size' });
+    expect(await coordinator.enqueueAll([request, bad])).toEqual({ ok: false, reason: 'argv', message: 'bad word size' });
     expect(coordinator.state.get().runs).toHaveLength(0);
     const runId = (await coordinator.enqueue(request)).runId!;
     expect(viewOf(coordinator, runId)!.snapshot.number).toBe(1);
@@ -981,7 +996,7 @@ describe('Coordinator', () => {
   // runs and in the file that the page saves; the user's file as given keeps the user's name (D21).
   it('names a made input after its run: the prefix of the run\'s outputs and the role, each run of a group its own', async () => {
     const { coordinator, data } = setup(new ManualEngine());
-    const made = async (text: string) => ({ dataset: { revisionIds: [(await data.indexSource((await data.addSource(new File([text], 'x.fa'))).sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId], from: [{ name: 'x.fa', records: 1, leftOut: [], leftOutCount: 1 }] } });
+    const made = async (text: string) => ({ dataset: { revisionIds: [(await data.indexSource((await data.addSource(new File([text], 'x.fa'))).sourceId, { program: 'blastn', role: 'query', dataLoaders: true, parseDeflines: false })).revisionId], from: [{ name: 'x.fa', records: 1, leftOut: [], leftOutCount: 1 }] } });
     const given = { file: new File(['>g\nACGT\n'], 'My file.fa') };
     const group = await coordinator.enqueueAll([
       { ...request, query: await made('>a\nACGT\n'), subject: given, parameters: [['-task', 'blastn']] },
@@ -1033,7 +1048,7 @@ describe('Coordinator', () => {
     const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
     const runInputs = (coordinator as unknown as { runInputs: Map<string, unknown> }).runInputs;
     const source = await data.addSource(new File(['>q\nACGT\n'], 'q.fa'));
-    const query = (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
+    const query = (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true, parseDeflines: false })).revisionId;
     const result = await coordinator.enqueueAll([
       // A record over 2147483647 letters, which LOSAT's reader refuses (a reader's error ends the records
       // instead: line WQA's D10, 2026-11-19).
@@ -1049,7 +1064,7 @@ describe('Coordinator', () => {
     const { coordinator, data } = setup();
     const add = async (name: string, text: string) => {
       const source = await data.addSource(new File([text], name));
-      return (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
+      return (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true, parseDeflines: false })).revisionId;
     };
     const subject = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
     const query = await add('q.fa', '>q\nACGT\n');
@@ -1065,5 +1080,197 @@ describe('Coordinator', () => {
     expect(a!.subject.bytes).toBe(b!.subject.bytes);
     expect(new TextDecoder().decode(c!.subject.bytes)).toBe('>s2\nGGCC\n');
     expect(c!.subject.records).toEqual([{ id: 's2', length: 4 }]);
+  });
+
+  it("indexes text and file inputs with the validation's parseDeflines setting", async () => {
+    const engine = new ManualEngine();
+    engine.validate = async (argv?: readonly string[]): Promise<ValidationResult> => ({
+      ok: true,
+      dataLoaders: true,
+      parseDeflines: argv?.includes('-parse_deflines') === true,
+    });
+    const { coordinator, data } = setup(engine);
+    const seen: boolean[] = [];
+    const indexSource = data.indexSource.bind(data);
+    data.indexSource = async (sourceId, reader) => {
+      seen.push(reader.parseDeflines);
+      return indexSource(sourceId, reader);
+    };
+    const run = await coordinator.enqueue({ ...request, extra: ['-parse_deflines'] });
+    expect(run.ok).toBe(true);
+    expect(seen).toEqual([true, true]);
+  });
+
+  const addIndexed = async (data: DataGateway, name: string, text: string) => {
+    const source = await data.addSource(new File([text], name));
+    return (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true, parseDeflines: false })).revisionId;
+  };
+
+  it('shares the bytes of the same revisions across programs of the same reader kind', async () => {
+    let builds = 0;
+    const { coordinator, data } = setup(new FakeEngine(), (d) => {
+      const gateway = Object.create(d) as DataGateway;
+      gateway.buildRunInput = (ids) => {
+        builds++;
+        return d.buildRunInput(ids);
+      };
+      return gateway;
+    });
+    const subject = await addIndexed(data, 's.fa', '>s1\nACGT\n>s2\nGGCC\n');
+    const query = await addIndexed(data, 'q.fa', '>q\nACGT\n');
+    const result = await coordinator.enqueueAll([
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject] } } },
+      { ...request, program: 'tblastx', query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject] } } },
+    ]);
+    expect(result.ok).toBe(true);
+    const [a, b] = result.runIds!.map((id) => viewOf(coordinator, id)!.snapshot);
+    expect(builds).toBe(2);
+    expect(a!.query.bytes).toBe(b!.query.bytes);
+    expect(a!.subject.bytes).toBe(b!.subject.bytes);
+  });
+
+  it('records engine readRecords on RunRecord when an assembled input reads differently at register (D17)', async () => {
+    const engine = new FakeEngine();
+    const realRun = engine.run.bind(engine);
+    let sawAssembled: boolean | undefined;
+    engine.run = async (req, output, onPhase) => {
+      sawAssembled = req.query?.assembled;
+      const info = await realRun(req, output, onPhase);
+      return { ...info, readRecords: { query: [{ id: 'q1', length: 120 }] } };
+    };
+    const { coordinator, data } = setup(engine);
+    const q1 = await addIndexed(data, 'q1.fa', '>q1\nACGTACGT\n');
+    const q2 = await addIndexed(data, 'q2.fa', '>q2\nGGCCGGCC\n');
+    const s = await addIndexed(data, 's.fa', '>s1\nACGTACGT\n');
+    const queued = await coordinator.enqueue({
+      ...request,
+      query: {
+        dataset: {
+          revisionIds: [q1, q2],
+          from: [
+            { name: 'q1.fa', records: 1, leftOut: [], leftOutCount: 0 },
+            { name: 'q2.fa', records: 1, leftOut: [], leftOutCount: 0 },
+          ],
+        },
+      },
+      subject: { dataset: { name: 's.fa', revisionIds: [s] } },
+    });
+    expect(queued.ok).toBe(true);
+    await waitFor(coordinator, queued.runId!, 'completed');
+    expect(sawAssembled).toBe(true);
+    const view = viewOf(coordinator, queued.runId!)!;
+    expect(view.snapshot.query.records).toEqual([
+      { id: 'q1', length: 8 },
+      { id: 'q2', length: 8 },
+    ]);
+    expect(view.record.readRecords).toEqual({ query: [{ id: 'q1', length: 120 }] });
+  });
+});
+
+// --- saved counts held by the runs that read them -------------------------------------------------
+
+describe('the saved counts of a taxonomy ID, held by the runs that read them', () => {
+  const TAXID = 562;
+  const origin: CountsOrigin = { kind: 'downloaded', taxid: TAXID, url: countsUrl(TAXID), lastModified: 'Thu, 01 Oct 2026 08:00:00 GMT' };
+  const countsFile = () => new File([new Uint8Array([1, 2, 3, 4])], 'wmasker.obinary');
+  const counted = (file: File = countsFile()): SearchRequest => ({
+    ...request,
+    parameters: [['-window_masker_taxid', String(TAXID)]],
+    windowMasker: file,
+    windowMaskerOrigin: origin,
+  });
+  const made = { run: 1, argv: ['windowmasker'], inputs: [], engineBuild: 'b', madeAt: 0 };
+  /** Lets the lock double's releases (promise callbacks) run. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  function lockSetup(engine: EngineGateway) {
+    const opfs = new MemoryOpfs();
+    const s = setup(engine, undefined, undefined, webCountsLocks(opfs));
+    // The counts store of the Data worker, on the same origin's locks.
+    const counts = new OpfsCountsStore(opfs.root as unknown as FileSystemDirectoryHandle, opfs);
+    const held = async () => {
+      await settle();
+      return (await opfs.query()).held.filter((entry) => entry.name === countsLockName(TAXID) && entry.mode === 'shared').length;
+    };
+    return { ...s, counts, held };
+  }
+
+  it('holds the ID in shared mode from enqueue to every end of the run, and the store refuses Replace, Delete and a download meanwhile', async () => {
+    const engine = new ManualEngine();
+    const { coordinator, counts, held } = lockSetup(engine);
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const queued = await coordinator.enqueue(counted());
+      expect(queued.ok).toBe(true);
+      ids.push(queued.runId!);
+    }
+    const [completed, failed, queuedCancel, runningCancel, last] = ids as [string, string, string, string, string];
+    expect(await held()).toBe(5);
+    await expect(counts.beginCounts(TAXID, { made, size: 4, from: 0, replace: true })).rejects.toMatchObject({ name: COUNTS_IN_USE });
+    await expect(counts.beginCounts(TAXID, { url: countsUrl(TAXID), lastModified: 'x', size: 4, from: 0 })).rejects.toMatchObject({ name: COUNTS_IN_USE });
+    await expect(counts.deleteCounts(TAXID)).rejects.toMatchObject({ name: COUNTS_IN_USE });
+
+    // Cancelled while queued.
+    coordinator.cancel(queuedCancel);
+    expect(statusOf(coordinator, queuedCancel)).toBe('cancelled');
+    expect(await held()).toBe(4);
+    // Completed.
+    await waitFor(coordinator, completed, 'running');
+    engine.finish(completed);
+    await waitFor(coordinator, completed, 'completed');
+    expect(await held()).toBe(3);
+    // Failed.
+    await waitFor(coordinator, failed, 'running');
+    engine.fail(failed, 'Error: boom');
+    await waitFor(coordinator, failed, 'failed');
+    expect(await held()).toBe(2);
+    // Cancelled while running.
+    await waitFor(coordinator, runningCancel, 'running');
+    coordinator.cancel(runningCancel);
+    await waitFor(coordinator, runningCancel, 'cancelled');
+    expect(await held()).toBe(1);
+    // Still refused while the last one runs.
+    await expect(counts.deleteCounts(TAXID)).rejects.toMatchObject({ name: COUNTS_IN_USE });
+    await waitFor(coordinator, last, 'running');
+    engine.fail(last, 'Error: the engine stopped');
+    await waitFor(coordinator, last, 'failed');
+    expect(await held()).toBe(0);
+    await counts.deleteCounts(TAXID);
+  });
+
+  it('queues nothing, and holds nothing, while a writing holds the ID or when the chosen file was replaced since', async () => {
+    const { coordinator, counts, held } = lockSetup(new ManualEngine());
+    const token = await counts.beginCounts(TAXID, { made, size: 4, from: 0, replace: true });
+    expect(await coordinator.enqueue(counted())).toEqual({
+      ok: false,
+      reason: 'counts',
+      message: 'The saved counts for 562 are being written or removed. Run again when that ends.',
+    });
+    expect(coordinator.state.get().runs).toHaveLength(0);
+    await counts.closeCounts(token!);
+
+    // A file of the browser's storage that was written since it was opened refuses to be read.
+    const stale = countsFile();
+    Object.defineProperty(stale, 'slice', { value: () => new Blob([]) });
+    expect(await coordinator.enqueue(counted(stale))).toEqual({
+      ok: false,
+      reason: 'counts',
+      message: 'The saved counts for 562 were replaced or removed after they were chosen. Run again.',
+    });
+    expect(await held()).toBe(0);
+    expect(coordinator.state.get().runs).toHaveLength(0);
+
+    // A refusal leaves no gap in the numbers.
+    const queued = await coordinator.enqueue(counted());
+    expect(queued.ok).toBe(true);
+    expect(viewOf(coordinator, queued.runId!)?.snapshot.number).toBe(1);
+    expect(await held()).toBe(1);
+  });
+
+  it('holds nothing for a run whose counts are a chosen file (-window_masker_db) or that has none', async () => {
+    const { coordinator, held } = lockSetup(new ManualEngine());
+    expect((await coordinator.enqueue({ ...request, parameters: [['-window_masker_db', 'mine.counts']], windowMasker: countsFile() })).ok).toBe(true);
+    expect((await coordinator.enqueue(request)).ok).toBe(true);
+    expect(await held()).toBe(0);
   });
 });

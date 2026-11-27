@@ -45,7 +45,6 @@ fn ncbi_batch_crossing_record_is_retained() {
         title: Vec::new(),
         sequence: vec![b'A'; n],
         lowercase_masks: vec![],
-        warnings: vec![],
         source: None,
         around: None,
         skipped: None,
@@ -73,7 +72,6 @@ fn the_batch_size_is_the_limit_of_a_batch() {
         title: Vec::new(),
         sequence: vec![b'A'; n],
         lowercase_masks: vec![],
-        warnings: vec![],
         source: None,
         around: None,
         skipped: None,
@@ -111,7 +109,7 @@ fn a_reader_batch_is_one_unit_only_where_a_unit_cannot_give_its_rows() {
             .join(name);
         let name = path.to_str().unwrap();
         let mut db = SeqDb::open(name, SeqType::Protein).unwrap();
-        db.read_name_records(name, true).unwrap();
+        db.read_name_records(name.as_bytes(), true).unwrap();
         db
     };
     // A new masking for each database: the walk is kept with the masking, as one search keeps it.
@@ -146,7 +144,6 @@ fn a_reader_batch_is_one_unit_only_where_a_unit_cannot_give_its_rows() {
         title: Vec::new(),
         sequence: vec![b'A'; n],
         lowercase_masks: vec![],
-        warnings: vec![],
         source: None,
         around: None,
         skipped: None,

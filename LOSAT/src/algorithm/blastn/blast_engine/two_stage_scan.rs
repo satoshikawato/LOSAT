@@ -35,6 +35,7 @@
 //! finder, `prelim_subject::ScanBatch` or its copy per subject, and the chunk's own values), and
 //! what it writes is `TwoStageScanState`, both built once per chunk. Nothing here runs on the pool.
 
+use super::neg_window::NegSteps;
 use super::pair_extend;
 use super::prelim_subject::ScanBatch;
 use super::{
@@ -108,7 +109,9 @@ pub(super) struct TwoStageScanState<'s> {
 /// goes to `pair_extend::extend_offset_pairs` before a word when it holds `OFFSET_ARRAY_SIZE` pairs
 /// and after it when it holds `offset_array_size`) through the discontiguous, CSR or contiguous
 /// scan, the scan's time (LOSAT_TIMING, without the time of the ungapped extensions,
-/// `scan_pause_ns`), the last batch, and the debug `[PERF]` line.
+/// `scan_pause_ns`), the last batch, and the debug `[PERF]` line. `neg` is where the batches'
+/// steps go (`neg_window::NegSteps`): `()` for a window of 0 or more, the table of a window below 0
+/// (`neg_window::neg_chunk_hits`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1504-1506,1523-1537
 /// (`s_MBScanSubject_Any`, :1482-1626, one of the scanners that `s_MBChooseScanSubject`,
@@ -126,7 +129,11 @@ pub(super) struct TwoStageScanState<'s> {
 /// scan's loop (13.46 M -> 13.39 M instructions for that query) and the LOSAT_X_DCCSR ring's scan
 /// (26.67 M -> 27.04 M for a 600 kb x 300 kb pair).
 #[inline(always)]
-pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoStageScanState<'_>) {
+pub(super) fn scan_two_stage_lookup<N: NegSteps>(
+    x: &TwoStageScanInputs<'_>,
+    state: &mut TwoStageScanState<'_>,
+    neg: N,
+) {
     let &TwoStageScanInputs {
         scan,
         two_stage,
@@ -242,6 +249,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         dbg_ungapped_ext_calls: &mut dbg_ungapped_ext_calls,
         dbg_ungapped_low: &mut *dbg_ungapped_low,
         dbg_gapped_attempted: &mut *dbg_gapped_attempted,
+        neg,
     };
 
     // The presence vector and its shift, held by the scans' per-word closures by value

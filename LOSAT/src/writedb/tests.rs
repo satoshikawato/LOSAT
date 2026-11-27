@@ -10,6 +10,7 @@ use super::makeblastdb::{run_with, MakedbArgs};
 use super::platform::Platform;
 use super::time::LocalTime;
 use super::writer::{DbVersion, Indices, WriteDb};
+use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::seqdb::SeqType;
 use crate::utils::test_dir::TempDir;
 
@@ -298,7 +299,7 @@ fn build_version(
     let mut messages = Vec::new();
     let result = (|| {
         let mut db = BuildDatabase::new(
-            out_base,
+            out_base.as_bytes(),
             title.as_bytes(),
             is_protein,
             &mut log,
@@ -504,13 +505,13 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
         std::fs::create_dir(&out_dir).unwrap();
         let base = out_dir.join("db").to_string_lossy().into_owned();
         let args = MakedbArgs {
-            input: input.clone(),
+            input: std::ffi::OsString::from(&input),
             input_type: "fasta".to_string(),
             dbtype: if case.protein { "prot" } else { "nucl" }.to_string(),
-            title: Some(case.title.to_string()),
-            out: Some(base.clone()),
+            title: Some(std::ffi::OsString::from(case.title)),
+            out: Some(std::ffi::OsString::from(&base)),
             blastdb_version: 4,
-            max_file_sz: case.max_file_sz.unwrap_or("3GB").to_string(),
+            max_file_sz: std::ffi::OsString::from(case.max_file_sz.unwrap_or("3GB")),
             metadata_output_prefix: None,
             logfile: None,
             parse_seqids: false,
@@ -534,7 +535,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
-            None,
+            &ApplicationSettings::default(),
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -608,13 +609,13 @@ fn makedb_version(
     version: i32,
 ) -> (i32, String, String) {
     let args = MakedbArgs {
-        input: input.to_string(),
+        input: std::ffi::OsString::from(input),
         input_type: "fasta".to_string(),
         dbtype: "prot".to_string(),
-        title: Some("t".to_string()),
-        out: Some(out.to_string()),
+        title: Some(std::ffi::OsString::from("t")),
+        out: Some(std::ffi::OsString::from(out)),
         blastdb_version: version,
-        max_file_sz: max_file_sz.to_string(),
+        max_file_sz: std::ffi::OsString::from(max_file_sz),
         metadata_output_prefix: None,
         logfile: None,
         parse_seqids: false,
@@ -634,7 +635,7 @@ fn makedb_version(
     let mut stdin = stdin;
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut stdin,
@@ -1385,6 +1386,138 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
     assert_eq!(volumes[999..], ["db.00999", "db.1000"]);
 }
 
+/// A log whose pipe closes after `lines` lines (flushes): from then on every write and flush
+/// fails as on a pipe whose reader has closed.
+pub(super) struct ClosedAfter {
+    lines: usize,
+    /// The lines written (flushed).
+    pub(super) flushed: usize,
+    /// The bytes written.
+    pub(super) log: Vec<u8>,
+}
+
+impl ClosedAfter {
+    pub(super) fn new(lines: usize) -> Self {
+        Self {
+            lines,
+            flushed: 0,
+            log: Vec::new(),
+        }
+    }
+}
+
+impl std::io::Write for ClosedAfter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.flushed == self.lines {
+            return Err(std::io::ErrorKind::BrokenPipe.into());
+        }
+        self.log.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.flushed == self.lines {
+            return Err(std::io::ErrorKind::BrokenPipe.into());
+        }
+        self.flushed += 1;
+        Ok(())
+    }
+}
+
+/// One nucleotide build of `input` into `base` (version 5, title "t") whose log is `log`: the exit
+/// status and the standard error stream.
+fn makedb_logged(input: &str, base: &str, log: &mut dyn std::io::Write) -> (i32, Vec<u8>) {
+    let words: Vec<String> = ["-in", input, "-dbtype", "nucl", "-out", base, "-title", "t"]
+        .iter()
+        .map(|word| word.to_string())
+        .collect();
+    let args = parse_makedb_words(&words);
+    let now = time_of("Oct 12, 2026  9:00 PM");
+    let mut err = Vec::new();
+    let status = run_with(
+        &args,
+        &ApplicationSettings::default(),
+        Some(&now),
+        LINUX,
+        &mut std::io::empty(),
+        log,
+        &mut err,
+    );
+    (status, err)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1165-1177
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1440-1467
+/// A pipe whose reader has closed ends the build at the line of the log that meets it, with exit
+/// status 0 and nothing on the standard error stream (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+/// exception 10; NCBI BLAST+ 2.17.0 is ended there by SIGPIPE, probes of 2026-11-24). The lines of
+/// a build: four of the constructor, then (an existing database removed) "Keep MBits",
+/// "Maximum file size", "Adding sequences from FASTA" and the two of `EndBuild`. Up to "Maximum
+/// file size" no file of the build is made, as in NCBI; at "Adding sequences" the volume is still
+/// open (NCBI's ended process also leaves LMDB's lock files, and its file streams still hold the
+/// bytes of a small input); after the close of `EndBuild` the volume's files are complete and no
+/// metadata file is written, as in NCBI. An existing database of the name is removed after the
+/// fourth line.
+#[cfg(not(windows))]
+#[test]
+fn a_closed_pipe_ends_the_build_at_its_line() {
+    let tmp = TempDir::unique("closed-pipe");
+    let input = base_in(&tmp, "in.fa");
+    std::fs::write(
+        &input,
+        ">s1 one\nACGTACGTACGTAGCTAGCTAGCTAGCATCGATCG\n>s2 two\nTTGACCGGTTAACCGGTTAAGGCC\n",
+    )
+    .unwrap();
+    let complete = [
+        "db.ndb", "db.nhr", "db.nin", "db.not", "db.nsq", "db.ntf", "db.nto",
+    ];
+    let open_volume = ["db.00.nhr", "db.00.nin", "db.00.nsq", "db.ndb", "db.ntf"];
+    let cases: [&[&str]; 9] = [
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &open_volume,
+        &complete,
+        &complete,
+    ];
+    for (lines, files) in cases.iter().enumerate() {
+        let dir = tmp.join(format!("k{lines}"));
+        let base = dir.join("db").to_string_lossy().into_owned();
+        let mut log = ClosedAfter::new(lines);
+        let (status, err) = makedb_logged(&input, &base, &mut log);
+        assert_eq!(status, 0, "{lines} lines");
+        assert_eq!(String::from_utf8_lossy(&err), "", "{lines} lines");
+        assert_eq!(log.flushed, lines);
+        assert_eq!(files_named(&dir, "db"), *files, "{lines} lines");
+    }
+    // The ninth line is the last one: the build ends as with an open pipe, its metadata file
+    // written.
+    let dir = tmp.join("k9");
+    let base = dir.join("db").to_string_lossy().into_owned();
+    let mut log = ClosedAfter::new(9);
+    assert_eq!(makedb_logged(&input, &base, &mut log), (0, Vec::new()));
+    assert_eq!(log.flushed, 9);
+    assert!(log.log.ends_with(b"seconds.\n\n\n"));
+    assert!(files_named(&dir, "db").contains(&"db.njs".to_string()));
+
+    // An existing database: closed before "Sequence type" it stays, closed at the line that
+    // reports its removal it is gone and nothing new is made.
+    for (lines, kept) in [(3, true), (4, false)] {
+        let dir = tmp.join(format!("old{lines}"));
+        let base = dir.join("db").to_string_lossy().into_owned();
+        assert_eq!(makedb_logged(&input, &base, &mut Vec::new()).0, 0);
+        let old = files_named(&dir, "db");
+        let mut log = ClosedAfter::new(lines);
+        assert_eq!(makedb_logged(&input, &base, &mut log), (0, Vec::new()));
+        let left = files_named(&dir, "db");
+        assert_eq!(left == old, kept, "{lines} lines: {left:?}");
+        assert!(kept || left.is_empty(), "{lines} lines: {left:?}");
+    }
+}
+
 /// The parsed `losat makeblastdb` arguments of a makeblastdb command line (the
 /// words after the program's name).
 pub(super) fn parse_makedb_words(words: &[String]) -> MakedbArgs {
@@ -1528,7 +1661,7 @@ fn run_v5_case(case: &V5Case) {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
-            None,
+            &ApplicationSettings::default(),
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -1775,7 +1908,7 @@ fn input_files_that_cannot_be_opened_are_skipped() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
-            None,
+            &ApplicationSettings::default(),
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -1852,7 +1985,7 @@ fn run_parse_case(case: &ParseCase) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -1961,7 +2094,7 @@ fn run_fix_case(case: &FixCase) {
     let mut stdin = case.stdin;
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut stdin,
@@ -2069,7 +2202,7 @@ fn parse_seqids_v5_run(label: &str, input: &str, extra: &[&str]) -> (i32, String
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -2168,7 +2301,7 @@ fn s2_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
-                None,
+                &ApplicationSettings::default(),
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -2211,7 +2344,7 @@ fn s3a_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
-                None,
+                &ApplicationSettings::default(),
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -2255,7 +2388,7 @@ fn s3b_gate() {
                     };
                     run_with(
                         &args,
-                        None,
+                        &ApplicationSettings::default(),
                         Some(&now),
                         LINUX,
                         &mut std::io::empty(),

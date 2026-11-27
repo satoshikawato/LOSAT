@@ -14,13 +14,13 @@
 //! `std::bad_alloc` or another `std::exception` of a string's reserve, or LOSAT's refusal of what
 //! NCBI's process may or may not read by the host's memory. What a primitive posts while it reads
 //! (a byte of a VisibleString read as `#`, a UTF8String tag for a VisibleString) is handed to the
-//! caller in order (`StringPost`), which adds the stack trace that NCBI's message names.
+//! caller as it is made (`StringPost`), which adds the stack trace that NCBI's message names.
 
 use super::asn_text_reader::{
     AsnSource, AsnTextError, AsnTextErrorKind, EnumWord, MemberId, NcbiThrow, PointerType, Reader,
     FILL_BUFFER_EOF, FIND_NAME, FIND_VALUE, SKIP_WHITE_SPACE_EOF, UNEXPECTED_MEMBER,
 };
-use super::asn_types::read::Post;
+use super::asn_types::read::PostSink;
 use super::asn_types::Member;
 use super::encoder::StreamPosition;
 use super::object_frame::{text_frame_site, FrameKind};
@@ -38,8 +38,9 @@ use crate::rpsbproc::{HOST_DEPENDENT_BYTES, USER_SPACE_BYTES};
 pub(crate) enum Fail {
     /// NCBI's `CEofException` (see the module comment).
     Eof,
-    /// A `CSerialException`, with the frame stack that `END_OBJECT_FRAME` adds to it.
-    Serial(Box<NcbiException>),
+    /// A `CSerialException`, with the frame stack that `END_OBJECT_FRAME` adds to it
+    /// ([`SerialFail`]).
+    Serial(Box<SerialFail>),
     /// Another `CException` (the `CUtilException` of a number in text, the `CStringException` of
     /// a member's tag), with a line for each frame it leaves (`NCBI_RETHROW_SAME`).
     Exception(Box<NcbiException>),
@@ -51,6 +52,43 @@ pub(crate) enum Fail {
     Std(&'static &'static str),
     /// NCBI reads it, or not, by what LOSAT does not know (the host's memory); LOSAT refuses it.
     Unsupported(Box<Refusal>),
+}
+
+/// A `CSerialException` on its way out through the object frames: the exception, and the names
+/// (`GetFrameName()`) of the frames it has left since it was last used whole, innermost first,
+/// which `END_OBJECT_FRAME` adds to its frame stack (`AddFrameInfo`). They are added at once where
+/// the exception is used whole ([`SerialFail::exception`]): NCBI puts each name in front of the
+/// stack, so an error deep inside a nest of any depth built its stack in time quadratic in the
+/// depth; this builds it in linear time.
+#[derive(Debug)]
+pub(crate) struct SerialFail {
+    exception: NcbiException,
+    frames: Vec<&'static str>,
+}
+
+impl SerialFail {
+    /// `AddFrameInfo` of the frame's name `name` as the exception leaves the frame (an empty name
+    /// adds nothing).
+    pub(crate) fn add_frame(&mut self, name: &'static str) {
+        if !name.is_empty() {
+            self.frames.push(name);
+        }
+    }
+
+    /// `GetErrCode()` of the exception, by its name (`NcbiException::kind`).
+    pub(crate) fn kind(&self) -> &'static str {
+        self.exception.kind()
+    }
+
+    /// The exception with the names of the frames it left added to its frame stack.
+    pub(crate) fn exception(self) -> NcbiException {
+        let SerialFail {
+            mut exception,
+            frames,
+        } = self;
+        exception.add_frame_infos(&frames);
+        exception
+    }
 }
 
 /// What [`Fail::Unsupported`] says of what LOSAT does not read.
@@ -70,7 +108,10 @@ impl Fail {
     /// [`Fail::Serial`] of `e`.
     #[cold]
     pub(crate) fn serial(e: NcbiException) -> Fail {
-        Fail::Serial(Box::new(e))
+        Fail::Serial(Box::new(SerialFail {
+            exception: e,
+            frames: Vec::new(),
+        }))
     }
 
     /// [`Fail::Exception`] of `e`.
@@ -128,13 +169,20 @@ pub(crate) const VECTOR_RESERVE_LENGTH_ERROR: &str = "vector::reserve";
 /// What LOSAT's own messages call the document that a reader reads, the reader, the input that a
 /// length can pass the end of, and the part of NCBI's program that allocates what a length asks
 /// for (the lexical layer's refusals, `asn_text_reader::Reader::new`, and [`reserve`]'s): the one
-/// owner of those words for each caller.
+/// owner of those words for each caller; and whether NCBI's program reads the objects of a file
+/// with one object stream (`one_stream`).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Names {
     pub(crate) document: &'static str,
     pub(crate) reader: &'static str,
     pub(crate) input: &'static str,
     pub(crate) allocator: &'static str,
+    /// Whether NCBI's program reads all the objects of a file with one object stream, whose line
+    /// count goes on from one object to the next (blast_formatter's archive reader: observed,
+    /// line RG item F3, agent C6, 2026-11-23, a bad byte of an archive's second object posted
+    /// with the line of the file), instead of a new stream for each object
+    /// (`read::ObjectStream`, `Input::new_object`).
+    pub(crate) one_stream: bool,
     /// Whether the program reports every `CSerialException` of the read with a message of its own
     /// (psiblast's and tblastn's "Unrecognized format for PSSM", `CPsiBlastArgs`), so that what
     /// the exception says does not show (`read::TypedReader::other_type`).
@@ -142,13 +190,33 @@ pub(crate) struct Names {
 }
 
 impl Names {
-    /// The PSSM file of `-in_pssm`.
+    /// The PSSM file of `-in_pssm` (psiblast and tblastn).
     pub(crate) const PSSM: Names = Names {
         document: "PSSM",
         reader: "PSSM reader",
         input: "input",
         allocator: "NCBI's reader",
+        one_stream: false,
         own_serial_message: true,
+    };
+    /// A profile file of makeprofiledb (`-in`, ASN.1 text or `-binary`). makeprofiledb prints the
+    /// exception's own text, so `:OtherType` depends on the types its process has met before.
+    pub(crate) const PROFILE: Names = Names {
+        document: "profile",
+        reader: "PSSM reader",
+        input: "file",
+        allocator: "makeprofiledb",
+        one_stream: false,
+        own_serial_message: false,
+    };
+    /// Binary definition lines (`ASN1_BlastDefLine` user object) of makeprofiledb.
+    pub(crate) const BINARY_DEFLINES: Names = Names {
+        document: "binary definition lines",
+        reader: "binary definition lines reader",
+        input: "binary header",
+        allocator: "makeprofiledb",
+        one_stream: false,
+        own_serial_message: false,
     };
     /// A mask data file of makeblastdb's `-mask_data`.
     pub(crate) const MASK: Names = Names {
@@ -156,6 +224,34 @@ impl Names {
         reader: "mask data reader",
         input: "file",
         allocator: "makeblastdb",
+        one_stream: false,
+        own_serial_message: false,
+    };
+    /// A Seq-entry or Bioseq-set of makeblastdb's `-input_type asn1_txt` / `asn1_bin`.
+    pub(crate) const BIOSEQ: Names = Names {
+        document: "bioseq",
+        reader: "bioseq reader",
+        input: "file",
+        allocator: "makeblastdb",
+        one_stream: false,
+        own_serial_message: false,
+    };
+    /// Binary definition lines (`ASN1_BlastDefLine`) of a Bioseq.
+    pub(crate) const DEFLINE_HEADER: Names = Names {
+        document: "Blast-def-line-set",
+        reader: "Blast-def-line-set reader",
+        input: "header",
+        allocator: "makeblastdb",
+        one_stream: false,
+        own_serial_message: false,
+    };
+    /// The input of `losat rpsbproc`: `Blast4-archive` objects in ASN.1 text (`rpsbproc::archive`).
+    pub(crate) const ARCHIVE: Names = Names {
+        document: "archive",
+        reader: "rpsbproc",
+        input: "input",
+        allocator: "NCBI's rpsbproc",
+        one_stream: false,
         own_serial_message: false,
     };
     /// The bytes of a delayed member that a writer reads again (`CDelayBuffer::Update`). The read
@@ -165,7 +261,33 @@ impl Names {
         reader: "delayed member reader",
         input: "member's bytes",
         allocator: "NCBI's reader",
+        one_stream: false,
         own_serial_message: false,
+    };
+    /// A search strategy file of `-import_search_strategy` (`report::archive::read::import`). The
+    /// import has no message of its own for a `CSerialException`: a value of another class
+    /// (`:name`) is LOSAT's refusal (`read::TypedReader::other_type`), as in the other files that
+    /// LOSAT reads without such a message.
+    pub(crate) const STRATEGY: Names = Names {
+        document: "search strategy",
+        reader: "search strategy reader",
+        input: "input",
+        allocator: "NCBI's reader",
+        one_stream: false,
+        own_serial_message: false,
+    };
+    /// A BLAST archive of blast_formatter's `-archive` (`report::archive::read`). blast_formatter
+    /// reports every `CSerialException` of the read as "Invalid input format for BLAST Archive."
+    /// (exit status 1), a value of another class (`:Object-id`, `:No-such-type`, `:Seq-entry`) in
+    /// the messages, the algorithm options and the alignments too (NCBI 2.17.0, line RG item F3,
+    /// agent C8, 2026-11-24).
+    pub(crate) const BLAST_ARCHIVE: Names = Names {
+        document: "ASN.1 text",
+        reader: "ASN.1 text reader",
+        input: "input",
+        allocator: "NCBI's reader",
+        one_stream: true,
+        own_serial_message: true,
     };
     /// The documents of the tests of the readers.
     #[cfg(test)]
@@ -174,6 +296,7 @@ impl Names {
         reader: "test reader",
         input: "input",
         allocator: "NCBI's reader",
+        one_stream: false,
         own_serial_message: true,
     };
 }
@@ -241,9 +364,9 @@ fn host_dependent(length: u64, bytes: u64, what: Reserve, names: Names) -> Fail 
     ))
 }
 
-/// What reading a string posts, in the order NCBI posts it.
+/// What reading a string posts, given to the caller when NCBI posts it.
 #[derive(Debug)]
-pub(crate) enum StringPost {
+pub(crate) enum StringPost<'a> {
     /// The warning of a UTF8String tag for a VisibleString (binary, `ExpectStringTag`,
     /// objistrasnb.cpp:296-305; [`utf8_tag_message`]).
     Utf8Tag,
@@ -252,7 +375,7 @@ pub(crate) enum StringPost {
     BadChar {
         position: StreamPosition,
         byte: u8,
-        string: Vec<u8>,
+        string: &'a [u8],
     },
 }
 
@@ -363,6 +486,9 @@ pub(crate) trait Input {
     /// Whether the stream throws `eMissingValue` (the XML stream's ENUMERATED without its
     /// attribute), which `ReadWithSetFlagMember` takes for an OPTIONAL or DEFAULT member.
     const MISSING_VALUES: bool = false;
+    /// Whether the stream holds what it posts outside its strings until `drain_posts` (the XML
+    /// stream), which the object stack drains at the end of each value it reads.
+    const HELD_POSTS: bool = false;
     /// Whether the elements of a list of the type `element` are read in an element frame
     /// (`eFrameArrayElement`; the XML stream's only when the type will have no name,
     /// `WillHaveName`).
@@ -415,17 +541,17 @@ pub(crate) trait Input {
     /// Moves what the stream posted outside the strings it read (the XML stream posts each byte
     /// it replaces at once, also in the attributes it skips) to `posts`, in the order posted.
     #[inline(always)]
-    fn drain_posts(&mut self, _posts: &mut Vec<Post>) {}
+    fn drain_posts(&mut self, _posts: &mut dyn PostSink) {}
     /// `GetPosition()`: `line N` in text, `byte N` (from the start of the object) in binary.
     fn position(&self) -> StreamPosition;
     /// The state of a new object stream at the next byte (each object of a file is read by a
     /// stream of its own in NCBI: its line count, or its byte count and data limits, start
-    /// again).
+    /// again), or, in text, of the one stream of a program that reads all the objects of a file
+    /// with it (`Names::one_stream`: the line count goes on).
     fn new_object(&mut self);
     /// `EndOfData()`: whether no object follows (binary: no byte left; text: nothing but white
-    /// space and comments, or what `SkipWhiteSpace` stops at). Only the tests read several
-    /// objects of one stream so far; makeblastdb's Seq-entry input will (line RG item D3c-3b).
-    #[cfg(test)]
+    /// space and comments, or what `SkipWhiteSpace` stops at): blast_formatter's archive reader
+    /// asks it before each object (`report::archive::read::ArchiveReader`).
     fn end_of_data(&mut self) -> bool;
     /// The depth of NCBI's object stack (`GetStackDepth()`), which the text reader's
     /// `SkipWhiteSpace` asks at the end of the text.
@@ -462,15 +588,16 @@ pub(crate) trait Input {
     fn read_real(&mut self) -> R<f64>;
     fn skip_real(&mut self) -> R<()>;
     /// `ReadString` (`ReadStringStore`) of a string of `kind`, appended to `out`, with what NCBI
-    /// posts while it reads it in `posts` (also when it then fails).
+    /// posts while it reads it given to `posts` when it is posted (also when the read then
+    /// fails).
     fn read_string(
         &mut self,
         kind: StringKind,
         out: &mut Vec<u8>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()>;
     /// `SkipString` (`SkipStringStore`).
-    fn skip_string(&mut self, kind: StringKind, posts: &mut Vec<StringPost>) -> R<()>;
+    fn skip_string(&mut self, kind: StringKind, posts: &mut dyn FnMut(StringPost<'_>)) -> R<()>;
     /// An OCTET STRING (`ReadBytes` of a `vector<char>`), `SkipByteBlock`.
     fn read_octets(&mut self) -> R<Vec<u8>>;
     fn skip_octets(&mut self) -> R<()>;
@@ -513,6 +640,8 @@ pub(crate) struct TextInput<S: AsnSource> {
     block_start: bool,
     /// `GetStackDepth()` (`Input::set_stack_depth`).
     depth: usize,
+    /// `Names::one_stream`: the line count goes on at a new object.
+    one_stream: bool,
 }
 
 /// A `ThrowError` of `CObjectIStreamAsn` (objistrasn.cpp) at `line` of `function`.
@@ -562,6 +691,7 @@ impl<S: AsnSource> TextInput<S> {
             r: Reader::new(src, names.document, names.reader),
             block_start: false,
             depth: 0,
+            one_stream: names.one_stream,
         }
     }
 
@@ -682,6 +812,24 @@ impl<S: AsnSource> TextInput<S> {
         let result = self.r.expect(c);
         result.map_err(|e| self.fail(e))
     }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:443-455
+    /// Skips raw ASCII space, tab, newline and carriage return before the next object and peeks
+    /// the byte that starts it (`None` at end of input), releasing everything before it.
+    pub(crate) fn skip_raw_spaces_and_peek(&mut self) -> Option<u8> {
+        loop {
+            match self.r.src.byte_at(self.r.pos) {
+                Some(b' ' | b'\t' | b'\n' | b'\r') => {
+                    self.r.pos += 1;
+                    self.r.src.release_before(self.r.pos);
+                }
+                other => {
+                    self.r.src.release_before(self.r.pos);
+                    return other;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -700,14 +848,18 @@ impl<S: AsnSource> Input for TextInput<S> {
         StreamPosition::Line(self.r.line as u64)
     }
 
-    /// The state of a new `CObjectIStreamAsn` at the next byte: line 1, no block started.
+    /// The state of a new `CObjectIStreamAsn` at the next byte: line 1, no block started; with
+    /// `one_stream`, the one stream's state: no block started, the line count going on. The bytes
+    /// before it are not read again (a stream keeps about one object, not the objects before it).
     fn new_object(&mut self) {
-        self.r.line = 1;
+        if !self.one_stream {
+            self.r.line = 1;
+        }
         self.block_start = false;
+        self.r.src.release_before(self.r.pos);
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:98-109
-    #[cfg(test)]
     fn end_of_data(&mut self) -> bool {
         self.r.skip_white_space().is_err()
     }
@@ -879,12 +1031,12 @@ impl<S: AsnSource> Input for TextInput<S> {
         &mut self,
         kind: StringKind,
         out: &mut Vec<u8>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()> {
         self.string(kind, Some(out), posts)
     }
 
-    fn skip_string(&mut self, kind: StringKind, posts: &mut Vec<StringPost>) -> R<()> {
+    fn skip_string(&mut self, kind: StringKind, posts: &mut dyn FnMut(StringPost<'_>)) -> R<()> {
         self.string(kind, None, posts)
     }
 
@@ -1001,7 +1153,7 @@ impl<S: AsnSource> TextInput<S> {
         &mut self,
         kind: StringKind,
         out: Option<&mut Vec<u8>>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()> {
         let skip = out.is_none();
         let mut none = Vec::new();
@@ -1010,11 +1162,11 @@ impl<S: AsnSource> TextInput<S> {
             out,
             kind != StringKind::Utf8,
             skip,
-            &mut |line, byte, piece| {
-                posts.push(StringPost::BadChar {
+            &mut |_, line, byte, piece| {
+                posts(StringPost::BadChar {
                     position: StreamPosition::Line(line as u64),
                     byte,
-                    string: piece.to_vec(),
+                    string: piece,
                 })
             },
         );

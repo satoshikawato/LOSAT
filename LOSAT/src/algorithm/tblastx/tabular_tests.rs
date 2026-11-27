@@ -1,4 +1,5 @@
 use super::*;
+use crate::report::tabular::taxdb_warning_line;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357: outfmt 20's line of the field names, after the warning of its
 // formatter when `taxdb.bti` is not found and a plural name is shown.
@@ -9,17 +10,31 @@ fn outfmt_20_writes_its_line_and_its_formatter_s_warning() {
         other => panic!("{outfmt}: {other:?}"),
     };
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    write_tabular_prolog(spec("20 qseqid sscinames"), false, &mut out, &mut err).unwrap();
+    write_tabular_prolog(
+        spec("20 qseqid sscinames"),
+        false,
+        "tblastx",
+        &mut out,
+        &mut err,
+    )
+    .unwrap();
     assert_eq!(out, b"qseqid,sscinames\n");
     assert_eq!(err, taxdb_warning_line("tblastx").as_bytes());
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    write_tabular_prolog(spec("20 delim=| qseqid"), true, &mut out, &mut err).unwrap();
+    write_tabular_prolog(
+        spec("20 delim=| qseqid"),
+        true,
+        "tblastx",
+        &mut out,
+        &mut err,
+    )
+    .unwrap();
     assert_eq!(
         (out.as_slice(), err.as_slice()),
         (&b"qseqid\n"[..], &b""[..])
     );
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    write_tabular_prolog(spec("10 sscinames"), false, &mut out, &mut err).unwrap();
+    write_tabular_prolog(spec("10 sscinames"), false, "tblastx", &mut out, &mut err).unwrap();
     assert!(out.is_empty() && err.is_empty());
 }
 

@@ -591,10 +591,12 @@ pub(super) fn compare_preliminary_lists_for_kappa(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-676 and
 // c++/src/algo/blast/core/blast_hits.c:1976-2010:
 // Reaps HSPs exceeding `prelim_evalue` in the preliminary pass or `expect_value`
-// in the post-Kappa pass, compacting surviving entries in place.
-#[allow(dead_code)]
+// in the post-Kappa pass, compacting surviving entries in place. A NaN E-value (a PSSM whose
+// gapped block is not valid) is not above the limit, and its HSP stays. The preliminary stage of
+// each subject reaps with it (`stage_d_pipeline`).
 pub(super) fn reap_by_evalue(list: &mut LinkedHspList, prelim_evalue: f64) {
-    list.hsps.retain(|hsp| hsp.evalue <= prelim_evalue);
+    list.hsps
+        .retain(|hsp| hsp.evalue <= prelim_evalue || hsp.evalue.is_nan());
 }
 
 #[cfg(test)]

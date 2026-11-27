@@ -89,12 +89,12 @@ test("a query whose reader fails on a later record runs, and the run ends with t
 
 // BLASTP reads 10000 letters a batch: ten records of 1100 fill the first. Two records named q1 in the
 // first batch end the command line there under -parse_deflines, before it reads the record of the
-// second batch whose Seq-id names a nucleotide sequence (`ref|NM_…`); the Web read every record before
-// the run and failed with the second error (review of line WQA's D7, L1).
+// second batch whose Seq-id is a database-ordinal id (`gnl|BL_ORD_ID|1`) that the reader refuses; the
+// Web read every record before the run and failed with the second error (review of line WQA's D7, L1).
 test('under -parse_deflines an error of an earlier query batch comes before the reader\'s error of a later one', async ({ page }, testInfo) => {
   test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine reads no ids of the deflines: the engine build runs this test');
   const protein = letters('ACDEFGHIKLMNPQRSTVWY', 11, 1100);
-  const names = ['q1', 'q1', ...Array.from({ length: 9 }, (_, i) => `q${i + 3}`), 'ref|NM_000001.1|'];
+  const names = ['q1', 'q1', ...Array.from({ length: 9 }, (_, i) => `q${i + 3}`), 'gnl|BL_ORD_ID|1'];
   const query = names.map((name) => `>${name}\n${protein}\n`).join('');
   const subject = `>s1\n${protein.slice(0, 300)}\n`;
   const message =

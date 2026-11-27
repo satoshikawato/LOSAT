@@ -1,6 +1,7 @@
 use super::*;
 use crate::blastinput::app::{FormatChoice, ReportFormat};
 use crate::common::Hit;
+use crate::report::tabular::taxdb_warning_line;
 
 fn hit(q: (usize, usize), s: (usize, usize), s_idx: u32) -> Hit {
     Hit {
@@ -62,8 +63,8 @@ fn report(
         format,
         &FormatChoice {
             number,
-            spec: fields.to_string(),
-            delimiter: String::new(),
+            spec: fields.as_bytes().to_vec(),
+            delimiter: Vec::new(),
         },
         app.request_kind(),
     )
@@ -83,7 +84,7 @@ fn report(
         searched_lengths: &[100, 50],
         range_length: None,
         ungapped: false,
-        database: "User specified sequence set (Input: s.faa)",
+        database: b"User specified sequence set (Input: s.faa)",
         subjects: TabularSubjects::Records {
             records: &[],
             ids: &ids,
@@ -160,27 +161,27 @@ fn rows_and_comment_lines_are_ncbis() {
 fn the_spec_is_the_apps_formatters() {
     let spec = custom_tabular_spec("20 delim=@ qseqid evalue", BlastpApp::Blastp).unwrap();
     assert_eq!(
-        (spec.kind, spec.delimiter.as_str()),
-        (TabularKind::CsvWithHeader, "@")
+        (spec.kind, spec.delimiter.as_slice()),
+        (TabularKind::CsvWithHeader, b"@".as_slice())
     );
     assert_eq!(
-        custom_tabular_spec("6 delim=@", BlastpApp::Blastp).map(|spec| spec.delimiter.as_str()),
-        Some("@")
+        custom_tabular_spec("6 delim=@", BlastpApp::Blastp).map(|spec| spec.delimiter.as_slice()),
+        Some(b"@".as_slice())
     );
     assert_eq!(
         custom_tabular_spec("10 delim=@ qseqid", BlastpApp::Blastp)
-            .map(|spec| spec.delimiter.as_str()),
-        Some("@")
+            .map(|spec| spec.delimiter.as_slice()),
+        Some(b"@".as_slice())
     );
     for app in [BlastpApp::Psiblast, BlastpApp::Rpsblast] {
         let spec = custom_tabular_spec("20 delim=@ qseqid evalue", app).unwrap();
         assert_eq!(
-            (spec.kind, spec.delimiter.as_str(), spec.fields.len()),
-            (TabularKind::CsvWithHeader, ",", 2),
+            (spec.kind, spec.delimiter.as_slice(), spec.fields.len()),
+            (TabularKind::CsvWithHeader, b",".as_slice(), 2),
             "{app:?}"
         );
         let spec = custom_tabular_spec("10 delim=@ qseqid", app).unwrap();
-        assert_eq!(spec.delimiter, ",", "{app:?}");
+        assert_eq!(spec.delimiter, b",", "{app:?}");
         assert!(custom_tabular_spec("6 delim=@", app).is_none(), "{app:?}");
         assert!(custom_tabular_spec("7 delim=,", app).is_none(), "{app:?}");
         assert!(custom_tabular_spec("6", app).is_none(), "{app:?}");

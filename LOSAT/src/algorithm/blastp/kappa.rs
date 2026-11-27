@@ -290,7 +290,7 @@ fn unified_p_without_search_space(refusal: UnifiedPRefusal<'_>, query: usize) ->
 /// every E-value of the query before it as 0, an alignment whose E-value was 0 without an
 /// E-value (the product of 0 and infinity is not a number), and drops a match of such alignments
 /// only. With unified P-values that batch is refused (`refuse` is `Some`; the error is a
-/// `HeaderReadError` of the batch's first query, so the reports of the batches before are
+/// `ErrorAfterBatchReports` of the batch's first query, so the reports of the batches before are
 /// written first, and its text names the two queries).
 pub(crate) fn evalue_adjust_contexts(
     contexts: &[QueryContext],
@@ -323,11 +323,10 @@ pub(crate) fn evalue_adjust_contexts(
             if let Some(refusal) = refuse {
                 if ctx.is_valid && ctx.aa_len > 0 && next.eff_searchsp == 0.0 {
                     // Before the batch's redo: none of its fetches read a header.
-                    return Err(crate::algorithm::common::database::HeaderReadError {
-                        query: batch.start,
-                        error: unified_p_without_search_space(refusal, q_idx),
-                        utf8: None,
-                    }
+                    return Err(crate::blastinput::app::ErrorAfterBatchReports::of_batch(
+                        batch.start,
+                        unified_p_without_search_space(refusal, q_idx),
+                    )
                     .into());
                 }
             }
@@ -1524,6 +1523,7 @@ pub(crate) fn postprocess_preliminary_hits(
 // Out of line: the one-thread loop calls it where `-use_sw_tback` asks for it, and the X-drop
 // redo's function keeps its own body.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn postprocess_preliminary_hits_smith_waterman(
     preliminary_hits: &[BlastpPreliminaryHsp],
     query_workspace: &BlastpKappaQueryWorkspace,
@@ -1531,6 +1531,7 @@ pub(crate) fn postprocess_preliminary_hits_smith_waterman(
     query_nomask: &[u8],
     subject: &[u8],
     matrix: ScoringMatrix,
+    unadjusted: Option<&AdjustedProteinMatrix>,
     karlin_params: &KarlinParams,
     gumbel_params: Option<&BlastGumbelBlk>,
     redo_align_params: &BlastRedoAlignParams,
@@ -1569,6 +1570,7 @@ pub(crate) fn postprocess_preliminary_hits_smith_waterman(
                 &BLASTP_REDO_ALIGN_CALLBACKS,
                 composition_workspace,
                 matrix_state,
+                unadjusted,
                 expect_value,
                 resume,
                 &mut |_query_index, evalue, score| would_insert(evalue, score),

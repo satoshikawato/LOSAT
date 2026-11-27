@@ -19,6 +19,7 @@ import {
   hitLimits,
   NO_FILTERS,
   orientation,
+  queryRound,
   sortHsps,
   sortSubjects,
   type HitLimits,
@@ -30,22 +31,31 @@ import {
   type SubjectSortKey,
   type ViewFilters,
 } from '../domain/result-index';
-import { isTerminal } from '../domain/run';
+import { isTerminal, runInputRecords } from '../domain/run';
 import { toolTakesValue } from '../domain/tools';
-import { verificationBadge, type Badge, type OptionGrammar, type VerificationTable } from '../domain/verification';
+import {
+  toolOptionGrammar,
+  toolVerificationBadge,
+  verificationBadge,
+  type Badge,
+  type OptionGrammar,
+  type ToolOptionGrammar,
+  type VerificationTable,
+} from '../domain/verification';
 import type { RunStore } from '../ports/data';
 import { isToolRun, type AnyRunView, type AppState, type RunView, type ToolRunView } from './coordinator';
 import { Store } from './store';
 
-/** The identity of an HSP: its run, its query record and its rank among the query's HSPs. */
+/** The identity of an HSP: its run, its query record, its round (0 without rounds), and its rank within that (query, round). */
 export interface HspId {
   readonly runId: string;
   readonly qIdx: number;
+  readonly round: number;
   readonly rank: number;
 }
 
 export const sameHsp = (a: HspId | undefined, b: HspId | undefined): boolean =>
-  a !== undefined && b !== undefined && a.runId === b.runId && a.qIdx === b.qIdx && a.rank === b.rank;
+  a !== undefined && b !== undefined && a.runId === b.runId && a.qIdx === b.qIdx && a.round === b.round && a.rank === b.rank;
 
 export interface QueryEntry {
   readonly qIdx: number;
@@ -154,6 +164,8 @@ export interface ResultsState {
   readonly loaded?: LoadedRun;
   /** The selected tool run (WindowMasker), when a tool run is open in Results. */
   readonly toolRun?: ToolRunView;
+  /** The support badge of the selected completed tool run; none for help/version or failed runs. */
+  readonly toolBadge?: Badge;
   /**
    * The options' grammar of the run's mode (`describe`: which options take a value), for its
    * command; also for a run without results. Undefined until the engine has described it.
@@ -165,6 +177,10 @@ export interface ResultsState {
   /** The queries listed, after the query filters. */
   readonly queries: readonly QueryEntry[];
   readonly qIdx?: number;
+  /** 1-based PSI-BLAST iteration rounds available for the selected query (empty for searches without rounds). */
+  readonly rounds: readonly number[];
+  /** Selected round of the selected query (1-based for PSI-BLAST, 0 for searches without rounds). */
+  readonly round?: number;
   /** Subjects of the query that pass the view filters, in the subject sort order. */
   readonly subjects: readonly SubjectEntry[];
   /** The selected query's subjects and HSPs before the view filters. */
@@ -198,6 +214,7 @@ const INITIAL: ResultsState = Object.freeze<ResultsState>({
   subjectSort: { key: 'order', descending: false },
   hspSort: { key: 'rank', descending: false },
   queries: [],
+  rounds: [],
   subjects: [],
   hidden: { subjects: 0, hsps: 0 },
   atSubjectLimit: false,
@@ -214,10 +231,11 @@ export class ResultsBrowser {
   /** Outfmt 6 rows already split, by table row, for the loaded run. */
   private rows = new Map<number, Outfmt6Row>();
   /**
-   * Table rows of the loaded run by rank, per query, made when an HSP of the query is first looked
-   * up: a map of every HSP built at each opening cost about 20 ms for 150,000 HSPs (W4b F1).
+   * Table rows of the loaded run by rank, per `${qIdx}:${round}`, made when an HSP of the query
+   * round is first looked up: a map of every HSP built at each opening cost about 20 ms for
+   * 150,000 HSPs (W4b F1).
    */
-  private rowsByRank = new Map<number, Int32Array>();
+  private rowsByRank = new Map<string, Int32Array>();
   /** The E values and bit scores that the outfmt 6 rows of the loaded run show, made at the first filter on them. */
   private scores: Pick<HspTable, 'eValue' | 'bitScore'> | undefined;
   private loadToken = 0;
@@ -225,13 +243,13 @@ export class ResultsBrowser {
   private readonly headingQueue: number[] = [];
   /** The load token of the heading reader that runs, if one does. */
   private headingReader: number | undefined;
-  /** Outfmt 0 sections of the loaded run read or being read, by `${qIdx}:${rank}`; another run drops them. */
+  /** Outfmt 0 sections of the loaded run read or being read, by `${qIdx}:${round}:${rank}`; another run drops them. */
   private sections = new Map<string, Promise<string | undefined>>();
   /** Outfmt 0 subject headings of the loaded run read or being read, by subject record index. */
   private headingReads = new Map<number, Promise<string | undefined>>();
   /** The options' grammar of each mode that the engine has described (one engine build: it does not change). */
   private readonly grammars = new Map<ProgramId, OptionGrammar>();
-  private readonly toolGrammars = new Map<string, OptionGrammar>();
+  private readonly toolGrammars = new Map<string, ToolOptionGrammar>();
 
   /** The table the verification badges come from (generated at build time). */
   get verification(): VerificationTable {
@@ -250,7 +268,11 @@ export class ResultsBrowser {
         const hasOutputs = run.status === 'completed' || (run.status === 'failed' && run.record.exitStatus !== undefined);
         if (phase === 'unavailable' && hasOutputs) void this.open(runId);
         else if (phase === 'unavailable') this.set({ toolRun: run, message: unavailableMessage(run) });
-        else if (phase === 'ready') this.set({ toolRun: run });
+        else if (phase === 'ready') {
+          const grammar = this.toolGrammars.get(run.snapshot.tool);
+          const toolBadge = grammar === undefined ? undefined : this.computeToolBadge(run, grammar);
+          this.set({ toolRun: run, toolBadge });
+        }
         return;
       }
       if (phase !== 'unavailable') return;
@@ -280,12 +302,14 @@ export class ResultsBrowser {
       const ready =
         isTerminal(run.status) &&
         (run.status === 'completed' || (run.status === 'failed' && run.record.exitStatus !== undefined));
+      const toolBadge = ready && grammar !== undefined ? this.computeToolBadge(run, grammar) : undefined;
       this.state.set({
         ...INITIAL,
         filters,
         runId,
         phase: ready ? 'ready' : 'unavailable',
         toolRun: run,
+        ...(toolBadge === undefined ? {} : { toolBadge }),
         ...(ready ? {} : { message: unavailableMessage(run) }),
         ...(grammar === undefined ? {} : { grammar }),
       });
@@ -376,30 +400,66 @@ export class ResultsBrowser {
     );
   }
 
+  private computeToolBadge(run: ToolRunView, grammar: ToolOptionGrammar): Badge | undefined {
+    if (run.status !== 'completed' || run.snapshot.prints !== undefined) return undefined;
+    return toolVerificationBadge(
+      {
+        tool: run.snapshot.tool,
+        argv: run.snapshot.argv,
+        runtimePath: run.record.runtimePath,
+        grammar,
+      },
+      this.deps.verification,
+    );
+  }
+
   private describeToolGrammar(token: number, tool: string): void {
-    const fallback: OptionGrammar = { takesValue: toolTakesValue(undefined) };
-    const apply = (grammar: OptionGrammar): void => {
-      if (token === this.loadToken) this.set({ grammar });
+    const fallback: ToolOptionGrammar = { takesValue: toolTakesValue(undefined) };
+    const apply = (grammar: ToolOptionGrammar, fromDescribe: boolean): void => {
+      if (token !== this.loadToken) return;
+      const run = this.state.get().toolRun;
+      // Only a grammar built from the engine's -xmlhelp (`toolOptionGrammar`) knows which options
+      // take values and their defaults; the fallback is for CommandText only and gives no badge.
+      const toolBadge =
+        fromDescribe && run !== undefined && this.state.get().phase === 'ready'
+          ? this.computeToolBadge(run, grammar)
+          : undefined;
+      this.set({ grammar, toolBadge });
     };
     if (this.deps.describeTool === undefined) {
-      this.toolGrammars.set(tool, fallback);
-      apply(fallback);
+      apply(fallback, false);
       return;
     }
     this.deps.describeTool(tool).then(
       (description) => {
-        const grammar: OptionGrammar = { takesValue: toolTakesValue(description) };
+        const grammar = toolOptionGrammar(description);
         this.toolGrammars.set(tool, grammar);
-        apply(grammar);
+        apply(grammar, true);
       },
-      () => apply(fallback),
+      () => apply(fallback, false),
     );
   }
 
   selectQuery(qIdx: number): void {
     const state = this.state.get();
     if (state.loaded === undefined) return;
-    this.set({ qIdx, sIdx: undefined, hsp: undefined, detail: undefined });
+    const group = state.loaded.index.queries.get(qIdx);
+    const rounds = group === undefined ? [] : group.rounds.map((entry) => entry.round).filter((round) => round > 0);
+    const round = group?.rounds[group.rounds.length - 1]?.round;
+    this.set({ qIdx, rounds, round, sIdx: undefined, hsp: undefined, detail: undefined });
+    this.refresh();
+    const subject = this.state.get().subjects[0];
+    if (subject !== undefined) this.selectSubject(subject.sIdx);
+  }
+
+  /** Switches the shown PSI-BLAST iteration round for the selected query. */
+  selectRound(round: number): void {
+    const state = this.state.get();
+    if (state.loaded === undefined || state.qIdx === undefined) return;
+    const group = state.loaded.index.queries.get(state.qIdx);
+    if (group === undefined || !group.rounds.some((entry) => entry.round === round)) return;
+    if (state.round === round) return;
+    this.set({ round, sIdx: undefined, hsp: undefined, detail: undefined });
     this.refresh();
     const subject = this.state.get().subjects[0];
     if (subject !== undefined) this.selectSubject(subject.sIdx);
@@ -412,19 +472,21 @@ export class ResultsBrowser {
     this.selectHsp(first?.id);
   }
 
-  /** Selects an HSP of the loaded run; its query and subject follow. */
+  /** Selects an HSP of the loaded run; its query, round, and subject follow. */
   selectHsp(id: HspId | undefined): void {
     const state = this.state.get();
     if (id === undefined || state.loaded === undefined || id.runId !== state.runId) {
       this.set({ hsp: undefined, detail: undefined });
       return;
     }
-    const row = this.rowOf(state.loaded, id.qIdx, id.rank);
+    const row = this.rowOf(state.loaded, id.qIdx, id.round, id.rank);
     if (row === undefined) return;
     const table = state.loaded.index.table;
     const sIdx = table.sIdx[row]!;
-    if (state.qIdx !== id.qIdx || state.sIdx !== sIdx) {
-      this.set({ qIdx: id.qIdx, sIdx });
+    if (state.qIdx !== id.qIdx || state.round !== id.round || state.sIdx !== sIdx) {
+      const group = state.loaded.index.queries.get(id.qIdx);
+      const rounds = group === undefined ? [] : group.rounds.map((entry) => entry.round).filter((round) => round > 0);
+      this.set({ qIdx: id.qIdx, rounds, round: id.round, sIdx });
       this.refresh();
     }
     if (sameHsp(this.state.get().hsp, id) && this.state.get().detail !== undefined) return;
@@ -448,7 +510,7 @@ export class ResultsBrowser {
       const first = queries[0];
       if (first !== undefined) this.selectQuery(first.qIdx);
       else {
-        this.set({ qIdx: undefined, sIdx: undefined, hsp: undefined, detail: undefined });
+        this.set({ qIdx: undefined, rounds: [], round: undefined, sIdx: undefined, hsp: undefined, detail: undefined });
         this.refresh();
       }
       return;
@@ -468,10 +530,9 @@ export class ResultsBrowser {
   }
 
   /** The outfmt 6 row of a table row of the loaded run, split into its fields. */
-  row(row: number): Outfmt6Row {
+  row(row: number, loaded: LoadedRun = this.state.get().loaded!): Outfmt6Row {
     let fields = this.rows.get(row);
     if (fields === undefined) {
-      const loaded = this.state.get().loaded!;
       const range = out6Range(loaded.index.table, row);
       if (range === undefined) throw new Error(`HSP row ${row} has no outfmt 6 row`);
       fields = splitOutfmt6Row(decoder.decode(loaded.out6.subarray(range[0], range[1])));
@@ -491,11 +552,11 @@ export class ResultsBrowser {
     const state = this.state.get();
     const loaded = state.loaded;
     if (loaded === undefined || id.runId !== state.runId) return Promise.resolve(undefined);
-    const key = `${id.qIdx}:${id.rank}`;
+    const key = `${id.qIdx}:${id.round}:${id.rank}`;
     let read = this.sections.get(key);
     if (read === undefined) {
       const sections = this.sections;
-      const row = this.rowOf(loaded, id.qIdx, id.rank);
+      const row = this.rowOf(loaded, id.qIdx, id.round, id.rank);
       const range = row === undefined ? undefined : out0Range(loaded.index.table, row);
       read =
         range === undefined
@@ -530,12 +591,12 @@ export class ResultsBrowser {
         const batch = this.headingQueue.splice(0, 40);
         const state = this.state.get();
         const loaded = state.loaded;
-        const query = state.qIdx === undefined ? undefined : loaded?.index.queries.get(state.qIdx);
-        if (loaded === undefined || query === undefined) break;
+        const roundGroup = state.qIdx === undefined ? undefined : queryRound(loaded?.index.queries.get(state.qIdx), state.round);
+        if (loaded === undefined || roundGroup === undefined) break;
         const read = new Map<number, string>();
         for (const sIdx of batch) {
           if (token !== this.loadToken) break;
-          const subject = query.subjects.find((s) => s.sIdx === sIdx);
+          const subject = roundGroup.subjects.find((s) => s.sIdx === sIdx);
           const heading = subject === undefined ? undefined : await this.readHeading(loaded, sIdx, subject.rows[0]!);
           if (heading !== undefined) read.set(sIdx, heading);
         }
@@ -552,21 +613,22 @@ export class ResultsBrowser {
     }
   }
 
-  /** The table row of an HSP of the loaded run (its query's rows by rank, made once), or undefined. */
-  private rowOf(loaded: LoadedRun, qIdx: number, rank: number): number | undefined {
+  /** The table row of an HSP of the loaded run (its query round's rows by rank, made once), or undefined. */
+  private rowOf(loaded: LoadedRun, qIdx: number, round: number, rank: number): number | undefined {
     const table = loaded.index.table;
-    let rows = this.rowsByRank.get(qIdx);
+    const key = `${qIdx}:${round}`;
+    let rows = this.rowsByRank.get(key);
     if (rows === undefined) {
-      const query = loaded.index.queries.get(qIdx);
-      if (query === undefined) return undefined;
-      rows = new Int32Array(query.hspCount).fill(-1);
-      for (const subject of query.subjects) {
+      const roundGroup = loaded.index.queries.get(qIdx)?.rounds.find((entry) => entry.round === round);
+      if (roundGroup === undefined) return undefined;
+      rows = new Int32Array(roundGroup.hspCount).fill(-1);
+      for (const subject of roundGroup.subjects) {
         for (const row of subject.rows) if (table.rank[row]! >= 0 && table.rank[row]! < rows.length) rows[table.rank[row]!] = row;
       }
-      this.rowsByRank.set(qIdx, rows);
+      this.rowsByRank.set(key, rows);
     }
     const row = rank >= 0 && rank < rows.length ? rows[rank]! : -1;
-    return row >= 0 && table.qIdx[row] === qIdx && table.rank[row] === rank ? row : undefined;
+    return row >= 0 && table.qIdx[row] === qIdx && table.round[row] === round && table.rank[row] === rank ? row : undefined;
   }
 
   /**
@@ -614,7 +676,7 @@ export class ResultsBrowser {
       return;
     }
     const { table } = loaded.index;
-    const query = loaded.index.queries.get(state.qIdx);
+    const query = queryRound(loaded.index.queries.get(state.qIdx), state.round);
     if (query === undefined) {
       this.set({
         subjects: [],
@@ -627,7 +689,7 @@ export class ResultsBrowser {
       });
       return;
     }
-    const subjectRecords = loaded.run.snapshot.subject.records;
+    const subjectRecords = runInputRecords(loaded.run, 'subject');
     const byScore = state.filters.maxEValue !== undefined || state.filters.minBitScore !== undefined;
     if (byScore) this.scores ??= shownScores(table, loaded.out6);
     const filtered = filterQuery(query, state.filters, this.scores ?? table, (subject) => [
@@ -642,7 +704,12 @@ export class ResultsBrowser {
       filtered.subjects.map((subject) => unfiltered.get(subject.sIdx)!),
       state.subjectSort,
       table,
-      (sIdx) => subjectRecords[sIdx]?.length ?? 0,
+      (sIdx) => {
+        const recordLength = subjectRecords[sIdx]?.length;
+        if (recordLength !== undefined) return recordLength;
+        const first = unfiltered.get(sIdx)?.rows[0];
+        return first === undefined ? 0 : (table.subjectLength[first] ?? 0);
+      },
     );
     const subjects = sorted.map((all) => this.subjectEntry(loaded, shown.get(all.sIdx)!, all, order.get(all.sIdx)!, state.hspSort));
     const selected = subjects.find((s) => s.sIdx === state.sIdx);
@@ -678,14 +745,15 @@ export class ResultsBrowser {
     order: number,
     hspSort: SortSpec<HspSortKey>,
   ): SubjectEntry {
-    const record: RecordKey | undefined = loaded.run.snapshot.subject.records[shown.sIdx];
+    const record: RecordKey | undefined = runInputRecords(loaded.run, 'subject')[shown.sIdx];
     const first = all.rows[0]!;
+    const firstRow = this.row(first);
     return {
       sIdx: shown.sIdx,
-      recordId: record?.id ?? '',
-      length: record?.length ?? 0,
+      recordId: record?.id ?? firstRow.sseqid,
+      length: record?.length ?? loaded.index.table.subjectLength[first] ?? 0,
       order,
-      first: this.row(first),
+      first: firstRow,
       hspCount: all.rows.length,
       rows: sortHsps(shown.rows, hspSort, loaded.index.table),
       inOutfmt0: out0SubjectRange(loaded.index.table, first) !== undefined,
@@ -700,7 +768,16 @@ export class ResultsBrowser {
     return subject.rows.flatMap((row, i) => {
       if (!shown.has(row)) return [];
       const [from, to] = subjectSpan(table, row);
-      return [{ id: { runId, qIdx: table.qIdx[row]!, rank: table.rank[row]! }, row, n: i + 1, from, to, inOutfmt0: out0Range(table, row) !== undefined }];
+      return [
+        {
+          id: { runId, qIdx: table.qIdx[row]!, round: table.round[row]!, rank: table.rank[row]! },
+          row,
+          n: i + 1,
+          from,
+          to,
+          inOutfmt0: out0Range(table, row) !== undefined,
+        },
+      ];
     });
   }
 
@@ -713,7 +790,7 @@ export class ResultsBrowser {
     const subjectFrame = translated(loaded.kinds.subject) ? frame(table.subjectFrame, row) : undefined;
     return {
       row,
-      id: { runId: loaded.run.snapshot.runId, qIdx: table.qIdx[row]!, rank: table.rank[row]! },
+      id: { runId: loaded.run.snapshot.runId, qIdx: table.qIdx[row]!, round: table.round[row]!, rank: table.rank[row]! },
       fields: this.row(row),
       orientation: orientation(table, row, loaded.kinds),
       ...(queryFrame === undefined ? {} : { queryFrame }),
@@ -725,13 +802,33 @@ export class ResultsBrowser {
   private queryEntries(loaded: LoadedRun, filters: ViewFilters): readonly QueryEntry[] {
     const text = (filters.queryText ?? '').toLowerCase();
     const entries: QueryEntry[] = [];
-    loaded.run.snapshot.query.records.forEach((record, qIdx) => {
-      const group = loaded.index.queries.get(qIdx);
-      if (filters.queriesWithHitsOnly && group === undefined) return;
-      const id = recordName(record.id, 'query', qIdx, loaded.run.record.shownIds);
-      if (text !== '' && !id.toLowerCase().includes(text)) return;
-      entries.push({ qIdx, id, length: record.length, subjects: group?.subjects.length ?? 0, hsps: group?.hspCount ?? 0 });
-    });
+    const records = runInputRecords(loaded.run, 'query');
+    if (records.length > 0) {
+      records.forEach((record, qIdx) => {
+        const group = loaded.index.queries.get(qIdx);
+        if (filters.queriesWithHitsOnly && group === undefined) return;
+        const id = recordName(record.id, 'query', qIdx, loaded.run.record.shownIds);
+        if (text !== '' && !id.toLowerCase().includes(text)) return;
+        entries.push({ qIdx, id, length: record.length, subjects: group?.subjects.length ?? 0, hsps: group?.hspCount ?? 0 });
+      });
+      return entries;
+    }
+    const queryFile = loaded.run.snapshot.queryFile;
+    if (queryFile === undefined) return entries;
+    if (loaded.index.queries.size === 0) {
+      if (filters.queriesWithHitsOnly) return entries;
+      const id = queryFile.name;
+      if (text !== '' && !id.toLowerCase().includes(text)) return entries;
+      entries.push({ qIdx: 0, id, length: 0, subjects: 0, hsps: 0 });
+      return entries;
+    }
+    for (const [qIdx, group] of loaded.index.queries) {
+      const first = group.subjects[0]?.rows[0];
+      const id = first === undefined ? queryFile.name : this.row(first, loaded).qseqid;
+      if (text !== '' && !id.toLowerCase().includes(text)) continue;
+      const length = first === undefined ? 0 : (loaded.index.table.queryLength[first] ?? 0);
+      entries.push({ qIdx, id, length, subjects: group.subjects.length, hsps: group.hspCount });
+    }
     return entries;
   }
 
@@ -801,7 +898,7 @@ export function noHspReason(state: ResultsState): NoHspReason | undefined {
   if (loaded === undefined) return undefined;
   if (loaded.run.snapshot.prints !== undefined) return `printed-${loaded.run.snapshot.prints}`;
   if (loaded.run.snapshot.dryRun === true) return 'dry-run';
-  if (loaded.run.snapshot.query.records.length === 0) return 'empty-query';
+  if (loaded.run.snapshot.queryFile === undefined && runInputRecords(loaded.run, 'query').length === 0) return 'empty-query';
   if (loaded.limits.maxTargetSeqs === 0) return 'no-tabular-hits';
   if (loaded.tabularError !== undefined) return 'no-tabular-output';
   if (state.queries.length === 0) return 'no-queries';

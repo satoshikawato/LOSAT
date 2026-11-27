@@ -21,16 +21,16 @@
 //! The masks come from `SeqDb::read_mask_block` a window of sequences at a time
 //! (`algorithm::common::db_mask_search::SubjectMasks`, one reader per worker's diagonal table); a
 //! read error is the reader's error of the search (`x_db_stream::XReadError`). LOSAT's refusals
-//! of a sequence whose short chunk's HSPs NCBI's interval tree splits without end or its merge
-//! joins with another chunk's are the search's errors of that sequence
-//! (`common::hard_chunk_scan::short_chunk_tree_refusal`, `short_chunk_merge_refusal`, passed on
-//! as they are by `native::search_error_as_is`).
+//! of a sequence whose short chunk's HSPs NCBI's interval tree splits without end or whose
+//! one-hit ungapped merge divides by zero are the search's errors of that sequence
+//! (`common::hard_chunk_scan::short_chunk_tree_refusal`, `chunk_merge_undefined_refusal`, passed
+//! on as they are by `native::search_error_as_is`).
 
 use anyhow::Result;
 
 use super::super::args::ResolvedOptions;
 use super::super::parameters::ContextParameters;
-use super::super::preliminary::{sort_by_score, PreliminaryHsp};
+use super::super::preliminary::{compare_score, PreliminaryHsp};
 use super::super::query_setup::PreparedQueryBatch;
 use super::super::results::subject_besthit_preliminary;
 use super::super::seed::{sort_initial_hits, BxLookup, Diagonals, InitHsp};
@@ -40,10 +40,12 @@ use super::{compute_subject, compute_subject_of, one_word_hits, SubjectComputati
 use crate::algorithm::common::database::search_read_error_of;
 use crate::algorithm::common::db_mask_search::{SearchMask, SubjectPlan};
 use crate::algorithm::common::hard_chunk_scan::{
-    merge_joins, short_chunk_merge_refusal, short_chunk_tree_refusal, OneWord, WordContext,
+    chunk_merge_undefined_refusal, last_range_overlap_merge_refusal, short_chunk_tree_refusal,
+    OneWord, WordContext,
 };
 use crate::algorithm::common::hard_chunk_walk::{ChunkWork, DiagonalWalk, HardTable, NcbiStart};
-use crate::core::subject_split::HardChunk;
+use crate::core::blast_hits::merge_subject_chunk_hsps;
+use crate::core::subject_split::{HardChunk, MAX_DBSEQ_LEN};
 use crate::seqdb::{SeqDb, SeqDbError};
 
 /// The program that the reader's errors name.
@@ -111,7 +113,7 @@ pub(super) fn compute_masked_subject(
     } else {
         None
     };
-    if stored.is_empty() {
+    if stored.is_empty() && !(mask.hard() && subjects.length(oid) > MAX_DBSEQ_LEN) {
         let Some(start) = ncbi else {
             return plain(diagonals);
         };
@@ -240,41 +242,25 @@ impl Masked<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:476-591
     // Each hard chunk is searched alone: its scan, its extensions, the purge of the HSPs with
     // common endpoints (gapped) and the sort by score; its HSPs move by the chunk's offset
-    // (`Blast_HSPListAdjustOffsets`) and join the sequence's list (`Blast_HSPListsMerge`). NCBI's
-    // overlap there is not 0: it compares the chunk's offset with the left of the range after it
-    // (the chunker has already moved to it, blast_engine.c:254-258, 579-580) and takes the chunk
-    // overlap of 100. The merge only looks at the HSPs of the joined list that end past the new
-    // chunk's offset (blast_hits.c:2888-2899); a chunk ends where its range does and no HSP reaches
-    // into the mask after it, and no chunk that can hold HSPs starts before the end of an earlier
-    // one (else `HardMaskShape::PartsOutOfOrder`), so there are none and the merge appends the
-    // chunk's HSPs and sorts the list by score (`s_BlastHSPListsCombineByScore`,
-    // blast_hits.c:2749-2766). TBLASTN's and TBLASTX's chunks of a long range overlap; this reason
-    // does not carry over. With `-subject_besthit` the filter then runs on the joined list after
-    // every chunk with HSPs (blast_engine.c:586-591, blast_hits.c:2538-2580), not once on the whole
-    // sequence's list.
+    // (`Blast_HSPListAdjustOffsets`) and join the sequence's list (`Blast_HSPListsMerge`,
+    // `core::blast_hits::merge_subject_chunk_hsps`) using `chunk.overlap` (0 where the chunk
+    // starts at the left of the range at `hm_index`, else `DBSEQ_CHUNK_OVERLAP` = 100; after the
+    // last hard range NCBI reads past its list and LOSAT takes 100, as for unmasked long
+    // subjects). With `-subject_besthit` the filter then runs on the merged list after every chunk
+    // with HSPs (blast_engine.c:586-591, blast_hits.c:2538-2580), not once on the whole sequence's
+    // list.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
     // Every chunk goes through the word finder, whose exit moves the diagonal offset by the chunk's
     // length (negative between overlapping masks) plus the window.
     /// The sequence's computation: the link cutoffs of its whole length (`compute_subject_with`),
     /// and its HSPs over the soft ranges or the hard chunks, each piece searched by the default
     /// path's bodies (`masked_piece`). Every hard chunk is walked in order
-    /// (`common::hard_chunk_walk::DiagonalWalk`): a chunk that holds a word is searched over its
-    /// own letters (over the scan range of the whole chunk, the reference scan, where its diagonal
-    /// offset went back below an entry of the table); a shorter one gives the two-hit search its
-    /// one word ([`Masked::one_word`]), whose seeds go through the chunk's gapped stage, or are its
-    /// HSPs in an ungapped search (LOSAT's refusal of the sequence where NCBI's interval tree
-    /// splits without end or its merge joins them with another chunk's), and the one-hit search
-    /// nothing. The sequence is searched on its own: on a new table at NCBI's one-thread offset
-    /// where its hits meet the entries that no sequence wrote in NCBI's one-thread search or that
-    /// search clears the table inside it (`ncbi`, `common::hard_chunk_walk::NcbiWalk`), else with
-    /// the diagonal offset moved so that no entry of another sequence reaches its hits or theirs
-    /// (`common::hard_chunk_walk::DiagonalWalk::start`,
-    /// `DiagonalWalk::after`; PD-LOSAT-NCBI-DEFECTS exception 29, the Owner's answer Q5 = B of M4b,
-    /// 2026-11-22). The sequences that LOSAT refuses before the search never come here
-    /// (`blastinput::db_mask::HardMaskShape`: masks out of the order of their start, past the end,
-    /// a range longer than `MAX_DBSEQ_LEN`, a tail mask with masks stored after it, a one word past
-    /// the sentinel that can change a result), so the sequence's result does not depend on the
-    /// entries of the sequences the table searched before or after it.
+    /// (`common::hard_chunk_walk::DiagonalWalk`), its HSPs merged via NCBI's `Blast_HSPListsMerge`
+    /// (`core::blast_hits::merge_subject_chunk_hsps`). The sequences that LOSAT refuses before the
+    /// search never come here (`HardMaskShape::Inverted`, `PastEnd`, `TailMaskWithLaterMasks`,
+    /// `WordPastEnd`, `LastRangeOverlap`). With a negative window (a search strategy's) the chunks
+    /// run on NCBI's one-thread table without a walk: a chunk that holds a word is searched over
+    /// its own letters, a shorter one only moves the offset.
     fn compute(&self, diagonals: &mut Diagonals) -> Result<SubjectComputation> {
         let Masked {
             db,
@@ -346,23 +332,53 @@ impl Masked<'_> {
         // finds no hit: BLASTX's translation has no residue 0), so `reference` is exact or more,
         // and its margins too (a larger margin moves the offset further past entries that no hit
         // reaches).
-        let (mut walk, start) = DiagonalWalk::start(
-            options.word_size,
-            options.window_size,
-            length,
-            &chunks,
-            ncbi,
-            diagonals.offset(),
-        );
-        start.apply(diagonals, options.window_size)?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-766
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
+        // A negative window (a search strategy's; the command line takes none) has no walk: the
+        // table keeps NCBI's one-thread state from chunk to chunk and from sequence to sequence
+        // (`Diagonals::finish_chunk_wide`), the one-hit scan of a chunk shorter than the word reads
+        // nothing, and every chunk's exit moves the offset by its length plus the window.
+        let mut walk = if options.window_size < 0 {
+            None
+        } else {
+            let (walk, start) = DiagonalWalk::start(
+                options.word_size,
+                options.window_size,
+                length,
+                &chunks,
+                ncbi,
+                diagonals.offset(),
+            );
+            start.apply(diagonals, options.window_size)?;
+            Some(walk)
+        };
         let mut raw = Vec::new();
         let mut purged = Vec::new();
         let mut containment = Vec::new();
         let mut letters = Vec::new();
+        // Maximum `s_end` of HSPs from earlier hard ranges vs the current hard range, so a
+        // final-chunk merge (`overlap_past_list`) with an earlier range (e.g., from a short
+        // `OneWord` chunk) is refused while merges within a >5M final range keep
+        // `DBSEQ_CHUNK_OVERLAP`.
+        let (mut earlier_range_end, mut cur_range_end, mut cur_range): (
+            Option<i32>,
+            Option<i32>,
+            usize,
+        ) = (None, None, 0);
         for &chunk in &chunks {
+            if chunk.range != cur_range {
+                if let Some(end) = cur_range_end.take() {
+                    earlier_range_end = Some(earlier_range_end.map_or(end, |prev| prev.max(end)));
+                }
+                cur_range = chunk.range;
+            }
             // The exit of this chunk's word finder clears the table (`Diagonals::finish_chunk`).
             let clears = diagonals.offset() >= i32::MAX / 4;
-            let work = walk.chunk(chunk.offset, chunk.length);
+            let work = match walk.as_mut() {
+                Some(walk) => walk.chunk(chunk.offset, chunk.length),
+                None if chunk.length < options.word_size => ChunkWork::Nothing,
+                None => ChunkWork::Words { reference: false },
+            };
             let found = match work {
                 ChunkWork::Words { reference } => {
                     // The chunk's letters between the sentinels that the sequence has.
@@ -417,46 +433,79 @@ impl Masked<'_> {
                     }
                 }
                 ChunkWork::Nothing => {
-                    diagonals.finish_chunk(chunk.length)?;
+                    if walk.is_some() {
+                        diagonals.finish_chunk(chunk.length)?;
+                    } else {
+                        diagonals.finish_chunk_wide(i64::from(chunk.length));
+                    }
                     None
                 }
             };
-            if clears {
+            if let (true, Some(walk)) = (clears, walk.as_mut()) {
                 walk.clear();
             }
-            let Some((chunk_raw, chunk_purged, chunk_containment)) = found else {
+            let Some((chunk_raw, mut chunk_purged, chunk_containment)) = found else {
                 continue;
             };
             let offset = chunk.offset as i32;
-            let chunk_hits = !chunk_purged.is_empty();
-            // Only the HSPs of a chunk shorter than the word can meet another chunk's
-            // (`HardMaskShape::PartsOutOfOrder` refuses chunks that hold words and meet).
-            if chunk_hits
-                && merge_joins(
-                    &chunk,
-                    purged.iter().map(|hsp: &PreliminaryHsp| hsp.s_end),
-                    chunk_purged.iter().map(|hsp| hsp.s_start + offset),
-                )
-            {
-                return Err(short_chunk_merge_refusal(db.oid(oid as u32), PROGRAM));
-            }
             raw.extend(chunk_raw.into_iter().map(|hsp| shifted(hsp, offset)));
-            purged.extend(chunk_purged.into_iter().map(|hsp| shifted(hsp, offset)));
             containment.extend(
                 chunk_containment
                     .into_iter()
                     .map(|(hsp, contained)| (shifted(hsp, offset), contained)),
             );
-            if options.subject_besthit && chunk_hits {
-                // The filter of the joined list after this chunk, in the merge's order.
-                sort_by_score(&mut purged);
+            if chunk_purged.is_empty() {
+                continue;
+            }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:578-591
+            // Shift the chunk's HSPs in place by `chunk.offset`, refuse if an earlier hard range's
+            // HSP meets this final chunk across NCBI's out-of-bounds overlap read
+            // (`overlap_past_list`), merge into `purged` (`Blast_HSPListsMerge`) without allocating
+            // a copy, then apply `-subject_besthit` if enabled.
+            let mut chunk_max_end: Option<i32> = None;
+            for hsp in &mut chunk_purged {
+                hsp.s_start += offset;
+                hsp.s_end += offset;
+                hsp.s_gapped_start += offset;
+                chunk_max_end = Some(chunk_max_end.map_or(hsp.s_end, |m| m.max(hsp.s_end)));
+            }
+            if chunk.overlap_past_list
+                && !purged.is_empty()
+                && earlier_range_end.is_some_and(|end| end > offset)
+            {
+                return Err(last_range_overlap_merge_refusal(
+                    db.oid(oid as u32),
+                    PROGRAM,
+                ));
+            }
+            if let Some(end) = chunk_max_end {
+                cur_range_end = Some(cur_range_end.map_or(end, |prev| prev.max(end)));
+            }
+            if merge_subject_chunk_hsps(
+                &mut purged,
+                &mut chunk_purged,
+                offset,
+                chunk.overlap as i32,
+                i32::MAX as usize,
+                options.gapped,
+                compare_score,
+            )
+            .is_err()
+            {
+                return Err(chunk_merge_undefined_refusal(
+                    db.oid(oid as u32),
+                    None,
+                    PROGRAM,
+                ));
+            }
+            if options.subject_besthit {
                 subject_besthit_preliminary(&mut purged);
             }
         }
-        walk.after(diagonals.offset())
-            .apply(diagonals, options.window_size)?;
-        // The merge's order: by score.
-        sort_by_score(&mut purged);
+        if let Some(walk) = walk {
+            walk.after(diagonals.offset())
+                .apply(diagonals, options.window_size)?;
+        }
         Ok(SubjectComputation {
             raw,
             purged,

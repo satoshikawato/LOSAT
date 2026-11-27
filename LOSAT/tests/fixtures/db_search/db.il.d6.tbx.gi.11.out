@@ -1,0 +1,1247 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "tblastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nq0"
+                  }
+                }
+              },
+              title "nq0"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 200,
+              seq-data ncbi2na '5541F31D225A501511EEECB2B12C85D760BFDDBF0AD3EA
+CC5679040021A1BBF831EE3B619A7DE271878EE0D138780F69D5BA'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nq1"
+                  }
+                }
+              },
+              title "nq1"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 200,
+              seq-data ncbi2na 'FCD669E35157FB67674281BFEE5D18BD44171DD50A5828
+4D23F8F624D01182F3965836929B29B796B93E100FCA0A4D907063'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nq2"
+                  }
+                }
+              },
+              title "nq2"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 200,
+              seq-data ncbi2na '568524BD09A97192BA32AE4323FAAB33A08D8B6574E429
+69BE8A5992AC981B6359350F141943D7BAF3199583EA7AEB615040'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_4"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nq3"
+                  }
+                }
+              },
+              title "nq3"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 200,
+              seq-data ncbi2na '7E5FF2EA433780EA95C745F54ECE649F04851139D9E4D8
+42EDDD96E77122697B13F0DFD8436B3BB855D672F4E36D099CD7DC'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_5"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nq4"
+                  }
+                }
+              },
+              title "nq4"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 200,
+              seq-data ncbi2na '5A4295F44353BD29EEA5660EAE408B8928C03666473DB0
+1CFFC4CCFC4E1CEA969C9AD29EB65D4B6CDEE721D063C66734B2C3'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_6"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">nq5"
+                  }
+                }
+              },
+              title "nq5"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 200,
+              seq-data ncbi2na '225F5AC019DE71A324B70B4463DECBCE782C00973F2C90
+1D807E64EFFC391BF7B322003EFD75B3C4123186CA8A9374BE8838'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/n",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 13
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "DbGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 16575
+        }
+      },
+      program-options {
+        {
+          name "GiList",
+          value big-integer-list {
+            202,
+            204,
+            206
+          }
+        },
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type diags,
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              gi 202
+            },
+            loc {
+              int {
+                from 0,
+                to 197,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 197,
+                strand minus,
+                id gi 202
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 351
+              },
+              {
+                id str "blast_score",
+                value int 351
+              },
+              {
+                id str "e_value",
+                value real { 170777821745315, 10, -59 }
+              },
+              {
+                id str "bit_score",
+                value real { 163731364889916, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              gi 202
+            },
+            loc {
+              int {
+                from 1,
+                to 198,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 1,
+                to 198,
+                strand plus,
+                id gi 202
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 346
+              },
+              {
+                id str "blast_score",
+                value int 346
+              },
+              {
+                id str "e_value",
+                value real { 83580322771693, 10, -58 }
+              },
+              {
+                id str "bit_score",
+                value real { 161440322189727, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              gi 202
+            },
+            loc {
+              int {
+                from 2,
+                to 199,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 2,
+                to 199,
+                strand plus,
+                id gi 202
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 344
+              },
+              {
+                id str "blast_score",
+                value int 344
+              },
+              {
+                id str "e_value",
+                value real { 157751346037868, 10, -58 }
+              },
+              {
+                id str "bit_score",
+                value real { 160523905109651, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              gi 202
+            },
+            loc {
+              int {
+                from 2,
+                to 199,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 2,
+                to 199,
+                strand minus,
+                id gi 202
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 341
+              },
+              {
+                id str "blast_score",
+                value int 341
+              },
+              {
+                id str "e_value",
+                value real { 409050208231277, 10, -58 }
+              },
+              {
+                id str "bit_score",
+                value real { 159149279489538, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              gi 202
+            },
+            loc {
+              int {
+                from 1,
+                to 198,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 1,
+                to 198,
+                strand minus,
+                id gi 202
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 333
+              },
+              {
+                id str "blast_score",
+                value int 333
+              },
+              {
+                id str "e_value",
+                value real { 519102041249987, 10, -57 }
+              },
+              {
+                id str "bit_score",
+                value real { 155483611169235, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              gi 202
+            },
+            loc {
+              int {
+                from 0,
+                to 197,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 197,
+                strand plus,
+                id gi 202
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 322
+              },
+              {
+                id str "blast_score",
+                value int 322
+              },
+              {
+                id str "e_value",
+                value real { 17081751503104, 10, -54 }
+              },
+              {
+                id str "bit_score",
+                value real { 150443317228818, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "gi:202"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type diags,
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_3",
+              gi 204
+            },
+            loc {
+              int {
+                from 0,
+                to 197,
+                strand minus,
+                id local str "Query_3"
+              },
+              int {
+                from 0,
+                to 197,
+                strand minus,
+                id gi 204
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 371
+              },
+              {
+                id str "blast_score",
+                value int 371
+              },
+              {
+                id str "e_value",
+                value real { 297674185141787, 10, -62 }
+              },
+              {
+                id str "bit_score",
+                value real { 172895535690674, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_3",
+              gi 204
+            },
+            loc {
+              int {
+                from 2,
+                to 199,
+                strand plus,
+                id local str "Query_3"
+              },
+              int {
+                from 2,
+                to 199,
+                strand plus,
+                id gi 204
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 364
+              },
+              {
+                id str "blast_score",
+                value int 364
+              },
+              {
+                id str "e_value",
+                value real { 274968394062743, 10, -61 }
+              },
+              {
+                id str "bit_score",
+                value real { 169688075910409, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_3",
+              gi 204
+            },
+            loc {
+              int {
+                from 2,
+                to 199,
+                strand minus,
+                id local str "Query_3"
+              },
+              int {
+                from 2,
+                to 199,
+                strand minus,
+                id gi 204
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 356
+              },
+              {
+                id str "blast_score",
+                value int 356
+              },
+              {
+                id str "e_value",
+                value real { 348946539483234, 10, -60 }
+              },
+              {
+                id str "bit_score",
+                value real { 166022407590106, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_3",
+              gi 204
+            },
+            loc {
+              int {
+                from 1,
+                to 198,
+                strand plus,
+                id local str "Query_3"
+              },
+              int {
+                from 1,
+                to 198,
+                strand plus,
+                id gi 204
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 353
+              },
+              {
+                id str "blast_score",
+                value int 353
+              },
+              {
+                id str "e_value",
+                value real { 904820518000124, 10, -60 }
+              },
+              {
+                id str "bit_score",
+                value real { 164647781969992, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_3",
+              gi 204
+            },
+            loc {
+              int {
+                from 0,
+                to 197,
+                strand plus,
+                id local str "Query_3"
+              },
+              int {
+                from 0,
+                to 197,
+                strand plus,
+                id gi 204
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 348
+              },
+              {
+                id str "blast_score",
+                value int 348
+              },
+              {
+                id str "e_value",
+                value real { 442827939670549, 10, -59 }
+              },
+              {
+                id str "bit_score",
+                value real { 162356739269803, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_3",
+              gi 204
+            },
+            loc {
+              int {
+                from 1,
+                to 198,
+                strand minus,
+                id local str "Query_3"
+              },
+              int {
+                from 1,
+                to 198,
+                strand minus,
+                id gi 204
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 341
+              },
+              {
+                id str "blast_score",
+                value int 341
+              },
+              {
+                id str "e_value",
+                value real { 409050208231277, 10, -58 }
+              },
+              {
+                id str "bit_score",
+                value real { 159149279489538, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "gi:204"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type diags,
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_5",
+              gi 206
+            },
+            loc {
+              int {
+                from 2,
+                to 199,
+                strand plus,
+                id local str "Query_5"
+              },
+              int {
+                from 2,
+                to 199,
+                strand plus,
+                id gi 206
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 343
+              },
+              {
+                id str "blast_score",
+                value int 343
+              },
+              {
+                id str "e_value",
+                value real { 21672428979206, 10, -57 }
+              },
+              {
+                id str "bit_score",
+                value real { 160065696569613, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_5",
+              gi 206
+            },
+            loc {
+              int {
+                from 1,
+                to 198,
+                strand plus,
+                id local str "Query_5"
+              },
+              int {
+                from 1,
+                to 198,
+                strand plus,
+                id gi 206
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 341
+              },
+              {
+                id str "blast_score",
+                value int 341
+              },
+              {
+                id str "e_value",
+                value real { 409050208231277, 10, -58 }
+              },
+              {
+                id str "bit_score",
+                value real { 159149279489538, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_5",
+              gi 206
+            },
+            loc {
+              int {
+                from 0,
+                to 197,
+                strand minus,
+                id local str "Query_5"
+              },
+              int {
+                from 0,
+                to 197,
+                strand minus,
+                id gi 206
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 337
+              },
+              {
+                id str "blast_score",
+                value int 337
+              },
+              {
+                id str "e_value",
+                value real { 145718495074094, 10, -57 }
+              },
+              {
+                id str "bit_score",
+                value real { 157316445329386, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_5",
+              gi 206
+            },
+            loc {
+              int {
+                from 1,
+                to 198,
+                strand minus,
+                id local str "Query_5"
+              },
+              int {
+                from 1,
+                to 198,
+                strand minus,
+                id gi 206
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 336
+              },
+              {
+                id str "blast_score",
+                value int 336
+              },
+              {
+                id str "e_value",
+                value real { 200193140329338, 10, -57 }
+              },
+              {
+                id str "bit_score",
+                value real { 156858236789348, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_5",
+              gi 206
+            },
+            loc {
+              int {
+                from 0,
+                to 197,
+                strand plus,
+                id local str "Query_5"
+              },
+              int {
+                from 0,
+                to 197,
+                strand plus,
+                id gi 206
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 329
+              },
+              {
+                id str "blast_score",
+                value int 329
+              },
+              {
+                id str "e_value",
+                value real { 184922942755404, 10, -56 }
+              },
+              {
+                id str "bit_score",
+                value real { 153650777009083, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_5",
+              gi 206
+            },
+            loc {
+              int {
+                from 2,
+                to 199,
+                strand minus,
+                id local str "Query_5"
+              },
+              int {
+                from 2,
+                to 199,
+                strand minus,
+                id gi 206
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 319
+              },
+              {
+                id str "blast_score",
+                value int 319
+              },
+              {
+                id str "e_value",
+                value real { 442930864603991, 10, -55 }
+              },
+              {
+                id str "bit_score",
+                value real { 149068691608705, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 66
+              },
+              {
+                id str "num_positives",
+                value int 66
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 335, 10, -1 }
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "gi:206"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 130,
+              to 151,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 164,
+              to 188,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame plus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { -1, 10, 0 },
+        k { -1, 10, 0 },
+        h { -1, 10, 0 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 16575",
+      "Effective search space used: 16575",
+      "Length adjustment: 15"
+    }
+  }
+}

@@ -1,21 +1,28 @@
-//! The walk of the diagonal offsets over the hard chunks of a protein database sequence with
-//! `-db_hard_mask` (BLASTP and BLASTX; series NP, M4b-3b), where the stored masks may overlap or
-//! nest, or be out of the order of their start. NCBI searches every chunk of the sequence's hard
-//! ranges whatever its length (`core::subject_split::HardChunk::length`, NCBI's `Int4`: negative
-//! for the inverted range between two masks that overlap), and after each chunk moves the diagonal
-//! offset by the chunk's length plus the window: back where the length is negative, so that a
-//! later chunk can meet the word hits of an earlier one on its diagonals. [`DiagonalWalk`] is the
-//! one owner of that walk: the two programs' searches (`blastp::blast_engine::db_masked`,
-//! `blastx::search::db_masked`) and LOSAT's refusal before the search
-//! (`blastinput::db_mask::HardMaskShape::of_scan`) all walk the chunks of
-//! `core::subject_split::HardSplitState` with it, so they cannot disagree. It gives what the word
-//! finder reads of each chunk ([`ChunkWork`]), the margins by which the sequence's word hits
-//! reach past it ([`DiagonalMargins`]), and from them how the search moves the diagonal offset
-//! so that no entry of another sequence reaches a sequence's hits ([`DiagonalWalk::start`],
-//! [`DiagonalWalk::after`]: PD-LOSAT-NCBI-DEFECTS exception 29, the Owner's answer Q5 = B of M4b,
-//! 2026-11-22). [`NcbiWalk`] follows NCBI's one-thread offsets over the searched sequences before
-//! the search and names the sequences whose hits meet entries that no sequence wrote, which the
-//! search starts on such a table at NCBI's offset ([`HardStarts`], [`TableStart::New`]).
+//! The walk of the diagonal offsets over the hard chunks of a database sequence with
+//! `-db_hard_mask` (BLASTP and BLASTX, series NP M4b-3b; TBLASTN and TBLASTX, M4b-3c part 2),
+//! where the stored masks may overlap or nest (or, in BLASTP and BLASTX, be out of the order of
+//! their start), and NCBI's one-thread diagonal-offset walk for those hard-masked searches and
+//! translated `-db_soft_mask` searches (TBLASTN and TBLASTX; series NP, M4b-T3) whose
+//! out-of-order masks make a later chunk scan letters before it. NCBI searches every chunk of the
+//! sequence's hard ranges whatever its length (`core::subject_split::HardChunk::length`, NCBI's
+//! `Int4`: negative for the inverted range between two masks that overlap), and after each chunk
+//! moves the diagonal offset by the chunk's length plus the window: back where the length is
+//! negative, so that a later chunk can meet the word hits of an earlier one on its diagonals.
+//! [`DiagonalWalk`] is the one owner of that walk: the searches (`blastp::blast_engine::db_masked`,
+//! `blastx::search::db_masked`, `tblastn::search_gapped`, `tblastx::blast_engine`) and LOSAT's
+//! refusal before the search (`blastinput::db_mask::HardMaskShape::of_scan`, `translated_walk`)
+//! all walk the chunks of `core::subject_split::HardSplitState` with it, so they cannot disagree.
+//! It gives what the word finder reads of each chunk ([`ChunkWork`]), the margins by which the
+//! sequence's word hits reach past it ([`DiagonalMargins`]), and from them how the search moves
+//! the diagonal offset so that no entry of another sequence reaches a sequence's hits
+//! ([`DiagonalWalk::start`], [`DiagonalWalk::after`]: PD-LOSAT-NCBI-DEFECTS exception 29, the
+//! Owner's answer Q5 = B of M4b, 2026-11-22). [`NcbiWalk`] follows NCBI's one-thread offsets over
+//! the searched sequences in database order: for `-db_hard_mask` protein searches (`plain`,
+//! `masked`) and translated searches (`translated_masked`) it names the sequences whose hits meet
+//! entries that no sequence wrote or where a clear falls inside them, and for `-db_soft_mask`
+//! translated searches ([`NcbiWalk::translated`]) it gives the table start of each sequence whose
+//! scan reads before a chunk, so that all start on NCBI's table at NCBI's offset
+//! ([`HardStarts`], [`TableStart::New`]).
 
 /// What the word finder reads of one hard chunk ([`DiagonalWalk::chunk`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,10 +92,10 @@ pub(crate) enum TableEnd {
     Clear,
 }
 
-/// The diagonal table of a protein program's word finder as a `-db_hard_mask` search moves it
+/// The diagonal table of a protein or translated program's word finder as a masked search moves it
 /// between its sequences (BLASTP's `blastp::blast_engine::BlastpSubjectScratch`, BLASTX's
-/// `blastx::seed::Diagonals`), so that both programs' searches change their tables the one way of
-/// [`TableStart::apply`] and [`TableEnd::apply`].
+/// `blastx::seed::Diagonals`, TBLASTN's `tblastn::search_init::Diagonals`), so that each search
+/// changes its table the one way of [`TableStart::apply`] and [`TableEnd::apply`].
 pub(crate) trait HardTable {
     /// The error of a move that takes the offset past Int4 (none in BLASTP, whose walk keeps the
     /// offset below INT4_MAX / 4).
@@ -227,6 +234,13 @@ impl DiagonalWalk {
         }
     }
 
+    /// Sets the length of the current reading frame (its sentinel byte offset) for a translated
+    /// subject whose six frames share one diagonal walk (`NcbiWalk::translated_masked`,
+    /// `tblastn::search_gapped`).
+    pub(crate) fn frame(&mut self, length: usize) {
+        self.length = i64::try_from(length).unwrap_or(i64::MAX);
+    }
+
     /// The next chunk, at `offset` in the sequence with the length `length` (NCBI's `Int4`): what
     /// its word finder reads. The diagonal offset then moves on by the length and the window.
     pub(crate) fn chunk(&mut self, offset: usize, length: i32) -> ChunkWork {
@@ -305,11 +319,6 @@ impl DiagonalWalk {
         }
     }
 
-    /// The letters of a word.
-    pub(crate) fn word(&self) -> i32 {
-        i32::try_from(self.word).unwrap_or(i32::MAX)
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 87-107, 110-155
     /// The sequence starts on the table of [`TableStart::New`]: every entry is the one that no
     /// sequence wrote since NCBI's thread made its table (0 without the flag: the `calloc` of
@@ -342,6 +351,22 @@ impl DiagonalWalk {
         i32::try_from(self.window).unwrap_or(i32::MAX)
     }
 
+    /// The walk of `(sentinel, offset, length)` chunk items from a sequence's start (`sentinel` is
+    /// the sequence's or frame's length before its sentinel byte).
+    fn ahead_items(
+        word: i32,
+        window: i32,
+        zero_words: bool,
+        items: impl IntoIterator<Item = (usize, usize, i32)>,
+    ) -> Self {
+        let mut ahead = Self::new(word, window, 0, zero_words);
+        for (sentinel, offset, length) in items {
+            ahead.frame(sentinel);
+            ahead.chunk(offset, length);
+        }
+        ahead
+    }
+
     /// The walk of the chunks `chunks` of a sequence of `length` letters from its start, as the
     /// search's walk reads them (a one word that covers the sentinel taken to hit).
     fn ahead(
@@ -350,11 +375,14 @@ impl DiagonalWalk {
         length: usize,
         chunks: &[crate::core::subject_split::HardChunk],
     ) -> Self {
-        let mut ahead = Self::new(word, window, length, true);
-        for chunk in chunks {
-            ahead.chunk(chunk.offset, chunk.length);
-        }
-        ahead
+        Self::ahead_items(
+            word,
+            window,
+            true,
+            chunks
+                .iter()
+                .map(|chunk| (length, chunk.offset, chunk.length)),
+        )
     }
 
     /// The sequence does not start on a new table, and the search moved the offset up by `before`
@@ -399,10 +427,7 @@ impl DiagonalWalk {
     ///   chunk below the chunk after the clear would meet the cleared entries; NCBI's one-thread
     ///   search has no clear inside it, else it is `ncbi`). From the cleared offset its chunks
     ///   lie within the walk's extent of the window, which reaches INT4_MAX / 4 (536,870,911
-    ///   positions) only for a protein whose chunks move the offset that far: each chunk moves it
-    ///   by its letters plus the window, and the chunks with words are disjoint parts of the
-    ///   sequence (else `HardMaskShape::PartsOutOfOrder`), so it takes more than 536 million
-    ///   letters or about 12 million masks (at the window 40 and the word 3).
+    ///   positions) only for a protein whose chunks move the offset that far.
     /// - A sequence with no margin below its start whose walk does not read back and has no clear
     ///   inside keeps its offset ([`TableStart::Keep`]).
     pub(crate) fn start(
@@ -567,6 +592,20 @@ impl NcbiStart {
     }
 }
 
+/// What [`NcbiWalk::translated_masked`] learns of one searched translated sequence across its six
+/// reading frames' hard chunks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct TranslatedStart {
+    /// `Some` where NCBI's one-thread search starts the sequence on a table whose unwritten
+    /// entries its hits meet, or clears the table inside it (`TableStart::New`).
+    pub(crate) ncbi: Option<NcbiStart>,
+    /// How far the lowest chunk that reads a word that can hit lies below the sequence's start.
+    pub(crate) below_start: i64,
+    /// The offset in its frame of the first one word past its frame's sentinel that can change a
+    /// result (only when `zero_words` is true).
+    pub(crate) word_past_end: Option<usize>,
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1432
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 476-500
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 87-107, 162-173
@@ -582,17 +621,25 @@ impl NcbiStart {
 // subject offset `s` of a chunk at offset `D` on an entry `u` without the flag stores itself as on
 // a cleared entry only where `s + D - u` is at least the window (two-hit), or not below 0
 // (one-hit, whose window is 0).
-/// NCBI's one-thread walk of the diagonal offset over the searched sequences of a `-db_hard_mask`
-/// search with the word `word` and the window `window`, in the order of the search, before the
-/// search: for each sequence its [`NcbiStart`], and whether the search starts it on a table of
-/// entries that no sequence wrote at that offset ([`TableStart::New`]): where a hit of its walk
-/// can meet such an entry (its lowest chunk that reads a word lies less than the window past the
-/// entries, or below them in the one-hit search: the first searched sequence's walk below its
-/// start, a sequence searched within a few hundred letters of the start or of a clear, or one
-/// after walks that went back), or where NCBI's walk clears the table after one of its chunks
-/// before the last. Every other sequence meets such entries nowhere, and no clear falls inside
-/// it, so that its result is NCBI's wherever no entry of another sequence reaches it, at any
-/// offset ([`DiagonalWalk::start`]).
+/// NCBI's one-thread walk of the diagonal offset over the searched sequences in database order,
+/// with the word `word` and the window `window`:
+/// - For `-db_hard_mask` protein searches (`plain`, `masked`), before the search: for each
+///   sequence its [`NcbiStart`], and whether the search starts it on a table of entries that no
+///   sequence wrote at that offset ([`TableStart::New`]): where a hit of its walk can meet such an
+///   entry (its lowest chunk that reads a word lies less than the window past the entries, or
+///   below them in the one-hit search: the first searched sequence's walk below its start, a
+///   sequence searched within a few hundred letters of the start or of a clear, or one after walks
+///   that went back), or where NCBI's walk clears the table after one of its chunks before the
+///   last. Every other sequence meets such entries nowhere, and no clear falls inside it, so that
+///   its result is NCBI's wherever no entry of another sequence reaches it, at any offset
+///   ([`DiagonalWalk::start`]).
+/// - For `-db_soft_mask` translated searches ([`NcbiWalk::translated`], series NP, M4b-T3), on the
+///   first sequence whose scan reads before a chunk: the [`NcbiStart`] of each searched sequence
+///   across its six frames' searched chunks, so that every lead sequence starts at NCBI's
+///   one-thread offset and cleared state at every thread count.
+/// - For `-db_hard_mask` translated searches ([`NcbiWalk::translated_masked`], series NP, M4b-3c
+///   part 2), when any sequence has a negative frame chunk: the [`TranslatedStart`] of each
+///   searched sequence across its six frames' hard chunks.
 #[derive(Debug, Clone)]
 pub(crate) struct NcbiWalk {
     word: i32,
@@ -683,6 +730,81 @@ impl NcbiWalk {
             self.exit(chunk.length);
         }
         (new.then_some(start), ahead.reads_back)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,804-855,
+    // 1318-1331,1368-1369,1429
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107,162-173
+    // In a translated search each thread keeps one diagonal table for the database; subjects
+    // shorter than three times the word size plus two bases are skipped with no exit, and every
+    // searched chunk of each of the six frames (in NCBI's order, omitting chunks without a scan
+    // range) exits by clearing the table when the offset has reached INT4_MAX / 4 or else adding
+    // the chunk's length and the window.
+    /// A searched translated subject whose searched chunks (across its six frames in NCBI's order;
+    /// none for a subject too short to be searched) have lengths `chunk_lengths`: its
+    /// [`NcbiStart`] before the subject's first chunk, after which the walk exits on each chunk.
+    pub(crate) fn translated(
+        &mut self,
+        chunk_lengths: impl IntoIterator<Item = usize>,
+    ) -> NcbiStart {
+        let start = self.here();
+        for length in chunk_lengths {
+            self.exit(i32::try_from(length).unwrap_or(i32::MAX));
+        }
+        start
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276,478-500,804-855,
+    // 1318-1331,1368-1369,1429
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66,87-107,162-173
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-551,762-802
+    // In a translated `-db_hard_mask` search one diagonal table walks the hard chunks of every
+    // frame (+1, +2, +3, -1, -2, -3) of every searched sequence in database order, moving the
+    // offset by each chunk's `Int4` length plus the window and clearing at INT4_MAX / 4.
+    /// A searched translated subject with `-db_hard_mask` whose chunks across its six frames in
+    /// NCBI's order are `chunks` (`(frame_length, offset, ncbi_length)` each; empty for a subject
+    /// too short to be searched): returns its [`TranslatedStart`] (its [`NcbiStart`] where it
+    /// meets unwritten entries or clears inside it, its below-start margin, and, when `zero_words`
+    /// is true, the first one word past a frame's sentinel that can change a result), then advances
+    /// the walk across every chunk.
+    pub(crate) fn translated_masked(
+        &mut self,
+        chunks: &[(usize, usize, i32)],
+        zero_words: bool,
+    ) -> TranslatedStart {
+        if chunks.is_empty() {
+            return TranslatedStart::default();
+        }
+        let start = self.here();
+        let ahead = DiagonalWalk::ahead_items(self.word, self.window, true, chunks.iter().copied());
+        let margins = ahead.margins();
+        let clears_inside = ahead
+            .inner
+            .is_some_and(|inner| self.offset + inner >= CLEAR_AT);
+        let new = (ahead.lowest_scan.is_some() && self.meets_unwritten(start, margins.below_start))
+            || clears_inside;
+        let ncbi = new.then_some(start);
+        let word_past_end = if !zero_words {
+            None
+        } else if let Some(ncbi_start) = ncbi {
+            let mut walk = DiagonalWalk::new(self.word, self.window, 0, true);
+            walk.start_on_ncbi_table(ncbi_start);
+            for &(frame_len, offset, length) in chunks {
+                walk.frame(frame_len);
+                walk.chunk(offset, length);
+            }
+            walk.word_past_end()
+        } else {
+            ahead.word_past_end()
+        };
+        for &(_, _, length) in chunks {
+            self.exit(length);
+        }
+        TranslatedStart {
+            ncbi,
+            below_start: margins.below_start,
+            word_past_end,
+        }
     }
 }
 

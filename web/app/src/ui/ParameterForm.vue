@@ -91,24 +91,26 @@ function onConffile(event: Event): void {
           <span v-if="extraChanged" class="visually-hidden">, changed from the default</span>
         </label>
         <div class="param-control">
-          <input
-            :id="`${prefix}-extra`"
-            class="extra-options"
-            type="text"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            :value="extra"
-            v-bind="refusedMark(extraRefused, refusalId)"
-            :data-testid="`${prefix}-extra`"
-            @input="model.setExtra(($event.target as HTMLInputElement).value)"
-          />
-          <HelpTip
-            v-if="model.extraHelp"
-            :id="`${prefix}-extra`"
-            label="About Additional options"
-            :text="model.extraHelp"
-          />
+          <span class="control-tip">
+            <input
+              :id="`${prefix}-extra`"
+              class="extra-options"
+              type="text"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              :value="extra"
+              v-bind="refusedMark(extraRefused, refusalId)"
+              :data-testid="`${prefix}-extra`"
+              @input="model.setExtra(($event.target as HTMLInputElement).value)"
+            />
+            <HelpTip
+              v-if="model.extraHelp"
+              :id="`${prefix}-extra`"
+              label="About Additional options"
+              :text="model.extraHelp"
+            />
+          </span>
         </div>
       </div>
       <!-- The file that -conffile names, chosen as the counts file of a row is (ParameterField): the search reads it under that name. -->
@@ -139,17 +141,19 @@ function onConffile(event: Event): void {
               :data-testid="`${prefix}-conffile-file`"
               @change="onConffile"
             />
-            <template v-if="conffile">
-              <span class="file-name" :data-testid="`${prefix}-conffile-name`">{{ conffile.name }} ({{ formatBytes(conffile.size) }})</span>
-              <button type="button" class="link" :data-testid="`${prefix}-conffile-remove`" @click="model.setConffile(undefined)">Remove</button>
-            </template>
-            <span v-else class="file-missing" role="status" :data-testid="`${prefix}-conffile-missing`">Choose the file that the search reads as {{ conffileName }}.</span>
+            <span class="hint-line">
+              <template v-if="conffile">
+                <span class="file-name" :data-testid="`${prefix}-conffile-name`">{{ conffile.name }} ({{ formatBytes(conffile.size) }})</span><wbr />
+                <button type="button" class="link" :data-testid="`${prefix}-conffile-remove`" @click="model.setConffile(undefined)">Remove</button>
+              </template>
+              <span v-else class="file-missing" role="status" :data-testid="`${prefix}-conffile-missing`">Choose the file that the search reads as {{ conffileName }}.</span>
+              <HelpTip
+                :id="`${prefix}-conffile`"
+                label="About -conffile"
+                text="The settings file that the losat command line reads with -conffile, in place of the program's .ini file: the search reads the file chosen here under the name in Additional options."
+              />
+            </span>
           </span>
-          <HelpTip
-            :id="`${prefix}-conffile`"
-            label="About -conffile"
-            text="The settings file that the losat command line reads with -conffile, in place of the program's .ini file: the search reads the file chosen here under the name in Additional options."
-          />
         </div>
       </div>
     </div>

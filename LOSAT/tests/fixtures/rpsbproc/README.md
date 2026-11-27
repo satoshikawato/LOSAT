@@ -327,3 +327,53 @@ changes are of `use` `tied`:
   query with a NaN E-value or bit score), and the counts must equal the table's. Lines are counted as a diff counts
   them: the lines of each block that a longest common subsequence of NCBI's and LOSAT's block leaves out, NCBI's
   (`ncbi_lines`, removed) and LOSAT's (`losat_lines`, added), so that a changed line after a moved one counts too.
+
+## Bytes outside 0x20..0x7E in an archive (line RG-KB, item 9(a))
+
+NCBI's rpsbproc reads the archive with the toolkit's typed reader. In a VisibleString, each byte outside
+0x20..0x7E is read as `#`, and NCBI posts `Error: (803.7) <stack path>`, `Bad char [0x<HEX>] in string at line <N>` and
+the piece of the string being read. The posts come before the session, because the object is read whole first. A
+UTF8String, such as a DefLine's title, keeps its bytes and posts nothing. The archives in `root/` are copies of
+`q_tab_utf8.asn` with such bytes, made by `K/kb/i9a/mkin.py`, `K/kb/i9a/agent1/tools/mkin2.py`, and
+`K/kb/i9a/review/mkrev6.py` of the task folder. NCBI's binary and Bioconda's 0.5.1 gave the
+same bytes (2026-11-24), run as above:
+
+- `vis_all.asn` (`vis_all.doms`, `vis_all.full`) puts such bytes in these places:
+  - the `ident` (0x7F) and a query's `local str`;
+  - a title with `""` and two bytes in one piece, and a `comment` across a line end;
+  - a title whose byte is past the first 128 bytes of its run, and a `name`;
+  - a `Seq-annot`'s `name` and its descriptor's `comment`, and a `string-list` of a `Blast4-value`;
+  - a Dense-seg id, the search statistics and the archive's `messages`.
+- `cm_bad.asn` (`cm_bad.doms`) has a `comment` with 0xE9, followed in the same `descr` by `nonesuch 5`, which is not a
+  Seqdesc. The post comes first. Then NCBI's reader fails, and the run ends with no session and exit status 0.
+- `two_e9.asn` (`two_e9.doms`) holds two archives, one after the other, with 0xE9 in a title of the second. Each object
+  is read by a new stream, whose line 1 is the rest of the line on which the object before it ended. The title is on
+  line 47 of the first object, so the post names line 48.
+- `t_nul.asn` (`t_nul.doms`) has a 0 byte in a title. The piece is quoted with the byte as it is.
+- `t_tab_title2.asn` (`t_tab_title2.doms`) has a TAB (0x09) at the start of a title, a second one after 130 more
+  bytes and a 0xE9 after it. A TAB is a byte outside 0x20..0x7E too. Each of the three posts quotes the piece that
+  holds the byte: the first 128 bytes of the string, then the rest.
+- `t_tab_delayed.asn` (`t_tab_delayed.doms`) has a TAB in a `pub`'s author name, which NCBI's reader skips (the
+  delayed member `Auth-list.names`: its post quotes no piece), and in the `pub`'s title.
+- `t_cr_typed.asn` (`t_cr_typed.doms`) has a lone CR (0x0D) inside a `comment`, followed by 0xE9. The CR ends a line,
+  so the post names the next line and quotes the piece after the CR.
+
+## Title-less annotated queries (line RG-KB, item 9c)
+
+When a query `Bioseq` has no `title` descriptor but has `annot`, NCBI's `GetDescrTitleFromBioseq` scans its `ftable`
+annotations in order, taking `Gene-ref.desc` when `CBioseq::IsNa` (`dna`, `rna`, `na`) and the first `Prot-ref.name`
+otherwise (`aa`, `not-set`, `other`). An explicit `title` descriptor (even empty `""`) takes precedence over `annot`,
+and a `NULL` `Seq-annot` or `Seq-feat` reached before a matching feature throws `CCoreException::eNullPtr` with a
+host-dependent stack trace (refused by LOSAT). NCBI's official 0.5.1 binary and Bioconda's 0.5.1 gave the same bytes
+on the compare rows below (2026-11-26), run as above:
+
+- `annot_title_prot.asn` (`annot_title_prot.doms`, `annot_title_prot.full`) holds 6 `aa` queries covering `Prot-ref.name`
+  selection (skipping non-`ftable` annotations, non-`prot` features, `Prot-ref` without `name`, and empty `name {}`, with
+  a 0xE9 byte in `Prot-ref.name` posting 803.7 and replaced by `#`), `:Seq-annot`/`:Seq-feat` pointer syntax with a
+  `name` descriptor and ignored `Seq-feat.title`, empty first `Prot-ref.name` stopping before a later feature, empty
+  `title ""` overriding `annot`, explicit `title` overriding `annot { NULL }`, and a match preceding `NULL` elements.
+- `annot_title_na.asn` (`annot_title_na.doms`) holds 7 queries covering `dna` with `gene` lacking `desc` (empty title),
+  `dna` taking `Gene-ref.desc` with 0x7F posting 803.7, empty `Gene-ref.desc ""` stopping before a later feature, `rna`
+  and `na` taking `Gene-ref.desc`, and `not-set`/`other` printing `Nucleotide` while taking `Prot-ref.name`.
+- `refuse_annot_null.asn` (`refuse_annot_null.doms`) and `refuse_ftable_null.asn` (`refuse_ftable_null.doms`) are
+  title-less queries whose `annot` or `ftable` reaches `NULL` before a matching feature (refused).

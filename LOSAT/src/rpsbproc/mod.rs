@@ -35,6 +35,7 @@ use std::io::{BufReader, Read, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_exception::{err_post_x, err_post_x_bytes, NcbiException};
+use crate::report::serial::asn_types::read::{Post, PostSink};
 
 use archive::{ArchiveStream, ParamValue, Queries, RequestBody, SeqEntry, Subject};
 use args::TargetData;
@@ -257,6 +258,16 @@ impl Report {
     }
 }
 
+/// What NCBI's reader posts while it reads an archive, written when it is posted (the stream's
+/// posts, `ArchiveStream::posts`): before rpsbproc uses the object, also when the object then
+/// fails to read. rpsbproc sets no prefix for the posts (`Post::line`).
+impl PostSink for Report {
+    fn post(&mut self, post: Post) {
+        self.before_post();
+        self.diag.post_bytes(&post.line(None));
+    }
+}
+
 /// A line that rpsbproc writes to `cerr` (`text` streamed to `cerr`, then `endl`): standard error,
 /// whatever the `-logfile`.
 fn cerr_line(text: &str) {
@@ -290,7 +301,15 @@ impl Diagnostics {
 
     /// `LOG_POST_X`: rpsbproc's messages are its text alone (the old post format).
     fn post(&mut self, text: &str) {
-        self.post_bytes(format!("{text}\n").as_bytes());
+        self.post_line_bytes(text.as_bytes());
+    }
+
+    /// `LOG_POST_X` of raw bytes (adds the trailing newline).
+    fn post_line_bytes(&mut self, bytes: &[u8]) {
+        let mut line = Vec::with_capacity(bytes.len() + 1);
+        line.extend_from_slice(bytes);
+        line.push(b'\n');
+        self.post_bytes(&line);
     }
 
     /// Writes `bytes` where the diagnostics go; on standard error as `write_stderr_bytes`
@@ -460,10 +479,10 @@ fn find_data_path(diag: &mut Diagnostics, data_path: Option<&OsStr>) -> Option<O
             if found(datapath) {
                 return Some(datapath.to_os_string());
             }
-            diag.post(&format!(
-                "Specified data location ({}) does not exist or does not contain data files",
-                datapath.to_string_lossy()
-            ));
+            let mut msg = b"Specified data location (".to_vec();
+            msg.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(datapath));
+            msg.extend_from_slice(b") does not exist or does not contain data files");
+            diag.post_line_bytes(&msg);
             None
         }
         None => {
@@ -576,9 +595,15 @@ fn header_tail(evalue: f64, mode: DataMode, show_families: bool, target: TargetD
 // NCBI reference (598d8ae6): c++/src/objects/seq/Seq_descr.cpp:57-68
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:257-287
 // (`CSerialObject::x_GetVerifyData`, serialobject.cpp:180-221, reads `SERIAL_VERIFY_DATA_GET`
-// the same way; `NO`, `NEVER`, `DEFVALUE` and `DEFVALUE_ALWAYS` turn the checks off: a missing
-// member is no longer a read error, and the getter of an unset member gives its default instead
-// of throwing `CUnassignedMember`. `YES`, `ALWAYS` and other values keep NCBI's default.)
+// the same way; `NO`, `NEVER`, `DEFVALUE` and `DEFVALUE_ALWAYS` turn the checks off
+// (`ncbi_environment::verification_off`): a missing member is no longer a read error, and the
+// getter of an unset member gives its default instead of throwing `CUnassignedMember`. `YES`,
+// `ALWAYS` and other values keep NCBI's default.)
+// rpsbproc refuses the whole run where the other programs refuse only an input that fails a check
+// (`ncbi_environment::ReadVerification`): its readers of the archive and of the BLAST XML report
+// read past members that they do not keep without checking them, where NCBI's check of a
+// missing mandatory member stops the read by default and only posts under these values; a run
+// whose input would pass the check is not told apart from one that would not.
 // `OBJECTS_SEQ_DESCR_ALLOW_EMPTY` lets an empty `Seq-descr` read; LOSAT rejects it with any value
 // when the input is an archive (`xml` false: a BlastOutput document has no `Seq-descr`).
 // The other parameters of the readers are registry entries (`NCBI_CONFIG__SERIAL__...`, which
@@ -596,9 +621,7 @@ fn reader_variable(
         let changes = match name {
             "OBJECTS_SEQ_DESCR_ALLOW_EMPTY" => !xml,
             "SERIAL_VERIFY_DATA_READ" | "SERIAL_VERIFY_DATA_GET" => {
-                ["NO", "NEVER", "DEFVALUE", "DEFVALUE_ALWAYS"]
-                    .iter()
-                    .any(|off| value.eq_ignore_ascii_case(off))
+                crate::blastinput::ncbi_environment::verification_off(&value)
             }
             _ => false,
         };
@@ -691,23 +714,6 @@ fn init(
     settings: Result<ApplicationSettings, String>,
     diag: &mut Diagnostics,
 ) -> Result<Init, Outcome> {
-    // File names that are not UTF-8 are refused as the other programs refuse them (NCBI writes
-    // their bytes in its messages and the report's header).
-    for (role, name) in [
-        ("i", &args.infile),
-        ("o", &args.outfile),
-        ("d", &args.data_path),
-    ] {
-        if let Some(name) = name {
-            if let Err(error) = crate::blastinput::input_files::check_utf8_file_name(
-                std::path::Path::new(name),
-                role,
-                "rpsbproc",
-            ) {
-                return Err(Outcome::refused(error.to_string()));
-            }
-        }
-    }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044 (cited at the BLAST
     // programs in `cli::main_entry`): the application layer reads its environment and its
     // registry files (`rpsbproc.ini`, `.ncbirc`) before `Init`.
@@ -721,21 +727,21 @@ fn init(
     let mut header: Vec<u8> = b"#Post-RPSBLAST Processing Utility\n\n#Input data file:".to_vec();
     let mut input: Option<Box<dyn Read>> = None;
     if let Some(infile) = &args.infile {
-        let name = infile.to_string_lossy();
+        let name = crate::utils::os_bytes::os_str_bytes(infile);
         if file_exists(infile) {
             match std::fs::File::open(infile) {
                 Ok(file) => {
                     input = Some(Box::new(file));
                     header.push(b'\t');
-                    header.extend_from_slice(infile.as_encoded_bytes());
+                    header.extend_from_slice(&name);
                 }
                 Err(_) => {
-                    diag.post(&format!("Unable to open input file: {name}"));
+                    diag.post_line_bytes(&[b"Unable to open input file: ", &name[..]].concat());
                     status = E_INPUT_FILE_OPEN_ERROR;
                 }
             }
         } else {
-            diag.post(&format!("Input file does not exist: {name}"));
+            diag.post_line_bytes(&[b"Input file does not exist: ", &name[..]].concat());
             status = E_INPUT_FILE_OPEN_ERROR;
         }
     }
@@ -749,17 +755,15 @@ fn init(
     header.extend_from_slice(b"\n#Output data file:");
     let mut out: Box<dyn Write> = Box::new(crate::cli::standard_output());
     if let Some(outfile) = &args.outfile {
+        let name = crate::utils::os_bytes::os_str_bytes(outfile);
         match std::fs::File::create(outfile) {
             Ok(file) => {
                 out = Box::new(file);
                 header.push(b'\t');
-                header.extend_from_slice(outfile.as_encoded_bytes());
+                header.extend_from_slice(&name);
             }
             Err(_) => {
-                diag.post(&format!(
-                    "Unable to open output file: {}",
-                    outfile.to_string_lossy()
-                ));
+                diag.post_line_bytes(&[b"Unable to open output file: ", &name[..]].concat());
                 status = E_OUTPUT_FILE_OPEN_ERROR;
             }
         }
@@ -797,10 +801,10 @@ fn init(
     let mut data = CddData::default();
     match find_data_path(diag, args.data_path.as_deref()) {
         Some(path) => {
+            let base = crate::utils::os_bytes::os_str_bytes(&path);
             header.push(b'\t');
-            header.extend_from_slice(path.as_encoded_bytes());
-            let base = path.to_string_lossy().into_owned();
-            let file = |name: &str| format!("{base}/{name}");
+            header.extend_from_slice(&base);
+            let file = |name: &str| [&base[..], b"/", name.as_bytes()].concat();
             let files = DataFiles {
                 cddids: file("cddid.tbl"),
                 spfeats: file("cddannot.dat"),
@@ -809,18 +813,17 @@ fn init(
                 cdtrack: file("cdtrack.txt"),
                 famlinks: file("family_superfamily_links"),
             };
-            if path.to_str().is_none() {
-                return Err(Outcome::refused(
-                    "a data path that is not UTF-8 is not supported by LOSAT's rpsbproc"
-                        .to_string(),
-                ));
-            }
             match CddData::load(&files) {
                 Ok(loaded) => data = loaded,
                 Err(DataError::Missing(path)) => {
-                    diag.post(&format!(
-                        "Annotation data loading unsuccessful: Data file {path} does not exist"
-                    ));
+                    diag.post_line_bytes(
+                        &[
+                            b"Annotation data loading unsuccessful: Data file ".as_slice(),
+                            &path,
+                            b" does not exist",
+                        ]
+                        .concat(),
+                    );
                     status = E_DATA_LOAD_ERROR;
                 }
                 Err(DataError::Conversion(error)) => {
@@ -905,9 +908,8 @@ fn run_ready(args: &RpsbprocArgs, ready: Ready, diag: Diagnostics) -> Outcome {
         )
     } else {
         run_sessions(
-            &mut report,
             &header,
-            ArchiveStream::new(input, &[first]),
+            ArchiveStream::new(input, &[first], &mut report),
             &data,
             args.mode(),
             args.show_families,
@@ -942,9 +944,8 @@ fn value_variant(value: &ParamValue) -> &'static str {
 // both (main:886-896 are not reached). The refusals that a session's request decides come
 // before anything of that session.
 fn run_sessions<R: Read>(
-    report: &mut Report,
     header: &[u8],
-    mut stream: ArchiveStream<R>,
+    mut stream: ArchiveStream<R, &mut Report>,
     data: &CddData,
     mode: DataMode,
     show_families: bool,
@@ -953,15 +954,20 @@ fn run_sessions<R: Read>(
 ) -> Outcome {
     // NCBI's function-static motif positions (`MotifCheck`): one list for the whole run.
     let mut motif_state = MotifState::default();
+    // The report is where the stream's posts go (`PostSink for Report`): the stream writes them
+    // while it reads an object, rpsbproc between the objects.
+    let report: &mut Report = stream.posts();
     report.write(header);
     report.line(&[b"DATA"]);
     let mut session = 0usize;
     let mut queries_done = 0usize;
     loop {
-        if report.stopped() {
+        if stream.posts().stopped() {
             return Outcome::Exit(E_OK);
         }
-        let archive = match stream.next_archive() {
+        let archive = stream.next_archive();
+        let report: &mut Report = stream.posts();
+        let archive = match archive {
             Ok(Some(archive)) => archive,
             Ok(None) => break,
             Err(refusal) => return Outcome::refused(refusal.message),
@@ -1112,6 +1118,7 @@ fn run_sessions<R: Read>(
         report.line(&[b"ENDSESSION\t", session_text.as_bytes()]);
         report.progress(&format!("RPSBlast session {session} done..."));
     }
+    let report: &mut Report = stream.posts();
     report.line(&[b"ENDDATA"]);
     report.progress(&format!("All done, {queries_done} queries processed\n"));
     Outcome::Exit(E_OK)

@@ -1,0 +1,30 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "Error: (803.7) [blastx] Blast-def-line-set.E.title Bad char
+ [0xE9] in string at byte 18 d0 fam one"
+    },
+    {
+      code 2,
+      message "Error: NCBI C++ Exception: T0 ""/home/coremake/release_build/bu
+ild/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRele
+ase_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cp
+p"", line 377: Error: (CSerialException::eFormatError)
+ ncbi::CObjectIStreamAsnBinary::UnexpectedSysTagByte() - byte 6: unexpected
+ tag: GeneralString (27), should be: VisibleString (26) T0 ""/home/coremake/re
+lease_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_900
+8__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/
+member.cpp"", line 752: Error: (CSerialException::eFormatError)
+ ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading
+ title ( at Blast-def-line-set.[].[].title)"
+    }
+  }
+}

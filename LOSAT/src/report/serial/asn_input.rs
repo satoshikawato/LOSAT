@@ -282,8 +282,8 @@ impl Names {
     /// the messages, the algorithm options and the alignments too (NCBI 2.17.0, line RG item F3,
     /// agent C8, 2026-11-24).
     pub(crate) const BLAST_ARCHIVE: Names = Names {
-        document: "ASN.1 text",
-        reader: "ASN.1 text reader",
+        document: "BLAST archive",
+        reader: "archive reader",
         input: "input",
         allocator: "NCBI's reader",
         one_stream: true,

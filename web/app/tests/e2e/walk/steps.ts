@@ -20,14 +20,16 @@
 // value; two runs of the same form give the same bytes. A walk of the engine's build completes
 // runs, and compares them with the native CLI when it is given (runner.ts).
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { axeViolations } from '../support/axe';
 import { NATIVE } from '../support/native';
+import { REPOSITORY } from '../support/harness-server';
 import { navigate, reload } from '../support/navigate';
 import { described, storedOutputs } from '../support/search';
 import { alphabetOf, pickFor, type FixtureLibrary } from './fixtures';
+import { accessionLines } from '../../../src/domain/accession';
 import {
   emptyModel,
   expectedInputs,
@@ -105,6 +107,38 @@ export interface Walker {
   notes: string[];
   /** The outputs compared with the native CLI, the runs that ended each way, and the completed runs whose inputs the walk could not tell apart. */
   readonly counts: { compared: number; completed: number; failed: number; cancelled: number; refused: number; unmatched: number; offered: number; offeredLeftOut: number };
+  /** Sweep 2: runs started by 'start' and not yet checked, with the form they were started from. */
+  readonly pending: Array<{ runs: number[]; before: Submitted }>;
+  /** Sweep 2: the accessions that a 'fetch' step may send (its own and the race's records), while it runs. */
+  fetching: Set<string> | undefined;
+  /** Sweep 2: the stubbed sources' records, by accession. */
+  readonly fetchRecords: Map<string, string>;
+  /** Sweep 2: the requests that the stubbed sources answered. */
+  readonly fetchLog: string[];
+}
+
+/** Sweep 2: the fetch sources, stubbed at their real addresses (fetch.spec.ts). */
+const FETCH_SOURCES = /^https:\/\/(?:eutils\.ncbi\.nlm\.nih\.gov|www\.ebi\.ac\.uk|rest\.uniprot\.org|ngdc\.cncb\.ac\.cn)\//;
+const RACE = new Map([
+  ['MH011443.1', '>MH011443.1 Homo sapiens TP53 (TP53) gene, exon 5 and partial cds\nTGGGTTGATTCCACACCCCCGCCCGGCACCCGCGTCCGCGCCGTGGCCATCTAC\n'],
+  ['NP_414542.1', '>NP_414542.1 thr operon leader peptide\nMKRISTTITTTITITTGNGAG\n'],
+  ['P0AD86', '>sp|P0AD86|LPT_ECOLI thr operon leader peptide\nMKRISTTITTTITITTGNGAG\n'],
+]);
+const FETCH_ACCESSIONS = Object.freeze({ nucleotide: ['NM_000001.1', 'AB123456.1', 'MN000003.2'], protein: ['NP_000001.1', 'P12345', 'WP_000004.1'] });
+const FETCH_MISSING = Object.freeze({ nucleotide: 'XM_999999.9', protein: 'XP_999999.9' });
+
+function fetchRecords(fixtures: FixtureLibrary): Map<string, string> {
+  const records = new Map<string, string>();
+  for (const alphabet of ['nucleotide', 'protein'] as const) {
+    const texts = fixtures.texts.filter((text) => text.alphabet === alphabet);
+    FETCH_ACCESSIONS[alphabet].forEach((accession, i) => {
+      const text = texts[i % texts.length]!.text;
+      const next = text.indexOf('\n>', 1);
+      const first = next < 0 ? text : text.slice(0, next + 1);
+      records.set(accession, first.replace(/^>(\S*)/, `>${accession} $1`));
+    });
+  }
+  return records;
 }
 
 /** WebKit's report of a <select>'s own inline style (see `watch`). */
@@ -123,7 +157,34 @@ export async function watch(page: Page, fixtures: FixtureLibrary, outDir: string
     problems: [],
     notes: [],
     counts: { compared: 0, completed: 0, failed: 0, cancelled: 0, refused: 0, unmatched: 0, offered: 0, offeredLeftOut: 0 },
+    pending: [],
+    fetching: undefined,
+    fetchRecords: fetchRecords(fixtures),
+    fetchLog: [],
   };
+  await page.context().route(FETCH_SOURCES, async (route) => {
+    const url = new URL(route.request().url());
+    const id = url.searchParams.get('id') ?? url.searchParams.get('acc') ?? decodeURIComponent(url.pathname.split('/').pop()!).replace(/\.fasta$/, '');
+    walker.fetchLog.push(route.request().url());
+    if (walker.fetching === undefined) walker.problems.push(`fetch-unasked: a request to ${route.request().url()} outside a Fetch`);
+    else if (!walker.fetching.has(id)) walker.problems.push(`fetch-leak: a request for ${id} (${route.request().url()}); the Fetch was for ${[...walker.fetching].join(' ')}`);
+    const body = walker.fetchRecords.get(id) ?? RACE.get(id);
+    await route.fulfill({
+      status: body === undefined ? 404 : 200,
+      contentType: 'text/plain',
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: body ?? 'not found',
+    });
+  });
+  await page.addInitScript(() => {
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', { get: () => visibility, configurable: true });
+    Object.defineProperty(document, 'hidden', { get: () => visibility === 'hidden', configurable: true });
+    (window as unknown as { __walkSetVisible: (visible: boolean) => void }).__walkSetVisible = (visible) => {
+      visibility = visible ? 'visible' : 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+  });
   const engine = page.context().browser()?.browserType().name();
   page.on('pageerror', (error) => walker.problems.push(`page-error: ${error.message}`));
   page.on('console', (message) => {
@@ -135,6 +196,8 @@ export async function watch(page: Page, fixtures: FixtureLibrary, outDir: string
     // The walk's Chromium and Firefox runs still catch a style that the application itself adds,
     // and the violations below are checked in every engine.
     if (engine === 'webkit' && message.text() === WEBKIT_SELECT_CSP) return;
+    // Sweep 2: the browser's own line for a source's 404 (an accession it has not), which a page cannot keep quiet.
+    if (/^Failed to load resource: the server responded with a status of 404/.test(message.text()) && FETCH_SOURCES.test(message.location().url)) return;
     walker.problems.push(`console-error: ${message.text()}`);
   });
   await page.addInitScript(() => {
@@ -158,7 +221,7 @@ export async function watch(page: Page, fixtures: FixtureLibrary, outDir: string
     const url = new URL(request.url());
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
     const own = new URL(page.url() === 'about:blank' ? request.url() : page.url()).origin;
-    if (url.origin !== own) walker.problems.push(`other-origin: a request to ${request.url()}`);
+    if (url.origin !== own && !(FETCH_SOURCES.test(request.url()) && walker.fetching !== undefined)) walker.problems.push(`other-origin: a request to ${request.url()}`);
   });
   return walker;
 }
@@ -276,7 +339,22 @@ export async function check(walker: Walker): Promise<void> {
   if (xss !== undefined) throw new StepFailure('xss', `a script of the inputs ran (${xss} times)`);
   const overflow = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
   if (overflow.scroll > overflow.client + 1) {
-    throw new StepFailure('overflow', `the page is ${overflow.scroll} px wide in a window of ${overflow.client} px`);
+    // Sweep 2: the elements that reach past the window, for the report.
+    const wide = await page.evaluate(() => {
+      const vw = document.documentElement.clientWidth;
+      const out: string[] = [];
+      for (const el of document.querySelectorAll('body *')) {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.right <= vw + 0.5) continue;
+        let clipped = false;
+        for (let a = el.parentElement; a !== null && a !== document.body; a = a.parentElement) {
+          if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(a).overflowX)) clipped = true;
+        }
+        if (!clipped) out.push(`${el.tagName.toLowerCase()}[${el.getAttribute('data-testid') ?? ''}.${String(el.className).slice(0, 40)}] ${Math.round(r.left)}..${Math.round(r.right)} "${(el.textContent ?? '').trim().slice(0, 40)}"`);
+      }
+      return out.slice(-12);
+    });
+    throw new StepFailure('overflow', `the page is ${overflow.scroll} px wide in a window of ${overflow.client} px; past the window: ${wide.join(' | ')}`);
   }
   // axe's rules hold in the page as the step left it, once the colours of a tab just chosen have
   // ended their transition (as announce.spec.ts checks the pages it touches). The FakeEngine's
@@ -441,6 +519,33 @@ const EXTRAS = Object.freeze([
   '-not_an_option',
   '-max_target_seqs',
   '"unclosed',
+  // Sweep 3: options that reached the Web after sweep 2 (each runs in some modes and is refused in others).
+  '-best_hit_overhang 0.1 -best_hit_score_edge 0.1',
+  '-best_hit_overhang 0.2',
+  '-best_hit_score_edge 0.05 -culling_limit 2',
+  '-best_hit_overhang 0.6',
+  '-best_hit_overhang abc',
+  '-use_sw_tback',
+  '-max_intron_length 500',
+  '-max_intron_length 0',
+  '-sum_stats true',
+  '-sum_stats false',
+  '-strand plus',
+  '-strand minus',
+  '-task rmblastn',
+  '-reward 0 -penalty 0',
+  '-ungapped',
+  '-xdrop_ungap 10 -xdrop_gap 20',
+  '-xdrop_gap_final 30',
+  '-db nr',
+  '-seqidlist ids.txt',
+  '-taxids 9606',
+  '-filtering_db x',
+  '-db_hard_mask 1',
+  '-save_search_strategy ss.txt',
+  '-no_greedy',
+  '-comp_based_stats 2',
+  '-use_sw_tback -best_hit_overhang 0.1',
 ]);
 
 const extra: StepBody = async (walker, draws) => {
@@ -630,6 +735,8 @@ interface Submitted {
   readonly values: ReadonlyMap<string, string>;
   /** The runs that the inputs make: one per input of each role searched apart. */
   readonly expectedRuns: number;
+  /** Sweep 4: the mode the runs were started in (a run verified after a later mode change keeps its own). */
+  readonly program?: string;
 }
 
 async function submitted(walker: Walker): Promise<Submitted> {
@@ -666,7 +773,7 @@ async function submitted(walker: Walker): Promise<Submitted> {
     inputs[role] = expectedInputs(walker.model[role], ready);
   }
   const expectedRuns = ROLES.reduce((product, role) => product * Math.max(1, inputs[role].length), 1);
-  return { inputs, changed, extraFlags, values, expectedRuns };
+  return { inputs, changed, extraFlags, values, expectedRuns, program: walker.program };
 }
 
 /** The words of Additional options as a POSIX shell reads them (single and double quotes). */
@@ -693,7 +800,7 @@ function parseOptions(text: string): string[] {
  * Presses Run LOSAT: the runs it starts (their numbers), or none with the reason the page gives.
  * A press that starts nothing must say why.
  */
-async function pressRun(walker: Walker, before: Submitted): Promise<{ runs: number[]; refused?: string }> {
+async function pressRun(walker: Walker, before: Submitted, allowNoInput = false): Promise<{ runs: number[]; refused?: string }> {
   const { page } = walker;
   await showTab(page, 'search');
   const label = (await page.getByTestId('run-losat').textContent()) ?? '';
@@ -723,7 +830,7 @@ async function pressRun(walker: Walker, before: Submitted): Promise<{ runs: numb
   }
   if (await tabShown(page, 'results')) {
     for (const role of ROLES) {
-      if (before.inputs[role].every((input) => input.bytes.length === 0)) {
+      if (!allowNoInput && before.inputs[role].every((input) => input.bytes.length === 0)) {
         throw new StepFailure('run-without-input', `Run LOSAT started a search, but the walk gave the ${role} no record to search`);
       }
     }
@@ -821,16 +928,16 @@ async function offeredInput(page: Page, role: Role): Promise<{ name: string; byt
  * the time of "Run LOSAT" cannot be known beforehand, so they are read from the name that the page gives the run's outfmt 6 file
  * (which has the number and program too: they must be the walk's). Not the app's function.
  */
-async function madeNameOf(walker: Walker, run: number, role: Role): Promise<string> {
+async function madeNameOf(walker: Walker, run: number, role: Role, program: string = walker.program): Promise<string> {
   const { page } = walker;
   await page.getByTestId('results-download-all').click();
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('results-download-menu').getByTestId('results-download-6').click()]);
   const saved = download.suggestedFilename();
   const parts = /^losat-run(\d+)-([a-z]+)(?:-(.+?))?-(\d{8}T\d{6}Z)\.outfmt6\.txt$/.exec(saved);
-  if (parts === null || Number(parts[1]) !== run || parts[2] !== walker.program) {
-    throw new StepFailure('output-prefix', `run ${run} of ${walker.program}: the page names its outfmt 6 file ${saved}`);
+  if (parts === null || Number(parts[1]) !== run || parts[2] !== program) {
+    throw new StepFailure('output-prefix', `run ${run} of ${program}: the page names its outfmt 6 file ${saved}`);
   }
-  return `losat-run${run}-${walker.program}${parts[3] === undefined ? '' : `-${parts[3]}`}-${parts[4]}.${role}.fa`;
+  return `losat-run${run}-${program}${parts[3] === undefined ? '' : `-${parts[3]}`}-${parts[4]}.${role}.fa`;
 }
 
 /** A file that the native CLI is given: its name, its bytes, and whether the page made it. */
@@ -881,7 +988,7 @@ async function filesOf(walker: Walker, run: number, before: Submitted, at: numbe
     if (userNames.has(shownName)) {
       throw new StepFailure('offered-user-name', `run ${run}: the page offers ${shownName} as the ${role} file, a name that one of the user's files has`);
     }
-    const expectedName = await madeNameOf(walker, run, role);
+    const expectedName = await madeNameOf(walker, run, role, before.program);
     if (shownName !== expectedName) {
       throw new StepFailure('offered-name', `run ${run}: the page offers ${shownName} as the ${role} file; the walk expects ${expectedName}`);
     }
@@ -929,6 +1036,12 @@ async function verifyRun(walker: Walker, run: number, before: Submitted, at: num
     // it let through and that then fails is a defect (or a check the form lacks).
     await pickRun(page, run);
     const text = ((await page.getByTestId('results-status').textContent()) ?? '').trim();
+    // Sweep 3 (D10, D13): the CLI reads a byte order mark as a line that is not FASTA, and a run of such an input ends with its error.
+    const bom = ROLES.some((role) => before.inputs[role].some((input) => input.bytes[0] === 0xef && input.bytes[1] === 0xbb && input.bytes[2] === 0xbf));
+    if (bom && /CFastaReader: Near line \d+, there's a line that doesn't look like plausible data/.test(text)) {
+      walker.notes.push(`run ${run}: failed with the reader's error on an input that starts with a byte order mark (as the CLI does)`);
+      return undefined;
+    }
     throw new StepFailure('run-failed', `run ${run} failed: ${text}`);
   }
   const details = await runDetails(page, run);
@@ -1004,7 +1117,407 @@ const runOnce: StepBody = async (walker) => {
     await verifyRun(walker, run, before, at);
     ended.push(`${run} ${await page.getByTestId(`run-${run}-option`).getAttribute('data-status')}`);
   }
-  return `runs ${ended.join(', ')}`;
+  const drained = await drain(walker);
+  return `runs ${ended.join(', ')}${drained}`;
+};
+
+/** Sweep 2: checks the runs that 'start' left running, as runOnce checks its own. */
+export async function drain(walker: Walker): Promise<string> {
+  const notes: string[] = [];
+  while (walker.pending.length > 0) {
+    const { runs, before } = walker.pending.shift()!;
+    for (const [at, run] of runs.entries()) {
+      await verifyRun(walker, run, before, at);
+      notes.push(`${run} ${await walker.page.getByTestId(`run-${run}-option`).getAttribute('data-status')}`);
+    }
+  }
+  return notes.length === 0 ? '' : `; started earlier: ${notes.join(', ')}`;
+}
+
+/** Sweep 2: Run LOSAT, and the next steps act while the runs go on. */
+const startRun: StepBody = async (walker) => {
+  const { page } = walker;
+  await showTab(page, 'search');
+  await settle(page);
+  const before = await submitted(walker);
+  const { runs, refused } = await pressRun(walker, before);
+  if (refused !== undefined) return `refused: ${refused}`;
+  walker.pending.push({ runs, before });
+  // Back to the form at once, as a user who goes on editing does (half of the time).
+  return `started ${runs.join(', ')}`;
+};
+
+const FILTER_VALUES = Object.freeze({
+  evalue: ['1e-5', '0.001', '10', '1e-50', 'abc', '', ' 2 ', '-1'],
+  bits: ['50', '0', '1000', 'abc', '', '30.5'],
+  subject: ['ns1', 'fs1', 'pq', '<b>', 'zzz', '配列', '', 'S'],
+});
+
+/** Sweep 2: the results' filters and sorting, on the run shown. */
+const filter: StepBody = async (walker, draws) => {
+  const { page } = walker;
+  await showTab(page, 'results');
+  if ((await page.getByTestId('view-filters').count()) === 0) return 'no results shown';
+  const action = draws.pick(['evalue', 'bits', 'subject', 'reset', 'sort', 'hits-only'] as const);
+  if (action === 'reset') {
+    await page.getByTestId('filter-clear').click();
+    return 'reset';
+  }
+  if (action === 'sort') {
+    const sorts = page.locator('[data-testid*="-sort-"]:visible');
+    const count = await sorts.count();
+    if (count === 0) return 'no sort shown';
+    const button = sorts.nth(draws.index(count));
+    const id = await button.getAttribute('data-testid');
+    await button.click();
+    return `sort ${id}`;
+  }
+  if (action === 'hits-only') {
+    const box = page.locator('[data-testid="filter-hits-only"]');
+    if ((await box.count()) === 0) return 'no hits-only box';
+    await box.first().click();
+    return 'hits-only toggled';
+  }
+  const value = draws.pick(FILTER_VALUES[action]);
+  await page.getByTestId(`filter-${action}`).fill(value);
+  if (draws.next() < 0.5) await page.getByTestId('filter-apply').click();
+  else await page.getByTestId(`filter-${action}`).press('Enter');
+  return `${action} ${JSON.stringify(value)}`;
+};
+
+/** Sweep 2: accessions typed in a box and fetched from a stubbed source. */
+const fetchStep: StepBody = async (walker, draws) => {
+  const { page } = walker;
+  await showTab(page, 'search');
+  await settle(page);
+  const role = draws.pick(ROLES);
+  const alphabet = alphabetOf(walker.program, role);
+  // Mostly the role's alphabet; sometimes the other's, or one that no source has.
+  const pool = draws.next() < 0.85 ? FETCH_ACCESSIONS[alphabet] : FETCH_ACCESSIONS[alphabet === 'nucleotide' ? 'protein' : 'nucleotide'];
+  const accessions = [draws.pick(pool)];
+  if (draws.next() < 0.4) accessions.push(draws.pick(pool));
+  if (draws.next() < 0.15) accessions.push(FETCH_MISSING[alphabet]);
+  const text = accessions.join(draws.next() < 0.5 ? '\n' : '\n\n') + (draws.next() < 0.5 ? '\n' : '');
+  await page.getByTestId(`${role}-input`).fill(text);
+  walker.model = withPaste(walker.model, role, '');
+  await expect(page.getByTestId(`${role}-fetch-row`).or(page.getByTestId(`${role}-fetch-groups`)).first()).toBeVisible({ timeout: SETTLE_TIMEOUT });
+  const choose = page.getByTestId(`${role}-fetch-source`);
+  let source = 'groups';
+  if ((await choose.count()) > 0) {
+    const options = await choose.locator('option').evaluateAll((list) => list.map((option) => (option as HTMLOptionElement).value));
+    source = draws.pick(options);
+    await choose.selectOption(source);
+  }
+  walker.fetching = new Set([...accessions.map((a) => a.toUpperCase()), ...RACE.keys()]);
+  try {
+    const one = page.getByTestId(`${role}-fetch`);
+    if ((await one.count()) > 0 && (await one.isVisible())) {
+      await one.click();
+    } else {
+      const groups = page.locator(`[data-testid^="${role}-fetch-group-"][data-testid$="-button"]`);
+      const count = await groups.count();
+      for (let i = 0; i < count; i++) await groups.nth(0).click().catch(() => undefined);
+    }
+    // Done when the box holds FASTA, or an error is shown.
+    await expect
+      .poll(
+        async () => {
+          const value = await page.getByTestId(`${role}-input`).inputValue();
+          if (value.startsWith('>')) return 'fasta';
+          if ((await page.getByTestId(`${role}-fetch-error`).count()) > 0) return 'error';
+          return 'waiting';
+        },
+        { timeout: SETTLE_TIMEOUT },
+      )
+      .not.toBe('waiting')
+      .catch(() => {
+        throw new StepFailure('fetch-stuck', `the Fetch of ${accessions.join(' ')} from ${source} did not end in 30 s`);
+      });
+  } finally {
+    walker.fetching = undefined;
+  }
+  const value = await page.getByTestId(`${role}-input`).inputValue();
+  const onlyAccessions = accessionLines(value) !== undefined;
+  walker.model = withPaste(walker.model, role, onlyAccessions ? '' : value);
+  await expect
+    .poll(async () => (await sourceCards(page, role)).length, { timeout: SETTLE_TIMEOUT })
+    .toBe(walker.model[role].sources.length)
+    .catch(async () => {
+      throw new StepFailure('fetch-model', `after the Fetch the ${role} has ${(await sourceCards(page, role)).length} inputs; the box holds ${JSON.stringify(value.slice(0, 80))}`);
+    });
+  await settle(page);
+  const error = page.getByTestId(`${role}-fetch-error`);
+  const said = (await error.count()) > 0 ? ` error ${JSON.stringify(((await error.textContent()) ?? '').trim().slice(0, 120))}` : '';
+  return `${role} ${accessions.join(' ')} from ${source}: ${onlyAccessions ? 'not written' : `${value.length} bytes`}${said}`;
+};
+
+/** Sweep 2: the tab is hidden for a while and shown again (as a phone or another tab does). */
+const hide: StepBody = async (walker, draws) => {
+  const { page } = walker;
+  const ms = draws.pick([300, 1500, 3000]);
+  await page.evaluate(() => (window as unknown as { __walkSetVisible: (v: boolean) => void }).__walkSetVisible(false));
+  await page.waitForTimeout(ms);
+  await page.evaluate(() => (window as unknown as { __walkSetVisible: (v: boolean) => void }).__walkSetVisible(true));
+  await page.waitForTimeout(300);
+  const notice = page.getByTestId('resume-notice');
+  let note = `${ms} ms`;
+  if ((await notice.count()) > 0) {
+    note += `: ${JSON.stringify(((await notice.textContent()) ?? '').trim().replace(/\s+/g, ' ').slice(0, 160))}`;
+    if (draws.next() < 0.5 && (await page.getByTestId('resume-dismiss').count()) > 0) {
+      await page.getByTestId('resume-dismiss').click();
+      note += ' dismissed';
+    }
+  }
+  return note;
+};
+
+
+// --- sweep 3 ----------------------------------------------------------------------------------
+
+/** Sweep 3: a clean form (every field at its default, the options as given) in a mode. */
+async function cleanForm(walker: Walker, programId: string, extraText: string): Promise<void> {
+  const { page } = walker;
+  await showTab(page, 'search');
+  await settle(page);
+  await page.getByTestId(`program-${programId}`).check();
+  await described(page);
+  // Sweep 4: Restore defaults keeps the task; BLASTP's PSI-BLAST task is another program for the walk.
+  if (programId === 'blastp' && (await page.getByTestId('param-task-blastp').count()) > 0) {
+    await page.getByTestId('param-task-blastp').check();
+    await described(page);
+  }
+  walker.program = programId;
+  await settle(page);
+  await openParameters(page);
+  await page.getByTestId('restore-defaults').click();
+  await page.getByTestId('param-extra').fill(extraText);
+  await settle(page);
+}
+
+/** Sweep 3: the inputs of both roles replaced by pasted texts. */
+async function setInputs(walker: Walker, texts: Readonly<Record<Role, string>>): Promise<void> {
+  const { page } = walker;
+  for (const role of ROLES) {
+    while (walker.model[role].sources.length > 0) {
+      await page.getByTestId(`${role}-source-0-remove`).click();
+      walker.model = withoutSource(walker.model, role, 0);
+      await settle(page);
+    }
+    await page.getByTestId(`${role}-input`).fill(texts[role]);
+    walker.model = withPaste(walker.model, role, texts[role]);
+    await expect.poll(async () => (await sourceCards(page, role)).length, { timeout: SETTLE_TIMEOUT }).toBe(walker.model[role].sources.length);
+  }
+  await settle(page);
+}
+
+function lettersOf(alphabet: string, seed: number, length: number): string {
+  let state = seed;
+  let out = '';
+  for (let i = 0; i < length; i++) {
+    state = (Math.imul(state, 1103515245) + 12345) >>> 0;
+    out += alphabet[(state >>> 16) % alphabet.length];
+  }
+  return out;
+}
+
+const AA = 'ACDEFGHIKLMNPQRSTVWY';
+
+/** The native CLI on the command that the page shows for a failed run (`losat blastp -query query.fa ...`): standard output and the -out file, the error. */
+function nativeFailed(walker: Walker, command: string, query: string, subject: string): { status: number | null; stdout: Buffer; file: Buffer; stderr: string; words: string[] } | undefined {
+  if (NATIVE === undefined) return undefined;
+  const words = parseShellWords(command);
+  const directory = join(walker.outDir, `failrun-${Date.now()}`);
+  mkdirSync(directory, { recursive: true });
+  const names = [words[words.indexOf('-query') + 1] ?? 'query.fa', words[words.indexOf('-subject') + 1] ?? 'subject.fa'];
+  writeFileSync(join(directory, names[0]!), query);
+  writeFileSync(join(directory, names[1]!), subject);
+  const a = spawnSync(NATIVE, words.slice(1), { cwd: directory, maxBuffer: 1 << 28, timeout: 120_000 });
+  spawnSync(NATIVE, [...words.slice(1), '-out', 'out.txt'], { cwd: directory, maxBuffer: 1 << 28, timeout: 120_000 });
+  let file = Buffer.alloc(0);
+  try {
+    file = readFileSync(join(directory, 'out.txt'));
+  } catch {
+    // no file
+  }
+  return { status: a.status, stdout: a.stdout, file, stderr: String(a.stderr), words };
+}
+
+const FAIL_OUTFMTS = Object.freeze(['', '6', '7', '6 qseqid sseqid', '0', '10']);
+
+/** Sweep 3: a run that fails on a later query batch keeps the outputs written before the error (D10, D15); same bytes as the CLI. */
+const failrun: StepBody = async (walker, draws) => {
+  const { page } = walker;
+  const variant = draws.pick(['empty-batch', 'reader-error'] as const);
+  const outfmt = draws.pick(FAIL_OUTFMTS);
+  const dir = join(REPOSITORY, 'web/adapter/tests/fixtures/failed_outputs');
+  let query: string;
+  let subject: string;
+  let message: string;
+  if (variant === 'empty-batch') {
+    query = readFileSync(join(dir, 'later_batch.q.faa'), 'utf8');
+    subject = readFileSync(join(dir, 'later_batch.s.faa'), 'utf8');
+    message = 'Sequence contains no data';
+  } else {
+    // Ten records of 1100 letters fill BLASTP's first batch of 10000; the eleventh has a bad line.
+    const protein = lettersOf(AA, 11, 1100);
+    const copy = (i: number) => protein.slice(0, 1000 - 7 * i) + lettersOf(AA, 100 + i, 100 + 7 * i);
+    query = Array.from({ length: 10 }, (_, i) => `>q${i + 1} walk\n${copy(i)}\n`).join('') + `>bad\nMKV%%%%\n>q12\n${protein.slice(0, 200)}\n`;
+    subject = `>s1\n${protein.slice(0, 600)}\n`;
+    message = "there's a line that doesn't look like plausible data";
+  }
+  await cleanForm(walker, 'blastp', outfmt === '' ? '' : outfmt.includes(' ') ? `-outfmt "${outfmt}"` : `-outfmt ${outfmt}`);
+  await setInputs(walker, { query, subject });
+  const before = await submitted(walker);
+  const { runs, refused } = await pressRun(walker, before);
+  if (refused !== undefined) return `refused: ${refused}`;
+  const run = runs[0]!;
+  const status = await runStatus(page, run);
+  walker.counts[status as 'completed' | 'failed' | 'cancelled'] += 1;
+  if (status !== 'failed') throw new StepFailure('failrun-not-failed', `run ${run} (${variant}, outfmt ${JSON.stringify(outfmt)}) ended ${status}, not failed`);
+  await pickRun(page, run);
+  const text = ((await page.getByTestId('results-status').textContent()) ?? '').replace(/\s+/g, ' ').trim();
+  if (!text.includes(`Run ${run} failed:`) || !text.includes(message)) throw new StepFailure('failrun-message', `run ${run} says ${JSON.stringify(text)}; expected the CLI's ${JSON.stringify(message)}`);
+  // The command that the page shows (when it shows outputs) is what the CLI runs; else the walk's own words.
+  const commandShown = (await page.getByTestId('result-command').count()) > 0 ? ((await page.getByTestId('result-command').first().textContent()) ?? '').trim() : '';
+  const command = commandShown !== '' ? commandShown : `losat blastp -query query.fa -subject subject.fa${outfmt === '' ? '' : ` -outfmt '${outfmt}'`}`;
+  const cli = nativeFailed(walker, command, query, subject);
+  if (cli !== undefined && !cli.stderr.includes(message)) throw new StepFailure('failrun-native-message', `the CLI says ${JSON.stringify(cli.stderr)}; the test expected ${JSON.stringify(message)} for ${command}`);
+  if (cli !== undefined && !text.includes(cli.stderr.trim().replace(/^Error: /, ''))) {
+    throw new StepFailure('failrun-words', `run ${run} says ${JSON.stringify(text)}; the CLI's error is ${JSON.stringify(cli.stderr)}`);
+  }
+  const outputs = page.getByTestId('results-failed-outputs');
+  const shown = (await outputs.count()) > 0;
+  const kept = cli !== undefined ? cli.stdout.length > 0 : undefined;
+  if (kept === true && !shown) throw new StepFailure('failrun-outputs-lost', `run ${run} (${variant}, outfmt ${JSON.stringify(outfmt)}): the CLI writes ${cli!.stdout.length} bytes before its error; the page shows no outputs: ${JSON.stringify(text)}`);
+  if (kept === false && shown) throw new StepFailure('failrun-outputs-invented', `run ${run} (${variant}): the CLI writes nothing before its error; the page shows outputs`);
+  let note = `${variant} outfmt ${JSON.stringify(outfmt)}: ${JSON.stringify(text.slice(0, 100))}`;
+  if (shown) {
+    const output = (await outputs.getByTestId('result-output').textContent()) ?? '';
+    const [download] = await Promise.all([page.waitForEvent('download'), outputs.getByTestId('export-output').click()]);
+    const saved = readFileSync((await download.path())!);
+    if (saved.toString('utf8') !== output) throw new StepFailure('failrun-export', `run ${run}: the exported file is not what the page shows`);
+    if (cli !== undefined) {
+      if (!saved.equals(cli.stdout)) {
+        writeFileSync(join(walker.outDir, `failrun-web-${run}.out`), saved);
+        throw new StepFailure('failrun-bytes', `run ${run} (${variant}, outfmt ${JSON.stringify(outfmt)}): the kept output (${saved.length} bytes) differs from the CLI's standard output (${cli.stdout.length} bytes)`);
+      }
+      if (!saved.equals(cli.file)) throw new StepFailure('failrun-bytes-out', `run ${run} (${variant}): the kept output differs from the CLI's -out file`);
+      walker.counts.compared += 1;
+    }
+    note += ` kept ${saved.length} bytes`;
+  }
+  // Download All of the failed run and the run's details must not throw or offer outputs the CLI did not write.
+  if ((await page.getByTestId('results-download-all').count()) > 0 && (await page.getByTestId('results-download-all').isEnabled())) {
+    await page.getByTestId('results-download-all').click();
+    const items = await page.getByTestId('results-download-menu').locator('[data-testid^="results-download-"]').evaluateAll((l) => l.map((e) => e.getAttribute('data-testid')));
+    note += ` download-all: ${items.join(',')}`;
+    await page.keyboard.press('Escape');
+  }
+  // The walk's next runs search again: the inputs of the mode, and no -outfmt.
+  await showTab(page, 'search');
+  await page.getByTestId('param-extra').fill('');
+  const fit: Record<Role, string> = {
+    query: pickFor(walker.fixtures.texts, [], alphabetOf(walker.program, 'query'), 0, 0).text,
+    subject: pickFor(walker.fixtures.texts, [], alphabetOf(walker.program, 'subject'), 0, 0.99).text,
+  };
+  await setInputs(walker, fit);
+  return note;
+};
+
+const PRINTED = Object.freeze(['-h', '-help', '-help-full', '--help', '-xmlhelp', '-version', '-version-full', '-version-full-xml', '-version-full-json']);
+
+/** Sweep 3: a help or version word as the command line runs it (D14), with the text saved, in a mode (and combined with inputs or not). */
+const printed: StepBody = async (walker, draws) => {
+  const { page } = walker;
+  const id = draws.pick(PROGRAMS);
+  const word = draws.pick(PRINTED);
+  const withInputs = draws.next() < 0.3;
+  await cleanForm(walker, id, word);
+  if (!withInputs) await setInputs(walker, { query: '', subject: '' });
+  // A printed word makes one run whatever the inputs (D20, S3-2's fix in draft.ts runCount).
+  const before = { ...(await submitted(walker)), expectedRuns: 1 };
+  const { runs, refused } = await pressRun(walker, before, true);
+  if (refused !== undefined) {
+    await showTab(page, 'search');
+    await page.getByTestId('param-extra').fill('');
+    await settle(page);
+    return `${id} ${word}: refused: ${refused}`;
+  }
+  const run = runs[0]!;
+  const status = await runStatus(page, run);
+  walker.counts[status as 'completed' | 'failed' | 'cancelled'] += 1;
+  // The runs that the page lists, against those that Run LOSAT's label promised.
+  await page.waitForTimeout(1000);
+  const listed = await page.locator('[data-testid^="run-"][data-testid$="-option"]').count();
+  if (listed !== walker.runs) {
+    walker.notes.push(`printed ${id} ${word}: Run LOSAT promised ${runs.length} run(s); the page lists ${listed} runs in all, the walk counted ${walker.runs}`);
+    walker.runs = listed;
+  }
+  if (status !== 'completed') {
+    await pickRun(page, run);
+    throw new StepFailure('printed-failed', `${id} ${word}: run ${run} ${status}: ${((await page.getByTestId('results-status').textContent()) ?? '').trim()}`);
+  }
+  await pickRun(page, run);
+  await page.getByTestId('results-view-outputs').click();
+  const tab = page.getByTestId('format-printed');
+  if ((await tab.count()) === 0) throw new StepFailure('printed-no-tab', `${id} ${word}: the Outputs have no Help or Version tab`);
+  const command = ((await page.getByTestId('result-command').textContent()) ?? '').trim();
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-printed').click()]);
+  const saved = readFileSync((await download.path())!);
+  const name = download.suggestedFilename();
+  const shown = ((await page.getByTestId('printed-output').textContent()) ?? '');
+  if (shown.replace(/\s+/g, ' ').trim() !== saved.toString('utf8').replace(/\s+/g, ' ').trim()) throw new StepFailure('printed-shown', `${id} ${word}: the text shown is not the text saved`);
+  if (/BLAST\+|BLAST \+/.test(saved.toString('utf8')) && !word.includes('help')) walker.notes.push(`${id} ${word}: the text says BLAST+ (check it is a BLAST+ comparison)`);
+  if (NATIVE !== undefined) {
+    const words = parseShellWords(command);
+    const directory = join(walker.outDir, `printed-${Date.now()}`);
+    mkdirSync(directory, { recursive: true });
+    const cli = spawnSync(NATIVE, words.slice(1), { cwd: directory, maxBuffer: 1 << 26, timeout: 60_000 });
+    if (cli.status !== 0 || !saved.equals(cli.stdout)) {
+      writeFileSync(join(directory, 'web.out'), saved);
+      throw new StepFailure('printed-bytes', `${id} ${word}: the saved text (${saved.length} bytes, ${name}) differs from the CLI's standard output (${cli.stdout.length} bytes, rc ${cli.status}) for ${command} (files in ${directory})`);
+    }
+    walker.counts.compared += 1;
+  }
+  // The word does not stay in Additional options: the walk's next runs search.
+  await showTab(page, 'search');
+  await page.getByTestId('param-extra').fill('');
+  await settle(page);
+  return `${id} ${word}${withInputs ? ' with inputs' : ''}: ${name}, ${saved.length} bytes`;
+};
+
+const LOGFILES = Object.freeze(['walk.log', './walk.log', 'a b.log', 'sub/dir/walk.log', 'dir/', '.', 'walk.log/', '../walk.log', "it's.log", '日本語.log', '-x.log', 'a'.repeat(260)]);
+
+/** Sweep 3: `-logfile` with names of every shape (D11): the run must give the CLI's bytes, or the CLI's refusal. */
+const logfile: StepBody = async (walker, draws) => {
+  const { page } = walker;
+  await showTab(page, 'search');
+  await settle(page);
+  await openParameters(page);
+  // Only -logfile is under test: the form's other fields and options (which the walk may have made invalid) go back to their defaults.
+  await page.getByTestId('restore-defaults').click();
+  await settle(page);
+  const name = draws.pick(LOGFILES);
+  const quoted = /[\s']/.test(name) ? (name.includes("'") ? `"${name}"` : `'${name}'`) : name;
+  await page.getByTestId('param-extra').fill(`-logfile ${quoted}`);
+  // The form's check starts after a pause: wait for it to begin and end before reading its state.
+  await page.waitForTimeout(900);
+  await settle(page);
+  const validation = ((await page.getByTestId('argv-validation').textContent()) ?? '').trim();
+  const state = await page.getByTestId('argv-validation').getAttribute('data-state');
+  let cliNote = '';
+  if (NATIVE !== undefined) {
+    // What does the CLI say for this name, on a tiny search?
+    const directory = join(walker.outDir, `logfile-${Date.now()}`);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'q.fa'), '>q\nACGTACGTACGTAGCTAGCTAGCATCGATCGATCGACTGACTAGCTAGCTAGCATGCATCGATCGATC\n');
+    const cli = spawnSync(NATIVE, ['blastn', '-query', 'q.fa', '-subject', 'q.fa', '-logfile', name, '-outfmt', '6'], { cwd: directory, timeout: 60_000 });
+    cliNote = ` cli rc ${cli.status}${cli.status === 0 ? '' : ` ${String(cli.stderr).trim().slice(0, 120)}`}`;
+    if ((cli.status === 0) !== (state === 'ok') && !name.includes('..')) {
+      throw new StepFailure('logfile-validation', `-logfile ${JSON.stringify(name)}: the CLI ${cli.status === 0 ? 'runs' : `refuses (${String(cli.stderr).trim().slice(0, 160)})`}; the form says ${state}: ${JSON.stringify(validation.slice(0, 200))}`);
+    }
+  }
+  return `${JSON.stringify(name.slice(0, 40))}: ${state}${cliNote}`;
 };
 
 /**
@@ -1042,7 +1555,7 @@ const twice: StepBody = async (walker) => {
     }
     notes.push(`${run}=${second.runs[i]}`);
   }
-  return `runs ${notes.join(', ')}`;
+  return `runs ${notes.join(', ')}${await drain(walker)}`;
 };
 
 const cancel: StepBody = async (walker) => {
@@ -1061,7 +1574,7 @@ const cancel: StepBody = async (walker) => {
     await verifyRun(walker, run, before, at);
     ended.push(`${run} ${await page.getByTestId(`run-${run}-option`).getAttribute('data-status')}`);
   }
-  return `runs ${ended.join(', ')}`;
+  return `runs ${ended.join(', ')}${await drain(walker)}`;
 };
 
 // --- the page -------------------------------------------------------------------------------
@@ -1129,6 +1642,8 @@ const width: StepBody = async (walker, draws) => {
 
 const reloadPage: StepBody = async (walker) => {
   const { page } = walker;
+  // Sweep 2: runs left running end with the page (its beforeunload is accepted).
+  walker.pending.length = 0;
   await reload(page);
   await described(page);
   // LOSAT Web keeps nothing for the next visit (REQ-20): the page starts again, with no input and no run.
@@ -1140,6 +1655,331 @@ const reloadPage: StepBody = async (walker) => {
   await showTab(page, 'search');
   await start(walker);
   return walker.program;
+};
+
+// --- sweep 4 (not on dev): a local BLAST database as the subject, psiblast rounds, a search strategy file ---
+
+/** Sweep 4's databases, made by the native makeblastdb from synthetic sequences (sweep4/scripts/makedata.py). */
+const S4_DATA = '/home/kawato/losat-baselines/web-qa-20261119/sweep4/data';
+const S4_DBS: Readonly<Record<'nucleotide' | 'protein', readonly string[]>> = Object.freeze({
+  nucleotide: ['nuc5', 'nuc4', 'alias', 'masked', 'nuc5notax'],
+  protein: ['prot5'],
+});
+const S4_FILTERS = Object.freeze(['none', 'taxids', 'negative_taxids', 'seqidlist', 'mask', 'none'] as const);
+
+function s4Files(dir: string): string[] {
+  return readdirSync(join(S4_DATA, dir)).filter((name) => statSync(join(S4_DATA, dir, name)).isFile());
+}
+
+/** Replaces the query inputs only (as setInputs does for both). */
+async function setQueryOnly(walker: Walker, text: string): Promise<void> {
+  const { page } = walker;
+  while (walker.model.query.sources.length > 0) {
+    await page.getByTestId('query-source-0-remove').click();
+    walker.model = withoutSource(walker.model, 'query', 0);
+    await settle(page);
+  }
+  await page.getByTestId('query-input').fill(text);
+  walker.model = withPaste(walker.model, 'query', text);
+  await expect.poll(async () => (await sourceCards(page, 'query')).length, { timeout: SETTLE_TIMEOUT }).toBe(walker.model.query.sources.length);
+  await settle(page);
+}
+
+/** Presses Run LOSAT for a form whose subject is not the walk's model (a database): one run, or none with a message. */
+async function pressRunOne(walker: Walker): Promise<{ run?: number; refused?: string }> {
+  const { page } = walker;
+  await showTab(page, 'search');
+  await settle(page);
+  if (await page.getByTestId('run-losat').isDisabled()) {
+    return { refused: `Run LOSAT is disabled: ${((await page.getByTestId('argv-validation').textContent()) ?? '').trim().slice(0, 200)}` };
+  }
+  await page.getByTestId('run-losat').click();
+  await expect
+    .poll(async () => ((await tabShown(page, 'results')) ? 'started' : (await page.getByTestId('search-message').count()) > 0 ? 'refused' : 'waiting'), { timeout: 15_000 })
+    .not.toBe('waiting')
+    .catch(() => undefined);
+  if (await tabShown(page, 'results')) {
+    walker.runs += 1;
+    return { run: walker.runs };
+  }
+  const message = page.getByTestId('search-message');
+  if ((await message.count()) === 0) throw new StepFailure('silent-refusal', 'Run LOSAT started no run and said nothing');
+  walker.counts.refused += 1;
+  return { refused: ((await message.textContent()) ?? '').trim() };
+}
+
+/** Runs the commands that Run details shows in a directory of the given files; throws on a byte difference. */
+async function s4Compare(walker: Walker, run: number, files: Readonly<Record<string, Buffer | string>>, runFiles?: Readonly<Record<string, Buffer>>): Promise<string> {
+  const { page } = walker;
+  // Run details of a database run has no subject input line: read the commands only.
+  await pickRun(page, run);
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(run), { timeout: SETTLE_TIMEOUT });
+  await page.getByTestId('results-view-details').click();
+  const details = { commands: new Map<string, string[]>() };
+  for (const format of [...FORMATS.map(String), 'custom']) {
+    const command = page.getByTestId(`run-command-${format}`);
+    if ((await command.count()) > 0) details.commands.set(format, parseShellWords(((await command.textContent()) ?? '').trim()));
+  }
+  const { outputs, warnings } = await storedOutputs(page, run);
+  const stored = new Map<string, Buffer>(FORMATS.map((format) => [String(format), outputs[format]]));
+  if (details.commands.has('custom')) {
+    const custom = await customOutput(page);
+    if (custom !== undefined) stored.set('custom', custom);
+  }
+  const offered = await offeredInput(page, 'query');
+  if (NATIVE === undefined) return 'no native';
+  let compared = 0;
+  for (const [format, words0] of details.commands) {
+    const words = [...words0];
+    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+    delete env['BLASTDB'];
+    while (words.length > 0 && /^[A-Z_]+=/.test(words[0]!)) {
+      const [k, ...v] = words.shift()!.split('=');
+      env[k!] = v.join('=');
+    }
+    if (words[0] !== 'losat') throw new StepFailure('command', `run ${run}: the command of ${format} does not start with losat: ${words0.join(' ')}`);
+    const directory = join(walker.outDir, `s4-run-${run}-${format}-${Date.now()}`);
+    mkdirSync(directory, { recursive: true });
+    for (const [name, bytes] of Object.entries(files)) {
+      mkdirSync(dirname(join(directory, name)), { recursive: true });
+      writeFileSync(join(directory, name), bytes);
+    }
+    const qName = words[words.indexOf('-query') + 1];
+    if (offered !== undefined && qName !== undefined) writeFileSync(join(directory, qName), offered.bytes);
+    const cli = spawnSync(NATIVE, words.slice(1), { cwd: directory, env, maxBuffer: 1 << 28, timeout: 120_000 });
+    if (cli.status !== 0) throw new StepFailure('native-refuses', `run ${run}: completed in the Web; its command of outfmt ${format} fails in the CLI (${cli.status}): ${String(cli.stderr).slice(0, 300)}\n${words0.join(' ')}`);
+    const web = stored.get(format);
+    if (web === undefined || !web.equals(cli.stdout)) {
+      writeFileSync(join(directory, `web.${format}.out`), web ?? '');
+      writeFileSync(join(directory, `native.${format}.out`), cli.stdout);
+      throw new StepFailure(`native-bytes:${format}`, `run ${run}: the stored outfmt ${format} (${web?.length ?? 'none'} bytes) differs from the CLI's (${cli.stdout.length}) for ${words0.join(' ')} (files in ${directory})`);
+    }
+    if (format === '6' && String(cli.stderr).trim() !== warnings.trim()) {
+      throw new StepFailure('native-warnings', `run ${run}: the Web's warnings ${JSON.stringify(warnings.slice(0, 200))} differ from the CLI's ${JSON.stringify(String(cli.stderr).slice(0, 200))} for ${words0.join(' ')}`);
+    }
+    for (const [name, bytes] of Object.entries(runFiles ?? {})) {
+      let native: Buffer | undefined;
+      try {
+        native = readFileSync(join(directory, name));
+      } catch {
+        native = undefined;
+      }
+      if (native === undefined || !native.equals(bytes)) {
+        writeFileSync(join(directory, `web.file.${name}`), bytes);
+        throw new StepFailure('native-run-file', `run ${run}: the run's file ${name} (${bytes.length} bytes) differs from the CLI's (${native?.length ?? 'none'}) for ${words0.join(' ')} (files in ${directory})`);
+      }
+    }
+    compared += 1;
+    walker.counts.compared += 1;
+  }
+  return `compared ${compared}`;
+}
+
+/** The run's own files (Outputs, "files" tab): name -> bytes. */
+async function s4RunFiles(page: Page, run: number): Promise<Record<string, Buffer>> {
+  await pickRun(page, run);
+  await page.getByTestId('results-view-outputs').click();
+  const files: Record<string, Buffer> = {};
+  if ((await page.getByTestId('format-run-files').count()) === 0) return files;
+  await page.getByTestId('format-run-files').click();
+  for (let i = 0; i < 8; i++) {
+    const button = page.getByTestId(`run-file-download-${i}`);
+    if ((await button.count()) === 0) break;
+    const name = ((await page.getByTestId(`run-file-${i}`).getByTestId('run-file-name').textContent()) ?? '').trim();
+    const [download] = await Promise.all([page.waitForEvent('download'), button.click()]);
+    files[name] = readFileSync((await download.path())!);
+  }
+  return files;
+}
+
+/** Sweep 4: the subject is a local database (files picked), with a filter or a mask, on the form as the walk left it; then back to FASTA. */
+const database: StepBody = async (walker, draws) => {
+  const { page } = walker;
+  await showTab(page, 'search');
+  await settle(page);
+  const kind = alphabetOf(walker.program, 'subject') as 'nucleotide' | 'protein';
+  const queryKind = alphabetOf(walker.program, 'query');
+  const db = draws.pick(S4_DBS[kind]);
+  const filter = draws.pick(S4_FILTERS);
+  // A query that hits the database, pasted; the fields stay as the walk left them, Additional options are cleared.
+  const query = readFileSync(join(S4_DATA, queryKind === 'nucleotide' ? 'qn.fa' : 'qp.fa'), 'utf8');
+  await openParameters(page);
+  await page.getByTestId('param-extra').fill('');
+  await setQueryOnly(walker, query);
+  await page.getByTestId('subject-source-database').check();
+  const names = s4Files(db);
+  await page.getByTestId('subject-db-files-input').setInputFiles(names.map((name) => join(S4_DATA, db, name)));
+  await expect(page.getByTestId('subject-db-scanning')).toHaveCount(0, { timeout: SETTLE_TIMEOUT });
+  const files: Record<string, Buffer> = Object.fromEntries(names.map((name) => [name, readFileSync(join(S4_DATA, db, name))]));
+  let note = `${db} ${filter}`;
+  if (filter !== 'none') {
+    const details = page.getByTestId('subject-db-filters');
+    if (!(await details.evaluate((element) => (element as HTMLDetailsElement).open))) await page.getByTestId('subject-db-filters-toggle').click();
+    if (filter === 'taxids') await page.getByTestId('db-filter-taxids').fill('9606');
+    else if (filter === 'negative_taxids') await page.getByTestId('db-filter-negative_taxids').fill('9606');
+    else if (filter === 'seqidlist') {
+      const list = kind === 'nucleotide' ? 'ids.txt' : 'pids.txt';
+      await page.getByTestId('db-filter-seqidlist-input').setInputFiles(join(S4_DATA, list));
+      files[list] = readFileSync(join(S4_DATA, list));
+    } else if (filter === 'mask' && (await page.getByTestId('db-mask-mode').count()) > 0) {
+      await page.getByTestId('db-mask-mode').selectOption(draws.pick(['soft', 'hard'] as const));
+      await page.getByTestId('db-mask-algorithm').fill(kind === 'nucleotide' ? '11' : '21');
+    }
+  }
+  await page.waitForTimeout(900);
+  await settle(page);
+  const { run, refused } = await pressRunOne(walker);
+  if (refused !== undefined) note += ` refused: ${refused.slice(0, 160)}`;
+  else {
+    const status = await runStatus(page, run!);
+    walker.counts[status as 'completed' | 'failed' | 'cancelled'] += 1;
+    if (status === 'failed') {
+      await pickRun(page, run!);
+      const text = ((await page.getByTestId('results-status').textContent()) ?? '').trim();
+      // A database whose mask algorithm it does not hold fails in the CLI too; the walk notes it and checks the words by hand.
+      walker.notes.push(`database run ${run} (${db} ${filter}) failed: ${text.slice(0, 200)}`);
+      note += ` run ${run} failed: ${text.slice(0, 120)}`;
+    } else if (status === 'completed') note += ` run ${run} ${await s4Compare(walker, run!, files)}`;
+  }
+  // Back to the FASTA subject: the walk's subject inputs are as they were.
+  await showTab(page, 'search');
+  if ((await page.getByTestId('subject-db-filters').count()) > 0 && filter !== 'none') {
+    const clear = page.getByTestId('db-filter-seqidlist-remove');
+    if ((await clear.count()) > 0) await clear.click();
+    if (filter === 'taxids') await page.getByTestId('db-filter-taxids').fill('');
+    if (filter === 'negative_taxids') await page.getByTestId('db-filter-negative_taxids').fill('');
+    if (filter === 'mask' && (await page.getByTestId('db-mask-mode').count()) > 0) await page.getByTestId('db-mask-mode').selectOption('none');
+  }
+  await page.getByTestId('subject-source-fasta').check();
+  await settle(page);
+  return note;
+};
+
+/** Sweep 4: BLASTP's PSI-BLAST with 1 to 3 rounds (and sometimes -out_pssm), on the walk's protein inputs; compared with the CLI. */
+const psiround: StepBody = async (walker, draws) => {
+  const { page } = walker;
+  await showTab(page, 'search');
+  await settle(page);
+  if (walker.program !== 'blastp' && walker.program !== 'psiblast') {
+    await page.getByTestId('program-blastp').check();
+    await described(page);
+    await settle(page);
+    walker.program = await checkedProgram(page);
+    // the walk's inputs may be nucleotide: protein inputs that hit
+    const fit: Record<Role, string> = {
+      query: pickFor(walker.fixtures.texts, [], 'protein', 0, 0).text,
+      subject: pickFor(walker.fixtures.texts, [], 'protein', 0, 0.99).text,
+    };
+    await setInputs(walker, fit);
+  }
+  await page.getByTestId('param-task-psiblast').check();
+  await described(page);
+  await settle(page);
+  walker.program = await checkedProgram(page);
+  await openParameters(page);
+  const rounds = draws.pick(['1', '2', '3', '2', '3'] as const);
+  await page.getByTestId('param-num_iterations').fill(rounds);
+  const pssm = draws.pick([false, true]);
+  if (pssm) {
+    await page.getByTestId('param-out_pssm').fill('walk.pssm');
+    await page.getByTestId('param-out_ascii_pssm').fill('walk.ascii');
+  }
+  await page.waitForTimeout(900);
+  await settle(page);
+  const before = await submitted(walker);
+  const { runs, refused } = await pressRun(walker, before);
+  let note = `rounds ${rounds}${pssm ? ' +pssm' : ''}`;
+  if (refused !== undefined) note += ` refused: ${refused.slice(0, 160)}`;
+  for (const [at, run] of runs.entries()) {
+    const status = await runStatus(page, run);
+    if (status !== 'completed') {
+      await verifyRun(walker, run, before, at);
+      continue;
+    }
+    walker.counts.completed += 1;
+    // the page's round picker holds as many rounds as outfmt 0 reports
+    await pickRun(page, run);
+    await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(run), { timeout: SETTLE_TIMEOUT });
+    await page.getByTestId('results-view-hits').click();
+    await page.getByTestId('results-round').waitFor({ timeout: 5_000 }).catch(() => undefined);
+    const picker = await page.getByTestId('results-round').evaluateAll((list) => list.map((select) => (select as HTMLSelectElement).options.length));
+    const runFiles = pssm ? await s4RunFiles(page, run) : {};
+    // the inputs: the walk's model gives their bytes (the run's own made names come from Download All)
+    const shown = (await runDetails(page, run)).inputs;
+    const files = await filesOf(walker, run, before, at, shown);
+    const given: Record<string, Buffer> = {};
+    if (files !== undefined) for (const role of ROLES) given[files[role].name] = Buffer.from(files[role].bytes);
+    note += ` run ${run} ${await s4Compare(walker, run, given, runFiles)} picker ${picker.join(',') || 'none'}`;
+    const { outputs } = await storedOutputs(page, run);
+    // the picker is the shown query's (the first): its rounds in outfmt 0 are the headings before the second query
+    // outfmt 0 prints "Results from round N" before each query's "Query=" line: count the rounds whose next query is the first
+    const roundsOf = new Map<string, Set<string>>();
+    let round = '';
+    let firstName: string | undefined;
+    for (const line of outputs[0].toString('utf8').split('\n')) {
+      const r = /^Results from round (\d+)/.exec(line);
+      if (r !== null) round = r[1]!;
+      else if (line.startsWith('Query= ')) {
+        firstName ??= line;
+        if (round !== '') (roundsOf.get(line) ?? roundsOf.set(line, new Set()).get(line)!).add(round);
+      }
+    }
+    const headings = firstName === undefined ? 0 : (roundsOf.get(firstName)?.size ?? 0);
+    if ((picker[0] ?? 0) > 1 || headings > 1) {
+      if ((picker[0] ?? 0) !== headings) throw new StepFailure('psi-rounds', `run ${run}: the round picker has ${picker[0] ?? 0} rounds; outfmt 0 reports ${headings}`);
+    }
+  }
+  // Back to BLASTP's blastp task with the default rounds and no PSSM files.
+  await showTab(page, 'search');
+  await openParameters(page);
+  await page.getByTestId('param-num_iterations').fill('1').catch(() => undefined);
+  if (pssm) {
+    await page.getByTestId('param-out_pssm').fill('').catch(() => undefined);
+    await page.getByTestId('param-out_ascii_pssm').fill('').catch(() => undefined);
+  }
+  await page.getByTestId('param-task-blastp').check();
+  await described(page);
+  await settle(page);
+  walker.program = await checkedProgram(page);
+  return note;
+};
+
+/** Sweep 4: -export_search_strategy NAME on the form as the walk left it: the strategy file is the CLI's, byte for byte. */
+const strategy: StepBody = async (walker, draws) => {
+  const { page } = walker;
+  await showTab(page, 'search');
+  await settle(page);
+  await openParameters(page);
+  const name = draws.pick(['walk.asn', 'strategy.txt', 's p.asn']);
+  const extra = page.getByTestId('param-extra');
+  const kept = await extra.inputValue();
+  await extra.fill(`${kept} -export_search_strategy ${name.includes(' ') ? `'${name}'` : name}`.trim());
+  await page.waitForTimeout(900);
+  await settle(page);
+  const before = await submitted(walker);
+  const { runs, refused } = await pressRun(walker, before);
+  let note = name;
+  if (refused !== undefined) note += ` refused: ${refused.slice(0, 160)}`;
+  for (const [at, run] of runs.entries()) {
+    const status = await runStatus(page, run);
+    if (status !== 'completed') {
+      await verifyRun(walker, run, before, at);
+      continue;
+    }
+    walker.counts.completed += 1;
+    const runFiles = await s4RunFiles(page, run);
+    if (runFiles[name] === undefined) throw new StepFailure('strategy-file', `run ${run}: no file ${name} among the run's files (${Object.keys(runFiles).join(', ')})`);
+    const shown = (await runDetails(page, run)).inputs;
+    const files = await filesOf(walker, run, before, at, shown);
+    const given: Record<string, Buffer> = {};
+    if (files !== undefined) for (const role of ROLES) given[files[role].name] = Buffer.from(files[role].bytes);
+    note += ` run ${run} ${await s4Compare(walker, run, given, { [name]: runFiles[name] })}`;
+  }
+  await showTab(page, 'search');
+  await openParameters(page);
+  await extra.fill(kept);
+  await settle(page);
+  return note;
 };
 
 export const STEPS: Readonly<Record<WalkKind, StepBody>> = Object.freeze({
@@ -1163,4 +2003,14 @@ export const STEPS: Readonly<Record<WalkKind, StepBody>> = Object.freeze({
   view,
   width,
   reload: reloadPage,
+  start: startRun,
+  filter,
+  fetch: fetchStep,
+  hide,
+  failrun,
+  printed,
+  logfile,
+  database,
+  psiround,
+  strategy,
 });

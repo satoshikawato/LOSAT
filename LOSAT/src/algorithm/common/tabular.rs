@@ -486,6 +486,7 @@ pub(crate) fn subject_lookup_failure(
             bioseq: false,
             length: false,
             lineless: false,
+            map_length: false,
         }),
         None => failed_id.then(|| crate::report::tabular::LookupFailure::of_plain(database)),
     }

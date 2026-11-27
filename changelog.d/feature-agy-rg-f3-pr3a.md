@@ -12,3 +12,7 @@
   `BL2SEQ_LEGACY`) whose subject sequence does not read (more letters declared than held, a length
   of 4294967295) ends with NCBI BLAST+'s engine error before any output, as NCBI's sets up the
   subject sequences.
+- `losat blast_formatter`: in the tabular formats, `-subject` sequences with `BL2SEQ_LEGACY` and a
+  subject (or query) that declares 4294967295 letters give NCBI BLAST+'s rows: the length as NCBI
+  reads it at each row (the declared one, or that of the letters once read), and where NCBI's
+  prefetch of the subjects meets such a subject, its rows with only the ids and the scores.

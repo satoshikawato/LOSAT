@@ -516,6 +516,7 @@ impl ShownSubjects<'_> {
                         bioseq: false,
                         length: false,
                         lineless: false,
+                        map_length: false,
                     }),
                 None => reported
                     .tabular_ids(oid)

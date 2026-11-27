@@ -516,7 +516,7 @@ struct RefusedRow {
 }
 
 /// The rows that LOSAT refuses by name.
-const REFUSED_ROWS: [RefusedRow; 10] = [
+const REFUSED_ROWS: [RefusedRow; 9] = [
     // NCBI's database reader does not open it: NCBI then asks its servers (its remote loader's
     // failure under `unshare -rn`).
     RefusedRow {
@@ -608,16 +608,6 @@ const REFUSED_ROWS: [RefusedRow; 10] = [
         ncbi_status: 255,
         ncbi_err: "reference out of range of Seq-inst data: 1124",
         losat_err: "a -subject Bioseq with letters that do not all read",
-    },
-    // A -subject Bioseq of 4294967295 letters with BL2SEQ_LEGACY: NCBI's row of it has no fields
-    // but the ids and the scores, and a subject length of 0.
-    RefusedRow {
-        program: "blast_formatter",
-        name: "refused_tabular_slen_huge_legacy",
-        kind: "Tabular",
-        ncbi_status: 0,
-        ncbi_err: "",
-        losat_err: "a subject Bioseq of 4294967295 letters",
     },
 ];
 

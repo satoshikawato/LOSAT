@@ -4198,6 +4198,7 @@ impl ParsedSubject {
                 bioseq: false,
                 length: false,
                 lineless,
+                map_length: false,
             }),
         )
     }

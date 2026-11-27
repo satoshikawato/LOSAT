@@ -317,6 +317,26 @@ pub(crate) fn row_reads<E: From<ReadStop>>(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:756-776, 866-877
+/// The row of the plan `plan` that leaves `SetFields` at the subject block's catch
+/// (`bioseqs_found` false, `return -1`): the scores and the query block's `qcovhsp`, the rest the
+/// values of `x_ResetFields` (no letters read, no counts).
+pub(crate) fn caught_hsp<'r>(plan: &RowPlan) -> TabularHsp<'r> {
+    let RowScores {
+        score,
+        bit_score,
+        evalue,
+        ..
+    } = plan.scores;
+    TabularHsp {
+        evalue,
+        bit_score,
+        score,
+        qcovhsp: plan.qcovhsp,
+        ..empty_hsp()
+    }
+}
+
 /// The values of `x_ResetFields` (0, no rows).
 fn empty_hsp<'r>() -> TabularHsp<'r> {
     TabularHsp {

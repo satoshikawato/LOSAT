@@ -137,9 +137,9 @@ fn xml2(kind: Xml2Kind, titles: &[&[u8]], calls: Calls<'_>) -> (Vec<u8>, Option<
             program_type: None,
         };
         let mut document = Xml2Writer::for_run(kind, params, None, None);
-        document.document_mut().resume(std::mem::take(&mut carry));
+        document.resume(std::mem::take(&mut carry));
         let result = call(&mut document, &queries[range], (epilog, stops), &mut out);
-        carry = document.document_mut().take_carry();
+        carry = document.take_carry();
         if let Err(error) = result {
             return (out, Some(error.to_string()));
         }
@@ -275,9 +275,9 @@ fn the_start_comes_with_the_first_written_report() {
         let mut document = Xml2Writer::for_run(kind, params(), None, None);
         call(&mut document, &queries[..1], (false, false), &mut out).expect("qa's call");
         assert!(out.is_empty(), "{kind:?}: {} bytes", out.len());
-        let carry = document.document_mut().take_carry();
+        let carry = document.take_carry();
         let mut document = Xml2Writer::for_run(kind, params(), None, None);
-        document.document_mut().resume(carry);
+        document.resume(carry);
         call(&mut document, &queries[1..], (false, false), &mut out).expect("qb's call");
         assert_eq!(out, before_end(kind, &[b"qa", b"qb"])[..out.len()]);
         assert!(out.starts_with(&prolog_bytes(kind)) && out.len() > prolog_bytes(kind).len());

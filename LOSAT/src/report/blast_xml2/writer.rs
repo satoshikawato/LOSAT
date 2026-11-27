@@ -20,7 +20,7 @@ use crate::report::serial::json::JsonEncoder;
 use crate::report::serial::xml::XmlEncoder;
 
 use super::framing::{
-    HeldReport, MadeReport, NoSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind,
+    HeldReport, MadeReport, NoSideFiles, RunSideFiles, SideFiles, Xml2Carry, Xml2Document, Xml2Kind,
 };
 use super::records::{Xml2Run, Xml2Target};
 
@@ -762,6 +762,8 @@ pub struct Xml2Writer<F: SideFiles = NoSideFiles> {
     params: Xml2Run,
     scratch: Scratch,
     report: Vec<u8>,
+    /// The caller's output buffer between its calls (`StructuredXml::take_out`).
+    out: Vec<u8>,
 }
 
 impl Xml2Writer<NoSideFiles> {
@@ -797,6 +799,7 @@ impl<F: SideFiles> Xml2Writer<F> {
             params,
             scratch: Scratch::default(),
             report: Vec::new(),
+            out: Vec::new(),
         }
     }
 
@@ -804,6 +807,28 @@ impl<F: SideFiles> Xml2Writer<F> {
     /// writers in turn (`Xml2Document::take_carry` and `resume`).
     pub fn document_mut(&mut self) -> &mut Xml2Document<F> {
         &mut self.document
+    }
+
+    // No NCBI counterpart: LOSAT's buffers.
+    /// Takes the state of the run so far (`Xml2Document::take_carry`) with the writer's buffers
+    /// (its report's and the caller's output buffer, `StructuredXml::keep_out`), emptied, for the
+    /// writer of a later call of the run (`resume`): the calls of a run grow them once, as one
+    /// call does (BLASTN's report stream, review M3 of line RG series D, item xml-stream).
+    pub fn take_carry(&mut self) -> Xml2Carry {
+        let mut carry = self.document.take_carry();
+        carry.keep_buffers([
+            std::mem::take(&mut self.report),
+            std::mem::take(&mut self.out),
+        ]);
+        carry
+    }
+
+    /// Continues the run whose state `carry` holds (`take_carry`): the document's
+    /// (`Xml2Document::resume`) and the buffers of the writer before.
+    pub fn resume(&mut self, mut carry: Xml2Carry) {
+        let [report, out] = carry.take_buffers();
+        (self.report, self.out) = (report, out);
+        self.document.resume(carry);
     }
 }
 
@@ -924,6 +949,15 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
 
     fn take_posts(&mut self) -> crate::report::blast_xml::DocumentPosts {
         self.document.take_posts()
+    }
+
+    fn take_out(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.out)
+    }
+
+    fn keep_out(&mut self, mut out: Vec<u8>) {
+        out.clear();
+        self.out = out;
     }
 
     fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()> {

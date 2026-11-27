@@ -612,6 +612,43 @@ fn a_run_written_by_several_documents_in_turn_has_the_bytes_of_one() {
 }
 
 #[test]
+fn a_writer_hands_its_buffers_on_emptied_and_writes_the_bytes_of_one() {
+    // BLASTN's report stream writes a run with a writer per batch: the writer's report buffer and
+    // the call's output buffer go on with the carry, empty, so that the calls grow them once.
+    let message = invalid_message();
+    let run = run(None, "");
+    for kind in [Xml2Kind::Single16, Xml2Kind::Single15] {
+        let target = Xml2Target::Database;
+        let mut first = Xml2Writer::new(kind, params(target));
+        let mut out = first.take_out();
+        first
+            .query(&run, &invalid_query(&message), &mut out, |_| Ok(()))
+            .unwrap();
+        let written = out.clone();
+        let capacity = out.capacity();
+        first.keep_out(out);
+        let mut carry = first.take_carry();
+        let [report, kept] = carry.take_buffers();
+        assert!(report.is_empty() && report.capacity() > 0, "{kind:?}");
+        assert!(kept.is_empty() && kept.capacity() == capacity, "{kind:?}");
+        carry.keep_buffers([report, kept]);
+        let mut second = Xml2Writer::new(kind, params(target));
+        second.resume(carry);
+        let mut out = second.take_out();
+        assert!(out.is_empty() && out.capacity() == capacity, "{kind:?}");
+        second.finish(&mut out).unwrap();
+        // The bytes of the one writer of the run.
+        let mut whole = Xml2Writer::new(kind, params(target));
+        let mut expected = Vec::new();
+        whole
+            .query(&run, &invalid_query(&message), &mut expected, |_| Ok(()))
+            .unwrap();
+        whole.finish(&mut expected).unwrap();
+        assert_eq!([written, out].concat(), expected, "{kind:?}");
+    }
+}
+
+#[test]
 fn a_refused_held_report_is_refused_where_it_is_written_and_never_where_it_is_not() {
     // NCBI makes the held report of a `-subject` run where it writes it (the arrival of another
     // query's result, in the same report call or a later one, or the epilog), so a report that

@@ -374,6 +374,19 @@ pub trait StructuredXml {
     fn take_posts(&mut self) -> DocumentPosts {
         DocumentPosts::default()
     }
+
+    /// An empty buffer for a call's output (the `out` of the other methods): the one that the
+    /// call before kept (`keep_out`), whose capacity a run's later calls reuse; a new one where
+    /// the writer keeps none.
+    fn take_out(&mut self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    /// Keeps the call's output buffer `out` for a later call (`take_out`); dropped where the
+    /// writer keeps none.
+    fn keep_out(&mut self, out: Vec<u8>) {
+        let _ = out;
+    }
 }
 
 /// How many of the `queries` of a report call have reports that the documents write, and so have

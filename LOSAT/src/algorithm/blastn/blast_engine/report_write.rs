@@ -553,11 +553,10 @@ pub(super) fn write_structured_xml(
             let mut document =
                 crate::report::blast_xml2::Xml2Writer::for_run(kind, params, report.out, side_sink);
             // EXPERIMENT (LOSAT_X_RPTSTREAM): a batch's call continues the document of the calls
-            // before it and hands its state on (`x_rpt_stream::Written::xml2`).
+            // before it and hands its state on (`x_rpt_stream::Written::xml2`), with the
+            // writer's buffers (`Xml2Writer::take_carry`).
             if let Some(carry) = report.xml2_carry {
-                document
-                    .document_mut()
-                    .resume(std::mem::take(&mut *carry.lock().expect("the carry")));
+                document.resume(std::mem::take(&mut *carry.lock().expect("the carry")));
             }
             crate::algorithm::blastn::blast_xml::write_blastn_xml(
                 &xml,
@@ -567,7 +566,7 @@ pub(super) fn write_structured_xml(
                 format_warnings,
             )?;
             if let Some(carry) = report.xml2_carry {
-                *carry.lock().expect("the carry") = document.document_mut().take_carry();
+                *carry.lock().expect("the carry") = document.take_carry();
             }
         }
     }

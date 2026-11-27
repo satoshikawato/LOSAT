@@ -9749,10 +9749,11 @@ fn x_debug_output(args: &BlastnArgs) -> bool {
 /// Whether the prolog of `format` comes with its reports (or, for a run that stops before any
 /// report, from `write_pairwise_prologs`) and not before the search: the start of the XML2 and
 /// JSON documents of outfmt 16 and 15. NCBI writes that start before the search too
-/// (`PrintProlog`), but LOSAT's refusals of the reports (a title that NCBI crashes on,
-/// `names::Refusal`, DECISIONS 20 as K4h left it) come after the search and before the first
-/// byte, so the start is written with the first report, or by the path of an NCBI error that
-/// stops the run before one. The outfmt 0 to 4 prolog comes before the search for every sink
+/// (`PrintProlog`), where it waits in its stream's buffer until the first report is flushed, and
+/// LOSAT refuses a report (a title that NCBI crashes on, `names::Refusal`) where NCBI makes it
+/// (remaining-gaps DECISIONS D-SO-6), so that a refused first report writes nothing: the start
+/// is written with the first report (`blast_xml::StartFirst`), or by the path of an NCBI error
+/// that stops the run before one. The outfmt 0 to 4 prolog comes before the search for every sink
 /// (`write_pairwise_prologs`; a library `File` sink is kept for the run,
 /// `api::local_blast::KeptFile`).
 ///

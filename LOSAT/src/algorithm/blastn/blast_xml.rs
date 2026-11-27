@@ -146,7 +146,8 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     };
     let mut taxdb_printer = xml.taxdb_notes.printer();
     let (mut query_row, mut subject_row): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
-    let mut buf: Vec<u8> = Vec::new();
+    // The call's output buffer, that of the call before where the writer keeps it.
+    let mut buf: Vec<u8> = document.take_out();
     // The document's start (`StructuredXml::start`), before the first query's warnings, after the
     // refusal of the database counts that the written reports would print. A `-subject` XML2 or
     // JSON document's start waits for the output's first write or flush (`StartFirst`), as NCBI's
@@ -154,7 +155,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     document.start((reports > 0).then_some(&xml.run), &mut buf)?;
     let mut writer = StartFirst {
         inner: writer,
-        start: std::mem::take(&mut buf),
+        start: buf.split_off(0),
     };
     if !holds_back {
         writer.emit()?;
@@ -370,6 +371,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         // The call wrote nothing (it holds its report): a later call writes the start.
         document.start_not_written();
     }
+    document.keep_out(buf);
     Ok(())
 }
 

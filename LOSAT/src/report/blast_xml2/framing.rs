@@ -306,9 +306,12 @@ impl Xml2Document<RunSideFiles> {
 /// several calls (the BLASTP block search, `x_query_blocks.rs`; BLASTN's report stream,
 /// `blastn::blast_engine::x_rpt_stream`): the count of reports written, whether the start of the
 /// document has been written, and the held report of a `-subject` run (with its refusal,
-/// `Xml2Document::hold_refused`).
+/// `Xml2Document::hold_refused`); with `Xml2Writer::take_carry`, the writer's buffers too.
 #[derive(Default)]
 pub struct Xml2Carry {
+    /// The buffers that a call's writer grows (`Xml2Writer::take_carry`), empty: kept for their
+    /// capacity, so that the calls of a run grow them once, as one call does.
+    buffers: [Vec<u8>; 2],
     written: u32,
     started: bool,
     pending: Vec<u8>,
@@ -320,6 +323,19 @@ pub struct Xml2Carry {
 }
 
 impl Xml2Carry {
+    /// Keeps `buffers` (emptied) for the next call's writer (`Xml2Writer::take_carry`).
+    pub(super) fn keep_buffers(&mut self, mut buffers: [Vec<u8>; 2]) {
+        for buffer in &mut buffers {
+            buffer.clear();
+        }
+        self.buffers = buffers;
+    }
+
+    /// The buffers that the call before kept (`keep_buffers`), empty; new ones where none was.
+    pub(super) fn take_buffers(&mut self) -> [Vec<u8>; 2] {
+        std::mem::take(&mut self.buffers)
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-367
     /// The start of a document of kind `kind` where the run stops with an error of NCBI's before any
     /// call wrote it (NCBI's exit flushes the start that `PrintProlog` wrote): appended to `out`
@@ -336,6 +352,7 @@ impl<F: SideFiles> Xml2Document<F> {
     /// takes it up with [`Xml2Document::resume`].
     pub fn take_carry(&mut self) -> Xml2Carry {
         Xml2Carry {
+            buffers: Default::default(),
             written: std::mem::take(&mut self.written),
             started: std::mem::take(&mut self.started),
             pending: std::mem::take(&mut self.pending),

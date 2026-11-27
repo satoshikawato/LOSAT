@@ -168,9 +168,9 @@ pub(super) fn scan_na_lookup(x: &NaScanInputs<'_>, state: &mut NaScanState<'_>) 
         None
     };
     let mut scan_pause_ns: u64 = 0;
-    // The batch's scanner (`ScanBatch::mb_scan_kind`: for these tables the word and lookup word
-    // lengths are `safe_k`).
-    let mb_scan_kind = scan.mb_scan_kind(subject_masked);
+    // The batch's scanner (`ScanForms::scan_kind` of `ScanBatch::forms`: for these tables the word
+    // and lookup word lengths are `safe_k`).
+    let mb_scan_kind = scan.forms.scan_kind(subject_masked);
     // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants of the seeds
     // (`s_end` adds `safe_k`) are the batch's (`scan.x_lv_seeds`: the word length is `safe_k`
     // without a two-stage table).

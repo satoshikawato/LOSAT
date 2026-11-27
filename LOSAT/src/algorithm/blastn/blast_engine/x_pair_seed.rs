@@ -42,6 +42,7 @@
 //! 8, `-task blastn-short`) goes to the child module `na` (`x_pair_seed_na.rs`,
 //! LOSAT_X_PAIRPARNA, called by `run.rs` as `run_na`).
 
+use super::two_stage_scan::{MbCsrHead, ScanForms};
 use super::DiagStruct;
 use super::{
     extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, first_scan_range,
@@ -50,9 +51,9 @@ use super::{
     scan_subject_kmers_range_mb_10_3, scan_subject_kmers_range_mb_11_1mod4,
     scan_subject_kmers_range_mb_11_2mod4, scan_subject_kmers_range_mb_11_3mod4,
     scan_subject_kmers_range_mb_9_1, scan_subject_kmers_range_mb_9_2,
-    scan_subject_kmers_range_mb_any, scan_subject_kmers_with_offsets, select_mb_scan_kind,
-    type_of_word, BlastnTiming, DiagHashTable, MbScanSubjectKind, QueryContext, QueryContextIndex,
-    UngappedHit, COMPRESSION_RATIO,
+    scan_subject_kmers_range_mb_any, scan_subject_kmers_with_offsets, type_of_word, BlastnTiming,
+    DiagHashTable, MbScanSubjectKind, QueryContext, QueryContextIndex, UngappedHit,
+    COMPRESSION_RATIO,
 };
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 #[cfg(all(
@@ -78,7 +79,7 @@ mod latest;
 
 #[path = "x_pair_seed_na.rs"]
 mod na;
-pub(super) use na::{run as run_na, wants as wants_na, NaInputs};
+pub(super) use na::{owner_scope as owner_scope_na, run as run_na, wants as wants_na, NaInputs};
 
 // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold of both strips paths split by diagonal-hash bucket
 // over the pool (`x_pair_seed_part.rs`); its scratch is a field of `SubjectScratch`.
@@ -96,9 +97,13 @@ static X_OWNER_SCAN_NS: AtomicU64 = AtomicU64::new(0);
 static X_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 
 /// The inputs of the seed stage of one subject chunk, borrowed from
-/// `prelim_subject::prelim_chunk_hits` (the same names as there).
+/// `prelim_subject::prelim_chunk_hits` (the same names as there; `two_stage` and `forms` are the
+/// batch's table and the word finder's forms chosen once from it, `ScanBatch::two_stage_lookup_ref`
+/// and `ScanBatch::forms`, which the strips read instead of choosing them again; `recording`:
+/// the run records the switches' sides, `ScanBatch::x_recording`).
 pub(super) struct Inputs<'a> {
     pub(super) two_stage: &'a TwoStageLookup,
+    pub(super) forms: &'a ScanForms<'a>,
     pub(super) search_seq_packed: &'a [u8],
     pub(super) s_len: usize,
     pub(super) subject_seq_ranges: &'a [(i32, i32)],
@@ -123,6 +128,7 @@ pub(super) struct Inputs<'a> {
     pub(super) small_na_word: bool,
     pub(super) diagnostics: bool,
     pub(super) one_subject_owner: bool,
+    pub(super) recording: bool,
     pub(super) timing: Option<&'a BlastnTiming>,
 }
 
@@ -470,19 +476,16 @@ pub(super) fn owner_scope(
 }
 
 /// No NCBI counterpart (scheduling only): whether `prelim_subject::prelim_chunk_hits` calls `run`
-/// for a chunk (`disc`: the table is discontiguous), asked before it builds `Inputs`: always for a
-/// discontiguous table (`disc::run` decides with its own switches), else `run`'s tests for a
-/// contiguous table (`owner_chunk`): the batch's part (`scope`, `owner_scope`), a chunk the
-/// subject's owner searches by itself (`one_subject_owner`) and a pool of two threads or more, so a
-/// chunk that `run` would send back at once (every chunk of a database search: one thread has no
-/// pool, and a pool searches the subjects in parallel) costs neither the inputs nor the call. Such
-/// a chunk records the reference side of LOSAT_X_PAIRPAR here, as `run` recorded it, while the run
-/// records the sides (`recording`, the batch's `xreach::recording`).
+/// for a chunk with a contiguous table, asked before it builds `Inputs`: `run`'s tests for such a
+/// table (`owner_chunk`): the batch's part (`scope`, `owner_scope`), a chunk the subject's owner
+/// searches by itself (`one_subject_owner`) and a pool of two threads or more, so a chunk that
+/// `run` would send back at once (every chunk of a database search: one thread has no pool, and a
+/// pool searches the subjects in parallel) costs neither the inputs nor the call. Such a chunk
+/// records the reference side of LOSAT_X_PAIRPAR here, as `run` recorded it, while the run records
+/// the sides (`recording`, the batch's `xreach::recording`). A chunk with a discontiguous table is
+/// not asked: it always goes to `run` (`disc::run` decides with its own switches).
 #[inline(always)]
-pub(super) fn wants(disc: bool, scope: bool, one_subject_owner: bool, recording: bool) -> bool {
-    if disc {
-        return true;
-    }
+pub(super) fn wants(scope: bool, one_subject_owner: bool, recording: bool) -> bool {
     let wanted = scope && one_subject_owner && pool_threads().is_some();
     if !wanted && recording {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
@@ -607,9 +610,10 @@ fn plan_strips(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1504-1533
-/// Phase 1 for one strip: the scan kernel `scan_subject_kmers_with_ranges` picks for this
-/// lookup width and step (`select_mb_scan_kind`: NCBI's Any scanner for a masked subject), from
-/// `job.start` to `job.end`; every lookup chain hit as in `on_word` (the chain order); every pair through `seed_of_pair`.
+/// Phase 1 for one strip: the scan kernel `scan_subject_kmers_with_ranges` picks for this lookup
+/// width and step (the batch's, `ScanForms::scan_kind`: NCBI's Any scanner for a masked subject),
+/// from `job.start` to `job.end`; every lookup chain hit as in `on_word` (the chain order); every
+/// pair through `seed_of_pair`.
 fn scan_strip<O: SeedOut>(x: &Inputs<'_>, job: &StripJob, out: &mut O) {
     scan_strip_from::<O, false>(x, job, Resume::at(job.start), out);
 }
@@ -624,19 +628,25 @@ fn scan_strip_from<O: SeedOut, const PIECE: bool>(
     from: Resume,
     out: &mut O,
 ) -> Option<Resume> {
+    // The sides of the batch's forms that this strip's scan takes, while the run records them.
+    if x.recording {
+        x.forms.record_head();
+    }
     // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no chains.
-    // EXPERIMENT (LOSAT_X_BNCSRPACK): the form of its head chosen once, each form's scan its own.
-    if let Some(csr) = x.two_stage.x_mb_csr() {
+    // EXPERIMENT (LOSAT_X_BNCSRPACK): the form of its head, the batch's (`ScanForms::head`), each
+    // form's scan its own.
+    if let Some(head) = x.forms.head {
         // EXPERIMENT (LOSAT_X_BNPVONCE): one presence test per word on a head that fits the cache.
-        return match csr.x_packed() {
-            Some(packed) if super::x_bn_pv_once(&packed) => {
+        return match head {
+            MbCsrHead::PackedOnce(packed) => {
                 scan_strip_csr::<O, _, false, PIECE>(x, &packed, job, from, out)
             }
-            Some(packed) => scan_strip_csr::<O, _, true, PIECE>(x, &packed, job, from, out),
-            None => scan_strip_csr::<O, _, true, PIECE>(x, csr, job, from, out),
+            MbCsrHead::Packed(packed) => {
+                scan_strip_csr::<O, _, true, PIECE>(x, &packed, job, from, out)
+            }
+            MbCsrHead::Csr(csr) => scan_strip_csr::<O, _, true, PIECE>(x, csr, job, from, out),
         };
     }
-    super::x_bn_rank_once(false);
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let packed = x.search_seq_packed;
@@ -665,6 +675,7 @@ fn scan_strip_from<O: SeedOut, const PIECE: bool>(
         }
     };
     scan_kernel(
+        x.forms.scan_kind(x.subject_masked),
         packed,
         subject_len,
         lut_word_length,
@@ -700,10 +711,10 @@ fn scan_strip_csr<
     let two_stage = x.two_stage;
     let s_range = job.s_range;
     let cut = Cut::new(&from);
-    // EXPERIMENT (LOSAT_X_BNRANKONCE): with `rank_once` a word's run is the one of the head's
-    // element the ring hands over with it (a packed head's word is ranked once), else the cell's
-    // run read again.
-    let rank_once = super::x_bn_rank_once(true);
+    // EXPERIMENT (LOSAT_X_BNRANKONCE): with `rank_once` (the batch's, `ScanForms::rank_once`) a
+    // word's run is the one of the head's element the ring hands over with it (a packed head's word
+    // is ranked once), else the cell's run read again.
+    let rank_once = x.forms.rank_once;
     let mut emit = |(kmer_start, index): (usize, u64), e: usize| {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
         let mut run = if rank_once {
@@ -737,6 +748,7 @@ fn scan_strip_csr<
         }
     };
     scan_kernel(
+        x.forms.scan_kind(x.subject_masked),
         x.search_seq_packed,
         x.s_len,
         two_stage.lut_word_length(),
@@ -753,11 +765,13 @@ fn scan_strip_csr<
     cut.stop.get()
 }
 
-/// The scan kernel `scan_subject_kmers_with_ranges` picks for this lookup width and step,
-/// from `start` to `end` (`scan_strip`, and the child module `na`).
+/// The scan kernel `kind` (the batch's scanner for this lookup width and step and the chunk's
+/// masking, `ScanForms::scan_kind`, as `scan_subject_kmers_with_ranges` takes it), from `start` to
+/// `end` (`scan_strip`, and the child module `na`).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn scan_kernel<F: FnMut(usize, u64) -> bool>(
+    kind: Option<MbScanSubjectKind>,
     packed: &[u8],
     subject_len: usize,
     lut_word_length: usize,
@@ -767,7 +781,7 @@ fn scan_kernel<F: FnMut(usize, u64) -> bool>(
     end: usize,
     on_kmer: &mut F,
 ) {
-    match select_mb_scan_kind(lut_word_length, scan_step, subject_masked) {
+    match kind {
         Some(MbScanSubjectKind::Any) => scan_subject_kmers_range_mb_any(
             packed,
             subject_len,
@@ -1748,6 +1762,7 @@ pub(super) fn run(
     if x.two_stage.disc().is_some() {
         return disc::run(x, diag_hash, diag_array, ungapped_hits, fold_scratch);
     }
+    // (the sides are recorded while the run records them, `Inputs::recording`)
     if !owner_chunk(
         x.use_array_indexing,
         x.window_size,
@@ -1756,14 +1771,20 @@ pub(super) fn run(
         x.diagnostics,
         x.one_subject_owner,
     ) {
-        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+        if x.recording {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+        }
         return false;
     }
     let Some(threads) = pool_threads() else {
-        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+        if x.recording {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+        }
         return false;
     };
-    crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", true);
+    if x.recording {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", true);
+    }
     let timing = x.timing;
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
     let t_start = timed.then(std::time::Instant::now);

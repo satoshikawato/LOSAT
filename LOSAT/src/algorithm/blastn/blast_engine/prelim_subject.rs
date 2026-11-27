@@ -25,7 +25,8 @@
 //!
 //! This module is a child of `run` for the items it keeps private (the types `SubjectChunk`,
 //! `SubjectSplitState`, `SubjectScratch`, `PrelimHit`, `QueryContext`, `QueryContextIndex`,
-//! `DiagStruct`, `BlastnTiming`, `BlastnSubjectRef` and `SubjectCtx`; `advance_diag_table_offset`,
+//! `DiagStruct`, `DiagHashTable`, `UngappedHit`, `BlastnTiming`, `BlastnSubjectRef` and
+//! `SubjectCtx`; `x_mb_hit_prefetch_on`, `advance_diag_table_offset`,
 //! `diag_hash_insert_window`, `merge_prelim_hit_lists`, `prelim_subject_best_hit`,
 //! `build_subject_seq_ranges_from_masks`, `read_db_soft_ranges`, `ungapped_subject_stage`, the
 //! e-value helpers, `database` and the child modules of the scans and of the HSP list). Its
@@ -54,12 +55,11 @@ use super::{
     advance_diag_table_offset, build_subject_seq_ranges_from_masks,
     calculate_blastn_context_statistics, database, diag_hash_insert_window,
     encode_iupac_to_blastna, merge_prelim_hit_lists, na_scan, next_subject_chunk, prelim_hsp_list,
-    prelim_subject_best_hit, read_db_seq_ranges, select_mb_scan_kind, two_stage_scan,
-    ungapped_subject_stage, x_diag_lv, x_mb_hit_prefetch_on, x_pair_seed, BlastnSubjectRef,
-    BlastnTiming, ContextKarlin, DiagHashTable, DiagStruct, GapAlignScratch, HspListSplit,
-    MbScanSubjectKind, PrelimHit, PrelimReap, QueryContext, QueryContextIndex, SubjectChunk,
-    SubjectChunkStatus, SubjectCtx, SubjectScratch, SubjectSplitState, UngappedHit,
-    COMPRESSION_RATIO, DBSEQ_CHUNK_OVERLAP,
+    prelim_subject_best_hit, read_db_seq_ranges, two_stage_scan, ungapped_subject_stage, x_diag_lv,
+    x_mb_hit_prefetch_on, x_pair_seed, BlastnSubjectRef, BlastnTiming, ContextKarlin,
+    DiagHashTable, DiagStruct, GapAlignScratch, HspListSplit, PrelimHit, PrelimReap, QueryContext,
+    QueryContextIndex, SubjectChunk, SubjectChunkStatus, SubjectCtx, SubjectScratch,
+    SubjectSplitState, UngappedHit, COMPRESSION_RATIO, DBSEQ_CHUNK_OVERLAP,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::alignment::x_greedy_prelim::XPrelimSubject;
@@ -296,33 +296,29 @@ pub(super) struct ScanBatch<'a> {
     pub(super) min_ungapped_score: i32,
     pub(super) timing_ref: Option<&'a BlastnTiming>,
     pub(super) timing_enabled: bool,
-    /// The word finder's forms, chosen once for the batch from its table, switches and
-    /// diagnostics, as NCBI chooses the lookup table's scanner and extension once for the search
-    /// (below), so that a chunk's word finder reads them instead of deciding them again: the head
-    /// of a contiguous two-stage table laid out as CSR in the form its scan takes
-    /// (`two_stage_scan::MbCsrHead`; `None` for a table with chains, a discontiguous table and
-    /// the other tables) and whether a word's run is the ring's element (LOSAT_X_BNRANKONCE);
-    /// whether the steps of the pairs prefetch the query line of a later pair (LOSAT_X_MBHITPF,
-    /// for a two-stage table); the megablast scanner of an unmasked and of a masked chunk
-    /// (`select_mb_scan_kind`, the masked one as NCBI's word finder falls back to the scanner of
-    /// any offset); the part of PAIRPAR's scope that is the same for every chunk
-    /// (`x_pair_seed::owner_scope`); and whether the run records the switches' sides
-    /// (`xreach::recording`): a chunk records the sides of its forms only then, where it recorded
-    /// them before (`two_stage_scan::record_forms`, `x_pair_seed::wants`).
+    /// The word finder's forms (the CSR head's form, LOSAT_X_BNRANKONCE and the megablast
+    /// scanners), chosen once for the batch from its table, scan step and switches
+    /// (`two_stage_scan::ScanForms::choose`, the one place that chooses them), as NCBI chooses the
+    /// lookup table's scanner once for the search: the reference scans (`two_stage_scan`,
+    /// `na_scan`, `neg_window`) read them here, the strips of PAIRPAR and LOSAT_X_PAIRPARNA
+    /// through their inputs (`pair_par_chunk`, `pair_par_chunk_na`), and no chunk or strip chooses
+    /// them again.
+    pub(super) forms: two_stage_scan::ScanForms<'a>,
+    /// What else a chunk's word finder reads instead of deciding it again, taken once for the
+    /// batch: whether the steps of the pairs prefetch the query line of a later pair
+    /// (LOSAT_X_MBHITPF, for a two-stage table); the parts of the scopes of PAIRPAR and
+    /// LOSAT_X_PAIRPARNA that are the same for every chunk (`x_pair_seed::owner_scope`,
+    /// `x_pair_seed::owner_scope_na`); and whether the run records the switches' sides
+    /// (`xreach::recording`): a chunk and a strip record the sides of their forms only then
+    /// (`two_stage_scan::record_forms`, `ScanForms::record_head`, `x_pair_seed::wants`,
+    /// `x_pair_seed::Inputs::recording`).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1022-1026 (the scanner
-    /// and the extension chosen once, `BlastChooseNucleotideScanSubject` at
-    /// c++/src/algo/blast/core/blast_nascan.c:2982-2992, for a megablast table
-    /// `s_MBChooseScanSubject` at :2602-2680, and `BlastChooseNaExtend` at
-    /// c++/src/algo/blast/core/na_ungapped.c:1791-1836) and
-    /// c++/src/algo/blast/core/na_ungapped.c:1651-1667 (a masked chunk's scanner)
-    /// The CSR head's forms, the prefetch, PAIRPAR and the records have no NCBI counterpart.
-    pub(super) x_mb_head: Option<two_stage_scan::MbCsrHead<'a>>,
-    pub(super) x_rank_once: bool,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1022-1026 (the extension
+    /// chosen once, `BlastChooseNaExtend` at c++/src/algo/blast/core/na_ungapped.c:1791-1836)
+    /// The prefetch, the strips' scopes and the records have no NCBI counterpart.
     pub(super) x_hit_prefetch: bool,
-    pub(super) mb_scan_kind: Option<MbScanSubjectKind>,
-    pub(super) mb_scan_kind_masked: Option<MbScanSubjectKind>,
     pub(super) x_pair_scope: bool,
+    pub(super) x_pair_scope_na: bool,
     pub(super) x_recording: bool,
 }
 
@@ -359,8 +355,6 @@ impl<'a> ScanBatch<'a> {
         let exact_ungapped = batch.matrix_only || word_length < 11;
         let diagnostics =
             debug_enabled || batch.blastn_trace_enabled || batch.debug_window.is_some();
-        // The word finder's forms (the fields' comment).
-        let (x_mb_head, x_rank_once) = two_stage_scan::MbCsrHead::choose(two_stage_lookup_ref);
         ScanBatch {
             batch,
             two_stage_lookup_ref,
@@ -434,11 +428,13 @@ impl<'a> ScanBatch<'a> {
             min_ungapped_score: batch.min_ungapped_score,
             timing_ref: batch.timing_ref,
             timing_enabled: batch.timing_ref.is_some(),
-            x_mb_head,
-            x_rank_once,
+            // The word finder's forms and what else its chunks read once (the fields' comments).
+            forms: two_stage_scan::ScanForms::choose(
+                two_stage_lookup_ref,
+                lut_word_length,
+                batch.scan_step,
+            ),
             x_hit_prefetch: two_stage_lookup_ref.is_some() && x_mb_hit_prefetch_on(),
-            mb_scan_kind: select_mb_scan_kind(lut_word_length, batch.scan_step, false),
-            mb_scan_kind_masked: select_mb_scan_kind(lut_word_length, batch.scan_step, true),
             x_pair_scope: x_pair_seed::owner_scope(
                 use_array_indexing,
                 window_size,
@@ -446,18 +442,13 @@ impl<'a> ScanBatch<'a> {
                 !batch.small_na_compressed_query.is_empty(),
                 diagnostics,
             ),
+            x_pair_scope_na: x_pair_seed::owner_scope_na(
+                use_array_indexing,
+                window_size,
+                batch.scan_range,
+                diagnostics,
+            ),
             x_recording: crate::utils::xreach::recording(),
-        }
-    }
-
-    /// The megablast scanner of a chunk (`mb_scan_kind`, or `mb_scan_kind_masked` for a masked
-    /// chunk).
-    #[inline(always)]
-    pub(super) fn mb_scan_kind(&self, subject_masked: bool) -> Option<MbScanSubjectKind> {
-        if subject_masked {
-            self.mb_scan_kind_masked
-        } else {
-            self.mb_scan_kind
         }
     }
 }
@@ -715,29 +706,29 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // discontiguous table, `x_pair_seed_disc.rs`) with the subject scan in strips
             // and the pairs folded by this thread in the scan order; `continue` ends the
             // one-iteration strand loop. Otherwise `two_stage_scan::scan_two_stage_lookup`
-            // runs. `x_pair_seed::wants` asks `run`'s tests of a contiguous table first, so a
-            // chunk that `run` would send back (every chunk of a database search) builds no
-            // inputs and makes no call.
-            if x_pair_seed::wants(
-                two_stage.disc().is_some(),
-                scan.x_pair_scope,
-                !batch.use_parallel && reuse_prelim_hits,
-                scan.x_recording,
-            ) && pair_par_chunk(
-                scan,
-                two_stage,
-                search_seq_packed,
-                s_len,
-                subject_seq_ranges,
-                subject_masked,
-                diag_offset,
-                !batch.use_parallel && reuse_prelim_hits,
-                diag_hash,
-                &mut *hit_level_array,
-                &mut *hit_len_array,
-                ungapped_hits,
-                &mut subject_scratch.x_pair_fold,
-            ) {
+            // runs. A chunk with a discontiguous table always goes to `run` (`disc::run`
+            // decides). For a contiguous table `x_pair_seed::wants` asks `run`'s tests first, so a
+            // chunk that `run` would send back (every chunk of a database search with a contiguous
+            // table) builds no inputs and makes no call. Either goes to `run` out of line
+            // (`pair_par_chunk`), which builds the inputs.
+            let one_subject_owner = !batch.use_parallel && reuse_prelim_hits;
+            if (two_stage.disc().is_some()
+                || x_pair_seed::wants(scan.x_pair_scope, one_subject_owner, scan.x_recording))
+                && pair_par_chunk(
+                    scan,
+                    search_seq_packed,
+                    s_len,
+                    subject_seq_ranges,
+                    subject_masked,
+                    diag_offset,
+                    one_subject_owner,
+                    diag_hash,
+                    &mut *hit_level_array,
+                    &mut *hit_len_array,
+                    ungapped_hits,
+                    &mut subject_scratch.x_pair_fold,
+                )
+            {
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-498
@@ -747,7 +738,6 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             two_stage_scan::scan_two_stage_lookup(
                 &two_stage_scan::TwoStageScanInputs {
                     scan,
-                    two_stage,
                     search_seq_packed,
                     s_len,
                     subject_seq_ranges,
@@ -784,11 +774,9 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // `x_pair_seed::wants_na` asks `run_na`'s tests first, so a chunk that `run_na`
             // would send back builds no inputs and makes no call.
             if x_pair_seed::wants_na(
-                use_array_indexing,
-                scan.window_size,
-                scan.scan_range,
-                scan.diagnostics,
+                scan.x_pair_scope_na,
                 !batch.use_parallel && reuse_prelim_hits,
+                scan.x_recording,
             ) && pair_par_chunk_na(
                 scan,
                 search_seq_packed,
@@ -874,19 +862,25 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     chunk_prelim_hits
 }
 
-/// The strips dispatch of PAIRPAR for a chunk with a two-stage table (`x_pair_seed::run` with
-/// its inputs, the chunk's values and the batch's word finder `scan`), for a chunk that
-/// `x_pair_seed::wants` sends to it: whether the strips took the chunk. Out of line, so that the
-/// chunk's search that never takes the strips (every chunk of a database search) reads none of
-/// the inputs: inline, the loads of the batch's values that the inputs copy went before the
-/// test, with their stores to the stack, in every chunk (the stores of such spills in each of
-/// mlst's chunks went from 23 to 4 with this and the batch's forms, cachegrind, line FM s6). No
-/// NCBI counterpart (scheduling only).
+/// The strips dispatch of PAIRPAR for a chunk with the batch's two-stage table:
+/// `x_pair_seed::run` with its inputs, the chunk's values and the batch's word finder `scan`,
+/// whose table and forms the strips read (`ScanBatch::two_stage_lookup_ref`, `ScanBatch::forms`);
+/// whether the strips took the chunk. `prelim_chunk_hits` calls it for every chunk with a
+/// discontiguous table (`disc::run` decides, and records its sides only while the run records
+/// them, `Inputs::recording`) and for a chunk with a contiguous table that `x_pair_seed::wants`
+/// sends to it. Out of line, so that a chunk that does not come here (every chunk of a database
+/// search with a contiguous table) reads none of the inputs: inline, the loads of the batch's
+/// values that the inputs copy went to the chunk's start, with their stores to the stack, in every
+/// chunk (the stores of such spills in each of mlst's chunks went from 23 to 4 with this and the
+/// batch's forms, cachegrind, line FM s6). Inline for the chunks with a discontiguous table only,
+/// the loads and stores of about 30 of those values stayed at the start of every chunk, also of
+/// the chunks with a contiguous table, which never read them (line FM s7, the disassembly of
+/// `prelim_chunk_hits`); out of line, a chunk with a discontiguous table adds the call, small
+/// beside its strips stage. No NCBI counterpart (scheduling only).
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
 fn pair_par_chunk(
     scan: &ScanBatch<'_>,
-    two_stage: &TwoStageLookup,
     search_seq_packed: &[u8],
     s_len: usize,
     subject_seq_ranges: &[(i32, i32)],
@@ -899,11 +893,17 @@ fn pair_par_chunk(
     ungapped_hits: &mut Vec<UngappedHit>,
     x_pair_fold: &mut x_pair_seed::PartScratch,
 ) -> bool {
+    // The batch's table, the one its forms were chosen from and the strips' only source of it
+    // (`prelim_chunk_hits` comes here for a batch with one only).
+    let Some(two_stage) = scan.two_stage_lookup_ref else {
+        return false;
+    };
     let use_array_indexing = scan.use_array_indexing;
     let diag_array_size = scan.diag_array_size;
     x_pair_seed::run(
         &x_pair_seed::Inputs {
             two_stage,
+            forms: &scan.forms,
             search_seq_packed,
             s_len,
             subject_seq_ranges,
@@ -932,6 +932,7 @@ fn pair_par_chunk(
             small_na_word: !scan.small_na_compressed_query.is_empty(),
             diagnostics: scan.diagnostics,
             one_subject_owner,
+            recording: scan.x_recording,
             timing: scan.timing_ref,
         },
         diag_hash,
@@ -971,6 +972,7 @@ fn pair_par_chunk_na(
             na_lookup: scan.na_lookup_ref,
             use_direct_lookup: scan.use_direct_lookup,
             word_length: scan.safe_k,
+            forms: &scan.forms,
             search_seq_packed,
             s_len,
             subject_seq_ranges,
@@ -996,6 +998,7 @@ fn pair_par_chunk_na(
             scan_range: scan.scan_range,
             diagnostics: scan.diagnostics,
             one_subject_owner,
+            recording: scan.x_recording,
             timing: scan.timing_ref,
         },
         diag_hash,

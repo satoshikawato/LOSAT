@@ -156,11 +156,14 @@ fn seed_stage_on_strips_equals_one_scan() {
             vec![(0i32, s_len as i32)]
         };
         let diag_offset = 37 + rng.below(1000) as isize;
+        // the batch's forms (`ScanBatch::forms`), chosen as `ScanBatch::new` chooses them
+        let forms = ScanForms::choose(None, word_length, 1);
         let x = NaInputs {
             pv_direct_lookup: Some(&lookup),
             na_lookup: None,
             use_direct_lookup: true,
             word_length,
+            forms: &forms,
             search_seq_packed: &packed,
             s_len,
             subject_seq_ranges: &seq_ranges,
@@ -182,6 +185,7 @@ fn seed_stage_on_strips_equals_one_scan() {
             scan_range: 0,
             diagnostics: false,
             one_subject_owner: true,
+            recording: crate::utils::xreach::recording(),
             timing: None,
         };
         let new_hash = || {

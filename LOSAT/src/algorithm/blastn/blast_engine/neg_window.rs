@@ -34,9 +34,9 @@ use super::prelim_subject::{chunk_hsp_list, PrelimSubject, ScanBatch};
 use super::two_stage_scan::{scan_two_stage_lookup, TwoStageScanInputs, TwoStageScanState};
 use super::{
     extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, mask_lookup_index,
-    packed_kmer_at_seed_mask, scan_subject_kmers_with_ranges, select_mb_scan_kind, type_of_word,
-    x_push_ungapped, GapAlignScratch, OffsetPair, PrelimHit, QueryContext, SubjectChunk,
-    SubjectScratch, UngappedHit, COMPRESSION_RATIO,
+    packed_kmer_at_seed_mask, scan_subject_kmers_with_ranges, type_of_word, x_push_ungapped,
+    GapAlignScratch, OffsetPair, PrelimHit, QueryContext, SubjectChunk, SubjectScratch,
+    UngappedHit, COMPRESSION_RATIO,
 };
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:164,173
@@ -462,7 +462,9 @@ fn scan_na_lookup(
     subject_masked: bool,
 ) {
     let safe_k = scan.safe_k;
-    let mb_scan_kind = select_mb_scan_kind(safe_k, scan.scan_step, subject_masked);
+    // The batch's scanner (`ScanForms::scan_kind` of `ScanBatch::forms`: for these tables the word
+    // and lookup word lengths are `safe_k`).
+    let mb_scan_kind = scan.forms.scan_kind(subject_masked);
     scan_subject_kmers_with_ranges(
         search_seq_packed,
         s_len,
@@ -575,13 +577,13 @@ pub(super) fn neg_chunk_hits<const UNGAPPED: bool>(
         table.exit(s_len);
         return Vec::new();
     }
-    if let Some(two_stage) = scan.two_stage_lookup_ref {
+    // (the scan reads the batch's table itself, `ScanBatch::two_stage_lookup_ref`)
+    if scan.two_stage_lookup_ref.is_some() {
         let (mut positions, mut seeds, mut window_seeds, mut low, mut gapped) =
             (0usize, 0usize, 0usize, 0usize, 0usize);
         scan_two_stage_lookup(
             &TwoStageScanInputs {
                 scan,
-                two_stage,
                 search_seq_packed: s_seq_packed,
                 s_len,
                 subject_seq_ranges,

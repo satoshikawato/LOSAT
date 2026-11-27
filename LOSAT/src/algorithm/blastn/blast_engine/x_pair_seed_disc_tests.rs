@@ -3,6 +3,7 @@
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 use super::super::super::scan_subject_disc_words_with_ranges;
+use super::super::super::two_stage_scan::ScanForms;
 use super::super::super::{
     build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
     diag_hash_insert_window, QueryContext, QueryContextIndex,
@@ -263,6 +264,15 @@ fn ctx_refs(c: &Case) -> Vec<&[u8]> {
     c.ctx_seqs.iter().map(Vec::as_slice).collect()
 }
 
+/// The batch's forms (`ScanBatch::forms`) of these cases, which the discontiguous stages do not
+/// read: a discontiguous table has no CSR head (`ScanForms::choose` gives it none) and its scans
+/// take no megablast scanner (these are for a lookup word of 11 letters at step 1). The one
+/// contiguous table of these cases is refused before any scan (a window above 0).
+fn disc_forms() -> &'static ScanForms<'static> {
+    static FORMS: std::sync::OnceLock<ScanForms<'static>> = std::sync::OnceLock::new();
+    FORMS.get_or_init(|| ScanForms::choose(None, 11, 1))
+}
+
 fn inputs<'a>(
     c: &'a Case,
     lookup: &'a TwoStageLookup,
@@ -271,6 +281,7 @@ fn inputs<'a>(
 ) -> Inputs<'a> {
     Inputs {
         two_stage: lookup,
+        forms: disc_forms(),
         search_seq_packed: &c.packed,
         s_len: c.s_len,
         subject_seq_ranges: &c.seq_ranges,
@@ -294,6 +305,7 @@ fn inputs<'a>(
         small_na_word: false,
         diagnostics: false,
         one_subject_owner: true,
+        recording: crate::utils::xreach::recording(),
         timing: None,
     }
 }

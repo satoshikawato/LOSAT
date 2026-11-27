@@ -3038,18 +3038,11 @@ fn x_bn_mapped() -> bool {
 /// query of megabases; the loop over the offset pairs prefetches the line of the hit `X_HIT_AHEAD`
 /// places on. It changes no value.
 ///
-/// Its value, read once per batch (`prelim_subject::ScanBatch::new`); a chunk's scan records its
-/// side (`x_mb_hit_prefetch`) only while the run records the sides.
+/// Its value, read once per batch (`prelim_subject::ScanBatch::new`, its `x_hit_prefetch`); a
+/// chunk's scan records that side (`two_stage_scan::record_forms`) while the run records the sides.
 fn x_mb_hit_prefetch_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBHITPF"))
-}
-
-/// `x_mb_hit_prefetch_on`, with its side recorded (`LOSAT_X_REACH`).
-fn x_mb_hit_prefetch() -> bool {
-    let on = x_mb_hit_prefetch_on();
-    crate::utils::xreach::x_reach!("LOSAT_X_MBHITPF", on);
-    on
 }
 const X_HIT_AHEAD: usize = 16;
 
@@ -3058,13 +3051,10 @@ const X_HIT_AHEAD: usize = 16;
 /// those fit the second-level cache (4^11 cells or fewer); a larger head keeps the small presence
 /// vector in front. The words it keeps are the words with hits either way (the presence vector
 /// only skips words without hits). It changes no value.
-fn x_bn_pv_once(head: &x_dc_csr::XPacked<'_>) -> bool {
-    let once = x_bn_pv_once_of(head);
-    crate::utils::xreach::x_reach!("LOSAT_X_BNPVONCE", once);
-    once
-}
-
-/// `x_bn_pv_once` without the record of its side: the batch's form (`ScanBatch::new`).
+///
+/// Whether the packed head `head` takes the form, asked once per batch
+/// (`two_stage_scan::ScanForms::choose`); the scans record the side of the form they take
+/// (`ScanForms::record_head`).
 fn x_bn_pv_once_of(head: &x_dc_csr::XPacked<'_>) -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let on = *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNPVONCE"));
@@ -3086,17 +3076,11 @@ pub(super) fn x_bn_ext_first() -> bool {
 /// the scans of a contiguous table laid out as CSR take each word's run from the element of the
 /// head that the ring hands over with the word (`x_dc_csr::XRing`): a word of a packed head is
 /// ranked once, where it enters the ring, not again where it leaves. The words, their runs and
-/// every value are the same. Recorded (`LOSAT_X_REACH`) where a scan chooses the table's form.
-pub(super) fn x_bn_rank_once(csr: bool) -> bool {
-    let on = x_bn_rank_once_on();
-    if on {
-        crate::utils::xreach::x_reach!("LOSAT_X_BNRANKONCE", csr);
-    }
-    on && csr
-}
-
-/// Whether LOSAT_X_BNRANKONCE is on, without the record of a side: the batch's form
-/// (`ScanBatch::new`).
+/// every value are the same.
+///
+/// Whether it is on, asked once per batch (`two_stage_scan::ScanForms::choose`) and where a scan
+/// records its side (`ScanForms::record_head`: the CSR head's side, or the reference side for a
+/// table with chains).
 fn x_bn_rank_once_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNRANKONCE"))

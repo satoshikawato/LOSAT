@@ -42,6 +42,7 @@
 //! threads on and 1,465 offsets (about 2.3 MB) at 4 threads; the seeds in flight stay at about
 //! (`AHEAD_PER_THREAD` + 1) x threads strips.
 
+use super::super::two_stage_scan::ScanForms;
 use super::super::x_diag_lv;
 use super::super::{
     extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, BlastnTiming, DiagHashTable,
@@ -79,12 +80,15 @@ static X_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 
 /// The inputs of the seed stage of one subject chunk with a table that is not two-stage,
 /// borrowed from `prelim_subject::prelim_chunk_hits` (the same names as there; `word_length` is
-/// its `safe_k`, the word length and the lookup word length of these tables).
+/// its `safe_k`, the word length and the lookup word length of these tables; `forms` is the batch's
+/// word finder's forms, `ScanBatch::forms`, whose scanner the strips read instead of choosing it
+/// again; `recording`: the run records the switches' sides, `ScanBatch::x_recording`).
 pub(in super::super) struct NaInputs<'a> {
     pub(in super::super) pv_direct_lookup: Option<&'a PvDirectLookup>,
     pub(in super::super) na_lookup: Option<&'a NaLookupTable>,
     pub(in super::super) use_direct_lookup: bool,
     pub(in super::super) word_length: usize,
+    pub(in super::super) forms: &'a ScanForms<'a>,
     pub(in super::super) search_seq_packed: &'a [u8],
     pub(in super::super) s_len: usize,
     pub(in super::super) subject_seq_ranges: &'a [(i32, i32)],
@@ -107,6 +111,7 @@ pub(in super::super) struct NaInputs<'a> {
     pub(in super::super) scan_range: usize,
     pub(in super::super) diagnostics: bool,
     pub(in super::super) one_subject_owner: bool,
+    pub(in super::super) recording: bool,
     pub(in super::super) timing: Option<&'a BlastnTiming>,
 }
 
@@ -131,51 +136,40 @@ impl NaInputs<'_> {
 /// No NCBI counterpart: whether a chunk is in the scope of this module (see the module
 /// comment).
 fn in_scope(x: &NaInputs<'_>) -> bool {
-    scope(
+    owner_scope(
         x.use_array_indexing,
         x.window_size,
         x.scan_range,
         x.diagnostics,
-        x.one_subject_owner,
-    )
+    ) && x.one_subject_owner
 }
 
-/// No NCBI counterpart: the test of `in_scope` on the values of `NaInputs` (their names).
-#[inline(always)]
-fn scope(
+/// No NCBI counterpart (scheduling only): the part of `in_scope` that is the same for every chunk
+/// and thread of a batch (the names of `NaInputs`), taken once per batch
+/// (`prelim_subject::ScanBatch::new`, its `x_pair_scope_na`) for `wants`.
+pub(in super::super) fn owner_scope(
     use_array_indexing: bool,
     window_size: usize,
     scan_range: usize,
     diagnostics: bool,
-    one_subject_owner: bool,
 ) -> bool {
-    !use_array_indexing && window_size == 0 && scan_range == 0 && !diagnostics && one_subject_owner
+    !use_array_indexing && window_size == 0 && scan_range == 0 && !diagnostics
 }
 
 /// No NCBI counterpart (scheduling only): whether `prelim_subject::prelim_chunk_hits` calls `run`
-/// for a chunk with these inputs (the names of `NaInputs`), asked before it builds `NaInputs`:
-/// `run`'s tests (the switch, `scope` and a pool of two threads or more), so a chunk that `run`
-/// would send back at once costs neither the inputs nor the call. Such a chunk records the
-/// reference side of LOSAT_X_PAIRPARNA here (while the switch is on), as `run` recorded it.
+/// for a chunk, asked before it builds `NaInputs`: `run`'s tests (the switch, `in_scope`: the
+/// batch's part, `scope` from `owner_scope`, and a chunk the subject's owner searches by itself,
+/// `one_subject_owner`; and a pool of two threads or more), so a chunk that `run` would send back
+/// at once costs neither the inputs nor the call. Such a chunk records the reference side of
+/// LOSAT_X_PAIRPARNA here (while the switch is on), as `run` recorded it, while the run records the
+/// sides (`recording`, the batch's `xreach::recording`).
 #[inline(always)]
-pub(in super::super) fn wants(
-    use_array_indexing: bool,
-    window_size: usize,
-    scan_range: usize,
-    diagnostics: bool,
-    one_subject_owner: bool,
-) -> bool {
+pub(in super::super) fn wants(scope: bool, one_subject_owner: bool, recording: bool) -> bool {
     if !on() {
         return false;
     }
-    let wanted = scope(
-        use_array_indexing,
-        window_size,
-        scan_range,
-        diagnostics,
-        one_subject_owner,
-    ) && pool_threads().is_some();
-    if !wanted {
+    let wanted = scope && one_subject_owner && pool_threads().is_some();
+    if !wanted && recording {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", false);
     }
     wanted
@@ -251,6 +245,7 @@ fn scan_strip_na_from<O: SeedOut, const PIECE: bool>(
         true
     };
     scan_kernel(
+        x.forms.scan_kind(x.subject_masked),
         x.search_seq_packed,
         x.s_len,
         x.word_length,
@@ -679,18 +674,25 @@ pub(in super::super) fn run(
     if !on() {
         return false;
     }
+    // (the sides are recorded while the run records them, `NaInputs::recording`)
     if !in_scope(x) {
-        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", false);
+        if x.recording {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", false);
+        }
         return false;
     }
     let threads = match pool_threads() {
         Some(threads) => threads,
         None => {
-            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", false);
+            if x.recording {
+                crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", false);
+            }
             return false;
         }
     };
-    crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", true);
+    if x.recording {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARNA", true);
+    }
     let timing = x.timing;
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
     let t_start = timed.then(std::time::Instant::now);

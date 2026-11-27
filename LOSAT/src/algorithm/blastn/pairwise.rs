@@ -69,15 +69,6 @@ impl<'a> QueryRecords<'a> {
         self.searched
     }
 
-    /// These records cut to the first `queries` searched queries (the reports of the query
-    /// batches before a batch at which a call stops).
-    pub(crate) fn head(self, queries: usize) -> Self {
-        Self {
-            searched: &self.searched[..queries.min(self.searched.len())],
-            ..self
-        }
-    }
-
     /// The record of searched query `q_idx` (`None` for a query the call does not hold).
     pub(crate) fn record(&self, q_idx: usize) -> Option<QueryRecord<'a>> {
         let searched = self.searched.get(q_idx)?;

@@ -1,0 +1,36 @@
+>no taxid title 0
+229 - 236
+512 - 521
+>no taxid title 1
+229 - 236
+512 - 521
+>titled human
+229 - 236
+512 - 521
+>Homo sapiens
+Error: Error: Offset error at end of taxdb file.
+229 - 236
+512 - 521
+>
+229 - 236
+512 - 521
+>t150
+Error: Error: Offset error at end of taxdb file.
+229 - 236
+512 - 521
+>t99990 again
+229 - 236
+512 - 521
+>first >gb|AB410008.1| second
+229 - 236
+512 - 521
+>
+Error: Error: Offset error at end of taxdb file.
+229 - 236
+512 - 521
+>
+229 - 236
+512 - 521
+>titled human b
+229 - 236
+512 - 521

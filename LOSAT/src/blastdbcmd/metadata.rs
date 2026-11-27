@@ -4,7 +4,7 @@
 
 use crate::cli::NcbiStdio;
 use crate::ncbi_app::args::Args;
-use crate::ncbi_app::files::OutputFile;
+use crate::ncbi_app::files::OutputDevice;
 use crate::seqdb::date::iso8601_date_time;
 use crate::seqdb::{SearchPath, SeqDb, SeqType};
 use crate::writedb::cout::cout;
@@ -21,7 +21,7 @@ use super::{database_error, refusal, Diag};
 // J190 of line BDC), which LOSAT refuses. The JSON ends with the line feed of `NcbiEndl`
 // (`writedb::metadata::write_metadata`, probes T13, T14, S39, J180-J199).
 /// `-metadata` of the database `name` opened as `db`, its files named after
-/// `-metadata_output_prefix`, to `out` (`-out`'s stream, nothing written to it yet); the exit
+/// `-metadata_output_prefix`, to `out` (`-out`'s device, nothing written to it yet); the exit
 /// status.
 pub(super) fn metadata(
     db: &SeqDb,
@@ -29,7 +29,7 @@ pub(super) fn metadata(
     args: &Args,
     path: &SearchPath,
     diag: &mut Diag,
-    out: OutputFile<'_>,
+    out: OutputDevice<'_>,
 ) -> i32 {
     let prefix = metadata_user_path(args.bytes("metadata_output_prefix").as_deref());
     let separator = std::path::MAIN_SEPARATOR as u8;
@@ -99,17 +99,17 @@ pub(super) fn metadata(
     // library API, whose writer takes the same bytes at other times.
     let mut posts = Vec::new();
     let escaped = match out {
-        OutputFile::File(file) => {
+        OutputDevice::File(file) => {
             let mut stream = OfStream::of_file(file);
             write_metadata(&mut stream, &metadata, super::TOOL.program, &mut posts)
         }
-        OutputFile::Stdout(stdout) => {
+        OutputDevice::Stdout(stdout) => {
             let mut stream = cout(stdout, NcbiStdio::cout());
             write_metadata(&mut stream, &metadata, super::TOOL.program, &mut posts)
         }
         // Refused when `-out` was opened (`super::output_refusal`); never a failed write of
         // NCBI's serializer.
-        OutputFile::Refused(reason) => return diag.refuse(&super::output_refusal(&reason)),
+        OutputDevice::Refused(reason) => return diag.refuse(&super::output_refusal(&reason)),
     };
     diag.write_text(&posts);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247

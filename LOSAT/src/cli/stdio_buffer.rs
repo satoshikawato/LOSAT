@@ -108,18 +108,21 @@ impl NcbiBuffer {
     }
 
     /// The stream it was made for.
+    #[inline]
     pub fn stream(&self) -> NcbiStdio {
         self.stream
     }
 
     /// How many of the last bytes inserted the buffer still holds; all bytes before them have
     /// reached the file or device.
+    #[inline]
     pub fn held(&self) -> usize {
         self.held
     }
 
     /// The buffer holding `held` bytes, where its stream keeps the bytes and counts them itself
     /// (`report::ostream`'s report stream, after its writes to the device).
+    #[inline]
     pub(crate) fn set_held(&mut self, held: usize) {
         debug_assert!(held == 0 || self.made || self.stream == NcbiStdio::File);
         self.held = held;
@@ -130,6 +133,7 @@ impl NcbiBuffer {
     /// written only by the next insertion); 0 where the insertion must be read (standard output
     /// before its first insertion, and a terminal's, which writes at its newlines). The report
     /// stream skips the model for such insertions (`report::ostream`).
+    #[inline]
     pub fn room(&self) -> usize {
         match self.stream {
             NcbiStdio::File => NCBI_BUFSIZ - 1 - self.held,
@@ -143,6 +147,7 @@ impl NcbiBuffer {
 
     /// An insertion of the last `n` bytes of `stream` (a string or a number; `stream` is
     /// everything inserted so far). Afterwards `held` is what NCBI's buffer holds.
+    #[inline]
     pub fn sputn(&mut self, n: usize, stream: &[u8]) {
         if n == 0 {
             return;
@@ -196,6 +201,7 @@ impl NcbiBuffer {
     }
 
     /// An insertion of the one byte that ends `stream` (`put`).
+    #[inline]
     pub fn sputc(&mut self, stream: &[u8]) {
         match self.stream {
             NcbiStdio::Cout { block, lines } => {
@@ -220,6 +226,7 @@ impl NcbiBuffer {
     }
 
     /// A flush (`endl`, `flush`, a write to standard error); holds 0.
+    #[inline]
     pub fn flush(&mut self) {
         self.held = 0;
     }

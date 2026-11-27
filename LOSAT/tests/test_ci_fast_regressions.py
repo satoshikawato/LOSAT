@@ -190,6 +190,12 @@ class DbSearchFixtureTests(unittest.TestCase):
                     else:
                         self.assertLessEqual(cut, int(source["stdout_bytes"]), r["row_id"])
                         self.assertEqual(r["stdout_bytes"], str(cut), r["row_id"])
+                # A rejection row that expects the first N bytes of NCBI's run of its own command
+                # (`ncbi-first: N bytes`) has those N bytes as its own frozen stdout.
+                own = db_fixtures.own_cut(r)
+                if own is not None:
+                    self.assertEqual((r["kind"], near, r["stdout_bytes"]), ("losat-rejection", None, str(own)),
+                                     r["row_id"])
                 # A rejection row's frozen stderr is NCBI's up to its exception report (`ncbi-stderr`), or none.
                 err = db_fixtures.FROZEN / f"{r['row_id']}.err"
                 self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])
@@ -207,6 +213,8 @@ class DbSearchFixtureTests(unittest.TestCase):
                 # Its stderr, where NCBI writes one, is a warning of the arguments that names no copy.
                 err = db_fixtures.FROZEN / f"{r['row_id']}.err"
                 self.assertFalse(err.exists() and db_fixtures.COPY_PREFIX.encode() in err.read_bytes(), r["row_id"])
+            # An ncbi row takes all of its own run's bytes (`ncbi-first:` is a rejection row's).
+            self.assertIsNone(db_fixtures.own_cut(r), r["row_id"])
             # A row that expects a near input's NCBI run (`ncbi-near:`) reads that row's files and has its columns.
             near = db_fixtures.near_row_id(r)
             # A row frozen from NCBI under valgrind (`ncbi-valgrind`) has frozen files of its own run.
@@ -244,6 +252,19 @@ class DbSearchFixtureTests(unittest.TestCase):
                     "ncbi-near: db.x.1 first -1 bytes", "ncbi-near: db.x.1 (the first 349 bytes)", "ncbi-near: | x"):
             with self.assertRaises(SystemExit, msg=bad):
                 near(bad)
+
+    def test_own_first_bytes_marker_is_a_part_of_covers(self):
+        def own(covers):
+            return db_fixtures.own_cut({"row_id": "r", "covers": covers})
+        self.assertIsNone(own("staxid, expect: an uninitialised staxid"))
+        self.assertEqual(own("staxid, expect: x | ncbi-first: 12 bytes"), 12)
+        self.assertEqual(own("a | ncbi-first: 0 bytes | expect: b"), 0)
+        # Only a part after a ` | `; any other words in that part stop the tool.
+        self.assertIsNone(own("ncbi-first: 12 bytes"))
+        for bad in ("a | ncbi-first: 12", "a | ncbi-first: twelve bytes", "a | ncbi-first: -1 bytes",
+                    "a | ncbi-first: 12 byte"):
+            with self.assertRaises(SystemExit, msg=bad):
+                own(bad)
 
     def test_valgrind_marker_is_a_part_of_covers(self):
         self.assertTrue(db_fixtures.under_valgrind({"covers": "RG-J2A: windows past the buffers | ncbi-valgrind"}))

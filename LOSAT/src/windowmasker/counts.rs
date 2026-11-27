@@ -6,13 +6,16 @@
 
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{self, BufWriter, Write};
+use std::io::Write;
 
-use crate::report::run_files::{Created, OpenFiles, OpenedFile};
+use crate::algorithm::common::database::TaxdbRun;
+use crate::report::run_files::{Created, OpenFiles};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
-use crate::ncbi_app::files::{input_lines, LineEnds, Ostream};
+use crate::ncbi_app::files::{
+    input_lines, standard_output_file, tool_stream, LineEnds, OutputFile,
+};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::seqmasks_io::run::post_read_texts;
@@ -30,102 +33,71 @@ use super::work::{
 };
 
 /// Where the counts go (`CSeqMaskerOstat`'s stream).
-enum Sink {
-    /// The standard output (`-out -`).
-    Stdout,
-    /// A file opened by name (`OpenFiles::create`); after a failed write the rest is lost, as
-    /// NCBI's `ofstream` loses it.
-    File(Option<BufWriter<OpenedFile>>),
+enum Sink<'o> {
+    /// NCBI's stream: the standard output (`-out -`) or a file opened by name
+    /// (`OpenFiles::create`); after a failed write the rest is lost, as NCBI's `ofstream` loses it
+    /// (`OutputFile`).
+    Out(OutputFile<'o>),
     /// A name that did not open: NCBI's writer writes to its failed `ofstream`, which loses
     /// everything without a message.
     Lost,
 }
 
-/// The counts writer's stream: `sink`, which is `stdout` for the standard output.
-struct SinkStream<'s, 'o> {
-    sink: &'s mut Sink,
-    stdout: &'s mut Ostream<'o>,
-}
-
-impl Write for SinkStream<'_, '_> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self.sink {
-            Sink::Stdout => self.stdout.write(buf),
-            Sink::File(file) => {
-                if let Some(writer) = file {
-                    if writer.write_all(buf).is_err() {
-                        *file = None;
-                    }
-                }
-                Ok(buf.len())
-            }
-            Sink::Lost => Ok(buf.len()),
-        }
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        match self.sink {
-            Sink::Stdout => self.stdout.flush(),
-            Sink::File(file) => {
-                if let Some(writer) = file {
-                    if writer.flush().is_err() {
-                        *file = None;
-                    }
-                }
-                Ok(())
-            }
-            Sink::Lost => Ok(()),
-        }
-    }
-}
-
 /// The output of a counts writer of `format` made with `-out` `name`
 /// (`CSeqMaskerOstatFactory::create`): the stream constructor for `-`, which the binary
-/// format starts with an extra word on (written to `stdout`, where the next post brings it
-/// out); otherwise the name constructor, whose `ofstream` makes or empties the file at once
-/// (an ascii writer given an empty name writes to the standard output), a file of the run's
+/// format starts with an extra word on (NCBI's insertion, written before the next post,
+/// `ncbi_app::Diag`); otherwise the name constructor, whose `ofstream` makes or empties the file at
+/// once (an ascii writer given an empty name writes to the standard output), a file of the run's
 /// files (`OpenFiles::create`; LOSAT Web's name of the standard output writes there, without the
-/// stream's extra word). `Err` with LOSAT's refusal of a name that LOSAT Web does not write.
+/// stream's extra word). `stdout` is the run's standard output (`files::standard_output_file`).
+/// `Err` with LOSAT's refusal of a name that LOSAT Web does not write.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_ascii.cpp:69-77
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_bin.cpp:55-67
-fn open_sink(
+fn open_sink<'o>(
     name: &OsStr,
     format: CountsFormat,
-    stdout: &mut Ostream<'_>,
+    stdout: &'o mut dyn Write,
     files: &OpenFiles,
-) -> Result<Sink, Failure> {
+) -> Result<Sink<'o>, Failure> {
     if name == "-" || (name.is_empty() && format == CountsFormat::Ascii) {
-        if name == "-" {
-            let _ = stdout.write_all(format.stream_prefix());
+        let mut out = standard_output_file(stdout, files);
+        if name == "-" && out.write_all(format.stream_prefix()).is_err() && out.closed() {
+            return Err(Failure::ClosedPipe);
         }
-        return Ok(Sink::Stdout);
+        return Ok(Sink::Out(out));
     }
     match files.create(name) {
-        Ok(Created::File(file)) => Ok(Sink::File(Some(BufWriter::with_capacity(1 << 16, file)))),
-        Ok(Created::Stdout) => Ok(Sink::Stdout),
+        Ok(Created::File(file)) => Ok(Sink::Out(OutputFile::Stream(tool_stream(
+            Some(file),
+            files,
+        )))),
+        Ok(Created::Stdout) => Ok(Sink::Out(standard_output_file(stdout, files))),
         Ok(Created::Refused(reason)) => Err(Failure::Refused(unsupported(&reason))),
         Err(_) => Ok(Sink::Lost),
     }
 }
 
-/// `finalize` of `writer` into `sink` (`stdout` for the standard output), its message
-/// (`optimizing the data structure`) posted. Nothing of the counts is written before the
-/// message, so nothing waits in `stdout` then.
-fn finalize(
-    writer: CountsWriter,
-    sink: &mut Sink,
-    stdout: &mut Ostream<'_>,
-    diag: &mut Diag,
-) -> Result<(), Failure> {
-    let mut stream = SinkStream { sink, stdout };
-    writer
-        .finalize(&mut stream, &mut |line| diag.post(line))
-        .map_err(|error| match error {
-            FinalizeError::Ncbi(exception) => Failure::Ncbi(exception),
-            FinalizeError::Refused(what) => Failure::Refused(unsupported(&what)),
-            FinalizeError::ClosedPipe => Failure::ClosedPipe,
-        })
+/// `finalize` of `writer` into `sink`, its message (`optimizing the data structure`) posted.
+fn finalize(writer: CountsWriter, sink: &mut Sink<'_>, diag: &mut Diag) -> Result<(), Failure> {
+    let mut lost = std::io::sink();
+    let out: &mut dyn Write = match sink {
+        Sink::Out(out) => out,
+        Sink::Lost => &mut lost,
+    };
+    let mut closed = false;
+    let result = writer.finalize(out, &mut |line| {
+        diag.post(line);
+        closed |= diag.closed();
+    });
+    if closed {
+        return Err(Failure::ClosedPipe);
+    }
+    result.map_err(|error| match error {
+        FinalizeError::Ncbi(exception) => Failure::Ncbi(exception),
+        FinalizeError::Refused(what) => Failure::Refused(unsupported(&what)),
+        FinalizeError::ClosedPipe => Failure::ClosedPipe,
+    })
 }
 
 /// The file list of `-in` (`CWinMaskCountsGenerator::operator()`): the names between commas
@@ -181,41 +153,36 @@ fn read_error() -> NcbiException {
 /// `CWinMaskUtil::consider` keeps.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:171-215
-pub(super) struct GenomeInput<'r, 'd, 'w, 'o> {
+pub(super) struct GenomeInput<'r, 'd, 'w> {
     /// The names of the files, as their bytes (a `-fa_list` line is not text).
     files: Vec<Vec<u8>>,
     database: bool,
     lists: &'r IdLists,
     /// The settings of the database reader (`ApplicationSettings::database`).
     reader_settings: crate::blastinput::ncbi_environment::DatabaseSettings<'r>,
-    /// The standard output, which comes out before each post.
-    out: &'d mut Ostream<'o>,
     diag: &'d mut Diag<'w>,
     /// What the last read posted (`GenomeSource::repeat_posts`).
     posts: Vec<u8>,
+    /// The taxonomy database of the databases read so far: NCBI's one per process
+    /// (`CSeqDBTaxInfo`), whose texts of opening come once, at the first lookup of the run's
+    /// first read (`TaxdbRun::sequential_after`).
+    taxonomy: Option<TaxdbRun>,
 }
 
-/// The function that `GenomeInput::each_record` gives each sequence, with the output and the
-/// diagnostics.
-pub(super) type RecordFn<'f> =
-    dyn FnMut(&Record, &mut Ostream<'_>, &mut Diag) -> Result<(), Failure> + 'f;
+/// The function that `GenomeInput::each_record` gives each sequence, with the diagnostics.
+pub(super) type RecordFn<'f> = dyn FnMut(&Record, &mut Diag) -> Result<(), Failure> + 'f;
 
-/// Posts `line` (`LOG_POST`) after the output written so far (NCBI's `cerr` is tied to
-/// `cout`); a closed pipe ends the run there, as SIGPIPE ends NCBI's.
-pub(super) fn post_after_output(
-    out: &mut Ostream<'_>,
-    diag: &mut Diag,
-    line: &[u8],
-) -> Result<(), Failure> {
-    let _ = out.flush();
-    if out.closed() {
+/// Posts `line` (`LOG_POST`) after NCBI's writes of the output so far (NCBI's `cerr` is tied to
+/// `cout`, `Diag`); a closed pipe ends the run there, as SIGPIPE ends NCBI's.
+pub(super) fn post_after_output(diag: &mut Diag, line: &[u8]) -> Result<(), Failure> {
+    diag.post_bytes(line);
+    if diag.closed() {
         return Err(Failure::ClosedPipe);
     }
-    diag.post_bytes(line);
     Ok(())
 }
 
-impl GenomeInput<'_, '_, '_, '_> {
+impl GenomeInput<'_, '_, '_> {
     /// One read of every file: `f` gets each sequence that has letters and that the id lists
     /// keep, with the output and the diagnostics. The posts of the read are kept.
     pub(super) fn each_record(&mut self, f: &mut RecordFn<'_>) -> Result<(), Failure> {
@@ -234,44 +201,53 @@ impl GenomeInput<'_, '_, '_, '_> {
                     .map_err(|_| Failure::Ncbi(read_error()))?;
                 fasta_source(file, false)?
             };
+            if let Some(taxonomy) = &self.taxonomy {
+                source.follow_taxonomy_of(taxonomy);
+            }
             if self.lists.match_titles() {
                 source.make_titles();
             }
-            while let Some(record) = source.next_record(self.out, self.diag)? {
-                post_read_texts::<Failure>(&record.texts, self.out, self.diag)?;
-                if record.iupac.is_empty() || !self.lists.consider(&record) {
-                    continue;
+            let result = (|| -> Result<(), Failure> {
+                while let Some(record) = source.next_record(self.diag)? {
+                    post_read_texts::<Failure>(&record.texts, self.diag)?;
+                    if record.iupac.is_empty() || !self.lists.consider(&record) {
+                        continue;
+                    }
+                    f(&record, self.diag)?;
                 }
-                f(&record, self.out, self.diag)?;
+                Ok(())
+            })();
+            if let Some(taxonomy) = source.taxonomy() {
+                self.taxonomy = Some(taxonomy.sequential_after());
             }
+            result?;
         }
         Ok(())
     }
 }
 
-impl GenomeSource for GenomeInput<'_, '_, '_, '_> {
+impl GenomeSource for GenomeInput<'_, '_, '_> {
     type Error = Failure;
 
     fn read(&mut self, f: &mut dyn FnMut(&[u8])) -> Result<(), Failure> {
-        self.each_record(&mut |record, _, _| {
+        self.each_record(&mut |record, _| {
             f(&record.iupac);
             Ok(())
         })
     }
 
     fn repeat_posts(&mut self) -> Result<(), Failure> {
-        let _ = self.out.flush();
-        if self.out.closed() {
-            return Err(Failure::ClosedPipe);
-        }
         let posts = std::mem::take(&mut self.posts);
         self.diag.write_text(&posts);
         self.posts = posts;
+        if self.diag.closed() {
+            return Err(Failure::ClosedPipe);
+        }
         Ok(())
     }
 
     fn log(&mut self, line: &str) -> Result<(), Failure> {
-        post_after_output(self.out, self.diag, line.as_bytes())
+        post_after_output(self.diag, line.as_bytes())
     }
 }
 
@@ -345,29 +321,19 @@ fn mk_counts_run(
 ) -> Result<i32, Failure> {
     check_mk_counts(args)?;
     let infmt = args.value("infmt").expect("-infmt has a default");
-    let mut stdout = Ostream::new(out);
-    let result = make_counts(args, settings, lists, infmt, &mut stdout, diag);
-    output_then(&mut stdout, result)
+    make_counts(args, settings, lists, infmt, out, diag)
 }
 
-/// The end of a counts mode that ended with `result`: the output written so far comes out
-/// before the diagnostics of a failure (NCBI's `cerr` is tied to `cout`), and a closed pipe
-/// ends the run there, without them.
-fn output_then(stdout: &mut Ostream<'_>, result: Result<i32, Failure>) -> Result<i32, Failure> {
-    let _ = stdout.flush();
-    if stdout.closed() {
-        return Err(Failure::ClosedPipe);
-    }
-    result
-}
-
-/// `CWinMaskCountsGenerator` of the input `-in` in `-infmt` `infmt`.
+/// `CWinMaskCountsGenerator` of the input `-in` in `-infmt` `infmt`; `stdout` is the standard
+/// output. The diagnostics of a failure come after NCBI's writes of the output (`Diag`'s tie; a
+/// closed pipe ends the run there, without them), and the stream ends after the run
+/// (`OpenFiles::finish_streams`).
 fn make_counts(
     args: &Args,
     settings: &ApplicationSettings,
     lists: &IdLists,
     infmt: &str,
-    stdout: &mut Ostream<'_>,
+    stdout: &mut dyn Write,
     diag: &mut Diag,
 ) -> Result<i32, Failure> {
     let input = args.os_value("in").expect("-in has a default");
@@ -383,9 +349,9 @@ fn make_counts(
         database,
         lists,
         reader_settings: settings.database(),
-        out: &mut *stdout,
         diag: &mut *diag,
         posts: Vec::new(),
+        taxonomy: None,
     };
     if args.boolean("checkdup").unwrap_or(false) {
         check_duplicates(&mut source)?;
@@ -397,7 +363,7 @@ fn make_counts(
         GenError::Refused(what) => Failure::Refused(unsupported(&what)),
     })?;
     drop(source);
-    finalize(writer, &mut sink, stdout, diag)?;
+    finalize(writer, &mut sink, diag)?;
     Ok(0)
 }
 
@@ -437,9 +403,7 @@ pub(super) fn convert(args: &Args, out: &mut dyn Write, diag: &mut Diag) -> i32 
 }
 
 fn convert_run(args: &Args, out: &mut dyn Write, diag: &mut Diag) -> Result<i32, Failure> {
-    let mut stdout = Ostream::new(out);
-    let result = convert_file(args, &mut stdout, diag);
-    output_then(&mut stdout, result)
+    convert_file(args, out, diag)
 }
 
 /// An error of `-convert` of the counts file `file` (`-in <name>`): LOSAT's refusals in the words
@@ -470,8 +434,9 @@ pub(super) fn check_convert(args: &Args) -> Result<(), Failure> {
     Ok(())
 }
 
-/// `CWinMaskCountsConverter` of `-in` to `-out`.
-fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Result<i32, Failure> {
+/// `CWinMaskCountsConverter` of `-in` to `-out`; `stdout` is the standard output. The
+/// diagnostics of a failure come after NCBI's writes of the output, as in [`make_counts`].
+fn convert_file(args: &Args, stdout: &mut dyn Write, diag: &mut Diag) -> Result<i32, Failure> {
     check_convert(args)?;
     let input = args.os_value("in").expect("-in has a default");
     let output = args.os_value("out").expect("-out has a default");
@@ -492,17 +457,17 @@ fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Resul
     let format = counts_format(args);
     let mut writer = CountsWriter::new(format, metadata);
     let mut sink = open_sink(output, format, stdout, args.files())?;
-    // The messages come after the output written so far (the binary format's extra word); a
-    // closed pipe ends the run at the first, as SIGPIPE ends NCBI's.
+    // The messages come after NCBI's writes of the output so far (the binary format's extra
+    // word); a closed pipe ends the run at the first, as SIGPIPE ends NCBI's.
     let mut closed = false;
     convert_counts(&istat, count_map, &mut writer, &mut |line| {
-        closed = closed || post_after_output(stdout, diag, line.as_bytes()).is_err();
+        closed = closed || post_after_output(diag, line.as_bytes()).is_err();
     })
     .map_err(|error| convert_failure(&file, error))?;
     if closed {
         return Err(Failure::ClosedPipe);
     }
     drop(istat);
-    finalize(writer, &mut sink, stdout, diag)?;
+    finalize(writer, &mut sink, diag)?;
     Ok(0)
 }

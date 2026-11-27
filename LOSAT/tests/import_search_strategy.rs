@@ -399,9 +399,12 @@ fn other_refusals_of_another_programs_strategy_name_the_running_application() {
         let output = command.output().expect("run losat");
         let stderr = String::from_utf8_lossy(&output.stderr);
         let app = program.to_ascii_uppercase();
-        let named = stderr
-            .lines()
-            .any(|line| line.ends_with(&format!("{words} {app}")));
+        // The refusal names the running application, at the line's end or before more words
+        // (`...; reward 0 needs penalty 0`).
+        let named = stderr.lines().any(|line| {
+            line.split_once(&format!("{words} {app}"))
+                .is_some_and(|(_, after)| !after.starts_with(|c: char| c.is_alphanumeric()))
+        });
         if output.status.code() != Some(case.rc)
             || !output.stdout.is_empty()
             || !named

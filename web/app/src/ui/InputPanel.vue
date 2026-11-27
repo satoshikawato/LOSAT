@@ -7,7 +7,6 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import type { InputRole } from 'losat/domain';
 import type { DraftState, SearchDraft } from '../application/draft';
-import { isReadAgain } from '../application/draft';
 import { groupSite, raceChoice } from '../application/source-race';
 import {
   accessionLines,
@@ -41,7 +40,6 @@ import {
 import { programById, querySourcesOf, residueUnit, sequenceKind } from '../domain/programs';
 import DatabasePicker from './DatabasePicker.vue';
 import { formatBytes, optionHelp } from './format';
-import { holdHeightWhile } from './height-hold';
 import HelpTip from './HelpTip.vue';
 import { searchFormModel } from './form-model';
 import LosatLoader from './LosatLoader.vue';
@@ -157,17 +155,7 @@ const fetchHelp = computed(() => {
   );
 });
 
-/**
- * The inputs that are read, and those read again (`isReadAgain`): their records come back once they are read, and meanwhile
- * the block keeps its place (line WQA's D25, 2026-11-27). "Several … inputs" went while they were read again and came back,
- * and the block became shorter and grew again, so that what is below it, "Run LOSAT" among it, moved up and back under a press.
- */
-const readSources = computed(() => roleState.value.sources.filter((source) => source.status === 'ready' || isReadAgain(source)));
-const panel = ref<HTMLElement>();
-const subrangeBox = ref<HTMLElement>();
-holdHeightWhile(() => panel.value, () => roleState.value.sources.some(isReadAgain));
-// The subrange of a single record goes while its input is read again, and the box keeps its place too.
-holdHeightWhile(() => subrangeBox.value, () => roleState.value.sources.some(isReadAgain));
+const readySources = computed(() => roleState.value.sources.filter((source) => source.status === 'ready'));
 const regionRecord = computed(() => {
   void props.state;
   return props.draft.regionRecord(props.role);
@@ -370,7 +358,6 @@ function onDrop(event: DragEvent): void {
 
 <template>
   <fieldset
-    ref="panel"
     class="search-block input-panel"
     :class="{ dragging }"
     :data-testid="`${role}-panel`"
@@ -852,7 +839,7 @@ function onDrop(event: DragEvent): void {
           {{ fetchState.message }}
         </p>
       </div>
-      <div ref="subrangeBox" class="entry-subrange">
+      <div class="entry-subrange">
         <RegionPicker
           v-if="regionRecord"
           :draft="draft"
@@ -921,7 +908,7 @@ function onDrop(event: DragEvent): void {
       />
     </ul>
 
-    <fieldset v-if="readSources.length > 1" class="mode" :data-testid="`${role}-mode`">
+    <fieldset v-if="readySources.length > 1" class="mode" :data-testid="`${role}-mode`">
       <legend>Several {{ title.toLowerCase() }} inputs</legend>
       <label>
         <input

@@ -10,7 +10,7 @@ use std::io::Write;
 use crate::algorithm::common::database::losat_reader_error;
 use crate::blastinput::ncbi_environment::{ApplicationSettings, ReadVerification};
 use crate::ncbi_app::args::Args;
-use crate::ncbi_app::files::{Cin, OutputFile};
+use crate::ncbi_app::files::{standard_output_file, Cin, OutputFile};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::NcbiException;
 use crate::seqdb::find::find_blast_dbs;
@@ -116,9 +116,8 @@ pub(super) fn run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    let mut file: OutputFile<'_>;
-    let stream: &mut dyn Write = if args.given("logfile") {
-        file = match args.output_file("logfile", out) {
+    let stream: OutputFile<'_> = if args.given("logfile") {
+        let file = match args.output_file("logfile", out) {
             Ok(file) => file,
             Err(error) => {
                 diag.post_bytes(
@@ -130,9 +129,9 @@ pub(super) fn run(
         if let Some(reason) = file.refusal() {
             return diag.refuse(&crate::seqmasks_io::run::unsupported(reason, PROGRAM));
         }
-        &mut file
+        file
     } else {
-        out
+        standard_output_file(out, args.files())
     };
     let level = args.integer("verbosity").unwrap_or(SUMMARY);
     let mut log = Log::new(stream, level);

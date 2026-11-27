@@ -479,6 +479,13 @@ impl<I: Input> ObjectStream<I> {
         self.failed || self.reader.inp.end_of_data()
     }
 
+    /// Whether the last object read (`read_object`) may hold an element of a list of `CRef<>`s
+    /// stated as `NULL`: when false, `view::V::holds_null_element` is false for every part of it,
+    /// which a caller need not walk.
+    pub(crate) fn null_element_read(&self) -> bool {
+        self.reader.null_element
+    }
+
     /// The primitives of the stream after the objects read (`stream`: the text after them goes
     /// back to the caller).
     pub(crate) fn into_input(self) -> I {
@@ -520,6 +527,7 @@ impl<I: Input, P: PostSink> ObjectStream<I, P> {
         let reader = &mut self.reader;
         reader.frames.clear();
         reader.open.clear();
+        reader.members_read.clear();
         reader.outer = Some((root, steps));
         reader.keep = false;
         let value = read(reader);
@@ -573,6 +581,15 @@ pub(crate) struct TypedReader<I: Input, P: PostSink = Vec<Post>> {
     /// The values being read, outermost first (`Open`): NCBI's recursion of `ReadObject` as a list
     /// on the heap, so that a value nested to any depth is read in LOSAT's own stack.
     open: Vec<Open>,
+    /// The members read so far of the SEQUENCE values being read, outermost first: each
+    /// `Open::Sequence` owns those from its `from` to the next one's. A SEQUENCE's members are
+    /// moved from here into a list of their own size when it ends (`next_member`), so that no
+    /// list of members grows (and moves) as its members are read.
+    members_read: Vec<(u16, Value)>,
+    /// Whether the object being read keeps an element of a list of `CRef<>`s as `Value::Null` (an
+    /// element stated as `NULL`, `next_element`): when not, no part of it holds one
+    /// (`view::V::holds_null_element` is false for each, `ObjectStream::null_element_read`).
+    null_element: bool,
     /// Whether the warning of a UTF8String tag was posted (`Utf8TagOnce`; one stream is all a
     /// run of LOSAT reads with it).
     utf8_once: Utf8TagOnce,
@@ -593,12 +610,12 @@ enum Open {
     /// of a value read whole inside one that is not kept (`kept`, `hooks::reads_its_value`).
     Value { target: u16, kept: bool },
     /// A SEQUENCE reading the member at `reading` (`members`), whose value's frames are those
-    /// above `depth`.
+    /// above `depth`; the members it has read are those of `members_read` from `from`.
     Sequence {
         ty: u16,
         members: &'static [Member],
         skip: bool,
-        values: Vec<(u16, Value)>,
+        from: usize,
         reading: usize,
         depth: usize,
     },
@@ -711,6 +728,8 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             unkept: Vec::new(),
             outer: None,
             open: Vec::new(),
+            members_read: Vec::new(),
+            null_element: false,
             utf8_once: Utf8TagOnce::default(),
             names,
             root: NO_TYPE,
@@ -724,6 +743,8 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         self.inp.new_object();
         self.frames.clear();
         self.open.clear();
+        self.members_read.clear();
+        self.null_element = false;
         self.root = NO_TYPE;
     }
 
@@ -1093,6 +1114,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     /// (`missing_value`).
     pub(crate) fn read_value(&mut self, ty: u16, skip: bool) -> R<Value> {
         let (open, frames) = (self.open.len(), self.frames.len());
+        let read = self.members_read.len();
         let mut step = self.start(ty, skip);
         loop {
             step = match step {
@@ -1105,10 +1127,10 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
                 Err(error) if I::MISSING_VALUES && is_missing_value(&error) => {
                     match self.missing_value_member(open) {
                         Some(at) => self.missing_value(at),
-                        None => return Err(self.unwind_values(open, frames, error)),
+                        None => return Err(self.unwind_values(open, frames, read, error)),
                     }
                 }
-                Err(error) => return Err(self.unwind_values(open, frames, error)),
+                Err(error) => return Err(self.unwind_values(open, frames, read, error)),
             };
         }
     }
@@ -1151,12 +1173,19 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     #[cold]
     #[inline(never)]
     fn missing_value(&mut self, at: usize) -> R<Step> {
+        // The members read by the SEQUENCE values inside the member are left with them.
+        if let Some(inner) = self.open[at + 1..].iter().find_map(|held| match held {
+            Open::Sequence { from, .. } => Some(*from),
+            _ => None,
+        }) {
+            self.members_read.truncate(inner);
+        }
         self.open.truncate(at + 1);
         let Some(Open::Sequence {
             ty,
             members,
             skip,
-            values,
+            from,
             reading,
             depth,
         }) = self.open.pop()
@@ -1167,14 +1196,16 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             self.drop_frame();
         }
         self.inp.end_member()?;
-        self.next_member(ty, members, skip, values, reading + 1)
+        self.next_member(ty, members, skip, from, reading + 1)
     }
 
-    /// The values above `open` and the frames above `frames` left by `fail`: each SEQUENCE member
-    /// being read with a set flag adds its line once the frames of its value are left.
+    /// The values above `open` and the frames above `frames` left by `fail` (and the members
+    /// read inside them, above `read`): each SEQUENCE member being read with a set flag adds its
+    /// line once the frames of its value are left.
     #[cold]
     #[inline(never)]
-    fn unwind_values(&mut self, open: usize, frames: usize, mut fail: Fail) -> Fail {
+    fn unwind_values(&mut self, open: usize, frames: usize, read: usize, mut fail: Fail) -> Fail {
+        self.members_read.truncate(read);
         while self.open.len() > open {
             if let Some(Open::Sequence {
                 members,
@@ -1227,7 +1258,8 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
                 self.push(FrameKind::Class, target, skip);
                 self.inp.begin_class()?;
                 self.push(FrameKind::ClassMember, NO_TYPE, skip);
-                return self.next_member(target, members.members(), skip, Vec::new(), 0);
+                let from = self.members_read.len();
+                return self.next_member(target, members.members(), skip, from, 0);
             }
             Kind::Choice(variants) => return self.start_choice(target, variants.members(), skip),
             Kind::List { element, set, refs } => return self.start_list(element, set, refs, skip),
@@ -1274,7 +1306,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
                 ty,
                 members,
                 skip,
-                mut values,
+                from,
                 reading,
                 ..
             } => {
@@ -1291,10 +1323,10 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
                         }
                     }
                     if self.keep {
-                        values.push((reading as u16, value));
+                        self.members_read.push((reading as u16, value));
                     }
                 }
-                self.next_member(ty, members, skip, values, reading + 1)
+                self.next_member(ty, members, skip, from, reading + 1)
             }
             Open::Choice { index } => {
                 self.inp.end_variant()?;
@@ -1314,6 +1346,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             } => {
                 self.inp.end_element()?;
                 if !skip && self.keep {
+                    self.null_element |= refs && matches!(value, Value::Null);
                     values.push(value);
                 }
                 self.next_element(element, refs, skip, values)
@@ -1393,13 +1426,13 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         ty: u16,
         members: &'static [Member],
         skip: bool,
-        mut values: Vec<(u16, Value)>,
+        from: usize,
         mut pos: usize,
     ) -> R<Step> {
         while let Some(index) = self.member_begin(members, pos)? {
             let member = &members[index];
             if !skip {
-                super::hooks::pre_read_member(ty, index, &values)?;
+                super::hooks::pre_read_member(ty, index, &self.members_read[from..])?;
             }
             let depth = self.frames.len();
             let delayed = member.flags & DELAYED != 0 && !skip;
@@ -1412,11 +1445,12 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             if pointee == Pointee::Null {
                 // A delayed `NULL` is kept as the bytes read, as NCBI's buffer keeps it.
                 if let Some(start) = start {
-                    values.push((
+                    let bytes = self.inp.delayed(start);
+                    self.members_read.push((
                         index as u16,
                         Value::Delayed {
                             encoding: I::ENCODING,
-                            bytes: self.inp.delayed(start),
+                            bytes,
                         },
                     ));
                 }
@@ -1428,7 +1462,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
                 ty,
                 members,
                 skip,
-                values,
+                from,
                 reading: index,
                 depth,
             });
@@ -1446,6 +1480,8 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         }
         self.inp.end_class()?;
         self.drop_frame();
+        // The members read, in a list of their own size.
+        let values: Vec<(u16, Value)> = self.members_read.drain(from..).collect();
         Ok(Step::Done(Value::Sequence(values)))
     }
 
@@ -1534,6 +1570,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             };
             if pointee == Pointee::Null {
                 if !skip && self.keep {
+                    self.null_element = true;
                     values.push(Value::Null);
                 }
                 self.inp.end_element()?;

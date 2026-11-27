@@ -44,19 +44,49 @@ fn automatic_tag(position: u16) -> u8 {
 /// Writes `value`, a value of the type `ty` of the table, with `enc` (as the value of the member
 /// or element that the caller opened, or of a document that it began).
 pub(crate) fn write_value<E: Encoder>(enc: &mut E, ty: u16, value: &Value) {
-    write_until(enc, ty, value, |_| false);
+    ValueWriter::new().write(enc, ty, value);
+}
+
+/// The writer of values one after another (`write_value` of each, the elements of a list that
+/// the caller writes itself: the Seq-aligns of a Seq-annot): the list of what is left to write is
+/// made once and kept for the next value.
+pub(crate) struct ValueWriter<'a> {
+    todo: Vec<Step<'a>>,
+}
+
+impl<'a> ValueWriter<'a> {
+    pub(crate) fn new() -> Self {
+        ValueWriter { todo: Vec::new() }
+    }
+
+    /// `write_value` of `value`, a value of the type `ty`.
+    pub(crate) fn write<E: Encoder>(&mut self, enc: &mut E, ty: u16, value: &'a Value) {
+        write_until_with(&mut self.todo, enc, ty, value, |_| false);
+    }
 }
 
 /// `write_value` until `stop(enc)` holds before a step (a value opened or one call of the
 /// encoder): whether the value was written whole.
 fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E) -> bool) -> bool {
-    let mut todo = vec![Step::Value(ty, value)];
+    write_until_with(&mut Vec::new(), enc, ty, value, stop)
+}
+
+/// `write_until` with `todo` as the list of what is left to write (emptied first).
+fn write_until_with<'a, E: Encoder>(
+    todo: &mut Vec<Step<'a>>,
+    enc: &mut E,
+    ty: u16,
+    value: &'a Value,
+    stop: impl Fn(&E) -> bool,
+) -> bool {
+    todo.clear();
+    todo.push(Step::Value(ty, value));
     while let Some(step) = todo.pop() {
         if stop(enc) {
             return false;
         }
         match step {
-            Step::Value(ty, value) => open(enc, ty, value, &mut todo),
+            Step::Value(ty, value) => open(enc, ty, value, todo),
             Step::Member(member, tag) => enc.member(member.name(), tag),
             Step::EndMember => enc.end_member(),
             Step::EndSequence => enc.end_sequence(),

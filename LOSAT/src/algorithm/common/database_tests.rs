@@ -1265,3 +1265,27 @@ fn the_pairwise_reports_and_the_rows_that_read_titles_take_the_decodes() {
     }
     assert!(!takes(None, true));
 }
+
+#[test]
+fn linux_online_cpu_parsers_match_sysfs_and_proc_stat() {
+    assert_eq!(parse_linux_cpu_list("0\n"), Some(1));
+    assert_eq!(parse_linux_cpu_list("0-31\n"), Some(32));
+    assert_eq!(parse_linux_cpu_list("0,2-5\n"), Some(5));
+    assert_eq!(parse_linux_cpu_list("0-3,8,10-11"), Some(7));
+    assert_eq!(parse_linux_cpu_list(""), None);
+    assert_eq!(parse_linux_cpu_list("   \n"), None);
+    assert_eq!(parse_linux_cpu_list("5-2"), None);
+    assert_eq!(parse_linux_cpu_list("0,"), None);
+    assert_eq!(parse_linux_cpu_list("abc"), None);
+
+    let proc_stat = "cpu  10 20 30 40\ncpu0 1 2 3 4\ncpu1 5 6 7 8\ncpu12 1 1 1 1\nintr 0\n";
+    assert_eq!(parse_linux_proc_stat_cpus(proc_stat), Some(3));
+    assert_eq!(
+        parse_linux_proc_stat_cpus("cpu  10 20 30 40\nintr 0\n"),
+        None
+    );
+
+    assert_eq!(ncbi_effective_threads(1), 1);
+    #[cfg(target_os = "linux")]
+    assert!(ncbi_online_cpu_count() >= 1);
+}

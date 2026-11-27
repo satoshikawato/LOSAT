@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::file::DbFile;
+use super::file::{mapped_length, DbFile};
 use super::{SeqDbError, SeqType};
 
 /// Parsed index file: the volume's summary values and its offset arrays.
@@ -234,27 +234,40 @@ struct Fixed {
     amb_at: u64,
 }
 
-/// The size of the pages that a mapped file is read in: 4 KiB, the page of Linux on x86-64 and
-/// aarch64, which is what NCBI's official build and the machines of LOSAT's probes use. NCBI's
-/// zeros to the end of the page follow the kernel's page, so on a system of larger pages (64 KiB
-/// on some aarch64 Linux, 16 KiB on macOS arm64) this is not NCBI's: it matters only for a
-/// header field that crosses 4 KiB.
-const MAPPING_PAGE: u64 = 4096;
-
 /// The index file as NCBI's reader sees it through its memory mapping: the bytes of the file,
-/// then zeros up to the end of the file's last page (POSIX: the rest of a partial page reads as
-/// zero). A read past the last page is outside the mapping: not data of the file.
+/// then zeros up to the end of the file's last 4 KiB page (`file::mapped_length`). A read past
+/// the last page is outside the mapping: not data of the file.
 struct Mapped<'a>(&'a DbFile);
 
 impl Source for Mapped<'_> {
     fn len(&self) -> u64 {
-        self.0.len().div_ceil(MAPPING_PAGE) * MAPPING_PAGE
+        mapped_length(self.0.len())
     }
 
     fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<(), SeqDbError> {
         let held = self.0.len().saturating_sub(offset).min(buf.len() as u64) as usize;
         if held > 0 {
             self.0.read_exact_at(&mut buf[..held], offset)?;
+        }
+        buf[held..].fill(0);
+        Ok(())
+    }
+}
+
+/// A byte slice padded with zeros to its last 4 KiB mapped page (`file::mapped_length`), matching
+/// [`Mapped`] for `IndexFile::parse` (`LOSAT_X_DBIDXREAD=0`).
+struct MappedSlice<'a>(&'a [u8]);
+
+impl Source for MappedSlice<'_> {
+    fn len(&self) -> u64 {
+        mapped_length(self.0.len() as u64)
+    }
+
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> Result<(), SeqDbError> {
+        let at = usize::try_from(offset).unwrap_or(usize::MAX);
+        let held = self.0.len().saturating_sub(at).min(buf.len());
+        if held > 0 {
+            buf[..held].copy_from_slice(&self.0[at..at + held]);
         }
         buf[held..].fill(0);
         Ok(())
@@ -298,15 +311,6 @@ fn decode_words(bytes: &[u8], out: &mut [u32]) {
         *word = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
     }
 }
-
-/// Entries of an array that the check of `IndexFile::open` reads at once (1 MiB).
-const CHECK_CHUNK_ENTRIES: usize = 1 << 18;
-
-/// EXPERIMENT (LOSAT_X_BPDBKEEP): `CHECK_CHUNK_ENTRIES` with the switch (64 KiB): the check's
-/// buffers stay below glibc's first mmap threshold (128 KiB), so that freeing them does not raise
-/// it (`algorithm/blastp/blast_engine/database/x_db_keep.rs`). The size changes nothing but the
-/// number of reads.
-const X_KEEP_CHECK_CHUNK_ENTRIES: usize = 1 << 14;
 
 impl IndexFile {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:134-236
@@ -496,206 +500,62 @@ impl IndexFile {
         }
     }
 
-    // NCBI keeps the arrays in the mapped file; LOSAT copies them (4 or 8, for
-    // nucleotide 12, bytes per sequence). Arrays that are cut short or not in
-    // ascending order, which NCBI would follow out of its mapping, are
-    // explicit format errors.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:134-236
+    // NCBI maps the index file (zeros to the end of the last 4 KiB page) and does not validate
+    // offset monotonicity at open: non-ascending offsets are handled at sequence/header read time.
     /// Parses the bytes of an index file opened as `seqtype`, and holds its arrays.
     pub fn parse(bytes: &[u8], seqtype: SeqType, path: &Path) -> Result<Self, SeqDbError> {
-        let fixed = Self::parse_fixed(bytes, seqtype, path)?;
+        let mapped = MappedSlice(bytes);
+        let fixed = Self::parse_fixed(&mapped, seqtype, path)?;
         let region = fixed.num_oids as usize + 1;
-        let array = |at: u64| {
-            let at = at as usize;
+        let array = |at: u64| -> Result<Vec<u32>, SeqDbError> {
+            let mut raw = vec![0u8; 4 * region];
+            mapped.read_at(&mut raw, at)?;
             let mut words = vec![0u32; region];
-            decode_words(&bytes[at..at + 4 * region], &mut words);
-            words
+            decode_words(&raw, &mut words);
+            Ok(words)
         };
         let held = HeldOffsets {
-            hdr: array(fixed.hdr_at),
-            seq: array(fixed.seq_at),
+            hdr: array(fixed.hdr_at)?,
+            seq: array(fixed.seq_at)?,
             amb: match seqtype {
-                SeqType::Nucleotide => array(fixed.amb_at),
+                SeqType::Nucleotide => array(fixed.amb_at)?,
                 SeqType::Protein => Vec::new(),
             },
         };
-        let index = Self::with_offsets(fixed, seqtype, Offsets::Held(held));
-        index.check_offsets(path)?;
-        Ok(index)
+        Ok(Self::with_offsets(fixed, seqtype, Offsets::Held(held)))
     }
 
-    // NCBI maps the index file and reads an offset where it needs one
-    // (`x_GetHdr()[oid]`, cited at `header_range`). LOSAT reads the fixed part
-    // when it opens the file and then the ranges of the arrays it needs with
-    // positioned reads (the file stays open), so the arrays take no memory.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:134-236
+    // NCBI maps the index file and reads an offset where it needs one (`x_GetHdr()[oid]`, cited
+    // at `header_range`). LOSAT reads the fixed part when it opens the file (zero-filling the
+    // last 4 KiB mapped page) and then the ranges of the arrays it needs with positioned reads.
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): opens the index file `file` as `seqtype`, the arrays left
-    /// in the file. The arrays are checked here, as `parse` checks them, with one pass that
-    /// reads 1 MiB at a time; the errors are those of `parse`.
+    /// in the file. The errors are those of `parse`.
     pub fn open(file: DbFile, seqtype: SeqType) -> Result<Self, SeqDbError> {
-        let chunk_entries = if super::x_bp_db_keep() {
-            X_KEEP_CHECK_CHUNK_ENTRIES
-        } else {
-            CHECK_CHUNK_ENTRIES
-        };
-        Self::open_checked(file, seqtype, chunk_entries)
+        let file = file.zero_pad_last_page();
+        let path = file.path().to_path_buf();
+        let fixed = Self::parse_fixed(&Mapped(&file), seqtype, &path)?;
+        let (hdr_at, seq_at, amb_at) = (fixed.hdr_at, fixed.seq_at, fixed.amb_at);
+        Ok(Self::with_offsets(
+            fixed,
+            seqtype,
+            Offsets::Read(ReadOffsets {
+                file,
+                hdr_at,
+                seq_at,
+                amb_at,
+            }),
+        ))
     }
 
+    #[cfg(test)]
     pub(super) fn open_checked(
         file: DbFile,
         seqtype: SeqType,
-        chunk_entries: usize,
+        _chunk_entries: usize,
     ) -> Result<Self, SeqDbError> {
-        let path = file.path().to_path_buf();
-        Self::parse_fixed(&file, seqtype, &path).and_then(|fixed| {
-            let (hdr_at, seq_at, amb_at) = (fixed.hdr_at, fixed.seq_at, fixed.amb_at);
-            let index = Self::with_offsets(
-                fixed,
-                seqtype,
-                Offsets::Read(ReadOffsets {
-                    file,
-                    hdr_at,
-                    seq_at,
-                    amb_at,
-                }),
-            );
-            index.check_streamed(&path, chunk_entries)?;
-            Ok(index)
-        })
-    }
-
-    fn check_offsets(&self, path: &Path) -> Result<(), SeqDbError> {
-        let Offsets::Held(held) = &self.offsets else {
-            unreachable!("check_offsets checks held arrays");
-        };
-        let format = |message: String| SeqDbError::Format {
-            path: path.to_path_buf(),
-            message,
-        };
-        if let Some(oid) = held.hdr.windows(2).position(|w| w[0] > w[1]) {
-            return Err(format(header_order_message(oid)));
-        }
-        if let Some(oid) = held.seq.windows(2).position(|w| w[0] > w[1]) {
-            return Err(format(sequence_order_message(oid)));
-        }
-        match self.seqtype {
-            SeqType::Protein => {
-                // One NUL byte precedes the first sequence and one follows each.
-                if self.num_oids > 0 && held.seq[0] == 0 {
-                    return Err(format(FIRST_SENTINEL_MESSAGE.to_string()));
-                }
-                if let Some(oid) = held.seq.windows(2).position(|w| w[0] == w[1]) {
-                    return Err(format(sentinel_after_message(oid)));
-                }
-            }
-            SeqType::Nucleotide => {
-                for oid in 0..self.num_oids as usize {
-                    let start = held.seq[oid];
-                    let amb = held.amb[oid];
-                    let next = held.seq[oid + 1];
-                    // The 2-bit data hold at least the byte with the remainder count.
-                    if !(start < amb && amb <= next) {
-                        return Err(format(ambiguity_position_message(oid)));
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// EXPERIMENT (LOSAT_X_DBIDXREAD): the checks of `check_offsets` in the same order, over
-    /// the arrays in the file, `chunk_entries` entries at a time: the header array in one pass,
-    /// then the sequence array (with the ambiguity array beside it for nucleotide) in one
-    /// pass that notes the first fault of each kind and reports them in `check_offsets`' order.
-    // Out of line, so the registers of its per-sequence loop do not depend on what the caller
-    // that opens the database holds: inlined into `SeqDb::open_search_in`, the loop took one more
-    // stack load per sequence when that caller held one more value (line NP M4c-2, perf g2).
-    #[inline(never)]
-    fn check_streamed(&self, path: &Path, chunk_entries: usize) -> Result<(), SeqDbError> {
-        let format = |message: String| SeqDbError::Format {
-            path: path.to_path_buf(),
-            message,
-        };
-        let entries = self.num_oids as usize + 1;
-        let chunk_entries = chunk_entries.max(1);
-        let mut words = Vec::new();
-        let mut scratch = Vec::new();
-
-        let mut previous: Option<u32> = None;
-        let mut first = 0;
-        while first < entries {
-            let count = chunk_entries.min(entries - first);
-            words.resize(count, 0);
-            self.read_words(Region::Header, first, &mut words, &mut scratch)?;
-            for (i, &word) in words.iter().enumerate() {
-                if previous.is_some_and(|previous| previous > word) {
-                    return Err(format(header_order_message(first + i - 1)));
-                }
-                previous = Some(word);
-            }
-            first += count;
-        }
-
-        let nucleotide = self.seqtype == SeqType::Nucleotide;
-        let mut ambiguity = Vec::new();
-        let mut order_fault = None;
-        let mut equal_fault = None;
-        let mut ambiguity_fault = None;
-        let mut first_word = None;
-        let mut previous: Option<(u32, u32)> = None;
-        let mut first = 0;
-        while first < entries {
-            let count = chunk_entries.min(entries - first);
-            words.resize(count, 0);
-            self.read_words(Region::Sequence, first, &mut words, &mut scratch)?;
-            if nucleotide {
-                // The entry of `num_oids` is not read: no sequence starts there.
-                ambiguity.resize(
-                    count.min(self.num_oids as usize - first.min(self.num_oids as usize)),
-                    0,
-                );
-                self.read_words(Region::Ambiguity, first, &mut ambiguity, &mut scratch)?;
-            }
-            first_word = first_word.or(words.first().copied());
-            for (i, &word) in words.iter().enumerate() {
-                if let Some((start, amb)) = previous {
-                    let oid = first + i - 1;
-                    if start > word {
-                        order_fault.get_or_insert(oid);
-                    }
-                    if start == word {
-                        equal_fault.get_or_insert(oid);
-                    }
-                    // The 2-bit data hold at least the byte with the remainder count.
-                    if nucleotide && !(start < amb && amb <= word) {
-                        ambiguity_fault.get_or_insert(oid);
-                    }
-                }
-                previous = Some((word, ambiguity.get(i).copied().unwrap_or(0)));
-            }
-            if order_fault.is_some() {
-                break;
-            }
-            first += count;
-        }
-        if let Some(oid) = order_fault {
-            return Err(format(sequence_order_message(oid)));
-        }
-        match self.seqtype {
-            SeqType::Protein => {
-                // One NUL byte precedes the first sequence and one follows each.
-                if self.num_oids > 0 && first_word == Some(0) {
-                    return Err(format(FIRST_SENTINEL_MESSAGE.to_string()));
-                }
-                if let Some(oid) = equal_fault {
-                    return Err(format(sentinel_after_message(oid)));
-                }
-            }
-            SeqType::Nucleotide => {
-                if let Some(oid) = ambiguity_fault {
-                    return Err(format(ambiguity_position_message(oid)));
-                }
-            }
-        }
-        Ok(())
+        Self::open(file, seqtype)
     }
 
     /// Fills `out` with the entries `first..first + out.len()` of `region`.
@@ -737,40 +597,8 @@ impl IndexFile {
         Ok(())
     }
 
-    /// EXPERIMENT (LOSAT_X_DBIDXREAD): the order that the open checked (`check_streamed`) in
-    /// the entries `first..` of `region` read again from the file after the open (`words`,
-    /// `pair`; the open's own pass gives `parse`'s errors): the header offsets ascend; the
-    /// sequence offsets ascend, strictly and from 1 in a protein volume with sequences (the
-    /// sentinel bytes). Entries that break it were written after the open, and the error
-    /// stands where the reads that use them (`Volume::read_block`, `Volume::visit_deflines`,
-    /// BLASTP's diagonal offset) would subtract them.
-    fn check_reread(&self, region: Region, first: usize, words: &[u32]) -> Result<(), SeqDbError> {
-        let strict = match (region, self.seqtype) {
-            (Region::Ambiguity, _) => return Ok(()),
-            (Region::Sequence, SeqType::Protein) => {
-                if self.num_oids > 0 && words.first() == Some(&0) {
-                    return Err(self.changed(region, first, words.len()));
-                }
-                true
-            }
-            _ => false,
-        };
-        let ordered = words.windows(2).all(|pair| {
-            if strict {
-                pair[0] < pair[1]
-            } else {
-                pair[0] <= pair[1]
-            }
-        });
-        if ordered {
-            Ok(())
-        } else {
-            Err(self.changed(region, first, words.len()))
-        }
-    }
-
-    /// The error of `check_reread`, also given where two reads of the file disagree
-    /// (`Volume::block_bytes`, `Volume::x_read_block_end`, `Volume::read_block`).
+    /// The error of an index offset range that cannot be read as ascending sequence or ambiguity
+    /// bounds (`Volume::block_bytes`, `Volume::x_read_block_end`, `Volume::read_block`).
     fn changed(&self, region: Region, first: usize, count: usize) -> SeqDbError {
         let path = match &self.offsets {
             Offsets::Read(read) => read.file.path().to_path_buf(),
@@ -779,7 +607,7 @@ impl IndexFile {
         SeqDbError::Format {
             path,
             message: format!(
-                "{region:?} offsets {first}..{} differ from those checked at open (the file changed)",
+                "{region:?} offsets {first}..{} are not in ascending order",
                 first + count
             ),
         }
@@ -799,18 +627,12 @@ impl IndexFile {
     fn words(&self, region: Region, first: u32, count: usize) -> Result<Vec<u32>, SeqDbError> {
         let mut out = vec![0u32; count];
         self.read_words(region, first as usize, &mut out, &mut Vec::new())?;
-        if !self.holds_offsets() {
-            self.check_reread(region, first as usize, &out)?;
-        }
         Ok(out)
     }
 
     fn pair(&self, region: Region, first: u32) -> Result<(u64, u64), SeqDbError> {
         let mut out = [0u32; 2];
         self.read_words(region, first as usize, &mut out, &mut Vec::new())?;
-        if !self.holds_offsets() {
-            self.check_reread(region, first as usize, &out)?;
-        }
         Ok((u64::from(out[0]), u64::from(out[1])))
     }
 
@@ -900,22 +722,4 @@ impl IndexFile {
     pub fn holds_offsets(&self) -> bool {
         matches!(self.offsets, Offsets::Held(_))
     }
-}
-
-fn header_order_message(oid: usize) -> String {
-    format!("header offsets of sequence {oid} are not in ascending order")
-}
-
-fn sequence_order_message(oid: usize) -> String {
-    format!("sequence offsets of sequence {oid} are not in ascending order")
-}
-
-const FIRST_SENTINEL_MESSAGE: &str = "the first protein sequence has no sentinel byte before it";
-
-fn sentinel_after_message(oid: usize) -> String {
-    format!("protein sequence {oid} has no sentinel byte after it")
-}
-
-fn ambiguity_position_message(oid: usize) -> String {
-    format!("ambiguity offset of sequence {oid} lies outside its sequence data")
 }

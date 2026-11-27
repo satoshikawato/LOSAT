@@ -48,7 +48,7 @@ None that change the output of a normal run. The options, NCBI's help and usage 
 `blast_formatter` stops with its own error message in these cases:
 
 - `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `11`, `13`, `14`, `15`, `16`, `17` and `18`.
-- The tabular formats (`6`, `7`, `10`, `20`) of an archive whose queries are locations that the database does not hold (NCBI BLAST+ then asks NCBI's servers for them), and Seq-aligns whose sequences NCBI BLAST+'s scope may find otherwise; each with the case named.
+- The tabular formats (`6`, `7`, `10`, `20`) of an archive whose queries are locations that the database does not hold (NCBI BLAST+ then asks NCBI's servers for them) or whose database sequences have taxids or a definition line that NCBI BLAST+ repairs, and Seq-aligns whose sequences NCBI BLAST+'s scope may find otherwise; each with the case named.
 - A database named in the archive that cannot be opened here as NCBI opens it. NCBI BLAST+ then asks NCBI's servers for its sequences.
 - `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12`: NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one.
 - Archives that NCBI's own programs do not write and on which NCBI BLAST+ has no defined result, a stored message of severity Fatal, and archives of the mapper.

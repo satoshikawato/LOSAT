@@ -3944,6 +3944,13 @@ impl ParsedSubject {
         &self.set.deflines[self.target]
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1328-1360
+    /// The definition line whose ids and title the Bioseq that the data loader builds for the
+    /// Seq-align id has (`GetBioseq` with that id as its target: the first line that holds it).
+    pub fn bioseq_defline(&self) -> &BlastDefline {
+        self.target()
+    }
+
     /// What `GenerateDefline` reads of the subject Bioseq: its Seq-ids, whether it has a source
     /// and the name of its first source (none where LOSAT refuses it, `source`).
     fn bioseq_facts(&self) -> BioseqFacts {

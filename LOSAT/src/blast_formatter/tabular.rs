@@ -1451,11 +1451,13 @@ const LOCATED_ELSEWHERE: &str =
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1310-1470
 /// The queries of a `seq-loc-list` (each a whole sequence or an interval, `check_queries`): the
 /// queries' scope has no loader, so the scope's loader of the database gives each Seq-id's
-/// sequence (`database_subject`, the subjects' lookup), whose Bioseq is the query: its
-/// definition line's ids and title, the whole sequence's length and letters, the database's
-/// residue type. A Seq-id that the database does not hold, or a `-subject` object, is NCBI's ask
-/// of its servers (refused). A sequence of several definition lines, of taxids (the texts of
-/// its load) or of a title or id that the reader repairs is refused.
+/// sequence (`database_subject`, the subjects' lookup), whose Bioseq is the query: the ids and
+/// title of its definition line that holds the Seq-id (`GetBioseq` with the Seq-id as its
+/// target), the whole sequence's length and letters, the database's residue type. A Seq-id that
+/// the database does not hold, or a `-subject` object, is NCBI's ask of its servers (refused). A
+/// sequence of taxids (its load's lookups of the volume's taxonomy cache, whose texts the
+/// subjects' loads model), of a title or id that the reader repairs, or that the scope finds
+/// otherwise (`unfetchable`, `scope_finds_none`, `load_throws`) is refused.
 fn located_queries<'r>(
     inputs: &ObjectInputs<'_>,
     queries: &'r Queries,
@@ -1494,11 +1496,12 @@ fn located_queries<'r>(
                 "a query location whose database sequence has no parsed definition line",
             ));
         };
-        let [defline] = subject.deflines() else {
+        if subject.unfetchable() || subject.scope_finds_none() || subject.load_throws() {
             return Err(refused(
-                "a query location whose database sequence has several definition lines",
+                "a query location whose database sequence NCBI BLAST+'s scope finds otherwise",
             ));
-        };
+        }
+        let defline = subject.bioseq_defline();
         if !subject.volume_lookups().is_empty()
             || defline.replaced_title_bytes > 0
             || defline.replaced_id_bytes > 0

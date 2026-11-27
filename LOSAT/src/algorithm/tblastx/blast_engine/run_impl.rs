@@ -3639,6 +3639,28 @@ fn tblastx_query_scopes(
     })
 }
 
+/// The error of a query batch (of the input records from `input_start`) before its queries are
+/// set up, in NCBI's order: the query splitter reads its environment variables for every batch
+/// (`check_query_split_environment`), and the first batch meets an error there; then, for a batch
+/// that LOSAT refuses (`scope_refusal`), `SetupQueries_OMF`'s failure with `CSeqVector_CI` /
+/// `Sequence contains no data` (`ScopeRefusal::setup_queries_error`), which comes before
+/// `BLAST_MainSetUp` checks the matrix name (`TblastxMatrix::Unknown`, line RG-KB item 7b).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:485-652
+fn batch_error_before_setup(
+    input_start: usize,
+    scope_refusal: Option<&anyhow::Error>,
+) -> Option<anyhow::Error> {
+    if input_start == 0 {
+        if let Err(error) = crate::blastinput::app::check_query_split_environment(true, true) {
+            return Some(error);
+        }
+    }
+    scope_refusal
+        .and_then(crate::blastinput::query_batch::ScopeRefusal::of)
+        .and_then(crate::blastinput::query_batch::ScopeRefusal::setup_queries_error)
+}
+
 /// The batch loop of `run_in_pool`: reads the batches, checks them, takes each one's search
 /// result from `take`, and writes the reports: each batch's when the loop takes it with `stream`
 /// (`report_stream`), else all of them after the loop.
@@ -3902,24 +3924,8 @@ fn run_batch_loop(
             )?;
             batch_warnings.append(&strategy.take_all_posts());
         }
-        // The query splitter reads its environment variables for every batch, before the
-        // queries are set up (`check_query_split_environment`); the first batch meets an
-        // error there.
-        if input_start == 0 {
-            if let Err(error) = crate::blastinput::app::check_query_split_environment(true, true) {
-                reports.write_before_failed_batch(outputs, done, &warnings)?;
-                batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                return Err(error);
-            }
-        }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:485-652
-        // `SetupQueries_OMF` fails with `CSeqVector_CI` / `Sequence contains no data` before
-        // `BLAST_MainSetUp` checks the matrix name (`TblastxMatrix::Unknown`, line RG-KB item 7b).
-        if let Some(error) = scope_refusal
-            .as_ref()
-            .and_then(crate::blastinput::query_batch::ScopeRefusal::of)
-            .and_then(crate::blastinput::query_batch::ScopeRefusal::setup_queries_error)
-        {
+        // The errors of the batch before its queries' set-up (`batch_error_before_setup`).
+        if let Some(error) = batch_error_before_setup(input_start, scope_refusal.as_ref()) {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             return Err(error);

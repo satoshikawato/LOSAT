@@ -1,0 +1,802 @@
+# nucleotide lengths after patch: {'n0': [0], 'ns_mid': [1200, 0, 840]}
+tool	prog	db	threads	rep	rc	rows	sha	stderr1
+ncbi	blastp	a_0s	1	0	0	14	1ea795d6	
+ncbi	blastp	a_0s	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_0s	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_0s	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_0s	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_0s	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_0s	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_0s	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_0s	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_0s	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_0s	1	0	0	22	5fa5c147	
+ncbi	blastp_ug	a_0s	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_0s	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_0s	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_0s	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_0s	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_0s	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_0s	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_0s	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_0s	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_0s	1	0	0	30	7678c907	
+ncbi	blastx	a_0s	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_0s	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_0s	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_0s	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_0s	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_0s	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_0s	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_0s	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_0s	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	psiblast	a_0s	1	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+ncbi	psiblast	a_0s	2	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_0s	2	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_0s	2	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_0s	4	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_0s	4	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_0s	4	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_0s	8	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_0s	8	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_0s	8	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	blastp	a_s0	1	0	0	14	1ea795d6	
+ncbi	blastp	a_s0	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0	1	0	0	22	5fa5c147	
+ncbi	blastp_ug	a_s0	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0	1	0	0	30	7678c907	
+ncbi	blastx	a_s0	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	psiblast	a_s0	1	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+ncbi	psiblast	a_s0	2	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0	2	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0	2	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0	4	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0	4	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0	4	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0	8	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0	8	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0	8	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	blastp	a_s0s	1	0	0	24	ea5bd05b	
+ncbi	blastp	a_s0s	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0s	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0s	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0s	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0s	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0s	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0s	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0s	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	a_s0s	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0s	1	0	0	36	f4cf233f	
+ncbi	blastp_ug	a_s0s	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0s	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0s	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0s	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0s	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0s	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0s	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0s	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	a_s0s	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0s	1	0	0	51	11eb9f27	
+ncbi	blastx	a_s0s	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0s	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0s	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0s	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0s	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0s	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0s	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0s	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	a_s0s	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	psiblast	a_s0s	1	0	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+ncbi	psiblast	a_s0s	2	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0s	2	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0s	2	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0s	4	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0s	4	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0s	4	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0s	8	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0s	8	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	a_s0s	8	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	blastp	s_first	1	0	0	14	1ea795d6	
+ncbi	blastp	s_first	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_first	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_first	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_first	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_first	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_first	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_first	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_first	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_first	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_first	1	0	0	22	5fa5c147	
+ncbi	blastp_ug	s_first	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_first	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_first	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_first	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_first	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_first	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_first	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_first	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_first	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_first	1	0	0	30	7678c907	
+ncbi	blastx	s_first	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_first	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_first	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_first	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_first	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_first	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_first	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_first	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_first	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	psiblast	s_first	1	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+ncbi	psiblast	s_first	2	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_first	2	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_first	2	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_first	4	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_first	4	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_first	4	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_first	8	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_first	8	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_first	8	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	blastp	s_mid	1	0	0	24	ea5bd05b	
+ncbi	blastp	s_mid	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_mid	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_mid	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_mid	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_mid	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_mid	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_mid	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_mid	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_mid	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_mid	1	0	0	36	f4cf233f	
+ncbi	blastp_ug	s_mid	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_mid	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_mid	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_mid	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_mid	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_mid	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_mid	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_mid	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_mid	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_mid	1	0	0	51	11eb9f27	
+ncbi	blastx	s_mid	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_mid	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_mid	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_mid	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_mid	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_mid	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_mid	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_mid	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_mid	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	psiblast	s_mid	1	0	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+ncbi	psiblast	s_mid	2	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_mid	2	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_mid	2	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_mid	4	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_mid	4	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_mid	4	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_mid	8	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_mid	8	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_mid	8	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	blastp	s_last	1	0	0	14	1ea795d6	
+ncbi	blastp	s_last	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_last	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_last	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_last	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_last	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_last	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_last	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_last	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	s_last	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_last	1	0	0	22	5fa5c147	
+ncbi	blastp_ug	s_last	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_last	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_last	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_last	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_last	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_last	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_last	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_last	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	s_last	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_last	1	0	0	30	7678c907	
+ncbi	blastx	s_last	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_last	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_last	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_last	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_last	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_last	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_last	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_last	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	s_last	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	psiblast	s_last	1	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+ncbi	psiblast	s_last	2	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_last	2	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_last	2	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_last	4	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_last	4	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_last	4	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_last	8	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_last	8	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	s_last	8	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	blastp	m_mid	1	0	0	24	1f33040b	
+ncbi	blastp	m_mid	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_mid	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_mid	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_mid	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_mid	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_mid	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_mid	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_mid	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_mid	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_mid	1	0	0	36	1ff4ea23	
+ncbi	blastp_ug	m_mid	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_mid	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_mid	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_mid	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_mid	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_mid	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_mid	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_mid	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_mid	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_mid	1	0	0	24	3a5bbe22	
+ncbi	blastx	m_mid	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_mid	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_mid	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_mid	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_mid	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_mid	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_mid	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_mid	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_mid	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	psiblast	m_mid	1	0	0	50	02e08653	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+ncbi	psiblast	m_mid	2	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_mid	2	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_mid	2	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_mid	4	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_mid	4	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_mid	4	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_mid	8	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_mid	8	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_mid	8	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	blastp	m_first	1	0	0	10	a6971ccc	
+ncbi	blastp	m_first	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_first	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_first	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_first	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_first	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_first	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_first	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_first	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp	m_first	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_first	1	0	0	14	15115929	
+ncbi	blastp_ug	m_first	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_first	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_first	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_first	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_first	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_first	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_first	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_first	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastp_ug	m_first	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_first	1	0	0	10	f60e4ad2	
+ncbi	blastx	m_first	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_first	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_first	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_first	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_first	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_first	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_first	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_first	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastx	m_first	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	psiblast	m_first	1	0	0	22	87f93cb7	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+ncbi	psiblast	m_first	2	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_first	2	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_first	2	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_first	4	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_first	4	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_first	4	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_first	8	0	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_first	8	1	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	psiblast	m_first	8	2	-6	0	e3b0c442	BLAST Database error: Sequence not returned.
+ncbi	blastn_mega	na_0s	1	0	0	22	2f32e06c	
+ncbi	blastn_mega	na_0s	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	na_0s	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	na_0s	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	na_0s	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	na_0s	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	na_0s	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	na_0s	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	na_0s	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	na_0s	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	na_0s	1	0	0	22	0eb1ce04	
+ncbi	blastn	na_0s	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	na_0s	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	na_0s	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	na_0s	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	na_0s	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	na_0s	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	na_0s	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	na_0s	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	na_0s	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	na_0s	1	0	0	14	31df26e4	
+ncbi	tblastn	na_0s	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	na_0s	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	na_0s	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	na_0s	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	na_0s	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	na_0s	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	na_0s	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	na_0s	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	na_0s	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	na_0s	1	0	0	132	5ffe3b89	
+ncbi	tblastx	na_0s	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	na_0s	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	na_0s	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	na_0s	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	na_0s	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	na_0s	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	na_0s	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	na_0s	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	na_0s	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	ns_mid	1	0	0	36	4ec92118	
+ncbi	blastn_mega	ns_mid	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	ns_mid	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	ns_mid	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	ns_mid	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	ns_mid	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	ns_mid	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	ns_mid	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	ns_mid	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn_mega	ns_mid	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	ns_mid	1	0	0	36	0f150a20	
+ncbi	blastn	ns_mid	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	ns_mid	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	ns_mid	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	ns_mid	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	ns_mid	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	ns_mid	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	ns_mid	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	ns_mid	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	blastn	ns_mid	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	ns_mid	1	0	0	24	d21a4132	
+ncbi	tblastn	ns_mid	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	ns_mid	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	ns_mid	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	ns_mid	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	ns_mid	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	ns_mid	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	ns_mid	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	ns_mid	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastn	ns_mid	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	ns_mid	1	0	0	216	67010a13	
+ncbi	tblastx	ns_mid	2	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	ns_mid	2	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	ns_mid	2	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	ns_mid	4	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	ns_mid	4	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	ns_mid	4	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	ns_mid	8	0	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	ns_mid	8	1	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+ncbi	tblastx	ns_mid	8	2	-6	0	e3b0c442	BLAST engine error: Database memory map file error
+losat	blastp	a_0s	1	0	0	14	1ea795d6	
+losat	blastp	a_0s	2	0	0	14	1ea795d6	
+losat	blastp	a_0s	2	1	0	14	1ea795d6	
+losat	blastp	a_0s	2	2	0	14	1ea795d6	
+losat	blastp	a_0s	4	0	0	14	1ea795d6	
+losat	blastp	a_0s	4	1	0	14	1ea795d6	
+losat	blastp	a_0s	4	2	0	14	1ea795d6	
+losat	blastp	a_0s	8	0	0	14	1ea795d6	
+losat	blastp	a_0s	8	1	0	14	1ea795d6	
+losat	blastp	a_0s	8	2	0	14	1ea795d6	
+losat	blastp_ug	a_0s	1	0	0	22	5fa5c147	
+losat	blastp_ug	a_0s	2	0	0	22	5fa5c147	
+losat	blastp_ug	a_0s	2	1	0	22	5fa5c147	
+losat	blastp_ug	a_0s	2	2	0	22	5fa5c147	
+losat	blastp_ug	a_0s	4	0	0	22	5fa5c147	
+losat	blastp_ug	a_0s	4	1	0	22	5fa5c147	
+losat	blastp_ug	a_0s	4	2	0	22	5fa5c147	
+losat	blastp_ug	a_0s	8	0	0	22	5fa5c147	
+losat	blastp_ug	a_0s	8	1	0	22	5fa5c147	
+losat	blastp_ug	a_0s	8	2	0	22	5fa5c147	
+losat	blastx	a_0s	1	0	0	30	7678c907	
+losat	blastx	a_0s	2	0	0	30	7678c907	
+losat	blastx	a_0s	2	1	0	30	7678c907	
+losat	blastx	a_0s	2	2	0	30	7678c907	
+losat	blastx	a_0s	4	0	0	30	7678c907	
+losat	blastx	a_0s	4	1	0	30	7678c907	
+losat	blastx	a_0s	4	2	0	30	7678c907	
+losat	blastx	a_0s	8	0	0	30	7678c907	
+losat	blastx	a_0s	8	1	0	30	7678c907	
+losat	blastx	a_0s	8	2	0	30	7678c907	
+losat	psiblast	a_0s	1	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_0s	2	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_0s	2	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_0s	2	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_0s	4	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_0s	4	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_0s	4	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_0s	8	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_0s	8	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_0s	8	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	blastp	a_s0	1	0	0	14	1ea795d6	
+losat	blastp	a_s0	2	0	0	14	1ea795d6	
+losat	blastp	a_s0	2	1	0	14	1ea795d6	
+losat	blastp	a_s0	2	2	0	14	1ea795d6	
+losat	blastp	a_s0	4	0	0	14	1ea795d6	
+losat	blastp	a_s0	4	1	0	14	1ea795d6	
+losat	blastp	a_s0	4	2	0	14	1ea795d6	
+losat	blastp	a_s0	8	0	0	14	1ea795d6	
+losat	blastp	a_s0	8	1	0	14	1ea795d6	
+losat	blastp	a_s0	8	2	0	14	1ea795d6	
+losat	blastp_ug	a_s0	1	0	0	22	5fa5c147	
+losat	blastp_ug	a_s0	2	0	0	22	5fa5c147	
+losat	blastp_ug	a_s0	2	1	0	22	5fa5c147	
+losat	blastp_ug	a_s0	2	2	0	22	5fa5c147	
+losat	blastp_ug	a_s0	4	0	0	22	5fa5c147	
+losat	blastp_ug	a_s0	4	1	0	22	5fa5c147	
+losat	blastp_ug	a_s0	4	2	0	22	5fa5c147	
+losat	blastp_ug	a_s0	8	0	0	22	5fa5c147	
+losat	blastp_ug	a_s0	8	1	0	22	5fa5c147	
+losat	blastp_ug	a_s0	8	2	0	22	5fa5c147	
+losat	blastx	a_s0	1	0	0	30	7678c907	
+losat	blastx	a_s0	2	0	0	30	7678c907	
+losat	blastx	a_s0	2	1	0	30	7678c907	
+losat	blastx	a_s0	2	2	0	30	7678c907	
+losat	blastx	a_s0	4	0	0	30	7678c907	
+losat	blastx	a_s0	4	1	0	30	7678c907	
+losat	blastx	a_s0	4	2	0	30	7678c907	
+losat	blastx	a_s0	8	0	0	30	7678c907	
+losat	blastx	a_s0	8	1	0	30	7678c907	
+losat	blastx	a_s0	8	2	0	30	7678c907	
+losat	psiblast	a_s0	1	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0	2	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0	2	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0	2	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0	4	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0	4	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0	4	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0	8	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0	8	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0	8	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	blastp	a_s0s	1	0	0	24	ea5bd05b	
+losat	blastp	a_s0s	2	0	0	24	ea5bd05b	
+losat	blastp	a_s0s	2	1	0	24	ea5bd05b	
+losat	blastp	a_s0s	2	2	0	24	ea5bd05b	
+losat	blastp	a_s0s	4	0	0	24	ea5bd05b	
+losat	blastp	a_s0s	4	1	0	24	ea5bd05b	
+losat	blastp	a_s0s	4	2	0	24	ea5bd05b	
+losat	blastp	a_s0s	8	0	0	24	ea5bd05b	
+losat	blastp	a_s0s	8	1	0	24	ea5bd05b	
+losat	blastp	a_s0s	8	2	0	24	ea5bd05b	
+losat	blastp_ug	a_s0s	1	0	0	36	f4cf233f	
+losat	blastp_ug	a_s0s	2	0	0	36	f4cf233f	
+losat	blastp_ug	a_s0s	2	1	0	36	f4cf233f	
+losat	blastp_ug	a_s0s	2	2	0	36	f4cf233f	
+losat	blastp_ug	a_s0s	4	0	0	36	f4cf233f	
+losat	blastp_ug	a_s0s	4	1	0	36	f4cf233f	
+losat	blastp_ug	a_s0s	4	2	0	36	f4cf233f	
+losat	blastp_ug	a_s0s	8	0	0	36	f4cf233f	
+losat	blastp_ug	a_s0s	8	1	0	36	f4cf233f	
+losat	blastp_ug	a_s0s	8	2	0	36	f4cf233f	
+losat	blastx	a_s0s	1	0	0	51	11eb9f27	
+losat	blastx	a_s0s	2	0	0	51	11eb9f27	
+losat	blastx	a_s0s	2	1	0	51	11eb9f27	
+losat	blastx	a_s0s	2	2	0	51	11eb9f27	
+losat	blastx	a_s0s	4	0	0	51	11eb9f27	
+losat	blastx	a_s0s	4	1	0	51	11eb9f27	
+losat	blastx	a_s0s	4	2	0	51	11eb9f27	
+losat	blastx	a_s0s	8	0	0	51	11eb9f27	
+losat	blastx	a_s0s	8	1	0	51	11eb9f27	
+losat	blastx	a_s0s	8	2	0	51	11eb9f27	
+losat	psiblast	a_s0s	1	0	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0s	2	0	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0s	2	1	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0s	2	2	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0s	4	0	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0s	4	1	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0s	4	2	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0s	8	0	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0s	8	1	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	a_s0s	8	2	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	blastp	s_first	1	0	0	14	1ea795d6	
+losat	blastp	s_first	2	0	0	14	1ea795d6	
+losat	blastp	s_first	2	1	0	14	1ea795d6	
+losat	blastp	s_first	2	2	0	14	1ea795d6	
+losat	blastp	s_first	4	0	0	14	1ea795d6	
+losat	blastp	s_first	4	1	0	14	1ea795d6	
+losat	blastp	s_first	4	2	0	14	1ea795d6	
+losat	blastp	s_first	8	0	0	14	1ea795d6	
+losat	blastp	s_first	8	1	0	14	1ea795d6	
+losat	blastp	s_first	8	2	0	14	1ea795d6	
+losat	blastp_ug	s_first	1	0	0	22	5fa5c147	
+losat	blastp_ug	s_first	2	0	0	22	5fa5c147	
+losat	blastp_ug	s_first	2	1	0	22	5fa5c147	
+losat	blastp_ug	s_first	2	2	0	22	5fa5c147	
+losat	blastp_ug	s_first	4	0	0	22	5fa5c147	
+losat	blastp_ug	s_first	4	1	0	22	5fa5c147	
+losat	blastp_ug	s_first	4	2	0	22	5fa5c147	
+losat	blastp_ug	s_first	8	0	0	22	5fa5c147	
+losat	blastp_ug	s_first	8	1	0	22	5fa5c147	
+losat	blastp_ug	s_first	8	2	0	22	5fa5c147	
+losat	blastx	s_first	1	0	0	30	7678c907	
+losat	blastx	s_first	2	0	0	30	7678c907	
+losat	blastx	s_first	2	1	0	30	7678c907	
+losat	blastx	s_first	2	2	0	30	7678c907	
+losat	blastx	s_first	4	0	0	30	7678c907	
+losat	blastx	s_first	4	1	0	30	7678c907	
+losat	blastx	s_first	4	2	0	30	7678c907	
+losat	blastx	s_first	8	0	0	30	7678c907	
+losat	blastx	s_first	8	1	0	30	7678c907	
+losat	blastx	s_first	8	2	0	30	7678c907	
+losat	psiblast	s_first	1	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_first	2	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_first	2	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_first	2	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_first	4	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_first	4	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_first	4	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_first	8	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_first	8	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_first	8	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	blastp	s_mid	1	0	0	24	ea5bd05b	
+losat	blastp	s_mid	2	0	0	24	ea5bd05b	
+losat	blastp	s_mid	2	1	0	24	ea5bd05b	
+losat	blastp	s_mid	2	2	0	24	ea5bd05b	
+losat	blastp	s_mid	4	0	0	24	ea5bd05b	
+losat	blastp	s_mid	4	1	0	24	ea5bd05b	
+losat	blastp	s_mid	4	2	0	24	ea5bd05b	
+losat	blastp	s_mid	8	0	0	24	ea5bd05b	
+losat	blastp	s_mid	8	1	0	24	ea5bd05b	
+losat	blastp	s_mid	8	2	0	24	ea5bd05b	
+losat	blastp_ug	s_mid	1	0	0	36	f4cf233f	
+losat	blastp_ug	s_mid	2	0	0	36	f4cf233f	
+losat	blastp_ug	s_mid	2	1	0	36	f4cf233f	
+losat	blastp_ug	s_mid	2	2	0	36	f4cf233f	
+losat	blastp_ug	s_mid	4	0	0	36	f4cf233f	
+losat	blastp_ug	s_mid	4	1	0	36	f4cf233f	
+losat	blastp_ug	s_mid	4	2	0	36	f4cf233f	
+losat	blastp_ug	s_mid	8	0	0	36	f4cf233f	
+losat	blastp_ug	s_mid	8	1	0	36	f4cf233f	
+losat	blastp_ug	s_mid	8	2	0	36	f4cf233f	
+losat	blastx	s_mid	1	0	0	51	11eb9f27	
+losat	blastx	s_mid	2	0	0	51	11eb9f27	
+losat	blastx	s_mid	2	1	0	51	11eb9f27	
+losat	blastx	s_mid	2	2	0	51	11eb9f27	
+losat	blastx	s_mid	4	0	0	51	11eb9f27	
+losat	blastx	s_mid	4	1	0	51	11eb9f27	
+losat	blastx	s_mid	4	2	0	51	11eb9f27	
+losat	blastx	s_mid	8	0	0	51	11eb9f27	
+losat	blastx	s_mid	8	1	0	51	11eb9f27	
+losat	blastx	s_mid	8	2	0	51	11eb9f27	
+losat	psiblast	s_mid	1	0	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_mid	2	0	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_mid	2	1	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_mid	2	2	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_mid	4	0	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_mid	4	1	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_mid	4	2	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_mid	8	0	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_mid	8	1	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_mid	8	2	0	50	f6ee9b96	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	blastp	s_last	1	0	0	14	1ea795d6	
+losat	blastp	s_last	2	0	0	14	1ea795d6	
+losat	blastp	s_last	2	1	0	14	1ea795d6	
+losat	blastp	s_last	2	2	0	14	1ea795d6	
+losat	blastp	s_last	4	0	0	14	1ea795d6	
+losat	blastp	s_last	4	1	0	14	1ea795d6	
+losat	blastp	s_last	4	2	0	14	1ea795d6	
+losat	blastp	s_last	8	0	0	14	1ea795d6	
+losat	blastp	s_last	8	1	0	14	1ea795d6	
+losat	blastp	s_last	8	2	0	14	1ea795d6	
+losat	blastp_ug	s_last	1	0	0	22	5fa5c147	
+losat	blastp_ug	s_last	2	0	0	22	5fa5c147	
+losat	blastp_ug	s_last	2	1	0	22	5fa5c147	
+losat	blastp_ug	s_last	2	2	0	22	5fa5c147	
+losat	blastp_ug	s_last	4	0	0	22	5fa5c147	
+losat	blastp_ug	s_last	4	1	0	22	5fa5c147	
+losat	blastp_ug	s_last	4	2	0	22	5fa5c147	
+losat	blastp_ug	s_last	8	0	0	22	5fa5c147	
+losat	blastp_ug	s_last	8	1	0	22	5fa5c147	
+losat	blastp_ug	s_last	8	2	0	22	5fa5c147	
+losat	blastx	s_last	1	0	0	30	7678c907	
+losat	blastx	s_last	2	0	0	30	7678c907	
+losat	blastx	s_last	2	1	0	30	7678c907	
+losat	blastx	s_last	2	2	0	30	7678c907	
+losat	blastx	s_last	4	0	0	30	7678c907	
+losat	blastx	s_last	4	1	0	30	7678c907	
+losat	blastx	s_last	4	2	0	30	7678c907	
+losat	blastx	s_last	8	0	0	30	7678c907	
+losat	blastx	s_last	8	1	0	30	7678c907	
+losat	blastx	s_last	8	2	0	30	7678c907	
+losat	psiblast	s_last	1	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_last	2	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_last	2	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_last	2	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_last	4	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_last	4	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_last	4	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_last	8	0	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_last	8	1	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	s_last	8	2	0	30	5dcdda98	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	blastp	m_mid	1	0	0	24	1f33040b	
+losat	blastp	m_mid	2	0	0	24	1f33040b	
+losat	blastp	m_mid	2	1	0	24	1f33040b	
+losat	blastp	m_mid	2	2	0	24	1f33040b	
+losat	blastp	m_mid	4	0	0	24	1f33040b	
+losat	blastp	m_mid	4	1	0	24	1f33040b	
+losat	blastp	m_mid	4	2	0	24	1f33040b	
+losat	blastp	m_mid	8	0	0	24	1f33040b	
+losat	blastp	m_mid	8	1	0	24	1f33040b	
+losat	blastp	m_mid	8	2	0	24	1f33040b	
+losat	blastp_ug	m_mid	1	0	0	36	1ff4ea23	
+losat	blastp_ug	m_mid	2	0	0	36	1ff4ea23	
+losat	blastp_ug	m_mid	2	1	0	36	1ff4ea23	
+losat	blastp_ug	m_mid	2	2	0	36	1ff4ea23	
+losat	blastp_ug	m_mid	4	0	0	36	1ff4ea23	
+losat	blastp_ug	m_mid	4	1	0	36	1ff4ea23	
+losat	blastp_ug	m_mid	4	2	0	36	1ff4ea23	
+losat	blastp_ug	m_mid	8	0	0	36	1ff4ea23	
+losat	blastp_ug	m_mid	8	1	0	36	1ff4ea23	
+losat	blastp_ug	m_mid	8	2	0	36	1ff4ea23	
+losat	blastx	m_mid	1	0	0	24	3a5bbe22	
+losat	blastx	m_mid	2	0	0	24	3a5bbe22	
+losat	blastx	m_mid	2	1	0	24	3a5bbe22	
+losat	blastx	m_mid	2	2	0	24	3a5bbe22	
+losat	blastx	m_mid	4	0	0	24	3a5bbe22	
+losat	blastx	m_mid	4	1	0	24	3a5bbe22	
+losat	blastx	m_mid	4	2	0	24	3a5bbe22	
+losat	blastx	m_mid	8	0	0	24	3a5bbe22	
+losat	blastx	m_mid	8	1	0	24	3a5bbe22	
+losat	blastx	m_mid	8	2	0	24	3a5bbe22	
+losat	psiblast	m_mid	1	0	0	50	02e08653	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_mid	2	0	0	50	02e08653	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_mid	2	1	0	50	02e08653	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_mid	2	2	0	50	02e08653	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_mid	4	0	0	50	02e08653	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_mid	4	1	0	50	02e08653	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_mid	4	2	0	50	02e08653	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_mid	8	0	0	50	02e08653	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_mid	8	1	0	50	02e08653	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_mid	8	2	0	50	02e08653	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	blastp	m_first	1	0	0	10	a6971ccc	
+losat	blastp	m_first	2	0	0	10	a6971ccc	
+losat	blastp	m_first	2	1	0	10	a6971ccc	
+losat	blastp	m_first	2	2	0	10	a6971ccc	
+losat	blastp	m_first	4	0	0	10	a6971ccc	
+losat	blastp	m_first	4	1	0	10	a6971ccc	
+losat	blastp	m_first	4	2	0	10	a6971ccc	
+losat	blastp	m_first	8	0	0	10	a6971ccc	
+losat	blastp	m_first	8	1	0	10	a6971ccc	
+losat	blastp	m_first	8	2	0	10	a6971ccc	
+losat	blastp_ug	m_first	1	0	0	14	15115929	
+losat	blastp_ug	m_first	2	0	0	14	15115929	
+losat	blastp_ug	m_first	2	1	0	14	15115929	
+losat	blastp_ug	m_first	2	2	0	14	15115929	
+losat	blastp_ug	m_first	4	0	0	14	15115929	
+losat	blastp_ug	m_first	4	1	0	14	15115929	
+losat	blastp_ug	m_first	4	2	0	14	15115929	
+losat	blastp_ug	m_first	8	0	0	14	15115929	
+losat	blastp_ug	m_first	8	1	0	14	15115929	
+losat	blastp_ug	m_first	8	2	0	14	15115929	
+losat	blastx	m_first	1	0	0	10	f60e4ad2	
+losat	blastx	m_first	2	0	0	10	f60e4ad2	
+losat	blastx	m_first	2	1	0	10	f60e4ad2	
+losat	blastx	m_first	2	2	0	10	f60e4ad2	
+losat	blastx	m_first	4	0	0	10	f60e4ad2	
+losat	blastx	m_first	4	1	0	10	f60e4ad2	
+losat	blastx	m_first	4	2	0	10	f60e4ad2	
+losat	blastx	m_first	8	0	0	10	f60e4ad2	
+losat	blastx	m_first	8	1	0	10	f60e4ad2	
+losat	blastx	m_first	8	2	0	10	f60e4ad2	
+losat	psiblast	m_first	1	0	0	22	87f93cb7	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_first	2	0	0	22	87f93cb7	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_first	2	1	0	22	87f93cb7	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_first	2	2	0	22	87f93cb7	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_first	4	0	0	22	87f93cb7	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_first	4	1	0	22	87f93cb7	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_first	4	2	0	22	87f93cb7	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_first	8	0	0	22	87f93cb7	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_first	8	1	0	22	87f93cb7	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	psiblast	m_first	8	2	0	22	87f93cb7	Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence 
+losat	blastn_mega	na_0s	1	0	0	22	2f32e06c	
+losat	blastn_mega	na_0s	2	0	0	22	2f32e06c	
+losat	blastn_mega	na_0s	2	1	0	22	2f32e06c	
+losat	blastn_mega	na_0s	2	2	0	22	2f32e06c	
+losat	blastn_mega	na_0s	4	0	0	22	2f32e06c	
+losat	blastn_mega	na_0s	4	1	0	22	2f32e06c	
+losat	blastn_mega	na_0s	4	2	0	22	2f32e06c	
+losat	blastn_mega	na_0s	8	0	0	22	2f32e06c	
+losat	blastn_mega	na_0s	8	1	0	22	2f32e06c	
+losat	blastn_mega	na_0s	8	2	0	22	2f32e06c	
+losat	blastn	na_0s	1	0	0	22	0eb1ce04	
+losat	blastn	na_0s	2	0	0	22	0eb1ce04	
+losat	blastn	na_0s	2	1	0	22	0eb1ce04	
+losat	blastn	na_0s	2	2	0	22	0eb1ce04	
+losat	blastn	na_0s	4	0	0	22	0eb1ce04	
+losat	blastn	na_0s	4	1	0	22	0eb1ce04	
+losat	blastn	na_0s	4	2	0	22	0eb1ce04	
+losat	blastn	na_0s	8	0	0	22	0eb1ce04	
+losat	blastn	na_0s	8	1	0	22	0eb1ce04	
+losat	blastn	na_0s	8	2	0	22	0eb1ce04	
+losat	tblastn	na_0s	1	0	0	14	31df26e4	
+losat	tblastn	na_0s	2	0	0	14	31df26e4	
+losat	tblastn	na_0s	2	1	0	14	31df26e4	
+losat	tblastn	na_0s	2	2	0	14	31df26e4	
+losat	tblastn	na_0s	4	0	0	14	31df26e4	
+losat	tblastn	na_0s	4	1	0	14	31df26e4	
+losat	tblastn	na_0s	4	2	0	14	31df26e4	
+losat	tblastn	na_0s	8	0	0	14	31df26e4	
+losat	tblastn	na_0s	8	1	0	14	31df26e4	
+losat	tblastn	na_0s	8	2	0	14	31df26e4	
+losat	tblastx	na_0s	1	0	0	132	5ffe3b89	
+losat	tblastx	na_0s	2	0	0	132	5ffe3b89	
+losat	tblastx	na_0s	2	1	0	132	5ffe3b89	
+losat	tblastx	na_0s	2	2	0	132	5ffe3b89	
+losat	tblastx	na_0s	4	0	0	132	5ffe3b89	
+losat	tblastx	na_0s	4	1	0	132	5ffe3b89	
+losat	tblastx	na_0s	4	2	0	132	5ffe3b89	
+losat	tblastx	na_0s	8	0	0	132	5ffe3b89	
+losat	tblastx	na_0s	8	1	0	132	5ffe3b89	
+losat	tblastx	na_0s	8	2	0	132	5ffe3b89	
+losat	blastn_mega	ns_mid	1	0	0	36	4ec92118	
+losat	blastn_mega	ns_mid	2	0	0	36	4ec92118	
+losat	blastn_mega	ns_mid	2	1	0	36	4ec92118	
+losat	blastn_mega	ns_mid	2	2	0	36	4ec92118	
+losat	blastn_mega	ns_mid	4	0	0	36	4ec92118	
+losat	blastn_mega	ns_mid	4	1	0	36	4ec92118	
+losat	blastn_mega	ns_mid	4	2	0	36	4ec92118	
+losat	blastn_mega	ns_mid	8	0	0	36	4ec92118	
+losat	blastn_mega	ns_mid	8	1	0	36	4ec92118	
+losat	blastn_mega	ns_mid	8	2	0	36	4ec92118	
+losat	blastn	ns_mid	1	0	0	36	0f150a20	
+losat	blastn	ns_mid	2	0	0	36	0f150a20	
+losat	blastn	ns_mid	2	1	0	36	0f150a20	
+losat	blastn	ns_mid	2	2	0	36	0f150a20	
+losat	blastn	ns_mid	4	0	0	36	0f150a20	
+losat	blastn	ns_mid	4	1	0	36	0f150a20	
+losat	blastn	ns_mid	4	2	0	36	0f150a20	
+losat	blastn	ns_mid	8	0	0	36	0f150a20	
+losat	blastn	ns_mid	8	1	0	36	0f150a20	
+losat	blastn	ns_mid	8	2	0	36	0f150a20	
+losat	tblastn	ns_mid	1	0	0	24	d21a4132	
+losat	tblastn	ns_mid	2	0	0	24	d21a4132	
+losat	tblastn	ns_mid	2	1	0	24	d21a4132	
+losat	tblastn	ns_mid	2	2	0	24	d21a4132	
+losat	tblastn	ns_mid	4	0	0	24	d21a4132	
+losat	tblastn	ns_mid	4	1	0	24	d21a4132	
+losat	tblastn	ns_mid	4	2	0	24	d21a4132	
+losat	tblastn	ns_mid	8	0	0	24	d21a4132	
+losat	tblastn	ns_mid	8	1	0	24	d21a4132	
+losat	tblastn	ns_mid	8	2	0	24	d21a4132	
+losat	tblastx	ns_mid	1	0	0	216	67010a13	
+losat	tblastx	ns_mid	2	0	0	216	67010a13	
+losat	tblastx	ns_mid	2	1	0	216	67010a13	
+losat	tblastx	ns_mid	2	2	0	216	67010a13	
+losat	tblastx	ns_mid	4	0	0	216	67010a13	
+losat	tblastx	ns_mid	4	1	0	216	67010a13	
+losat	tblastx	ns_mid	4	2	0	216	67010a13	
+losat	tblastx	ns_mid	8	0	0	216	67010a13	
+losat	tblastx	ns_mid	8	1	0	216	67010a13	
+losat	tblastx	ns_mid	8	2	0	216	67010a13	

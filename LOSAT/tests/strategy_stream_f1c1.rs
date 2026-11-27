@@ -11,10 +11,13 @@
 //!   `dashm`, `dashom`), standard output on `/dev/full` (`dashfull`:
 //!   exit 6 for outfmt 0, SIGABRT for the formats whose request write throws), and `>>` (`dashapp`,
 //!   `PRE\n` kept); psiblast's `-in_pssm` and `-in_msa` with rounds (the prolog before the request,
-//!   also with `-html`, `-out_pssm`, `2>&1` and `/dev/stdout`); a report that cannot be written
-//!   (`outfull`: `-out /dev/full`; `outfsz`: `-out F` at its size limit), whose run ends with the
-//!   requests up to the batch whose report failed (`-`, `/dev/stdout` and a file); SAM's `@PG CL:`
-//!   tag (the program's path) is left out on both sides.
+//!   also with `-html`, `-out_pssm`, `2>&1` and `/dev/stdout`; before the failure of a strategy
+//!   file on `/dev/full`; and with `2>&1` before the `803.7` post of a request whose database name
+//!   has the byte 0xE9: setup `e9`, the run's folder as the working folder with `tests` and `d\xe9`
+//!   linked in it); a strategy file with `-out /dev/full` (empty, as NCBI's prolog fails first); a
+//!   report that cannot be written (`outfull`: `-out /dev/full`; `outfsz`: `-out F` at its size
+//!   limit), whose run ends with the requests up to the batch whose report failed (`-`,
+//!   `/dev/stdout` and a file); SAM's `@PG CL:` tag (the program's path) is left out on both sides.
 //! - Linux, item F1c-1 (`tests/fixtures/strategy/f1c1_cases.tsv` and `tests/fixtures/strategy/f1c1/`):
 //!   byte-for-byte comparison against frozen official NCBI BLAST+ 2.17.0 outputs (mapped via
 //!   `losat::wording::losat_output_bytes`) at 1 and 4 threads across all 8 programs, covering:
@@ -332,6 +335,17 @@ mod ncbi_frozen {
         crate::outfmt11_blastx::expected_losat_bytes(bytes)
     }
 
+    /// The folder name of setup `e9` (`d` and the byte 0xE9, not UTF-8), which `{e9}` in an
+    /// argument stands for.
+    const E9_FOLDER: &[u8] = b"d\xe9";
+
+    /// An argument of a row: `{e9}` becomes `E9_FOLDER`.
+    fn os_arg(text: &str) -> std::ffi::OsString {
+        use std::os::unix::ffi::OsStringExt;
+        let parts: Vec<&[u8]> = text.split("{e9}").map(str::as_bytes).collect();
+        std::ffi::OsString::from_vec(parts.join(E9_FOLDER))
+    }
+
     fn run_case(table: Table, case: &Case, threads: &str, root: &Path, rps_shared: &Path) {
         let dir = root.join(format!("{}_t{threads}", case.name));
         let _ = std::fs::remove_dir_all(&dir);
@@ -344,22 +358,36 @@ mod ncbi_frozen {
             std::fs::write(&f_path, b"").unwrap();
             std::os::unix::fs::symlink("F", &lnk_path).unwrap();
         }
+        // Setup `e9`: the run's folder is the working folder, with the engine's `tests` and a
+        // link `d\xe9` to its `tests/db_search` in it, so that `-db {e9}/paja` names a database
+        // whose name NCBI posts (`803.7`) where it writes the request; the post shows the name
+        // as given, the same on every machine.
+        let e9 = case.setup == "e9";
+        if e9 {
+            use std::os::unix::ffi::OsStrExt;
+            std::os::unix::fs::symlink(engine().join("tests"), dir.join("tests")).unwrap();
+            std::os::unix::fs::symlink(
+                engine().join("tests/db_search"),
+                dir.join(std::ffi::OsStr::from_bytes(E9_FOLDER)),
+            )
+            .unwrap();
+        }
 
         let uses_f = case
             .args
             .iter()
             .any(|a| a.contains("{f}") || a.contains("{dot}") || a.contains("{lnk}"));
-        let mut argv: Vec<String> = Vec::with_capacity(case.args.len() + 3);
-        argv.push(case.program.clone());
+        let mut argv: Vec<std::ffi::OsString> = Vec::with_capacity(case.args.len() + 3);
+        argv.push(case.program.clone().into());
         for a in &case.args {
-            argv.push(
-                a.replace("{f}", f_path.to_str().unwrap())
+            argv.push(os_arg(
+                &a.replace("{f}", f_path.to_str().unwrap())
                     .replace("{dot}", &dot_path)
                     .replace("{lnk}", lnk_path.to_str().unwrap()),
-            );
+            ));
         }
-        argv.push("-num_threads".to_string());
-        argv.push(threads.to_string());
+        argv.push("-num_threads".into());
+        argv.push(threads.into());
 
         let mut cmd = match (case.stdout.as_str(), case.fsize.as_deref()) {
             ("merged", Some(limit)) => {
@@ -398,7 +426,8 @@ mod ncbi_frozen {
             }
             (other, Some(limit)) => panic!("unsupported stdout={other} with fsize={limit}"),
         };
-        cmd.current_dir(engine()).stdin(Stdio::null());
+        cmd.current_dir(if e9 { dir.clone() } else { engine() })
+            .stdin(Stdio::null());
         clean_env(&mut cmd);
         cmd.env("HOME", &dir);
         for (k, v) in &case.env {

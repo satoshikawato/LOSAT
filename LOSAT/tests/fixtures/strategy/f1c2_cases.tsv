@@ -3,6 +3,9 @@
 # Left out: psiblast outfmt 15/16 and the rpsblast organism report of an unsearched batch (LOSAT's refusals).
 # Fix round 1 (review 1 B1, S1): psiblast -in_pssm / -in_msa with rounds (the prolog before the request; -, 2>&1,
 # /dev/stdout), and a report that cannot be written (-out /dev/full: the requests up to the failed batch's only).
+# Fix round 2 (review 2 S1): psiblast -in_pssm / -in_msa with rounds whose prolog comes before a strategy file on
+# /dev/full, before NCBI's 803.7 post of the request (setup e9: the database name holds the byte 0xE9; 2>&1),
+# and a strategy file with -out /dev/full (empty: NCBI's prolog fails first).
 # Columns: name, program, env, stdout, fsize, setup, args, rc
 name	program	env	stdout	fsize	setup	args	rc
 dash.blastn.f0	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy -	0
@@ -287,3 +290,12 @@ outfull.rpsblast.dash.f11	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	
 outfull.rpsblast.dash.f7	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 7 -export_search_strategy - -out /dev/full	sig:6
 outfsz.blastp.dash.f6	blastp	BATCH_SIZE=1	pipe	120	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy - -out {f}	sig:6
 outfsz.blastp.dso.f6	blastp	BATCH_SIZE=1	pipe	120	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout -out {f}	sig:6
+stratfull.psiblast.pssm2.f0	psiblast	-	pipe	-	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy /dev/full	0
+stratfullm.psiblast.pssm2.f0	psiblast	-	merged	-	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy /dev/full	0
+outfull.psiblast.file.pssm2.f0	psiblast	-	pipe	-	-	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy {f} -out /dev/full	6
+e9m.psiblast.file.pssm2.f0	psiblast	-	merged	-	e9	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db {e9}/paja -num_iterations 2 -outfmt 0 -export_search_strategy {f}	0
+e9m.psiblast.file.pssm2html.f0	psiblast	-	merged	-	e9	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db {e9}/paja -num_iterations 2 -html -outfmt 0 -export_search_strategy {f}	0
+e9m.psiblast.file.msa2.f0	psiblast	-	merged	-	e9	-in_msa tests/fixtures/msa/ps6_b_db_0.aln -db {e9}/paja -num_iterations 2 -outfmt 0 -export_search_strategy {f}	0
+e9m.psiblast.dso.pssm2.f0	psiblast	-	merged	-	e9	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db {e9}/paja -num_iterations 2 -outfmt 0 -export_search_strategy /dev/stdout	0
+e9m.psiblast.dso.outpssm.f0	psiblast	-	merged	-	e9	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db {e9}/paja -out_pssm {f} -outfmt 0 -export_search_strategy /dev/stdout	0
+e9m.psiblast.dash.pssm2.f0	psiblast	-	merged	-	e9	-in_pssm tests/fixtures/db_search/db.ps.asn.rnd.6.asn -db {e9}/paja -num_iterations 2 -outfmt 0 -export_search_strategy -	0

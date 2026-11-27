@@ -62,6 +62,6 @@ fn an_empty_basename_has_no_lmdb_file_name() {
     );
     assert!(matches!(
         build_lmdb_file_name(b"", true),
-        Err(WriteDbError::InvalidArgument("Basename is empty"))
+        Err(WriteDbError::Std(what)) if what == "Basename is empty"
     ));
 }

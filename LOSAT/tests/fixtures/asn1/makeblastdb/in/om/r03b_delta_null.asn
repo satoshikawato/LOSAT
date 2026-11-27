@@ -1,0 +1,5 @@
+Seq-entry ::= seq {
+  id { local str "s2" },
+  descr { title "t2" },
+  inst { repr delta, mol dna, length 4, ext delta { literal { length 4, seq-data ncbi2na '1B'H }, NULL } }
+}

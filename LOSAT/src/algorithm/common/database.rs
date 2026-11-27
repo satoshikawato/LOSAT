@@ -125,17 +125,22 @@ fn apply_list(
 
 /// A warning of `SeqDb::restrict` as NCBI posts it, with its line feed: after the diagnostic
 /// prefix `[prefix] ` of the application, or none where it sets none (blast_formatter's `Run`).
-/// The lines keep the bytes of a seqid list's words (probe R3 of line LIB-B).
+/// The lines keep the bytes of a seqid list's words (probe R3 of line LIB-B). Each is a post of
+/// NCBI's main thread (`LOG_POST`, whose header is empty, or `ERR_POST`), in the state of its
+/// diagnostic stream (`ncbi_exception::post_text`).
 pub(crate) fn list_warning_line(
     warning: crate::seqdb::ListWarning,
     prefix: Option<&str>,
 ) -> Vec<u8> {
+    use crate::ncbi_exception::post_text;
     let tag = prefix.map(|p| format!("[{p}] ")).unwrap_or_default();
     let mut line = match warning {
-        crate::seqdb::ListWarning::Log(text) => text,
-        crate::seqdb::ListWarning::Posted(text) => format!("Warning: {tag}{text}").into_bytes(),
+        crate::seqdb::ListWarning::Log(text) => post_text(b"", &text),
+        crate::seqdb::ListWarning::Posted(text) => {
+            post_text(format!("Warning: {tag}").as_bytes(), text.as_bytes())
+        }
         crate::seqdb::ListWarning::Error(text) => {
-            [format!("Error: {tag}").as_bytes(), &text].concat()
+            post_text(format!("Error: {tag}").as_bytes(), &text)
         }
         crate::seqdb::ListWarning::SeqId(warning) => {
             crate::writedb::fasta_source::defline_ids::seq_id_warning_line(prefix, warning)

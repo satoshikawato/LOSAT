@@ -10,7 +10,8 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use super::asn_source::{
-    fix_asn_delta, write_serial_posts, AsnBioseq, AsnFormat, AsnStream, SeqEntrySource,
+    fix_asn_delta, null_pointer, write_serial_posts, AsnBioseq, AsnFormat, AsnStream,
+    SeqEntrySource,
 };
 use super::bioseq::{Bioseq, DeltaFix, ParsedIds};
 use super::convert::{short_nucleotide_data, ShortNucleotideData};
@@ -764,7 +765,7 @@ impl<'a> BuildDatabase<'a> {
             SourceErrorKind::Creation => WriteDbError::creation(error.message),
             SourceErrorKind::OutOfMemory => WriteDbError::OutOfMemory,
             SourceErrorKind::Std => {
-                WriteDbError::Other(String::from_utf8_lossy(&error.message).into_owned())
+                WriteDbError::Std(String::from_utf8_lossy(&error.message).into_owned())
             }
             SourceErrorKind::Refused => {
                 WriteDbError::Unsupported(String::from_utf8_lossy(&error.message).into_owned())
@@ -1094,7 +1095,7 @@ impl<'a> BuildDatabase<'a> {
                     return Err(WriteDbError::Exception(e));
                 }
                 Err(ReadError::OutOfMemory) => return Err(WriteDbError::OutOfMemory),
-                Err(ReadError::Std(what)) => return Err(WriteDbError::Other(what.to_string())),
+                Err(ReadError::Std(what)) => return Err(WriteDbError::Std(what.to_string())),
                 Err(ReadError::Unsupported(what)) => return Err(WriteDbError::Unsupported(what)),
                 Err(ReadError::Eof) => {
                     return Err(WriteDbError::Unsupported(
@@ -1102,17 +1103,11 @@ impl<'a> BuildDatabase<'a> {
                     ));
                 }
             };
-            if decoded.null_defline {
-                return Err(WriteDbError::Unsupported(
-                    "a NULL element in Blast-def-line-set (NCBI makeblastdb dereferences a NULL pointer there)"
-                        .to_string(),
-                ));
-            }
-            if !decoded.null_seqids.is_empty() {
-                return Err(WriteDbError::Unsupported(
-                    "a NULL element in Blast-def-line.seqid (NCBI makeblastdb dereferences a NULL pointer there)"
-                        .to_string(),
-                ));
+            // A NULL definition line (`x_SetDeflinesFromBinary`) or Seq-id of one (`GetDeflineKeys`
+            // of `x_SetLinkAndMbit`): `CRef`'s dereference (probe D3c-6a b1, b3: an address report;
+            // b2, b4: after the stream failed, its line feed).
+            if decoded.null_defline || !decoded.null_seqids.is_empty() {
+                return Err(null_pointer(crate::ncbi_exception::main_diag_failbit()));
             }
             deflines::strip_empty_lists(&mut decoded.set);
             return Ok((decoded.set, true));

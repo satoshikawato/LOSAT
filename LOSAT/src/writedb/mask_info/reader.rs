@@ -752,7 +752,7 @@ impl MaskFileReader {
                 MaskFileError::Ncbi(WriteDbError::Exception(e))
             }
             ReadError::OutOfMemory => MaskFileError::Ncbi(WriteDbError::OutOfMemory),
-            ReadError::Std(what) => MaskFileError::Ncbi(WriteDbError::Other(what.to_string())),
+            ReadError::Std(what) => MaskFileError::Ncbi(WriteDbError::Std(what.to_string())),
             ReadError::Unsupported(what) => MaskFileError::Unsupported(what),
             ReadError::Eof => MaskFileError::EofInContinuation {
                 path: self.path.clone(),

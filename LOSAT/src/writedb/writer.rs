@@ -476,7 +476,7 @@ impl WriteDb {
             return error;
         }
         self.reset_sequence_data();
-        WriteDbError::LengthError("basic_string::_M_create")
+        WriteDbError::Std("basic_string::_M_create".to_string())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:110-137
@@ -1367,7 +1367,7 @@ pub(crate) fn build_lmdb_file_name(
     is_protein: bool,
 ) -> Result<Vec<u8>, WriteDbError> {
     if basename.is_empty() {
-        return Err(WriteDbError::InvalidArgument("Basename is empty"));
+        return Err(WriteDbError::Std("Basename is empty".to_string()));
     }
     let extension: &[u8] = if is_protein { b".pdb" } else { b".ndb" };
     Ok([basename, extension].concat())

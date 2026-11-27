@@ -390,17 +390,18 @@ fn all_frozen_ncbi_2_17_0_asn1_cases_match_byte_for_byte() {
         checked += 1;
     }
     assert!(
-        checked >= 118,
-        "expected >= 118 frozen cases, got {checked}"
+        checked >= 129,
+        "expected >= 129 frozen cases, got {checked}"
     );
 }
 
-/// The objects that NCBI's makeblastdb indexes with a report of memory addresses (an empty
-/// region's post before the diagnostic stream failed, the report of an element stated as NULL)
-/// or crashes on (a division by zero) as they join the object manager's scope
-/// (`asn_source::join_scope`): LOSAT refuses each in its words, with exit status 1, writes the
-/// part of NCBI's log that comes before that point, and leaves no file of the database. The table
-/// holds NCBI 2.17.0's exit status, log and first line of standard error of each.
+/// The objects that NCBI's makeblastdb reads with a report of memory addresses (an empty region's
+/// post before the diagnostic stream failed, the `CCoreException::eNullPtr` report of an element
+/// stated as NULL) or crashes on (a division by zero): LOSAT refuses each in its words, with exit
+/// status 1, writes exactly the lines of NCBI's log that come before that point, and leaves no
+/// file of the database. The table holds NCBI 2.17.0's exit status, log and standard error of
+/// each, and the number of lines of the log written before the report or the crash
+/// (`stdout_lines_before`, from a run with both streams on one pipe).
 #[test]
 fn object_manager_address_and_crash_cases_are_refused() {
     use crate::objmgr::annot_index::Refusal;
@@ -409,7 +410,7 @@ fn object_manager_address_and_crash_cases_are_refused() {
     let mut checked = 0usize;
     for line in table.lines().skip(1) {
         let cols: Vec<&str> = line.split('\t').collect();
-        let [name, in_spec, itype, dbtype, refusal, ncbi_rc, ncbi_out_hex, ncbi_err_line] =
+        let [name, in_spec, itype, dbtype, refusal, ncbi_rc, ncbi_out_hex, ncbi_err_hex, lines_before] =
             cols.as_slice()
         else {
             panic!("malformed row: {line}");
@@ -421,13 +422,19 @@ fn object_manager_address_and_crash_cases_are_refused() {
             other => panic!("case {name}: refusal {other}"),
         };
         // The row is one that NCBI writes with memory addresses or crashes on.
+        let ncbi_err = String::from_utf8_lossy(&decode_hex(ncbi_err_hex)).into_owned();
         match refusal {
             Refusal::EmptyRegion => assert!(
-                ncbi_err_line.contains("Empty region in ") && ncbi_err_line.contains("0x"),
+                ncbi_err
+                    .lines()
+                    .find(|line| line.contains("Empty region in "))
+                    .is_some_and(|line| line.contains("0x")),
                 "case {name}"
             ),
             Refusal::NullElement => assert!(
-                *ncbi_rc == "255" && *ncbi_err_line == "Error: NCBI C++ Exception:",
+                *ncbi_rc == "255"
+                    && ncbi_err.contains("(CCoreException::eNullPtr)")
+                    && ncbi_err.contains(" addr=0x"),
                 "case {name}"
             ),
             _ => assert_eq!(*ncbi_rc, "136", "case {name}"),
@@ -462,10 +469,17 @@ fn object_manager_address_and_crash_cases_are_refused() {
         );
         let actual_out = norm_log(&stdout, &dir_str, &fix_a_str, &fix_m_str);
         let ncbi_out = decode_hex(ncbi_out_hex);
-        assert!(
-            ncbi_out.starts_with(&actual_out),
-            "case {name}: the log is not the start of NCBI's: {}",
-            String::from_utf8_lossy(&actual_out)
+        let lines_before: usize = lines_before.parse().unwrap();
+        let expected_out: Vec<u8> = ncbi_out
+            .split_inclusive(|&b| b == b'\n')
+            .take(lines_before)
+            .flatten()
+            .copied()
+            .collect();
+        assert_eq!(
+            String::from_utf8_lossy(&actual_out),
+            String::from_utf8_lossy(&expected_out),
+            "case {name}: the log before the refusal"
         );
         assert!(
             snapshot_dir(&tmp, &dir_str, &fix_a_str, &fix_m_str).is_empty(),
@@ -473,7 +487,7 @@ fn object_manager_address_and_crash_cases_are_refused() {
         );
         checked += 1;
     }
-    assert!(checked >= 41, "expected >= 41 refused cases, got {checked}");
+    assert!(checked >= 45, "expected >= 45 refused cases, got {checked}");
 }
 
 #[test]

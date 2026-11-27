@@ -98,13 +98,17 @@ pub enum WriteDbError {
     /// other ids: NCBI's writer aborts at its close (`writer::gi_only_between_keys_error`).
     /// makeblastdb reports it as a creation error.
     GiOnlyBetweenKeys { oid: u32, name: Vec<u8> },
-    /// NCBI's `std::invalid_argument` with its `what()`: `BuildLMDBFileName` of an empty
-    /// database name (`writer::build_lmdb_file_name`).
-    InvalidArgument(&'static str),
-    /// NCBI's `std::length_error` with its `what()`: `CWriteDB_Impl::AddSequence` assigning a
-    /// protein sequence whose signed 32-bit `GetRawSeqAndAmbig` length wrapped negative
-    /// (`>= 2^31` residues) to `std::string`.
-    LengthError(&'static str),
+    /// A `std::exception` of NCBI's with its `what()`, which makeblastdb's general handler
+    /// reports as "Error: " and the text, exit status 255, the volumes written so far kept (an
+    /// NCBI end, not LOSAT's refusal): the `std::invalid_argument` of `BuildLMDBFileName` for an
+    /// empty database name (`writer::build_lmdb_file_name`); the `std::length_error` of
+    /// `CWriteDB_Impl::AddSequence` assigning a protein sequence whose signed 32-bit
+    /// `GetRawSeqAndAmbig` length wrapped negative (`>= 2^31` residues) to `std::string`; the
+    /// `std::length_error` of NCBI's serial reader (`asn_types::read::ReadError::Std`) in an
+    /// ASN.1 input object, a binary definition line header and a mask file; the
+    /// `std::out_of_range` of the FASTA reader; and the object manager's
+    /// (`objmgr::annot_index::End::Std`).
+    Std(String),
     /// LOSAT's refusal of given definition lines whose first line has no Seq-id in a database
     /// without parsed Seq-ids: NCBI's writer puts the `gnl|BL_ORD_ID` id past the end of the
     /// empty list (undefined behaviour). makeprofiledb gives such lines (a query without ids);
@@ -120,13 +124,13 @@ pub enum WriteDbError {
     /// clause of its general handler: "Error: " and the exception's report
     /// (`CException::what()`), exit status 255.
     Exception(NcbiException),
-    /// The end of makeblastdb's run by its general handler (`CATCH_ALL`) as `cli::NativeError`
-    /// gives its report and exit status, the text already in the form it has before the main
-    /// thread's diagnostic stream failed (`makeblastdb::finish` writes its line feed after,
-    /// `cli::catch_all_text`): the object manager's ends on the ASN.1 input
-    /// (`objmgr::annot_index::End`), among them the failed write of an object's text, which ends
-    /// the run with no report and exit status 0. The volumes written so far stay, as at an
-    /// `Exception`.
+    /// An end of makeblastdb's run by its general handler (`CATCH_ALL`) that no other variant
+    /// holds, as `cli::NativeError` gives its report and exit status (`makeblastdb::finish`
+    /// writes the report through `cli::catch_all_text`): on the ASN.1 input, a null pointer that
+    /// NCBI dereferences after the main thread's diagnostic stream failed (the report is its line
+    /// feed alone; `asn_source::null_pointer`) and the failed write of an object's text, which
+    /// ends the run with no report and exit status 0 (`objmgr::annot_index::End`). The volumes
+    /// written so far stay, as at an `Exception`.
     Native(crate::cli::NativeError),
     /// NCBI's `CSeqDBException` (the LMDB environment that could not be opened, `CBlastEnv`):
     /// the text makeblastdb prints after "BLAST Database error: ", exit status 2. At the close
@@ -135,9 +139,8 @@ pub enum WriteDbError {
     /// LOSAT's own refusals (an input on which makeblastdb crashes, does not end or cannot be
     /// followed), printed after "Error: " with exit status 255, and the errors of the LMDB
     /// layer after its environment is open (`lmdb::error`, NCBI's `CSeqDBException` texts of
-    /// `CWriteDB_LMDB`), which occur only in the close and so become creation errors; and the
-    /// `what()` of a `std::exception` that the general handler reports the same way (the
-    /// `std::length_error` of a mask file's string longer than `std::string` holds).
+    /// `CWriteDB_LMDB`), which occur only in the close and so become creation errors. NCBI's
+    /// `std::exception`s are `Std`.
     Other(String),
     /// LOSAT's refusal of an input that makeblastdb reads, raised inside the build (mask data
     /// whose ranges NCBI orders by memory addresses, `mask_data::range_set`, at the close of a
@@ -200,9 +203,7 @@ impl WriteDbError {
                 DATABASE_CREATION_ERROR,
                 &writer::gi_only_between_keys_message(*oid, name),
             ),
-            WriteDbError::InvalidArgument(what) | WriteDbError::LengthError(what) => {
-                text("Error: ", what.as_bytes())
-            }
+            WriteDbError::Std(what) => text("Error: ", what.as_bytes()),
             WriteDbError::OrdinalIdWithoutIds => text(
                 "losat makeblastdb: ",
                 b"a first definition line without a Seq-id, whose gnl|BL_ORD_ID id NCBI's writer \

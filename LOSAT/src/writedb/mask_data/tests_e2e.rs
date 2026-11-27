@@ -1201,9 +1201,9 @@ fn outcomes_become_makeblastdb_s_status_and_text() {
         Some((4, "BLAST ran out of memory".to_string()))
     );
     assert_eq!(
-        describe(MaskDataError::File(MaskFileError::Ncbi(
-            WriteDbError::Other("basic_string::_M_create".into())
-        ))),
+        describe(MaskDataError::File(MaskFileError::Ncbi(WriteDbError::Std(
+            "basic_string::_M_create".into()
+        )))),
         Some((255, "Error: basic_string::_M_create".to_string()))
     );
     assert_eq!(

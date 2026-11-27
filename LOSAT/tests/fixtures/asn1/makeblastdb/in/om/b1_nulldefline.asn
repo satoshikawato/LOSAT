@@ -1,0 +1,14 @@
+Seq-entry ::= set {
+  seq-set {
+    seq {
+      id { local str "s1" },
+      descr { title "t" },
+      inst { repr raw, mol dna, length 120, seq-data iupacna "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT" }
+    },
+    seq {
+      id { local str "s2" },
+      descr { title "t2", user { type str "ASN1_BlastDefLine", data { { label str "ASN1_BlastDefLine", data oss { '308005000000'H } } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    }
+  }
+}

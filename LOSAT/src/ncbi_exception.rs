@@ -549,8 +549,9 @@ pub(crate) fn post_line(
     post_line_in(severity, id, prefix, message, main_diag_failbit())
 }
 
-/// `post_line` with the state of the stream given: `failed` drops the message (the post's header,
-/// `<severity>: (<id>) [<prefix>] `, and its line feed stay; see `main_diag_failbit`).
+/// `post_line` with the state of the stream given (`failed`, `post_text_in`): the post's header
+/// `<severity>: (<id>) [<prefix>] `, the message unless the stream failed, and a line feed, in
+/// LOSAT's words.
 pub(crate) fn post_line_in(
     severity: Severity,
     id: Option<&str>,
@@ -558,25 +559,21 @@ pub(crate) fn post_line_in(
     message: &[u8],
     failed: bool,
 ) -> Vec<u8> {
-    let header: &[u8] = match severity {
+    let severity: &[u8] = match severity {
         Severity::Warning => b"Warning: ",
         Severity::Error => b"Error: ",
     };
-    // One buffer of the line's length (a run of many posts makes no growth of each).
     let length = |part: Option<&str>| part.map_or(0, |part| part.len() + 3);
-    let mut line =
-        Vec::with_capacity(header.len() + length(id) + length(prefix) + message.len() + 1);
-    line.extend_from_slice(header);
+    let mut header = Vec::with_capacity(severity.len() + length(id) + length(prefix));
+    header.extend_from_slice(severity);
     for (part, open, close) in [(id, b'(', b')'), (prefix, b'[', b']')] {
         if let Some(part) = part {
-            line.push(open);
-            line.extend_from_slice(part.as_bytes());
-            line.extend_from_slice(&[close, b' ']);
+            header.push(open);
+            header.extend_from_slice(part.as_bytes());
+            header.extend_from_slice(&[close, b' ']);
         }
     }
-    if !failed {
-        line.extend_from_slice(message);
-    }
+    let mut line = post_text_in(&header, message, failed);
     line.push(b'\n');
     // LOSAT's words: an exception's class and code (`id`) and NCBI's exception reports are left
     // out (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
@@ -586,13 +583,21 @@ pub(crate) fn post_line_in(
     }
 }
 
-/// A post's text in the state of the main thread's diagnostic stream (`main_diag_failbit`): its
-/// header (`<severity>: (<id>) [<prefix>] `), then `message` unless the stream has failed, in the
-/// words given (`post_line` builds the header and maps the words to LOSAT's). makeblastdb's posts,
-/// which follow the object manager's on its ASN.1 input (`objmgr::annot_index`), are made here.
+/// `post_text_in` in the state of the main thread's diagnostic stream (`main_diag_failbit`), for
+/// the posts whose header the caller makes: makeblastdb's (803.7, 802.5, the masks, the
+/// destructor's, `No sequences written`) and the Seq-id warnings 1306 of NCBI's FASTA reader and
+/// of a database's Seq-id list (`writedb::fasta_source::defline_ids::seq_id_warning_line`, also
+/// the search programs'), with the words the caller gives.
 pub(crate) fn post_text(header: &[u8], message: &[u8]) -> Vec<u8> {
-    let failed = main_diag_failbit();
-    let mut text = Vec::with_capacity(header.len() + if failed { 0 } else { message.len() });
+    post_text_in(header, message, main_diag_failbit())
+}
+
+/// The one place of the rule of every post of NCBI's main thread: its `header`
+/// (`<severity>: (<id>) [<prefix>] `), then `message` unless the thread's diagnostic stream failed
+/// (`failed`; see `main_diag_failbit`). The buffer has room for the line feed that most posts
+/// add.
+pub(crate) fn post_text_in(header: &[u8], message: &[u8], failed: bool) -> Vec<u8> {
+    let mut text = Vec::with_capacity(header.len() + if failed { 0 } else { message.len() } + 1);
     text.extend_from_slice(header);
     if !failed {
         text.extend_from_slice(message);

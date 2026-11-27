@@ -81,7 +81,7 @@ pub enum DbList {
 /// A warning NCBI writes while it applies the list, to be written as it is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ListWarning {
-    /// `LOG_POST` of `text` as a `Warning` or a line written to `cerr`: the text alone.
+    /// `LOG_POST` of `text` as a `Warning`: the text alone.
     Log(Vec<u8>),
     /// `ERR_POST` of `text` as a `Warning`: with the diagnostic prefix of the program.
     Posted(String),

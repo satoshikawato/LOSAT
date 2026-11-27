@@ -5,4 +5,8 @@
   written, as NCBI's does. An object that NCBI reports with a memory address (`Empty region in 0x...`,
   an element stated as `NULL`) or crashes on is refused where NCBI meets it and leaves no files; such
   objects were built without a message before, and some descriptors stated as `NULL` that NCBI does
-  not read were refused.
+  not read were refused. After `Failed to parse location of`, an element stated as `NULL` in a
+  `Delta-ext` or a binary definition line header ends the build as NCBI's does, keeping the volumes
+  written. An error that NCBI reports with a standard library message (for example
+  `Error: vector::reserve` of an object that asks for more elements than a list can hold) now keeps
+  the volumes written so far, as NCBI's does; they were removed before.

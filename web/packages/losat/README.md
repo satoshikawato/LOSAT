@@ -220,8 +220,9 @@ its outfmt 6 is byte for byte what NCBI BLAST+ 2.17.0 writes for the same search
 
 ## Running CLI tools (`windowmasker` and `blast_formatter`)
 
-`engine.runTool(argv, options)` runs the command line's browser-supported tools (`windowmasker` and `blast_formatter`)
-on the user's files, as the command line runs them in a folder that holds them:
+`engine.runTool(argv, options)` runs the command line's browser-supported tools (`windowmasker` and `blast_formatter`
+here; `makeblastdb`, which writes its database into the run's directory, in "Running makeblastdb" below) on the user's
+files, as the command line runs them in a folder that holds them:
 
 - `windowmasker` (`losat windowmasker`: `-mk_counts` in each `-sformat`, `-convert`, and the masking of `-ustat` in each
   `-outfmt`, with their options, help and version), reading `-in`, `-ustat`, `-fa_list` and the files it lists, `-ids`,

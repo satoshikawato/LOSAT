@@ -293,12 +293,15 @@ test.describe('makeblastdb of a large input, measured', () => {
       }, 250);
       let results: MakeblastdbResult[];
       try {
+        // A run of `-version` first loads and compiles the engine, so that the measured run is the build alone.
+        const warm: MakeblastdbCase = { id: 'measure.warm-up', argv: ['makeblastdb', '-version'], files: [] };
         const run: MakeblastdbCase = { id: `measure.${item.id}`, argv, files: [[name, '']], picked: '#measure-pick', digestsOnly: true, search: item.search };
-        results = await page.evaluate((list) => window.losatHarness!.engine.makeblastdbRuns(list), [run]);
+        results = await page.evaluate((list) => window.losatHarness!.engine.makeblastdbRuns(list), [warm, run]);
       } finally {
         clearInterval(sampler);
       }
-      const result = results[0];
+      const result = results[1];
+      console.log(`warm-up (load and compile the engine, makeblastdb -version): ${Math.round(results[0]?.toolMs ?? 0)} ms`);
       expect(result!.error).toBeUndefined();
       expect(result!.status).toBe(0);
       const files = result!.files!;

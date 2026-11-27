@@ -273,16 +273,26 @@ impl SetWriter<'_> {
         close(&mut self.out);
     }
 
+    /// Enters the member or alternative `name`: the path names one more frame, as the object
+    /// stack does for a member. The record's types make at most `MEMBER_PATH_DEPTH` names; a
+    /// deeper path panics on the index.
+    ///
+    /// NCBI reference (598d8ae6): c++/include/serial/impl/objstack.inl:193-202
     fn push_path(&mut self, name: &'static str) {
         self.path[self.path_len] = name;
         self.path_len += 1;
     }
 
+    /// Leaves the innermost member of the path.
+    ///
+    /// NCBI reference (598d8ae6): c++/include/serial/impl/objstack.inl:205-214
     fn pop_path(&mut self) {
         self.path_len -= 1;
     }
 
     /// A member or an alternative `[number]` around `body`, named `name` in the path.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1346-1378,1659-1702
     fn context(&mut self, number: u8, name: &'static str, body: impl FnOnce(&mut Self)) {
         self.push_path(name);
         self.open(TAG_CONTEXT_CONSTRUCTED | number);
@@ -291,6 +301,14 @@ impl SetWriter<'_> {
         self.pop_path();
     }
 
+    /// A VisibleString. With `write_strings`, its tag, its length and its bytes with their
+    /// replacements (`write_visible_string`); without, its tag and length, and its bytes only
+    /// searched and counted in `skipped`, so the reports and their stream offsets are the same.
+    /// Each report names the member path, its names joined by dots.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:831-872
+    /// NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459
+    /// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-120
     fn string(&mut self, text: &[u8]) {
         let mut bad = Vec::new();
         if self.write_strings {

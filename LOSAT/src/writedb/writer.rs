@@ -161,7 +161,8 @@ impl std::fmt::Debug for WriteDb {
 // hold and each time the definition line is serialized (`post_bad_chars`: of any
 // string of a parsed definition line, under the path of its member):
 // "Error: (803.7) [makeblastdb] Blast-def-line-set.E.title", "Bad char [0xC3]
-// in string at byte 21" and the title.
+// in string at byte 21" and the title. Nothing is posted, and no string made,
+// for a title without reports.
 fn post_bad_title_chars(
     diagnostics: &mut Vec<u8>,
     diag_prefix: Option<&str>,
@@ -189,7 +190,10 @@ fn post_bad_title_chars(
 /// `post_bad_title_chars` for the strings of definition lines with parsed Seq-ids:
 /// `Error: (803.7) [makeblastdb] Blast-def-line-set.E.seqid.E.local.str`, `Bad char
 /// [0xE9] in string at byte 38` and the string (makeblastdb 2.17.0, survey B fixture
-/// p23_nonascii; the member paths of the other alternatives from the S3a probes).
+/// p23_nonascii; the member paths of the other alternatives from the S3a probes). Nothing is
+/// posted, and no string made, for a record without reports.
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1864-1885
 fn post_bad_chars(diagnostics: &mut Vec<u8>, diag_prefix: Option<&str>, bad: &[BadChar]) {
     if bad.is_empty() {
         return;

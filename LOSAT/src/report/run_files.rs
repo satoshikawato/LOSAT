@@ -20,6 +20,18 @@ pub trait FileReceiver: Send + Sync {
     /// contents.
     fn receive(&self, name: &[u8], bytes: &[u8]) -> io::Result<()>;
 
+    /// One file of a search's run besides its outputs, whole (`receive`), with the option that
+    /// names it (`RunFileOption`), which the run knows where it hands the file over: the file of
+    /// `-logfile` (`RunFiles::deliver_log`), the strategy file (`strategy::end_run`) and the PSSM
+    /// files (`psiblast::pssm`, `psiblast::rounds`). LOSAT Web's host labels the file by it
+    /// (docs/web/abi_v2.md §5, stream 8), as two options' names may name one file where the run
+    /// opens only one of them (line RG item F1w-r2, review 3 S1). Default: `receive`, for a
+    /// receiver that keeps no option.
+    fn receive_run_file(&self, option: RunFileOption, name: &[u8], bytes: &[u8]) -> io::Result<()> {
+        let _ = option;
+        self.receive(name, bytes)
+    }
+
     /// Opens the file `name` of a tool's run (`OpenFiles`: `-out FILE`, `-logfile FILE`) to take
     /// the run's writes as the run makes them (`FileStream`); the file is complete when the stream
     /// is dropped, when the run ends. `None`, the default: the receiver takes each file whole, which
@@ -54,6 +66,39 @@ pub trait FileReceiver: Send + Sync {
     /// when `output_name` would otherwise make a new file (`OutputName::File { key }`).
     fn output_read_files(&self) -> &[Vec<u8>] {
         &[]
+    }
+}
+
+/// The option of a search's argv that names a file of its run besides its outputs
+/// (`FileReceiver::receive_run_file`). No NCBI counterpart: NCBI writes files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunFileOption {
+    Logfile,
+    ExportSearchStrategy,
+    OutPssm,
+    OutAsciiPssm,
+}
+
+impl RunFileOption {
+    /// The option's name without its hyphen, as LOSAT Web's host names it (`logfile`,
+    /// `export_search_strategy`, `out_pssm`, `out_ascii_pssm`).
+    pub fn name(self) -> &'static str {
+        match self {
+            RunFileOption::Logfile => "logfile",
+            RunFileOption::ExportSearchStrategy => "export_search_strategy",
+            RunFileOption::OutPssm => "out_pssm",
+            RunFileOption::OutAsciiPssm => "out_ascii_pssm",
+        }
+    }
+
+    /// The option as the argv writes it (`-out_pssm`).
+    pub fn flag(self) -> &'static str {
+        match self {
+            RunFileOption::Logfile => "-logfile",
+            RunFileOption::ExportSearchStrategy => "-export_search_strategy",
+            RunFileOption::OutPssm => "-out_pssm",
+            RunFileOption::OutAsciiPssm => "-out_ascii_pssm",
+        }
     }
 }
 
@@ -180,7 +225,8 @@ impl RunFiles {
     pub fn deliver_log(&self, name: Option<&[u8]>, target: DiagTarget) -> io::Result<()> {
         match (self, name, target) {
             (RunFiles::Receiver(receiver), Some(name), DiagTarget::Memory(bytes)) => receiver
-                .receive(
+                .receive_run_file(
+                    RunFileOption::Logfile,
                     name,
                     &bytes.into_inner().unwrap_or_else(PoisonError::into_inner),
                 ),

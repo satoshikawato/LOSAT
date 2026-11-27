@@ -206,6 +206,96 @@ fn the_strategy_file_is_a_file_of_the_run_with_the_command_lines_bytes() {
     }
 }
 
+/// The files of the run (stream 8), each with the option that its entry's comment names.
+fn labeled(streams: &BTreeMap<u32, Vec<u8>>) -> Vec<(String, String)> {
+    streams
+        .get(&STREAM_RUN_FILES)
+        .map(|archive| {
+            crate::zip::read_with_comments(archive)
+                .into_iter()
+                .map(|(name, _, comment)| {
+                    (
+                        String::from_utf8(name).unwrap(),
+                        String::from_utf8(comment).unwrap(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Each file of the run carries the option that names it, its entry's comment, by which the host
+/// labels it (line RG item F1w-r2, review 3 S1). Where the `-logfile` name and another option's
+/// name have one host name but the run opens only the other option's file (the log's directory
+/// as written, `/data/..` or `sub/..`, is missing, so the messages stay on the standard error),
+/// the one file is that option's: NCBI 2.17.0 blastp makes only the strategy file, and psiblast
+/// only the PSSM file. The *start* names both alike (`log_file_name` names a log that a run with
+/// those folders makes), so its names cannot tell the files apart.
+#[test]
+fn each_file_of_the_run_carries_the_option_that_names_it() {
+    let row = &ROWS[0];
+    let (name, _, query, subject, _) = *row;
+    for (log, strategy) in [("/data/../tmp/X", "/tmp/X"), ("sub/../X", "X")] {
+        let mut words = row_argv(row, strategy);
+        words.extend(["-logfile", log]);
+        let start = start_json(&words).unwrap();
+        assert!(
+            start.contains(&format!(
+                "\"log_file_name\":\"{strategy}\",\"strategy_file\":\"{strategy}\""
+            )),
+            "{start}"
+        );
+        let (result, streams) = run_files_of(&words, query, subject);
+        result.unwrap();
+        assert_eq!(files(&streams), [(strategy.to_string(), frozen(name))]);
+        assert_eq!(
+            labeled(&streams),
+            [(strategy.to_string(), "export_search_strategy".to_string())]
+        );
+    }
+    // Both files: each with its own option.
+    let mut words = row_argv(row, "s.asn");
+    words.extend(["-logfile", "run.log"]);
+    let (result, streams) = run_files_of(&words, query, subject);
+    result.unwrap();
+    assert_eq!(
+        labeled(&streams),
+        [
+            ("s.asn".to_string(), "export_search_strategy".to_string()),
+            ("run.log".to_string(), "logfile".to_string()),
+        ]
+    );
+    // psiblast's PSSM files (the PSSM of the last round, `-save_pssm_after_last_round`).
+    let psiblast = [
+        "psiblast",
+        "-query",
+        "psiblast/q1b_gi.faa",
+        "-subject",
+        "psiblast/q1_subj_ids.faa",
+        "-num_iterations",
+        "2",
+        "-save_pssm_after_last_round",
+        "-num_descriptions",
+        "3",
+        "-num_alignments",
+        "2",
+    ];
+    for (log, option, file) in [
+        ("/data/../tmp/P", "-out_pssm", "/tmp/P"),
+        ("sub/../P", "-out_ascii_pssm", "P"),
+    ] {
+        let mut words = psiblast.to_vec();
+        words.extend([option, file, "-logfile", log]);
+        let (result, streams) = run_files_of(&words, words[2], words[4]);
+        result.unwrap();
+        assert_eq!(
+            labeled(&streams),
+            [(file.to_string(), option[1..].to_string())],
+            "{option}"
+        );
+    }
+}
+
 /// A run that fails after the file is made has what the command line's file has then: empty for an
 /// error of the options (`blastp.sub.ungapped`), the request of the batch whose search fails
 /// (`blastp.sub.ee`: a query without letters).
@@ -944,15 +1034,27 @@ fn the_files_of_a_database_search_are_no_strategy_file() {
 /// The run's files go to the host once, after the run (`RunFileArchive::close`): a file handed over
 /// after that is refused, so that a strategy file that the engine hands over late is its error
 /// (LOSAT's internal error of `strategy::end_run`) and not a file lost without one (review 2 of
-/// line RG F1w, N-a).
+/// line RG F1w, N-a). Each file comes with the option that names it, which its entry's comment
+/// carries; one without is LOSAT's internal error (line RG item F1w-r2, review 3 S1).
 #[test]
 fn a_file_handed_over_after_the_runs_files_went_out_is_refused() {
-    use losat::web_adapter::FileReceiver as _;
+    use losat::web_adapter::{FileReceiver as _, RunFileOption};
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
     let archive = RunFileArchive::default();
-    archive.receive(b"s.asn", b"requests").unwrap();
+    archive
+        .receive_run_file(RunFileOption::ExportSearchStrategy, b"s.asn", b"requests")
+        .unwrap();
+    assert_eq!(
+        archive
+            .receive(b"x.asn", b"unlabeled")
+            .unwrap_err()
+            .to_string(),
+        "LOSAT's internal error: the run's file x.asn came without the option that names it"
+    );
     RunFileArchive::emit(archive.close()).unwrap();
-    let late = archive.receive(b"late.asn", b"more").unwrap_err();
+    let late = archive
+        .receive_run_file(RunFileOption::ExportSearchStrategy, b"late.asn", b"more")
+        .unwrap_err();
     assert_eq!(
         late.to_string(),
         "late.asn came after the run's files were emitted"
@@ -970,5 +1072,13 @@ fn a_file_handed_over_after_the_runs_files_went_out_is_refused() {
     assert_eq!(
         files(&streams),
         [("s.asn".to_string(), b"requests".to_vec())]
+    );
+    assert_eq!(
+        crate::zip::read_with_comments(&streams[&crate::emit::STREAM_RUN_FILES]),
+        [(
+            b"s.asn".to_vec(),
+            b"requests".to_vec(),
+            b"export_search_strategy".to_vec()
+        )]
     );
 }

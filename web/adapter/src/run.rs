@@ -2136,7 +2136,7 @@ pub fn run(
     // The run's files (the file of `-logfile`), after the run, whether it failed or not.
     let handed = started.map_or(Ok(()), CallerStart::finish);
     // The archive closes here, also where the start's files failed: a file handed over later is
-    // refused (`RunFileArchive::receive`).
+    // refused (`RunFileArchive::receive_run_file`).
     let kept = files.close();
     let emitted = handed.and_then(|()| RunFileArchive::emit(kept));
     // The run's import of its search strategy ends with it (`imported`).
@@ -2144,12 +2144,16 @@ pub fn run(
     result.and(emitted.map_err(|error| format!("the files of the run: {error}")))
 }
 
-/// Entries queued in [`RunFileArchive`] before the run emits them on `STREAM_RUN_FILES`.
-type ArchivedEntries = Vec<(Vec<u8>, Vec<u8>)>;
+/// Entries queued in [`RunFileArchive`] before the run emits them on `STREAM_RUN_FILES`: each
+/// one's name, bytes and the option that names it.
+type ArchivedEntries = Vec<(Vec<u8>, Vec<u8>, losat::web_adapter::RunFileOption)>;
 
-/// The files of a run besides its outputs (the file of `-logfile`), which the engine hands over
-/// when the run ends (`RunFiles::Receiver`), emitted as a ZIP archive on `STREAM_RUN_FILES` after
-/// the run, whether it succeeded or failed (docs/web/abi_v2.md §5), and only when there are any.
+/// The files of a run besides its outputs (the file of `-logfile`, the strategy file, the PSSM
+/// files), which the engine hands over when the run ends (`RunFiles::Receiver`), each with the
+/// option that names it (`FileReceiver::receive_run_file`), emitted as a ZIP archive on
+/// `STREAM_RUN_FILES` after the run, whether it succeeded or failed (docs/web/abi_v2.md §5), and
+/// only when there are any: each entry's comment is its option (`RunFileOption::name`), by which
+/// the host labels the file (line RG item F1w-r2, review 3 S1).
 /// The archive closes once, after the run (`close`): a file handed over after it (`None`) is
 /// refused, so that a file that the engine hands over late is its error (LOSAT's internal error of
 /// `-export_search_strategy`, `strategy::end_run`) instead of a file lost without one.
@@ -2189,8 +2193,8 @@ impl RunFileArchive {
             return Ok(());
         }
         let mut zip = crate::zip::ZipStream::new(StreamWriter::new(STREAM_RUN_FILES));
-        for (name, bytes) in &files {
-            zip.add(name, bytes)?;
+        for (name, bytes, option) in &files {
+            zip.add_with_comment(name, bytes, option.name().as_bytes())?;
         }
         zip.finish()?.finish();
         Ok(())
@@ -2198,7 +2202,21 @@ impl RunFileArchive {
 }
 
 impl losat::web_adapter::FileReceiver for RunFileArchive {
-    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+    /// Every file of a search's run comes with its option (`receive_run_file`): one without is
+    /// LOSAT's internal error, not an entry that the host would label by its name alone.
+    fn receive(&self, name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+        Err(std::io::Error::other(format!(
+            "LOSAT's internal error: the run's file {} came without the option that names it",
+            String::from_utf8_lossy(name)
+        )))
+    }
+
+    fn receive_run_file(
+        &self,
+        option: losat::web_adapter::RunFileOption,
+        name: &[u8],
+        bytes: &[u8],
+    ) -> std::io::Result<()> {
         match &mut *self
             .files
             .lock()
@@ -2206,11 +2224,13 @@ impl losat::web_adapter::FileReceiver for RunFileArchive {
         {
             Some(files) => {
                 // Match filesystem semantics: writing the same file name again replaces its bytes
-                // in place so stream 8 holds the final bytes written for each name.
-                if let Some(existing) = files.iter_mut().find(|(n, _)| n.as_slice() == name) {
+                // in place so stream 8 holds the final bytes written for each name, under the
+                // option that wrote them (`-out_ascii_pssm` after `-out_pssm` of one name).
+                if let Some(existing) = files.iter_mut().find(|(n, _, _)| n.as_slice() == name) {
                     existing.1 = bytes.to_vec();
+                    existing.2 = option;
                 } else {
-                    files.push((name.to_vec(), bytes.to_vec()));
+                    files.push((name.to_vec(), bytes.to_vec(), option));
                 }
                 Ok(())
             }

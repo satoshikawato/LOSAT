@@ -43,6 +43,18 @@ export interface RunFile {
 
 /** The options whose files a run makes besides its outputs (stream 8), without the hyphen. */
 export type RunFileOption = 'logfile' | 'export_search_strategy' | 'out_pssm' | 'out_ascii_pssm';
+const RUN_FILE_OPTIONS: readonly RunFileOption[] = Object.freeze(['logfile', 'export_search_strategy', 'out_pssm', 'out_ascii_pssm']);
+
+/**
+ * A file of the engine's archive of a run's files (stream 8, `readStoredZip`), with the option whose file it is
+ * as the engine says (the comment of its entry, docs/web/abi_v2.md §5): absent in the archive of a module before
+ * line RG item F1w-r2's third round, which labels no entry.
+ */
+export interface StoredRunFile {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+  readonly label?: RunFileOption;
+}
 
 /** The option that named a file of a run (`RunFile.option`; `logfile` where it is absent). */
 export function runFileOption(file: RunFile): RunFileOption {
@@ -56,17 +68,20 @@ function matchesPssmFile(fileName: string, baseName: string | null | undefined, 
 }
 
 /**
- * The files of a run (stream 8) with the option that named each, which the engine's *start* of the
- * argv gives (ABI v2 §9: `log_file_name`, `strategy_file`, `out_pssm`, `out_ascii_pssm`,
- * `save_each_pssm`): each is the command line's file name under which a run gives that file, and
- * they are matched in that order (the file of `-logfile`, the strategy file, the PSSM files). The
- * `-logfile` value as written (`log_file`) is not matched: every module of this ABI version gives
- * the log file under `log_file_name` (since version 14), and the value as written may be the name of
- * another option's file (`-logfile -` makes no file, and `-export_search_strategy ./-` makes the
- * file `-`). A file that none of them names is an error of the engine.
+ * The files of a run (stream 8) with the option that named each: the option whose file the engine says it is
+ * (`StoredRunFile.label`), which the engine's *start* of the argv must name so (ABI v2 §9: `log_file_name`,
+ * `strategy_file`, `out_pssm`, `out_ascii_pssm`, `save_each_pssm`, the command line's file name under which a run
+ * gives the file of each option); a file that its option's name in the start does not give is an error of the
+ * engine. The names cannot tell the files apart: one host name may be both the `-logfile` name and another option's
+ * where the run opens only the other option's file (`-logfile sub/../X -export_search_strategy X` without a folder
+ * `sub`: the log's folder as written is missing, and NCBI 2.17.0 makes only the strategy file `X`). The archive of
+ * a module before line RG item F1w-r2's third round labels no file: there the names of the start are matched in
+ * order (the file of `-logfile`, the strategy file, the PSSM files). The `-logfile` value as written (`log_file`) is
+ * not matched: it may be the name of another option's file (`-logfile -` makes no file, and
+ * `-export_search_strategy ./-` makes the file `-`). A file that none of them names is an error of the engine.
  */
 export function namedRunFiles(
-  files: readonly RunFile[],
+  files: readonly StoredRunFile[],
   start: {
     readonly logFileName?: string | null;
     readonly strategyFile: string | null;
@@ -76,7 +91,27 @@ export function namedRunFiles(
   },
 ): RunFile[] {
   const saveEach = start.saveEachPssm === true;
+  const names = (option: RunFileOption, name: string): boolean => {
+    switch (option) {
+      case 'logfile':
+        return start.logFileName != null && name === start.logFileName;
+      case 'export_search_strategy':
+        return name === start.strategyFile;
+      case 'out_pssm':
+        return matchesPssmFile(name, start.outPssm, saveEach);
+      case 'out_ascii_pssm':
+        return matchesPssmFile(name, start.outAsciiPssm, saveEach);
+    }
+  };
   return files.map((file) => {
+    if (file.label !== undefined) {
+      if (!names(file.label, file.name)) {
+        throw new Error(
+          `the engine's archive of the run's files (ABI v2 stream 8) has a file of -${file.label} that the argv names otherwise: ${JSON.stringify(file.name)}`,
+        );
+      }
+      return file.label === 'logfile' ? { name: file.name, bytes: file.bytes } : { name: file.name, bytes: file.bytes, option: file.label };
+    }
     if (start.logFileName != null && file.name === start.logFileName) return { name: file.name, bytes: file.bytes };
     if (file.name === start.strategyFile) return { name: file.name, bytes: file.bytes, option: 'export_search_strategy' };
     const isAscii = matchesPssmFile(file.name, start.outAsciiPssm, saveEach);
@@ -157,10 +192,11 @@ function crc32(bytes: Uint8Array): number {
  * The files of the engine's archive of a run's files (stream 8), in its order. The archive is the
  * adapter's (web/adapter/src/zip.rs): stored entries (method 0), each with its CRC-32 and sizes in
  * its local header (no data descriptor) and a UTF-8 name, then a central directory that lists the
- * same entries, then the end record. Anything else, and an entry whose bytes do not have its CRC-32,
- * is an error of the engine's archive.
+ * same entries, each with the option whose file it is as its comment (`StoredRunFile.label`; none in
+ * the archive of an earlier module), then the end record. Anything else, an entry whose bytes do not
+ * have its CRC-32, and a comment that is no such option, is an error of the engine's archive.
  */
-export function readStoredZip(archive: Uint8Array): RunFile[] {
+export function readStoredZip(archive: Uint8Array): StoredRunFile[] {
   const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
   const fail = (reason: string): never => {
     throw new Error(`the engine's archive of the run's files (ABI v2 stream 8) cannot be read: ${reason}`);
@@ -168,8 +204,15 @@ export function readStoredZip(archive: Uint8Array): RunFile[] {
   const u16 = (at: number) => (at + 2 <= archive.length ? view.getUint16(at, true) : fail(`it ends at byte ${archive.length}`));
   const u32 = (at: number) => (at + 4 <= archive.length ? view.getUint32(at, true) : fail(`it ends at byte ${archive.length}`));
   const decoder = new TextDecoder('utf-8', { fatal: true });
-  const files: RunFile[] = [];
-  const entries: Array<{ readonly offset: number; readonly crc: number; readonly size: number; readonly name: Uint8Array }> = [];
+  const files: StoredRunFile[] = [];
+  const entries: Array<{
+    readonly offset: number;
+    readonly crc: number;
+    readonly size: number;
+    readonly name: Uint8Array;
+    readonly text: string;
+    readonly bytes: Uint8Array;
+  }> = [];
   let at = 0;
   while (u32(at) === LOCAL_HEADER) {
     const n = entries.length + 1;
@@ -192,8 +235,7 @@ export function readStoredZip(archive: Uint8Array): RunFile[] {
     } catch {
       return fail(`the name of entry ${n} is not UTF-8`);
     }
-    entries.push({ offset: at, crc, size, name });
-    files.push({ name: text, bytes });
+    entries.push({ offset: at, crc, size, name, text, bytes });
     at = data + size;
   }
   // The central directory lists the same entries, and the end record ends the archive.
@@ -212,7 +254,23 @@ export function readStoredZip(archive: Uint8Array): RunFile[] {
       name.length === entry.name.length &&
       name.every((byte, i) => byte === entry.name[i]);
     if (!same) fail(`the central directory differs from entry ${n}`);
-    at += 46 + nameLength + u16(at + 30) + u16(at + 32);
+    const commentAt = at + 46 + nameLength + u16(at + 30);
+    const commentLength = u16(at + 32);
+    if (commentAt + commentLength > archive.length) fail(`the comment of entry ${n} ends past the archive`);
+    let comment: string;
+    try {
+      comment = decoder.decode(archive.subarray(commentAt, commentAt + commentLength));
+    } catch {
+      return fail(`the comment of entry ${n} is not UTF-8`);
+    }
+    if (comment === '') {
+      files.push({ name: entry.text, bytes: entry.bytes });
+    } else if (RUN_FILE_OPTIONS.includes(comment as RunFileOption)) {
+      files.push({ name: entry.text, bytes: entry.bytes, label: comment as RunFileOption });
+    } else {
+      fail(`entry ${n} has the comment ${JSON.stringify(comment)}, which is no option of a run's file`);
+    }
+    at = commentAt + commentLength;
   }
   if (u32(at) !== END_OF_CENTRAL_DIRECTORY) fail(`no end record after ${entries.length} entries`);
   const count = u16(at + 10);

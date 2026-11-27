@@ -196,8 +196,11 @@ function storedZipEntries(archive) {
     const data = local + 30 + archive.readUInt16LE(local + 26) + archive.readUInt16LE(local + 28);
     const bytes = archive.subarray(data, data + size);
     assert.equal(crc32(bytes), crc, `${name}: the CRC-32 of its bytes`);
-    entries.push([name, bytes]);
-    at += 46 + nameLength + extraLength;
+    // The comment: the option whose file the entry is, in the engine's archive of a run's files (stream 8).
+    const commentLength = archive.readUInt16LE(at + 32);
+    const comment = archive.subarray(at + 46 + nameLength + extraLength, at + 46 + nameLength + extraLength + commentLength).toString("utf8");
+    entries.push([name, bytes, comment]);
+    at += 46 + nameLength + extraLength + commentLength;
   }
   return entries;
 }
@@ -1036,7 +1039,8 @@ async function checkPrints(engine, reactor, native) {
   const logged = prints(["tblastx", ...inputs, "-version", "-logfile", "v.log", "-num_threads", "1"], "version");
   assert.equal(logged.json.log_file, "v.log");
   const made = fs.readFileSync(path.join(dir, "v.log"));
-  assert.deepEqual(storedZipEntries(logged.run.streams.get(8)).map(([name, bytes]) => [name, sha256(bytes)]), [["v.log", sha256(made)]],
+  assert.deepEqual(storedZipEntries(logged.run.streams.get(8)).map(([name, bytes, option]) => [name, sha256(bytes), option]),
+                   [["v.log", sha256(made), "logfile"]],
                    "the file of -logfile (stream 8) is the CLI's");
   fs.rmSync(path.join(dir, "v.log"));
   // A -logfile name with a directory: the CLI opens the file of -logfile before it prints its help and its version;
@@ -1433,16 +1437,21 @@ async function checkStrategyFiles(reactor, native, scratch, engine, waitForWorke
       return registered.status;
     });
     for (const format of program === "blastp" || program === "blastx" ? [6, 11] : [6]) {
-      // [the name typed, the CLI's file, the Web's name of it]. A `..` after a link (`/var/run` is `/run` on the host
-      // that checkLogfileNames requires): the CLI makes `/tmp/<id>.asn`, not the name read lexically
-      // (`/var/tmp/<id>.asn`), and the Web names that file (line RG item F1w-r2's second fix round, 2026-11-28).
+      // [the name typed, the CLI's file, the Web's name of it, more words]. A `..` after a link (`/var/run` is `/run` on
+      // the host that checkLogfileNames requires): the CLI makes `/tmp/<id>.asn`, not the name read lexically
+      // (`/var/tmp/<id>.asn`), and the Web names that file (line RG item F1w-r2's second fix round, 2026-11-28). A
+      // `-logfile` name whose folder as written is missing (`sub/..`) and that is the strategy file's: the run makes
+      // only the strategy file, and the engine labels its entry so (the third fix round's S1).
       const id = `losat-v-abi-${process.pid}-${engine.name}-strategy`;
-      const names = [[index % 2 === 0 ? "s.asn" : "./s.asn", path.join(directory, "s.asn"), "s.asn"]];
-      if (index === 0 && format === 6) names.push([`/var/run/../tmp/${id}.asn`, `/tmp/${id}.asn`, `/tmp/${id}.asn`]);
-      for (const [typed, madePath, named] of names) {
-        const argv = [program, "-query", "q.fa", "-subject", "s.fa", ...words, "-outfmt", String(format), "-export_search_strategy", typed];
+      const names = [[index % 2 === 0 ? "s.asn" : "./s.asn", path.join(directory, "s.asn"), "s.asn", []]];
+      if (index === 0 && format === 6) {
+        names.push([`/var/run/../tmp/${id}.asn`, `/tmp/${id}.asn`, `/tmp/${id}.asn`, []]);
+        names.push(["x.asn", path.join(directory, "x.asn"), "x.asn", ["-logfile", "sub/../x.asn"]]);
+      }
+      for (const [typed, madePath, named, more] of names) {
+        const argv = [program, "-query", "q.fa", "-subject", "s.fa", ...words, "-outfmt", String(format), "-export_search_strategy", typed, ...more];
         const cli = nativeOnPipes(native, [...argv, "-num_threads", "1", "-out", "o.out"], directory);
-        const label = `${engine.name} ${program} outfmt ${format} ${typed}`;
+        const label = `${engine.name} ${program} outfmt ${format} ${typed}${more.length > 0 ? ` ${more.join(" ")}` : ""}`;
         const lexical = typed.startsWith("/") ? path.posix.normalize(typed) : undefined;
         const lexicalMade = lexical !== undefined && lexical !== madePath && fs.existsSync(lexical);
         if (lexicalMade) fs.rmSync(lexical);
@@ -1461,7 +1470,7 @@ async function checkStrategyFiles(reactor, native, scratch, engine, waitForWorke
           if (waitForWorkers) await waitForWorkers();
           assert.equal(run.status, 0, `${label} threads ${threads}: ${run.error}`);
           const sent = run.streams.has(8) ? storedZipEntries(run.streams.get(8)) : [];
-          assert.deepEqual(sent.map(([name, bytes]) => [name, sha256(bytes)]), [[named, sha256(file)]],
+          assert.deepEqual(sent.map(([name, bytes, option]) => [name, sha256(bytes), option]), [[named, sha256(file), "export_search_strategy"]],
                            `${label} threads ${threads}: the file of the run (stream 8) is the CLI's (${requests} requests)`);
           const stream = format === 6 ? 6 : CUSTOM_STREAM;
           assert.equal(sha256(run.streams.get(stream) || Buffer.alloc(0)), sha256(out), `${label} threads ${threads}: outfmt ${format}`);
@@ -1960,6 +1969,12 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
         assert.equal(sha256(run.streams.get(3) || Buffer.alloc(0)), sha256(cliStderr), `${label}: diagnostics`);
         const sentFiles = run.streams.has(8) ? storedZipEntries(run.streams.get(8)).sort((a, b) => a[0].localeCompare(b[0])) : [];
         assert.deepEqual(sentFiles.map(([n]) => n), cliPssmFiles.map(([n]) => n), `${label}: stream 8 PSSM files`);
+        // Each file's option, the comment of its entry: the option whose name the file has (`F` or `F.<round>`).
+        const optionOf = (name) => ["-out_ascii_pssm", "-out_pssm"].find((flag) => {
+          const at = c.extra.indexOf(flag);
+          return at >= 0 && (name === c.extra[at + 1] || name.startsWith(`${c.extra[at + 1]}.`));
+        })?.slice(1);
+        assert.deepEqual(sentFiles.map(([, , option]) => option), sentFiles.map(([n]) => optionOf(n)), `${label}: stream 8 PSSM files' options`);
         for (let i = 0; i < sentFiles.length; i++) {
           assert.equal(sha256(sentFiles[i][1]), sha256(cliPssmFiles[i][1]), `${label}: PSSM file ${sentFiles[i][0]}`);
         }

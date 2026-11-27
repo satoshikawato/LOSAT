@@ -178,7 +178,7 @@ pub use crate::api::start::{CallerSink, CallerStart, ErrorSource};
 pub use crate::blastinput::ncbi_environment::{
     log_file, preparse, ApplicationSettings, Preparsed, RegistryFiles, TextPlace,
 };
-pub use crate::report::run_files::{FileReceiver, FileStream, RunFiles};
+pub use crate::report::run_files::{FileReceiver, FileStream, RunFileOption, RunFiles};
 /// The names of the command line's programs (`losat <program>`, and the names that run one without
 /// its word): LOSAT Web's tool run tells a program that it does not run from a name that is none.
 pub use crate::utils::entry_names::ENTRY_NAMES as PROGRAMS;

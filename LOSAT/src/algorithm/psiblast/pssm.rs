@@ -1551,7 +1551,13 @@ impl PssmFiles {
                         if let crate::report::run_files::RunFiles::Receiver(receiver) =
                             &self.run_files
                         {
-                            receiver.receive(&host_name, &bytes).map_err(commit_err)?;
+                            receiver
+                                .receive_run_file(
+                                    crate::report::run_files::RunFileOption::OutPssm,
+                                    &host_name,
+                                    &bytes,
+                                )
+                                .map_err(commit_err)?;
                         }
                     }
                     other => {
@@ -1582,7 +1588,11 @@ impl PssmFiles {
                             .run_files
                             .pssm_target("-out_ascii_pssm", file.path.as_os_str())
                         {
-                            let _ = receiver.receive(&host_name, &ascii);
+                            let _ = receiver.receive_run_file(
+                                crate::report::run_files::RunFileOption::OutAsciiPssm,
+                                &host_name,
+                                &ascii,
+                            );
                         }
                     }
                     crate::report::run_files::RunFiles::Disk => {

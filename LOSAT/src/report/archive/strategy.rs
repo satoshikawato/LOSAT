@@ -211,7 +211,11 @@ impl StrategySink for ReceivedFile {
         if std::mem::replace(&mut self.handed, true) {
             return Ok(());
         }
-        self.receiver.receive(&self.name, &self.bytes)
+        self.receiver.receive_run_file(
+            crate::report::run_files::RunFileOption::ExportSearchStrategy,
+            &self.name,
+            &self.bytes,
+        )
     }
 }
 

@@ -66,6 +66,9 @@ pub(super) trait ReportSink {
     /// Sets the stream's `badbit` (an insertion of a null `const char*`, the pairwise epilog's
     /// matrix name, `report::ostream::ReportWrite::badbit`), which throws: the run's error.
     fn badbit(&mut self) -> anyhow::Error;
+    /// The run's error of a write that failed in the alignments of outfmt 0-4
+    /// (`report::ostream::Site::Alignments`; `flushing`: at a flush), after NCBI's posts there.
+    fn alignments_failed(&mut self, error: anyhow::Error, flushing: bool) -> anyhow::Error;
 }
 
 /// What the object's report reads besides the archive's search.

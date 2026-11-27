@@ -544,8 +544,11 @@ fn the_chunk_stops_come_before_the_setup_failures() {
 
 /// Line RG item bp-SF1 (NCBI BLAST+ 2.17.0 probes of the item, remaining-gaps-20261112/D/logs/bp_sf1/PROBES.md):
 /// the part of the near run `near` that NCBI writes before the batch that a refusal of the same input with one more
-/// batch meets: outfmt 7 up to its last line (`# BLAST processed`), outfmt 0 up to its epilog (`  Database:`),
-/// outfmt 6 all of it.
+/// batch meets: outfmt 7 up to its last line (`# BLAST processed`), outfmt 0 up to its epilog, which starts with
+/// the two line ends before the database's summary (a query's report ends with its line of the search space, as in
+/// NCBI's own bytes where an engine error stops it after such reports, row `db.empty.unsearched.bs1.0`), outfmt 6
+/// all of it.
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2249-2258
 fn reports_before(near: &Run, outfmt: &str) -> String {
     assert_eq!(near.code, Some(0), "near run: {}", near.stderr);
     let end = match outfmt {
@@ -555,7 +558,7 @@ fn reports_before(near: &Run, outfmt: &str) -> String {
             .expect("outfmt 7's last line"),
         "0" => near
             .stdout
-            .rfind("  Database: ")
+            .rfind("\n\n  Database: ")
             .expect("outfmt 0's epilog"),
         _ => near.stdout.len(),
     };
@@ -695,9 +698,13 @@ fn a_search_space_overflow_is_refused_after_the_batches_before() {
 // `db.ak.bp.rej.nseq0.oldfsc.one.0`).
 #[test]
 fn a_first_batch_refusal_follows_the_pairwise_prolog() {
+    // The prolog ends before the first query's report, which starts with two line ends (NCBI's
+    // bytes where an engine error stops the first batch, as in rows `db.empty.0` and
+    // `db.t5d.blastp.sw.0`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1489-1494
     let prolog = |near: &Run| {
         assert_eq!(near.code, Some(0), "near run: {}", near.stderr);
-        let end = near.stdout.find("Query= ").expect("a query's report");
+        let end = near.stdout.find("\n\nQuery= ").expect("a query's report");
         near.stdout[..end].to_string()
     };
     let overflow =

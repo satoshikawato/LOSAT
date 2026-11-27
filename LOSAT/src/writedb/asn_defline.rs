@@ -1371,7 +1371,7 @@ impl TseFeatureIndex {
     }
 
     /// Resolves the ordered list of Bioseq indices targeted by `bio_idx` (itself, plus any
-    /// segment Bioseqs when `repr == seg`, found through the scope).
+    /// segment Bioseqs of a segmented Bioseq, found through the scope).
     fn target_bioseqs(&self, bio_idx: usize) -> Vec<usize> {
         let mut out = vec![bio_idx];
         if let Some(seg_loc) = self.bioseq_seg_locs.get(&bio_idx) {
@@ -1625,7 +1625,8 @@ impl TseFeatureIndex {
     }
 
     /// `s_GetCdregionLabel` + `feature::GetLabel` (`fFGL_Content`) for a `Cdregion` feature: the
-    /// product's protein name comes from the Bioseq the scope finds for `GetId(product, scope)`.
+    /// product's protein name comes from the Bioseq the scope finds for the product's `GetId`
+    /// with the scope.
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/feature.cpp:139-247,710-776
     fn cdregion_content_label(&self, cds: &CdsFeature, warn: Warn<'_>) -> Vec<u8> {
@@ -2270,7 +2271,7 @@ impl Scope<'_> {
             || self.bio_of[a as usize].is_some_and(|bio| self.bio_of[b as usize] == Some(bio))
     }
 
-    /// `GetId(loc, scope)`: the first Seq-id of `loc` when `s_GetId` finds every Seq-id on its
+    /// `GetId` with the scope: the first Seq-id of `loc` when `s_GetId` finds every Seq-id on its
     /// Bioseq.
     ///
     /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:325-370

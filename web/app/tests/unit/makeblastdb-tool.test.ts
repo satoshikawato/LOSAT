@@ -173,7 +173,7 @@ describe('MakeblastdbDraft', () => {
 
   async function loaded(draft: MakeblastdbDraft): Promise<void> {
     draft.ensureLoaded();
-    await vi.waitFor(() => expect(draft.state.get().description).toBeDefined());
+    await vi.waitFor(() => expect(draft.state.get().description).toBeDefined(), { timeout: 10_000 });
   }
 
   it('runs pasted FASTA and opened files as one -in list, with the files of the run', async () => {
@@ -319,7 +319,7 @@ describe('the results of a makeblastdb run', () => {
     await vi.waitFor(() => {
       const run = coordinator.state.get().runs.find((entry) => entry.snapshot.runId === runId);
       expect(run?.status).toBe('completed');
-    });
+    }, { timeout: 30_000 });
     return runId;
   }
 

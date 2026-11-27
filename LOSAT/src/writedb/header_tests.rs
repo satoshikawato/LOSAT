@@ -384,7 +384,10 @@ mod parsed {
         );
     }
 
-    /// Ids of the alternatives with strings, every string member set to `s`.
+    /// Ids of every Seq-id alternative with strings, every string member set to `s`: `local` as a
+    /// string, `giim`, the twelve Textseq-id alternatives, `patent` with both Id-pat numbers,
+    /// `general` and `pdb` with both Date forms; ids without strings (`local` as an integer,
+    /// `gibbsq`, `gi`) stand between them.
     fn ids_with_strings(s: &[u8]) -> Vec<ParsedSeqId> {
         let t = |s: &[u8]| Some(s.to_vec());
         let ts = TextseqId {
@@ -403,6 +406,9 @@ mod parsed {
                 release: t(s),
             }),
             ParsedSeqId::Genbank(ts.clone()),
+            ParsedSeqId::Embl(ts.clone()),
+            ParsedSeqId::Pir(ts.clone()),
+            ParsedSeqId::Swissprot(ts.clone()),
             ParsedSeqId::Patent(PatentSeqId {
                 seqid: 2,
                 cit: IdPat {
@@ -425,6 +431,8 @@ mod parsed {
                 tag: ObjectId::Str(s.to_vec()),
             }),
             ParsedSeqId::Gi(-1),
+            ParsedSeqId::Ddbj(ts.clone()),
+            ParsedSeqId::Prf(ts.clone()),
             ParsedSeqId::Pdb(PdbSeqId {
                 mol: s.to_vec(),
                 chain: Some(32),
@@ -445,12 +453,17 @@ mod parsed {
                 rel: Some(Date::Str(s.to_vec())),
                 chain_id: None,
             }),
+            ParsedSeqId::Tpg(ts.clone()),
+            ParsedSeqId::Tpe(ts.clone()),
+            ParsedSeqId::Tpd(ts.clone()),
+            ParsedSeqId::Gpipe(ts.clone()),
             ParsedSeqId::NamedAnnotTrack(ts),
         ]
     }
 
-    /// The member path of the deepest members (every alternative with strings, a date of both
-    /// kinds) fits the fixed stack array (`MEMBER_PATH_DEPTH`) and returns to the root.
+    /// The member path of the deepest members (every alternative with strings, `ids_with_strings`,
+    /// a date of both kinds) fits the fixed stack array (`MEMBER_PATH_DEPTH`) and returns to the
+    /// root.
     #[test]
     fn the_member_path_fits_the_fixed_depth() {
         let set = DeflineSet {
@@ -476,7 +489,7 @@ mod parsed {
     /// the texts of `search_texts` (random bytes of any value, and of an alphabet with bytes
     /// outside ' '..'~') and texts of 127, 128, 255, 256 and 65,536 bytes (a BER length in the
     /// short form and in the long form with one to three length bytes) in every string member of
-    /// every alternative with strings, before and after other members.
+    /// every alternative with strings (`ids_with_strings`), before and after other members.
     #[test]
     fn bad_chars_alone_are_those_of_the_record() {
         let mut texts = crate::utils::byte_search::tests::search_texts();

@@ -2956,7 +2956,13 @@ NCBI BLAST+ 2.17.0 reads a reported subject's definition line where it makes the
 posts `Error: (803.7) [<program>] Blast-def-line-set.E.title` / `Bad char [0x..] in string at byte N` / the title, for
 each such byte in order, at each read that the cache does not answer (N is the position after the whole title in its
 record; the bytes before the posted one are already `#`). Outfmt 8, 9, 11 and 12 read the definition line there only
-(`PRE_FETCH_SEQS_LIMIT=2147483647` makes 8, 9 and 12 prefetch); the other formats read it again, which LOSAT refuses
+(`PRE_FETCH_SEQS_LIMIT=2147483647` makes 8, 9 and 12 prefetch). With the prefetch (outfmt 6, 7, 10, 17 and 20, and 8, 9
+and 12 at `INT_MAX`; rows `6`, `6t`, `mb.7t`, `10t`, `big.6t`, `alias.6t`, `17`, `pfmax.8`, line RG-KB item 9b-2), each
+batch's prefetch loads each subject once, in Seq-id handle order (OID 0 last), unless NCBI's cache of 10 released blobs
+still holds it from a batch before: the load reads the header through the volume's cache, then registers the ids of the
+header its Bioseq holds, which posts unless a second volume wrote it again (`alias.6t`); then each table row whose fields
+read the definition line (`sall*` ids, taxonomy, `stitle`, `salltitles`) posts once more. The other formats, the
+prefetch off and parsed Seq-ids with the prefetch read it where LOSAT does not model the reads, which LOSAT refuses
 (the `losat-rejection` rows), except in a batch that fails at a header read, which reaches no formatter (`dmg.*`,
 including `psiblast` one-round and multi-round runs and `rpsblast`/`rpstblastn` against `rps_mini` with
 `rps/rps_mini_tchar_dmg.phr.gz`, where OID 2's title holds `0xE9` and OID 0's title tag is rewritten to `0x1B`;

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.122
+- Version: 1.123
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -986,7 +986,20 @@
   and query-chunk merges (scaled score leaving `Int4`); Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.121 at the merge of dev cb7044346 that brought
   line RG-KB item 12's 1.121; first 1.113, then 1.114, then 1.115, then 1.116, then 1.117,
-  then 1.118, then 1.120, then 1.121)
+  then 1.118, then 1.120, then 1.121);
+  1.123 2026-11-27 (1.120's rejection of a stored definition-line title with a byte outside
+  `' '` to `'~'` narrowed further to the runs whose reads of the definition line LOSAT does not
+  model: BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX with one `-outfmt` of 6, 7, 10, 17 or 20, or
+  8, 9 or 12 with `PRE_FETCH_SEQS_LIMIT=2147483647`, write NCBI's output and `Error: (803.7)`
+  messages, rule 2: those of each query batch's prefetch, which loads each subject once in Seq-id
+  handle order unless NCBI's data source still holds its blob from a batch before, and those of
+  each table row whose fields read the definition line; explicit rejection, rule 3, where NCBI's
+  bytes are not determined: a subject whose blob NCBI's cache of 10 released blobs may hold or not
+  (an earlier release of more than it keeps, in an order that follows the addresses of NCBI's
+  objects; probe `K/kb/i9b2/probe` E1 and E3 under several allocator settings), a batch whose
+  prefetch asks for more than 200 ids, a database with parsed Seq-ids, a prefetch that may be off,
+  and `OBJMGR_*` settings; line RG-KB item 9b-2, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -5238,15 +5251,20 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`): NCBI shows the query's title and letters for the
   id (its second lookup, by the display id, the query's title in that line).
 - A stored Seq-id with a byte outside ' ' to '~', and a stored title with such a byte in the
-  cases narrowed by version 1.120 (line RG-KB item 9(b), Owner-delegated: `psiblast`, `rpsblast`
-  and `rpstblastn`; a format other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with
-  `PRE_FETCH_SEQS_LIMIT=2147483647`; a search restricted by a seqid, GI or taxid list, an alias
+  cases narrowed by versions 1.120 and 1.123 (line RG-KB items 9(b) and 9b-2, Owner-delegated:
+  `psiblast`, `rpsblast` and `rpstblastn`; `-outfmt` 0 to 5, 13 to 16 and 18, and more than one
+  format unless each writes the Seq-aligns as they are without the prefetch; with `-outfmt` 6, 7, 10, 17 and 20, or 8, 9 and 12 with
+  `PRE_FETCH_SEQS_LIMIT=2147483647`, a prefetch that may be off, a database with parsed Seq-ids,
+  `OBJMGR_*` settings, a subject whose blob NCBI's data source may hold or not from an earlier
+  batch, or a batch whose prefetch asks for more than 200 ids; a search restricted by a seqid, GI
+  or taxid list, an alias
   file with a list or an OID mask, or a volume with an OID mask type; a query batch whose headers
   also give NCBI's warning of a UTF8String; except a query batch that ends at a header NCBI cannot
   read, which writes NCBI's `Error: (803.7)` messages for the titles read before it, then NCBI's
   error, in any format of all eight search programs): NCBI prints `#` and an error message each
   time it reads the definition line. Otherwise BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX write
-  NCBI's output and `Error: (803.7)` messages.
+  NCBI's output and `Error: (803.7)` messages, of the Seq-aligns, of the prefetch's loads and of the
+  table rows that read the definition line.
 - psiblast and tblastn `-in_pssm` with `-subject` (version 1.45, line RG item D3-1,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): a Seq-id twice in the
   PSSM query's entry whose `duplicate Bioseq id` message may spell a subject record's Seq-id (NCBI

@@ -989,6 +989,42 @@ pub(super) fn call_search_spaces<'s>(
                 Some(batch) => split_option_space(batch, context_index, options_searchsp),
                 None => options_searchsp,
             };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-732
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:752-761
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1112-1115
+            // PHI-BLAST (psiblast `-phi_pattern`): the setup's own branch gives each context the
+            // database length less the count times its length adjustment, which is the pattern's
+            // minimum match length in a batch's first context and 0 in the others; no product of
+            // lengths, so no space of a PHI search overflows `Int8` (NCBI 2.17.0 reports a query of
+            // 4,970 letters over a length of 2^55, review M4 of line RG item bp-SF1). The pattern's
+            // search reads the same value (`phi_search::stats::search_space`).
+            if let Some(Ok(pattern)) = args.phi.as_deref() {
+                if eff_db_length == 0 && given_searchsp == 0 {
+                    let space = SearchSpace {
+                        effective_space: 0.0,
+                        length_adjustment: 0,
+                    };
+                    return Ok((space, None));
+                }
+                let first_of_batch = query_batches
+                    .binary_search_by_key(&(ctx.q_idx as usize), |batch| batch.searched.start)
+                    .is_ok();
+                let length_adjustment = if first_of_batch {
+                    pattern.min_match_length
+                } else {
+                    0
+                };
+                let space = crate::algorithm::phi_search::stats::search_space(
+                    eff_db_length,
+                    i64::from(num_subjects),
+                    length_adjustment,
+                );
+                let space_of = SearchSpace {
+                    effective_space: space as f64,
+                    length_adjustment,
+                };
+                return Ok((space_of, Some(space)));
+            }
             if given_searchsp != 0 {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:826-846
                 // The given space is the context's: only its length adjustment is computed.

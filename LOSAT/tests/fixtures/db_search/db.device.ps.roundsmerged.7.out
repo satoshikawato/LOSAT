@@ -1,0 +1,22 @@
+Error: [psiblast] Error: Offset error at end of taxdb file.
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: q
+# Database: tests/db_search/ids/txr_p
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+q	AAA00001.1	90.000	250	25	0	1	250	1	250	2.78e-171	461
+q	BBB00001.1	75.200	250	62	0	1	250	1	250	5.34e-135	369
+q	DDD00001.1	24.444	45	27	2	32	69	132	176	8.9	14.2
+Warning: [psiblast] Query_1 q: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics 
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: q
+# Database: tests/db_search/ids/txr_p
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+q	AAA00001.1	90.000	250	25	0	1	250	1	250	1.48e-173	467
+q	BBB00001.1	75.200	250	62	0	1	250	1	250	1.11e-167	452
+
+Search has CONVERGED!
+# BLAST processed 2 queries

@@ -1,0 +1,13 @@
+qs1	g0	g0 bad#a
+qs1	g1	g1 bad#b
+qs1	g256	g256 bad#a
+qs1	g257	g257 bad#b
+qs2	g256	g256 bad#a
+qs2	g1	g1 bad#b
+qs2	g0	g0 bad#a
+qs2	g257	g257 bad#b
+qs3	g2	g2 cee#
+qs4	g258	g258 dee clean
+qs5	g2	g2 cee#
+qs6	g3	g3 eta#
+qs8	g3	g3 eta#

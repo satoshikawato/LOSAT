@@ -1,0 +1,18 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:180
+@SQ	SN:Query_2	LN:180
+@PG	ID:0	VN:2.17.0+	CL:/home/losatbench/losat-bench/tools/env_blast/bin/blastn -db tests/db_search/tchar/tc_n -query tests/db_search/tchar/tc_q2.fna -outfmt 17 -num_threads 1 	PN:blastn
+BL_ORD_ID:0	0	Query_1	1	255	180M	*	0	0	*	*	AS:i:180	EV:f:1.00078e-95	NM:i:0	PI:f:100.00	BS:f:333.517
+BL_ORD_ID:1	0	Query_1	1	255	172M8H	*	0	0	*	*	AS:i:166	EV:f:6.06589e-88	NM:i:0	PI:f:98.84	BS:f:307.664
+BL_ORD_ID:2	0	Query_1	1	255	159M1I7M1D5M308H	*	0	0	*	*	AS:i:157	EV:f:6.10895e-83	NM:i:2	PI:f:98.25	BS:f:291.044
+BL_ORD_ID:2	0	Query_1	1	255	300H135M45H	*	0	0	*	*	AS:i:135	EV:f:1.03681e-70	NM:i:0	PI:f:100.00	BS:f:250.418
+BL_ORD_ID:3	0	Query_1	1	255	124M56H	*	0	0	*	*	AS:i:124	EV:f:1.35072e-64	NM:i:0	PI:f:100.00	BS:f:230.105
+BL_ORD_ID:5	0	Query_1	1	255	99M81H	*	0	0	*	*	AS:i:99	EV:f:1.06657e-50	NM:i:0	PI:f:100.00	BS:f:183.939
+BL_ORD_ID:6	0	Query_1	1	255	87M93H	*	0	0	*	*	AS:i:87	EV:f:4.99749e-44	NM:i:0	PI:f:100.00	BS:f:161.779
+BL_ORD_ID:1	0	Query_2	1	255	180M	*	0	0	*	*	AS:i:174	EV:f:2.1663e-92	NM:i:0	PI:f:98.89	BS:f:322.437
+BL_ORD_ID:0	0	Query_2	1	255	172M8H	*	0	0	*	*	AS:i:172	EV:f:2.80229e-91	NM:i:0	PI:f:100.00	BS:f:318.744
+BL_ORD_ID:2	0	Query_2	1	255	159M1I7M1D13M300H	*	0	0	*	*	AS:i:165	EV:f:2.18168e-87	NM:i:2	PI:f:98.32	BS:f:305.817
+BL_ORD_ID:2	0	Query_2	1	255	300H159M1I7M1D13M	*	0	0	*	*	AS:i:141	EV:f:4.7898e-74	NM:i:2	PI:f:93.85	BS:f:261.498
+BL_ORD_ID:3	0	Query_2	1	255	159M1I7M1D13M	*	0	0	*	*	AS:i:126	EV:f:1.04417e-65	NM:i:2	PI:f:91.06	BS:f:233.798
+BL_ORD_ID:5	0	Query_2	1	255	99M81H	*	0	0	*	*	AS:i:99	EV:f:1.06657e-50	NM:i:0	PI:f:100.00	BS:f:183.939
+BL_ORD_ID:6	0	Query_2	1	255	87M93H	*	0	0	*	*	AS:i:87	EV:f:4.99749e-44	NM:i:0	PI:f:100.00	BS:f:161.779

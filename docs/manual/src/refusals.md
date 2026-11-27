@@ -227,8 +227,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-phi_pattern` with `-num_iterations` other than 1 | Refused: not yet supported. With a matrix and gap costs that have no pattern statistics, NCBI searches nothing and LOSAT gives its answer of one round. |
 | `-phi_pattern` with `-outfmt` 1 to 5, 11, 13 to 16 or 18 | Refused: not yet supported. `-outfmt` 8, 9 and 12 get NCBI's own error (exit status 3) where an alignment is found, and no output otherwise. |
 | `-phi_pattern` with `-html` | Refused: not yet supported. |
-| `-phi_pattern` with `-sum_stats true` | Refused: not yet supported. |
-| `-phi_pattern` with a subject longer than 5,000,000 residues | Refused: not yet supported. NCBI searches such a sequence in overlapping parts. |
 | `-phi_pattern`: the order of these refusals | NCBI's own errors come first: a pattern that NCBI rejects, a query without the pattern, a last query record without letters, and with `-outfmt 11` NCBI's error archive. With a matrix and gap costs that have no pattern statistics, LOSAT gives NCBI's answer (its message and no hits) and refuses only `-outfmt` 5 and 11 and `-html`. |
 | `phi_pattern` in the library and pylosat | Refused: not yet supported. Use `losat psiblast -phi_pattern`. |
 | A `-phi_pattern` pattern with an unterminated `(`, `{` or `x(` | Refused. NCBI reads past the end of the pattern and crashes. |

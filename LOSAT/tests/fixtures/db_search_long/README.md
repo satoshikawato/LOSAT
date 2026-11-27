@@ -47,3 +47,26 @@ blastn -query hlq.fna -db hl -db_hard_mask 11 -task blastn-short -evalue 1e-5 -o
 ```
 
 `dbmask_prot_hard_long.<program>.<mode>.6.out`: NCBI BLAST+ 2.17.0's rows (`-outfmt "6 std nident positive btop"`) of `tests/protein_db_hard_long.rs` (series NP, M4b-3d): `-db_hard_mask 21` on five protein sequences: `phl_lr_mid` (5,000,300 aa, masks `[10, 20)` and `[5_000_250, 5_000_280)` — a > 5,000,000 hard range in the middle), `phl_lr_po` (5,000,300 aa, masks `[620, 650)`, `[50, 80)`, `[5_000_250, 5_000_280)` — out-of-order masks combined with a > 5,000,000 hard range), `phl_lr_plain` (5,000,300 aa, no masks — unmasked > 5,000,000 sibling), `phl_po` (400 aa, out-of-order masks `[250, 280)`, `[100, 130)`, `[320, 340)`), and `phl_ow` (240 aa, overlapping masks with a one-word short chunk whose HSP merges with a later chunk). The test writes `phl.faa`, `phl_masks.asnt`, `phlq.faa`, and `phlq.fna`; `DBMASK_PROT_HARD_LONG_DIR=<dir>` keeps them. Frozen from official NCBI BLAST+ 2.17.0 (`-num_threads 1`, matching `-num_threads 4`). A second test in the same file checks decision B-d on `overlap_past_list`: `po_last` (static `LastRangeOverlap` refusal), `po_ow_last` (dynamic `last_range_overlap_merge_refusal`), and `lr_last` (a > 5,000,000-residue final hard range merging within its own range with `DBSEQ_CHUNK_OVERLAP = 100`).
+
+`phi_long.<case>.6.out`: NCBI BLAST+ 2.17.0's rows of `tests/psiblast_phi_long.rs` (line PS, item PS8a-2): psiblast
+`-phi_pattern` (`W-C-x(2)-H-W`) on subjects longer than NCBI's part of 5,000,000 residues, searched in overlapping
+parts: a pattern where the second part starts (`phl_5m1`), in the overlap of two parts (`phl_ov`, its hit counted in
+both parts, which every E-value reads), across 5,000,000 (`phl_c2`), in both overlaps of three parts (`phl_3`) and the
+two places of the second query in an overlap (`phl_2`), with two short subjects, and `-sum_stats true` with
+`-evalue 1e-138` (the linked E-values free HSPs that the run without sum statistics keeps). The test writes `phl_s.faa`,
+`phl_q.faa`, `phl_q2.faa` and `phl.pat` with a fixed generator; `PHI_LONG_DIR=<dir>` keeps them. Frozen with NCBI's own
+makeblastdb and psiblast (`F="6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore
+score nident"`, `P="-phi_pattern phl.pat -num_iterations 1 -outfmt $F -num_threads 1"`):
+
+```
+makeblastdb -in phl_s.faa -dbtype prot -out phl
+psiblast -query phl_q.faa -subject phl_s.faa $P > phi_long.sub.6.out
+psiblast -query phl_q.faa -db phl $P > phi_long.db.6.out
+psiblast -query phl_q2.faa -subject phl_s.faa $P > phi_long.q2.sub.6.out
+psiblast -query phl_q2.faa -db phl $P > phi_long.q2.db.6.out
+psiblast -query phl_q.faa -subject phl_s.faa $P -evalue 1e-138 > phi_long.e138.sub.6.out
+psiblast -query phl_q.faa -subject phl_s.faa $P -evalue 1e-138 -sum_stats true > phi_long.ss.e138.sub.6.out
+psiblast -query phl_q2.faa -db phl $P -evalue 1e-138 -sum_stats true > phi_long.ss.e138.q2.db.6.out
+```
+
+NCBI's rows at `-num_threads 8` are the same (with `-subject`, NCBI warns that it searches with one thread).

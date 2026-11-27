@@ -108,7 +108,7 @@ Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid
 Not yet supported:
 
 - `-outfmt` 13 to 16. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors.
-- With `-phi_pattern`: more than one round, `-html`, `-outfmt` other than 0, 6, 7, 10 and 20 (8, 9 and 12 get NCBI's own error where an alignment is found), `-sum_stats true` and a subject longer than 5,000,000 residues. NCBI's own errors come before these refusals. The library and pylosat do not take `phi_pattern`.
+- With `-phi_pattern`: more than one round, `-html`, `-outfmt` other than 0, 6, 7, 10 and 20 (8, 9 and 12 get NCBI's own error where an alignment is found). NCBI's own errors come before these refusals. The library and pylosat do not take `phi_pattern`.
 
 Also refused:
 

@@ -394,6 +394,7 @@ test('real engine: the databases of the tab are the native command line\'s, and 
   ]);
   const protBefore = nativeMade(protArgv, protInputs);
   await runMakeblastdb(page, 3);
+  await expect(page.getByTestId('tool-output-text')).toContainText('Adding sequences from FASTA');
   await shots(page, 'mk-mask-data-finished');
   const prot = await downloadAll(page);
   const protAfter = nativeMade(protArgv, protInputs);

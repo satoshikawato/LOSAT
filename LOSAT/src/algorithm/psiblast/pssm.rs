@@ -1441,13 +1441,10 @@ impl PssmFiles {
             return match self.run_files.pssm_target("-out_pssm", path.as_os_str()) {
                 PssmTarget::File(host_name) => Ok(Staged::Receiver(host_name, asn.to_vec())),
                 PssmTarget::Discard => Ok(Staged::Null),
-                PssmTarget::Full => Err(cannot_write(std::io::Error::from(
-                    std::io::ErrorKind::StorageFull,
+                PssmTarget::Full => Err(cannot_write(crate::utils::os_error_text::oracle_error(
+                    crate::utils::os_error_text::NO_SPACE,
                 ))),
-                PssmTarget::Unopened => Err(cannot_write(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "cannot open file",
-                ))),
+                PssmTarget::Unopened(failure) => Err(cannot_write(failure.error())),
                 PssmTarget::Refused(reason) => Err(anyhow::anyhow!("{reason}")),
             };
         }

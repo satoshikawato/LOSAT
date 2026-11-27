@@ -672,26 +672,65 @@ fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
         }
     }
     for (given, expected) in [
-        ("nodir/c.counts", OutputName::Unopened),
-        ("nodir/../c.counts", OutputName::Unopened),
-        ("in.fa/c.counts", OutputName::Unopened),
-        ("/proc/self/cwd/nodir/c.counts", OutputName::Unopened),
-        ("sub", OutputName::Unopened),
-        ("sub/", OutputName::Unopened),
-        (".", OutputName::Unopened),
-        ("..", OutputName::Unopened),
-        ("sub/..", OutputName::Unopened),
-        ("/proc/self/cwd", OutputName::Unopened),
-        ("/tmp", OutputName::Unopened),
-        ("/c.counts", OutputName::Unopened),
-        ("/etc/c.counts", OutputName::Unopened),
-        ("/data/c.counts", OutputName::Unopened),
-        ("/root/../tmp/c.counts", OutputName::Unopened),
-        ("/proc/self/status", OutputName::Unopened),
-        ("/dev/fd/3", OutputName::Unopened),
-        ("/dev/kmsg", OutputName::Unopened),
-        ("", OutputName::Unopened),
-        (long.as_str(), OutputName::Unopened),
+        (
+            "nodir/c.counts",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        (
+            "nodir/../c.counts",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        (
+            "in.fa/c.counts",
+            OutputName::Unopened(OpenFailure::NotADirectory),
+        ),
+        (
+            "/proc/self/cwd/nodir/c.counts",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        ("sub", OutputName::Unopened(OpenFailure::IsADirectory)),
+        ("sub/", OutputName::Unopened(OpenFailure::IsADirectory)),
+        (".", OutputName::Unopened(OpenFailure::IsADirectory)),
+        ("..", OutputName::Unopened(OpenFailure::IsADirectory)),
+        ("sub/..", OutputName::Unopened(OpenFailure::IsADirectory)),
+        (
+            "/proc/self/cwd",
+            OutputName::Unopened(OpenFailure::IsADirectory),
+        ),
+        ("/tmp", OutputName::Unopened(OpenFailure::IsADirectory)),
+        (
+            "/c.counts",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/etc/c.counts",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/data/c.counts",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        (
+            "/root/../tmp/c.counts",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/proc/self/status",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/dev/fd/3",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/dev/kmsg",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        ("", OutputName::Unopened(OpenFailure::NotFound)),
+        (
+            long.as_str(),
+            OutputName::Unopened(OpenFailure::NameTooLong),
+        ),
         ("in.fa", OutputName::Existing),
         ("sub/f", OutputName::Existing),
         ("/proc/self/cwd/in.fa", OutputName::Existing),

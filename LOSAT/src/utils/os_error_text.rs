@@ -46,14 +46,14 @@ fn system_text(_error: &std::io::Error, _code: i32) -> Option<Cow<'static, str>>
 /// `Too many open files, please raise the open file limit` for a text that holds `Too many open
 /// files`, which these do). The WASI values are those of the WASI preview 1 interface
 /// (`wasi_snapshot_preview1.witx`), which wasi-libc's `errno` and so std's `raw_os_error` give.
-/// Each entry: the WASI code, the Linux code (the tests check the text against the system's on
+/// ENOSPC (a write to `/dev/full`) is the one code here that only a write gives. Each entry: the WASI code, the Linux code (the tests check the text against the system's on
 /// Linux), the text.
-#[cfg(any(target_os = "wasi", test))]
-pub(crate) const ORACLE_TEXTS: [(i32, i32, &str); 11] = [
+pub(crate) const ORACLE_TEXTS: [(i32, i32, &str); 12] = [
     (63, 1, "Operation not permitted"),
     (44, 2, "No such file or directory"),
     (29, 5, "Input/output error"),
     (48, 12, "Cannot allocate memory"),
+    (51, 28, "No space left on device"),
     (2, 13, "Permission denied"),
     (54, 20, "Not a directory"),
     (31, 21, "Is a directory"),
@@ -70,6 +70,30 @@ pub(crate) fn oracle_text(code: i32) -> Option<&'static str> {
         .iter()
         .find(|&&(wasi, _, _)| wasi == code)
         .map(|&(_, _, text)| text)
+}
+
+/// Linux's `ENOSPC`, the code of a write that finds no space (`/dev/full`).
+pub(crate) const NO_SPACE: i32 = 28;
+
+/// The error that the oracle platform (Linux) gives for its code `linux`, printing as the native
+/// CLI's does (`No such file or directory (os error 2)`) on every platform, LOSAT Web's too: a
+/// refusal of a name that the Web's model gives where the command line's open fails with that
+/// code (`ORACLE_TEXTS`). Panics for a code outside the table.
+pub(crate) fn oracle_error(linux: i32) -> std::io::Error {
+    let text = ORACLE_TEXTS
+        .iter()
+        .find(|&&(_, code, _)| code == linux)
+        .map(|&(_, _, text)| text)
+        .expect("a Linux code of ORACLE_TEXTS");
+    let kind = match linux {
+        NO_SPACE => std::io::ErrorKind::StorageFull,
+        2 => std::io::ErrorKind::NotFound,
+        13 => std::io::ErrorKind::PermissionDenied,
+        20 => std::io::ErrorKind::NotADirectory,
+        21 => std::io::ErrorKind::IsADirectory,
+        _ => std::io::ErrorKind::Other,
+    };
+    std::io::Error::new(kind, format!("{text} (os error {linux})"))
 }
 
 #[cfg(test)]

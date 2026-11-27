@@ -350,17 +350,14 @@ impl RoundFiles {
                     }
                     PssmTarget::Discard => {}
                     PssmTarget::Full if checked => {
-                        return Err(cannot_write(std::io::Error::from(
-                            std::io::ErrorKind::StorageFull,
+                        return Err(cannot_write(crate::utils::os_error_text::oracle_error(
+                            crate::utils::os_error_text::NO_SPACE,
                         )));
                     }
-                    PssmTarget::Unopened if checked => {
-                        return Err(cannot_write(std::io::Error::new(
-                            std::io::ErrorKind::NotFound,
-                            "cannot open file",
-                        )));
+                    PssmTarget::Unopened(failure) if checked => {
+                        return Err(cannot_write(failure.error()));
                     }
-                    PssmTarget::Full | PssmTarget::Unopened => {}
+                    PssmTarget::Full | PssmTarget::Unopened(_) => {}
                     PssmTarget::Refused(reason) => anyhow::bail!("{reason}"),
                 }
                 Ok(())

@@ -187,7 +187,9 @@ impl RunFiles {
     /// `OpenFiles::create` (`receiver_output_name`). No NCBI counterpart: NCBI writes files.
     pub(crate) fn pssm_target(&self, option: &str, name: &OsStr) -> PssmTarget {
         let RunFiles::Receiver(receiver) = self else {
-            return PssmTarget::Unopened;
+            // A disk's names are opened by the system, which gives its own error; no caller asks
+            // a disk for more than `Refused`.
+            return PssmTarget::Unopened(OpenFailure::NotFound);
         };
         match receiver_output_name(receiver.as_ref(), name.as_encoded_bytes()) {
             OutputName::File {
@@ -195,7 +197,7 @@ impl RunFiles {
             } => PssmTarget::File(host_name),
             OutputName::Discard => PssmTarget::Discard,
             OutputName::Full => PssmTarget::Full,
-            OutputName::Unopened => PssmTarget::Unopened,
+            OutputName::Unopened(failure) => PssmTarget::Unopened(failure),
             OutputName::Stdout => PssmTarget::Refused(format!(
                 "an {option} file that is also the standard output ({}) is not supported by LOSAT's PSIBLAST",
                 name.display()
@@ -222,7 +224,7 @@ impl RunFiles {
         let none = |_: &[u8], _: &[u8]| None;
         match output_name(name.as_encoded_bytes(), &none) {
             OutputName::File { name, .. } => Some(name),
-            OutputName::Unopened
+            OutputName::Unopened(_)
             | OutputName::Stdout
             | OutputName::Discard
             | OutputName::Full
@@ -243,8 +245,9 @@ pub(crate) enum PssmTarget {
     /// Writes fail (`/dev/full`).
     Full,
     /// Cannot be opened by the command line (a directory, a missing folder inside the working
-    /// directory, or a path a user cannot open).
-    Unopened,
+    /// directory, or a path a user cannot open), for the reason that the command line's open
+    /// gives (`OpenFailure::error`).
+    Unopened(OpenFailure),
     /// The standard output, standard error, a special device/procfs file, or an existing file in
     /// the run's directory (refused by LOSAT Web).
     Refused(String),
@@ -511,7 +514,7 @@ impl OpenFiles {
         };
         let bytes = name.as_encoded_bytes();
         match receiver_output_name(table.receiver.as_ref(), bytes) {
-            OutputName::Unopened => Err(Unopened),
+            OutputName::Unopened(_) => Err(Unopened),
             OutputName::File {
                 name: host_name,
                 key,
@@ -693,6 +696,41 @@ impl Write for SharedOpening {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+/// Why the system's open of an output file name fails on the oracle platform (Linux), by its error
+/// code (`OpenFailure::error`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OpenFailure {
+    /// `ENOENT`: a folder of the name or the empty name is not there.
+    NotFound,
+    /// `EACCES`: a folder that the user cannot search, or a name that the user cannot make or
+    /// write.
+    PermissionDenied,
+    /// `ENOTDIR`: a folder of the name is a file.
+    NotADirectory,
+    /// `EISDIR`: the name is a directory (`.`, `..`, a trailing `/`).
+    IsADirectory,
+    /// `ENAMETOOLONG`: a component of more than 255 bytes, or a path of 4096 or more.
+    NameTooLong,
+    /// `ELOOP`: more links than the system follows.
+    TooManyLinks,
+}
+
+impl OpenFailure {
+    /// The error of the command line's open, as the native CLI prints it
+    /// (`No such file or directory (os error 2)`): the one producer of these words for the
+    /// run's output names.
+    pub(crate) fn error(self) -> io::Error {
+        crate::utils::os_error_text::oracle_error(match self {
+            OpenFailure::NotFound => 2,
+            OpenFailure::PermissionDenied => 13,
+            OpenFailure::NotADirectory => 20,
+            OpenFailure::IsADirectory => 21,
+            OpenFailure::NameTooLong => 36,
+            OpenFailure::TooManyLinks => 40,
+        })
     }
 }
 
@@ -950,11 +988,32 @@ fn folder_present(
     entry: Option<EntryLookup<'_>>,
     final_dir: bool,
 ) -> bool {
+    folder_failure(path, cwd, entry, final_dir).is_none()
+}
+
+/// Why `folder_present` is false, as the system's open of a name in that folder fails: a file
+/// where a folder is wanted (`ENOTDIR`, also a file that the model knows outside the run's
+/// directory, `/dev/null`), a folder that is not there (`ENOENT`), and a folder of root's that the
+/// model does not list as one where the user makes files (`EACCES`: the model cannot tell a
+/// folder of root's there that is not there from one that is, and takes the one that a name in it
+/// would be refused in). `None` where the folder is present.
+fn folder_failure(
+    path: &[u8],
+    cwd: &[u8],
+    entry: Option<EntryLookup<'_>>,
+    final_dir: bool,
+) -> Option<OpenFailure> {
     match entry.and_then(|entry| entry(path, cwd)) {
-        Some(Entry::Directory) => true,
-        Some(Entry::File | Entry::Missing) => false,
-        None if final_dir => directory_at(path) == Directory::Known,
-        None => directory_at(path) != Directory::None,
+        Some(Entry::Directory) => None,
+        Some(Entry::File) => Some(OpenFailure::NotADirectory),
+        Some(Entry::Missing) => Some(OpenFailure::NotFound),
+        None => match directory_at(path) {
+            Directory::Known => None,
+            Directory::Unknown if final_dir => Some(OpenFailure::PermissionDenied),
+            Directory::Unknown => None,
+            Directory::None if is_known_file(path) => Some(OpenFailure::NotADirectory),
+            Directory::None => Some(OpenFailure::NotFound),
+        },
     }
 }
 
@@ -975,8 +1034,8 @@ fn run_directory_entry(path: &[u8]) -> Entry {
 /// What an output file name gives for a `Receiver` (`output_name`).
 #[derive(Debug, PartialEq, Eq)]
 enum OutputName {
-    /// The system does not open it: the command line's open fails.
-    Unopened,
+    /// The system does not open it: the command line's open fails, for this reason.
+    Unopened(OpenFailure),
     /// A file made at this host name (`host_file_name`) and file-table key (`file_key`).
     File { name: Vec<u8>, key: Vec<u8> },
     /// The process's standard output.
@@ -1020,8 +1079,11 @@ const DISCARDING_DEVICES: [&[u8]; 4] =
 /// directory (`Existing`; a folder of it does not open), or a file of that name in the working
 /// directory, in a home or in a directory where every user makes files (`File`).
 fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
-    if name.is_empty() || !fits(name) {
-        return OutputName::Unopened;
+    if name.is_empty() {
+        return OutputName::Unopened(OpenFailure::NotFound);
+    }
+    if !fits(name) {
+        return OutputName::Unopened(OpenFailure::NameTooLong);
     }
     let cwd = working_directory(name);
     let (folders, last) = match name.iter().rposition(|byte| *byte == b'/') {
@@ -1032,23 +1094,29 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     let mut walk = Walk::at(name, &cwd);
     for part in folders.split(|byte| *byte == b'/') {
         walk.step(part);
-        if walk.refused || !folder_present(walk.path(), &cwd, Some(entry), false) {
-            return OutputName::Unopened;
+        if let Some(failure) = walk
+            .refusal
+            .or_else(|| folder_failure(walk.path(), &cwd, Some(entry), false))
+        {
+            return OutputName::Unopened(failure);
         }
         if directories.last().map(Vec::as_slice) != Some(walk.path()) {
             directories.push(walk.path().to_vec());
         }
     }
-    if !folder_present(walk.path(), &cwd, Some(entry), true) || matches!(last, b"" | b"." | b"..") {
-        return OutputName::Unopened;
+    if let Some(failure) = folder_failure(walk.path(), &cwd, Some(entry), true) {
+        return OutputName::Unopened(failure);
+    }
+    if matches!(last, b"" | b"." | b"..") {
+        return OutputName::Unopened(OpenFailure::IsADirectory);
     }
     walk.step(last);
-    if walk.refused {
-        return OutputName::Unopened;
+    if let Some(failure) = walk.refusal {
+        return OutputName::Unopened(failure);
     }
     let path = walk.path().to_vec();
     if directories.iter().any(|directory| within(directory, &path)) {
-        return OutputName::Unopened;
+        return OutputName::Unopened(OpenFailure::IsADirectory);
     }
     let stream = |descriptor: &[u8]| {
         [SELF, THREAD]
@@ -1065,7 +1133,7 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
         return if is_procfs_file(&path) {
             OutputName::Special
         } else {
-            OutputName::Unopened
+            OutputName::Unopened(OpenFailure::PermissionDenied)
         };
     }
     if path == b"/dev/full" {
@@ -1079,11 +1147,14 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     }
     let found = entry(&path, &cwd);
     if found == Some(Entry::Directory) {
-        return OutputName::Unopened;
+        return OutputName::Unopened(OpenFailure::IsADirectory);
+    }
+    if found.is_none() && directory_at(&path) == Directory::Known {
+        return OutputName::Unopened(OpenFailure::IsADirectory);
     }
     let existing = found == Some(Entry::File) && !is_virtual_or_device(&path);
     if !existing && !opens(&path) {
-        return OutputName::Unopened;
+        return OutputName::Unopened(OpenFailure::PermissionDenied);
     }
     if path.starts_with(b"/dev/mqueue/") {
         return OutputName::Special;
@@ -1510,8 +1581,8 @@ struct Walk<'a> {
     cwd: &'a [u8],
     /// The links that the walk followed.
     links: usize,
-    /// Whether the system refused the path.
-    refused: bool,
+    /// Why the system refused the path, if it did.
+    refusal: Option<OpenFailure>,
 }
 
 impl<'a> Walk<'a> {
@@ -1522,7 +1593,7 @@ impl<'a> Walk<'a> {
             resolved: Vec::new(),
             cwd,
             links: 0,
-            refused: false,
+            refusal: None,
         };
         if path.first() != Some(&b'/') {
             walk.walk(cwd);
@@ -1535,7 +1606,7 @@ impl<'a> Walk<'a> {
     fn resolve(path: &[u8], cwd: &'a [u8]) -> Option<Vec<u8>> {
         let mut walk = Walk::at(path, cwd);
         walk.walk(path);
-        (!walk.refused).then(|| walk.path().to_vec())
+        walk.refusal.is_none().then(|| walk.path().to_vec())
     }
 
     /// Takes every component of `path`.
@@ -1549,11 +1620,11 @@ impl<'a> Walk<'a> {
     fn step(&mut self, part: &[u8]) {
         #[cfg(test)]
         WALK_STEPS.with(|steps| steps.set(steps.get() + 1));
-        if part.is_empty() || self.refused {
+        if part.is_empty() || self.refusal.is_some() {
             return;
         }
         if !searchable(self.path()) {
-            self.refused = true;
+            self.refusal = Some(OpenFailure::PermissionDenied);
             return;
         }
         match part {
@@ -1583,7 +1654,7 @@ impl<'a> Walk<'a> {
                 if target.is_some() || stream {
                     self.links += 1;
                     if self.links > MAX_LINKS {
-                        self.refused = true;
+                        self.refusal = Some(OpenFailure::TooManyLinks);
                         return;
                     }
                 }
@@ -1656,12 +1727,12 @@ fn log_name(name: &[u8], entry: Option<EntryLookup<'_>>) -> LogName {
     let mut walk = Walk::at(&file.path, &cwd);
     for part in folders.split(|byte| *byte == b'/') {
         walk.step(part);
-        if walk.refused || !folder_present(walk.path(), &cwd, entry, false) {
+        if walk.refusal.is_some() || !folder_present(walk.path(), &cwd, entry, false) {
             return LogName::Unopened;
         }
     }
     walk.step(last);
-    if walk.refused {
+    if walk.refusal.is_some() {
         return LogName::Unopened;
     }
     let path = walk.path().to_vec();
@@ -1721,7 +1792,7 @@ fn walks_to_directory(
     let mut walk = Walk::at(directory, cwd);
     for part in directory.split(|byte| *byte == b'/') {
         walk.step(part);
-        if walk.refused || !folder_present(walk.path(), cwd, entry, false) {
+        if walk.refusal.is_some() || !folder_present(walk.path(), cwd, entry, false) {
             return false;
         }
         if directories.last().map(Vec::as_slice) != Some(walk.path()) {

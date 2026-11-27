@@ -1314,6 +1314,68 @@ fn a_pssm_title_outside_the_visible_range_is_written_with_ncbis_posts() {
     assert_eq!(file_posts("psiblast", &replaced).text(), want);
 }
 
+/// A `-out_pssm` name that LOSAT Web cannot open fails with the words of the native CLI's open
+/// (`No such file or directory (os error 2)`), in the staging of a search's PSSM and in the
+/// rounds' files, as it does for `-out_pssm sub/x.asn` run natively (line WQA D34, 2026-11-28).
+#[test]
+fn a_receiver_names_the_system_error_of_an_unopenable_pssm_file() {
+    use crate::algorithm::psiblast::rounds::RoundFiles;
+    use crate::report::run_files::{FileReceiver, RunFiles};
+    use std::sync::Arc;
+
+    struct Nothing(Vec<Vec<u8>>);
+
+    impl FileReceiver for Nothing {
+        fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn registered_files(&self) -> &[Vec<u8>] {
+            &self.0
+        }
+    }
+
+    let run_files = RunFiles::Receiver(Arc::new(Nothing(vec![b"in.fa".to_vec()])));
+    let request = |name: &str| PssmRequest {
+        asn_path: Some(std::path::PathBuf::from(name)),
+        ascii_path: None,
+        save_each: false,
+        pseudocount: 0,
+        versions: Default::default(),
+        run_files: run_files.clone(),
+    };
+    let cannot = |name: &str, reason: &str| {
+        format!(
+            "a -out_pssm file that cannot be written ({name}: {reason}), where NCBI BLAST+'s psiblast stops after the query's report with a serial-stream write error, is not supported by LOSAT's PSIBLAST"
+        )
+    };
+    for (name, reason) in [
+        ("sub/x.asn", "No such file or directory (os error 2)"),
+        (
+            "nodir/deeper/x.asn",
+            "No such file or directory (os error 2)",
+        ),
+        ("<b>bold</b>.asn", "No such file or directory (os error 2)"),
+        ("in.fa/x.asn", "Not a directory (os error 20)"),
+        ("sub/", "Is a directory (os error 21)"),
+        ("..", "Is a directory (os error 21)"),
+        ("/root/../x.asn", "Permission denied (os error 13)"),
+        ("/dev/full", "No space left on device (os error 28)"),
+    ] {
+        let mut files = PssmFiles::new(&request(name));
+        let error = files.add(Some(b"asn"), None).unwrap_err();
+        assert_eq!(error.to_string(), cannot(name, reason), "{name}");
+        let mut rounds = RoundFiles::new(&request(name), None);
+        let error = rounds.write(Some(b"asn"), None).unwrap_err();
+        assert!(
+            error.to_string().starts_with(&format!(
+                "a -out_pssm file that cannot be written ({name}: {reason}), where NCBI BLAST+'s psiblast stops with"
+            )),
+            "{name}: {error}"
+        );
+    }
+}
+
 #[test]
 fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
     use crate::algorithm::psiblast::rounds::RoundFiles;

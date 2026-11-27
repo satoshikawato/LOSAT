@@ -530,7 +530,7 @@ pub(super) fn write_tabular_prolog_warning(
 
 /// Writes outfmt 20's line of the field names (`PrintProlog`; nothing for the other kinds).
 pub(super) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -> Result<()> {
-    TabularWriter::new(spec, "", None).prolog(writer)?;
+    TabularWriter::new(spec, crate::blastinput::app::Program::Blastp, "", None).prolog(writer)?;
     Ok(())
 }
 
@@ -553,7 +553,8 @@ pub(super) fn write_tabular_without_queries(
             diagnostics.write_all(line.as_bytes())?;
             diagnostics.flush()?;
         }
-        TabularWriter::new(spec, "", None).epilog(writer, 0)?;
+        TabularWriter::new(spec, crate::blastinput::app::Program::Blastp, "", None)
+            .epilog(writer, 0)?;
         // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
         writer.ncbi_flush()?;
     }
@@ -583,7 +584,8 @@ pub(super) fn write_tabular_round_epilog(
         diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
-    TabularWriter::new(spec, "", None).epilog(writer, rounds)?;
+    TabularWriter::new(spec, crate::blastinput::app::Program::Blastp, "", None)
+        .epilog(writer, rounds)?;
     writer.ncbi_flush()?;
     Ok(())
 }
@@ -747,6 +749,7 @@ fn write_tabular_rows<const RPS: bool>(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1017-1020
     let table = TabularWriter::new(
         spec,
+        crate::blastinput::app::Program::Blastp,
         tab.program_version,
         (tab.app != BlastpApp::Rpsblast).then_some(tab.matrix),
     );

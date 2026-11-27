@@ -685,6 +685,7 @@ pub(crate) fn tabular_taxonomy(
 pub(crate) fn write_tabular_prolog(
     spec: &TabularSpec,
     taxdb_found: bool,
+    program_kind: crate::blastinput::app::Program,
     program: &str,
     program_version: &str,
     writer: &mut dyn Write,
@@ -698,7 +699,7 @@ pub(crate) fn write_tabular_prolog(
         diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
-    TabularWriter::new(spec, program_version, None).prolog(writer)?;
+    TabularWriter::new(spec, program_kind, program_version, None).prolog(writer)?;
     Ok(())
 }
 

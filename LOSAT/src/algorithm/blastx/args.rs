@@ -385,7 +385,7 @@ impl ResolvedOptions {
     /// the default outfmt 6 and 7 the `std` fields and a tab of the same formatter
     /// (`TabularSpec::std`); `None` for a format that is not tabular. `tabular` itself stays
     /// `None` for the default report, as the shared rules of the default fields read it
-    /// (`report::tabular::stops_at_lookup_failure`, `TabularIds::of`).
+    /// (`report::tabular::stops_at_lookup_failure_for`, `TabularIds::of`).
     pub(crate) fn tabular_report(&self) -> Option<&'static crate::report::tabular::TabularSpec> {
         match self.tabular {
             Some(spec) => Some(spec),

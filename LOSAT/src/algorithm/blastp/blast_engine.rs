@@ -7112,11 +7112,7 @@ fn search(
             for posts in utf8.iter().chain([&titled]) {
                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
-            Err(database::ErrorAfterPosts::written(
-                failure.error,
-                &mut *outputs.diagnostics,
-                args.archive.as_ref(),
-            )?)
+            Err(failure.error)
         })?;
     } else if batches.stop.is_some() {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253

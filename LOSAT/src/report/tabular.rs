@@ -924,9 +924,8 @@ impl TabularSpec {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
     /// The warning that the formatter NCBI makes for each query's report of this field list
     /// writes when it is made (`x_CheckTaxDB`: `checks_taxdb` and no `taxdb.bti` found,
-    /// `taxdb_found`), as `program` (lower case) posts it: the one owner of that rule for the
-    /// report writers and for what a refused report writes before its refusal
-    /// (`FailedLookupRefusal::formatter_warning`).
+    /// `taxdb_found`), as `program` (lower case) posts it: the one owner of that rule for every
+    /// program's tabular report writer.
     pub fn formatter_warning(&self, taxdb_found: bool, program: &str) -> Option<String> {
         (self.checks_taxdb() && !taxdb_found).then(|| taxdb_warning_line(program))
     }
@@ -1722,17 +1721,6 @@ pub struct LookupFailure {
 }
 
 impl LookupFailure {
-    /// The failure of a subject without parsed Seq-ids whose generated title throws: a `-subject`
-    /// record's (`SetSubjectId` only), or a database sequence's (`database`: its one definition
-    /// line holds the `gnl|BL_ORD_ID` id, so `x_SetSubjectIds` throws at it too).
-    pub fn of_plain(database: bool) -> Self {
-        Self {
-            subject_id: true,
-            all_ids: database,
-            ..Self::default()
-        }
-    }
-
     /// The failure of a subject whose load throws (`LookupFailure::bioseq`), whatever its other
     /// lookups would do (NCBI makes none of them).
     pub fn thrown() -> Self {
@@ -1834,9 +1822,10 @@ impl TabularRows {
     // `row_stop_field`)
     /// Where the next row of the default fields (outfmt 6 and 7 without a field list,
     /// `outfmt6::write_hit_fields_bytes`) of the query `query_id` stops where NCBI has no result:
-    /// a row of subject `subject` whose lookups fail as `failure` says (`None`: they do not; a
-    /// `-subject` record's or database sequence's failed id, `LookupFailure::of_plain`, or a load
-    /// that throws, `LookupFailure::thrown`) reads the null `m_SubjectId` at `saccver`
+    /// a row of subject `subject` whose lookups fail as `failure` says (`None`: they do not;
+    /// `common::tabular::default_failure` for a `-subject` record's or database sequence's failed
+    /// id or empty handle, or `LookupFailure::thrown` for a load that throws) reads the null
+    /// `m_SubjectId` at `saccver`
     /// (`failed_lookup_stop`, `None` for the default fields): the bytes of the row before it,
     /// `qaccver` and a tab, and the stop (`row_stop_end`). `None`: the row is written. The one
     /// check of every program's default fields.
@@ -2060,6 +2049,9 @@ pub fn run_end(
 /// The writer of a tabular report (`TabularWriter::new`).
 pub struct TabularWriter<'a> {
     spec: &'a TabularSpec,
+    /// The program of the report, used for program-specific empty-handle stops
+    /// (`empty_handle_stop`).
+    program: crate::blastinput::app::Program,
     /// The `# BLASTN 2.17.0+` line's program and version.
     program_version: &'a str,
     /// The matrix that scores the rows' pairs of letters for the positives, where the report
@@ -2068,11 +2060,11 @@ pub struct TabularWriter<'a> {
 }
 
 impl<'a> TabularWriter<'a> {
-    /// The writer of the report `spec`, whose `# BLASTX 2.17.0+` line names `program_version`;
-    /// `matrix` is the matrix of a protein search's positives (`None` for BLASTN and for a
-    /// formatter without one: positives are identities): the formatter's `m_ScoringMatrix`,
-    /// which `CBlastFormat` makes with `GetAsciiProteinMatrix` (outfmt 0's matrix,
-    /// `utils::matrix::protein_display_score`), not the XML's `CBlastFormattingMatrix`.
+    /// The writer of `program`'s report `spec`, whose `# BLASTX 2.17.0+` line names
+    /// `program_version`; `matrix` is the matrix of a protein search's positives (`None` for
+    /// BLASTN and for a formatter without one: positives are identities): the formatter's
+    /// `m_ScoringMatrix`, which `CBlastFormat` makes with `GetAsciiProteinMatrix` (outfmt 0's
+    /// matrix, `utils::matrix::protein_display_score`), not the XML's `CBlastFormattingMatrix`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:183
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-830
@@ -2083,11 +2075,13 @@ impl<'a> TabularWriter<'a> {
     /// rows score no pair of letters (the same bytes; decided once for the writer, not per row).
     pub fn new(
         spec: &'a TabularSpec,
+        program: crate::blastinput::app::Program,
         program_version: &'a str,
         matrix: Option<ScoringMatrix>,
     ) -> Self {
         Self {
             spec,
+            program,
             program_version,
             matrix: matrix.filter(|_| spec.has_any(&[Positives, PercentPositives])),
         }
@@ -2246,25 +2240,12 @@ impl<'a> TabularWriter<'a> {
     /// block throws inside `SetFields`'s alignment block (`empty_handle_reads_letters`,
     /// `empty_handle_reads_minus_frame`).
     fn empty_handle_stop(&self, minus_subject_frame: bool) -> Option<&'static str> {
-        let program = self.program();
-        if self.spec.empty_handle_reads_letters(program) {
+        if self.spec.empty_handle_reads_letters(self.program) {
             Some(FAILED_LOOKUP_EMPTY_HANDLE_SEQ)
-        } else if minus_subject_frame && self.spec.empty_handle_reads_minus_frame(program) {
+        } else if minus_subject_frame && self.spec.empty_handle_reads_minus_frame(self.program) {
             Some(FAILED_LOOKUP_EMPTY_HANDLE_FRAME)
         } else {
             None
-        }
-    }
-
-    /// The program of `self.program_version`.
-    fn program(&self) -> crate::blastinput::app::Program {
-        use crate::blastinput::app::Program;
-        match self.program_version.split_whitespace().next() {
-            Some("BLASTN") => Program::Blastn,
-            Some("TBLASTN" | "PSITBLASTN") => Program::Tblastn,
-            Some("TBLASTX") => Program::Tblastx,
-            Some("BLASTX" | "RPSTBLASTN") => Program::Blastx,
-            _ => Program::Blastp,
         }
     }
 

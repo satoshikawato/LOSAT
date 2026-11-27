@@ -94,7 +94,13 @@ pub(super) fn write_prolog(
         return Ok(());
     }
     write_taxdb_warning(program.app, spec, taxdb_found, writer, diagnostics)?;
-    TabularWriter::new(spec, program_version(program), None).prolog(writer)?;
+    TabularWriter::new(
+        spec,
+        crate::blastinput::app::Program::Blastx,
+        program_version(program),
+        None,
+    )
+    .prolog(writer)?;
     Ok(())
 }
 
@@ -400,6 +406,7 @@ pub(super) fn write_blastx_tabular(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3552-3556
     let table = TabularWriter::new(
         spec,
+        crate::blastinput::app::Program::Blastx,
         program_version(options.program()),
         options.rpstblastn.is_none().then_some(options.scoring),
     );

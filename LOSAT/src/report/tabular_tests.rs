@@ -324,7 +324,12 @@ fn taxonomy_names_get_ncbis_fillers() {
             delimiter: Vec::new(),
         };
         let spec = blastp_spec(format, &choice).unwrap();
-        let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
+        let writer = TabularWriter::new(
+            &spec,
+            crate::blastinput::app::Program::Blastn,
+            "BLASTN 2.17.0+",
+            None,
+        );
         let subject = TabularSubject {
             id: b"s",
             accession: b"s",
@@ -538,7 +543,12 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
         index: 0,
     };
     let row = |spec: &TabularSpec, num_ident: usize, rows: Option<(&[u8], &[u8])>| {
-        let writer = TabularWriter::new(spec, "BLASTP 2.17.0+", Some(ScoringMatrix::Blosum62));
+        let writer = TabularWriter::new(
+            spec,
+            crate::blastinput::app::Program::Blastp,
+            "BLASTP 2.17.0+",
+            Some(ScoringMatrix::Blosum62),
+        );
         let hsp = TabularHsp {
             q_start: 1,
             q_end: 6,
@@ -591,6 +601,7 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
     let commented = spec(ReportFormat::TabularWithComments, "qseqid");
     let writer = TabularWriter::new(
         &commented,
+        crate::blastinput::app::Program::Blastp,
         "PSIBLAST 2.17.0+",
         Some(ScoringMatrix::Blosum62),
     );
@@ -655,7 +666,13 @@ fn id_columns_are_the_subject_s_own() {
         qcovhsp: 100,
     };
     let mut out = Vec::new();
-    let stop = TabularWriter::new(&spec, "BLASTP 2.17.0+", None).row(
+    let stop = TabularWriter::new(
+        &spec,
+        crate::blastinput::app::Program::Blastp,
+        "BLASTP 2.17.0+",
+        None,
+    )
+    .row(
         &mut out,
         &mut TabularRows::default(),
         &TabularQuery::local(b"q1", 6),
@@ -701,7 +718,12 @@ fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
         ops: &[],
         qcovhsp: 50,
     };
-    let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
+    let writer = TabularWriter::new(
+        &spec,
+        crate::blastinput::app::Program::Blastn,
+        "BLASTN 2.17.0+",
+        None,
+    );
     let mut rows = TabularRows::default();
     let mut out = Vec::new();
     for subject in subjects {
@@ -1309,7 +1331,10 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
     let field = |fields: Option<&str>, failure, first| {
         row_stop_field(fields.map(spec).as_ref(), failure, first).map(|(at, _)| at)
     };
-    let failed = LookupFailure::of_plain(false);
+    let failed = LookupFailure {
+        subject_id: true,
+        ..LookupFailure::default()
+    };
     assert_eq!(field(None, failed, false), Some(1));
     assert_eq!(field(Some("qseqid staxid sacc"), failed, true), Some(1));
     assert_eq!(field(Some("qseqid staxid sacc"), failed, false), Some(2));
@@ -1408,7 +1433,12 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
         qcovhsp: 10,
     };
     let s = spec("qseqid sallacc evalue");
-    let writer = TabularWriter::new(&s, "BLASTP 2.17.0+", None);
+    let writer = TabularWriter::new(
+        &s,
+        crate::blastinput::app::Program::Blastp,
+        "BLASTP 2.17.0+",
+        None,
+    );
     let mut rows = TabularRows::default();
     let mut buf = Vec::new();
     let stop = writer.row(&mut buf, &mut rows, &query, &subject, None, &hsp);
@@ -1650,7 +1680,11 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
         .unwrap()
     };
     let empty = LookupFailure::empty_handle();
-    let plain = LookupFailure::of_plain(true);
+    let plain = LookupFailure {
+        subject_id: true,
+        all_ids: true,
+        ..LookupFailure::default()
+    };
     // Subject-block field catches the empty handle before the alignment block runs.
     assert!(!spec("sseqid sseq").empty_handle_throws(Program::Blastp));
     assert!(!spec("sseqid qseq").empty_handle_throws(Program::Blastn));
@@ -1732,7 +1766,7 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
     // `TabularWriter::row` writes plus-strand empty-handle rows and stops before writing any byte
     // of a minus-strand empty-handle row (with earlier rows intact).
     let frame_spec = spec("qseqid qstart sframe");
-    let writer = TabularWriter::new(&frame_spec, "TBLASTN 2.17.0+", None);
+    let writer = TabularWriter::new(&frame_spec, Program::Tblastn, "TBLASTN 2.17.0+", None);
     let none = TabularTaxonomy::default();
     let empty_subject = TabularSubject {
         id: b"pdb|1AB3|",

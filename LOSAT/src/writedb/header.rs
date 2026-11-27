@@ -67,19 +67,19 @@ fn write_int4(out: &mut Vec<u8>, data: i32) {
 // makeblastdb runs with the default method (replace and warn) and the
 // substitute '#': every byte outside ' '..'~' is written as '#' and reported
 // with the stream position of the replacement. The runs of visible bytes between them are
-// found a block at a time (`find_first`) and copied whole.
+// copied whole (`for_each_bad_visible`).
 fn write_visible_string_bytes(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleChar>) {
-    let mut rest = text;
-    while let Some(at) = find_first(rest, is_bad_visible) {
-        out.extend_from_slice(&rest[..at]);
+    let mut copied = 0;
+    for_each_bad_visible(text, |at| {
+        out.extend_from_slice(&text[copied..at]);
         bad.push(BadTitleChar {
-            byte: rest[at],
+            byte: text[at],
             stream_offset: out.len(),
         });
         out.push(b'#');
-        rest = &rest[at + 1..];
-    }
-    out.extend_from_slice(rest);
+        copied = at + 1;
+    });
+    out.extend_from_slice(&text[copied..]);
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:842-871
@@ -97,20 +97,32 @@ fn is_bad_visible(byte: u8) -> bool {
     Stream::AsnBinary.replaces(byte)
 }
 
+/// Calls `found` with the index of each byte of `text` that `write_visible_string` writes as `#`,
+/// in order: the one walk of `write_visible_string_bytes` and `bad_visible_chars`. The runs of
+/// visible bytes between them are found a block at a time (`find_first`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:842-871
+#[inline(always)]
+fn for_each_bad_visible(text: &[u8], mut found: impl FnMut(usize)) {
+    let mut from = 0;
+    while let Some(at) = find_first(&text[from..], is_bad_visible) {
+        found(from + at);
+        from += at + 1;
+    }
+}
+
 /// The bytes of `text` that `write_visible_string` writes as `#` and the stream offsets that it
 /// reports, without writing them: `start` is the stream offset of the string's first byte, after
 /// its tag and length.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:842-871
 fn bad_visible_chars(text: &[u8], start: usize, bad: &mut Vec<BadTitleChar>) {
-    let mut at = 0;
-    while let Some(found) = find_first(&text[at..], is_bad_visible) {
+    for_each_bad_visible(text, |at| {
         bad.push(BadTitleChar {
-            byte: text[at + found],
-            stream_offset: start + at + found,
+            byte: text[at],
+            stream_offset: start + at,
         });
-        at += found + 1;
-    }
+    });
 }
 
 /// The bytes of `defline_set`'s record besides its title: at most 77 (eleven tags with indefinite
@@ -147,12 +159,7 @@ pub(crate) fn bad_title_chars(title: &[u8], bad: &mut Vec<BadTitleChar>) {
     };
     let mut prefix = Vec::with_capacity(16);
     title_prefix(&mut prefix, title);
-    let start = prefix.len();
-    bad.push(BadTitleChar {
-        byte: title[first],
-        stream_offset: start + first,
-    });
-    bad_visible_chars(&title[first + 1..], start + first + 1, bad);
+    bad_visible_chars(&title[first..], prefix.len() + first, bad);
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:866-893

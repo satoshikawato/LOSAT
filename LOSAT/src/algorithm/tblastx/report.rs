@@ -1161,7 +1161,10 @@ pub(crate) fn write_outfmt7_query_header<W: Write>(
 
 /// Writes the outfmt 6 or 7 rows of the final hit list (in its order); outfmt 7 adds the
 /// block header of every query and, with the epilog (`Some` of the queries that earlier calls
-/// wrote, `report_stream`), the count of queries.
+/// wrote, `report_stream`), the count of queries. `Some` where a row stops where NCBI has no
+/// result (`report::tabular::TabularRows::default_stop`: a subject whose id fails, or whose load
+/// throws at the query's first row): the bytes before the stop are written, and the caller ends
+/// the run (`report::tabular::row_stop_end`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 #[allow(clippy::too_many_arguments)]
@@ -1178,7 +1181,7 @@ pub(crate) fn write_tabular<W: crate::report::ostream::ReportWrite>(
     epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
-) -> io::Result<()> {
+) -> io::Result<Option<crate::report::tabular::RowStop>> {
     let config = OutputConfig::ncbi_compat();
     let mut by_query: Vec<Vec<(HspIndex, &TblastxHsp)>> = vec![Vec::new(); query_titles.len()];
     for (hsp_index, hsp) in hits.iter().enumerate() {
@@ -1215,15 +1218,28 @@ pub(crate) fn write_tabular<W: crate::report::ostream::ReportWrite>(
                     warnings.subject_read(q_idx, hsp.hit.s_idx, &mut *writer)?;
                 }
             }
+            let query_id = query_ids
+                .get(hsp.hit.q_idx as usize)
+                .map_or(&b""[..], |id| id.as_ref());
+            // A row where NCBI has no result: the bytes before its stop.
+            if let Some((written, stop)) = rows.default_stop(
+                query_id,
+                crate::algorithm::common::tabular::default_failure(
+                    subject_ids,
+                    thrown,
+                    hsp.hit.s_idx as usize,
+                ),
+                hsp.hit.s_idx as usize,
+            ) {
+                writer.write_all(&written)?;
+                return Ok(Some(stop));
+            }
             // One printed row is one HSP; the probe marks it without changing it.
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.begin(hsp_index);
             }
             if thrown {
-                let query_id = query_ids
-                    .get(hsp.hit.q_idx as usize)
-                    .map_or(&b""[..], |id| id.as_ref());
                 rows.write_thrown_default(
                     writer,
                     query_id,
@@ -1255,7 +1271,7 @@ pub(crate) fn write_tabular<W: crate::report::ostream::ReportWrite>(
         // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
         writer.ncbi_flush()?;
     }
-    Ok(())
+    Ok(None)
 }
 
 /// The outfmt 6 / 7 row of one HSP (`write_tabular`).
@@ -1272,7 +1288,7 @@ pub(crate) fn write_tabular_row<W: Write>(
     let query_id = query_ids
         .get(hit.q_idx as usize)
         .map_or(&b""[..], |id| id.as_ref());
-    // A failed lookup's rows are refused before (`check_failed_lookups`).
+    // A failed lookup's row stops before its subject id (`write_tabular`).
     let subject_id = crate::algorithm::common::tabular::printed_id(subject_ids, hit.s_idx as usize);
     write_hit_fields_bytes(
         writer,

@@ -87,7 +87,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // would print where NCBI's sums overflow (`ReportSumRefusal`), of a `-sorthits` table whose
         // last total NCBI pads without end (`TotalScoreRefusal`, an `io::Error` of the report's
         // writes), of an organism report (outfmt 18, made before its first byte), of a tabular
-        // row at which NCBI stops (`report::tabular::check_failed_lookups`), of a database
+        // row at which NCBI stops (`report::tabular::row_stop_end`), of a database
         // sequence that a query-anchored report (outfmt 1 to 4) would show as a query
         // (`ParsedRefusal`, `report::write_pairwise`), or of a report of an ungapped HSP of
         // length 0 in a form LOSAT does not write (`report::pairwise::EmptyRowsRefusal`): not an error

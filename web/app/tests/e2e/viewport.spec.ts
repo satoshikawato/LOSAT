@@ -67,12 +67,29 @@ interface HelpTipMeasurement {
   readonly followsX: boolean;
 }
 
+/** A control group (`.control-tip`: a control and its "?"; `.radios`) alone in its `.param-control`. */
+interface ControlGroupMeasurement {
+  readonly id: string;
+  readonly width: number;
+  readonly wants: number;
+  readonly room: number;
+}
+
+interface ViewMeasurement {
+  readonly scrollWidth: number;
+  readonly clientWidth: number;
+  readonly tips: readonly HelpTipMeasurement[];
+  readonly groups: readonly ControlGroupMeasurement[];
+}
+
 /**
  * Checks every visible "?" (`.help-toggle`) on the current view: it shares a line with the content
  * right before it (for a sentence, the last rect of `Range.getClientRects()` over its text; for a
- * control, the control's bounding rect), so no "?" ever starts a line alone.
+ * control, the control's bounding rect), so no "?" ever starts a line alone. Also measures each
+ * control group alone in its `.param-control`: its width, the width of its content on one line
+ * (`max-content`), and the row's content width.
  */
-async function measureAllHelpTips(page: Page): Promise<{ readonly scrollWidth: number; readonly clientWidth: number; readonly tips: readonly HelpTipMeasurement[] }> {
+async function measureAllHelpTips(page: Page): Promise<ViewMeasurement> {
   return page.evaluate(() => {
     const isVisibleElement = (el: Element): boolean => {
       if (el.classList.contains('visually-hidden')) return false;
@@ -161,19 +178,37 @@ async function measureAllHelpTips(page: Page): Promise<{ readonly scrollWidth: n
         followsX: br.left >= prevRect.right - 1,
       });
     }
+
+    const groups: ControlGroupMeasurement[] = [];
+    for (const row of document.querySelectorAll('.param-control')) {
+      const shown = [...row.children].filter(isVisibleElement);
+      const group = shown[0];
+      if (shown.length !== 1 || !(group instanceof HTMLElement) || !group.matches('.control-tip, .radios')) continue;
+      const style = getComputedStyle(row);
+      const room =
+        row.getBoundingClientRect().width -
+        parseFloat(style.paddingLeft) -
+        parseFloat(style.paddingRight) -
+        parseFloat(style.borderLeftWidth) -
+        parseFloat(style.borderRightWidth);
+      const width = group.getBoundingClientRect().width;
+      const saved = [group.style.width, group.style.maxWidth] as const;
+      group.style.width = 'max-content';
+      group.style.maxWidth = 'none';
+      const wants = group.getBoundingClientRect().width;
+      [group.style.width, group.style.maxWidth] = saved;
+      groups.push({ id: row.closest('[data-testid]')?.getAttribute('data-testid') ?? 'param-control', width, wants, room });
+    }
     return {
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
       tips,
+      groups,
     };
   });
 }
 
-function expectAllHelpTipsShareLine(
-  measured: { readonly scrollWidth: number; readonly clientWidth: number; readonly tips: readonly HelpTipMeasurement[] },
-  context: string,
-  requireAtLeastOne = true,
-): void {
+function expectAllHelpTipsShareLine(measured: ViewMeasurement, context: string, requireAtLeastOne = true): void {
   expect(measured.scrollWidth, `${context}: page should not overflow horizontally`).toBeLessThanOrEqual(measured.clientWidth);
   if (requireAtLeastOne) {
     expect(measured.tips.length, `${context}: expected at least one visible HelpTip`).toBeGreaterThan(0);
@@ -188,6 +223,13 @@ function expectAllHelpTipsShareLine(
       tip.followsX,
       `${context}: ${tip.id} should sit after its preceding content (btnLeft ${tip.btnLeft.toFixed(1)} vs prevRight ${tip.prevRight.toFixed(1)})`,
     ).toBe(true);
+  }
+  // A control and its "?" wrap only when the whole row is too narrow for them.
+  for (const group of measured.groups) {
+    expect(
+      group.width,
+      `${context}: ${group.id} should use the row's width before wrapping (wants ${group.wants.toFixed(1)}, row ${group.room.toFixed(1)})`,
+    ).toBeGreaterThanOrEqual(Math.min(group.wants, group.room) - 0.5);
   }
 }
 
@@ -350,6 +392,19 @@ test('at 320, 390, 768, 850 and 900 px every visible "?" shares a line with its 
 
   await attachCountsFixture(page);
   await checkAllTipsAtWidths(page, 'BLASTN Counts file');
+});
+
+// The task's radios and the genetic code selects sit outside "Algorithm parameters"; at 390 px an empty
+// second column of `.param-control` took 8 px from them, so BLASTN's last task name wrapped.
+test('at 320, 390, 768, 850 and 900 px each mode\'s "?" shares a line and its controls use the row\'s width', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await openSearch(page);
+  for (const id of ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx', 'psiblast']) {
+    await program(page, id);
+    await openParameters(page);
+    await checkAllTipsAtWidths(page, `${id} search page`);
+  }
 });
 
 test('at 320, 390 and 768 px the WindowMasker row checkbox shares a line with its name', async ({ page }) => {

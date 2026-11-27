@@ -654,44 +654,6 @@ fn a_cut_of_a_load_of_the_cache_slot_is_refused() {
     assert!(texts.is_empty());
 }
 
-// Review 2 of D1c-1c-b PR 2b, M1 and L1: before NCBI stops at a row of a batch's last query, each
-// of the batch's queries up to it writes its posts, its formatter's taxonomy database warning and
-// the texts of its subjects' reads; the row's query only those of its rows up to the row.
-#[test]
-fn a_stopped_batch_writes_each_querys_posts_formatter_warning_and_reads_up_to_the_row() {
-    let posts = [
-        Posts::of_lines(b"R\nW0\n".to_vec()),
-        Posts::new(),
-        Posts::of_lines(b"W2\n".to_vec()),
-    ];
-    let reads = vec![
-        vec![
-            SubjectRead::of_text(5, b"T0.5\n"),
-            SubjectRead::of_text(6, b"T0.6\n"),
-        ],
-        Vec::new(),
-        vec![
-            SubjectRead::of_text(7, b"T2.7\n"),
-            SubjectRead::of_text(8, b"T2.8\n"),
-            SubjectRead::of_text(9, b"T2.9\n"),
-        ],
-    ];
-    let mut written = Vec::new();
-    posts_before_stop(&posts, &reads, &[7, 8], Some("F\n"))
-        .write(&mut written, None)
-        .unwrap();
-    assert_eq!(
-        String::from_utf8(written).unwrap(),
-        "R\nW0\nF\nT0.5\nT0.6\nF\nW2\nF\nT2.7\nT2.8\n"
-    );
-    // No formatter warning, no reads: the posts alone.
-    let mut written = Vec::new();
-    posts_before_stop(&posts, &[], &[], None)
-        .write(&mut written, None)
-        .unwrap();
-    assert_eq!(written, b"R\nW0\nW2\n");
-}
-
 /// `QueryWarnings::before_query` flushes `report` before the first diagnostic byte emitted by a
 /// `Post::Request` release (matching NCBI's `cerr.tie(&cout)` for both `803.7` posts and strategy
 /// write failures such as `/dev/full`), while leaving `report` unflushed when a request mark

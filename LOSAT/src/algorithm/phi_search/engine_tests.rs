@@ -126,8 +126,9 @@ fn sum_statistics_link_the_preliminary_hsps_and_reap_them_by_the_preliminary_eva
         num: 1,
         edit_script: Vec::new(),
     };
-    // In order on both sequences (one set of two), the lower score first.
-    let hsps = vec![at((200, 260), (500, 560), 60), at((10, 60), (20, 70), 80)];
+    // In order on both sequences with a gap of 10 letters on both (a small-gap set of two: the
+    // gapped `gap_prob` of 1 leaves large gaps no weight), the lower score first.
+    let hsps = vec![at((70, 120), (80, 130), 60), at((10, 60), (20, 70), 80)];
     // Without sum statistics: nothing changes.
     let mut unlinked = hsps.clone();
     search.link_preliminary(&mut unlinked, 1000);

@@ -134,17 +134,19 @@ const ARCHIVE_SOURCES: readonly { readonly id: ArchiveSourceKind; readonly label
   { id: 'session', label: 'Session outfmt 11' },
 ];
 
-function onArchiveFile(event: Event): void {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
+function pickArchive(file: File | undefined): void {
   if (file !== undefined) props.draft.setArchiveFile(file);
-  input.value = '';
+}
+
+function onArchiveFile(event: Event): void {
+  const target = event.target as HTMLInputElement;
+  pickArchive(target.files?.[0]);
+  target.value = '';
 }
 
 function onArchiveDrop(event: DragEvent): void {
   dragActive.value = false;
-  const file = event.dataTransfer?.files?.[0];
-  if (file !== undefined) props.draft.setArchiveFile(file);
+  pickArchive(event.dataTransfer?.files?.[0]);
 }
 
 function onSessionChange(event: Event): void {
@@ -314,7 +316,7 @@ function onRunFiles(event: Event): void {
           Output format <OptionName class="flag" name="-outfmt" />
         </label>
         <div class="param-control">
-          <div v-if="!customOutfmt" class="control-tip bf-outfmt-row">
+          <div class="control-tip bf-outfmt-row" :class="{ custom: customOutfmt }">
             <select
               id="bf-outfmt"
               :value="outfmtSelectValue"
@@ -326,22 +328,9 @@ function onRunFiles(event: Event): void {
               </option>
               <option :value="OTHER_OUTFMT">Other / custom format…</option>
             </select>
-            <HelpTip v-if="outfmtHelp" id="bf-outfmt-help" :text="outfmtHelp" label="Help for -outfmt" />
-          </div>
-          <div v-else class="bf-outfmt-custom-wrap">
-            <select
-              id="bf-outfmt"
-              :value="outfmtSelectValue"
-              data-testid="bf-outfmt-select"
-              @change="onOutfmtSelect(($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="choice in BLAST_FORMATTER_OUTFMT_CHOICES" :key="choice.value" :value="choice.value">
-                {{ choice.label }}
-              </option>
-              <option :value="OTHER_OUTFMT">Other / custom format…</option>
-            </select>
-            <div class="control-tip bf-outfmt-row">
+            <div class="control-tip bf-outfmt-tail">
               <input
+                v-if="customOutfmt"
                 ref="customOutfmtInput"
                 type="text"
                 autocomplete="off"

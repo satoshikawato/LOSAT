@@ -2944,21 +2944,30 @@ pre.range-text {
   max-width: 100%;
 }
 
-.bf-outfmt-row select,
-.bf-outfmt-row input {
+.bf-outfmt-row.custom {
+  flex-wrap: wrap;
+}
+
+.bf-outfmt-row > select {
   flex: 0 1 auto;
   min-width: 0;
   max-width: calc(100% - 28px);
 }
 
-.bf-outfmt-custom-wrap {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 8px;
+.bf-outfmt-row.custom > select {
   max-width: 100%;
 }
 
-.bf-outfmt-custom-wrap > select {
+.bf-outfmt-tail {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
   max-width: 100%;
+}
+
+.bf-outfmt-tail > input {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(100% - 28px);
 }

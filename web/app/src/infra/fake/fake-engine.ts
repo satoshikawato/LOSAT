@@ -98,7 +98,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       const [flag, inline] = word.split(/=(.*)/s, 2);
       if (WINDOWMASKER_HELP_FLAGS.has(flag!) || WINDOWMASKER_VERSION_FLAGS.has(flag!)) return { ok: true };
       const param = byFlag.get(flag!);
-      const extraValued = flag === '-logfile' || flag === '-conffile';
+      const extraValued = flag === '-logfile' || flag === '-conffile' || (tool === 'blast_formatter' && flag === '-rid');
       if (param === undefined && !extraValued) {
         return { ok: false, message: `Argument error: Unknown argument: "${word}"` };
       }
@@ -136,14 +136,19 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     if (tool === 'windowmasker' && !seen.has('-mk_counts') && !seen.has('-convert') && !seen.has('-ustat')) {
       return { ok: false, message: 'Argument error: One of -mk_counts, -convert, or -ustat must be specified' };
     }
-    if (tool === 'blast_formatter' && !seen.has('-archive')) {
-      if (!seen.has('-rid')) {
-        return { ok: false, message: 'Command line argument error: Argument "rid". The argument has no value' };
+    if (tool === 'blast_formatter') {
+      if (seen.has('-rid') && seen.has('-archive')) {
+        return { ok: false, message: 'Argument error: -rid and -archive are mutually exclusive' };
       }
-      if ((values.get('-rid') ?? '') === '') {
-        return { ok: false, message: 'LOSAT engine error: Empty RID string specified' };
+      if (!seen.has('-archive')) {
+        if (!seen.has('-rid')) {
+          return { ok: false, message: 'Command line argument error: Argument "rid". The argument has no value' };
+        }
+        if ((values.get('-rid') ?? '') === '') {
+          return { ok: false, message: 'LOSAT engine error: Empty RID string specified' };
+        }
+        return { ok: false, message: "Error: -rid (the results of a search on NCBI's servers) is not supported by LOSAT's BLAST_FORMATTER" };
       }
-      return { ok: false, message: "Error: -rid (the results of a search on NCBI's servers) is not supported by LOSAT's BLAST_FORMATTER" };
     }
     return { ok: true };
   }

@@ -203,6 +203,8 @@ describe('verification table', () => {
     }
 
     const bfGrammar = toolOptionGrammar(parseToolDescription(BLAST_FORMATTER_XMLHELP_DOC.xml));
+    const bfBadge = (argv: readonly string[]) =>
+      toolVerificationBadge({ tool: 'blast_formatter', argv, runtimePath: 'serial', grammar: bfGrammar }, table);
     for (const argv of [
       ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '8'],
       ['blast_formatter', '-archive', 'db.asn', '-outfmt', '9', '-out', 'out.asnb'],
@@ -210,7 +212,7 @@ describe('verification table', () => {
       ['blast_formatter', '-archive', 'db.asn', '-outfmt', '8', '-max_target_seqs', '2'],
       ['blast_formatter', '-archive', 'db.asn', '-outfmt', '8', '-parse_deflines'],
     ]) {
-      const badge = toolVerificationBadge({ tool: 'blast_formatter', argv, runtimePath: 'serial', grammar: bfGrammar }, table);
+      const badge = bfBadge(argv);
       expect(badge.level, argv.join(' ')).toBe('certified');
       expect(badge.label, argv.join(' ')).toBe(SUPPORTED_LABEL);
     }
@@ -219,7 +221,7 @@ describe('verification table', () => {
       ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '6'],
       ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '8', '-line_length', '40'],
     ]) {
-      const badge = toolVerificationBadge({ tool: 'blast_formatter', argv, runtimePath: 'serial', grammar: bfGrammar }, table);
+      const badge = bfBadge(argv);
       expect(badge.level, argv.join(' ')).toBe('outside');
       expect(badge.label, argv.join(' ')).toBe(NOT_SUPPORTED_LABEL);
     }

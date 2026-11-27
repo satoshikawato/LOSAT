@@ -300,21 +300,24 @@ export class BlastFormatterDraft {
     }
   }
 
+  private argvInputOf(state: BlastFormatterDraftState, archiveName: string | undefined, extra?: readonly string[]) {
+    return {
+      ...(archiveName === undefined ? {} : { archiveName }),
+      outfmt: state.outfmt,
+      outName: state.outName,
+      values: state.values,
+      ...(state.description === undefined ? {} : { description: state.description }),
+      ...(extra === undefined ? {} : { extra }),
+    };
+  }
+
   private buildArgv(state: BlastFormatterDraftState): { readonly ok: true; readonly argv: readonly string[] } | { readonly ok: false; readonly message: string } {
     const extra = this.extraWordsOf(state);
     if (!extra.ok) return extra;
     const prints = toolPrintsKind(['blast_formatter', ...extra.words]);
     const archiveName = prints !== null ? undefined : this.archiveNameOf(state);
     try {
-      const argv = buildBlastFormatterArgv({
-        ...(archiveName === undefined ? {} : { archiveName }),
-        outfmt: state.outfmt,
-        outName: state.outName,
-        values: state.values,
-        ...(state.description === undefined ? {} : { description: state.description }),
-        extra: extra.words,
-      });
-      return { ok: true, argv };
+      return { ok: true, argv: buildBlastFormatterArgv(this.argvInputOf(state, archiveName, extra.words)) };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : String(error) };
     }
@@ -323,21 +326,17 @@ export class BlastFormatterDraft {
   previewCommandWords(state: BlastFormatterDraftState = this.state.get()): readonly string[] {
     const built = this.buildArgv(state);
     if (built.ok) return toolCommandWords(built.argv);
-    const archiveName = this.archiveNameOf(state);
-    return toolCommandWords(
-      buildBlastFormatterArgv({
-        ...(archiveName === undefined ? {} : { archiveName }),
-        outfmt: state.outfmt,
-        outName: state.outName,
-        values: state.values,
-        ...(state.description === undefined ? {} : { description: state.description }),
-      }),
-    );
+    return toolCommandWords(buildBlastFormatterArgv(this.argvInputOf(state, this.archiveNameOf(state))));
+  }
+
+  private nextValidateToken(): number {
+    this.validateToken += 1;
+    return this.validateToken;
   }
 
   private scheduleValidation(): void {
     if (this.validateTimer !== undefined) clearTimeout(this.validateTimer);
-    const token = ++this.validateToken;
+    const token = this.nextValidateToken();
     this.validateTimer = setTimeout(() => {
       this.validateTimer = undefined;
       if (token === this.validateToken) void this.runValidation();
@@ -346,15 +345,15 @@ export class BlastFormatterDraft {
 
   private async runValidation(): Promise<void> {
     const state = this.state.get();
-    const token = ++this.validateToken;
-    const built = this.buildArgv(state);
-    if (!built.ok) {
-      this.set({ validation: { state: 'invalid', message: built.message } });
+    const token = this.nextValidateToken();
+    const checked = this.buildArgv(state);
+    if (!checked.ok) {
+      this.set({ validation: { state: 'invalid', message: checked.message } });
       return;
     }
-    const prints = toolPrintsKind(built.argv);
+    const prints = toolPrintsKind(checked.argv);
     // Avoid flashing "Argument rid has no value" before the user has provided an archive.
-    if (prints === null && this.archiveNameOf(state) === undefined && !built.argv.some((w) => w === '-archive' || w.startsWith('-archive=') || w === '-rid' || w.startsWith('-rid='))) {
+    if (prints === null && this.archiveNameOf(state) === undefined && !checked.argv.some((w) => w === '-archive' || w.startsWith('-archive=') || w === '-rid' || w.startsWith('-rid='))) {
       this.set({ validation: { state: 'idle' } });
       return;
     }
@@ -369,51 +368,51 @@ export class BlastFormatterDraft {
     } else if (state.archiveSource === 'session' && state.sessionArchive !== undefined) {
       directory.push({ name: state.sessionArchive.name, file: new Blob([]) });
     }
+    let nextValidation: BlastFormatterValidationState;
     try {
-      const verdict = await this.deps.engine.validateTool(built.argv, { directory });
-      if (token !== this.validateToken) return;
-      this.set({
-        validation: verdict.ok ? { state: 'valid' } : { state: 'invalid', message: verdict.message },
-      });
+      const verdict = await this.deps.engine.validateTool(checked.argv, { directory });
+      nextValidation = verdict.ok ? { state: 'valid' } : { state: 'invalid', message: verdict.message };
     } catch (error) {
-      if (token !== this.validateToken) return;
       const message = error instanceof Error ? error.message : String(error);
-      this.set({
-        validation: isUnavailable(error) ? { state: 'unavailable', message } : { state: 'invalid', message },
-      });
+      nextValidation = isUnavailable(error) ? { state: 'unavailable', message } : { state: 'invalid', message };
     }
+    if (token !== this.validateToken) return;
+    this.set({ validation: nextValidation });
   }
 
   // --- Submit --------------------------------------------------------------------------------
+
+  private failSubmit(text: string, validation?: BlastFormatterValidationState): EnqueueAllResult {
+    this.set({
+      ...(validation === undefined ? {} : { validation }),
+      message: { kind: 'error', text },
+    });
+    return { ok: false, reason: 'argv', message: text };
+  }
 
   async submit(): Promise<EnqueueAllResult> {
     const state = this.state.get();
     if (state.submitting) return { ok: false, reason: 'argv', message: 'Submission already in progress.' };
     this.set({ submitting: true, message: undefined });
     try {
-      const built = this.buildArgv(state);
-      if (!built.ok) {
-        this.set({ validation: { state: 'invalid', message: built.message }, message: { kind: 'error', text: built.message } });
-        return { ok: false, reason: 'argv', message: built.message };
+      const result = this.buildArgv(state);
+      if (!result.ok) {
+        return this.failSubmit(result.message, { state: 'invalid', message: result.message });
       }
-      const prints = toolPrintsKind(built.argv);
+      const printed = toolPrintsKind(result.argv);
       const directory: ToolDirectoryFile[] = [];
       const seen = new Set<string>();
 
-      if (prints === null) {
+      if (printed === null) {
         if (state.archiveSource === 'file') {
           if (state.archiveFile === undefined) {
-            const text = 'Choose a BLAST archive file (-outfmt 11), or paste one.';
-            this.set({ message: { kind: 'error', text } });
-            return { ok: false, reason: 'argv', message: text };
+            return this.failSubmit('Choose a BLAST archive file (-outfmt 11), or paste one.');
           }
           directory.push({ name: state.archiveFile.name, file: state.archiveFile.file, origin: { kind: 'picked' } });
           seen.add(state.archiveFile.name);
         } else if (state.archiveSource === 'paste') {
           if (state.archivePaste.trim() === '') {
-            const text = 'Paste a BLAST archive (-outfmt 11), or choose a file.';
-            this.set({ message: { kind: 'error', text } });
-            return { ok: false, reason: 'argv', message: text };
+            return this.failSubmit('Paste a BLAST archive (-outfmt 11), or choose a file.');
           }
           directory.push({
             name: PASTED_ARCHIVE_NAME,
@@ -423,9 +422,7 @@ export class BlastFormatterDraft {
           seen.add(PASTED_ARCHIVE_NAME);
         } else {
           if (state.sessionArchive === undefined) {
-            const text = 'Choose a completed -outfmt 11 search output from this session, or choose a file.';
-            this.set({ message: { kind: 'error', text } });
-            return { ok: false, reason: 'argv', message: text };
+            return this.failSubmit('Choose a completed -outfmt 11 search output from this session, or choose a file.');
           }
           const archiveFile = await this.deps.getSessionArchiveFile(state.sessionArchive.runId, state.sessionArchive.name);
           directory.push({
@@ -439,15 +436,13 @@ export class BlastFormatterDraft {
 
       for (const entry of state.runFiles) {
         if (seen.has(entry.name)) {
-          const text = `Run directory file "${entry.name}" conflicts with the archive file name.`;
-          this.set({ message: { kind: 'error', text } });
-          return { ok: false, reason: 'argv', message: text };
+          return this.failSubmit(`Run directory file "${entry.name}" conflicts with the archive file name.`);
         }
         seen.add(entry.name);
         directory.push({ name: entry.name, file: entry.file, origin: { kind: 'picked' } });
       }
 
-      const verdict = await this.deps.engine.validateTool(built.argv, {
+      const verdict = await this.deps.engine.validateTool(result.argv, {
         directory: directory.map((entry) => ({ name: entry.name, file: entry.file })),
       });
       if (!verdict.ok) {
@@ -461,9 +456,9 @@ export class BlastFormatterDraft {
       const request: ToolRequest = {
         tool: 'blast_formatter',
         stage: 'format',
-        argv: built.argv,
+        argv: result.argv,
         directory,
-        ...(prints === null ? {} : { prints }),
+        ...(printed === null ? {} : { prints: printed }),
       };
       const queued = await this.deps.enqueueToolAll([request]);
       if (!queued.ok) {
@@ -473,9 +468,7 @@ export class BlastFormatterDraft {
       }
       return queued;
     } catch (error) {
-      const text = failureText(error);
-      this.set({ message: { kind: 'error', text } });
-      return { ok: false, reason: 'argv', message: text };
+      return this.failSubmit(failureText(error));
     } finally {
       this.set({ submitting: false });
     }

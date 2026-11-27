@@ -48,11 +48,46 @@ function trackNet(page: Page): string[] {
   return external;
 }
 
+const DESKTOP_VIEWPORT = { width: 1280, height: 900 };
+const MOBILE_VIEWPORT = { width: 390, height: 844 };
+
+async function clickBfTab(page: Page): Promise<void> {
+  await page.getByTestId('tab-blast-formatter').click();
+}
+
+async function expectBfPanelVisible(page: Page): Promise<void> {
+  await expect(page.getByTestId('bf-panel')).toBeVisible();
+}
+
 async function openFormatArchive(page: Page): Promise<void> {
   await openSearch(page);
-  await page.getByTestId('tab-blast-formatter').click();
-  await expect(page.getByTestId('bf-panel')).toBeVisible();
+  await clickBfTab(page);
+  await expectBfPanelVisible(page);
   await expect(page.getByTestId('bf-panel')).toHaveAttribute('data-describe', 'ready');
+}
+
+async function runBfAndWait(page: Page): Promise<void> {
+  await page.getByTestId('bf-run-losat').click();
+  await expect(page.getByTestId('tool-run-view')).toBeVisible();
+}
+
+async function expectTextOutputVisible(page: Page): Promise<void> {
+  await expect(page.getByTestId('tool-output-text')).toBeVisible();
+}
+
+async function maybeShot(page: Page, name: string, viewport?: { readonly width: number; readonly height: number }): Promise<void> {
+  if (!SCREENSHOT_DIR) return;
+  if (viewport !== undefined) await page.setViewportSize(viewport);
+  mkdirSync(SCREENSHOT_DIR, { recursive: true });
+  await page.screenshot({ path: join(SCREENSHOT_DIR, name), fullPage: true });
+}
+
+async function resetDesktopViewport(page: Page): Promise<void> {
+  await page.setViewportSize(DESKTOP_VIEWPORT);
+}
+
+function expectNoExternalRequests(external: readonly string[]): void {
+  expect(external, 'zero external network requests').toEqual([]);
 }
 
 /** Reads the active tool output tab's full downloaded bytes via Playwright download interception. */
@@ -132,24 +167,19 @@ test('Format Archive tab layout, -xmlhelp options, responsive viewports and -rid
   await page.getByTestId('bf-options-toggle').click();
   await expect(page.getByTestId('bf-parameter-form')).toBeVisible();
 
-  await assertLayoutAndHelpTips(page, { width: 1280, height: 900 });
-  if (SCREENSHOT_DIR) {
-    mkdirSync(SCREENSHOT_DIR, { recursive: true });
-    await page.screenshot({ path: join(SCREENSHOT_DIR, 'bf-tab-1280.png'), fullPage: true });
-  }
+  await assertLayoutAndHelpTips(page, DESKTOP_VIEWPORT);
+  await maybeShot(page, 'bf-tab-1280.png');
 
-  await assertLayoutAndHelpTips(page, { width: 390, height: 844 });
-  if (SCREENSHOT_DIR) {
-    await page.screenshot({ path: join(SCREENSHOT_DIR, 'bf-tab-390.png'), fullPage: true });
-  }
+  await assertLayoutAndHelpTips(page, MOBILE_VIEWPORT);
+  await maybeShot(page, 'bf-tab-390.png');
 
   // -rid in Additional options is refused in-place by validateTool.
-  await page.setViewportSize({ width: 1280, height: 900 });
+  await resetDesktopViewport(page);
   await page.getByTestId('bf-param-extra').fill('-rid ABCDEFGH01R');
   await expect(page.getByTestId('bf-argv-validation')).toHaveAttribute('data-state', 'invalid');
   await expect(page.getByTestId('bf-argv-validation')).toContainText("BLAST_FORMATTER");
 
-  expect(external, 'zero external network requests').toEqual([]);
+  expectNoExternalRequests(external);
 });
 
 test('real engine: Format Archive matches native losat blast_formatter byte-for-byte (-subject, -db, outfmt 8/9/12, and Search -outfmt 11 shortcut)', async ({
@@ -166,16 +196,15 @@ test('real engine: Format Archive matches native losat blast_formatter byte-for-
   await expect(page.getByTestId('bf-archive-chosen')).toContainText('bn.asn');
 
   for (const outfmt of ['8', '9', '12'] as const) {
-    await page.getByTestId('tab-blast-formatter').click();
+    await clickBfTab(page);
     await page.getByTestId('bf-outfmt-select').selectOption(outfmt);
-    await page.getByTestId('bf-run-losat').click();
-    await expect(page.getByTestId('tool-run-view')).toBeVisible();
+    await runBfAndWait(page);
     await expect(page.getByTestId('tool-output-download')).toBeVisible();
 
     if (outfmt === '9') {
       await expect(page.getByTestId('tool-output-binary')).toBeVisible();
     } else {
-      await expect(page.getByTestId('tool-output-text')).toBeVisible();
+      await expectTextOutputVisible(page);
     }
     const webBytes = await downloadActiveToolOutput(page);
     const native = runNativeBf(['-archive', 'in/bn.asn', '-outfmt', outfmt], BF_DIR);
@@ -185,12 +214,9 @@ test('real engine: Format Archive matches native losat blast_formatter byte-for-
 
   // Capture results view screenshot at 1280 px and 390 px if requested.
   if (SCREENSHOT_DIR) {
-    mkdirSync(SCREENSHOT_DIR, { recursive: true });
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await page.screenshot({ path: join(SCREENSHOT_DIR, 'bf-result-1280.png'), fullPage: true });
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.screenshot({ path: join(SCREENSHOT_DIR, 'bf-result-390.png'), fullPage: true });
-    await page.setViewportSize({ width: 1280, height: 900 });
+    await maybeShot(page, 'bf-result-1280.png', DESKTOP_VIEWPORT);
+    await maybeShot(page, 'bf-result-390.png', MOBILE_VIEWPORT);
+    await resetDesktopViewport(page);
   }
 
   // Verify Support badge on Run details tab for completed blast_formatter run.
@@ -198,7 +224,7 @@ test('real engine: Format Archive matches native losat blast_formatter byte-for-
   await expect(page.getByTestId('verification-badge')).toContainText('Supported');
 
   // 2. Local -db archive (db.asn + in/db/s3.*) with -out report.json.
-  await page.getByTestId('tab-blast-formatter').click();
+  await clickBfTab(page);
   await page.getByTestId('bf-archive-file-input').setInputFiles(join(BF_DIR, 'in/db.asn'));
   const dbDir = join(BF_DIR, 'in/db');
   const dbFiles = readdirSync(dbDir)
@@ -226,8 +252,7 @@ test('real engine: Format Archive matches native losat blast_formatter byte-for-
   await expect(page.getByTestId('bf-run-files-list')).toContainText('in/db/s3.nin');
   await page.getByTestId('bf-outfmt-select').selectOption('12');
   await page.getByTestId('bf-out').fill('report.json');
-  await page.getByTestId('bf-run-losat').click();
-  await expect(page.getByTestId('tool-run-view')).toBeVisible();
+  await runBfAndWait(page);
   await expect(page.getByTestId('tool-tab-file-0')).toContainText('-out report.json');
   const dbWebBytes = await downloadActiveToolOutput(page);
   const dbNative = runNativeBf(['-archive', 'in/db.asn', '-outfmt', '12'], BF_DIR);
@@ -251,18 +276,17 @@ test('real engine: Format Archive matches native losat blast_formatter byte-for-
 
   // Click "Format archive…" -> opens Format Archive tab with session archive preselected.
   await page.getByTestId('format-archive-action').click();
-  await expect(page.getByTestId('bf-panel')).toBeVisible();
+  await expectBfPanelVisible(page);
   await expect(page.getByTestId('bf-source-session')).toBeChecked();
   // Clear previous -out and run files from step 2 so we format the session archive to stdout in outfmt 8.
   await page.getByTestId('bf-out').fill('');
   await page.getByTestId('bf-outfmt-select').selectOption('8');
-  await page.getByTestId('bf-run-losat').click();
-  await expect(page.getByTestId('tool-run-view')).toBeVisible();
-  await expect(page.getByTestId('tool-output-text')).toBeVisible();
+  await runBfAndWait(page);
+  await expectTextOutputVisible(page);
   const roundtripBytes = await downloadActiveToolOutput(page);
   const roundtripNative = runNativeBf(['-archive', '-', '-outfmt', '8'], BF_DIR, Buffer.from(archiveText ?? '', 'utf8'));
   expect(roundtripNative.status).toBe(0);
   expect(sha256(roundtripBytes), 'Search -outfmt 11 -> Format archive… -> outfmt 8').toBe(sha256(roundtripNative.stdout));
 
-  expect(external, 'zero external network requests').toEqual([]);
+  expectNoExternalRequests(external);
 });

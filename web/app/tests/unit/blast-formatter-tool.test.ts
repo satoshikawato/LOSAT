@@ -75,11 +75,15 @@ describe('BlastFormatterDraft', () => {
     return { engine, draft, queued, enqueueToolAll, getSessionArchiveFile };
   }
 
+  async function waitDescribed(draft: BlastFormatterDraft): Promise<void> {
+    await vi.waitFor(() => expect(draft.state.get().description).toBeDefined());
+  }
+
   it('loads -xmlhelp, submits a picked archive file with run directory files, and tracks leave guard', async () => {
     const { draft, queued } = setup();
     expect(holdsBlastFormatterInputs(draft.state.get())).toBe(false);
     draft.ensureLoaded();
-    await vi.waitFor(() => expect(draft.state.get().description).toBeDefined());
+    await waitDescribed(draft);
 
     const archive = new File(['Blast4-archive ::= {}'], 'db.asn');
     const dbFile = new File(['dbbytes'], 's3.nin');
@@ -126,7 +130,7 @@ describe('BlastFormatterDraft', () => {
   it('supports session -outfmt 11 shortcut and refuses -rid via validateTool', async () => {
     const { draft, queued, getSessionArchiveFile } = setup();
     draft.useSessionArchive({ runId: 'r1', runNumber: 1, program: 'blastn', name: 'run_1_blastn.asn' });
-    await vi.waitFor(() => expect(draft.state.get().description).toBeDefined());
+    await waitDescribed(draft);
 
     const res = await draft.submit();
     expect(res.ok).toBe(true);

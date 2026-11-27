@@ -485,6 +485,55 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
     assert!(has(&got_c, &c_dbs.join("v1.pin")), "{got_c:?}");
 }
 
+// Line WQA D26: LOSAT Web's files of a database are those that the command line refuses
+// (`SeqDb::read_paths`): besides the lookup candidates and the alias lists, each volume's
+// component files (missing ones too) and the `MASKLIST` GI-mask files; the `OIDLIST` path beside
+// the first volume only where the one beside the alias file is not a file.
+#[test]
+fn database_lookup_files_hold_the_volume_and_gi_mask_files() {
+    use super::database_lookup_files;
+    let dir = crate::utils::test_dir::TempDir::unique("losat-d26-lookup-files");
+    let vols = dir.join("vols");
+    std::fs::create_dir_all(&vols).unwrap();
+    for ext in ["nin", "nhr", "nsq"] {
+        std::fs::write(vols.join(format!("v.{ext}")), b"x").unwrap();
+    }
+    std::fs::write(dir.join("o.msk"), b"x").unwrap();
+    std::fs::write(
+        dir.join("m.nal"),
+        format!(
+            "TITLE m\nDBLIST v\nOIDLIST o.msk\nMASKLIST {}\n",
+            dir.join("mk").display()
+        ),
+    )
+    .unwrap();
+    let got = database_lookup_files(
+        dir.join("m").as_os_str().as_encoded_bytes(),
+        SeqType::Nucleotide,
+        Some(vols.as_os_str().as_encoded_bytes()),
+    );
+    let has = |path: &std::path::Path| {
+        let want = path.as_os_str().as_encoded_bytes();
+        got.iter().any(|p| p.as_slice() == want)
+    };
+    for file in [
+        dir.join("m.nal"),
+        dir.join("o.msk"),
+        dir.join("index.alx"),
+        vols.join("v.nin"),
+        vols.join("v.nsq"),
+        vols.join("v.nog"),
+        vols.join("v.ndb"),
+        dir.join("mk.gni"),
+        dir.join("mk.gno"),
+    ] {
+        assert!(has(&file), "{} in {got:?}", file.display());
+    }
+    for file in [vols.join("o.msk"), dir.join("mk.gnd"), vols.join("v.pin")] {
+        assert!(!has(&file), "{} in {got:?}", file.display());
+    }
+}
+
 #[test]
 fn v5_compare_seq_id_and_set_ops_match_ncbi_semantics() {
     use super::{compare_seq_id, set_difference_by, set_intersection_by, validate_compare_seqids};

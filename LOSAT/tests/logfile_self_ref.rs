@@ -781,6 +781,74 @@ fn tools_refuse_self_referencing_logfile() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+// Line WQA D26 item 7 (D19b review follow-up): the entries that `windowmasker -mk_counts
+// -fa_list true` reads from its list file are inputs of the run, as the list file is.
+#[test]
+fn windowmasker_fa_list_entries_are_refused() {
+    let dir = fresh_dir("wm-fa-list");
+    let list = dir.join("list.txt");
+    let entry = dir.join("m.fa");
+    fs::write(&list, b"m.fa\n").unwrap();
+    fn argv(log: Option<&str>) -> Vec<&str> {
+        let mut argv = vec![
+            "windowmasker",
+            "-mk_counts",
+            "-fa_list",
+            "true",
+            "-in",
+            "list.txt",
+            "-out",
+            "c.out",
+        ];
+        if let Some(log) = log {
+            argv.extend(["-logfile", log]);
+        }
+        argv
+    }
+    let list_snap = snapshot(&list);
+
+    // A missing entry: refused before `-logfile` creates it.
+    let out = run_in(&dir, &argv(Some("m.fa")), &[]);
+    assert_refused_and_unchanged(
+        &out,
+        &[(&list, &list_snap)],
+        "windowmasker -fa_list missing entry",
+    );
+    assert!(!entry.exists(), "m.fa created");
+    assert!(!dir.join("c.out").exists(), "c.out created");
+
+    // An existing entry: refused, its bytes and mtime unchanged.
+    fs::write(&entry, NUCL_FASTA).unwrap();
+    let entry_snap = snapshot(&entry);
+    let out = run_in(&dir, &argv(Some("m.fa")), &[]);
+    assert_refused_and_unchanged(
+        &out,
+        &[(&entry, &entry_snap), (&list, &list_snap)],
+        "windowmasker -fa_list entry",
+    );
+
+    // The list file itself: refused.
+    let out = run_in(&dir, &argv(Some("list.txt")), &[]);
+    assert_refused_and_unchanged(
+        &out,
+        &[(&entry, &entry_snap), (&list, &list_snap)],
+        "windowmasker -fa_list list file",
+    );
+
+    // Without `-logfile` the run counts the entry.
+    let out = run_in(&dir, &argv(None), &[]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "windowmasker -fa_list without -logfile: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(snapshot(&entry), entry_snap, "m.fa changed");
+    assert!(dir.join("c.out").exists(), "c.out not written");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[cfg(unix)]
 #[test]
 fn symlinks_and_hardlinks_to_inputs_are_refused() {

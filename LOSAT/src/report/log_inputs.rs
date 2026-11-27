@@ -12,13 +12,15 @@
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
+use crate::algorithm::blastn::blast_engine::{
+    index_volume_names, old_style_names, volume_super_header,
+};
 use crate::blastinput::ncbi_environment::{
     log_file_name, log_path, ncbi_cwd, preparse, special_log_target, ApplicationStart, PathRules,
     Preparsed,
 };
-use crate::dbindex::format::{volume_name as mb_index_volume_name, SuperHeader};
 use crate::ncbi_app::args::{scan_argv_kinds, Kind};
-use crate::seqdb::{SearchPath, SeqDb, SeqType};
+use crate::seqdb::{DbReadPaths, SearchPath, SeqDb, SeqType};
 use crate::utils::same_file::same_file_target;
 
 /// Data files that `rpsbproc` reads from its `-d` directory (default `data`).
@@ -40,11 +42,70 @@ pub(crate) struct RunInputs {
     /// BLAST database arguments read by the run (`-db`, `-filtering_db`, `-dblist`, `-seqid_db`,
     /// or `-in`/`-input` with `blastdb` format), passed verbatim to `SeqDb::read_paths`.
     pub(crate) databases: Vec<OsString>,
-    /// Old-style MegaBLAST index names (`blastn -index_name`, or `-db` when `-index_name` is not
-    /// given), resolved via `SearchPath`.
-    pub(crate) mb_indexes: Vec<OsString>,
+    /// The MegaBLAST index that a BLASTN run's loader looks for (`None`: the run reads no index).
+    pub(crate) mb_index: Option<MbIndexNames>,
     /// Explicit `-dbtype` (`prot` or `nucl`) for tools whose database type is not fixed by program.
     pub(crate) dbtype: Option<SeqType>,
+}
+
+/// The names of the MegaBLAST index that NCBI's handler asks the loader for
+/// (`BlastnArgs::megablast_index_name`, cited at `blast_engine::mb_index::megablast_index`).
+#[derive(Debug)]
+pub(crate) enum MbIndexNames {
+    /// The `-index_name` values: the old-style index volumes of each (the loader looks for no
+    /// new-style index then).
+    OldStyle(Vec<OsString>),
+    /// The `-db` values: the new-style index of each database volume (its super header, and the
+    /// index volumes it names), then the old-style index volumes of the value, which the loader
+    /// looks for when the new style fails.
+    NewStyle(Vec<OsString>),
+}
+
+/// What BLASTN's arguments say of the MegaBLAST index (`collect_general_inputs`): `-use_index`,
+/// `-task`, a discontiguous template, an imported search strategy and the `-index_name` values.
+#[derive(Default)]
+struct IndexArgs {
+    use_index: bool,
+    task: Option<OsString>,
+    template: bool,
+    import: bool,
+    index_names: Vec<OsString>,
+}
+
+impl IndexArgs {
+    fn note(&mut self, name: &str, value: Option<&OsStr>) {
+        match (name, value) {
+            ("use_index", Some(value)) => self.use_index = parse_ncbi_bool(value),
+            ("task", Some(value)) => self.task = Some(value.to_os_string()),
+            ("template_type" | "template_length", Some(_)) => self.template = true,
+            ("import_search_strategy", Some(_)) => self.import = true,
+            ("index_name", Some(value)) => push_db_list(&mut self.index_names, value),
+            _ => {}
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3381-3414
+    /// The index that the loader looks for with the `-db` values `dbs`: with `-use_index true`,
+    /// task megablast (the default) and a database, without a template (`megablast_index`
+    /// looks for no index then), the `-index_name` values, else the `-db` values. An imported
+    /// strategy may ask for an index of its own (`ImportRun::mb_index`), which the strategy file
+    /// holds: the names of the command line are compared then whatever its other options say.
+    fn names(self, dbs: Vec<OsString>) -> Option<MbIndexNames> {
+        let asked = self.import
+            || (!dbs.is_empty()
+                && self.use_index
+                && self.task.as_deref().is_none_or(|task| task == "megablast")
+                && !self.template);
+        if !asked {
+            None
+        } else if !self.index_names.is_empty() {
+            Some(MbIndexNames::OldStyle(self.index_names))
+        } else if !dbs.is_empty() {
+            Some(MbIndexNames::NewStyle(dbs))
+        } else {
+            None
+        }
+    }
 }
 
 /// Checks whether `-logfile` `log_name` on `Disk` would open or create an input file read by the
@@ -344,7 +405,11 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
     let is_blastn = program == "blastn";
     let mut reads_formatter_rc = false;
     let mut blastn_dbs: Vec<OsString> = Vec::new();
+    let mut index_args = IndexArgs::default();
     scan_argv_kinds(program, words, |name, kind, value| {
+        if is_blastn {
+            index_args.note(name, value);
+        }
         if name == "html" {
             reads_formatter_rc = true;
             return;
@@ -408,16 +473,11 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
             "filtering_db" if is_blastn => {
                 inputs.add_db(value);
             }
-            "index_name" if is_blastn => {
-                inputs.add_mb_index(value);
-            }
             _ => {}
         }
     });
-    if is_blastn && inputs.mb_indexes.is_empty() {
-        for db in blastn_dbs {
-            inputs.add_mb_index(&db);
-        }
+    if is_blastn {
+        inputs.mb_index = index_args.names(blastn_dbs);
     }
     if reads_formatter_rc {
         push_file(&mut inputs.files, PathBuf::from(".ncbirc"));
@@ -447,23 +507,28 @@ fn matches_any_input(
             return true;
         }
     }
-    if !inputs.databases.is_empty() || !inputs.mb_indexes.is_empty() {
-        let registry_blastdb = start.settings().ok().and_then(|s| s.blastdb);
-        let search_path = SearchPath::from_environment(registry_blastdb.as_deref());
-        let seqtypes = db_seqtypes(program, inputs.dbtype);
-        let is_blastn = program == "blastn";
-        for db in &inputs.databases {
-            if matches_database(candidates, db, seqtypes, &search_path, is_blastn) {
-                return true;
-            }
-        }
-        for index in &inputs.mb_indexes {
-            if matches_mb_index(candidates, index, &search_path) {
-                return true;
-            }
-        }
+    if inputs.databases.is_empty() && inputs.mb_index.is_none() {
+        return false;
     }
-    false
+    let registry_blastdb = start.settings().ok().and_then(|s| s.blastdb);
+    let search_path = SearchPath::from_environment(registry_blastdb.as_deref());
+    let seqtypes = db_seqtypes(program, inputs.dbtype);
+    let mut volumes_of: Vec<(&OsStr, Vec<Vec<u8>>)> = Vec::with_capacity(inputs.databases.len());
+    for db in &inputs.databases {
+        let read = database_read_paths(db, seqtypes, &search_path);
+        if read
+            .files
+            .iter()
+            .any(|file| matches_bytes_path(candidates, file))
+        {
+            return true;
+        }
+        volumes_of.push((db.as_os_str(), read.volumes));
+    }
+    inputs
+        .mb_index
+        .as_ref()
+        .is_some_and(|index| matches_mb_index(candidates, index, &volumes_of, &search_path))
 }
 
 /// The sequence types tried when resolving a BLAST database for `program` (`SeqDb::open_in` /
@@ -484,74 +549,104 @@ fn db_seqtypes(program: &str, dbtype: Option<SeqType>) -> &'static [SeqType] {
     }
 }
 
-/// Whether any candidate `-logfile` path matches an alias file, alias filter list, GI-mask file,
-/// volume component file, or (for `blastn`) new-style MegaBLAST index file of BLAST database
-/// `db_name` resolved through `SeqDb::read_paths`. Databases that cannot be resolved fail to open
-/// in the run itself and are not refused here.
-fn matches_database(
-    candidates: &[PathBuf],
+/// The files that reading BLAST database `db_name` checks or opens (`SeqDb::read_paths`) for each
+/// of `seqtypes` that the run tries, in the order and with the rule of `SeqDb::open_guessing`,
+/// and the volumes of the type that opens. A database that does not resolve gives the files
+/// that its resolution checked, which `-logfile` would create and the run then read.
+fn database_read_paths(
     db_name: &OsStr,
     seqtypes: &[SeqType],
     search_path: &SearchPath,
-    is_blastn: bool,
-) -> bool {
+) -> DbReadPaths {
     let db_bytes = crate::utils::os_bytes::os_str_bytes(db_name);
-    let Some(read_paths) = seqtypes
-        .iter()
-        .find_map(|&seqtype| SeqDb::read_paths(db_bytes.as_ref(), seqtype, search_path).ok())
-    else {
-        return false;
-    };
-    for file in &read_paths.files {
-        if matches_bytes_path(candidates, file) {
-            return true;
+    let mut files = Vec::new();
+    let volumes = SeqDb::open_guessing(seqtypes, |seqtype| {
+        let read = SeqDb::read_paths(db_bytes.as_ref(), seqtype, search_path);
+        files.extend(read.files);
+        match read.error {
+            None => Ok(read.volumes),
+            Some(error) => Err(error),
         }
+    })
+    .unwrap_or_default();
+    DbReadPaths {
+        volumes,
+        files,
+        error: None,
     }
-    if is_blastn && matches_volume_mb_indexes(candidates, &read_paths.volumes, search_path) {
-        return true;
-    }
-    false
 }
 
-/// Whether any candidate `-logfile` path matches a new-style MegaBLAST index super header
-/// (`<volume>.shd`) or index volume (`<volume>.NN.idx`) of any resolved volume in `volumes`.
-fn matches_volume_mb_indexes(
+/// Whether any candidate `-logfile` path matches a file of the MegaBLAST index that the loader
+/// looks for (`index`): the old-style index volumes of each name, or the new-style index of the
+/// volumes of each `-db` value (`volumes_of`, from `database_read_paths`) and then its
+/// old-style index volumes.
+fn matches_mb_index(
+    candidates: &[PathBuf],
+    index: &MbIndexNames,
+    volumes_of: &[(&OsStr, Vec<Vec<u8>>)],
+    search_path: &SearchPath,
+) -> bool {
+    match index {
+        MbIndexNames::OldStyle(names) => names
+            .iter()
+            .any(|name| matches_old_style_index(candidates, name, search_path)),
+        MbIndexNames::NewStyle(dbs) => dbs.iter().any(|db| {
+            let volumes = volumes_of
+                .iter()
+                .find(|(name, _)| *name == db.as_os_str())
+                .map_or(&[][..], |(_, volumes)| volumes.as_slice());
+            matches_new_style_index(candidates, volumes, search_path)
+                || matches_old_style_index(candidates, db, search_path)
+        }),
+    }
+}
+
+/// Whether any candidate `-logfile` path matches a file of the new-style index of the database
+/// `volumes` that the loader reads (`AddIndexInfo`): each volume's super header (`<volume>.shd`),
+/// and where it loads, the index volumes it names along `search_path` up to the first one not
+/// found (`volume_super_header`, `index_volume_names`). A volume without a super header has no
+/// index volume that the loader reads.
+fn matches_new_style_index(
     candidates: &[PathBuf],
     volumes: &[Vec<u8>],
     search_path: &SearchPath,
 ) -> bool {
     for volume in volumes {
-        let shd = [volume.as_slice(), b".shd"].concat();
-        let shd_path = crate::utils::os_bytes::path_of_bytes(&shd);
-        if matches_candidate(candidates, &shd_path) {
+        let (shd, header) = volume_super_header(volume);
+        if matches_bytes_path(candidates, &shd) {
             return true;
         }
-        let vol_count = SuperHeader::load(&shd_path).map_or(100u32, |h| h.num_vol.min(10_000));
-        for vol in 0..vol_count {
-            let idx = mb_index_volume_name(volume, vol);
-            if matches_bytes_path(candidates, &idx)
-                || search_path
-                    .resolve_file(&idx)
-                    .is_some_and(|resolved| matches_bytes_path(candidates, &resolved))
-            {
+        let Some(header) = header else {
+            continue;
+        };
+        for name in index_volume_names(volume, &header) {
+            let resolved = search_path.resolve_file(&name);
+            if matches_bytes_path(candidates, resolved.as_deref().unwrap_or(&name)) {
                 return true;
+            }
+            if resolved.is_none() {
+                break;
             }
         }
     }
     false
 }
 
-/// Whether any candidate `-logfile` path matches an old-style MegaBLAST index volume
-/// (`<base>.NN.idx`, 00..=99) resolved through `search_path`.
-fn matches_mb_index(candidates: &[PathBuf], index_name: &OsStr, search_path: &SearchPath) -> bool {
+/// Whether any candidate `-logfile` path matches an old-style MegaBLAST index volume that the
+/// loader looks for along `search_path` for the value `index_name` (`old_style_names`: every
+/// volume of each name's range, `<base>.NN.idx`, 00 to 99 by default); the loader refuses a range
+/// that it never finishes before it looks for that name's volumes.
+fn matches_old_style_index(
+    candidates: &[PathBuf],
+    index_name: &OsStr,
+    search_path: &SearchPath,
+) -> bool {
     let bytes = crate::utils::os_bytes::os_str_bytes(index_name);
-    for token in bytes.split(|&b| b == b' ').filter(|s| !s.is_empty()) {
-        let base = token.split(|&b| b == b',').next().unwrap_or(token);
-        if base.is_empty() {
-            continue;
-        }
-        for vol in 0..100u32 {
-            let file = mb_index_volume_name(base, vol);
+    for name in old_style_names(&bytes) {
+        let Some(volumes) = name.volume_files() else {
+            return false;
+        };
+        for (_, file) in volumes {
             let target = search_path.resolve_file(&file).unwrap_or(file);
             if matches_bytes_path(candidates, &target) {
                 return true;
@@ -583,10 +678,6 @@ impl RunInputs {
 
     fn add_db(&mut self, value: &OsStr) {
         push_db_list(&mut self.databases, value);
-    }
-
-    fn add_mb_index(&mut self, value: &OsStr) {
-        push_db_list(&mut self.mb_indexes, value);
     }
 
     fn set_dbtype(&mut self, value: &OsStr) {

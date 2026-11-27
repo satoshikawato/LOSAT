@@ -59,10 +59,24 @@ fn read_num_vols(path: &Path) -> Option<i32> {
     blob.read_i32().ok()
 }
 
+/// The data file of volume `vol` of the GI-mask `name` whose index names `num_vols` volumes, as
+/// `x_Open` names it (cited at `GiMaskFiles::open`): `<name>.gnd` for one volume, else
+/// `<name>.NN.gnd` (`vol / 10` then `vol % 10`; the big-endian extension on a big-endian host).
+fn data_file_name(name: &[u8], num_vols: i32, vol: u32) -> Vec<u8> {
+    let extension = if num_vols == 1 {
+        EXTENSIONS[2].to_string()
+    } else {
+        format!("{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2])
+    };
+    [name, b".", extension.as_bytes()].concat()
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.cpp:137-178
 /// Collects the index, offset, and data file paths that `GiMaskFiles::open` reads for the
-/// GI-mask `name` along `search` (`<name>.gni`/`.gno`/`.gnd` or `<name>.NN.gnd`, or the
-/// big-endian equivalents on big-endian hosts). When a file does not exist yet on `search`, the
+/// GI-mask `name` along `search` (`<name>.gni`/`.gno`, then the data files of the volumes that
+/// the index names, [`data_file_name`], up to the first that `search` does not hold; the
+/// big-endian equivalents on big-endian hosts). The data files are read only after an index that
+/// reads, so without one none is collected. When a file does not exist yet on `search`, the
 /// relative file name is recorded so `-logfile` cannot create it.
 pub(super) fn read_paths(
     name: &[u8],
@@ -70,8 +84,6 @@ pub(super) fn read_paths(
     out: &mut std::collections::BTreeSet<Vec<u8>>,
 ) {
     let file_name = |extension: &str| [name, b".", extension.as_bytes()].concat();
-    let vol_data_file =
-        |vol: u32| file_name(&format!("{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2]));
     let index_file = file_name(EXTENSIONS[0]);
     let index_resolved = search.resolve_file(&index_file);
     out.insert(index_resolved.clone().unwrap_or(index_file));
@@ -81,23 +93,21 @@ pub(super) fn read_paths(
     };
     push_or_raw(file_name(EXTENSIONS[1]));
 
+    // `open` reads the data files in order and stops at the first that the search path does not
+    // hold, which it checked.
     let num_vols = index_resolved
         .as_deref()
-        .and_then(|path| read_num_vols(&path_of_bytes(path)));
-    match num_vols {
-        Some(n) if n > 1 => {
-            for vol in 0..n.min(10_000) as u32 {
-                push_or_raw(vol_data_file(vol));
+        .and_then(|path| read_num_vols(&path_of_bytes(path)))
+        .unwrap_or(0);
+    for vol in 0..num_vols.max(0) as u32 {
+        let file = data_file_name(name, num_vols, vol);
+        match search.resolve_file(&file) {
+            Some(resolved) => {
+                out.insert(resolved);
             }
-        }
-        other => {
-            push_or_raw(file_name(EXTENSIONS[2]));
-            if other != Some(1) {
-                for vol in 0..100u32 {
-                    if let Some(resolved) = search.resolve_file(&vol_data_file(vol)) {
-                        out.insert(resolved);
-                    }
-                }
+            None => {
+                out.insert(file);
+                break;
             }
         }
     }
@@ -505,11 +515,7 @@ impl GiMaskFiles {
         let fields = read_fields(&index)?;
         let mut data = Vec::new();
         for vol in 0..fields.num_vols.max(0) {
-            let file = if fields.num_vols == 1 {
-                file_name(EXTENSIONS[2])
-            } else {
-                file_name(&format!("{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2]))
-            };
+            let file = data_file_name(name, fields.num_vols, vol as u32);
             let Some(path) = search.resolve_file(&file) else {
                 return Err(SeqDbError::MemoryMap(super::oid_list::not_a_file(b"")));
             };

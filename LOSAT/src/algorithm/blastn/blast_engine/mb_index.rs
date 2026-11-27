@@ -395,9 +395,7 @@ impl Loader<'_> {
         vol_name: &[u8],
         dbnseq: u32,
     ) -> Result<Option<Vec<(Vec<u8>, u32)>>, Failed> {
-        let shd_bytes = [vol_name, b".shd"].concat();
-        let Some(shdr) = SuperHeader::load(&crate::utils::os_bytes::path_of_bytes(&shd_bytes))
-        else {
+        let Some(shdr) = volume_super_header(vol_name).1 else {
             return Ok(None);
         };
         if shdr.num_seq != dbnseq {
@@ -415,8 +413,8 @@ impl Loader<'_> {
         }
         let mut names = Vec::new();
         let mut total_idxvol_oids: u64 = 0;
-        for i in 0..shdr.num_vol {
-            let Some(name) = self.database.resolve_db_path(&volume_name(vol_name, i)) else {
+        for candidate in index_volume_names(vol_name, &shdr) {
+            let Some(name) = self.database.resolve_db_path(&candidate) else {
                 self.error(
                     [
                         b"index volume  not resolved; index will not be used for ".as_slice(),
@@ -484,48 +482,21 @@ impl Loader<'_> {
     /// an exception when none is found.
     fn old_style(&mut self, indexnames: &[u8]) -> Result<Loaded, Failed> {
         let mut index_names: Vec<Vec<u8>> = Vec::new();
-        if !indexnames.is_empty() {
-            let mut dbnames = split_old_style_names(indexnames);
-            dbnames.sort_by(|a, b| {
-                crate::seqdb::SeqDb::compare_volume_paths(
-                    &crate::utils::os_bytes::path_of_bytes(a),
-                    &crate::utils::os_bytes::path_of_bytes(b),
-                )
-            });
-            for indexname in &dbnames {
-                let (index_base, start_vol, stop_vol) = parse_old_style_name(indexname);
-                if start_vol > stop_vol {
-                    continue;
-                }
-                // NCBI's loop counts `i` (a `long`) up by one from `start_vol` while `i` cast to
-                // `unsigned long` is at most `stop_vol`: a last volume of `ULONG_MAX`, or one
-                // past `LONG_MAX` after a first one below it, never ends the loop (the `long`
-                // overflows).
-                if stop_vol == u64::MAX
-                    || (stop_vol > i64::MAX as u64 && start_vol <= i64::MAX as u64)
-                {
-                    return Err(Failed::Refused(format!(
-                        "an -index_name range of volumes that NCBI's loader does not finish ('{}')",
-                        String::from_utf8_lossy(indexname)
-                    )));
-                }
-                let mut last_i: i64 = -1;
-                let mut i = start_vol as i64;
-                while (i as u64) <= stop_vol {
-                    let number = if i >= 0 {
-                        format!(".{i:02}.idx")
-                    } else {
-                        format!(".{i}.idx")
-                    };
-                    let candidate = [index_base.as_slice(), number.as_bytes()].concat();
-                    if let Some(name) = self.database.resolve_db_path(&candidate) {
-                        if last_i + 1 < i {
-                            self.posts.push(Post::Gaps(last_i + 1, i));
-                        }
-                        index_names.push(name);
-                        last_i = i;
+        for name in old_style_names(indexnames) {
+            let Some(volumes) = name.volume_files() else {
+                return Err(Failed::Refused(format!(
+                    "an -index_name range of volumes that NCBI's loader does not finish ('{}')",
+                    String::from_utf8_lossy(&name.text)
+                )));
+            };
+            let mut last_i: i64 = -1;
+            for (i, candidate) in volumes {
+                if let Some(found) = self.database.resolve_db_path(&candidate) {
+                    if last_i + 1 < i {
+                        self.posts.push(Post::Gaps(last_i + 1, i));
                     }
-                    i += 1;
+                    index_names.push(found);
+                    last_i = i;
                 }
             }
         }
@@ -626,6 +597,94 @@ fn min_index_word_size(fname: &Path) -> MinWordSize {
     match read.ok().and_then(|_| Header::read(&bytes)) {
         Some(header) => MinWordSize::Read(header.min_word_size()),
         None => MinWordSize::Unreadable,
+    }
+}
+
+/// The super header file `<volume>.shd` of the database volume `vol_name` that `AddIndexInfo`
+/// reads (cited at `Loader::add_index_info`), and its header when it loads.
+pub(crate) fn volume_super_header(vol_name: &[u8]) -> (Vec<u8>, Option<SuperHeader>) {
+    let shd = [vol_name, b".shd"].concat();
+    let header = SuperHeader::load(&crate::utils::os_bytes::path_of_bytes(&shd));
+    (shd, header)
+}
+
+/// The index volumes `<volume>.NN.idx` that `AddIndexInfo` looks for along the search path for
+/// the database volume `vol_name` whose super header is `header`, in its order (it stops at the
+/// first one not found).
+pub(crate) fn index_volume_names<'a>(
+    vol_name: &'a [u8],
+    header: &SuperHeader,
+) -> impl Iterator<Item = Vec<u8>> + 'a {
+    (0..header.num_vol).map(move |i| volume_name(vol_name, i))
+}
+
+/// One name of `CIndexedDb_Old` (`old_style_names`): its text, its base and the first and last
+/// volumes of its range (`parse_old_style_name`).
+pub(crate) struct OldStyleName {
+    text: Vec<u8>,
+    base: Vec<u8>,
+    first: u64,
+    last: u64,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:944-1028
+/// The names of `indexnames` that `CIndexedDb_Old` reads, in its order (`SeqDB_CompareVolume` of
+/// the names that `split_old_style_names` gives; none for an empty value): the run's loader
+/// (`Loader::old_style`) and the check of `-logfile` against the run's inputs
+/// (`report::log_inputs`) read the same names.
+pub(crate) fn old_style_names(indexnames: &[u8]) -> Vec<OldStyleName> {
+    if indexnames.is_empty() {
+        return Vec::new();
+    }
+    let mut dbnames = split_old_style_names(indexnames);
+    dbnames.sort_by(|a, b| {
+        crate::seqdb::SeqDb::compare_volume_paths(
+            &crate::utils::os_bytes::path_of_bytes(a),
+            &crate::utils::os_bytes::path_of_bytes(b),
+        )
+    });
+    dbnames
+        .into_iter()
+        .map(|text| {
+            let (base, first, last) = parse_old_style_name(&text);
+            OldStyleName {
+                text,
+                base,
+                first,
+                last,
+            }
+        })
+        .collect()
+}
+
+impl OldStyleName {
+    /// The index volumes `<base>.NN.idx` that NCBI's loop looks for along the search path, with
+    /// their numbers, in order (none for a first volume past the last); `None` for a range that
+    /// the loop never finishes. NCBI's loop counts `i` (a `long`) up by one from the first volume
+    /// while `i` cast to `unsigned long` is at most the last: a last volume of `ULONG_MAX`, or one
+    /// past `LONG_MAX` after a first one below it, never ends the loop (the `long` overflows). A
+    /// number below 0 (a first volume past `LONG_MAX`) is written without the two digits.
+    pub(crate) fn volume_files(&self) -> Option<impl Iterator<Item = (i64, Vec<u8>)> + '_> {
+        let (first, last) = (self.first, self.last);
+        if first <= last
+            && (last == u64::MAX || (last > i64::MAX as u64 && first <= i64::MAX as u64))
+        {
+            return None;
+        }
+        let mut i = first as i64;
+        Some(std::iter::from_fn(move || {
+            if (i as u64) > last {
+                return None;
+            }
+            let number = if i >= 0 {
+                format!(".{i:02}.idx")
+            } else {
+                format!(".{i}.idx")
+            };
+            let item = (i, [self.base.as_slice(), number.as_bytes()].concat());
+            i += 1;
+            Some(item)
+        }))
     }
 }
 

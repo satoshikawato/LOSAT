@@ -1527,6 +1527,80 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
 /// `registered_run_files` uses one reader regardless of whether the argv parses (line WQA D19
 /// round R1): the same argv with and without an unknown option and with `-h` yields the same
 /// registered names for blastn (with `-window_masker_taxid`), tblastx, and psiblast.
+// Line WQA D26 item 2: LOSAT Web refuses the files of a `-db` that the command line refuses (one
+// producer, `SeqDb::read_paths`): besides the lookup candidates, a missing component file of a
+// volume and the GI-mask files of the alias file's `MASKLIST`.
+#[test]
+fn the_search_receiver_refuses_the_databases_files_as_the_command_line() {
+    struct CleanDir(std::path::PathBuf);
+    impl Drop for CleanDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let tmp_dir = std::env::temp_dir().join(format!("losat-d26-search-{}", std::process::id()));
+    let _clean = CleanDir(tmp_dir.clone());
+    if tmp_dir.exists() {
+        std::fs::remove_dir_all(&tmp_dir).unwrap();
+    }
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+    let fixture = format!(
+        "{}/../../LOSAT/tests/db_search/arch_tbx_snucl",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    for ext in ["nhr", "nin", "nsq"] {
+        std::fs::copy(format!("{fixture}.{ext}"), tmp_dir.join(format!("v.{ext}"))).unwrap();
+    }
+    std::fs::write(
+        tmp_dir.join("m.nal"),
+        format!(
+            "TITLE m\nDBLIST v\nMASKLIST {}\n",
+            tmp_dir.join("mk").display()
+        ),
+    )
+    .unwrap();
+    let db = tmp_dir.join("m");
+    let db = db.to_str().unwrap();
+    let words = |log: &str| -> Vec<String> {
+        [
+            "blastn",
+            "-task",
+            "blastn",
+            "-query",
+            "q.fa",
+            "-db",
+            db,
+            "-outfmt",
+            "6",
+            "-num_threads",
+            "1",
+            "-logfile",
+            log,
+        ]
+        .map(str::to_string)
+        .to_vec()
+    };
+    for name in ["v.nog", "v.nhd", "v.ndb", "mk.gni", "mk.gno"] {
+        let path = tmp_dir.join(name);
+        let path = path.to_str().unwrap();
+        let owned = words(path);
+        let words: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let want = format!(
+            "a -logfile file '{path}' that is a file of the run's directory (LOSAT Web reads the \
+             run's files and writes none of them) is not supported by LOSAT's BLASTN"
+        );
+        assert_eq!(validate(&words).unwrap_err(), want, "{name}: validate");
+        assert_eq!(run_db_of(&words).0.unwrap_err(), want, "{name}: run");
+    }
+    // Control: a name that the run does not read is the run's log, with the search's hits.
+    let owned = words("run.log");
+    let control: Vec<&str> = owned.iter().map(String::as_str).collect();
+    validate(&control).unwrap();
+    let (res, streams) = run_db_of(&control);
+    res.unwrap();
+    assert!(!stream_text(&streams, 6).is_empty(), "control returns hits");
+}
+
 #[test]
 fn registered_run_files_uses_one_reader_regardless_of_parse() {
     let taxid_path = format!("{}/9606/wmasker.obinary", crate::files::WINDOW_MASKER_PATH);

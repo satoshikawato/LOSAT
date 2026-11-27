@@ -573,7 +573,7 @@ fn destroy(built: &Built, out_db_name: &[u8], op_mode: OpMode) {
     };
     if !built.done {
         for name in &built.vol_names {
-            for extension in ["rps", "loo", "aux", "freq"] {
+            for extension in crate::seqdb::rps::RPS_EXTENSIONS {
                 remove(name, extension);
             }
             if op_mode == OpMode::Delta {

@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "m7",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "in/m7.faa",
+  "number-of-letters": 119,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-25T05:50:00",
+  "number-of-volumes": 1,
+  "bytes-total": 684,
+  "bytes-to-cache": 219,
+  "files": [
+    "m7.phr",
+    "m7.pin",
+    "m7.pog",
+    "m7.psd",
+    "m7.psi",
+    "m7.psq"
+  ]
+}

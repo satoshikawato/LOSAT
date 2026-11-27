@@ -138,72 +138,34 @@ fn write_scientific_ncbi<W: Write + ?Sized>(
     writer.write_all(formatted.as_bytes())
 }
 
-/// Format E-value exactly as NCBI BLAST does (base GetScoreString logic).
+/// A number as the `write_*` function `write` writes it, as a `String`: the one form of NCBI's
+/// `GetScoreString` texts (`write_evalue_ncbi_base`, `write_evalue_ncbi_tabular`,
+/// `write_bitscore_ncbi`), which the writers of tabular rows write in place.
+fn formatted(write: impl FnOnce(&mut Vec<u8>) -> io::Result<()>) -> String {
+    let mut out = Vec::with_capacity(16);
+    write(&mut out).expect("a Vec takes every byte");
+    String::from_utf8(out).expect("ASCII")
+}
+
+/// Format E-value exactly as NCBI BLAST does (base GetScoreString logic): `write_evalue_ncbi_base`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-983
 pub fn format_evalue_ncbi(e_value: f64) -> String {
-    if e_value == 0.0 || e_value < 1.0e-180 {
-        // Formats as "0.0" matching NCBI's threshold below 1e-180.
-        "0.0".to_string()
-    } else if e_value < 1.0e-99 {
-        // NCBI: "%2.0le" -> e.g., "1e-100"
-        format_scientific_ncbi(e_value, 0)
-    } else if e_value < 0.0009 {
-        // NCBI: "%3.0le" -> e.g., "1e-50"
-        format_scientific_ncbi(e_value, 0)
-    } else if e_value < 0.1 {
-        // NCBI: "%4.3lf" -> e.g., "0.005"
-        format!("{:.3}", e_value)
-    } else if e_value < 1.0 {
-        // NCBI: "%3.2lf" -> e.g., "0.50"
-        format!("{:.2}", e_value)
-    } else if e_value < 10.0 {
-        // NCBI: "%2.1lf" -> e.g., "5.5"
-        format!("{:.1}", e_value)
-    } else {
-        // NCBI: "%2.0lf" -> e.g., "100"
-        format!("{:.0}", e_value)
-    }
+    formatted(|out| write_evalue_ncbi_base(out, e_value))
 }
 
-/// Format E-value exactly as NCBI BLAST does for tabular output.
+/// Format E-value exactly as NCBI BLAST does for tabular output: `write_evalue_ncbi_tabular`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1332-1337
 pub fn format_evalue_ncbi_tabular(e_value: f64) -> String {
-    if e_value == 0.0 || e_value < 1.0e-180 {
-        "0.0".to_string()
-    } else if e_value < 0.0009 {
-        format_scientific_ncbi(e_value, 2)
-    } else if e_value.is_nan() {
-        // `GetScoreString`'s last form (`%2.0lf`) of a NaN, which no comparison above takes:
-        // glibc's `-nan` where its sign bit is set (the NaN of NCBI's reader of `NOT-A-NUMBER` in
-        // an archive, blast_formatter), else `nan`.
-        if e_value.is_sign_negative() {
-            "-nan"
-        } else {
-            "nan"
-        }
-        .to_string()
-    } else {
-        format_evalue_ncbi(e_value)
-    }
+    formatted(|out| write_evalue_ncbi_tabular(out, e_value))
 }
 
-/// Format bit score exactly as NCBI BLAST does
+/// Format bit score exactly as NCBI BLAST does: `write_bitscore_ncbi`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:986-994
 pub fn format_bitscore_ncbi(bit_score: f64) -> String {
-    if bit_score > 99999.0 {
-        // NCBI: "%5.3le" -> scientific notation
-        format_scientific_ncbi(bit_score, 3)
-    } else if bit_score > 99.9 {
-        // NCBI: "%3.0ld" with `bit_score` cast to `long` truncates toward zero before formatting,
-        // in a field of 3 (a score in (99.9, 100) is " 99").
-        format!("{:3}", bit_score as i64)
-    } else {
-        // NCBI: "%4.1lf" -> one decimal place
-        format!("{:4.1}", bit_score)
-    }
+    formatted(|out| write_bitscore_ncbi(out, bit_score))
 }
 
 /// The total bit score of a description table row (`total_bit_string`), which `GetScoreString`
@@ -223,7 +185,7 @@ pub fn format_total_bitscore_ncbi(total_bit_score: f64) -> String {
 /// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-441
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2388-2401
 pub fn format_percent_identity_ncbi(
-    num_ident: usize,
+    num_ident: i64,
     alignment_length: usize,
     precision: usize,
 ) -> String {
@@ -232,8 +194,9 @@ pub fn format_percent_identity_ncbi(
 }
 
 /// The value that `format_percent_identity_ncbi` prints, not rounded: the expression of
-/// `x_PrintPercentIdentical` (c++/include/objtools/align_format/tabular.hpp:437-442, above).
-pub fn percent_identity_ncbi(num_ident: usize, alignment_length: usize) -> f64 {
+/// `x_PrintPercentIdentical` (c++/include/objtools/align_format/tabular.hpp:437-442, above), of
+/// NCBI's `int` count (-1 where blast_formatter's BLASTN Seq-align has none, `GetAlnScores`).
+pub fn percent_identity_ncbi(num_ident: i64, alignment_length: usize) -> f64 {
     if alignment_length > 0 {
         (num_ident as f64 / alignment_length as f64) * 100.0
     } else {
@@ -241,10 +204,15 @@ pub fn percent_identity_ncbi(num_ident: usize, alignment_length: usize) -> f64 {
     }
 }
 
-/// Write E-value exactly as NCBI BLAST does (base GetScoreString logic).
+/// Write E-value exactly as NCBI BLAST does (base GetScoreString logic). A NaN, which no
+/// comparison takes, gets the last form (`%2.0lf`): glibc's `-nan` or `nan` (`write_nan`); the
+/// finite values take the comparisons they always took.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-983
-fn write_evalue_ncbi_base<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io::Result<()> {
+pub(crate) fn write_evalue_ncbi_base<W: Write + ?Sized>(
+    writer: &mut W,
+    e_value: f64,
+) -> io::Result<()> {
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
     } else if e_value < 0.0009 {
@@ -257,15 +225,20 @@ fn write_evalue_ncbi_base<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io
         write!(writer, "{:.2}", e_value)
     } else if e_value < 10.0 {
         write!(writer, "{:.1}", e_value)
-    } else {
+    } else if e_value >= 10.0 {
         write!(writer, "{:.0}", e_value)
+    } else {
+        write_nan(writer, e_value, 2)
     }
 }
 
 /// Write E-value exactly as NCBI BLAST does for tabular output.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1332-1337
-fn write_evalue_ncbi_tabular<W: Write + ?Sized>(writer: &mut W, e_value: f64) -> io::Result<()> {
+pub(crate) fn write_evalue_ncbi_tabular<W: Write + ?Sized>(
+    writer: &mut W,
+    e_value: f64,
+) -> io::Result<()> {
     if e_value == 0.0 || e_value < 1.0e-180 {
         write!(writer, "0.0")
     } else if e_value < 0.0009 {
@@ -275,17 +248,41 @@ fn write_evalue_ncbi_tabular<W: Write + ?Sized>(writer: &mut W, e_value: f64) ->
     }
 }
 
-/// Write bit score exactly as NCBI BLAST does.
+/// Write bit score exactly as NCBI BLAST does: `%5.3le` above 99999, `%3.0ld` of the `long` above
+/// 99.9, `%4.1lf` otherwise. The comparisons are NCBI's turned around (`<= 99.9` first, the most
+/// common), so that what no comparison takes is the NaN, which `%4.1lf` writes as glibc's `-nan`
+/// or ` nan` (`write_nan`); plus infinity takes `%5.3le`, `  inf`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:986-993
-fn write_bitscore_ncbi<W: Write + ?Sized>(writer: &mut W, bit_score: f64) -> io::Result<()> {
-    if bit_score > 99999.0 {
-        write_scientific_ncbi(writer, bit_score, 3)
-    } else if bit_score > 99.9 {
-        write!(writer, "{:3}", bit_score as i64)
-    } else {
+pub(crate) fn write_bitscore_ncbi<W: Write + ?Sized>(
+    writer: &mut W,
+    bit_score: f64,
+) -> io::Result<()> {
+    if bit_score <= 99.9 {
         write!(writer, "{:4.1}", bit_score)
+    } else if bit_score <= 99999.0 {
+        // NCBI: "%3.0ld" with `bit_score` cast to `long` truncates toward zero before formatting,
+        // in a field of 3 (a score in (99.9, 100) is " 99").
+        write!(writer, "{:3}", bit_score as i64)
+    } else if bit_score < f64::INFINITY {
+        write_scientific_ncbi(writer, bit_score, 3)
+    } else if bit_score > 99999.0 {
+        writer.write_all(b"  inf")
+    } else {
+        write_nan(writer, bit_score, 4)
     }
+}
+
+/// glibc's `printf` of a NaN (`%f` and `%e`) in a field of `width`: `-nan` where its sign bit is
+/// set (the NaN of NCBI's reader of `NOT-A-NUMBER` in an archive, blast_formatter), else `nan`,
+/// right-aligned.
+fn write_nan<W: Write + ?Sized>(writer: &mut W, value: f64, width: usize) -> io::Result<()> {
+    let text = if value.is_sign_negative() {
+        "-nan"
+    } else {
+        "nan"
+    };
+    write!(writer, "{text:>width$}")
 }
 
 /// The twelve fields of a default tabular row (`qaccver saccver pident length mismatch gapopen
@@ -318,7 +315,7 @@ pub fn write_hit_fields_bytes<W: Write + ?Sized>(
     writer.write_all(subject_id)?;
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-441
     let identity_fmt = if config.ncbi_evalue_format {
-        format_percent_identity_ncbi(num_ident, length, config.identity_decimals)
+        format_percent_identity_ncbi(num_ident as i64, length, config.identity_decimals)
     } else {
         format!("{:.prec$}", identity, prec = config.identity_decimals)
     };

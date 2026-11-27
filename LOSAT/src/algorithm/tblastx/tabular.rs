@@ -460,7 +460,7 @@ pub(super) fn write_tblastx_tabular(
                     gap_opens: 0,
                     gaps: 0,
                     // Counted again from the rows when they are read (the writer).
-                    num_ident: engine_ident,
+                    num_ident: engine_ident as i64,
                     q_frame,
                     s_frame,
                     rows: rows_read.then_some((qrow.as_slice(), srow.as_slice())),

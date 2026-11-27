@@ -349,7 +349,7 @@ fn tabular_hsp<'r>(
         length: hsp.length,
         gap_opens: hsp.gapopen,
         gaps,
-        num_ident: hsp.num_ident,
+        num_ident: hsp.num_ident as i64,
         q_frame: 1,
         s_frame: if hsp.s_start > hsp.s_end { -1 } else { 1 },
         rows,
@@ -364,24 +364,16 @@ fn tabular_hsp<'r>(
 }
 
 /// `qcovus` of one subject's HSPs (in the Seq-align order) for a query of `query_length`:
-/// `GetUniqSeqCoverage` in percent as `InsertSubjectScores` keeps it, -1 (`N/A`) when nothing is
-/// covered.
+/// `GetUniqSeqCoverage` in percent as `InsertSubjectScores` keeps it (`coverage_percent`, the rule
+/// of `qcovs`), -1 (`N/A`) when nothing is covered. The covered length is at most the query's: a
+/// query gap's wrapped `TSeqPos` range is empty (range.hpp:158-166), so its `int` is the length.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:646-657
 fn uniq_subject_coverage(hsps: &[BlastnHsp], query_length: usize) -> i32 {
     if query_length == 0 {
         return -1;
     }
-    // `uniq_coverage`, an `int`, of the `TSeqPos` length.
-    let covered = uniq_seq_coverage(hsps) as i32;
-    if covered == 0 {
-        return -1;
-    }
-    let mut pct = 100.0 * f64::from(covered) / query_length as f64;
-    if pct < 99.0 {
-        pct += 0.5;
-    }
-    pct as i32
+    coverage_percent(uniq_seq_coverage(hsps) as usize, query_length)
 }
 
 /// NCBI's `CRange<TSeqPos>`: `from` and `to_open` as `TSeqPos` (unsigned 32-bit, wrapping).

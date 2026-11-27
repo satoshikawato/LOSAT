@@ -509,7 +509,7 @@ pub(super) fn write_tblastn_tabular(
                         engine_ident
                     } else {
                         payload.report_num_ident
-                    },
+                    } as i64,
                     q_frame: 0,
                     s_frame,
                     rows: rows_read.then_some((qrow.as_bytes(), srow.as_bytes())),

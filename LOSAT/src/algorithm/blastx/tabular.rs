@@ -755,7 +755,7 @@ pub(super) fn write_blastx_tabular(
                                 length: a.qseq.len(),
                                 gap_opens: a.gap_opens,
                                 gaps: a.gaps,
-                                num_ident: hsp.identity,
+                                num_ident: hsp.identity as i64,
                                 q_frame: i32::from(a.frame),
                                 s_frame: 0,
                                 rows,

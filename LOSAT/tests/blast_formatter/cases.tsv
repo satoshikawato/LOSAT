@@ -5,6 +5,7 @@
 # Rows from of8_delta on (line RG item F3 PR 1, agent C6 of ad-RG-F3-5, 2026-11-23): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC6.py, every NCBI run under unshare -rn. in/delta.asn and in/phi.asn: the first object of in/ps.asn with its service changed to delta_blast and phi (review of PR 1, F3/review/c_tmp/scripts); in/tax_both.asn and in/tx5_both.asn: in/db.asn with a taxid list and a negative taxid list, on in/db/s3 and on in/txdb/t (makeblastdb -in in/s3.fa -dbtype nucl -taxid 9606 -blastdb_version 5, in the review); in/bad1.asn and in/bad2.asn: in/batch.asn with a byte 0x07 in a query title of its first and of its second object (the line of the post counts over the file). in/real_pinf.asn and in/real_nan.asn (tools/fixC6b.py): in/bn.asn with its first e-value PLUS-INFINITY and NOT-A-NUMBER; refused_real_12 is LOSAT's refusal by name of such a value (NCBI stops at it in JSON); NCBI writes it in ASN.1 binary, as LOSAT does since line RG-F3's PR 2 (row real_pinf_9, named refused_real_9 until agent C9 of ad-RG-F3-10, 2026-11-24; NCBI's bytes unchanged).
 # Rows from opt_bho09_8 on (line RG item F3 PR 1, agent C7 of ad-RG-F3-5, 2026-11-24): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC7.py, every NCBI run under unshare -rn. in/opt_<name>.asn is in/bn.asn with one option of its search added or changed to a value that a search program's option check refuses (BestHitOverhang 0.9, BestHitScoreEdge -1, Culling 1 with best hit, Culling -1, MaxHspsPerSubject -1, PercentIdentity 150, QueryCovHspPerc 150, WordSize 3 and -1, an e-value of 0, HitlistSize 0): blast_formatter builds the options of each object without checking them, and only the hit list size changes what it writes.
 # Rows from of6_db on (line RG item F3 PR 3a, agent E1 of ad-RG-F3-10, 2026-11-25): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build, as the first rows; the archives by the official release's search programs), by remaining-gaps-20261112/F/f3/tools/fixE1.py and fixE1b.py (rows of20_prefetch_abc, of7_deltablast_all, refused_tabular_locations), every NCBI run under unshare -rn (refused_tabular_locations under unshare -rnu with the host name rgff3-probe, as NCBI's request names the machine). New inputs: in/s3pd.fa, in/qgnl.fa, in/bp_s.faa, in/qacc.fa (made by fixE1.py and fixE1b.py from in/s3.fa, in/q.fa, in/ps.faa); in/bn_ungapped.asn, dcmb.asn, bnt.asn, bnspd.asn, pdq.asn, bp_db.asn, bp_ungapped.asn, bp_subject.asn, bp_subject_pd.asn, pdq_acc.asn (NCBI's blastn/blastp -outfmt 11; pdq_acc.asn with -parse_deflines holds its query as a seq-loc-list); in/mix_n_p.asn (db.asn then bp_db.asn), in/ps_step_str.asn (ps.asn with its second Web_StepNumber a string).
+# Rows from of6_bit_nan on (line RG item F3 PR 3a, review round: agents E2 and E2b of ad-RG-F3-10/11, 2026-11-25): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build, as the first rows; the archives by the official release's search programs and makeblastdb), by remaining-gaps-20261112/F/f3/tools/fixE2.py, every NCBI run under unshare -rn. New inputs: in/bit_nan.asn, bit_pinf.asn, bit_ninf.asn (in/bn.asn with its first bit score NOT-A-NUMBER, PLUS-INFINITY, MINUS-INFINITY); in/minus.asn and minus_subj.asn (blastn of in/qm.fa against in/db/s3 and -subject in/s3.fa: minus-strand hits, several HSPs of one subject); in/zero.asn (in/qz.fa: a query without hits after one with hits); in/qcovus_wrap.asn (in/db.asn with the first query's Seq-aligns replaced by two of one subject, the second's uncovered part at a query gap); in/missing_scores.asn and no_num_ident.asn (in/db.asn without a bit score, e-value or score in the second query's Seq-aligns, without every num_ident); in/ids1_q2.asn and ids1_subj.asn (the second query's first Dense-seg with one Seq-id, of in/db.asn and of a -subject archive); in/strands_pm.asn, strands_mp.asn (a Dense-seg whose strands differ by segment); in/gi_ok.asn, gi_overflow.asn, gi_empty.asn, gi_space.asn (in/bn.asn with gi: score names); in/self_db.asn (blastp -parse_deflines of in/m7.faa against in/m7db/m7, made of in/m7.faa with -parse_seqids -taxid 9606) and self_subj.asn (blastn -parse_deflines of in/m7n.fa against itself as -subject): self hits; in/two_ids.asn (blastp -parse_deflines of in/l8q.faa against -subject in/l8.faa, a Bioseq of a gi and a swissprot id, the second query's Seq-aligns naming it by its other id).
 noargs	
 h	-h
 help	-help
@@ -198,3 +199,35 @@ of6_deltablast	-archive in/delta.asn -outfmt 6
 of6_pd_general_query	-archive in/pdq.asn -outfmt 6
 refused_tabular_bl2seq_legacy_7	BL2SEQ_LEGACY=1 -archive in/bn.asn -outfmt 7
 refused_tabular_locations	-archive in/pdq_acc.asn -outfmt 6
+of6_bit_nan	-archive in/bit_nan.asn -outfmt 6
+of6_bit_pinf	-archive in/bit_pinf.asn -outfmt '6 std score'
+of6_bit_ninf	-archive in/bit_ninf.asn -outfmt 6
+of7_minus_all	-archive in/minus.asn -outfmt '7 std sstrand sframe frames qseq sseq btop qcovs qcovus qcovhsp'
+of10_minus	-archive in/minus.asn -outfmt 10
+of6_minus_all	-archive in/minus.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_minus_subj	-archive in/minus_subj.asn -outfmt '6 std sstrand qseq sseq btop qcovs qcovus'
+of7_zero	-archive in/zero.asn -outfmt 7
+of6_zero	-archive in/zero.asn -outfmt 6
+of10_zero	-archive in/zero.asn -outfmt 10
+of20_zero	-archive in/zero.asn -outfmt 20
+of6_qcovus_wrap	-archive in/qcovus_wrap.asn -outfmt '6 std qcovs qcovus'
+of7_qcovus_wrap	-archive in/qcovus_wrap.asn -outfmt '7 qseqid sseqid qcovs qcovus qcovhsp sseq'
+of6_missing_scores	-archive in/missing_scores.asn -outfmt '6 std score'
+of6_no_num_ident	-archive in/no_num_ident.asn -outfmt '6 qseqid sseqid nident pident mismatch length'
+of7_ids1_q2	-archive in/ids1_q2.asn -outfmt 7
+of6_ids1_q2	-archive in/ids1_q2.asn -outfmt 6
+of20_ids1_q2	-archive in/ids1_q2.asn -outfmt 20
+of7_ids1_subj	-archive in/ids1_subj.asn -outfmt 7
+of6_strands_pm	-archive in/strands_pm.asn -outfmt '6 std sstrand qseq sseq btop'
+of6_strands_mp	-archive in/strands_mp.asn -outfmt '6 std sstrand qseq sseq btop'
+of6_gi_ok	-archive in/gi_ok.asn -outfmt 6
+of6_gi_overflow	-archive in/gi_overflow.asn -outfmt 6
+of6_gi_empty	-archive in/gi_empty.asn -outfmt 6
+of6_gi_space	-archive in/gi_space.asn -outfmt 6
+of7_self_db_all	-archive in/self_db.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_self_db_tax	-archive in/self_db.asn -outfmt '6 qaccver saccver staxid ssciname scomname sblastname sskingdom staxids sscinames scomnames sblastnames sskingdoms'
+of6_self_db_pd	-archive in/self_db.asn -outfmt '6 std stitle salltitles sallseqid staxid sseq' -parse_deflines
+of7_self_subj_all	-archive in/self_subj.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_self_subj_pd	-archive in/self_subj.asn -outfmt '6 std stitle sallseqid staxid sseq' -parse_deflines
+of6_two_ids	-archive in/two_ids.asn -outfmt '6 std sseqid sallseqid stitle qcovs'
+of7_two_ids	-archive in/two_ids.asn -outfmt 7

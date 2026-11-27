@@ -727,9 +727,9 @@ pub(super) fn render_queries_with(
         && SubjectLoc::of(shown) == SubjectLoc::Interval
         && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
     {
-        stderr.write_all(&crate::algorithm::common::database::prefetch_warning(
+        stderr.write_all(&crate::algorithm::common::database::prefetch_warning(Some(
             options.app_name,
-        ))?;
+        )))?;
     }
     if options.pairwise_view().is_some() {
         return write_pairwise(

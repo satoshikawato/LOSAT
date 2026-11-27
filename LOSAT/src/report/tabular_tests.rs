@@ -534,7 +534,7 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
         lookup: SubjectLookup::Found,
         index: 0,
     };
-    let row = |spec: &TabularSpec, num_ident: usize, rows: Option<(&[u8], &[u8])>| {
+    let row = |spec: &TabularSpec, num_ident: i64, rows: Option<(&[u8], &[u8])>| {
         let writer = TabularWriter::new(spec, "BLASTP 2.17.0+", Some(ScoringMatrix::Blosum62));
         let hsp = TabularHsp {
             q_start: 1,

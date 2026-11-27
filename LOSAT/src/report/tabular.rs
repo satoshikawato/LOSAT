@@ -16,7 +16,7 @@ use std::io::{self, Write};
 use crate::blastinput::app::{FormatChoice, ReportFormat};
 use crate::config::ScoringMatrix;
 use crate::report::outfmt6::{
-    format_bitscore_ncbi, format_evalue_ncbi_tabular, format_percent_identity_ncbi,
+    format_percent_identity_ncbi, write_bitscore_ncbi, write_evalue_ncbi_tabular,
     write_outfmt7_query_line,
 };
 use crate::report::pairwise::end_gap_span;
@@ -590,9 +590,10 @@ impl TabularSpec {
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908
     /// Inline, and the count by reference so that it is read only where the condition reaches it:
     /// `TabularWriter::row` evaluates it for every row as the expression it replaced (no NCBI
-    /// counterpart: code placement only).
+    /// counterpart: code placement only). The count is the engine's (`usize`) or the row's
+    /// (`TabularHsp::num_ident`, NCBI's `int`, -1 for none).
     #[inline]
-    pub fn opens_counts(&self, num_ident: &usize) -> bool {
+    pub fn opens_counts<N: Copy + PartialOrd + Default>(&self, num_ident: &N) -> bool {
         self.has_any(&[
             QueryStart,
             QueryEnd,
@@ -610,7 +611,7 @@ impl TabularSpec {
             QueryFrame,
             Btop,
             SubjectStrand,
-        ]) || (self.has(NumIdentical) && *num_ident > 0)
+        ]) || (self.has(NumIdentical) && *num_ident > N::default())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-980
@@ -1693,8 +1694,10 @@ pub struct TabularHsp<'a> {
     pub length: usize,
     pub gap_opens: usize,
     pub gaps: usize,
-    /// The engine's identities (counted again from `rows` when they are given).
-    pub num_ident: usize,
+    /// The engine's identities (counted again from `rows` when they are given), NCBI's `int`:
+    /// blast_formatter's -1 of a BLASTN Seq-align without `num_ident`, which `nident`, `pident`
+    /// and `mismatch` print as NCBI does (frozen tests/blast_formatter/ncbi/of6_no_num_ident).
+    pub num_ident: i64,
     /// `qframe` and `sframe` as NCBI shows them.
     pub q_frame: i32,
     pub s_frame: i32,
@@ -2112,8 +2115,12 @@ impl<'a> TabularWriter<'a> {
                 SubjectAllGis => out.extend_from_slice(list(1)),
                 SubjectAllAccessions => out.extend_from_slice(list(2)),
                 SubjectLength => push_num(out, if subject_set { subject.length } else { 0 }),
-                Evalue => out.extend_from_slice(format_evalue_ncbi_tabular(hsp.evalue).as_bytes()),
-                BitScore => out.extend_from_slice(format_bitscore_ncbi(hsp.bit_score).as_bytes()),
+                Evalue => {
+                    write_evalue_ncbi_tabular(out, hsp.evalue).expect("a Vec takes every byte")
+                }
+                BitScore => {
+                    write_bitscore_ncbi(out, hsp.bit_score).expect("a Vec takes every byte")
+                }
                 Score => push_num(out, hsp.score),
                 PercentIdentical => out.extend_from_slice(b"0.000"),
                 PercentPositives => out.extend_from_slice(b"0.00"),
@@ -2145,9 +2152,9 @@ impl<'a> TabularWriter<'a> {
         // (the identities and positives counted again from the rows, and the BTOP string). A pair
         // of letters is scored only by the matrix of a writer whose report prints the positives
         // (`new`).
-        let (num_ident, positives) = match hsp.rows {
+        let (num_ident, positives): (i64, i64) = match hsp.rows {
             Some((qrow, srow)) => {
-                let (mut ident, mut positive) = (0usize, 0usize);
+                let (mut ident, mut positive) = (0i64, 0i64);
                 for (&q, &s) in qrow.iter().zip(srow) {
                     if q == s {
                         ident += 1;
@@ -2211,8 +2218,12 @@ impl<'a> TabularWriter<'a> {
                     hsp.end_gaps,
                     hsp.stored_gaps[1],
                 ),
-                Evalue => out.extend_from_slice(format_evalue_ncbi_tabular(hsp.evalue).as_bytes()),
-                BitScore => out.extend_from_slice(format_bitscore_ncbi(hsp.bit_score).as_bytes()),
+                Evalue => {
+                    write_evalue_ncbi_tabular(out, hsp.evalue).expect("a Vec takes every byte")
+                }
+                BitScore => {
+                    write_bitscore_ncbi(out, hsp.bit_score).expect("a Vec takes every byte")
+                }
                 Score => push_num(out, hsp.score),
                 AlignmentLength => push_num(out, hsp.length),
                 PercentIdentical => out.extend_from_slice(
@@ -2220,7 +2231,7 @@ impl<'a> TabularWriter<'a> {
                 ),
                 NumIdentical => push_num(out, num_ident),
                 // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478
-                Mismatches => push_num(out, hsp.length as i64 - num_ident as i64 - hsp.gaps as i64),
+                Mismatches => push_num(out, hsp.length as i64 - num_ident - hsp.gaps as i64),
                 Positives => push_num(out, positives),
                 GapOpenings => push_num(out, hsp.gap_opens),
                 Gaps => push_num(out, hsp.gaps),

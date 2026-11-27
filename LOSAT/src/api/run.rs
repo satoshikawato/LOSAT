@@ -182,7 +182,7 @@ impl HspRecord {
     // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-442
     /// The percentage of identical columns (`pident`), not rounded.
     pub fn percent_identity(&self) -> f64 {
-        crate::report::outfmt6::percent_identity_ncbi(self.num_ident, self.length)
+        crate::report::outfmt6::percent_identity_ncbi(self.num_ident as i64, self.length)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1109-1120

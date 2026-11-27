@@ -831,7 +831,7 @@ fn write_tabular_rows<const RPS: bool>(
                 // Outside NCBI's alignment block `nident` is the 0 of `x_ResetFields`: with
                 // `nident` the block stays closed only on a Seq-align count of 0, which is that 0.
                 if !spec.opens_counts(&seqalign_num_ident) {
-                    row.num_ident = seqalign_num_ident;
+                    row.num_ident = seqalign_num_ident as i64;
                 }
                 // One printed row is one HSP; the probe marks it without changing it.
                 if let Some(probe) = probe.as_deref_mut() {
@@ -923,7 +923,7 @@ fn tabular_hsp<'r>(
         length: hsp.length,
         gap_opens: hsp.gapopen,
         gaps: usize::try_from(hsp.length as i64 - hsp.num_ident as i64 - hsp.mismatch).unwrap_or(0),
-        num_ident: hsp.num_ident,
+        num_ident: hsp.num_ident as i64,
         q_frame: 1,
         s_frame: 1,
         rows,

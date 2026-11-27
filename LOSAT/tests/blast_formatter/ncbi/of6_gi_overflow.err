@@ -1,0 +1,3 @@
+Error: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/corelib/ncbistr.cpp", line 852: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string '9223372036854775808' to Int8, overflow (m_Pos = 18)
+

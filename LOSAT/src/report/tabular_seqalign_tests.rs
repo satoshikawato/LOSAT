@@ -24,6 +24,18 @@ fn spec(fields: &str) -> TabularSpec {
     .expect("a tabular format")
 }
 
+/// The row of `align`, as the driver makes it: its scores, its plan, then its letters.
+fn hsp<'r>(
+    align: &ReadAlign<'_>,
+    ctx: &RowContext<'_>,
+    sequences: &dyn Sequences,
+    buffers: &'r mut RowBuffers,
+) -> Result<TabularHsp<'r>, ReadStop> {
+    let scores = row_scores(align, ctx.spec)?;
+    let plan = row_plan(align, scores, ctx)?;
+    row_hsp(&plan, ctx, sequences, buffers)
+}
+
 /// A gapped Seq-align of `q1` (letters 0..=9) on the minus strand of `s1` (10..=19).
 const MINUS: &str = "Seq-align ::= { type partial, dim 2, score { { id str \"score\", value int 8 }, \
     { id str \"e_value\", value real { 2, 10, -3 } }, { id str \"bit_score\", value real { 165, 10, -1 } }, \
@@ -41,9 +53,14 @@ fn a_row_of_the_minus_strand_counts_its_columns() {
         no_fetch: true,
         query_length: 10,
     };
+    // The subject's letters of the row's range only (10..=19), as the driver reads them.
+    let scores = row_scores(&read[0], &spec).unwrap();
+    let plan = row_plan(&read[0], scores, &ctx).unwrap();
+    assert_eq!(plan.subject_range(&ctx), Some((10, 19)));
     let letters = RowLetters {
         query: b"ACGTACGTAC",
-        subject: b"AAAAAAAAAAAAAAAAAAAA",
+        subject: b"AAAAAAAAAA",
+        subject_from: 10,
     };
     let mut buffers = RowBuffers::default();
     let row = hsp(&read[0], &ctx, &letters, &mut buffers).unwrap();
@@ -71,6 +88,7 @@ fn a_row_without_counted_fields_reads_no_letters() {
     let empty = RowLetters {
         query: b"",
         subject: b"",
+        subject_from: 0,
     };
     let mut buffers = RowBuffers::default();
     let row = hsp(&read[0], &ctx, &empty, &mut buffers).unwrap();
@@ -90,7 +108,7 @@ fn qcovs_is_set_on_the_first_row_of_each_subject() {
         V::new(named::SEQ_ALIGN, &second),
     ];
     let read = read_set(&set, false);
-    let scores = subject_scores(&read, Some(20), "qcovs", false).unwrap();
+    let scores = subject_scores(&read, Some(20), &spec("qcovs"), "qcovs", false).unwrap();
     assert_eq!(scores.len(), 2);
     // The union of the query's ranges, 0..=11 of 20 letters: 60 %.
     assert_eq!(scores[0].0, 60);

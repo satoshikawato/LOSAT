@@ -52,15 +52,32 @@ pub(crate) struct AlnScores {
 
 /// The Dense-seg of two rows that the tabular formats build of a Seq-align
 /// (tabular.cpp:925-941): its segments' starts (two per segment, -1 for a gap) and lengths, and
-/// the strands of its first segment (`GetSeqStrand`: plus where the Dense-seg has none).
+/// the strands of its first segment (`GetSeqStrand`: plus where the Dense-seg has none) and of
+/// its last.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PairDenseg {
     pub(crate) starts: Vec<i32>,
     pub(crate) lens: Vec<u32>,
     pub(crate) strands: [Strand; 2],
+    /// The strands of the last segment (plus where the Dense-seg has none).
+    pub(crate) last_strands: [Strand; 2],
     /// Whether the Dense-seg has strands and its first is minus: the tabular formats reverse it
     /// then (tabular.cpp:943-952).
     pub(crate) first_minus: bool,
+}
+
+impl PairDenseg {
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:643-680
+    /// The strands that `CAlnMap` reads of the Dense-seg as the tabular formats read it (before
+    /// `Denseg::pair` reverses them where `first_minus`): the first segment's, or where the
+    /// Dense-seg is reversed the last segment's, which `Reverse` makes the first.
+    pub(crate) fn pair_strands(&self) -> [Strand; 2] {
+        if self.first_minus {
+            self.last_strands
+        } else {
+            self.strands
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3160-3212
@@ -131,7 +148,7 @@ impl<'a> ReadAlign<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:229-270
     /// `GetAlnScores`: the scores of the Seq-align's list, and where it has no `e_value` or
     /// `sum_e` those of its first segment (a Dense-diag's, a Std-seg's or the Dense-seg's) read
-    /// again from -1. A score without an id is NCBI's unset member (`GetId()`), a value of the
+    /// on top of the values already found. A score without an id is NCBI's unset member (`GetId()`), a value of the
     /// other kind its `CInvalidChoiceSelection`; the `use_this_gi` scores are not read by the
     /// tabular formats, but a `gi:` score that is no number throws there and is refused.
     pub(crate) fn scores(&self) -> Result<AlnScores, ReadStop> {
@@ -301,10 +318,12 @@ impl<'a> ReadAlign<'a> {
                 return Err(ReadStop::Unsupported("an alignment row without letters"));
             }
         }
-        let row_strand = |row: usize| strands.get(row).map_or(Strand::Plus, |&s| strand(s));
+        let row_strand = |at: usize| strands.get(at).map_or(Strand::Plus, |&s| strand(s));
+        let last = 2 * (numseg - 1);
         Ok(PairDenseg {
             first_minus: strands.first() == Some(&2),
             strands: [row_strand(0), row_strand(1)],
+            last_strands: [row_strand(last), row_strand(last + 1)],
             starts,
             lens,
         })
@@ -363,14 +382,15 @@ fn read_scores(list: V<'_>, scores: &mut AlnScores) -> Result<bool, ReadStop> {
                 int()?;
             }
             b"num_ident" => scores.num_ident = int()?,
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:262-266
+            // Every `gi:` removed (`NStr::Replace`), the rest converted by
+            // `StringToNumeric<TGi>` (`NStr::StringToInt8` without flags), whose
+            // `CStringException` ends the run where the row reads its scores (frozen
+            // tests/blast_formatter/ncbi/of6_gi_ok, of6_gi_overflow, of6_gi_empty, of6_gi_space).
             text if text.starts_with(b"gi:") => {
-                let digits = &text[3..];
-                if digits.is_empty() || digits.len() > 18 || !digits.iter().all(u8::is_ascii_digit)
-                {
-                    return Err(ReadStop::Unsupported(
-                        "a gi: score whose name is no plain number",
-                    ));
-                }
+                let digits = crate::ncbi_str::replace(text, b"gi:", b"");
+                crate::ncbi_str::string_to_int8(&digits, 0)
+                    .map_err(|exception| ReadStop::Stop(Stop::Exception(exception)))?;
             }
             _ => {}
         }

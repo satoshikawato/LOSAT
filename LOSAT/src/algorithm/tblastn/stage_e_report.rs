@@ -1082,8 +1082,11 @@ fn write_tabular(
                     oid,
                     (hsp.q_start + 1, hsp.q_end, s_start, s_end),
                 )?;
-                let percent =
-                    format_percent_identity_ncbi(payload.report_num_ident, payload.align_length, 3);
+                let percent = format_percent_identity_ncbi(
+                    payload.report_num_ident as i64,
+                    payload.align_length,
+                    3,
+                );
                 let bits = format_bitscore_ncbi(payload.bit_score);
                 let evalue = format_evalue_ncbi_tabular(linked.evalue);
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108:

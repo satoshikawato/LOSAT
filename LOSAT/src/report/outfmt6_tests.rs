@@ -161,3 +161,29 @@ fn outfmt7_query_lines_follow_the_ncbi_oracle() {
         assert_eq!(out, line, "{defline:?}");
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:965-994
+// glibc's `printf` of the reals that no finite comparison takes: a NaN (a negative one from NCBI's
+// reader of `NOT-A-NUMBER`, frozen tests/blast_formatter/ncbi/of7_real_nan.out and of6_bit_nan.out)
+// gets each branch's last form, plus infinity the bit score's `%5.3le` (of6_bit_pinf.out).
+#[test]
+fn non_finite_scores_take_glibc_forms() {
+    let negative_nan = -f64::NAN;
+    assert!(negative_nan.is_sign_negative());
+    assert_eq!(format_bitscore_ncbi(negative_nan), "-nan");
+    assert_eq!(format_bitscore_ncbi(f64::NAN), " nan");
+    assert_eq!(format_bitscore_ncbi(f64::INFINITY), "  inf");
+    assert_eq!(format_bitscore_ncbi(f64::NEG_INFINITY), "-inf");
+    assert_eq!(format_evalue_ncbi_tabular(negative_nan), "-nan");
+    assert_eq!(format_evalue_ncbi_tabular(f64::NAN), "nan");
+    assert_eq!(format_evalue_ncbi_tabular(f64::INFINITY), "inf");
+    assert_eq!(format_evalue_ncbi_tabular(f64::NEG_INFINITY), "0.0");
+    assert_eq!(format_evalue_ncbi(negative_nan), "-nan");
+    assert_eq!(format_evalue_ncbi(f64::INFINITY), "inf");
+    // The finite forms at the turned-around bounds.
+    assert_eq!(format_bitscore_ncbi(99.9), "99.9");
+    assert_eq!(format_bitscore_ncbi(99999.0), "99999");
+    assert_eq!(format_bitscore_ncbi(99999.5), "1.000e+05");
+    assert_eq!(format_evalue_ncbi(10.0), "10");
+    assert_eq!(format_evalue_ncbi(9.95), "9.9");
+}

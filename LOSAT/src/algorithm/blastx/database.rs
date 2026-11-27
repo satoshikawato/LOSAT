@@ -186,7 +186,7 @@ impl BlastxDatabase {
     /// NCBI's warning of a failed prefetch, which names the running application `app`
     /// (`shared::prefetch_warning`).
     pub(crate) fn prefetch_warning(&self, app: &str) -> Vec<u8> {
-        shared::prefetch_warning(app)
+        shared::prefetch_warning(Some(app))
     }
 
     /// Whether a later query batch of an XML, XML2 or JSON run could still refuse a taxonomy

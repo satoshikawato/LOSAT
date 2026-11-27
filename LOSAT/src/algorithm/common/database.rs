@@ -7921,7 +7921,7 @@ pub(crate) fn batch_prefetch<'s, 'b>(
     let mut posts = crate::report::diag_log::Posts::new();
     posts.loads(reads);
     if failed_lookup.is_some() || fails {
-        posts.lines(&prefetch_warning(&run.prefix(program)));
+        posts.lines(&prefetch_warning(Some(&run.prefix(program))));
     }
     Ok(posts)
 }
@@ -8115,14 +8115,17 @@ fn scope_utf8_before_failure(
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:778-786
 /// NCBI's warning where the prefetch of a query batch fails ([`batch_prefetch`], and BLASTX's and
 /// RPSTBLASTN's Seq-align of a subject row whose range it cannot take,
-/// `blastx::empty_rows::prefetch_reads_unranged_row`): the one producer of its text.
-pub(crate) fn prefetch_warning(app: &str) -> Vec<u8> {
+/// `blastx::empty_rows::prefetch_reads_unranged_row`, and blast_formatter's prefetch of an
+/// archive's Seq-aligns): the one producer of its text, with the prefix of the running search
+/// program `app` (none in blast_formatter, whose posts NCBI writes without one: frozen
+/// tests/blast_formatter/ncbi/of6_ids1_q2.err).
+pub(crate) fn prefetch_warning(app: Option<&str>) -> Vec<u8> {
     // A post of NCBI's main thread (`ncbi_exception::post_line`: the header alone after the run's diagnostic
     // stream failed).
     crate::ncbi_exception::post_line(
         crate::ncbi_exception::Severity::Warning,
         None,
-        Some(&app.to_ascii_lowercase()),
+        app.map(str::to_ascii_lowercase).as_deref(),
         b"Error pre-fetching sequence data",
     )
 }

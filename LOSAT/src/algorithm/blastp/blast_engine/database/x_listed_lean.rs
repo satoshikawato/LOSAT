@@ -61,7 +61,7 @@ impl ListedSubjects {
         &'a self,
         database: &'a BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
-        (batch_starts, one_by_one): (&[usize], bool),
+        batch_starts: &[usize],
     ) -> Result<ListedTitles<'a>> {
         let ranks = self.ordinals.len();
         let mut titles: Vec<Arc<[u8]>> = vec![Arc::from(&b""[..]); ranks];
@@ -69,7 +69,7 @@ impl ListedSubjects {
         let mut sources = Vec::new();
         let mut read = vec![false; ranks];
         let mut parsed = ParsedSubjects::default();
-        let headers = self.header_reader(database, batch_starts, one_by_one);
+        let headers = self.header_reader(database, batch_starts);
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;

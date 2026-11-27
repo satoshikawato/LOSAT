@@ -226,8 +226,8 @@ fn subject_file_with_an_undecodable_reported_title(dir: &Path, first_row: &[u8])
 }
 
 // A reported subject whose tabular ID cannot be written: the run is refused with the same message,
-// exit code and rows (none: LOSAT rejects it before any format is written) in the block search and
-// in the search of all queries. The block search is not taken for such a subject set
+// exit code and bytes (NCBI's before the row's stop at `saccver`: the first row's `qaccver` and its
+// tab, line RG-KB item 18b) in the block search and in the search of all queries. The block search is not taken for such a subject set
 // (`x_query_block_plan`), so no block runs and no stored value is made. The check of the stored
 // values with such records is tested in `x_subject_meta.rs`. One search setting: the plan refuses
 // such a subject set whatever the block size, before any block runs, at any thread count.
@@ -260,7 +260,8 @@ fn a_reported_subject_without_a_tabular_id_is_refused_alike_in_blocks() {
         "{}",
         all.stderr
     );
-    assert!(all.stdout.is_empty());
+    let qaccver = first_row.split(|&byte| byte == b'\t').next().unwrap();
+    assert_eq!(all.stdout, [qaccver, &b"\t"[..]].concat());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

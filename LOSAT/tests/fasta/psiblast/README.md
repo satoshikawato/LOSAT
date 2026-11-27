@@ -122,3 +122,6 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
 - `ps8b_tk30.faa` (line PS, PS8b): letters 1-30 of `tk.faa` (one place of `tests/fixtures/phi/ploop.pat`), the query of
   rows `db.phi.b.tk30.*` against `tests/db_search/ps8b_qid`: PHI-BLAST's rounds in outfmt 11, whose archive of round 2
   stays under 64 KB.
+- `ps8b_q3_first.faa` (line PS, PS8b): the first query of `ps8_q3.faa` alone, NCBI's run of row
+  `db.phi.b.q3first.it2.6` that writes the rows LOSAT writes before its refusal of `db.phi.b.q3.it2.6` (NCBI crashes at
+  the second query of three).

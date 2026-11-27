@@ -339,6 +339,12 @@ fn the_after_batch_sets_follow_the_search_space() {
     let mut unsearched = HandleCarry::default();
     handle.pass(&mut unsearched, None);
     assert_eq!(names(&unsearched), ["CompositionBasedStats"]);
+    // An archive's request is written within its batch, before the sets after it (NCBI BLAST+
+    // 2.17.0 `r.it2.11` of item PS8b: the archive of a PHI-BLAST query's round 2 holds no
+    // `CompositionBasedStats`).
+    let mut archive = HandleCarry::default();
+    handle.pass_search(&mut archive, searched(66_050));
+    assert_eq!(names(&archive), ["EffectiveSearchSpace"]);
 }
 
 #[test]

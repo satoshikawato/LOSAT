@@ -406,8 +406,9 @@ fn phi_limits(
 /// (`report::archive::OptionsHandle::set_search_sets`): after each batch it resets the
 /// composition-based statistics to their value before the batches, which PHI-BLAST's options never
 /// set (psiblast's arguments do not set them for `phiblastp`), so the reset appends
-/// `CompositionBasedStats 0` after the batch's `EffectiveSearchSpace`: the requests of the batches
-/// after the first hold both (NCBI BLAST+ 2.17.0 `st.multi`).
+/// `CompositionBasedStats 0` after the batch's `EffectiveSearchSpace`: the search strategy's
+/// requests of the batches after the first hold both (NCBI BLAST+ 2.17.0 `st.multi`); the archives
+/// of the later rounds, written within the batch, the space alone (`OptionsHandle::pass_search`).
 #[cold]
 #[inline(never)]
 pub(super) fn note_handle_sets(handle: &crate::report::archive::OptionsHandle) -> Result<()> {

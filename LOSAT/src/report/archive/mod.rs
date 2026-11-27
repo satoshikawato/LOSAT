@@ -460,8 +460,23 @@ impl OptionsHandle {
     /// (`SplitQuery_SetEffectiveSearchSpace` writes it into the handle): `searched` is the batch's
     /// context 0 (the option is the search's own value, or what `RequestLength` makes of it),
     /// `None` for a batch NCBI does not search, which leaves the option as the batch before left
-    /// it; then what the application sets after the batch (`after_batch`).
+    /// it (`pass_search`); then what the application sets after the batch (`after_batch`).
     pub fn pass(&self, carry: &mut HandleCarry, searched: Option<SearchedContext0>) {
+        self.pass_search(carry, searched);
+        if let Some(search) = self.0.search.get() {
+            for param in &search.after_batch {
+                carry.0.set(param.field(), param.value.clone());
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:507-532
+    /// `pass` up to the batch's `EffectiveSearchSpace`, without what the application sets after
+    /// the batch: an archive's request (`ArchiveHandle::request_sets`), which NCBI writes within
+    /// its batch. The only sets after a batch are psiblast's reset of the composition-based
+    /// statistics after the rounds of a PHI-BLAST batch (`phi_hooks::note_handle_sets`), whose
+    /// archives are the later rounds of its one query (two queries with rounds are refused).
+    pub fn pass_search(&self, carry: &mut HandleCarry, searched: Option<SearchedContext0>) {
         if let Some(search) = self.0.search.get() {
             for param in &search.each_batch {
                 carry.0.set(param.field(), param.value.clone());
@@ -477,11 +492,6 @@ impl OptionsHandle {
                 fields::EFFECTIVE_SEARCH_SPACE,
                 options::ParamValue::BigInteger(length.space(context0)),
             );
-        }
-        if let Some(search) = self.0.search.get() {
-            for param in &search.after_batch {
-                carry.0.set(param.field(), param.value.clone());
-            }
         }
     }
 
@@ -688,10 +698,10 @@ impl ArchiveHandle {
     /// options, after its batch (`OptionsHandle::request_sets`): its `EffectiveSearchSpace` option
     /// is the batch's own value when the batch was searched (`searched`, its context 0; kept for
     /// the batches after it), else the one of the last searched batch, which is absent before one
-    /// (`OptionsHandle::pass`).
+    /// (`OptionsHandle::pass_search`).
     pub fn request_sets(&self, searched: Option<writer::SearchedContext0>) -> Vec<options::Param> {
         self.with_state(|state| {
-            self.0.options.pass(&mut state.carry, searched);
+            self.0.options.pass_search(&mut state.carry, searched);
             self.0.options.request_sets(&state.carry)
         })
     }

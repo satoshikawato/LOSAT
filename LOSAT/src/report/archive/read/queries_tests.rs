@@ -46,6 +46,24 @@ fn bytes(rendered: Rendered) -> Vec<u8> {
     }
 }
 
+/// The letters of `bioseq` as a row of the tabular formats over all of them on the plus strand
+/// reads them (`seq_vector::RowVector`: one read from the first letter to the last), or its end.
+fn bioseq_letters(bioseq: Bioseq<'_>) -> Result<Vec<u8>, RenderError> {
+    let map = seq_vector::SeqMap::of(bioseq)?;
+    let length = map.length()?;
+    let mut out = Vec::new();
+    if length > 0 {
+        seq_vector::RowVector::new(&map, true).read(0, length - 1)?;
+        map.letters(0, length, &mut out);
+    }
+    Ok(out)
+}
+
+/// [`bioseq_letters`]' end without its letters.
+fn check_bioseq_letters(bioseq: Bioseq<'_>) -> Result<(), RenderError> {
+    bioseq_letters(bioseq).map(|_| ())
+}
+
 #[test]
 fn every_probed_query_set_is_written_as_ncbi_wrote_it() {
     let manifest = String::from_utf8(read("cases.tsv").expect("cases.tsv")).unwrap();
@@ -276,7 +294,8 @@ fn the_setup_reads_a_subject_whole_and_the_rows_keep_only_range_free_errors() {
         let entry = set.field("seq-set").item(0).expect("one entry");
         let bioseq = Bioseq::of(entry.choice().1);
         let setup = match check_setup_letters(bioseq, protein) {
-            Ok(()) => "ok".to_string(),
+            Ok(SubjectSetup::Read) => "ok".to_string(),
+            Ok(SubjectSetup::Empty) => "empty".to_string(),
             Err(RenderError::Exception(e)) => String::from_utf8_lossy(e.get_msg()).into_owned(),
             Err(RenderError::Unsupported(part)) => format!("refused: {part}"),
             Err(other) => panic!("{other:?}"),

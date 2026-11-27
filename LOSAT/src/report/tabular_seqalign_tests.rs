@@ -57,10 +57,19 @@ fn a_row_of_the_minus_strand_counts_its_columns() {
     let scores = row_scores(&read[0], &spec).unwrap();
     let plan = row_plan(&read[0], scores, &ctx).unwrap();
     assert_eq!(plan.subject_range(&ctx), Some((10, 19)));
+    // The rows' strands as `CAlnVec` reads them (the Dense-seg reversed: the query plus).
+    let [query_plus, subject_plus] = plan.rows_plus().expect("a Dense-seg");
     let letters = RowLetters {
-        query: b"ACGTACGTAC",
-        subject: b"AAAAAAAAAA",
-        subject_from: 10,
+        query: RowSequence {
+            letters: RowSource::Held(b"ACGTACGTAC", 0),
+            size: 10,
+            minus: !query_plus,
+        },
+        subject: RowSequence {
+            letters: RowSource::Held(b"AAAAAAAAAA", 10),
+            size: 20,
+            minus: !subject_plus,
+        },
     };
     let mut buffers = RowBuffers::default();
     let row = hsp(&read[0], &ctx, &letters, &mut buffers).unwrap();
@@ -86,9 +95,8 @@ fn a_row_without_counted_fields_reads_no_letters() {
         query_length: 10,
     };
     let empty = RowLetters {
-        query: b"",
-        subject: b"",
-        subject_from: 0,
+        query: RowSequence::NONE,
+        subject: RowSequence::NONE,
     };
     let mut buffers = RowBuffers::default();
     let row = hsp(&read[0], &ctx, &empty, &mut buffers).unwrap();

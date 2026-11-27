@@ -37,7 +37,7 @@ use crate::ncbi_app::files::{self, OutputDevice};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::archive::read::options::{archive_request, BuiltOptions, EProgram};
-use crate::report::archive::read::queries::{check_setup_letters, RenderError};
+use crate::report::archive::read::queries::{check_setup_letters, RenderError, SubjectSetup};
 use crate::report::archive::read::request::{ParamSet, Queries, Subject};
 use crate::report::archive::read::{
     seq_align_id, Archive, ArchiveReader, Message, Search, Severity, Stop,
@@ -578,7 +578,11 @@ impl<'r, 'o> Run<'r, 'o> {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:402-422
         self.output.begin_object()?;
         if database.is_none() {
-            setup_subjects(&request.subject, search_options.program)?;
+            let (warnings, end) = setup_subjects(&request.subject, search_options.program)?;
+            post_line(&mut self.output, diag, &warnings);
+            if let Some(end) = end {
+                return Err(end);
+            }
         }
         xinclude_check_for(&formatting.choice, Some(Path::new(&self.options.out)))?;
         if let Some(refusal) = refusals::output_format(formatting.choice.number) {
@@ -1060,14 +1064,23 @@ fn check_subjects(subject: &Subject) -> anyhow::Result<()> {
 /// (`BL2SEQ_LEGACY` unset, `s_InitializeSubject`): `MakeSeqSrc` sets up the subjects
 /// (`SetupSubjects_OMF`), which reads each subject Bioseq whole, in order
 /// (`queries::check_setup_letters`, by the program's subject molecule, `GetSubjectEncoding`;
-/// the programs for which that function aborts set up nothing here). The first exception
-/// (rethrown at the setup with its message, `NCBI_RETHROW_SAME`) is the report of the chain
-/// (`ReportAll`) in a `CBlastException` `eSeqSrcInit`, NCBI's engine error (exit status 3), in
-/// every output format, before the object's first byte (probes `of6_slen_huge`, `of6_slen_short`,
-/// `of8_slen_big` of agent E3, 2026-11-27); a read that LOSAT does not reproduce is refused.
-fn setup_subjects(subject: &Subject, program: EProgram) -> anyhow::Result<()> {
+/// the programs for which that function aborts set up nothing here). A Bioseq of 0 letters is
+/// skipped with the warning `<id> <title>: Subject sequence contains no data` (`GetSeqIdString`
+/// of the id that `FindBestChoice` with `BestRank` picks, the first title; probes `of6_s_empty`,
+/// `of6_e_*` of agent E3, 2026-11-27). The first exception (rethrown at the setup with its
+/// message, `NCBI_RETHROW_SAME`: at line 793 a `CBlastException`, at 797 any other) is the
+/// report of the chain (`ReportAll`) in a `CBlastException` `eSeqSrcInit`, NCBI's engine error
+/// (exit status 3), in every output format, before the object's first byte (probes
+/// `of6_slen_huge`, `of6_slen_short`, `of8_slen_big`, `of6_s_*`, `of6_c_*`, `of6_e_nodata`); a
+/// read that LOSAT does not reproduce is refused (`Err`, before any warning). The warnings of
+/// the Bioseqs before NCBI's end, and that end.
+fn setup_subjects(
+    subject: &Subject,
+    program: EProgram,
+) -> anyhow::Result<(Vec<u8>, Option<anyhow::Error>)> {
+    let mut warnings = Vec::new();
     if std::env::var_os("BL2SEQ_LEGACY").is_some() {
-        return Ok(());
+        return Ok((warnings, None));
     }
     let protein = match program {
         EProgram::Blastn
@@ -1083,28 +1096,46 @@ fn setup_subjects(subject: &Subject, program: EProgram) -> anyhow::Result<()> {
         | EProgram::PsiBlast
         | EProgram::DeltaBlast
         | EProgram::PhiBlastp => true,
-        EProgram::RpsBlast | EProgram::RpsTblastn | EProgram::PhiBlastn => return Ok(()),
+        EProgram::RpsBlast | EProgram::RpsTblastn | EProgram::PhiBlastn => {
+            return Ok((warnings, None))
+        }
     };
     for bioseq in subject.bioseqs() {
-        match check_setup_letters(bioseq, protein) {
-            Ok(()) => {}
+        let end: anyhow::Error = match check_setup_letters(bioseq, protein) {
+            Ok(SubjectSetup::Read) => continue,
+            Ok(SubjectSetup::Empty) => {
+                warnings.extend_from_slice(b"Warning: ");
+                if let Some(id) = bioseq.best_id() {
+                    crate::seqid::label::content(id, false, &mut warnings);
+                    warnings.push(b' ');
+                }
+                warnings.extend_from_slice(bioseq.title().unwrap_or_default());
+                warnings.extend_from_slice(b": Subject sequence contains no data\n");
+                continue;
+            }
             Err(RenderError::Exception(exception)) => {
                 let message = exception.get_msg().to_vec();
+                let line = if exception.first_site().kind.starts_with("CBlastException::") {
+                    793
+                } else {
+                    797
+                };
                 let setup = exception.rethrow_same(
                     "src/algo/blast/api/blast_setup_cxx.cpp",
-                    797,
+                    line,
                     "BLAST::ncbi::blast::SetupSubjects_OMF",
                     message,
                 );
                 // The message is the chain's report (`ReportAll`), in LOSAT's words (`what`).
                 let seq_src = NcbiException::new(SEQ_SRC_INIT, setup.what());
-                return Err(NativeError::exception(&seq_src).into());
+                NativeError::exception(&seq_src).into()
             }
             Err(RenderError::Unsupported(what)) => return Err(Refusal::SubjectSetup(what).into()),
             Err(RenderError::Write(error)) => return Err(error.into()),
-        }
+        };
+        return Ok((warnings, Some(end)));
     }
-    Ok(())
+    Ok((warnings, None))
 }
 
 /// Where `s_CheckForBlastSeqSrcErrors` throws the error of a sequence source's setup.

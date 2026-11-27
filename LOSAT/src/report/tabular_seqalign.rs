@@ -12,8 +12,9 @@
 //! `CreateDensegFromDendiag`), reversed where its first strand is minus, as `CAlnVec` reads it
 //! (`query_anchored::aln_vec::AlnMap`: the lengths, the rows' letters and the coordinates).
 
+use crate::report::archive::read::queries::seq_vector::SeqMap;
 use crate::report::query_anchored::aln_vec::{AlnMap, MapBuffers};
-use crate::report::query_anchored::{Denseg, SeqKey, Sequences};
+use crate::report::query_anchored::{pair_plus, Denseg, SeqKey, Sequences};
 use crate::report::serial::seqalign::Strand;
 use crate::report::serial::seqalign_read::{PairDenseg, ReadAlign, ReadStop};
 use crate::report::tabular::{TabularField, TabularHsp, TabularSpec};
@@ -155,6 +156,14 @@ pub(crate) fn row_plan(
 }
 
 impl RowPlan {
+    /// Whether the row's query and subject rows are on the plus strand, as `CAlnVec` reads them
+    /// (`pair_denseg`), where the counts' block opens.
+    pub(crate) fn rows_plus(&self) -> Option<[bool; 2]> {
+        self.ds
+            .as_ref()
+            .map(|ds| pair_plus(ds.strands, ds.first_minus))
+    }
+
     /// The subject letters that the row reads: from the first to the last letter of row 1's
     /// segments (inclusive, plus strand, whatever their strands), `None` where it reads none
     /// (`reads_letters`).
@@ -206,17 +215,7 @@ pub(crate) fn row_hsp<'r>(
     let Some(ds) = &plan.ds else {
         return Ok(hsp);
     };
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:943-952
-    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:644-681
-    // `CDense_seg::Reverse` flips each strand in place without reversing the strands vector, so
-    // the reversed Dense-seg's first-segment strands are `ds.strands` flipped.
-    let denseg = Denseg::pair(
-        [SeqKey::Query, SeqKey::Subject(0)],
-        &ds.starts,
-        &ds.lens,
-        ds.strands,
-        ds.first_minus,
-    );
+    let denseg = pair_denseg(ds);
     let RowBuffers {
         map,
         query,
@@ -274,6 +273,48 @@ pub(crate) fn row_hsp<'r>(
         hsp.rows = Some((query, subject));
     }
     Ok(hsp)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:943-952
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:644-681
+/// The Dense-seg of a row as `CAlnVec` reads it: reversed where its first strand is minus
+/// (`CDense_seg::Reverse` flips each strand in place without reversing the strands vector, so the
+/// reversed Dense-seg's first-segment strands are `ds.strands` flipped).
+fn pair_denseg(ds: &PairDenseg) -> Denseg {
+    Denseg::pair(
+        [SeqKey::Query, SeqKey::Subject(0)],
+        &ds.starts,
+        &ds.lens,
+        ds.strands,
+        ds.first_minus,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
+/// The reads of the letters of the row of the plan `plan` where it reads them (`reads_letters`):
+/// `GetSeqString` of each segment of row 0 (the query), then of row 1 (the subject), as
+/// `row_hsp`'s `GetWholeAlnSeqString` makes them (`AlnMap::seq_string_reads`), each given to
+/// `read` with its row and whether the row is on the plus strand.
+pub(crate) fn row_reads<E: From<ReadStop>>(
+    plan: &RowPlan,
+    ctx: &RowContext<'_>,
+    buffers: &mut RowBuffers,
+    mut read: impl FnMut(usize, bool, u32, u32) -> Result<(), E>,
+) -> Result<(), E> {
+    let Some(ds) = plan
+        .ds
+        .as_ref()
+        .filter(|_| reads_letters(ctx.spec, ctx.no_fetch))
+    else {
+        return Ok(());
+    };
+    let denseg = pair_denseg(ds);
+    let aln = AlnMap::new_in(&denseg, &mut buffers.map).map_err(ReadStop::Unsupported)?;
+    for row in 0..2 {
+        let plus = aln.is_positive_strand(row);
+        aln.seq_string_reads(row, |from, to| read(row, plus, from, to))?;
+    }
+    Ok(())
 }
 
 /// The values of `x_ResetFields` (0, no rows).
@@ -520,27 +561,69 @@ pub(crate) fn uniq_seq_coverage(group: &[ReadAlign<'_>]) -> Result<u32, ReadStop
     Ok(query_ranges.covered_length())
 }
 
-/// The letters of a row's query and subject, plus strand, as `CSeqVector` gives them in
-/// `ncbieaa` or IUPAC (`Sequences` of one row): the whole query, and the subject's letters from
-/// `subject_from` on (the row's range of the subject, `RowPlan::subject_range`).
+/// The letters of a row's query and subject, plus strand, as their `CSeqVector`s give them in
+/// `ncbieaa` or IUPAC (`Sequences` of one row).
 pub(crate) struct RowLetters<'a> {
-    pub(crate) query: &'a [u8],
-    pub(crate) subject: &'a [u8],
-    pub(crate) subject_from: u32,
+    pub(crate) query: RowSequence<'a>,
+    pub(crate) subject: RowSequence<'a>,
+}
+
+/// One row's sequence (`RowLetters`): its letters, the size of its vector and its strand.
+#[derive(Clone, Copy)]
+pub(crate) struct RowSequence<'a> {
+    pub(crate) letters: RowSource<'a>,
+    /// The vector's size: the sequence's length (`GetBioseqLength`).
+    pub(crate) size: u32,
+    /// Whether the row is on the minus strand (`AlnMap::is_positive_strand`, `RowPlan::rows_plus`).
+    pub(crate) minus: bool,
+}
+
+/// Where a row's letters come from (`RowSequence`).
+#[derive(Clone, Copy)]
+pub(crate) enum RowSource<'a> {
+    /// Letters held from a position on: a database sequence's (a protein's whole, a nucleotide's
+    /// of the row's range, `RowPlan::subject_range`).
+    Held(&'a [u8], u32),
+    /// A Bioseq of the request, through its sequence map (the letters of the reads that did not
+    /// throw, `seq_vector::RowVector`).
+    Map(&'a SeqMap<'a>),
+}
+
+impl RowSequence<'_> {
+    /// A row that reads no letters.
+    pub(crate) const NONE: RowSequence<'static> = RowSequence {
+        letters: RowSource::Held(&[], 0),
+        size: 0,
+        minus: false,
+    };
 }
 
 impl Sequences for RowLetters<'_> {
+    // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:287-313
+    /// `GetSeqString`'s letters: on the plus strand `GetSeqData(from, to + 1)` up to the size;
+    /// on the minus strand `GetSeqData(size - to - 1, size - from)` in the unsigned `TSeqPos`,
+    /// none where `to` is past the size.
     fn letters(&self, seq: SeqKey, from: u32, to: u32, out: &mut Vec<u8>) {
-        let (letters, offset) = match seq {
-            SeqKey::Query => (self.query, 0),
-            SeqKey::Subject(_) => (self.subject, self.subject_from),
+        let sequence = match seq {
+            SeqKey::Query => &self.query,
+            SeqKey::Subject(_) => &self.subject,
         };
-        let (Some(from), Some(to)) = (from.checked_sub(offset), to.checked_sub(offset)) else {
+        if sequence.minus && to >= sequence.size {
             return;
-        };
-        let end = (to as usize + 1).min(letters.len());
-        if let Some(range) = letters.get(from as usize..end) {
-            out.extend_from_slice(range);
+        }
+        let end = to.saturating_add(1).min(sequence.size);
+        match sequence.letters {
+            RowSource::Held(letters, offset) => {
+                let (Some(from), Some(end)) = (from.checked_sub(offset), end.checked_sub(offset))
+                else {
+                    return;
+                };
+                let end = (end as usize).min(letters.len());
+                if let Some(range) = letters.get(from as usize..end) {
+                    out.extend_from_slice(range);
+                }
+            }
+            RowSource::Map(map) => map.letters(from, end, out),
         }
     }
 

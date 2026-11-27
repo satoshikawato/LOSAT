@@ -517,7 +517,6 @@ impl Denseg {
         widths: [u32; 2],
         reverse: bool,
     ) {
-        use crate::report::serial::seqalign::Strand;
         self.lens.clear();
         self.lens.extend(lens);
         self.starts.clear();
@@ -526,14 +525,11 @@ impl Denseg {
         if widths != [1, 1] {
             self.widths.extend(widths);
         }
-        let mut strands = strands;
         if reverse {
             self.reverse();
-            strands = strands.map(Strand::reversed);
         }
         self.plus.clear();
-        self.plus
-            .extend([strands[0] != Strand::Minus, strands[1] != Strand::Minus]);
+        self.plus.extend(pair_plus(strands, reverse));
     }
 
     /// The Dense-seg of two rows, the sequences `keys`, without widths (`set_pair`): the
@@ -571,6 +567,20 @@ impl Denseg {
             }
         }
     }
+}
+
+/// Whether each row of a Dense-seg of two rows whose first segment's strands are `strands` is on
+/// the plus strand (not minus), the Dense-seg reversed where `reverse` (`CDense_seg::Reverse`
+/// flips each strand: `Denseg::set_pair`).
+pub(crate) fn pair_plus(
+    strands: [crate::report::serial::seqalign::Strand; 2],
+    reverse: bool,
+) -> [bool; 2] {
+    use crate::report::serial::seqalign::Strand;
+    strands.map(|strand| {
+        let strand = if reverse { strand.reversed() } else { strand };
+        strand != Strand::Minus
+    })
 }
 
 /// What a program gives the section about its sequences.

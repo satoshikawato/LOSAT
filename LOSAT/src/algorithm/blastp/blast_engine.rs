@@ -1712,6 +1712,12 @@ impl CallTableWords {
         }
     }
 
+    /// Whether a searched batch is split: the call's table leaves its queries' words out, and its
+    /// chunks build their own tables after the call's scan (`search_split_query_batches`).
+    fn splits(&self) -> bool {
+        self.0.is_some()
+    }
+
     /// Whether the table holds the words of the batch whose searched queries are `searched` (a
     /// batch of `of`'s batches): every batch but one that NCBI splits.
     fn holds_batch(&self, searched: &std::ops::Range<usize>) -> bool {
@@ -7855,12 +7861,14 @@ fn x_block_search_refuses_nothing(
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:189,221-231
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the last check of `x_block_search_refuses_nothing`, made on the
 // search's pool before the first block, and the blocks' ends. With the compressed lookup table:
-// - whether no table of one of NCBI's query batches (or of a query chunk of a split batch) can fill
-//   NCBI's overflow banks (`try_build_blosum62_compressed_lookup`). A table takes at most a quarter
-//   of its words as overflow cells, and a batch's tables have no more words than the batch's
-//   offsets add (`CompressedWordCount`): a batch whose words are at most four times the banks'
-//   cells cannot fill them; a batch with more leaves the search to the reference path (`None`),
-//   which tests the batch exactly.
+// - whether no table of one of NCBI's query batches can fill NCBI's overflow banks
+//   (`try_build_blosum62_compressed_lookup`). A table takes at most a quarter of its words as
+//   overflow cells, and a batch's table has no more words than the batch's offsets add
+//   (`CompressedWordCount`): a batch whose words are at most four times the banks' cells cannot
+//   fill them; a batch with more leaves the search to the reference path (`None`), which tests the
+//   batch exactly. A batch that NCBI splits is not tested: no block's table holds its words, and
+//   its chunks' builds test their own tables in the chunks' searches, which follow the blocks as
+//   they follow the search of all queries (`search_split_query_batches`).
 // - the blocks closed also on their words (`x_query_blocks`). NCBI builds the table of one batch,
 //   searches the batch and frees the table before the next batch (above), so its largest table is
 //   that of the batch with the most words (of those it does not split, which have no table:
@@ -7910,8 +7918,9 @@ fn x_word_blocks(
     let query_batches = query_input.batches(batch_size);
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
     // A batch that NCBI splits has no table, and no block's table holds its words
-    // (`CallTableWords`): its words count only for the banks' test of its chunks' tables (a
-    // chunk's table has no more words than its batch's offsets add).
+    // (`CallTableWords`): it counts no word. Its chunks' tables are tested by their own builds,
+    // in the chunks' searches that follow the blocks as they follow the search of all queries
+    // (`search_split_query_batches`).
     let tabled = CallTableWords::of(args, &query_batches, &lengths, false).ok()?;
     // The words of all letters of the queries: the lookup query
     // (`encode_protein_query_frame_with_seg`) has the same letters, and its lookup segments
@@ -7920,6 +7929,9 @@ fn x_word_blocks(
     // letters too only closes such a block earlier and reserves room that its table does not fill
     // (`x_block_appends`) and never touches.
     let words = |searched: &std::ops::Range<usize>| {
+        if !tabled.holds_batch(searched) {
+            return Some(0);
+        }
         let encoded: Vec<EncodedProtein> = queries[searched.clone()]
             .iter()
             .map(|record| encode_protein_sequence(record.seq()))
@@ -7927,12 +7939,7 @@ fn x_word_blocks(
         let mut letters = encoded
             .iter()
             .map(|query| &query.aa_seq[1..query.aa_seq.len() - 1]);
-        let words = counter.batch_words(&mut letters)?;
-        Some(if tabled.holds_batch(searched) {
-            words
-        } else {
-            0
-        })
+        counter.batch_words(&mut letters)
     };
     let batch_words: Vec<u64> = x_each_batch_on(&query_batches, pool, &words)
         .into_iter()
@@ -10608,6 +10615,13 @@ fn run_call(
             (&exact_search_spaces, &search_spaces),
         )?;
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-283
+    // NCBI frees each table before it builds the next. Where a searched batch of the call is split,
+    // its chunks build their own tables now (`search_split_query_batches`) and the call's scan is
+    // over, so the call's table goes first (it holds no word of that batch, `CallTableWords`).
+    let lookup = (!CallTableWords::of(&args, &query_batches, &query_lengths, false)
+        .is_ok_and(|words| words.splits()))
+    .then_some(lookup);
     search_split_query_batches(
         &args,
         query_records,
@@ -10713,7 +10727,8 @@ fn run_call(
     // EXPERIMENT (LOSAT_X_BPLKDROP): nothing reads the lookup table after the preliminary stage;
     // it is dropped here unless a later block's build may take its vectors (at the end below).
     // Item SC2d: a flat table's vectors go to the next block's build here.
-    let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
+    let lookup =
+        lookup.and_then(|lookup| x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead));
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     let fetch_notes = database::FetchNotes::new(listed_subjects.as_ref(), database, sw_c0_redo);
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every

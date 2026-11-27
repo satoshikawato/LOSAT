@@ -3041,7 +3041,8 @@ fn test_x_word_blocks_close_on_the_words_of_a_lowered_threshold() {
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215
 // EXPERIMENT (LOSAT_X_BPQBLOCK): a batch that NCBI splits adds no word to a block's table
 // (`CallTableWords`): the blocks' words are those of the other batches, on one thread and on
-// three; an ungapped search splits no batch and counts them all.
+// three, and its words are not tested against the banks; an ungapped search splits no batch and
+// counts them all.
 #[test]
 #[cfg_attr(
     not(feature = "parallel"),
@@ -3089,6 +3090,19 @@ fn test_x_word_blocks_leave_out_the_words_of_a_split_batch() {
             };
             assert_eq!(total(&gapped), words[0] + words[2] + words[3]);
             assert_eq!(total(&ungapped), words.iter().sum::<u64>());
+            // Every word a neighbor (`-threshold` 1e10): the split batch's words would fill the
+            // banks, but no block's table holds them (its chunks' builds test their own tables),
+            // so the blocks are planned; unsplit, the batch leaves the search to the reference
+            // path.
+            let mut every = gapped.clone();
+            every.threshold = 1e10;
+            let mut every_ungapped = ungapped.clone();
+            every_ungapped.threshold = 1e10;
+            assert!(x_word_blocks(&every, &records, &input, batch_size, &whole, pool).is_some());
+            assert!(
+                x_word_blocks(&every_ungapped, &records, &input, batch_size, &whole, pool)
+                    .is_none()
+            );
             Ok(())
         })
         .expect("pool");

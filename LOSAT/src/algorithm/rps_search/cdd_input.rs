@@ -196,7 +196,7 @@ impl Hit {
         }
         new_segments.extend(slots.into_iter().flatten());
         // `compare_hitseg_range`: by the subject's start (Rust's stable sort keeps equal starts in
-        // intersection order; PD-LOSAT-NCBI-DEFECTS 1.124 / Owner Q-DL-SEGTIE=A, 2026-11-26).
+        // intersection order; PD-LOSAT-NCBI-DEFECTS 1.127 / Owner Q-DL-SEGTIE=A, 2026-11-26).
         new_segments.sort_by_key(|segment| segment.subject.from);
         self.segments = new_segments;
     }
@@ -373,7 +373,7 @@ pub(crate) fn remove_multiple_cd_hits(mut hits: Vec<Hit>) -> Result<Vec<Hit>, Cd
     // `compare_hits_by_seqid_eval`: the domain's id, then the E-value. Rust's stable sort keeps hits
     // of one domain with one E-value in the order of the domain search's results; NCBI's sort
     // leaves them in the order its C++ library's sort gives, which can trim a hit of the domain
-    // differently (PD-LOSAT-NCBI-DEFECTS, approved difference of version 1.124; Owner, 2026-11-24).
+    // differently (PD-LOSAT-NCBI-DEFECTS, approved difference of version 1.127; Owner, 2026-11-24).
     hits.sort_by(|a, b| {
         compare_ordered(&a.id, &b.id)
             .then_with(|| a.e_value.partial_cmp(&b.e_value).unwrap_or(Ordering::Equal))

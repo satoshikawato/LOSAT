@@ -289,6 +289,13 @@ Record: [The decision record on blastdbcmd output that NCBI gets wrong](https://
 - **Why.** NCBI's error says that it ignores the id, but NCBI then stores the id far past the end of its list of ids, which is undefined in C++. LOSAT does what the error says.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### `blastdbcheck`: alias count checks and `-ends` near 2^31
+
+- **What you see.** An alias file whose `FIRST_OID`, `LAST_OID`, `MAXOID`, `NSEQ`, `LENGTH` or `OIDLIST` combinations overflow NCBI's 32-bit or 64-bit signed integer arithmetic (such as `FIRST_OID 65535` with `LAST_OID 65535`) passes without a false error, while keeping any unrelated warnings such as a missing `.msk` extension. With `-ends` near `-2147483648`, LOSAT jumps past the end of the volume and fails with `OID not found` just as NCBI does for nearby negative values such as `-ends -2147483638`, whereas NCBI wraps the 32-bit subtraction and passes all OIDs.
+- **When.** `blastdbcheck` on alias files or `-ends` options whose arithmetic passes signed 32-bit or 64-bit bounds. All values inside those bounds give NCBI's exact report and exit status.
+- **Why.** NCBI's behaviour is signed integer overflow, which is undefined in C++. LOSAT evaluates those expressions in wider signed integers (`i128` for alias count checks, `i64` for OID bounds).
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### `cleanup-blastdb-volumes.py`
 
 - **Version line.** `-version` writes `cleanup-blastdb-volumes.py LOSAT 0.2.0` where NCBI BLAST+ 2.17.0 writes `cleanup-blastdb-volumes.py 1.0`.

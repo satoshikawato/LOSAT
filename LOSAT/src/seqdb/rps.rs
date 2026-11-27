@@ -16,7 +16,13 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::utils::mapped_file::MappedFile;
+use crate::utils::os_bytes::path_from_bytes;
+
+use super::alias::SearchPath;
+use super::file::mapped_length;
+use super::{SeqDb, SeqType};
 
 mod cd_data;
 
@@ -608,39 +614,14 @@ impl RpsVolumeFiles {
             path.push(extension);
             PathBuf::from(path)
         };
-        let aux_text = std::fs::read(with(".aux")).map_err(|_| {
-            RpsOpenError::Ncbi(
-                [
-                    b"Cannot open RPS-BLAST auxiliary file: ",
-                    &shown[..],
-                    b".aux",
-                ]
-                .concat(),
-            )
-        })?;
+        let aux_text = std::fs::read(with(".aux"))
+            .map_err(|_| RpsOpenError::Ncbi(aux_open_message(&shown)))?;
         let map = |extension: &str| {
-            MappedFile::open(&with(extension)).map_err(|_| {
-                RpsOpenError::Ncbi(
-                    [
-                        b"Cannot memory map RPS-BLAST database file: ",
-                        &shown[..],
-                        extension.as_bytes(),
-                    ]
-                    .concat(),
-                )
-            })
+            MappedFile::open(&with(extension))
+                .map_err(|_| RpsOpenError::Ncbi(mmap_fail_message(&shown, extension)))
         };
-        let magic_error = |extension: &str| {
-            RpsOpenError::Ncbi(
-                [
-                    b"RPS BLAST profile file (",
-                    &shown[..],
-                    extension.as_bytes(),
-                    b") is either corrupt or constructed for an incompatible architecture",
-                ]
-                .concat(),
-            )
-        };
+        let magic_error =
+            |extension: &str| RpsOpenError::Ncbi(magic_error_message(&shown, extension, false));
         let empty = |extension: &str| {
             RpsOpenError::Refused(format!(
                 "a profile database whose {extension} file is shorter than its header (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}"
@@ -803,17 +784,7 @@ impl RpsVolumeFiles {
         database_name: Option<&[u8]>,
     ) -> Result<(), RpsOpenError> {
         let shown = database_name.map_or_else(|| canonical_volume_path(base), <[u8]>::to_vec);
-        let missing = || {
-            RpsOpenError::Ncbi(
-                [
-                    &shown[..],
-                    b" contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ",
-                    &shown[..],
-                    b".",
-                ]
-                .concat(),
-            )
-        };
+        let missing = || RpsOpenError::Ncbi(freq_ratios_missing_message(&shown));
         let mut path = base.as_os_str().to_os_string();
         path.push(".freq");
         let freq = FreqSource::open(&PathBuf::from(path)).map_err(|_| missing())?;
@@ -1114,6 +1085,415 @@ impl RpsVolumeFiles {
     /// The presence bits of the cells with hits.
     pub(crate) fn pv(&self) -> &[u64] {
         &self.pv
+    }
+}
+
+/// Shared NCBI error texts of `CBlastRPSInfo` and its file wrappers (`rps_aux.cpp`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:180-188
+fn aux_open_message(shown: &[u8]) -> Vec<u8> {
+    [b"Cannot open RPS-BLAST auxiliary file: ", shown, b".aux"].concat()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:253-262
+fn mmap_fail_message(shown: &[u8], extension: &str) -> Vec<u8> {
+    [
+        b"Cannot memory map RPS-BLAST database file: ",
+        shown,
+        extension.as_bytes(),
+    ]
+    .concat()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:294-301, 341-348, 391-398, 440-447, 489-496
+fn magic_error_message(shown: &[u8], extension: &str, freq_ratios: bool) -> Vec<u8> {
+    let prefix: &[u8] = if freq_ratios {
+        b"RPS BLAST freq ratios file ("
+    } else {
+        b"RPS BLAST profile file ("
+    };
+    [
+        prefix,
+        shown,
+        extension.as_bytes(),
+        b") is either corrupt or constructed for an incompatible architecture",
+    ]
+    .concat()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:598-602
+fn freq_ratios_missing_message(db_name: &[u8]) -> Vec<u8> {
+    [
+        db_name,
+        b" contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ",
+        db_name,
+        b".",
+    ]
+    .concat()
+}
+
+const RPS_AUX_CPP: &str = "src/algo/blast/api/rps_aux.cpp";
+const BLAST_INVALID: &str = "CBlastException::eInvalid";
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5748-5756
+const NCBIFILE_MMAP_MISSING: ThrowSite = ThrowSite {
+    file: "src/corelib/ncbifile.cpp",
+    line: 5754,
+    kind: "CFileException::eMemoryMap",
+    function: Some("ncbi::CMemoryFileMap::CMemoryFileMap"),
+};
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5938-5946
+const NCBIFILE_MMAP_OPEN: ThrowSite = ThrowSite {
+    file: "src/corelib/ncbifile.cpp",
+    line: 5945,
+    kind: "CFileException::eMemoryMap",
+    function: Some("ncbi::CMemoryFileMap::x_Open"),
+};
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:185-188
+const RPS_AUX_OPEN_SITE: ThrowSite = ThrowSite {
+    file: RPS_AUX_CPP,
+    line: 186,
+    kind: BLAST_INVALID,
+    function: Some("BLAST::ncbi::blast::CRpsAuxFile::CRpsAuxFile"),
+};
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:258-261
+const RPS_MMAP_SITE: ThrowSite = ThrowSite {
+    file: RPS_AUX_CPP,
+    line: 259,
+    kind: BLAST_INVALID,
+    function: Some("BLAST::ncbi::blast::CRpsMmappedFile::CRpsMmappedFile"),
+};
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:297-300
+const RPS_LOO_MAGIC_SITE: ThrowSite = ThrowSite {
+    file: RPS_AUX_CPP,
+    line: 298,
+    kind: BLAST_INVALID,
+    function: Some("BLAST::ncbi::blast::CRpsLookupTblFile::CRpsLookupTblFile"),
+};
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:344-347
+const RPS_PSSM_MAGIC_SITE: ThrowSite = ThrowSite {
+    file: RPS_AUX_CPP,
+    line: 345,
+    kind: BLAST_INVALID,
+    function: Some("BLAST::ncbi::blast::CRpsPssmFile::CRpsPssmFile"),
+};
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:394-397
+const RPS_WCOUNTS_MAGIC_SITE: ThrowSite = ThrowSite {
+    file: RPS_AUX_CPP,
+    line: 395,
+    kind: BLAST_INVALID,
+    function: Some("BLAST::ncbi::blast::CRpsFreqsFile::CRpsFreqsFile"),
+};
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:443-446
+const RPS_OBSR_MAGIC_SITE: ThrowSite = ThrowSite {
+    file: RPS_AUX_CPP,
+    line: 444,
+    kind: BLAST_INVALID,
+    function: Some("BLAST::ncbi::blast::CRpsObsrFile::CRpsObsrFile"),
+};
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:492-495
+const RPS_FREQ_MAGIC_SITE: ThrowSite = ThrowSite {
+    file: RPS_AUX_CPP,
+    line: 493,
+    kind: BLAST_INVALID,
+    function: Some("BLAST::ncbi::blast::CRpsFreqRatiosFile::CRpsFreqRatiosFile"),
+};
+
+const RPS_INIT_FN: Option<&str> = Some("BLAST::ncbi::blast::CBlastRPSInfo::x_Init");
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:526-529
+const RPS_INIT_PATH_SITE: ThrowSite = ThrowSite {
+    file: RPS_AUX_CPP,
+    line: 527,
+    kind: BLAST_INVALID,
+    function: RPS_INIT_FN,
+};
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:599-602
+const RPS_INIT_FREQ_SITE: ThrowSite = ThrowSite {
+    file: RPS_AUX_CPP,
+    line: 601,
+    kind: BLAST_INVALID,
+    function: RPS_INIT_FN,
+};
+
+pub(crate) type RpsHeaderResult = Result<RpsProfileHeader, RpsHeaderError>;
+
+/// Which DELTA-BLAST frequency file header `read_cdd_freqs_header` reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CddFreqsKind {
+    /// `.freq` (`fFreqRatiosFile`, checked for magic, profile count and offsets).
+    Freq,
+    /// `.wcounts` (`fFrequenciesFile`, checked for magic, profile count and offsets).
+    Wcounts,
+    /// `.obsr` (`fObservationsFile`, checked for magic and profile count only).
+    Obsr,
+}
+
+impl CddFreqsKind {
+    pub(crate) fn ext(self) -> &'static str {
+        match self {
+            CddFreqsKind::Freq => ".freq",
+            CddFreqsKind::Wcounts => ".wcounts",
+            CddFreqsKind::Obsr => ".obsr",
+        }
+    }
+}
+
+/// The header fields of an RPS / DELTA-BLAST profile file (`.rps`, `.freq`, `.wcounts`, `.obsr`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RpsProfileHeader {
+    pub(crate) magic: i32,
+    pub(crate) num_profiles: i32,
+    pub(crate) offsets: Vec<i32>,
+}
+
+/// Why reading an RPS / DELTA-BLAST file header fails.
+#[derive(Debug)]
+pub(crate) enum RpsHeaderError {
+    /// NCBI's own chained `CBlastException` (`CBlastRPSInfo::x_Init` and its file wrappers).
+    Ncbi(NcbiException),
+    /// LOSAT's refusal where NCBI crashes (empty file mapped to NULL) or reads past its mapped
+    /// 4 KiB page.
+    Refused(String),
+}
+
+/// Resolves `db_name` as a protein database the way `CBlastRPSInfo::x_Init` calls
+/// `CSeqDB::FindVolumePaths`, returning the first volume path bytes.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:521-530
+fn resolve_rps_volume(
+    db_name: &[u8],
+    search_path: &SearchPath,
+    program: &str,
+) -> Result<Vec<u8>, RpsHeaderError> {
+    match SeqDb::volume_and_alias_paths(db_name, SeqType::Protein, search_path) {
+        Ok((volumes, _)) => volumes.into_iter().next().ok_or_else(|| {
+            RpsHeaderError::Refused(format!(
+                "an RPS database whose volume list is empty, which is not supported by LOSAT's {program}"
+            ))
+        }),
+        Err(error) => {
+            if let Some(exception) = error.ncbi_exception() {
+                return Err(RpsHeaderError::Ncbi(exception.clone()));
+            }
+            if error.is_seqdb_exception() {
+                if let (Some(site), Some(message)) =
+                    (error.throw_site(), error.ncbi_request_message())
+                {
+                    let inner = NcbiException::new(site, message);
+                    return Err(RpsHeaderError::Ncbi(
+                        inner.rethrow(RPS_INIT_PATH_SITE, "Cannot retrieve path to RPS database"),
+                    ));
+                }
+            }
+            Err(RpsHeaderError::Refused(
+                crate::algorithm::common::database::losat_reader_error(&error, program),
+            ))
+        }
+    }
+}
+
+/// Reads the mapped header of `<volume_path><ext>` as `CRpsMmappedFile` and its subclasses do,
+/// zero-filling bytes in the file's last 4 KiB page (`file::mapped_length`) and refusing empty
+/// files (where NCBI dereferences NULL) or reads past the mapped page.
+///
+/// `offsets_to_read`: `None` for `.loo` (magic only), `Some(None)` to read the file's own
+/// `num_profiles` offsets (`.rps`), or `Some(Some(n))` to read `n` offsets (`.freq`, `.wcounts`,
+/// or `0` for `.obsr`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:253-499
+fn read_mapped_rps_header(
+    volume_path: &[u8],
+    ext: &str,
+    magic_site: ThrowSite,
+    freq_ratios: bool,
+    offsets_to_read: Option<Option<i32>>,
+    program: &str,
+) -> RpsHeaderResult {
+    use std::io::Read;
+    let refused = |msg: String| RpsHeaderError::Refused(msg);
+    let mmap_err = |inner: NcbiException| {
+        RpsHeaderError::Ncbi(inner.rethrow(RPS_MMAP_SITE, mmap_fail_message(volume_path, ext)))
+    };
+    if cfg!(target_endian = "big") {
+        return Err(refused(format!(
+            "a profile database (its files are little endian) on a big-endian platform is not supported by LOSAT's {program}"
+        )));
+    }
+    let full_bytes = [volume_path, ext.as_bytes()].concat();
+    let full_path = path_from_bytes(full_bytes.clone());
+    let read_err = |source: std::io::Error| {
+        refused(format!(
+            "{}: read failed ({source}), which is not supported by LOSAT's {program}",
+            full_path.display()
+        ))
+    };
+    if !super::alias::exists(&full_path) {
+        let inner = NcbiException::new(
+            NCBIFILE_MMAP_MISSING,
+            super::oid_list::not_a_file(&full_bytes),
+        );
+        return Err(mmap_err(inner));
+    }
+    let mut file = match std::fs::File::open(&full_path) {
+        Ok(file) => file,
+        Err(source) => {
+            let Some(strerror) = crate::utils::os_error_text::ncbi_strerror(&source) else {
+                return Err(refused(format!(
+                    "{}: cannot be opened ({source}), which is not supported by LOSAT's {program}",
+                    full_path.display()
+                )));
+            };
+            let inner = NcbiException::new(
+                NCBIFILE_MMAP_OPEN,
+                [
+                    b"CMemoryFile: Cannot memory map file '".as_slice(),
+                    &full_bytes,
+                    b"':",
+                    strerror.as_bytes(),
+                ]
+                .concat(),
+            );
+            return Err(mmap_err(inner));
+        }
+    };
+    let file_len = file
+        .metadata()
+        .map_err(|source| {
+            refused(format!(
+                "{}: metadata failed ({source}), which is not supported by LOSAT's {program}",
+                full_path.display()
+            ))
+        })?
+        .len();
+    if file_len == 0 {
+        return Err(refused(format!(
+            "a profile database whose {ext} file has zero length (NCBI crashes on it) is not supported by LOSAT's {program}"
+        )));
+    }
+    let mapped_len = mapped_length(file_len);
+    // Read the first 8 bytes (magic + num_profiles), zero-filled inside the first 4 KiB page.
+    let head_read = file_len.min(8) as usize;
+    let mut head = [0u8; 8];
+    file.read_exact(&mut head[..head_read]).map_err(read_err)?;
+    let magic = i32::from_le_bytes([head[0], head[1], head[2], head[3]]);
+    if magic != RPS_MAGIC_NUM && magic != RPS_MAGIC_NUM_28 {
+        let exc = NcbiException::new(
+            magic_site,
+            magic_error_message(volume_path, ext, freq_ratios),
+        );
+        return Err(RpsHeaderError::Ncbi(exc));
+    }
+    let Some(offset_spec) = offsets_to_read else {
+        return Ok(RpsProfileHeader {
+            magic,
+            num_profiles: 0,
+            offsets: Vec::new(),
+        });
+    };
+    let num_profiles = i32::from_le_bytes([head[4], head[5], head[6], head[7]]);
+    let offset_count = match offset_spec {
+        None => num_profiles.max(0) as usize,
+        Some(expected) => expected.max(0) as usize,
+    };
+    let end_bytes = (offset_count as u64)
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_add(8));
+    if end_bytes.is_none_or(|end| end > mapped_len) {
+        return Err(refused(format!(
+            "a profile database whose {ext} file header passes its mapped 4 KiB page (NCBI reads past its mapping) is not supported by LOSAT's {program}"
+        )));
+    }
+    let mut offsets = Vec::with_capacity(offset_count);
+    if offset_count > 0 {
+        let want_bytes = offset_count * 4;
+        let held_bytes = file_len.saturating_sub(8).min(want_bytes as u64) as usize;
+        let mut raw = vec![0u8; want_bytes];
+        if held_bytes > 0 {
+            file.read_exact(&mut raw[..held_bytes]).map_err(read_err)?;
+        }
+        for chunk in raw.chunks_exact(4) {
+            offsets.push(i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+        }
+    }
+    Ok(RpsProfileHeader {
+        magic,
+        num_profiles,
+        offsets,
+    })
+}
+
+/// Reads the RPS header for `CCddDeltaHeadersTest::x_GetHeader` (`CBlastRPSInfo` with `fRpsBlast`):
+/// resolves `db_name` as protein, checks `.aux` opens, checks `.loo` magic, and reads `.rps` magic,
+/// `num_profiles`, and `start_offsets[0..num_profiles]`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:518-575
+pub(crate) fn read_cdd_rps_header(
+    db_name: &[u8],
+    search_path: &SearchPath,
+    program: &str,
+) -> RpsHeaderResult {
+    let volume_path = resolve_rps_volume(db_name, search_path, program)?;
+    let aux_path = path_from_bytes([volume_path.as_slice(), b".aux"].concat());
+    if std::fs::File::open(&aux_path).is_err() {
+        return Err(RpsHeaderError::Ncbi(NcbiException::new(
+            RPS_AUX_OPEN_SITE,
+            aux_open_message(&volume_path),
+        )));
+    }
+    read_mapped_rps_header(
+        &volume_path,
+        ".loo",
+        RPS_LOO_MAGIC_SITE,
+        false,
+        None,
+        program,
+    )?;
+    read_mapped_rps_header(
+        &volume_path,
+        ".rps",
+        RPS_PSSM_MAGIC_SITE,
+        false,
+        Some(None),
+        program,
+    )
+}
+
+/// Reads one DELTA-BLAST frequency file header (`.freq`, `.wcounts`, or `.obsr`) for
+/// `CCddDeltaHeadersTest::x_TestFreqs`, checking `expected_profiles` offsets for `.freq` and
+/// `.wcounts` and none for `.obsr`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:576-606
+pub(crate) fn read_cdd_freqs_header(
+    db_name: &[u8],
+    search_path: &SearchPath,
+    kind: CddFreqsKind,
+    expected_profiles: i32,
+    program: &str,
+) -> RpsHeaderResult {
+    let base_path = resolve_rps_volume(db_name, search_path, program)?;
+    let (magic_site, freq_ratios, offsets_to_read) = match kind {
+        CddFreqsKind::Freq => (RPS_FREQ_MAGIC_SITE, true, Some(Some(expected_profiles))),
+        CddFreqsKind::Wcounts => (RPS_WCOUNTS_MAGIC_SITE, false, Some(Some(expected_profiles))),
+        CddFreqsKind::Obsr => (RPS_OBSR_MAGIC_SITE, false, Some(Some(0))),
+    };
+    let result = read_mapped_rps_header(
+        &base_path,
+        kind.ext(),
+        magic_site,
+        freq_ratios,
+        offsets_to_read,
+        program,
+    );
+    match (kind, result) {
+        (CddFreqsKind::Freq, Err(RpsHeaderError::Ncbi(inner))) => Err(RpsHeaderError::Ncbi(
+            inner.rethrow(RPS_INIT_FREQ_SITE, freq_ratios_missing_message(db_name)),
+        )),
+        (_, other) => other,
     }
 }
 

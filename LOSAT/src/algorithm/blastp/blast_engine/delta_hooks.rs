@@ -116,8 +116,8 @@ impl DeltaRun {
         *self.settings.lock().expect("deltablast's settings") = Some(settings);
     }
 
-    /// LOSAT's refusal of a domain database (`-rpsdb`) of several volumes, made before the run
-    /// writes anything (`psi_round::refuse_before_output`; NCBI 2.17.0 searches one, probes
+    /// LOSAT's refusal of a domain database (`-rpsdb`) of several volumes, made before any search
+    /// (`psi_round::refuse_before_search`; NCBI 2.17.0 searches one, probes
     /// `delta2`, `delta2_0` of PS13a's fix round 2a): its volumes as the domain search opens them
     /// (`open_side`, NCBI's open of the domain database in its first search, after the prolog). A
     /// database that does not open here gets NCBI's error there, at NCBI's place.

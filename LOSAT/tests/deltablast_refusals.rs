@@ -1,6 +1,7 @@
 //! `losat deltablast`'s refusals (series PR, item PS13a): each runs where LOSAT's DELTABLAST stops, with its text,
-//! and writes to the standard output only what NCBI BLAST+ 2.17.0 writes before the same step (nothing for all of
-//! them here). NCBI runs the commands of the first group to their end (the rows of
+//! and writes to the standard output only what NCBI BLAST+ 2.17.0 writes before the same step: nothing, or with
+//! `-outfmt 0` for a refusal at the search the start of the report, which every program writes before its first
+//! query batch, where NCBI writes it (line RG item T4b-f). NCBI runs the commands of the first group to their end (the rows of
 //! `tests/db_search_manifest/deltablast.tsv` freeze its bytes for the cases that LOSAT writes); with those of the
 //! second group (PS13a fix round 1) NCBI crashes or stops with a C++ exception. The refusal of a Seq-id that is
 //! not local or general is a unit test of `rps_search::cdd_input`.
@@ -55,6 +56,46 @@ fn assert_refused(run: &Run, what: &str, text: &str) {
     );
 }
 
+/// Asserts the run refused with `text` after the start of the outfmt 0 report, `prolog`.
+fn assert_refused_after(run: &Run, what: &str, text: &str, prolog: &[u8]) {
+    assert_ne!(run.rc, 0, "{what}");
+    assert!(run.stderr.contains(text), "{what}: {}", run.stderr);
+    assert!(
+        run.stderr
+            .contains("is not supported by LOSAT's DELTABLAST"),
+        "{what}: {}",
+        run.stderr
+    );
+    assert!(!prolog.is_empty(), "{what}: the prolog");
+    assert!(
+        run.stdout == prolog,
+        "{what}: stdout {:?}",
+        String::from_utf8_lossy(&run.stdout)
+    );
+}
+
+/// The start of the outfmt 0 report of a run of `q_serpin.faa` against the subjects that `args`
+/// give (`-subject ...`; none: `-db dbs`): the standard output of that run with
+/// `-domain_inclusion_ethresh 0`, which stops with NCBI's error right after it (row
+/// `db.dl.dih.zero.0`).
+fn prolog(args: &[&str]) -> Vec<u8> {
+    let mut all = vec![
+        "-query",
+        "tests/db_search/delta/q_serpin.faa",
+        "-rpsdb",
+        "tests/db_search/delta/deltatest",
+        "-domain_inclusion_ethresh",
+        "0",
+    ];
+    if args.is_empty() {
+        all.extend_from_slice(&["-db", "tests/db_search/delta/dbs"]);
+    }
+    all.extend_from_slice(args);
+    let run = run_raw(&all, &[]);
+    assert_eq!(run.rc, 1, "prolog {args:?}: {}", run.stderr);
+    run.stdout
+}
+
 fn refused(extra: &[&str], text: &str) {
     let mut args = RPS.to_vec();
     args.extend_from_slice(extra);
@@ -84,17 +125,24 @@ fn outfmts_other_than_0_6_7_are_refused() {
 
 #[test]
 fn use_sw_tback_is_refused_as_psiblasts_pssm_search_refuses_it() {
-    refused(&["-use_sw_tback"], "use_sw_tback");
+    let mut args = RPS.to_vec();
+    args.push("-use_sw_tback");
+    assert_refused_after(
+        &run_query("q_serpin.faa", &args),
+        "-use_sw_tback",
+        "use_sw_tback",
+        &prolog(&[]),
+    );
 }
 
 #[test]
 fn a_domain_database_of_several_volumes_is_refused() {
     let run = run_query("q_serpin.faa", &["-rpsdb", "tests/db_search/delta/delta2"]);
-    assert_refused(&run, "delta2", "several volumes");
+    assert_refused_after(&run, "delta2", "several volumes", &prolog(&[]));
 }
 
 #[test]
-fn a_subject_set_larger_than_max_target_seqs_is_refused_before_any_output() {
+fn a_subject_set_larger_than_max_target_seqs_is_refused_before_the_search() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .current_dir(root)
@@ -117,7 +165,12 @@ fn a_subject_set_larger_than_max_target_seqs_is_refused_before_any_output() {
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     };
-    assert_refused(&run, "subject set", "-max_target_seqs");
+    assert_refused_after(
+        &run,
+        "subject set",
+        "-max_target_seqs",
+        &prolog(&["-subject", "tests/db_search/delta/subj_mix.faa"]),
+    );
 }
 
 // --- PS13a fix round 1: NCBI 2.17.0 probes of `PR/ps13/fix1_probe` (x2, xs, none1) ---
@@ -536,9 +589,10 @@ fn domain_search_refusal_and_subject_limit_by_num_descriptions_name_deltablast()
         ],
         &[],
     );
-    assert_refused(
+    assert_refused_after(
         &run,
         "D7 num_descriptions/num_alignments",
         "-num_descriptions",
+        &prolog(&["-subject", "tests/db_search/delta/subj_mix.faa"]),
     );
 }

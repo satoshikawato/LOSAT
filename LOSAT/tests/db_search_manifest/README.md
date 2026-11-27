@@ -102,7 +102,10 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   cells: NCBI's stdout of the same command, or with `ncbi-near: ROW_ID` that of the `ncbi` row ROW_ID of the same
   outfmt (a near input that NCBI runs to its end, for example the copy row of the batches that LOSAT writes before it
   refuses, or line WQA D10's near input, whose refused batch NCBI's reader stops at), and with
-  `ncbi-near: ROW_ID first N bytes` its first N bytes. Where NCBI crashes on the row's own command,
+  `ncbi-near: ROW_ID first N bytes` its first N bytes (line RG item T4b-f: where LOSAT refuses after the prolog
+  that BLASTP, PSIBLAST, RPSBLAST and TBLASTN write before their first batch, the prolog of a search of the same
+  database and outfmt; rows `db.pro.*` and `db.id.pro.*` are such searches with a query without hits). Where NCBI
+  crashes on the row's own command,
   its stdout depends on where the crash cuts it: `freeze` stops on such a run, and the row takes a near row (or has
   empty stdout cells where LOSAT writes nothing before it refuses).
 - `db`: path relative to LOSAT/ (an empty cell is `-db ""`; names separated by spaces are one `-db` argument;

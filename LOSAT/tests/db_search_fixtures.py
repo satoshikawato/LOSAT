@@ -150,7 +150,8 @@ databases of the inflated directory, not paths. `freeze` and `check` refuse to s
   `-num_iterations 1`), or a search of the same database and
   output format whose first N bytes are the prolog that LOSAT writes before it refuses the report (line RG
   item T3c: the same search with a description table, which NCBI ends with an exception at an HSP of length
-  0, or without a hit). `freeze` runs nothing for such a row and writes the sha256 and size of those bytes
+  0, or without a hit; item T4b-f: the refusals after the prolog that BLASTP, PSIBLAST, RPSBLAST and TBLASTN
+  write before their first batch, rows `db.pro.*` and `db.id.pro.*` with a query without hits). `freeze` runs nothing for such a row and writes the sha256 and size of those bytes
   into its stdout columns, `check` reads them from ROW_ID's frozen stdout (`frozen_id`, `expected_stdout`),
   and the row keeps its own rc and stderr (LOSAT's). Where NCBI ends a row by a signal (a crash), its stdout
   stops where the crash cuts it, which its heap and the environment move (the same official 2.17.0 binary
@@ -1551,9 +1552,10 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         # command line does, BLASTX's XML documents through `blast_xml::documents_may_refuse`, and
         # keeps what was written before an error, `api::run`): none for most rows; what NCBI wrote
         # before its failing step for the others, whose stdout cells hold NCBI's frozen stdout or a
-        # near row's (blastx's `db.x2g.*`: the prolog; the refusals at a later query batch, as
-        # tblastn's `db.xs.tblastn.bat.*`: the reports of the query batches before; psiblast's PSSM
-        # file and rounds rows, which the library skips).
+        # near row's (blastx's `db.x2g.*` and the refusals after the outfmt 0-4 prolog that BLASTP,
+        # PSIBLAST, RPSBLAST and TBLASTN write before their first batch, `ncbi-near:`: the prolog; the
+        # refusals at a later query batch, as tblastn's `db.xs.tblastn.bat.*`: the reports of the
+        # query batches before; psiblast's PSSM file and rounds rows, which the library skips).
         if row["stdout_bytes"]:
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):

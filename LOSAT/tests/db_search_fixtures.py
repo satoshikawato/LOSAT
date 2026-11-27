@@ -65,9 +65,13 @@ databases of the inflated directory, not paths. `freeze` and `check` refuse to s
   overlapping masks after which NCBI's word hits reach diagonal entries of another subject, with the near database
   that holds a spacer of `X` between the two subjects under an alias with the database's statistics; exception 31:
   a PSSM file's gapped Lambda for which NCBI's search for the hit-saving cutoff never ends, with the near Lambda
-  8e-9 whose search stays inside Int4, in outfmt 7, which prints neither Lambda). The row has no
-  frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row`). ROW_ID is
-  an `ncbi` row of the same outfmt without a near row of its own, and an `ncbi` row takes all of its bytes.
+  8e-9 whose search stays inside Int4, in outfmt 7, which prints neither Lambda; exception 35: DELTABLAST
+  `-query_loc` with a range whose domain hits NCBI writes past its alignment of conserved domains, where NCBI
+  crashes, with the near input the range's letters as a query of their own, in fields that read no query letter).
+  The row has no frozen stdout or stderr of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns
+  (`near_row`), and for a row with PSSM files (the same `files` kind as ROW_ID's) ROW_ID's `side_sha256` and frozen
+  PSSM files under the row's own names (`copy_near_pssm`). ROW_ID is an `ncbi` row of the same outfmt without a
+  near row of its own, and an `ncbi` row takes all of its bytes.
 - a `ncbi` row whose `covers` cell has a part ` | ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind
   memcheck, where NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3: the window of a one-hit
   gapped start of negative length; natively NCBI may crash there or read bytes that differ from run to run, valgrind
@@ -1371,6 +1375,8 @@ def freeze(args: argparse.Namespace) -> int:
             if cut is not None:
                 raise SystemExit(f"{row['row_id']}: an ncbi row takes all of its near row's bytes (no 'first N bytes')")
             row.update({key: source[key] for key in ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256")})
+            if row.get("files") or source.get("files"):
+                copy_near_pssm(row, source)
         else:
             # A rejection row keeps its own rc and stderr (LOSAT's) and takes the near run's stdout, or its first
             # N bytes, which the near run must still write.
@@ -1383,6 +1389,21 @@ def freeze(args: argparse.Namespace) -> int:
               + f"\trc={row['rc']}\tstdout={row['stdout_bytes']}")
     write_manifest(comments, rows)
     return 0
+
+
+def copy_near_pssm(row: dict[str, str], source: dict[str, str]) -> None:
+    """The PSSM files of an `ncbi` row whose expectation is its near row's (`near_row`): the near row's `side_sha256`
+    and its frozen PSSM files under the row's own names, so that `check` and `frozen_pssm_agrees` read them as the
+    row's (DELTABLAST `-query_loc` past NCBI's alignment, PD-LOSAT-NCBI-DEFECTS exception 35: the PSSM of the
+    range's letters as their own query). Both rows have the same PSSM `files` kind."""
+    if not (xinclude.wants_pssm(row) and xinclude.wants_pssm(source)) or row["files"] != source["files"]:
+        raise SystemExit(f"{row['row_id']}: ncbi-near {source['row_id']} has other files ({source.get('files', '')!r})")
+    old, _ = xinclude.pssm_files(FROZEN, row["row_id"])
+    for name, _ in old:
+        (FROZEN / name).unlink()
+    for name, data in xinclude.pssm_files(FROZEN, source["row_id"])[0]:
+        (FROZEN / (row["row_id"] + name[len(source["row_id"]):])).write_bytes(data)
+    row.update(side_sha256=source.get("side_sha256", ""))
 
 
 def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> None:

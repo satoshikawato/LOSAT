@@ -162,3 +162,83 @@ fn intersected_segments_with_equal_subject_start_keep_stable_order() {
         [(0, 10, 0, 10), (10, 10, 10, 10), (10, 15, 10, 15)]
     );
 }
+
+/// The rows of `place_cells` as text: `.` an unaligned cell, else the column's index.
+fn row_text(rows: &[Vec<CdCell>]) -> Vec<String> {
+    rows.iter()
+        .map(|row| {
+            row.iter()
+                .map(|&cell| {
+                    if cell == CdCell::UNALIGNED {
+                        ".".to_string()
+                    } else {
+                        (0..64)
+                            .find(|&index| cell == CdCell::aligned(index))
+                            .expect("a column below 64")
+                            .to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect()
+}
+
+#[test]
+fn cells_of_a_range_from_1_sit_in_their_rows() {
+    // Two hits on a range of 5 letters that starts at 1 (`range_start` 0): every record position
+    // is inside its row, as without a range.
+    let segments = [(0, 1, 3, 0), (1, 0, 2, 3)];
+    let rows = place_cells(&segments, 2, 5, 0).expect("in its rows");
+    assert_eq!(row_text(&rows), [". 0 1 2 .", "3 4 . . ."]);
+}
+
+#[test]
+fn cells_past_a_row_spill_into_the_next_hits_rows_and_later_hits_win() {
+    // L = 5, a range at record positions 3..8 (`range_start` 3): hit 0's segment at 6..8 writes
+    // flat cells 6 and 7 (NCBI's index h * L + q), row 1's positions 1 and 2; hit 1's at 3 is flat
+    // 8, row 1's position 3.
+    let segments = [(0, 6, 2, 0), (1, 3, 1, 2)];
+    let rows = place_cells(&segments, 2, 5, 3).expect("inside NCBI's array");
+    assert_eq!(row_text(&rows), [". . . . .", ". 0 1 2 ."]);
+    // NCBI writes in the hits' order: a later hit's cell at a flat index that an earlier hit
+    // wrote holds the later hit's column (record position 1, flat 6, over hit 0's spilled cell).
+    let segments = [(0, 6, 2, 0), (1, 1, 1, 2)];
+    let rows = place_cells(&segments, 2, 5, 3).expect("inside NCBI's array");
+    assert_eq!(row_text(&rows), [". . . . .", ". 2 1 . ."]);
+}
+
+#[test]
+fn a_cell_at_the_arrays_end_places_every_hit_at_the_ranges_coordinates() {
+    // L = 5, N = 2: hit 1's segment at record positions 5..7 reaches flat index 1 * 5 + 5 = 10 =
+    // N * L, past NCBI's array (the range 2-364 of q_serpin: its kept hit ends at the record's
+    // last letter). Every hit is then placed at the range's coordinates (record position minus
+    // `range_start` 1), the alignment of the range's letters as a query of their own.
+    let segments = [(0, 1, 2, 0), (1, 5, 1, 2)];
+    let rows = place_cells(&segments, 2, 5, 1).expect("inside the range");
+    assert_eq!(row_text(&rows), ["0 1 . . .", ". . . . 2"]);
+    // A cell just before the array's end keeps NCBI's flat placement.
+    let segments = [(0, 1, 2, 0), (1, 4, 1, 2)];
+    let rows = place_cells(&segments, 2, 5, 1).expect("inside NCBI's array");
+    assert_eq!(row_text(&rows), [". 0 1 . .", ". . . . 2"]);
+}
+
+#[test]
+fn a_segment_of_negative_length_is_still_refused() {
+    let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/delta/deltatest");
+    let files = CdProfileFiles::open(&base, "DELTABLAST").expect("the fixture's profile files");
+    let mut negative = hit(1, 1e-5, &[(0, 0, 3)]);
+    negative.segments[0].query.to = negative.segments[0].query.from - 1;
+    let error = build_msa(&[1; 10], &[negative], &files, 0).expect_err("refused");
+    assert!(
+        error.to_string().contains("has a segment of negative length or start"),
+        "{error}"
+    );
+    // A segment past the searched letters is placed at NCBI's index (here in the next hit's row),
+    // not refused.
+    let hits = [hit(1, 1e-5, &[(8, 0, 3)]), hit(2, 1e-5, &[(5, 0, 1)])];
+    let msa = build_msa(&[1; 10], &hits, &files, 0).expect("placed");
+    assert_eq!(msa.rows.len(), 2);
+    assert_eq!(msa.rows[1][0], CdCell::aligned(2));
+    assert_eq!(msa.rows[1][1], CdCell::UNALIGNED);
+}

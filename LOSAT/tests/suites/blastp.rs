@@ -66,6 +66,8 @@ mod blastp_subject_runs;
 mod blastp_sw_tback;
 #[path = "../blastp_ungap_sent.rs"]
 mod blastp_ungap_sent;
+#[path = "../deltablast_query_loc.rs"]
+mod deltablast_query_loc;
 #[path = "../deltablast_refusals.rs"]
 mod deltablast_refusals;
 #[path = "../psiblast_pssm_files.rs"]

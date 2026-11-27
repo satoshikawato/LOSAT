@@ -66,16 +66,6 @@ fn refused(extra: &[&str], text: &str) {
 }
 
 #[test]
-fn show_domain_hits_is_refused() {
-    refused(&["-show_domain_hits"], "-show_domain_hits");
-}
-
-#[test]
-fn query_loc_is_refused() {
-    refused(&["-query_loc", "10-200"], "query_loc");
-}
-
-#[test]
 fn outfmts_other_than_0_6_7_are_refused() {
     for format in ["5", "8", "11", "15"] {
         refused(&["-outfmt", format], &format!("output format {format}"));

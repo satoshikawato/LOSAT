@@ -21,9 +21,11 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   after which every reading frame keeps a letter after its part, for exception 21 with the freed letters stored as `X`
   or `N`; for exception 3 the same volume with zero bytes after its last memory page; for exception 19 the hit list
   size 1073741798; for exception 27 the database with the short mask dropped and its bases stored as `N`; for
-  exception 31 a PSSM file's gapped Lambda of 8e-9, in outfmt 7, which prints no Lambda), where NCBI's own run of the
-  row reaches an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exceptions 13, 21, 3, 19, 27 and 31); `freeze` copies
-  ROW_ID's columns and runs nothing.
+  exception 31 a PSSM file's gapped Lambda of 8e-9, in outfmt 7, which prints no Lambda; for exception 35 the letters
+  of a DELTABLAST `-query_loc` range as a query of their own, in fields that read no query letter), where NCBI's own
+  run of the row reaches an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exceptions 13, 21, 3, 19, 27, 31 and 35);
+  `freeze` copies ROW_ID's columns, and for a row with PSSM files ROW_ID's `side_sha256` and frozen PSSM files under
+  the row's own names, and runs nothing.
 - `kind ncbi` with a part ` | ncbi-valgrind` of covers: the frozen bytes are NCBI's run under valgrind memcheck, where
   NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3) and may crash or vary; `freeze` runs
   such a row only with `--valgrind CMD` (for example `--valgrind "valgrind -q --log-file=/dev/null"`) and otherwise

@@ -1,0 +1,145 @@
+PHIBLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set.
+           1 sequences; 410 total letters
+
+Results from round 1
+
+
+Query= qset
+
+Length=300
+2 occurrence(s) of pattern: 
+W-C-X(2)-H-W at position(s) 51, 251 of query sequence
+pattern probability=7.48789e-08
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_g30                                                                 619     0.0  
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_g30                                                                 618     0.0  
+
+
+
+Significant alignments for pattern occurrence 1 at position 51
+
+> s_g30
+Length=410
+
+ Score = 619 bits (1610),  Expect = 0.0
+ Identities = 300/330 (91%), Positives = 300/330 (91%), Gaps = 30/330 (9%)
+
+pattern                                                         ******    
+Query    1    MFPCDVENYCTHCDQQDIDVQCYEIYCYYPCICVFLQFVEYLVGEYYHNEWCAAHWVQMR  60
+              MFPCDVENYCTHCDQQDIDVQCYEIYCYYPCICVFLQFVEYLVGEYYHNEWCAAHWVQMR
+Sbjct    41   MFPCDVENYCTHCDQQDIDVQCYEIYCYYPCICVFLQFVEYLVGEYYHNEWCAAHWVQMR  100
+
+Query    61   YRNLIGIDYLTSMRLDETQGMFSQCDVYMMNSYRDDKSDCLYRLPNARNGESCHLFIPPS  120
+              YRNLIGIDYLTSMRLDETQGMFSQCDVYMMNSYRDDKSDCLYRLPNARNGESCHLFIPPS
+Sbjct    101  YRNLIGIDYLTSMRLDETQGMFSQCDVYMMNSYRDDKSDCLYRLPNARNGESCHLFIPPS  160
+
+Query    121  DGRPVKFQVKQNPIFDGFIIASYGKLAFQV------------------------------  150
+              DGRPVKFQVKQNPIFDGFIIASYGKLAFQV                              
+Sbjct    161  DGRPVKFQVKQNPIFDGFIIASYGKLAFQVCGQDKADKDIDKERAMVQKFCTIEGKCGHL  220
+
+Query    151  NYMFTCRVPPPPESPCHDHRGEMCEAYFVENADHPFKNNSEESRSSLDFEMKSGTAHTNF  210
+              NYMFTCRVPPPPESPCHDHRGEMCEAYFVENADHPFKNNSEESRSSLDFEMKSGTAHTNF
+Sbjct    221  NYMFTCRVPPPPESPCHDHRGEMCEAYFVENADHPFKNNSEESRSSLDFEMKSGTAHTNF  280
+
+Query    211  VATLDKTNGNIVVTMIHIPIHTSNAAKSKHNRNNDIEISHWCKLHWDEPHSGQMDPRPDG  270
+              VATLDKTNGNIVVTMIHIPIHTSNAAKSKHNRNNDIEISHWCKLHWDEPHSGQMDPRPDG
+Sbjct    281  VATLDKTNGNIVVTMIHIPIHTSNAAKSKHNRNNDIEISHWCKLHWDEPHSGQMDPRPDG  340
+
+Query    271  GFAFYRFSNFVVFAAETFQHHAKHLTIYMK  300
+              GFAFYRFSNFVVFAAETFQHHAKHLTIYMK
+Sbjct    341  GFAFYRFSNFVVFAAETFQHHAKHLTIYMK  370
+
+
+ Score =  1.0 bits (1),  Expect = 1.9
+ Identities = 4/8 (50%), Positives = 5/8 (63%), Gaps = 0/8 (0%)
+
+pattern         ******
+Query    49   NEWCAAHW  56
+              + WC  HW
+Sbjct    319  SHWCKLHW  326
+
+
+
+
+Significant alignments for pattern occurrence 2 at position 251
+
+> s_g30
+Length=410
+
+ Score = 618 bits (1609),  Expect = 0.0
+ Identities = 300/330 (91%), Positives = 300/330 (91%), Gaps = 30/330 (9%)
+
+Query    1    MFPCDVENYCTHCDQQDIDVQCYEIYCYYPCICVFLQFVEYLVGEYYHNEWCAAHWVQMR  60
+              MFPCDVENYCTHCDQQDIDVQCYEIYCYYPCICVFLQFVEYLVGEYYHNEWCAAHWVQMR
+Sbjct    41   MFPCDVENYCTHCDQQDIDVQCYEIYCYYPCICVFLQFVEYLVGEYYHNEWCAAHWVQMR  100
+
+Query    61   YRNLIGIDYLTSMRLDETQGMFSQCDVYMMNSYRDDKSDCLYRLPNARNGESCHLFIPPS  120
+              YRNLIGIDYLTSMRLDETQGMFSQCDVYMMNSYRDDKSDCLYRLPNARNGESCHLFIPPS
+Sbjct    101  YRNLIGIDYLTSMRLDETQGMFSQCDVYMMNSYRDDKSDCLYRLPNARNGESCHLFIPPS  160
+
+Query    121  DGRPVKFQVKQNPIFDGFIIASYGKLAFQV------------------------------  150
+              DGRPVKFQVKQNPIFDGFIIASYGKLAFQV                              
+Sbjct    161  DGRPVKFQVKQNPIFDGFIIASYGKLAFQVCGQDKADKDIDKERAMVQKFCTIEGKCGHL  220
+
+Query    151  NYMFTCRVPPPPESPCHDHRGEMCEAYFVENADHPFKNNSEESRSSLDFEMKSGTAHTNF  210
+              NYMFTCRVPPPPESPCHDHRGEMCEAYFVENADHPFKNNSEESRSSLDFEMKSGTAHTNF
+Sbjct    221  NYMFTCRVPPPPESPCHDHRGEMCEAYFVENADHPFKNNSEESRSSLDFEMKSGTAHTNF  280
+
+pattern                                               ******              
+Query    211  VATLDKTNGNIVVTMIHIPIHTSNAAKSKHNRNNDIEISHWCKLHWDEPHSGQMDPRPDG  270
+              VATLDKTNGNIVVTMIHIPIHTSNAAKSKHNRNNDIEISHWCKLHWDEPHSGQMDPRPDG
+Sbjct    281  VATLDKTNGNIVVTMIHIPIHTSNAAKSKHNRNNDIEISHWCKLHWDEPHSGQMDPRPDG  340
+
+Query    271  GFAFYRFSNFVVFAAETFQHHAKHLTIYMK  300
+              GFAFYRFSNFVVFAAETFQHHAKHLTIYMK
+Sbjct    341  GFAFYRFSNFVVFAAETFQHHAKHLTIYMK  370
+
+
+ Score =  1.0 bits (1),  Expect = 1.9
+ Identities = 4/8 (50%), Positives = 5/8 (63%), Gaps = 0/8 (0%)
+
+pattern         ******
+Query    249  SHWCKLHW  256
+              + WC  HW
+Sbjct    89   NEWCAAHW  96
+
+
+
+
+Lambda      K        H        a         alpha
+   0.270   0.0470     1.00     0.00     0.00 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.270   0.0470     1.00     0.00     0.00     0.00 
+
+Effective search space used: 404
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 410
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

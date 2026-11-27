@@ -111,6 +111,11 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   `db.phi.varlen.*` rows (PR #1654 R3): `ps8_varlen_q1.faa` / `ps8_varlen_s1.faa` and `ps8_varlen_q2.faa` /
   `ps8_varlen_s2.faa` with `tests/fixtures/phi/cx12c.pat` (`C-x(1,2)-C`), exercising variable-length pattern
   hits starting at the same offset (`CACC`) under `-culling_limit` and `-best_hit_*`.
+- `ps8a2_set_q.faa` and `ps8a2_set_s.faa` (line PS, PS8a-2; rows `db.phi.set.0` and `db.phi.ss.set.*` of
+  `psiblast.phi.tsv`, pattern `tests/fixtures/phi/wcx2hw.pat` `W-C-x(2)-H-W`): a random 300-letter query (Python's
+  `random.Random(7)`, letters without `W`) with the pattern at 51 (`WCAAHW`) and 251 (`WCKLHW`), and a subject of
+  40 random letters, the query's first 150 letters, 30 random letters, its last 150 and 40 random letters: with
+  `-sum_stats true` the two places' HSPs link into one set of two, which outfmt 0 shows as `Expect(2)`.
 - `ps15b2_othr_*.faa` (line PS, PS15b-2 fix 1): subjects of the molecule-`other` PSSM
   `tests/fixtures/pssm/ps15b2_tk_other_stdaa.asn.gz` (rows `db.ps15b2.p.othr.*`), from `tk.faa`: `del100` without
   letter 101 (a query letter against a gap of the subject on a query row of its own: NCBI 2.17.0's merge writes

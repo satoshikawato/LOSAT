@@ -389,7 +389,91 @@ fn all_frozen_ncbi_2_17_0_asn1_cases_match_byte_for_byte() {
         assert_eq!(actual_files, expected_files, "case {name}: DB files differ");
         checked += 1;
     }
-    assert!(checked >= 82, "expected >= 82 frozen cases, got {checked}");
+    assert!(
+        checked >= 118,
+        "expected >= 118 frozen cases, got {checked}"
+    );
+}
+
+/// The objects that NCBI's makeblastdb indexes with a report of memory addresses (an empty
+/// region's post before the diagnostic stream failed, the report of an element stated as NULL)
+/// or crashes on (a division by zero) as they join the object manager's scope
+/// (`asn_source::join_scope`): LOSAT refuses each in its words, with exit status 1, writes the
+/// part of NCBI's log that comes before that point, and leaves no file of the database. The table
+/// holds NCBI 2.17.0's exit status, log and first line of standard error of each.
+#[test]
+fn object_manager_address_and_crash_cases_are_refused() {
+    use crate::objmgr::annot_index::Refusal;
+    let (fix_a, _fix_m, fix_a_str, fix_m_str) = asn1_fixture_paths();
+    let table = std::fs::read_to_string(fix_a.join("makeblastdb/ncbi_2_17_0_refused.tsv")).unwrap();
+    let mut checked = 0usize;
+    for line in table.lines().skip(1) {
+        let cols: Vec<&str> = line.split('\t').collect();
+        let [name, in_spec, itype, dbtype, refusal, ncbi_rc, ncbi_out_hex, ncbi_err_line] =
+            cols.as_slice()
+        else {
+            panic!("malformed row: {line}");
+        };
+        let refusal = match *refusal {
+            "EmptyRegion" => Refusal::EmptyRegion,
+            "NullElement" => Refusal::NullElement,
+            "DivideByZero" => Refusal::DivideByZero,
+            other => panic!("case {name}: refusal {other}"),
+        };
+        // The row is one that NCBI writes with memory addresses or crashes on.
+        match refusal {
+            Refusal::EmptyRegion => assert!(
+                ncbi_err_line.contains("Empty region in ") && ncbi_err_line.contains("0x"),
+                "case {name}"
+            ),
+            Refusal::NullElement => assert!(
+                *ncbi_rc == "255" && *ncbi_err_line == "Error: NCBI C++ Exception:",
+                "case {name}"
+            ),
+            _ => assert_eq!(*ncbi_rc, "136", "case {name}"),
+        }
+        let tmp = TempDir::unique(&format!("asn1-refused-{name}"));
+        let dir_str = dir_string(&tmp);
+        let words = vec![
+            "-in".into(),
+            in_spec.replace("@M", &fix_m_str).replace("@A", &fix_a_str),
+            "-input_type".into(),
+            (*itype).into(),
+            "-dbtype".into(),
+            (*dbtype).into(),
+            "-title".into(),
+            "T".into(),
+            "-out".into(),
+            format!("{dir_str}/db"),
+        ];
+        let env = MakedbEnv {
+            skip_unverified: false,
+            scan_cfastareader: true,
+        };
+        let (rc, stdout, stderr) = run_case(&words, env, &[]);
+        assert_eq!(rc, 1, "case {name}: {}", String::from_utf8_lossy(&stderr));
+        assert_eq!(
+            String::from_utf8_lossy(&stderr),
+            format!(
+                "losat makeblastdb: {} is not supported by LOSAT's makeblastdb\n",
+                refusal.text(super::asn_source::ASN_OBJECT)
+            ),
+            "case {name}: stderr"
+        );
+        let actual_out = norm_log(&stdout, &dir_str, &fix_a_str, &fix_m_str);
+        let ncbi_out = decode_hex(ncbi_out_hex);
+        assert!(
+            ncbi_out.starts_with(&actual_out),
+            "case {name}: the log is not the start of NCBI's: {}",
+            String::from_utf8_lossy(&actual_out)
+        );
+        assert!(
+            snapshot_dir(&tmp, &dir_str, &fix_a_str, &fix_m_str).is_empty(),
+            "case {name}: files of the database were left"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 41, "expected >= 41 refused cases, got {checked}");
 }
 
 #[test]

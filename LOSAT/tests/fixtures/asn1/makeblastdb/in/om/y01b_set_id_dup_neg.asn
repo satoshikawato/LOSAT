@@ -1,0 +1,17 @@
+Seq-entry ::= set {
+  id id -3,
+  class genbank,
+  seq-set {
+    set {
+      id id -3,
+      class pop-set,
+      seq-set {
+        seq {
+  id { local str "s1" },
+  descr { title "t" },
+  inst { repr raw, mol dna, length 120, seq-data iupacna "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT" }
+}
+      }
+    }
+  }
+}

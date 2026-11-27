@@ -719,7 +719,7 @@ fn collect_tree(
 
 /// How LOSAT's refusals of the object manager's step, and of an element stated as NULL that
 /// makeblastdb reads, name an object of the ASN.1 input (`annot_index::Refusal::text`).
-const ASN_OBJECT: Subject = Subject {
+pub(crate) const ASN_OBJECT: Subject = Subject {
     annot: "an ASN.1 input object whose annot",
     entry: "an ASN.1 input object",
     null_lists: "NCBI's makeblastdb reads as it takes the object and makes its titles (a member of a Bioseq-set, a descriptor of a Bioseq or of a Bioseq-set, a Seq-id of a Bioseq, an annotation, a feature, an alignment or a graph, an annotation's id or desc, the parts of a location, a feature's ids or xref, a Seq-table column, a list inside an alignment)",

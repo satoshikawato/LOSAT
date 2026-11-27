@@ -484,10 +484,10 @@ SOFTWARE.
 10. BitMagic 8.0.1, as bundled in NCBI BLAST+ 2.17.0 (c++/include/util/bitset/)
 ===============================================================================
 
-What: the reading of the BitMagic data in the Seq-tables of a PSSM query (the BVector-data
-that psiblast and tblastn -in_pssm read), ported from BitMagic's deserializer (bm.h,
-bmblocks.h, bmconst.h, bmdef.h, bmfunc.h, bmserial.h, bmsimd.h, bmsse2.h, bmsse4.h,
-bmsse_util.h, encoding.h); in the tests, the encoder of encoding.h (bit_out).
+What: the reading of the BitMagic data in Seq-tables (the BVector-data of a PSSM query that
+psiblast and tblastn -in_pssm read, and of makeblastdb's ASN.1 input), ported from BitMagic's
+deserializer (bm.h, bmblocks.h, bmconst.h, bmdef.h, bmfunc.h, bmserial.h, bmsimd.h, bmsse2.h,
+bmsse4.h, bmsse_util.h, encoding.h); in the tests, the encoder of encoding.h (bit_out).
 Files: src/objmgr/annot_index/bitmagic.rs,
 src/objmgr/annot_index/bitmagic_tests.rs.
 License: Apache License 2.0. BitMagic's license.txt, then the Apache License 2.0 that it

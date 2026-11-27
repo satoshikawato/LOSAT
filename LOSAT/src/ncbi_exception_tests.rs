@@ -82,6 +82,22 @@ fn each_run_has_a_diagnostic_stream_of_its_own() {
     });
 }
 
+// makeblastdb 2.17.0 after the object manager failed the stream on its ASN.1 input (line RG D3c-6a,
+// rows d3c6a_y08, y09, P_x49 of the makeblastdb ASN.1 manifest): each later post is its header
+// and its line feed.
+#[test]
+fn a_post_after_the_stream_failed_is_its_header() {
+    let diag = std::sync::Arc::new(MainDiag::new());
+    let _run = MainDiag::enter(Some(diag));
+    let header = b"Warning: [makeblastdb] ";
+    assert_eq!(
+        post_text(header, b"No sequences written"),
+        b"Warning: [makeblastdb] No sequences written"
+    );
+    set_main_diag_failbit();
+    assert_eq!(post_text(header, b"No sequences written"), header);
+}
+
 // makeblastdb 2.17.0 (the official Linux x64 release) with `MAX_LMDB_TXN_ENTRY=-1x` and two
 // sequences (probe of 2026-11-08, case txn_endptr_2seq): a report with the position.
 #[test]

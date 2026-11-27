@@ -1,0 +1,11 @@
+Seq-entry ::= seq {
+  id { local str "s1" },
+  descr {
+    title "t"
+  },
+  inst { repr raw, mol dna, length 120, seq-data iupacna "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT" },
+  annot { { data ftable {
+    { data imp { key "misc_feature" }, location mix { empty local str "X", int { from 0, to 29, id local str "s1" } } },
+    { data gene { locus "q" }, location mix { empty local str "Y", int { from 30, to 59, id local str "s1" } } }
+  } } }
+}

@@ -1,0 +1,11 @@
+Seq-entry ::= set {
+  class nuc-prot,
+  descr { user { type str "Unverified", data { { label str "Type", data str "Organism" } } }, NULL },
+  seq-set {
+    seq {
+  id { local str "s7" },
+  descr { title "t" },
+  inst { repr raw, mol dna, length 120, seq-data iupacna "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT" }
+}
+  }
+}

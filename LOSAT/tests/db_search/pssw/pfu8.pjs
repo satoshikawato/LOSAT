@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pfu8",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pfu8",
+  "number-of-letters": 1440,
+  "number-of-sequences": 12,
+  "last-updated": "2026-11-28T16:45:00",
+  "number-of-volumes": 1,
+  "bytes-total": 51943,
+  "bytes-to-cache": 1637,
+  "files": [
+    "pfu8.pdb",
+    "pfu8.phr",
+    "pfu8.pin",
+    "pfu8.pog",
+    "pfu8.pos",
+    "pfu8.pot",
+    "pfu8.psq",
+    "pfu8.ptf",
+    "pfu8.pto"
+  ]
+}

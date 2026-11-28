@@ -83,3 +83,8 @@ probe `c3c/probeA2/`).
 `ps_sw_tk_scores.asn.gz`: `ps4_tk_paja.asn.gz` without the Pssm member `intermediateData` (scores only, no frequency
 ratios), gzipped without a name or time by `../db_search/pssw/make_pssw.py`; the PSSM query of rows `db.sw.scores.*`
 (line PS-SW, PSIBLAST `-use_sw_tback` with a PSSM of scores only).
+
+`ps_sw_hd0.asn.gz`: the PSSM of `../db_search/t5/hd_q0.faa` from NCBI psiblast (`-subject ../db_search/t5/hd.faa
+-num_iterations 1 -save_pssm_after_last_round`), gzipped without a name or time by `../db_search/pssw/make_pssw.py
+--fix2-only`; the PSSM query of rows `db.sw.utf8.*` and `db.sw.rej.hdr2.*` (line PS-SW fix round 2, PSIBLAST
+`-use_sw_tback` on the databases `pssw/pfu8` and `pssw/pfu2t`).

@@ -3601,11 +3601,16 @@ file would differ, and NCBI's programs still could not open the database).
   PSIBLAST"; rows `db.sw.rej.crash.*`). Both refusals come after the reports of the queries and
   rounds before: NCBI's application writes each round's report, and saves the next round's PSSM,
   before it searches the next round (`psiblast_app.cpp:246-262`), as in the form of 1.40 and in
-  1.53. A match whose subject NCBI's fetch excludes (a subject that a `-negative_seqidlist` keeps
-  without a line) sets the status back to 0, in OID order at `-comp_based_stats 0` and in the
+  1.53; a later round's PSSM can put a failing match last where round 1 did not (row
+  `db.sw.rej.crash.r2.c1`: NCBI crashes in round 2 after round 1's report). A match whose
+  subject NCBI's fetch excludes (a subject that a `-negative_seqidlist` keeps without a line) sets
+  the status back to 0, in OID order at `-comp_based_stats 0` and in the
   order of the preliminary e-values at 1 to 3, so the same database fails, crashes or ends with
   exit 0 by the mode (rows `db.sw.excl.*`, databases `LOSAT/tests/db_search/pssw`,
-  `make_pssw.py`). The status is per thread in NCBI; LOSAT gives the outcome of `-num_threads 1`
+  `make_pssw.py`). Under the list the redo reads the header of each subject it fetches in the same
+  order, so the mode decides which unreadable header ends NCBI's search and whether a redo that
+  never ends comes before it (rows `db.sw.rej.hdr2.*`, `db.sw.rej.endless.hdr.*` and
+  `db.sw.rej.hdr.endless.*`). The status is per thread in NCBI; LOSAT gives the outcome of `-num_threads 1`
   at every thread count. Unlike TBLASTN's redo of a PSSM (1.73), PSIBLAST's takes the PSSM's rows
   by the query's own positions, so `-in_pssm -use_sw_tback` gives NCBI's results (rows
   `db.sw.inpssm.*`).

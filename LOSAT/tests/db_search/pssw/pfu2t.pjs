@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pfu2t",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pfu2t",
+  "number-of-letters": 360,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-28T16:45:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49935,
+  "bytes-to-cache": 476,
+  "files": [
+    "pfu2t.pdb",
+    "pfu2t.phr",
+    "pfu2t.pin",
+    "pfu2t.pog",
+    "pfu2t.pos",
+    "pfu2t.pot",
+    "pfu2t.psq",
+    "pfu2t.ptf",
+    "pfu2t.pto"
+  ]
+}

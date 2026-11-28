@@ -1525,6 +1525,16 @@ Smith-Waterman redo) and `tests/fasta/pssw/smm.faa` (tks_M twice, a redo that NC
 line, and NCBI's fetch of the redo excludes it, which sets the redo's status back to 0. The redo takes the matches in OID
 order at `-comp_based_stats 0` and in e-value order at 1 to 3, so the excluded subject's mark comes before sfail's
 failing match in the one and after it in the other: the same search fails, crashes NCBI or ends with exit 0 by the mode.
+With `--fix2-only` (fix round 2) it writes the version 5 databases `pssw/pfu8` (rows `db.sw.utf8.*`: OID 0 a weak match
+with a UTF8String title, then ten copies of the query hd0 of `t5/hd_q0.faa`), `pssw/pfu2t` (rows `db.sw.rej.hdr2.*`: the
+weak match with its title's tag an OctetString, then hd0 with an INTEGER tag) and `pssw/pende` (rows
+`db.sw.rej.endless.hdr.*` and `db.sw.rej.hdr.endless.*`: smm, then the tk PSSM's query, whose match comes first by
+e-value, with an OctetString tag), the PSSM of hd_q0
+`tests/fixtures/pssm/ps_sw_hd0.asn.gz` and the subjects `tests/fasta/pssw/sflip.faa` (rows `db.sw.flip.*` and
+`db.sw.rej.crash.r2.*`: sfail, then tks_W with two letters changed, whose match round 2 redoes before sfail's). Under a
+negative list NCBI's redo reads the header of each subject it fetches: in OID order at `-comp_based_stats 0` and in
+e-value order at 1 to 3, so the mode decides which header NCBI reads first, or whether it reaches one after a redo that
+never ends.
 
 ## Alias files with OIDLIST (line RG, series D, D1b-1)
 

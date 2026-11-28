@@ -620,9 +620,9 @@ struct SearchRunFiles {
 /// `-filtering_db`, `-in_pssm` or `-in_msa`, nor the list files and taxids without `-db`), and
 /// with a `-logfile` that names a file the registered strategy file (kind 3) adds what it makes
 /// the run read (`losat::web_adapter::strategy_reads`): its database's and its repeat filter
-/// database's lookup files to `read`, the counts of its window masker taxid to `registered` where
-/// the host registered them. `registered` keeps the argv's files that the host holds, which the
-/// run's directory holds whether or not the run reads them.
+/// database's lookup files to `read`, the counts of its window masker (its database, or its
+/// taxid's) to `registered` where the host registered them. `registered` keeps the argv's files
+/// that the host holds, which the run's directory holds whether or not the run reads them.
 fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
     use losat::web_adapter::{
         preparse, scan_program_argv, search_database_read_files, strategy_reads,
@@ -739,8 +739,15 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     let reads: Option<StrategyReads> = strategy
         .and_then(|name| crate::files::strategy(Path::new(&name)))
         .and_then(|bytes| strategy_reads(program.name(), arguments, &bytes, override_subject));
-    if let Some(taxid) = reads.as_ref().and_then(|reads| reads.window_masker_taxid) {
-        push_taxid(&mut registered, &taxid.to_string());
+    // The strategy's window masker counts: its database (a `FilterString`'s `W -d`), else its
+    // taxid's, as the command line counts them (`report::log_inputs`).
+    if let Some(reads) = &reads {
+        if let Some(taxid) = reads.window_masker_taxid {
+            push_taxid(&mut registered, &taxid.to_string());
+        }
+        if let Some(database) = &reads.window_masker_db {
+            push_counts(&mut registered, database);
+        }
     }
     let mut read = read_always;
     if !dbs.is_empty() {

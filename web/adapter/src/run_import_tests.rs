@@ -460,3 +460,51 @@ fn a_logfile_naming_what_a_strategy_run_ignores_is_not_refused() {
         files::release(handle).unwrap();
     }
 }
+
+/// Review 2 N2 (line RG-F item F2f): a strategy's window masker database (a `FilterString`'s
+/// `W -d`), which the run reads in the place of its taxid's counts, counts on LOSAT Web as on the
+/// command line (`report::log_inputs`): a counts file that the host registered under its name is a
+/// file of the run (`search_run_files`' `registered`), whose `-logfile` is refused at `validate`.
+/// LOSAT's import later refuses the `FilterString` itself; the names are read before.
+#[test]
+fn a_strategys_window_masker_database_is_a_file_of_the_run() {
+    let name = "f2f_wm/u9.obinary";
+    let counts = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../LOSAT/tests/winmask/counts/mg1655_u9.obinary"
+    ))
+    .unwrap();
+    let counts_handle = files::begin(files::KIND_WINDOW_MASKER_COUNTS, name, counts.len()).unwrap();
+    files::chunk(counts_handle, &counts).unwrap();
+    files::end(counts_handle).unwrap();
+    let text = std::fs::read_to_string(format!("{}/ss/bn_rpt.ss", fixtures())).unwrap();
+    let at = "{\n        name \"UngappedMode\",";
+    assert!(text.contains(at));
+    let param = format!(
+        "{{\n        name \"FilterString\",\n        value string \"L;W -d {name};\"\n      }},\n      {at}"
+    );
+    let handle = register_strategy("f2f_wm.ss", text.replacen(at, &param, 1).as_bytes());
+    let registry = files::registry_files();
+    let words = |log: &'static str| {
+        [
+            "blastn",
+            "-import_search_strategy",
+            "f2f_wm.ss",
+            "-logfile",
+            log,
+        ]
+    };
+    assert!(
+        registered_run_files(&words("run.log"), &registry).contains(&name.as_bytes().to_vec()),
+        "registered"
+    );
+    let error = crate::run::validate(&words(name)).unwrap_err();
+    assert!(
+        error.contains(&format!(
+            "a -logfile file '{name}' that is a file of the run's directory"
+        )),
+        "{error}"
+    );
+    files::release(handle).unwrap();
+    files::release(counts_handle).unwrap();
+}

@@ -647,9 +647,15 @@ pub fn convert2blastmask_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8
 /// `err`, and its dates are those of the zone of `TZ` (`writedb::time::LocalTime::now`). The
 /// application start is the command line's (its environment and its registry files: the run's
 /// `.ncbirc`, `makeblastdb.ini`, the file of `-conffile`), and `-xmlhelp` prints NCBI's XML, as
-/// there.
+/// there. The file of `-logfile` is the command line's where it is a file of the working
+/// directory, and goes to `files` where it is a file elsewhere (`/tmp/mk.log`), on the run's
+/// standard output for `/dev/stdout` and on its standard error for `/dev/stderr`, a line at a time
+/// as there; `files` is a `Receiver` whose run writes its working directory
+/// (`FileReceiver::writes_working_directory`; docs/web/abi_v2.md §4, line NP WW4b1 R2,
+/// 2026-11-28).
 pub fn run_makeblastdb(
     words: &[&str],
+    files: &RunFiles,
     input: &mut dyn std::io::Read,
     out: &mut dyn std::io::Write,
     err: &mut dyn std::io::Write,
@@ -660,6 +666,7 @@ pub fn run_makeblastdb(
         out,
         err,
         crate::api::tools::MakeblastdbCall::WebRun,
+        files,
     )
     .status
 }
@@ -669,10 +676,24 @@ pub fn run_makeblastdb(
 /// files of the run's working directory), NCBI's reader, LOSAT's refusals and settings, and
 /// makeblastdb's checks of the environment and the registry (LOSAT Web's validation of a tool's
 /// words, `losat_web2_validate`; line NP WW4b1, D-WW4b-3, 2026-11-27, as D-WW3-7). It opens no
-/// file for writing: the file of `-logfile` is kept in memory. `Err` with what the command line
-/// writes for the words that it refuses: its standard error, then its standard output and the file
-/// of `-logfile`, without the last line end.
+/// file for writing: the file of `-logfile` is kept in memory where the run opens one, and where
+/// the run's messages stay on its standard error (a name in a folder that the working directory
+/// does not have, a folder) they stay there, as the run reads the name (`RunFiles::log_target`;
+/// line NP WW4b1 R2, 2026-11-28). `Err` with what the command line writes for the words that it
+/// refuses: its standard error, then its standard output and the file of `-logfile`, without the
+/// last line end.
 pub fn check_makeblastdb(words: &[&str]) -> Result<(), String> {
+    /// The files of a checked makeblastdb run (`run_makeblastdb`'s), which writes none.
+    struct WorkingDirectory;
+    impl FileReceiver for WorkingDirectory {
+        fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn writes_working_directory(&self) -> bool {
+            true
+        }
+    }
     let mut out = Vec::new();
     let mut err = Vec::new();
     let end = crate::api::tools::makeblastdb_call(
@@ -681,6 +702,7 @@ pub fn check_makeblastdb(words: &[&str]) -> Result<(), String> {
         &mut out,
         &mut err,
         crate::api::tools::MakeblastdbCall::WebCheck,
+        &RunFiles::Receiver(std::sync::Arc::new(WorkingDirectory)),
     );
     if end.status == 0 {
         return Ok(());

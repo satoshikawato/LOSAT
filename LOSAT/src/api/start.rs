@@ -46,28 +46,6 @@ pub(super) fn open<S: AsRef<OsStr> + Clone>(
     )
 }
 
-/// `open` of a check of the words that writes no file (LOSAT Web's check of a tool's words before
-/// the tool runs, `web_adapter::check_makeblastdb`; line NP WW4b1, 2026-11-27): the start and the
-/// refusal of a `-logfile` that names an input of the run as `open`'s
-/// (`report::log_inputs::check_disk_logfile`), then the file of `-logfile`, where the command line
-/// appends to it, a file in memory (`DiagTarget::Memory`) that gets what the command line writes
-/// to the file; NCBI's special names (`-`, `""`, `/dev/null`) as there.
-pub(super) fn open_unwritten<S: AsRef<OsStr> + Clone>(
-    program: &str,
-    words: &[S],
-    diagnostics: &mut dyn Write,
-) -> Result<Opened, Error> {
-    let start = ApplicationStart::of_process(program, words);
-    let log = |start: &ApplicationStart| {
-        let name = log_file(words);
-        crate::report::log_inputs::check_disk_logfile(start.program(), words, start, name)?;
-        let target = crate::blastinput::ncbi_environment::special_log_target(name)
-            .unwrap_or_else(|| DiagTarget::Memory(Default::default()));
-        Ok((target, None))
-    };
-    open_logged(start, diagnostics, log)
-}
-
 /// `open` with the start `start` (made from the arguments `words`), whose file of `-logfile` goes
 /// to `files` (`RunFiles::log_target`).
 fn open_with<S: AsRef<OsStr> + Clone>(
@@ -82,8 +60,9 @@ fn open_with<S: AsRef<OsStr> + Clone>(
 }
 
 /// The start `start` up to its configuration load, whose file of `-logfile` is the target that
-/// `log` opens (with its host file name; `Err` with LOSAT's refusal of the name).
-fn open_logged(
+/// `log` opens (with its host file name; `Err` with LOSAT's refusal of the name): `open`, and
+/// makeblastdb's start of LOSAT Web's run and check of its words (`api::tools::makeblastdb_call`).
+pub(super) fn open_logged(
     start: ApplicationStart,
     diagnostics: &mut dyn Write,
     log: impl FnOnce(&ApplicationStart) -> Result<(DiagTarget, Option<Vec<u8>>), String>,

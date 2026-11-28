@@ -84,7 +84,7 @@ pub(crate) fn check_disk_logfile<S: AsRef<OsStr>>(
 /// writing:
 /// - NCBI's `log_file_name` path (when its checked directory exists and the path is not a
 ///   directory, matching `ncbi_environment::open_log_file`);
-/// - for `makeblastdb`, also the raw `raw_name` path opened by `makeblastdb::log_of` (which opens
+/// - for `makeblastdb`, also the raw `raw_name` path of its log (`OpenFiles::log_output`, which opens
 ///   the raw OS path directly in addition to `diag_target`).
 fn disk_log_candidates(program: &str, raw_name: &OsStr) -> Vec<PathBuf> {
     let mut candidates = Vec::new();

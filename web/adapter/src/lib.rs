@@ -494,6 +494,7 @@ pub unsafe extern "C" fn losat_web2_run(
     subject_handle: u32,
 ) -> i32 {
     guarded(|| {
+        run::read_host_environment();
         let argv = words(text(argv_ptr, argv_len, "argv")?);
         let program = run::Program::parse(argv.first().copied().unwrap_or(""))?;
         // A run that prints a text in place of a search reads no input, as the command line reads
@@ -530,6 +531,7 @@ pub unsafe extern "C" fn losat_web2_run(
 #[no_mangle]
 pub unsafe extern "C" fn losat_web2_tool(argv_ptr: *const u8, argv_len: usize) -> i32 {
     guarded(|| {
+        run::read_host_environment();
         tool::run(&words(text(argv_ptr, argv_len, "argv")?))?;
         Ok(0)
     })

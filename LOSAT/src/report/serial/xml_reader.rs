@@ -992,7 +992,9 @@ impl<S: AsnSource> XmlReader<S> {
                 let at = from + next;
                 match rest.get(at + 1..at + 3) {
                     Some(b"]>") => {
-                        out.extend_from_slice(&rest[..at]);
+                        if at > 0 {
+                            out.extend_from_slice(&rest[..at]);
+                        }
                         self.pos += at + 3;
                         return Ok(());
                     }

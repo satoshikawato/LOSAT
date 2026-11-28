@@ -303,6 +303,15 @@ export function changedToolOptionsCount(
   return changedOptionsCount(params, values, extra);
 }
 
+/**
+ * Whether words of Additional options name the option `flag` themselves (`-in`, `-in=…`): the one rule of the tool tabs
+ * for an option that their form writes too (makeblastdb's, WindowMasker's and the Masking tools' `-in`): the words give
+ * it, so the form writes no value that it found itself (the database of the run's files), refuses none, and asks for none.
+ */
+export function namesOption(words: readonly string[], flag: string): boolean {
+  return words.some((word) => word === flag || word.startsWith(`${flag}=`));
+}
+
 /** Reads the last value of `flag` in `argv` (supporting both `-flag val` and `-flag=val`). */
 export function toolOptionValue(argv: readonly string[], flag: string): string | undefined {
   let found: string | undefined;

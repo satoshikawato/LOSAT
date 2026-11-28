@@ -72,6 +72,24 @@ function memoryStore(initial: Partial<Record<DatabaseSlot, RememberedDatabase>> 
   };
 }
 
+
+/**
+ * Makes the read of `file` that discovery does (its bytes: an alias file is read with its byte order mark) wait; the
+ * function returned gives the file's text.
+ */
+function delayRead(file: File): (text: string) => void {
+  let give: ((text: string) => void) | undefined;
+  let given: string | undefined;
+  file.arrayBuffer = () =>
+    new Promise<ArrayBuffer>((resolve) => {
+      give = (text) => resolve(new TextEncoder().encode(text).buffer as ArrayBuffer);
+      if (given !== undefined) give(given);
+    });
+  return (text) => {
+    given = text;
+    give?.(text);
+  };
+}
 describe('blast-db domain discovery & directory assembly', () => {
   it('normalizes safe relative paths and rejects unsafe segments', () => {
     expect(pickedFilePath(fileWithRelPath('mydb/nt.nin'))).toBe('mydb/nt.nin');
@@ -114,6 +132,32 @@ describe('blast-db domain discovery & directory assembly', () => {
     expect(parseAliasMetadata('TITLE one\nTITLE  two  words \n')).toEqual({ title: 'two  words', dblist: [] });
   });
 
+  // Line WW, WW4d R2 (review N4): SeqDB reads an alias file's bytes as they are: a UTF-8 byte order mark is part of the
+  // first line's key, which is then no key it knows (NCBI BLAST+ 2.17.0 and native LOSAT, blastdbcmd -info, probe
+  // alias-r2: a first line `<BOM>TITLE t` gives no title, `<BOM>DBLIST a` no database list).
+  it('reads an alias file that starts with a byte order mark as SeqDB does: the mark is part of the first key (line WW, WW4d R2)', async () => {
+    const files = [
+      fileWithRelPath('db/t.nal', '﻿TITLE t\nDBLIST a\n'),
+      fileWithRelPath('db/m.nal', '﻿DBLIST m.00 m.01\n'),
+      ...['a', 'm.00', 'm.01'].flatMap((stem) => ['nin', 'nhr', 'nsq'].map((ext) => fileWithRelPath(`db/${stem}.${ext}`, ext))),
+    ];
+    const discovery = await discoverBlastDatabases(files);
+    const t = discovery.databases.find((db) => db.name === 'db/t');
+    expect(t).toBeDefined();
+    expect(t!.title).toBeUndefined();
+    // No DBLIST: the volumes of `m` are not hidden behind it (the alias lists nothing).
+    expect(discovery.databases.map((db) => db.name)).toEqual(['db/a', 'db/m', 'db/m.00', 'db/m.01', 'db/t']);
+  });
+
+  // Line WW (dev defect found by the WW4d R2 review): the database that an option reads is of one molecule kind.
+  it('names the primary database of the kind asked for, and of either kind when none is asked for (line WW, WW4d R2)', () => {
+    const names = ['db/p.pin', 'db/p.psq', 'db/nuc.nin', 'db/nuc.nsq'];
+    expect(primaryBlastDbName(names)).toBe('db/p');
+    expect(primaryBlastDbName(names, 'nucleotide')).toBe('db/nuc');
+    expect(primaryBlastDbName(names, 'protein')).toBe('db/p');
+    expect(primaryBlastDbName(['db/p.pin'], 'nucleotide')).toBeUndefined();
+  });
+
   it('offers a multi-volume database whose volume names hold a non-ASCII space as one alias of its volumes (line WW, WW4d R1)', async () => {
     const files = [
       fileWithRelPath('db/vol\u3000a.nal', 'TITLE wide\nDBLIST vol\u3000a.00 vol\u3000a.01\n'),
@@ -131,6 +175,10 @@ describe('blast-db domain discovery & directory assembly', () => {
     nsq.text = () => {
       nsqReads++;
       return Promise.resolve('BINARY');
+    };
+    nsq.arrayBuffer = () => {
+      nsqReads++;
+      return Promise.resolve(new ArrayBuffer(0));
     };
     const files = [
       fileWithRelPath('dbdir/multi.nal', 'TITLE Multi Nuc\nDBLIST multi.00 multi.01\n'),
@@ -643,12 +691,8 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     pasteQuery(draft);
     pasteSubject(draft);
 
-    let resolveAlias!: (text: string) => void;
     const delayedAlias = fileWithRelPath('rep/repeats.nal', 'TITLE Delayed\nDBLIST repeats.00\n');
-    delayedAlias.text = () =>
-      new Promise<string>((resolve) => {
-        resolveAlias = resolve;
-      });
+    const resolveAlias = delayRead(delayedAlias);
     const vol = fileWithRelPath('rep/repeats.00.nin', 'nin');
 
     const scanPromise = draft.setFilteringDbFiles([delayedAlias, vol]);
@@ -788,9 +832,8 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(draft.state.get().database.remembered).toEqual({ name: 'nuc5' });
     expect(draft.readiness()).toBe('Choose the files again.');
 
-    let release!: (text: string) => void;
     const alias = diskFile('nuc5.nal', 'DBLIST nuc5\n');
-    alias.text = () => new Promise<string>((resolve) => (release = resolve));
+    const release = delayRead(alias);
     const picking = draft.setSubjectDatabaseFiles([diskFile('nuc5.nin', 'x'), alias]);
     expect(draft.state.get().database.scanning).toBe('files');
     expect(draft.readiness()).toBe('Reading the database files.');
@@ -835,8 +878,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
       expect(draft.state.get().values.blastn[FILTERING_DB_FLAG]).toBe(true);
       expect(draft.readiness()).toBe(again);
 
-      let release!: (text: string) => void;
-      pick[1]!.text = () => new Promise<string>((resolve) => (release = resolve));
+      const release = delayRead(pick[1]!);
       const picking = draft.setFilteringDbFiles(pick);
       expect(draft.readiness()).toBe(reading);
       release('DBLIST x\n');
@@ -1195,5 +1237,63 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     draft.selectFilteringDb('q"r/rep');
     expect(draft.state.get().values.blastn[FILTERING_DB_FLAG]).toBe(true);
     expect(runCalls).toHaveLength(0);
+  });
+
+  // Line WW, WW4d R2 (review L1): words that print help or the version read no database, so a database name that its
+  // list cannot carry refuses nothing, as in the tool tabs and on the command line (NCBI BLAST+ 2.17.0 prints its help
+  // for `blastn -db 'q"d/ndb' -help`). The argv that the check asks about leaves the refused name out; the run prints.
+  it('runs help or the version with a refused -db or Repeats database, as the command line prints them (line WW, WW4d R2)', async () => {
+    const reason = 'a double quote there starts or ends a name';
+    const { draft, coordinator, runCalls, engine } = setup();
+    const asked: (readonly string[])[] = [];
+    const start = engine.start.bind(engine);
+    engine.start = async (argv: readonly string[] = []) => {
+      asked.push(argv);
+      const started = await start(argv);
+      return started.ok && argv.includes('-help') ? { ok: true, start: { ...started.start, prints: 'help' } } : started;
+    };
+    // The engine's check of an argv that prints help, as the real engine answers it (the fake knows no -help of a search).
+    const validate = engine.validate.bind(engine);
+    engine.validate = async (argv: readonly string[]) => (argv.includes('-help') ? { ok: true, dataLoaders: false, parseDeflines: false } : validate(argv));
+    pasteQuery(draft);
+    draft.setSubjectSource('database');
+    await draft.setSubjectDatabaseFiles([fileWithRelPath('q"d/ndb.nin', 'nin'), fileWithRelPath('q"d/ndb.nsq', 'nsq')]);
+    await draft.idle();
+    const refused = `A database named "q"d/ndb" cannot be in -db: ${reason}.`;
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused });
+    draft.setExtra('-help');
+    await draft.idle();
+    expect(draft.state.get().validation).toEqual({ state: 'ok' });
+    expect(draft.printsKind()).toBe('help');
+    expect(draft.readiness()).toBeUndefined();
+    expect(asked.every((argv) => !argv.join(' ').includes('q"'))).toBe(true);
+    const first = await draft.submit();
+    expect(first).toMatchObject({ ok: true });
+    await waitCompleted(coordinator, (first as { runIds: readonly string[] }).runIds[0]!);
+    expect(runCalls[0]!.argv).toContain('-help');
+    expect(runCalls[0]!.argv.join(' ')).not.toContain('q"');
+    // Without the words, the search reads the database again: refused.
+    draft.setExtra('');
+    await draft.idle();
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused });
+    expect(await draft.submit()).toEqual({ ok: false, message: refused });
+
+    // The Repeats database (-filtering_db).
+    draft.setSubjectSource('fasta');
+    pasteSubject(draft);
+    draft.setFilteringDbEnabled(true);
+    await draft.setFilteringDbFiles([fileWithRelPath('q"r/rep.nin', 'nin'), fileWithRelPath('q"r/rep.nsq', 'nsq')]);
+    await draft.idle();
+    const refusedRepeats = `A database named "q"r/rep" cannot be in -filtering_db: ${reason}.`;
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refusedRepeats });
+    draft.setExtra('-help');
+    await draft.idle();
+    expect(draft.state.get().validation).toEqual({ state: 'ok' });
+    expect(draft.readiness()).toBeUndefined();
+    const second = await draft.submit();
+    expect(second).toMatchObject({ ok: true });
+    await waitCompleted(coordinator, (second as { runIds: readonly string[] }).runIds[0]!);
+    expect(runCalls[1]!.argv).toContain('-help');
+    expect(runCalls[1]!.argv.join(' ')).not.toContain('q"');
   });
 });

@@ -475,7 +475,10 @@ describe('MaskingDraft', () => {
     expect(queued[0]!.argv).toEqual(['dustmasker', '-in', 'dbs/db', '-infmt', 'blastdb']);
     expect(queued[0]!.directory.map((entry) => entry.name)).toEqual(['dbs/db.nin', 'dbs/db.nsq']);
 
+    // A cleared name is none: the files of the run name -in again (line WW, WW4d R2); without them, none is given.
     draft.setBlastDbIn('');
+    expect(draft.inName()).toBe('dbs/db');
+    for (const entry of draft.state.get().runFiles) draft.removeRunFile(entry.key);
     const refused = await draft.submit();
     expect(refused).toEqual({ ok: false, message: 'Enter an input name or open files.' });
   });
@@ -489,7 +492,12 @@ describe('MaskingDraft', () => {
       draft.setTool(tool);
       await described(draft, tool);
       draft.setField('-infmt', 'blastdb');
-      draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `db.${ext}`)), ['my dbs/db.nin', 'my dbs/db.nsq']);
+      // The database of the tool's kind: protein for segmasker, nucleotide for dustmasker (WW4d R2).
+      const exts = tool === 'segmasker' ? ['pin', 'psq'] : ['nin', 'nsq'];
+      draft.addRunFiles(
+        exts.map((ext, i) => new File([new Uint8Array([i])], `db.${ext}`)),
+        exts.map((ext) => `my dbs/db.${ext}`),
+      );
       expect(draft.inName()).toBe('"my dbs/db"');
       expect(draft.previewArgv()).toEqual([tool, '-in', '"my dbs/db"', '-infmt', 'blastdb']);
       await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
@@ -498,7 +506,10 @@ describe('MaskingDraft', () => {
 
       // A database whose name -in cannot carry, which the files of the run now name (the shortest name).
       const message = 'A database named "q"/d" cannot be in -in: a double quote there starts or ends a name.';
-      draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `d.${ext}`)), ['q"/d.nin', 'q"/d.nsq']);
+      draft.addRunFiles(
+        exts.map((ext, i) => new File([new Uint8Array([i])], `d.${ext}`)),
+        exts.map((ext) => `q"/d.${ext}`),
+      );
       expect(draft.databaseRefusal()).toBe(message);
       expect(draft.inName()).toBe('');
       await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message }));
@@ -509,6 +520,43 @@ describe('MaskingDraft', () => {
       draft.setField('-infmt', 'fasta');
       expect(draft.databaseRefusal()).toBeUndefined();
     }
+  });
+
+  // Line WW, WW4d R2 (review N1, N2): a cleared Input name is none, and words of Additional options that name -in give -in
+  // themselves (makeblastdb's rule, one for the three tabs): the found database is not written and not refused.
+  it('takes a cleared Input name as none, and writes and refuses no found database when Additional options name -in (line WW, WW4d R2)', async () => {
+    const message = 'A database named "q"/d" cannot be in -in: a double quote there starts or ends a name.';
+    const { draft, queued } = setup({ validate: 'ok' });
+    draft.ensureLoaded();
+    await described(draft, 'dustmasker');
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `d.${ext}`)), ['q"/d.nin', 'q"/d.nsq']);
+    draft.setBlastDbIn('typed');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    draft.setBlastDbIn('');
+    expect(draft.databaseRefusal()).toBe(message);
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message }));
+    draft.setExtra('-in other');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued[0]!.argv).toEqual(['dustmasker', '-infmt', 'blastdb', '-in', 'other']);
+  });
+
+  // Line WW (dev defect found by the WW4d R2 review): segmasker reads a protein database and dustmasker a nucleotide one,
+  // so the files of the run name the database of that kind in a folder that holds both.
+  it("names the run files' database of the tool's kind: protein for segmasker, nucleotide for dustmasker (line WW, WW4d R2)", async () => {
+    const { draft } = setup({ validate: 'ok' });
+    draft.ensureLoaded();
+    await described(draft, 'dustmasker');
+    draft.setField('-infmt', 'blastdb');
+    const names = ['db/p.pin', 'db/p.psq', 'db/nuc.nin', 'db/nuc.nsq'];
+    draft.addRunFiles(names.map((name, i) => new File([new Uint8Array([i])], name.slice(3))), names);
+    expect(draft.inName()).toBe('db/nuc');
+    draft.setTool('segmasker');
+    await described(draft, 'segmasker');
+    draft.setField('-infmt', 'blastdb');
+    expect(draft.inName()).toBe('db/p');
   });
 
   it("reports NCBI's error while convert2blastmask's required options are missing, as the command line does", async () => {

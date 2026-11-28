@@ -55,7 +55,10 @@ const inputProblem = computed(() => props.draft.inputProblem(state.value));
 watch(inputProblem, (problem) => {
   if (problem !== undefined) announce(problem, 'alert');
 });
-/** Why the database of the files of the run cannot be -in, for as long as its files are in the run (line WW, WW4d R1). */
+/**
+ * Why the database of the files of the run cannot be -in, for as long as its files are in the run (line WW, WW4d R1). Not
+ * an alert: the check's line, which is live, says the same sentence (WW4d R2).
+ */
 const databaseRefusal = computed(() => props.draft.databaseRefusal(state.value));
 
 const dragging = ref(false);
@@ -153,8 +156,8 @@ watch(
               type="text"
               autocomplete="off"
               spellcheck="false"
-              placeholder="db/mydb"
-              :value="draft.dbInName(state)"
+              :placeholder="draft.dbInName(state) || 'db/mydb'"
+              :value="state.dbInEdited ? state.dbIn : draft.dbInName(state)"
               data-testid="mk-db-in"
               @input="draft.setDbIn(($event.target as HTMLInputElement).value)"
             />
@@ -189,7 +192,7 @@ watch(
           {{ state.runFiles.length }} {{ state.runFiles.length === 1 ? 'file' : 'files' }} in the run directory.
         </p>
         <p v-if="state.runFilesError" class="error small" role="alert" data-testid="mk-db-in-error">{{ state.runFilesError }}</p>
-        <p v-if="databaseRefusal" class="error small" role="alert" data-testid="mk-db-in-refused">{{ databaseRefusal }}</p>
+        <p v-if="databaseRefusal" class="error small" data-testid="mk-db-in-refused">{{ databaseRefusal }}</p>
       </template>
 
       <template v-else>

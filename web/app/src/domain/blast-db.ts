@@ -450,15 +450,17 @@ const byShortestName = (a: BlastDbCandidate, b: BlastDbCandidate) => a.name.leng
 
 /**
  * Picks the primary BLAST database name from a list of run-directory paths: an alias file
- * (`.nal`/`.pal`) first, otherwise a volume (`.nin`/`.pin`), shortest name first.
+ * (`.nal`/`.pal`) first, otherwise a volume (`.nin`/`.pin`), shortest name first; of the molecule
+ * kind `kind` where the option that reads it takes one kind (WindowMasker's `-in`: nucleotide), of
+ * either kind where that is not known.
  */
-export function primaryBlastDbName(fileNames: readonly string[]): string | undefined {
-  return primaryBlastDb(fileNames)?.name;
+export function primaryBlastDbName(fileNames: readonly string[], kind?: SequenceKind): string | undefined {
+  return primaryBlastDb(fileNames, kind)?.name;
 }
 
 /** The primary BLAST database of a list of run-directory paths (`primaryBlastDbName`), with its molecule type. */
-export function primaryBlastDb(fileNames: readonly string[]): BlastDbCandidate | undefined {
-  const candidates = discoverBlastDatabaseNames(fileNames);
+export function primaryBlastDb(fileNames: readonly string[], kind?: SequenceKind): BlastDbCandidate | undefined {
+  const candidates = discoverBlastDatabaseNames(fileNames).filter((db) => kind === undefined || db.kind === kind);
   if (candidates.length === 0) return undefined;
   const aliases = candidates.filter((db) => db.entry === 'alias').sort(byShortestName);
   if (aliases.length > 0) return aliases[0]!;
@@ -501,7 +503,9 @@ export async function discoverBlastDatabases(picked: readonly File[], relativeNa
     const aliasFile = filesByName.get(`${item.name}${ext}`);
     if (aliasFile === undefined || aliasFile.size > MAX_ALIAS_BYTES) continue;
     try {
-      const text = await aliasFile.text();
+      // The bytes as SeqDB reads them: a UTF-8 byte order mark stays, as part of the first line's key (`Blob.text()` would
+      // take it off; NCBI BLAST+ 2.17.0 and LOSAT read `<BOM>DBLIST a` as no DBLIST; line WW, WW4d R2).
+      const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(await aliasFile.arrayBuffer());
       const meta = parseAliasMetadata(text);
       aliasMeta.set(`${item.kind}:${item.name}`, meta);
     } catch {

@@ -8,13 +8,13 @@
 // waits for the check before it queues the runs on the shared Coordinator queue, recording on each run that
 // can write masking information the `-outfmt` default of its tool's `-xmlhelp` (`maskOutfmtDefault`). A tool supplies its inputs
 // and its argv through the abstract members.
-import type { DirectoryFile, ToolDescription } from 'losat/domain';
+import type { DirectoryFile, SequenceKind, ToolDescription } from 'losat/domain';
 import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports';
 import { duplicateRunFileMessage, normalizeRunPath, pickedFilePath, primaryBlastDbName, RunDirectoryBuilder } from '../domain/blast-db';
 import type { FieldValue } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
 import { isSeqdbList, listNameRefusal, seqdbNameList, type ListOption } from '../domain/list-flags';
-import { fileListNames, maskOutfmtDefault, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
+import { fileListNames, maskOutfmtDefault, namesOption, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
 import { TOOL_FILE_LIST_FLAGS, type ToolId } from '../domain/tools';
 import { failureText } from './availability';
 import type { EnqueueAllResult, ToolDirectoryFile, ToolRequest } from './coordinator';
@@ -103,6 +103,15 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
 
   /** The words of Additional options; throws the message of words that cannot be read. */
   protected abstract parseExtra(state: S): readonly string[];
+
+  /** The words of Additional options as `parseExtra` reads them; none when they cannot be read (the check says why). */
+  protected wordsOf(state: S): readonly string[] {
+    try {
+      return this.parseExtra(state);
+    } catch {
+      return [];
+    }
+  }
 
   /**
    * The argv that the check sends (with placeholder names for inputs not chosen yet), or undefined
@@ -545,16 +554,31 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
 export type FoundDatabase = { readonly written: string; readonly refusal?: undefined } | { readonly written?: undefined; readonly refusal: string };
 
 /**
- * The BLAST database that the files of the run hold (`primaryBlastDbName`), for an option whose value is a SeqDB name
- * list (`isSeqdbList`: WindowMasker's `-in` with `-infmt blastdb`, makeblastdb's `-in`): its name as the list writes it
- * (`seqdbNameList`: `"my dbs/wm"`), or why the list cannot carry it (`listNameRefusal`); undefined when the files hold
- * none or the option takes one file's name. The drafts work out from it, every time, the name that `-in` shows until
- * one is typed and the refusal that the Input block, the check and "Run LOSAT" say while its files are in the run (line
- * WW, WW4d R1).
+ * An option whose value the files of the run may name (`foundDatabase`): the option, and the molecule kind of the
+ * database that it reads (WindowMasker's and dustmasker's `-in`: nucleotide, segmasker's: protein, makeblastdb's: its
+ * `-dbtype`'s), undefined while it is not known (makeblastdb before `-dbtype` is chosen: then either kind).
  */
-export function foundDatabase(option: ListOption, runFiles: readonly ToolExtraFile[]): FoundDatabase | undefined {
-  if (!isSeqdbList(option)) return undefined;
-  const name = primaryBlastDbName(runFiles.map((entry) => entry.name));
+export interface DatabaseOption {
+  readonly option: ListOption;
+  readonly kind: SequenceKind | undefined;
+}
+
+/**
+ * The BLAST database that the files of the run hold (`primaryBlastDbName`, of the option's kind), for an option whose
+ * value is a SeqDB name list (`isSeqdbList`: the `-in` of WindowMasker, dustmasker and segmasker with `-infmt blastdb`,
+ * makeblastdb's `-in`): its name as the list writes it (`seqdbNameList`: `"my dbs/wm"`), or why the list cannot carry it
+ * (`listNameRefusal`); undefined when the files hold none, the option takes one file's name, or the words of Additional
+ * options name the option themselves (`namesOption`: they give its value). The drafts work out from it, every time, the
+ * name that `-in` shows until one is typed and the refusal that the Input block, the check and "Run LOSAT" say while its
+ * files are in the run (line WW, WW4d R1 and R2).
+ */
+export function foundDatabase(
+  { option, kind }: DatabaseOption,
+  runFiles: readonly ToolExtraFile[],
+  words: readonly string[],
+): FoundDatabase | undefined {
+  if (!isSeqdbList(option) || namesOption(words, option.flag)) return undefined;
+  const name = primaryBlastDbName(runFiles.map((entry) => entry.name), kind);
   if (name === undefined) return undefined;
   const refusal = listNameRefusal(option, name, 'database');
   return refusal === undefined ? { written: seqdbNameList(option.flag, [name]) } : { refusal };

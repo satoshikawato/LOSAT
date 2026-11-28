@@ -387,6 +387,46 @@ describe('MakeblastdbDraft', () => {
     expect(queued[0]!.argv.slice(0, 3)).toEqual(['makeblastdb', '-in', 'in/old']);
   });
 
+  // Line WW, WW4d R2 (review N1, N2): a cleared -in name is none, and words of Additional options that name -in give -in
+  // themselves: the found database is neither written nor refused (one rule with WindowMasker and Masking).
+  it('takes a cleared -in name as none, and writes no found database when Additional options name -in (line WW, WW4d R2)', async () => {
+    const refused = 'A database named "q"/d" cannot be in -in: a double quote there starts or ends a name.';
+    const { draft } = setup();
+    await loaded(draft);
+    draft.setField('-input_type', 'blastdb');
+    draft.setField('-dbtype', 'nucl');
+    draft.addRunFiles(['nin', 'nsq'].map((ext) => new File(['x'], `old.${ext}`)), ['in/old.nin', 'in/old.nsq']);
+    draft.setDbIn('typed');
+    draft.setDbIn(' ');
+    expect(draft.dbInName()).toBe('in/old');
+    draft.setDbIn('typed');
+    draft.addRunFiles(['nin', 'nsq'].map((ext) => new File(['x'], `d.${ext}`)), ['q"/d.nin', 'q"/d.nsq']);
+    draft.setDbIn('');
+    expect(draft.databaseRefusal()).toBe(refused);
+    // -in in Additional options: the found database (refused or not) is not written.
+    for (const entry of draft.state.get().runFiles.filter((file) => file.name.startsWith('q"/'))) draft.removeRunFile(entry.key);
+    draft.setExtra('-in other');
+    expect(draft.dbInName()).toBe('');
+    expect(draft.previewArgv().filter((word) => word === '-in')).toHaveLength(1);
+    expect(draft.previewArgv().slice(-2)).toEqual(['-in', 'other']);
+  });
+
+  // Line WW (dev defect found by the WW4d R2 review): -input_type blastdb reads a database of -dbtype's kind; before
+  // -dbtype is chosen the kind is not known, and the files of the run name the database as before (an alias first, then
+  // the shortest name, of either kind).
+  it("names the run files' database of -dbtype's kind, and of either kind before -dbtype is chosen (line WW, WW4d R2)", async () => {
+    const { draft } = setup();
+    await loaded(draft);
+    draft.setField('-input_type', 'blastdb');
+    const names = ['db/p.pin', 'db/p.psq', 'db/nuc.nin', 'db/nuc.nsq'];
+    draft.addRunFiles(names.map((name) => new File(['x'], name.slice(3))), names);
+    expect(draft.dbInName()).toBe('db/p');
+    draft.setField('-dbtype', 'nucl');
+    expect(draft.dbInName()).toBe('db/nuc');
+    draft.setField('-dbtype', 'prot');
+    expect(draft.dbInName()).toBe('db/p');
+  });
+
   it('adds mask data to -mask_data as a list, once per file, and takes it away with the file', async () => {
     const { draft } = setup();
     const a = new File(['a'], 'wm.asnb');

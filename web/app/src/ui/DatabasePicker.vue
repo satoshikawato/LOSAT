@@ -43,7 +43,10 @@ const mismatch = computed(() =>
     ? noMatchingDatabaseMessage(discovery.value, props.moleculeKind, props.contextLabel)
     : undefined,
 );
-/** Why the chosen database cannot be written in the option (a name with a double quote, line WW, WW4d), as "Run LOSAT" says it. */
+/**
+ * Why the chosen database cannot be written in the option (a name with a double quote, line WW, WW4d), as "Run LOSAT"
+ * says it. Not an alert: the check's line, which is live, says the same sentence (WW4d R2).
+ */
 const refusal = computed(() => (selected.value === undefined ? undefined : listNameRefusal({ flag: props.flag }, selected.value.name, 'database')));
 const taxonomySummary = computed(() => {
   if (discovery.value === undefined || selected.value === undefined) return '';
@@ -143,7 +146,7 @@ function optionText(db: (typeof matches.value)[number]): string {
           <span v-else-if="selected.entry === 'alias'" class="muted"> (alias)</span>
           <span v-if="selected.title && selected.title !== selected.name" class="muted"> — {{ selected.title }}</span>
         </p>
-        <p v-if="refusal !== undefined" class="error db-refused" role="alert" :data-testid="`${testIdPrefix}-refused`">
+        <p v-if="refusal !== undefined" class="error db-refused" :data-testid="`${testIdPrefix}-refused`">
           {{ refusal }}
         </p>
         <p class="db-meta muted" :data-testid="`${testIdPrefix}-meta`">

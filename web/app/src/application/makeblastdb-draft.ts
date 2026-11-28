@@ -7,16 +7,23 @@
 // The run's directory holds the input files as the user opened them: makeblastdb reads `.gz`, `.bz2`
 // and `.zst` itself (its `-in` names the compressed file, as on the command line), and several files
 // are one `-in` list, as the command line takes them (`SeqDB_SplitQuoted`), not one file made of them.
-import type { DirectoryFile } from 'losat/domain';
+import type { DirectoryFile, SequenceKind } from 'losat/domain';
 import { splitOptions } from '../domain/argv';
 import { duplicateRunFileMessage, normalizeRunPath } from '../domain/blast-db';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
 import { listNameRefusal, seqdbNameList } from '../domain/list-flags';
-import { buildMakeblastdbArgv, fileListNames } from '../domain/tool-argv';
+import { buildMakeblastdbArgv, fileListNames, namesOption } from '../domain/tool-argv';
 import { makeblastdbInputType, makeblastdbOptionParameters, toolPrintsKind, type MakeblastdbInputType } from '../domain/tools';
 import type { ToolDirectoryFile, ToolRequest } from './coordinator';
-import { foundDatabase, ToolDraftCore, type StatePatch, type ToolDraftCoreDeps, type ToolExtraFile, type ToolFormState } from './tool-draft-core';
+import {
+  foundDatabase,
+  ToolDraftCore,
+  type FoundDatabase,
+  type ToolDraftCoreDeps,
+  type ToolExtraFile,
+  type ToolFormState,
+} from './tool-draft-core';
 
 /** makeblastdb's `-in`: a SeqDB name list, of FASTA or ASN.1 files or of BLAST databases (`isSeqdbList`). */
 const MAKEBLASTDB_IN = { command: 'makeblastdb', flag: '-in' } as const;
@@ -180,22 +187,23 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
   }
 
   /**
-   * `-in` for `-input_type blastdb`: the name typed, or, until one is typed, the BLAST database that the files of the run
-   * hold (`foundDatabase`: quoted when it holds a space); none when `-in`'s list cannot carry its name (`databaseRefusal`).
+   * `-in` for `-input_type blastdb`: the name typed, or, while none is (a blank one is none), the BLAST database of
+   * `-dbtype`'s kind that the files of the run hold (`foundDatabase`: quoted when it holds a space); none when `-in`'s
+   * list cannot carry its name (`databaseRefusal`) or words of Additional options name `-in`.
    */
   dbInName(state: MakeblastdbDraftState = this.state.get()): string {
-    if (state.dbInEdited) return state.dbIn;
-    return foundDatabase(MAKEBLASTDB_IN, state.runFiles)?.written ?? '';
+    if (typedDbIn(state)) return state.dbIn;
+    return this.foundIn(state)?.written ?? '';
   }
 
   /**
    * Why the BLAST database that the files of the run hold cannot be `-in` (a name with a double quote), while it would
-   * name `-in`: `-input_type blastdb`, its files in the run, no name typed. The Input block, the check and "Run LOSAT" say
-   * it for as long as that lasts (line WW, WW4d R1).
+   * name `-in`: `-input_type blastdb`, its files in the run, no name typed, no `-in` in Additional options. The Input
+   * block, the check and "Run LOSAT" say it for as long as that lasts (line WW, WW4d R1 and R2).
    */
   databaseRefusal(state: MakeblastdbDraftState = this.state.get()): string | undefined {
-    if (this.inputType(state) !== 'blastdb' || state.dbInEdited) return undefined;
-    return foundDatabase(MAKEBLASTDB_IN, state.runFiles)?.refusal;
+    if (this.inputType(state) !== 'blastdb' || typedDbIn(state)) return undefined;
+    return this.foundIn(state)?.refusal;
   }
 
   /** The input type that `-input_type` chooses. */
@@ -232,11 +240,6 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
 
   protected optionValue(state: MakeblastdbDraftState, flag: string): FieldValue | undefined {
     return state.values[flag];
-  }
-
-  /** A name typed and then cleared gives `-in` back to the files of the run, when files are added. */
-  protected override runFilesAdded(state: MakeblastdbDraftState): StatePatch<MakeblastdbDraftState> {
-    return state.dbInEdited && state.dbIn.trim() === '' ? { dbIn: '', dbInEdited: false } : {};
   }
 
   /**
@@ -288,7 +291,15 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     if (toolPrintsKind(argv) !== null) return undefined;
     const taken = pasteNameTaken(state, this.inputType(state));
     if (taken !== undefined) return taken;
-    return namesInput(argv) ? undefined : this.databaseRefusal(state);
+    return this.databaseRefusal(state);
+  }
+
+  /**
+   * The BLAST database of `-dbtype`'s kind (of either kind before `-dbtype` is chosen) that the files of the run hold, for
+   * `-in` (`foundDatabase`: none where words of Additional options name `-in`).
+   */
+  private foundIn(state: MakeblastdbDraftState): FoundDatabase | undefined {
+    return foundDatabase({ option: MAKEBLASTDB_IN, kind: dbtypeKind(state.values['-dbtype']) }, state.runFiles, this.wordsOf(state));
   }
 
   /** `-in`'s value for the input type chosen: `dbInName` for a BLAST database, the files of FASTA and ASN.1 input as one list. */
@@ -322,9 +333,20 @@ function pasteNameTaken(state: MakeblastdbDraftState, type: MakeblastdbInputType
     : undefined;
 }
 
-/** Whether the words name `-in` themselves. */
+/** Whether the words of an argv name `-in` themselves (`namesOption`). */
 function namesInput(argv: readonly string[]): boolean {
-  return argv.slice(1).some((word) => /^-in(?:=|$)/.test(word));
+  return namesOption(argv.slice(1), '-in');
+}
+
+/** Whether the `-in` name was typed and is not blank (a blank one is none: the files of the run name `-in` then). */
+function typedDbIn(state: MakeblastdbDraftState): boolean {
+  return state.dbInEdited && state.dbIn.trim() !== '';
+}
+
+/** The molecule kind of `-dbtype` (`nucl`, `prot`, as the command line takes them), undefined while none is chosen. */
+function dbtypeKind(value: FieldValue | undefined): SequenceKind | undefined {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text === 'nucl' ? 'nucleotide' : text === 'prot' ? 'protein' : undefined;
 }
 
 /** What Run LOSAT says when the input type chosen has no input yet. */

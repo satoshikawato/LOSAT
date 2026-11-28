@@ -5,8 +5,13 @@
   for a database named `my` and failed. Run details shows the command with the name quoted, so it works
   when pasted. A database whose name holds a double quote, which the command line cannot read in these
   options, is refused where it is chosen, with the reason. The refusal stays in the input block, the
-  check and Run LOSAT for as long as that database is chosen or its files are in the run. With
+  check and Run LOSAT for as long as that database is chosen or its files are in the run; words that
+  print the help or the version (`-help`) still run, as on the command line. An input name typed and
+  then cleared gives the input back to the database of the run's files, and an `-in` written in
+  Additional options is the one input, so the database of the run's files is then neither written nor
+  refused. The run's files name a database of the kind the tool reads (nucleotide for WindowMasker and
+  DustMasker, protein for SegMasker, makeblastdb's `-dbtype`) in a folder that holds both kinds. With
   WindowMasker's `-infmt seqids` or `-fa_list` and the Masking tools' FASTA input, whose input is one
   file's name, the files of the run do not fill in the input name. The Database picker reads the
-  database list of an alias file as BLAST+ does, so a multi-volume database whose volume names hold a
-  wide space (U+3000) is one choice, not several.
+  database list of an alias file as BLAST+ does (also one that starts with a byte order mark), so a
+  multi-volume database whose volume names hold a wide space (U+3000) is one choice, not several.

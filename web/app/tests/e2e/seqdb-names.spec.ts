@@ -102,6 +102,8 @@ test('a database named with a double quote is refused where it is chosen, with t
   await expect(page.getByTestId('subject-db-selected')).toContainText('q"db');
   const dbRefused = `A database named "q"db" cannot be in -db: ${REASON}.`;
   await expect(page.getByTestId('subject-db-refused')).toHaveText(dbRefused);
+  // The check's line, which is live, says it; the picker's line is not a second alert of the same sentence (WW4d R2, N3).
+  await expect(page.getByTestId('subject-db-refused')).not.toHaveAttribute('role', 'alert');
   await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'invalid');
   await expect(page.getByTestId('argv-validation')).toHaveText(dbRefused);
   await shots(page, 'db-refused');
@@ -114,7 +116,7 @@ test('a database named with a double quote is refused where it is chosen, with t
   await page.getByTestId('param-filtering_db-files-input').setInputFiles([named('q"rep.nin'), named('q"rep.nhr'), named('q"rep.nsq')]);
   const repRefused = `A database named "q"rep" cannot be in -filtering_db: ${REASON}.`;
   await expect(page.getByTestId('param-filtering_db-refused')).toHaveText(repRefused);
-  await expect(page.getByTestId('param-filtering_db-refused')).toHaveAttribute('role', 'alert');
+  await expect(page.getByTestId('param-filtering_db-refused')).not.toHaveAttribute('role', 'alert');
   // The check says it too, as it says -db's (WW4d R1).
   await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'invalid');
   await expect(page.getByTestId('argv-validation')).toHaveText(repRefused);
@@ -149,7 +151,7 @@ test('a database named with a double quote is refused where it is chosen, with t
   await page.getByTestId('wm-in-files').setInputFiles([named('q"wm.nin'), named('q"wm.nsq')]);
   const wmRefused = `A database named "q"wm" cannot be in -in: ${REASON}.`;
   await expect(page.getByTestId('wm-in-refused')).toHaveText(wmRefused);
-  await expect(page.getByTestId('wm-in-refused')).toHaveAttribute('role', 'alert');
+  await expect(page.getByTestId('wm-in-refused')).not.toHaveAttribute('role', 'alert');
   await expect(page.getByTestId('wm-in-name')).toHaveValue('');
   await expect(page.getByTestId('wm-argv-validation')).toHaveAttribute('data-state', 'invalid');
   await expect(page.getByTestId('wm-argv-validation')).toHaveText(wmRefused);
@@ -172,6 +174,18 @@ test('a database named with a double quote is refused where it is chosen, with t
   await expect(page.getByTestId('wm-in-name')).toHaveValue('"my wm"');
   await expect(page.getByTestId('wm-command')).toContainText(`-in '"my wm"'`);
   await expect(page.getByTestId('wm-in-refused')).toHaveCount(0);
+  // A name typed and then cleared is none: the files' database names -in again, shown as the field's placeholder (WW4d
+  // R2, N1).
+  await page.getByTestId('wm-in-name').fill('typed/db');
+  await expect(page.getByTestId('wm-command')).toContainText('-in typed/db');
+  await page.getByTestId('wm-in-name').fill('');
+  await expect(page.getByTestId('wm-in-name')).toHaveValue('');
+  await expect(page.getByTestId('wm-in-name')).toHaveAttribute('placeholder', '"my wm"');
+  await expect(page.getByTestId('wm-command')).toContainText(`-in '"my wm"'`);
+  // The one-shot error of an add (a file whose name is in the run already) is an alert.
+  await page.getByTestId('wm-in-files').setInputFiles([named('my wm.nin')]);
+  await expect(page.getByTestId('wm-in-error')).toHaveText('A file named "my wm.nin" is already in the run directory.');
+  await expect(page.getByTestId('wm-in-error')).toHaveAttribute('role', 'alert');
 
   // makeblastdb's -in of -input_type blastdb: the Input block, the check and Run LOSAT (WW4d R1).
   await page.getByTestId('tab-makeblastdb').click();
@@ -180,7 +194,7 @@ test('a database named with a double quote is refused where it is chosen, with t
   await page.getByTestId('mk-db-files').setInputFiles([named('q"mk.nin'), named('q"mk.nsq')]);
   const mkRefused = `A database named "q"mk" cannot be in -in: ${REASON}.`;
   await expect(page.getByTestId('mk-db-in-refused')).toHaveText(mkRefused);
-  await expect(page.getByTestId('mk-db-in-refused')).toHaveAttribute('role', 'alert');
+  await expect(page.getByTestId('mk-db-in-refused')).not.toHaveAttribute('role', 'alert');
   await expect(page.getByTestId('mk-db-in')).toHaveValue('');
   await expect(page.getByTestId('mk-argv-validation')).toHaveAttribute('data-state', 'invalid');
   await expect(page.getByTestId('mk-argv-validation')).toHaveText(mkRefused);
@@ -197,7 +211,7 @@ test('a database named with a double quote is refused where it is chosen, with t
   await page.getByTestId('ms-in-files').setInputFiles([named('q"ms.nin'), named('q"ms.nsq')]);
   const msRefused = `A database named "q"ms" cannot be in -in: ${REASON}.`;
   await expect(page.getByTestId('ms-in-refused')).toHaveText(msRefused);
-  await expect(page.getByTestId('ms-in-refused')).toHaveAttribute('role', 'alert');
+  await expect(page.getByTestId('ms-in-refused')).not.toHaveAttribute('role', 'alert');
   await expect(page.getByTestId('ms-in-name')).toHaveValue('');
   await expect(page.getByTestId('ms-argv-validation')).toHaveAttribute('data-state', 'invalid');
   await expect(page.getByTestId('ms-argv-validation')).toHaveText(msRefused);
@@ -287,6 +301,26 @@ test.describe('real engine: database names with a space are the native command l
           nativeSearch(['blastn', '-query', 'wm_query.fa', '-subject', subjectName, '-filtering_db', '"rep dbs/rpt_d4"', '-soft_masking', 'false'], work, format),
         );
       }
+
+      // 4. Help with a database that -db cannot name (WW4d R2, L1): the words print the command line's help, which reads
+      // no database, as `losat blastn -db 'q"d/nslice' -help` does.
+      await page.getByTestId('param-filtering_db').uncheck();
+      copyInto(dbSearch, nslice, join(work, 'q"d'));
+      await page.getByTestId('subject-source-database').check();
+      await page.getByTestId('subject-db-folder-input').setInputFiles(join(work, 'q"d'));
+      const dbRefused = `A database named "q"d/nslice" cannot be in -db: ${REASON}.`;
+      await expect(page.getByTestId('subject-db-refused')).toHaveText(dbRefused);
+      await expect(page.getByTestId('argv-validation')).toHaveText(dbRefused);
+      await page.getByTestId('param-extra').fill('-help');
+      await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+      await submit(page);
+      await waitStatus(page, 4, 'completed');
+      await pickRun(page, 4);
+      await page.getByTestId('results-view-outputs').click();
+      const [printed] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-printed').click()]);
+      const helpNative = native(['blastn', '-db', 'q"d/nslice', '-help'], work);
+      expect(helpNative.status).toBe(0);
+      expect(readFileSync((await printed.path())!).toString('utf8'), 'blastn -db \'q"d/nslice\' -help').toBe(helpNative.stdout);
     } finally {
       rmSync(work, { recursive: true, force: true });
     }

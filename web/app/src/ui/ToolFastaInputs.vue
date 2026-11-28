@@ -22,7 +22,10 @@ const inFilesInput = ref<HTMLInputElement | null>(null);
 const inFolderInput = ref<HTMLInputElement | null>(null);
 
 const usesFasta = computed(() => props.draft.usesFastaBox(props.state));
-/** Why the database of the files of the run cannot be -in, for as long as its files are in the run (line WW, WW4d R1). */
+/**
+ * Why the database of the files of the run cannot be -in, for as long as its files are in the run (line WW, WW4d R1). Not
+ * an alert: the check's line, which is live, says the same sentence (WW4d R2); the one-shot error of an add is one.
+ */
 const databaseRefusal = computed(() => props.draft.databaseRefusal(props.state));
 const fastaCount = computed(() => (props.state.fastaPaste.trim() !== '' ? 1 : 0) + props.state.fastaFiles.length);
 
@@ -138,8 +141,8 @@ function onInFiles(event: Event): void {
           type="text"
           autocomplete="off"
           spellcheck="false"
-          placeholder="db/wm"
-          :value="draft.inName(state)"
+          :placeholder="draft.inName(state) || 'db/wm'"
+          :value="state.blastDbInEdited ? state.blastDbIn : draft.inName(state)"
           :data-testid="`${prefix}-in-name`"
           @input="draft.setBlastDbIn(($event.target as HTMLInputElement).value)"
         />
@@ -174,6 +177,6 @@ function onInFiles(event: Event): void {
       {{ state.runFiles.length }} {{ state.runFiles.length === 1 ? 'file' : 'files' }} in the run directory.
     </p>
     <p v-if="state.runFilesError" class="error small" role="alert" :data-testid="`${prefix}-in-error`">{{ state.runFilesError }}</p>
-    <p v-if="databaseRefusal" class="error small" role="alert" :data-testid="`${prefix}-in-refused`">{{ databaseRefusal }}</p>
+    <p v-if="databaseRefusal" class="error small" :data-testid="`${prefix}-in-refused`">{{ databaseRefusal }}</p>
   </template>
 </template>

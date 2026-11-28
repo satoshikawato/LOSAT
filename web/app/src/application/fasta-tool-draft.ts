@@ -9,14 +9,21 @@
 import type { DirectoryFile } from 'losat/domain';
 import { isUnavailable } from 'losat/ports';
 import { normalizeRunPath } from '../domain/blast-db';
-import type { ListOption } from '../domain/list-flags';
 import type { ToolId } from '../domain/tools';
 import type { DataGateway } from '../ports/data';
 import { failureText } from './availability';
 import type { ToolDirectoryFile } from './coordinator';
 import type { InputMode } from './draft';
 import { SessionFiles } from './session-files';
-import { foundDatabase, ToolDraftCore, type StatePatch, type ToolDraftCoreDeps, type ToolFormState } from './tool-draft-core';
+import { namesOption } from '../domain/tool-argv';
+import {
+  foundDatabase,
+  ToolDraftCore,
+  type DatabaseOption,
+  type StatePatch,
+  type ToolDraftCoreDeps,
+  type ToolFormState,
+} from './tool-draft-core';
 
 /** One FASTA file added to a tool tab's Input block (inflated into OPFS when compressed). */
 export interface ToolInputFile {
@@ -38,7 +45,10 @@ export interface FastaInputState extends ToolFormState {
   readonly fastaMode: InputMode;
   /** The Input name typed (`-in` of an input that is not FASTA), as the command line takes it. */
   readonly blastDbIn: string;
-  /** Whether the user typed the Input name; until then the files of the run name it (`inName`). */
+  /**
+   * Whether the user typed the Input name; until then, and while what is typed is blank, the files of the run name it
+   * (`inName`). The field shows what was typed, a blank one with the name found as its placeholder.
+   */
   readonly blastDbInEdited: boolean;
 }
 
@@ -52,9 +62,12 @@ export interface FastaToolDraftDeps extends ToolDraftCoreDeps {
   readonly sessionFiles?: SessionFiles;
 }
 
-/** The input of one run: the name that `-in` gives, the file of the run directory under it (none for a named BLAST database), and the session files that it reads. */
+/**
+ * The input of one run: the name that `-in` gives (none where words of Additional options name `-in`: `namesOption`), the
+ * file of the run directory under it (none for a named BLAST database), and the session files that it reads.
+ */
 export interface FastaRunInput {
-  readonly name: string;
+  readonly name?: string;
   readonly file?: ToolDirectoryFile;
   readonly sessionTokens: readonly string[];
 }
@@ -96,9 +109,10 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
 
   /**
    * The `-in` option of the input that is not FASTA, with the `-infmt` that decides whether it is a SeqDB name list
-   * (`isSeqdbList`: with `-infmt blastdb`); undefined when `-in` names no input of this block (WindowMasker's Convert).
+   * (`isSeqdbList`: with `-infmt blastdb`), and the molecule kind of the database that the tool reads; undefined when
+   * `-in` names no input of this block (WindowMasker's Convert).
    */
-  protected abstract inOption(state: S): ListOption | undefined;
+  protected abstract inDatabase(state: S): DatabaseOption | undefined;
 
   // --- the FASTA box and the -in name ---------------------------------------------------------
 
@@ -155,23 +169,24 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
   }
 
   /**
-   * The Input name (`-in` when the form does not read the FASTA box): the name typed, or, until one is typed, the BLAST
-   * database that the files of the run hold when `-in` is a SeqDB name list (`foundDatabase`: `-infmt blastdb`,
-   * `"my dbs/wm"`; line WW, WW4d), as makeblastdb's `dbInName` is; none when the list cannot carry its name
-   * (`databaseRefusal`). With `-infmt seqids` or `-fa_list`, `-in` is one file's name, which the user types.
+   * The Input name (`-in` when the form does not read the FASTA box): the name typed, or, while none is (a blank one is
+   * none), the BLAST database of the tool's kind that the files of the run hold when `-in` is a SeqDB name list
+   * (`foundDatabase`: `-infmt blastdb`, `"my dbs/wm"`; line WW, WW4d), as makeblastdb's `dbInName` is; none when the list
+   * cannot carry its name (`databaseRefusal`) or words of Additional options name `-in`. With `-infmt seqids` or
+   * `-fa_list`, `-in` is one file's name, which the user types.
    */
   inName(state: S = this.state.get()): string {
-    if (state.blastDbInEdited) return state.blastDbIn;
+    if (typedName(state)) return state.blastDbIn;
     return this.foundIn(state)?.written ?? '';
   }
 
   /**
    * Why the BLAST database that the files of the run hold cannot be `-in` (a name with a double quote), while it would
-   * name `-in`: `-infmt blastdb`, its files in the run, no name typed. The Input block, the check and "Run LOSAT" say it
-   * for as long as that lasts (line WW, WW4d R1).
+   * name `-in`: `-infmt blastdb`, its files in the run, no name typed, no `-in` in Additional options. The Input block,
+   * the check and "Run LOSAT" say it for as long as that lasts (line WW, WW4d R1 and R2).
    */
   databaseRefusal(state: S = this.state.get()): string | undefined {
-    return state.blastDbInEdited ? undefined : this.foundIn(state)?.refusal;
+    return typedName(state) ? undefined : this.foundIn(state)?.refusal;
   }
 
   /** Files dropped on the Input block: FASTA inputs while the form reads the FASTA box, else files of the run. */
@@ -229,11 +244,16 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
    * Throws the message to show when the inputs are not ready (a database that `-in` cannot name: `databaseRefusal`).
    */
   protected async runInputs(state: S): Promise<readonly FastaRunInput[]> {
+    // Words of Additional options that name -in give the input themselves: the form asks for none (makeblastdb's rule).
+    const wordsGiveIn = this.wordsNameIn(state);
     if (!this.usesFastaBox(state)) {
       const refusal = this.databaseRefusal(state);
       if (refusal !== undefined) throw new Error(refusal);
       const name = this.inName(state).trim();
-      if (name === '') throw new Error('Enter an input name or open files.');
+      if (name === '') {
+        if (wordsGiveIn) return [{ sessionTokens: [] }];
+        throw new Error('Enter an input name or open files.');
+      }
       return [{ name, sessionTokens: [] }];
     }
 
@@ -258,6 +278,7 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
       });
     }
     if (parts.length === 0) {
+      if (wordsGiveIn) return [{ sessionTokens: [] }];
       throw new Error('Enter sequences or open FASTA files.');
     }
 
@@ -281,11 +302,6 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
     ];
   }
 
-  /** A name typed and then cleared gives the Input name back to the files of the run, when files are added. */
-  protected override runFilesAdded(state: S): StatePatch<S> {
-    return state.blastDbInEdited && state.blastDbIn.trim() === '' ? ({ blastDbIn: '', blastDbInEdited: false } as StatePatch<S>) : {};
-  }
-
   protected override heldTokens(state: S): readonly string[] {
     return state.fastaFiles.flatMap((entry) => (entry.sessionToken === undefined ? [] : [entry.sessionToken]));
   }
@@ -299,10 +315,15 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
 
   // --- internals --------------------------------------------------------------------------------
 
+  /** Whether the words of Additional options name `-in` themselves (`namesOption`): they give the input. */
+  protected wordsNameIn(state: S): boolean {
+    return namesOption(this.wordsOf(state), '-in');
+  }
+
   /** The BLAST database of the files of the run, for `-in` (`foundDatabase`; none when `-in` names no input here). */
   private foundIn(state: S): ReturnType<typeof foundDatabase> {
-    const option = this.inOption(state);
-    return option === undefined ? undefined : foundDatabase(option, state.runFiles);
+    const input = this.inDatabase(state);
+    return input === undefined ? undefined : foundDatabase(input, state.runFiles, this.wordsOf(state));
   }
 
   /** The file of the pasted FASTA `text` (`input.fa`), the same for the check and the runs of one text. */
@@ -378,4 +399,9 @@ async function combineFastaFiles(parts: readonly ToolDirectoryFile[]): Promise<F
     }
   }
   return new File(blobs, COMBINED_NAME, { type: 'text/plain' });
+}
+
+/** Whether the Input name was typed and is not blank (a blank one is none: the files of the run name `-in` then). */
+function typedName(state: FastaInputState): boolean {
+  return state.blastDbInEdited && state.blastDbIn.trim() !== '';
 }

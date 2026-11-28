@@ -428,6 +428,68 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     expect(draft.inName()).toBe('"my dbs/wm"');
   });
 
+  // Line WW, WW4d R2 (review N1): an Input name typed and then cleared is no name: the database of the run's files names
+  // -in again at once, and its refusal comes back, without waiting for the next file added.
+  it('takes a cleared Input name as none: the found database and its refusal come back at once (line WW, WW4d R2)', async () => {
+    const refused = 'A database named "q"/w" cannot be in -in: a double quote there starts or ends a name.';
+    const { draft } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['my dbs/wm.nin', 'my dbs/wm.nsq']);
+    draft.setBlastDbIn('typed/db');
+    expect(draft.inName()).toBe('typed/db');
+    draft.setBlastDbIn('  ');
+    expect(draft.inName()).toBe('"my dbs/wm"');
+    expect(draft.previewArgv()[draft.previewArgv().indexOf('-in') + 1]).toBe('"my dbs/wm"');
+    draft.setBlastDbIn('typed/db');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    expect(draft.databaseRefusal()).toBeUndefined();
+    draft.setBlastDbIn('');
+    expect(draft.databaseRefusal()).toBe(refused);
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused }));
+    expect(await draft.submit()).toEqual({ ok: false, message: refused });
+  });
+
+  // Line WW, WW4d R2 (review N2): makeblastdb's rule for the three tabs: words of Additional options that name -in give
+  // -in themselves, so the database of the run's files is not written, its refusal does not apply, and no Input name is
+  // asked for.
+  it('writes no found database and refuses none when Additional options name -in (line WW, WW4d R2)', async () => {
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    expect(draft.databaseRefusal()).toBeDefined();
+    draft.setExtra('-in other');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    expect(draft.inName()).toBe('');
+    expect(draft.previewArgv().filter((word) => word === '-in')).toHaveLength(1);
+    expect(draft.previewArgv().slice(-2)).toEqual(['-in', 'other']);
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    expect((await draft.submit()).ok).toBe(true);
+    const argv = submitted[0]![0]!.argv;
+    expect(argv.filter((word) => word === '-in')).toHaveLength(1);
+    expect(argv.slice(-2)).toEqual(['-in', 'other']);
+    // A database that the list can carry is not written either: the words' -in is the one -in.
+    for (const entry of draft.state.get().runFiles) draft.removeRunFile(entry.key);
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['my dbs/wm.nin', 'my dbs/wm.nsq']);
+    expect(draft.previewArgv()).not.toContain('"my dbs/wm"');
+    draft.setExtra('');
+    expect(draft.inName()).toBe('"my dbs/wm"');
+  });
+
+  // Line WW (dev defect found by the WW4d R2 review): WindowMasker reads a nucleotide database, so the files of the run
+  // name the nucleotide one in a folder that holds both kinds.
+  it('names the nucleotide database of the run files for -in, also beside a protein one with a shorter name (line WW, WW4d R2)', async () => {
+    const { draft } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(
+      ['db/p.pin', 'db/p.psq', 'db/nuc.nin', 'db/nuc.nsq'].map((name, i) => new File([new Uint8Array([i])], name.slice(3))),
+      ['db/p.pin', 'db/p.psq', 'db/nuc.nin', 'db/nuc.nsq'],
+    );
+    expect(draft.inName()).toBe('db/nuc');
+  });
+
   it('SearchDraft.useCounts switches to BLASTN with -window_masker_db file attached', () => {
     const { data } = makeData();
     const draft = new SearchDraft({

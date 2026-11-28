@@ -70,6 +70,6 @@ fn the_bytes_of_a_block_count_its_vectors() {
     result.x_compact_hsp_lists.push((0, list));
     let block = vec![result];
     let blocks = block.capacity() * size_of::<BlastpSubjectResult>();
-    assert_eq!(x_kept_bytes(&Ok(block)), hsps + lists + blocks);
+    assert_eq!(x_kept_bytes(&Ok((block, false))), hsps + lists + blocks);
     assert_eq!(x_kept_bytes(&Err(anyhow::anyhow!("failed"))), 0);
 }

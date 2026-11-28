@@ -11,6 +11,7 @@ import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { CountsLoader } from './application/counts';
 import { ExampleLoader } from './application/examples';
+import { MakeblastdbDraft } from './application/makeblastdb-draft';
 import { ResultsBrowser } from './application/results';
 import { SessionFiles } from './application/session-files';
 import { ToolDraft } from './application/tool-draft';
@@ -35,6 +36,8 @@ export interface App {
   readonly toolDraft: ToolDraft;
   /** The Format Archive (`blast_formatter`) job being edited on the Format Archive tab. */
   readonly blastFormatterDraft: BlastFormatterDraft;
+  /** The makeblastdb job being edited on the makeblastdb tab (line WW, WW4b2). */
+  readonly makeblastdbDraft: MakeblastdbDraft;
   /** The Example sets that load into the draft (line WF-2). */
   readonly examples: ExampleLoader;
   /** The WindowMasker counts of the taxonomy IDs, downloaded when the user asks (line WW2). */
@@ -121,7 +124,12 @@ export function createApp(options: AppOptions = {}): App {
     getSessionArchiveFile: (runId, fileName) => coordinator.getOutputFile(runId, CUSTOM_OUTPUT, fileName),
     isBusy: () => coordinator.isBusy(),
   });
-  const tools = [toolDraft, blastFormatterDraft];
+  const makeblastdbDraft = new MakeblastdbDraft({
+    engine,
+    enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
+    isBusy: () => coordinator.isBusy(),
+  });
+  const tools = [toolDraft, blastFormatterDraft, makeblastdbDraft];
   const availability = new Availability({ draft, tools, dataWorkerEnded });
   const examples = new ExampleLoader({
     downloader: new BrowserFileDownloader({ inflater: data }),
@@ -147,5 +155,17 @@ export function createApp(options: AppOptions = {}): App {
     checkStored: () => data.checkStoredResults(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, toolDraft, blastFormatterDraft, examples, counts, results, attention, availability, usesFakeEngine: ENGINE_ASSETS === null };
+  return {
+    coordinator,
+    draft,
+    toolDraft,
+    blastFormatterDraft,
+    makeblastdbDraft,
+    examples,
+    counts,
+    results,
+    attention,
+    availability,
+    usesFakeEngine: ENGINE_ASSETS === null,
+  };
 }

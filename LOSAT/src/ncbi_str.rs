@@ -33,7 +33,8 @@ pub(crate) mod utf8;
 pub use data_size::string_to_uint8_data_size;
 pub use data_size::string_to_uint8_data_size_bytes;
 pub(crate) use double::{
-    string_to_double, string_to_double_posix, string_to_double_posix_or_local, NCBI_NAN,
+    scan_double, string_to_double, string_to_double_posix, string_to_double_posix_or_local,
+    NCBI_NAN,
 };
 pub(crate) use mask::matches_mask;
 
@@ -65,6 +66,21 @@ pub(crate) const fn is_space(c: u8) -> bool {
 /// the C locale (white space, a sign, the digits up to the first other byte; a value beyond `long`
 /// is `LONG_MAX` or `LONG_MIN`), truncated to `int`.
 pub(crate) fn c_atoi(s: &[u8]) -> i32 {
+    strtol10(s).0 as i32
+}
+
+/// glibc `sscanf` of `s` with the conversion `%ld`: `strtol`'s value in base 10 where a digit
+/// follows the white space and the sign, `None` where the conversion stores nothing (it returns 0
+/// or `EOF`; NCBI's callers then read the variable they did not set). glibc 2.39's values are the
+/// unit test's (`LOSAT/tests/unit/sscanf_le_ld_vectors.tsv`).
+pub(crate) fn scan_long(s: &[u8]) -> Option<i64> {
+    let (value, digits) = strtol10(s);
+    digits.then_some(value)
+}
+
+/// glibc `strtol` of `s` in base 10 in the C locale: the value (beyond `long`, `LONG_MAX` or
+/// `LONG_MIN`) and whether a digit was read after the white space and the sign.
+fn strtol10(s: &[u8]) -> (i64, bool) {
     let mut i = 0;
     while i < s.len() && is_space(s[i]) {
         i += 1;
@@ -74,6 +90,7 @@ pub(crate) fn c_atoi(s: &[u8]) -> i32 {
         negative = s[i] == b'-';
         i += 1;
     }
+    let start = i;
     // The magnitude, up to that of LONG_MIN (2^63).
     let mut value: u64 = 0;
     while i < s.len() && s[i].is_ascii_digit() {
@@ -87,7 +104,7 @@ pub(crate) fn c_atoi(s: &[u8]) -> i32 {
     } else {
         value.min(i64::MAX as u64) as i64
     };
-    long as i32
+    (long, i > start)
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:106-115

@@ -482,38 +482,72 @@ fn the_standard_error_file_writes_to_the_standard_error() {
 }
 
 /// The names of `-export_search_strategy` of a receiver (LOSAT Web, line RG's F1w), read as the
-/// command line on Linux opens them for writing, the name as typed (`strategy_name`), on the host
-/// and as the user of the `-logfile` model: a file of the run where the user makes files, NCBI's
-/// error where the command line cannot open the name (a directory, a name ending in `/`, a name in
-/// a directory of root's, a component of 256 bytes), the standard output's refusal, no file for the
-/// null device and the standard input, and LOSAT Web's refusal of the standard error, of the
-/// devices whose writes fail or wait for a reader, and of procfs's and mqueue's files.
+/// command line on Linux opens them for writing, the name as typed (`RunFiles::strategy_target`),
+/// on the host and as the user of the `-logfile` model, against the run's files (line RG item
+/// F1w-r2: the view of `-logfile` and a tool's output, line WQA D19; here registered names, and
+/// this test's working directory, the crate's, for `src` and `Cargo.toml`): a file of the run where
+/// the user makes files, also in a folder of the run's files; NCBI's error where the command line
+/// cannot open the name (a folder that the run's files do not have or that is a file of them, a
+/// folder of them, a name ending in `/`, a name in a directory of root's, a component of 256
+/// bytes); LOSAT Web's refusal of a file of the run's files; the standard output's refusal, no
+/// file for the null device and the standard input, and LOSAT Web's refusal of the standard error,
+/// of the devices whose writes fail or wait for a reader, and of procfs's and mqueue's files.
 #[test]
 fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
     use StrategyTarget as T;
-    let files = RunFiles::Receiver(Arc::new(Kept::default()));
+    // Registered names stand for the folders and files of the command line's directory (as in
+    // `a_receiver_reads_a_log_name_as_the_command_line_on_linux`).
+    let files = RunFiles::Receiver(Arc::new(Kept::with_registered(&[
+        "out/keep", "a/b/keep", "in/q.fa",
+    ])));
     let target = |name: &str| files.strategy_target(OsStr::new(name), &[]);
+    let file = |name: &str| T::File(name.as_bytes().to_vec());
     let long_component = "a".repeat(256);
     let component_255 = "a".repeat(255);
     for (name, read) in [
-        ("s.asn", T::File),
-        ("out/s.asn", T::File),
-        ("./s.asn", T::File),
-        (" s.asn", T::File),
-        ("../s.asn", T::File),
-        ("a/b/../s.asn", T::File),
-        ("/tmp/s.asn", T::File),
-        ("/dev/shm/s.asn", T::File),
-        ("/var/lock/s.asn", T::File),
-        ("/home/me/s.asn", T::File),
-        ("/proc/self/cwd/s.asn", T::File),
-        ("/proc/thread-self/cwd/s.asn", T::File),
-        (component_255.as_str(), T::File),
+        ("s.asn", file("s.asn")),
+        ("out/s.asn", file("out/s.asn")),
+        ("./s.asn", file("s.asn")),
+        (" s.asn", file(" s.asn")),
+        ("../s.asn", file("../s.asn")),
+        ("a/b/../s.asn", file("a/s.asn")),
+        ("a/s.asn", file("a/s.asn")),
+        ("in/s.asn", file("in/s.asn")),
+        ("in/../s.asn", file("s.asn")),
+        ("src/s.asn", file("src/s.asn")),
+        ("/tmp/s.asn", file("/tmp/s.asn")),
+        ("/dev/shm/s.asn", file("/dev/shm/s.asn")),
+        ("/var/lock/s.asn", file("/var/lock/s.asn")),
+        // A `..` after a link steps back from the link's target (NCBI 2.17.0 blastp makes
+        // `/tmp/s.asn` for `/var/run/../tmp/s.asn`; `/var/run` is `/run`).
+        ("/var/run/../tmp/s.asn", file("/tmp/s.asn")),
+        ("/var/lock/../shm/s.asn", file("/run/shm/s.asn")),
+        ("/proc/self/root/../tmp/s.asn", file("/tmp/s.asn")),
+        (
+            "/proc/self/root/tmp/s.asn",
+            file("/proc/self/root/tmp/s.asn"),
+        ),
+        ("/home/me/s.asn", file("/home/me/s.asn")),
+        ("/proc/self/cwd/s.asn", file("s.asn")),
+        ("/proc/self/cwd/out/s.asn", file("out/s.asn")),
+        ("/proc/thread-self/cwd/s.asn", file("s.asn")),
+        (component_255.as_str(), file(&component_255)),
         ("", T::Inaccessible),
         (".", T::Inaccessible),
         ("..", T::Inaccessible),
+        ("out", T::Inaccessible),
         ("out/", T::Inaccessible),
         ("out/.", T::Inaccessible),
+        ("in", T::Inaccessible),
+        ("a/b", T::Inaccessible),
+        ("src", T::Inaccessible),
+        ("nodir/s.asn", T::Inaccessible),
+        ("nodir/../s.asn", T::Inaccessible),
+        ("a/c/../s.asn", T::Inaccessible),
+        ("in/q.fa/s.asn", T::Inaccessible),
+        ("in/q.fa/", T::Inaccessible),
+        ("Cargo.toml/s.asn", T::Inaccessible),
+        ("/proc/self/cwd/nodir/s.asn", T::Inaccessible),
         ("/tmp", T::Inaccessible),
         ("/tmp/", T::Inaccessible),
         ("/s.asn", T::Inaccessible),
@@ -530,6 +564,12 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
         ("/proc/self/cwd", T::Inaccessible),
         ("/sys/s.asn", T::Inaccessible),
         (long_component.as_str(), T::Inaccessible),
+        ("in/q.fa", T::Existing),
+        ("./in/q.fa", T::Existing),
+        ("a/../in/q.fa", T::Existing),
+        ("/proc/self/cwd/in/q.fa", T::Existing),
+        ("out/keep", T::Existing),
+        ("Cargo.toml", T::Existing),
         ("/dev/stdout", T::StandardOutput),
         ("/dev/fd/1", T::StandardOutput),
         ("/proc/self/fd/1", T::StandardOutput),
@@ -551,6 +591,241 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
         ("/dev/mqueue/q", T::System),
     ] {
         assert_eq!(target(name), read, "{name:?}");
+        // The *start*'s name of the file (`losat_web2_start`, before the run's files) is the run's.
+        if let T::File(made) = &read {
+            assert_eq!(
+                RunFiles::output_host_name(OsStr::new(name)).as_ref(),
+                Some(made),
+                "{name:?}"
+            );
+        }
+    }
+    // Without those folders, as in a new directory that holds only the run's other files, the
+    // command line cannot open a name in them (NCBI's `File is not accessible`); the *start* still
+    // names the file that a run with the folders makes.
+    let bare = RunFiles::Receiver(Arc::new(Kept::default()));
+    for (name, made) in [
+        ("out/s.asn", "out/s.asn"),
+        ("a/b/../s.asn", "a/s.asn"),
+        ("in/s.asn", "in/s.asn"),
+        ("/proc/self/cwd/out/s.asn", "out/s.asn"),
+    ] {
+        assert_eq!(
+            bare.strategy_target(OsStr::new(name), &[]),
+            T::Inaccessible,
+            "{name:?}"
+        );
+        assert_eq!(
+            RunFiles::output_host_name(OsStr::new(name)),
+            Some(made.as_bytes().to_vec()),
+            "{name:?}"
+        );
+    }
+    // A name that makes no file in any run's files has no name in the *start*.
+    for name in [
+        "",
+        ".",
+        "..",
+        "s.asn/",
+        "/tmp",
+        "/etc/s.asn",
+        "//s.asn",
+        "/dev/null",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/full",
+        "/proc/self/comm",
+        "/dev/mqueue/q",
+    ] {
+        assert_eq!(
+            RunFiles::output_host_name(OsStr::new(name)),
+            None,
+            "{name:?}"
+        );
+    }
+}
+
+/// A strategy name against the run's files outside the working directory and the files that the
+/// search reads (line RG item F1w-r2, as `outside_cwd_registered_files_are_seen_by_log_and_output_names`
+/// and `read_files_refuse_matching_writes_without_creating_folders` read `-logfile` and `-out`): a
+/// registered file outside the working directory is a file of the run (LOSAT Web's refusal, or the
+/// refusal that names its option) and its folder is there; a file that the search reads, present or
+/// missing, is LOSAT Web's refusal, without making its folder present.
+#[test]
+fn a_strategy_name_sees_registered_and_read_files_outside_the_view() {
+    use StrategyTarget as T;
+    let files = RunFiles::Receiver(Arc::new(Kept {
+        registered: vec![b"/data/q.fa".to_vec(), b"../up.fa".to_vec()],
+        read: vec![b"tfp.pal".to_vec(), b"missing_sub/x.fa".to_vec()],
+        ..Kept::default()
+    }));
+    let query = [RunFileName {
+        option: "query",
+        name: OsStr::new("/data/q.fa"),
+    }];
+    for (name, others, read) in [
+        ("/data/q.fa", &[][..], T::Existing),
+        ("/data/q.fa", &query[..], T::OtherFile("query")),
+        ("/data/./q.fa", &query[..], T::OtherFile("query")),
+        ("/data", &[], T::Inaccessible),
+        ("/data/", &[], T::Inaccessible),
+        ("/data/s.asn", &[], T::Inaccessible),
+        ("/data/q.fa/s.asn", &[], T::Inaccessible),
+        // `/data` is there, the folder of a registered file: a name may pass it on its way out.
+        ("/data/../tmp/s.asn", &[], T::File(b"/tmp/s.asn".to_vec())),
+        ("../up.fa", &[], T::Existing),
+        ("../s.asn", &[], T::File(b"../s.asn".to_vec())),
+        ("tfp.pal", &[], T::Existing),
+        ("./tfp.pal", &[], T::Existing),
+        ("tfp.pin", &[], T::File(b"tfp.pin".to_vec())),
+        ("missing_sub/x.fa", &[], T::Inaccessible),
+        ("missing_sub/s.asn", &[], T::Inaccessible),
+    ] {
+        assert_eq!(
+            files.strategy_target(OsStr::new(name), others),
+            read,
+            "{name:?}"
+        );
+        // The *start* names each file that the run makes as the run does (`/tmp/s.asn` too,
+        // though `/data` is no directory of the model's).
+        if let T::File(made) = &read {
+            assert_eq!(
+                RunFiles::output_host_name(OsStr::new(name)).as_ref(),
+                Some(made),
+                "{name:?}"
+            );
+        }
+    }
+}
+
+/// `-logfile` and `-export_search_strategy` of one name with a `..` after a link are two files, as
+/// on the command line (NCBI 2.17.0 blastp with both `/var/run/../tmp/X`: the log `/var/tmp/X`, as
+/// NCBI reads `-logfile` lexically, and the strategy file `/tmp/X`, which the system opens as
+/// typed, `/var/run` being `/run`): neither is the other's, each under its own name in the run and
+/// in the *start*. Without the link, one name is one file (the strategy file is the log's).
+#[test]
+fn a_log_and_a_strategy_of_one_name_after_a_link_are_two_files() {
+    let files = RunFiles::Receiver(Arc::new(Kept::default()));
+    for (name, log_name, strategy) in [
+        (
+            "/var/run/../tmp/X",
+            "/var/tmp/X",
+            StrategyTarget::File(b"/tmp/X".to_vec()),
+        ),
+        ("/tmp/X", "/tmp/X", StrategyTarget::OtherFile("logfile")),
+    ] {
+        let log = [RunFileName {
+            option: "logfile",
+            name: OsStr::new(name),
+        }];
+        assert_eq!(
+            files.strategy_target(OsStr::new(name), &log),
+            strategy,
+            "{name:?}"
+        );
+        let Ok((DiagTarget::Memory(_), Some(logged))) = files.log_target(Some(OsStr::new(name)))
+        else {
+            panic!("{name:?}: a -logfile file");
+        };
+        assert_eq!(logged, log_name.as_bytes(), "{name:?}");
+        assert_eq!(
+            RunFiles::log_host_name(OsStr::new(name)),
+            Some(logged),
+            "{name:?}"
+        );
+    }
+    assert_eq!(
+        RunFiles::output_host_name(OsStr::new("/var/run/../tmp/X")),
+        Some(b"/tmp/X".to_vec())
+    );
+}
+
+/// One view of the run's files for every name that the run writes (line RG item F1w-r2): for a
+/// name that NCBI's reading of `-logfile` takes as it is typed (no leading space, no final `/`, no
+/// `..` after a link, none of NCBI's special names), the strategy file, the `-logfile` file and a
+/// tool's output are each a new file of the run, no file (NCBI's error, the messages on the
+/// standard error, a tool's open that fails), or LOSAT Web's refusal of a file of the run, in the
+/// same run's files.
+#[test]
+fn a_strategy_name_a_log_name_and_an_output_name_are_one_reading() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Read {
+        File,
+        Unopened,
+        Refused,
+    }
+    let kept = Arc::new(Kept {
+        registered: ["out/keep", "a/b/keep", "in/q.fa", "/data/q.fa", "../up.fa"]
+            .iter()
+            .map(|name| name.as_bytes().to_vec())
+            .collect(),
+        read: vec![b"tfp.pal".to_vec()],
+        out_read: vec![b"tfp.pal".to_vec()],
+        ..Kept::default()
+    });
+    let run_files = RunFiles::Receiver(kept);
+    let open_files = OpenFiles::new(&run_files);
+    for name in [
+        "s.asn",
+        "./s.asn",
+        "out/s.asn",
+        "a/b/../s.asn",
+        "a/../s.asn",
+        "in/s.asn",
+        "src/s.asn",
+        "../s.asn",
+        "/proc/self/cwd/out/s.asn",
+        "/tmp/s.asn",
+        "nodir/s.asn",
+        "nodir/../s.asn",
+        "a/c/../s.asn",
+        "in/q.fa/s.asn",
+        "Cargo.toml/s.asn",
+        "/proc/self/cwd/nodir/s.asn",
+        "out",
+        "in",
+        "a/b",
+        "src",
+        "/data",
+        "/data/s.asn",
+        "/etc/s.asn",
+        "in/q.fa",
+        "./in/q.fa",
+        "a/../in/q.fa",
+        "/proc/self/cwd/in/q.fa",
+        "out/keep",
+        "Cargo.toml",
+        "/data/q.fa",
+        "../up.fa",
+        "tfp.pal",
+        "./tfp.pal",
+    ] {
+        let strategy_target = run_files.strategy_target(OsStr::new(name), &[]);
+        let strategy = match &strategy_target {
+            StrategyTarget::File(_) => Read::File,
+            StrategyTarget::Inaccessible => Read::Unopened,
+            StrategyTarget::Existing => Read::Refused,
+            other => panic!("{name:?}: strategy {other:?}"),
+        };
+        let log_target = run_files.log_target(Some(OsStr::new(name)));
+        let log = match &log_target {
+            Ok((DiagTarget::Memory(_), Some(_))) => Read::File,
+            Ok((DiagTarget::Stderr, None)) => Read::Unopened,
+            Err(_) => Read::Refused,
+            Ok(_) => panic!("{name:?}: log target"),
+        };
+        // A file of both is the command line's one file, under one host name.
+        if let (StrategyTarget::File(made), Ok((_, Some(logged)))) = (&strategy_target, &log_target)
+        {
+            assert_eq!(made, logged, "{name:?}");
+        }
+        let output = match open_files.create(name) {
+            Ok(Created::File(_)) => Read::File,
+            Err(Unopened) => Read::Unopened,
+            Ok(Created::Refused(_)) => Read::Refused,
+            Ok(Created::Stdout) => panic!("{name:?}: output Stdout"),
+        };
+        assert_eq!((strategy, log), (output, output), "{name:?}");
     }
 }
 
@@ -572,6 +847,7 @@ fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
             .collect();
         files.strategy_target(OsStr::new(name), &others)
     };
+    let file = |name: &str| T::File(name.as_bytes().to_vec());
     for (name, others, read) in [
         ("q.fa", vec![("query", "q.fa")], T::OtherFile("query")),
         ("./q.fa", vec![("query", "q.fa")], T::OtherFile("query")),
@@ -580,7 +856,7 @@ fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
             vec![("query", "q.fa")],
             T::OtherFile("query"),
         ),
-        ("q.fa", vec![("query", "../x/../w/q.fa")], T::File),
+        ("q.fa", vec![("query", "../x/../w/q.fa")], file("q.fa")),
         (
             "../w/q.fa",
             vec![("query", "../x/../w/q.fa")],
@@ -591,14 +867,18 @@ fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
             vec![("query", "../../a/q.fa")],
             T::OtherFile("query"),
         ),
-        ("../a/q.fa", vec![("query", "../../a/q.fa")], T::File),
-        ("q.fa.asn", vec![("query", "q.fa")], T::File),
+        (
+            "../a/q.fa",
+            vec![("query", "../../a/q.fa")],
+            file("../a/q.fa"),
+        ),
+        ("q.fa.asn", vec![("query", "q.fa")], file("q.fa.asn")),
         (
             "/tmp/s.fa",
             vec![("query", "q.fa"), ("subject", "/tmp/s.fa")],
             T::OtherFile("subject"),
         ),
-        ("./-", vec![("query", "-")], T::File),
+        ("./-", vec![("query", "-")], file("-")),
         (
             "run.log",
             vec![("logfile", "run.log")],
@@ -615,8 +895,8 @@ fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
             vec![("logfile", "../run.log")],
             T::OtherFile("logfile"),
         ),
-        ("run.log", vec![("logfile", "../run.log")], T::File),
-        ("./-", vec![("logfile", "-")], T::File),
+        ("run.log", vec![("logfile", "../run.log")], file("run.log")),
+        ("./-", vec![("logfile", "-")], file("-")),
         (
             "wm.obinary",
             vec![("window_masker_db", "wm.obinary")],
@@ -663,6 +943,13 @@ fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
         ("/home/me/c.counts", "/home/me/c.counts"),
         ("/etc/default/../../tmp/c.counts", "/tmp/c.counts"),
         ("/var/lock/c.counts", "/var/lock/c.counts"),
+        ("/var/run/../tmp/c.counts", "/tmp/c.counts"),
+        ("/var/lock/../shm/c.counts", "/run/shm/c.counts"),
+        ("/proc/self/root/../tmp/c.counts", "/tmp/c.counts"),
+        (
+            "/proc/self/root/tmp/c.counts",
+            "/proc/self/root/tmp/c.counts",
+        ),
     ] {
         match name(given) {
             OutputName::File { name: got, .. } => {
@@ -705,8 +992,9 @@ fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
         ("/dev/zero", OutputName::Discard),
         ("/dev/urandom", OutputName::Discard),
         ("/dev/full", OutputName::Full),
-        ("/dev/stderr", OutputName::Special),
-        ("/dev/fd/2", OutputName::Special),
+        ("/dev/stderr", OutputName::StandardError),
+        ("/dev/fd/2", OutputName::StandardError),
+        ("/proc/self/fd/2", OutputName::StandardError),
         ("/dev/ptmx", OutputName::Special),
         ("/proc/self/comm", OutputName::Special),
         ("/dev/mqueue/q", OutputName::Special),
@@ -810,6 +1098,11 @@ fn log_and_output_names_share_the_runs_files_view() {
         ("logs/run.log", Some("logs/run.log")),
         ("/proc/self/cwd/run.log", Some("run.log")),
         ("/etc/default/../../tmp/run.log", Some("/tmp/run.log")),
+        // NCBI reads `-logfile` lexically (a `..` after a link is not the link's parent).
+        ("/var/run/../tmp/run.log", Some("/var/tmp/run.log")),
+        // A file that a run makes beside a registered `/data/q.fa` (`/data` is no directory of the
+        // model's).
+        ("/data/../tmp/run.log", Some("/tmp/run.log")),
         ("/dev/stdout", Some("/dev/stdout")),
         ("//dev/stdout", Some("/dev/stdout")),
         ("-", None),
@@ -967,11 +1260,19 @@ fn a_receiver_s_output_file_goes_to_the_receiver_when_the_run_ends() {
         full.write_all(b"x").unwrap_err().kind(),
         io::ErrorKind::StorageFull
     );
-    drop((null, full, files));
+    // A `..` after a link steps back from the link's target: the file is `/tmp/...`.
+    let Ok(Created::File(mut linked)) = files.create("/var/run/../tmp/ww3a-linked.counts") else {
+        panic!("a file in memory");
+    };
+    linked.write_all(b"linked").unwrap();
+    drop((null, full, linked, files));
     assert_eq!(
         *kept.files.lock().unwrap(),
-        vec![(name.as_bytes().to_vec(), b"counts bytes".to_vec())],
-        "one file, none of the devices"
+        vec![
+            (name.as_bytes().to_vec(), b"counts bytes".to_vec()),
+            (b"/tmp/ww3a-linked.counts".to_vec(), b"linked".to_vec()),
+        ],
+        "two files, none of the devices"
     );
     assert!(!std::path::Path::new(name).exists(), "no file on the disk");
     // The command line's and the library's files are the file system's.
@@ -1243,12 +1544,14 @@ fn outside_cwd_registered_files_are_seen_by_log_and_output_names() {
             "create should not open {unopened:?}"
         );
     }
-    // Controls: sibling files in writable outside dirs and cwd open; `/data/run.log` stays
-    // unopened because `/data` is outside `user_makes`.
+    // Controls: sibling files in writable outside dirs and cwd open, also past the folder of a
+    // registered file (`/data/../tmp/run.log`), each under the *start*'s name of it
+    // (`log_host_name`); `/data/run.log` stays unopened because `/data` is outside `user_makes`.
     for (raw, want) in [
         ("/tmp/run.log", "/tmp/run.log"),
         ("../run.log", "../run.log"),
         ("run.log", "run.log"),
+        ("/data/../tmp/run.log", "/tmp/run.log"),
     ] {
         assert!(
             matches!(
@@ -1256,6 +1559,11 @@ fn outside_cwd_registered_files_are_seen_by_log_and_output_names() {
                 Ok((DiagTarget::Memory(_), Some(ref name))) if name == want.as_bytes()
             ),
             "log_target control {raw:?}"
+        );
+        assert_eq!(
+            RunFiles::log_host_name(OsStr::new(raw)).as_deref(),
+            Some(want.as_bytes()),
+            "log_host_name control {raw:?}"
         );
         assert!(
             matches!(open_files.create(raw), Ok(Created::File(_))),
@@ -1323,4 +1631,157 @@ fn read_files_refuse_matching_writes_without_creating_folders() {
         .is_some());
     assert!(matches!(open_files.create("ids.txt"), Ok(Created::File(_))));
     assert!(open_files.refused_output(OsStr::new("ids.txt")).is_none());
+}
+
+/// A receiver whose run writes its working directory through the file system (makeblastdb of
+/// LOSAT Web, `FileReceiver::writes_working_directory`), taking its other files as they are
+/// written (`Streamed`).
+#[derive(Default)]
+struct WritesDirectory(Streamed);
+
+impl FileReceiver for WritesDirectory {
+    fn receive(&self, name: &[u8], _bytes: &[u8]) -> io::Result<()> {
+        panic!("a whole file: {}", String::from_utf8_lossy(name));
+    }
+
+    fn open(&self, name: &[u8]) -> Option<Box<dyn FileStream>> {
+        self.0.open(name)
+    }
+
+    fn writes_working_directory(&self) -> bool {
+        true
+    }
+}
+
+/// The `-logfile` of a run that writes its working directory (makeblastdb of LOSAT Web; line NP
+/// WW4b1 R2, finding 1, 2026-11-28) follows the device model of docs/web/abi_v2.md §4, as
+/// windowmasker's and blast_formatter's: the diagnostics' target and the log's own opening
+/// (`OpenFiles::log_output`, makeblastdb's `AsOutputFile`) read the name through one owner
+/// (`log_name`, `output_name`). The null device loses both; `/dev/stdout` and `/dev/stderr` are
+/// the run's standard streams; `/dev/full` fails the log's writes for want of space; a file
+/// outside the working directory (`/tmp/mk.log`) is a file of the run that the receiver takes as
+/// it is written, the two openings appending to one file; a name in a folder that the directory
+/// does not have and a folder leave the diagnostics on the standard error and do not open the
+/// log; a device that LOSAT Web does not write is refused, in the run and in a check of the
+/// words, before anything opens.
+#[test]
+fn a_run_that_writes_its_directory_opens_its_log_by_the_device_model() {
+    let receiver = WritesDirectory::default();
+    let events = receiver.0 .0.clone();
+    let run_files = RunFiles::Receiver(Arc::new(receiver));
+    let files = OpenFiles::new(&run_files);
+    let target = |name: &str| match files.log_target(Some(OsStr::new(name))) {
+        Ok(ToolLog::Target(target)) => Some(target),
+        Ok(ToolLog::Stdout) => None,
+        Err(reason) => panic!("{name}: {reason}"),
+    };
+    let output = |name: &str| files.log_output(OsStr::new(name));
+    // The null device and its spellings: nothing is written anywhere.
+    for name in ["/dev/null", "//dev/null", "/dev/zero"] {
+        assert!(
+            matches!(output(name), Ok(LogOutput::File(OpenedFile::Discard))),
+            "{name}"
+        );
+    }
+    assert!(matches!(target("/dev/zero"), Some(DiagTarget::Discard)));
+    // The standard streams.
+    assert!(target("/dev/stdout").is_none());
+    assert!(matches!(output("/dev/stdout"), Ok(LogOutput::Stdout)));
+    assert!(matches!(output("/dev/fd/1"), Ok(LogOutput::Stdout)));
+    assert!(matches!(
+        target("/dev/stderr"),
+        Some(DiagTarget::StderrFile)
+    ));
+    for name in ["/dev/stderr", "/dev/fd/2", "/proc/self/fd/2"] {
+        assert!(matches!(output(name), Ok(LogOutput::Stderr)), "{name}");
+    }
+    // `/dev/full`: the log opens, and its writes fail as the system's.
+    let Ok(LogOutput::File(mut full)) = output("/dev/full") else {
+        panic!("/dev/full opens");
+    };
+    assert!(full.write_all(b"line\n").is_err());
+    // A file outside the working directory: one file of the run, the diagnostics' opening and
+    // the log's appending to it in the order they write.
+    let outside = "/tmp/ww4b1-r2-model-mk.log";
+    let diagnostics = target(outside).expect("a file");
+    assert!(matches!(diagnostics, DiagTarget::Stream(_)));
+    let Ok(LogOutput::File(mut log)) = output(outside) else {
+        panic!("{outside} opens");
+    };
+    diagnostics.write_text(b"diagnostic\n", &mut io::sink());
+    log.write_all(b"log\n").unwrap();
+    drop((diagnostics, log));
+    assert!(!std::path::Path::new(outside).exists(), "not on the disk");
+    // Names that do not open: the diagnostics stay on the standard error and the log does not
+    // open (`src` is a folder of the crate's directory, the tests' working directory).
+    for name in ["ww4b1-r2-nodir/mk.log", "src", "src/"] {
+        assert!(matches!(target(name), Some(DiagTarget::Stderr)), "{name}");
+        assert_eq!(output(name).err(), Some(Unopened), "{name}");
+    }
+    assert!(!std::path::Path::new("ww4b1-r2-nodir").exists());
+    // A device that LOSAT Web does not write: refused by the run and by the check alike.
+    for name in ["/dev/ptmx", "/proc/self/comm"] {
+        assert!(matches!(output(name), Ok(LogOutput::Refused(_))), "{name}");
+        assert!(
+            run_files.refused_log_output(OsStr::new(name)).is_some(),
+            "{name}"
+        );
+    }
+    for name in [
+        "/dev/null",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/full",
+        outside,
+        "src",
+    ] {
+        assert_eq!(
+            run_files.refused_log_output(OsStr::new(name)),
+            None,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        RunFiles::Disk.refused_log_output(OsStr::new("/dev/ptmx")),
+        None
+    );
+    drop(files);
+    assert_eq!(
+        *events.lock().unwrap(),
+        [
+            "/tmp/ww4b1-r2-model-mk.log opened",
+            "/tmp/ww4b1-r2-model-mk.log @0 diagnostic\n",
+            "/tmp/ww4b1-r2-model-mk.log @11 log\n",
+            "/tmp/ww4b1-r2-model-mk.log end",
+        ]
+    );
+}
+
+/// A check of the words of a run that writes its working directory (`RunFiles::log_target`, the
+/// `losat_web2_validate` of makeblastdb; line NP WW4b1 R2, finding 2, 2026-11-28) chooses the
+/// diagnostics' target as the run does (`OpenFiles::log_target`), from the same reading of the
+/// name, and makes nothing: a file of the directory that the run opens is in memory (not made), a
+/// name in a missing folder and a folder leave the messages on the standard error, as the run's
+/// opening does.
+#[test]
+fn a_check_of_a_run_that_writes_its_directory_chooses_the_run_s_target() {
+    let run_files = RunFiles::Receiver(Arc::new(WritesDirectory::default()));
+    let checked = |name: &str| run_files.log_target(Some(OsStr::new(name))).unwrap().0;
+    assert!(matches!(
+        checked("ww4b1-r2-check.log"),
+        DiagTarget::Memory(_)
+    ));
+    assert!(
+        !std::path::Path::new("ww4b1-r2-check.log").exists(),
+        "not made"
+    );
+    for name in ["ww4b1-r2-nodir/mk.log", "src", "src/"] {
+        assert!(matches!(checked(name), DiagTarget::Stderr), "{name}");
+    }
+    assert!(matches!(checked("/dev/stderr"), DiagTarget::StderrFile));
+    assert!(matches!(checked("/dev/null"), DiagTarget::Discard));
+    assert!(matches!(
+        checked("/tmp/ww4b1-r2-check.log"),
+        DiagTarget::Memory(_)
+    ));
 }

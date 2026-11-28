@@ -5,7 +5,8 @@
 // is `finalizing` ends the wait for its results, which are deleted if they come later: a Data
 // worker that stopped answering kept such a run "Organizing results" for good, with no Cancel
 // (line WQA's sweep, D2, 2026-11-19). When the Data worker ends, the active run ends at once,
-// with its search: it could not keep its results (the review of D2, L2).
+// with its search: it could not keep its results (the review of D2, L2). A cancel (or that end) while the run's outputs
+// are staged ends it at once too, before the Data worker answers; outputs staged later are dropped (D30, 2026-11-27).
 //
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
@@ -21,6 +22,7 @@ import {
   runFileOption,
   type RunFile,
   type RunOutput,
+  type SequenceKind,
 } from 'losat/domain';
 import {
   isUnavailable,
@@ -56,8 +58,10 @@ import {
   type ToolRunRecord,
   type ToolRunSnapshot,
 } from '../domain/run';
-import { isCountsOutputFile, toolFileOptionLabel } from '../domain/tool-argv';
-import { toolOutputFileName, type ToolId, type ToolStage } from '../domain/tools';
+import { primaryBlastDb } from '../domain/blast-db';
+import { tarArchive } from '../domain/tar';
+import { isCountsOutputFile, maskDataName, toolFileOptionLabel } from '../domain/tool-argv';
+import { toolOutputDownloadName, toolOutputFileName, type ToolId, type ToolStage } from '../domain/tools';
 import type { CountsLocks } from '../ports/counts';
 import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
@@ -168,6 +172,32 @@ export interface SessionCountsEntry {
   readonly size: number;
 }
 
+/** The BLAST database that a makeblastdb run made, for "Use as Database (-db)" and "Use as Repeats database (-filtering_db)". */
+export interface MadeDatabase {
+  /** The molecule type of the run's database (its alias file's, or else its volume's). */
+  readonly kind: SequenceKind;
+  /** Every file that the run made, as the folder of the database that a search opens. */
+  readonly files: readonly File[];
+  /**
+   * Each file's path under the folder named for its run (`run2/db.nin`, `run2/sub/dir/db.nin`): the databases of two
+   * runs, as `-db` and as `-filtering_db` of one search, never share a name in its run directory.
+   */
+  readonly names: readonly string[];
+}
+
+/** The folder of a search's run directory that holds the database made by run `number` (`run2`). */
+export function madeDatabaseFolder(number: number): string {
+  return `run${number}`;
+}
+
+/** The mask data of a masking run, for makeblastdb's `-mask_data` ("Use as -mask_data in makeblastdb"). */
+export interface MaskDataHandover {
+  readonly file: File;
+  /** The name of the file in makeblastdb's run directory (`maskDataName`). */
+  readonly name: string;
+  readonly origin: ToolFileOrigin;
+}
+
 /** A completed `-outfmt 11` BLAST archive output from this session, offered to Format Archive (`blast_formatter`). */
 export interface SessionArchiveEntry {
   readonly runId: string;
@@ -252,12 +282,15 @@ export class Coordinator {
   private readonly runDirectories = new Map<string, readonly DirectoryFile[]>();
   /** Working directory files held for queued/running tool runs; cleared when the run finishes or is cancelled. */
   private readonly toolDirectories = new Map<string, readonly DirectoryFile[]>();
+  /** The database of each completed makeblastdb run handed over (`madeDatabase`), by run: its Files, read once. */
+  private readonly madeDatabases = new Map<string, Promise<MadeDatabase>>();
   /** The releases of the saved-counts locks that each queued or running run holds (holdCounts), by run. */
   private readonly countsHolds = new Map<string, () => void>();
   private active: string | undefined;
   /**
-   * Ends the active run's wait for its search or for the commit of its results with an error: a cancel while its results
-   * are organized (cancel), or the end of the Data worker (dataWorkerEnded).
+   * Ends the active run's wait for the staging of its outputs, for its search or for the commit of its results with an
+   * error: a cancel while it is preparing or its results are organized (cancel), or the end of the Data worker
+   * (dataWorkerEnded).
    */
   private stopActive: ((error: Error) => void) | undefined;
   private toolAbort: AbortController | undefined;
@@ -701,14 +734,66 @@ export class Coordinator {
   async exportToolOutput(runId: string, key: string): Promise<void> {
     const view = this.findTool(runId);
     if (view === undefined || view.record.exitStatus === undefined) throw new Error('the run has no outputs');
-    const { name } = this.toolOutputEntry(runId, key);
-    const baseName = key === 'stdout' ? 'stdout.txt' : key === 'stderr' ? 'stderr.txt' : name;
-    const downloadName = toolOutputFileName(view.snapshot, baseName);
-    const file = await this.deps.data.getToolOutputFile(runId, key, downloadName);
+    const downloadName = toolOutputDownloadName(view.snapshot, this.toolOutputEntry(runId, key));
+    await this.saveFile(downloadName, await this.deps.data.getToolOutputFile(runId, key, downloadName));
+  }
+
+  /**
+   * "Download all" of the files that a tool run wrote (a makeblastdb run's database): one tar archive of them under their
+   * paths in the run's directory, made of their stored Files (no byte of them is read into the page).
+   */
+  async exportToolFiles(runId: string): Promise<void> {
+    const view = this.findTool(runId);
+    const entries = view?.record.files ?? [];
+    if (view === undefined || entries.length === 0) throw new Error('the run wrote no files');
+    const files = await Promise.all(entries.map((entry) => this.deps.data.getToolOutputFile(runId, entry.key, baseName(entry.name))));
+    const archive = tarArchive(
+      entries.map((entry, index) => ({ name: entry.name, file: files[index]! })),
+      view.record.endedAt ?? view.snapshot.queuedAt,
+    );
+    const stem = primaryBlastDb(entries.map((entry) => entry.name))?.name ?? 'files';
+    await this.saveFile(toolOutputFileName(view.snapshot, `${stem}.tar`), archive);
+  }
+
+  /**
+   * The database that a completed makeblastdb run made: every file of the run, as a search's database folder. Its Files
+   * are read once per run (`madeDatabases`), so that every hand-over of the run gives the same objects: `-db` and
+   * `-filtering_db` of one run are then one file each in the search's directory, whatever stamp a store gives a read.
+   */
+  async madeDatabase(runId: string): Promise<MadeDatabase> {
+    const view = this.findTool(runId);
+    const entries = view?.record.files ?? [];
+    const primary = primaryBlastDb(entries.map((entry) => entry.name));
+    if (view?.status !== 'completed' || primary === undefined) throw new Error('the run made no BLAST database');
+    let made = this.madeDatabases.get(runId);
+    if (made === undefined) {
+      const folder = madeDatabaseFolder(view.snapshot.number);
+      made = Promise.all(entries.map((entry) => this.deps.data.getToolOutputFile(runId, entry.key, baseName(entry.name)))).then((files) => ({
+        kind: primary.kind,
+        files,
+        names: entries.map((entry) => `${folder}/${entry.name}`),
+      }));
+      this.madeDatabases.set(runId, made);
+      made.catch(() => this.madeDatabases.delete(runId));
+    }
+    return made;
+  }
+
+  /** The mask data of an output of a completed masking run (`maskDataName`), as a file for makeblastdb's `-mask_data`. */
+  async maskData(runId: string, key: string): Promise<MaskDataHandover> {
+    const view = this.findTool(runId);
+    const entry = this.toolOutputEntry(runId, key);
+    const name = view?.status === 'completed' ? maskDataName(view.snapshot, entry) : undefined;
+    if (view === undefined || name === undefined) throw new Error('the output is not mask data');
+    const file = await this.deps.data.getToolOutputFile(runId, key, baseName(name));
+    return { file, name, origin: { kind: 'made', runNumber: view.snapshot.number } };
+  }
+
+  private async saveFile(name: string, file: Blob): Promise<void> {
     if (this.deps.downloader.saveBlob !== undefined) {
-      this.deps.downloader.saveBlob(downloadName, file);
+      this.deps.downloader.saveBlob(name, file);
     } else {
-      this.deps.downloader.save(downloadName, new Uint8Array(await file.arrayBuffer()), 'application/octet-stream');
+      this.deps.downloader.save(name, new Uint8Array(await file.arrayBuffer()), 'application/octet-stream');
     }
   }
 
@@ -948,9 +1033,9 @@ export class Coordinator {
     stopped.catch(() => undefined);
     try {
       this.update(runId, { status: 'preparing', record: { startedAt } });
-      const output = await this.deps.data.openRun(runId, runOutputs(snapshot.argv));
+      const output = await stageOutputs(this.deps.data.openRun(runId, runOutputs(snapshot.argv)), stopped, () => this.deps.data.discardRun(runId));
       staged = true;
-      // A stop while the outputs were staged found no search to end: the engine has not started it, and does not.
+      // A stop that came with the port found no search to end: the engine has not started it, and does not.
       if (stop !== undefined) {
         output.close();
         throw stop;
@@ -1062,9 +1147,8 @@ export class Coordinator {
     let sink: ToolStorageSink | undefined;
     try {
       this.updateTool(runId, { status: 'preparing', record: { startedAt, phaseTimes: { preparing: startedAt } } });
-      // Same order as search's openRun: wait for openToolRun instead of racing it so a cancel in
-      // preparing always closes the port and deletes the staged tool run on the Data side.
-      const port = await this.deps.data.openToolRun(runId);
+      // As a search's outputs: a stop ends the wait at once, and a port that comes later is closed and its run deleted.
+      const port = await stageOutputs(this.deps.data.openToolRun(runId), stopped, () => this.deps.data.deleteRun(runId));
       staged = true;
       if (stop !== undefined) {
         port.close();
@@ -1257,6 +1341,25 @@ function engineInput(input: InputSnapshot): EngineInput {
   };
 }
 
+/**
+ * The port of a run's staged outputs (`openRun`, `openToolRun`), unless the run is stopped first (`stopped`: a Cancel, the
+ * end of the Data worker). A stop ends the wait at once: the Data worker may answer seconds later, behind the index scan
+ * of an input, or never, and the run stayed "Preparing" until then with a Cancel that did nothing (line WQA's D30,
+ * 2026-11-27). A port that comes after the stop is closed and its run dropped (`drop`), which the Data worker can do only
+ * once it has staged the run; a refusal that comes after it is ignored.
+ */
+function stageOutputs(open: Promise<MessagePort>, stopped: Promise<never>, drop: () => Promise<void>): Promise<MessagePort> {
+  return Promise.race([open, stopped]).catch((error: unknown) => {
+    void open
+      .then((port) => {
+        port.close();
+        return drop();
+      })
+      .catch(() => undefined);
+    throw error;
+  });
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -1278,4 +1381,9 @@ async function readable(file: Blob): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** The last part of a path (`db.nin` of `sub/dir/db.nin`), a File's name. */
+function baseName(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1);
 }

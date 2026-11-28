@@ -5391,7 +5391,7 @@ Scheduling (each value computed by one thread with the original function; order 
   D-SO-2, BLAST XML and the XML2 and JSON documents of outfmt 5 and 13 to 16 are written batch by batch as NCBI's
   formatter writes them, the header or start with the first report, the end and the 13/14 master file in the
   epilog, the document's state of 13 to 16 handed from call to call (`Xml2Carry`); their refusals of a title NCBI
-  crashes on come after the output of the batches before (the Owner's Q-X2c of 2026-11-16), and the refusal of the
+  crashes on come after the output of the batches before (OWNER_DECISIONS 44 + D-SO-2, Owner-delegated; the form of Q-X2c), and the refusal of the
   held report of a `-subject` XML2 or JSON search comes from the call that writes it, the next batch's or the
   epilog's, or not at all where an error of NCBI's stops the run first), `subject_ids`, `titles`, `joined`, `large_parsed`, `ambiguity`, `taxonomy`, `search_space`,
   `chunk_size` (a negative `CHUNK_SIZE`, whose refusals come after the reports of the batches before

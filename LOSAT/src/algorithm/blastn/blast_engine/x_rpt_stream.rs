@@ -102,8 +102,8 @@
 //!   subject with a hit that cannot be written, `blast_xml.rs`). Outfmt 5 and the `-db` XML2 and
 //!   JSON documents make a batch's reports in its call, so their refusals come before the call's
 //!   first byte: after the reports of the batches before, without the footer, the end or the
-//!   master file (the Owner's decision of 2026-11-16 on line RG's Q-X2c, "the results of the
-//!   query batches before are written"; remaining-gaps DECISIONS D-SO-2). A `-subject` XML2 or JSON
+//!   master file (OWNER_DECISIONS 44 + D-SO-2, Owner-delegated; the form
+//!   of Q-X2c). A `-subject` XML2 or JSON
 //!   document makes a report where NCBI makes it (when the result of another query arrives, in
 //!   the same batch or a later one, or in the epilog: blast_format.cpp:2362-2403), and its refusal
 //!   comes there, after the reports before it and only the bytes NCBI has flushed by then: a

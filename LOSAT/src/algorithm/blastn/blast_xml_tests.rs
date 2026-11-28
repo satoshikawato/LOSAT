@@ -300,7 +300,7 @@ fn xml5(titles: &[&[u8]], calls: Calls<'_>) -> (Vec<u8>, Option<String>) {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:724-766
 // BLAST XML writes each report at once: a call refuses its reports before its first byte, after the
-// reports of the calls before (the Owner's Q-X2c, 2026-11-16), without the document's end.
+// reports of the calls before (OWNER_DECISIONS 44 + D-SO-2/D-SO-6, Owner-delegated; the form of Q-X2c), without the document's end.
 #[test]
 fn blast_xml_refuses_a_batch_before_its_first_byte() {
     let (one, error) = xml5(&[b"qa"], Calls::One);

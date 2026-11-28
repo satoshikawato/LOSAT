@@ -106,8 +106,8 @@ fn many_queries(path: &Path, bad_title: Option<(usize, &[u8])>, hit: &[u8]) {
 /// With more than one query batch (NCBI's `BATCH_SIZE` of 2,000 letters here, the default batch
 /// sizes of BLASTN's application for 300 queries of 400 letters in the other) a refusal that only a
 /// later batch finds comes after the output of the batches before, as NCBI's formatter writes each
-/// batch's reports before it reads the next (the Owner's decision of 2026-11-16 on line RG's Q-X2c,
-/// "the results of the query batches before are written"; remaining-gaps DECISIONS D-SO-2):
+/// batch's reports before it reads the next (OWNER_DECISIONS 44 + D-SO-2, Owner-delegated; the form of
+/// Q-X2c):
 /// standard output (or the `-out` file) is the start of the document that the same search without
 /// the refused title writes, to the end of an `Iteration` before the refused query's batch, without
 /// the document's end. With the reports written after the loop (`LOSAT_X_RPTSTREAM=0`) the refusal

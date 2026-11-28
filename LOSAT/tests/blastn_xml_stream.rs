@@ -12,8 +12,8 @@
 //! `-db`, at 1 and 4 threads, with small batches (`BATCH_SIZE`), also where NCBI's reader error
 //! stops a later batch; the `[X_STATS] RPTSTREAM` line shows that the loop wrote the batches. A
 //! title that LOSAT refuses (one NCBI crashes on, PD-LOSAT-NCBI-DEFECTS) comes after the output
-//! that NCBI has written by then (the Owner's decision of 2026-11-16 on line RG's Q-X2c, "the
-//! results of the query batches before are written"; remaining-gaps DECISIONS D-SO-6): the start of
+//! that NCBI has written by then (OWNER_DECISIONS 44 + D-SO-2/D-SO-6, Owner-delegated; the
+//! form of Q-X2c): the start of
 //! the document of the same search without the refused title, without its end. BLAST XML refuses
 //! the refused title's batch before its first byte, after the batches before; the held report of a
 //! `-subject` XML2 or JSON search is refused where NCBI makes it (the arrival of the next query's

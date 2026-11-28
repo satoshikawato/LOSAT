@@ -83,7 +83,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
 ) -> Result<()> {
     // A title NCBI crashes on (`names::Refusal`) is refused where NCBI makes the report that
     // shows it, after only the bytes that NCBI has flushed by then (remaining-gaps DECISIONS D-SO-6,
-    // Owner-delegated 2026-11-27, under the Owner's Q-X2c of 2026-11-16). A document that writes
+    // Owner-delegated 2026-11-27; OWNER_DECISIONS 44 + D-SO-2/D-SO-6, the form of Q-X2c). A document that writes
     // each report at once (outfmt 5; XML2 and JSON with `-db`) makes the call's reports in one
     // step, so their refusals come before the call's first byte, after the reports of the calls
     // before. A `-subject` XML2 or JSON document (`holds_back`) makes a report only when the

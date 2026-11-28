@@ -17,7 +17,11 @@
 //!   linked in it); a strategy file with `-out /dev/full` (empty, as NCBI's prolog fails first); a
 //!   report that cannot be written (`outfull`: `-out /dev/full`; `outfsz`: `-out F` at its size
 //!   limit), whose run ends with the requests up to the batch whose report failed (`-`,
-//!   `/dev/stdout` and a file); SAM's `@PG CL:` tag (the program's path) is left out on both sides.
+//!   `/dev/stdout` and a file); NCBI's exceptions after a batch's request (`subst`: blastp
+//!   `-subject` whose mapped alignment starts at the subject's first letter, exit 255, also after
+//!   an earlier batch's report, with reader messages and `2>&1`; `cbs`: rpstblastn outfmt 5, 15
+//!   and 16 on a database without frequency ratios, `{rps:rps_mini-freq}`, exit 3); SAM's
+//!   `@PG CL:` tag (the program's path) is left out on both sides.
 //! - Linux, item F1c-1 (`tests/fixtures/strategy/f1c1_cases.tsv` and `tests/fixtures/strategy/f1c1/`):
 //!   byte-for-byte comparison against frozen official NCBI BLAST+ 2.17.0 outputs (mapped via
 //!   `losat::wording::losat_output_bytes`) at 1 and 4 threads across all 8 programs, covering:
@@ -273,6 +277,12 @@ mod ncbi_frozen {
     }
 
     fn inflate_rps(spec: &str, dir: &Path) -> PathBuf {
+        // `NAMES-EXT`: the databases without their files of extension EXT (`rps_mini-freq`: no
+        // frequency ratios), as `export_search_strategy.rs` reads it.
+        let (spec, drop) = match spec.split_once('-') {
+            Some((names, extension)) => (names, Some(format!(".{extension}"))),
+            None => (spec, None),
+        };
         let target = dir.join("rpsdb");
         std::fs::create_dir_all(&target).unwrap();
         let src = engine().join("tests/db_search/rps");
@@ -284,6 +294,9 @@ mod ncbi_frozen {
             if !spec
                 .split('+')
                 .any(|name| stem.starts_with(&format!("{name}.")))
+                || drop
+                    .as_deref()
+                    .is_some_and(|extension| stem.ends_with(extension))
             {
                 continue;
             }

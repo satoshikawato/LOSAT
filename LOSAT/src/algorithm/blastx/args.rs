@@ -949,7 +949,7 @@ impl BlastxArgs {
             &matrix_bytes,
             word_size > 4,
             word_size,
-            self.program().lower,
+            self.program().app,
             self.program().refusal,
         )?;
         // A search strategy's word size below 2 (the command line takes 2 or more): NCBI builds a

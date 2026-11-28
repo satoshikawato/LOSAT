@@ -1,15 +1,18 @@
 // Single command-line builders for the tools (windowmasker: WW3b DESIGN §2.5, brief §4.4;
-// blast_formatter: RG-F3p7): the same argv array is validated by `validateTool`, run by `runTool`,
+// blast_formatter: RG-F3p7; makeblastdb: line WW WW4b2): the same argv array is validated by `validateTool`, run by `runTool`,
 // displayed beside "Run LOSAT" as `losat windowmasker ...` and shown in Run details. Defaults are
 // omitted; Make counts and Convert counts write `-out wmasker.<sformat>` until the user edits it.
 import type { ToolDescription, ToolParameterDescription } from 'losat/domain';
 import { splitOptions } from './argv';
+import { COMMA_LIST_FLAGS } from './list-flags';
 import { writtenValue, type FieldValue, type FormValues } from './parameters';
 import {
   allStageParameters,
   BLAST_FORMATTER_BLOCK_FLAGS,
   blastFormatterOptionParameters,
   defaultCountsOutName,
+  makeblastdbOptionParameters,
+  makeblastdbParameters,
   stageOptionParameters,
   toToolParameterField,
   WINDOWMASKER_BLOCK_FLAGS,
@@ -174,6 +177,86 @@ export function changedBlastFormatterOptionsCount(
   return changedOptionsCount(blastFormatterOptionParameters(description), values, extra);
 }
 
+export interface MakeblastdbArgvInput {
+  /**
+   * `-in`'s value as the command line takes it, omitted when empty: the files of the run as one list
+   * (`makeblastdbInputList`), or a database's name or list as the user typed it.
+   */
+  readonly input: string;
+  /** Option values keyed by `-flag` (`-input_type`, `-dbtype`, `-out`, and the options of the groups). */
+  readonly values: FormValues;
+  /** Parsed `-xmlhelp` description (provides defaults and usage order). */
+  readonly description?: ToolDescription;
+  /** Extra words parsed from "Additional options" (`splitOptions`). */
+  readonly extra?: readonly string[];
+}
+
+/**
+ * Why a name cannot be written in the list of names that `flag` takes, as the command line splits the list, or undefined
+ * when it can (and for an option that takes one name). The one rule for every list option: makeblastdb's `-in`
+ * (`SeqDB_SplitQuoted`: spaces separate the names and a double quote starts or ends a name with spaces, so no name can
+ * hold a double quote) and the options of `COMMA_LIST_FLAGS` (`-mask_data` and the other lists that `NStr::Split` cuts
+ * at commas, so no entry can hold a comma). `what` says what the name is of: a file opened, or a database that the
+ * files of the run hold.
+ */
+export function listNameRefusal(flag: string, name: string, what: 'file' | 'database' = 'file'): string | undefined {
+  const split = flag === '-in' ? IN_LIST_SPLIT : COMMA_LIST_FLAGS.has(flag) ? COMMA_LIST_SPLIT : undefined;
+  if (split === undefined || !name.includes(split.mark)) return undefined;
+  return `A ${what} named "${name}" cannot be in ${flag}: ${split.reason}.`;
+}
+
+/** What a list option's splitter takes out of a name (`listNameRefusal`): the mark, and why. */
+interface ListSplit {
+  readonly mark: string;
+  readonly reason: string;
+}
+
+const IN_LIST_SPLIT: ListSplit = { mark: '"', reason: 'a double quote there starts or ends a name' };
+const COMMA_LIST_SPLIT: ListSplit = { mark: ',', reason: 'a comma separates its files' };
+
+/**
+ * `-in`'s value for several names, as makeblastdb reads it (`SeqDB_SplitQuoted`) and writes it
+ * (`SeqDB_CombineAndQuote`): the names separated by spaces, a name with a space between double quotes. A name with a
+ * double quote cannot be written (`listNameRefusal`).
+ */
+export function makeblastdbInputList(names: readonly string[]): string {
+  return names
+    .filter((name) => name.trim() !== '')
+    .map((name) => (name.includes(' ') ? `"${name}"` : name))
+    .join(' ');
+}
+
+/**
+ * Builds `['makeblastdb', '-in', ..., ...]` for validation, execution and display: `-in` first, then the
+ * options set in the form in NCBI's `-help` usage order, then Additional options.
+ * Throws for a word of `extra` that Additional options refuse (`pushExtraWords`).
+ */
+export function buildMakeblastdbArgv(input: MakeblastdbArgvInput): readonly string[] {
+  const argv: string[] = ['makeblastdb'];
+  if (input.input.trim() !== '') argv.push('-in', input.input);
+  const ordered = makeblastdbParameters(input.description).filter((param) => param.flag !== '-in');
+  pushOptionWords(argv, ordered, input.values, MAKEBLASTDB_NAMED_FLAGS);
+  pushExtraWords(argv, input.extra);
+  return Object.freeze(argv);
+}
+
+/** makeblastdb's option whose words the builder writes from the Input block (the input's names). */
+const MAKEBLASTDB_NAMED_FLAGS: ReadonlySet<string> = new Set(['-in']);
+
+/** Count of changed options inside the collapsible "makeblastdb options" section (plus Additional options). */
+export function changedMakeblastdbOptionsCount(values: FormValues, extra: string, description: ToolDescription | undefined): number {
+  return changedOptionsCount(makeblastdbOptionParameters(description), values, extra);
+}
+
+/** The names of a comma-separated list of files (`-mask_data a.asnb,b.asnb`), without empty entries. */
+export function fileListNames(value: unknown): readonly string[] {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name !== '');
+}
+
 /** The command words as shown beside Run LOSAT and in Run details (`losat windowmasker ...`). */
 export function toolCommandWords(argv: readonly string[]): readonly string[] {
   return ['losat', ...argv];
@@ -232,6 +315,40 @@ export function toolFileOptionLabel(argv: readonly string[], fileName: string): 
 export function isCountsOutputFile(stage: ToolStage, argv: readonly string[], fileName: string, tool: ToolId = 'windowmasker'): boolean {
   if (tool !== 'windowmasker' || (stage !== 'mk_counts' && stage !== 'convert')) return false;
   return namedOutPath(argv) === normalizeRelName(fileName);
+}
+
+/**
+ * The `-outfmt` values of the masking tools that write mask data for makeblastdb's `-mask_data`, with an extension for a
+ * file of each. makeblastdb reads ASN.1 binary and text only: a file in another encoding (`maskinfo_xml`) is refused with
+ * "Unknown encoding for mask data in '<file>'" (exit 1; NCBI makeblastdb.cpp:160-181, LOSAT's
+ * `LOSAT/src/writedb/mask_info/reader.rs`), so no hand-over is offered for it.
+ */
+const MASK_DATA_FORMATS: Readonly<Record<string, string>> = Object.freeze({
+  maskinfo_asn1_bin: 'asnb',
+  maskinfo_asn1_text: 'asnt',
+});
+
+/** The tool runs that mask with a `-outfmt`: WindowMasker's Mask (`-ustat`); the masking tools of line WW WW4c join here. */
+function masks(tool: ToolId, stage: ToolStage): boolean {
+  return tool === 'windowmasker' && stage === 'mask';
+}
+
+/**
+ * The name under which an output of a tool run goes to makeblastdb's `-mask_data` ("Use as -mask_data in makeblastdb"),
+ * or undefined for an output that is not mask data: the `-out` file of a masking run whose `-outfmt` writes mask data
+ * that makeblastdb reads (`maskinfo_asn1_bin`, `maskinfo_asn1_text`; not `maskinfo_xml`, see `MASK_DATA_FORMATS`), or
+ * its standard output when it has no `-out`, named for the run (`windowmasker-run3.asnb`).
+ */
+export function maskDataName(
+  run: { readonly tool: ToolId; readonly stage: ToolStage; readonly argv: readonly string[]; readonly number: number },
+  entry: { readonly key: string; readonly name: string },
+): string | undefined {
+  if (!masks(run.tool, run.stage)) return undefined;
+  const extension = MASK_DATA_FORMATS[toolOptionValue(run.argv, '-outfmt') ?? ''];
+  if (extension === undefined) return undefined;
+  const out = namedOutPath(run.argv);
+  if (out === undefined) return entry.key === 'stdout' ? `${run.tool}-run${run.number}.${extension}` : undefined;
+  return entry.key !== 'stdout' && entry.key !== 'stderr' && normalizeRelName(entry.name) === out ? entry.name : undefined;
 }
 
 /**

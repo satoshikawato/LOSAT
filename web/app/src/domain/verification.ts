@@ -1,4 +1,6 @@
 import type { OutputFormat, ProgramId, ToolDescription } from 'losat/domain';
+// The generator of the table (build/verification.ts) runs this module in Node as it is: its imports name their files.
+import { COMMA_LIST_FLAGS, commaListLength } from './list-flags.ts';
 import type { ToolId } from './tools';
 // The verification badge of a run (plan §6.1, design §10.3, PD-LOSAT-WEB-APP-BOUNDARY
 // "Compatibility contract"). A run matches a certified profile only when its program and
@@ -60,12 +62,40 @@ const NOT_OPTIONS = new Set(['-query', '-subject', '-out', '-outfmt', '-num_thre
 /** Flags whose value is a coordinate range of the inputs (S11): a profile has the flag, not the range. */
 const RANGE_OPTIONS = new Set(['-query_loc', '-subject_loc']);
 export const RANGE_VALUE = '<range>';
-/** Placeholder for file-path option values (`-ustat`, `-ids`, `-exclude_ids`) in tool option keys. */
+/** Placeholder for the values of TOOL_FILE_OPTIONS in tool option keys (one name; a list of one entry). */
 export const FILE_VALUE = '<file>';
+/**
+ * Placeholder for the value of a list option of TOOL_FILE_OPTIONS (`COMMA_LIST_FLAGS`: `-mask_data`, `-mask_id`,
+ * `-mask_desc`, `-gi_mask_name`) that lists several entries: makeblastdb writes one mask column per `-mask_data` file
+ * (several make several algorithms in one column index), so a set with one entry is not a set with several.
+ */
+export const FILES_VALUE = '<files>';
 /** Tool flags that name only input/output/log files and do not change the option set. */
 const TOOL_NOT_OPTIONS = new Set(['-in', '-archive', '-out', '-logfile']);
-/** Tool flags whose values name files in the run directory (the flag stays in the key, the file name does not). */
-const TOOL_FILE_OPTIONS = new Set(['-ustat', '-ids', '-exclude_ids']);
+/**
+ * Tool flags whose values are names: files in the run directory (`-ustat`, `-ids`, `-exclude_ids`, makeblastdb's
+ * `-mask_data` and `-taxid_map`), the names of files that makeblastdb writes (`-gi_mask_name`) or lists in its
+ * metadata file (`-metadata_output_prefix`), and texts that makeblastdb stores in the database as given (the database
+ * `-title`, the masking algorithms' `-mask_id` and `-mask_desc`). The flag stays in the key, the name does not.
+ */
+const TOOL_FILE_OPTIONS = new Set([
+  '-ustat',
+  '-ids',
+  '-exclude_ids',
+  '-mask_data',
+  '-taxid_map',
+  '-title',
+  '-gi_mask_name',
+  '-metadata_output_prefix',
+  '-mask_id',
+  '-mask_desc',
+]);
+/**
+ * Placeholder for makeblastdb's `-taxid` values other than 0 in tool option keys: makeblastdb stores such a taxonomy
+ * ID in every sequence as given, while 0 leaves the sequences to `-taxid_map` (writedb `taxid_set.rs`,
+ * `global_taxid != 0`), so the key keeps 0 and not the other values.
+ */
+export const TAXID_VALUE = '<taxid>';
 
 export interface OptionGrammar {
   /** Whether the flag takes a value (the engine's `describe`). */
@@ -132,7 +162,11 @@ export function toolOptionKey(words: readonly string[], grammar: ToolOptionGramm
     }
     if (TOOL_NOT_OPTIONS.has(flag)) continue;
     if (TOOL_FILE_OPTIONS.has(flag)) {
-      pairs.push([flag, FILE_VALUE]);
+      pairs.push([flag, COMMA_LIST_FLAGS.has(flag) && commaListLength(value) > 1 ? FILES_VALUE : FILE_VALUE]);
+      continue;
+    }
+    if (flag === '-taxid') {
+      pairs.push([flag, /^\+?0+$/.test(value) ? '0' : TAXID_VALUE]);
       continue;
     }
     const isBool = grammar.isBoolean?.(flag) === true;

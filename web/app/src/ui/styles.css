@@ -2692,6 +2692,20 @@ pre.range-text {
   margin-left: auto;
 }
 
+/* The files that a makeblastdb run made (line WW, WW4b2): a list above the run's report. A file's name is the user's
+   database name, as long as they made it. */
+.tool-made-files {
+  margin: 10px 0 16px;
+}
+
+.tool-made-files h3 {
+  margin: 0 0 6px;
+}
+
+.tool-made-files .source-name {
+  overflow-wrap: anywhere;
+}
+
 .tool-save-taxid {
   display: inline-flex;
   flex-wrap: wrap;

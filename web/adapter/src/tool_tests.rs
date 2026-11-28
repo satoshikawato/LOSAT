@@ -1060,6 +1060,10 @@ fn blast_formatter_matches_library_for_subject_and_db_archives() {
             vec!["-archive", &bn, "-outfmt", "12"],
         ),
         (
+            "subject outfmt 6 stdout",
+            vec!["-archive", &bn, "-outfmt", "6"],
+        ),
+        (
             "batch outfmt 8 stdout",
             vec!["-archive", &batch, "-outfmt", "8"],
         ),
@@ -1072,8 +1076,8 @@ fn blast_formatter_matches_library_for_subject_and_db_archives() {
         ("version", vec!["-version"]),
         ("rid refusal", vec!["-rid", "ABCDEFGH01R"]),
         (
-            "unsupported outfmt 6",
-            vec!["-archive", &bn, "-outfmt", "6"],
+            "unsupported outfmt 5",
+            vec!["-archive", &bn, "-outfmt", "5"],
         ),
         (
             "missing archive",

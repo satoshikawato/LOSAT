@@ -2869,11 +2869,18 @@ file would differ, and NCBI's programs still could not open the database).
   matches.
 - The out-of-range `double` to `Int4` conversion (`INT_MIN`) of BLASTN's `BLAST_Cutoffs`
   (`BlastKarlinEtoS_simple`, `blast_stat.c:4041-4064`), listed until 2026-11-28 among the defects
-  without an effect, does change the output. With an extreme `-searchsp` and `-evalue` (rows
-  `db.etos.bn.int4min.ss.e300`: `-searchsp 9223372036854775807 -evalue 1e-300`) the quotient
-  `K * searchsp / E` is past the range of a double, NCBI's x86-64 build converts it to `INT_MIN`,
-  the hit-saving cutoff stays 1 and so does the word cutoff, every seed is extended, and NCBI
-  BLAST+ 2.17.0 writes an alignment that the finite value of exception 8 would not find (one row
+  without an effect, does change the output. The quotient `K * searchsp / E` is past the range of
+  a double once `K * searchsp` passes about 1.8e11 with an `-evalue` of 1e-297 or less (E is
+  raised to `kSmallFloat`), or a larger search space with a larger `-evalue`. An ordinary genome
+  pair with only `-evalue 1e-300` reaches it (MG1655 x Sakai, `LOSAT/tests/fasta/`). NCBI's
+  x86-64 build converts it to `INT_MIN`, the hit-saving cutoff stays 1 and so does the word
+  cutoff, and every seed is extended. On that pair (one thread) NCBI BLAST+ 2.17.0 and LOSAT
+  write the same 476 rows with `-task blastn` (NCBI 196 s and 1.19 GiB, LOSAT 147 s and
+  1.39 GiB) and 455 rows with megablast. The finite value of exception 8 gives as many rows, 1
+  and 6 of them another alignment of the same score, in 10 s and 61 MiB with `-task blastn`;
+  NCBI's own output with `-evalue 1e-290`, a finite quotient, holds those rows byte for byte. On
+  a constructed input (rows `db.etos.bn.int4min.ss.e300`: `-searchsp 9223372036854775807
+  -evalue 1e-300`) NCBI writes an alignment that the finite value would not find (one row
   against none; with `-evalue 1e-200` the quotient is finite and NCBI writes none,
   `db.etos.bn.finite.ss.e200`). LOSAT reproduces it (`stats::cutoffs::CutoffConversion::BLASTN`),
   as decision D4 reproduces the conversions of `-threshold` and the X-drops. Whether it stays so

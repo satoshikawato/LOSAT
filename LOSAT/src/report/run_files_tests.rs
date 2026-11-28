@@ -992,8 +992,9 @@ fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
         ("/dev/zero", OutputName::Discard),
         ("/dev/urandom", OutputName::Discard),
         ("/dev/full", OutputName::Full),
-        ("/dev/stderr", OutputName::Special),
-        ("/dev/fd/2", OutputName::Special),
+        ("/dev/stderr", OutputName::StandardError),
+        ("/dev/fd/2", OutputName::StandardError),
+        ("/proc/self/fd/2", OutputName::StandardError),
         ("/dev/ptmx", OutputName::Special),
         ("/proc/self/comm", OutputName::Special),
         ("/dev/mqueue/q", OutputName::Special),
@@ -1630,4 +1631,182 @@ fn read_files_refuse_matching_writes_without_creating_folders() {
         .is_some());
     assert!(matches!(open_files.create("ids.txt"), Ok(Created::File(_))));
     assert!(open_files.refused_output(OsStr::new("ids.txt")).is_none());
+
+    // The check's refusal (`refused_output`) is the run's (`create`) for every name that `create`
+    // refuses: the standard error, a device or a file of procfs too (line NP WW4c, 2026-11-28).
+    for name in ["missing.fa", "/dev/stderr", "/dev/fd/2", "/proc/self/comm"] {
+        let Ok(Created::Refused(reason)) = open_files.create(name) else {
+            panic!("{name}: create refuses it");
+        };
+        assert_eq!(
+            open_files.refused_output(OsStr::new(name)),
+            Some(reason),
+            "{name}"
+        );
+    }
+    for name in [
+        "/dev/stdout",
+        "/dev/null",
+        "/dev/full",
+        "new.out",
+        "missing_sub/x.out",
+    ] {
+        assert!(
+            open_files.refused_output(OsStr::new(name)).is_none(),
+            "{name}"
+        );
+    }
+}
+
+/// A receiver whose run writes its working directory through the file system (makeblastdb of
+/// LOSAT Web, `FileReceiver::writes_working_directory`), taking its other files as they are
+/// written (`Streamed`).
+#[derive(Default)]
+struct WritesDirectory(Streamed);
+
+impl FileReceiver for WritesDirectory {
+    fn receive(&self, name: &[u8], _bytes: &[u8]) -> io::Result<()> {
+        panic!("a whole file: {}", String::from_utf8_lossy(name));
+    }
+
+    fn open(&self, name: &[u8]) -> Option<Box<dyn FileStream>> {
+        self.0.open(name)
+    }
+
+    fn writes_working_directory(&self) -> bool {
+        true
+    }
+}
+
+/// The `-logfile` of a run that writes its working directory (makeblastdb of LOSAT Web; line NP
+/// WW4b1 R2, finding 1, 2026-11-28) follows the device model of docs/web/abi_v2.md §4, as
+/// windowmasker's and blast_formatter's: the diagnostics' target and the log's own opening
+/// (`OpenFiles::log_output`, makeblastdb's `AsOutputFile`) read the name through one owner
+/// (`log_name`, `output_name`). The null device loses both; `/dev/stdout` and `/dev/stderr` are
+/// the run's standard streams; `/dev/full` fails the log's writes for want of space; a file
+/// outside the working directory (`/tmp/mk.log`) is a file of the run that the receiver takes as
+/// it is written, the two openings appending to one file; a name in a folder that the directory
+/// does not have and a folder leave the diagnostics on the standard error and do not open the
+/// log; a device that LOSAT Web does not write is refused, in the run and in a check of the
+/// words, before anything opens.
+#[test]
+fn a_run_that_writes_its_directory_opens_its_log_by_the_device_model() {
+    let receiver = WritesDirectory::default();
+    let events = receiver.0 .0.clone();
+    let run_files = RunFiles::Receiver(Arc::new(receiver));
+    let files = OpenFiles::new(&run_files);
+    let target = |name: &str| match files.log_target(Some(OsStr::new(name))) {
+        Ok(ToolLog::Target(target)) => Some(target),
+        Ok(ToolLog::Stdout) => None,
+        Err(reason) => panic!("{name}: {reason}"),
+    };
+    let output = |name: &str| files.log_output(OsStr::new(name));
+    // The null device and its spellings: nothing is written anywhere.
+    for name in ["/dev/null", "//dev/null", "/dev/zero"] {
+        assert!(
+            matches!(output(name), Ok(LogOutput::File(OpenedFile::Discard))),
+            "{name}"
+        );
+    }
+    assert!(matches!(target("/dev/zero"), Some(DiagTarget::Discard)));
+    // The standard streams.
+    assert!(target("/dev/stdout").is_none());
+    assert!(matches!(output("/dev/stdout"), Ok(LogOutput::Stdout)));
+    assert!(matches!(output("/dev/fd/1"), Ok(LogOutput::Stdout)));
+    assert!(matches!(
+        target("/dev/stderr"),
+        Some(DiagTarget::StderrFile)
+    ));
+    for name in ["/dev/stderr", "/dev/fd/2", "/proc/self/fd/2"] {
+        assert!(matches!(output(name), Ok(LogOutput::Stderr)), "{name}");
+    }
+    // `/dev/full`: the log opens, and its writes fail as the system's.
+    let Ok(LogOutput::File(mut full)) = output("/dev/full") else {
+        panic!("/dev/full opens");
+    };
+    assert!(full.write_all(b"line\n").is_err());
+    // A file outside the working directory: one file of the run, the diagnostics' opening and
+    // the log's appending to it in the order they write.
+    let outside = "/tmp/ww4b1-r2-model-mk.log";
+    let diagnostics = target(outside).expect("a file");
+    assert!(matches!(diagnostics, DiagTarget::Stream(_)));
+    let Ok(LogOutput::File(mut log)) = output(outside) else {
+        panic!("{outside} opens");
+    };
+    diagnostics.write_text(b"diagnostic\n", &mut io::sink());
+    log.write_all(b"log\n").unwrap();
+    drop((diagnostics, log));
+    assert!(!std::path::Path::new(outside).exists(), "not on the disk");
+    // Names that do not open: the diagnostics stay on the standard error and the log does not
+    // open (`src` is a folder of the crate's directory, the tests' working directory).
+    for name in ["ww4b1-r2-nodir/mk.log", "src", "src/"] {
+        assert!(matches!(target(name), Some(DiagTarget::Stderr)), "{name}");
+        assert_eq!(output(name).err(), Some(Unopened), "{name}");
+    }
+    assert!(!std::path::Path::new("ww4b1-r2-nodir").exists());
+    // A device that LOSAT Web does not write: refused by the run and by the check alike.
+    for name in ["/dev/ptmx", "/proc/self/comm"] {
+        assert!(matches!(output(name), Ok(LogOutput::Refused(_))), "{name}");
+        assert!(
+            run_files.refused_log_output(OsStr::new(name)).is_some(),
+            "{name}"
+        );
+    }
+    for name in [
+        "/dev/null",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/full",
+        outside,
+        "src",
+    ] {
+        assert_eq!(
+            run_files.refused_log_output(OsStr::new(name)),
+            None,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        RunFiles::Disk.refused_log_output(OsStr::new("/dev/ptmx")),
+        None
+    );
+    drop(files);
+    assert_eq!(
+        *events.lock().unwrap(),
+        [
+            "/tmp/ww4b1-r2-model-mk.log opened",
+            "/tmp/ww4b1-r2-model-mk.log @0 diagnostic\n",
+            "/tmp/ww4b1-r2-model-mk.log @11 log\n",
+            "/tmp/ww4b1-r2-model-mk.log end",
+        ]
+    );
+}
+
+/// A check of the words of a run that writes its working directory (`RunFiles::log_target`, the
+/// `losat_web2_validate` of makeblastdb; line NP WW4b1 R2, finding 2, 2026-11-28) chooses the
+/// diagnostics' target as the run does (`OpenFiles::log_target`), from the same reading of the
+/// name, and makes nothing: a file of the directory that the run opens is in memory (not made), a
+/// name in a missing folder and a folder leave the messages on the standard error, as the run's
+/// opening does.
+#[test]
+fn a_check_of_a_run_that_writes_its_directory_chooses_the_run_s_target() {
+    let run_files = RunFiles::Receiver(Arc::new(WritesDirectory::default()));
+    let checked = |name: &str| run_files.log_target(Some(OsStr::new(name))).unwrap().0;
+    assert!(matches!(
+        checked("ww4b1-r2-check.log"),
+        DiagTarget::Memory(_)
+    ));
+    assert!(
+        !std::path::Path::new("ww4b1-r2-check.log").exists(),
+        "not made"
+    );
+    for name in ["ww4b1-r2-nodir/mk.log", "src", "src/"] {
+        assert!(matches!(checked(name), DiagTarget::Stderr), "{name}");
+    }
+    assert!(matches!(checked("/dev/stderr"), DiagTarget::StderrFile));
+    assert!(matches!(checked("/dev/null"), DiagTarget::Discard));
+    assert!(matches!(
+        checked("/tmp/ww4b1-r2-check.log"),
+        DiagTarget::Memory(_)
+    ));
 }

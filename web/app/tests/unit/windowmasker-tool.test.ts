@@ -412,6 +412,39 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     expect(missing.ok).toBe(false);
     expect(missing.ok ? '' : missing.message).toContain('9999');
   });
+
+  it("hands counts that a run made outside its directory (-out ../c.counts) to -ustat and -convert under their name alone (WW4e)", async () => {
+    const { coordinator, data } = makeCoordinator(new FakeEngine());
+    const submitted: ToolRequest[][] = [];
+    const draft = new ToolDraft({
+      engine: new FakeEngine(),
+      data,
+      enqueueToolAll: async (requests) => {
+        submitted.push([...requests]);
+        return coordinator.enqueueToolAll(requests);
+      },
+      debounceMs: 0,
+    });
+    draft.ensureLoaded();
+    await sleep(20);
+    draft.setFastaPaste('>q\nACGTACGT\n');
+    draft.setOutName('sub/../../c.counts');
+    expect((await draft.submit()).ok).toBe(true);
+    for (let i = 0; i < 200 && coordinator.state.get().runs.find(isToolRun)?.status !== 'completed'; i++) await sleep(5);
+    // The FakeEngine names the file by the -out typed; the engine names it `../c.counts` (its path from the run's directory).
+    const counts = coordinator.sessionMadeCounts()[0]!;
+    expect(counts.name).toBe('sub/../../c.counts');
+    draft.useCountsForMask(counts.runId, counts.runNumber, counts.key, '../c.counts', counts.size);
+    draft.setFastaPaste('>q\nACGTACGT\n');
+    expect((await draft.submit()).ok).toBe(true);
+    const mask = submitted[1]![0]!;
+    expect(mask.argv).toEqual(['windowmasker', '-ustat', 'c.counts', '-in', 'input.fa']);
+    expect(mask.directory.map((entry) => entry.name)).toEqual(['input.fa', 'c.counts']);
+    draft.setStage('convert');
+    draft.setConvertSession(counts.runId, counts.runNumber, counts.key, '/tmp/c.counts', counts.size);
+    expect((await draft.submit()).ok).toBe(true);
+    expect(submitted[2]![0]!.argv).toEqual(['windowmasker', '-convert', '-in', 'c.counts', '-out', 'wmasker.ascii']);
+  });
 });
 
 describe('Coordinator single queue and DataService tool storage', () => {

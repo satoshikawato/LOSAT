@@ -7,7 +7,9 @@
 //! `CBufferedLineReader`, `line_reader`), with the title that
 //! `CWriteDB::ExtractBioseqDeflines` gives its Blast-def-line (`title`) and the sequence
 //! data that `s_FixBioseqDeltas` leaves (`fix_bioseq_deltas`; the reader packs nucleotide
-//! residues with `CSeqConvert::Pack`, `pack`).
+//! residues with `CSeqConvert::Pack`, `pack`). The nucleotide reader keeps the residues as
+//! NCBI4na codes (`reader::Ncbi4naResidues`), from which the packing and the delta's data are
+//! made; NCBI's keeps their letters and converts them.
 //!
 //! What `AddSequences` does with the sequence afterwards is the caller's: it skips a
 //! sequence of the other molecule, stops at a length above 2,147,483,647, and ignores a
@@ -27,7 +29,11 @@ pub(crate) use title::fasta_reader_fasta;
 use std::io::Read;
 
 use super::bioseq::{Bioseq, DeltaFix, ParsedIds, SeqData};
-use reader::{DeltaSeq, FastaReader, ReadError, ReaderFlags, ReaderWarning, SeqInst};
+use pack::Ncbi4naBuilder;
+use reader::{
+    DeltaSeq, FastaReader, Ncbi4naResidues, ReadError, ReaderFlags, ReaderWarning, ResidueStore,
+    SeqInst,
+};
 
 /// An error that ends the reading: its message and how makeblastdb reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,8 +81,24 @@ pub type Warn<'a> = &'a mut dyn FnMut(&[u8]);
 pub struct FastaBioseqSource<R: Read> {
     /// `m_FastaReader` with its `m_LineReader`; `None` once `GetNext` has reset the line
     /// reader (the end of the input) or thrown.
-    reader: Option<FastaReader<R>>,
+    reader: Option<SourceReader<R>>,
 }
+
+/// The reader of a source, with the store of residues that its sequences' data is made from.
+enum SourceReader<R: Read> {
+    /// Nucleotide input: NCBI4na codes (`reader::Ncbi4naResidues`).
+    Nucleotide(FastaReader<R, Ncbi4naResidues>),
+    /// Protein input: NCBIeaa letters, which are the sequence data.
+    Protein(FastaReader<R>),
+    /// Nucleotide input read into letters and fixed from them
+    /// (`tests::fix_bioseq_deltas_of_letters`): the tests' reference for `Nucleotide`.
+    #[cfg(test)]
+    NucleotideLetters(FastaReader<R>),
+}
+
+/// The length (`Seq-inst.length`), the sequence data and what the fix made of a delta
+/// (`fix_bioseq_deltas`).
+type Fixed = (u64, Option<SeqData>, Option<DeltaFix>);
 
 impl<R: Read> FastaBioseqSource<R> {
     /// `CFastaBioseqSource` of the file, `is_protein` and `parse_ids`, with `long_ids` false: with
@@ -86,11 +108,28 @@ impl<R: Read> FastaBioseqSource<R> {
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:701-734
     /// The flags are cited at `reader::ReaderFlags::fasta_bioseq_source`.
     pub fn with_parse_ids(input: R, is_protein: bool, parse_ids: bool) -> Self {
-        Self {
-            reader: Some(FastaReader::new(
+        let reader = if is_protein {
+            SourceReader::Protein(FastaReader::new(
                 input,
-                ReaderFlags::fasta_bioseq_source(is_protein, parse_ids),
-            )),
+                ReaderFlags::fasta_bioseq_source(true, parse_ids),
+            ))
+        } else {
+            SourceReader::Nucleotide(FastaReader::nucleotide_db(input, parse_ids))
+        };
+        Self {
+            reader: Some(reader),
+        }
+    }
+
+    /// The nucleotide source of `with_parse_ids` whose reader keeps the residues as letters,
+    /// with the fix from letters (`tests::fix_bioseq_deltas_of_letters`): the tests' reference.
+    #[cfg(test)]
+    pub(crate) fn nucleotide_letters(input: R, parse_ids: bool) -> Self {
+        Self {
+            reader: Some(SourceReader::NucleotideLetters(FastaReader::new(
+                input,
+                ReaderFlags::fasta_bioseq_source(false, parse_ids),
+            ))),
         }
     }
 
@@ -98,9 +137,17 @@ impl<R: Read> FastaBioseqSource<R> {
     /// (`FastaReader::with_seq_pos_modulus`).
     #[cfg(test)]
     pub(crate) fn with_seq_pos_modulus(mut self, modulus: u64) -> Self {
-        self.reader = self
-            .reader
-            .map(|reader| reader.with_seq_pos_modulus(modulus));
+        self.reader = self.reader.map(|reader| match reader {
+            SourceReader::Nucleotide(reader) => {
+                SourceReader::Nucleotide(reader.with_seq_pos_modulus(modulus))
+            }
+            SourceReader::Protein(reader) => {
+                SourceReader::Protein(reader.with_seq_pos_modulus(modulus))
+            }
+            SourceReader::NucleotideLetters(reader) => {
+                SourceReader::NucleotideLetters(reader.with_seq_pos_modulus(modulus))
+            }
+        });
         self
     }
 
@@ -124,116 +171,119 @@ impl<R: Read> FastaBioseqSource<R> {
     /// message (LOSAT's text: NCBI's line reader throws a `CIOException` "Read error").
     /// After an error the source returns `None`.
     pub fn next_bioseq(&mut self, warn: Warn<'_>) -> Result<Option<Bioseq>, SourceError> {
-        let Some(reader) = &mut self.reader else {
-            return Ok(None);
+        let next = match &mut self.reader {
+            None => return Ok(None),
+            Some(SourceReader::Nucleotide(reader)) => next_of(reader, warn, fix_bioseq_deltas),
+            Some(SourceReader::Protein(reader)) => {
+                next_of(reader, warn, |inst| Ok(fix_protein(inst)))
+            }
+            #[cfg(test)]
+            Some(SourceReader::NucleotideLetters(reader)) => {
+                next_of(reader, warn, tests::fix_bioseq_deltas_of_letters)
+            }
         };
-        if reader.at_eof() {
-            let read_error = reader.take_read_error();
+        // The reader ends with the input and at an error.
+        if !matches!(next, Ok(Some(_))) {
             self.reader = None;
-            return match read_error {
-                Some(error) => Err(read_error_message(&error)),
-                None => Ok(None),
-            };
         }
-        // makeblastdb writes a warning of the reader as its line, and a warning of the
-        // Seq-id parser with its prefix.
-        let record = reader.read_one_seq(&mut |warning| match warning {
-            ReaderWarning::Line(line) => warn(line),
-            ReaderWarning::SeqId(warning) => post_seq_id_warning(warning, &mut *warn),
-        });
-        if let Some(error) = reader.take_read_error() {
-            self.reader = None;
-            return Err(read_error_message(&error));
-        }
-        let record = match record {
-            Ok(record) => record,
-            Err(ReadError::OutOfMemory) => {
-                self.reader = None;
-                return Err(SourceError::out_of_memory());
-            }
-            Err(ReadError::OutOfRange { pos, size }) => {
-                self.reader = None;
-                return Err(SourceError {
-                    message: reader::out_of_range_what(pos, size).into_bytes(),
-                    kind: SourceErrorKind::Std,
-                });
-            }
-            Err(ReadError::PackOverflow) => {
-                self.reader = None;
-                return Err(SourceError {
-                    message: format!(
-                        "{} is not supported by LOSAT's makeblastdb",
-                        reader::pack_overflow_what()
-                    )
-                    .into_bytes(),
-                    kind: SourceErrorKind::Refused,
-                });
-            }
-            Err(ReadError::Ncbi(exception)) => {
-                // Only convert2blastmask's reader throws other exceptions.
-                self.reader = None;
-                return Err(SourceError {
-                    message: exception.get_msg().to_vec(),
-                    kind: SourceErrorKind::Creation,
-                });
-            }
-            Err(ReadError::Parse(error)) => {
-                self.reader = None;
-                let message = error.message;
-                let message = message
-                    .strip_prefix("CFastaReader: ")
-                    .map(str::to_string)
-                    .unwrap_or(message);
-                return Err(SourceError {
-                    message: message.into_bytes(),
-                    kind: SourceErrorKind::Creation,
-                });
-            }
-        };
-        let is_aa = record.is_aa;
-        // With `-parse_seqids` the definition lines depend on the ids that
-        // `AddSequences` edits first: the writer builds them (`writedb::deflines`).
-        let (title, parsed) = if reader.parses_ids() {
-            let parsed = ParsedIds {
-                ids: record.ids,
-                hist_old_id: record.hist_old_id,
-                defline_field: record.defline_field,
-                title_descr: record.title_descr,
-            };
-            (Vec::new(), Some(parsed))
-        } else {
-            match extract_title(&record.defline_field, record.title_descr) {
-                Ok(title) => (title, None),
-                Err(message) => {
-                    self.reader = None;
-                    return Err(SourceError {
-                        message: message.to_string().into_bytes(),
-                        kind: SourceErrorKind::Creation,
-                    });
-                }
-            }
-        };
-        // `s_FixBioseqDeltas` throws for a protein delta (gaps that wrapped to 0 past 2^32).
-        let (length, seq_data, delta_fix) = match record.inst {
-            SeqInst::Delta { length, .. } if is_aa => (length, None, Some(DeltaFix::ProteinDelta)),
-            inst => {
-                let Ok(fixed) = fix_bioseq_deltas(inst) else {
-                    self.reader = None;
-                    return Err(SourceError::out_of_memory());
-                };
-                fixed
-            }
-        };
-        Ok(Some(Bioseq {
-            local_id: record.local_id.to_string(),
-            title,
-            is_aa,
-            length,
-            seq_data,
-            parsed,
-            delta_fix,
-        }))
+        next
     }
+}
+
+/// `next_bioseq` of `reader`, whose deltas `fix` fixes (`s_FixBioseqDeltas`): the next sequence,
+/// `None` at the end of the input, or the error that ends the reading.
+fn next_of<R: Read, S: ResidueStore>(
+    reader: &mut FastaReader<R, S>,
+    warn: Warn<'_>,
+    fix: impl FnOnce(SeqInst<S::Delta>) -> Result<Fixed, std::collections::TryReserveError>,
+) -> Result<Option<Bioseq>, SourceError> {
+    if reader.at_eof() {
+        return match reader.take_read_error() {
+            Some(error) => Err(read_error_message(&error)),
+            None => Ok(None),
+        };
+    }
+    // makeblastdb writes a warning of the reader as its line, and a warning of the
+    // Seq-id parser with its prefix.
+    let record = reader.read_one_seq(&mut |warning| match warning {
+        ReaderWarning::Line(line) => warn(line),
+        ReaderWarning::SeqId(warning) => post_seq_id_warning(warning, &mut *warn),
+    });
+    if let Some(error) = reader.take_read_error() {
+        return Err(read_error_message(&error));
+    }
+    let record = match record {
+        Ok(record) => record,
+        Err(ReadError::OutOfMemory) => return Err(SourceError::out_of_memory()),
+        Err(ReadError::OutOfRange { pos, size }) => {
+            return Err(SourceError {
+                message: reader::out_of_range_what(pos, size).into_bytes(),
+                kind: SourceErrorKind::Std,
+            });
+        }
+        Err(ReadError::PackOverflow) => {
+            return Err(SourceError {
+                message: format!(
+                    "{} is not supported by LOSAT's makeblastdb",
+                    reader::pack_overflow_what()
+                )
+                .into_bytes(),
+                kind: SourceErrorKind::Refused,
+            });
+        }
+        Err(ReadError::Ncbi(exception)) => {
+            // Only convert2blastmask's reader throws other exceptions.
+            return Err(SourceError {
+                message: exception.get_msg().to_vec(),
+                kind: SourceErrorKind::Creation,
+            });
+        }
+        Err(ReadError::Parse(error)) => {
+            let message = error.message;
+            let message = message
+                .strip_prefix("CFastaReader: ")
+                .map(str::to_string)
+                .unwrap_or(message);
+            return Err(SourceError {
+                message: message.into_bytes(),
+                kind: SourceErrorKind::Creation,
+            });
+        }
+    };
+    let is_aa = record.is_aa;
+    // With `-parse_seqids` the definition lines depend on the ids that
+    // `AddSequences` edits first: the writer builds them (`writedb::deflines`).
+    let (title, parsed) = if reader.parses_ids() {
+        let parsed = ParsedIds {
+            ids: record.ids,
+            hist_old_id: record.hist_old_id,
+            defline_field: record.defline_field,
+            title_descr: record.title_descr,
+        };
+        (Vec::new(), Some(parsed))
+    } else {
+        match extract_title(&record.defline_field, record.title_descr) {
+            Ok(title) => (title, None),
+            Err(message) => {
+                return Err(SourceError {
+                    message: message.to_string().into_bytes(),
+                    kind: SourceErrorKind::Creation,
+                });
+            }
+        }
+    };
+    let Ok((length, seq_data, delta_fix)) = fix(record.inst) else {
+        return Err(SourceError::out_of_memory());
+    };
+    Ok(Some(Bioseq {
+        local_id: record.local_id.to_string(),
+        title,
+        is_aa,
+        length,
+        seq_data,
+        parsed,
+        delta_fix,
+    }))
 }
 
 fn read_error_message(error: &std::io::Error) -> SourceError {
@@ -266,25 +316,45 @@ fn extract_title(
     })
 }
 
-/// `s_FixBioseqDeltas`: the length (`Seq-inst.length`), the sequence data and what the fix made
-/// of a delta of a record.
+/// `s_FixBioseqDeltas` of a protein: a sequence with `seq-data` (raw) or without a delta
+/// (virtual) is returned as it is, and a delta (gaps that wrapped to 0 past 2^32) is the
+/// caller's (`DeltaFix::ProteinDelta`: NCBI throws for it).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:290-295,306-311
+fn fix_protein(inst: SeqInst) -> Fixed {
+    match inst {
+        SeqInst::Virtual => (0, None, None),
+        SeqInst::TooLong { length } => (length, None, None),
+        SeqInst::Raw { length, seq_data } => (length, Some(seq_data), None),
+        SeqInst::Delta { length, .. } => (length, None, Some(DeltaFix::ProteinDelta)),
+    }
+}
+
+/// `s_FixBioseqDeltas` of a nucleotide sequence: the length (`Seq-inst.length`), the sequence
+/// data and what the fix made of a delta of a record, whose residues are NCBI4na codes
+/// (`reader::Ncbi4naResidues`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:290-295,306-311,318-334,343-382,395-398
 /// A sequence with `seq-data` (raw) or without a delta (virtual) is returned as it is.
-/// The delta of a protein is the caller's (`DeltaFix::ProteinDelta`), and a literal without a
-/// length or a `Seq-loc` other than null does not occur. A delta whose first piece is not a
-/// literal (a gap of unknown length) is returned as it is, without `seq-data`. The NCBI8na
-/// codes of a literal are those of its letters, and the NCBI4na bytes are made as they come
-/// (`pack::Ncbi4naBuilder`), without NCBI's `seq8na`.
+/// A literal without a length or a `Seq-loc` other than null does not occur. A delta whose
+/// first piece is not a literal (a gap of unknown length) is returned as it is, without
+/// `seq-data`. The NCBI8na code of a literal's residue is the NCBI4na code of its letter
+/// (`C2naTo8na` of an NCBI2na literal's base, `C4naTo8na` of an NCBI4na one; cited at
+/// `pack::Ncbi4naBuilder`), which is what the reader stored.
 ///
-/// NCBI appends every piece to `seq8na`, a gap as that many NCBI8na 15 and a gap of unknown
-/// length as one, and takes its size, an `int` (`length`), as the `TSeqPos` of the letters it
-/// converts and of `Seq-inst.length`: the sum of the pieces modulo 2^32 (an `int` that is
-/// negative there is the same `TSeqPos`). Past 2^32 letters (gaps that wrapped NCBI's
-/// `TSeqPos`) that is fewer than the pieces hold, and it can differ from `Seq-inst.length`
-/// (one letter for each gap of unknown length, and the pieces of a record whose wrapped gap
-/// positions repeat or skip residues). Only those letters are made here (NCBI makes all of the
-/// pieces' letters first).
+/// A delta of literals only (no gap: `pack`'s segments of the residues, in order) is the
+/// residues: its data are the stored codes, taken as they are. NCBI appends each literal to
+/// `seq8na` and converts it, the same bytes.
+///
+/// A delta with gap pieces: NCBI appends every piece to `seq8na`, a gap as that many NCBI8na 15
+/// and a gap of unknown length as one, and takes its size, an `int` (`length`), as the
+/// `TSeqPos` of the letters it converts and of `Seq-inst.length`: the sum of the pieces modulo
+/// 2^32 (an `int` that is negative there is the same `TSeqPos`). Past 2^32 letters (gaps that
+/// wrapped NCBI's `TSeqPos`) that is fewer than the pieces hold, and it can differ from
+/// `Seq-inst.length` (one letter for each gap of unknown length, and the pieces of a record
+/// whose wrapped gap positions repeat or skip residues). Only those letters are made here
+/// (NCBI makes all of the pieces' letters first), each literal's copied from the stored codes
+/// (`Ncbi4naBuilder::push_ncbi4na`).
 ///
 /// The length of a delta is the one its gap lines state, up to 2,147,483,647 residues
 /// for a few bytes of input, and NCBI reserves `seq8na` for it at once, then its NCBI4na
@@ -294,8 +364,8 @@ fn extract_title(
 /// would lose that outcome. The space is reserved for all letters, so that no later growth
 /// of the vector can fail.
 fn fix_bioseq_deltas(
-    inst: SeqInst,
-) -> Result<(u64, Option<SeqData>, Option<DeltaFix>), std::collections::TryReserveError> {
+    inst: SeqInst<Ncbi4naBuilder>,
+) -> Result<Fixed, std::collections::TryReserveError> {
     Ok(match inst {
         SeqInst::Virtual => (0, None, None),
         SeqInst::TooLong { length } => (length, None, None),
@@ -308,6 +378,15 @@ fn fix_bioseq_deltas(
             if pieces.first() == Some(&DeltaSeq::LocNull) {
                 return Ok((length, None, None));
             }
+            if pieces
+                .iter()
+                .all(|piece| matches!(piece, DeltaSeq::Literal(_)))
+            {
+                // Without gaps the record's length is its residues' count (below 2^32), and
+                // its literals are the residues in order.
+                debug_assert_eq!(residues.letters() as u64, length);
+                return Ok((length, Some(SeqData::Ncbi4na(residues.into_bytes())), None));
+            }
             let size = pieces.iter().fold(0u64, |size, piece| {
                 size + match piece {
                     DeltaSeq::LocNull => 1,
@@ -317,7 +396,7 @@ fn fix_bioseq_deltas(
             });
             // Below 2^32, so a `usize` on every target.
             let letters = (size % (1 << 32)) as usize;
-            let mut seq4na = pack::Ncbi4naBuilder::with_letters(letters)?;
+            let mut seq4na = Ncbi4naBuilder::with_letters(letters)?;
             // The letters still to push (`letters` less those pushed), counted down by each piece.
             let mut room = letters;
             for piece in pieces {
@@ -335,13 +414,9 @@ fn fix_bioseq_deltas(
                         run
                     }
                     DeltaSeq::Literal(segment) => {
-                        let start = segment.start as usize;
                         let run = (segment.length as usize).min(room);
                         // NCBI converts each literal from its coding (`C2naTo8na`, `C4naTo8na`).
-                        seq4na.push_literal(
-                            &residues[start..start + run],
-                            segment.coding == pack::Coding::Ncbi2na,
-                        );
+                        seq4na.push_ncbi4na(residues.bytes(), segment.start as usize, run);
                         run
                     }
                 };

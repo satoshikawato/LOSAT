@@ -731,11 +731,11 @@ fn record_past_32_bits() {
     );
 }
 
-/// The NCBI4na bytes of a delta whose literals are of both codings (`pack_iupacna`: NCBI2na for a
-/// run of `A`, `C`, `G`, `T`, `U` long enough to be a segment of its own, its blocks by
-/// comparisons; NCBI4na for runs with other letters, by the table; `Ncbi4naBuilder::push_literal`)
-/// and whose gaps put the literals at even and odd places: those of the table for the letters,
-/// each gap as `N`.
+/// The NCBI4na bytes of a delta whose literals are of both codings (`pack_ncbi4na`: NCBI2na for a
+/// run of `A`, `C`, `G`, `T`, `U` long enough to be a segment of its own, NCBI4na for runs with
+/// other letters) and whose gaps put the literals at even and odd places (copied from the
+/// reader's codes with and without a shift, `Ncbi4naBuilder::push_ncbi4na`): those of the table
+/// for the letters, each gap as `N`.
 #[test]
 fn delta_literals_of_both_codings_are_the_table() {
     let mut state = 0x2545_f491_4f6c_dd1d_u64;
@@ -933,7 +933,11 @@ fn read_error_ends_the_reading() {
 fn a_delta_that_cannot_be_allocated_is_an_error() {
     let delta = |gap: u64| SeqInst::Delta {
         length: 1 + gap,
-        residues: b"A".to_vec(),
+        residues: {
+            let mut codes = Ncbi4naBuilder::default();
+            codes.push_letters(b"A");
+            codes
+        },
         pieces: vec![
             DeltaSeq::Literal(pack::Segment {
                 coding: pack::Coding::Ncbi4na,
@@ -1138,4 +1142,302 @@ fn fasta_files_match_their_makeblastdb_databases() {
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+/// `s_FixBioseqDeltas` of a nucleotide sequence read into letters (the IUPACna residues of
+/// `SeqInst::Delta`): each literal's letters converted through the table one at a time
+/// (`Ncbi4naBuilder::push_letters_by_table`), each gap as `N`, the letters modulo 2^32. The
+/// reference that `fix_bioseq_deltas` over the reader's NCBI4na codes is compared with
+/// (`FastaBioseqSource::nucleotide_letters`); the form makeblastdb had before its reader
+/// stored codes.
+pub(super) fn fix_bioseq_deltas_of_letters(
+    inst: SeqInst,
+) -> Result<Fixed, std::collections::TryReserveError> {
+    Ok(match inst {
+        SeqInst::Virtual => (0, None, None),
+        SeqInst::TooLong { length } => (length, None, None),
+        SeqInst::Raw { length, seq_data } => (length, Some(seq_data), None),
+        SeqInst::Delta {
+            length,
+            residues,
+            pieces,
+        } => {
+            if pieces.first() == Some(&DeltaSeq::LocNull) {
+                return Ok((length, None, None));
+            }
+            let size = pieces.iter().fold(0u64, |size, piece| {
+                size + match piece {
+                    DeltaSeq::LocNull => 1,
+                    DeltaSeq::Gap { length } => *length,
+                    DeltaSeq::Literal(segment) => u64::from(segment.length),
+                }
+            });
+            let letters = (size % (1 << 32)) as usize;
+            let mut seq4na = Ncbi4naBuilder::with_letters(letters)?;
+            let mut room = letters;
+            for piece in pieces {
+                if room == 0 {
+                    break;
+                }
+                room -= match piece {
+                    DeltaSeq::LocNull => {
+                        seq4na.push_run(0x0f, 1);
+                        1
+                    }
+                    DeltaSeq::Gap { length } => {
+                        let run = (length as usize).min(room);
+                        seq4na.push_run(0x0f, run);
+                        run
+                    }
+                    DeltaSeq::Literal(segment) => {
+                        let start = segment.start as usize;
+                        let run = (segment.length as usize).min(room);
+                        seq4na.push_letters_by_table(&residues[start..start + run]);
+                        run
+                    }
+                };
+            }
+            assert_eq!(seq4na.letters(), letters - room);
+            let fix = (letters as u64 != length).then_some(DeltaFix::Length(letters as u64));
+            (length, Some(SeqData::Ncbi4na(seq4na.into_bytes())), fix)
+        }
+    })
+}
+
+/// Every call of `next_bioseq` on `source` to the end of the input: the warnings it posted and
+/// what it returned.
+type Calls = Vec<(Vec<Vec<u8>>, Result<Option<Bioseq>, SourceError>)>;
+
+fn calls<R: Read>(mut source: FastaBioseqSource<R>) -> Calls {
+    let mut calls = Vec::new();
+    loop {
+        let mut warnings = Vec::new();
+        let next = source.next_bioseq(&mut |line: &[u8]| warnings.push(line.to_vec()));
+        let end = !matches!(next, Ok(Some(_)));
+        calls.push((warnings, next));
+        if end {
+            return calls;
+        }
+    }
+}
+
+/// The positions counted modulo 2^32 (`None`) and modulo 16, 64, 256 and 4,096
+/// (`with_seq_pos_modulus`).
+const MODULI: [Option<u64>; 5] = [None, Some(16), Some(64), Some(256), Some(4096)];
+
+/// The nucleotide source (residues as NCBI4na codes) against the same reader keeping the
+/// letters with the fix from letters (`fix_bioseq_deltas_of_letters`) on `input`, with and
+/// without `-parse_seqids` and with the positions counted modulo each of `moduli`: every
+/// sequence, warning and error equal.
+fn assert_same_as_letters(input: &[u8], moduli: &[Option<u64>]) {
+    for parse_ids in [false, true] {
+        for &modulus in moduli {
+            let (codes, letters) = (
+                FastaBioseqSource::with_parse_ids(input, false, parse_ids),
+                FastaBioseqSource::nucleotide_letters(input, parse_ids),
+            );
+            let (codes, letters) = match modulus {
+                Some(modulus) => (
+                    codes.with_seq_pos_modulus(modulus),
+                    letters.with_seq_pos_modulus(modulus),
+                ),
+                None => (codes, letters),
+            };
+            let (codes, letters) = (calls(codes), calls(letters));
+            if codes != letters {
+                let first = codes
+                    .iter()
+                    .zip(&letters)
+                    .position(|(c, l)| c != l)
+                    .unwrap_or(codes.len().min(letters.len()));
+                panic!(
+                    "parse_ids {parse_ids} modulus {modulus:?}, call {first}:\ncodes   {:?}\nletters {:?}\ninput {:?}",
+                    codes.get(first),
+                    letters.get(first),
+                    String::from_utf8_lossy(&input[..input.len().min(2000)])
+                );
+            }
+        }
+    }
+}
+
+/// A random FASTA input for `assert_same_as_letters`: records of runs of residues (only `A`,
+/// `C`, `G`, `T`; with `U` and `N`; every IUPAC letter; in either case or mixed; runs of `N` up
+/// to 5,000), hyphens (at a line's start, middle and end, in runs, at the record's end), `>?`
+/// lines (sizes, `unk`, 0, modifiers, `>?_`), comment lines, spaces, tabs and digits in lines,
+/// now and then a byte of any value, empty records and records of gaps only; written in lines
+/// of a width around the blocks' sizes (1, 2, 3, 10, 59-65, 4,095-4,097, or a record on one
+/// line), with `\n` or `\r\n`.
+fn random_fasta(next: &mut impl FnMut(u64) -> u64, records: usize) -> Vec<u8> {
+    const WIDTHS: [usize; 15] = [1, 2, 3, 10, 59, 60, 61, 63, 64, 65, 4095, 4096, 4097, 0, 60];
+    const IUPAC: &[u8] = b"ACGTUMRWSYKVHDBNacgtumrwsykvhdbn";
+    let mut out = Vec::new();
+    for record in 0..records {
+        let eol: &[u8] = if next(4) == 0 { b"\r\n" } else { b"\n" };
+        out.extend_from_slice(format!(">r{record} title {}", next(1000)).as_bytes());
+        out.extend_from_slice(eol);
+        let width = WIDTHS[next(WIDTHS.len() as u64) as usize];
+        // The record's data as lines: runs of letters and hyphens are cut at `width` (0: one
+        // line), other lines stand alone.
+        let mut data: Vec<u8> = Vec::new();
+        let flush = |data: &mut Vec<u8>, out: &mut Vec<u8>| {
+            let width = if width == 0 { data.len().max(1) } else { width };
+            for line in data.chunks(width) {
+                out.extend_from_slice(line);
+                out.extend_from_slice(eol);
+            }
+            data.clear();
+        };
+        let parts = next(12);
+        for _ in 0..parts {
+            match next(16) {
+                0..=6 => {
+                    let length = match next(4) {
+                        0 => 1 + next(5) as usize,
+                        1 => 1 + next(130) as usize,
+                        2 => 1 + next(9000) as usize,
+                        _ => [63, 64, 65, 4095, 4096, 4097][next(6) as usize],
+                    };
+                    let alphabet: &[u8] = match next(5) {
+                        0 => b"ACGT",
+                        1 => b"acgtACGTuUnN",
+                        2 => IUPAC,
+                        3 => b"N",
+                        _ => b"acgt",
+                    };
+                    data.extend(
+                        (0..length).map(|_| alphabet[next(alphabet.len() as u64) as usize]),
+                    );
+                }
+                7 => {
+                    let hyphens = 1 + next(3) as usize;
+                    data.extend(std::iter::repeat_n(b'-', hyphens));
+                }
+                8 => {
+                    // A hyphen alone at the start or the end of a line.
+                    flush(&mut data, &mut out);
+                    out.extend_from_slice(if next(2) == 0 { b"-ACG" } else { b"ACG-" });
+                    out.extend_from_slice(eol);
+                }
+                9 => {
+                    flush(&mut data, &mut out);
+                    let line: &[u8] = match next(8) {
+                        0 => b">?unk 7",
+                        1 => b">?0",
+                        2 => b">?5 [gap-type=short-arm]",
+                        3 => b">?_12",
+                        4 => b">? 1",
+                        _ => b">?",
+                    };
+                    out.extend_from_slice(line);
+                    if line == b">?" {
+                        out.extend_from_slice(format!("{}", 1 + next(300)).as_bytes());
+                    }
+                    out.extend_from_slice(eol);
+                }
+                10 => {
+                    flush(&mut data, &mut out);
+                    out.extend_from_slice(b"; a comment");
+                    out.extend_from_slice(eol);
+                }
+                11 => {
+                    // Spaces, tabs and digits between residues, and a comment after them.
+                    flush(&mut data, &mut out);
+                    out.extend_from_slice(b"AC GT\tNN 12 acgu ;x");
+                    out.extend_from_slice(eol);
+                }
+                12 => {
+                    // A byte of any value among residues (after the record's first line, so
+                    // that the check of that line passes).
+                    flush(&mut data, &mut out);
+                    out.extend_from_slice(b"ACGTACGTACGTACGTACGTAC");
+                    out.push(next(256) as u8);
+                    out.extend_from_slice(b"GT");
+                    out.extend_from_slice(eol);
+                }
+                13 => {
+                    let run = 1 + next(5000) as usize;
+                    data.extend(std::iter::repeat_n(b'N', run));
+                }
+                _ => {
+                    data.extend_from_slice(b"ACGTN");
+                }
+            }
+        }
+        flush(&mut data, &mut out);
+    }
+    out
+}
+
+/// makeblastdb's nucleotide reader, which keeps the residues as NCBI4na codes, gives the
+/// sequences, warnings and errors of the reader that keeps letters with the fix from letters
+/// (the form before it), on random inputs (`random_fasta`) and on the edge cases: every byte
+/// value in a data line, a hyphen as a line's first or last byte, records past 2^32 residues
+/// (`>?4294967295`), sizes at the length limit, empty records and gaps only.
+#[test]
+fn the_nucleotide_reader_is_the_reader_of_letters() {
+    let mut state = 0x5851_f42d_4c95_7f2d_u64;
+    let mut next = move |bound: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % bound
+    };
+    for _ in 0..60 {
+        let records = 1 + next(6) as usize;
+        assert_same_as_letters(&random_fasta(&mut next, records), &MODULI);
+    }
+    let mut every_byte = b">a\nACGTACGTACGTACGTACGTACGTACGT\n".to_vec();
+    for byte in 0..=u8::MAX {
+        every_byte.extend_from_slice(b"ACGT");
+        every_byte.push(byte);
+        every_byte.extend_from_slice(b"TTGCA\n");
+    }
+    every_byte.extend_from_slice(b">b\nAC\n");
+    for input in [
+        &every_byte[..],
+        b">a\n-\nACGT\n",
+        b">a\n-\n ACGT\n",
+        b">a\nACGT-\n>b\n--\n>c\n-\n>d\n",
+        b">a\n>?10\n>b\n>?1\n>?1\n>c\n\n>d\nACGTN-\n",
+        b">a\nacgtnACGTN\r\n>b\r\nRYKM\r\nSWBDHV\r\n",
+        b"ACGT\n",
+        b">a\n",
+        b"",
+    ] {
+        assert_same_as_letters(input, &MODULI);
+    }
+    // Gaps that wrap NCBI's 32-bit positions, counted modulo 2^32 only (with a smaller modulus
+    // they would leave deltas of up to 2^31 letters to make).
+    for input in [
+        &b">a\nA\n>?4294967295\n"[..],
+        b">a\nACGT\n>?4294967295\n>?4294967295\nAC\n",
+        b">a\nACGTACGTAC\n>?4294967290\nACGT\n",
+        b">a\nAC\n>?4294967295\n>?3\nACGT\n",
+        b">a\n-\n>?4294967295\n>?1\nA\n",
+        b">a\nA\n>?2147483647\n>b\n>?2147483647\n>c\n>?4294967295\n>?4294967295\n",
+    ] {
+        assert_same_as_letters(input, &[None]);
+    }
+}
+
+/// The reader's codes past its buffer of letters: a record on one line of every length around
+/// whole buffers (each converted where it is, `Ncbi4naResidues::push_past_staging`) and lines
+/// that fill the buffer to every count of letters left, with an `N` placed to make a delta.
+#[test]
+fn records_across_the_buffer_of_letters() {
+    let bases = random_bases(3 * 4096 + 200, 0x1234_5678_9abc_def1);
+    for length in [4095, 4096, 4097, 8191, 8192, 8193, 3 * 4096 + 1] {
+        for width in [length, 61, 4096] {
+            for n_at in [None, Some(0), Some(length / 2), Some(length - 1)] {
+                let mut sequence = bases[..length].to_vec();
+                if let Some(at) = n_at {
+                    sequence[at] = b'N';
+                }
+                let mut input = fasta_lines(&sequence, width);
+                input.extend_from_slice(b">s\nACGTN\n");
+                assert_same_as_letters(&input, &MODULI);
+            }
+        }
+    }
 }

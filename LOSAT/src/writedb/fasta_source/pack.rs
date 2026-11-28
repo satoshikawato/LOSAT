@@ -1,4 +1,4 @@
-//! `CSeqConvert::Pack` of IUPACna residues into the segments of a delta sequence
+//! `CSeqConvert::Pack` of IUPACna or NCBI4na residues into the segments of a delta sequence
 //! (`CDelta_ext::AddAndSplit`), and the conversions of the residues into NCBI2na,
 //! NCBI4na and NCBI8na (`c++/src/util/sequtil/`).
 
@@ -182,7 +182,135 @@ impl Packer {
 /// the wide one: such a sequence is NCBI4na. The segments' bytes are made by the caller
 /// (`iupacna_to_ncbi2na`, `iupacna_to_ncbi4na`).
 pub(super) fn pack_iupacna(src: &[u8]) -> Vec<Segment> {
-    if src.is_empty() {
+    pack_runs(src.len(), |pos| {
+        let wide = BEST_IS_NCBI4NA[src[pos] as usize];
+        let rest = &src[pos + 1..];
+        let diff = |&residue: &u8| BEST_IS_NCBI4NA[residue as usize] != wide;
+        let end = if rest.len() < 20 {
+            pos + 1 + rest.iter().position(diff).unwrap_or(rest.len())
+        } else if let Some(at) = rest[..4].iter().position(diff) {
+            pos + 1 + at
+        } else {
+            let tail = &rest[4..];
+            // The run of residues of the same best coding, found with one search (LOSAT's speed).
+            let run = if wide == 0 {
+                find_first(tail, |residue| !is_ncbi2na_best(residue))
+            } else {
+                find_first(tail, is_ncbi2na_best)
+            };
+            pos + 5 + run.unwrap_or(tail.len())
+        };
+        (wide == 1, end)
+    })
+}
+
+/// Whether the NCBI4na code `code` (1 to 15) is one base (1, 2, 4 or 8): the class of a
+/// residue in `kBestCodingsWithoutGaps.ncbi4na`, NCBI2na for one base and NCBI4na for the other
+/// codes. A letter's code is one base exactly where the letter's best IUPACna coding is NCBI2na
+/// (`tests::the_class_of_a_code_is_the_class_of_its_letter`), so the residues of a letter and of
+/// its code pack alike. Code 0 (a gap) is never a residue.
+///
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_best_codings.inc:34-41,74-98
+#[inline(always)]
+const fn is_one_base(code: u8) -> bool {
+    code & code.wrapping_sub(1) == 0
+}
+
+/// Whether a byte of two NCBI4na codes (1 to 15) holds a code that is not one base, tested by
+/// arithmetic so that `find_first` tests a block of bytes at once.
+#[inline(always)]
+const fn holds_ambiguous(byte: u8) -> bool {
+    let (high, low) = (byte >> 4, byte & 0x0f);
+    (high & high.wrapping_sub(1)) | (low & low.wrapping_sub(1)) != 0
+}
+
+/// Whether a byte of two NCBI4na codes (1 to 15) holds a code of one base ([`holds_ambiguous`]'s
+/// arithmetic).
+#[inline(always)]
+const fn holds_one_base(byte: u8) -> bool {
+    let (high, low) = (byte >> 4, byte & 0x0f);
+    (high & high.wrapping_sub(1) == 0) | (low & low.wrapping_sub(1) == 0)
+}
+
+/// The NCBI4na code of residue `index` of `src` (two to a byte, the first in the high half).
+#[inline(always)]
+fn nibble(src: &[u8], index: usize) -> u8 {
+    (src[index / 2] >> (4 - 4 * (index % 2))) & 0x0f
+}
+
+/// `CSeqConvert::Pack` of the NCBI4na residues `start..end` of `src` (two to a byte, the first
+/// in the high half; `end - start` at most 4,294,967,295) as `e_Ncbi4na` into a
+/// `CDelta_ext_PackTarget`: the segments that `CDelta_ext::AddAndSplit` appends for them, with
+/// their starts counted from `start`. A residue's class is whether its code is one base
+/// ([`is_one_base`]), which is the class of its letter, so the segments are those that
+/// [`pack_iupacna`] gives for the residues' letters (makeblastdb's reader stores codes,
+/// `reader::Ncbi4naResidues`; NCBI's packs the letters). The bytes of a segment are the caller's
+/// (`ncbi4na_to_ncbi2na`, or the residues' own bytes).
+///
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1058-1063,1078-1080,1105-1107
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1124-1192
+/// NCBI's scan reads a byte of two codes at a time and adds the boundary of each half where the
+/// two differ; LOSAT scans the codes from `start`, which may be the low half of a byte.
+pub(crate) fn pack_ncbi4na(src: &[u8], start: usize, end: usize) -> Vec<Segment> {
+    pack_runs(end - start, |pos| {
+        let at = start + pos;
+        let wide = !is_one_base(nibble(src, at));
+        (wide, nibble_run_end(src, at + 1, end, wide) - start)
+    })
+}
+
+/// The first residue of `src` from `from` up to `end` whose class differs from that of a run of
+/// `wide` codes (true: codes that are not one base; false: codes of one base), or `end`. A few
+/// residues are tested one at a time, so that a near boundary is found without a search; the
+/// whole bytes after them with one search ([`find_first`], LOSAT's speed), then the residue in
+/// the byte it found.
+fn nibble_run_end(src: &[u8], mut from: usize, end: usize, wide: bool) -> usize {
+    let differs = |code: u8| is_one_base(code) == wide;
+    let near = if end - from < 20 { end } else { from + 4 };
+    while from < near {
+        if differs(nibble(src, from)) {
+            return from;
+        }
+        from += 1;
+    }
+    if from == end {
+        return end;
+    }
+    if from % 2 == 1 {
+        if differs(nibble(src, from)) {
+            return from;
+        }
+        from += 1;
+    }
+    let (first, last) = (from / 2, end / 2);
+    let bytes = &src[first..last];
+    let found = if wide {
+        find_first(bytes, holds_one_base)
+    } else {
+        find_first(bytes, holds_ambiguous)
+    };
+    match found {
+        Some(at) => {
+            let index = 2 * (first + at);
+            if differs(src[first + at] >> 4) {
+                index
+            } else {
+                index + 1
+            }
+        }
+        // With `end` odd, the high half of the byte `last` is the last residue.
+        None if end % 2 == 1 && differs(src[last] >> 4) => 2 * last,
+        None => end,
+    }
+}
+
+/// `CPacker::Pack` once its scan has found the runs of one best coding: `next_run(pos)` gives
+/// whether the residue at `pos` is best as NCBI4na and where its run ends, for the residues
+/// `0..length`. The segments of the best arrangement, each of the codings of its runs.
+///
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1124-1192
+fn pack_runs(length: usize, mut next_run: impl FnMut(usize) -> (bool, usize)) -> Vec<Segment> {
+    if length == 0 {
         return Vec::new();
     }
     let mut packer = Packer {
@@ -193,34 +321,17 @@ pub(super) fn pack_iupacna(src: &[u8]) -> Vec<Segment> {
         last_narrow: WIDE_CODING,
     };
     let mut pos = 0;
-    while pos < src.len() {
-        let wide = BEST_IS_NCBI4NA[src[pos] as usize];
-        let coding = if wide == 1 {
+    while pos < length {
+        let (wide, end) = next_run(pos);
+        let coding = if wide {
             Coding::Ncbi4na
         } else {
             Coding::Ncbi2na
         };
         packer.add_boundary(pos as u32, Some(coding));
-        let rest = &src[pos + 1..];
-        let diff = |&residue: &u8| BEST_IS_NCBI4NA[residue as usize] != wide;
-        if rest.len() < 20 {
-            pos += 1 + rest.iter().position(diff).unwrap_or(rest.len());
-            continue;
-        }
-        if let Some(at) = rest[..4].iter().position(diff) {
-            pos += 1 + at;
-            continue;
-        }
-        let tail = &rest[4..];
-        // The run of residues of the same best coding, found with one search (LOSAT's speed).
-        let run = if wide == 0 {
-            find_first(tail, |residue| !is_ncbi2na_best(residue))
-        } else {
-            find_first(tail, is_ncbi2na_best)
-        };
-        pos += 5 + run.unwrap_or(tail.len());
+        pos = end;
     }
-    packer.add_boundary(src.len() as u32, None);
+    packer.add_boundary(length as u32, None);
 
     // The best arrangement's codings, from the last segment back: each step becomes 1
     // where the segment it starts is NCBI4na.
@@ -407,27 +518,25 @@ pub(crate) fn iupacna_to_ncbi4na(src: &[u8]) -> Vec<u8> {
     dst
 }
 
-/// The number of letters of an NCBI2na literal that [`Ncbi4naBuilder::push_ncbi2na_blocks`]
-/// converts at a time by comparisons (LOSAT's speed).
-const NCBI2NA_LETTER_BLOCK: usize = 64;
+/// The number of letters that [`Ncbi4naBuilder::push_letters`] converts at a time
+/// ([`ncbi4na_block`], LOSAT's speed).
+const LETTER_BLOCK: usize = 64;
 
-/// The NCBI4na code of a letter for which [`is_ncbi2na_best`] holds: 1, 2, 4, 8, 8 for `A`, `C`,
-/// `G`, `T`, `U`, the code of `NCBI4NA_CODES` and the NCBI8na code that `C2naTo8na` gives the
-/// letter's NCBI2na code; 0 for any other byte (none is in an NCBI2na literal). No table and no
-/// branch, so that a loop over letters computes the codes of many at once. It folds case and
-/// pairs `T` with `U` as [`is_ncbi2na_best`] does, so it holds for every letter that the NCBI2na
-/// coding of `pack_iupacna` admits; the reader stores upper case, and the fold costs one AND a
-/// letter in the loop's vector code.
+/// The NCBI4na code of `A`, `C`, `G`, `T`, `U` and `N` in either case (1, 2, 4, 8, 8, 15, their
+/// rows of `NCBI4NA_CODES`); 0 for every other byte. No table and no branch, so that a loop over
+/// letters computes the codes of many at once ([`ncbi4na_block`]). Clearing bit 5 folds lower case
+/// to upper case, and clearing bit 0 pairs `T` (`0x54`) with `U` (`0x55`), as [`is_ncbi2na_best`]
+/// does (`tests::the_codes_of_common_letters_are_the_table` checks every byte).
 ///
-/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:79-351
-/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:950-1034
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:392-394,409-410
 #[inline(always)]
-const fn ncbi4na_code_of_ncbi2na_letter(residue: u8) -> u8 {
-    let upper = residue & 0xdf;
+const fn common_letter_code(letter: u8) -> u8 {
+    let upper = letter & 0xdf;
     (upper == b'A') as u8
         | ((upper == b'C') as u8) << 1
         | ((upper == b'G') as u8) << 2
         | (((upper & 0xfe) == b'T') as u8) << 3
+        | (((upper == b'N') as u8) * 15)
 }
 
 /// The byte of two NCBI4na codes (each 0 to 15), the first in the high half: the low byte of the
@@ -441,10 +550,83 @@ pub(crate) fn pair_byte(two: [u8; 2]) -> u8 {
     ((pair << 4) | (pair >> 8)) as u8
 }
 
-/// `s_FixBioseqDeltas`' `seq8na` and its NCBI4na copy in one: the NCBI4na bytes of the
-/// NCBI8na codes appended, two letters to a byte, the first in the high half (`C8naTo4na`).
-/// NCBI makes `seq8na` (1 byte a letter) and converts it; LOSAT writes the NCBI4na bytes
-/// (half a byte a letter) as the codes come, the same bytes without the `seq8na`.
+/// The NCBI4na bytes of [`LETTER_BLOCK`] residue letters (`x_ConvertIupacnaTo4na`'s loop): the
+/// codes of a block whose letters are all `A`, `C`, `G`, `T`, `U` or `N` by comparisons
+/// ([`common_letter_code`]) and then two to a byte ([`pair_byte`]), without a table and without a
+/// branch a letter; a block with another letter takes the table for each pair, as
+/// [`iupacna_to_ncbi4na`] does.
+///
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:313-339
+#[inline(always)]
+fn ncbi4na_block(block: &[u8; LETTER_BLOCK]) -> [u8; LETTER_BLOCK / 2] {
+    let mut codes = [0u8; LETTER_BLOCK];
+    for (code, &letter) in codes.iter_mut().zip(block) {
+        *code = common_letter_code(letter);
+    }
+    let mut bytes = [0u8; LETTER_BLOCK / 2];
+    // A fold of bytes, not of `bool`s: rustc 1.92 vectorizes only the former (`byte_search`).
+    if codes
+        .iter()
+        .fold(0u8, |any, &code| any | u8::from(code == 0))
+        == 0
+    {
+        for (byte, &two) in bytes.iter_mut().zip(codes.as_chunks::<2>().0) {
+            *byte = pair_byte(two);
+        }
+    } else {
+        for (byte, two) in bytes.iter_mut().zip(block.as_chunks::<2>().0) {
+            *byte = NCBI4NA_CODES[two[0] as usize] << 4 | NCBI4NA_CODES[two[1] as usize];
+        }
+    }
+    bytes
+}
+
+/// The NCBI2na codes of the four NCBI4na codes of `pair` (two bytes, the first code in the high
+/// half of the first byte), each code one base (1, 2, 4, 8 for `A`, `C`, `G`, `T`: 0, 1, 2, 3) or
+/// 0 (an NCBI2na code 0): four to a byte, the first in the high bits. A code's high bit is
+/// whether it is 4 or 8, its low bit whether it is 2 or 8. The two bytes are one 16-bit number
+/// and every step is arithmetic on it (no byte of the pair taken apart), so that a loop over pairs
+/// computes many at once.
+///
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1190-1268
+#[inline(always)]
+const fn ncbi2na_of_pair(pair: [u8; 2]) -> u8 {
+    let word = u16::from_le_bytes(pair);
+    // In each half byte, bit 2: bit 2 or 3 of the code; bit 1: bit 1 or 3. Then down by one: the
+    // first byte's codes in bits 4-5 and 0-1, the second byte's in bits 12-13 and 8-9.
+    let bits = (((word | word >> 1) & 0x4444) | ((word | word >> 2) & 0x2222)) >> 1;
+    let first = ((bits >> 2) & 0x0c) | (bits & 0x03);
+    let second = ((bits >> 10) & 0x0c) | ((bits >> 8) & 0x03);
+    (first << 4 | second) as u8
+}
+
+/// `CSeqConvert::Convert` from `e_Ncbi4na` to `e_Ncbi2na` of the first `letters` residues of
+/// `src` (`x_Convert4naTo2na` at an even position), every one a base (`pack_ncbi4na` gave them
+/// the NCBI2na coding): four to a byte, the first in the high bits, and 0 bits after the last
+/// (the low half of `src`'s last byte is 0 for an odd count, and a last single byte is paired
+/// with 0). These are the bytes that [`iupacna_to_ncbi2na`] makes of their letters.
+///
+/// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:663-705
+pub(crate) fn ncbi4na_to_ncbi2na(src: &[u8], letters: usize) -> Vec<u8> {
+    debug_assert_eq!(src.len(), letters.div_ceil(2));
+    let mut dst = Vec::with_capacity(letters.div_ceil(4));
+    let (pairs, rest) = src.as_chunks::<2>();
+    dst.extend(pairs.iter().map(|&pair| ncbi2na_of_pair(pair)));
+    if let [last] = rest {
+        dst.push(ncbi2na_of_pair([*last, 0]));
+    }
+    dst
+}
+
+/// NCBI4na bytes made as letters or codes come, two letters to a byte, the first in the high
+/// half; with an odd count the low half of the last byte is 0. Two owners use it:
+/// - makeblastdb's nucleotide reader keeps a record's residues in one (`reader::Ncbi4naResidues`,
+///   [`Self::push_letters`]), which becomes the record's NCBI4na data where that is its data
+///   (`reader::SeqInst`);
+/// - `s_FixBioseqDeltas`' `seq8na` and its NCBI4na copy in one (`fix_bioseq_deltas`, and
+///   `asn_source` for the ASN.1 input): the NCBI4na bytes of the NCBI8na codes appended
+///   (`C8naTo4na`). NCBI makes `seq8na` (1 byte a letter) and converts it; LOSAT writes the
+///   NCBI4na bytes (half a byte a letter) as the codes come, the same bytes without the `seq8na`.
 ///
 /// The NCBI8na codes of a literal's residues are the NCBI4na codes of its letters, as
 /// `s_FixBioseqDeltas` gets them from the literal's NCBI2na or NCBI4na data: an NCBI2na
@@ -454,6 +636,7 @@ pub(crate) fn pair_byte(two: [u8; 2]) -> u8 {
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-357
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
+#[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Ncbi4naBuilder {
     bytes: Vec<u8>,
     /// The last byte holds one letter, in its high half.
@@ -492,66 +675,46 @@ impl Ncbi4naBuilder {
         }
     }
 
-    /// The NCBI8na codes of the letters of a literal of a delta, `ncbi2na` when `pack_iupacna`
-    /// gave it the NCBI2na coding: `s_FixBioseqDeltas` converts each literal from its coding
-    /// (`C2naTo8na`, `C4naTo8na`), and both give every letter its code of `NCBI4NA_CODES`, two to
-    /// a byte, the first in the high half. An NCBI2na literal holds only letters for which
-    /// [`is_ncbi2na_best`] holds, so its blocks of [`NCBI2NA_LETTER_BLOCK`] letters get their codes
-    /// by comparisons ([`ncbi4na_code_of_ncbi2na_letter`]), without a table and without a branch a
-    /// letter (LOSAT's speed, [`Self::push_ncbi2na_blocks`]); its other letters, and every letter
-    /// of another literal, get theirs from the table. Inlined into its one caller, so that a
-    /// literal shorter than a block runs the table's loop without a call (one test of its length
-    /// more).
+    /// The NCBI4na codes of the residue letters `src` (`x_ConvertIupacnaTo4na`, the codes of
+    /// `NCBI4NA_CODES`): after a pending letter's partner, whole blocks of [`LETTER_BLOCK`]
+    /// letters ([`ncbi4na_block`]), and the letters after the last block as one block filled up
+    /// with `A`, of which only their bytes are kept (no loop a letter for any count). The bytes
+    /// of all of `src` are reserved first, so that a reader's store is first as long as the
+    /// letters it converts at once (`reader::Ncbi4naResidues`), and then grows as a `Vec` does.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:343-357
-    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:521-531
-    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
-    #[inline(always)]
-    pub(crate) fn push_literal(&mut self, mut src: &[u8], ncbi2na: bool) {
-        debug_assert!(!ncbi2na || src.iter().all(|&letter| is_ncbi2na_best(letter)));
+    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:313-339
+    pub(crate) fn push_letters(&mut self, mut src: &[u8]) {
+        self.bytes.reserve(src.len().div_ceil(2));
         if let (true, [first, rest @ ..]) = (self.odd, src) {
             self.push_code(NCBI4NA_CODES[*first as usize]);
             src = rest;
         }
-        if src.len() >= NCBI2NA_LETTER_BLOCK && ncbi2na {
-            src = self.push_ncbi2na_blocks(src);
+        while let Some((block, rest)) = src.split_first_chunk::<LETTER_BLOCK>() {
+            self.bytes.extend_from_slice(&ncbi4na_block(block));
+            src = rest;
         }
-        let mut chunks = src.chunks_exact(2);
-        self.bytes.extend(
-            (&mut chunks)
-                .map(|two| NCBI4NA_CODES[two[0] as usize] << 4 | NCBI4NA_CODES[two[1] as usize]),
-        );
-        if let [last] = chunks.remainder() {
-            self.push_code(NCBI4NA_CODES[*last as usize]);
+        if !src.is_empty() {
+            let mut block = [b'A'; LETTER_BLOCK];
+            block[..src.len()].copy_from_slice(src);
+            let bytes = ncbi4na_block(&block);
+            self.bytes
+                .extend_from_slice(&bytes[..src.len().div_ceil(2)]);
+            if src.len() % 2 == 1 {
+                if let Some(last) = self.bytes.last_mut() {
+                    *last &= 0xf0;
+                }
+                self.odd = true;
+            }
         }
     }
 
-    /// The NCBI4na bytes of the whole blocks of [`NCBI2NA_LETTER_BLOCK`] letters at the start of
-    /// `src`, letters of an NCBI2na literal, with no letter pending (`odd` is false): the codes
-    /// of a block by comparisons ([`ncbi4na_code_of_ncbi2na_letter`]), then two to a byte
-    /// ([`pair_byte`]). Returns the letters after the last block. A function of its own, not
-    /// inlined: its vector code inlined into the loop over a delta's pieces (`fix_bioseq_deltas`,
-    /// into which [`Self::push_literal`] is inlined) took that loop's registers, and every
-    /// literal paid loads and stores for it, a literal of one letter included.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:521-531
-    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
-    #[inline(never)]
-    fn push_ncbi2na_blocks<'a>(&mut self, mut src: &'a [u8]) -> &'a [u8] {
-        debug_assert!(!self.odd);
-        while let Some((block, rest)) = src.split_first_chunk::<NCBI2NA_LETTER_BLOCK>() {
-            let mut codes = [0u8; NCBI2NA_LETTER_BLOCK];
-            for (code, &letter) in codes.iter_mut().zip(block) {
-                *code = ncbi4na_code_of_ncbi2na_letter(letter);
-            }
-            let mut bytes = [0u8; NCBI2NA_LETTER_BLOCK / 2];
-            for (byte, &two) in bytes.iter_mut().zip(codes.as_chunks::<2>().0) {
-                *byte = pair_byte(two);
-            }
-            self.bytes.extend_from_slice(&bytes);
-            src = rest;
+    /// The NCBI4na codes of the letters `src`, one at a time through `NCBI4NA_CODES`: the
+    /// conversion of [`Self::push_letters`] without its blocks, for the tests' comparisons.
+    #[cfg(test)]
+    pub(crate) fn push_letters_by_table(&mut self, src: &[u8]) {
+        for &letter in src {
+            self.push_code(NCBI4NA_CODES[letter as usize]);
         }
-        src
     }
 
     /// Appends up to `letters` bases from packed NCBI2na bytes (`CSeqConvert::Convert` from
@@ -585,37 +748,76 @@ impl Ncbi4naBuilder {
         }
     }
 
-    /// Appends up to `letters` bases from packed NCBI4na bytes (`CSeqConvert::Convert` from
-    /// `e_Ncbi4na` to `e_Ncbi8na`, clamped by `AdjustLength` to `src.len() * 2`).
+    /// Appends up to `letters` bases of packed NCBI4na bytes from the base `start` of `src`
+    /// (`CSeqConvert::Convert` from `e_Ncbi4na` to `e_Ncbi8na` at that position, clamped by
+    /// `AdjustLength` to the bases of `src`): a copy of whole bytes where `start` and the
+    /// letters appended so far are both even or both odd (after the one base that fills a
+    /// pending half), else each byte from the halves of two (a shift by one base).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:350-356
-    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:808-837
-    pub(crate) fn push_ncbi4na(&mut self, src: &[u8], letters: usize) {
-        let count = letters.min(src.len().saturating_mul(2));
+    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:761-767
+    pub(crate) fn push_ncbi4na(&mut self, src: &[u8], start: usize, letters: usize) {
+        let count = letters.min(src.len().saturating_mul(2).saturating_sub(start));
         if count == 0 {
             return;
         }
-        if !self.odd {
-            let full_bytes = count / 2;
-            self.bytes.extend_from_slice(&src[..full_bytes]);
-            if count % 2 == 1 {
-                self.push_code(src[full_bytes] >> 4);
-            }
-            return;
+        let (mut from, end) = (start, start + count);
+        if self.odd {
+            self.push_code(nibble(src, from));
+            from += 1;
         }
-        for i in 0..count {
-            let code = if i & 1 == 0 {
-                src[i / 2] >> 4
-            } else {
-                src[i / 2] & 0x0f
-            };
-            self.push_code(code);
+        let pairs = (end - from) / 2;
+        if from.is_multiple_of(2) {
+            let first = from / 2;
+            self.bytes.extend_from_slice(&src[first..first + pairs]);
+        } else {
+            let first = from / 2;
+            self.bytes.extend(
+                src[first..first + pairs + 1]
+                    .windows(2)
+                    .map(|two| two[0] << 4 | two[1] >> 4),
+            );
+        }
+        from += 2 * pairs;
+        if from < end {
+            self.push_code(nibble(src, from));
         }
     }
 
     /// The count of letters appended.
     pub(crate) fn letters(&self) -> usize {
         self.bytes.len() * 2 - usize::from(self.odd)
+    }
+
+    /// The bytes (`letters()` of them, two to a byte).
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// No letters, the bytes' capacity kept.
+    pub(crate) fn clear(&mut self) {
+        self.bytes.clear();
+        self.odd = false;
+    }
+
+    /// Drops the first `count` letters (the reader's residues past 2^32,
+    /// `reader::Ncbi4naResidues`): the bytes after them move to the front, each made of the
+    /// halves of two where `count` is odd.
+    #[cold]
+    pub(crate) fn drop_front(&mut self, count: usize) {
+        let kept = self.letters() - count;
+        let first = count / 2;
+        if count.is_multiple_of(2) {
+            self.bytes.drain(..first);
+        } else {
+            let bytes = kept.div_ceil(2);
+            for j in 0..bytes {
+                let next = self.bytes.get(first + j + 1).map_or(0, |&byte| byte >> 4);
+                self.bytes[j] = self.bytes[first + j] << 4 | next;
+            }
+            self.bytes.truncate(bytes);
+        }
+        self.odd = kept % 2 == 1;
     }
 
     pub(crate) fn into_bytes(self) -> Vec<u8> {

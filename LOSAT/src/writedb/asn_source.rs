@@ -1294,7 +1294,7 @@ pub(crate) fn fix_asn_delta(bioseq: &mut AsnBioseq) -> Result<(), WriteDbError> 
             AsnDeltaItem::LiteralNcbi4na {
                 length: Some(len),
                 bytes,
-            } => builder.push_ncbi4na(&bytes, len as usize),
+            } => builder.push_ncbi4na(&bytes, 0, len as usize),
             _ => {}
         }
     }

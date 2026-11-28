@@ -8,13 +8,14 @@
 //! are split and packed into a delta sequence (`pack`); the definition line is kept in a
 //! user object for the database's title (`title`); lowercase masks are recorded only for
 //! convert2blastmask and makembindex (`ReaderFlags::lower_case_masks`: the others never call
-//! `SaveMask`, so `m_CurrentMask` stays empty).
+//! `SaveMask`, so `m_CurrentMask` stays empty). The residues are kept as NCBI's letters, or by
+//! makeblastdb's nucleotide reader as their NCBI4na codes (`ResidueStore`).
 
 use std::io::Read;
 
 use super::defline_ids;
 use super::line_reader::BufferedLineReader;
-use super::pack::{self, Coding, Segment};
+use super::pack::{self, Coding, Ncbi4naBuilder, Segment};
 use crate::blastinput::fasta_reader::reader::{
     canonicalize_string, convert_bad_indexes_to_string, gap_type_info, linkage_evidence_value,
     seq_data_in_title_warning, GapType, LinkEvid, Problem, LINKAGE_UNSPECIFIED,
@@ -377,19 +378,22 @@ pub(crate) enum DeltaSeq {
     Literal(Segment),
 }
 
-/// `Seq-inst` of a record as `CFastaReader::AssembleSeq` leaves it.
+/// `Seq-inst` of a record as `CFastaReader::AssembleSeq` leaves it; a delta carries the residues
+/// in the form of the reader's store (`D`, `ResidueStore::Delta`: the IUPACna or NCBIeaa
+/// letters, or makeblastdb's nucleotide residues as NCBI4na).
 #[derive(PartialEq, Eq, Debug)]
-pub(crate) enum SeqInst {
+pub(crate) enum SeqInst<D = Vec<u8>> {
     /// `repr virtual`: no residues and no gaps; length 0, no `seq-data`.
     Virtual,
     /// `repr raw`: a delta of one piece, whose `Seq-data` became the sequence's.
     Raw { length: u64, seq_data: SeqData },
-    /// `repr delta` of more than one piece over the IUPACna `residues`. Past 2^32 letters
-    /// (`assemble_seq`) gaps that stay pieces can make the pieces longer than `length`, and
-    /// their residues repeat or skip residues where the gaps' wrapped positions do.
+    /// `repr delta` of more than one piece over the `residues` (a literal's start and length
+    /// count residues). Past 2^32 letters (`assemble_seq`) gaps that stay pieces can make the
+    /// pieces longer than `length`, and their residues repeat or skip residues where the gaps'
+    /// wrapped positions do.
     Delta {
         length: u64,
-        residues: Vec<u8>,
+        residues: D,
         pieces: Vec<DeltaSeq>,
     },
     /// A record longer than 2,147,483,647 residues, which `CBuildDatabase::AddSequences`
@@ -406,9 +410,9 @@ pub(crate) fn out_of_range_what(pos: u64, size: u64) -> String {
     format!("basic_string::append: __pos (which is {pos}) > this->size() (which is {size})")
 }
 
-/// A record as `CFastaReader::ReadOneSeq` returns it.
+/// A record as `CFastaReader::ReadOneSeq` returns it (`D`: what a delta carries, `SeqInst`).
 #[derive(Debug)]
-pub(crate) struct Record {
+pub(crate) struct Record<D = Vec<u8>> {
     /// `Seq-id local id`, the number that `CSeqIdGenerator` gave the record (without
     /// `-parse_seqids`).
     pub(crate) local_id: u64,
@@ -423,7 +427,7 @@ pub(crate) struct Record {
     /// `CBioseq::IsAa()`: the molecule of the input (`fForceType`), or the one
     /// `AssignMolType` found.
     pub(crate) is_aa: bool,
-    pub(crate) inst: SeqInst,
+    pub(crate) inst: SeqInst<D>,
 }
 
 /// The title of a definition line (`SLineTextAndLoc`; its line number is used for the
@@ -598,11 +602,251 @@ fn extend_upper(out: &mut Vec<u8>, run: &[u8]) {
     added[len - UPPER_BLOCK..].as_chunks_mut::<UPPER_BLOCK>().0[0].make_ascii_uppercase();
 }
 
+/// What the reader keeps of the residues of the record being read (`m_SeqData` up to
+/// `m_CurrentPos`), and what it makes of them in `AssembleSeq`. Each program's reader has one
+/// form, fixed by what its consumer reads: [`Letters`] (NCBI's IUPACna or NCBIeaa string), or for
+/// makeblastdb's nucleotide input [`Ncbi4naResidues`] (the codes that the database is written
+/// from). No record, size or option chooses between them.
+pub(crate) trait ResidueStore {
+    /// What a delta (`SeqInst::Delta`) carries of the residues.
+    type Delta: std::fmt::Debug + PartialEq + Eq;
+    /// The store of no residues.
+    fn new() -> Self;
+    /// The count of residues stored (`m_SeqData.size()` after a data line).
+    fn len(&self) -> usize;
+    /// No residues are stored.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// No residues (`ReadOneSeq`'s reset of `m_SeqData`); what was allocated is kept.
+    fn clear(&mut self);
+    /// Stores the residues `run` of a data line, each a byte for which the character switch
+    /// `actions` gives a residue (`first`: the residue of `run[0]`), as NCBI's switch stores each
+    /// (`ParseDataLine`, cited at `RecordState::parse_data_line`).
+    fn push_run(&mut self, first: u8, run: &[u8], actions: &[u8; 256]);
+    /// Keeps the last `kept` residues (the residues since the record's count last wrapped
+    /// NCBI's `TSeqPos`, `RecordState::wrap_seq_data`).
+    fn keep_last(&mut self, kept: usize);
+    /// Completes the store before `AssembleSeq` reads it ([`Ncbi4naResidues`] converts what it
+    /// holds as letters).
+    fn finish(&mut self);
+    /// `CSeqConvert::Pack` of the nucleotide residues `start..end`: the segments of
+    /// `pack::pack_iupacna` for their letters, starts counted from `start`.
+    fn pack(&self, start: usize, end: usize) -> Vec<Segment>;
+    /// The `Seq-data` of the one literal of all residues in `coding` (a raw sequence).
+    fn literal_data(&mut self, coding: Coding) -> SeqData;
+    /// The residues, which a delta takes along; the store is left with none.
+    fn take_delta(&mut self) -> Self::Delta;
+    /// The residues as letters, for what reads NCBI's letters: `AssignMolType` and the
+    /// substitution of gaps without `fParseGaps`. Only [`Letters`] has them: the store of
+    /// NCBI4na codes is made only with makeblastdb's nucleotide flags
+    /// (`FastaReader::nucleotide_db`), with which neither runs (`Molecule::Nucleotide`,
+    /// `parse_gaps`).
+    fn letters(&self) -> &[u8];
+    /// Replaces the residues by `letters` (the substituted string; [`Self::letters`]).
+    fn set_letters(&mut self, letters: Vec<u8>);
+}
+
+/// The residues as NCBI's reader keeps them (`m_SeqData`): IUPACna or NCBIeaa letters in upper
+/// case, one byte a residue. Every reader but makeblastdb's nucleotide one: makeblastdb's protein
+/// input, the masking programs, convert2blastmask and makembindex, whose letters are their
+/// output.
+#[derive(Debug)]
+pub(crate) struct Letters(Vec<u8>);
+
+impl ResidueStore for Letters {
+    type Delta = Vec<u8>;
+
+    fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// The switch stores a residue in upper case (`tests::residue_tests_match_the_tables`); the
+    /// residues of a run are stored at once (LOSAT's speed).
+    #[inline(always)]
+    fn push_run(&mut self, first: u8, run: &[u8], actions: &[u8; 256]) {
+        if run.len() == 1 {
+            self.0.push(first);
+        } else if run.len() < UPPER_BLOCK {
+            self.0
+                .extend(run.iter().map(|&byte| actions[byte as usize]));
+        } else {
+            extend_upper(&mut self.0, run);
+        }
+    }
+
+    fn keep_last(&mut self, kept: usize) {
+        self.0.drain(..self.0.len() - kept);
+    }
+
+    fn finish(&mut self) {}
+
+    fn pack(&self, start: usize, end: usize) -> Vec<Segment> {
+        pack::pack_iupacna(&self.0[start..end])
+    }
+
+    /// NCBI's `Convert` of the letters into the segment's coding; a protein's NCBIeaa is the
+    /// letters themselves (`CSeqConvert::Pack` copies them).
+    fn literal_data(&mut self, coding: Coding) -> SeqData {
+        match coding {
+            Coding::Ncbi2na => SeqData::Ncbi2na(pack::iupacna_to_ncbi2na(&self.0)),
+            Coding::Ncbi4na => SeqData::Ncbi4na(pack::iupacna_to_ncbi4na(&self.0)),
+            Coding::Ncbieaa => SeqData::Ncbieaa(std::mem::take(&mut self.0)),
+        }
+    }
+
+    fn take_delta(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.0)
+    }
+
+    fn letters(&self) -> &[u8] {
+        &self.0
+    }
+
+    fn set_letters(&mut self, letters: Vec<u8>) {
+        self.0 = letters;
+    }
+}
+
+/// The letters that [`Ncbi4naResidues`] holds before it converts them.
+const STAGING: usize = 4096;
+
+/// makeblastdb's nucleotide residues as NCBI4na codes, two to a byte (`pack::Ncbi4naBuilder`):
+/// the codes that NCBI's packing reads of its IUPACna letters (`CSeqConvert::Pack` and
+/// `s_FixBioseqDeltas` give each residue the NCBI4na code of its letter, cited at
+/// `pack::pack_ncbi4na` and `fix_bioseq_deltas`), so the reader holds half a byte a residue and
+/// no copy of the record's letters. The residues of each run are copied to a buffer of
+/// [`STAGING`] letters, which is converted whole when the next run does not fit
+/// (`Ncbi4naBuilder::push_letters`, in blocks of 64 letters for runs of any length; the rest of a
+/// long run is converted where it is), and at the end of the record (`finish`).
+///
+/// A record whose data is NCBI4na takes the codes along (a raw NCBI4na sequence, and every
+/// delta), and the next record's codes start a new store; a raw NCBI2na sequence's data is made of
+/// them, and the store is kept for the next record.
+pub(crate) struct Ncbi4naResidues {
+    codes: Ncbi4naBuilder,
+    /// Allocated once, with the reader.
+    staging: Box<[u8; STAGING]>,
+    /// The letters at the start of `staging`, after those of `codes`.
+    staged: usize,
+}
+
+impl ResidueStore for Ncbi4naResidues {
+    type Delta = Ncbi4naBuilder;
+
+    fn new() -> Self {
+        Self {
+            codes: Ncbi4naBuilder::default(),
+            staging: Box::new([0; STAGING]),
+            staged: 0,
+        }
+    }
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.codes.letters() + self.staged
+    }
+
+    fn clear(&mut self) {
+        self.codes.clear();
+        self.staged = 0;
+    }
+
+    /// The letters of `run` (residues in either case: the code folds the case, as the switch's
+    /// upper case does) are copied to the buffer; a run that does not fit is
+    /// [`Self::push_past_staging`]'s.
+    #[inline(always)]
+    fn push_run(&mut self, _first: u8, run: &[u8], _actions: &[u8; 256]) {
+        let staged = self.staged;
+        if run.len() > STAGING - staged {
+            self.push_past_staging(run);
+        } else if let [letter] = run {
+            self.staging[staged] = *letter;
+            self.staged = staged + 1;
+        } else {
+            self.staging[staged..staged + run.len()].copy_from_slice(run);
+            self.staged = staged + run.len();
+        }
+    }
+
+    #[cold]
+    fn keep_last(&mut self, kept: usize) {
+        self.finish();
+        self.codes.drop_front(self.codes.letters() - kept);
+    }
+
+    fn finish(&mut self) {
+        if self.staged > 0 {
+            self.codes.push_letters(&self.staging[..self.staged]);
+            self.staged = 0;
+        }
+    }
+
+    fn pack(&self, start: usize, end: usize) -> Vec<Segment> {
+        debug_assert_eq!(self.staged, 0, "packed after finish");
+        pack::pack_ncbi4na(self.codes.bytes(), start, end)
+    }
+
+    /// The NCBI2na of the codes (`pack::ncbi4na_to_ncbi2na`), the store kept; or the codes
+    /// themselves, which leave the store.
+    fn literal_data(&mut self, coding: Coding) -> SeqData {
+        match coding {
+            Coding::Ncbi2na => SeqData::Ncbi2na(pack::ncbi4na_to_ncbi2na(
+                self.codes.bytes(),
+                self.codes.letters(),
+            )),
+            Coding::Ncbi4na => SeqData::Ncbi4na(std::mem::take(&mut self.codes).into_bytes()),
+            Coding::Ncbieaa => unreachable!("makeblastdb's nucleotide reader packs no NCBIeaa"),
+        }
+    }
+
+    fn take_delta(&mut self) -> Ncbi4naBuilder {
+        std::mem::take(&mut self.codes)
+    }
+
+    fn letters(&self) -> &[u8] {
+        unreachable!(
+            "makeblastdb's nucleotide reader neither guesses the molecule nor substitutes gaps"
+        )
+    }
+
+    fn set_letters(&mut self, _letters: Vec<u8>) {
+        unreachable!(
+            "makeblastdb's nucleotide reader neither guesses the molecule nor substitutes gaps"
+        )
+    }
+}
+
+impl Ncbi4naResidues {
+    /// A run longer than the room left in the buffer: the buffer filled up and converted, then
+    /// the whole buffers' worth of the run converted where it is, and the rest copied to the
+    /// buffer.
+    #[inline(never)]
+    fn push_past_staging(&mut self, run: &[u8]) {
+        let (head, run) = run.split_at(STAGING - self.staged);
+        self.staging[self.staged..].copy_from_slice(head);
+        self.codes.push_letters(&self.staging[..]);
+        let (whole, rest) = run.split_at(run.len() - run.len() % STAGING);
+        self.codes.push_letters(whole);
+        self.staging[..rest.len()].copy_from_slice(rest);
+        self.staged = rest.len();
+    }
+}
+
 /// The state of the record being read (`ReadOneSeq` resets it).
-struct RecordState {
+struct RecordState<S: ResidueStore> {
     flags: ReaderFlags,
-    /// `m_SeqData` up to `m_CurrentPos`: the raw residues, in upper case.
-    seq_data: Vec<u8>,
+    /// `m_SeqData` up to `m_CurrentPos`: the raw residues (`ResidueStore`).
+    residues: S,
     /// `m_Gaps`.
     gaps: Vec<Gap>,
     /// `m_CurrentGapLength`: the hyphens read since the last residue (their character,
@@ -642,12 +886,13 @@ struct RecordState {
 /// The range of NCBI's `TSeqPos` (32 bits).
 const SEQ_POS_MODULUS: u64 = 1 << 32;
 
-/// NCBI's `CFastaReader` over a `CBufferedLineReader`.
-pub(crate) struct FastaReader<R: Read> {
+/// NCBI's `CFastaReader` over a `CBufferedLineReader`, which keeps the residues in the store
+/// `S` (`ResidueStore`).
+pub(crate) struct FastaReader<R: Read, S: ResidueStore = Letters> {
     lines: BufferedLineReader<R>,
     /// `CSeqIdGenerator::m_Counter`.
     id_counter: u64,
-    state: RecordState,
+    state: RecordState<S>,
 }
 
 /// `PostWarning` for a warning: nothing for an ignored problem, else the message.
@@ -665,14 +910,43 @@ fn post_warning(ignored: &[Problem], problem: Problem, message: &[u8], warn: Rea
 impl<R: Read> FastaReader<R> {
     /// `CFastaReader` of `*m_LineReader` and the flags (`CFastaBioseqSource`) or of a stream and
     /// the flags (`CMaskFastaReader`; `ILineReader::New` makes the same line reader, cited at
-    /// `seqmasks_io::fasta_reader`) with the caller's `flags`; the IDs come from the reader's
-    /// own `CSeqIdGenerator`, which counts from 1 and has no prefix.
+    /// `seqmasks_io::fasta_reader`) with the caller's `flags`, keeping the residues as letters
+    /// (`Letters`); the IDs come from the reader's own `CSeqIdGenerator`, which counts from 1
+    /// and has no prefix.
     ///
     /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta_reader_utils.hpp:160-165
     /// The registry value `BLAST/MAX_SEQID_LENGTH` (build_db.cpp:738-747, makeblastdb's
     /// `SetMaxIDLength`) is not read: LOSAT has no `.ncbirc`, and makeblastdb refuses the
     /// setting (`check_registry_settings`). The mask reader never sets a maximum.
     pub(crate) fn new(input: R, flags: ReaderFlags) -> Self {
+        Self::with_store(input, flags)
+    }
+
+    /// The residues (IUPACna, upper case) that the record `read_one_seq` returned last was
+    /// packed from when it is a `SeqInst::Raw` of NCBI2na or NCBI4na data, which the reader
+    /// keeps until it reads the next record (a delta takes them along as its `residues`).
+    /// They are handed over with their buffer, so that a masking program holds its letters
+    /// without a second copy of the sequence; the next record is read into a buffer of the
+    /// same capacity, as before.
+    pub(crate) fn take_raw_residues(&mut self) -> Vec<u8> {
+        let capacity = self.state.residues.0.len();
+        std::mem::replace(&mut self.state.residues.0, Vec::with_capacity(capacity))
+    }
+}
+
+impl<R: Read> FastaReader<R, Ncbi4naResidues> {
+    /// The `CFastaReader` of makeblastdb's nucleotide input (`CFastaBioseqSource` of the file,
+    /// `is_protein` false and `parse_ids`; its flags are cited at
+    /// `ReaderFlags::fasta_bioseq_source`), as [`FastaReader::new`], keeping the residues as
+    /// NCBI4na codes (`Ncbi4naResidues`).
+    pub(crate) fn nucleotide_db(input: R, parse_ids: bool) -> Self {
+        Self::with_store(input, ReaderFlags::fasta_bioseq_source(false, parse_ids))
+    }
+}
+
+impl<R: Read, S: ResidueStore> FastaReader<R, S> {
+    /// The reader of `FastaReader::new` with the store `S`.
+    fn with_store(input: R, flags: ReaderFlags) -> Self {
         Self {
             lines: BufferedLineReader::new(input),
             id_counter: 1,
@@ -680,7 +954,7 @@ impl<R: Read> FastaReader<R> {
                 flags,
                 ids: Vec::new(),
                 hist_old_id: None,
-                seq_data: Vec::new(),
+                residues: S::new(),
                 gaps: Vec::new(),
                 current_gap_length: 0,
                 total_gap_length: 0,
@@ -727,17 +1001,6 @@ impl<R: Read> FastaReader<R> {
         std::mem::take(&mut self.state.masks)
     }
 
-    /// The residues (IUPACna, upper case) that the record `read_one_seq` returned last was
-    /// packed from when it is a `SeqInst::Raw` of NCBI2na or NCBI4na data, which the reader
-    /// keeps until it reads the next record (a delta takes them along as its `residues`).
-    /// They are handed over with their buffer, so that a masking program holds its letters
-    /// without a second copy of the sequence; the next record is read into a buffer of the
-    /// same capacity, as before.
-    pub(crate) fn take_raw_residues(&mut self) -> Vec<u8> {
-        let capacity = self.state.seq_data.len();
-        std::mem::replace(&mut self.state.seq_data, Vec::with_capacity(capacity))
-    }
-
     /// `GetLineReader().AtEOF()`.
     pub(crate) fn at_eof(&self) -> bool {
         self.lines.at_eof()
@@ -756,7 +1019,10 @@ impl<R: Read> FastaReader<R> {
     /// of the input after it. `FASTA_PROGRESS` posts to a listener only, and there is
     /// none. Without `fDLOptional` data before a definition line is the `eNoDefline`
     /// error. `CBadResiduesException` comes only with `fValidate`, which is not set.
-    pub(crate) fn read_one_seq(&mut self, warn: ReaderWarn<'_>) -> Result<Record, ReadError> {
+    pub(crate) fn read_one_seq(
+        &mut self,
+        warn: ReaderWarn<'_>,
+    ) -> Result<Record<S::Delta>, ReadError> {
         debug_assert!(
             self.state.flags.lower_case_masks || !self.state.flags.mask_from_fasta,
             "convert2blastmask's reader keeps the lower case masks"
@@ -778,9 +1044,9 @@ impl<R: Read> FastaReader<R> {
     fn read_one_seq_of<const MASKS: bool, const MASK_FROM_FASTA: bool>(
         &mut self,
         warn: ReaderWarn<'_>,
-    ) -> Result<Record, ReadError> {
+    ) -> Result<Record<S::Delta>, ReadError> {
         let state = &mut self.state;
-        state.seq_data.clear();
+        state.residues.clear();
         state.gaps.clear();
         state.current_gap_length = 0;
         state.total_gap_length = 0;
@@ -956,7 +1222,7 @@ fn data_line_counts(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
     data_line_counts_slow(checked, is_nuc)
 }
 
-impl RecordState {
+impl<S: ResidueStore> RecordState<S> {
     /// `ParseDefLine`: the title for the reader's checks
     /// (`CFastaDeflineReader::ParseDefline`), the ids (with `-parse_seqids`) or the
     /// generated local ID (`PostProcessIDs` without IDs), and the user object with the
@@ -1084,7 +1350,7 @@ impl RecordState {
         line_number: u64,
         warn: ReaderWarn<'_>,
     ) -> Result<(), ParseError> {
-        if !self.seq_data.is_empty() {
+        if !self.residues.is_empty() {
             return Ok(());
         }
         let len_to_check = s.len().min(70);
@@ -1156,7 +1422,7 @@ impl RecordState {
             Alphabet::Nucleotide
         };
         let actions = alphabet.actions();
-        let seq_data_length = self.seq_data.len() + s.len();
+        let seq_data_length = self.residues.len() + s.len();
         self.bad_positions.clear();
         let mut pos = 0;
         while pos < s.len() {
@@ -1180,21 +1446,13 @@ impl RecordState {
                 residue => {
                     self.close_gap(pos == 0, seq_data_length, raw_length);
                     // The residues that follow are stored at once (LOSAT's speed: no gap
-                    // is open after the first one). The switch stores a residue in upper case
-                    // (`tests::residue_tests_match_the_tables`).
+                    // is open after the first one).
                     let run = 1 + alphabet.residue_run(&s[pos + 1..]);
                     debug_assert!(run >= 1);
                     if MASKS {
                         self.mask_run(&s[pos..pos + run]);
                     }
-                    if run == 1 {
-                        self.seq_data.push(residue);
-                    } else if run < UPPER_BLOCK {
-                        self.seq_data
-                            .extend(s[pos..pos + run].iter().map(|&byte| actions[byte as usize]));
-                    } else {
-                        extend_upper(&mut self.seq_data, &s[pos..pos + run]);
-                    }
+                    self.residues.push_run(residue, &s[pos..pos + run], actions);
                     pos += run - 1;
                 }
             }
@@ -1202,7 +1460,7 @@ impl RecordState {
         }
         // NCBI resizes `m_SeqData` to the `TSeqPos` position `m_CurrentPos` (fasta.cpp:985): past
         // 2^32 residues the string keeps those written since the position last wrapped.
-        if self.seq_data.len() as u64 >= self.seq_pos_modulus {
+        if self.residues.len() as u64 >= self.seq_pos_modulus {
             self.wrap_seq_data();
         }
 
@@ -1225,8 +1483,8 @@ impl RecordState {
     /// for an empty `m_SeqData`.
     #[cold]
     fn wrap_seq_data(&mut self) {
-        let kept = (self.seq_data.len() as u64 % self.seq_pos_modulus) as usize;
-        self.seq_data.drain(..self.seq_data.len() - kept);
+        let kept = (self.residues.len() as u64 % self.seq_pos_modulus) as usize;
+        self.residues.keep_last(kept);
     }
 
     /// `bIsNuc` of `ParseDataLine` and of `CheckDataLine`: `fAssumeNuc` (with `fForceType`),
@@ -1244,7 +1502,7 @@ impl RecordState {
     /// `GetCurrentPos` with `ePosWithGapsAndSegs` (no `fInSegSet`, so `m_SegmentBase` is 0), a
     /// `TSeqPos`.
     fn current_pos_with_gaps(&self) -> u32 {
-        (self.seq_data.len() as u64 + self.total_gap_length) as u32
+        (self.residues.len() as u64 + self.total_gap_length) as u32
     }
 
     /// `OpenMask` and `CloseMask` of the residues of `run`, which are about to be stored: a
@@ -1320,11 +1578,12 @@ impl RecordState {
         if let Some(is_aa) = self.mol {
             return Ok(is_aa);
         }
-        if self.seq_data.is_empty() {
+        let letters = self.residues.letters();
+        if letters.is_empty() {
             return Ok(false);
         }
-        let length = self.seq_data.len().min(4096);
-        match sequence_type(&self.seq_data[..length]) {
+        let length = letters.len().min(4096);
+        match sequence_type(&letters[..length]) {
             Some(is_aa) => Ok(is_aa),
             None => Err(ParseError::new(
                 Thrower::AssignMolType,
@@ -1355,7 +1614,7 @@ impl RecordState {
             return;
         }
         let mut len = u64::from(self.current_gap_length);
-        let pos = self.seq_data.len();
+        let pos = self.residues.len();
         // `l` is the `TSeqPos` of `m_SeqData.length()` and `pos` the wrapped `m_CurrentPos`;
         // `pos + length()` is a `size_t` sum.
         let l = seq_data_length as u64 % self.seq_pos_modulus;
@@ -1379,10 +1638,10 @@ impl RecordState {
     /// default gap type (`m_gap_type`) is set neither by `CFastaBioseqSource` nor by
     /// `CMaskFastaReader`.
     fn parse_gap_line(&mut self, line: &[u8], line_number: u64, warn: ReaderWarn<'_>) {
-        self.close_gap(false, self.seq_data.len(), 0);
+        self.close_gap(false, self.residues.len(), 0);
 
         let mut remaining = truncate_spaces(&line[2..]);
-        let position = self.seq_data.len();
+        let position = self.residues.len();
         if let Some(rest) = remaining.strip_prefix(b"unk") {
             remaining = truncate_spaces_begin(rest);
         }
@@ -1485,8 +1744,9 @@ impl RecordState {
         &mut self,
         line_number: u64,
         warn: ReaderWarn<'_>,
-    ) -> Result<(SeqInst, bool), ReadError> {
-        self.close_gap(false, self.seq_data.len(), 0);
+    ) -> Result<(SeqInst<S::Delta>, bool), ReadError> {
+        self.residues.finish();
+        self.close_gap(false, self.residues.len(), 0);
         self.close_mask();
         // NCBI keeps the positions of a record in `TSeqPos` (`m_CurrentPos`, `SGap::m_uPos`,
         // `m_TotalGapLength`), which wrap at 2^32 (`RecordState::seq_pos_modulus`); past 2^32
@@ -1508,7 +1768,7 @@ impl RecordState {
 
         // `GetCurrentPos` with `ePosWithGaps`, `m_CurrentPos` plus `m_TotalGapLength`: the record's
         // length modulo 2^32, which makeblastdb tests and the `Seq-inst` takes.
-        let current = self.seq_data.len() as u64 % modulus;
+        let current = self.residues.len() as u64 % modulus;
         let total_gap_length = self.total_gap_length % modulus;
         let length = (current + total_gap_length) % modulus;
 
@@ -1529,14 +1789,15 @@ impl RecordState {
             } else {
                 length
             };
-            self.seq_data = self.substituted(keep, is_aa, warn)?;
+            let letters = self.substituted(keep, is_aa, warn)?;
+            self.residues.set_letters(letters);
             self.gaps.clear();
             self.total_gap_length = 0;
         }
         if too_long && !check_packing {
             return Ok((SeqInst::TooLong { length }, is_aa));
         }
-        if !substituted && self.gaps.is_empty() && self.seq_data.is_empty() {
+        if !substituted && self.gaps.is_empty() && self.residues.is_empty() {
             if !self.flags.disable_no_residues {
                 return Err(ReadError::Parse(ParseError::fasta_error(
                     ErrCode::NoResidues,
@@ -1546,8 +1807,8 @@ impl RecordState {
             }
             return Ok((SeqInst::Virtual, is_aa));
         }
-        if is_aa && self.gaps.is_empty() && !self.seq_data.is_empty() {
-            let seq_data = SeqData::Ncbieaa(std::mem::take(&mut self.seq_data));
+        if is_aa && self.gaps.is_empty() && !self.residues.is_empty() {
+            let seq_data = self.residues.literal_data(Coding::Ncbieaa);
             return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
 
@@ -1558,7 +1819,7 @@ impl RecordState {
         // wraps to 0).
         //
         // NCBI reference (598d8ae6): c++/include/corelib/tempstr.hpp:377-387
-        let size = self.seq_data.len() as u64;
+        let size = self.residues.len() as u64;
         let span = |pos: u64, len: u64| -> (usize, usize) {
             if pos >= size {
                 (0, 0)
@@ -1568,7 +1829,7 @@ impl RecordState {
         };
         let mut pieces = Vec::new();
         let add = |pieces: &mut Vec<DeltaSeq>,
-                   residues: &[u8],
+                   residues: &S,
                    (start, end): (usize, usize)|
          -> Result<(), ReadError> {
             if is_aa {
@@ -1592,7 +1853,7 @@ impl RecordState {
             } else {
                 length
             };
-            add(&mut pieces, &self.seq_data, span(0, len))?;
+            add(&mut pieces, &self.residues, span(0, len))?;
         }
         for i in 0..n {
             let gap = self.gaps[i];
@@ -1608,7 +1869,7 @@ impl RecordState {
             };
             if next_start != gap_pos(&gap) {
                 let seq_len = (next_start + modulus - gap_pos(&gap)) % modulus;
-                add(&mut pieces, &self.seq_data, span(gap_pos(&gap), seq_len))?;
+                add(&mut pieces, &self.residues, span(gap_pos(&gap), seq_len))?;
             }
         }
 
@@ -1618,24 +1879,17 @@ impl RecordState {
         if let [piece] = pieces[..] {
             let seq_data = match piece {
                 DeltaSeq::Literal(segment) => {
-                    debug_assert_eq!(segment.length as usize, self.seq_data.len());
-                    match segment.coding {
-                        Coding::Ncbi2na => {
-                            SeqData::Ncbi2na(pack::iupacna_to_ncbi2na(&self.seq_data))
-                        }
-                        Coding::Ncbi4na => {
-                            SeqData::Ncbi4na(pack::iupacna_to_ncbi4na(&self.seq_data))
-                        }
-                        Coding::Ncbieaa => {
-                            unreachable!("a protein of one literal has no gaps")
-                        }
+                    debug_assert_eq!(segment.length as usize, self.residues.len());
+                    if segment.coding == Coding::Ncbieaa {
+                        unreachable!("a protein of one literal has no gaps")
                     }
+                    self.residues.literal_data(segment.coding)
                 }
                 DeltaSeq::LocNull | DeltaSeq::Gap { .. } => SeqData::Other,
             };
             return Ok((SeqInst::Raw { length, seq_data }, is_aa));
         }
-        let residues = std::mem::take(&mut self.seq_data);
+        let residues = self.residues.take_delta();
         Ok((
             SeqInst::Delta {
                 length,
@@ -1665,7 +1919,7 @@ impl RecordState {
         warn: ReaderWarn<'_>,
     ) -> Result<Vec<u8>, ReadError> {
         let gap_char = if is_aa { b'X' } else { b'N' };
-        let residues = &self.seq_data[..];
+        let residues = self.residues.letters();
         let size = residues.len() as u64;
         let mut new_data = Vec::new();
         new_data
@@ -1818,20 +2072,20 @@ pub(crate) fn sequence_type(data: &[u8]) -> Option<bool> {
     }
 }
 
-/// `CDelta_ext::AddAndSplit` of the IUPACna residues `residues[start..end]`: one literal
-/// for each segment of `CSeqConvert::Pack`, or `ReadError::PackOverflow` at a segment whose
-/// byte count (`(length + 3) / 4` for NCBI2na, `(length + 1) / 2` for NCBI4na) wraps the
-/// `TSeqPos` (2^32, `modulus`) to 0.
+/// `CDelta_ext::AddAndSplit` of the nucleotide residues `start..end` of `residues`: one literal
+/// for each segment of `CSeqConvert::Pack` (`ResidueStore::pack`), or `ReadError::PackOverflow`
+/// at a segment whose byte count (`(length + 3) / 4` for NCBI2na, `(length + 1) / 2` for
+/// NCBI4na) wraps the `TSeqPos` (2^32, `modulus`) to 0.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Delta_ext.cpp:141-147,163-164,183-185,201-205
-fn add_and_split(
+fn add_and_split<S: ResidueStore>(
     pieces: &mut Vec<DeltaSeq>,
-    residues: &[u8],
+    residues: &S,
     start: usize,
     end: usize,
     modulus: u64,
 ) -> Result<(), ReadError> {
-    for segment in pack::pack_iupacna(&residues[start..end]) {
+    for segment in residues.pack(start, end) {
         let rounding = match segment.coding {
             Coding::Ncbi2na => 3,
             Coding::Ncbi4na => 1,

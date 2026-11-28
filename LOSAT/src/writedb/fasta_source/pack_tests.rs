@@ -177,7 +177,7 @@ fn ncbi4na_of_pieces() {
     assert_eq!(
         bytes(
             &|b| {
-                b.push_literal(b"AC", false);
+                b.push_letters(b"AC");
                 b.push_run(15, 1);
             },
             3
@@ -187,10 +187,10 @@ fn ncbi4na_of_pieces() {
     assert_eq!(
         bytes(
             &|b| {
-                b.push_literal(b"A", false);
-                b.push_literal(b"CGT", false);
+                b.push_letters(b"A");
+                b.push_letters(b"CGT");
                 b.push_run(15, 3);
-                b.push_literal(b"ACG", false);
+                b.push_letters(b"ACG");
                 b.push_run(15, 0);
                 b.push_run(15, 2);
             },
@@ -200,12 +200,12 @@ fn ncbi4na_of_pieces() {
     );
     for split in 0..=9 {
         let src = b"ACGTNRYKMS";
-        let whole = bytes(&|b| b.push_literal(src, false), 10);
+        let whole = bytes(&|b| b.push_letters(src), 10);
         assert_eq!(whole, iupacna_to_ncbi4na(src));
         let parts = bytes(
             &|b| {
-                b.push_literal(&src[..split], false);
-                b.push_literal(&src[split..], false);
+                b.push_letters(&src[..split]);
+                b.push_letters(&src[split..]);
             },
             10,
         );
@@ -213,13 +213,13 @@ fn ncbi4na_of_pieces() {
     }
 }
 
-/// The codes without a table are the table's for every byte whose best coding is NCBI2na (`A`,
-/// `C`, `G`, `T`, `U` in either case), and 0 for every other byte.
+/// The codes without a table are the table's for `A`, `C`, `G`, `T`, `U` and `N` in either
+/// case, and 0 for every other byte.
 #[test]
-fn the_codes_of_ncbi2na_letters_are_the_table() {
+fn the_codes_of_common_letters_are_the_table() {
     for byte in 0..=u8::MAX {
-        let code = ncbi4na_code_of_ncbi2na_letter(byte);
-        if is_ncbi2na_best(byte) {
+        let code = common_letter_code(byte);
+        if b"ACGTUNacgtun".contains(&byte) {
             assert_eq!(code, NCBI4NA_CODES[usize::from(byte)], "{byte:#04x}");
         } else {
             assert_eq!(code, 0, "{byte:#04x}");
@@ -227,17 +227,21 @@ fn the_codes_of_ncbi2na_letters_are_the_table() {
     }
 }
 
-/// The NCBI4na bytes of an NCBI2na literal (`Ncbi4naBuilder::push_literal`, by comparisons),
-/// after an even and after an odd count of letters, are those of the table's loop (the same
-/// letters as another literal: a pair of table codes a byte): every letter of
-/// an NCBI2na literal at every place of the first two blocks (and the letter after them), in
-/// lengths that end at that letter, at the end of the second block and after it, and every length
-/// up to 200.
+/// The residue letters of makeblastdb's nucleotide reader, in either case.
+const NUCLEOTIDES: &[u8] = b"ABCDGHKMNRSTUVWYabcdghkmnrstuvwy";
+
+/// The NCBI4na bytes of `push_letters` (blocks by comparisons where every letter is `A`, `C`,
+/// `G`, `T`, `U` or `N`, else by the table; the last letters in a block filled up) are those of
+/// the table one letter at a time, after an even and after an odd count of letters: every residue
+/// letter of the reader (and three other bytes) at every place of the first two blocks (and the
+/// letter after them), in lengths that end at that letter, at the end of the second block and
+/// after it, every length up to 200, and random letters of the reader in runs of lengths across
+/// blocks.
 #[test]
-fn ncbi2na_letters_are_the_table_of_every_letter() {
+fn letters_are_the_table_of_every_letter() {
     let built = |push: &dyn Fn(&mut Ncbi4naBuilder, &[u8]), first: &[u8], src: &[u8]| {
-        let mut builder = Ncbi4naBuilder::with_letters(first.len() + src.len()).unwrap();
-        builder.push_literal(first, false);
+        let mut builder = Ncbi4naBuilder::default();
+        builder.push_letters_by_table(first);
         push(&mut builder, src);
         assert_eq!(builder.letters(), first.len() + src.len());
         builder.into_bytes()
@@ -245,29 +249,228 @@ fn ncbi2na_letters_are_the_table_of_every_letter() {
     let check = |src: &[u8]| {
         for first in [&b""[..], b"N", b"AC", b"TGA"] {
             assert_eq!(
-                built(&|b, s| b.push_literal(s, true), first, src),
-                built(&|b, s| b.push_literal(s, false), first, src),
+                built(&|b, s| b.push_letters(s), first, src),
+                built(&|b, s| b.push_letters_by_table(s), first, src),
                 "{first:?} then {src:?}"
             );
         }
     };
-    let letters = b"ACGTUacgtu";
-    let bases: Vec<u8> = (0..200).map(|i| letters[(i * 7 + i / 10) % 10]).collect();
-    for place in 0..2 * NCBI2NA_LETTER_BLOCK + 1 {
-        for &letter in letters {
+    let letters = b"ACGTUNacgtun";
+    let bases: Vec<u8> = (0..200).map(|i| letters[(i * 7 + i / 12) % 12]).collect();
+    for place in 0..2 * LETTER_BLOCK + 1 {
+        for &byte in NUCLEOTIDES.iter().chain(b"-\x00\xff") {
             let mut src = bases.clone();
-            src[place] = letter;
-            for length in [
-                place + 1,
-                2 * NCBI2NA_LETTER_BLOCK,
-                2 * NCBI2NA_LETTER_BLOCK + 3,
-            ] {
+            src[place] = byte;
+            for length in [place + 1, 2 * LETTER_BLOCK, 2 * LETTER_BLOCK + 3] {
                 check(&src[..length.max(place + 1)]);
             }
         }
     }
     for length in 0..=bases.len() {
         check(&bases[..length]);
+    }
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut next = move |bound: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % bound
+    };
+    for _ in 0..200 {
+        let length = next(700) as usize;
+        let ambiguous = next(4);
+        let src: Vec<u8> = (0..length)
+            .map(|_| {
+                if next(64) < ambiguous {
+                    NUCLEOTIDES[next(NUCLEOTIDES.len() as u64) as usize]
+                } else {
+                    letters[next(12) as usize]
+                }
+            })
+            .collect();
+        check(&src);
+    }
+}
+
+/// A code is one base exactly where its letter's best coding is NCBI2na, for every byte (the
+/// classes of `pack_ncbi4na` and `pack_iupacna` agree), and the tests of a byte's two codes are
+/// those of each code.
+#[test]
+fn the_class_of_a_code_is_the_class_of_its_letter() {
+    for byte in 0..=u8::MAX {
+        assert_eq!(
+            is_one_base(ncbi4na_code(byte)),
+            is_ncbi2na_best(byte),
+            "{byte:#04x}"
+        );
+    }
+    for high in 1..16u8 {
+        for low in 1..16u8 {
+            let byte = high << 4 | low;
+            assert_eq!(
+                holds_ambiguous(byte),
+                !is_one_base(high) || !is_one_base(low),
+                "{byte:#04x}"
+            );
+            assert_eq!(
+                holds_one_base(byte),
+                is_one_base(high) || is_one_base(low),
+                "{byte:#04x}"
+            );
+        }
+    }
+}
+
+/// The NCBI4na codes of `letters`, two to a byte.
+fn codes_of(letters: &[u8]) -> Vec<u8> {
+    let mut builder = Ncbi4naBuilder::default();
+    builder.push_letters_by_table(letters);
+    builder.into_bytes()
+}
+
+/// The segments of `pack_ncbi4na` over the codes of any span of residues are those of
+/// `pack_iupacna` over the span's letters: runs of every class of every length around the
+/// search's edges and the block sizes (1 to 5, 19 to 21, 63 to 65, 4,095 to 4,097), boundaries
+/// at even and odd places, spans that start and end in either half of a byte, and every length
+/// up to 300.
+#[test]
+fn segments_of_codes_are_those_of_letters() {
+    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    let mut next = move |bound: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % bound
+    };
+    const RUNS: [usize; 15] = [1, 2, 3, 4, 5, 19, 20, 21, 63, 64, 65, 4095, 4096, 4097, 600];
+    let check = |letters: &[u8], start: usize, end: usize| {
+        let codes = codes_of(letters);
+        assert_eq!(
+            pack_ncbi4na(&codes, start, end),
+            pack_iupacna(&letters[start..end]),
+            "{start}..{end} of {} letters",
+            letters.len()
+        );
+    };
+    for round in 0..400 {
+        let mut letters = Vec::new();
+        let runs = 1 + next(8);
+        let mut wide = next(2) == 1;
+        for _ in 0..runs {
+            let length = if round % 2 == 0 {
+                RUNS[next(RUNS.len() as u64) as usize]
+            } else {
+                1 + next(40) as usize
+            };
+            for _ in 0..length {
+                letters.push(if wide {
+                    b"NRYKMSWBDHVnrykmswbdhv"[next(22) as usize]
+                } else {
+                    b"ACGTUacgtu"[next(10) as usize]
+                });
+            }
+            wide = !wide;
+        }
+        let n = letters.len();
+        check(&letters, 0, n);
+        for _ in 0..4 {
+            let start = next(n as u64 + 1) as usize;
+            let end = start + next((n - start) as u64 + 1) as usize;
+            check(&letters, start, end);
+        }
+    }
+    let src: Vec<u8> = (0..300usize)
+        .map(|i| b"ACGTNACGTRACGTACGTUM"[(i * 7 + i / 20) % 20])
+        .collect();
+    for length in 0..=src.len() {
+        check(&src[..length], 0, length);
+        if length > 1 {
+            check(&src[..length], 1, length);
+            check(&src[..length], 1, length - 1);
+        }
+    }
+}
+
+/// The NCBI2na bytes of a raw sequence's codes are those of its letters
+/// (`iupacna_to_ncbi2na`), for every length up to 300 and random bases in either case; and each
+/// code of one base gives its NCBI2na code at each of the four places of a pair of bytes.
+#[test]
+fn ncbi2na_of_codes_is_ncbi2na_of_letters() {
+    for (letter, code) in [(b'A', 0u8), (b'C', 1), (b'G', 2), (b'T', 3)] {
+        let nibble = ncbi4na_code(letter);
+        for (place, pair) in [[nibble << 4, 0], [nibble, 0], [0, nibble << 4], [0, nibble]]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(
+                ncbi2na_of_pair(pair),
+                code << (6 - 2 * place),
+                "{letter} {place}"
+            );
+        }
+    }
+    let mut state = 0x0fed_cba9_8765_4321_u64;
+    let mut next = move |bound: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % bound
+    };
+    for round in 0..4 {
+        let src: Vec<u8> = (0..300).map(|_| b"ACGTUacgtu"[next(10) as usize]).collect();
+        for length in 0..=src.len() {
+            let letters = &src[..length];
+            let upper = letters.to_ascii_uppercase();
+            assert_eq!(
+                ncbi4na_to_ncbi2na(&codes_of(letters), length),
+                iupacna_to_ncbi2na(&upper),
+                "round {round} length {length}"
+            );
+        }
+    }
+}
+
+/// `push_ncbi4na` from every base of a source, after an even and after an odd count of letters
+/// (the copy of whole bytes and the shift by one base), for every count, appends the codes of
+/// those bases (`push_letters_by_table` of their letters); the count is cut to the source's
+/// bases.
+#[test]
+fn ncbi4na_from_any_base() {
+    // An even count: the source has no half byte after its last base.
+    let letters: Vec<u8> = (0..78usize)
+        .map(|i| b"ACGTNRYKMSWBDHV"[(i * 11 + i / 15) % 15])
+        .collect();
+    let src = codes_of(&letters);
+    for first in [&b""[..], b"N", b"AC", b"TGA"] {
+        for start in 0..=letters.len() + 1 {
+            for count in 0..=letters.len() + 2 - start.min(letters.len()) {
+                let mut built = Ncbi4naBuilder::default();
+                built.push_letters_by_table(first);
+                built.push_ncbi4na(&src, start, count);
+                let mut expected = Ncbi4naBuilder::default();
+                expected.push_letters_by_table(first);
+                let from = start.min(letters.len());
+                expected.push_letters_by_table(&letters[from..(start + count).min(letters.len())]);
+                assert_eq!(built, expected, "{first:?} {start} {count}");
+            }
+        }
+    }
+}
+
+/// `drop_front` keeps the codes of the last letters, with an even and an odd count dropped and
+/// kept.
+#[test]
+fn dropping_the_first_letters() {
+    let letters: Vec<u8> = (0..40usize).map(|i| b"ACGTNRYKM"[i % 9]).collect();
+    for length in 0..=letters.len() {
+        for count in 0..=length {
+            let mut built = Ncbi4naBuilder::default();
+            built.push_letters(&letters[..length]);
+            built.drop_front(count);
+            let mut expected = Ncbi4naBuilder::default();
+            expected.push_letters_by_table(&letters[count..length]);
+            assert_eq!(built, expected, "{length} {count}");
+        }
     }
 }
 
@@ -326,7 +529,7 @@ fn ncbi8na_of_both_codings() {
         );
     }
     let mut seq4na = Ncbi4naBuilder::with_letters(6).unwrap();
-    seq4na.push_literal(b"ACGTUN", false);
+    seq4na.push_letters(b"ACGTUN");
     assert_eq!(seq4na.into_bytes(), [0x12, 0x48, 0x8f]);
 }
 

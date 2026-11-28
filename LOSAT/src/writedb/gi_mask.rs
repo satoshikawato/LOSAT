@@ -29,7 +29,7 @@
 //! reproduce (survey D6).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::column::{write_pad_bytes_string, write_string_var};
 use super::files::WriteDbFile;
@@ -453,12 +453,20 @@ fn files_place(name: &[u8]) -> Option<(PathBuf, Vec<u8>)> {
         Some(at) => (&name[..=at], &name[at + 1..]),
         None => (b".".as_slice(), name),
     };
-    let dir = std::fs::canonicalize(crate::utils::os_bytes::path_of_bytes(dir)).ok()?;
+    let dir = resolved_dir(&crate::utils::os_bytes::path_of_bytes(dir))?;
     if cfg!(any(windows, target_os = "macos")) {
         let dir = PathBuf::from(dir.to_string_lossy().to_lowercase());
         return Some((dir, lowercase_utf8_bytes(file)));
     }
     Some((dir, file.to_vec()))
+}
+
+/// The directory `dir` resolved through symbolic links, as `realpath(3)` resolves it
+/// (`utils::same_file::canonical_path`: also where the platform has no `canonicalize`, LOSAT Web's
+/// engine, so that two names of one directory are one place there too; line NP WW4b1,
+/// 2026-11-27); `None` where it is not a directory.
+fn resolved_dir(dir: &Path) -> Option<PathBuf> {
+    crate::utils::same_file::canonical_path(dir).filter(|path| path.is_dir())
 }
 
 /// The refusal of the algorithm `second`, whose next record would open a GI-mask data file that

@@ -118,6 +118,17 @@ pub(super) fn batch_failure(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+/// The first query of the call's first searched batch (`batches`, with whether NCBI skips each
+/// query's batch, `skipped`: no valid context), whose setup's failure (`batch_failure`) comes
+/// after the reports of the batches before; 0 where the call searches no batch.
+pub(super) fn first_searched_query(batches: &[seq_range::RangedBatch], skipped: &[bool]) -> usize {
+    batches
+        .iter()
+        .find(|batch| !batch.searched.is_empty() && !skipped[batch.searched.start])
+        .map_or(0, |batch| batch.searched.start)
+}
+
 /// The text of NCBI's engine error of a failed setup check of a batch (`SplitBatchSteps`' setup
 /// checks), apart from LOSAT's refusals there.
 #[derive(Debug)]
@@ -371,9 +382,14 @@ fn call_steps(
         match steps.unmet_checks() {
             Some(unmet) => {
                 debug_assert!(!searched_before, "a later batch meets no check");
+                // The refusal of a count of 0 that the traceback's own setup of this batch meets
+                // (NCBI divides by the count there and crashes) comes after the reports of the
+                // batches before, of invalid queries only (`batch_failure`, line RG item bp-SF1).
                 return Ok(match unmet {
                     UnmetChecks::TracebackFailed => CallSteps::FirstBatchError(TRACEBACK_FAILED),
-                    UnmetChecks::Refusal(refusal) => CallSteps::Fails(refusal),
+                    UnmetChecks::Refusal(refusal) => {
+                        CallSteps::Fails(batch_failure(args, range.start, refusal))
+                    }
                 });
             }
             None => searched_before = true,
@@ -388,7 +404,8 @@ fn call_steps(
 /// order: a split first searched batch's steps (`call_steps`), then the read of OID 0 of a database
 /// without sequences, the database's extent (`call_setup::db_extent`) and NCBI's error of its
 /// setup's average subject length (`call_setup::setup_fails`, after LOSAT's refusal of a count of
-/// 0). `setup_error` makes NCBI's engine error of the first searched batch
+/// 0, the first searched batch's failure: `batch_failure`). `setup_error` makes NCBI's engine
+/// error of the first searched batch
 /// (`preliminary_search_error`) of a database's name and a text. Gives whether the call's search
 /// reads the database (`CallSteps::Search`) and the extent.
 pub(super) fn first_batch_setup<'a>(
@@ -420,12 +437,22 @@ pub(super) fn first_batch_setup<'a>(
         ));
     }
     let extent = call_setup::db_extent(args, database, subjects)?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
+    // LOSAT's refusal of a count of 0 (`call_setup::setup_fails`) is the failure of NCBI's first
+    // searched batch, whose setup divides by the count and crashes (SIGFPE) after the batch loop
+    // has printed the reports of the batches before, of invalid queries only: the refusal comes
+    // after them (`batch_failure`; line RG item bp-SF1, NCBI 2.17.0 probes of six X-only batches
+    // before a valid query, as BLASTN's and TBLASTN's of D1a-5).
+    let any_valid = contexts.iter().any(|ctx| ctx.is_valid);
+    let fails = call_setup::setup_fails(args, &extent, any_valid).map_err(|refusal| {
+        batch_failure(args, first_searched_query(batches.0, skipped), refusal)
+    })?;
     // The setup of the first searched batch fails: NCBI has written the outfmt 0 prolog and the
     // batch's reader messages (`preliminary_search_error`; NCBI 2.17.0 blastp and psiblast
     // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
     // batch of invalid queries only, which NCBI does not search, the error follows the reports of
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
-    if call_setup::setup_fails(args, &extent, contexts.iter().any(|ctx| ctx.is_valid))? {
+    if fails {
         return Err(setup_error(
             b"",
             crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,

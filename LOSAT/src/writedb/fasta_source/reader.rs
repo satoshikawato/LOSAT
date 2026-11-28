@@ -633,8 +633,8 @@ pub(crate) trait ResidueStore {
     /// holds as letters).
     fn finish(&mut self);
     /// `CSeqConvert::Pack` of the nucleotide residues `start..end`: the segments of
-    /// `pack::pack_iupacna` for their letters, starts counted from `start`.
-    fn pack(&self, start: usize, end: usize) -> Vec<Segment>;
+    /// `pack::pack_iupacna` for their letters, starts counted from `start`, to `emit` in order.
+    fn pack(&self, start: usize, end: usize, emit: impl FnMut(Segment));
     /// The `Seq-data` of the one literal of all residues in `coding` (a raw sequence).
     fn literal_data(&mut self, coding: Coding) -> SeqData;
     /// The residues, which a delta takes along; the store is left with none.
@@ -695,8 +695,8 @@ impl ResidueStore for Letters {
 
     fn finish(&mut self) {}
 
-    fn pack(&self, start: usize, end: usize) -> Vec<Segment> {
-        pack::pack_iupacna(&self.0[start..end])
+    fn pack(&self, start: usize, end: usize, emit: impl FnMut(Segment)) {
+        pack::pack_iupacna(&self.0[start..end], emit);
     }
 
     /// NCBI's `Convert` of the letters into the segment's coding; a protein's NCBIeaa is the
@@ -815,9 +815,9 @@ impl ResidueStore for Ncbi4naResidues {
         }
     }
 
-    fn pack(&self, start: usize, end: usize) -> Vec<Segment> {
+    fn pack(&self, start: usize, end: usize, emit: impl FnMut(Segment)) {
         debug_assert_eq!(self.staged, 0, "packed after finish");
-        pack::pack_ncbi4na(self.codes.bytes(), start, end)
+        pack::pack_ncbi4na(self.codes.bytes(), start, end, emit);
     }
 
     /// The NCBI2na of the codes (`pack::ncbi4na_to_ncbi2na`), the store kept; or the codes
@@ -2115,19 +2115,21 @@ fn add_and_split<S: ResidueStore>(
     end: usize,
     modulus: u64,
 ) -> Result<(), ReadError> {
-    for segment in residues.pack(start, end) {
+    let mut overflow = false;
+    residues.pack(start, end, |segment| {
         let rounding = match segment.coding {
             Coding::Ncbi2na => 3,
             Coding::Ncbi4na => 1,
             Coding::Ncbieaa => 0,
         };
-        if u64::from(segment.length) + rounding >= modulus {
-            return Err(ReadError::PackOverflow);
-        }
+        overflow |= u64::from(segment.length) + rounding >= modulus;
         pieces.push(DeltaSeq::Literal(Segment {
             start: segment.start + start as u32,
             ..segment
         }));
+    });
+    if overflow {
+        return Err(ReadError::PackOverflow);
     }
     Ok(())
 }

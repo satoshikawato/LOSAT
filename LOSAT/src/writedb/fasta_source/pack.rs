@@ -183,9 +183,10 @@ impl Packer {
 /// IUPACna). The two arrangements cost the same when the residues are one run of one or
 /// two unambiguous bases (128 + 1 byte in either coding), and the comparison then takes
 /// the wide one: such a sequence is NCBI4na. The segments' bytes are made by the caller
-/// (`iupacna_to_ncbi2na`, `iupacna_to_ncbi4na`).
-pub(super) fn pack_iupacna(src: &[u8]) -> Vec<Segment> {
-    pack_runs(src.len(), |pos| {
+/// (`iupacna_to_ncbi2na`, `iupacna_to_ncbi4na`). Each segment goes to `emit` in order, as
+/// `CDelta_ext_PackTarget` appends it (LOSAT's speed: no list of the segments a literal).
+pub(super) fn pack_iupacna(src: &[u8], emit: impl FnMut(Segment)) {
+    pack_runs(src.len(), emit, |pos| {
         let wide = BEST_IS_NCBI4NA[src[pos] as usize];
         let rest = &src[pos + 1..];
         let diff = |&residue: &u8| BEST_IS_NCBI4NA[residue as usize] != wide;
@@ -204,7 +205,7 @@ pub(super) fn pack_iupacna(src: &[u8]) -> Vec<Segment> {
             pos + 5 + run.unwrap_or(tail.len())
         };
         (wide == 1, end)
-    })
+    });
 }
 
 /// Whether the NCBI4na code `code` (1 to 15) is one base (1, 2, 4 or 8): the class of a
@@ -262,7 +263,7 @@ const PAIR_CLASSES: [u8; 256] = {
 /// ([`is_one_base`]), which is the class of its letter, so the segments are those that
 /// [`pack_iupacna`] gives for the residues' letters (makeblastdb's reader stores codes,
 /// `reader::Ncbi4naResidues`; NCBI's packs the letters). The bytes of a segment are the caller's
-/// (`ncbi4na_to_ncbi2na`, or the residues' own bytes).
+/// (`ncbi4na_to_ncbi2na`, or the residues' own bytes); each goes to `emit` in order.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1058-1063,1078-1080,1105-1107
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1124-1192
@@ -272,7 +273,7 @@ const PAIR_CLASSES: [u8; 256] = {
 /// the bytes after two bytes in a row of the run's class are searched for the next byte with a
 /// code of the other class ([`find_first`], LOSAT's speed: four letters, then a search when
 /// twenty or more are left, as `pack_iupacna` scans letters).
-pub(crate) fn pack_ncbi4na(src: &[u8], start: usize, end: usize) -> Vec<Segment> {
+pub(crate) fn pack_ncbi4na(src: &[u8], start: usize, end: usize, emit: impl FnMut(Segment)) {
     // The class bits of a byte inside the current run (`inside`) are 3 (codes that are not one
     // base) or 0; `flip` starts a run of the other class at residue `pos`.
     #[inline(always)]
@@ -294,7 +295,7 @@ pub(crate) fn pack_ncbi4na(src: &[u8], start: usize, end: usize) -> Vec<Segment>
         }
     }
     if start == end {
-        return Vec::new();
+        return;
     }
     let mut packer = Packer::new();
     let mut inside = if is_one_base(nibble(src, start)) {
@@ -346,17 +347,22 @@ pub(crate) fn pack_ncbi4na(src: &[u8], start: usize, end: usize) -> Vec<Segment>
         flip(&mut packer, start, 2 * last, &mut inside);
     }
     packer.add_boundary((end - start) as u32, None);
-    packer.segments()
+    packer.segments(emit);
 }
 
 /// `CPacker::Pack` once its scan has found the runs of one best coding: `next_run(pos)` gives
 /// whether the residue at `pos` is best as NCBI4na and where its run ends, for the residues
-/// `0..length`. The segments of the best arrangement, each of the codings of its runs.
+/// `0..length`. The segments of the best arrangement, each of the codings of its runs, go to
+/// `emit` in order.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1124-1192
-fn pack_runs(length: usize, mut next_run: impl FnMut(usize) -> (bool, usize)) -> Vec<Segment> {
+fn pack_runs(
+    length: usize,
+    emit: impl FnMut(Segment),
+    mut next_run: impl FnMut(usize) -> (bool, usize),
+) {
     if length == 0 {
-        return Vec::new();
+        return;
     }
     let mut packer = Packer::new();
     let mut pos = 0;
@@ -366,7 +372,7 @@ fn pack_runs(length: usize, mut next_run: impl FnMut(usize) -> (bool, usize)) ->
         pos = end;
     }
     packer.add_boundary(length as u32, None);
-    packer.segments()
+    packer.segments(emit);
 }
 
 /// The coding of a residue of the class `wide` (not one base: NCBI4na; one base: NCBI2na).
@@ -391,13 +397,13 @@ impl Packer {
     }
 
     /// The segments of the best arrangement, once the last boundary (the end of the residues)
-    /// is added: each of the codings of its runs.
+    /// is added: each of the codings of its runs, to `emit` in order.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1124-1192
     /// Inlined into each scan, as `add_boundary` (LOSAT's speed: a short record's call and copy
     /// of the packer cost more than its steps).
     #[inline(always)]
-    fn segments(mut self) -> Vec<Segment> {
+    fn segments(mut self, mut emit: impl FnMut(Segment)) {
         // The best arrangement's codings, from the last segment back: each step becomes 1
         // where the segment it starts is NCBI4na.
         let mut narrow = self.narrow_cost < self.wide_cost;
@@ -413,7 +419,6 @@ impl Packer {
         }
         let steps = &self.steps;
         let n = steps.len();
-        let mut segments = Vec::new();
         let mut i = 0;
         while i < n {
             let wide = steps[i];
@@ -421,14 +426,13 @@ impl Packer {
             while i < n - 1 && steps[i + 1] == wide {
                 i += 1;
             }
-            segments.push(Segment {
+            emit(Segment {
                 coding: coding_of_class(wide == 1),
                 start,
                 length: self.boundaries[i + 1] - start,
             });
             i += 1;
         }
-        segments
     }
 }
 

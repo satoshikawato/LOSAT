@@ -1,10 +1,24 @@
 use super::*;
 
 fn segments(src: &[u8]) -> Vec<(Coding, u32, u32)> {
-    pack_iupacna(src)
+    letter_segments(src)
         .into_iter()
         .map(|segment| (segment.coding, segment.start, segment.length))
         .collect()
+}
+
+/// The segments that `pack_iupacna` emits for `src`.
+fn letter_segments(src: &[u8]) -> Vec<Segment> {
+    let mut segments = Vec::new();
+    pack_iupacna(src, |segment| segments.push(segment));
+    segments
+}
+
+/// The segments that `pack_ncbi4na` emits for the residues `start..end` of `codes`.
+fn code_segments(codes: &[u8], start: usize, end: usize) -> Vec<Segment> {
+    let mut segments = Vec::new();
+    pack_ncbi4na(codes, start, end, |segment| segments.push(segment));
+    segments
 }
 
 /// One run of unambiguous bases: NCBI4na for one or two bases (equal costs, the wide
@@ -121,7 +135,7 @@ fn least_cost_of_all_arrangements() {
                 .collect();
             least = least.min(cost(&codings));
         }
-        let packed = pack_iupacna(&src);
+        let packed = letter_segments(&src);
         let mut end = 0;
         for (index, segment) in packed.iter().enumerate() {
             assert_eq!(segment.start, end);
@@ -348,8 +362,8 @@ fn segments_of_codes_are_those_of_letters() {
     let check = |letters: &[u8], start: usize, end: usize| {
         let codes = codes_of(letters);
         assert_eq!(
-            pack_ncbi4na(&codes, start, end),
-            pack_iupacna(&letters[start..end]),
+            code_segments(&codes, start, end),
+            letter_segments(&letters[start..end]),
             "{start}..{end} of {} letters",
             letters.len()
         );

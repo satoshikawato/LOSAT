@@ -170,6 +170,10 @@ impl<R: Read> FastaBioseqSource<R> {
     /// A failed read of the input ends the reading with "Read error" and the system's
     /// message (LOSAT's text: NCBI's line reader throws a `CIOException` "Read error").
     /// After an error the source returns `None`.
+    ///
+    /// Inlined into `BuildDatabase::add_sequences`, its caller, as before the reader had two
+    /// forms (LOSAT's speed: as a call, ~110 more instructions a record of 20 residues).
+    #[inline(always)]
     pub fn next_bioseq(&mut self, warn: Warn<'_>) -> Result<Option<Bioseq>, SourceError> {
         let next = match &mut self.reader {
             None => return Ok(None),

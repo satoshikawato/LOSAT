@@ -2740,6 +2740,10 @@ mod import_tests;
 mod strategy_tests;
 
 #[cfg(test)]
+#[path = "run_psiblast_xml2_tests.rs"]
+mod psiblast_xml2_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

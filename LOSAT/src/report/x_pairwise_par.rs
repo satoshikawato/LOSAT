@@ -891,11 +891,14 @@ fn html_links_densegs<S: QuerySections, W: ReportWrite>(
 }
 
 /// What the report of query `query` writes to the run's diagnostics at `place`, after the report
-/// written so far (`writer`, flushed first): a load's text (`QueryWarnings::subject_read`) or what
-/// a `-html` read of NCBI's formatter registries posts (`html_at_place`). Inlined at each hook of
-/// the writers: the plain report's places are the loads that it reads alone (line RG T4a2 fix
-/// round 2, review c C5: an out-of-line call at each load of a plain run).
-#[inline]
+/// written so far (`writer`, flushed first): a load's text (`QueryWarnings::subject_read`), the
+/// posts of the formatter's reads of a definition line (`title_reads`) or what a `-html` read of
+/// NCBI's formatter registries posts (`html_at_place`). Always inlined at each hook of the
+/// writers: the plain report's places are the loads that it reads alone (line RG T4a2 fix round 2,
+/// review c C5: an out-of-line call at each load of a plain run), and with the arm of the reads of
+/// the definition lines the hint alone left it out of line (line RG-KB item 9b-2, PR2's cost run
+/// fx3f: +2.4k instructions in BLASTN's outfmt 0 run, +18.8k in TBLASTX's).
+#[inline(always)]
 pub(crate) fn at_place<W: io::Write>(
     warnings: Option<&mut QueryWarnings<'_>>,
     links: Option<&super::html_ids::HtmlLinks>,

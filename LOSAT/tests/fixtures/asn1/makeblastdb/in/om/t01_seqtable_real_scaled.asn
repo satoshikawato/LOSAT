@@ -1,0 +1,18 @@
+Seq-entry ::= seq {
+  id { local str "Query_1" },
+  descr { title "t" },
+  inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKVLAAGIVG" },
+  annot {
+    {
+      data seq-table {
+        feat-type 1,
+        num-rows 1,
+        columns {
+          { header { field-id location-id }, default id local str "Query_1" },
+          { header { field-id location-from }, data int { 3 } },
+          { header { field-id location-fuzz-from-lim }, data real-scaled { mul { 1, 10, 0 }, add { 0, 10, 0 }, data int { 1 } } }
+        }
+      }
+    }
+  }
+}

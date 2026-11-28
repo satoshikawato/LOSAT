@@ -1181,9 +1181,8 @@ fn multi_size_step(data: V<'_>) -> Result<u64, V<'_>> {
         "bit" => value.octets().len() as u64 * 8,
         "bit-bvector" => value.field(member::bvector_data::SIZE).int() as u32 as u64,
         "int-delta" => return Err(value),
-        "int-scaled" | "real-scaled" => {
-            return Err(value.field(member::scaled_int_multi_data::DATA))
-        }
+        "int-scaled" => return Err(value.field(member::scaled_int_multi_data::DATA)),
+        "real-scaled" => return Err(value.field(member::scaled_real_multi_data::DATA)),
         _ => value.len() as u64,
     })
 }

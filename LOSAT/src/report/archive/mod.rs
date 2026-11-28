@@ -23,6 +23,7 @@
 
 pub mod bioseq;
 pub mod fields;
+pub(crate) mod filter_string;
 pub mod masks;
 pub mod options;
 pub(crate) mod read;
@@ -49,8 +50,8 @@ use crate::stats::tables::KarlinParams;
 use options::OptionInputs;
 
 pub use writer::{
-    write_archive, write_error_archive, AlignSource, ArchiveOut, ArchiveRound, BatchArchive,
-    KaBlock, RequestInputs, SearchedContext0,
+    write_archive, write_error_archive, AlignSource, ArchiveRound, BatchArchive, KaBlock,
+    RequestInputs, SearchedContext0,
 };
 
 /// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes: the missing

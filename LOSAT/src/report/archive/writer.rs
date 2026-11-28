@@ -184,19 +184,9 @@ impl<'s, E: Encoder> ArchiveOut<'s, E> {
         }
     }
 
-    /// Hands the encoder's final bytes to the sink once enough have gathered. Call it after
-    /// each element of a long list.
-    pub fn flush_if_large(&mut self) {
-        if self.io_error.is_none() && self.enc.buffered() >= FLUSH_BYTES {
-            if let Err(error) = self.enc.flush_to(self.sink, false) {
-                self.io_error = Some(error);
-            }
-        }
-    }
-
     /// Runs `write` with the encoder and a function that hands the encoder's final bytes to
-    /// the sink (what `flush_if_large` does), for a writer that holds the encoder while it
-    /// writes an element.
+    /// the sink once enough have gathered (`FLUSH_BYTES`; the writers call it after each element
+    /// of a long list).
     pub fn write_with<R>(&mut self, write: impl FnOnce(&mut E, &mut dyn FnMut(&mut E)) -> R) -> R {
         let ArchiveOut {
             enc,
@@ -267,12 +257,71 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> ArchiveOut<'_, 
     }
 }
 
-/// The Seq-aligns of a batch: written as the elements of the `alignments` list.
+/// The Seq-aligns of a batch: written as the elements of the `alignments` list, `flush` after
+/// each (`ArchiveOut::write_with`).
 pub trait AlignSource {
-    fn write<E: Encoder>(&mut self, out: &mut ArchiveOut<'_, E>) -> Result<()>;
+    fn write<E: Encoder>(&mut self, enc: &mut E, flush: &mut dyn FnMut(&mut E)) -> Result<()>;
 }
 
-fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
+/// The `queries` of a request (`Blast4-queries`): the variant and the count of its elements.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum QueryList {
+    /// `pssm`: the one PSSM.
+    Pssm,
+    /// `seq-loc-list` of so many Seq-locs.
+    SeqLocs(usize),
+    /// `bioseq-set` of so many Bioseqs (each the `seq` of a `Seq-entry`).
+    Bioseqs(usize),
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:352-364,555-560,609-656
+/// What the `queue-search` request of an archive or a search strategy holds
+/// (`write_request_body`, the one writer of the request, as NCBI's `CExportStrategy` is): the
+/// search programs' request of a query batch (`BatchRequest`) and blast_formatter's request
+/// rebuilt from the archive it read (`blast_formatter::archive_out`).
+pub(crate) trait RequestSource {
+    /// The request's `program` and `service`.
+    fn program_and_service(&self) -> (&str, &str);
+    /// The variant of its `queries` and their count.
+    fn queries(&self) -> QueryList;
+    /// The PSSM, the Seq-loc or the Bioseq `index` of the queries (`queries` their list).
+    fn write_query<E: Encoder>(&self, enc: &mut E, queries: QueryList, index: usize);
+    /// The `database` subject; `None` for the `sequences` subject.
+    fn database(&self) -> Option<&[u8]>;
+    /// The count of the `sequences` subject's Bioseqs.
+    fn subjects(&self) -> usize;
+    /// The subject's Bioseq `index`.
+    fn write_subject<E: Encoder>(&self, enc: &mut E, index: usize);
+    /// The parameters of `algorithm-options` (each `write_param`).
+    fn write_algorithm_options<E: Encoder>(&self, enc: &mut E);
+    /// Whether the request has `program-options`, and its parameters.
+    fn has_program_options(&self) -> bool;
+    fn write_program_options<E: Encoder>(&self, enc: &mut E);
+    /// The `Web_StepNumber` of `format-options`.
+    fn step_number(&self) -> Option<i32>;
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/build_archive.cpp:84-152
+/// What the `results` of an archive hold (`write_archive_document`, the one writer of the
+/// archive, as NCBI's `s_BuildArchiveAll` is): the search programs' results of a batch
+/// (`BatchResults`) and blast_formatter's results read from the archive.
+pub(crate) trait ResultsSource {
+    /// The Seq-aligns, each an element of the `alignments` list, `flush` after each.
+    fn write_alignments<E: Encoder>(
+        &mut self,
+        enc: &mut E,
+        flush: &mut dyn FnMut(&mut E),
+    ) -> Result<()>;
+    /// The count of the `masks`, and the `Blast4-mask` `index`.
+    fn masks(&self) -> usize;
+    fn write_mask<E: Encoder>(&self, enc: &mut E, index: usize);
+    /// The ungapped and the gapped block.
+    fn ka_blocks(&self) -> [KaBlock; 2];
+    /// `search-stats`: the effective search space (written twice) and the length adjustment.
+    fn search_stats(&self) -> (i64, i64);
+}
+
+pub(crate) fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
     enc.element();
     enc.begin_sequence("Blast4-parameter");
     enc.member("name", 0);
@@ -342,7 +391,7 @@ fn write_messages<E: Encoder>(enc: &mut E, messages: &[Message]) {
     enc.end_member();
 }
 
-fn write_ka_block<E: Encoder>(enc: &mut E, block: &KaBlock) {
+pub(crate) fn write_ka_block<E: Encoder>(enc: &mut E, block: &KaBlock) {
     enc.element();
     enc.begin_sequence("Blast4-ka-block");
     enc.member("lambda", 0);
@@ -361,278 +410,361 @@ fn write_ka_block<E: Encoder>(enc: &mut E, block: &KaBlock) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:352-364
-/// Writes the `body` member of a `Blast4-request`: the `queue-search` request of one query
-/// batch. The archive (`write_search_archive`) and the search strategy file
+/// Writes the `body` member of a `Blast4-request`: the `queue-search` request of `request`. The
+/// archive (`write_archive_document`) and the search strategy file
 /// (`strategy::StrategyExport::write_request`) share it, as NCBI builds both with
-/// `CExportStrategy`. `sets` is what the options handle holds beyond the command line's options
-/// when the request is written (`OptionsHandle::request_sets`: the `EffectiveSearchSpace` option
-/// the batches before left, RPS's database length and `.aux` costs, ...), applied onto the
-/// request's options as NCBI's `x_AttachValue` applied them: a parameter of the command line is
-/// replaced in its place (`-searchsp` keeps its place with the batch's value, `-searchsp 0`
-/// too), the others follow in their order.
-fn write_request_body<E: Encoder>(
-    out: &mut ArchiveOut<'_, E>,
-    request: &super::ArchiveRequest,
-    batch: &RequestInputs<'_>,
-    sets: &[Param],
-    database_params: &[Param],
+/// `CExportStrategy`; `flush` hands the encoder's final bytes on after each element of a list.
+pub(crate) fn write_request_body<E: Encoder, R: RequestSource>(
+    enc: &mut E,
+    flush: &mut dyn FnMut(&mut E),
+    request: &R,
 ) {
-    out.enc.member("body", 1);
-    out.enc.variant("Blast4-request-body", "queue-search", 8);
-    out.enc.begin_sequence("Blast4-queue-search-request");
-    out.enc.member("program", 0);
-    out.enc.visible_str(request.program.as_bytes());
-    out.enc.end_member();
+    let (program, service) = request.program_and_service();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:535-560
     // A request of a PSSM is a `psi` request whatever its handle's service (`x_Process_Pssm`):
     // also psiblast `-phi_pattern`'s later rounds, whose handle is PHI-BLAST's (item PS8b).
-    let service = match batch.queries {
-        RequestQueries::Pssm(_) => "psi",
-        _ => request.service,
+    let service = match request.queries() {
+        QueryList::Pssm => "psi",
+        _ => service,
     };
-    out.enc.member("service", 1);
-    out.enc.visible_str(service.as_bytes());
-    out.enc.end_member();
+    enc.member("body", 1);
+    enc.variant("Blast4-request-body", "queue-search", 8);
+    enc.begin_sequence("Blast4-queue-search-request");
+    enc.member("program", 0);
+    enc.visible_str(program.as_bytes());
+    enc.end_member();
+    enc.member("service", 1);
+    enc.visible_str(service.as_bytes());
+    enc.end_member();
 
-    out.enc.member("queries", 2);
-    match batch.queries {
-        RequestQueries::Bioseqs(queries) => write_bioseq_queries(out, queries),
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:555-560
-        // The object that the application read (`x_Process_Pssm` takes the application's `CRef`,
-        // serialized at once), written with the request's encoder.
-        RequestQueries::Pssm(pssm) => {
-            out.enc.variant("Blast4-queries", "pssm", 0);
-            crate::report::serial::pssm::write_value(&mut out.enc, pssm);
-            out.enc.end_variant();
-            out.flush_if_large();
+    enc.member("queries", 2);
+    match request.queries() {
+        QueryList::Pssm => {
+            enc.variant("Blast4-queries", "pssm", 0);
+            request.write_query(enc, QueryList::Pssm, 0);
+            enc.end_variant();
+            flush(enc);
+        }
+        list @ QueryList::SeqLocs(count) => {
+            enc.variant("Blast4-queries", "seq-loc-list", 1);
+            enc.begin_list(false);
+            for index in 0..count {
+                enc.element();
+                request.write_query(enc, list, index);
+                flush(enc);
+            }
+            enc.end_list();
+            enc.end_variant();
+        }
+        list @ QueryList::Bioseqs(count) => {
+            enc.variant("Blast4-queries", "bioseq-set", 2);
+            enc.begin_sequence("Bioseq-set");
+            enc.member("seq-set", 7);
+            enc.begin_list(false);
+            for index in 0..count {
+                enc.element();
+                enc.variant("Seq-entry", "seq", 0);
+                request.write_query(enc, list, index);
+                enc.end_variant();
+                flush(enc);
+            }
+            enc.end_list();
+            enc.end_member();
+            enc.end_sequence();
+            enc.end_variant();
         }
     }
-    out.enc.end_member();
+    enc.end_member();
 
-    out.enc.member("subject", 3);
-    match &request.database {
+    enc.member("subject", 3);
+    match request.database() {
         Some(name) => {
-            out.enc.variant("Blast4-subject", "database", 0);
-            out.enc.visible_str(name);
+            enc.variant("Blast4-subject", "database", 0);
+            enc.visible_str(name);
         }
         None => {
-            out.enc.variant("Blast4-subject", "sequences", 1);
-            out.enc.begin_list(false);
-            for subject in batch.subjects {
-                out.enc.element();
-                write_bioseq(&mut out.enc, subject);
-                out.flush_if_large();
+            enc.variant("Blast4-subject", "sequences", 1);
+            enc.begin_list(false);
+            for index in 0..request.subjects() {
+                enc.element();
+                request.write_subject(enc, index);
+                flush(enc);
             }
-            out.enc.end_list();
+            enc.end_list();
         }
     }
-    out.enc.end_variant();
-    out.enc.end_member();
+    enc.end_variant();
+    enc.end_member();
 
-    write_request_options(out, request, batch, sets, database_params);
-    out.enc.end_sequence();
-    out.enc.end_variant();
-    out.enc.end_member();
+    enc.member("algorithm-options", 5);
+    enc.begin_named("Blast4-parameters");
+    enc.begin_list(false);
+    request.write_algorithm_options(enc);
+    enc.end_list();
+    enc.end_named();
+    enc.end_member();
+    if request.has_program_options() {
+        enc.member("program-options", 6);
+        enc.begin_named("Blast4-parameters");
+        enc.begin_list(false);
+        request.write_program_options(enc);
+        enc.end_list();
+        enc.end_named();
+        enc.end_member();
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:745-755
+    if let Some(step) = request.step_number() {
+        enc.member("format-options", 7);
+        enc.begin_named("Blast4-parameters");
+        enc.begin_list(false);
+        write_param(
+            enc,
+            &Param::new(fields::WEB_STEP_NUMBER, ParamValue::Integer(step)),
+        );
+        enc.end_list();
+        enc.end_named();
+        enc.end_member();
+    }
+    enc.end_sequence();
+    enc.end_variant();
+    enc.end_member();
 }
 
-/// The `queries` of a request of FASTA queries: the batch's Seq-locs, or its Bioseqs.
-fn write_bioseq_queries<E: Encoder>(out: &mut ArchiveOut<'_, E>, queries: &[BioseqInput<'_>]) {
+/// The search programs' request of one query batch: the run's request, the batch's inputs, what
+/// the options handle holds beyond the command line's options when the request is written
+/// (`sets`: `OptionsHandle::request_sets`, the `EffectiveSearchSpace` option the batches before
+/// left, RPS's database length and `.aux` costs, ...) and the database's list and masking
+/// (`database_params`).
+struct BatchRequest<'a> {
+    request: &'a super::ArchiveRequest,
+    batch: &'a RequestInputs<'a>,
+    sets: &'a [Param],
+    database_params: &'a [Param],
+}
+
+impl RequestSource for BatchRequest<'_> {
+    fn program_and_service(&self) -> (&str, &str) {
+        (self.request.program, self.request.service)
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:609-617,648-655
-    if queries.iter().all(|query| query.seq_loc.is_some()) {
-        out.enc.variant("Blast4-queries", "seq-loc-list", 1);
-        out.enc.begin_list(false);
-        for loc in queries.iter().filter_map(|query| query.seq_loc.as_ref()) {
-            out.enc.element();
-            write_seq_loc(&mut out.enc, loc);
-            out.flush_if_large();
+    /// The batch's Seq-locs where each query has one, else its Bioseqs; or the PSSM.
+    fn queries(&self) -> QueryList {
+        match self.batch.queries {
+            RequestQueries::Bioseqs(queries) => {
+                if queries.iter().all(|query| query.seq_loc.is_some()) {
+                    QueryList::SeqLocs(queries.len())
+                } else {
+                    QueryList::Bioseqs(queries.len())
+                }
+            }
+            RequestQueries::Pssm(_) => QueryList::Pssm,
         }
-        out.enc.end_list();
-        out.enc.end_variant();
-    } else {
-        out.enc.variant("Blast4-queries", "bioseq-set", 2);
-        out.enc.begin_sequence("Bioseq-set");
-        out.enc.member("seq-set", 7);
-        out.enc.begin_list(false);
-        for query in queries {
-            out.enc.element();
-            out.enc.variant("Seq-entry", "seq", 0);
-            write_bioseq(&mut out.enc, query);
-            out.enc.end_variant();
-            out.flush_if_large();
+    }
+
+    fn write_query<E: Encoder>(&self, enc: &mut E, list: QueryList, index: usize) {
+        match self.batch.queries {
+            RequestQueries::Bioseqs(queries) => match (list, &queries[index].seq_loc) {
+                (QueryList::SeqLocs(_), Some(loc)) => write_seq_loc(enc, loc),
+                _ => write_bioseq(enc, &queries[index]),
+            },
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:555-560
+            // The object that the application read (`x_Process_Pssm` takes the application's
+            // `CRef`, serialized at once), written with the request's encoder.
+            RequestQueries::Pssm(pssm) => crate::report::serial::pssm::write_value(enc, pssm),
         }
-        out.enc.end_list();
-        out.enc.end_member();
-        out.enc.end_sequence();
-        out.enc.end_variant();
     }
-}
 
-/// The options of a request: `algorithm-options` (the command line's with what the handle holds,
-/// `sets`), `program-options` (the query's range and masks, the database's list and masking,
-/// `database_params`) and `format-options` (psiblast's `Web_StepNumber`).
-fn write_request_options<E: Encoder>(
-    out: &mut ArchiveOut<'_, E>,
-    request: &super::ArchiveRequest,
-    batch: &RequestInputs<'_>,
-    sets: &[Param],
-    database_params: &[Param],
-) {
-    out.enc.member("algorithm-options", 5);
-    out.enc.begin_named("Blast4-parameters");
-    out.enc.begin_list(false);
-    let set = |name: &str| sets.iter().find(|param| param.name() == name);
-    for param in &request.algorithm {
-        write_param(&mut out.enc, set(param.name()).unwrap_or(param));
+    fn database(&self) -> Option<&[u8]> {
+        self.request.database.as_deref()
     }
-    for param in sets.iter().filter(|param| {
-        !request
-            .algorithm
-            .iter()
-            .any(|recorded| recorded.name() == param.name())
-    }) {
-        write_param(&mut out.enc, param);
-    }
-    out.enc.end_list();
-    out.enc.end_named();
-    out.enc.end_member();
 
-    if batch.required.is_some() || !batch.lcase_masks.is_empty() || !database_params.is_empty() {
-        out.enc.member("program-options", 6);
-        out.enc.begin_named("Blast4-parameters");
-        out.enc.begin_list(false);
-        if let Some((start, end)) = batch.required {
+    fn subjects(&self) -> usize {
+        self.batch.subjects.len()
+    }
+
+    fn write_subject<E: Encoder>(&self, enc: &mut E, index: usize) {
+        write_bioseq(enc, &self.batch.subjects[index]);
+    }
+
+    /// The command line's parameters with what the handle holds (`sets`), applied onto them as
+    /// NCBI's `x_AttachValue` applied them: a parameter of the command line is replaced in its
+    /// place (`-searchsp` keeps its place with the batch's value, `-searchsp 0` too), the others
+    /// follow in their order.
+    fn write_algorithm_options<E: Encoder>(&self, enc: &mut E) {
+        let sets = self.sets;
+        let set = |name: &str| sets.iter().find(|param| param.name() == name);
+        for param in &self.request.algorithm {
+            write_param(enc, set(param.name()).unwrap_or(param));
+        }
+        for param in sets.iter().filter(|param| {
+            !self
+                .request
+                .algorithm
+                .iter()
+                .any(|recorded| recorded.name() == param.name())
+        }) {
+            write_param(enc, param);
+        }
+    }
+
+    fn has_program_options(&self) -> bool {
+        self.batch.required.is_some()
+            || !self.batch.lcase_masks.is_empty()
+            || !self.database_params.is_empty()
+    }
+
+    /// The query's range and masks, then the database's list and masking.
+    fn write_program_options<E: Encoder>(&self, enc: &mut E) {
+        if let Some((start, end)) = self.batch.required {
             for (field, value) in [(fields::REQUIRED_START, start), (fields::REQUIRED_END, end)] {
-                write_param(&mut out.enc, &Param::new(field, ParamValue::Integer(value)));
+                write_param(enc, &Param::new(field, ParamValue::Integer(value)));
             }
         }
-        for mask in batch.lcase_masks {
-            out.enc.element();
-            out.enc.begin_sequence("Blast4-parameter");
-            out.enc.member("name", 0);
-            out.enc.visible_str(fields::L_CASE_MASK.name().as_bytes());
-            out.enc.end_member();
-            out.enc.member("value", 1);
+        for mask in self.batch.lcase_masks {
+            enc.element();
+            enc.begin_sequence("Blast4-parameter");
+            enc.member("name", 0);
+            enc.visible_str(fields::L_CASE_MASK.name().as_bytes());
+            enc.end_member();
+            enc.member("value", 1);
             let value_type = fields::L_CASE_MASK.value_type();
-            out.enc
-                .variant("Blast4-value", value_type.variant(), value_type.tag());
-            write_mask(&mut out.enc, mask);
-            out.enc.end_variant();
-            out.enc.end_member();
-            out.enc.end_sequence();
+            enc.variant("Blast4-value", value_type.variant(), value_type.tag());
+            write_mask(enc, mask);
+            enc.end_variant();
+            enc.end_member();
+            enc.end_sequence();
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:318-320
         // The database's list and masking come after the parameters of the query
         // (search_strategy.cpp:480-516: `TaxidList` or `NegativeTaxidList`, then
         // `DbFilteringAlgorithmKey` or `DbFilteringAlgorithmId`, then `SubjectMaskingType`).
-        for param in database_params {
-            write_param(&mut out.enc, param);
+        for param in self.database_params {
+            write_param(enc, param);
         }
-        out.enc.end_list();
-        out.enc.end_named();
-        out.enc.end_member();
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:745-755
-    if let Some(step) = request.step_number {
-        out.enc.member("format-options", 7);
-        out.enc.begin_named("Blast4-parameters");
-        out.enc.begin_list(false);
-        write_param(
-            &mut out.enc,
-            &Param::new(fields::WEB_STEP_NUMBER, ParamValue::Integer(step)),
-        );
-        out.enc.end_list();
-        out.enc.end_named();
-        out.enc.end_member();
+
+    fn step_number(&self) -> Option<i32> {
+        self.request.step_number
     }
 }
 
-fn write_search_archive<E: Encoder, A: AlignSource>(
-    out: &mut ArchiveOut<'_, E>,
-    request: &super::ArchiveRequest,
-    batch: &BatchArchive<'_>,
-    sets: &[Param],
-    database_params: &[Param],
+/// The search programs' results of one query batch: its Seq-aligns, masks, blocks and statistics.
+struct BatchResults<'a, A> {
+    batch: &'a BatchArchive<'a>,
+    aligns: &'a mut A,
+}
+
+impl<A: AlignSource> ResultsSource for BatchResults<'_, A> {
+    fn write_alignments<E: Encoder>(
+        &mut self,
+        enc: &mut E,
+        flush: &mut dyn FnMut(&mut E),
+    ) -> Result<()> {
+        self.aligns.write(enc, flush)
+    }
+
+    fn masks(&self) -> usize {
+        self.batch.masks.len()
+    }
+
+    fn write_mask<E: Encoder>(&self, enc: &mut E, index: usize) {
+        write_mask(enc, &self.batch.masks[index]);
+    }
+
+    fn ka_blocks(&self) -> [KaBlock; 2] {
+        self.batch.ka_blocks
+    }
+
+    fn search_stats(&self) -> (i64, i64) {
+        (self.batch.search_space, self.batch.length_adjustment)
+    }
+}
+
+/// Writes the `Blast4-archive` document of `request` and `results`, then `messages` (none:
+/// no `messages` member): the search programs' and blast_formatter's `-outfmt 11`.
+pub(crate) fn write_archive_document<E: Encoder, R: RequestSource, S: ResultsSource>(
+    enc: &mut E,
+    flush: &mut dyn FnMut(&mut E),
+    request: &R,
+    results: &mut S,
     messages: &[Message],
-    aligns: &mut A,
 ) -> Result<()> {
-    out.enc.begin_document("Blast4-archive");
-    out.enc.begin_sequence("Blast4-archive");
-    out.enc.member("request", 0);
-    out.enc.begin_sequence("Blast4-request");
-    out.enc.member("ident", 0);
+    enc.begin_document("Blast4-archive");
+    enc.begin_sequence("Blast4-archive");
+    enc.member("request", 0);
+    enc.begin_sequence("Blast4-request");
+    enc.member("ident", 0);
     // The request's `ident`: NCBI's `CBlastVersion::Print()`, LOSAT's version (`wording::LOSAT_VERSION`).
-    out.enc
-        .visible_str(crate::wording::LOSAT_VERSION.as_bytes());
-    out.enc.end_member();
-    write_request_body(out, request, &batch.request, sets, database_params);
-    out.enc.end_sequence();
-    out.enc.end_member();
+    enc.visible_str(crate::wording::LOSAT_VERSION.as_bytes());
+    enc.end_member();
+    write_request_body(enc, flush, request);
+    enc.end_sequence();
+    enc.end_member();
 
-    out.enc.member("results", 1);
-    out.enc.begin_sequence("Blast4-get-search-results-reply");
-    out.enc.member("alignments", 0);
-    out.enc.begin_named("Seq-align-set");
-    out.enc.begin_list(true);
-    aligns.write(out)?;
-    out.enc.end_list();
-    out.enc.end_named();
-    out.enc.end_member();
+    enc.member("results", 1);
+    enc.begin_sequence("Blast4-get-search-results-reply");
+    enc.member("alignments", 0);
+    enc.begin_named("Seq-align-set");
+    enc.begin_list(true);
+    results.write_alignments(enc, flush)?;
+    enc.end_list();
+    enc.end_named();
+    enc.end_member();
 
-    out.enc.member("masks", 2);
-    out.enc.begin_list(false);
-    for mask in batch.masks {
-        out.enc.element();
-        write_mask(&mut out.enc, mask);
+    enc.member("masks", 2);
+    enc.begin_list(false);
+    for index in 0..results.masks() {
+        enc.element();
+        results.write_mask(enc, index);
+        flush(enc);
     }
-    out.enc.end_list();
-    out.enc.end_member();
+    enc.end_list();
+    enc.end_member();
 
-    out.enc.member("ka-blocks", 3);
-    out.enc.begin_list(false);
-    for block in &batch.ka_blocks {
-        write_ka_block(&mut out.enc, block);
+    enc.member("ka-blocks", 3);
+    enc.begin_list(false);
+    for block in &results.ka_blocks() {
+        write_ka_block(enc, block);
     }
-    out.enc.end_list();
-    out.enc.end_member();
+    enc.end_list();
+    enc.end_member();
 
-    out.enc.member("search-stats", 4);
-    out.enc.begin_list(false);
+    let (search_space, length_adjustment) = results.search_stats();
+    enc.member("search-stats", 4);
+    enc.begin_list(false);
     for text in [
-        format!("Effective search space: {}", batch.search_space),
-        format!("Effective search space used: {}", batch.search_space),
-        format!("Length adjustment: {}", batch.length_adjustment),
+        format!("Effective search space: {search_space}"),
+        format!("Effective search space used: {search_space}"),
+        format!("Length adjustment: {length_adjustment}"),
     ] {
-        out.enc.element();
-        out.enc.visible_str(text.as_bytes());
+        enc.element();
+        enc.visible_str(text.as_bytes());
     }
-    out.enc.end_list();
-    out.enc.end_member();
-    out.enc.end_sequence();
-    out.enc.end_member();
+    enc.end_list();
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_member();
 
     if !messages.is_empty() {
-        write_messages(&mut out.enc, messages);
+        write_messages(enc, messages);
     }
-    out.enc.end_sequence();
-    out.enc.end_document();
+    enc.end_sequence();
+    enc.end_document();
     Ok(())
 }
 
 /// Writes the `Blast4-request` of one query batch as a document of its own: the search strategy
 /// file's (`-export_search_strategy`). NCBI's applications give `CExportStrategy` no client id
 /// (blast_app_util.cpp:335-337), so the request has no `ident`.
-fn write_strategy_document<E: Encoder>(
-    out: &mut ArchiveOut<'_, E>,
-    request: &super::ArchiveRequest,
-    batch: &RequestInputs<'_>,
-    sets: &[Param],
-    database_params: &[Param],
-) {
-    out.enc.begin_document("Blast4-request");
-    out.enc.begin_sequence("Blast4-request");
-    write_request_body(out, request, batch, sets, database_params);
-    out.enc.end_sequence();
-    out.enc.end_document();
+fn write_strategy_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, request: &BatchRequest<'_>) {
+    out.write_with(|enc, flush| {
+        enc.begin_document("Blast4-request");
+        enc.begin_sequence("Blast4-request");
+        write_request_body(enc, flush, request);
+        enc.end_sequence();
+        enc.end_document();
+    });
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:499-505
@@ -686,7 +818,13 @@ pub(super) fn encode_strategy_request(
     let mut buf = Vec::new();
     let (pieces, posts, thrown) = {
         let mut out = ArchiveOut::new(Traced::new(AsnTextEncoder::new(&mut buf), 0), &mut bytes);
-        write_strategy_document(&mut out, request, batch, sets, database_params);
+        let source = BatchRequest {
+            request,
+            batch,
+            sets,
+            database_params,
+        };
+        write_strategy_document(&mut out, &source);
         let thrown = out.enc.take_thrown();
         if thrown.is_some() {
             out.enc.flush_to(out.sink, true)?;
@@ -948,7 +1086,7 @@ fn write_archive_object<A: AlignSource>(
     written
 }
 
-/// What `write_search_archive` writes besides the encoder and the Seq-aligns.
+/// What `write_archive_document` writes of a batch besides the encoder and the Seq-aligns.
 struct SearchArchive<'a> {
     request: &'a super::ArchiveRequest,
     batch: &'a BatchArchive<'a>,
@@ -966,15 +1104,19 @@ impl SearchArchive<'_> {
         aligns: &mut A,
     ) -> Result<ArchiveOut<'s, E>> {
         let mut out = ArchiveOut::new(enc, sink);
-        write_search_archive(
-            &mut out,
-            self.request,
-            self.batch,
-            self.sets,
-            self.database_params,
-            self.messages,
+        let request = BatchRequest {
+            request: self.request,
+            batch: &self.batch.request,
+            sets: self.sets,
+            database_params: self.database_params,
+        };
+        let mut results = BatchResults {
+            batch: self.batch,
             aligns,
-        )?;
+        };
+        out.write_with(|enc, flush| {
+            write_archive_document(enc, flush, &request, &mut results, self.messages)
+        })?;
         Ok(out)
     }
 }

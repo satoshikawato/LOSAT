@@ -1295,13 +1295,11 @@ def masking() -> list[dict]:
                  "refusal"),
                 ("refusal.logfile_missing_input", base.replace(base.split()[1], "m.fa", 1) + " -logfile m.fa",
                  "refusal"),
-                # An input that the run cannot open: dustmasker opens it after -out and its writer, which the check
-                # leaves to the run; segmasker and convert2blastmask open it first and end there with NCBI's error, at
-                # the check too, which takes the run's steps up to -out (line NP WW4f, 2026-11-28).
-                ("in_missing", f"{base.replace(base.split()[1], 'missing.fa', 1)} -out out.res",
-                 "late_failure" if program == "dustmasker" else True),
-                ("in_directory", f"{base.replace(base.split()[1], 'dm', 1)} -out out.res",
-                 "late_failure" if program == "dustmasker" else True),
+                # An input that the run cannot open: dustmasker opens it after -out and its writer, segmasker and
+                # convert2blastmask open it first; each ends there with NCBI's error, at the check too, which takes the
+                # run's steps up to the input's first read (line NP WW4f, 2026-11-28).
+                ("in_missing", f"{base.replace(base.split()[1], 'missing.fa', 1)} -out out.res", True),
+                ("in_directory", f"{base.replace(base.split()[1], 'dm', 1)} -out out.res", True),
                 # With an -out that LOSAT Web does not write: dustmasker opens -out first and refuses it; segmasker and
                 # convert2blastmask end at the input with NCBI's error before -out (review of WW4c, F1; WW4f).
                 ("in_missing.out_dev_stderr", f"{base.replace(base.split()[1], 'missing.fa', 1)} -out /dev/stderr",
@@ -1327,8 +1325,9 @@ def masking() -> list[dict]:
     add("dustmasker", "error.window_abc", "-in dm/basic.fa -window abc", failure=True)
     add("dustmasker", "refusal.out_missing_input", "-in m.fa -out m.fa", failure="refusal")
     add("dustmasker", "big.file", "-in big.fa -outfmt fasta -out out.fa", frames=2)
-    add("dustmasker", "validate.late_failure.hard_masking", "-in dm/basic.fa -hard_masking -out out.res",
-        "late_failure", kind="validate")
+    # The writer of -outfmt, made before -in opens: the check makes it too (line NP WW4f, 2026-11-28).
+    add("dustmasker", "validate.hard_masking_interval", "-in dm/basic.fa -hard_masking -out out.res", True,
+        kind="validate")
     add("dustmasker", "validate.window_abc", "-in dm/basic.fa -window abc", True, kind="validate")
     add("dustmasker", "validate.refusal.out_missing_input", "-in m.fa -out m.fa", "refusal", kind="validate")
     # segmasker's options and its database input.

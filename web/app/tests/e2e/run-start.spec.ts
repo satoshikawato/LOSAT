@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { expect, type Download, type Locator, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
+import { REPOSITORY } from './support/harness-server';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { chooseRun, openFiles, openParameters, openSearch, paste, pickRun, program, storedOutputs, submit, waitStatus } from './support/search';
 
@@ -665,5 +666,41 @@ test('the file of -export_search_strategy is a file of the run, saved as the CLI
     const cli = spawnSync(NATIVE, [...words, './s.asn'], { cwd: directory });
     expect(cli.status, cli.stderr.toString('utf8')).toBe(0);
     expect(saved.bytes.equals(readFileSync(join(directory, 's.asn'))), "blastn -export_search_strategy ./s.asn: the CLI's file s.asn").toBe(true);
+  }
+});
+
+// One path is one file of the run, as on the command line (line RG item F1w-r3): psiblast `-logfile L -out_pssm L` gives
+// the CLI's file `L`, the PSSM (NCBI 2.17.0 opens the log first; the PSSM file removes the file of its name and makes
+// another), shown and saved once under -out_pssm. Before, the run gave `L` twice and the Outputs showed the empty log.
+test('a file that -logfile and -out_pssm both name is the PSSM file, saved as the CLI writes it', async ({ page }, testInfo) => {
+  if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the file: ${NO_NATIVE_REASON}` });
+  const query = readFileSync(join(REPOSITORY, 'LOSAT/tests/fasta/psiblast/q1b_gi.faa'), 'utf8');
+  const subject = readFileSync(join(REPOSITORY, 'LOSAT/tests/fasta/psiblast/q1_subj_ids.faa'), 'utf8');
+  await program(page, 'psiblast');
+  await paste(page, 'query', query);
+  await paste(page, 'subject', subject);
+  await openParameters(page);
+  await page.getByTestId('param-num_iterations').fill('2');
+  await page.getByTestId('param-out_pssm').fill('L');
+  await page.getByTestId('param-save_pssm_after_last_round').check();
+  await page.getByTestId('param-extra').fill('-logfile L');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await page.getByTestId('results-view-outputs').click();
+  const tab = page.getByTestId('format-run-files');
+  await expect(tab).toHaveText('-out_pssm L');
+  await tab.click();
+  await expect(page.getByTestId('run-file-download-1')).toHaveCount(0);
+  await expect(page.getByTestId('run-file-0').getByTestId('run-file-name')).toHaveText('L');
+  const saved = await downloaded(page, () => page.getByTestId('run-file-download-0').click());
+  expect(saved.name).toMatch(/^losat-run1-.*Z\.out_pssm\.L$/);
+  if (NATIVE !== undefined) {
+    const directory = nativeDirectory(query, subject);
+    const words = ['psiblast', '-query', 'query.fa', '-subject', 'subject.fa', '-num_iterations', '2', '-out_pssm', 'L'];
+    const cli = spawnSync(NATIVE, [...words, '-save_pssm_after_last_round', '-logfile', 'L', '-num_threads', '1'], { cwd: directory });
+    expect(cli.status, cli.stderr.toString('utf8')).toBe(0);
+    expect(saved.bytes.equals(readFileSync(join(directory, 'L'))), "psiblast -logfile L -out_pssm L: the CLI's file L").toBe(true);
   }
 });

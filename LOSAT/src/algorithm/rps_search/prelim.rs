@@ -209,7 +209,12 @@ impl RpsPrelim<'_> {
             } else {
                 0.0
             };
-            if e_value <= self.prelim_evalue {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-670
+            // NCBI drops an HSP whose e-value is above `prelim_evalue`: a NaN e-value stays, and a
+            // `prelim_evalue` of NaN (an `-evalue` of NaN, which NCBI's option check lets pass)
+            // keeps every HSP.
+            let above = e_value > self.prelim_evalue;
+            if !above {
                 evalued.push(XPrelimHsp { hsp: *hsp, e_value });
             }
         }

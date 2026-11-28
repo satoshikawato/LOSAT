@@ -721,11 +721,19 @@ impl RedoMatch<'_> {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687
     #[inline(always)]
     fn reap_by_expect(&self, redone: &mut Vec<Redone>, best_evalue: f64) -> Option<i32> {
-        redone.retain(|hsp| hsp.e_value <= self.expect_value || hsp.e_value.is_nan());
+        // NCBI drops an HSP whose e-value is above `-evalue`: a NaN e-value stays, and an
+        // `-evalue` of NaN (NCBI's option check lets it pass) keeps every HSP.
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "NCBI removes an HSP only when evalue > cutoff (blast_hits.c:1996); `<=` would drop NaN values and keep none under a NaN cutoff"
+        )]
+        redone.retain(|hsp| !(hsp.e_value > self.expect_value));
         let first = redone.first()?;
-        // The list's best E-value must be at most `-evalue`: NaN E-values (a PSSM whose gapped
-        // block gives them) pass the reaping above but leave it at `INT4_MAX`.
-        if best_evalue > self.expect_value {
+        // The list is kept when its best E-value is at most `-evalue` (NCBI's test): NaN E-values
+        // (a PSSM whose gapped block gives them) pass the reaping above but leave it at
+        // `INT4_MAX`, and an `-evalue` of NaN keeps no list.
+        let significant = best_evalue <= self.expect_value;
+        if !significant {
             return None;
         }
         Some(first.align.score)

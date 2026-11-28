@@ -869,16 +869,17 @@ impl BlastxArgs {
         ) {
             return Err(SemanticOptionsError::from(message).into());
         }
-        // LOSAT's limit, for values that NCBI's checks above accept: an e-value that is not
-        // finite (`+inf`, `1e999`, `-nan`; NCBI's argument reads `inf` and `nan` without a sign as
-        // no number). Every word size of NCBI's, 2 to 7, runs (item SC9 of line NP).
-        if !self.evalue.is_finite() {
-            bail!(
-                "an -evalue that is not finite ({}) is not supported by LOSAT's {}",
-                self.evalue,
-                self.program().upper
-            );
-        }
+        // LOSAT's limit, for values that NCBI's checks above accept: an infinite e-value (`+inf`,
+        // `1e999`) with the composition-based redo (decision D12,
+        // `protein_options_check::check_infinite_evalue`). NaN (`-nan`, `+nan`; NCBI's argument
+        // reads `inf` and `nan` without a sign as no number) and an infinite e-value without the
+        // redo run as NCBI runs them (line RG item X-evalue-nan; until then both were refused).
+        // Every word size of NCBI's, 2 to 7, runs (item SC9 of line NP).
+        crate::blastinput::protein_options_check::check_infinite_evalue(
+            self.evalue,
+            composition != 0,
+            self.program().upper,
+        )?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:429-433
         let fast = self.task == "blastx-fast";
         let word_size = self.word_size.unwrap_or(if fast { 5 } else { 3 });

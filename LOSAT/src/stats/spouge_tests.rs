@@ -591,7 +591,7 @@ fn unbounded_etos(
     } else {
         1.0
     };
-    let e0 = evalue.max(f64::MIN_POSITIVE);
+    let e0 = evalue;
     let mut a = 0i128;
     let mut b = i128::from(
         crate::core::blast_util::ncbi_int4_from_double(
@@ -710,5 +710,45 @@ fn ncbi_s_cutoff_searches_of_the_rnd_pssm_widened() {
         for (subject_length, db_length) in [psiblast, tblastn] {
             assert_eq!(etos(lambda, subject_length, db_length), i32::MAX);
         }
+    }
+}
+
+// Line RG item X-evalue-nan: NCBI's `BLAST_SpougeEtoS` takes the e-value as it is. An `-evalue` of
+// NaN, which NCBI's option check (`<= 0`) lets pass, and +inf start at 2 (the cast of NaN, or of
+// the logarithm of 0 over Lambda, is `INT_MIN`), no e-value is above them, and the cutoff is 0 (LOSAT
+// raised the e-value to the smallest normal double first and computed the cutoff of 2.2e-308). A
+// subnormal e-value takes NCBI's steps from 2 (the quotient is +inf), as `unbounded_etos` does.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5269
+#[test]
+fn a_nan_or_infinite_evalue_gives_ncbi_s_cutoff_of_0() {
+    let gbp = blosum62_gumbel(66_738);
+    let kbp = KarlinParams {
+        lambda: 0.267,
+        k: 0.041,
+        h: 0.14,
+        alpha: 1.9,
+        beta: -30.0,
+    };
+    for evalue in [
+        f64::NAN,
+        -f64::NAN,
+        f64::INFINITY,
+        5.0 * f64::NAN,
+        5.0 * f64::INFINITY,
+    ] {
+        for (m, n) in [(100, 200), (30, 10), (398, 87)] {
+            assert_eq!(
+                blast_spouge_etos(evalue, &kbp, &gbp, m, n),
+                0,
+                "{evalue} {m} {n}"
+            );
+            assert_eq!(unbounded_etos(evalue, &kbp, &gbp, m, n), Some(0));
+        }
+    }
+    for evalue in [f64::MIN_POSITIVE / 4.0, 5e-324, f64::MIN_POSITIVE, 1e-300] {
+        let expected = unbounded_etos(evalue, &kbp, &gbp, 100, 200).expect("a cutoff");
+        let cutoff = blast_spouge_etos(evalue, &kbp, &gbp, 100, 200);
+        assert_eq!(i128::from(cutoff), expected, "{evalue:e}");
+        assert!(cutoff > 2000, "{evalue:e}: {cutoff}");
     }
 }

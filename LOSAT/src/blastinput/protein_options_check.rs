@@ -43,35 +43,56 @@ pub struct ProteinOptionsCheck<'a> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3266
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4059-4061
 /// LOSAT's limit of `-evalue` for blastp, psiblast, rpsblast and tblastn (`program`, in
 /// capitals), checked where NCBI starts the search (decision D12 of
-/// docs/evidence/losat_web_e2e/AUTHORITY.md):
+/// docs/evidence/losat_web_e2e/AUTHORITY.md), with the composition-based redo
+/// (`composition_redo`: modes 1 to 3 after IDENTITY's reset):
 ///
-/// - An infinite value (`+inf`, `1e999`): NCBI's score cutoff of an e-value is the logarithm of
-///   0 converted to an `Int4`, a conversion out of range. Refused in every mode.
-/// - Exactly DBL_MAX (1.7976931348623157e308) with the composition-based redo
-///   (`composition_redo`: modes 1 to 3 after IDENTITY's reset): a list whose HSPs all fail the
-///   redo keeps the best e-value DBL_MAX, which passes `-evalue`, so NCBI puts the empty list
-///   into the hit list and crashes reading its first HSP (SIGSEGV) when the search keeps enough
-///   HSPs; LOSAT cannot tell beforehand. Without the redo (`-comp_based_stats 0`, IDENTITY,
-///   `-ungapped`) NCBI never inserts an empty list and runs: NCBI BLAST+ 2.17.0 gives the rows
-///   of 1.7976931348623156e308 there (blastp, psiblast and tblastn, gapped and ungapped, line
-///   O4c's review D1), so LOSAT searches it.
+/// - An infinite value (`+inf`, `1e999`): `check_infinite_evalue`.
+/// - Exactly DBL_MAX (1.7976931348623157e308): a list whose HSPs all fail the redo keeps the best
+///   e-value DBL_MAX, which passes `-evalue`, so NCBI puts the empty list into the hit list and
+///   crashes reading its first HSP (SIGSEGV) when the search keeps enough HSPs; LOSAT cannot tell
+///   beforehand. Without the redo (`-comp_based_stats 0`, IDENTITY, `-ungapped`) NCBI never inserts
+///   an empty list and runs: NCBI BLAST+ 2.17.0 gives the rows of 1.7976931348623156e308 there
+///   (blastp, psiblast and tblastn, gapped and ungapped, line O4c's review D1), so LOSAT searches
+///   it.
+///
+/// An `-evalue` of NaN, which NCBI's option check (`<= 0`) lets pass, runs in every mode: the
+/// redo's test of the best e-value against it is false, so NCBI keeps no match there.
 pub(crate) fn check_evalue_limit(
     evalue: f64,
     composition_redo: bool,
     program: &str,
 ) -> anyhow::Result<()> {
-    let ncbi_program = program.to_ascii_lowercase();
-    if evalue > f64::MAX {
-        anyhow::bail!(
-            "an infinite -evalue ({evalue}), whose score cutoff NCBI BLAST+'s {ncbi_program} cannot hold in an integer, is not supported by LOSAT's {program}"
-        );
-    }
+    check_infinite_evalue(evalue, composition_redo, program)?;
     if evalue == f64::MAX && composition_redo {
+        let ncbi_program = program.to_ascii_lowercase();
         anyhow::bail!(
             "an -evalue of DBL_MAX ({evalue}) with composition-based statistics (-comp_based_stats 1 to 3), with which NCBI BLAST+'s {ncbi_program} crashes on some inputs, is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3266
+/// LOSAT's limit of an infinite `-evalue` (`+inf`, `1e999`) for the protein programs (`program`, in
+/// capitals; BLASTX and RPSTBLASTN check only this one): refused with the composition-based redo
+/// (`composition_redo`), where a list whose HSPs all fail the redo keeps the best e-value DBL_MAX,
+/// which passes `-evalue`, and NCBI crashes on some inputs reading the empty list (decision D12; NCBI
+/// BLAST+ 2.17.0's blastp and tblastn on 300 subjects). Without the redo NCBI's cutoffs of it are
+/// those of any e-value that no score reaches (`BLAST_Cutoffs` keeps 1: the score of the logarithm
+/// of 0 over Lambda is below it; `BLAST_SpougeEtoS` gives 0), nothing is reaped, and the search
+/// runs (line RG item X-evalue-nan; until then refused in every mode).
+pub(crate) fn check_infinite_evalue(
+    evalue: f64,
+    composition_redo: bool,
+    program: &str,
+) -> anyhow::Result<()> {
+    if evalue > f64::MAX && composition_redo {
+        let ncbi_program = program.to_ascii_lowercase();
+        anyhow::bail!(
+            "an infinite -evalue ({evalue}) with composition-based statistics (-comp_based_stats 1 to 3), with which NCBI BLAST+'s {ncbi_program} crashes on some inputs, is not supported by LOSAT's {program}"
         );
     }
     Ok(())

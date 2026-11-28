@@ -558,7 +558,10 @@ fn spouge_stoe_at(
 // once it passes 2^31 - 1 the cutoff is above every `Int4` score and the search ends with
 // `i32::MAX`, the cutoff of NCBI's context that saves nothing (blast_parameters.c:920). So the
 // doubling runs at most 31 times and the bisection at most 33 for every Lambda (also a negative
-// one, whose e-value grows with the score and so stays above `evalue`).
+// one, whose e-value grows with the score and so stays above `evalue`). `evalue` is taken as it
+// is, as NCBI takes it: an `-evalue` of NaN (NCBI's option check lets it pass) or +inf starts at 2
+// (the cast of NaN, or of minus infinity, is `INT_MIN`), no e-value is above it, and the cutoff is
+// 0; a subnormal one starts at 2 too (the quotient is +inf) and doubles from there.
 pub fn blast_spouge_etos(
     evalue: f64,
     kbp: &KarlinParams,
@@ -576,7 +579,7 @@ pub fn blast_spouge_etos(
     } else {
         1.0
     };
-    let e0 = evalue.max(f64::MIN_POSITIVE);
+    let e0 = evalue;
     let mut b = i64::from(
         crate::core::blast_util::ncbi_int4_from_double(
             (db_scale_factor / e0).glibc_ln() / kbp.lambda,

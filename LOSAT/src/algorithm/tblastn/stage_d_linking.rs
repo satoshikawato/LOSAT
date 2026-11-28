@@ -597,12 +597,16 @@ pub(super) fn compare_preliminary_lists_for_kappa(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-676 and
 // c++/src/algo/blast/core/blast_hits.c:1976-2010:
 // Reaps HSPs exceeding `prelim_evalue` in the preliminary pass or `expect_value`
-// in the post-Kappa pass, compacting surviving entries in place. A NaN E-value (a PSSM whose
-// gapped block is not valid) is not above the limit, and its HSP stays. The preliminary stage of
-// each subject reaps with it (`stage_d_pipeline`).
+// in the post-Kappa pass, compacting surviving entries in place. NCBI drops an HSP whose E-value
+// is above the limit, so a NaN E-value (a PSSM whose gapped block is not valid) stays, and with a
+// limit of NaN (an `-evalue` of NaN, which NCBI's option check lets pass) every HSP stays. The
+// preliminary stage of each subject reaps with it (`stage_d_pipeline`).
 pub(super) fn reap_by_evalue(list: &mut LinkedHspList, prelim_evalue: f64) {
-    list.hsps
-        .retain(|hsp| hsp.evalue <= prelim_evalue || hsp.evalue.is_nan());
+    #[expect(
+        clippy::neg_cmp_op_on_partial_ord,
+        reason = "NCBI removes an HSP only when evalue > cutoff (blast_hits.c:1996); `<=` would drop NaN values and keep none under a NaN cutoff"
+    )]
+    list.hsps.retain(|hsp| !(hsp.evalue > prelim_evalue));
 }
 
 #[cfg(test)]

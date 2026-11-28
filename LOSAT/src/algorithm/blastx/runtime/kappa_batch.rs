@@ -613,7 +613,13 @@ impl Runtime<'_> {
                     x_timing::end(XEnd::KappaSerial, x_t);
                     finalized?
                 };
-                if output.hsps.is_empty() {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687
+                // The match is kept when its best e-value is at most `-evalue`; an `-evalue` of NaN
+                // (NCBI's option check lets it pass) keeps none, though the reaping keeps every
+                // HSP. (An empty list is not kept either: its best e-value is DBL_MAX, above every
+                // `-evalue` that LOSAT runs with the redo.)
+                let significant = output.best_evalue <= self.options.evalue;
+                if output.hsps.is_empty() || !significant {
                     continue;
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275

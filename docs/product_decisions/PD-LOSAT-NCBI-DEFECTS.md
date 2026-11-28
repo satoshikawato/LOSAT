@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.126
+- Version: 1.127
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -1041,7 +1041,13 @@
   that brought 1.121, line RG-KB item 12, then 1.123 at the merge of dev of 2026-11-27 that brought
   1.122, line NP item M4b-3d, then
   1.124 at the merge of dev of 2026-11-27 that brought 1.123, line RG-KB item 18b, then 1.126 at the merge
-  of dev of 2026-11-27 that brought 1.124 and 1.125, line RG-D2 items D2b-2..5 and exception 36)
+  of dev of 2026-11-27 that brought 1.124 and 1.125, line RG-D2 items D2b-2..5 and exception 36);
+  1.127 2026-11-28 (`-evalue` NaN and the infinities, line RG item X-evalue-nan: the item of rule
+  4 now holds in every program, BLASTX and RPSTBLASTN search NaN, Spouge's cutoff search, the
+  reaps and the redo's test of the best e-value take NCBI's comparisons, and the explicit
+  rejection of an infinite `-evalue` (decision D12) is limited to the composition-based redo, as
+  DBL_MAX's is; no new exception, rules 3 and 4; Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1225,12 +1231,17 @@ the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as re
 
 Explicit rejections (rule 3):
 
-- `-evalue` infinite or of DBL_MAX or more (BLASTP, TBLASTN; decision D12): a hit list
-  whose HSPs all drop keeps the best e-value DBL_MAX, which passes `best_evalue <=
-  expect_value` (`blast_kappa.c:409,3687`), and the empty list is read
+- `-evalue` infinite or of DBL_MAX or more with the composition-based redo (`-comp_based_stats`
+  1 to 3; BLASTP, PSIBLAST, RPSBLAST and TBLASTN, and an infinite value in BLASTX and RPSTBLASTN;
+  decision D12): a hit list whose HSPs all drop keeps the best e-value DBL_MAX, which passes
+  `best_evalue <= expect_value` (`blast_kappa.c:409,3687`), and the empty list is read
   (`blast_hits.c:3266`): NCBI crashes on some inputs, and LOSAT cannot tell in advance
-  which. `1.7976931348623156e308` and below run and match NCBI. TBLASTX runs these values
-  and matches NCBI.
+  which. `1.7976931348623156e308` and below run and match NCBI. Without the redo NCBI never
+  puts an empty list into the hit list, and LOSAT runs these values: DBL_MAX since line O4c's
+  review D1 (2026-11-21), an infinite value since line RG item X-evalue-nan (version 1.127; it was
+  refused in every mode, BLASTX's and RPSTBLASTN's too, though NCBI's cutoff of it is the cutoff of
+  any e-value that no score reaches: `BLAST_Cutoffs` keeps 1, Spouge's search gives 0). TBLASTX
+  and BLASTN run these values and match NCBI.
 - Query-split settings that NCBI fails on (BLASTP, TBLASTN; decision D13): a
   `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair with which a chunk would be split again, and a
   negative `CHUNK_SIZE` that splits a batch. Unlike BLASTN's exception 1, the maintainer
@@ -5547,8 +5558,18 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   `db.t5.sfu.*`, `db.t5.sfux.*`).
 - `-evalue` with a signed infinity or NaN (`+inf`, `-nan`, `+nan(1)`, `1e999`): NCBI's
   `CArg_Double` reads them with `strtod` and its option check (`<= 0`) lets them pass;
-  NCBI searches as with the largest e-value (the cutoff stays 1, no HSP is reaped). LOSAT
-  rejected them before Session S07+++b.
+  NCBI searches as with the largest e-value (`BLAST_Cutoffs` keeps the cutoff 1, Spouge's search
+  of the cutoff (`blast_stat.c:5236-5269`) gives 0, no HSP is reaped: a reap drops an HSP whose
+  e-value is above the limit). NCBI's tests that keep what is at most `-evalue` are false for NaN:
+  the composition-based redo (`blast_kappa.c:3687`) and the Smith-Waterman redo keep no match
+  there. LOSAT rejected them before Session S07+++b. Since line RG item X-evalue-nan (version
+  1.127) every program gives NCBI's output for NaN: until then BLASTX and RPSTBLASTN refused it,
+  the search of Spouge's cutoff raised it to the smallest normal double (BLASTP, PSIBLAST, RPSBLAST,
+  TBLASTN and BLASTX with a Gumbel block, that is without `-searchsp`: no hit), and TBLASTN,
+  RPSBLAST, PHI-BLAST and the redo of PSSM searches reaped with a test of at most `-evalue` (no
+  hit), while TBLASTN's and BLASTX's redo had no test of the best e-value. An infinite value runs
+  without the composition-based redo (rows `db.evnan.*`); with it, the explicit rejection of rule 3
+  (decision D12, above). `-inf` and `-1e999` stop at NCBI's option check in every program.
 - TBLASTX and TBLASTN `-db_soft_mask` with masks stored out of order on a subject frame of more than
   5,000,000 residues (version 1.89, 2026-11-23, line NP item M4b-T2; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07). NCBI moves a chunk's ranges to the chunk's offsets

@@ -1567,3 +1567,46 @@ fn uneven_gap_link_negative_karlin_block_matches_ncbi_guard() {
         assert_eq!(linked.best_evalue.to_bits(), expected.to_bits());
     }
 }
+
+// Line RG item X-evalue-nan: NCBI's reaping drops an HSP whose e-value is above the limit, so an
+// HSP of NaN e-value stays, and a limit of NaN (`-evalue -nan`, which NCBI's option check lets pass)
+// keeps every HSP (LOSAT kept only the HSPs of NaN e-value there).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1976-2003
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-670
+#[test]
+fn the_reaping_keeps_what_ncbi_s_greater_than_test_keeps() {
+    let hsp = |evalue: f64, source_index: usize| LinkedHsp {
+        context: 0,
+        hsp: GappedHsp {
+            frame: 1,
+            score: 30,
+            q_start: 0,
+            q_end: 1,
+            q_gapped_start: 0,
+            s_start: 0,
+            s_end: 1,
+            s_gapped_start: 0,
+        },
+        num: 1,
+        evalue,
+        source_index,
+    };
+    let evalues = [1e-30, 0.5, 10.0, 11.0, f64::NAN, f64::INFINITY];
+    let kept = |limit: f64| {
+        let mut list = LinkedHspList {
+            hsps: evalues
+                .iter()
+                .enumerate()
+                .map(|(i, &e)| hsp(e, i))
+                .collect(),
+            best_evalue: 1e-30,
+        };
+        reap_by_evalue(&mut list, limit);
+        list.hsps.iter().map(|h| h.source_index).collect::<Vec<_>>()
+    };
+    assert_eq!(kept(10.0), [0, 1, 2, 4]);
+    assert_eq!(kept(f64::NAN), [0, 1, 2, 3, 4, 5]);
+    assert_eq!(kept(-f64::NAN), [0, 1, 2, 3, 4, 5]);
+    assert_eq!(kept(f64::INFINITY), [0, 1, 2, 3, 4, 5]);
+    assert_eq!(kept(1e-40), [4]);
+}

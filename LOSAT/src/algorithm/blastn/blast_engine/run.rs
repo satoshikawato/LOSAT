@@ -440,7 +440,7 @@ fn calculate_blastn_context_statistics(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:662-664
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1996-1998
 // The HSP survives unless `evalue > cutoff`, the same comparison as C (a NaN
-// e-value survives; LOSAT rejects a NaN `-evalue` before the search).
+// e-value survives, and a NaN `-evalue`, which NCBI's option check lets pass, keeps every HSP).
 #[allow(clippy::neg_cmp_op_on_partial_ord)]
 fn hsp_survives_evalue_reap(evalue: f64, cutoff: f64) -> bool {
     !(evalue > cutoff)

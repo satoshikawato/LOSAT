@@ -2092,10 +2092,11 @@ fn tblastx_takes_a_database_and_its_size() {
 
 #[test]
 fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
-    // Decision D12 (AUTHORITY.md): an infinite -evalue, and DBL_MAX with the composition-based
+    // Decision D12 (AUTHORITY.md): an infinite -evalue and DBL_MAX with the composition-based
     // redo, which crashes NCBI's blastp and tblastn on some inputs
     // (`protein_options_check::check_evalue_limit`); without the redo NCBI runs DBL_MAX (line
-    // O4c's review D1). blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
+    // O4c's review D1) and an infinite -evalue (line RG item X-evalue-nan), and NaN runs in every
+    // mode. blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
     // NCBI's int wraps or crashes NCBI; LOSAT computes the size without the overflow and runs
     // (PD-LOSAT-NCBI-DEFECTS exception 19).
     let blastp = |words: &[&str]| {
@@ -2113,7 +2114,7 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
     for words in [
         &["-evalue", "+inf"][..],
         &["-evalue", "1e999"],
-        &["-evalue", "1e999", "-comp_based_stats", "0"],
+        &["-evalue", "1e999", "-comp_based_stats", "1"],
         &["-evalue", "1.7976931348623157e308"],
     ] {
         let error = format!("{:#}", blastp(words).unwrap_err());
@@ -2131,6 +2132,10 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
             "-comp_based_stats",
             "0",
         ],
+        &["-evalue", "1e999", "-comp_based_stats", "0"],
+        &["-evalue", "+inf", "-matrix", "IDENTITY"],
+        &["-evalue", "-nan"],
+        &["-evalue", "+nan", "-comp_based_stats", "0"],
         &["-max_target_seqs", "2147483647"],
         &["-max_target_seqs", "1073741798"],
         // Past NCBI's `int` overflow of the preliminary hit list size (LOSAT computes it without).
@@ -2152,6 +2157,7 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
         "{error}"
     );
     tblastn(&["-evalue", "1e308"]).unwrap();
+    tblastn(&["-evalue", "-nan"]).unwrap();
     for words in [
         &[
             "-evalue",
@@ -2173,8 +2179,81 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
         &["-evalue", "+inf", "-comp_based_stats", "0"][..],
         &["-evalue", "1e999", "-ungapped", "-comp_based_stats", "0"],
     ] {
+        tblastn(words).unwrap();
+    }
+    for words in [
+        &["-evalue", "+inf"][..],
+        &["-evalue", "1e999", "-comp_based_stats", "2"],
+    ] {
         let error = format!("{:#}", tblastn(words).unwrap_err());
         assert!(error.contains("an infinite -evalue"), "{words:?}: {error}");
+    }
+}
+
+// Line RG item X-evalue-nan: BLASTX and RPSTBLASTN search an `-evalue` of NaN, which NCBI's option
+// check lets pass (they refused it), and an infinite one without the composition-based redo; with
+// the redo (BLASTX's default mode 2, RPSTBLASTN's 1) an infinite one is refused as in blastp
+// (decision D12, `protein_options_check::check_infinite_evalue`). `-inf` stops at NCBI's check.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518-1523
+#[test]
+fn blastx_and_rpstblastn_search_a_nan_evalue_and_an_infinite_one_without_the_redo() {
+    let blastx = |words: &[&str]| {
+        let mut argv = vec!["losat", "blastx", "-query", "q.fa", "-subject", "s.fa"];
+        argv.extend(words);
+        let Commands::Blastx(args) = try_parse_from(argv).unwrap().command else {
+            unreachable!("blastx")
+        };
+        args.resolve().map(|_| ())
+    };
+    let rpstblastn = |words: &[&str]| {
+        let mut argv = vec!["losat", "rpstblastn", "-query", "q.fa", "-db", "rps"];
+        argv.extend(words);
+        let Commands::Rpstblastn(args) = try_parse_from(argv).unwrap().command else {
+            unreachable!("rpstblastn")
+        };
+        args.into_blastx_args()?.resolve().map(|_| ())
+    };
+    for words in [
+        &["-evalue", "-nan"][..],
+        &["-evalue", "+nan", "-comp_based_stats", "0"],
+        &["-evalue", "+nan(1)", "-use_sw_tback"],
+        &["-evalue", "+inf", "-comp_based_stats", "0"],
+        &["-evalue", "1e999", "-ungapped", "-comp_based_stats", "0"],
+    ] {
+        blastx(words).unwrap_or_else(|e| panic!("{words:?}: {e:#}"));
+    }
+    for words in [
+        &["-evalue", "-nan"][..],
+        &["-evalue", "+inf", "-comp_based_stats", "0"],
+    ] {
+        rpstblastn(words).unwrap_or_else(|e| panic!("{words:?}: {e:#}"));
+    }
+    for (words, program) in [
+        (&["-evalue", "+inf"][..], "BLASTX"),
+        (&["-evalue", "1e999", "-comp_based_stats", "3"], "BLASTX"),
+    ] {
+        let error = format!("{:#}", blastx(words).unwrap_err());
+        assert!(
+            error.contains("an infinite -evalue (inf) with composition-based statistics")
+                && error.contains(&format!("not supported by LOSAT's {program}")),
+            "{words:?}: {error}"
+        );
+    }
+    let error = format!("{:#}", rpstblastn(&["-evalue", "+inf"]).unwrap_err());
+    assert!(
+        error.contains("an infinite -evalue (inf) with composition-based statistics")
+            && error.contains("not supported by LOSAT's RPSTBLASTN"),
+        "{error}"
+    );
+    for words in [
+        &["-evalue", "-inf"][..],
+        &["-evalue", "-1e999", "-comp_based_stats", "0"],
+    ] {
+        let error = format!("{:#}", blastx(words).unwrap_err());
+        assert!(
+            error.contains("expect value or cutoff score must be greater than zero"),
+            "{words:?}: {error}"
+        );
     }
 }
 

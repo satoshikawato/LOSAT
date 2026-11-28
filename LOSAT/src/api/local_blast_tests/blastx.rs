@@ -410,8 +410,9 @@ fn hand_set_values_are_refused_as_ncbis_api_or_losat_refuses_them() {
         ("Argument \"strand\". Illegal value", |a| {
             a.strand = "up".into()
         }),
+        // An infinite -evalue with the composition-based redo (the default mode 2; decision D12).
         (
-            "an -evalue that is not finite (inf) is not supported by LOSAT's BLASTX",
+            "an infinite -evalue (inf) with composition-based statistics (-comp_based_stats 1 to 3), with which NCBI BLAST+'s blastx crashes on some inputs, is not supported by LOSAT's BLASTX",
             |a| a.evalue = f64::INFINITY,
         ),
         ("Invalid number of arguments to filtering option", |a| {

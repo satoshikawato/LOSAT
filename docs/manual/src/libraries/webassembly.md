@@ -28,7 +28,7 @@ The package holds two WebAssembly builds of the engine and the TypeScript host t
 
 A search takes an argv, as on the command line, and FASTA sequences that the page gives it. It writes `-outfmt 0`, `6` and `7` byte for byte as the command line does, and an HSP record for each hit. For `-db` and BLASTN `-filtering_db`, the WebAssembly engine and the npm package read BLAST databases from the run's `files` (`EngineRunRequest.files`), while LOSAT Web's browser form refuses both.
 
-`engine.runTool(argv, options)` runs `windowmasker` and `blast_formatter` with the command line's words on the files of `options.directory`, and gives the exit status, standard output, standard error and the files that the command line writes.
+`engine.runTool(argv, options)` runs `windowmasker`, `blast_formatter` and `makeblastdb` with the command line's words on the files of `options.directory`, and gives the exit status, standard output, standard error and the files that the command line writes (for `makeblastdb`, the database files that it leaves in the run's directory, dated in the browser's time zone as the command line dates them in the user's).
 
 ### Getting the package
 

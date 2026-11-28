@@ -11,7 +11,6 @@ use crate::algorithm::tblastx::subjects::{SubjectSetNumbers, Subjects, SubjectsU
 use crate::blastinput::report_counts::ReportCounts;
 use crate::report::diag_log::Posts;
 use crate::report::tabular::SubjectFetch;
-use crate::wording::ENGINE_ERROR;
 use std::sync::Arc;
 
 use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
@@ -1172,11 +1171,9 @@ fn read_subject_set(
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 fn check_subjects_not_empty(subjects: &[FastaRecord]) -> Result<()> {
     if subjects.is_empty() {
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
-        }
-        .into());
+        return Err(crate::blastinput::app::engine_error(
+            "Empty CBlastQueryVector",
+        ));
     }
     Ok(())
 }
@@ -3876,11 +3873,9 @@ fn run_batch_loop(
         if start == end {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
-            }
-            .into());
+            return Err(crate::blastinput::app::engine_error(
+                "Empty CBlastQueryVector",
+            ));
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:178-181
         // LOSAT's refusal of two queries of the batch's scope with one id, in the one form of every

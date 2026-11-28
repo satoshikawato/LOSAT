@@ -3,7 +3,6 @@
 use crate::blastinput::fasta_reader::believed::BelievedIds;
 use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
 use crate::report::blast_xml::matrix::XmlMatrixFailure;
-use crate::wording::ENGINE_ERROR;
 
 /// The query batch size from the environment variable `BATCH_SIZE` (`value`; 0 when it is not
 /// set: blastn then uses `CBatchSizeMixer`, the other programs their default). `Err` is the
@@ -2087,13 +2086,9 @@ fn read_batches(
             }
         }
         if stop_error.is_none() && start == end {
-            stop_error = Some(
-                crate::cli::NativeError {
-                    exit: 3,
-                    message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
-                }
-                .into(),
-            );
+            stop_error = Some(crate::blastinput::app::engine_error(
+                "Empty CBlastQueryVector",
+            ));
         }
         let mut stop_batch = None;
         if stop_error.is_none() {
@@ -2180,14 +2175,9 @@ fn psiblast_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
             "a query without letters alone in its batch (a last record without residues, or a -query_loc interval that starts just past the end of its record), with which NCBI BLAST+'s psiblast crashes, is not supported by LOSAT's PSIBLAST"
         )),
         [_] => None,
-        _ => Some(
-            crate::cli::NativeError {
-                exit: 3,
-                message: format!("{ENGINE_ERROR} PSI-BLAST only accepts one protein sequence as query\n")
-                    .into(),
-            }
-            .into(),
-        ),
+        _ => Some(crate::blastinput::app::engine_error(
+            "PSI-BLAST only accepts one protein sequence as query",
+        )),
     }
 }
 

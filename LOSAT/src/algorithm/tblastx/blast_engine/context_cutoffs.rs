@@ -24,7 +24,6 @@ use super::{
     gap_trigger_raw_score, ErrorAfterBatchReports, KarlinParams, QueryContext, QueryFrame,
     SubjectSetNumbers, Subjects, TblastxQueryStats, BLAST_GAP_DECAY_RATE, GAP_TRIGGER_BIT_SCORE,
 };
-use crate::wording::ENGINE_ERROR;
 use anyhow::{Context, Result};
 
 /// What `context_cutoffs` reads.
@@ -103,18 +102,12 @@ pub(super) fn subject_length_check(
     // `stats::setup::setup_subject_length`: the total divided by `num_seqs`, cast to `Int4` and
     // then to `Uint4`, is 0 (a negative `NSEQ` passes; one of 2^31 fails).
     if crate::stats::setup::setup_subject_length(total_length, num_seqs as i32, None).is_none() {
-        return Err(ErrorAfterBatchReports::new(
-            crate::cli::NativeError {
-                exit: 3,
-                message: format!(
-                    "{ENGINE_ERROR} {}\n",
-                    crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
-                )
-                .into(),
-            }
+        return Err(
+            ErrorAfterBatchReports::new(crate::blastinput::app::engine_error(
+                crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,
+            ))
             .into(),
-        )
-        .into());
+        );
     }
     Ok(())
 }

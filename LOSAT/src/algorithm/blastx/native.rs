@@ -41,11 +41,7 @@ use run_parts::{read_subjects, ArchiveBatch, RunSetup, SubjectRead};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 pub(crate) fn engine(message: impl fmt::Display) -> anyhow::Error {
-    NativeError {
-        exit: 3,
-        message: format!("{ENGINE_ERROR} {message}\n").into(),
-    }
-    .into()
+    crate::blastinput::app::engine_error(message.to_string())
 }
 
 /// The error of the database's sequences (`BlastxDatabase::x_check_stores`, or a read of

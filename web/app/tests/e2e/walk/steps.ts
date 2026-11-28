@@ -20,9 +20,11 @@
 // value; two runs of the same form give the same bytes. A walk of the engine's build completes
 // runs, and compares them with the native CLI when it is given (runner.ts).
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
+import { uploadableName } from '../support/artifact-names';
 import { axeViolations } from '../support/axe';
 import { NATIVE } from '../support/native';
 import { navigate, reload } from '../support/navigate';
@@ -94,7 +96,7 @@ export class Draws {
 export interface Walker {
   readonly page: Page;
   readonly fixtures: FixtureLibrary;
-  /** Where the native CLI's files go. */
+  /** Where a failed comparison with the native CLI keeps its files (keepEvidence); the CLI itself runs in a temporary folder. */
   readonly outDir: string;
   model: InputModel;
   program: string;
@@ -968,28 +970,55 @@ async function verifyRun(walker: Walker, run: number, before: Submitted, at: num
   if (query.name === subject.name && Buffer.compare(Buffer.from(query.bytes), Buffer.from(subject.bytes)) !== 0) {
     throw new StepFailure('command-names', `run ${run}: the command line names ${query.name} for both inputs, which differ`);
   }
-  const directory = join(walker.outDir, `run-${run}-${Date.now()}`);
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, query.name), query.bytes);
-  writeFileSync(join(directory, subject.name), subject.bytes);
-  for (const [format, words] of details.commands) {
-    if (words[0] !== 'losat') throw new StepFailure('command', `run ${run}: the command of ${format} does not start with losat: ${words.join(' ')}`);
-    const cli = spawnSync(NATIVE, words.slice(1), { cwd: directory, maxBuffer: 1 << 28, timeout: 60_000 });
-    if (cli.status !== 0) {
-      throw new StepFailure('native-refuses', `run ${run}: the run completed, but its command of outfmt ${format} fails in the CLI (${cli.status}): ${String(cli.stderr).slice(0, 400)}\n${words.join(' ')}`);
+  // The CLI reads the inputs under the names the command gives, which may hold characters CI's artifact
+  // upload refuses (a fixture's `<svg …>.fa`): it runs in a folder outside the test's output directory, and
+  // a failed comparison copies what it read and wrote there under names the upload keeps (keepEvidence).
+  const directory = mkdtempSync(join(tmpdir(), `losat-walk-run-${run}-`));
+  try {
+    writeFileSync(join(directory, query.name), query.bytes);
+    writeFileSync(join(directory, subject.name), subject.bytes);
+    for (const [format, words] of details.commands) {
+      if (words[0] !== 'losat') throw new StepFailure('command', `run ${run}: the command of ${format} does not start with losat: ${words.join(' ')}`);
+      const cli = spawnSync(NATIVE, words.slice(1), { cwd: directory, maxBuffer: 1 << 28, timeout: 60_000 });
+      if (cli.status !== 0) {
+        const kept = keepEvidence(walker, run, files, { [`web.${format}.out`]: stored.get(format) ?? '', [`native.${format}.stderr`]: cli.stderr ?? '' });
+        throw new StepFailure(
+          'native-refuses',
+          `run ${run}: the run completed, but its command of outfmt ${format} fails in the CLI (${cli.status}): ${String(cli.stderr).slice(0, 400)}\n${words.join(' ')} (files in ${kept})`,
+        );
+      }
+      const web = stored.get(format);
+      if (web === undefined || !web.equals(cli.stdout)) {
+        const kept = keepEvidence(walker, run, files, { [`web.${format}.out`]: web ?? '', [`native.${format}.out`]: cli.stdout });
+        throw new StepFailure(
+          `native-bytes:${format}`,
+          `run ${run}: the stored outfmt ${format} (${web?.length ?? 'none'} bytes) differs from the CLI's (${cli.stdout.length} bytes) for ${words.join(' ')} (files in ${kept})`,
+        );
+      }
+      walker.counts.compared += 1;
     }
-    const web = stored.get(format);
-    if (web === undefined || !web.equals(cli.stdout)) {
-      writeFileSync(join(directory, `web.${format}.out`), web ?? '');
-      writeFileSync(join(directory, `native.${format}.out`), cli.stdout);
-      throw new StepFailure(
-        `native-bytes:${format}`,
-        `run ${run}: the stored outfmt ${format} (${web?.length ?? 'none'} bytes) differs from the CLI's (${cli.stdout.length} bytes) for ${words.join(' ')} (files in ${directory})`,
-      );
-    }
-    walker.counts.compared += 1;
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
   return stored;
+}
+
+/**
+ * Keeps a failed comparison's inputs and outputs in the walk's output folder: each input under
+ * uploadableName() of its own name, with names.json mapping the kept names back. Returns the folder.
+ */
+function keepEvidence(walker: Walker, run: number, inputs: Record<Role, CliFile>, outputs: Record<string, string | Uint8Array>): string {
+  const folder = join(walker.outDir, `run-${run}-${Date.now()}`);
+  mkdirSync(folder, { recursive: true });
+  const names: Record<string, string> = {};
+  for (const file of Object.values(inputs)) {
+    const kept = uploadableName(file.name);
+    writeFileSync(join(folder, kept), file.bytes);
+    names[kept] = file.name;
+  }
+  for (const [name, bytes] of Object.entries(outputs)) writeFileSync(join(folder, name), bytes);
+  writeFileSync(join(folder, 'names.json'), `${JSON.stringify(names, null, 1)}\n`);
+  return folder;
 }
 
 const runOnce: StepBody = async (walker) => {

@@ -2,7 +2,7 @@
 // changes; what actually happened is appended to the RunRecord.
 import type { CountsFile, CountsUse, MessagePlace, PrintedKind, ProgramId, RecordKey, RunFile, SequenceKind, ShownIds } from 'losat/domain';
 import type { CountsOrigin } from './counts';
-import type { ToolId, WindowMaskerStage } from './tools';
+import type { ToolId, ToolStage } from './tools';
 
 export type RunStatus =
   | 'queued'
@@ -101,7 +101,10 @@ export interface DatabaseFilterFileSnapshot {
 
 /** Metadata of a local BLAST database (`-db` or BLASTN `-filtering_db`) fixed when a run is queued. */
 export interface DatabaseSnapshot {
-  /** Exact relative path passed to `-db` or `-filtering_db` (e.g. `mydb/nt_small`). */
+  /**
+   * The database's relative path as it is called (e.g. `mydb/nt_small`, `my dbs/nt`): the argv names it as the command line
+   * reads it (`seqdbNameList`: `"my dbs/nt"`), and a reader takes the name from here, not from the argv.
+   */
   readonly name: string;
   readonly folder?: string;
   readonly kind: SequenceKind;
@@ -248,6 +251,7 @@ export type ToolFileOrigin =
   | { readonly kind: 'inflated'; readonly from: string }
   | { readonly kind: 'combined'; readonly parts: readonly string[] }
   | { readonly kind: 'made'; readonly runNumber: number }
+  | { readonly kind: 'archive'; readonly runNumber: number }
   | { readonly kind: 'saved'; readonly taxid: number };
 
 /** Metadata of one file placed in a tool run's working directory (for Run details). */
@@ -276,10 +280,12 @@ export interface ToolRunSnapshot {
   /** 1-based position in this working session, shared with search runs. */
   readonly number: number;
   readonly tool: ToolId;
-  readonly stage: WindowMaskerStage;
+  readonly stage: ToolStage;
   readonly argv: readonly string[];
   readonly directory: readonly ToolDirectoryEntry[];
   readonly prints?: PrintedKind;
+  /** A masking run's `-outfmt` default from `-xmlhelp`, kept for the run's mask data (`domain/tool-argv.ts` `maskDataName`). */
+  readonly outfmtDefault?: string;
   readonly queuedAt: number;
   readonly group?: RunGroup;
 }

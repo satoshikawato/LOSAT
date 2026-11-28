@@ -2,15 +2,21 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watchEffect, type Ref } from 'vue';
 import { holdsResults, type Attention } from '../application/attention';
 import { withRemedy, type Availability } from '../application/availability';
-import type { Coordinator, SessionCountsEntry } from '../application/coordinator';
+import type { BlastFormatterDraft } from '../application/blast-formatter-draft';
+import type { Coordinator, MadeDatabase, MaskDataHandover, SessionArchiveEntry, SessionCountsEntry } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
 import type { CountsLoader } from '../application/counts';
 import type { ExampleLoader } from '../application/examples';
+import type { MakeblastdbDraft } from '../application/makeblastdb-draft';
+import type { MaskingDraft } from '../application/masking-draft';
 import type { ResultsBrowser } from '../application/results';
 import type { ToolDraft } from '../application/tool-draft';
 import { useStore } from './useStore';
+import FormatArchivePanel from './FormatArchivePanel.vue';
 import LiveAnnouncer from './LiveAnnouncer.vue';
 import LosatLogo from './LosatLogo.vue';
+import MakeblastdbPanel from './MakeblastdbPanel.vue';
+import MaskingPanel from './MaskingPanel.vue';
 import { holdWhilePressed } from './press-hold';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
@@ -25,6 +31,9 @@ const props = defineProps<{
   coordinator: Coordinator;
   draft: SearchDraft;
   toolDraft: ToolDraft;
+  maskingDraft: MaskingDraft;
+  blastFormatterDraft: BlastFormatterDraft;
+  makeblastdbDraft: MakeblastdbDraft;
   examples: ExampleLoader;
   counts: CountsLoader;
   results: ResultsBrowser;
@@ -50,6 +59,9 @@ const navigation = tabNavigation(window.history);
 const forms = {
   search: { scroll: 0, focus: null as Element | null },
   windowmasker: { scroll: 0, focus: null as Element | null },
+  masking: { scroll: 0, focus: null as Element | null },
+  makeblastdb: { scroll: 0, focus: null as Element | null },
+  blast_formatter: { scroll: 0, focus: null as Element | null },
 };
 function leave(): void {
   if (shown.value === 'results') return;
@@ -64,23 +76,33 @@ const tab = computed<MainTab>({
     navigation.choose(value);
   },
 });
-// Load windowmasker's `-xmlhelp` and saved counts list lazily on the first visit to the
-// WindowMasker tab so startup on Search does not issue extra worker calls.
+// Load tool `-xmlhelp` descriptions (and saved counts) lazily on the first visit to each tool tab
+// so startup on Search does not issue extra worker calls.
 watchEffect(() => {
   if (shown.value === 'windowmasker') {
     props.toolDraft.ensureLoaded();
     props.counts.refreshList();
+  } else if (shown.value === 'masking') {
+    props.maskingDraft.ensureLoaded();
+  } else if (shown.value === 'makeblastdb') {
+    props.makeblastdbDraft.ensureLoaded();
+  } else if (shown.value === 'blast_formatter') {
+    props.blastFormatterDraft.ensureLoaded();
   }
 });
 const searchPanel = ref<InstanceType<typeof SearchPanel>>();
+const makeblastdbPanel = ref<InstanceType<typeof MakeblastdbPanel>>();
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
 const mainTabs = ref<{ focus: (options?: FocusOptions) => void }>();
-/** Search, Results, and WindowMasker: tabs, each with its panel (WA2-AX-12). */
+/** Search, Results, WindowMasker, Masking, makeblastdb, and Format Archive: tabs, each with its panel (WA2-AX-12). */
 const ids = useId();
 const MAIN_TABS = [
   { value: 'search', label: 'Search', testid: 'tab-search', id: `${ids}-search-tab`, panel: `${ids}-search` },
   { value: 'results', label: 'Results', testid: 'tab-results', id: `${ids}-results-tab`, panel: `${ids}-results` },
   { value: 'windowmasker', label: 'WindowMasker', testid: 'tab-windowmasker', id: `${ids}-wm-tab`, panel: `${ids}-wm` },
+  { value: 'masking', label: 'Masking', testid: 'tab-masking', id: `${ids}-ms-tab`, panel: `${ids}-ms` },
+  { value: 'makeblastdb', label: 'makeblastdb', testid: 'tab-makeblastdb', id: `${ids}-mk-tab`, panel: `${ids}-mk` },
+  { value: 'blast_formatter', label: 'Format Archive', testid: 'tab-blast-formatter', id: `${ids}-bf-tab`, panel: `${ids}-bf` },
 ] as const;
 useRunAnnouncements(state, useStore(props.results.state));
 /** The results tab's view, kept while the search tab is shown and when another run opens. */
@@ -148,6 +170,44 @@ async function maskWithCounts(entry: SessionCountsEntry): Promise<void> {
   window.scrollTo(0, 0);
 }
 
+/** "Format archive…" on a completed `-outfmt 11` search output: opens it in Format Archive. */
+async function formatArchiveFromRun(entry: SessionArchiveEntry): Promise<void> {
+  props.blastFormatterDraft.useSessionArchive(entry);
+  tab.value = 'blast_formatter';
+  await nextTick();
+  window.scrollTo(0, 0);
+}
+
+/**
+ * "Use as Database (-db)" on a makeblastdb run's database: Search with the run's files as the database folder, the
+ * database selected, in BLASTN for a nucleotide database and BLASTP for a protein one (line WW, WW4b2).
+ */
+async function useAsDatabase(made: MadeDatabase): Promise<void> {
+  props.draft.setProgram(made.kind === 'nucleotide' ? 'blastn' : 'blastp');
+  tab.value = 'search';
+  await props.draft.setSubjectDatabaseFiles(made.files, made.names, { made: true });
+  await nextTick();
+  searchPanel.value?.focusDatabase();
+}
+
+/** "Use as Repeats database (-filtering_db)" on a makeblastdb run's nucleotide database: BLASTN's repeats database. */
+async function useAsRepeatsDatabase(made: MadeDatabase): Promise<void> {
+  props.draft.setProgram('blastn');
+  tab.value = 'search';
+  await props.draft.setFilteringDbFiles(made.files, made.names, { made: true });
+  await nextTick();
+  await searchPanel.value?.focusFilteringDb();
+}
+
+/** "Use as -mask_data in makeblastdb" on a masking run's mask data: the file joins makeblastdb's `-mask_data`. */
+async function useAsMaskData(data: MaskDataHandover): Promise<void> {
+  props.makeblastdbDraft.addMaskData(data.file, data.name, data.origin);
+  makeblastdbPanel.value?.showMessagesAtTop();
+  tab.value = 'makeblastdb';
+  await nextTick();
+  window.scrollTo(0, 0);
+}
+
 /**
  * Back or Forward moved between the tabs' history entries (tab-history.ts). The form comes back where
  * it was scrolled, with the focus where it was (it stays mounted, so "Run LOSAT" has it again after
@@ -168,7 +228,7 @@ async function arrived(): Promise<void> {
   }
   const saved = forms[next];
   window.scrollTo(0, saved.scroll);
-  const panelId = next === 'search' ? MAIN_TABS[0].panel : MAIN_TABS[2].panel;
+  const panelId = MAIN_TABS.find((main) => main.value === next)!.panel;
   const panel = document.getElementById(panelId);
   const active = document.activeElement;
   const onTab = MAIN_TABS.some((main) => main.id === active?.id);
@@ -270,6 +330,10 @@ onUnmounted(() => {
         @use-in-blastn="useCountsInBlastn"
         @use-taxid-in-blastn="useTaxidInBlastn"
         @mask-with-counts="maskWithCounts"
+        @format-archive="formatArchiveFromRun"
+        @use-as-database="useAsDatabase"
+        @use-as-repeats-database="useAsRepeatsDatabase"
+        @use-as-mask-data="useAsMaskData"
       />
       <WindowMaskerPanel
         v-show="tab === 'windowmasker'"
@@ -279,6 +343,33 @@ onUnmounted(() => {
         :draft="toolDraft"
         :coordinator="coordinator"
         :counts="counts"
+        @submitted="openResults"
+      />
+      <MaskingPanel
+        v-show="tab === 'masking'"
+        :id="MAIN_TABS[3].panel"
+        role="tabpanel"
+        :aria-labelledby="MAIN_TABS[3].id"
+        :draft="maskingDraft"
+        @submitted="openResults"
+      />
+      <MakeblastdbPanel
+        v-show="tab === 'makeblastdb'"
+        :id="MAIN_TABS[4].panel"
+        ref="makeblastdbPanel"
+        role="tabpanel"
+        :aria-labelledby="MAIN_TABS[4].id"
+        :draft="makeblastdbDraft"
+        :coordinator="coordinator"
+        @submitted="openResults"
+      />
+      <FormatArchivePanel
+        v-show="tab === 'blast_formatter'"
+        :id="MAIN_TABS[5].panel"
+        role="tabpanel"
+        :aria-labelledby="MAIN_TABS[5].id"
+        :draft="blastFormatterDraft"
+        :coordinator="coordinator"
         @submitted="openResults"
       />
     </section>

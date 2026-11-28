@@ -94,7 +94,13 @@ pub(super) fn write_prolog(
         return Ok(());
     }
     write_taxdb_warning(program.app, spec, taxdb_found, writer, diagnostics)?;
-    TabularWriter::new(spec, program_version(program), None).prolog(writer)?;
+    TabularWriter::new(
+        spec,
+        crate::blastinput::app::Program::Blastx,
+        program_version(program),
+        None,
+    )
+    .prolog(writer)?;
     Ok(())
 }
 
@@ -400,6 +406,7 @@ pub(super) fn write_blastx_tabular(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3552-3556
     let table = TabularWriter::new(
         spec,
+        crate::blastinput::app::Program::Blastx,
         program_version(options.program()),
         options.rpstblastn.is_none().then_some(options.scoring),
     );
@@ -713,7 +720,9 @@ pub(super) fn write_blastx_tabular(
                                 q_end: mapped.q_end,
                                 s_start: mapped.s_start,
                                 s_end: mapped.s_end,
-                                evalue,
+                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(
+                                    evalue,
+                                ),
                                 bit_score,
                                 score,
                                 length: mapped.length(),
@@ -738,7 +747,9 @@ pub(super) fn write_blastx_tabular(
                                 q_end: 0,
                                 s_start: 0,
                                 s_end: 0,
-                                evalue,
+                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(
+                                    evalue,
+                                ),
                                 bit_score,
                                 score,
                                 length: 0,
@@ -783,7 +794,9 @@ pub(super) fn write_blastx_tabular(
                                 q_end: i64::from(a.qend),
                                 s_start: i64::from(a.sstart),
                                 s_end: i64::from(a.send),
-                                evalue,
+                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(
+                                    evalue,
+                                ),
                                 bit_score,
                                 score,
                                 length: a.qseq.len(),
@@ -816,14 +829,34 @@ pub(super) fn write_blastx_tabular(
                             writer.flush()?;
                             probe.begin(next_hsp);
                         }
-                        table.row(
+                        // A row where NCBI has no result ends the run after its bytes before
+                        // the stop (`report::tabular::RowStop`).
+                        if let Some(stop) = table.row(
                             &mut buf,
                             &mut table_rows,
                             &row_query,
                             &row_subject,
                             kept.as_ref(),
                             &row,
-                        );
+                        ) {
+                            return Err(crate::report::tabular::row_stop_end(
+                                writer,
+                                &buf,
+                                stop,
+                                super::report::stopped_subject(
+                                    shown,
+                                    subjects,
+                                    stop.subject,
+                                    stop.lineless,
+                                ),
+                                options.program().upper,
+                                || {
+                                    if let Some(reads) = reads.as_mut() {
+                                        reads.end_run();
+                                    }
+                                },
+                            ));
+                        }
                         writer.write_all(&buf)?;
                         buf.clear();
                         if let Some(probe) = probe.as_deref_mut() {

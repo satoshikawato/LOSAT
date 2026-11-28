@@ -3,12 +3,16 @@ import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { VERIFICATION_TABLE } from 'virtual:losat-verification';
 import { engineBuildName, sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
 import type { EngineGateway, ToolEngine } from 'losat/ports';
+import { CUSTOM_OUTPUT } from 'losat/domain';
 import { Attention } from './application/attention';
 import { Availability } from './application/availability';
+import { BlastFormatterDraft } from './application/blast-formatter-draft';
 import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { CountsLoader } from './application/counts';
 import { ExampleLoader } from './application/examples';
+import { MakeblastdbDraft } from './application/makeblastdb-draft';
+import { MaskingDraft } from './application/masking-draft';
 import { ResultsBrowser } from './application/results';
 import { SessionFiles } from './application/session-files';
 import { ToolDraft } from './application/tool-draft';
@@ -31,6 +35,12 @@ export interface App {
   readonly draft: SearchDraft;
   /** The WindowMasker job being edited on the WindowMasker tab. */
   readonly toolDraft: ToolDraft;
+  /** The dustmasker, segmasker or convert2blastmask job being edited on the Masking tab (WW4c). */
+  readonly maskingDraft: MaskingDraft;
+  /** The Format Archive (`blast_formatter`) job being edited on the Format Archive tab. */
+  readonly blastFormatterDraft: BlastFormatterDraft;
+  /** The makeblastdb job being edited on the makeblastdb tab (line WW, WW4b2). */
+  readonly makeblastdbDraft: MakeblastdbDraft;
   /** The Example sets that load into the draft (line WF-2). */
   readonly examples: ExampleLoader;
   /** The WindowMasker counts of the taxonomy IDs, downloaded when the user asks (line WW2). */
@@ -111,7 +121,26 @@ export function createApp(options: AppOptions = {}): App {
     readSavedCounts: async (taxid) => (await counts.readSavedFile(taxid))?.file,
     sessionFiles,
   });
-  const availability = new Availability({ draft, toolDraft, dataWorkerEnded });
+  const maskingDraft = new MaskingDraft({
+    engine,
+    data,
+    enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
+    isBusy: () => coordinator.isBusy(),
+    sessionFiles,
+  });
+  const blastFormatterDraft = new BlastFormatterDraft({
+    engine,
+    enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
+    getSessionArchiveFile: (runId, fileName) => coordinator.getOutputFile(runId, CUSTOM_OUTPUT, fileName),
+    isBusy: () => coordinator.isBusy(),
+  });
+  const makeblastdbDraft = new MakeblastdbDraft({
+    engine,
+    enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
+    isBusy: () => coordinator.isBusy(),
+  });
+  const tools = [toolDraft, maskingDraft, blastFormatterDraft, makeblastdbDraft];
+  const availability = new Availability({ draft, tools, dataWorkerEnded });
   const examples = new ExampleLoader({
     downloader: new BrowserFileDownloader({ inflater: data }),
     store: data,
@@ -131,10 +160,23 @@ export function createApp(options: AppOptions = {}): App {
     page: browserPage,
     runs: coordinator.state,
     draft: draft.state,
-    toolDraft: toolDraft.state,
+    tools,
     probe: () => data.storageInfo(),
     checkStored: () => data.checkStoredResults(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, toolDraft, examples, counts, results, attention, availability, usesFakeEngine: ENGINE_ASSETS === null };
+  return {
+    coordinator,
+    draft,
+    toolDraft,
+    maskingDraft,
+    blastFormatterDraft,
+    makeblastdbDraft,
+    examples,
+    counts,
+    results,
+    attention,
+    availability,
+    usesFakeEngine: ENGINE_ASSETS === null,
+  };
 }

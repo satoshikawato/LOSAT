@@ -1,19 +1,16 @@
 //! NCBI BLAST cutoff score calculation - verbatim port
 //!
-//! This module implements NCBI BLAST's cutoff score calculation for tblastx ungapped extensions.
-//! All functions are direct ports from NCBI C code with original comments preserved.
+//! This module implements NCBI BLAST's cutoff score calculation for tblastx ungapped extensions:
+//! the hit-saving cutoff and the word cutoff of each context. `BLAST_Cutoffs` itself, which they
+//! call, is `stats::cutoffs` (every program's one owner).
 //!
 //! Reference files:
 //! - c++/src/algo/blast/core/blast_parameters.c
 //! - c++/src/algo/blast/core/blast_setup.c
 //! - c++/src/algo/blast/core/blast_stat.c
 
+use crate::stats::cutoffs::{cutoff_score, CutoffConversion};
 use crate::stats::KarlinParams;
-use crate::utils::glibc_fma_libm::GlibcLibm;
-
-/// Smallest float to avoid floating point exception in BlastKarlinEtoS_simple
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4049
-const K_SMALL_FLOAT: f64 = 1.0e-297;
 
 /// Default E-value cutoff for tblastx in BlastInitialWordParametersUpdate
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_parameters.h:80
@@ -137,150 +134,6 @@ pub fn try_compute_eff_lengths_tblastx(
     })
 }
 
-/// Calculate cutoff_score from E-value using `BLAST_Cutoffs` (gap decay disabled).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4039-4063
-///
-/// And from blast_parameters.c:942-943:
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:943-943
-///
-/// CRITICAL: Uses GAPPED params (kbp_gap/kbp_gap_std).
-/// CRITICAL: Uses ceil() rounding, NOT trunc.
-///
-/// NCBI's guard (`Lambda < 0. || K < 0. || H < 0.0`: `BLAST_SCORE_MIN`, c++/src/algo/blast/core/blast_stat.c:4054-4057) is
-/// not here: the callers pass valid blocks (`pssm_search::evalue::EvalueStats::hit_cutoff`, which
-/// may get a profile's block, has it).
-///
-/// # Arguments
-/// * `evalue` - Expected value threshold
-/// * `eff_searchsp` - Effective search space
-/// * `gapped_params` - GAPPED Karlin-Altschul parameters
-///
-/// # Returns
-/// cutoff_score_max (raw score)
-pub fn cutoff_score_from_evalue(
-    evalue: f64,
-    eff_searchsp: i64,
-    karlin_params: &KarlinParams, // Named generically - can be gapped or ungapped depending on program
-) -> i32 {
-    // Clamp the E-value below at `kSmallFloat`.
-    let e = evalue.max(K_SMALL_FLOAT);
-
-    // Convert E-value to raw score by taking the ceiling of ln(K * searchsp / E) / Lambda truncated to `Int4`.
-    let searchsp = eff_searchsp as f64;
-    let k_times_searchsp = karlin_params.k * searchsp;
-    let k_times_searchsp_over_e = k_times_searchsp / e;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4059-4061
-    // A quotient past the double (an E-value near kSmallFloat with a search space above about
-    // 4e12, or the largest -searchsp) is +inf in NCBI, and `(Int4)+inf` is undefined behaviour
-    // (x86-64 gives INT_MIN, so `BLAST_Cutoffs` keeps its cutoff of 1; LOSAT's `as i32` would
-    // give i32::MAX and drop every hit). LOSAT does not reproduce NCBI's undefined behaviour
-    // (Owner 2026-10-10; line PS DECISIONS 28): such a quotient takes the mathematically equal
-    // `ln K + ln searchsp - ln E`, a finite cutoff that every HSP of e-value at most E reaches.
-    // A finite quotient keeps NCBI's order of operations. That gives NCBI's rows where each hit is
-    // judged as one HSP (blastp, psiblast, blastx, tblastn). TBLASTX's rows differ there: its word
-    // cutoff, the smallest of the update, the gap trigger and `cutoff_score_max`, is the gap trigger with LOSAT's finite
-    // value (as with the `i32::MAX` before), while NCBI's x86-64 `cutoff_score_max` of 1 makes its
-    // word cutoff 1, so more ungapped HSPs reach its sum statistics (NCBI 2.17.0 320 rows, LOSAT
-    // 262 for a 6,077-codon sequence against itself with `-searchsp 9223372036854775807 -evalue
-    // 1e-300`): a difference of NCBI's undefined behaviour that LOSAT keeps (line PS DECISIONS 30).
-    // With the default options ordinary genome pairs reach it too (MG1655 1.2 Mb x Sakai 5.5 Mb:
-    // NCBI out of memory or time with no output, LOSAT 88,562 rows); LOSAT keeps the finite value
-    // there as well (Owner 2026-11-12, line PS DECISIONS 36; PD-LOSAT-NCBI-DEFECTS exception 8).
-    let log_value = if k_times_searchsp_over_e.is_finite() {
-        k_times_searchsp_over_e.glibc_ln()
-    } else {
-        karlin_params.k.glibc_ln() + searchsp.glibc_ln() - e.glibc_ln()
-    };
-    let score_before_ceil = log_value / karlin_params.lambda;
-    let score = score_before_ceil.ceil();
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:360-363
-    // NCBI computes the cutoff without emitting unconditional diagnostics.
-    if crate::utils::xenv::debug_cutoffs_is_some() && eff_searchsp > 40_000_000_000 {
-        eprintln!("[DEBUG CUTOFF_CALC] eff_searchsp={}", eff_searchsp);
-        eprintln!("[DEBUG CUTOFF_CALC] evalue={}, e_clamped={}", evalue, e);
-        eprintln!(
-            "[DEBUG CUTOFF_CALC] K={}, Lambda={}",
-            karlin_params.k, karlin_params.lambda
-        );
-        eprintln!(
-            "[DEBUG CUTOFF_CALC] K*searchsp={:.6e}, K*searchsp/E={:.6e}",
-            k_times_searchsp, k_times_searchsp_over_e
-        );
-        eprintln!(
-            "[DEBUG CUTOFF_CALC] log(K*searchsp/E)={:.6e}, score_before_ceil={:.6e}",
-            log_value, score_before_ceil
-        );
-        eprintln!("[DEBUG CUTOFF_CALC] final_score={} (ceil)", score as i32);
-    }
-
-    score as i32
-}
-
-/// Calculate cutoff_score for sum statistics path.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:951-976
-///
-/// # Arguments
-/// * `avg_query_len` - Average query length across all contexts
-/// * `avg_subject_len` - Average subject length (= subject_len_nucl/3 for tblastx -subject mode)
-/// * `gap_decay_rate` - Gap decay rate (typically 0.5 for ungapped, 0.1 for gapped)
-/// * `gapped_params` - GAPPED Karlin-Altschul parameters
-///
-/// # Returns
-/// cutoff_score for sum statistics (raw score)
-pub fn cutoff_score_sum_stats(
-    avg_query_len: i32,
-    avg_subject_len: i32,
-    gap_decay_rate: f64,
-    karlin_params: &KarlinParams, // Named generically - can be gapped or ungapped depending on program
-) -> i32 {
-    // NCBI uses a fixed per-HSP E-value of 1.0 for sum-statistics cutoffs.
-    let evalue_hsp: f64 = 1.0;
-
-    // Search space is the smaller of average query and subject lengths multiplied by average subject length.
-    let min_len = avg_query_len.min(avg_subject_len) as i64;
-    let searchsp = min_len * (avg_subject_len as i64);
-
-    // Convert `evalue_hsp` via `BLAST_Cutoffs` with gap decay enabled (`gap_decay_rate`).
-    // When `dodecay` is enabled, apply the gap decay divisor to E-value before conversion. Every caller's
-    // cutoff starts at 1 (blast_parameters.c:321 and 965), so a search space too small for
-    // E = 1 gives 1, not a score below it (with `-db` SeqDB's shortest length 10 makes TBLASTN's
-    // `n` 3: NCBI's cutoff is 1, which the Smith-Waterman redo's `cutoff_s` reads).
-    blast_cutoffs_from_one(cutoff_score_from_evalue_with_decay(
-        evalue_hsp,
-        searchsp,
-        gap_decay_rate,
-        karlin_params,
-    ))
-}
-
-/// Calculate cutoff_score from E-value with gap decay adjustment.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4112-4121
-///
-/// And from blast_stat.c:4079-4082:
-/// For nsegs=1: divisor = (1 - decayrate) * decayrate^0 = (1 - decayrate)
-fn cutoff_score_from_evalue_with_decay(
-    evalue: f64,
-    eff_searchsp: i64,
-    gap_decay_rate: f64,
-    karlin_params: &KarlinParams, // Named generically - can be gapped or ungapped depending on program
-) -> i32 {
-    // Single-segment gap decay divisor from `BLAST_GapDecayDivisor` is one minus `gap_decay_rate`.
-    let divisor = 1.0 - gap_decay_rate;
-
-    // Multiply the E-value by the single-segment gap decay divisor.
-    let adjusted_e = if gap_decay_rate > 0.0 && gap_decay_rate < 1.0 {
-        evalue * divisor
-    } else {
-        evalue
-    };
-
-    cutoff_score_from_evalue(adjusted_e, eff_searchsp, karlin_params)
-}
-
 /// Calculate cutoff_score for BlastInitialWordParametersUpdate (per-subject update).
 ///
 /// This is the NCBI tblastx ungapped path in BlastInitialWordParametersUpdate.
@@ -323,20 +176,22 @@ pub fn cutoff_score_for_update_tblastx(
         gap_decay_rate,
         ungapped_params,
         scale_factor,
+        CutoffConversion::TBLASTX,
     )
 }
 
 /// The word cutoff of `BlastInitialWordParametersUpdate` for a program without gapped extension of
-/// its initial words (TBLASTX; BLASTP and BLASTX with `-ungapped`), for the program's cutoff
+/// its initial words (TBLASTX; BLASTP with `-ungapped`), for the program's cutoff
 /// E-value `cutoff_e` (`s_GetCutoffEvalue`: `CUTOFF_E_TBLASTX` or `CUTOFF_E_BLASTP`, both 1e-300).
 /// The body of `cutoff_score_for_update_tblastx`, whose arguments are named for TBLASTX
 /// (`subject_len_nucl` is the subject length that NCBI's `subj_length` holds, whatever the
 /// program's alphabet); the same NCBI lines (blast_parameters.c:346-374).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:346-374
-/// BLASTX's word cutoff (`blastx::parameters::word_cutoff`) is the same lines with the E-value
-/// 1.0 (`CUTOFF_E_BLASTX`), but is not this function: it takes its lengths as signed `Int4`
-/// (`cutoff_score_sum_stats`) where NCBI's casts are unsigned, and has no scale factor.
+/// BLASTX's word cutoff (`blastx::parameters::word_cutoff`, the E-value 1.0 of `CUTOFF_E_BLASTX`)
+/// and TBLASTN's (`tblastn::stage_d_stats::ungapped_word_cutoff`) are the same lines with their
+/// programs' lengths; all three call `stats::cutoffs::cutoff_score` for `BLAST_Cutoffs`.
+/// `conversion` is the program's rule (`CutoffConversion::TBLASTX` or `PROTEIN`).
 #[allow(clippy::too_many_arguments)]
 pub fn word_cutoff_score_for_update(
     cutoff_e: f64,
@@ -347,6 +202,7 @@ pub fn word_cutoff_score_for_update(
     gap_decay_rate: f64,
     ungapped_params: &KarlinParams,
     scale_factor: f64,
+    conversion: CutoffConversion,
 ) -> i32 {
     // Search space is the smaller of `subj_length` and `query_length` multiplied by `subj_length`.
     // NOTE: This intentionally mixes AA (query_len_aa) and nucleotide (subject_len_nucl) lengths!
@@ -374,14 +230,16 @@ pub fn word_cutoff_score_for_update(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:288,310-311
     // Without sum statistics (`-sum_stats false`, no `link_hsp_params`) NCBI passes 0, and the
     // cutoff is the same: 1e-300 and 1e-300 * (1 - 0.5) are both below the 1e-297 that
-    // `BlastKarlinEtoS_simple` takes at least (blast_stat.c:4049,4059, `K_SMALL_FLOAT` in
-    // `cutoff_score_from_evalue`), so the callers pass `BLAST_GAP_DECAY_RATE` in both modes.
-    let mut new_cutoff = blast_cutoffs_from_one(cutoff_score_from_evalue_with_decay(
+    // `BlastKarlinEtoS_simple` takes at least (blast_stat.c:4049,4059, `stats::cutoffs::K_SMALL_FLOAT`),
+    // so the callers pass `BLAST_GAP_DECAY_RATE` in both modes. The cutoff starts at 1
+    // (blast_parameters.c:321): `stats::cutoffs::cutoff_score`, with the program's `conversion`.
+    let mut new_cutoff = cutoff_score(
         cutoff_e,
-        searchsp,
-        gap_decay_rate,
         ungapped_params,
-    ));
+        searchsp,
+        Some(gap_decay_rate),
+        conversion,
+    );
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:365-373
     if crate::utils::xenv::debug_cutoffs_is_some() && subject_len_nucl > 600_000 {
@@ -436,27 +294,15 @@ pub fn cutoff_score_max_for_tblastx(
     evalue_threshold: f64,
     ungapped_params: &KarlinParams,
 ) -> i32 {
-    // Convert the user E-value via `BLAST_Cutoffs` with gap decay disabled.
-    // Gap decay disabled (`dodecay` false) means no gap decay adjustment.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4108-4121
-    // A NaN e-value (`-evalue -nan`) is not greater than 0, so the cutoff stays 1.
-    let es = if evalue_threshold > 0.0 {
-        cutoff_score_from_evalue(evalue_threshold, eff_searchsp, ungapped_params)
-    } else {
-        1
-    };
-    blast_cutoffs_from_one(es)
-}
-
-/// The cutoff score that `BLAST_Cutoffs` returns to a caller whose cutoff starts at 1
-/// (its `new_cutoff` is set to 1 at blast_parameters.c:321 and 916): the larger of 1 and the score
-/// computed from E (`es`), so a large E-value against a small search space gives 1, not
-/// a score below it.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4097
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4126-4129
-fn blast_cutoffs_from_one(es: i32) -> i32 {
-    es.max(1)
+    // `BLAST_Cutoffs` without gap decay from the cutoff of 1 (blast_parameters.c:916 and 943):
+    // a NaN e-value (`-evalue -nan`) is not greater than 0, so the cutoff stays 1.
+    cutoff_score(
+        evalue_threshold,
+        ungapped_params,
+        eff_searchsp,
+        None,
+        CutoffConversion::TBLASTX,
+    )
 }
 
 #[cfg(test)]

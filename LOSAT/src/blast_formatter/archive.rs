@@ -1,9 +1,12 @@
 //! blast_formatter's run over the objects of a BLAST archive (`-archive`): NCBI's
 //! `CBlastFormatterApp::Run` with `CRemoteBlast::LoadFromArchive` and `PrintFormattedOutput`
 //! (c++/src/app/blast/blast_formatter.cpp:329-531) over the archive reader
-//! (`report::archive::read`), and the formats 8, 9 and 12, which write each query's Seq-aligns as
+//! (`report::archive::read`): the formats 8, 9 and 12, which write each query's Seq-aligns as
 //! the archive holds them, cut to the hit list size, inside the one Seq-annot wrapper of the
-//! search programs (`report::serial::seqalign::write_document_to`, decision F3-2 of line RG).
+//! search programs (`report::serial::seqalign::write_document_to`, decision F3-2 of line RG), the
+//! format 11, which writes the archive again with the search programs' writer (`archive_out`,
+//! `report::archive::writer::write_archive_document`), and the tabular formats 6, 7, 10 and 20
+//! (`tabular`).
 //!
 //! The object loop keeps what NCBI's `CRemoteBlast` keeps from one object to the next: the
 //! options of the first search object (`GetSearchOptions` builds them once: the program, the
@@ -19,12 +22,14 @@ use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::Path;
 
+use super::archive_out;
 use super::formatting::{extract_formatting, sam_check};
 use super::refusals::{self, Refusal};
 use super::search_program::{blast_type, program_type};
 use super::{Options, PROGRAM};
 use crate::algorithm::common::database::{
     database_error, database_error_of, list_warning_line, open_search_database, pairwise_database,
+    TaxdbRun,
 };
 use crate::blastinput::app::{
     engine_error, options_error_bytes, output_format, prefetch_seqs_limit, xinclude_check_for,
@@ -32,17 +37,21 @@ use crate::blastinput::app::{
 use crate::blastinput::db_mask::name_mask_error;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::{command_line_argument_error, NativeError};
-use crate::ncbi_app::files::{self, OutputFile};
+use crate::ncbi_app::files::{self, OutputDevice};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::archive::read::options::{archive_request, BuiltOptions};
-use crate::report::archive::read::request::{Queries, Subject};
+use crate::report::archive::fields;
+use crate::report::archive::options::{ParamValue, RemoteOptions};
+use crate::report::archive::read::options::{archive_request, BuiltOptions, EProgram};
+use crate::report::archive::read::queries::{check_setup_letters, RenderError, SubjectSetup};
+use crate::report::archive::read::request::{Bioseq, ParamSet, Queries, Subject};
 use crate::report::archive::read::{
     seq_align_id, Archive, ArchiveReader, Message, Search, Severity, Stop,
 };
 use crate::report::archive::writer::FLUSH_BYTES;
 use crate::report::run_files::{OpenFiles, OpenedFile};
 use crate::report::serial::asn_input::Names;
+use crate::report::serial::asn_types::read_xml::XmlStyle;
 use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, GuessStop};
 use crate::report::serial::asn_types::view::V;
 use crate::report::serial::asn_types::write::write_value;
@@ -52,6 +61,8 @@ use crate::report::serial::seqalign::{
     write_document, write_document_posting, AnnotDesc, DatabaseDesc, SeqAlignError,
     SeqAnnotDocument, SerialFormat,
 };
+use crate::report::serial::seqalign_read::ReadAlign;
+use crate::report::tabular::TabularSpec;
 use crate::seqdb::{DbList, SeqDb, SeqDbError, SeqType, TaxidList};
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::ParsedSeqId;
@@ -85,9 +96,13 @@ pub(crate) fn format_archive(
             formatting: false,
         },
         search_options: None,
+        algorithm_options: None,
         hitlist: 0,
         database: None,
         opened: None,
+        matrix_name: None,
+        psi_step: Ok(0),
+        taxdb: TaxdbRun::default(),
         buf: Vec::new(),
     };
     match run.objects(archive, diag) {
@@ -105,6 +120,10 @@ struct Run<'r, 'o> {
     /// The options of the first search object (`m_CBOH`, `m_TaxidList`,
     /// `m_DbFilteringAlgorithmId`, `m_Task`), which every later object is formatted with.
     search_options: Option<BuiltOptions>,
+    /// The remote options of `m_CBOH` (`-outfmt 11`), built once on the first search object
+    /// (`RemoteOptions::built`, `GetSearchOptions`) and set across objects (`HitlistSize`, RPS
+    /// `MatrixName`, `Run::print`).
+    algorithm_options: Option<RemoteOptions>,
     /// The options' hit list size: the first object's, then what `ExtractAlgorithmOptions` set
     /// for the last formatted object (`opts.SetHitlistSize` on the kept options).
     hitlist: i32,
@@ -112,7 +131,19 @@ struct Run<'r, 'o> {
     database: Option<(Vec<u8>, bool)>,
     /// The database opened for an earlier object (`opened_database`).
     opened: Option<OpenedDatabase>,
-    /// The encoder's buffer of one Seq-annot.
+    /// The matrix name of the first object's options as the next object's formatter takes it
+    /// (`opts.GetMatrixName()`, `tabular::options_matrix_name`; `None` before the first search
+    /// object): an `rpsblast` or `rpstblastn` object's `GetResultSet` sets the matrix of its
+    /// search statistics on those options after its formatter is made, for the objects after
+    /// it (`Run::print`, with the remote options' `MatrixName`).
+    matrix_name: Option<Option<Vec<u8>>>,
+    /// `GetPsiNumberOfIterations`: the `Web_StepNumber` of the format options that the last
+    /// object of the `psi` service read (`m_FormatOpts`; 0 without one), `Err` for a value that
+    /// is no integer.
+    psi_step: Result<u32, ()>,
+    /// The run's record of the taxonomy database (`tabular::ObjectInputs::taxdb`).
+    taxdb: TaxdbRun,
+    /// The encoder's buffer of one output document.
     buf: Vec<u8>,
 }
 
@@ -120,7 +151,7 @@ struct Run<'r, 'o> {
 /// formatted object), then `cout` or the file's `ofstream` as the release's C++ runtime has them
 /// (`writedb::ofstream`, `writedb::cout`: what they hold, when a write fails, their state and its
 /// exceptions).
-struct Output<'o> {
+pub(super) struct Output<'o> {
     /// The standard output until `-out` is opened.
     stdout: Option<&'o mut dyn Write>,
     /// The run's files, where `-out` is opened (`OpenFiles::create`).
@@ -197,16 +228,16 @@ impl<'o> Output<'o> {
             .stdout
             .take()
             .expect("the standard output until -out is opened");
-        let file = files::open_output_file("out", value, stdout, self.files)
+        let file = files::open_output_device("out", value, stdout, self.files)
             .map_err(|error| command_line_argument_error(error.message()))?;
         let buf = match file {
-            OutputFile::Stdout(out) => {
+            OutputDevice::Stdout(out) => {
                 OutBuf::Cout(CoutBuf::new(out, crate::cli::NcbiStdio::cout()))
             }
-            OutputFile::File(file) => OutBuf::File(FileBuf::of_file(file)),
+            OutputDevice::File(file) => OutBuf::File(FileBuf::of_file(file)),
             // LOSAT Web's refusal of a name that it does not write, in blastdbcmd's words
-            // (`OutputFile::Refused`); the command line and the library open every name.
-            OutputFile::Refused(reason) => {
+            // (`OutputDevice::Refused`); the command line and the library open every name.
+            OutputDevice::Refused(reason) => {
                 return Err(anyhow::anyhow!(crate::seqmasks_io::run::unsupported(
                     &reason, PROGRAM
                 )))
@@ -267,21 +298,17 @@ impl<'o> Output<'o> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:689-698
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:310-323
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:559-564
-    /// The insertion of the Seq-annot of `desc` and `aligns` in `format` into the stream (it
-    /// takes the format, then the Seq-annot): an object stream of its own over the stream
-    /// (`writedb::metadata::ObjectOStream`, no diagnostic prefix) takes the bytes
-    /// (`write_streamed` through `AnnotSink`, then `EndOfWrite`), and its destructor closes it.
-    /// A close that fails posts `802.4` (`ObjectOStream::destroy`); a write that threw then ends
-    /// the run (`BLAST failed to write output`, exit status 6). Where the posts go to `cerr` and
-    /// the stream is `cout`, the post's flush of `cout` (the tie) throws again inside the
+    /// Writes one serialized object (a Seq-annot or a Blast4-archive) into the stream through a
+    /// fresh `ObjectOStream` (`writedb::metadata::ObjectOStream`, no diagnostic prefix): `write`
+    /// receives the buffered sink and diagnostics stream, then `EndOfWrite`, and the destructor
+    /// closes it. A close that fails posts `802.4` (`ObjectOStream::destroy`); a write that threw
+    /// ends the run (`BLAST failed to write output`, exit status 6). Where the posts go to `cerr`
+    /// and the stream is `cout`, the post's flush of `cout` (the tie) throws again inside the
     /// destructor: `std::terminate` (`NativeError::ios_failure_abort`), without the post.
-    fn write_annot(
+    pub(super) fn write_object(
         &mut self,
-        format: SerialFormat,
-        desc: AnnotDesc<'_>,
-        aligns: &[V<'_>],
-        buf: &mut Vec<u8>,
         diag: &mut Diag,
+        write: impl FnOnce(&mut dyn Write, &mut dyn Write) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
         // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
         let tied = diag.is_cerr();
@@ -292,15 +319,7 @@ impl<'o> Output<'o> {
             buffer: &mut object.output,
             tie,
         };
-        let written = write_streamed(
-            format,
-            desc,
-            aligns,
-            buf,
-            &mut sink,
-            &mut DiagWriter(&mut *diag),
-        )
-        .and_then(|()| {
+        let written = write(&mut sink, &mut DiagWriter(&mut *diag)).and_then(|()| {
             object
                 .output
                 .end_of_write()
@@ -320,6 +339,20 @@ impl<'o> Output<'o> {
             } else {
                 error
             }
+        })
+    }
+
+    /// The insertion of the Seq-annot of `desc` and `aligns` in `format` into the stream.
+    fn write_annot(
+        &mut self,
+        format: SerialFormat,
+        desc: AnnotDesc<'_>,
+        aligns: &[V<'_>],
+        buf: &mut Vec<u8>,
+        diag: &mut Diag,
+    ) -> anyhow::Result<()> {
+        self.write_object(diag, |sink, diagnostics| {
+            write_streamed(format, desc, aligns, buf, sink, diagnostics)
         })
     }
 }
@@ -398,23 +431,31 @@ struct OpenedDatabase {
     protein: bool,
     title: Vec<u8>,
     warnings: Vec<u8>,
+    /// The database restricted to the options' taxid list: NCBI's BLAST database data loader of
+    /// the tabular formats' subjects (`tabular::ObjectInputs::database`).
+    db: SeqDb,
 }
 
 impl<'r, 'o> Run<'r, 'o> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:796-818
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1657-1665
     /// The `CRemoteBlast` made of a stream and the loop of `LoadFromArchive`: the encoding guessed
-    /// (an archive in ASN.1 binary or XML is refused by name), then each object read, its messages
-    /// posted and, unless it is the error archive, formatted.
+    /// (`CFormatGuess`, accepting ASN.1 text, ASN.1 binary and ASN.1-style XML), then each object
+    /// read, its messages posted and, unless it is the error archive, formatted.
     fn objects(&mut self, archive: &mut dyn Read, diag: &mut Diag) -> anyhow::Result<()> {
         let guessed = guess_encoding(archive);
-        match &guessed.encoding {
-            Ok(Encoding::Text) => {}
-            Ok(Encoding::Binary) => return Err(Refusal::BinaryArchive.into()),
-            Ok(Encoding::Xml) => return Err(Refusal::XmlArchive.into()),
+        let mut reader = match guessed.encoding {
+            Ok(Encoding::Text) => ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE)),
+            Ok(Encoding::Binary) => {
+                ArchiveReader::binary(guessed.into_binary(Names::BLAST_ARCHIVE))
+            }
+            Ok(Encoding::Xml) => {
+                ArchiveReader::xml(guessed.into_xml(XmlStyle::Asn, Names::BLAST_ARCHIVE))
+            }
             Ok(Encoding::Other) => return Err(invalid_archive()),
-            Err(GuessStop::Exception(exception)) => return Err(exception_error(exception)),
+            Err(GuessStop::Exception(exception)) => return Err(exception_error(&exception)),
             Err(GuessStop::Undecided(what)) => return Err(Refusal::Undecided(what).into()),
-        }
-        let mut reader = ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE));
+        };
         while let Some((read, posts)) = reader.next_archive() {
             for post in &posts {
                 post_line(&mut self.output, diag, &post.line(None));
@@ -438,9 +479,23 @@ impl<'r, 'o> Run<'r, 'o> {
         if let Subject::Database(name) = &search.request.subject {
             self.database = Some((name.clone(), search.request.db_is_protein()));
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1733-1737
+        if search.request.service == b"psi" {
+            self.psi_step = match search
+                .request
+                .param(ParamSet::Format, b"Web_StepNumber")
+                .map(|param| param.value().choice())
+            {
+                None => Ok(0),
+                Some(("integer", value)) => Ok(value.int() as u32),
+                Some(_) => Err(()),
+            };
+        }
         if self.search_options.is_none() {
             let options = archive_request(&search.request).map_err(|e| exception_error(&e))?;
             self.hitlist = options.hitlist_size();
+            self.matrix_name = Some(super::tabular::options_matrix_name(&options));
+            self.algorithm_options = Some(RemoteOptions::built(&options));
             self.search_options = Some(options);
         }
         let printed = self.print(&search, diag);
@@ -491,10 +546,14 @@ impl<'r, 'o> Run<'r, 'o> {
     /// warnings), the check of SAM, the queries (`check_queries`), the database or the subject
     /// sequences (`subject_database`), the formatter's constructor (`Output::begin_object`), the
     /// check of the XInclude formats (13 and 14 without `-out`); the output formats that LOSAT
-    /// does not write are refused there, after NCBI's errors that come before any output. Then
-    /// the results (`GetResultSet`: the alignments of each query, the masks), the prefetch's
-    /// variable, and the Seq-annot of each query that has alignments (`x_PrintStructuredReport`,
-    /// `Output::write_annot`).
+    /// does not write are refused there, after NCBI's errors that come before any output. The
+    /// kept options then take the object's hit list size and an RPS object's matrix
+    /// (`SetMatrixName` of `GetResultSet`); the format 11 writes the archive of the object with
+    /// them (`CBlastFormat::WriteArchive`, `archive_out::write_archive`); the others read the
+    /// results (`GetResultSet`: the alignments of each query, the masks), the prefetch's
+    /// variable, and write the Seq-annot of each query that has alignments
+    /// (`x_PrintStructuredReport`, `Output::write_annot`) or the tabular report of the object
+    /// (`tabular::print_object`).
     fn print(&mut self, search: &Search, diag: &mut Diag) -> anyhow::Result<()> {
         self.output.open(&self.options.out)?;
         // A negative hit list size (an archive that NCBI's searches do not write, probes
@@ -502,7 +561,8 @@ impl<'r, 'o> Run<'r, 'o> {
         // posts its warning (`hitlist_size < 5`) as for 0, which the handler reads in its place.
         let formatting = extract_formatting(self.options, self.hitlist.max(0) as usize)?;
         post_line(&mut self.output, diag, &formatting.warnings);
-        if self.hitlist >= 0 || self.options_set_hitlist(formatting.choice.number) {
+        let set_hitlist = self.options_set_hitlist(formatting.choice.number);
+        if self.hitlist >= 0 || set_hitlist {
             self.hitlist = i32::try_from(formatting.counts.hitlist_size)
                 .expect("a hit list size that the handler read from an int");
         }
@@ -536,15 +596,48 @@ impl<'r, 'o> Run<'r, 'o> {
         };
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:402-422
         self.output.begin_object()?;
+        if database.is_none() {
+            let (warnings, end) = setup_subjects(&request.subject, search_options.program)?;
+            post_line(&mut self.output, diag, &warnings);
+            if let Some(end) = end {
+                return Err(end);
+            }
+        }
         xinclude_check_for(&formatting.choice, Some(Path::new(&self.options.out)))?;
         if let Some(refusal) = refusals::output_format(formatting.choice.number) {
             return Err(refusal.into());
         }
-        let format = match formatting.choice.number {
-            output_format::ASN_TEXT => SerialFormat::AsnText,
-            output_format::ASN_BINARY => SerialFormat::AsnBinary,
-            _ => SerialFormat::Json,
-        };
+        // The options' matrix name when this object's formatter was made, before `GetResultSet`.
+        let matrix_name = self.matrix_name.clone().flatten();
+        let algo = self
+            .algorithm_options
+            .as_mut()
+            .expect("the options of the first search object");
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2978
+        // `ExtractAlgorithmOptions` sets the hit list size in the options of every object
+        // (`SetHitlistSize`), which only the format 11 writes.
+        algo.set(fields::HITLIST_SIZE, ParamValue::Integer(self.hitlist));
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2205-2215
+        // `GetResultSet` sets the matrix of an `rpsblast` or `rpstblastn` object's search
+        // statistics on the kept options (`SetMatrixName`): the remote parameter that the format
+        // 11 writes of this object, and the name that the formatters of the objects after it take.
+        if let Some(matrix) = search.results.search_stats(&request.service).matrix {
+            algo.set(fields::MATRIX_NAME, ParamValue::Str(matrix.clone()));
+            self.matrix_name = Some(Some(matrix));
+        }
+        if formatting.choice.number == output_format::ARCHIVE_FORMAT {
+            let database = self.database.as_ref().map(|(name, _)| name.as_slice());
+            return archive_out::write_archive(
+                search,
+                search_options,
+                algo,
+                database,
+                self.psi_step,
+                &mut self.output,
+                &mut self.buf,
+                diag,
+            );
+        }
         let sets = search
             .results
             .alignment_sets(&request.queries)
@@ -559,11 +652,46 @@ impl<'r, 'o> Run<'r, 'o> {
         // integer stops NCBI here (the search programs' one reader of the variable, decision
         // F3-6 (4)); NCBI's formats 8, 9 and 12 fetch nothing for any other value but `INT_MAX`
         // (`s_IsPrefetchFormat`, cited at `common::database::prefetch_reads_seq_aligns`), with
-        // which NCBI loads each subject through its data loaders: refused (decision C3-1).
-        if prefetch_seqs_limit()? == Some(i32::MAX) {
+        // which NCBI loads each subject through its data loaders: refused (decision C3-1). Their
+        // `PrintProlog` writes nothing; the tabular driver reads the variable after its prolog.
+        let tabular = TabularSpec::of_formatter(&formatting.choice).is_some();
+        if !tabular && prefetch_seqs_limit()? == Some(i32::MAX) {
             return Err(Refusal::Prefetch.into());
         }
         let alignments = search.results.alignments();
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:452-467
+        // The round that `PrintOneResultSet` takes where the run's task is psiblast
+        // (`GetPsiNumberOfIterations`), `numeric_limits<unsigned int>::max()` otherwise: no
+        // `# Iteration:` line.
+        let iteration = if search_options.program == EProgram::PsiBlast {
+            self.psi_step.map(|step| (step != u32::MAX).then_some(step))
+        } else {
+            Ok(None)
+        };
+        if tabular {
+            let inputs = super::tabular::ObjectInputs {
+                settings: self.settings,
+                options: search_options,
+                believe: self.options.parse_deflines,
+                choice: &formatting.choice,
+                matrix_name: matrix_name.as_deref(),
+                hitlist: self.hitlist as u32,
+                database: database.map(|database| (database.name.as_slice(), &database.db)),
+                taxdb: &self.taxdb,
+                iteration,
+            };
+            let mut sink = TabularSink {
+                output: &mut self.output,
+                diag,
+            };
+            return super::tabular::print_object(&inputs, request, &sets, &alignments, &mut sink);
+        }
+        psi_round(iteration, sets.len())?;
+        let format = match formatting.choice.number {
+            output_format::ASN_TEXT => SerialFormat::AsnText,
+            output_format::ASN_BINARY => SerialFormat::AsnBinary,
+            _ => SerialFormat::Json,
+        };
         // `PruneSeqalign` takes the size as an unsigned int: a negative size is its value modulo
         // 2^32.
         let number = self.hitlist as u32;
@@ -590,6 +718,38 @@ impl<'r, 'o> Run<'r, 'o> {
                 .write_annot(format, desc, &pruned, &mut self.buf, diag)?;
         }
         Ok(())
+    }
+}
+
+/// The `-out` stream and the diagnostics of a tabular report (`tabular::ReportSink`): the bytes
+/// inserted into the stream, whose failure (`badbit`, which throws) ends the run with `BLAST
+/// failed to write output`.
+struct TabularSink<'x, 'o, 'd> {
+    output: &'x mut Output<'o>,
+    diag: &'x mut Diag<'d>,
+}
+
+impl super::tabular::ReportSink for TabularSink<'_, '_, '_> {
+    fn write(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+        let (stream, _) = self.output.opened();
+        stream.insert(bytes);
+        if stream.take_thrown() {
+            return Err(NativeError::write_failure().into());
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> anyhow::Result<()> {
+        let (stream, _) = self.output.opened();
+        stream.flush();
+        if stream.take_thrown() {
+            return Err(NativeError::write_failure().into());
+        }
+        Ok(())
+    }
+
+    fn post(&mut self, lines: &[u8]) {
+        post_line(self.output, self.diag, lines);
     }
 }
 
@@ -637,7 +797,7 @@ impl SeqAnnotDocument for ArchiveDocument<'_> {
 /// formats keep the last `SPILL_LAG` bytes back (`lag`): a Seq-annot that their plain encoder
 /// stops on is written again through `Traced` behind the `written` bytes (`write_streamed`), and
 /// NCBI's buffer (4096 bytes) had written more than those when it posted the first replaced byte.
-struct Spill<'w> {
+pub(super) struct Spill<'w> {
     out: &'w mut dyn Write,
     lag: usize,
     /// The final bytes held back.
@@ -649,12 +809,26 @@ struct Spill<'w> {
 }
 
 /// The bytes that `Spill` keeps back for the ASN.1 text and binary formats.
-const SPILL_LAG: usize = 2 * crate::writedb::ofstream::BUFSIZ;
+pub(super) const SPILL_LAG: usize = 2 * crate::writedb::ofstream::BUFSIZ;
 
-impl Spill<'_> {
-    /// After an element of the Seq-annot's list: the encoder's final bytes handed on, once it
+impl<'w> Spill<'w> {
+    pub(super) fn new(out: &'w mut dyn Write, lag: usize) -> Self {
+        Spill {
+            out,
+            lag,
+            held: Vec::new(),
+            written: 0,
+            error: None,
+        }
+    }
+
+    pub(super) fn into_parts(self) -> (Vec<u8>, usize, Option<std::io::Error>) {
+        (self.held, self.written, self.error)
+    }
+
+    /// After an element of a long list: the encoder's final bytes handed on, once it
     /// holds `FLUSH_BYTES` and has met no error.
-    fn after_element<E: Encoder>(&mut self, enc: &mut E) {
+    pub(super) fn after_element<E: Encoder>(&mut self, enc: &mut E) {
         if self.error.is_some() || enc.error().is_some() || enc.buffered() < FLUSH_BYTES {
             return;
         }
@@ -700,9 +874,9 @@ impl Write for Counted<'_> {
 }
 
 /// A writer that drops the first `skip` bytes it is given (those that `Spill` handed on).
-struct SkipWriter<'w> {
-    inner: &'w mut dyn Write,
-    skip: usize,
+pub(super) struct SkipWriter<'w> {
+    pub(super) inner: &'w mut dyn Write,
+    pub(super) skip: usize,
 }
 
 impl Write for SkipWriter<'_> {
@@ -802,15 +976,15 @@ fn unwritable(error: SerialError, format: SerialFormat) -> anyhow::Error {
 /// Seq-aligns of the first `number` subjects, a new subject where the subject's id (row 1) does
 /// not match the one before; a `disc` Seq-align counts as one more and is kept without the
 /// check. NCBI writes the Seq-annot of a query with alignments also when nothing is left.
-fn prune_seqalign<'a>(set: &[V<'a>], number: u32) -> Result<Vec<V<'a>>, Stop> {
+pub(super) fn prune_seqalign<'a, A: Pruned<'a>>(set: &[A], number: u32) -> Result<Vec<A>, Stop> {
     let mut kept = Vec::with_capacity(set.len());
     let mut previous: Option<&ParsedSeqId> = None;
     let mut count: u32 = 0;
     for &align in set {
-        if align.field("segs").choice().0 == "disc" {
+        if align.disc() {
             count = count.wrapping_add(1);
         } else {
-            let subject = seq_align_id(align, 1)?;
+            let subject = align.subject_id()?;
             if previous.is_none_or(|previous| compare(subject, previous) != Sic::Yes) {
                 count = count.wrapping_add(1);
             }
@@ -822,6 +996,35 @@ fn prune_seqalign<'a>(set: &[V<'a>], number: u32) -> Result<Vec<V<'a>>, Stop> {
         kept.push(align);
     }
     Ok(kept)
+}
+
+/// A Seq-align as `PruneSeqalign` reads it: an archive's node (formats 8, 9 and 12) or one that
+/// the tabular formats read after the ungapped split (`ReadAlign`).
+pub(super) trait Pruned<'a>: Copy {
+    /// Whether its segments are `disc`.
+    fn disc(self) -> bool;
+    /// `GetSeq_id` of row 1.
+    fn subject_id(self) -> Result<&'a ParsedSeqId, Stop>;
+}
+
+impl<'a> Pruned<'a> for V<'a> {
+    fn disc(self) -> bool {
+        self.field("segs").choice().0 == "disc"
+    }
+
+    fn subject_id(self) -> Result<&'a ParsedSeqId, Stop> {
+        seq_align_id(self, 1)
+    }
+}
+
+impl<'a> Pruned<'a> for ReadAlign<'a> {
+    fn disc(self) -> bool {
+        self.variant() == "disc"
+    }
+
+    fn subject_id(self) -> Result<&'a ParsedSeqId, Stop> {
+        self.seq_id(1)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:170-180
@@ -909,6 +1112,135 @@ fn check_subjects(subject: &Subject) -> anyhow::Result<()> {
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:270-283
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:129-140
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_db_adapter.cpp:107-148
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:510-526
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:732-797
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1124-1152
+/// The formatter's constructor of an object of subject sequences in its scan mode
+/// (`BL2SEQ_LEGACY` unset, `s_InitializeSubject`): `MakeSeqSrc` sets up the subjects
+/// (`SetupSubjects_OMF`), which reads each subject Bioseq whole, in order
+/// (`queries::check_setup_letters`, by the program's subject molecule, `GetSubjectEncoding`;
+/// the programs for which that function aborts set up nothing here). A Bioseq of 0 letters is
+/// skipped with the warning `<id> <title>: Subject sequence contains no data` (`GetSeqIdString`
+/// of the id that `FindBestChoice` with `BestRank` picks, the first title; probes `of6_s_empty`,
+/// `of6_e_*` of agent E3, 2026-11-27). The first exception (rethrown at the setup with its
+/// message, `NCBI_RETHROW_SAME`: at line 793 a `CBlastException`, at 797 any other) is the
+/// report of the chain (`ReportAll`) in a `CBlastException` `eSeqSrcInit`, NCBI's engine error
+/// (exit status 3), in every output format, before the object's first byte (probes
+/// `of6_slen_huge`, `of6_slen_short`, `of8_slen_big`, `of6_s_*`, `of6_c_*`, `of6_e_nodata`); a
+/// read that LOSAT does not reproduce is refused (`Err`, before any warning). A Bioseq that
+/// declares 4294967295 letters and reads (a delta whose segments resolve) ends there at its
+/// length (`query_length`), the same way. The warnings of the Bioseqs before NCBI's end, and
+/// that end.
+fn setup_subjects(
+    subject: &Subject,
+    program: EProgram,
+) -> anyhow::Result<(Vec<u8>, Option<anyhow::Error>)> {
+    let mut warnings = Vec::new();
+    if std::env::var_os("BL2SEQ_LEGACY").is_some() {
+        return Ok((warnings, None));
+    }
+    let protein = match program {
+        EProgram::Blastn
+        | EProgram::Megablast
+        | EProgram::DiscMegablast
+        | EProgram::VecScreen
+        | EProgram::Mapper
+        | EProgram::Tblastn
+        | EProgram::PsiTblastn
+        | EProgram::Tblastx => false,
+        EProgram::Blastp
+        | EProgram::Blastx
+        | EProgram::PsiBlast
+        | EProgram::DeltaBlast
+        | EProgram::PhiBlastp => true,
+        EProgram::RpsBlast | EProgram::RpsTblastn | EProgram::PhiBlastn => {
+            return Ok((warnings, None))
+        }
+    };
+    for (index, bioseq) in subject.bioseqs().into_iter().enumerate() {
+        let end: anyhow::Error = match check_setup_letters(bioseq, protein) {
+            // The location of the subject is `0` to `length - 1` of its declared length
+            // (`s_ConvertSubjects2TSeqLocVector`): after a read, `GetLength` of one that declares
+            // 4294967295 letters (`kInvalidSeqPos`) throws (`query_length`).
+            Ok(SubjectSetup::Read) if bioseq.length() == Some(i64::from(u32::MAX)) => {
+                let length = query_length(index, bioseq);
+                let seq_src = NcbiException::new(SEQ_SRC_INIT, length.what());
+                NativeError::exception(&seq_src).into()
+            }
+            Ok(SubjectSetup::Read) => continue,
+            Ok(SubjectSetup::Empty) => {
+                warnings.extend_from_slice(b"Warning: ");
+                if let Some(id) = bioseq.best_id() {
+                    crate::seqid::label::content(id, false, &mut warnings);
+                    warnings.push(b' ');
+                }
+                warnings.extend_from_slice(bioseq.title().unwrap_or_default());
+                warnings.extend_from_slice(b": Subject sequence contains no data\n");
+                continue;
+            }
+            Err(RenderError::Exception(exception)) => {
+                let message = exception.get_msg().to_vec();
+                let line = if exception.first_site().kind.starts_with("CBlastException::") {
+                    793
+                } else {
+                    797
+                };
+                let setup = exception.rethrow_same(
+                    "src/algo/blast/api/blast_setup_cxx.cpp",
+                    line,
+                    "BLAST::ncbi::blast::SetupSubjects_OMF",
+                    message,
+                );
+                // The message is the chain's report (`ReportAll`), in LOSAT's words (`what`).
+                let seq_src = NcbiException::new(SEQ_SRC_INIT, setup.what());
+                NativeError::exception(&seq_src).into()
+            }
+            Err(RenderError::Unsupported(what)) => return Err(Refusal::SubjectSetup(what).into()),
+            Err(RenderError::Write(error)) => return Err(error.into()),
+        };
+        return Ok((warnings, Some(end)));
+    }
+    Ok((warnings, None))
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:231-255
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:323-344
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:858-859
+/// The throw of `CBlastQuerySourceOM::GetLength` at the subject `index` (counted over every
+/// subject Bioseq) of the setup (`max_subjlen`, after its letters are read), whose location
+/// is `kInvalidSeqPos` letters long: `Could not find length of query # <index> with Seq-id
+/// [<AsFastaString of its id>]` (the id that `FindBestChoice` with `BestRank` picks). NCBI's
+/// report of it names its module but no function (probe C of agent E3c, 2026-11-28:
+/// `of*_c_dlen*`, `of6_c_dlen_p`, and `of6_l_dlen_nolegacy*` of agent E3L).
+fn query_length(index: usize, bioseq: Bioseq<'_>) -> NcbiException {
+    let mut message =
+        format!("Could not find length of query # {index} with Seq-id [").into_bytes();
+    if let Some(id) = bioseq.best_id() {
+        crate::seqid::label::fasta(id, &mut message);
+    }
+    message.push(b']');
+    NcbiException::new(QUERY_LENGTH, message)
+}
+
+/// Where `CBlastQuerySourceOM::GetLength` throws.
+const QUERY_LENGTH: ThrowSite = ThrowSite {
+    file: "src/algo/blast/api/blast_objmgr_tools.cpp",
+    line: 337,
+    kind: "CBlastException::eInvalid",
+    function: Some("BLAST::"),
+};
+
+/// Where `s_CheckForBlastSeqSrcErrors` throws the error of a sequence source's setup.
+const SEQ_SRC_INIT: ThrowSite = ThrowSite {
+    file: "src/algo/blast/api/local_db_adapter.cpp",
+    line: 120,
+    kind: "CBlastException::eSeqSrcInit",
+    function: Some("BLAST::ncbi::blast::s_CheckForBlastSeqSrcErrors"),
+};
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:374-385
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:100-106
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:124-131
@@ -975,12 +1307,13 @@ fn opened_database<'d>(
     if !reused {
         let mut warnings = Vec::new();
         match open_database(name, protein, options, settings, &mut warnings) {
-            Ok(title) => {
+            Ok((title, db)) => {
                 *opened = Some(OpenedDatabase {
                     name: name.to_vec(),
                     protein,
                     title,
                     warnings,
+                    db,
                 });
             }
             Err(error) => return (Err(error), warnings),
@@ -990,15 +1323,15 @@ fn opened_database<'d>(
     (Ok(database), database.warnings.clone())
 }
 
-/// `opened_database` of a database not opened before: its title (`pairwise_database`), the
-/// warnings of its taxid list appended to `warnings`.
+/// `opened_database` of a database not opened before: its title (`pairwise_database`) and the
+/// restricted database, the warnings of its taxid list appended to `warnings`.
 fn open_database(
     name: &[u8],
     protein: bool,
     options: &BuiltOptions,
     settings: &ApplicationSettings,
     warnings: &mut Vec<u8>,
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<(Vec<u8>, SeqDb)> {
     let text = std::str::from_utf8(name)
         .map_err(|_| Refusal::Database(String::from_utf8_lossy(name).into_owned()))?;
     let seqtype = if protein {
@@ -1032,7 +1365,7 @@ fn open_database(
         db.name_mask_details(id)
             .map_err(|error| name_mask_error(&error, PROGRAM))?;
     }
-    Ok(pairwise_database(&db).definition)
+    Ok((pairwise_database(&db).definition, db))
 }
 
 /// An error of NCBI's database reader where `GetSeqDb` opens the database `name`: a
@@ -1049,10 +1382,28 @@ fn remote_database(error: &SeqDbError, name: &str) -> anyhow::Error {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:456-462
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2645-2662
+/// The round that `PrintOneResultSet` takes of each of an object's `sets` result sets, of its
+/// `iteration` (as `Run::print` reads it, `Err` for a `Web_StepNumber` that is no integer): the
+/// formats' one owner of the check. `GetPsiNumberOfIterations` is called in the loop over the
+/// result sets, so such a step throws at the first set (`GetInteger`, a serial exception: probe
+/// E1 probe1 O8 in 6, 7, 20 and 8) and not where there is none.
+pub(super) fn psi_round(
+    iteration: Result<Option<u32>, ()>,
+    sets: usize,
+) -> anyhow::Result<Option<u32>> {
+    match iteration {
+        Ok(round) => Ok(round),
+        Err(()) if sets == 0 => Ok(None),
+        Err(()) => Err(invalid_archive()),
+    }
+}
+
 /// `Invalid input format for BLAST Archive.`: the `CInputException` that `Run` throws for an
 /// input of another format and for a `CSerialException` of the loop (`BLAST query/options
 /// error`, exit status 1).
-fn invalid_archive() -> anyhow::Error {
+pub(super) fn invalid_archive() -> anyhow::Error {
     options_error_bytes(b"Invalid input format for BLAST Archive.")
 }
 
@@ -1066,7 +1417,7 @@ fn read_error(error: ReadError) -> anyhow::Error {
         ReadError::Exception(exception) => exception_error(&exception),
         ReadError::Std(what) => NativeError::std_exception(what).into(),
         ReadError::OutOfMemory => NativeError::out_of_memory().into(),
-        ReadError::Unsupported(text) => Refusal::UnreadText(text).into(),
+        ReadError::Unsupported(text) => Refusal::UnreadArchive(text).into(),
     }
 }
 
@@ -1074,7 +1425,7 @@ fn read_error(error: ReadError) -> anyhow::Error {
 /// of a CHOICE or an unset member are `invalid_archive` (the loop's `catch`); an exception is
 /// `exception_error`'s; a null pointer (an element stated as `NULL` in a list too), an `abort`
 /// and a read of memory the input does not decide are refused.
-fn stop_error(stop: Stop) -> anyhow::Error {
+pub(super) fn stop_error(stop: Stop) -> anyhow::Error {
     match stop {
         Stop::Exception(exception) => exception_error(&exception),
         Stop::InvalidSelection { .. } | Stop::Unassigned { .. } => invalid_archive(),

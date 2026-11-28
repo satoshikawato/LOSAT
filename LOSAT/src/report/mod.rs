@@ -24,6 +24,7 @@ pub mod seqid;
 pub mod serial;
 pub mod shown_bioseq;
 pub mod tabular;
+pub(crate) mod tabular_seqalign;
 pub mod tax_report;
 pub(crate) mod x_pairwise_par;
 

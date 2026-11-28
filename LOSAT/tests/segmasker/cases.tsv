@@ -559,3 +559,10 @@ db_oidmask_tabc_interval	-infmt blastdb -in ../db_search/oidmask/tabc -outfmt in
 access_int_ps	-in in/access.faa -parse_seqids
 access_seqloc_asn1_text_ps	-in in/access.faa -outfmt seqloc_asn1_text -parse_seqids
 access_maskinfo_asn1_text_ps	-in in/access.faa -outfmt maskinfo_asn1_text -parse_seqids
+# ww4c_* (line WW item WW4c, the Supported mark of LOSAT Web's Masking tab): a row for each combination of -infmt blastdb, -parse_seqids and -outfmt that no row had, db/mdefl_ps. Frozen 2026-11-28 by ad-WW-21 (WW4c) with the local official NCBI BLAST+ 2.17.0 release.
+ww4c_db_fasta_ps	-infmt blastdb -in db/mdefl_ps -outfmt fasta -parse_seqids
+ww4c_db_mibin_ps	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_db_mixml_ps	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_xml -parse_seqids
+ww4c_db_slbin_ps	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_asn1_bin -parse_seqids
+ww4c_db_sltxt_ps	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_asn1_text -parse_seqids
+ww4c_db_slxml_ps	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_xml -parse_seqids

@@ -220,6 +220,7 @@ fn blastp_and_tblastx_word_cutoffs_are_one_function() {
         cutoff_score_for_update_tblastx, word_cutoff_score_for_update, CUTOFF_E_BLASTP,
         CUTOFF_E_TBLASTX,
     };
+    use crate::stats::cutoffs::CutoffConversion;
     assert_eq!(CUTOFF_E_BLASTP, 1e-300);
     assert_eq!(CUTOFF_E_TBLASTX, 1e-300);
     let karlin = crate::stats::lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
@@ -240,13 +241,25 @@ fn blastp_and_tblastx_word_cutoffs_are_one_function() {
             0.0,
             &karlin,
             1.0,
+            CutoffConversion::PROTEIN,
         );
         assert_eq!(blastp, tblastx, "{query} {subject} {trigger} {cap}");
     }
     // The E-value is the program's: 1.0 (BLASTX's) lowers the score below the gap trigger.
-    let loose = word_cutoff_score_for_update(1.0, 300, 1_000, 1000, 1000, 0.0, &karlin, 1.0);
-    let tight =
-        word_cutoff_score_for_update(CUTOFF_E_BLASTP, 300, 1_000, 1000, 1000, 0.0, &karlin, 1.0);
+    let word_cutoff = |cutoff_e| {
+        word_cutoff_score_for_update(
+            cutoff_e,
+            300,
+            1_000,
+            1000,
+            1000,
+            0.0,
+            &karlin,
+            1.0,
+            CutoffConversion::PROTEIN,
+        )
+    };
+    let (loose, tight) = (word_cutoff(1.0), word_cutoff(CUTOFF_E_BLASTP));
     assert!(loose < tight, "{loose} {tight}");
 }
 
@@ -337,6 +350,15 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
                 observer: None,
                 later_warnings: None,
             };
+            // The outfmt 0 prolog comes before the search, as in `search` (line RG item T4b-f).
+            write_pairwise_prologs(
+                &resolved,
+                BlastpSubjectSource::Fasta(&[]),
+                "",
+                &mut outputs,
+                true,
+            )
+            .expect("the prolog");
             write_reports_without_queries(
                 &resolved,
                 BlastpSubjectSource::Fasta(&[]),
@@ -2592,8 +2614,9 @@ fn a_negative_window_is_refused_by_psiblast_and_rpsblast_only() {
 // EXPERIMENT (LOSAT_X_BPQBLOCK): a database search without the Gumbel block (`-searchsp`,
 // `OLD_FSC`) keeps its block plan where the setup counts its sequences, and has none where the
 // count is 0 (`call_setup::setup_count_refused`): that search refuses in the call of all
-// queries, before any output (review E of line RG D1a-4, N3; the bytes are the rows'
-// `db.ak.bp.rej.nseq0.oldfsc.blocks` and `db.ak.bp.nseq0.ssp.allx.7`). Thirty queries of 3,000
+// queries, after the reports of the batches before its first searched one (review E of line RG
+// D1a-4, N3; line RG item bp-SF1; the bytes are the rows' `db.ak.bp.rej.nseq0.oldfsc.blocks` and
+// `db.ak.bp.nseq0.ssp.allx.7`). Thirty queries of 3,000
 // letters, three batches, more than one block of the built-in 50,000 letters.
 #[test]
 fn x_query_block_plan_is_kept_without_the_gumbel_block_but_for_a_count_of_0() {
@@ -2696,6 +2719,83 @@ fn banks_filled_refusal_names_the_batch_of_the_table() {
         );
     }
     assert_eq!(named(&gapped, 0, true), Some(0));
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276 (cited at
+// `call_setup::overflow_failure`): a search space that overflows NCBI's `Int8` is the failure of
+// the batch whose setup computes it, named by the batch's first searched query; an option space
+// (computed before the batch's setup spaces) that overflows for an earlier context names that
+// context's batch (line RG item bp-SF1).
+#[test]
+fn search_space_overflow_names_the_batch_of_its_first_overflowing_context() {
+    let karlin = crate::stats::lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+    let context = |q_idx| QueryContext {
+        q_idx,
+        frame: 0,
+        aa_seq: vec![0; 12],
+        aa_seq_nomask: None,
+        aa_len: 10,
+        orig_len: 10,
+        frame_base: 0,
+        is_valid: true,
+        karlin_params: karlin,
+    };
+    let contexts = [context(0), context(1), context(2), context(3)];
+    let batches = [
+        seq_range::RangedBatch {
+            input: 0..1,
+            searched: 0..1,
+        },
+        seq_range::RangedBatch {
+            input: 1..3,
+            searched: 1..3,
+        },
+        seq_range::RangedBatch {
+            input: 3..4,
+            searched: 3..4,
+        },
+    ];
+    let args = make_blastp_args().resolve().expect("resolved blastp args");
+    let overflow = || crate::stats::setup::SearchSpaceOverflow {
+        db_length: 1 << 55,
+        query_length: 10,
+        program: "BLASTP".to_string(),
+    };
+    type OptionSpace<'f> =
+        Option<&'f dyn Fn(&QueryContext) -> Result<i64, crate::stats::setup::SearchSpaceOverflow>>;
+    let named = |failed: usize, option_space_of: OptionSpace<'_>| {
+        let failure = call_setup::overflow_failure(
+            &args,
+            &batches,
+            &contexts[..failed],
+            option_space_of,
+            (&contexts[failed], overflow().into()),
+        )
+        .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+        .expect("a batch's failure");
+        assert!(
+            failure
+                .error
+                .to_string()
+                .contains("overflows NCBI BLAST+'s 64-bit effective search space"),
+            "{}",
+            failure.error
+        );
+        failure.query
+    };
+    assert_eq!(named(3, None), Some(3));
+    assert_eq!(named(2, None), Some(1));
+    assert_eq!(named(0, None), Some(0));
+    let option_space_of_query_0 = |ctx: &QueryContext| {
+        if ctx.q_idx == 0 {
+            Err(overflow())
+        } else {
+            Ok(5)
+        }
+    };
+    assert_eq!(named(3, Some(&option_space_of_query_0)), Some(0));
+    let option_space_fits = |_: &QueryContext| Ok(5);
+    assert_eq!(named(2, Some(&option_space_fits)), Some(1));
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts of the search of all queries whose preliminary
@@ -3162,125 +3262,4 @@ fn hard_mask_starts_and_ends_move_the_table() {
         assert_eq!(scratch.diag_offset, start.offset);
         assert!(scratch.diag_array.iter().all(|&e| e == entry), "{start:?}");
     }
-}
-
-// Review 1 of D1c-1c-b PR 2b, M1 and I1: a refusal at a tabular row of a later batch fails that
-// batch (`failed_lookup_batch`): the error names the query of the refused result set (the result
-// sets are the queries with hit lists), carries the call's first UTF8String read only where the
-// failing batch made it, and holds what NCBI writes of the batch's reports before that row (its
-// prefetch texts, then the own warnings of its queries up to the row's, without the reader
-// messages that the failure writes first), which `ErrorAfterPosts::written` writes before it
-// gives back the refusal.
-#[test]
-fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
-    let lineless = crate::report::tabular::LookupFailure {
-        lineless: true,
-        ..Default::default()
-    };
-    let spec = crate::report::tabular::TabularSpec::of_app(
-        crate::blastinput::app::ReportFormat::Tabular,
-        &crate::blastinput::app::FormatChoice {
-            number: 6,
-            spec: b"qseqid sallacc".to_vec(),
-            delimiter: Vec::new(),
-        },
-        crate::report::archive::options::RequestKind::Blastp,
-    )
-    .unwrap();
-    // Queries 0, 2 and 3 have hit lists: result set 2 is query 3, in the batch of queries 2 and 3.
-    let refusal = || {
-        crate::report::tabular::check_failed_lookups(
-            Some(&spec),
-            [vec![0], vec![0], vec![1]],
-            |s_idx| (s_idx == 1).then_some(lineless),
-            |s_idx, failure| {
-                crate::report::tabular::failed_database_subject(s_idx, None, None, failure)
-            },
-            crate::blastinput::app::Program::Blastp,
-            "BLASTP",
-            true,
-        )
-        .unwrap_err()
-    };
-    let hit = || Some(BlastpHitList::new(1));
-    let hit_lists = [hit(), None, hit(), hit()];
-    let batches = [
-        seq_range::RangedBatch {
-            input: 0..2,
-            searched: 0..2,
-        },
-        seq_range::RangedBatch {
-            input: 2..4,
-            searched: 2..4,
-        },
-    ];
-    let lines = [
-        b"R0\nW0\n".to_vec(),
-        Vec::new(),
-        b"R2\nW2\n".to_vec(),
-        b"W3\n".to_vec(),
-    ];
-    let reader = [b"R0\n".to_vec(), Vec::new(), b"R2\n".to_vec(), Vec::new()];
-    let prefetches = [
-        (
-            0,
-            crate::report::diag_log::Posts::of_lines(b"P0\n".to_vec()),
-        ),
-        (
-            2,
-            crate::report::diag_log::Posts::of_lines(b"P2\n".to_vec()),
-        ),
-    ];
-    for (read_by, carried) in [(3, true), (1, false)] {
-        let utf8 = database::Utf8Read {
-            query: read_by,
-            path: "Seq-entry.title".to_string(),
-        };
-        let stop = LookupStop {
-            hit_lists: &hit_lists,
-            batches: &batches,
-            lines: &lines,
-            reader: &reader,
-            prefetches: &prefetches,
-            reads: &[],
-            utf8: Some(&utf8),
-        };
-        let failure = failed_lookup_batch(refusal(), &stop)
-            .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
-            .unwrap();
-        assert_eq!(failure.query, Some(3));
-        assert_eq!(
-            failure.utf8,
-            carried.then(|| utf8.clone()),
-            "read by {read_by}"
-        );
-        let mut written = Vec::new();
-        let error = database::ErrorAfterPosts::written(failure.error, &mut written, None).unwrap();
-        assert_eq!(written, b"P2\nW2\nW3\n");
-        assert_eq!(
-            error
-                .downcast_ref::<crate::report::tabular::FailedLookupRefusal>()
-                .unwrap()
-                .set(),
-            2
-        );
-    }
-    // Any other error stays, and writes nothing.
-    let stop = LookupStop {
-        hit_lists: &hit_lists,
-        batches: &batches,
-        lines: &lines,
-        reader: &reader,
-        prefetches: &prefetches,
-        reads: &[],
-        utf8: None,
-    };
-    let other = failed_lookup_batch(anyhow::anyhow!("another error"), &stop);
-    assert!(other
-        .downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>()
-        .is_none());
-    let mut written = Vec::new();
-    let other = database::ErrorAfterPosts::written(other, &mut written, None).unwrap();
-    assert!(written.is_empty());
-    assert_eq!(other.to_string(), "another error");
 }

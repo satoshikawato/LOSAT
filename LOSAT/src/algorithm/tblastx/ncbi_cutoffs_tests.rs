@@ -58,33 +58,6 @@ fn blosum62_ungapped() -> KarlinParams {
     }
 }
 
-/// BLOSUM62 gapped params (11/1) (kbp_gap)
-fn blosum62_gapped() -> KarlinParams {
-    KarlinParams {
-        lambda: 0.267,
-        k: 0.041,
-        h: 0.14,
-        alpha: 1.9,
-        beta: -30.0,
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:965-973
-// `BLAST_Cutoffs` starts from a cutoff of 1 and only raises it. With `-db` SeqDB's shortest
-// length 10 makes TBLASTN's subject length 3: a search space of 3 x 3 gives a score below 1
-// for E = 0.9, and the cutoff is 1 (NCBI 2.17.0's `cutoff_s` 1 and 32 of line RG X4b's
-// survey, section 1.6).
-#[test]
-fn the_sum_statistics_cutoff_is_at_least_one() {
-    let gapped = blosum62_gapped();
-    assert!(cutoff_score_from_evalue(0.9, 9, &gapped) <= 0);
-    assert_eq!(cutoff_score_sum_stats(160, 3, 0.1, &gapped), 1);
-    // A search space large enough keeps the computed score.
-    let computed = cutoff_score_from_evalue(0.9, 160 * 2500, &gapped);
-    assert!(computed > 1);
-    assert_eq!(cutoff_score_sum_stats(160, 2500, 0.1, &gapped), computed);
-}
-
 #[test]
 fn test_gap_trigger_raw_score() {
     let ungapped = blosum62_ungapped();
@@ -122,51 +95,6 @@ fn test_gap_trigger_past_int4_is_int_min() {
     ] {
         assert_eq!(gap_trigger_raw_score(bits, &ungapped), i32::MIN, "{bits}");
     }
-}
-
-#[test]
-fn test_cutoff_score_from_evalue_uses_ceil() {
-    let gapped = blosum62_gapped();
-
-    // Test that ceil is used (not trunc)
-    // For a large search space, the cutoff should be positive
-    let cutoff = cutoff_score_from_evalue(10.0, 1_000_000, &gapped);
-    assert!(
-        cutoff > 0,
-        "cutoff should be positive for reasonable search space"
-    );
-}
-
-// blast_stat.c:4059-4061 (line PS DECISIONS 28): a quotient `K searchsp / E` past the
-// double takes `ln K + ln searchsp - ln E`; a finite one keeps NCBI's order of operations.
-#[test]
-fn a_cutoff_whose_quotient_overflows_the_double_is_finite() {
-    let gapped = blosum62_gapped();
-    // 0.041 * (2^63 - 1) / 1e-297 = 3.8e314: past f64::MAX. E below kSmallFloat is
-    // raised to it. ceil((ln 0.041 + ln 9.223372036854775807e18 + 297 ln 10) / 0.267).
-    let expected = ((0.041f64.glibc_ln() + (i64::MAX as f64).glibc_ln() - 1.0e-297f64.glibc_ln())
-        / 0.267)
-        .ceil();
-    assert_eq!(expected, 2713.0);
-    for evalue in [1e-300, 1e-297] {
-        assert_eq!(cutoff_score_from_evalue(evalue, i64::MAX, &gapped), 2713);
-    }
-    // The edge: the largest search space whose quotient at E = 1e-297 is finite, and the
-    // next one.
-    let last_finite = (f64::MAX * 1.0e-297 / 0.041) as i64;
-    assert!((0.041 * last_finite as f64 / 1.0e-297).is_finite());
-    let finite = cutoff_score_from_evalue(1e-297, last_finite, &gapped);
-    assert_eq!(
-        finite,
-        ((0.041 * last_finite as f64 / 1.0e-297).glibc_ln() / 0.267).ceil() as i32
-    );
-    let past = (last_finite as f64 * (1.0 + 1e-9)) as i64;
-    assert!(!(0.041 * past as f64 / 1.0e-297).is_finite());
-    let overflowed = cutoff_score_from_evalue(1e-297, past, &gapped);
-    assert!(
-        (finite..=finite + 1).contains(&overflowed),
-        "{finite} {overflowed}"
-    );
 }
 
 #[test]

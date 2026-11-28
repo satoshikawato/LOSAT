@@ -14,6 +14,7 @@ use super::{seq_align_id, seq_loc_id, Archive, ArchiveReader, Message, Search, S
 use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::asn_text_reader::real_of_parts;
+use crate::report::serial::asn_types::read_xml::XmlStyle;
 use crate::report::serial::asn_types::stream::{guess_encoding, text_stream, Encoding};
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::view::V;
@@ -102,15 +103,27 @@ const EDITED: [&str; 2] = [
 /// The archives of blast_formatter's rows that are broken or edited by hand on purpose
 /// (`blast_formatter/cases.tsv`): a line of garbage after the archive, a file cut in its second
 /// object (the rows of NCBI's read errors), a byte that NCBI posts in a title of the first or the
-/// second object (the line of its post), and the review's requests with both taxid lists (written
-/// by hand, a list on one line).
-const BROKEN: [&str; 6] = [
+/// second object (the line of its post), the review's requests with both taxid lists (written
+/// by hand, a list on one line), and two FilterString setters longer than a line, written on one
+/// line (the ends of the 128-byte buffers of NCBI's parser, line RG-F3 P6F).
+const BROKEN: [&str; 8] = [
     "blast_formatter/in/garbage.asn",
     "blast_formatter/in/cut2.asn",
     "blast_formatter/in/bad1.asn",
     "blast_formatter/in/bad2.asn",
     "blast_formatter/in/tax_both.asn",
     "blast_formatter/in/tx5_both.asn",
+    "blast_formatter/in/fs_bn_Rlong.asn",
+    "blast_formatter/in/fs_bn_Dlate.asn",
+];
+
+/// The archives with a subnormal real (`{ 145968789957799, 10, -330 }`), which the reader makes
+/// `DBL_MIN` as NCBI's does: written back, it is `{ 22250738585072, 10, -321 }`, as NCBI BLAST+
+/// 2.17.0's `-outfmt 11` writes it (row `real_subnormal_11` of `blast_formatter/cases.tsv`). NCBI
+/// wrote the value for the unset SEG locut of row `refused_filter_seg_abc_11`.
+const CLAMPED: [&str; 2] = [
+    "blast_formatter/in/real_subnormal.asn",
+    "blast_formatter/ncbi/refused_filter_seg_abc_11.out",
 ];
 
 /// Whether a fixture holds a placeholder that its test replaces by a path (`@CWD@`, `{db_dir}`: an
@@ -163,7 +176,8 @@ fn unwrapped(text: &[u8]) -> Vec<u8> {
 /// header: NCBI's `-outfmt 11` output and the files that LOSAT's tests freeze as NCBI's) is read
 /// whole, object by object, and its values written back are its bytes. Left out: the malformed
 /// archives of rpsbproc's tests (`fixtures/rpsbproc/arch/bad`) and of blast_formatter's (`BROKEN`),
-/// rpsbproc's copies edited by hand (`EDITED`), the `.merged` files of `archive_replaced` (a run's
+/// rpsbproc's copies edited by hand (`EDITED`), the archives with a subnormal real (`CLAMPED`,
+/// whose rows freeze NCBI's writing of it), the `.merged` files of `archive_replaced` (a run's
 /// stdout and stderr in one file, with NCBI's messages inside the archive's text), and the archives
 /// that their writer cut (`cut_by_its_writer`), whose first object must end with the reader's
 /// error. An archive whose paths the tests replaced by a placeholder (`has_placeholder`) is
@@ -195,6 +209,7 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
             if EDITED
                 .iter()
                 .chain(&BROKEN)
+                .chain(&CLAMPED)
                 .any(|name| path.ends_with(name))
             {
                 continue;
@@ -290,16 +305,19 @@ enum End {
     Serial,
 }
 
-/// The archive objects read of `text` and how they end; the encoding guessed for a text that is
-/// not ASN.1 text.
-fn outcome(text: &[u8]) -> Result<(usize, End), Encoding> {
-    let guessed = guess_encoding(text);
-    match guessed.encoding.as_ref() {
-        Ok(Encoding::Text) => {}
-        Ok(other) => return Err(*other),
+/// The archive objects read of `bytes` (ASN.1 text, ASN.1 binary or XML) and how they end;
+/// `Err(Encoding::Other)` when `CFormatGuess` does not recognize any of the three.
+fn outcome(bytes: &[u8]) -> Result<(usize, End), Encoding> {
+    let guessed = guess_encoding(bytes);
+    let mut reader = match guessed.encoding {
+        Ok(Encoding::Text) => ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE)),
+        Ok(Encoding::Binary) => ArchiveReader::binary(guessed.into_binary(Names::BLAST_ARCHIVE)),
+        Ok(Encoding::Xml) => {
+            ArchiveReader::xml(guessed.into_xml(XmlStyle::Asn, Names::BLAST_ARCHIVE))
+        }
+        Ok(other) => return Err(other),
         Err(stop) => panic!("{stop:?}"),
-    }
-    let mut reader = ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE));
+    };
     let mut count = 0;
     while let Some((archive, _)) = reader.next_archive() {
         match archive {
@@ -375,50 +393,138 @@ fn the_objects_of_a_stream_end_as_ncbis_did() {
         ("JSON", fixture("bad/json"), Err(Encoding::Other)),
         ("bytes 0-255", fixture("bad/binjunk"), Err(Encoding::Other)),
         ("gzip", fixture("bad/gzip"), Err(Encoding::Other)),
+        // UTF-8 BOM before text ASN.1: CFormatGuess answers BinaryASN, whose reader stops at 0xef
+        // with CSerialException -> "Invalid input format for BLAST Archive." (P3.085).
+        ("UTF-8 BOM", with(b"\xef\xbb\xbf", b""), Ok((0, Serial))),
+        // Binary ASN.1 archives (P3.001-015, P3.102-104, P7.001-032); NCBI's exit status: 0 when
+        // whole, 1 (`Serial`) when cut at 50 %, 90 % or missing the last 2 bytes and after the
+        // archive with trailing 00 00, 0 without a message (`Eof`) when missing only the last
+        // byte or with a stray 0x30 after.
+        ("binary", binary.clone(), Ok((1, Data))),
         (
-            "UTF-8 BOM",
-            with(b"\xef\xbb\xbf", b""),
-            Err(Encoding::Binary),
+            "binary twice",
+            [&binary[..], &binary[..]].concat(),
+            Ok((2, Data)),
         ),
-        // NCBI's binary and XML readers (none in LOSAT yet): formatted (P3.001-015), 1 cut at
-        // 50 % and 90 % or without the last 20 bytes, 0 without its last byte (binary: nothing
-        // formatted; XML: formatted), 1 after the archive with an element after it.
-        ("binary", binary.clone(), Err(Encoding::Binary)),
         (
             "binary cut at 50 %",
             binary[..2461].to_vec(),
-            Err(Encoding::Binary),
+            Ok((0, Serial)),
         ),
         (
             "binary cut at 90 %",
             binary[..4429].to_vec(),
-            Err(Encoding::Binary),
+            Ok((0, Serial)),
         ),
         (
-            "binary no last byte",
-            binary[..4921].to_vec(),
-            Err(Encoding::Binary),
+            "binary no last 2 bytes",
+            binary[..4920].to_vec(),
+            Ok((0, Serial)),
         ),
-        ("XML", xml.clone(), Err(Encoding::Xml)),
-        ("XML cut at 50 %", xml[..25305].to_vec(), Err(Encoding::Xml)),
+        ("binary no last byte", binary[..4921].to_vec(), Ok((0, Eof))),
         (
-            "XML no last byte",
-            xml[..50610].to_vec(),
-            Err(Encoding::Xml),
+            "binary twice no last byte",
+            [&binary[..], &binary[..4921]].concat(),
+            Ok((1, Eof)),
         ),
+        (
+            "binary stray 0x30 after",
+            [&binary[..], &[0x30]].concat(),
+            Ok((1, Eof)),
+        ),
+        (
+            "binary two NULs after",
+            [&binary[..], &[0x00, 0x00]].concat(),
+            Ok((1, Serial)),
+        ),
+        // XML archives (P3.001-015, P3.092, P3.105-107); NCBI's exit status: 0 when whole or
+        // without the trailing newline, 1 (`Serial`) when cut at 50 % or without the last 20
+        // bytes and after the archive with `<junk/>`.
+        ("XML", xml.clone(), Ok((1, Data))),
+        ("XML twice", [&xml[..], &xml[..]].concat(), Ok((2, Data))),
+        ("XML cut at 50 %", xml[..25305].to_vec(), Ok((0, Serial))),
+        ("XML no last byte", xml[..50610].to_vec(), Ok((1, Data))),
         (
             "XML no last 20 bytes",
             xml[..50591].to_vec(),
-            Err(Encoding::Xml),
+            Ok((0, Serial)),
         ),
         (
             "XML element after",
             [&xml[..], b"<junk/>"].concat(),
-            Err(Encoding::Xml),
+            Ok((1, Serial)),
         ),
     ];
     for (name, bytes, expected) in cases {
         assert_eq!(outcome(&bytes), expected, "{name}");
+    }
+}
+
+/// Binary and XML archives read back through `ObjectStream::binary` and `ObjectStream::xml`
+/// produce the exact ASN.1 text of their text twins (single object and multi-object batches).
+#[test]
+fn binary_and_xml_archives_match_their_text_twins() {
+    use crate::report::serial::asn_input::Input;
+    use crate::report::serial::asn_types::read::ObjectStream;
+
+    fn drain_to_text<I: Input>(stream: &mut ObjectStream<I>) -> Vec<u8> {
+        let mut out = Vec::new();
+        while !stream.end_of_data() {
+            let (value, posts) = stream.read_object(named::BLAST4_ARCHIVE);
+            assert!(posts.is_empty(), "{posts:?}");
+            let value = value.expect("archive object");
+            let mut enc = AsnTextEncoder::new(&mut out);
+            write_document(&mut enc, named::BLAST4_ARCHIVE, &value);
+            assert_eq!(enc.error(), None);
+        }
+        out
+    }
+
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let read_to_text = |bytes: &[u8]| -> Vec<u8> {
+        let guessed = guess_encoding(bytes);
+        match guessed.encoding {
+            Ok(Encoding::Binary) => drain_to_text(&mut guessed.into_binary(Names::BLAST_ARCHIVE)),
+            Ok(Encoding::Xml) => {
+                drain_to_text(&mut guessed.into_xml(XmlStyle::Asn, Names::BLAST_ARCHIVE))
+            }
+            other => panic!("expected binary or XML, got {other:?}"),
+        }
+    };
+    let groups: &[(&str, &[&str])] = &[
+        (
+            "fixtures/archive_read/blastn_multi.asn",
+            &[
+                "fixtures/archive_read/blastn_multi.bin",
+                "fixtures/archive_read/blastn_multi.xml",
+            ],
+        ),
+        (
+            "fixtures/outfmt11/bad_sub.out",
+            &[
+                "fixtures/outfmt11/bad_sub_bin.out",
+                "fixtures/outfmt11/bad_sub_xml.out",
+            ],
+        ),
+        (
+            "fixtures/outfmt11/batches_sub.out",
+            &["fixtures/outfmt11/batches_sub_bin.out"],
+        ),
+        (
+            "fixtures/outfmt11/bp_batches_sub.out",
+            &["fixtures/outfmt11/bp_batches_sub_bin.out"],
+        ),
+        (
+            "fixtures/outfmt11/tbx_batches_sub.out",
+            &["fixtures/outfmt11/tbx_batches_sub_bin.out"],
+        ),
+    ];
+    for &(text, encoded_list) in groups {
+        let expected = std::fs::read(tests.join(text)).unwrap();
+        for &encoded in encoded_list {
+            let actual = read_to_text(&std::fs::read(tests.join(encoded)).unwrap());
+            assert_eq!(actual, expected, "{encoded} vs {text}");
+        }
     }
 }
 

@@ -1209,6 +1209,17 @@ fn search_database(
             outputs.formats.iter().map(|format| format.outfmt),
         ),
     );
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:99-174
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    let mt_stop = crate::algorithm::common::database::ncbi_mt_splits_db(
+        args.num_threads.max(1) as usize,
+        args.mt_mode,
+        database.x_seqdb().total_length(),
+        Some(args.query.as_path()),
+        900_000_000,
+        1_250_000,
+    );
+    let database = database.with_mt_stop_at_negative(mt_stop);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         args.strategy.as_ref(),
@@ -1305,12 +1316,17 @@ fn search_database(
         .first()
         .and_then(|options| options.db_mask.as_ref())
         .is_some_and(|mask| mask.is_hard());
-    let (longest, unreadable) = match database.x_open_stream_with_long(allow_long) {
-        Ok(longest) => (Some(longest), None),
+    let (opened, unreadable) = match database.x_open_stream_with_long(allow_long) {
+        Ok(opened) => (Some(opened), None),
         Err(error) => (None, Some(error)),
     };
-    let stream = longest.map(|longest| {
-        super::x_db_stream::XStreamDb::new_with_long(database.x_seqdb(), longest, allow_long)
+    let stream = opened.map(|(longest, scan_count)| {
+        super::x_db_stream::XStreamDb::with_scan_count_long(
+            database.x_seqdb(),
+            longest,
+            scan_count,
+            allow_long,
+        )
     });
     let unreadable = std::cell::RefCell::new(unreadable);
     let search_subjects = match &stream {

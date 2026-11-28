@@ -92,12 +92,12 @@ function trackExternalNet(page: Page): string[] {
 async function openWindowMasker(page: Page): Promise<void> {
   await openSearch(page);
   await page.getByTestId('tab-windowmasker').click();
-  await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await described(page, 'wm-panel', 'ready');
 }
 
 async function showWmTab(page: Page): Promise<void> {
   await page.getByTestId('tab-windowmasker').click();
-  await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await described(page, 'wm-panel', 'ready');
 }
 
 async function openWmOptions(page: Page): Promise<void> {

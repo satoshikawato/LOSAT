@@ -5,7 +5,7 @@ use std::io::Write;
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::{ArgException, Args};
-use crate::ncbi_app::files::{file_exception, open_input_file, Cin, Ostream};
+use crate::ncbi_app::files::{file_exception, open_input_file, Cin};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException};
 use crate::report::pairwise::cpp_default_double;
@@ -35,7 +35,7 @@ enum Failure {
     Std(String),
     /// A case LOSAT does not reproduce: a whole message.
     Refused(String),
-    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`): the
+    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`OutputFile::closed`): the
     /// run ends at once, exit status 0, no message.
     ClosedPipe,
 }
@@ -144,22 +144,19 @@ fn run_masks(
     let outfmt = value("outfmt");
     let parse_seqids = args.flag("parse_seqids");
     let masker = seg_masker(window, locut, hicut);
-    let mut source = reader(
-        value("infmt"),
-        args.os_value("in").expect("-in has a default"),
-        parse_seqids,
-        prints_title(outfmt),
-        settings.database(),
-        stdin,
-    )?;
-    let mut output = args.output_file("out", out).map_err(file_failure)?;
-    let mut writer = writer(outfmt, window, locut, hicut);
+    let mut source = source(args, settings, stdin)?;
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
-    let mut out = Ostream::new(&mut output);
+    let mut out = args.output_file("out", out).map_err(file_failure)?;
+    // LOSAT Web's refusal of an output that it does not write (`OpenFiles::create`), as soon as
+    // `-out` is opened (windowmasker's place and words).
+    if let Some(reason) = out.refusal() {
+        return Err(Failure::Refused(unsupported(reason)));
+    }
+    let mut writer = writer(outfmt, window, locut, hicut);
     let result = (|| {
         while let Some(record) = source.next_record()? {
-            post_read_texts::<Failure>(&record.texts, &mut out, diag)?;
+            post_read_texts::<Failure>(&record.texts, diag)?;
             let masks = seg_masks(&masker, &record.stdaa);
             let mask: Vec<(u32, u32)> = masks
                 .iter()
@@ -221,9 +218,7 @@ fn writer(outfmt: &str, window: i32, locut: f64, hicut: f64) -> MaskWriter {
     };
     match outfmt {
         "interval" => MaskWriter::Interval,
-        "fasta" => MaskWriter::Fasta {
-            hard_masking: false,
-        },
+        "fasta" => MaskWriter::fasta(false),
         "seqloc_asn1_bin" => MaskWriter::SeqLoc(Serial::AsnBinary),
         "seqloc_asn1_text" => MaskWriter::SeqLoc(Serial::AsnText),
         "seqloc_xml" => MaskWriter::SeqLoc(Serial::Xml),
@@ -256,6 +251,35 @@ struct Record {
 enum Source<'a> {
     Fasta(Box<MaskFastaReader<Box<dyn std::io::Read + 'a>>>),
     Database(Box<MaskBdbReader>),
+}
+
+// No NCBI counterpart: `run_masks` up to `-out`, which LOSAT Web's check takes too (review of
+// WW4c, F1, 2026-11-28).
+/// The first steps of `run_masks`: `-in` opened and its reader made (`reader`), before `-out`.
+fn source<'a>(
+    args: &Args,
+    settings: &ApplicationSettings,
+    stdin: &'a mut Cin<'_>,
+) -> Result<Source<'a>, Failure> {
+    let value = |name| args.value(name).expect("a key with a default");
+    reader(
+        value("infmt"),
+        args.os_value("in").expect("-in has a default"),
+        args.flag("parse_seqids"),
+        prints_title(value("outfmt")),
+        settings.database(),
+        stdin,
+    )
+}
+
+/// Whether the run with `args` reaches `-out`: its first steps (`source`) pass (LOSAT Web's check,
+/// `super::check`, refuses `-out` only then; review of WW4c, F1).
+pub(super) fn reaches_out(
+    args: &Args,
+    settings: &ApplicationSettings,
+    stdin: &mut Cin<'_>,
+) -> bool {
+    source(args, settings, stdin).is_ok()
 }
 
 /// `x_GetReader`: `CMaskFastaReader` of `-in` (a protein reader), or `CMaskBDBReader` of the

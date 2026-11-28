@@ -77,7 +77,13 @@ pub(crate) struct BlastnTabular<'a> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
 pub(crate) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -> Result<()> {
     let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
-    TabularWriter::new(spec, &version, None).prolog(writer)?;
+    TabularWriter::new(
+        spec,
+        crate::blastinput::app::Program::Blastn,
+        &version,
+        None,
+    )
+    .prolog(writer)?;
     Ok(())
 }
 
@@ -129,7 +135,12 @@ pub(crate) fn write_blastn_tabular(
         }
     }
     let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
-    let table = TabularWriter::new(spec, &version, None);
+    let table = TabularWriter::new(
+        spec,
+        crate::blastinput::app::Program::Blastn,
+        &version,
+        None,
+    );
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
@@ -351,19 +362,34 @@ pub(crate) fn write_blastn_tabular(
                         .rows
                         .then_some((query_row.as_slice(), subject_row.as_slice())),
                 );
-                match probe.as_deref_mut() {
-                    // One printed row is one HSP; the probe marks it without changing it.
-                    Some(probe) => {
-                        buf.clear();
-                        table.row(&mut buf, &mut rows, &query, &subject, kept.as_ref(), &row);
-                        writer.flush()?;
-                        probe.begin(hsp_index);
-                        writer.write_all(&buf)?;
-                        writer.flush()?;
-                        probe.end(hsp_index);
-                        buf.clear();
-                    }
-                    None => table.row(&mut buf, &mut rows, &query, &subject, kept.as_ref(), &row),
+                if probe.is_some() {
+                    buf.clear();
+                }
+                // A row where NCBI has no result ends the run after the bytes before its stop.
+                if let Some(stop) =
+                    table.row(&mut buf, &mut rows, &query, &subject, kept.as_ref(), &row)
+                {
+                    return Err(crate::report::tabular::row_stop_end(
+                        writer,
+                        &buf,
+                        stop,
+                        tab.subjects.stopped_subject(stop.subject, stop.lineless),
+                        PROGRAM,
+                        || {
+                            if let Some(warnings) = warnings.as_deref_mut() {
+                                warnings.end_run();
+                            }
+                        },
+                    ));
+                }
+                // One printed row is one HSP; the probe marks it without changing it.
+                if let Some(probe) = probe.as_deref_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                    writer.write_all(&buf)?;
+                    writer.flush()?;
+                    probe.end(hsp_index);
+                    buf.clear();
                 }
                 hsp_index += 1;
             }
@@ -403,7 +429,7 @@ fn tabular_hsp<'r>(
         q_end: hsp.q_end as i64,
         s_start: hsp.s_start as i64,
         s_end: hsp.s_end as i64,
-        evalue: hsp.e_value,
+        evalue: crate::report::serial::seqalign::seqalign_evalue_read(hsp.e_value),
         bit_score: hsp.bit_score,
         score: hsp.raw_score,
         length: hsp.length,
@@ -424,8 +450,9 @@ fn tabular_hsp<'r>(
 }
 
 /// `qcovus` of one subject's HSPs (in the Seq-align order) for a query of `query_length`:
-/// `GetUniqSeqCoverage` in percent as `InsertSubjectScores` keeps it, -1 (`N/A`) when nothing is
-/// covered.
+/// `GetUniqSeqCoverage` in percent as `InsertSubjectScores` keeps it (`coverage_percent`, the rule
+/// of `qcovs`), -1 (`N/A`) when nothing is covered. The covered length is at most the query's: a
+/// query gap's wrapped `TSeqPos` range is empty (range.hpp:158-166), so its `int` is the length.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:646-657
 fn uniq_subject_coverage(
@@ -440,35 +467,28 @@ fn uniq_subject_coverage(
     // `uniq_coverage`, an `int`, of the `TSeqPos` length. Any gapped class N throw was already
     // raised by `gapped_insert_subject_scores_throw` before the subject loop.
     let covered = uniq_seq_coverage(hsps, q_offset, ungapped)
-        .expect("gapped qcovus throw handled before subject loop") as i32;
-    if covered == 0 {
-        return -1;
-    }
-    let mut pct = 100.0 * f64::from(covered) / query_length as f64;
-    if pct < 99.0 {
-        pct += 0.5;
-    }
-    pct as i32
+        .expect("gapped qcovus throw handled before subject loop") as usize;
+    coverage_percent(covered, query_length)
 }
 
 /// NCBI's `CRange<TSeqPos>`: `from` and `to_open` as `TSeqPos` (unsigned 32-bit, wrapping).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SeqRange {
-    from: u32,
-    to_open: u32,
+pub(crate) struct SeqRange {
+    pub(crate) from: u32,
+    pub(crate) to_open: u32,
 }
 
 impl SeqRange {
     /// `CRange` from `from` to `to` (`Set` calls `SetFrom` with `from` and `SetTo` with `to`,
     /// which is `SetToOpen` with `to` plus 1).
-    fn new(from: u32, to: u32) -> Self {
+    pub(crate) fn new(from: u32, to: u32) -> Self {
         SeqRange {
             from,
             to_open: to.wrapping_add(1),
         }
     }
 
-    fn to(self) -> u32 {
+    pub(crate) fn to(self) -> u32 {
         self.to_open.wrapping_sub(1)
     }
 
@@ -481,7 +501,7 @@ impl SeqRange {
     }
 
     /// `CombineWith`.
-    fn combine_with(&mut self, r: SeqRange) {
+    pub(crate) fn combine_with(&mut self, r: SeqRange) {
         if !r.is_empty() {
             if !self.is_empty() {
                 self.from = self.from.min(r.from);
@@ -495,7 +515,7 @@ impl SeqRange {
     /// `s_FixMinusStrandRange`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4829-4836
-    fn fix_minus_strand(self) -> Self {
+    pub(crate) fn fix_minus_strand(self) -> Self {
         if self.from > self.to() {
             SeqRange::new(self.to(), self.from)
         } else {
@@ -508,7 +528,7 @@ impl SeqRange {
 /// `x_CombineWith`, `x_Subtract` and `GetCoveredLength` that `GetUniqSeqCoverage` calls, with
 /// their `TSeqPos` arithmetic).
 #[derive(Clone, Debug, Default)]
-struct RangeCollection(Vec<SeqRange>);
+pub(crate) struct RangeCollection(pub(crate) Vec<SeqRange>);
 
 impl RangeCollection {
     /// `lower_bound(begin, end, pos, p)` of `x_CombineWith` and `x_Subtract` (cited below) from
@@ -527,7 +547,7 @@ impl RangeCollection {
     /// `x_CombineWith` of a `TRange`.
     ///
     /// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:321-346
-    fn combine_with(&mut self, r: SeqRange) {
+    pub(crate) fn combine_with(&mut self, r: SeqRange) {
         let mut pos_from = r.from;
         let pos_to_open = r.to_open;
         if pos_from == 0 {
@@ -550,7 +570,7 @@ impl RangeCollection {
     /// `x_Subtract` of a `TRange`.
     ///
     /// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:348-376
-    fn subtract(&mut self, r: SeqRange) {
+    pub(crate) fn subtract(&mut self, r: SeqRange) {
         let pos_from = r.from;
         let pos_to_open = r.to_open;
         let mut begin = self.lower_bound(0, pos_from);
@@ -576,7 +596,7 @@ impl RangeCollection {
     }
 
     /// `GetCoveredLength`: the sum of the lengths, in `TSeqPos`.
-    fn covered_length(&self) -> u32 {
+    pub(crate) fn covered_length(&self) -> u32 {
         self.0
             .iter()
             .fold(0u32, |total, range| total.wrapping_add(range.length()))

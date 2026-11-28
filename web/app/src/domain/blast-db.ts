@@ -3,6 +3,7 @@
 // (WQA D12b + RG-D4 W2). Single owner reused by Subject "Database" (-db),
 // BLASTN "Repeats database" (-filtering_db), and WindowMasker (-infmt blastdb).
 import { WINDOW_MASKER_TAXID_FLAG, type DirectoryFile, type ProgramId, type SequenceKind } from 'losat/domain';
+import { seqdbNames } from './list-flags';
 
 export const DB_FLAG = '-db';
 export const FILTERING_DB_FLAG = '-filtering_db';
@@ -176,7 +177,10 @@ export function noTaxidExpansionConflicts(input: {
 }
 
 export interface BlastDbCandidate {
-  /** Exact relative database path passed to `-db` or `-filtering_db` (without `.nal`/`.pal`/`.nin`/`.pin`). */
+  /**
+   * The database's relative path as it is called (without `.nal`/`.pal`/`.nin`/`.pin`), which `-db` or `-filtering_db` names
+   * as the command line reads it (`seqdbNameList`).
+   */
   readonly name: string;
   readonly kind: SequenceKind;
   readonly entry: 'alias' | 'volume';
@@ -184,6 +188,8 @@ export interface BlastDbCandidate {
   readonly title?: string;
   /** Component volumes listed in `DBLIST` (for alias files). */
   readonly volumes?: readonly string[];
+  /** An alias of the pick lists this database in its `DBLIST`: the alias, not this member, is the default. */
+  readonly listed?: true;
 }
 
 export type DirectoryEntries = readonly DirectoryFile[];
@@ -222,11 +228,13 @@ export function duplicateRunFileMessage(name: string): string {
 
 /**
  * Normalizes a picked or folder-relative entry name for a run directory: uses `/` separators,
- * trims whitespace, strips leading `./` and `/` segments, and rejects empty, interior `.`, `..`,
- * or NUL-containing paths (matching `RunDirectory`'s path rules in `packages/losat`).
+ * strips leading `./` and `/` segments, and rejects empty, interior `.`, `..`, or NUL-containing
+ * paths (matching `RunDirectory`'s path rules in `packages/losat`). Spaces are part of a name, as
+ * in the user's folder and on the command line: the file is mounted, and named in the argv, as it
+ * is called (line WQA's D33, S4-3).
  */
 export function normalizeRunPath(raw: string): string | undefined {
-  const cleaned = raw.replaceAll('\\', '/').trim();
+  const cleaned = raw.replaceAll('\\', '/');
   if (cleaned === '' || cleaned.includes('\0')) return undefined;
   const parts: string[] = [];
   for (const segment of cleaned.split('/')) {
@@ -241,6 +249,46 @@ export function normalizeRunPath(raw: string): string | undefined {
 export function pickedFilePath(file: File, relativeName?: string): string | undefined {
   const rel = relativeName ?? (file as File & { readonly webkitRelativePath?: string }).webkitRelativePath;
   return normalizeRunPath(rel && rel.trim() !== '' ? rel : file.name);
+}
+
+/**
+ * The one folder every picked file lies in (its first path segment), or undefined for a pick of
+ * files: a folder pick gives every file the folder's name in its relative path, a files pick does not.
+ */
+export function pickedFolder(picked: readonly File[]): string | undefined {
+  let folder: string | undefined;
+  for (const file of picked) {
+    const path = pickedFilePath(file);
+    if (path === undefined) continue;
+    const slash = path.indexOf('/');
+    if (slash <= 0) return undefined;
+    const top = path.slice(0, slash);
+    if (folder === undefined) folder = top;
+    else if (folder !== top) return undefined;
+  }
+  return folder;
+}
+
+/** What the user chose to give a database: a folder, or files. */
+export type DatabasePickKind = 'folder' | 'files';
+
+export function databasePickKind(picked: readonly File[]): DatabasePickKind {
+  return pickedFolder(picked) === undefined ? 'files' : 'folder';
+}
+
+/** The kind of a pick remembered across a reload: `rememberDb` keeps a folder for a folder pick only. */
+export function rememberedPickKind(remembered: { readonly folder?: string }): DatabasePickKind {
+  return remembered.folder === undefined ? 'files' : 'folder';
+}
+
+/** Asking again for what the user picked, after a reload. */
+export function chooseAgainMessage(kind: DatabasePickKind): string {
+  return `Choose the ${kind === 'folder' ? 'folder' : 'files'} again.`;
+}
+
+/** Status while a pick is read; `what` is "database" or "repeats database". */
+export function readingDatabaseMessage(what: string, kind: DatabasePickKind): string {
+  return `Reading the ${what} ${kind === 'folder' ? 'folder' : 'files'}.`;
 }
 
 function parentPrefixes(name: string): string[] {
@@ -293,38 +341,35 @@ export class RunDirectoryBuilder {
   }
 }
 
-/** Parses `TITLE` and `DBLIST` tokens from a BLAST `.nal` or `.pal` alias file. */
+/**
+ * The `TITLE` and the `DBLIST` names of a BLAST `.nal` or `.pal` alias file, as NCBI's SeqDB reads them: its lines by
+ * `aliasValues`, and `DBLIST`'s value as a SeqDB name list (`seqdbNames`: only a space separates two names, a double
+ * quote starts or ends one), each name with its backslashes read as slashes (SeqDB's `SeqDB_ConvertOSPath`).
+ */
 export function parseAliasMetadata(text: string): { readonly title?: string; readonly dblist: readonly string[] } {
-  let title: string | undefined;
-  const dblist: string[] = [];
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
+  const values = aliasValues(text);
+  const title = values.get('TITLE');
+  const dblist = seqdbNames(values.get('DBLIST') ?? '').map((name) => name.replaceAll('\\', '/'));
+  return title === undefined || title === '' ? { dblist } : { title, dblist };
+}
+
+/**
+ * The keys and values of an alias file's lines, as NCBI's SeqDB reads them (LOSAT `seqdb/alias.rs` `read_values`; line
+ * WW, WW4d R1): a line ends at a newline or a carriage return; the spaces before it are skipped, and a line that then
+ * starts with `#` is a comment; the key is the line up to its first space or tab, exactly (`DBLISTX` is another key);
+ * the value is the rest without the spaces and tabs at its ends, each tab read as a space; a key given again replaces
+ * the earlier value.
+ */
+function aliasValues(text: string): ReadonlyMap<string, string> {
+  const values = new Map<string, string>();
+  for (const raw of text.split(/[\r\n]/)) {
+    const line = raw.replace(/^ +/, '');
     if (line === '' || line.startsWith('#')) continue;
-    if (line.startsWith('TITLE')) {
-      const value = line.slice('TITLE'.length).trim();
-      if (value !== '') title = value;
-      continue;
-    }
-    if (!line.startsWith('DBLIST')) continue;
-    const rest = line.slice('DBLIST'.length).trim();
-    let i = 0;
-    while (i < rest.length) {
-      while (i < rest.length && /\s/.test(rest[i]!)) i++;
-      if (i >= rest.length) break;
-      let token: string;
-      if (rest[i] === '"') {
-        const end = rest.indexOf('"', i + 1);
-        token = end < 0 ? rest.slice(i + 1) : rest.slice(i + 1, end);
-        i = end < 0 ? rest.length : end + 1;
-      } else {
-        const start = i;
-        while (i < rest.length && !/\s/.test(rest[i]!)) i++;
-        token = rest.slice(start, i);
-      }
-      if (token !== '') dblist.push(token.replaceAll('\\', '/'));
-    }
+    const key = /^[^ \t]*/.exec(line)![0];
+    if (key === '') continue;
+    values.set(key, line.slice(key.length).replace(/^[ \t]+|[ \t]+$/g, '').replaceAll('\t', ' '));
   }
-  return title === undefined ? { dblist } : { title, dblist };
+  return values;
 }
 
 function parentDir(path: string): string {
@@ -335,6 +380,29 @@ function parentDir(path: string): string {
 function joinPath(dir: string, rel: string): string {
   const clean = rel.replace(/^\/+/, '');
   return dir === '' ? clean : `${dir}/${clean}`;
+}
+
+/**
+ * The volume names of an alias's DBLIST as makeblastdb writes it: `A.00`, `A.01` ... `A.(n-1)`, every
+ * number written to one width of 2 digits or more (`core_nt.000`); each name relative to the alias's
+ * folder, or as the alias's own path. Empty for any other DBLIST.
+ */
+function numberedVolumes(alias: string, dir: string, dblist: readonly string[]): readonly string[] {
+  const names: string[] = [];
+  const numbers = new Set<number>();
+  let width = 0;
+  for (const token of dblist) {
+    const name = [token, joinPath(dir, token)].find((candidate) => candidate.startsWith(`${alias}.`));
+    const digits = name?.slice(alias.length + 1);
+    if (name === undefined || digits === undefined || !/^\d{2,}$/.test(digits)) return [];
+    if (width === 0) width = digits.length;
+    else if (digits.length !== width) return [];
+    numbers.add(Number(digits));
+    names.push(name);
+  }
+  if (names.length === 0 || numbers.size !== names.length) return [];
+  for (let n = 0; n < names.length; n++) if (!numbers.has(n)) return [];
+  return names;
 }
 
 function classifyBlastDbFile(
@@ -354,38 +422,27 @@ function classifyBlastDbFile(
 /**
  * Synchronous, name-only BLAST database discovery shared by Subject Database (`-db`),
  * BLASTN Repeats database (`-filtering_db`), and WindowMasker (`-infmt blastdb`).
- * Matches NCBI `FindBlastDBs` case-sensitive `.nal`/`.nin`/`.pal`/`.pin` extensions,
- * prefers aliases over index volumes of the same stem, and hides numbered volume stems
- * (`foo.00`) when an alias `foo` of the same molecule type exists (plus any explicit
- * `hiddenComponents` keys `${kind}:${stem}` learned from alias `DBLIST` lines).
+ * Matches NCBI `FindBlastDBs` case-sensitive `.nal`/`.nin`/`.pal`/`.pin` extensions and
+ * prefers aliases over index volumes of the same stem. Every database is listed, as
+ * `blastdbcmd -list` lists them; `discoverBlastDatabases` hides the volumes of one database
+ * after it has read the aliases (`DBLIST`).
  */
-export function discoverBlastDatabaseNames(
-  fileNames: readonly string[],
-  hiddenComponents?: ReadonlySet<string>,
-): readonly BlastDbCandidate[] {
+export function discoverBlastDatabaseNames(fileNames: readonly string[]): readonly BlastDbCandidate[] {
   const byKey = new Map<string, { readonly name: string; readonly kind: SequenceKind; readonly entry: 'alias' | 'volume' }>();
-  const aliasStems = new Set<string>();
 
   for (const name of fileNames) {
     const classified = classifyBlastDbFile(name);
     if (classified === undefined) continue;
     const key = `${classified.kind}:${classified.stem}`;
-    if (classified.entry === 'alias') aliasStems.add(key);
     const existing = byKey.get(key);
     if (existing === undefined || (existing.entry === 'volume' && classified.entry === 'alias')) {
       byKey.set(key, { name: classified.stem, kind: classified.kind, entry: classified.entry });
     }
   }
 
-  const databases: BlastDbCandidate[] = [];
-  for (const [key, item] of byKey) {
-    if (item.entry === 'volume') {
-      if (hiddenComponents?.has(key)) continue;
-      const numbered = /^(.*)\.\d{2,}$/.exec(item.name);
-      if (numbered !== null && aliasStems.has(`${item.kind}:${numbered[1]!}`)) continue;
-    }
-    databases.push(Object.freeze({ name: item.name, kind: item.kind, entry: item.entry }));
-  }
+  const databases: BlastDbCandidate[] = [...byKey.values()].map((item) =>
+    Object.freeze({ name: item.name, kind: item.kind, entry: item.entry }),
+  );
 
   databases.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0));
   return Object.freeze(databases);
@@ -395,29 +452,36 @@ const byShortestName = (a: BlastDbCandidate, b: BlastDbCandidate) => a.name.leng
 
 /**
  * Picks the primary BLAST database name from a list of run-directory paths: an alias file
- * (`.nal`/`.pal`) first, otherwise a volume (`.nin`/`.pin`), shortest name first.
+ * (`.nal`/`.pal`) first, otherwise a volume (`.nin`/`.pin`), shortest name first; of the molecule
+ * kind `kind` where the option that reads it takes one kind (WindowMasker's `-in`: nucleotide), of
+ * either kind where that is not known.
  */
-export function primaryBlastDbName(fileNames: readonly string[]): string | undefined {
-  const candidates = discoverBlastDatabaseNames(fileNames);
+export function primaryBlastDbName(fileNames: readonly string[], kind?: SequenceKind): string | undefined {
+  return primaryBlastDb(fileNames, kind)?.name;
+}
+
+/** The primary BLAST database of a list of run-directory paths (`primaryBlastDbName`), with its molecule type. */
+export function primaryBlastDb(fileNames: readonly string[], kind?: SequenceKind): BlastDbCandidate | undefined {
+  const candidates = discoverBlastDatabaseNames(fileNames).filter((db) => kind === undefined || db.kind === kind);
   if (candidates.length === 0) return undefined;
   const aliases = candidates.filter((db) => db.entry === 'alias').sort(byShortestName);
-  if (aliases.length > 0) return aliases[0]!.name;
-  return [...candidates].sort(byShortestName)[0]!.name;
+  if (aliases.length > 0) return aliases[0]!;
+  return [...candidates].sort(byShortestName)[0]!;
 }
 
 /**
  * Discovers valid BLAST databases (`.nal`/`.pal`, `.nin`/`.pin`, multi-volume sets) from picked
- * files. Reads only tiny `.nal`/`.pal` alias text files; binary volume files are never read into memory.
+ * files (at `relativeNames` where given: the paths of the files that a makeblastdb run made). Reads
+ * only tiny `.nal`/`.pal` alias text files; binary volume files are never read into memory.
  */
-export async function discoverBlastDatabases(picked: readonly File[]): Promise<BlastDbDiscovery> {
+export async function discoverBlastDatabases(picked: readonly File[], relativeNames?: readonly string[]): Promise<BlastDbDiscovery> {
   const builder = new RunDirectoryBuilder();
   const filesByName = new Map<string, File>();
   let totalBytes = 0;
-  let folder: string | undefined;
-  let allShareFolder = picked.length > 0;
+  const folder = pickedFolder(picked);
 
-  for (const file of picked) {
-    const path = pickedFilePath(file);
+  for (const [index, file] of picked.entries()) {
+    const path = pickedFilePath(file, relativeNames?.[index]);
     if (path === undefined) continue;
     if (builder.has(path)) {
       builder.add(path, file);
@@ -426,24 +490,14 @@ export async function discoverBlastDatabases(picked: readonly File[]): Promise<B
     builder.add(path, file);
     filesByName.set(path, file);
     totalBytes += file.size;
-    const slash = path.indexOf('/');
-    if (slash > 0) {
-      const top = path.slice(0, slash);
-      if (folder === undefined) folder = top;
-      else if (folder !== top) allShareFolder = false;
-    } else {
-      allShareFolder = false;
-    }
   }
-  if (!allShareFolder) folder = undefined;
 
   const files = builder.build();
   const names = files.map((entry) => entry.name);
   const initial = discoverBlastDatabaseNames(names);
 
-  // Read alias metadata (`TITLE`, `DBLIST`) to hide component volumes of multi-volume aliases.
+  // Read alias metadata (`TITLE`, `DBLIST`) for the picker's words.
   const aliasMeta = new Map<string, { readonly title?: string; readonly dblist: readonly string[] }>();
-  const hiddenComponents = new Set<string>();
 
   for (const item of initial) {
     if (item.entry !== 'alias') continue;
@@ -451,28 +505,50 @@ export async function discoverBlastDatabases(picked: readonly File[]): Promise<B
     const aliasFile = filesByName.get(`${item.name}${ext}`);
     if (aliasFile === undefined || aliasFile.size > MAX_ALIAS_BYTES) continue;
     try {
-      const text = await aliasFile.text();
+      // The bytes as SeqDB reads them: a UTF-8 byte order mark stays, as part of the first line's key (`Blob.text()` would
+      // take it off; NCBI BLAST+ 2.17.0 and LOSAT read `<BOM>DBLIST a` as no DBLIST; line WW, WW4d R2).
+      const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(await aliasFile.arrayBuffer());
       const meta = parseAliasMetadata(text);
       aliasMeta.set(`${item.kind}:${item.name}`, meta);
-      const dir = parentDir(item.name);
-      for (const token of meta.dblist) {
-        hiddenComponents.add(`${item.kind}:${token}`);
-        hiddenComponents.add(`${item.kind}:${joinPath(dir, token)}`);
-      }
     } catch {
       // Unreadable alias file is still surfaced so the engine can report its own error if chosen.
     }
   }
 
-  const databases = discoverBlastDatabaseNames(names, hiddenComponents).map((item) => {
-    const meta = aliasMeta.get(`${item.kind}:${item.name}`);
-    if (meta === undefined) return item;
-    return Object.freeze({
-      ...item,
-      ...(meta.title === undefined ? {} : { title: meta.title }),
-      ...(meta.dblist.length > 0 ? { volumes: Object.freeze([...meta.dblist]) } : {}),
+  // A database an alias of its kind lists in its DBLIST stays a choice, except the volumes of one
+  // database: a DBLIST that is exactly `A.00`, `A.01` ... (consecutive from 0, one width) is what
+  // makeblastdb writes for the alias `A` of a multi-volume database, and those names are not choices.
+  // A `foo.NN` that no alias lists, or that `foo` lists among other names, is a database like any other.
+  const known = new Set(initial.map((db) => `${db.kind}:${db.name}`));
+  const listed = new Set<string>();
+  const volumes = new Set<string>();
+  for (const [key, meta] of aliasMeta) {
+    const kind = key.slice(0, key.indexOf(':'));
+    const alias = key.slice(key.indexOf(':') + 1);
+    const dir = parentDir(alias);
+    const written = new Set(numberedVolumes(alias, dir, meta.dblist));
+    for (const token of meta.dblist) {
+      for (const member of [token, joinPath(dir, token)]) {
+        if (!known.has(`${kind}:${member}`)) continue;
+        listed.add(`${kind}:${member}`);
+        if (written.has(member)) volumes.add(`${kind}:${member}`);
+      }
+    }
+  }
+
+  const databases = initial
+    .filter((db) => !volumes.has(`${db.kind}:${db.name}`))
+    .map((db) => {
+      // The default skips the databases that an alias lists, not the aliases that another alias lists.
+      const item = db.entry === 'volume' && listed.has(`${db.kind}:${db.name}`) ? Object.freeze({ ...db, listed: true as const }) : db;
+      const meta = aliasMeta.get(`${item.kind}:${item.name}`);
+      if (meta === undefined) return item;
+      return Object.freeze({
+        ...item,
+        ...(meta.title === undefined ? {} : { title: meta.title }),
+        ...(meta.dblist.length > 0 ? { volumes: Object.freeze([...meta.dblist]) } : {}),
+      });
     });
-  });
 
   return Object.freeze({
     ...(folder === undefined ? {} : { folder }),
@@ -514,6 +590,14 @@ export function databaseTaxonomy(discovery: BlastDbDiscovery, selectedName: stri
 export function matchingDatabases(discovery: BlastDbDiscovery | undefined, kind: SequenceKind): readonly BlastDbCandidate[] {
   if (discovery === undefined) return [];
   return discovery.databases.filter((db) => db.kind === kind);
+}
+
+/**
+ * The database a pick starts with: the one chosen before a reload (`remembered`) when the pick has it,
+ * else the first that no alias of the pick lists, else the first.
+ */
+export function defaultDatabase(matches: readonly BlastDbCandidate[], remembered?: string): BlastDbCandidate | undefined {
+  return matches.find((db) => db.name === remembered) ?? matches.find((db) => db.listed !== true) ?? matches[0];
 }
 
 /** Clear user-facing message when picked files hold no BLAST database of the required molecule type. */

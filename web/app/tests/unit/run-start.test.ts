@@ -40,6 +40,13 @@ import {
 } from '../../../packages/losat/src/infra/reactor/abi';
 import type { MainLinks } from '../../../packages/losat/src/infra/engine-worker/link';
 
+/** The adapter's reading of an argv (web/adapter/src/lib.rs `words`): NUL-separated words, the empty one after the last NUL dropped. */
+function words(argv: string): string[] {
+  const split = argv.split('\0');
+  if (split.at(-1) === '') split.pop();
+  return split;
+}
+
 /** The runtime's links to the main thread (link.ts): these tests start no threaded instance. */
 const NO_LINKS: MainLinks = {
   link: () => {
@@ -63,12 +70,12 @@ function crc(bytes: Uint8Array): number {
 }
 
 /** An archive laid out as the adapter writes it (web/adapter/src/zip.rs): stored entries, the central directory, the end record. */
-function storedZip(entries: ReadonlyArray<readonly [string, Uint8Array]>): Uint8Array {
+function storedZip(entries: ReadonlyArray<readonly [string, Uint8Array, string?]>): Uint8Array {
   const parts: number[] = [];
   const u16 = (value: number) => parts.push(value & 0xff, (value >>> 8) & 0xff);
   const u32 = (value: number) => parts.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
-  const central: Array<{ name: Uint8Array; crc: number; size: number; offset: number }> = [];
-  for (const [text, bytes] of entries) {
+  const central: Array<{ name: Uint8Array; comment: Uint8Array; crc: number; size: number; offset: number }> = [];
+  for (const [text, bytes, label] of entries) {
     const name = encode(text);
     const offset = parts.length;
     u32(0x04034b50);
@@ -79,7 +86,7 @@ function storedZip(entries: ReadonlyArray<readonly [string, Uint8Array]>): Uint8
     u16(name.length);
     u16(0);
     parts.push(...name, ...bytes);
-    central.push({ name, crc: crc(bytes), size: bytes.length, offset });
+    central.push({ name, comment: encode(label ?? ''), crc: crc(bytes), size: bytes.length, offset });
   }
   const start = parts.length;
   for (const entry of central) {
@@ -88,10 +95,10 @@ function storedZip(entries: ReadonlyArray<readonly [string, Uint8Array]>): Uint8
     u32(entry.crc);
     u32(entry.size);
     u32(entry.size);
-    [entry.name.length, 0, 0, 0, 0].forEach(u16);
+    [entry.name.length, 0, entry.comment.length, 0, 0].forEach(u16);
     u32(0);
     u32(entry.offset);
-    parts.push(...entry.name);
+    parts.push(...entry.name, ...entry.comment);
   }
   const size = parts.length - start;
   u32(0x06054b50);
@@ -110,6 +117,33 @@ describe("the reader of the engine's archive of a run's files", () => {
       { name: 'ü.log', bytes: new Uint8Array() },
     ]);
     expect(readStoredZip(storedZip([]))).toEqual([]);
+  });
+
+  it("labels each entry by its comment, the option whose file the engine says it is, and refuses a comment that names none or an archive that labels some entries only", () => {
+    const files = readStoredZip(
+      storedZip([
+        ['X', encode('Blast4-request ::= {'), 'export_search_strategy'],
+        ['run.log', encode('Warning: one\n'), 'logfile'],
+        ['p.asn', encode('PssmWithParameters ::= {'), 'out_pssm'],
+        ['p.txt', encode('\nLast position-specific'), 'out_ascii_pssm'],
+      ]),
+    );
+    expect(files.map((file) => [file.name, file.label])).toEqual([
+      ['X', 'export_search_strategy'],
+      ['run.log', 'logfile'],
+      ['p.asn', 'out_pssm'],
+      ['p.txt', 'out_ascii_pssm'],
+    ]);
+    expect(() => readStoredZip(storedZip([['run.log', encode('Warning: one\n'), '-logfile']]))).toThrow(
+      /cannot be read: entry 1 has the comment "-logfile", which is no option of a run's file/,
+    );
+    // The engine labels every file, an earlier module none: an archive that labels some is the archive's error.
+    expect(() => readStoredZip(storedZip([['X', encode('Blast4-request ::= {'), 'export_search_strategy'], ['run.log', encode('Warning: one\n')]]))).toThrow(
+      /cannot be read: it labels entry 1 and not entry 2$/,
+    );
+    expect(() => readStoredZip(storedZip([['run.log', encode('Warning: one\n')], ['X', encode('Blast4-request ::= {'), 'export_search_strategy']]))).toThrow(
+      /cannot be read: it labels entry 2 and not entry 1$/,
+    );
   });
 
   it('refuses what the adapter does not write, naming the engine: a wrong CRC-32, a method, a data descriptor, a cut, a wrong directory, bytes after the end', () => {
@@ -172,7 +206,7 @@ function fakeExports(
     },
     losat_web2_last_error_len: () => encode(error).length,
     losat_web2_start: (ptr: number, len: number) => {
-      log.push(`start ${text(ptr, len).split('\0').join(' ')}`);
+      log.push(`start ${words(text(ptr, len)).join(' ')}`);
       if (options.start === 'fail') {
         error = 'psiblast is not available in the browser (ABI v2)';
         return -1;
@@ -181,7 +215,7 @@ function fakeExports(
       return 0;
     },
     losat_web2_validate: (ptr: number, len: number) => {
-      log.push(`validate ${text(ptr, len).split('\0').join(' ')}`);
+      log.push(`validate ${words(text(ptr, len)).join(' ')}`);
       if (options.trapValidate) throw new WebAssembly.RuntimeError('unreachable');
       if (options.validate === undefined) {
         respond('{"data_loaders":true,"parse_deflines":false}');
@@ -759,6 +793,21 @@ describe("the Engine worker's runtime and the files of a run", () => {
       { name: 'logs', bytes: LOG.bytes },
     ]);
     fifth.close();
+    // The engine's label of each file (the comment of its entry), which the start's name of its option gives: the one
+    // name of `-logfile sub/../X -export_search_strategy X` without a folder `sub` is the strategy file, which the run
+    // makes (line RG item F1w-r2, review 3 S1), and a label that the start's name does not give is the engine's error.
+    const labeled = fakeAbi({ logFileName: 'X', runFiles: storedZip([['X', strategy, 'export_search_strategy']]) });
+    const sixth = workerRun(['-export_search_strategy', 'X', '-logfile', 'sub/../X']);
+    expect((await runtimeWith(labeled.abi).run(sixth.run, () => undefined)).runFiles).toEqual([
+      { name: 'X', bytes: strategy, option: 'export_search_strategy' },
+    ]);
+    sixth.close();
+    const mislabeled = fakeAbi({ runFiles: storedZip([['run.log', LOG.bytes, 'export_search_strategy']]) });
+    const seventh = workerRun(['-export_search_strategy', 'out/s.asn', '-logfile', 'run.log']);
+    await expect(runtimeWith(mislabeled.abi).run(seventh.run, () => undefined)).rejects.toThrow(
+      'has a file of -export_search_strategy that the argv names otherwise: "run.log"',
+    );
+    seventh.close();
   });
 
   // line WQA's sweep, D7, 2026-11-19: a run of -parse_deflines reads its inputs together for its argv, releases the
@@ -1235,7 +1284,9 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
 
     const warned = run(abi, ['-outfmt', '6', '-max_target_seqs', '1', '-logfile', 'run.log']);
     expect(warned.error).toBeUndefined();
-    expect(readStoredZip(warned.joined(RUN_FILES_STREAM))).toEqual([{ name: 'run.log', bytes: encode('Warning: [tblastx] Examining 5 or more matches is recommended\n') }]);
+    expect(readStoredZip(warned.joined(RUN_FILES_STREAM))).toEqual([
+      { name: 'run.log', bytes: encode('Warning: [tblastx] Examining 5 or more matches is recommended\n'), label: 'logfile' },
+    ]);
     expect(warned.streams.has(3)).toBe(false);
 
     // A subject record without residues: NCBI's error ends the run, and TBLASTX writes it into the file.

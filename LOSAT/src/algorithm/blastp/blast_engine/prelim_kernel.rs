@@ -35,7 +35,7 @@ use super::{
     preliminary_score_compare, preliminary_tree_hsp, prepare_preliminary_hits_for_kappa_in_place,
     rebuild_preliminary_interval_tree_from_list, remove_preliminary_hits_for_query,
     should_retry_exact_preliminary_gapped_alignment, split_preliminary_hits_by_query_into,
-    x_bp_tree_max_cells, x_build_compact_preliminary_hsp_list, x_hits_flat, x_ih_pool, x_outlined,
+    x_bp_tree_max_cells, x_build_compact_preliminary_hsp_list, x_hits_flat, x_ih_pool,
     x_soft_subject, BlastpContextLookupBounds, BlastpOffsetPairScanMode, BlastpPrelimValues,
     BlastpRuntimeLookup, BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, BlastpTiming,
     InitHSP, BLASTP_RESTRICTED_MULT,
@@ -62,6 +62,7 @@ use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::config::ScoringMatrix;
 use crate::core::blast_hits::reap_by_query_coverage;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
+use crate::utils::call_boundary::out_of_line;
 
 /// What the kernel reads of `run_call` (`search_subject` and its gapped half `gapped_subject`): each
 /// field is `run_call`'s value of the same name, which the kernel closure captured before (references
@@ -536,10 +537,10 @@ impl BlastpPrelimKernel<'_> {
         // scans, with the extension of the matrix's byte-table walks (the sentinel walks of
         // `x_candidate_sent!` where the block and the subject pass their checks, else
         // `extend_two_hit_table`; the reference where they do not cover a call), in a function of
-        // their own (`x_outlined`), so that this kernel only gains its call. Its one-hit search is
+        // their own (`out_of_line`), so that this kernel only gains its call. Its one-hit search is
         // the branch below.
         if args.window_size != 0 && args.scoring.matrix != ScoringMatrix::Blosum62 {
-            x_outlined(|| {
+            out_of_line(|| {
                 let x_of = (
                     args.scoring.matrix,
                     blastp::x_ungapped_fast::matrix_table(args.scoring.matrix),
@@ -821,7 +822,7 @@ impl BlastpPrelimKernel<'_> {
                 }
             }
         } else if args.scoring.matrix != ScoringMatrix::Blosum62 {
-            x_outlined(|| match tables.as_deref_mut() {
+            out_of_line(|| match tables.as_deref_mut() {
                 Some(x_tables) => {
                     let mut x_one_hit =
                         x_one_hit_of!(x_tables, extend_one_hit_of, args.scoring.matrix);

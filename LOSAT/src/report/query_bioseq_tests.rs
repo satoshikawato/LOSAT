@@ -79,9 +79,7 @@ fn notes_the_query_of_the_span_that_holds_the_id() {
     let from = seen.numbered_from(1);
     assert!(from.any());
     assert_eq!(from.of(0, 7).map(QueryBioseq::length), Some(179));
-    assert_eq!(from.row(0, Some(7), 3), SEEN_ROW);
-    assert_eq!(from.row(0, Some(8), 3), 3);
-    assert_eq!(from.row(0, None, 3), 3);
+    assert!(from.of(0, 8).is_none());
 }
 
 #[test]

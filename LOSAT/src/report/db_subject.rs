@@ -3717,9 +3717,9 @@ impl ParsedSubject {
     }
 
     /// Whether NCBI's formatters find no Bioseq by the Seq-align id whatever its lookup gives
-    /// (see `new`), so that no lookup is needed. Read by tests only: the engine asks
-    /// `common::database::scope_bioseq`, which looks it up first.
-    #[cfg(test)]
+    /// (see `new`), so that no lookup is needed. The search programs ask
+    /// `common::database::scope_bioseq`, which looks it up first; blast_formatter's tabular
+    /// formats refuse such a subject.
     pub fn unfetchable(&self) -> bool {
         self.unfetchable
     }
@@ -4482,6 +4482,7 @@ impl ParsedSubject {
                 bioseq: false,
                 length: false,
                 lineless,
+                map_length: false,
             }),
         )
     }
@@ -5260,6 +5261,7 @@ fn defline_tabular_ids(defline: &BlastDefline, word: &[u8]) -> super::tabular::D
         id: field(TabularId::Full),
         gi: defline.gi(),
         accession: field(TabularId::Accession),
+        lineless: defline.ids.is_empty(),
     }
 }
 
@@ -5597,8 +5599,8 @@ impl From<Vec<Option<usize>>> for ReportKeys {
 /// a row of no identities there reads nothing of the subject, so its load neither throws nor ends
 /// anything (it prints the 0 of `x_ResetFields`). `first_row_ends`: a table whose run NCBI ends
 /// where a report's first row throws (`report::tabular::first_thrown_row_ends_run`: the null
-/// pointer of `sacc` or `saccver`, exit 255), which LOSAT refuses
-/// (`report::tabular::check_failed_lookups`); no report after it is reached, so no subject is
+/// pointer of `sacc` or `saccver`, exit 255), where LOSAT ends the run after NCBI's bytes before
+/// it (`report::tabular::row_stop_end`); no report after it is reached, so no subject is
 /// held in one (review 1 of line DBID pfoff-4, H2: the null pointer's words, not a later report's
 /// holder's). `keeps_scope`: the run writes outfmt 5, whose formatter keeps NCBI's scope for the
 /// whole run (`CBlastFormat::ResetScopeHistory` empties it after each query batch for every other
@@ -5904,6 +5906,13 @@ impl FormatThrow {
         }
     }
 
+    /// Whether the query's report or the run ends at the first subject whose load throws
+    /// ([`AfterThrow::EndsReport`], [`AfterThrow::EndsRun`]): the subjects after it are not read.
+    pub fn ends_on_throw(self) -> bool {
+        self.run()
+            .is_some_and(|run| matches!(run.after, AfterThrow::EndsReport | AfterThrow::EndsRun))
+    }
+
     /// [`FormatThrow::run`] of the answer of the formats `formats` ([`FormatThrow::of_formats`]).
     pub fn of_run(formats: impl IntoIterator<Item = Self>) -> Option<RunThrow> {
         Self::of_formats(formats).run()
@@ -6042,7 +6051,7 @@ pub fn unchanged_by_load_throws_outfmts<O: AsRef<[u8]>>(
 /// the organism report's HSPs (outfmt 18) of a subject: the one answer to "this subject's lookup
 /// throws there" and "this subject is never loaded", which the refusals
 /// (`ParsedSubject::fetched`, the tables' rows at which NCBI has no result,
-/// `report::tabular::check_failed_lookups`), the names of the `Hit`s
+/// `report::tabular::row_stop_end`), the names of the `Hit`s
 /// (`blast_xml::subjects::HitNames`), the tables' rows (`report::tabular::SubjectLookup::Throws`)
 /// and their names and taxonomy (`common::tabular::tabular_taxonomy`, the taxonomy database's
 /// lookups), the organism report (`tax_report::SubjectTable`), the taxonomy reads

@@ -264,7 +264,7 @@ fn help_and_parser_errors_come_before_a_value_that_is_not_utf8() {
     assert!(!error.to_string().contains("not UTF-8"), "{error}");
 }
 
-// A file name keeps its bytes in both spellings (`check_utf8_file_name` reads it).
+// A file name keeps its bytes in both spellings (`-query=<name>` and `-query <name>`).
 #[test]
 fn file_names_keep_their_bytes_in_both_spellings() {
     let name = b"q\xff.fa".to_vec();

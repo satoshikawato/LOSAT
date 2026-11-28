@@ -21,12 +21,12 @@ use super::time::LocalTime;
 use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
-use crate::blastinput::ncbi_environment::{
-    diag_target, ApplicationSettings, DiagStream, ReadVerification,
-};
+use crate::blastinput::ncbi_environment::{ApplicationSettings, DiagTarget, ReadVerification};
 use crate::ncbi_str::string_to_uint8_data_size_bytes;
+use crate::report::run_files::{LogOutput, OpenFiles, ToolLog, Unopened};
 use crate::seqdb::date::iso8601_date_time_exception;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
+use std::cell::RefCell;
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:224-244
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:292-306
@@ -1517,7 +1517,7 @@ pub(crate) fn registry_blastdb(settings: &ApplicationSettings) -> Option<&[u8]> 
 // argument error: Argument "logfile". File is not accessible:  `F'" and exit
 // status 1. The diagnostics' file is the one that NCBI's diagnostics open for the
 // name (`ncbi_environment::diag_target`) and the log's the one that the system opens
-// under the name as written (`log_of`): one file for most names, two where NCBI's
+// under the name as written (`OpenFiles::log_output`): one file for most names, two where NCBI's
 // diagnostics read the name otherwise (` mk.log` is `mk.log` there, `a/../mk.log`
 // the `mk.log` beside the link `a`), and no log for `logs/`, which the
 // diagnostics read as the file `logs` (NCBI BLAST+ 2.17.0; line WQA's D11 round 2,
@@ -1569,6 +1569,34 @@ pub(crate) fn run_with_env(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
+    run_in(
+        args,
+        env,
+        settings,
+        now,
+        platform,
+        (stdin, out, err),
+        &OpenFiles::disk(),
+    )
+}
+
+/// [`run_with_env`] whose file of `-logfile` is opened through `files` (`OpenFiles`): the file
+/// system on `Disk` (the command line, the library), and for LOSAT Web's run (a `Receiver` whose
+/// run writes its working directory; line NP WW4b1 R2, 2026-11-28) the file system for a file of
+/// the run's directory and the model of a user's Linux for a name outside it and a device
+/// (`report::run_files`: `/dev/stdout` the run's standard output, `/dev/stderr` its standard
+/// error, the null device and `/dev/full` lost, `/tmp/mk.log` a file of the run that the host gets,
+/// as for windowmasker; docs/web/abi_v2.md §4). `streams` are the standard input, output and error.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_in(
+    args: &MakedbArgs,
+    env: MakedbEnv,
+    settings: &ApplicationSettings,
+    now: Option<&LocalTime>,
+    platform: Platform,
+    (stdin, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
+    files: &OpenFiles,
+) -> i32 {
     let mut end_messages = Vec::new();
     let name = match args.logfile.as_deref() {
         None => {
@@ -1606,16 +1634,48 @@ pub(crate) fn run_with_env(
         Some(name) => name,
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201
-    // The diagnostics go to the target of `-logfile` (`ncbi_environment::diag_target`, which
-    // owns the special names), and the log to `AsOutputFile` of the same name (`log_of`).
-    let target = diag_target(Some(name));
-    let log = log_of(name);
-    let mut diag = DiagStream {
-        target: &target,
-        stderr: err,
+    // The diagnostics go to the target of `-logfile` (`OpenFiles::log_target`: on `Disk`
+    // `ncbi_environment::diag_target`, which owns the special names), and the log to
+    // `AsOutputFile` of the same name (`OpenFiles::log_output`). The run's standard streams are
+    // shared: with `-logfile /dev/stdout` (or `/dev/stderr`) of LOSAT Web the diagnostics, the
+    // log and the writer's own lines reach one stream in the order they are written, as the
+    // command line's three openings of it.
+    // One lifetime for both streams (`LogDiagnostics`): the reborrows' coercion shortens them.
+    let (out, err): (&mut dyn Write, &mut dyn Write) = (&mut *out, &mut *err);
+    let out = RefCell::new(out);
+    let err = RefCell::new(err);
+    let target = match files.log_target(Some(name)) {
+        Ok(ToolLog::Target(target)) => Some(target),
+        Ok(ToolLog::Stdout) => None,
+        Err(reason) => {
+            // A refusal of the start's, which comes first (`api::tools::makeblastdb_call`).
+            let refusal = MakedbError::Unsupported(reason);
+            return finish(Err(refusal), &end_messages, &mut **err.borrow_mut());
+        }
     };
-    match log {
-        Some(mut log) => {
+    let mut diag = LogDiagnostics {
+        target: target.as_ref(),
+        out: &out,
+        err: &err,
+    };
+    let opened = match files.log_output(name) {
+        Ok(LogOutput::File(file)) => Ok(Box::new(file) as Box<dyn Write>),
+        Ok(LogOutput::Stdout) => Ok(Box::new(Shared(&out)) as Box<dyn Write>),
+        Ok(LogOutput::Stderr) => Ok(Box::new(Shared(&err)) as Box<dyn Write>),
+        Ok(LogOutput::Refused(reason)) => Err(MakedbError::Unsupported(reason)),
+        Err(Unopened) => {
+            let mut msg = b"Argument \"logfile\". File is not accessible:  `".to_vec();
+            msg.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(name));
+            msg.push(b'\'');
+            Err(MakedbError::Argument(msg))
+        }
+    };
+    match opened {
+        Ok(file) => {
+            let mut log = LogLines {
+                file,
+                line: Vec::new(),
+            };
             let result = build_database_with_log(
                 args,
                 env,
@@ -1624,18 +1684,15 @@ pub(crate) fn run_with_env(
                 platform,
                 stdin,
                 &mut log,
-                Some(out),
+                Some(&mut Shared(&out)),
                 &mut diag,
                 None,
                 &mut end_messages,
             );
+            let _ = log.flush();
             finish(result, &end_messages, &mut diag)
         }
-        None => {
-            let mut msg = b"Argument \"logfile\". File is not accessible:  `".to_vec();
-            msg.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(name));
-            msg.push(b'\'');
-            let error = MakedbError::Argument(msg);
+        Err(error) => {
             let result = build_database_with_log(
                 args,
                 env,
@@ -1643,7 +1700,7 @@ pub(crate) fn run_with_env(
                 now,
                 platform,
                 stdin,
-                out,
+                &mut Shared(&out),
                 None,
                 &mut diag,
                 Some(error),
@@ -1654,25 +1711,76 @@ pub(crate) fn run_with_env(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201
-/// The log of `-logfile name` (`AsOutputFile`, append): the file that the system opens under
-/// the name as written; none for the empty name and a name that it cannot open (`logs/`). The
-/// diagnostics open the file of NCBI's reading of the name (`diag_target`), which is this file
-/// for most names and another one where that reading differs (` mk.log`, `a/../mk.log` beside
-/// a link `a`; NCBI BLAST+ 2.17.0 makeblastdb writes its log to ` mk.log` and its
-/// diagnostics to `mk.log`; line WQA's D11 round 2, 2026-11-20). Both append, so where they are
-/// one file the two streams land in it in the order they are written, as NCBI's two appending
-/// streams on the file do. (A second open, not a copy of the diagnostics' handle, `try_clone`,
-/// which the WASI targets cannot make: the run stopped with "File is not accessible".)
-fn log_of(name: &std::ffi::OsStr) -> Option<std::fs::File> {
-    if name.is_empty() {
-        return None;
+/// One of the run's standard streams, which makeblastdb's diagnostics, its log and its writer
+/// share with `-logfile` (`run_in`): each write goes to the stream as it comes.
+struct Shared<'a, 'w>(&'a RefCell<&'w mut dyn Write>);
+
+impl Write for Shared<'_, '_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().write(buf)
     }
-    std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(name)
-        .ok()
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.borrow_mut().flush()
+    }
+}
+
+/// makeblastdb's diagnostics with `-logfile` (`run_in`): each write goes where the diagnostics go
+/// (`DiagTarget::write_text`, the standard error for `cerr`), or, where the target is the run's
+/// standard output (`ToolLog::Stdout`, LOSAT Web's `-logfile /dev/stdout`), to the standard output
+/// as it is written, as the command line's file of that name writes it.
+struct LogDiagnostics<'a, 'w> {
+    target: Option<&'a DiagTarget>,
+    out: &'a RefCell<&'w mut dyn Write>,
+    err: &'a RefCell<&'w mut dyn Write>,
+}
+
+impl Write for LogDiagnostics<'_, '_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self.target {
+            Some(target) => target.write_text(buf, &mut **self.err.borrow_mut()),
+            None => {
+                let _ = self.out.borrow_mut().write_all(buf);
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The file of `-logfile` as NCBI's log stream writes it: each line, ended by its `NcbiEndl`, in
+/// one write (line RG KD-11b2: the pieces of a line are not written one by one); the bytes of a
+/// line not ended yet at the end.
+struct LogLines<'a> {
+    /// The log's opening (`OpenFiles::log_output`).
+    file: Box<dyn Write + 'a>,
+    /// The bytes of the line being written.
+    line: Vec<u8>,
+}
+
+impl Write for LogLines<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut rest = buf;
+        while let Some(at) = rest.iter().position(|&byte| byte == b'\n') {
+            self.line.extend_from_slice(&rest[..=at]);
+            rest = &rest[at + 1..];
+            let line = std::mem::take(&mut self.line);
+            self.file.write_all(&line)?;
+        }
+        self.line.extend_from_slice(rest);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if !self.line.is_empty() {
+            let line = std::mem::take(&mut self.line);
+            self.file.write_all(&line)?;
+        }
+        self.file.flush()
+    }
 }
 
 /// The error message and the exit code of a build, then the messages of

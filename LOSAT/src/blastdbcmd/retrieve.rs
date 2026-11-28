@@ -9,12 +9,13 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
-use std::io::{BufWriter, Write};
+use std::io::Write;
 
 use crate::algorithm::common::database::TaxdbRun;
 use crate::ncbi_app::args::Args;
-use crate::ncbi_app::files::{input_lines, read_input_file, Cin, LineEnds, Ostream};
+use crate::ncbi_app::files::{input_lines, read_input_file, Cin, LineEnds, OutputFile};
 use crate::ncbi_str::string_to_non_negative_int;
+use crate::report::ostream::{with_stream_inserter, CutBuffer, ReportWrite, StreamInserter};
 use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
@@ -49,14 +50,20 @@ pub(super) enum Stop {
     /// such read (`Source::deflines`), before the record's text. `Run::write` posts it and
     /// writes the record again; the warning is posted once.
     Utf8Post(String),
-    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`):
+    /// A failed binary ASN.1 header read that first replaced non-VisibleString bytes with `#`
+    /// (`Error: (803.7)`), then stopped with `after`.
+    ReplacedThen {
+        posts: Vec<crate::report::serial::encoder::ReplacedChar>,
+        after: Box<Stop>,
+    },
+    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`OutputFile::closed`):
     /// the retrieval ends at once, exit status 0, no message. Any other failed write is
-    /// dropped by the `Ostream` and the retrieval goes on.
+    /// dropped by the `OutputFile` and the retrieval goes on.
     ClosedPipe,
 }
 
 impl Stop {
-    /// The error of a write to the retrieval's `Ostream`, which fails only on a closed pipe.
+    /// The error of a write to the retrieval's `OutputFile`, which fails only on a closed pipe.
     pub fn write(_: std::io::Error) -> Stop {
         Stop::ClosedPipe
     }
@@ -184,11 +191,24 @@ impl<'a> Source<'a> {
     }
 
     /// The stop of a read of the header at `at` that failed with `error`: NCBI's warning first
-    /// where its read took a UTF8String before the failure (`utf8_post`), else the error.
+    /// where its read took a UTF8String before the failure (`utf8_post`), then any `#`-replaced
+    /// character posts before a binary ASN.1 failure, else the error.
     #[cold]
     #[inline(never)]
     fn failed_read(&self, at: SeqLocation, error: crate::seqdb::SeqDbError) -> Stop {
-        self.utf8_post(at).unwrap_or_else(|| error.into())
+        if let Some(post) = self.utf8_post(at) {
+            return post;
+        }
+        if matches!(error, crate::seqdb::SeqDbError::Ncbi(_)) {
+            let posts = self.db.header_replaced_char_posts_at(at);
+            if !posts.is_empty() {
+                return Stop::ReplacedThen {
+                    posts,
+                    after: Box::new(error.into()),
+                };
+            }
+        }
+        error.into()
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:411-425
@@ -203,18 +223,15 @@ impl<'a> Source<'a> {
             .map_err(|_| Stop::Ncbi(OID_NOT_FOUND.to_string()))
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
-    /// `GetSeqLength` of `oid`: signed 32-bit `int` for proteins (wrapping `>= 2^31` to negative
-    /// as in NCBI's `GetSeqLengthProt`), widened unsigned 32-bit for nucleotides.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-323
+    /// `GetSeqLength` of `oid`: signed 32-bit `int` as returned by NCBI's `GetSeqLengthProt`
+    /// and `GetSeqLengthExact`.
     pub fn length(&self, oid: u32) -> Result<i64, Stop> {
         let at = self.at(oid)?;
         if self.protein {
             Ok(i64::from(self.db.protein_length_i32_at(at)?))
         } else {
-            let length = self.db.nucleotide_length_at(at)?;
-            u32::try_from(length)
-                .map(i64::from)
-                .map_err(|_| Stop::refused(format!("sequence {oid} is longer than 32 bits")))
+            Ok(i64::from(self.db.nucleotide_length_i32_at(at)?))
         }
     }
 
@@ -298,7 +315,7 @@ impl<'a> Source<'a> {
             let block = self.db.read_sequence_at(at)?;
             return Ok(DbSeqData::Ncbistdaa(block.protein(0).to_vec()));
         }
-        let block = self.db.read_sequence_at(at)?;
+        let block = self.db.read_nucleotide_search_sequence_at(at)?;
         Ok(match block.nucleotide_seq_data(0)? {
             (true, bytes) => DbSeqData::Ncbi2na(bytes),
             (false, bytes) => DbSeqData::Ncbi4na(bytes),
@@ -342,7 +359,7 @@ impl<'a> Source<'a> {
             let block = self.db.read_sequence_at(at)?;
             Ok(protein_string_letters(slice(block.protein(0), range)))
         } else {
-            self.nucleotide_letters(oid, range)
+            self.nucleotide_letters(oid, range, true)
         }
     }
 
@@ -357,12 +374,28 @@ impl<'a> Source<'a> {
             let block = self.db.read_sequence_at(at)?;
             Ok(protein_fasta_letters(slice(block.protein(0), range)))
         } else {
-            self.nucleotide_letters(oid, range)
+            self.nucleotide_letters(oid, range, false)
         }
     }
 
-    fn nucleotide_letters(&self, oid: u32, range: Option<(u32, u32)>) -> Result<Vec<u8>, Stop> {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1619-1628
+    fn nucleotide_letters(
+        &self,
+        oid: u32,
+        range: Option<(u32, u32)>,
+        error_when_empty: bool,
+    ) -> Result<Vec<u8>, Stop> {
         let at = self.at(oid)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1627-1628
+        if self.db.nucleotide_length_i32_at(at)? < 1 {
+            return if error_when_empty {
+                Err(Stop::Ncbi(
+                    "Error: could not get sequence or range.".to_string(),
+                ))
+            } else {
+                Ok(Vec::new())
+            };
+        }
         Ok(match range {
             Some((from, to)) => {
                 self.db
@@ -465,70 +498,110 @@ fn check_read_bytes(oid: u32, set: &DeflineSet) -> Result<(), Stop> {
 
 /// The retrieval's output and its diagnostics, NCBI's `cout` and the `cerr` tied to it.
 pub(super) struct Output<'a, 'b> {
-    out: &'a mut dyn Write,
+    out: &'a mut dyn ReportWrite,
     diag: &'a mut Diag<'b>,
 }
 
-// NCBI's `cerr` is tied to `cout` (the C++ standard's `cerr.tie()`): before each line of
-// diagnostics NCBI's stream flushes the output, so the two come out in the order they were
-// written, and on a closed pipe SIGPIPE ends NCBI's process before the line is written.
+// NCBI's `cerr` is tied to `cout` (the C++ standard's `cerr.tie()`): each line of diagnostics
+// comes after NCBI's writes of the output so far (`Diag`), and on a closed pipe SIGPIPE ends
+// NCBI's process at that write, before the line.
 impl Output<'_, '_> {
-    /// The error that the retrieval posts (`ERR_POST` at severity `Error`, with `message`): the
-    /// output is flushed first (to the file or the pipe, `cerr`'s tie), and a closed pipe ends the
-    /// retrieval without the line.
-    pub fn post(&mut self, message: impl AsRef<[u8]>) -> Result<(), Stop> {
-        self.out.flush().map_err(Stop::write)?;
-        self.diag.err_post_bytes(message.as_ref());
+    /// `Err(Stop::ClosedPipe)` where a write met a closed pipe before a text.
+    fn closed(&self) -> Result<(), Stop> {
+        if self.diag.closed() {
+            return Err(Stop::ClosedPipe);
+        }
         Ok(())
+    }
+
+    /// The error that the retrieval posts (`ERR_POST` at severity `Error`, with `message`),
+    /// after NCBI's writes of the output; a closed pipe ends the retrieval without the line.
+    pub fn post(&mut self, message: impl AsRef<[u8]>) -> Result<(), Stop> {
+        self.diag.err_post_bytes(message.as_ref());
+        self.closed()
     }
 
     /// NCBI's warning of a UTF8String read for the VisibleString member `path`
     /// (`Diag::post_utf8_string`), after the output so far, as `post`.
     pub fn post_utf8_string(&mut self, path: &str) -> Result<(), Stop> {
-        self.out.flush().map_err(Stop::write)?;
         self.diag.post_utf8_string(path);
-        Ok(())
+        self.closed()
+    }
+
+    /// Runs `f` with a direct inserter into the underlying report stream (one lock per record,
+    /// zero intermediate `CutBuffer` copy).
+    pub fn with_inserter(
+        &mut self,
+        mut f: impl FnMut(&mut StreamInserter<'_>) -> std::io::Result<()>,
+    ) -> Result<(), Stop> {
+        with_stream_inserter(&mut *self.out, &mut f).map_err(Stop::write)
+    }
+
+    /// NCBI's insertions and flushes `text` (`CutBuffer`), emptied.
+    pub fn insertions(&mut self, text: &mut CutBuffer) -> Result<(), Stop> {
+        text.write_to(self.out).map_err(Stop::write)
+    }
+
+    /// NCBI's errors (`803.7`) for non-VisibleString bytes replaced with `#`
+    /// (`Diag::post_replaced`), after the output so far, as `post`.
+    pub fn post_replaced_chars(
+        &mut self,
+        posts: &[crate::report::serial::encoder::ReplacedChar],
+    ) -> Result<(), Stop> {
+        self.diag.post_replaced(posts);
+        self.closed()
     }
 
     /// The write of `object` to `m_Out` through `MSerial_AsnText`: the ASN.1 text document
     /// `document`, with NCBI's post of each byte its text stream replaces
-    /// (`bioseq::write_asn_text`).
+    /// (`bioseq::write_asn_text`). The object stream's `Close` writes its buffer and does not
+    /// flush `m_Out`.
     pub fn asn_text<D: AsnTextDocument>(&mut self, document: &D) -> Result<(), Stop> {
         let diag = &mut *self.diag;
         write_asn_text(document, &mut *self.out, |replaced| {
-            diag.post_replaced(std::slice::from_ref(replaced))
+            diag.post_replaced(std::slice::from_ref(replaced));
+            if diag.closed() {
+                return Err(std::io::ErrorKind::BrokenPipe.into());
+            }
+            Ok(())
         })
     }
 
     /// The line of `x_Print` whose one field is the ASN.1 text document `document`, which NCBI
     /// writes into the field's string first: the posts of the bytes its text stream replaces, then
-    /// the document and the line's end.
+    /// the field's insertion, the last separator (empty) and `endl`.
     pub fn asn_text_line<D: AsnTextDocument>(&mut self, document: &D) -> Result<(), Stop> {
         let mut line = Vec::new();
         let mut replaced = Vec::new();
-        write_asn_text(document, &mut line, |byte| replaced.push(byte.clone()))?;
+        write_asn_text(document, &mut line, |byte| {
+            replaced.push(byte.clone());
+            Ok(())
+        })?;
         if !replaced.is_empty() {
-            self.out.flush().map_err(Stop::write)?;
             self.diag.post_replaced(&replaced);
+            self.closed()?;
         }
-        line.push(b'\n');
-        self.out.write_all(&line).map_err(Stop::write)
+        let mut text = CutBuffer::default();
+        text.insertion(&line);
+        text.endl();
+        self.insertions(&mut text)
     }
 }
 
 impl Write for Output<'_, '_> {
+    /// One insertion of NCBI's.
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.out.write(buf)
+        self.out.write_all(buf)?;
+        Ok(buf.len())
     }
 
-    // The output's own `write_all` (a `BufWriter`'s copies the record whole), not the trait's
-    // loop over `write`: the formatters' path of every record stays the one dev wrote.
     fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
         self.out.write_all(buf)
     }
 
+    /// LOSAT's flushes hold (`files::OutputFile`).
     fn flush(&mut self) -> std::io::Result<()> {
-        self.out.flush()
+        Ok(())
     }
 }
 
@@ -570,7 +643,7 @@ impl Formatter {
     /// `Write(-1, config)`: the OID of a PIG that no volume holds. The FASTA and Bioseq
     /// formatters' `GetBioseq` throws `OID not found`; the `%` formatter's first read does
     /// (`FormatSpec::write_missing_oid`).
-    fn write_missing(&mut self, out: &mut dyn Write) -> Result<(), Stop> {
+    fn write_missing(&mut self, out: &mut Output<'_, '_>) -> Result<(), Stop> {
         match self {
             Formatter::Fasta(_) | Formatter::Bioseq(_) => {
                 Err(Stop::Ncbi(OID_NOT_FOUND.to_string()))
@@ -628,29 +701,25 @@ pub(super) fn parse_target_with(text: &[u8], flags: u32) -> Result<ParsedSeqId, 
 /// `-taxids` / `-taxidlist` (`m_TaxIdList`; with `-target_only` the database is restricted to
 /// it), `dbtype_protein` NCBI's `m_DbIsProtein`, `stdin` what a batch file `-` reads.
 ///
-/// A failed write leaves NCBI's `ostream` bad and the run goes on (`Ostream`): the later
+/// A failed write leaves NCBI's `ostream` bad and the run goes on (`OutputFile`): the later
 /// entries are still looked up and their errors posted, and the exit status is theirs (NCBI
 /// 2.17.0 with `-out /dev/full` and an id that is not found after it: `Skipped`, exit status 1;
 /// review 2 of line RG item K1, F3). A closed pipe ends the retrieval at once, with exit
-/// status 0 and no message, where SIGPIPE ends NCBI's (`Stop::ClosedPipe`): the output is
-/// flushed before each diagnostic (`Run::post`, `cerr`'s tie to `cout`), so a closed pipe is
-/// met before any message is written.
+/// status 0 and no message, where SIGPIPE ends NCBI's (`Stop::ClosedPipe`): at NCBI's write
+/// that meets it, which a diagnostic makes first (`Diag`, `cerr`'s tie to `cout`), so the
+/// messages before that write are written and none after.
 pub(super) fn process(
     db: &SeqDb,
     args: &Args,
     diag: &mut Diag,
     stdin: &mut Cin<'_>,
-    out: &mut Ostream<'_>,
+    out: &mut OutputFile<'_>,
     tax_ids: Option<&BTreeSet<i32>>,
     dbtype_protein: bool,
 ) -> i32 {
     let source = Source::new(db, dbtype_protein);
-    let mut sink = BufWriter::new(&mut *out);
-    let result = request(args, &source, tax_ids, diag, stdin, &mut sink);
-    // The output is flushed before the last diagnostic, as `cerr`'s tie flushes NCBI's.
-    let _ = sink.flush();
-    drop(sink);
-    if out.closed() {
+    let result = request(args, &source, tax_ids, diag, stdin, &mut *out);
+    if out.closed() || diag.closed() {
         return 0;
     }
     match result {
@@ -672,6 +741,22 @@ pub(super) fn process(
             diag.post_utf8_string(&path);
             0
         }
+        Err(Stop::ReplacedThen { posts, after }) => {
+            diag.post_replaced(&posts);
+            match *after {
+                Stop::Ncbi(message) => {
+                    diag.err_post(&message);
+                    1
+                }
+                Stop::NcbiBytes(message) => {
+                    diag.err_post_bytes(&message);
+                    1
+                }
+                Stop::Refused(reason) => diag.refuse(&reason),
+                Stop::ClosedPipe => 0,
+                Stop::Utf8Post(_) | Stop::ReplacedThen { .. } => 1,
+            }
+        }
     }
 }
 
@@ -683,7 +768,7 @@ fn request(
     tax_ids: Option<&BTreeSet<i32>>,
     diag: &mut Diag,
     stdin: &mut Cin<'_>,
-    out: &mut dyn Write,
+    out: &mut dyn ReportWrite,
 ) -> Result<bool, Stop> {
     let (mut config, kind) = init_search_request(args, source, diag)?;
     let line_length = args
@@ -1134,6 +1219,10 @@ impl Run<'_, '_, '_> {
             .write(self.source, oid, config, target, &mut self.output)
         {
             Err(Stop::Utf8Post(path)) => self.write_after_utf8_post(&path, oid, config, target),
+            Err(Stop::ReplacedThen { posts, after }) => {
+                self.output.post_replaced_chars(&posts)?;
+                Err(*after)
+            }
             written => written,
         }
     }
@@ -1174,8 +1263,16 @@ impl Run<'_, '_, '_> {
         target: Option<&[u8]>,
     ) -> Result<(), Stop> {
         self.output.post_utf8_string(path)?;
-        self.formatter
+        match self
+            .formatter
             .write(self.source, oid, config, target, &mut self.output)
+        {
+            Err(Stop::ReplacedThen { posts, after }) => {
+                self.output.post_replaced_chars(&posts)?;
+                Err(*after)
+            }
+            written => written,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:411-416

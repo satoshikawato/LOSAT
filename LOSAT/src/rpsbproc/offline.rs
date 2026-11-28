@@ -74,13 +74,16 @@ pub(crate) struct OfflineQuery {
 impl OfflineQuery {
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:125-142
     // (The Iteration's members come before its hits; `m_strMessage` is never printed.)
-    /// `Iteration_query-ID`.
-    pub(crate) fn set_accession(&mut self, id: Vec<u8>) {
+    /// `Iteration_query-ID`. (The queries are kept to the end of the document: the id and the
+    /// title keep only their bytes, not the room that reading them grew; a shrink is not a copy.)
+    pub(crate) fn set_accession(&mut self, mut id: Vec<u8>) {
+        id.shrink_to_fit();
         self.accession = id;
     }
 
-    /// `Iteration_query-def`.
-    pub(crate) fn set_title(&mut self, def: Vec<u8>) {
+    /// `Iteration_query-def`, shrunk as the id.
+    pub(crate) fn set_title(&mut self, mut def: Vec<u8>) {
+        def.shrink_to_fit();
         self.title = def;
     }
 

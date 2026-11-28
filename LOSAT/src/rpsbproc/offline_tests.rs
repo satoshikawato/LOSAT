@@ -79,6 +79,24 @@ fn getters_and_the_cutoff() {
     assert_eq!(q.aligns.len(), 1);
 }
 
+// The id and the title are kept to the end of the document with their bytes only, not the room
+// that reading them grew.
+#[test]
+fn kept_strings_hold_only_their_bytes() {
+    let mut q = query(10);
+    let mut id = Vec::with_capacity(64);
+    id.extend_from_slice(b"Query_1");
+    q.set_accession(id);
+    let mut def = Vec::with_capacity(70_000);
+    def.extend_from_slice(&[b'a'; 40_000]);
+    q.set_title(def);
+    assert_eq!(
+        (q.accession.as_slice(), q.accession.capacity()),
+        (&b"Query_1"[..], 7)
+    );
+    assert_eq!((q.title.len(), q.title.capacity()), (40_000, 40_000));
+}
+
 // A protein HSP (`PRCommit`, frame 0): the segments where both strings have residues, the
 // query's residues written at their positions (`-` elsewhere), a gap of the query or of the
 // domain, and the leading gaps trimmed.

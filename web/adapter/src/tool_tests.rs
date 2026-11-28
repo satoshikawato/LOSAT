@@ -896,6 +896,41 @@ fn the_check_refuses_out_only_where_the_run_reaches_it() {
     }
 }
 
+/// Review of WW4c, F5: the output file names of `tests/standard_output_names.tsv`, which the app's
+/// `isStandardOutputName` reads too, are the run's standard output (the data on stream 11, no file)
+/// exactly where the list says `stdout`; else a file, lost bytes or the run's error.
+#[test]
+fn the_standard_output_names_are_the_engines() {
+    emitted();
+    let input = fixture("dustmasker/in/basic.fa");
+    let list = std::fs::read_to_string(format!(
+        "{}/tests/standard_output_names.tsv",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let mut rows = 0;
+    for line in list.lines().filter(|line| !line.starts_with('#')) {
+        let (name, kind) = line.split_once('\t').unwrap();
+        run(&[
+            "dustmasker",
+            "-in",
+            &input,
+            "-outfmt",
+            "maskinfo_asn1_bin",
+            "-out",
+            name,
+        ])
+        .unwrap();
+        let calls = emitted();
+        let to_stdout = calls.last().unwrap() == &(STREAM_RESPONSE, b"{\"status\":0}".to_vec())
+            && !joined(&calls, STREAM_PRINTED).is_empty()
+            && frames(&calls).is_empty();
+        assert_eq!(to_stdout, kind == "stdout", "{name}");
+        rows += 1;
+    }
+    assert_eq!(rows, 24);
+}
+
 /// Tool runs and tool validation read `-logfile` against the run's real files (line WQA D19):
 /// missing/existing folders keep diagnostics on stream 3 with no log file; existing files are
 /// refused (exit status 1 in `run`, `Err` in `validate`); `/dev/stdout` writes diagnostics into

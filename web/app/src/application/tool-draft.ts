@@ -3,6 +3,7 @@
 // through the tool drafts' shared core (`ToolDraftCore`: files of the run, check, submit). Its
 // FASTA input (paste, files inflated into session OPFS, Combined or Separate runs, the `-in` name of
 // a BLAST database) is the one that the Masking tab reads too (`FastaToolDraft`).
+import type { DirectoryFile } from 'losat/domain';
 import { splitOptions } from '../domain/argv';
 import { normalizeRunPath } from '../domain/blast-db';
 import { countsName } from '../domain/counts';
@@ -266,6 +267,19 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
     const inputName = this.previewInputName(state) ?? (state.stage === 'convert' ? 'counts.ascii' : 'input.fa');
     const ustatName = state.stage === 'mask' ? (state.ustatSource.kind === 'none' ? 'counts.ascii' : state.ustatSource.name) : undefined;
     return this.buildArgv(state, extra, { inputName, ustatName });
+  }
+
+  /**
+   * The check's directory holds the inputs that the run reads, under their names (review of WW4c, F2): the FASTA
+   * input and, for Mask, the `-ustat` counts; for Convert the counts. A counts file that the form reads only when the
+   * run starts (saved or made in the session) stands in by its name, as the check does not read the counts.
+   */
+  protected override validationInputs(state: ToolDraftState): readonly DirectoryFile[] {
+    if (toolPrintsKind(this.buildArgv(state, this.parseExtra(state))) !== null) return [];
+    const counts = (choice: ToolCountsChoice): readonly DirectoryFile[] =>
+      choice.kind === 'none' ? [] : [{ name: choice.name, file: choice.kind === 'file' ? choice.file : new Blob([]) }];
+    if (state.stage === 'convert') return counts(state.convertSource);
+    return [...this.fastaCheckInputs(state), ...(state.stage === 'mask' ? counts(state.ustatSource) : [])];
   }
 
   protected async buildRequests(state: ToolDraftState, extra: readonly string[]): Promise<readonly ToolRequest[]> {

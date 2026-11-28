@@ -3,6 +3,7 @@
 // (argv per tool, per-tool values, -out, the shared FASTA input, blastdb, required options, help and
 // version, the `-outfmt` default that a run records), the one rule for mask data (`maskDataName`) with the
 // Coordinator's and the makeblastdb draft's hand-over, and the FakeEngine's rows for the three tools.
+import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { describe, expect, it, vi } from 'vitest';
 import { sha256Hex } from 'losat';
@@ -13,9 +14,14 @@ import { MakeblastdbDraft } from '../../src/application/makeblastdb-draft';
 import { MaskingDraft } from '../../src/application/masking-draft';
 import { SessionFiles } from '../../src/application/session-files';
 import { ToolDraft } from '../../src/application/tool-draft';
+import type { FormValues } from '../../src/domain/parameters';
 import {
+  buildBlastFormatterArgv,
+  buildMakeblastdbArgv,
   buildMaskingArgv,
+  buildWindowMaskerArgv,
   changedMaskingOptionsCount,
+  isStandardOutputName,
   maskDataName,
   maskOutfmtDefault,
 } from '../../src/domain/tool-argv';
@@ -29,7 +35,10 @@ import {
   toolLabel,
   toolRunTitle,
   toolStageLabel,
+  toToolParameterField,
+  TOOL_WRITTEN_TEXT_FLAGS,
 } from '../../src/domain/tools';
+import { countsName } from '../../src/domain/counts';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FAKE_MARKER, FakeEngine } from '../../src/infra/fake/fake-engine';
@@ -38,12 +47,16 @@ import CONVERT2BLASTMASK_XMLHELP_DOC from '../../src/infra/fake/convert2blastmas
 import DUSTMASKER_XMLHELP_DOC from '../../src/infra/fake/dustmasker-xmlhelp.json';
 import SEGMASKER_XMLHELP_DOC from '../../src/infra/fake/segmasker-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from '../../src/infra/fake/windowmasker-xmlhelp.json';
+import BLAST_FORMATTER_XMLHELP_DOC from '../../src/infra/fake/blast_formatter-xmlhelp.json';
+import MAKEBLASTDB_XMLHELP_DOC from '../../src/infra/fake/makeblastdb-xmlhelp.json';
 import { NodeInflater } from './support/node-inflater';
 
 const DUST = parseToolDescription(DUSTMASKER_XMLHELP_DOC.xml);
 const SEG = parseToolDescription(SEGMASKER_XMLHELP_DOC.xml);
 const C2B = parseToolDescription(CONVERT2BLASTMASK_XMLHELP_DOC.xml);
 const WM = parseToolDescription(WINDOWMASKER_XMLHELP_DOC.xml);
+const BF = parseToolDescription(BLAST_FORMATTER_XMLHELP_DOC.xml);
+const MKDB = parseToolDescription(MAKEBLASTDB_XMLHELP_DOC.xml);
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const flags = (params: readonly { readonly flag: string }[]) => params.map((param) => param.flag);
 
@@ -122,7 +135,50 @@ describe('Masking domain helpers', () => {
         description: C2B,
       }),
     ).toEqual(['convert2blastmask', '-in', 'lc.fa', '-out', 'mask.asnt', '-masking_algorithm', 'dust', '-masking_options', 'window=64, level=20']);
-    expect(() => buildMaskingArgv({ tool: 'segmasker', values: {}, description: SEG, extra: [''] })).toThrow(/Additional options/);
+    expect(() => buildMaskingArgv({ tool: 'segmasker', values: {}, description: SEG, extra: ['a\0b'] })).toThrow(/Additional options/);
+  });
+
+  it('writes a text that the tool writes or stores as given as typed, and takes an empty value from Additional options (review of WW4c, F3)', () => {
+    const typed = '  -window 64 -level 20  ';
+    const c2b = (values: FormValues, extra?: readonly string[]) =>
+      buildMaskingArgv({ tool: 'convert2blastmask', inputName: 'lc.fa', values, description: C2B, ...(extra === undefined ? {} : { extra }) });
+    expect(c2b({ '-masking_algorithm': ' Dust', '-masking_options': typed })).toEqual([
+      'convert2blastmask', '-in', 'lc.fa', '-masking_algorithm', ' Dust', '-masking_options', typed,
+    ]);
+    // An empty value, as on the command line (`-masking_options ''`), from Additional options; an empty box writes nothing.
+    expect(c2b({ '-masking_algorithm': 'dust', '-masking_options': '' }, ['-masking_options', ''])).toEqual([
+      'convert2blastmask', '-in', 'lc.fa', '-masking_algorithm', 'dust', '-masking_options', '',
+    ]);
+    // The fields that change, tool by tool: a value with white space around it is written as typed in these, and
+    // without the white space in every other text box (names, numbers, keywords), as before and as the search forms.
+    const descriptions = { windowmasker: WM, blast_formatter: BF, makeblastdb: MKDB, dustmasker: DUST, segmasker: SEG, convert2blastmask: C2B };
+    const asTyped: Record<string, string[]> = {};
+    for (const [tool, description] of Object.entries(descriptions)) {
+      asTyped[tool] = [];
+      for (const param of description.parameters) {
+        if (toToolParameterField(param).kind !== 'text') continue;
+        const values = { [param.flag]: ' 7 ' };
+        const argv =
+          tool === 'makeblastdb'
+            ? buildMakeblastdbArgv({ input: '', values, description })
+            : tool === 'windowmasker'
+              ? buildWindowMaskerArgv({ stage: 'mask', values, description })
+              : tool === 'blast_formatter'
+                ? buildBlastFormatterArgv({ values, description })
+                : buildMaskingArgv({ tool: tool as 'dustmasker', values, description });
+        if (argv.includes(' 7 ')) asTyped[tool]!.push(param.flag);
+        else if (argv.includes(param.flag)) expect(argv[argv.indexOf(param.flag) + 1], `${tool} ${param.flag}`).toBe('7');
+      }
+    }
+    expect(asTyped).toEqual({
+      windowmasker: ['-meta'],
+      blast_formatter: [],
+      makeblastdb: ['-mask_desc', '-mask_id', '-title'],
+      dustmasker: [],
+      segmasker: [],
+      convert2blastmask: ['-masking_algorithm', '-masking_options'],
+    });
+    expect([...TOOL_WRITTEN_TEXT_FLAGS].sort()).toEqual(Object.values(asTyped).flat().sort());
   });
 
   it('counts the changed options of the options section and Additional options', () => {
@@ -176,9 +232,21 @@ describe('Masking domain helpers', () => {
     expect(maskDataName(run('windowmasker', ['windowmasker', '-ustat', 'c'], 'interval'), stdout)).toBeUndefined();
     expect(maskDataName({ tool: 'windowmasker', stage: 'mk_counts', argv: ['windowmasker', '-mk_counts', '-outfmt', 'maskinfo_xml'], number: 1 }, stdout)).toBeUndefined();
     expect(maskDataName({ tool: 'blast_formatter', stage: 'format', argv: ['blast_formatter', '-outfmt', 'maskinfo_xml'], number: 1 }, stdout)).toBeUndefined();
-    // A snapshot that went through storage names its output as the live one does.
-    const live = run('convert2blastmask', ['convert2blastmask', '-in', 'a.fa'], 'maskinfo_asn1_text');
-    expect(maskDataName(JSON.parse(JSON.stringify(live)) as typeof live, stdout)).toBe(maskDataName(live, stdout));
+    // An -out that the engine opens as the standard output is the standard output (review of WW4c, F5).
+    for (const out of ['/dev/stdout', '/dev/fd/1', '/proc/self/fd/1', '//dev/./stdout']) {
+      const toStdout = run('dustmasker', ['dustmasker', '-in', 'a.fa', '-outfmt', 'maskinfo_asn1_bin', '-out', out], 'interval');
+      expect(maskDataName(toStdout, stdout), out).toBe('dustmasker-run4.asnb');
+      expect(maskDataName(toStdout, wrote(out)), out).toBeUndefined();
+    }
+  });
+});
+
+describe('the standard output names (review of WW4c, F5)', () => {
+  it("are the engine's: the names of web/adapter/tests/standard_output_names.tsv, which the engine's test reads too", () => {
+    const list = readFileSync(new URL('../../../adapter/tests/standard_output_names.tsv', import.meta.url), 'utf8');
+    const rows = list.split('\n').filter((line) => line !== '' && !line.startsWith('#')).map((line) => line.split('\t'));
+    expect(rows).toHaveLength(24);
+    for (const [name, kind] of rows) expect(isStandardOutputName(name!), name).toBe(kind === 'stdout');
   });
 });
 
@@ -361,6 +429,77 @@ describe('MaskingDraft', () => {
     expect((await draft.submit()).ok).toBe(true);
     expect(queued[1]).toMatchObject({ tool: 'convert2blastmask', argv: ['convert2blastmask', '-help'], prints: 'help' });
     expect(queued[1]!.outfmtDefault).toBeUndefined();
+  });
+
+  it("checks the argv in a directory that holds the run's input under the run's name (review of WW4c, F2)", async () => {
+    const { draft, queued, validateTool } = setup({ validate: 'ok' });
+    draft.ensureLoaded();
+    await described(draft, 'dustmasker');
+    draft.setTool('segmasker');
+    await described(draft, 'segmasker');
+    const lastCheck = () => {
+      const [argv, options] = validateTool.mock.calls.at(-1)!;
+      return { argv, directory: options?.directory ?? [] };
+    };
+    // An -out that names the input: the check's directory holds the input, as the run's does.
+    draft.setFastaPaste('>q\nMKLLLL\n');
+    draft.setOutName('input.fa');
+    await vi.waitFor(() => expect(lastCheck().argv).toEqual(['segmasker', '-in', 'input.fa', '-out', 'input.fa']));
+    expect(lastCheck().directory.map((entry) => entry.name)).toEqual(['input.fa']);
+    expect(await lastCheck().directory[0]!.file.text()).toBe('>q\nMKLLLL\n');
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued.at(-1)!.directory.map((entry) => entry.name)).toEqual(['input.fa']);
+    // Several inputs combined: combined_input.fa, in the check as in the run; Separate: the first run's input.
+    draft.addFastaFiles([new File(['>a\nMK\n'], 'a.fa'), new File(['>b\nLL'], 'b.fa')]);
+    await vi.waitFor(() => expect(draft.state.get().fastaFiles.every((entry) => entry.status === 'ready')).toBe(true));
+    draft.setOutName('combined_input.fa');
+    await vi.waitFor(() => expect(lastCheck().argv).toEqual(['segmasker', '-in', 'combined_input.fa', '-out', 'combined_input.fa']));
+    expect(lastCheck().directory.map((entry) => entry.name)).toEqual(['combined_input.fa']);
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued.at(-1)!.directory.map((entry) => entry.name)).toEqual(['combined_input.fa']);
+    draft.setFastaMode('separate');
+    draft.setOutName('m.out');
+    await vi.waitFor(() => expect(lastCheck().argv).toEqual(['segmasker', '-in', 'input.fa', '-out', 'm.out']));
+    expect(lastCheck().directory.map((entry) => entry.name)).toEqual(['input.fa']);
+    // Help reads no input: none in the check's directory, as in the run's.
+    draft.setExtra('-help');
+    await vi.waitFor(() => expect(lastCheck().argv).toEqual(['segmasker', '-out', 'm.out', '-help']));
+    expect(lastCheck().directory).toEqual([]);
+  });
+
+  it("checks WindowMasker's argv with its FASTA input and counts under the run's names (review of WW4c, F2)", async () => {
+    const fake = new FakeEngine();
+    const validateTool = vi.fn(async (..._args: Parameters<ToolEngine['validateTool']>) => ({ ok: true as const }));
+    const queued: ToolRequest[] = [];
+    const draft = new ToolDraft({
+      engine: { describeTool: (tool: string) => fake.describeTool(tool), validateTool },
+      data: makeData(),
+      enqueueToolAll: async (requests) => {
+        queued.push(...requests);
+        return { ok: true, runIds: requests.map((_, index) => `wm-${index}`) };
+      },
+      debounceMs: 0,
+    });
+    draft.ensureLoaded();
+    await vi.waitFor(() => expect(draft.state.get().description).toBeDefined());
+    const names = () => (validateTool.mock.calls.at(-1)![1]?.directory ?? []).map((entry) => entry.name);
+    draft.setStage('mask');
+    draft.setFastaPaste('>q\nACGT\n');
+    draft.setUstatFile(new File(['counts'], 'c.ascii'));
+    draft.setOutName('c.ascii');
+    await vi.waitFor(() => expect(validateTool.mock.calls.at(-1)![0]).toContain('c.ascii'));
+    await vi.waitFor(() => expect(names()).toEqual(['input.fa', 'c.ascii']));
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued.at(-1)!.directory.map((entry) => entry.name)).toEqual(['input.fa', 'c.ascii']);
+    // A saved counts file stands in by its name.
+    draft.setUstatSaved(562, 6);
+    await vi.waitFor(() => expect(names()).toEqual(['input.fa', countsName(562)]));
+    draft.setStage('mk_counts');
+    await vi.waitFor(() => expect(validateTool.mock.calls.at(-1)![0]).toContain('-mk_counts'));
+    expect(names()).toEqual(['input.fa']);
+    draft.setStage('convert');
+    draft.setConvertFile(new File(['counts'], 'u.ascii'));
+    await vi.waitFor(() => expect(names()).toEqual(['u.ascii']));
   });
 
   it('holds its inflated session files apart from another draft that shares the holder tracker', async () => {

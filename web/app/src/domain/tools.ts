@@ -420,6 +420,22 @@ export function stageBlockParameter(description: MaybeToolDescription, stage: Wi
  * several lines (blast_formatter's `-sorthits`: "Sorting option for hits:", then one line a value);
  * the "?" holds every line (`toolParameterHelpText`), as the Search tab's "?" holds the CLI's help.
  */
+/**
+ * The tool options whose text the tool writes or stores as given, with no list of values: makeblastdb's database
+ * `-title` and the masking algorithms' `-mask_id` and `-mask_desc`, convert2blastmask's `-masking_algorithm` (compared
+ * as given, case aside) and `-masking_options` (its `algo-options`), windowmasker's `-meta` (the counts' note). The
+ * tool forms write them as typed, white space and all (`tool-argv.ts`; review of WW4c, F3); the search forms and the
+ * tools' names, numbers and keywords drop the white space around a value.
+ */
+export const TOOL_WRITTEN_TEXT_FLAGS: ReadonlySet<string> = new Set([
+  '-title',
+  '-mask_id',
+  '-mask_desc',
+  '-masking_algorithm',
+  '-masking_options',
+  '-meta',
+]);
+
 export function toToolParameterField(param: ToolParameterDescription): ParameterField {
   const hint = (param.help.split('\n')[0] ?? '').trim();
   if (param.kind === 'Flag') {

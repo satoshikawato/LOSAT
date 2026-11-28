@@ -5,6 +5,7 @@
 // several inputs as one run (`combined_input.fa`, joined as Blob references, checking only the last
 // byte of each file so page JS heap never holds the sequences) or one run each, and, for an input
 // that is not FASTA (`-infmt blastdb`), the `-in` name with the files of the run that it names.
+import type { DirectoryFile } from 'losat/domain';
 import { isUnavailable } from 'losat/ports';
 import { normalizeRunPath, primaryBlastDbName } from '../domain/blast-db';
 import type { ToolId } from '../domain/tools';
@@ -79,6 +80,8 @@ const LF = 0x0a;
 export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraftCore<S> implements FastaInputForm {
   protected readonly sessionFiles: SessionFiles;
   private readonly fastaData: FastaToolDraftDeps['data'];
+  /** The file of the pasted FASTA (`input.fa`), made once for each text. */
+  private pasted: { readonly text: string; readonly file: File } | undefined;
 
   protected constructor(tool: ToolId, deps: FastaToolDraftDeps, initial: S) {
     const sessionFiles =
@@ -173,6 +176,22 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
     return state.fastaPaste.trim() !== '' ? PASTE_NAME : state.fastaFiles[0]!.name;
   }
 
+  /**
+   * The FASTA input of the check's directory, under the name that the run gives it (review of WW4c, F2): the
+   * pasted FASTA or the opened file of the first run, or for several inputs combined `combined_input.fa` (the
+   * files one after another: the check opens the input and reads its start, as the run does before `-out`, which
+   * the line ends that the run puts between files do not change); none for an input that is not FASTA (its files
+   * are files of the run). So the check refuses an `-out` that names the input, as the run does.
+   */
+  protected fastaCheckInputs(state: S): readonly DirectoryFile[] {
+    if (!this.usesFastaBox(state)) return [];
+    const parts: DirectoryFile[] = [];
+    if (state.fastaPaste.trim() !== '') parts.push({ name: PASTE_NAME, file: this.pasteFile(state.fastaPaste) });
+    for (const entry of state.fastaFiles) parts.push({ name: entry.name, file: entry.file });
+    if (parts.length <= 1 || state.fastaMode === 'separate') return parts.slice(0, 1);
+    return [{ name: COMBINED_NAME, file: new Blob(parts.map((part) => part.file), { type: 'text/plain' }) }];
+  }
+
   /** Whether the FASTA input or the files of the run hold anything that a reload would lose. */
   protected holdsFastaInputs(state: S): boolean {
     return state.fastaPaste.trim() !== '' || state.fastaFiles.length > 0 || state.runFiles.length > 0;
@@ -200,11 +219,7 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
 
     const parts: Array<ToolDirectoryFile & { readonly sessionToken?: string }> = [];
     if (state.fastaPaste.trim() !== '') {
-      parts.push({
-        name: PASTE_NAME,
-        file: new File([state.fastaPaste], PASTE_NAME, { type: 'text/plain' }),
-        origin: { kind: 'pasted' },
-      });
+      parts.push({ name: PASTE_NAME, file: this.pasteFile(state.fastaPaste), origin: { kind: 'pasted' } });
     }
     for (const entry of state.fastaFiles) {
       parts.push({
@@ -257,6 +272,12 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
   }
 
   // --- internals --------------------------------------------------------------------------------
+
+  /** The file of the pasted FASTA `text` (`input.fa`), the same for the check and the runs of one text. */
+  private pasteFile(text: string): File {
+    if (this.pasted?.text !== text) this.pasted = { text, file: new File([text], PASTE_NAME, { type: 'text/plain' }) };
+    return this.pasted.file;
+  }
 
   /** Changes the state of the FASTA input (a key set to `undefined` is removed). */
   private setInput(change: StatePatch<FastaInputState>): void {

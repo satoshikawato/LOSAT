@@ -5,6 +5,7 @@
 // the tools; each tool keeps its own option values, Additional options and `-out` name (empty: no
 // `-out` word, the standard output, as on the command line). Each tool's `-xmlhelp` is read when the
 // tool is first shown.
+import type { DirectoryFile } from 'losat/domain';
 import { splitOptions } from '../domain/argv';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import { buildMaskingArgv } from '../domain/tool-argv';
@@ -134,6 +135,11 @@ export class MaskingDraft extends FastaToolDraft<MaskingDraftState> {
   /** The argv of the check: an input not given yet is named `input.fa`. */
   protected validationArgv(state: MaskingDraftState, extra: readonly string[]): readonly string[] {
     return this.argvOf(state, extra, this.inputNameOf(state, extra) ?? (toolPrintsKind([state.tool, ...extra]) === null ? 'input.fa' : undefined));
+  }
+
+  /** The check's directory holds the input that the run reads, under its name (none for help and the version). */
+  protected override validationInputs(state: MaskingDraftState): readonly DirectoryFile[] {
+    return toolPrintsKind([state.tool, ...this.parseExtra(state)]) === null ? this.fastaCheckInputs(state) : [];
   }
 
   protected async buildRequests(state: MaskingDraftState, extra: readonly string[]): Promise<readonly ToolRequest[]> {

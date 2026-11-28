@@ -520,7 +520,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
 
   /**
    * Records on a run that can write masking information the `-outfmt` default of its tool's `-xmlhelp`
-   * (`maskOutfmtDefault`), so that the run's output is judged mask data (`maskDataName`) the same live and restored.
+   * (`maskOutfmtDefault`), so that the run's output is judged mask data (`maskDataName`) from the run alone.
    */
   private recordMaskOutfmt(request: ToolRequest): ToolRequest {
     if (request.prints !== undefined) return request;

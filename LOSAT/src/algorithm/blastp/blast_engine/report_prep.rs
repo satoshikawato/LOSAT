@@ -1409,8 +1409,9 @@ pub(super) fn read_shown_residues(
 /// (`app::check_prefetch_environment`): where NCBI cannot convert its value, what NCBI writes
 /// before it stops is written (the first batch's search strategy request to the strategy file,
 /// `CallRequests::end_at`; the outfmt 0 prolog, the batch's reader messages and the posts of that
-/// request to `outputs`), and NCBI's error is returned. Otherwise the call's limit (`None` where it
-/// is not set, or where the archive alone is written), the one read of the call (`report_values`).
+/// request to `outputs`), and NCBI's error is returned. Otherwise the call's limit, the one read of
+/// the call (`report_values`): `None` where the variable is not set, or where the archive alone is
+/// written and NCBI cannot convert its value (that archive is written without the prefetch).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:732-734
 pub(super) fn refuse_prefetch_environment(

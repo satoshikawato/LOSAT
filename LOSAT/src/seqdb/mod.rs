@@ -1343,15 +1343,12 @@ pub struct SeqDb {
     /// negative.
     mt_stop_at_negative: bool,
     /// Whether a reader read the title of a reported sequence that holds a byte outside
-    /// ' ' ..= '~' (`SeqDb::note_replaced_title`): only then are the reads of NCBI's cache of
-    /// header records modelled (`header_cache`).
+    /// ' ' ..= '~' (`SeqDb::note_replaced_title`): only then are the reads of NCBI's caches of
+    /// header records and of released blobs modelled (`title_caches`).
     replaced_titles: AtomicBool,
-    /// The model of NCBI's cache of read header records (`SeqDb::read_header_record`), from the
-    /// first read of such a title on.
-    header_cache: std::sync::Mutex<HeaderCache>,
-    /// The model of NCBI's cache of the blobs that the formatter's scope released
-    /// (`SeqDb::batch_blobs`).
-    blob_cache: std::sync::Mutex<BlobCache>,
+    /// The models of those caches ([`TitleCaches`]), made at their first use, from the first read
+    /// of such a title on: a run without one holds no model, only this pointer.
+    title_caches: std::sync::Mutex<Option<Box<TitleCaches>>>,
     /// Whether a batch's prefetch loaded its subjects before that model started
     /// (`SeqDb::note_unmodelled_prefetch`).
     unmodelled_prefetch: AtomicBool,
@@ -1373,6 +1370,16 @@ pub enum BlobHeld {
     /// Held or not, by an order of NCBI's that LOSAT does not know (a release of more than the
     /// cache holds; a batch the model did not see).
     Unsure,
+}
+
+/// The models of NCBI's caches that the reads of a title with a byte outside ' ' ..= '~' meet
+/// (`SeqDb::title_caches`).
+#[derive(Debug, Default)]
+struct TitleCaches {
+    /// NCBI's cache of read header records ([`SeqDb::read_header_record`]).
+    headers: HeaderCache,
+    /// NCBI's cache of the blobs that the formatter's scope released ([`SeqDb::batch_blobs`]).
+    blobs: BlobCache,
 }
 
 /// The model of NCBI's cache of released blobs ([`SeqDb::batch_blobs`]).
@@ -2141,8 +2148,7 @@ impl SeqDb {
             scope_utf8_held: AtomicBool::new(false),
             mt_stop_at_negative: false,
             replaced_titles: AtomicBool::new(false),
-            header_cache: Default::default(),
-            blob_cache: Default::default(),
+            title_caches: Default::default(),
             unmodelled_prefetch: AtomicBool::new(false),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
@@ -3625,18 +3631,27 @@ impl SeqDb {
     #[cold]
     #[inline(never)]
     pub fn read_header_record(&self, at: SeqLocation) -> bool {
-        let mut cache = self
-            .header_cache
+        self.with_title_caches(|caches| {
+            let slots = caches
+                .headers
+                .0
+                .entry(at.volume)
+                .or_insert_with(|| Box::new([None; HEADER_CACHE_SLOTS]));
+            let slot = &mut slots[at.vol_oid as usize % HEADER_CACHE_SLOTS];
+            let read = *slot != Some(at.vol_oid);
+            *slot = Some(at.vol_oid);
+            read
+        })
+    }
+
+    /// Runs `use_caches` on the models of NCBI's caches that the reads of titles that post meet
+    /// ([`TitleCaches`]), made at their first use.
+    fn with_title_caches<T>(&self, use_caches: impl FnOnce(&mut TitleCaches) -> T) -> T {
+        let mut caches = self
+            .title_caches
             .lock()
-            .expect("the header cache is not poisoned");
-        let slots = cache
-            .0
-            .entry(at.volume)
-            .or_insert_with(|| Box::new([None; HEADER_CACHE_SLOTS]));
-        let slot = &mut slots[at.vol_oid as usize % HEADER_CACHE_SLOTS];
-        let read = *slot != Some(at.vol_oid);
-        *slot = Some(at.vol_oid);
-        read
+            .expect("the title caches are not poisoned");
+        use_caches(caches.get_or_insert_with(Box::default))
     }
 
     /// The model of NCBI's cache of header records (`read_header_record`), and of its cache of
@@ -3645,15 +3660,10 @@ impl SeqDb {
     #[cold]
     #[inline(never)]
     pub fn restart_header_reads(&self) {
-        self.header_cache
-            .lock()
-            .expect("the header cache is not poisoned")
-            .0
-            .clear();
         *self
-            .blob_cache
+            .title_caches
             .lock()
-            .expect("the blob cache is not poisoned") = BlobCache::default();
+            .expect("the title caches are not poisoned") = None;
         self.unmodelled_prefetch
             .store(false, std::sync::atomic::Ordering::Relaxed);
     }
@@ -3727,11 +3737,7 @@ impl SeqDb {
         let unmodelled = self
             .unmodelled_prefetch
             .load(std::sync::atomic::Ordering::Relaxed);
-        let mut cache = self
-            .blob_cache
-            .lock()
-            .expect("the blob cache is not poisoned");
-        cache.batch(subjects, unmodelled)
+        self.with_title_caches(|caches| caches.blobs.batch(subjects, unmodelled))
     }
 
     /// Notes that a reader met a reported sequence whose Seq-align id the lookup gives first to

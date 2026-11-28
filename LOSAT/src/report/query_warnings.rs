@@ -46,24 +46,28 @@ pub struct QueryWarnings<'a> {
 /// posts (`algorithm::common::database::title_decodes`: a title with a byte outside ' ' ..= '~'),
 /// by the key that the report's writer gives the subject: what each read of a formatter writes to
 /// standard error (`CSeqDB::ExtractBlastDefline` decodes the header again each time), after the
-/// report written before it (the post flushes it).
+/// report written before it (the post flushes it). Boxed, made at the first subject whose read
+/// posts: the reports of a database without such a title hold one pointer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct TitleDecodes(std::collections::HashMap<u32, Vec<u8>>);
+pub struct TitleDecodes(Option<Box<std::collections::HashMap<u32, Vec<u8>>>>);
 
 impl TitleDecodes {
     /// Sets the posts `text` of one read of the subject `key`.
     pub(crate) fn insert(&mut self, key: u32, text: Vec<u8>) {
-        self.0.insert(key, text);
+        self.0.get_or_insert_with(Box::default).insert(key, text);
     }
 
     /// Whether no subject's read posts.
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.0.as_ref().is_none_or(|decodes| decodes.is_empty())
     }
 
     /// The posts of one read of the subject `key` (empty where it posts nothing).
     pub fn of(&self, key: u32) -> &[u8] {
-        self.0.get(&key).map_or(&[][..], Vec::as_slice)
+        self.0
+            .as_ref()
+            .and_then(|decodes| decodes.get(&key))
+            .map_or(&[][..], Vec::as_slice)
     }
 
     /// Writes the posts of one read of the subject `key` to `sink`, after the report written so

@@ -175,7 +175,7 @@ impl SetupFailures {
         args: &ResolvedBlastpArgs,
         database: Option<&BlastpDatabase>,
         subjects: &[EncodedProtein],
-        contexts: &[QueryContext],
+        any_valid: bool,
     ) -> Self {
         if database.is_some_and(BlastpDatabase::first_oid_read_fails) {
             return Self {
@@ -189,7 +189,7 @@ impl SetupFailures {
         let read_error =
             database.and_then(|database| database.sequence_file_read_error(args.app.name()));
         let checks = call_setup::db_extent(args, database, subjects).and_then(|extent| {
-            match call_setup::setup_fails(args, &extent, contexts)? {
+            match call_setup::setup_fails(args, &extent, any_valid)? {
                 true => Err(SetupText(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into()),
                 false => Ok(()),
             }
@@ -304,7 +304,12 @@ fn call_steps(
     if searched.first().and_then(&split_of).is_none() {
         return Ok(searches);
     }
-    let failures = SetupFailures::of(args, subject_source.database(), subjects, contexts);
+    let failures = SetupFailures::of(
+        args,
+        subject_source.database(),
+        subjects,
+        contexts.iter().any(|ctx| ctx.is_valid),
+    );
     if !failures.pending() {
         return Ok(searches);
     }
@@ -438,7 +443,8 @@ pub(super) fn first_batch_setup<'a>(
     // has printed the reports of the batches before, of invalid queries only: the refusal comes
     // after them (`batch_failure`; line RG item bp-SF1, NCBI 2.17.0 probes of six X-only batches
     // before a valid query, as BLASTN's and TBLASTN's of D1a-5).
-    let fails = call_setup::setup_fails(args, &extent, contexts).map_err(|refusal| {
+    let any_valid = contexts.iter().any(|ctx| ctx.is_valid);
+    let fails = call_setup::setup_fails(args, &extent, any_valid).map_err(|refusal| {
         batch_failure(args, first_searched_query(batches.0, skipped), refusal)
     })?;
     // The setup of the first searched batch fails: NCBI has written the outfmt 0 prolog and the
@@ -597,9 +603,20 @@ pub(super) fn refused_batch_setup_error(
         .iter()
         .any(|context| context.is_valid && context.aa_len > 0)
     {
-        return BatchSetUp::Unknown;
+        if chunks.is_some() {
+            return BatchSetUp::Unknown;
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-982
+        // The subjects' failures of a batch with a valid context (`SetupFailures`, which read the
+        // subjects alone): where there is none, NCBI's batch fails the same whatever the letters
+        // that NCBI reads for its repeats (`BatchSetUp::NoValidContext`).
+        let subjects_pass = SetupFailures::of(args, database, &encoded, true)
+            .of_whole_batch()
+            .is_none();
+        return BatchSetUp::NoValidContext { subjects_pass };
     }
-    let failures = SetupFailures::of(args, database, &encoded, &contexts);
+    let failures = SetupFailures::of(args, database, &encoded, true);
     let Some(chunks) = chunks else {
         return failures
             .of_whole_batch()

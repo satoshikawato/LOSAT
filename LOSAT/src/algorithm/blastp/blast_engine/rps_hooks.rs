@@ -410,7 +410,10 @@ pub(super) fn rps_search(
             Err(RpsVolumeError::NoMatrix) => {
                 let queries = run.batches.first().map_or(0, |batch| batch.len());
                 return Err(RpsEngineError(
-                    "Error: Unknown error code -1 ".repeat(queries).into_bytes(),
+                    crate::algorithm::common::unknown_matrix::unknown_matrix_message_of(
+                        (0..queries).map(|_| Vec::new()),
+                    )
+                    .into_bytes(),
                 )
                 .into());
             }

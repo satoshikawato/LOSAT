@@ -20,7 +20,6 @@ use crate::record::FastaRecord;
 use crate::report::PairwiseHit;
 use crate::utils::dust::MaskedInterval;
 use crate::utils::threading::SearchPool;
-use crate::wording::ENGINE_ERROR;
 
 use super::args::BlastnArgs;
 use super::coordination::QueryLetters;
@@ -302,10 +301,9 @@ where
 /// NCBI's stop at the set-up of a query batch whose repeat search failed with `error`, with
 /// `queries` queries in it: each query's set-up runs the search again (the masks are made
 /// only once they are made) and posts its error as a warning, and the batch, left without a valid
-/// query, stops with them (`TSearchMessages::ToString`: the severity, the text and a space for
-/// each query) after the engine's prefix (`ENGINE_ERROR`, NCBI's `BLAST engine error:`; exit 3),
-/// as WindowMasker's error of a batch does (`window_masker::batch_error`). `None` for LOSAT's own
-/// errors (`rejection`).
+/// query, stops with them (`report::query_warnings::each_query_error`; exit 3), as WindowMasker's
+/// error of a batch does (`window_masker::batch_error`). `None` for LOSAT's own errors
+/// (`rejection`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:176-228
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
@@ -313,14 +311,9 @@ pub(crate) fn batch_error(error: &RepeatError, queries: usize) -> Option<crate::
     let RepeatError::Posted(text) = error else {
         return None;
     };
-    let mut message = format!("{ENGINE_ERROR} ").into_bytes();
-    for _ in 0..queries {
-        message.extend_from_slice(b"Warning: ");
-        message.extend_from_slice(text);
-        message.push(b' ');
-    }
-    message.push(b'\n');
-    Some(crate::cli::NativeError { exit: 3, message })
+    Some(crate::report::query_warnings::each_query_error(
+        text, queries,
+    ))
 }
 
 /// LOSAT's rejection of a repeat search's error that NCBI does not report as `batch_error` does:

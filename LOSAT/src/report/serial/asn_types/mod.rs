@@ -707,9 +707,20 @@ impl Value {
         }
     }
 
-    /// Whether the value holds values (that may hold more).
+    /// Whether dropping the value walks the values in it (`drop_nested`): a SEQUENCE or a list
+    /// that holds values, or a CHOICE whose variant is such a value or a CHOICE. A CHOICE of a
+    /// value that holds none (a number, a string) is dropped as it is, two levels deep.
     #[inline]
     fn holds_values(&self) -> bool {
+        match self {
+            Value::Choice(_, value) => value.is_nest(),
+            value => value.is_nest(),
+        }
+    }
+
+    /// Whether the value is a SEQUENCE or a list that holds values, or a CHOICE.
+    #[inline]
+    fn is_nest(&self) -> bool {
         match self {
             Value::Sequence(members) => !members.is_empty(),
             Value::Choice(..) => true,
@@ -719,13 +730,20 @@ impl Value {
     }
 
     /// `Drop` of a value that holds values: each one that holds more is taken out (`take_nested`)
-    /// to a list on the heap, which is emptied the same way.
+    /// to a list on the heap, which is emptied the same way. A SEQUENCE or list taken out holds
+    /// none that do once its own are taken: its list is dropped as it is, not walked again by its
+    /// `Drop`.
     #[inline(never)]
     fn drop_nested(&mut self) {
         let mut nested = Vec::new();
         self.take_nested(&mut nested);
         while let Some(mut value) = nested.pop() {
             value.take_nested(&mut nested);
+            match &mut value {
+                Value::Sequence(members) => drop(std::mem::take(members)),
+                Value::List(items) => drop(std::mem::take(items)),
+                _ => {}
+            }
         }
     }
 

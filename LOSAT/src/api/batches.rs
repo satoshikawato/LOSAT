@@ -287,7 +287,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
                 .is_some_and(|range| record_interval(&range, length) == RecordInterval::PastEnd)
         })
         .collect::<Vec<bool>>();
-    let run_scopes = run_scopes(search, inputs);
+    let run_scopes = run_scopes(search, inputs, command);
     let count = batch_count(search, inputs);
     Ok(Batches {
         search,
@@ -325,12 +325,38 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
 fn run_scopes(
     search: &Search,
     inputs: Inputs<'_>,
+    command: &Commands,
 ) -> Option<crate::blastinput::query_batch::QueryScopes> {
-    use crate::blastinput::query_batch::{QueryScopeSpan, QueryScopes};
+    use crate::blastinput::query_batch::{QueryMasks, QueryScopeSpan, QueryScopes};
     if !search.parse_deflines() || inputs.database || inputs.query_file.is_some() {
         return None;
     }
-    Some(QueryScopes::new(QueryScopeSpan::Run, program_name(search)))
+    // The strand as the call reads `-strand` (`QueryStrand::parse`; a value that it refuses ends
+    // the call before the batch is set up).
+    use crate::algorithm::blastn::args::QueryStrand;
+    let strand = match command {
+        Commands::Blastn(a) => QueryStrand::parse(&a.strand),
+        Commands::Blastx(a) => QueryStrand::parse(&a.strand),
+        Commands::Tblastx(a) => QueryStrand::parse(&a.strand),
+        _ => Ok(QueryStrand::Both),
+    }
+    .unwrap_or(QueryStrand::Both);
+    // BLASTN's filtering of the letters as its call reads `-dust` (`BlastnArgs::resolve_dust`; a
+    // value that it refuses ends the call before the batch is set up).
+    let query_masks = match command {
+        Commands::Blastn(a) => {
+            let mut args = a.clone();
+            let _ = args.resolve_dust();
+            args.query_masks()
+        }
+        _ => QueryMasks::None,
+    };
+    Some(
+        QueryScopes::new(QueryScopeSpan::Run, program_name(search))
+            .with_query_range(query_range_of(command))
+            .with_strand(strand)
+            .with_query_masks(query_masks),
+    )
 }
 
 /// NCBI's count of the query records into the batches under `-parse_deflines`
@@ -414,10 +440,11 @@ impl Batches<'_> {
         let query_range = query_range_of(&command);
         // The batch joins the run's scope of the queries before its call (`run_scopes`).
         let scope_refusal = match self.run_scopes.as_mut().map(|scopes| {
-            scopes.add_batch_ids(
+            scopes.add_batch_records(
                 self.inputs.query[range.clone()]
                     .iter()
-                    .map(|record| (record.believed(), record.seq().len())),
+                    .zip(&self.skipped[range.clone()])
+                    .map(|(record, &skipped)| (record.believed(), record.seq().len(), !skipped)),
                 range.start,
             )
         }) {

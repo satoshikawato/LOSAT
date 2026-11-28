@@ -764,10 +764,6 @@ impl ResolvedBlastpArgs {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
-    /// The program that the reports name (the formatter's program): the application's, or
-    /// `phiblastp` for psiblast's `-phi_pattern` (`PHIBLASTP` in the prolog and in outfmt 7's
-    /// header, item PS8a).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:862-872
     /// The program type of the search's XML2 and JSON documents (`blast_xml2::Xml2Run::program_type`):
     /// the app's (`BlastpApp::program_type`), but none for psiblast's `-phi_pattern`, whose search
@@ -777,6 +773,10 @@ impl ResolvedBlastpArgs {
         self.app.program_type().filter(|_| self.phi.is_none())
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:94
+    /// The program that the reports name (the formatter's program): the application's, or
+    /// `phiblastp` for psiblast's `-phi_pattern` (`PHIBLASTP` in the prolog and in outfmt 7's
+    /// header, item PS8a).
     pub(crate) fn report_program(&self) -> &'static str {
         if self.phi.is_some() {
             "phiblastp"

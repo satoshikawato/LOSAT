@@ -23,10 +23,10 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 | `10` | Comma-separated values | all eight |
 | `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all eight |
 | `12` | Seqalign, JSON | all eight |
-| `13` | Multiple-file BLAST JSON (needs `-out`) | all but `psiblast` |
-| `14` | Multiple-file BLAST XML2 (needs `-out`) | all but `psiblast` |
-| `15` | Single-file BLAST JSON | all but `psiblast` |
-| `16` | Single-file BLAST XML2 | all but `psiblast` |
+| `13` | Multiple-file BLAST JSON (needs `-out`) | all eight |
+| `14` | Multiple-file BLAST XML2 (needs `-out`) | all eight |
+| `15` | Single-file BLAST JSON | all eight |
+| `16` | Single-file BLAST XML2 | all eight |
 | `17` | SAM | `blastn` only |
 | `18` | Organism report | all eight |
 | `20` | Comma-separated values with header lines | all eight |

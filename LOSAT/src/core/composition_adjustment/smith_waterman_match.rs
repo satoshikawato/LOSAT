@@ -84,7 +84,7 @@ impl std::error::Error for SwRedoFailed {}
 /// NCBI's Smith-Waterman redo of a match that does not end: a score of 0 is significant, the
 /// window has two or more HSPs and the first query letter's row scores the window's first subject
 /// letter above 0 (`SwWindowRedo::Endless`, the regime of RPS-BLAST's `SwEndless`;
-/// PD-LOSAT-NCBI-DEFECTS 1.53, 1.73 for TBLASTN and 1.127 for PSIBLAST, within the class of 1.30).
+/// PD-LOSAT-NCBI-DEFECTS 1.53, 1.73 for TBLASTN and 1.129 for PSIBLAST, within the class of 1.30).
 /// The window that reaches it decides; the windows before it in the call belong to the same match,
 /// which NCBI never finishes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -636,7 +636,7 @@ impl SwBatchStatus {
 /// (`SwRedoFailed`), for `program` (NCBI's name, `blastp`): NCBI's `Traceback failed` (exit 3),
 /// or, when the batch's first query holds a redone match (`first_query_holds_match`), LOSAT's
 /// refusal of the batch where NCBI's clean-up crashes (PD-LOSAT-NCBI-DEFECTS 1.53, 1.73 for
-/// TBLASTN and 1.127 for PSIBLAST, whose batch is a round of one query; rule 3; exit 1). The caller
+/// TBLASTN and 1.129 for PSIBLAST, whose batch is a round of one query; rule 3; exit 1). The caller
 /// puts it after the reports of the batches before.
 ///
 /// NCBI keeps the last nonzero status of its threads, and its traceback throws `Traceback failed`
@@ -658,7 +658,7 @@ pub(crate) fn sw_batch_failed_error(program: &str, first_query_holds_match: bool
 }
 
 /// LOSAT's refusal of a match whose Smith-Waterman redo does not end in NCBI (`SwRedoEndless`;
-/// PD-LOSAT-NCBI-DEFECTS 1.53, 1.73 for TBLASTN and 1.127 for PSIBLAST, rule 3, within the class of
+/// PD-LOSAT-NCBI-DEFECTS 1.53, 1.73 for TBLASTN and 1.129 for PSIBLAST, rule 3, within the class of
 /// RPS-BLAST's refusal of 1.30), for
 /// `program` (NCBI's name, `blastp`) and what makes the score of 0 significant there (`why`). The
 /// caller puts it after the reports of the batches before. Exit status 1, its message.

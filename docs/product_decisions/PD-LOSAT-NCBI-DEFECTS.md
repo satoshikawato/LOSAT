@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.127
+- Version: 1.129
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -1042,15 +1042,17 @@
   1.122, line NP item M4b-3d, then
   1.124 at the merge of dev of 2026-11-27 that brought 1.123, line RG-KB item 18b, then 1.126 at the merge
   of dev of 2026-11-27 that brought 1.124 and 1.125, line RG-D2 items D2b-2..5 and exception 36);
-  1.127 2026-11-27 (PSIBLAST `-use_sw_tback`, line PS-SW (row PS12c): the explicit rejections of
+  1.129 2026-11-27 (PSIBLAST `-use_sw_tback`, line PS-SW (row PS12c): the explicit rejections of
   1.53 and 1.73, a Smith-Waterman redo that NCBI repeats without end and a failed round whose
   query holds a redone match, on which NCBI's clean-up crashes, extended to PSIBLAST's first round
   and PSSM rounds, rule 3, within the class of 1.30, after the reports of the queries and rounds
   before; a failed last match, the status that a subject excluded at the redo's fetch clears, and
   the OID order of the redo at `-comp_based_stats 0` reproduced, rule 2; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; numbered after 1.126 at the merge of dev 74f94b820
-  that brought line RG-D2's 1.124 and 1.125 (exceptions 35 and 36) and line RG item T4b-f's 1.126;
-  first 1.123, then 1.124 at the merge of dev 7f9a7ef34 that brought line RG-KB item 18b's 1.123)
+  instruction 2026-09-29, restated 2026-10-07; numbered 1.129 on 2026-11-28 after 1.127 and 1.128
+  of pull request #1664 (`losat deltablast`), which merges first; first 1.123, then 1.124 at the
+  merge of dev 7f9a7ef34 that brought line RG-KB item 18b's 1.123, then 1.127 at the merge of dev
+  74f94b820 that brought line RG-D2's 1.124 and 1.125 (exceptions 35 and 36) and line RG item
+  T4b-f's 1.126)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3575,7 +3577,7 @@ file would differ, and NCBI's programs still could not open the database).
   `-strand minus` inputs on which NCBI ends, `db.rpstbn.sw.tksm.minus.6`,
   `db.rpstbn.sw.tksw.minus.6` and `db.rpstbn.sw.s5e.minus.*`).
 
-- PSIBLAST `-use_sw_tback` (version 1.127, 2026-11-27, line PS-SW, row PS12c, Owner-delegated,
+- PSIBLAST `-use_sw_tback` (version 1.129, 2026-11-27, line PS-SW, row PS12c, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07, within the class of 1.30 and the rules of
   1.53; P2, P3: the same match body and round loop as BLASTP's,
   `core::composition_adjustment::smith_waterman_match`, and one redo loop for PSIBLAST's X-drop and

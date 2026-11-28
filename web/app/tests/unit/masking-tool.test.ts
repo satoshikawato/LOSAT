@@ -21,9 +21,11 @@ import {
   buildMaskingArgv,
   buildWindowMaskerArgv,
   changedMaskingOptionsCount,
+  isCountsOutputFile,
   isStandardOutputName,
   maskDataName,
   maskOutfmtDefault,
+  toolFileOptionLabel,
 } from '../../src/domain/tool-argv';
 import {
   allMaskingParameters,
@@ -248,6 +250,114 @@ describe('the standard output names (review of WW4c, F5)', () => {
     const rows = list.split('\n').filter((line) => line !== '' && !line.startsWith('#')).map((line) => line.split('\t'));
     expect(rows).toHaveLength(24);
     for (const [name, kind] of rows) expect(isStandardOutputName(name!), name).toBe(kind === 'stdout');
+  });
+});
+
+/**
+ * The spellings of the WW4e probe (2026-11-28: the native `losat` of Web run 46112132724 in a folder holding input.fa and
+ * the folder sub/, and the Web's real engine in Chromium with the same files, sub/ picked as a folder): the value of
+ * `-out` or `-logfile` and the name of the file that the run made, which the native run made and the Web's run reported
+ * (`web` rows: names outside the run's directory, the Web's run only), and for a file outside the run's directory the
+ * name under which it goes to makeblastdb's run directory. Before WW4e the app cut only `./`, so every row that needs
+ * more than that had no `-out`/`-logfile` label and no hand-over, and a file outside went over under its path, which
+ * makeblastdb's form refused ("Invalid file name: "../m.asnb".").
+ */
+const RUN_FILE_SPELLINGS: ReadonlyArray<readonly [option: '-out' | '-logfile', value: string, file: string, handed?: string]> = [
+  ['-out', 'm.asnb', 'm.asnb'],
+  ['-out', './m.asnb', 'm.asnb'],
+  ['-out', './/m.asnb', 'm.asnb'],
+  ['-out', 'sub/../m.asnb', 'm.asnb'],
+  ['-out', 'sub//../m.asnb', 'm.asnb'],
+  ['-out', './sub/./../m.asnb', 'm.asnb'],
+  ['-out', 'sub/m.asnb', 'sub/m.asnb'],
+  ['-out', 'sub//m.asnb', 'sub/m.asnb'],
+  ['-out', './sub/m.asnb', 'sub/m.asnb'],
+  ['-out', '/proc/self/cwd/m.asnb', 'm.asnb'],
+  ['-out', '/proc/self/cwd/sub/../m.asnb', 'm.asnb'],
+  ['-out', '../m.asnb', '../m.asnb', 'm.asnb'],
+  ['-out', 'sub/../../m.asnb', '../m.asnb', 'm.asnb'],
+  ['-logfile', 'run.log', 'run.log'],
+  ['-logfile', './run.log', 'run.log'],
+  ['-logfile', 'sub/../run.log', 'run.log'],
+  ['-logfile', 'sub//run.log', 'sub/run.log'],
+  ['-logfile', '/proc/self/cwd/run.log', 'run.log'],
+  ['-logfile', 'run.log/', 'run.log'],
+  ['-logfile', ' run.log', 'run.log'],
+  // web
+  ['-out', '/tmp/m.asnb', '/tmp/m.asnb', 'm.asnb'],
+  ['-out', '/tmp//m.asnb', '/tmp/m.asnb', 'm.asnb'],
+  ['-out', '/var/run/../tmp/m.asnb', '/tmp/m.asnb', 'm.asnb'],
+  ['-out', '/var/lock/m.asnb', '/var/lock/m.asnb', 'm.asnb'],
+  ['-out', '../nosub/../m.asnb', '../m.asnb', 'm.asnb'],
+  ['-out', '/var/run/../tmp/x.out', '/tmp/x.out', 'x.out'],
+  ['-logfile', '/var/run/../tmp/x.out', '/var/tmp/x.out'],
+  ['-logfile', '/var/run/../tmp/run.log', '/var/tmp/run.log'],
+];
+
+describe("the run's files that -out and -logfile name (WW4e)", () => {
+  const maskRun = (out: string) =>
+    ({ tool: 'dustmasker', stage: 'mask', argv: ['dustmasker', '-in', 'input.fa', '-out', out, '-outfmt', 'maskinfo_asn1_bin'], number: 2 }) as const;
+
+  const rows = RUN_FILE_SPELLINGS.map(([option, value, file, handed]) => ({ option, value, file, handed }));
+  it.each(rows)("reads $option '$value' as the run's file $file: its label, its hand-over as mask data, its counts", ({ option, value, file, handed }) => {
+    expect(toolFileOptionLabel(['dustmasker', '-in', 'input.fa', option, value], file)).toBe(option);
+    if (option !== '-out') return;
+    expect(maskDataName(maskRun(value), { key: 'file:0', name: file })).toBe(handed ?? file);
+    expect(isCountsOutputFile('mk_counts', ['windowmasker', '-mk_counts', '-in', 'a.fa', '-out', value], file)).toBe(true);
+  });
+
+  it('reads both options in one run: one file of two spellings, and two files where -out and -logfile read one name apart', () => {
+    expect(toolFileOptionLabel(['dustmasker', '-out', 'm.asnb', '-logfile', 'sub/../m.asnb'], 'm.asnb')).toBe('-out, -logfile');
+    const both = ['dustmasker', '-in', 'input.fa', '-out', 'sub/../m.asnb', '-outfmt', 'maskinfo_asn1_bin', '-logfile', './m.asnb'];
+    expect(toolFileOptionLabel(both, 'm.asnb')).toBe('-out, -logfile');
+    expect(maskDataName({ ...maskRun('sub/../m.asnb'), argv: both }, { key: 'file:0', name: 'm.asnb' })).toBe('m.asnb');
+    // The system walks `-out` past the link /var/run (to /run, then up to /); NCBI reads `-logfile` by its words.
+    const apart = ['dustmasker', '-out', '/var/run/../tmp/x.out', '-logfile', '/var/run/../tmp/x.out'];
+    expect(toolFileOptionLabel(apart, '/tmp/x.out')).toBe('-out');
+    expect(toolFileOptionLabel(apart, '/var/tmp/x.out')).toBe('-logfile');
+  });
+
+  it('does not read a name as another file, a directory or a stream', () => {
+    const other: ReadonlyArray<readonly ['-out' | '-logfile', string, string]> = [
+      ['-out', '../m.asnb', 'm.asnb'],
+      ['-out', 'm.asnb', '../m.asnb'],
+      ['-out', 'sub/m.asnb', 'm.asnb'],
+      ['-out', 'sub/../m.asnb', 'sub/m.asnb'],
+      ['-out', 'm.asnb/', 'm.asnb'],
+      ['-out', 'm.asnb/.', 'm.asnb'],
+      ['-out', '-', '-'],
+      ['-out', '/tmp/m.asnb', 'm.asnb'],
+      ['-out', '/dev/stdout', 'stdout'],
+      ['-logfile', '-', '-'],
+      ['-logfile', '/dev/null', '/dev/null'],
+      ['-logfile', '', 'input.fa'],
+      ['-logfile', '../run.log', 'run.log'],
+    ];
+    for (const [option, value, file] of other) {
+      expect(toolFileOptionLabel(['dustmasker', option, value], file), `${option} ${value}: ${file}`).toBeUndefined();
+    }
+    expect(maskDataName(maskRun('sub/m.asnb'), { key: 'file:0', name: 'm.asnb' })).toBeUndefined();
+    expect(isCountsOutputFile('mk_counts', ['windowmasker', '-mk_counts', '-out', 'a', '-logfile', 'sub/../log'], 'log')).toBe(false);
+  });
+
+  it("hands a file outside the run's directory to makeblastdb's form under its name alone, which the form takes", () => {
+    for (const [out, file] of [
+      ['../m.asnb', '../m.asnb'],
+      ['sub/../../m.asnb', '../m.asnb'],
+      ['/tmp//m.asnb', '/tmp/m.asnb'],
+    ] as const) {
+      const name = maskDataName(maskRun(out), { key: 'file:0', name: file })!;
+      const makeblastdb = new MakeblastdbDraft({
+        engine: new FakeEngine(),
+        enqueueToolAll: async (): Promise<EnqueueAllResult> => ({ ok: true, runIds: [] }),
+        debounceMs: 0,
+      });
+      makeblastdb.addMaskData(new File(['mask'], 'm.asnb'), name, { kind: 'made', runNumber: 2 });
+      const state = makeblastdb.state.get();
+      expect(state.message, `-out ${out}`).toBeUndefined();
+      expect(state.values['-mask_data'], `-out ${out}`).toBe('m.asnb');
+      expect(state.runFiles.map((entry) => entry.name)).toEqual(['m.asnb']);
+    }
   });
 });
 

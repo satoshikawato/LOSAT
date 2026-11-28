@@ -14,16 +14,34 @@ export type Role = 'query' | 'subject';
 /** A FASTA file of LOSAT/tests/fasta. */
 export const fasta = (path: string): Buffer => readFileSync(join(REPOSITORY, 'LOSAT/tests/fasta', path));
 
+/** The panels whose `data-describe` tells whether the engine answered their describe: the search form and the tool tabs. */
+export type DescribedPanel = 'search-panel' | 'wm-panel' | 'ms-panel' | 'mk-panel' | 'bf-panel';
+
 /**
- * Waits until the engine's describe of the chosen program has come (or failed). It comes after
- * the page opens (the Data worker starts its session and loads the serial reactor first: up to
- * a second in Firefox) or the mode changes, and its help and task move every control below
- * "Task Selection" down. A click on such a control while it moves is lost: Firefox and
- * WebKit press and release some 20-300 ms apart, Playwright checks the target at the press
- * only, and the release lands on the panel (WF1, losat-baselines/web-flaky-20261016).
+ * How long a test waits for the engine to answer a panel's describe (`described`). The first describe of a page starts
+ * the engine (the Data worker's session and the serial reactor fetched and compiled), so its time follows the machine's
+ * load: 30 s ran out for the search form under a local load average of 36-97 (masking-tool.spec.ts, WW4c R1 Firefox and
+ * WW4c final WebKit) where the same test passed alone, and the tool tabs had waited 60 s.
  */
-export async function described(page: Page): Promise<void> {
-  await expect(page.getByTestId('search-panel')).toHaveAttribute('data-describe', /^(ready|failed)$/, { timeout: 30_000 });
+export const ENGINE_DESCRIBE_TIMEOUT = 60_000;
+
+/**
+ * Waits until the engine has answered the describe of `panel` (the search form's program, or a tool tab's `-xmlhelp`):
+ * `answered` accepts either answer, `ready` or `failed` waits for that one. The one wait for the engine's describe in the
+ * e2e tests (`ENGINE_DESCRIBE_TIMEOUT`). The search form's describe comes after the page opens (the Data worker starts
+ * its session and loads the serial reactor first: up to a second in Firefox) or the mode changes, and its help and task
+ * move every control below "Task Selection" down. A click on such a control while it moves is lost: Firefox and WebKit
+ * press and release some 20-300 ms apart, Playwright checks the target at the press only, and the release lands on the
+ * panel (WF1, losat-baselines/web-flaky-20261016).
+ */
+export async function described(
+  page: Page,
+  panel: DescribedPanel = 'search-panel',
+  answer: 'answered' | 'ready' | 'failed' = 'answered',
+): Promise<void> {
+  await expect(page.getByTestId(panel)).toHaveAttribute('data-describe', answer === 'answered' ? /^(ready|failed)$/ : answer, {
+    timeout: ENGINE_DESCRIBE_TIMEOUT,
+  });
 }
 
 /** Opens the application at its search form, once the form no longer moves (`described`). */

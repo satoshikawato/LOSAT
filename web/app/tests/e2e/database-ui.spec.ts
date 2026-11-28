@@ -10,7 +10,7 @@ import { axeViolations } from './support/axe';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { chooseRun, openParameters, openSearch, paste, program, result, submit, waitStatus } from './support/search';
+import { chooseRun, described, openParameters, openSearch, paste, program, result, submit, waitStatus } from './support/search';
 import { test } from './support/test';
 
 const LOSAT = join(REPOSITORY, 'LOSAT');
@@ -146,7 +146,7 @@ test.describe('local BLAST database (-db) and repeats database (-filtering_db) U
     await setSubjectDbFiles(page, [{ name: 'again.pin', mimeType: 'application/octet-stream', buffer: Buffer.from('n') }]);
     await expect(page.getByTestId('subject-db-selected')).toContainText('again');
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('search-panel')).toHaveAttribute('data-describe', /^(ready|failed)$/, { timeout: 30_000 });
+    await described(page);
     await expect(page.getByTestId('subject-source-database')).toBeChecked();
     await expect(page.getByTestId('subject-db-reload')).toContainText('Previous database: again. Choose the files again.');
     await paste(page, 'query', '>q\nACGTACGTACGTACGTACGT\n');
@@ -166,7 +166,7 @@ test.describe('local BLAST database (-db) and repeats database (-filtering_db) U
       await page.getByTestId('subject-db-folder-input').setInputFiles(dir);
       await expect(page.getByTestId('subject-db-selected')).toContainText('nucdb/nt');
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await expect(page.getByTestId('search-panel')).toHaveAttribute('data-describe', /^(ready|failed)$/, { timeout: 30_000 });
+      await described(page);
       await expect(page.getByTestId('subject-db-reload')).toContainText('Previous database: nucdb/nt. Choose the folder again.');
       await paste(page, 'query', '>q\nACGTACGTACGTACGTACGT\n');
       await page.getByTestId('run-losat').click();

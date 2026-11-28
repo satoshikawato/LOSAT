@@ -45,6 +45,22 @@ class DatabaseBytes(unittest.TestCase):
             for bad in (index(version, b"2026-11-01T09:05:00"), index(version, b""), index(version, aligned=False)):
                 self.assertEqual(self.index_of(bad), bad)
 
+    def test_a_column_index_drops_only_its_creation_time(self):
+        def column(time: bytes = b"11/28/2026 01:31:25", title: bytes = b"BlastDb/MaskData", rest: bytes = b"meta") -> bytes:
+            return bytes(range(32)) + bytes([len(title)]) + title + bytes([len(time)]) + time + rest
+
+        for name in ("db.naa", "db.paa", "db.00.nba"):
+            view = lambda data: corpus.database_bytes(name, {name: data})  # noqa: E731
+            self.assertEqual(view(column()), view(column(b"01/02/2027 23:59:59")))
+            self.assertNotEqual(view(column()), view(column(rest=b"other")))
+            self.assertNotEqual(view(column()), view(column(title=b"BlastDb/Other")))
+            self.assertNotIn(b"2026", view(column()))
+            # Another form of the time, or a string longer than one length byte, keeps the file whole.
+            for whole in (column(b"2026-11-28T01:31:25"), column(title=b"t" * 200), column()[:20]):
+                self.assertEqual(view(whole), whole)
+        # The data files of a column (`.nab`, `.nac`) and other files are compared whole.
+        self.assertEqual(corpus.database_bytes("db.nab", {"db.nab": column()}), column())
+
     def test_the_json_manifest_drops_the_time_and_compares_the_sizes(self):
         files = {"db.nin": b"12", "db.nsq": b"345", "db.not": b"6789"}
 

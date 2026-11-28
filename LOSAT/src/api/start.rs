@@ -52,13 +52,26 @@ fn open_with<S: AsRef<OsStr> + Clone>(
     files: &RunFiles,
     diagnostics: &mut dyn Write,
 ) -> Result<Opened, Error> {
+    open_logged(start, diagnostics, |start| {
+        files.log_target_for(words, start, log_file(words))
+    })
+}
+
+/// The start `start` up to its configuration load, whose file of `-logfile` is the target that
+/// `log` opens (`Err` with LOSAT's refusal of the name): `open`, and
+/// makeblastdb's start of LOSAT Web's run and check of its words (`api::tools::makeblastdb_call`).
+pub(super) fn open_logged(
+    start: ApplicationStart,
+    diagnostics: &mut dyn Write,
+    log: impl FnOnce(&ApplicationStart) -> Result<DiagTarget, String>,
+) -> Result<Opened, Error> {
     match start.usage_report() {
         Ok(text) => {
             let _ = diagnostics.write_all(text.as_bytes());
         }
         Err(reason) => return Err(Error::Search(reason.into())),
     }
-    let mut target = match files.log_target_for(words, &start, log_file(words)) {
+    let mut target = match log(&start) {
         Ok(opened) => opened,
         Err(reason) => {
             let program = crate::cli::reader::tool(start.program()).map_or_else(

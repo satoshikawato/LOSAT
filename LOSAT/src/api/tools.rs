@@ -21,9 +21,14 @@
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
 
+use std::sync::{Arc, Mutex};
+
 use super::error::Error;
-use crate::blastinput::ncbi_environment::{preparse, Preparsed};
+use crate::blastinput::ncbi_environment::{
+    log_file, preparse, special_log_target, ApplicationStart, DiagTarget, Preparsed,
+};
 use crate::cli::Commands;
+use crate::report::run_files::{OpenFiles, RunFiles, ToolLog};
 use crate::writedb::makeblastdb;
 use crate::writedb::time::LocalTime;
 use crate::writedb::Platform;
@@ -260,63 +265,244 @@ pub fn run_makeblastdb(
     output: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<(), Error> {
+    makeblastdb_call(
+        argv,
+        input,
+        output,
+        diagnostics,
+        MakeblastdbCall::Library,
+        &RunFiles::Disk,
+    )
+    .result
+}
+
+/// Who runs makeblastdb through [`makeblastdb_call`]: the library API, or LOSAT Web's engine
+/// (`web_adapter::run_makeblastdb`, `web_adapter::check_makeblastdb`; line NP WW4b1, 2026-11-27).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MakeblastdbCall {
+    /// The library API ([`run_makeblastdb`]): `-xmlhelp`, whose XML only the command line
+    /// writes, is refused.
+    Library,
+    /// A tool run of LOSAT Web's ABI v2 (`losat_web2_tool`): `-xmlhelp` prints NCBI's XML, as on
+    /// the command line (D-WW3-8).
+    WebRun,
+    /// A check of the words of a tool run (`losat_web2_validate`): `WebRun` up to where `Run`
+    /// would begin, which it does not run, and which opens no file: the file of `-logfile`, where
+    /// the run opens one, is a file of the run's table (`RunFiles::log_target`), which the
+    /// caller's receiver gets when the run's files end (`RunFiles::end`), and where the run's
+    /// diagnostics stay on the standard error (a folder, a name in a missing folder) they stay
+    /// there.
+    WebCheck,
+}
+
+/// How a run of [`makeblastdb_call`] ended.
+pub(crate) struct MakeblastdbEnd {
+    /// The exit status of the command line's run of the words.
+    pub(crate) status: i32,
+    /// The library's result: `Ok` for the exit status 0.
+    pub(crate) result: Result<(), Error>,
+}
+
+/// makeblastdb with the words `argv` (after the program's name), as the command line runs them
+/// (`cli::main_entry`): the application start, the versions, the configuration load, NCBI's
+/// reader, `-dryrun`, LOSAT's refusals and settings and makeblastdb's checks of the environment and
+/// the registry, then the build (`makeblastdb::run_in`; not for `MakeblastdbCall::WebCheck`).
+/// `input` is the command line's standard input, `output` its standard output and `diagnostics`
+/// its standard error, which get the bytes that the command line writes there. The files of
+/// `-logfile` go to `files` (`RunFiles::Disk` for the library; for LOSAT Web a `Receiver` whose
+/// run writes its working directory, `FileReceiver::writes_working_directory`): the start's
+/// opening and the run's two (`makeblastdb::run_in`) are the openings of one run
+/// (`OpenFiles`), so that a file outside the run's directory (`-logfile /tmp/mk.log`) gets their
+/// bytes in the order the command line's three appending openings write them; a check
+/// (`WebCheck`) chooses the start's target as the run does and writes nothing
+/// (`RunFiles::log_target`). LOSAT Web refuses, at the start, a `-logfile` that the log's own
+/// opening could not write as the command line does (a device or a file of procfs:
+/// `RunFiles::refused_log_output`).
+pub(crate) fn makeblastdb_call(
+    argv: &[&str],
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+    call: MakeblastdbCall,
+    files: &RunFiles,
+) -> MakeblastdbEnd {
     let mut recorded = Recorded {
         writer: diagnostics,
         bytes: Vec::new(),
     };
+    // The run's openings of `-logfile` (the start's and the build's), and what the start writes to
+    // the run's standard output where `-logfile` names it (`ToolLog::Stdout`), which goes there
+    // before the run's next bytes (`PendingStdout`).
+    let opened_files = OpenFiles::new(files);
+    let pending = Arc::new(Mutex::new(Vec::new()));
     // NCBI's application start (`cli::main_entry`): the usage report's messages, the `-logfile`
     // file, the versions (`ncbi_version::print`, line RG item E3), then the configuration load.
-    let mut opened = match super::start::open("makeblastdb", argv, &mut recorded) {
+    let start = ApplicationStart::of_process("makeblastdb", argv);
+    let name = log_file(argv);
+    let opened = super::start::open_logged(start, &mut recorded, |start| {
+        if let Some(reason) = name
+            .filter(|name| special_log_target(Some(name)).is_none())
+            .and_then(|name| files.refused_log_output(name))
+        {
+            return Err(reason);
+        }
+        match call {
+            MakeblastdbCall::WebCheck => files.log_target_for(argv, start, name),
+            MakeblastdbCall::Library | MakeblastdbCall::WebRun => {
+                match opened_files.log_target_for(argv, start, name)? {
+                    ToolLog::Target(target) => Ok(target),
+                    ToolLog::Stdout => Ok(DiagTarget::Stream(Mutex::new(Box::new(PendingWriter(
+                        pending.clone(),
+                    ))))),
+                }
+            }
+        }
+    });
+    let mut opened = match opened {
         Ok(opened) => opened,
-        Err(error) => return Err(refused(recorded, error.message())),
+        Err(error) => {
+            return MakeblastdbEnd {
+                status: 1,
+                result: Err(refused(recorded, error.message())),
+            }
+        }
     };
+    let mut output = PendingStdout {
+        pending,
+        out: output,
+    };
+    let (status, result) = makeblastdb_started(
+        &mut opened,
+        argv,
+        input,
+        &mut output,
+        recorded,
+        (call, &opened_files),
+    );
+    let _ = output.write_pending();
+    MakeblastdbEnd { status, result }
+}
+
+/// What the start of a makeblastdb run writes to the file of `-logfile` where that file is the
+/// run's standard output (`ToolLog::Stdout`: LOSAT Web's `-logfile /dev/stdout`): the bytes, kept
+/// for `PendingStdout` (a target outlives the caller's writer, `DiagTarget::Stream`).
+struct PendingWriter(Arc<Mutex<Vec<u8>>>);
+
+impl Write for PendingWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The standard output of a makeblastdb run (`makeblastdb_call`): what the start wrote to it as
+/// the file of `-logfile` (`PendingWriter`) goes out before each later write and at the end, so
+/// that the bytes come in the order the command line's process writes them to its standard output.
+struct PendingStdout<'a> {
+    pending: Arc<Mutex<Vec<u8>>>,
+    out: &'a mut dyn Write,
+}
+
+impl PendingStdout<'_> {
+    /// Writes what the start wrote and the output has not had yet.
+    fn write_pending(&mut self) -> io::Result<()> {
+        let pending = std::mem::take(
+            &mut *self
+                .pending
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        if pending.is_empty() {
+            return Ok(());
+        }
+        self.out.write_all(&pending)
+    }
+}
+
+impl Write for PendingStdout<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.write_pending()?;
+        self.out.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.write_pending()?;
+        self.out.flush()
+    }
+}
+
+/// [`makeblastdb_call`] after the start `opened`: the exit status and the library's result.
+fn makeblastdb_started(
+    opened: &mut super::start::Opened,
+    argv: &[&str],
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    mut recorded: Recorded<'_>,
+    (call, files): (MakeblastdbCall, &OpenFiles),
+) -> (i32, Result<(), Error>) {
     let words = || ["losat", "makeblastdb"].iter().chain(argv).copied();
     if let Some(text) = crate::cli::ncbi_version_request(words()) {
         let _ = output.write_all(text.as_bytes());
-        return Ok(());
+        return (0, Ok(()));
     }
     match opened
         .start
         .write_config_load(&mut opened.target, &mut recorded)
     {
         Ok(None) => {}
-        Ok(Some(status)) => return outcome(status, recorded.bytes),
-        Err(reason) => return Err(refused(recorded, reason.as_bytes())),
+        Ok(Some(status)) => return (status, outcome(status, recorded.bytes)),
+        Err(reason) => return (1, Err(refused(recorded, reason.as_bytes()))),
     }
     // NCBI's reader of the words that the start leaves to it (`-dryrun` taken), as on the command
     // line (`cli::main_entry`): the help on `output`, an argument error's usage on the
-    // diagnostics and its posts where the diagnostics go (the file of `-logfile`); `-xmlhelp`,
-    // whose XML only the command line writes, is refused.
+    // diagnostics and its posts where the diagnostics go (the file of `-logfile`); `-xmlhelp`
+    // prints NCBI's XML in LOSAT Web, as on the command line (`cli::xml_help_text`), and the
+    // library refuses it.
     let tool = crate::cli::reader::tool("makeblastdb").expect("makeblastdb is on the reader");
     let (words, dryrun) = match preparse(argv) {
         Preparsed::Words { words, dryrun, .. } => (words, dryrun),
         Preparsed::Version(_) => unreachable!("the versions are printed above"),
     };
     let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    let xml_help = match call {
+        MakeblastdbCall::Library => None,
+        MakeblastdbCall::WebRun | MakeblastdbCall::WebCheck => {
+            Some(crate::cli::xml_help_text as fn(&str) -> Option<String>)
+        }
+    };
     let mut diag = crate::ncbi_app::Diag::new(&opened.target, &mut recorded, tool);
     let read = crate::ncbi_app::read(
         tool,
         &words,
         output,
         &mut diag,
-        None,
+        xml_help,
         &crate::report::run_files::OpenFiles::disk(),
     );
     drop(diag);
     let args = match read {
         Ok(args) => args,
-        Err(crate::ncbi_app::ReadEnd::Exit(0)) => return Ok(()),
-        Err(crate::ncbi_app::ReadEnd::Exit(_)) => return Err(Error::written_argv(recorded.bytes)),
+        Err(crate::ncbi_app::ReadEnd::Exit(0)) => return (0, Ok(())),
+        Err(crate::ncbi_app::ReadEnd::Exit(status)) => {
+            return (status, Err(Error::written_argv(recorded.bytes)))
+        }
         Err(crate::ncbi_app::ReadEnd::Refused(reason)) => {
-            return Err(refused_argument(recorded, reason))
+            return (1, Err(refused_argument(recorded, reason)))
         }
     };
     // `-dryrun` ends here, after the settings that LOSAT refuses, as on the command line
     // (`cli::main_entry`).
     if dryrun {
         return match opened.start.settings() {
-            Ok(_) => Ok(()),
-            Err(reason) => Err(refused(recorded, reason.as_bytes())),
+            Ok(_) => (0, Ok(())),
+            Err(reason) => (1, Err(refused(recorded, reason.as_bytes()))),
         };
     }
     let converted = match crate::cli::reader::refusal_after_read(tool, &args) {
@@ -326,13 +512,13 @@ pub fn run_makeblastdb(
     let args = match converted {
         Ok(Commands::Makedb(args)) => args,
         Ok(_) => unreachable!("makeblastdb's arguments are makeblastdb's"),
-        Err(reason) => return Err(refused_argument(recorded, reason)),
+        Err(reason) => return (1, Err(refused_argument(recorded, reason))),
     };
     // NCBI's application layer reads the environment and the registry files before `Run`, and
     // LOSAT rejects the settings that change the output (`cli/main_entry.rs`).
     let settings = match opened.start.settings() {
         Ok(settings) => settings,
-        Err(reason) => return Err(refused(recorded, reason.as_bytes())),
+        Err(reason) => return (1, Err(refused(recorded, reason.as_bytes()))),
     };
     let checked = makeblastdb::check_registry_settings(
         &args,
@@ -344,17 +530,20 @@ pub fn run_makeblastdb(
     )
     .and_then(|()| makeblastdb::check_environment(&args, &|name: &str| std::env::var_os(name)));
     if let Err(reason) = checked {
-        return Err(refused(recorded, reason.as_bytes()));
+        return (1, Err(refused(recorded, reason.as_bytes())));
+    }
+    if call == MakeblastdbCall::WebCheck {
+        return (0, Ok(()));
     }
     let now = LocalTime::now();
-    let status = makeblastdb::run_with(
+    let status = makeblastdb::run_in(
         &args,
+        makeblastdb::MakedbEnv::from_env(&|name| std::env::var_os(name)),
         &settings,
         now.as_ref(),
         Platform::host(),
-        input,
-        output,
-        &mut recorded,
+        (input, output, &mut recorded),
+        files,
     );
-    outcome(status, recorded.bytes)
+    (status, outcome(status, recorded.bytes))
 }

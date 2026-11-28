@@ -1295,6 +1295,12 @@ async function checkLogfileNames(engine, native, scratch) {
   const differs = hostDiffers();
   assert.ok(differs === undefined, `-logfile names: this host is not a Linux like LOSAT Web's (${differs}); ` +
             "run V-ABI as a user on Ubuntu 24.04 or a Linux like it");
+  // The rows' `<dir>` names are in the scratch folder: one where the model's user makes files (USER_DIRECTORIES and the
+  // homes of LOSAT/src/report/run_files.rs), not under /dev, whose names the rows read as devices (line NP WW4f,
+  // 2026-11-28: TMPDIR=/dev/shm/... and /run/user/1006/... failed here far from the cause).
+  assert.ok(/^\/(tmp|var\/tmp|var\/crash|run\/lock|run\/user\/1000|home\/[^/]+|mnt\/(c|d|wsl|wslg))\//.test(`${scratch}/`),
+            `-logfile names: V-ABI's scratch folder ${scratch} (TMPDIR) is not one where LOSAT Web's user makes files ` +
+            "outside /dev: use /tmp or the home");
   const inputs = path.join(ROOT, "LOSAT/tests/fasta/outfmt11");
   const query = path.join(inputs, "arch_tbx_q.fna"), subject = path.join(inputs, "arch_tbx_s.fna");
   const standardOutput = new Set(["/dev/stdout"]);
@@ -2199,10 +2205,6 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  // The -logfile rows read a name under /dev, /proc or /sys as a device's (checkLogfileNames): a scratch folder there
-  // would make the run's files look like devices (line NP WW4f, 2026-11-28: TMPDIR=/dev/shm/...).
-  assert.ok(!/^\/+(dev|proc|sys)\//.test(`${os.tmpdir()}/`),
-            `V-ABI's scratch folder (TMPDIR, ${os.tmpdir()}) is under /dev, /proc or /sys: use another`);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "losat-v-abi-"));
   const results = [];
   const selected = (options.engines || "serial,threads").split(",");

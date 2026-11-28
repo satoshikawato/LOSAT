@@ -477,10 +477,13 @@ pub(super) fn prefetch_reported_subjects(
                     crate::report::tabular::PrintedIds::default(),
                     |words, outfmt| words.or(outfmt.printed_ids()),
                 ),
-                format_plans.iter().any(|outfmt| match outfmt {
-                    BlastpReport::CustomTabular(spec) => spec.light_length(),
-                    _ => false,
-                }),
+                crate::algorithm::common::database::HolderTables::of(
+                    crate::blastinput::app::Program::Blastp,
+                    format_plans.iter().filter_map(|outfmt| match outfmt {
+                        BlastpReport::CustomTabular(spec) => Some(Some(*spec)),
+                        _ => None,
+                    }),
+                ),
             ),
         )?;
         // The holders' titles are read as the subjects' own (`check_reported_titles`).

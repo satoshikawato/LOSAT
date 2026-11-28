@@ -554,21 +554,26 @@ impl BatchTitles {
 
 /// The records of the holders that the reports of the batch `batches` write for its subjects
 /// (`shared::ShownHolders::shown`; `parsed`: the batch's subjects with parsed Seq-ids by ordinal
-/// id, `loads` by ordinal id), by ordinal id: LOSAT refuses a table's `slen` without the Bioseq
-/// (`light_length`). The reports read the holder's letters (`read_oid`), on which every table
-/// counts its identities (from its rows, `tabular::write_tabular`), as NCBI.
+/// id, `loads` by ordinal id), by ordinal id; `holder_tables`: what the tables read of a holder
+/// besides its record (`shared::HolderTables`). The reports read the holder's letters
+/// (`read_oid`), on which every table counts its identities (from its rows,
+/// `tabular::write_tabular`), as NCBI.
 fn shown_records(
     database: &BlastxDatabase,
     batches: &[BatchResults],
     parsed: &BTreeMap<usize, Arc<ParsedSubject>>,
     loads: &HitLoads,
-    light_length: bool,
+    holder_tables: shared::HolderTables,
 ) -> Result<BTreeMap<usize, crate::report::shown_bioseq::ShownBioseq>> {
     let mut records = BTreeMap::new();
     if !loads.writes_any_shown() {
         return Ok(records);
     }
-    let holders = shared::ShownHolders::new(&database.db, true, database.program);
+    let holders = shared::ShownHolders::new(
+        &database.db,
+        crate::blastinput::app::Program::Blastx,
+        database.program,
+    );
     let mut ends: BTreeMap<usize, usize> = BTreeMap::new();
     for list in batches.iter().flat_map(|batch| &batch.queries).flatten() {
         let end = ends.entry(list.oid).or_default();
@@ -582,8 +587,8 @@ fn shown_records(
             loads,
             oid,
             (ordinal, subject),
-            (ends.get(&oid).copied().unwrap_or(0), false),
-            (light_length, false),
+            ends.get(&oid).copied().unwrap_or(0),
+            (holder_tables, false),
             // The scope's queries are noted after the batch's subjects (`refuse_ids_of_queries`,
             // which refuses a holder that they find).
             crate::report::query_bioseq::SeenFrom::default(),
@@ -786,9 +791,9 @@ impl ReportedSubjects {
     /// tables' rows, the taxonomy reads and the run's record of the loads, `note_loaded`, take that
     /// one answer), with how a pairwise report reads the subjects (`pairwise_read_order`): the
     /// batch's reports come after the loads of the record (the batches before and the calls
-    /// before, `TaxdbRun::loads_before`), in the batch's scope (`HitLoads::of`). `light_length`:
-    /// whether a table writes `slen` without the subject's Bioseq, which decides whether the
-    /// reports write the record of a holder (`shown_records`).
+    /// before, `TaxdbRun::loads_before`), in the batch's scope (`HitLoads::of`). `holder_tables`:
+    /// what the tables read of a holder besides its record (`shared::HolderTables`), which
+    /// decides whether the reports write the record of a holder (`shown_records`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -811,7 +816,7 @@ impl ReportedSubjects {
             crate::report::db_subject::FormatThrow,
             Option<crate::report::pairwise::PairwiseReading>,
         ),
-        light_length: bool,
+        holder_tables: shared::HolderTables,
     ) -> Result<Self> {
         let BatchTitles {
             listed,
@@ -946,7 +951,7 @@ impl ReportedSubjects {
         let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
         // The holders' records that the reports write for subjects (`shared::ShownHolders`).
         let shown_records = if reports {
-            shown_records(database, batches, &parsed, &loads, light_length)?
+            shown_records(database, batches, &parsed, &loads, holder_tables)?
         } else {
             BTreeMap::new()
         };
@@ -968,18 +973,22 @@ impl ReportedSubjects {
                     database.program,
                 )?;
             }
-            let shown_record = shown_records.get(&oid);
-            // The letters and the title of the holder whose record the reports write.
-            let read_oid = shown_record.map_or(oid, |bioseq| bioseq.ordinal() as usize);
-            let title = shown_record.map_or(title, |bioseq| Arc::from(bioseq.record.first_title()));
-            if let Some(subject) = shown_record
-                .map(|bioseq| &bioseq.record)
-                .or(parsed.get(&oid))
-            {
-                let load = match shown_record {
-                    Some(_) => crate::report::db_subject::HitLoad::Loaded,
-                    None => loads.load(oid),
-                };
+            // The record, letters and title that the reports write: the subject's, or those of
+            // its holder (`shown_records`).
+            let written = parsed.get(&oid).map(|subject| {
+                crate::report::shown_bioseq::Written::of(
+                    shown_records.get(&oid),
+                    (ordinal, subject),
+                    || loads.load(oid),
+                )
+            });
+            let read_oid = written.map_or(oid, |written| written.ordinal as usize);
+            let title = match written {
+                Some(written) if written.held => Arc::from(written.record.first_title()),
+                _ => title,
+            };
+            if let Some(written) = written {
+                let (subject, load) = (written.record, written.load);
                 if reports && reads {
                     // `handle_load_refusal` is checked in `check_handle_loads` after
                     // `refuse_ids_of_queries` has populated `seen`.

@@ -1777,14 +1777,13 @@ pub(super) fn read_titles(
 pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown {
     let pairwise = output_formats.iter().any(|format| format.is_pairwise());
     ParsedShown {
-        // BLASTN's tables count the identities on the rows where NCBI does.
-        table_identities: false,
-        light_length: output_formats.iter().any(|format| {
-            format.is_tabular()
-                && format
-                    .tabular_spec()
-                    .is_some_and(crate::report::tabular::TabularSpec::light_length)
-        }),
+        holder_tables: shared::HolderTables::of(
+            crate::blastinput::app::Program::Blastn,
+            output_formats
+                .iter()
+                .filter(|format| format.is_tabular())
+                .map(|format| format.tabular_spec()),
+        ),
         tabular: output_formats
             .iter()
             .any(|format| format.tabular_reads_subject()),
@@ -2430,12 +2429,12 @@ pub(super) fn reported_subjects(
     let db = &database.db;
     // The holders whose records the writers write for subjects (`shared::ShownHolders`); the rows
     // read a shorter holder's letters to its end (`pairwise::context_rows_into`).
-    let holders = shared::ShownHolders::new(db, false, PROGRAM);
+    let holders = shared::ShownHolders::new(db, crate::blastinput::app::Program::Blastn, PROGRAM);
     let record = |&ordinal: &u32| -> Result<Reported> {
         let header = titles
             .get(&ordinal)
             .with_context(|| format!("database sequence {} has no title read", db.oid(ordinal)))?;
-        let (title, subject, source) = match header {
+        let (title, subject, source, read) = match header {
             ReportedHeader::Stored(stored) => {
                 shared::check_reported_title(
                     db,
@@ -2447,64 +2446,45 @@ pub(super) fn reported_subjects(
                 if shown.pairwise {
                     stored.check_shown_source(|| db.oid(ordinal), PROGRAM)?;
                 }
-                (stored.title.clone(), None, stored.source.clone())
+                (stored.title.clone(), None, stored.source.clone(), ordinal)
             }
             ReportedHeader::Parsed(subject) => {
                 let taxdb = shown.pairwise && *taxdb_found.get_or_init(|| db.taxdb_found());
                 let shown = reads.shown(shown, ordinal);
-                if let Some(bioseq) = holders.shown(
+                let shown_bioseq = holders.shown(
                     &loads,
                     ordinal as usize,
                     (ordinal, subject),
-                    (0, false),
-                    (shown.light_length, seen_all.contains(&ordinal)),
+                    0,
+                    (shown.holder_tables, seen_all.contains(&ordinal)),
                     seen,
-                )? {
-                    shared::check_reported_parsed(
-                        db,
-                        &bioseq.record,
-                        shown,
-                        crate::report::db_subject::HitLoad::Loaded,
-                        false,
-                        taxdb,
-                        bioseq.ordinal(),
-                        false,
-                        PROGRAM,
-                    )?;
-                    let store = if letters {
-                        Some(reported_store(db, bioseq.ordinal())?)
-                    } else {
-                        None
-                    };
-                    let record = FastaRecord {
-                        local_id: db.oid(ordinal).fasta_id(),
-                        title: bioseq.record.first_title().to_vec(),
-                        sequence: Vec::new(),
-                        warnings: Vec::new(),
-                        source: Default::default(),
-                    };
-                    return Ok((record, store, Some(bioseq.record), Default::default()));
-                }
+                )?;
+                let written = crate::report::shown_bioseq::Written::of(
+                    shown_bioseq.as_ref(),
+                    (ordinal, subject),
+                    || loads.load(ordinal as usize),
+                );
                 shared::check_reported_parsed(
                     db,
-                    subject,
+                    written.record,
                     shown,
-                    loads.load(ordinal as usize),
+                    written.load,
                     false,
                     taxdb,
-                    ordinal,
-                    seen_all.contains(&ordinal),
+                    written.ordinal,
+                    written.seen_by_scope(seen_all.contains(&ordinal)),
                     PROGRAM,
                 )?;
                 (
-                    subject.first_title().to_vec(),
-                    Some(Arc::clone(subject)),
+                    written.record.first_title().to_vec(),
+                    Some(Arc::clone(written.record)),
                     Default::default(),
+                    written.ordinal,
                 )
             }
         };
         let store = if letters {
-            Some(reported_store(db, ordinal)?)
+            Some(reported_store(db, read)?)
         } else {
             None
         };

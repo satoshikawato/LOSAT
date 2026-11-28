@@ -3127,7 +3127,8 @@ impl ListedTitles<'_> {
     /// subject's `Hit` (`hit_loads`, the one answer: a `Hit` that throws, a subject that no
     /// report loads, one for which NCBI's places give another sequence). Returns, by rank, the
     /// records of the holders that the reports write for subjects (`shown_record`), whose own
-    /// checks are made here; `light_length`: a table writes `slen` without the subject's Bioseq.
+    /// checks are made here; `holder_tables`: what the tables read of a holder besides its record
+    /// (`shared::HolderTables`).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn check_parsed_reports(
         &self,
@@ -3137,7 +3138,7 @@ impl ListedTitles<'_> {
         joined: bool,
         taxonomy: bool,
         loads: &HitLoads,
-        (words, light_length): (crate::report::tabular::PrintedIds, bool),
+        (words, holder_tables): (crate::report::tabular::PrintedIds, shared::HolderTables),
     ) -> Result<Vec<(usize, crate::report::shown_bioseq::ShownBioseq)>> {
         let mut shown_records = Vec::new();
         if self.parsed.is_empty() {
@@ -3145,10 +3146,15 @@ impl ListedTitles<'_> {
         }
         if fetched {
             let seen = self.seen();
-            let holders = database
-                .map(|database| shared::ShownHolders::new(database.seqdb(), true, self.program));
+            let holders = database.map(|database| {
+                shared::ShownHolders::new(
+                    database.seqdb(),
+                    crate::blastinput::app::Program::Blastp,
+                    self.program,
+                )
+            });
             for rank in Self::reported(hit_lists) {
-                if let Some(subject) = self.parsed_subject(rank) {
+                if let Some(subject) = self.parsed.get(rank).and_then(Option::as_ref) {
                     let ordinal = self.listed.ordinals[rank];
                     let seen_by_scope = seen.any()
                         && seen.hides_ordinal(
@@ -3167,35 +3173,39 @@ impl ListedTitles<'_> {
                             ordinal,
                         );
                     let shown = match &holders {
-                        Some(holders) if loads.writes_shown_records(rank) => self.shown_record(
+                        Some(holders) => self.shown_record(
                             holders,
                             loads,
                             (rank, subject),
-                            (light_length, seen_by_scope),
+                            (holder_tables, seen_by_scope),
                         )?,
-                        _ => None,
+                        None => None,
                     };
-                    // The holder's record is checked as the subject's own (`HitLoad::Loaded`).
-                    let (subject, load, seen_by_scope) = match &shown {
-                        Some(bioseq) => (
-                            bioseq.record.as_ref(),
-                            crate::report::db_subject::HitLoad::Loaded,
-                            false,
-                        ),
-                        None => (subject, loads.load(rank), seen_by_scope),
-                    };
-                    subject
-                        .fetched_with_scope(taxonomy, load, seen_by_scope)
+                    let written = crate::report::shown_bioseq::Written::of(
+                        shown.as_ref(),
+                        (ordinal, subject),
+                        || loads.load(rank),
+                    );
+                    written
+                        .record
+                        .fetched_with_scope(
+                            taxonomy,
+                            written.load,
+                            written.seen_by_scope(seen_by_scope),
+                        )
                         .map_err(|reason| {
                             shared::parsed_refusal(self.oids.oid(ordinal), &reason, self.program)
                         })?;
-                    subject.check_printed_word(true, words).map_err(|problem| {
-                        shared::parsed_refusal(
-                            self.oids.oid(self.listed.ordinals[rank]),
-                            &format!("has {problem}"),
-                            self.program,
-                        )
-                    })?;
+                    written
+                        .record
+                        .check_printed_word(true, words)
+                        .map_err(|problem| {
+                            shared::parsed_refusal(
+                                self.oids.oid(ordinal),
+                                &format!("has {problem}"),
+                                self.program,
+                            )
+                        })?;
                     if let Some(bioseq) = shown {
                         shown_records.push((rank, bioseq));
                     }
@@ -3233,17 +3243,10 @@ impl ListedTitles<'_> {
         holders: &shared::ShownHolders<'_>,
         loads: &HitLoads,
         (rank, subject): (usize, &ParsedSubject),
-        flags: (bool, bool),
+        flags: (shared::HolderTables, bool),
     ) -> Result<Option<crate::report::shown_bioseq::ShownBioseq>> {
         let ordinal = self.listed.ordinals[rank];
-        holders.shown(
-            loads,
-            rank,
-            (ordinal, subject),
-            (0, false),
-            flags,
-            self.seen(),
-        )
+        holders.shown(loads, rank, (ordinal, subject), 0, flags, self.seen())
     }
 
     /// What the XML2 and JSON reports of the final hit lists `hit_lists` (in the order of the

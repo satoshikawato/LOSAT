@@ -1092,15 +1092,13 @@ pub(crate) fn parsed_shown(
 ) -> ParsedShown {
     let pairwise = formats.iter().any(|format| format.is_pairwise());
     ParsedShown {
-        // TBLASTX's tables count their identities on the rows (`report::set_displayed_identities`,
-        // `tabular::ROW_FIELDS`) of the letters that the reports read, the holder's.
-        table_identities: false,
-        light_length: formats.iter().any(|format| {
-            format.is_tabular()
-                && format
-                    .tabular_spec()
-                    .is_some_and(crate::report::tabular::TabularSpec::light_length)
-        }),
+        holder_tables: shared::HolderTables::of(
+            crate::blastinput::app::Program::Tblastx,
+            formats
+                .iter()
+                .filter(|format| format.is_tabular())
+                .map(|format| format.tabular_spec()),
+        ),
         tabular: formats.iter().any(|format| format.tabular_reads_subject()),
         stops_at_failed_lookup: formats.iter().any(|format| {
             format.is_tabular()
@@ -1216,7 +1214,11 @@ pub(crate) fn reported_subjects(
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
     let mut sources = Vec::new();
     // The holders whose records the writers write for subjects (`shared::ShownHolders`).
-    let holders = shared::ShownHolders::new(&database.db, false, PROGRAM);
+    let holders = shared::ShownHolders::new(
+        &database.db,
+        crate::blastinput::app::Program::Tblastx,
+        PROGRAM,
+    );
     for (rank, &ordinal) in ordinals.iter().enumerate() {
         // The sequence whose letters and length the reports read: the subject's, or its holder's.
         let mut read_ordinal = ordinal;
@@ -1245,48 +1247,36 @@ pub(crate) fn reported_subjects(
                 // Whether `taxdb.bti` is on the search path, looked up at the first sequence
                 // with parsed Seq-ids that outfmt 0 shows (once for the run, `taxdb_found`).
                 let taxdb = shown.pairwise && database.taxdb_found();
-                let shown_bioseq = if loads.writes_shown_records(ordinal as usize) {
-                    holders.shown(
-                        &loads,
-                        ordinal as usize,
-                        (ordinal, subject),
-                        (
-                            shared::x_nucleotide_length(&database.db, ordinal, PROGRAM)?,
-                            true,
-                        ),
-                        (shown.light_length, seen_all.contains(&ordinal)),
-                        seen,
-                    )?
-                } else {
-                    None
-                };
-                let (subject, checked, load) = match &shown_bioseq {
-                    Some(bioseq) => {
-                        read_ordinal = bioseq.ordinal();
-                        (
-                            &bioseq.record,
-                            read_ordinal,
-                            crate::report::db_subject::HitLoad::Loaded,
-                        )
-                    }
-                    None => (subject, ordinal, loads.load(ordinal as usize)),
-                };
+                let shown_bioseq = holders.shown(
+                    &loads,
+                    ordinal as usize,
+                    (ordinal, subject),
+                    0,
+                    (shown.holder_tables, seen_all.contains(&ordinal)),
+                    seen,
+                )?;
+                let written = crate::report::shown_bioseq::Written::of(
+                    shown_bioseq.as_ref(),
+                    (ordinal, subject),
+                    || loads.load(ordinal as usize),
+                );
+                read_ordinal = written.ordinal;
                 shared::check_reported_parsed(
                     &database.db,
-                    subject,
+                    written.record,
                     reads.shown(shown, ordinal),
-                    load,
+                    written.load,
                     false,
                     taxdb,
-                    checked,
-                    shown_bioseq.is_none() && seen_all.contains(&ordinal),
+                    written.ordinal,
+                    written.seen_by_scope(seen_all.contains(&ordinal)),
                     PROGRAM,
                 )?;
                 if parsed.is_empty() {
                     parsed = vec![None; ordinals.len()];
                 }
-                parsed[rank] = Some(Arc::clone(subject));
-                subject.first_title().to_vec()
+                parsed[rank] = Some(Arc::clone(written.record));
+                written.record.first_title().to_vec()
             }
         };
         lengths.push(match stores {

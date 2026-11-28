@@ -1,17 +1,19 @@
 // The parts of a tool tab's form draft that do not depend on the tool (WindowMasker's `ToolDraft`,
-// Format Archive's `BlastFormatterDraft`, makeblastdb's `MakeblastdbDraft`; RG-F3p7 review R1 #3): the
-// tool's `-xmlhelp`, the files of the run (refusing a second file under a name already there; a file
-// chosen for an option, which the option then names), the check of the argv by
+// Format Archive's `BlastFormatterDraft`, makeblastdb's `MakeblastdbDraft`, Masking's `MaskingDraft`; RG-F3p7
+// review R1 #3): the `-xmlhelp` of the tool shown (each tool's asked once; the Masking tab shows one of three),
+// the files of the run (refusing a second file under a name already there; a file chosen for an option, which
+// the option then names), the check of the argv by
 // `validateTool` (debounced, one at a time, an older answer dropped; it runs while the engine is busy,
 // behind the run), the run directory (one builder for the check and the run), and the submit that
-// waits for the check before it queues the runs on the shared Coordinator queue. A tool supplies its
-// inputs and its argv through the abstract members.
+// waits for the check before it queues the runs on the shared Coordinator queue, recording on each run that
+// can write masking information the `-outfmt` default of its tool's `-xmlhelp` (`maskOutfmtDefault`). A tool supplies its inputs
+// and its argv through the abstract members.
 import type { DirectoryFile, ToolDescription } from 'losat/domain';
 import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports';
 import { duplicateRunFileMessage, normalizeRunPath, pickedFilePath, RunDirectoryBuilder } from '../domain/blast-db';
 import type { FieldValue } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
-import { fileListNames, listNameRefusal, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
+import { fileListNames, listNameRefusal, maskOutfmtDefault, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
 import { TOOL_FILE_LIST_FLAGS, type ToolId } from '../domain/tools';
 import { failureText } from './availability';
 import type { EnqueueAllResult, ToolDirectoryFile, ToolRequest } from './coordinator';
@@ -35,6 +37,7 @@ export interface ToolExtraFile {
 export interface ToolFormState {
   readonly runFiles: readonly ToolExtraFile[];
   readonly runFilesError?: string;
+  /** The `-xmlhelp` of the tool that the form shows (`shownTool`), and why it could not be read. */
   readonly description?: ToolDescription;
   readonly descriptionError?: string;
   readonly descriptionUnavailable?: true;
@@ -76,7 +79,11 @@ interface Check {
 export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm {
   readonly state: Store<S>;
   protected nextKey = 1;
-  private descriptionRequest: Promise<ToolDescription> | undefined;
+  /** Each tool's `-xmlhelp` once read, and the request of each tool being asked. */
+  private readonly descriptions = new Map<ToolId, ToolDescription>();
+  private readonly descriptionRequests = new Map<ToolId, Promise<ToolDescription>>();
+  /** Why each tool's `-xmlhelp` could not be read, until it is read. */
+  private readonly descriptionErrors = new Map<ToolId, { readonly message: string; readonly unavailable: boolean }>();
   private validationTimer: ReturnType<typeof setTimeout> | undefined;
   private validationGeneration = 0;
   private validationTurn: Promise<void> = Promise.resolve();
@@ -126,6 +133,9 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
    */
   protected runFilesAdded?(state: S, runFiles: readonly ToolExtraFile[]): StatePatch<S>;
 
+  /** The tool whose `-xmlhelp` the form shows when it is not the tab's own tool (the tool chosen on the Masking tab). */
+  protected shownTool?(state: S): ToolId;
+
   /** The value of an option of the form (of the stage shown, for WindowMasker). */
   protected abstract optionValue(state: S, flag: string): FieldValue | undefined;
 
@@ -134,10 +144,11 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
 
   // --- the tool's description ---------------------------------------------------------------
 
-  /** Loads the tool's `-xmlhelp` once, when its tab is first opened. */
+  /** Loads the `-xmlhelp` of the tool shown once, when its tab is first opened (or the tool is first chosen). */
   ensureLoaded(): void {
-    if (this.state.get().description === undefined && this.descriptionRequest === undefined) {
-      void this.loadDescription();
+    const tool = this.describedTool(this.state.get());
+    if (!this.descriptions.has(tool) && !this.descriptionRequests.has(tool)) {
+      void this.loadDescription(tool);
     }
   }
 
@@ -146,7 +157,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
     const state = this.state.get();
     const tasks: Array<Promise<unknown>> = [...this.asking];
     if (state.descriptionUnavailable === true) {
-      const task = this.loadDescription(true);
+      const task = this.loadDescription(this.describedTool(state), true);
       this.trackAsking(task);
       tasks.push(task);
     }
@@ -330,7 +341,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
       const state = this.state.get();
       // Hold every inflated session file before any await of buildRequests, so that Remove during the
       // submit cannot drop an OPFS session file out from under it.
-      const holder = `submit:${this.nextKey++}`;
+      const holder = this.holder('submit', String(this.nextKey++));
       const stateTokens = this.heldTokens?.(state) ?? [];
       if (stateTokens.length > 0) this.core.sessionFiles?.set(holder, stateTokens);
       try {
@@ -349,7 +360,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
           this.reportError(text);
           return { ok: false, message: text };
         }
-        const requests = await this.buildRequests(state, extra);
+        const requests = (await this.buildRequests(state, extra)).map((request) => this.recordMaskOutfmt(request));
         const requestTokens = requests.flatMap((request) => request.sessionTokens ?? []);
         if (requestTokens.length > 0) this.core.sessionFiles?.set(holder, new Set([...stateTokens, ...requestTokens]));
         const result = await this.core.enqueueToolAll(requests);
@@ -379,6 +390,27 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
   }
 
   // --- for the tools ------------------------------------------------------------------------
+
+  /** The name under which the draft holds inflated session files (`SessionFiles`), apart from every other draft's. */
+  protected holder(kind: 'form' | 'submit', key: string): string {
+    return `${kind}:${this.tool}:${key}`;
+  }
+
+  /**
+   * Shows the `-xmlhelp` of the tool shown now (`shownTool`) after the tool changed: as read, or
+   * why it could not be, or asks for it.
+   */
+  protected showDescription(): void {
+    const tool = this.describedTool(this.state.get());
+    const description = this.descriptions.get(tool);
+    const error = this.descriptionErrors.get(tool);
+    this.patch({
+      description,
+      descriptionError: error?.message,
+      descriptionUnavailable: error?.unavailable === true ? true : undefined,
+    });
+    this.ensureLoaded();
+  }
 
   /** The run directory of `inputs` and the files of the run; throws `duplicateRunFileMessage` when two files claim one name. */
   protected runDirectory<E extends DirectoryFile>(state: S, inputs: readonly E[], origin: (entry: ToolExtraFile) => E): readonly E[] {
@@ -458,25 +490,51 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
     }
   }
 
-  private loadDescription(force = false): Promise<ToolDescription | undefined> {
-    if (!force && this.descriptionRequest !== undefined) return this.descriptionRequest;
-    const request = this.core.engine.describeTool(this.tool);
-    this.descriptionRequest = request;
+  private loadDescription(tool: ToolId, force = false): Promise<ToolDescription | undefined> {
+    const pending = this.descriptionRequests.get(tool);
+    if (!force && pending !== undefined) return pending;
+    const request = this.core.engine.describeTool(tool);
+    this.descriptionRequests.set(tool, request);
+    const shown = () => this.describedTool(this.state.get()) === tool;
     return request.then(
       (description) => {
-        this.patch({ description, descriptionError: undefined, descriptionUnavailable: undefined });
-        this.scheduleValidation();
+        this.descriptions.set(tool, description);
+        this.descriptionErrors.delete(tool);
+        if (shown()) {
+          this.patch({ description, descriptionError: undefined, descriptionUnavailable: undefined });
+          this.scheduleValidation();
+        }
         return description;
       },
       (error: unknown) => {
-        if (this.descriptionRequest === request) this.descriptionRequest = undefined;
-        this.patch({
-          descriptionError: errorMessage(error),
-          ...(isUnavailable(error) ? { descriptionUnavailable: true as const } : {}),
-        });
+        if (this.descriptionRequests.get(tool) === request) this.descriptionRequests.delete(tool);
+        const message = errorMessage(error);
+        const unavailable = isUnavailable(error);
+        this.descriptionErrors.set(tool, { message, unavailable });
+        if (shown()) {
+          this.patch({
+            descriptionError: message,
+            ...(unavailable ? { descriptionUnavailable: true as const } : {}),
+          });
+        }
         return undefined;
       },
     );
+  }
+
+  /**
+   * Records on a run that can write masking information the `-outfmt` default of its tool's `-xmlhelp`
+   * (`maskOutfmtDefault`), so that the run's output is judged mask data (`maskDataName`) from the run alone.
+   */
+  private recordMaskOutfmt(request: ToolRequest): ToolRequest {
+    if (request.prints !== undefined) return request;
+    const outfmtDefault = maskOutfmtDefault(request.tool, request.stage, this.descriptions.get(request.tool));
+    return outfmtDefault === undefined ? request : { ...request, outfmtDefault };
+  }
+
+  /** The tool whose `-xmlhelp` the form shows: the tab's own tool, or the one that `shownTool` names. */
+  private describedTool(state: S): ToolId {
+    return this.shownTool?.(state) ?? this.tool;
   }
 
   private trackAsking(promise: Promise<unknown>): void {

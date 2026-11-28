@@ -62,7 +62,7 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   (psiblast's outfmt 0 draws no query masks, so the record that is both a query and a subject is written).
 - `ps5c_big.faa` (PS5c): YP_009220597.1 of `tests/fasta/WSSV.faa` (capsid protein, 6,077 letters), searched
   against itself with `-searchsp 9223372036854775807 -evalue 1e-300`: a hit cutoff whose `K × searchsp / E`
-  is past the double (`ncbi_cutoffs::cutoff_score_from_evalue`).
+  is past the double (`stats::cutoffs::karlin_etos_simple`).
 - `ps5c_qx.faa` (PS5c): one query of 30 X, which gives no Karlin-Altschul parameters (NCBI does not search its
   batch); `ps5c_qx_tk.faa`: `ps5c_qx.faa`, then `tk.faa`. With `BATCH_SIZE=1` and a search that fails in its
   setup (here the empty database `tests/seqdb/db/empty`), NCBI reports the first batch, then the error of the

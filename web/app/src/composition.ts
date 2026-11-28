@@ -12,6 +12,7 @@ import { SearchDraft } from './application/draft';
 import { CountsLoader } from './application/counts';
 import { ExampleLoader } from './application/examples';
 import { MakeblastdbDraft } from './application/makeblastdb-draft';
+import { MaskingDraft } from './application/masking-draft';
 import { ResultsBrowser } from './application/results';
 import { SessionFiles } from './application/session-files';
 import { ToolDraft } from './application/tool-draft';
@@ -34,6 +35,8 @@ export interface App {
   readonly draft: SearchDraft;
   /** The WindowMasker job being edited on the WindowMasker tab. */
   readonly toolDraft: ToolDraft;
+  /** The dustmasker, segmasker or convert2blastmask job being edited on the Masking tab (WW4c). */
+  readonly maskingDraft: MaskingDraft;
   /** The Format Archive (`blast_formatter`) job being edited on the Format Archive tab. */
   readonly blastFormatterDraft: BlastFormatterDraft;
   /** The makeblastdb job being edited on the makeblastdb tab (line WW, WW4b2). */
@@ -118,6 +121,13 @@ export function createApp(options: AppOptions = {}): App {
     readSavedCounts: async (taxid) => (await counts.readSavedFile(taxid))?.file,
     sessionFiles,
   });
+  const maskingDraft = new MaskingDraft({
+    engine,
+    data,
+    enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
+    isBusy: () => coordinator.isBusy(),
+    sessionFiles,
+  });
   const blastFormatterDraft = new BlastFormatterDraft({
     engine,
     enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
@@ -129,7 +139,7 @@ export function createApp(options: AppOptions = {}): App {
     enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
     isBusy: () => coordinator.isBusy(),
   });
-  const tools = [toolDraft, blastFormatterDraft, makeblastdbDraft];
+  const tools = [toolDraft, maskingDraft, blastFormatterDraft, makeblastdbDraft];
   const availability = new Availability({ draft, tools, dataWorkerEnded });
   const examples = new ExampleLoader({
     downloader: new BrowserFileDownloader({ inflater: data }),
@@ -159,6 +169,7 @@ export function createApp(options: AppOptions = {}): App {
     coordinator,
     draft,
     toolDraft,
+    maskingDraft,
     blastFormatterDraft,
     makeblastdbDraft,
     examples,

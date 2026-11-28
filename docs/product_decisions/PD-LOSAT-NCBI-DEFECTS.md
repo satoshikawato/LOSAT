@@ -1472,7 +1472,7 @@ Accepted by the maintainer on 2026-11-12 (line PS `DECISIONS.md` 36).
    extreme `-searchsp` and `-evalue` on a small input NCBI does write rows: 320 for a
    6,077-codon sequence against itself with `-searchsp 9223372036854775807 -evalue 1e-300`.
    A valid result exists and can be checked: LOSAT keeps the finite cutoff of the mathematically
-   equal `ln K + ln searchsp - ln E` (`algorithm::tblastx::ncbi_cutoffs`), and on a nearby pair
+   equal `ln K + ln searchsp - ln E` (`stats::cutoffs`), and on a nearby pair
    whose quotient stays finite (the same 1.2 Mb query against a 2 Mb subject made of 30 kb of
    the Sakai genome inside N) NCBI and LOSAT write the same 457 rows byte for byte. On the
    genome pair above LOSAT writes 88,562 rows in 2 minutes, and on the small input 262 rows. The
@@ -2862,9 +2862,27 @@ file would differ, and NCBI's programs still could not open the database).
   `hard_ranges[n]` after the last chunk (version 1.83; version 1.82 and before named `[1]`; for a
   masked subject `n` is the number of hard ranges, a read 4 bytes past the array of
   `CSeqDB`; the overlap it chooses only merges HSPs that intersect across a chunk boundary, and
-  hard chunks are disjoint), the out-of-range `double` to `Int4`
-  conversion (INT_MIN), and the catch in `BlastSetupPreliminarySearchEx` that never
+  hard chunks are disjoint), and the catch in `BlastSetupPreliminarySearchEx` that never
   matches.
+- The out-of-range `double` to `Int4` conversion (`INT_MIN`) of BLASTN's `BLAST_Cutoffs`
+  (`BlastKarlinEtoS_simple`, `blast_stat.c:4041-4064`), listed until 2026-11-28 among the defects
+  without an effect, does change the output. The quotient `K * searchsp / E` is past the range of
+  a double once `K * searchsp` passes about 1.8e11 with an `-evalue` of 1e-297 or less (E is
+  raised to `kSmallFloat`), or a larger search space with a larger `-evalue`. An ordinary genome
+  pair with only `-evalue 1e-300` reaches it (MG1655 x Sakai, `LOSAT/tests/fasta/`). NCBI's
+  x86-64 build converts it to `INT_MIN`, the hit-saving cutoff stays 1 and so does the word
+  cutoff, and every seed is extended. On that pair (one thread) NCBI BLAST+ 2.17.0 and LOSAT
+  write the same 476 rows with `-task blastn` (NCBI 196 s and 1.19 GiB, LOSAT 147 s and
+  1.39 GiB) and 455 rows with megablast. The finite value of exception 8 gives as many rows, 1
+  and 6 of them another alignment of the same score, in 10 s and 61 MiB with `-task blastn`;
+  NCBI's own output with `-evalue 1e-290`, a finite quotient, holds those rows byte for byte. On
+  a constructed input (rows `db.etos.bn.int4min.ss.e300`: `-searchsp 9223372036854775807
+  -evalue 1e-300`) NCBI writes an alignment that the finite value would not find (one row
+  against none; with `-evalue 1e-200` the quotient is finite and NCBI writes none,
+  `db.etos.bn.finite.ss.e200`). LOSAT reproduces it (`stats::cutoffs::CutoffConversion::BLASTN`),
+  as decision D4 reproduces the conversions of `-threshold` and the X-drops. Whether it stays so
+  is the maintainer's open question Q-ETOS8 (line RG item X-etos-owner), with the other programs'
+  conversion of the same quotient.
 - `losat windowmasker -mk_counts`, `-convert` and `-checkdup` (version 1.72, 2026-11-22, line NP
   item M5b, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): NCBI's defined
   but surprising results are written byte for byte (fixture rows of `LOSAT/tests/windowmasker`):

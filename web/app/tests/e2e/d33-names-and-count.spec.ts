@@ -1,7 +1,8 @@
 // Line WQA's D33 (2026-11-28), two low defects of sweep 4, through the real application (the engine build, LOSAT_WEB_REACTORS):
 //  - S4-3: a list file of the Database filters whose name starts or ends with a space is run, and shown, under that name,
 //    quoted as a query file is (the shown command runs on the command line with the same bytes);
-//  - S4-8: Run LOSAT's "(N runs)" never shows the count of an older argv after a help or version word is typed or taken out.
+//  - S4-8: Run LOSAT's "(N runs)" never shows the count of an older argv after a help or version word is typed or taken out;
+//    the WindowMasker tab's button says one run for a help or version word, as the press starts one (R1, M3).
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect } from '@playwright/test';
@@ -111,6 +112,32 @@ test('the button names no count of an older argv after a help or version word is
   // A press at once after the word starts one run, as the label that waits for the answer says.
   await page.getByTestId('param-extra').fill('-version');
   await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await expect(page.getByTestId('run-2-option')).toHaveCount(0);
+});
+
+test('the WindowMasker button names no count for a help or version word, which starts one print request (S4-8, R1 M3)', async ({ page }) => {
+  await page.getByTestId('tab-windowmasker').click();
+  await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  const files = ['a', 'b'].map((name) => ({
+    name: `${name}.fa`,
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(`>${name}\nACGTACGTACGTACGTACGTAAAC\n`),
+  }));
+  await page.getByTestId('wm-fasta-files').setInputFiles(files);
+  await expect(page.locator('[data-testid="wm-fasta-list"] > li')).toHaveCount(2);
+  await page.getByTestId('wm-fasta-mode-separate').check();
+  const button = page.getByTestId('wm-run-losat');
+  await expect(button).toHaveText('Run LOSAT (2 runs)');
+  const toggle = page.getByTestId('wm-options-toggle');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await page.getByTestId('wm-param-extra').fill('-version');
+  await expect(button).toHaveText('Run LOSAT');
+  await page.getByTestId('wm-param-extra').fill('');
+  await expect(button).toHaveText('Run LOSAT (2 runs)');
+  await page.getByTestId('wm-param-extra').fill('-version');
+  await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+  await button.click();
   await waitStatus(page, 1, 'completed');
   await expect(page.getByTestId('run-2-option')).toHaveCount(0);
 });

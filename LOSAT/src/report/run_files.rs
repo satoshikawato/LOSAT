@@ -943,6 +943,9 @@ impl OpenFiles {
             Some(index) => index,
             None => {
                 let host = outside.join(placed.len().to_string());
+                // Empty: a host that keeps its folder across runs may hold what an earlier run
+                // that ended in a trap left there.
+                let _ = std::fs::remove_dir_all(&host);
                 std::fs::create_dir_all(&host)?;
                 placed.push(Placed {
                     key,

@@ -586,9 +586,9 @@ export function maskDataName(
 /**
  * The name in another run's directory of a run's file that is handed over to it (the name that the engine gave the file,
  * `runFileNamed`): as makeblastdb's `-mask_data` (`maskDataName`), WindowMasker's `-ustat` or `-convert` input ("Mask with
- * these counts") or BLASTN's `-window_masker_db` ("Use in BLASTN"). The file's path where it is a file of its run's
- * directory (`m.asnb`, `sub/m.asnb`), else its name alone (`../m.asnb` and `/tmp/m.asnb` are `m.asnb`), as no run
- * directory holds a path above it or from the root.
+ * these counts"), BLASTN's `-window_masker_db` ("Use in BLASTN"), or a file of makeblastdb's database ("Use as Database",
+ * "Download all"). The file's path where it is a file of its run's directory (`m.asnb`, `sub/m.asnb`), else its name
+ * alone (`../m.asnb` and `/tmp/m.asnb` are `m.asnb`), as no run directory holds a path above it or from the root.
  */
 export function handedOverName(name: string): string {
   return name.startsWith('/') || name.split('/').includes('..') ? name.slice(name.lastIndexOf('/') + 1) : name;

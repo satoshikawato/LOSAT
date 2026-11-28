@@ -117,7 +117,7 @@ impl MaskWriter {
     // With `-gi_mask` (`m_UseGiMask`) a registration makes no entry of the mask column: the id
     // maps to a new GI mask of the algorithm (`CWriteDB_GiMask`). Its description, in the header
     // of the algorithm's index files, is the value the column would have stored, `name` the name
-    // of its files, and `max_file_size` (`m_MaxFileSize`, `-max_file_sz`) the limit of its data
+    // of its files (made under `path`, where the run's files place them), and `max_file_size` (`m_MaxFileSize`, `-max_file_sz`) the limit of its data
     // volumes. The two index files read the clock (`clock`) in their constructors, the `.gmi`
     // file first.
     /// `RegisterMaskAlgorithm` of a program, its options and a name.
@@ -126,6 +126,7 @@ impl MaskWriter {
         program: i32,
         options: &[u8],
         name: &[u8],
+        path: &[u8],
         volumes_exist: bool,
         max_file_size: u64,
         clock: &ColumnDates,
@@ -147,7 +148,7 @@ impl MaskWriter {
         if self.gi_masks.is_some() {
             let dates = [clock.now()?, clock.now()?];
             if let Some(gi_masks) = self.gi_masks.as_mut() {
-                gi_masks.add(algorithm_id, name, &value, max_file_size, dates);
+                gi_masks.add(algorithm_id, name, path, &value, max_file_size, dates);
             }
             return Ok(algorithm_id);
         }

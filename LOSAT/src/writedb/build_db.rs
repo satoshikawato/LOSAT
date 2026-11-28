@@ -27,6 +27,7 @@ use super::writer::{DbVersion, Indices, WriteDb};
 use super::WriteDbError;
 use crate::ncbi_app::files::ends_like_sigpipe;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::run_files::{MadeFolder, OpenFiles};
 use crate::report::serial::asn_input::Utf8TagOnce;
 use crate::report::serial::asn_types::ReadError;
 use crate::seqdb::column::MASK_DATA_TITLE;
@@ -66,6 +67,11 @@ pub struct BuildDatabase<'a> {
     cout: Option<&'a mut dyn Write>,
     output_db: WriteDb,
     output_dbname: Vec<u8>,
+    /// The path of the database's files: `output_dbname`, or where the run's files place them
+    /// (`OpenFiles::place`: LOSAT Web's database outside the run's directory).
+    database_path: Vec<u8>,
+    /// The run's files (`new_in`), which place the files of the GI masks too.
+    files: OpenFiles,
     /// `m_ParseIDs` (`-parse_seqids`).
     parse_ids: bool,
     /// `m_Taxids` (`SetTaxids`).
@@ -368,8 +374,18 @@ const fn create_directories_site(line: u32) -> ThrowSite {
     }
 }
 
-/// `CBuildDatabase::CreateDirectories`.
+/// `CBuildDatabase::CreateDirectories` on the file system (makeprofiledb's, and makeblastdb's of
+/// the command line: `create_directories_in` with `OpenFiles::disk`).
 pub(crate) fn create_directories(dbname: &[u8]) -> Result<(), WriteDbError> {
+    create_directories_in(dbname, &OpenFiles::disk())
+}
+
+// No NCBI counterpart for `files`: LOSAT Web's run answers NCBI's questions of the folder on the
+// model of its other tools' outputs (`OpenFiles::folder_is_directory`, `OpenFiles::make_folder`,
+// `OpenFiles::folder_writable`; line NP WW4i, 2026-11-28); the file system answers those that
+// `files` leaves to it (`Disk`, a folder made in the run's directory).
+/// `CBuildDatabase::CreateDirectories` of the run whose files are `files`.
+pub(crate) fn create_directories_in(dbname: &[u8], files: &OpenFiles) -> Result<(), WriteDbError> {
     let dir_entry = dir_entry_path(dbname);
     let Some(at) = dir_entry.iter().rposition(|&c| is_any_separator(c)) else {
         return Ok(());
@@ -379,13 +395,24 @@ pub(crate) fn create_directories(dbname: &[u8]) -> Result<(), WriteDbError> {
         .iter()
         .rposition(|&c| is_any_separator(c))
         .map_or(d, |at| &d[at + 1..]);
-    if !path_of_bytes(d).is_dir() && !create_path(d) {
+    let is_dir = files
+        .folder_is_directory(d)
+        .unwrap_or_else(|| path_of_bytes(d).is_dir());
+    let made = || match files.make_folder(d) {
+        None => create_path(d),
+        Some(MadeFolder::InRunDirectory(path)) => create_path(&path),
+        Some(MadeFolder::Outside(made)) => made,
+    };
+    if !is_dir && !made() {
         return Err(WriteDbError::Exception(NcbiException::new(
             CREATE_PATH_FAILED,
             [b"Failed to create directory '".as_slice(), name, b"'"].concat(),
         )));
     }
-    if !check_access_write(d) {
+    if !files
+        .folder_writable(d)
+        .unwrap_or_else(|| check_access_write(d))
+    {
         return Err(WriteDbError::Exception(NcbiException::new(
             NO_WRITE_ACCESS,
             [
@@ -555,10 +582,57 @@ impl<'a> BuildDatabase<'a> {
         platform: Platform,
         indices: Indices,
     ) -> Result<Self, WriteDbError> {
-        create_directories(dbname)?;
+        Self::new_in(
+            dbname,
+            title,
+            is_protein,
+            log,
+            now,
+            version,
+            platform,
+            indices,
+            OpenFiles::disk(),
+        )
+    }
+
+    // No NCBI counterpart for `files` (line NP WW4i, 2026-11-28): see `create_directories_in` and
+    // `OpenFiles::place`.
+    /// `new` for the run whose files are `files`: its folder checked and made as `files` answers
+    /// (`create_directories_in`), and its files made where `files` places them
+    /// (`OpenFiles::place`: LOSAT Web's database outside the run's directory, in a folder of the
+    /// host's, whose files the run hands back under their names, `OpenFiles::hand_back`). The
+    /// name in the log and of the deletion's message is NCBI's (`output_dbname`) wherever the
+    /// files are.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_in(
+        dbname: &[u8],
+        title: &[u8],
+        is_protein: bool,
+        log: &'a mut dyn Write,
+        now: &LocalTime,
+        version: DbVersion,
+        platform: Platform,
+        indices: Indices,
+        files: OpenFiles,
+    ) -> Result<Self, WriteDbError> {
+        create_directories_in(dbname, &files)?;
         // The name is the bytes of NCBI's `std::string`: the current directory's bytes joined with
         // `-out`, in the log line, the deletion and the files.
         let output_dbname = create_absolute_path(dbname);
+        // The name that `create_absolute_path` reads (an absolute name as it is, a relative one
+        // without the C spaces at its ends), without its final separators.
+        let typed = if dbname.starts_with(b"/") {
+            dbname
+        } else {
+            crate::ncbi_str::truncate_spaces(dbname)
+        };
+        let database_path = files
+            .place(dir_entry_path(typed))
+            .map_err(|source| WriteDbError::Io {
+                path: crate::utils::os_bytes::path_from_bytes(output_dbname.clone()),
+                source,
+            })?
+            .unwrap_or_else(|| output_dbname.clone());
         let mol_type = if is_protein { "Protein" } else { "Nucleotide" };
         let _ = write!(
             log,
@@ -577,7 +651,7 @@ impl<'a> BuildDatabase<'a> {
         endl(log)?;
         let _ = write!(log, "Sequence type: {mol_type}");
         endl(log)?;
-        if delete_blast_db(&output_dbname, is_protein)? {
+        if delete_blast_db(&database_path, is_protein)? {
             let _ = write!(log, "Deleted existing {mol_type} BLAST database named ")
                 .and_then(|()| log.write_all(&output_dbname));
             endl(log)?;
@@ -588,7 +662,7 @@ impl<'a> BuildDatabase<'a> {
         // The limit of 1000*1000*1000 that the constructor sets is replaced
         // by makeblastdb before a sequence is added.
         let output_db = WriteDb::new(
-            &output_dbname,
+            &database_path,
             is_protein,
             title,
             now.index_date().as_bytes(),
@@ -605,6 +679,8 @@ impl<'a> BuildDatabase<'a> {
             cout: None,
             output_db,
             output_dbname,
+            database_path,
+            files,
             parse_ids: indices.full,
             taxids: TaxIdSet::default(),
             mask_data: None,
@@ -644,14 +720,32 @@ impl<'a> BuildDatabase<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1583-1594
     /// `RegisterMaskingAlgorithm` of a program, its options and a name: see
     /// [`WriteDb::register_mask_algorithm`].
+    ///
+    /// With `-gi_mask` the files of the algorithm's GI masks are made where the run's files place
+    /// `name` (`OpenFiles::place`: LOSAT Web's names outside the run's directory, as the
+    /// database's files; line NP WW4i, 2026-11-28).
     pub fn register_masking_algorithm(
         &mut self,
         program: i32,
         options: &[u8],
         name: &[u8],
     ) -> Result<i32, WriteDbError> {
-        self.output_db
-            .register_mask_algorithm(program, options, name)
+        let placed = if self.output_db.uses_gi_masks() {
+            self.files
+                .place(name)
+                .map_err(|source| WriteDbError::Io {
+                    path: crate::utils::os_bytes::path_from_bytes(name.to_vec()),
+                    source,
+                })?
+        } else {
+            None
+        };
+        self.output_db.register_mask_algorithm_at(
+            program,
+            options,
+            name,
+            placed.as_deref().unwrap_or(name),
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1596-1607
@@ -717,6 +811,12 @@ impl<'a> BuildDatabase<'a> {
     /// `GetOutputDbName`: the absolute name of the database.
     pub fn output_dbname(&self) -> &[u8] {
         &self.output_dbname
+    }
+
+    /// The path of the database's files (`new_in`): `output_dbname`, or where the run's files
+    /// placed them.
+    pub(crate) fn database_path(&self) -> &[u8] {
+        &self.database_path
     }
 
     /// The log stream (`m_LogFile`).

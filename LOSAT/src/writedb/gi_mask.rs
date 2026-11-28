@@ -208,6 +208,9 @@ fn index_header(num_vols: u32, num_index: u32, num_gis: u32, desc: &[u8], date: 
 pub(crate) struct GiMask {
     /// `m_MaskName`: empty after a close without GIs.
     name: Vec<u8>,
+    /// The path under which its files are made: `name`, or where the run's files place them
+    /// (`GiMasks::add`).
+    path: Vec<u8>,
     max_file_size: u64,
     /// `m_DFile`, `m_DFile_LE`.
     data: [GiMaskData; 2],
@@ -229,21 +232,34 @@ impl GiMask {
     /// The files of the algorithm `name` with the description `desc`; `dates` are the dates of
     /// the `.gmi` and the `.gni` file (the current time as `CTime` text, which each of NCBI's
     /// constructors reads; the caller reads them in that order).
+    #[cfg(test)]
     pub(crate) fn new(name: &[u8], desc: &[u8], max_file_size: u64, dates: [Vec<u8>; 2]) -> Self {
+        Self::new_at(name, name, desc, max_file_size, dates)
+    }
+
+    /// `new` whose files are made under `path` (`GiMasks::add`).
+    fn new_at(
+        name: &[u8],
+        path: &[u8],
+        desc: &[u8],
+        max_file_size: u64,
+        dates: [Vec<u8>; 2],
+    ) -> Self {
         Self {
             name: name.to_vec(),
+            path: path.to_vec(),
             max_file_size,
             data: [
-                GiMaskData::new(name, "gmd", 0, max_file_size, false),
-                GiMaskData::new(name, "gnd", 0, max_file_size, true),
+                GiMaskData::new(path, "gmd", 0, max_file_size, false),
+                GiMaskData::new(path, "gnd", 0, max_file_size, true),
             ],
             offset_files: [
-                WriteDbFile::lazy_unindexed(name, "gmo", max_file_size),
-                WriteDbFile::lazy_unindexed(name, "gno", max_file_size),
+                WriteDbFile::lazy_unindexed(path, "gmo", max_file_size),
+                WriteDbFile::lazy_unindexed(path, "gno", max_file_size),
             ],
             index_files: [
-                WriteDbFile::lazy_unindexed(name, "gmi", max_file_size),
-                WriteDbFile::lazy_unindexed(name, "gni", max_file_size),
+                WriteDbFile::lazy_unindexed(path, "gmi", max_file_size),
+                WriteDbFile::lazy_unindexed(path, "gni", max_file_size),
             ],
             desc: desc.to_vec(),
             dates,
@@ -282,7 +298,7 @@ impl GiMask {
             for (data, (extension, le)) in self.data.iter_mut().zip([("gmd", false), ("gnd", true)])
             {
                 data.file.close();
-                *data = GiMaskData::new(&self.name, extension, index, self.max_file_size, le);
+                *data = GiMaskData::new(&self.path, extension, index, self.max_file_size, le);
             }
         }
         let (volume, offset) = self.data[0].offset();
@@ -343,19 +359,21 @@ pub(crate) struct GiMasks {
 impl GiMasks {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1453-1456
     /// The registration of the algorithm `algorithm_id` (`RegisterMaskAlgorithm` with
-    /// `m_UseGiMask`): its files under `name`.
+    /// `m_UseGiMask`): its files under `name`, made under `path` (`name`, or where the run's files
+    /// place them, `report::run_files::OpenFiles::place`).
     pub(crate) fn add(
         &mut self,
         algorithm_id: i32,
         name: &[u8],
+        path: &[u8],
         desc: &[u8],
         max_file_size: u64,
         dates: [Vec<u8>; 2],
     ) {
         self.algo_map.insert(algorithm_id, self.masks.len());
-        self.places.push(files_place(name));
+        self.places.push(files_place(path));
         self.masks
-            .push(GiMask::new(name, desc, max_file_size, dates));
+            .push(GiMask::new_at(name, path, desc, max_file_size, dates));
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1391-1397

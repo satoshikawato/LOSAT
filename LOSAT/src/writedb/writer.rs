@@ -1035,10 +1035,24 @@ impl WriteDb {
         options: &[u8],
         name: &[u8],
     ) -> Result<i32, WriteDbError> {
+        self.register_mask_algorithm_at(program, options, name, name)
+    }
+
+    /// `register_mask_algorithm` whose GI-mask files (with `-gi_mask`) are made under `path`
+    /// rather than `name`, which names the algorithm (`MASKLIST`): where the run's files place
+    /// them (`OpenFiles::place`, LOSAT Web's names outside the run's directory; line NP WW4i).
+    pub(crate) fn register_mask_algorithm_at(
+        &mut self,
+        program: i32,
+        options: &[u8],
+        name: &[u8],
+        path: &[u8],
+    ) -> Result<i32, WriteDbError> {
         let id = self.mask.register_program(
             program,
             options,
             name,
+            path,
             !self.volumes.is_empty(),
             self.max_file_size,
             &self.column_dates,

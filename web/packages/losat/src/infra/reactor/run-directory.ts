@@ -33,6 +33,14 @@
 // A file that it removed (a lock, a volume's name before its rename, what a failed run cleans up) is not there. Writes
 // are possible only on the serial instance, whose table is its own: tool runs are serial (runtime.ts).
 //
+// The directory has a second preopen, `/outside` (descriptor 4, `OUTSIDE_DIRECTORY`; line NP WW4i, 2026-11-28): a folder
+// that is empty at the start of each run, where a tool run that writes through the file system makes the files that the
+// engine puts outside the run's directory (makeblastdb's `-out ../db`, `-out /tmp/db`: the engine places them there,
+// reads them back and gives them on stream 12 under their names, leaving the folder empty; abi_v2.md §3, §4). It is
+// writable when the run's directory is, read-only for a search, holds no user's file, and is never part of the run's
+// output (`takeWritten`). A name does not leave it (`..` past it is ENOTCAPABLE) and nothing moves between it and the
+// run's directory (EXDEV), as between two file systems.
+//
 // LOSAT opens a database file when a search needs it (once for a run; the repeat database of BLASTN's -filtering_db at
 // each query batch) (LOSAT/src/seqdb/file.rs: on WASI, a seek and a read under a lock) and
 // reads it from the search's threads. A descriptor that one thread opened must therefore be read on another: each
@@ -48,6 +56,12 @@ import type { DirectoryFile } from '../../domain/run-files.js';
 export const PREOPEN_FD = 3;
 /** The run directory's name: the preopen's, which the engine makes its current directory (abi_v2.md §3). */
 export const RUN_DIRECTORY = '/work';
+/** The descriptor of the preopened folder of the files that the engine puts outside the run's directory. */
+export const OUTSIDE_FD = 4;
+/** That folder's name (abi_v2.md §3; `OUTSIDE_DIRECTORY` in web/adapter/src/tool.rs). */
+export const OUTSIDE_DIRECTORY = '/outside';
+/** The number of that folder among the folders (`RunDirectory.dirNodes`), after the run directory's 0. */
+const OUTSIDE_ID = 1;
 /** The first descriptor of an open file of the directory: far from the shim's own (0-2 and the few it opens). */
 export const FILE_FD_BASE = 0x40000000;
 /** How many files of the directory may be open at once. */
@@ -269,7 +283,10 @@ export class RunDirectory {
   private writable = false;
   /** The files, those of the list first (in its order), then those that the run made. */
   private fileNodes: FileNode[] = [];
-  /** The folders: the run directory first, then those of the list's paths (in the order they come), then the run's. */
+  /**
+   * The folders: the run directory first, then the folder outside it (`OUTSIDE_ID`), then those of the list's paths (in
+   * the order they come), then the run's.
+   */
   private dirNodes: DirNode[] = [];
   private nextIno = 2n;
   private readonly slots: Int32Array;
@@ -330,10 +347,11 @@ export class RunDirectory {
   /** Gives the directory the files of a run that the Engine worker opened (`open`): a thread worker's. */
   take(files: readonly DirectoryFile[]): void {
     const root: DirNode = { kind: 'dir', id: 0, ino: 1n, children: new Map(), parent: undefined, name: '', removed: false, mtime: 0n };
+    const outside: DirNode = { kind: 'dir', id: OUTSIDE_ID, ino: BigInt(files.length + 1 + OUTSIDE_ID), children: new Map(), parent: undefined, name: '', removed: false, mtime: 0n };
     const fileNodes: FileNode[] = [];
-    // The folders are numbered in the order that the list's paths give them (the same on every thread), and their
-    // inode numbers come after the files'.
-    const dirNodes: DirNode[] = [root];
+    // The folders are numbered in the order that the list's paths give them (the same on every thread), after the
+    // folder outside the directory, and their inode numbers come after the files'.
+    const dirNodes: DirNode[] = [root, outside];
     files.forEach((file, id) => {
       const names = pathNames(file.name);
       if (names === undefined || names.length === 0) throw new Error(`the file name ${JSON.stringify(file.name)} is not a path in the run's directory`);
@@ -572,8 +590,8 @@ export class RunDirectory {
     /**
      * What a path of the directory names, looked up from `from`. Each name is looked up in the folder that the names
      * before it give, as the OS looks a path up: a name (`..` too) after a file is ENOTDIR, after a name that is not
-     * there ENOENT (a final `/` after it asks for a folder: `slash`); `..` past the directory is ENOTCAPABLE, as WASI
-     * gives it; a folder that the run removed holds nothing.
+     * there ENOENT (a final `/` after it asks for a folder: `slash`); `..` past the directory (or past the folder
+     * outside it) is ENOTCAPABLE, as WASI gives it; a folder that the run removed holds nothing.
      */
     const lookup = (path: string, from: DirNode): Found => {
       let node: DirectoryNode | undefined = from;
@@ -594,7 +612,7 @@ export class RunDirectory {
         }
         if (node.removed) return { errno: ERRNO_NOENT };
         if (part === '..') {
-          if (node.parent === undefined) return node.id === 0 ? { errno: ERRNO_NOTCAPABLE } : { errno: ERRNO_NOENT };
+          if (node.parent === undefined) return node.id === 0 || node.id === OUTSIDE_ID ? { errno: ERRNO_NOTCAPABLE } : { errno: ERRNO_NOENT };
           node = node.parent;
           name = part;
           continue;
@@ -617,8 +635,17 @@ export class RunDirectory {
       const state = Atomics.load(this.slots, slotOf(fd));
       return state < 0 ? this.dirNodes[-state - 1] : undefined;
     };
-    /** The folder that a path is looked up from: the preopen's, or an open folder's; undefined for any other descriptor. */
-    const baseOf = (fd: number): DirNode | undefined => (fd === PREOPEN_FD ? this.dirNodes[0] : isFile(fd) ? openFolder(fd) : undefined);
+    /** The folder of a preopen's descriptor: the run directory, or the folder outside it; undefined for another. */
+    const preopened = (fd: number): DirNode | undefined =>
+      fd === PREOPEN_FD ? this.dirNodes[0] : fd === OUTSIDE_FD ? this.dirNodes[OUTSIDE_ID] : undefined;
+    /** The folder that a path is looked up from: a preopen's, or an open folder's; undefined for any other descriptor. */
+    const baseOf = (fd: number): DirNode | undefined => preopened(fd) ?? (isFile(fd) ? openFolder(fd) : undefined);
+    /** The top folder of `node`: the run directory, the folder outside it, or a removed folder. */
+    const topOf = (node: DirectoryNode): DirectoryNode => {
+      let top = node;
+      while (top.parent !== undefined) top = top.parent;
+      return top;
+    };
     /** The errno of a path call on a descriptor of the directory that is no folder (a free slot's, a file's). */
     const notFolder = (fd: number) => (Atomics.load(this.slots, slotOf(fd)) === 0 ? ERRNO_BADF : ERRNO_NOTDIR);
     const writeFilestat = (pointer: number, node: DirectoryNode) => {
@@ -722,17 +749,21 @@ export class RunDirectory {
       };
     };
 
+    /** The name of a preopen's descriptor; undefined for another (the shim's: EBADF past them ends the C library's scan). */
+    const preopenName = (fd: number): string | undefined => (fd === PREOPEN_FD ? RUN_DIRECTORY : fd === OUTSIDE_FD ? OUTSIDE_DIRECTORY : undefined);
     own.fd_prestat_get = (fd, pointer) => {
-      if (Number(fd) !== PREOPEN_FD) return fallback.fd_prestat_get!(fd, pointer);
+      const name = preopenName(Number(fd));
+      if (name === undefined) return fallback.fd_prestat_get!(fd, pointer);
       const out = view(Number(pointer), 8);
       out.setUint8(0, 0); // a directory
-      out.setUint32(4, RUN_DIRECTORY.length, true); // the length of its name
+      out.setUint32(4, name.length, true); // the length of its name
       return ERRNO_SUCCESS;
     };
     own.fd_prestat_dir_name = (fd, pointer, length) => {
-      if (Number(fd) !== PREOPEN_FD) return fallback.fd_prestat_dir_name!(fd, pointer, length);
-      if (Number(length) < RUN_DIRECTORY.length) return ERRNO_NAMETOOLONG;
-      bytes(Number(pointer), RUN_DIRECTORY.length).set(new TextEncoder().encode(RUN_DIRECTORY));
+      const name = preopenName(Number(fd));
+      if (name === undefined) return fallback.fd_prestat_dir_name!(fd, pointer, length);
+      if (Number(length) < name.length) return ERRNO_NAMETOOLONG;
+      bytes(Number(pointer), name.length).set(new TextEncoder().encode(name));
       return ERRNO_SUCCESS;
     };
     onPath('path_open', (from, _dirflags, path, pathLength, oflags, rightsBase, _rightsInheriting, fdflags, opened) => {
@@ -860,6 +891,8 @@ export class RunDirectory {
       const node = source.node;
       // As Linux: the names `.` and `..` and the run directory itself do not move (EBUSY).
       if (source.name === '.' || source.name === '..' || node.parent === undefined) return ERRNO_BUSY;
+      // Between the run directory and the folder outside it, as between two file systems (EXDEV).
+      if (topOf(node) !== topOf(target.node ?? target.parent)) return ERRNO_XDEV;
       if (target.node === undefined) {
         // `new/` names a folder: a file does not go there (ENOTDIR).
         if (target.slash && node.kind === 'file') return ERRNO_NOTDIR;
@@ -883,8 +916,9 @@ export class RunDirectory {
       return ERRNO_SUCCESS;
     };
     own.fd_filestat_get = (fd, pointer) => {
-      if (Number(fd) === PREOPEN_FD) {
-        writeFilestat(Number(pointer), this.dirNodes[0]!);
+      const top = preopened(Number(fd));
+      if (top !== undefined) {
+        writeFilestat(Number(pointer), top);
         return ERRNO_SUCCESS;
       }
       if (!isFile(Number(fd))) return fallback.fd_filestat_get!(fd, pointer);
@@ -894,7 +928,7 @@ export class RunDirectory {
       return ERRNO_SUCCESS;
     };
     own.fd_fdstat_get = (fd, pointer) => {
-      const folder = Number(fd) === PREOPEN_FD || (isFile(Number(fd)) && openFolder(Number(fd)) !== undefined);
+      const folder = preopened(Number(fd)) !== undefined || (isFile(Number(fd)) && openFolder(Number(fd)) !== undefined);
       if (!folder && !isFile(Number(fd))) return fallback.fd_fdstat_get!(fd, pointer);
       if (!folder && openFile(Number(fd)) === undefined) return ERRNO_BADF;
       const mode = folder ? 0 : this.modes[slotOf(Number(fd))]!;

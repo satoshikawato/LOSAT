@@ -735,6 +735,10 @@ fn verify_input_files(
 /// makeblastdb opens the file. `end_messages` gets the messages of `~CBuildDatabase` (no
 /// sequence matched a mask, `-taxid_map` matched no sequence), which makeblastdb posts after
 /// everything else, the error of the build included.
+///
+/// The database's folder is checked and made, and its files made, as the run's `files` answer
+/// and place them (`BuildDatabase::new_in`: LOSAT Web's database outside the run's directory;
+/// the caller hands its files back, `handed_back`).
 #[allow(clippy::too_many_arguments)]
 fn build_database_with_log(
     args: &MakedbArgs,
@@ -748,6 +752,7 @@ fn build_database_with_log(
     err: &mut dyn Write,
     logfile_error: Option<MakedbError>,
     end_messages: &mut Vec<Vec<u8>>,
+    files: &OpenFiles,
 ) -> Result<(), MakedbError> {
     let registry_blastdb = registry_blastdb(settings);
     let version = db_version(args)?;
@@ -819,7 +824,7 @@ fn build_database_with_log(
             "this platform has no clock for the database's date",
         ));
     };
-    let mut db = BuildDatabase::new(
+    let mut db = BuildDatabase::new_in(
         dbname,
         &title,
         is_protein,
@@ -833,6 +838,7 @@ fn build_database_with_log(
             hash: args.hash_index,
             trace: false,
         },
+        files.clone(),
     )?;
     if let Some(cout) = cout {
         db.set_cout(cout);
@@ -1344,7 +1350,8 @@ fn open_new_database(
     registry_blastdb: Option<&[u8]>,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
-    let new_db = db.output_dbname();
+    // The database's files where the run made them (`BuildDatabase::database_path`).
+    let new_db = db.database_path();
     let seqtype = seq_type(is_protein);
     // `CSeqDB` names its search path in the message of a database that is not there: the
     // current directory, `BLASTDB` and the registry entry `[BLAST] BLASTDB` (`registry_blastdb`,
@@ -1612,7 +1619,9 @@ pub(crate) fn run_in(
                 err,
                 None,
                 &mut end_messages,
+                files,
             );
+            let result = handed_back(files, result);
             return finish(result, &end_messages, err);
         }
         Some(name) if crate::utils::os_bytes::os_str_bytes(name).as_ref() == b"-" => {
@@ -1628,7 +1637,9 @@ pub(crate) fn run_in(
                 err,
                 None,
                 &mut end_messages,
+                files,
             );
+            let result = handed_back(files, result);
             return finish(result, &end_messages, err);
         }
         Some(name) => name,
@@ -1688,7 +1699,9 @@ pub(crate) fn run_in(
                 &mut diag,
                 None,
                 &mut end_messages,
+                files,
             );
+            let result = handed_back(files, result);
             let _ = log.flush();
             finish(result, &end_messages, &mut diag)
         }
@@ -1705,9 +1718,26 @@ pub(crate) fn run_in(
                 &mut diag,
                 Some(error),
                 &mut end_messages,
+                files,
             );
+            let result = handed_back(files, result);
             finish(result, &end_messages, &mut diag)
         }
+    }
+}
+
+// No NCBI counterpart: NCBI's files are where it made them (line NP WW4i, 2026-11-28).
+/// The result of a build (`build_database_with_log`) after the files that the run placed outside
+/// its directory (`OpenFiles::place`: LOSAT Web's database there) were handed back under their
+/// names (`OpenFiles::hand_back`), whatever the build gave, as the command line's files stay
+/// where it made them; LOSAT's message where the host's files could not be handed back.
+fn handed_back(files: &OpenFiles, result: Result<(), MakedbError>) -> Result<(), MakedbError> {
+    match files.hand_back() {
+        Ok(()) => result,
+        Err(error) => result.and(Err(MakedbError::Unsupported(format!(
+            "the files of the database outside the run's directory could not be handed back \
+             ({error})"
+        )))),
     }
 }
 

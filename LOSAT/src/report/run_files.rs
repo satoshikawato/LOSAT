@@ -81,6 +81,17 @@ pub trait FileReceiver: Send + Sync {
     fn writes_working_directory(&self) -> bool {
         false
     }
+
+    /// An empty folder of the host's that the run may write through the file system, where a tool
+    /// that writes its files through the file system makes those that the model puts outside the
+    /// run's working directory (`OpenFiles::place`: makeblastdb's database and its GI masks,
+    /// `-out ../db`, `-out /tmp/db`); the run hands them back under their names
+    /// (`OpenFiles::hand_back`) and leaves the folder empty (LOSAT Web's `/outside`,
+    /// docs/web/abi_v2.md §3; line NP WW4i, 2026-11-28). Default: `None`, no such folder: the file
+    /// system opens every name as typed.
+    fn outside_directory(&self) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 /// The option of a search's argv that names a file of its run besides its outputs
@@ -479,6 +490,21 @@ impl std::fmt::Debug for OpenFiles {
 struct FileTable {
     receiver: Arc<dyn FileReceiver>,
     files: Mutex<Vec<(Vec<u8>, Arc<Mutex<SharedFile>>)>>,
+    /// The folders outside the working directory whose files the run makes in the host's folder
+    /// (`OpenFiles::place`), in the order the run placed them.
+    placed: Mutex<Vec<Placed>>,
+}
+
+/// A folder outside the run's working directory whose files a tool makes through the file system
+/// in a folder of the host's (`OpenFiles::place`).
+struct Placed {
+    /// The folder's path (`file_key`): every name of it is one folder.
+    key: Vec<u8>,
+    /// The folder as the run first named it, with its final `/` (`../`, `/tmp/x/`): its files'
+    /// names are read from it (`output_name`).
+    typed: Vec<u8>,
+    /// The host's folder that holds its files (in `FileReceiver::outside_directory`).
+    folder: std::path::PathBuf,
 }
 
 /// How an opening writes to its file (`FileTable::open`).
@@ -499,6 +525,7 @@ impl OpenFiles {
                 RunFiles::Receiver(receiver) => Some(Arc::new(FileTable {
                     receiver: receiver.clone(),
                     files: Mutex::new(Vec::new()),
+                    placed: Mutex::new(Vec::new()),
                 })),
             },
             streams: Arc::default(),
@@ -797,6 +824,226 @@ fn receiver_output_name(receiver: &dyn FileReceiver, bytes: &[u8]) -> OutputName
         OutputName::File { key, .. } if view.reads(&key) => OutputName::Existing,
         other => other,
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1051-1071 (cited
+// at `writedb::build_db::create_directories_in`)
+// No NCBI counterpart for the reading: LOSAT Web has no file system (line NP WW4i, 2026-11-28).
+// makeblastdb asks three questions of the folder `d` of its database (`CreateDirectories`):
+// whether it is a directory (`d.Exists()`), else whether `CreatePath` makes it, then whether the
+// user may write in it (`CheckAccess(fWrite)`). A `Receiver`'s run answers them as the command line
+// of a user on Linux answers them in the run's working directory, on the model that reads the
+// names of the other tools' outputs (`output_name`): the folders of the run's directory are the
+// file system's, and those outside it the model's (`directory_at`, `user_makes`), so that the
+// database goes where `-out` of another tool would put a file (`../db`, `/tmp/db`, abi_v2.md §4).
+impl OpenFiles {
+    /// Whether the folder `d` of makeblastdb's database is a directory (`d.Exists()` of
+    /// `CreateDirectories`), for a `Receiver`: the name walked in the run's working directory as
+    /// the system walks it (`walked_folder`). `None` on `Disk`, where the file system tells.
+    pub(crate) fn folder_is_directory(&self, d: &[u8]) -> Option<bool> {
+        let table = self.table.as_ref()?;
+        Some(walked_folder(&RunView::new(table.receiver.as_ref(), &[]), d).is_some())
+    }
+
+    /// Whether the user may write in the folder `d` (`CheckAccess(fWrite)` of
+    /// `CreateDirectories`), for a `Receiver`: a directory (`walked_folder`) where the user makes
+    /// entries (`user_makes`: the working directory's tree, a home, `USER_DIRECTORIES`; not `/`,
+    /// `/proc`, `/etc`). `None` on `Disk`.
+    pub(crate) fn folder_writable(&self, d: &[u8]) -> Option<bool> {
+        let table = self.table.as_ref()?;
+        Some(
+            walked_folder(&RunView::new(table.receiver.as_ref(), &[]), d)
+                .is_some_and(|(path, _)| user_makes(&path)),
+        )
+    }
+
+    /// `CreatePath` of the folder `d` (`CreateDirectories`, where `d` is no directory), for a
+    /// `Receiver`: `d` made absolute in the working directory and normalized without links, as
+    /// NCBI makes it (`nodir/..` is the working directory, which is there). A folder strictly
+    /// inside the working directory is the file system's to make, under its normalized path
+    /// (`MadeFolder::InRunDirectory`); a folder elsewhere is there, or made where the user makes
+    /// entries in the deepest folder of it that the system has (`MadeFolder::Outside`; the model
+    /// takes the folders of the working directory's tree and of a user's directory as present,
+    /// `directory_at`, so only a folder in root's directories is missing: `/etc/x`, `/work`).
+    /// `None` on `Disk`.
+    pub(crate) fn make_folder(&self, d: &[u8]) -> Option<MadeFolder> {
+        let table = self.table.as_ref()?;
+        let view = RunView::new(table.receiver.as_ref(), &[]);
+        let entry = |path: &[u8], cwd: &[u8]| view.entry(path, cwd);
+        let cwd = working_directory(d);
+        let joined = if d.first() == Some(&b'/') {
+            d.to_vec()
+        } else {
+            [cwd.as_slice(), b"/", d].concat()
+        };
+        let Some(path) = crate::blastinput::ncbi_environment::PathRules::Unix.normalize(&joined, None)
+        else {
+            return Some(MadeFolder::Outside(false));
+        };
+        if let Some(inside) = inside_cwd(&path, &cwd) {
+            return Some(MadeFolder::InRunDirectory(inside.to_vec()));
+        }
+        let mut prefix = path.as_slice();
+        loop {
+            let at = if prefix.is_empty() { b"/".as_slice() } else { prefix };
+            if let Some(found) = Walk::resolve(at, &cwd) {
+                if folder_present(&found, &cwd, Some(&entry), true) {
+                    return Some(MadeFolder::Outside(
+                        prefix.len() == path.len() || user_makes(&found),
+                    ));
+                }
+            }
+            if prefix.is_empty() {
+                return Some(MadeFolder::Outside(false));
+            }
+            prefix = &prefix[..prefix.iter().rposition(|byte| *byte == b'/').unwrap_or(0)];
+        }
+    }
+
+    /// Where a tool that writes its files through the file system makes the file `name` and the
+    /// files named `name` and a suffix (makeblastdb's database, `-out`, with its extensions, and
+    /// the files of a GI mask), for a `Receiver` whose host gives a folder for the files outside
+    /// its working directory (`FileReceiver::outside_directory`): a name whose folder, walked as
+    /// `walked_folder` walks it, is a directory outside the working directory where the user makes
+    /// entries (`user_makes`: `../db`, `sub/../../db`, `/tmp/x/db`) is made in a folder of the
+    /// host's, one per folder (`file_key`: `../` and `sub/../../` are one), whose files the run
+    /// hands back under their names when it ends (`hand_back`); the path of `name` there. `None`
+    /// on `Disk`, where the host gives no folder, for a name of the run's directory and for one in
+    /// a folder that the user cannot write: the file system opens the name as typed (a file of the
+    /// run's directory, or none).
+    pub(crate) fn place(&self, name: &[u8]) -> io::Result<Option<Vec<u8>>> {
+        let Some(table) = &self.table else {
+            return Ok(None);
+        };
+        let Some(at) = name.iter().rposition(|byte| *byte == b'/') else {
+            return Ok(None);
+        };
+        let (folder, last) = (&name[..=at], &name[at + 1..]);
+        if last.is_empty() {
+            return Ok(None);
+        }
+        let Some(outside) = table.receiver.outside_directory() else {
+            return Ok(None);
+        };
+        let Some((path, cwd)) = walked_folder(&RunView::new(table.receiver.as_ref(), &[]), folder)
+        else {
+            return Ok(None);
+        };
+        if path == cwd || inside_cwd(&path, &cwd).is_some() || !user_makes(&path) {
+            return Ok(None);
+        }
+        let key = file_key(&path, &cwd);
+        let mut placed = table.placed.lock().unwrap_or_else(PoisonError::into_inner);
+        let index = match placed.iter().position(|place| place.key == key) {
+            Some(index) => index,
+            None => {
+                let host = outside.join(placed.len().to_string());
+                std::fs::create_dir_all(&host)?;
+                placed.push(Placed {
+                    key,
+                    typed: folder.to_vec(),
+                    folder: host,
+                });
+                placed.len() - 1
+            }
+        };
+        let mut path = crate::utils::os_bytes::os_str_bytes(placed[index].folder.as_os_str()).into_owned();
+        path.push(b'/');
+        path.extend_from_slice(last);
+        Ok(Some(path))
+    }
+
+    /// Hands the files that the run made in the host's folders (`place`) to the receiver, as the
+    /// run's files under the names that the command line's files have (`output_name` of the
+    /// folder as the run named it and the file's name: `../db.nhr`, `/tmp/x/db.nal`), each file's
+    /// bytes from the host's file, which then goes, and then the host's folder (No NCBI
+    /// counterpart: NCBI's files are where it made them). The folders in the order the run placed
+    /// them, the files of each by name in byte order, a folder's files before those of its
+    /// folders. Every file is handed back; the first error, if any, is returned. Nothing on `Disk`.
+    pub(crate) fn hand_back(&self) -> io::Result<()> {
+        let Some(table) = &self.table else {
+            return Ok(());
+        };
+        let placed = std::mem::take(&mut *table.placed.lock().unwrap_or_else(PoisonError::into_inner));
+        let mut result = Ok(());
+        for place in placed {
+            result = result.and(hand_back_folder(table, &place.typed, &place.folder));
+            let _ = std::fs::remove_dir_all(&place.folder);
+        }
+        result
+    }
+}
+
+/// Hands the files of the host's folder `folder`, named `typed` by the run (`OpenFiles::hand_back`),
+/// to `table`'s receiver.
+fn hand_back_folder(table: &FileTable, typed: &[u8], folder: &std::path::Path) -> io::Result<()> {
+    let mut entries: Vec<(Vec<u8>, std::path::PathBuf, bool)> = std::fs::read_dir(folder)?
+        .map(|entry| {
+            let entry = entry?;
+            let name = crate::utils::os_bytes::os_str_bytes(&entry.file_name()).into_owned();
+            Ok((name, entry.path(), entry.file_type()?.is_dir()))
+        })
+        .collect::<io::Result<_>>()?;
+    entries.sort();
+    let mut result = Ok(());
+    for (name, path, _) in entries.iter().filter(|(_, _, folder)| !folder) {
+        let typed = [typed, name.as_slice()].concat();
+        if let OutputName::File { name, key } = receiver_output_name(table.receiver.as_ref(), &typed) {
+            let mut opening = table.open(&name, key, Opening::Create);
+            result = result.and(copy_file(path, &mut opening));
+        }
+        let _ = std::fs::remove_file(path);
+    }
+    for (name, path, _) in entries.iter().filter(|(_, _, folder)| *folder) {
+        let typed = [typed, name.as_slice(), b"/"].concat();
+        result = result.and(hand_back_folder(table, &typed, path));
+    }
+    result
+}
+
+/// Copies the file `path` to `to` in pieces of 1 MiB.
+fn copy_file(path: &std::path::Path, to: &mut dyn Write) -> io::Result<()> {
+    use std::io::Read;
+    let mut file = File::open(path)?;
+    let mut buffer = vec![0u8; 1 << 20];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(());
+        }
+        to.write_all(&buffer[..read])?;
+    }
+}
+
+/// What `CreatePath` of makeblastdb's folder gives for a `Receiver` (`OpenFiles::make_folder`).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum MadeFolder {
+    /// A folder strictly inside the run's working directory, at this normalized path relative to
+    /// it: the file system makes it.
+    InRunDirectory(Vec<u8>),
+    /// A folder elsewhere: whether the system has it or makes it.
+    Outside(bool),
+}
+
+/// The folder `d` walked in the run's working directory as the system walks it (`Walk`, in the
+/// name's own `working_directory`): every folder of it present, as `output_name` walks a name's
+/// folders (`folder_present`: inside the working directory the run's directory tells, outside it
+/// the model's `directory_at`), the last a directory. Its path without links and the working
+/// directory; `None` where the system reaches no directory (`nodir/..`, `in.fa/..`, `/etc/x`).
+fn walked_folder(view: &RunView<'_>, d: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+    if d.is_empty() || !fits(d) {
+        return None;
+    }
+    let entry = |path: &[u8], cwd: &[u8]| view.entry(path, cwd);
+    let cwd = working_directory(d);
+    let mut walk = Walk::at(d, &cwd);
+    for part in d.split(|byte| *byte == b'/') {
+        walk.step(part);
+        if walk.refused || !folder_present(walk.path(), &cwd, Some(&entry), false) {
+            return None;
+        }
+    }
+    folder_present(walk.path(), &cwd, Some(&entry), true).then(|| (walk.path().to_vec(), cwd))
 }
 
 impl FileTable {

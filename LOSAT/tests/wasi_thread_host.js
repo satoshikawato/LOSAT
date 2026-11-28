@@ -447,15 +447,15 @@ function recycleWorkers(kind) {
   return kind === "threaded-reactor" && raw === "1";
 }
 
-async function instantiateMain(module, args, spawnThread, limits, provided, files, directory, environment) {
+async function instantiateMain(module, args, spawnThread, limits, provided, files, directory, environment, outside) {
   const initial = parsePositiveIntEnv("LOSAT_WASM_MEMORY_INITIAL_PAGES", limits.initial);
   // A maximum given in the environment is used as it is, without stepping down.
   const requested = parsePositiveIntEnv("LOSAT_WASM_MEMORY_MAXIMUM_PAGES", limits.maximum);
   const { memory, maximum } = createSharedMemory(initial, requested,
     process.env.LOSAT_WASM_MEMORY_MAXIMUM_PAGES === undefined);
   debug(`shared memory: initial ${initial} pages, maximum ${maximum} pages (module declares ${limits.maximum})`);
-  return { ...await instantiateWithMemory(module, memory, args, spawnThread, provided, undefined, files, directory, environment),
-    memory };
+  return { ...await instantiateWithMemory(module, memory, args, spawnThread, provided, undefined, files, directory, environment,
+    outside), memory };
 }
 
 async function terminateWorkers(workers) {
@@ -572,7 +572,9 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   // 2026-11-20), and reads it on the search's threads. `options.environment`: the main instance's environment as a
   // function, read at each `environ_sizes_get` (environImports; a host whose `TZ` changes between runs, line NP WW4b1
   // R2, 2026-11-28), in place of this process's at its start.
-  const files = sharedFileTable(), directory = options.directory;
+  // `options.outside`: the folder preopened as "/outside" beside "/work" on every thread, where a tool run makes the files
+  // that the engine puts outside its run directory (createWasi; line NP WW4i, 2026-11-28).
+  const files = sharedFileTable(), directory = options.directory, outside = options.outside;
   const workers = new Set(), exits = new Map(), events = [], standby = [];
   // LOSAT_WASI_RECYCLE: the workers that run one guest thread after another, the guest threads
   // they run now (tids), and how each of those threads' exit promise is resolved.
@@ -631,7 +633,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   const recycledWorker = (data) => {
     const control = new SharedArrayBuffer(4 * START_WORDS);
     const worker = new Worker(WORKER_FILE, threadWorkerOptions({ module, wasmPath, args, memory: mainMemory,
-      control, files, directory, fault: options.fault || null, recycle: true, ...data }));
+      control, files, directory, outside, fault: options.fault || null, recycle: true, ...data }));
     const slot = { index: nextSlot++, worker, control, state: new Int32Array(control), tid: data.tid ?? null };
     if (data.tid === undefined) Atomics.store(slot.state, SLOT_STATE, SLOT_PREPARING);
     worker.on("message", message => {
@@ -697,7 +699,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     let worker;
     try {
       worker = new Worker(WORKER_FILE, threadWorkerOptions({ module, wasmPath, args, memory: mainMemory,
-        startArg, tid, control, files, directory, fault: options.fault || null }));
+        startArg, tid, control, files, directory, outside, fault: options.fault || null }));
     } catch (err) { event("spawn_rejected", { tid, error: String(err) }); return -1; }
     workers.add(worker); event("spawned", { tid });
     exits.set(worker, new Promise(resolve => {
@@ -729,10 +731,10 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
       try {
         if (early) {
           worker = early.worker;
-          worker.postMessage({ module, wasmPath, args, memory: mainMemory, files, directory });
+          worker.postMessage({ module, wasmPath, args, memory: mainMemory, files, directory, outside });
         } else {
           worker = new Worker(WORKER_FILE, threadWorkerOptions({ module, wasmPath, args, memory: mainMemory,
-            control, files, directory, standby: index, fault: options.fault || null }));
+            control, files, directory, outside, standby: index, fault: options.fault || null }));
         }
       } catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }
       worker.unref();
@@ -754,7 +756,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     }
   };
   const instantiated = await instantiateMain(module, args, spawnThread, identity.memory, options.imports, files, directory,
-    options.environment);
+    options.environment, outside);
   mainMemory = instantiated.memory;
   const { instance, wasi } = instantiated;
   if (kind === "threaded-reactor") wasi.initialize(instance);

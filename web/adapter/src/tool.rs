@@ -12,7 +12,10 @@
 //! opens twice (`-out x -logfile x`, D-WW3-9). `makeblastdb` writes, reads back, renames and
 //! removes the files of its database in the run's working directory through the file system, as on
 //! the command line (D-WW4b-1): the host gives a tool run a working directory that it can write
-//! (abi_v2.md §3), and hands the files that the run left there to its caller when the run ends.
+//! (abi_v2.md §3), and hands the files that the run left there to its caller when the run ends. A
+//! database that the model puts outside the run's directory (`-out ../db`, `-out /tmp/db`) is made
+//! in the host's folder `/outside` and goes to stream 12 under its names when the run ends
+//! (`ToolFiles::outside`; line NP WW4i, 2026-11-28).
 
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -176,6 +179,47 @@ struct ToolFiles {
     /// (makeblastdb, D-WW4b-1; `FileReceiver::writes_working_directory`): only its files elsewhere
     /// (`-logfile /tmp/mk.log`) come here.
     writes: bool,
+    /// The host's folder where makeblastdb makes its files outside the run's directory
+    /// (`FileReceiver::outside_directory`: `-out ../db`, `-out /tmp/db`; line NP WW4i).
+    outside: Option<Outside>,
+}
+
+/// The folder that the host gives a tool run for the files that it makes through the file system
+/// outside the run's directory (docs/web/abi_v2.md §3): the preopen `/outside`, empty at the start
+/// of the run, which the run leaves empty (`OpenFiles::hand_back`).
+pub const OUTSIDE_DIRECTORY: &str = "/outside";
+
+/// The folder of `ToolFiles::outside`: the host's preopen (`OUTSIDE_DIRECTORY`) on WASI, where the
+/// host gives it; on another target (the adapter's tests) a new folder of the system's temporary
+/// folder, which goes with the run.
+struct Outside(std::path::PathBuf);
+
+impl Outside {
+    fn new() -> Option<Self> {
+        #[cfg(target_os = "wasi")]
+        {
+            std::path::Path::new(OUTSIDE_DIRECTORY)
+                .is_dir()
+                .then(|| Outside(OUTSIDE_DIRECTORY.into()))
+        }
+        #[cfg(not(target_os = "wasi"))]
+        {
+            static NEXT: AtomicU32 = AtomicU32::new(0);
+            let folder = std::env::temp_dir().join(format!(
+                "losat-web-outside-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&folder).ok().map(|()| Outside(folder))
+        }
+    }
+}
+
+#[cfg(not(target_os = "wasi"))]
+impl Drop for Outside {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 impl ToolFiles {
@@ -190,11 +234,13 @@ impl ToolFiles {
             // where the command line's refusal of a log naming an input applies.
             ToolKind::Makeblastdb => (Vec::new(), Vec::new()),
         };
+        let writes = kind == ToolKind::Makeblastdb;
         Self {
             next: AtomicU32::new(0),
             read,
             out_read,
-            writes: kind == ToolKind::Makeblastdb,
+            writes,
+            outside: writes.then(Outside::new).flatten(),
         }
     }
 }
@@ -219,6 +265,10 @@ impl FileReceiver for ToolFiles {
 
     fn writes_working_directory(&self) -> bool {
         self.writes
+    }
+
+    fn outside_directory(&self) -> Option<std::path::PathBuf> {
+        self.outside.as_ref().map(|outside| outside.0.clone())
     }
 }
 

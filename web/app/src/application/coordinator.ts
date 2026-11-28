@@ -60,7 +60,7 @@ import {
 } from '../domain/run';
 import { primaryBlastDb } from '../domain/blast-db';
 import { tarArchive } from '../domain/tar';
-import { isCountsOutputFile, maskDataName, toolFileOptionLabel } from '../domain/tool-argv';
+import { handedOverName, isCountsOutputFile, maskDataName, toolFileOptionLabel } from '../domain/tool-argv';
 import { toolOutputDownloadName, toolOutputFileName, type ToolId, type ToolStage } from '../domain/tools';
 import type { CountsLocks } from '../ports/counts';
 import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
@@ -743,25 +743,30 @@ export class Coordinator {
 
   /**
    * "Download all" of the files that a tool run wrote (a makeblastdb run's database): one tar archive of them under their
-   * paths in the run's directory, made of their stored Files (no byte of them is read into the page).
+   * paths in the run's directory, made of their stored Files (no byte of them is read into the page). A file that the
+   * run made outside its directory (`-out ../db`, `-out /tmp/db`) is there under its name alone (`handedOverName`), as
+   * an archive holds no path above it or from the root.
    */
   async exportToolFiles(runId: string): Promise<void> {
     const view = this.findTool(runId);
     const entries = view?.record.files ?? [];
     if (view === undefined || entries.length === 0) throw new Error('the run wrote no files');
     const files = await Promise.all(entries.map((entry) => this.deps.data.getToolOutputFile(runId, entry.key, baseName(entry.name))));
+    const names = entries.map((entry) => handedOverName(entry.name));
     const archive = tarArchive(
-      entries.map((entry, index) => ({ name: entry.name, file: files[index]! })),
+      names.map((name, index) => ({ name, file: files[index]! })),
       view.record.endedAt ?? view.snapshot.queuedAt,
     );
-    const stem = primaryBlastDb(entries.map((entry) => entry.name))?.name ?? 'files';
+    const stem = primaryBlastDb(names)?.name ?? 'files';
     await this.saveFile(toolOutputFileName(view.snapshot, `${stem}.tar`), archive);
   }
 
   /**
-   * The database that a completed makeblastdb run made: every file of the run, as a search's database folder. Its Files
-   * are read once per run (`madeDatabases`), so that every hand-over of the run gives the same objects: `-db` and
-   * `-filtering_db` of one run are then one file each in the search's directory, whatever stamp a store gives a read.
+   * The database that a completed makeblastdb run made: every file of the run, as a search's database folder, each under
+   * the name that the run's directory gives it (`handedOverName`: a database made outside it, `-out ../db`, is the folder's
+   * `db`). Its Files are read once per run (`madeDatabases`), so that every hand-over of the run gives the same objects:
+   * `-db` and `-filtering_db` of one run are then one file each in the search's directory, whatever stamp a store gives a
+   * read.
    */
   async madeDatabase(runId: string): Promise<MadeDatabase> {
     const view = this.findTool(runId);
@@ -774,7 +779,7 @@ export class Coordinator {
       made = Promise.all(entries.map((entry) => this.deps.data.getToolOutputFile(runId, entry.key, baseName(entry.name)))).then((files) => ({
         kind: primary.kind,
         files,
-        names: entries.map((entry) => `${folder}/${entry.name}`),
+        names: entries.map((entry) => `${folder}/${handedOverName(entry.name)}`),
       }));
       this.madeDatabases.set(runId, made);
       made.catch(() => this.madeDatabases.delete(runId));

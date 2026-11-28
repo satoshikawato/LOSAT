@@ -4,7 +4,7 @@
 // writable directory, the overlay of the run's files on the user's (line NP WW4b1, D-WW4b-1, 2026-11-27): each call
 // that makeblastdb's `std::fs` makes, answered as Linux answers it, and the files that the run leaves.
 import { describe, expect, it } from 'vitest';
-import { AHEAD_BYTES, AHEAD_FILES, CHUNK_BYTES, FILE_FD_BASE, pathNames, PREOPEN_FD, RUN_DIRECTORY, RunDirectory, TABLE_BYTES, type BlobReader } from '../src/infra/reactor/run-directory.ts';
+import { AHEAD_BYTES, AHEAD_FILES, CHUNK_BYTES, FILE_FD_BASE, OUTSIDE_DIRECTORY, OUTSIDE_FD, pathNames, PREOPEN_FD, RUN_DIRECTORY, RunDirectory, TABLE_BYTES, type BlobReader } from '../src/infra/reactor/run-directory.ts';
 
 const ERRNO = {
   SUCCESS: 0,
@@ -19,6 +19,7 @@ const ERRNO = {
   NOTDIR: 54,
   NOTEMPTY: 55,
   ROFS: 69,
+  XDEV: 75,
   NOTCAPABLE: 76,
 };
 const RIGHT_FD_READ = 1n << 1n;
@@ -167,8 +168,13 @@ describe("the run's working directory", () => {
     expect(wasi.fd_prestat_dir_name!(PREOPEN_FD, 16, RUN_DIRECTORY.length - 1)).toBe(ERRNO.NAMETOOLONG);
     expect(wasi.fd_prestat_dir_name!(PREOPEN_FD, 16, RUN_DIRECTORY.length)).toBe(ERRNO.SUCCESS);
     expect(new TextDecoder().decode(new Uint8Array(view().buffer, 16, RUN_DIRECTORY.length))).toBe('/work');
-    // Descriptor 4 is not a preopen: the shim's answer.
-    expect(wasi.fd_prestat_get!(4, 0)).toBe(ERRNO.BADF);
+    // Descriptor 4 is the folder outside the run's directory (line NP WW4i); descriptor 5 is not a preopen: the shim's
+    // answer, which ends the C library's scan.
+    expect(wasi.fd_prestat_get!(OUTSIDE_FD, 0)).toBe(ERRNO.SUCCESS);
+    expect(view().getUint32(4, true)).toBe(OUTSIDE_DIRECTORY.length);
+    expect(wasi.fd_prestat_dir_name!(OUTSIDE_FD, 16, OUTSIDE_DIRECTORY.length)).toBe(ERRNO.SUCCESS);
+    expect(new TextDecoder().decode(new Uint8Array(view().buffer, 16, OUTSIDE_DIRECTORY.length))).toBe('/outside');
+    expect(wasi.fd_prestat_get!(5, 0)).toBe(ERRNO.BADF);
   });
 
   it('opens a file by its path, and reads it in place', () => {
@@ -836,5 +842,45 @@ describe("a tool run's writable directory", () => {
     expect(g.wasi.fd_filestat_set_size!(fd, 0n)).toBe(ERRNO.INVAL);
     expect(g.wasi.fd_allocate!(fd, 0n, 1n)).toBe(ERRNO.BADF);
     expect(directory.takeWritten()).toEqual([]);
+  });
+});
+
+describe('the folder outside the run directory (`/outside`, line NP WW4i)', () => {
+  it("is a tool run's empty folder at each run, writable as the directory, apart from it, and no output of the run", () => {
+    const w = writableOf({ 'in.fa': '>a\nACGT\n' });
+    const OUT = 2048;
+    const outsideOpen = (name: string, oflags: number, rights: bigint) => {
+      const errno = w.wasi.path_open!(OUTSIDE_FD, 0, ...w.path(name), oflags, rights, 0n, 0, OUT);
+      return { errno, fd: w.view().getUint32(OUT, true) };
+    };
+    // A folder, then a file in it, written and read back, as makeblastdb's database there (`create_dir_all`, `File::create`).
+    expect(w.wasi.path_create_directory!(OUTSIDE_FD, ...w.path('0'))).toBe(ERRNO.SUCCESS);
+    const made = outsideOpen('0/db.nsq', OFLAGS_CREAT | OFLAGS_TRUNC, RIGHT_FD_WRITE | RIGHT_FD_READ);
+    expect(made.errno).toBe(ERRNO.SUCCESS);
+    expect(w.write(made.fd, 'ACGT').count).toBe(4);
+    expect(w.wasi.path_filestat_get!(OUTSIDE_FD, 0, ...w.path('0/db.nsq'), OUT)).toBe(ERRNO.SUCCESS);
+    expect(w.view().getBigUint64(OUT + 32, true)).toBe(4n);
+    expect(w.wasi.fd_filestat_get!(OUTSIDE_FD, OUT)).toBe(ERRNO.SUCCESS);
+    expect(w.view().getUint8(OUT + 16)).toBe(FILETYPE_DIRECTORY);
+    // A name does not leave it (`..` past it), and nothing moves between it and the run's directory (EXDEV).
+    expect(outsideOpen('../work/in.fa', 0, RIGHT_FD_READ).errno).toBe(ERRNO.NOTCAPABLE);
+    expect(w.open('../outside/0/db.nsq').errno).toBe(ERRNO.NOTCAPABLE);
+    const [fromAt, fromLength] = w.path('0/db.nsq');
+    const target = new TextEncoder().encode('moved');
+    new Uint8Array(w.view().buffer).set(target, 1536);
+    expect(w.wasi.path_rename!(OUTSIDE_FD, fromAt, fromLength, PREOPEN_FD, 1536, target.length)).toBe(ERRNO.XDEV);
+    // The run's output is the run directory's files alone; the folder outside holds the file until the run removes it.
+    expect(writtenOf(w.directory)).toEqual([]);
+    expect(w.wasi.path_unlink_file!(OUTSIDE_FD, ...w.path('0/db.nsq'))).toBe(ERRNO.SUCCESS);
+    expect(w.wasi.path_remove_directory!(OUTSIDE_FD, ...w.path('0'))).toBe(ERRNO.SUCCESS);
+    expect(w.wasi.path_remove_directory!(OUTSIDE_FD, ...w.path('.'))).toBe(ERRNO.INVAL);
+    // The next run finds it empty, whatever the last one left.
+    expect(w.wasi.path_create_directory!(OUTSIDE_FD, ...w.path('left'))).toBe(ERRNO.SUCCESS);
+    w.directory.open([], { writable: true });
+    expect(w.wasi.path_filestat_get!(OUTSIDE_FD, 0, ...w.path('left'), OUT)).toBe(ERRNO.NOENT);
+    // A search's folder outside is read-only, as its directory.
+    w.directory.open([]);
+    expect(w.wasi.path_create_directory!(OUTSIDE_FD, ...w.path('x'))).toBe(ERRNO.ROFS);
+    expect(outsideOpen('x', OFLAGS_CREAT, RIGHT_FD_WRITE).errno).toBe(ERRNO.ROFS);
   });
 });

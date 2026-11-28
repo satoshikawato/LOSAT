@@ -565,6 +565,29 @@ describe('the results of a makeblastdb run', () => {
     expect(new TextDecoder().decode(tar.subarray(0, 100)).replace(/\0+$/, '')).toMatch(/^db\/mydb\.p(hr|in|sq)$/);
   });
 
+  it('hands a database made outside the run\'s directory under the names that the folder gives it, and downloads it so (line NP WW4i)', async () => {
+    const { coordinator, saved } = makeCoordinator();
+    for (const [index, out] of ['../mydb', '/tmp/x/mydb'].entries()) {
+      const runId = await finished(coordinator, {
+        tool: 'makeblastdb',
+        stage: 'build',
+        argv: ['makeblastdb', '-in', 'input.fa', '-dbtype', 'prot', '-out', out],
+        directory: [{ name: 'input.fa', file: new Blob(['>p\nMKV\n']), origin: { kind: 'pasted' } }],
+      });
+      const made = await coordinator.madeDatabase(runId);
+      const folder = madeDatabaseFolder(index + 1);
+      expect([...made.names].sort()).toEqual([`${folder}/mydb.phr`, `${folder}/mydb.pin`, `${folder}/mydb.psq`]);
+      const directory = assembleSearchDirectory({
+        subjectDb: { discovery: await discoverBlastDatabases(made.files, made.names), selectedName: `${folder}/mydb` },
+      });
+      expect(directory.files.map((file) => file.name).sort()).toEqual([...made.names].sort());
+      await coordinator.exportToolFiles(runId);
+      expect(saved.at(-1)!.name).toMatch(/\.mydb\.tar$/);
+      const tar = new Uint8Array(await saved.at(-1)!.blob.arrayBuffer());
+      expect(new TextDecoder().decode(tar.subarray(0, 100)).replace(/\0+$/, '')).toMatch(/^mydb\.p(hr|in|sq)$/);
+    }
+  });
+
   it("hands two runs' databases of one name to one search in two folders, one per run (WW4b2 R1 finding 3)", async () => {
     const { coordinator } = makeCoordinator();
     const request = (sequence: string): ToolRequest => ({

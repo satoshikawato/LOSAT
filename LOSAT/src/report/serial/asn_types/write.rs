@@ -43,6 +43,10 @@ fn automatic_tag(position: u16) -> u8 {
 
 /// Writes `value`, a value of the type `ty` of the table, with `enc` (as the value of the member
 /// or element that the caller opened, or of a document that it began).
+///
+/// Out of line: the making and the freeing of the writer's list stay in this function, one per
+/// encoder, not in each of its many callers.
+#[inline(never)]
 pub(crate) fn write_value<E: Encoder>(enc: &mut E, ty: u16, value: &Value) {
     ValueWriter::new().write(enc, ty, value);
 }

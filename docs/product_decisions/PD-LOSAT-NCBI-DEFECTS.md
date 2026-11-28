@@ -1051,7 +1051,8 @@
   TBLASTN, TBLASTX, RPSBLAST and PSIBLAST with one round made it before the report of the first
   query batch (in outfmt 0 to 4 after the prolog, version 1.126 and TBLASTX's), BLASTN, BLASTX and
   RPSTBLASTN lost the reports before in outfmt 5, 15 and 16, BLASTN lost the field line of outfmt 20 where the first batch failed, and every program
-  but PSIBLAST lost the files of the batches before in outfmt 13 and 14; Owner-delegated, standing
+  but PSIBLAST lost the files of the batches before in outfmt 13 and 14, and BLASTP, BLASTN, BLASTX, TBLASTN and
+  TBLASTX the prologs of outfmt 15 and 16 where the first batch failed; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.127, line DBID item pfoff-9, which
   lands first; first 1.126, then 1.127 at the merge of dev 74f94b820a that brought line RG item
   T4b-f's 1.126);

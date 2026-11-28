@@ -3,4 +3,6 @@
   `blastp`, `tblastn`, `tblastx`, `rpsblast` and `psiblast` with one round stopped before writing those results,
   `blastn`, `blastx` and `rpstblastn` lost them in `-outfmt` 5, 15 and 16, `blastn` lost the field line of `-outfmt` 20
   when the first query batch failed, and every program but `psiblast` lost the files of the query batches before with
-  `-outfmt` 13 and 14 and `-out`. The exit status (1) is unchanged.
+  `-outfmt` 13 and 14 and `-out`; where the first query batch fails, `blastp`, `blastn`, `blastx`, `tblastn` and
+  `tblastx` now write the opening lines of `-outfmt` 15 and 16 before the error, as NCBI writes them before its first
+  batch (they wrote nothing). The exit status (1) is unchanged.

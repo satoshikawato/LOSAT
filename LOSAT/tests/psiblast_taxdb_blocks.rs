@@ -2,10 +2,11 @@
 //! with a taxonomy database on `BLASTDB` (line DBID P1). psiblast's batches of one query each
 //! prefetch their subjects, which looks their taxids up there (`ListedTitles::prefetch_messages`):
 //! the checks before the first block also read every sequence's taxid and ask whether a lookup can
-//! be refused (`x_titles_allow_blocks`), so that a refusal in a later block does not come after
-//! the reports of the earlier ones; where none can be, the blocks write the messages of the search
-//! of all queries. `tests/db_search/tm_psi_u` is a database without parsed Seq-ids (the block
-//! search's) of the 8 subjects of `tm_psi`, all with taxid 9606 (`tests/db_search/README.md`).
+//! be refused (`x_titles_allow_blocks`), so that a refusal in a later block comes where the search
+//! of all queries puts it (after the reports of the batches before, line DBID item rf-1); where none
+//! can be, the blocks write the messages of the search of all queries. `tests/db_search/tm_psi_u`
+//! is a database without parsed Seq-ids (the block search's) of the 8 subjects of `tm_psi`, all
+//! with taxid 9606 (`tests/db_search/README.md`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262-264
 
@@ -76,23 +77,25 @@ fn home(tag: &str) -> String {
 
 // `tm_psi_qb.faa` holds q3, without hits at `-evalue 1e-10`, then q1, with hits: with an empty
 // `taxdb.btd` the lookup of taxid 9606 in the batch of q1 is refused (NCBI reads unmapped memory
-// there). Outfmt 7 writes the lines of q3 without hits; the refusal comes before them in blocks
-// as in the search of all queries.
+// there). Outfmt 7 writes the lines of q3 without hits, then the refusal comes at q1's batch, whose
+// loads make the lookup (line DBID item rf-1), in blocks as in the search of all queries: the
+// lines of q3 of the run with a good taxonomy database, up to q1's. NCBI BLAST+ 2.17.0 on these
+// arguments writes the same lines (its version's words aside), then dies there (SIGSEGV).
 #[test]
-fn a_lookup_refused_in_a_later_block_is_refused_before_any_report() {
+fn a_lookup_refused_in_a_later_block_comes_after_the_reports_before() {
     let home = home("refused");
+    let args = ["-evalue", "1e-10", "-outfmt", "7"];
     for block in ["1", "0"] {
-        let run = psiblast(
-            "tm_psi_qb.faa",
-            "btd_empty",
-            block,
-            &["-evalue", "1e-10", "-outfmt", "7"],
-            &home,
-        );
+        let run = psiblast("tm_psi_qb.faa", "btd_empty", block, &args, &home);
+        let good = psiblast("tm_psi_qb.faa", "good", block, &args, &home);
         let stderr = messages(&run);
         assert!(!run.status.success(), "LOSAT_X_BPQBLOCK={block}: {stderr}");
+        assert!(good.status.success(), "LOSAT_X_BPQBLOCK={block}");
+        let good = String::from_utf8_lossy(&good.stdout);
+        let q1 = good.find("# Query: q1").expect("q1's lines");
+        let before = &good[..good[..q1].rfind("# PSIBLAST").expect("q1's first line")];
         assert!(
-            run.stdout.is_empty(),
+            before.contains("# Query: q3") && run.stdout == before.as_bytes(),
             "LOSAT_X_BPQBLOCK={block}: {}",
             String::from_utf8_lossy(&run.stdout)
         );

@@ -1,0 +1,8 @@
+# TBLASTN 2.17.0+
+# Query: 1AB1_A query title
+# Database: tests/db_search/pdbchain/pdbnthrow
+# Fields: query id, subject id, subject title, subject length, evalue
+# 2 hits found
+pdb|1AB1|A	pdb|1AB1|A	N/A	220	3.62e-173
+pdb|1AB1|A	pdb|1AB1|A	N/A	220	0.58
+# BLAST processed 1 queries

@@ -2899,6 +2899,11 @@ item 12, F2; rows `db.pdbchain.seen.n.*` of TBLASTN, BLASTN and TBLASTX) is the 
 two records back-translated, with the Seq-ids `pdb|1AB1|A` and `pdb|1AB2|A` as makeblastdb writes them, and
 `pdbchain/q_pdb1ab1.fna` the nucleotide query `pdb|1AB1|A` of the same letters back-translated (also BLASTX's against
 `pdbonly`, rows `db.pdbchain.seen.only.blastx.*`): NCBI's scope finds the query for `1AB1` in each program.
+`pdbchain/pdbnthrow` (line DBID item rf-2, review 1 L1; rows `db.rf2.seen.tn.*`) is a nucleotide database of a sequence
+without hits, then `pdbn`'s first record with one definition line holding `pdb 1AB1` chain 321 without a chain-id (the
+Seq-align id) and `pdb|1AB1|A`: NCBI's load of it throws, but its scope finds `q_pdb1ab1.faa` (read with `-parse_deflines`)
+for it, so TBLASTN's tables and outfmt 18 show the query; the sequence is the first reported (rank 0) and the second in the
+database (ordinal 1).
 `pdbchain/pdbnonly` (rows `db.pdbchain.nonly.tblastn.*`) is the one-sequence nucleotide database of `1AB1` with chain 321
 and no `chain-id` (empty Bioseq handle), paired with `q_pdb1ab1.faa` (plus-strand rows: `GetFrame` computes `(start % 3) + 1`
 without touching the handle) and `q_pdbn_minus.faa` (minus-strand row: `GetFrame` throws `CCoreException::eNullPtr`).

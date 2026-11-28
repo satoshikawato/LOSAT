@@ -536,6 +536,12 @@ fn a_query_of_an_unsearched_batch_lists_no_masks() {
 /// adds no line to standard error, while the other formats refuse it (rc 1, DBID DECISIONS 13 (3))
 /// at 1, 4, 8 and 16 threads. BLASTP writes nothing to standard output then but outfmt 0's prolog,
 /// which it writes before its first batch, as NCBI does (line RG item T4b-f).
+/// Outfmt 15 and 16 keep their prologs (the start of the bytes without the taxonomy database, no
+/// report), which NCBI's `PrintProlog` writes before its first batch: the refusal comes at the
+/// batch whose loads make the lookup, after the prologs (line DBID item rf-1,
+/// PD-LOSAT-NCBI-DEFECTS 1.128). NCBI BLAST+ 2.17.0 on these arguments dies at that load (SIGSEGV)
+/// with the prolog still in its buffer; with `BLASTDB=tests/seqdb/taxdb/good` its output begins
+/// with the same 20 (outfmt 15) or 275 (outfmt 16) bytes.
 #[test]
 fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -584,13 +590,22 @@ fn the_taxdb_is_read_by_the_prefetching_formats_only() {
             }
         }
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:361-368
     for format in ["15", "16"] {
-        let output = run_in(
-            engine,
-            &["blastp", "-db", db, "-query", query, "-outfmt", format],
-            &[("BLASTDB", damaged)],
-        );
+        let args = &["blastp", "-db", db, "-query", query, "-outfmt", format];
+        let without = run_in(engine, args, &[]);
+        let output = run_in(engine, args, &[("BLASTDB", damaged)]);
+        assert_eq!(without.status.code(), Some(0), "outfmt {format}");
         assert_eq!(output.status.code(), Some(1), "outfmt {format}");
-        assert!(output.stdout.is_empty(), "outfmt {format}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(refusal),
+            "outfmt {format}"
+        );
+        assert!(
+            !output.stdout.is_empty()
+                && without.stdout.starts_with(&output.stdout)
+                && !String::from_utf8_lossy(&output.stdout).contains("report"),
+            "outfmt {format}: the prolog"
+        );
     }
 }

@@ -17,7 +17,8 @@
 //! values; the debug output) the `[X_STATS]` line names why and the bytes
 //! are the same too. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
 //! streamed alike. Where LOSAT refuses a tabular row whose lookup fails (a subject's id or a
-//! failed lookup), both paths write the reports of the batches before and then the refusal, as
+//! failed lookup) or a lookup of an empty `taxdb.btd` (where NCBI dies at the batch's load, line
+//! DBID item rf-1), both paths write the reports of the batches before and then the refusal, as
 //! NCBI does; where LOSAT refuses another sequence that a later batch reports (a stored title,
 //! ambiguity data, a parsed Seq-id, a taxonomy record), the switch writes the reports of the
 //! batches before and then the same refusal (drop-in DECISIONS 44): those reports begin the
@@ -308,8 +309,8 @@ fn same_two(
 
 /// A search that LOSAT refuses in a batch after the first (drop-in DECISIONS 44: stored title,
 /// ambiguity data, prefetch, parsed Seq-id, taxonomy record; tabular-id and failed-lookup refusals
-/// write the reports of the batches before in both paths): without the switch the refusal comes
-/// before every report; with it (and with `LOSAT_X_STATS`, the counters' line taken out) after the
+/// and a lookup of an empty `taxdb.btd`, line DBID item rf-1, write the reports of the batches
+/// before in both paths): without the switch the refusal comes before every report; with it (and with `LOSAT_X_STATS`, the counters' line taken out) after the
 /// reports of the batches before, with the same exit status and standard error ending as without
 /// it (the batches' query warnings may come first). Returns the off run, the run with the switch
 /// and its counters (the switch acts: `none`).
@@ -1532,7 +1533,10 @@ fn custom_tabular_reports_give_the_off_bytes() {
     // offsets do not increase: the record of taxid 9606 begins past the end of `taxdb.btd`, so its
     // names are not found and no lookup is refused), the queries that hit only from the third
     // batch on, 25 sequences each (the sequences with taxids among them). A refusal comes after
-    // the comment lines of the eight queries without hits (outfmt 7), the report of those alone.
+    // the comment lines of the eight queries without hits (outfmt 7), the report of those alone:
+    // with the switch (`Some(false)`: LOSAT's refusal of a parsed Seq-id), or with and without it
+    // (`Some(true)`: a lookup of the empty `taxdb.btd`, where NCBI dies at the batch's load, at the
+    // place of line DBID item rf-1).
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let ids = |name: &str| {
         tests
@@ -1558,38 +1562,40 @@ fn custom_tabular_reports_give_the_off_bytes() {
             "6 qseqid sseqid sallseqid sallacc staxids",
             None,
             4,
-            false,
+            None,
         ),
         (
             "nucl_v5",
             "7 qseqid sseqid staxids sscinames scomnames sblastnames sskingdoms",
             Some("good"),
             1,
-            false,
+            None,
         ),
         (
             "nucl_v5",
             "6 qseqid ssciname sscinames",
             Some("bad_magic"),
             4,
-            false,
+            None,
         ),
-        ("nucl_v4", "20 qseqid sseqid staxid", Some("good"), 1, false),
+        ("nucl_v4", "20 qseqid sseqid staxid", Some("good"), 1, None),
         (
             "nucl_v5",
             "10 qseqid ssciname",
             Some("offset_mid_past_end"),
             1,
-            false,
+            None,
         ),
+        // NCBI BLAST+ 2.17.0 on these arguments writes the comment lines of the eight queries
+        // without hits (its version's words aside) and dies at the lookup (SIGSEGV).
         (
             "nucl_v5",
             "7 qseqid sseqid sscinames",
             Some("btd_empty"),
             4,
-            true,
+            Some(true),
         ),
-        ("nrefuse_v5", "7 qseqid sallseqid", None, 4, true),
+        ("nrefuse_v5", "7 qseqid sallseqid", None, 4, Some(false)),
     ] {
         let path = ids(db);
         let mut args = [
@@ -1610,9 +1616,13 @@ fn custom_tabular_reports_give_the_off_bytes() {
             extra.push(("BLASTDB", dir.as_str()));
         }
         let what = format!("{db} outfmt {outfmt} {blastdb:?}");
-        if refused {
+        if let Some(both) = refused {
             let (off, on, (batches, _)) = refused_late(&what, &args, threads, &extra);
-            assert!(off.report.is_empty(), "{what}: off, no row");
+            if both {
+                assert!(off.report == on.report, "{what}: off, the reports before");
+            } else {
+                assert!(off.report.is_empty(), "{what}: off, no row");
+            }
             args[3] = nohit.to_str().unwrap();
             let (eight, _) = same_two(&what, &args, threads, &extra, None);
             assert_eq!(eight.status, Some(0), "{what}: {eight:?}");

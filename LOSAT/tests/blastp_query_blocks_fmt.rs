@@ -1286,8 +1286,9 @@ fn a_punctuation_database_title_stops_outfmt_6_blocks_but_not_the_others() {
 
 // Outfmt 15 and 16 with `-db` taxids (`tests/db_search/paja_taxid`: taxid 10090 in every definition
 // line but BDT63547.1's 9606, a subject that only the second NCBI query batch of `bpqb_q.faa` hits)
-// and a taxonomy database on `BLASTDB`. The taxonomy database's refusals come before the first byte
-// in the search of all queries, so an unreadable `taxdb.btd` leaves the block search; its
+// and a taxonomy database on `BLASTDB`. The taxonomy database's refusals come in the search of all
+// queries (an empty `taxdb.btd`: at the first batch, whose loads look 10090 up, after the prolog;
+// line DBID item rf-1), so an unreadable `taxdb.btd` leaves the block search; its
 // messages on standard error (the open, the volume's lookup once per taxid, each `Hit`'s lookup) are
 // written by the blocks as by the search of all queries, at the `Hit` that first needs them. A
 // scientific name of 9606 with bytes >= 0x80 is no refusal: outfmt 15 copies it, outfmt 16 is cut at
@@ -1341,6 +1342,8 @@ fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
         let mut fmt = outfmt(spec).to_vec();
         fmt.extend(extra.map(OsString::from));
         for threads in THREADS {
+            // The report of the search without a taxonomy database, which begins with the prolog.
+            let mut complete: Option<Vec<u8>> = None;
             for (variant, completes, messages, reduced) in cases {
                 let query = if reduced { &query_without_9606 } else { &query };
                 // The block search is taken where the search of all queries completes.
@@ -1371,10 +1374,19 @@ fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
                     reference.stderr
                 );
                 if !completes {
+                    // The prolog of the run whose taxonomy database reads, then the refusal at the
+                    // first batch, whose loads make the lookup (line DBID item rf-1): NCBI BLAST+
+                    // 2.17.0 on these arguments dies there (SIGSEGV) with its prolog unflushed;
+                    // with `taxdb/good` its output begins with the same bytes.
+                    let complete = complete.as_ref().expect("the search without a taxdb");
                     assert!(
-                        reference.stdout.is_empty(),
-                        "{what}: no byte before the refusal"
+                        !reference.stdout.is_empty()
+                            && complete.starts_with(&reference.stdout)
+                            && !String::from_utf8_lossy(&reference.stdout).contains("report"),
+                        "{what}: the prolog before the refusal"
                     );
+                } else if variant.is_none() {
+                    complete = Some(reference.stdout.clone());
                 }
                 let run = run_with(&[("LOSAT_X_BPQBLOCK", "1")]);
                 assert_same_outcome(&run, &reference, blocks, &what);

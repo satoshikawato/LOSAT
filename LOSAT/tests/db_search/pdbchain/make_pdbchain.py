@@ -60,6 +60,14 @@ per letter, BACK), with the Seq-ids `pdb|1AB1|A` and `pdb|1AB2|A` as makeblastdb
 `q_pdb1ab1.fna` the query `pdb|1AB1|A` of the duplicated record's letters back-translated: NCBI's scope finds the query
 (`q_pdb1ab1.faa` in TBLASTN, `q_pdb1ab1.fna` in BLASTN and TBLASTX) for `1AB1`.
 
+`pdbnthrow` (line DBID item rf-2, review 1 L1) is a nucleotide database of two records: `lcl|nohit0` (letters
+without a hit, NOHIT_SEED), then `pdbn`'s first record with one definition line of the Seq-ids `pdb|1AB1|B`,
+rewritten to chain 321 without a chain-id (the Seq-align id, whose handle looks up chain 65 = `A`), and
+`pdb|1AB1|A`, titled `t1`: NCBI's load of it throws (no definition line holds the handle's id as the load reads
+the ids), but `q_pdb1ab1.faa` read with `-parse_deflines` holds that id, so NCBI's scope finds the query and
+nothing is loaded. The record that the query hits is the second (rank 0 among the reported, ordinal 1). Its keys
+are not patched, as `pdbtwo`'s.
+
 The sequence index files (`.psd`, `.psi`) keep the ids as makeblastdb wrote them except that the letter
 that ends a pdb key is the low byte of the stored chain (`GetChain()` cast to `char`, as
 `CPDB_seq_id` forms the chain of a Seq-id without a chain-id), lower case, the keys the search looks
@@ -70,6 +78,7 @@ Python 3 standard library only; makeblastdb and blastdbcmd are NCBI's (the compa
 inputs, under the caller's `flock` on the oracle lock).
 """
 import os
+import random
 import struct
 import subprocess
 import sys
@@ -171,7 +180,11 @@ DATABASES = {
     "pdbtwo": False,
     "pdbn": False,
     "pdbnonly": False,
+    "pdbnthrow": False,
 }
+
+# The seed of the letters of `pdbnthrow`'s first record (`random.Random`, A C G T, three per query letter).
+NOHIT_SEED = 20261128
 
 # One codon per letter: the back-translation of `pdbn` and `q_pdb1ab1.fna`.
 BACK = {"A": "GCT", "R": "CGT", "N": "AAC", "D": "GAC", "C": "TGC", "Q": "CAG", "E": "GAA", "G": "GGC", "H": "CAC",
@@ -250,9 +263,11 @@ def with_first_pdb(record, mol, chain):
 
 def patch(base, db, nucl=False):
     """Rewrites the stored deflines of the version 4 database `base` (one record each of CHAINS, or
-    of NORMALIZED for `pdbnorm`, of TWO_LINES for `pdbtwo`, of CHAINS[:1] for `pdbnonly`) and the
+    of NORMALIZED for `pdbnorm`, of TWO_LINES for `pdbtwo`, of CHAINS[:1] for `pdbnonly`, the second
+    record of two for `pdbnthrow`) and the
     header offsets of its index file."""
-    rows = {"pdbnorm": NORMALIZED, "pdbtwo": TWO_LINES, "pdbnonly": CHAINS[:1]}.get(db, CHAINS)
+    rows = {"pdbnorm": NORMALIZED, "pdbtwo": TWO_LINES, "pdbnonly": CHAINS[:1],
+            "pdbnthrow": [None, None]}.get(db, CHAINS)
     idx_ext, hdr_ext = ("nin", "nhr") if nucl else ("pin", "phr")
     index = bytearray(open(f"{base}.{idx_ext}", "rb").read())
     version, = struct.unpack(">I", index[0:4])
@@ -271,6 +286,8 @@ def patch(base, db, nucl=False):
                    for record, (mol, _, chain, rel, chain_id) in zip(records, rows)]
     elif db == "pdbtwo":
         records = [with_first_pdb(record, mol, 321) for record, (mol, _) in zip(records, rows)]
+    elif db == "pdbnthrow":
+        records = [records[0], with_first_pdb(records[1], "1AB1", 321)]
     else:
         records = [with_chain(record, chain) for record, (_, _, chain) in zip(records, rows)]
     offsets = [0]
@@ -342,6 +359,17 @@ def main(ncbi_bin, names):
             subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "nucl", "-parse_seqids",
                             "-blastdb_version", "4", "-title", db, "-out", os.path.join(HERE, db)],
                            check=True, env=env, stdout=subprocess.DEVNULL)
+            continue
+        if db == "pdbnthrow":
+            rng = random.Random(NOHIT_SEED)
+            with open(fasta, "w") as f:
+                f.write(">lcl|nohit0 no hit\n" + "".join(rng.choice("ACGT") for _ in range(3 * len(seq))) + "\n")
+                f.write(">pdb|1AB1|B|pdb|1AB1|A t1\n" + back(record_letters(seq, 0)) + "\n")
+            base = os.path.join(HERE, db)
+            subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "nucl", "-parse_seqids",
+                            "-blastdb_version", "4", "-title", db, "-out", base],
+                           check=True, env=env, stdout=subprocess.DEVNULL)
+            patch(base, db, nucl=True)
             continue
         if db == "pdbnonly":
             name, letter, _ = CHAINS[0]

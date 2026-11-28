@@ -811,13 +811,7 @@ pub(super) fn prefetch_reported_subjects(
                             let joins_copies = first_report.is_some_and(
                                 crate::blastinput::app::ReportFormat::joins_adjacent_copies,
                             );
-                            let ends_on_throw = after_throw.run().is_some_and(|run| {
-                                matches!(
-                                    run.after,
-                                    crate::report::db_subject::AfterThrow::EndsReport
-                                        | crate::report::db_subject::AfterThrow::EndsRun
-                                )
-                            });
+                            let ends_on_throw = after_throw.ends_on_throw();
                             let query_ranks =
                                 crate::algorithm::common::database::one_by_one_query_reads(
                                     database::ListedTitles::fetched_ranks(shown, rows),

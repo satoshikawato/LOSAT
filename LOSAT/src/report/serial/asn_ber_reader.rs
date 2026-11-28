@@ -978,8 +978,15 @@ impl<S: AsnSource> Input for BerReader<S> {
                 format_args!("Unsupported encoding of REAL data: encoding = {kind}"),
             ));
         }
-        let mut text = Vec::with_capacity(length as usize);
-        self.read_bytes(length - 1, &mut text)?;
+        // The text is at most `MAX_DOUBLE_LENGTH - 1` bytes: read into a buffer on the stack, one
+        // byte at a time as `read_bytes` would (the end of the data inside it is a
+        // `CEofException` after the bytes before it).
+        let mut buffer = [0u8; MAX_DOUBLE_LENGTH as usize];
+        let text = &mut buffer[..(length - 1) as usize];
+        for byte in text.iter_mut() {
+            *byte = self.byte()?;
+        }
+        let text = &*text;
         // NCBI ends the text with a 0 byte after its length: the number ends at the first 0 byte.
         let end = text.iter().position(|&c| c == 0).unwrap_or(text.len());
         let read = string_to_double_posix(&text[..end], true);

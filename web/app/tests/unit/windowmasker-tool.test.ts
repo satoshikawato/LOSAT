@@ -3,7 +3,7 @@
 // Coordinator queue (search -> tool -> search, cancel, non-zero exit, Data worker end), and
 // DataService tool output storage / OPFS-backed session inflation.
 import { gzipSync } from 'node:zlib';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { sha256Hex } from 'losat';
 import { parseToolDescription } from 'losat/domain';
 import {
@@ -25,6 +25,7 @@ import { OpfsCountsStore } from '../../src/infra/data/counts-store';
 import { FakeCountsDownloader } from '../../src/infra/fake/fake-counts';
 import type { CountsLocks } from '../../src/ports/counts';
 import { MemoryOpfs } from './support/memory-opfs';
+import { runEnd } from './support/run-end';
 import { ToolDraft } from '../../src/application/tool-draft';
 import {
   buildWindowMaskerArgv,
@@ -119,15 +120,6 @@ function makeCoordinator(
     ...(countsLocks === undefined ? {} : { countsLocks }),
   });
   return { coordinator, data, store, saved };
-}
-
-async function waitTerminal(coordinator: Coordinator, runId: string) {
-  for (let i = 0; i < 400; i++) {
-    const run = coordinator.state.get().runs.find((entry) => entry.snapshot.runId === runId);
-    if (run !== undefined && ['completed', 'cancelled', 'failed'].includes(run.status)) return run;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error(`run ${runId} did not finish`);
 }
 
 describe('windowmasker domain helpers', () => {
@@ -315,6 +307,103 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     expect(await combined!.file.text()).toBe('>a\nACGT\n>b\nTGCA\n');
   });
 
+  // Line WQA's D33 R1 (M3): the WindowMasker button counts one run for a help or version word, as the press starts one print request.
+  it('counts one run for a help or version word in Additional options, with two FASTA files in separate mode', async () => {
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa'), new File(['>b\nTGCA\n'], 'b.fa')]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    draft.setFastaMode('separate');
+    expect(draft.runCount()).toBe(2);
+    for (const word of ['-version', '-h', '-help', '-version-full']) {
+      draft.setExtra(word);
+      expect(draft.runCount(), word).toBe(1);
+    }
+    draft.setExtra('');
+    expect(draft.runCount()).toBe(2);
+    draft.setExtra('-version');
+    expect((await draft.submit()).ok).toBe(true);
+    expect(submitted.at(-1)).toHaveLength(1);
+  });
+
+  // Line WQA's D33 R3 (L1): words that the argv cannot be built with (a NUL) leave the count to the words alone, as the Masking tab
+  // reads them, and never throw (WindowMaskerPanel's computed reads the count); the check says why and the press starts nothing.
+  it('counts without throwing when the argv cannot be built with the words of Additional options (a NUL)', async () => {
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa'), new File(['>b\nTGCA\n'], 'b.fa')]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    draft.setFastaMode('separate');
+    for (const [words, count] of [['-xyz a\0b', 2], ['-version a\0b', 1]] as const) {
+      draft.setExtra(words);
+      expect(draft.runCount(), JSON.stringify(words)).toBe(count);
+      await vi.waitFor(() =>
+        expect(draft.state.get().validation, JSON.stringify(words)).toMatchObject({ state: 'invalid', message: expect.stringContaining('NUL') }),
+      );
+      expect((await draft.submit()).ok, JSON.stringify(words)).toBe(false);
+    }
+    expect(submitted).toHaveLength(0);
+  });
+
+  // Line WQA's D33 R2 (H2): a name that comes from a file reaches the argv as the run directory holds it, a space at its start or
+  // end included, so the run opens it (and the shown command, quoted, runs on the command line with the same bytes): the FASTA
+  // input, a file chosen for -ids, -ustat and Convert's -in. Only text that the user types is trimmed.
+  it('names each file in the argv as the run directory holds it, a space at its start or end included', async () => {
+    const valueOf = (request: ToolRequest, flag: string) => request.argv[request.argv.indexOf(flag) + 1];
+    const namesOf = (request: ToolRequest) => request.directory.map((entry) => entry.name);
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa ')]);
+      draft.setOptionFile('-ids', new File(['a\n'], ' ids.txt'));
+      await sleep(30);
+      expect((await draft.submit()).ok).toBe(true);
+      const request = submitted.at(-1)![0]!;
+      expect(valueOf(request, '-in')).toBe('a.fa ');
+      expect(valueOf(request, '-ids')).toBe(' ids.txt');
+      expect(namesOf(request)).toEqual(['a.fa ', ' ids.txt']);
+      expect(draft.previewArgv()).toEqual(request.argv);
+      // A name typed in the box of -ids is typed text: without the white space around it.
+      draft.setField('-ids', '  typed.txt ');
+      expect(valueOf({ ...request, argv: draft.previewArgv() }, '-ids')).toBe('typed.txt');
+    }
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.addFastaFiles([new File(['>b\nACGT\n'], ' b.fa'), new File(['>c\nACGT\n'], 'c.fa ')]);
+      await sleep(30);
+      draft.setFastaMode('separate');
+      expect((await draft.submit()).ok).toBe(true);
+      expect(submitted.at(-1)!.map((request) => [valueOf(request, '-in'), namesOf(request)])).toEqual([
+        [' b.fa', [' b.fa']],
+        ['c.fa ', ['c.fa ']],
+      ]);
+    }
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.setStage('mask');
+      draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa')]);
+      draft.setUstatFile(new File(['>x\n'], 'c.ascii '));
+      await sleep(30);
+      expect((await draft.submit()).ok).toBe(true);
+      const request = submitted.at(-1)![0]!;
+      expect(valueOf(request, '-ustat')).toBe('c.ascii ');
+      expect(namesOf(request)).toEqual(['a.fa', 'c.ascii ']);
+    }
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.setStage('convert');
+      draft.setConvertFile(new File(['>x\n'], ' c.ascii'));
+      await sleep(30);
+      expect((await draft.submit()).ok).toBe(true);
+      const request = submitted.at(-1)![0]!;
+      expect(valueOf(request, '-in')).toBe(' c.ascii');
+      expect(namesOf(request)).toEqual([' c.ascii']);
+    }
+  });
+
   it('refuses duplicate filenames and detects blastdb names from opened folder files', async () => {
     const { draft } = setupDraft();
     draft.setField('-infmt', 'blastdb');
@@ -322,12 +411,172 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
       [new File([new Uint8Array([1])], 'wm.nin'), new File([new Uint8Array([2])], 'wm.nsq')],
       ['db/wm.nin', 'db/wm.nsq'],
     );
-    expect(draft.state.get().blastDbIn).toBe('db/wm');
+    expect(draft.inName()).toBe('db/wm');
     expect(draft.state.get().runFilesError).toBeUndefined();
 
     draft.addRunFiles([new File([new Uint8Array([3])], 'wm.nin')], ['db/wm.nin']);
     expect(draft.state.get().runFilesError).toContain('db/wm.nin');
     expect(draft.state.get().runFiles).toHaveLength(2);
+  });
+
+  it('writes a found BLAST database with a space as -in "my dbs/wm" for -infmt blastdb, and refuses one with a double quote (line WW, WW4d)', async () => {
+    const { draft, submitted } = setupDraft();
+    draft.setStage('mask');
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(
+      ['nin', 'nhr', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)),
+      ['my dbs/wm.nin', 'my dbs/wm.nhr', 'my dbs/wm.nsq'],
+    );
+    expect(draft.inName()).toBe('"my dbs/wm"');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    const inValue = (argv: readonly string[]) => argv[argv.indexOf('-in') + 1];
+    expect(inValue(draft.previewArgv())).toBe('"my dbs/wm"');
+    expect(draft.previewArgv()).toEqual(expect.arrayContaining(['-infmt', 'blastdb']));
+    draft.setUstatFile(new File(['counts'], 'c.ustat'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect((await draft.submit()).ok).toBe(true);
+    const req = submitted[0]![0]!;
+    expect(inValue(req.argv)).toBe('"my dbs/wm"');
+    expect(req.argv[req.argv.indexOf('-ustat') + 1]).toBe('c.ustat');
+    expect(req.directory.map((entry) => entry.name).sort()).toEqual(['c.ustat', 'my dbs/wm.nhr', 'my dbs/wm.nin', 'my dbs/wm.nsq']);
+
+    const { draft: other } = setupDraft();
+    other.setField('-infmt', 'blastdb');
+    other.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['q"d/wm.nin', 'q"d/wm.nsq']);
+    expect(other.inName()).toBe('');
+    expect(other.databaseRefusal()).toBe('A database named "q"d/wm" cannot be in -in: a double quote there starts or ends a name.');
+  });
+
+  // Line WW, WW4d R1 (review finding 1): the refusal is worked out from the draft (the files of the run, -infmt, a name
+  // typed), so it lasts as long as its cause, and a name found earlier does not run in its place.
+  it('keeps refusing a found database named with a double quote while its files are in the run: the Input block, the check and Run LOSAT, and no name found earlier runs (line WW, WW4d R1)', async () => {
+    const refused = 'A database named "q"/w" cannot be in -in: a double quote there starts or ends a name.';
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['db/wm.nin', 'db/wm.nsq']);
+    const inValue = () => draft.previewArgv()[draft.previewArgv().indexOf('-in') + 1];
+    expect(inValue()).toBe('db/wm');
+    // A second database, which the files of the run now name (the shortest name), and whose name -in cannot carry.
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    expect(draft.previewArgv()).not.toContain('db/wm');
+    expect(draft.databaseRefusal()).toBe(refused);
+    expect(draft.inName()).toBe('');
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused }));
+    // Edits that cleared the old one-shot error keep it now: its cause is still there.
+    draft.setField('-sformat', 'binary');
+    draft.setStage('mask');
+    // Mask's -in is FASTA here (its own -infmt): the files name nothing.
+    expect(draft.databaseRefusal()).toBeUndefined();
+    draft.setStage('mk_counts');
+    draft.resetOptions();
+    expect(draft.databaseRefusal()).toBe(refused);
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused }));
+    expect(await draft.submit()).toEqual({ ok: false, message: refused });
+    expect(submitted).toHaveLength(0);
+    // Without the refused database's files, the files name the other database again.
+    for (const entry of draft.state.get().runFiles.filter((file) => file.name.startsWith('q"/'))) draft.removeRunFile(entry.key);
+    expect(draft.databaseRefusal()).toBeUndefined();
+    expect(inValue()).toBe('db/wm');
+    // A name typed is the user's, whatever the files hold.
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    draft.setBlastDbIn('db/wm');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    expect((await draft.submit()).ok).toBe(true);
+    expect(submitted[0]![0]!.argv[submitted[0]![0]!.argv.indexOf('-in') + 1]).toBe('db/wm');
+  });
+
+  // Line WW, WW4d R1 (review finding 3): -in is a SeqDB name list only with -infmt blastdb; with -infmt seqids (or
+  // -fa_list) it is one file's name, which the files of the run do not name, quote or refuse.
+  it('names no database for -infmt seqids, whose -in is one file name: no quotes and no refusal; -infmt blastdb then names it (line WW, WW4d R1)', async () => {
+    const { draft } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'seqids');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['my dbs/wm.nin', 'my dbs/wm.nsq']);
+    expect(draft.previewArgv()).not.toContain('"my dbs/wm"');
+    expect(draft.inName()).toBe('');
+    draft.setBlastDbIn('my ids.txt');
+    expect(draft.previewArgv()[draft.previewArgv().indexOf('-in') + 1]).toBe('my ids.txt');
+    draft.setBlastDbIn('');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    expect(draft.state.get().runFilesError).toBeUndefined();
+    expect(draft.databaseRefusal()).toBeUndefined();
+    expect(draft.inName()).toBe('');
+    // -fa_list: -in names a file of FASTA file names.
+    draft.setField('-infmt', '');
+    draft.setField('-fa_list', true);
+    expect(draft.usesFastaBox()).toBe(false);
+    expect(draft.databaseRefusal()).toBeUndefined();
+    expect(draft.inName()).toBe('');
+    // -infmt blastdb: the files of the run name -in (the shortest name, refused here).
+    draft.setField('-fa_list', false);
+    draft.setField('-infmt', 'blastdb');
+    expect(draft.databaseRefusal()).toBe('A database named "q"/w" cannot be in -in: a double quote there starts or ends a name.');
+    for (const entry of draft.state.get().runFiles.filter((file) => file.name.startsWith('q"/'))) draft.removeRunFile(entry.key);
+    expect(draft.inName()).toBe('"my dbs/wm"');
+  });
+
+  // Line WW, WW4d R2 (review N1): an Input name typed and then cleared is no name: the database of the run's files names
+  // -in again at once, and its refusal comes back, without waiting for the next file added.
+  it('takes a cleared Input name as none: the found database and its refusal come back at once (line WW, WW4d R2)', async () => {
+    const refused = 'A database named "q"/w" cannot be in -in: a double quote there starts or ends a name.';
+    const { draft } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['my dbs/wm.nin', 'my dbs/wm.nsq']);
+    draft.setBlastDbIn('typed/db');
+    expect(draft.inName()).toBe('typed/db');
+    draft.setBlastDbIn('  ');
+    expect(draft.inName()).toBe('"my dbs/wm"');
+    expect(draft.previewArgv()[draft.previewArgv().indexOf('-in') + 1]).toBe('"my dbs/wm"');
+    draft.setBlastDbIn('typed/db');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    expect(draft.databaseRefusal()).toBeUndefined();
+    draft.setBlastDbIn('');
+    expect(draft.databaseRefusal()).toBe(refused);
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused }));
+    expect(await draft.submit()).toEqual({ ok: false, message: refused });
+  });
+
+  // Line WW, WW4d R2 (review N2): makeblastdb's rule for the three tabs: words of Additional options that name -in give
+  // -in themselves, so the database of the run's files is not written, its refusal does not apply, and no Input name is
+  // asked for.
+  it('writes no found database and refuses none when Additional options name -in (line WW, WW4d R2)', async () => {
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    expect(draft.databaseRefusal()).toBeDefined();
+    draft.setExtra('-in other');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    expect(draft.inName()).toBe('');
+    expect(draft.previewArgv().filter((word) => word === '-in')).toHaveLength(1);
+    expect(draft.previewArgv().slice(-2)).toEqual(['-in', 'other']);
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    expect((await draft.submit()).ok).toBe(true);
+    const argv = submitted[0]![0]!.argv;
+    expect(argv.filter((word) => word === '-in')).toHaveLength(1);
+    expect(argv.slice(-2)).toEqual(['-in', 'other']);
+    // A database that the list can carry is not written either: the words' -in is the one -in.
+    for (const entry of draft.state.get().runFiles) draft.removeRunFile(entry.key);
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['my dbs/wm.nin', 'my dbs/wm.nsq']);
+    expect(draft.previewArgv()).not.toContain('"my dbs/wm"');
+    draft.setExtra('');
+    expect(draft.inName()).toBe('"my dbs/wm"');
+  });
+
+  // Line WW (dev defect found by the WW4d R2 review): WindowMasker reads a nucleotide database, so the files of the run
+  // name the nucleotide one in a folder that holds both kinds.
+  it('names the nucleotide database of the run files for -in, also beside a protein one with a shorter name (line WW, WW4d R2)', async () => {
+    const { draft } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(
+      ['db/p.pin', 'db/p.psq', 'db/nuc.nin', 'db/nuc.nsq'].map((name, i) => new File([new Uint8Array([i])], name.slice(3))),
+      ['db/p.pin', 'db/p.psq', 'db/nuc.nin', 'db/nuc.nsq'],
+    );
+    expect(draft.inName()).toBe('db/nuc');
   });
 
   it('SearchDraft.useCounts switches to BLASTN with -window_masker_db file attached', () => {
@@ -412,6 +661,39 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     expect(missing.ok).toBe(false);
     expect(missing.ok ? '' : missing.message).toContain('9999');
   });
+
+  it("hands counts that a run made outside its directory (-out ../c.counts) to -ustat and -convert under their name alone (WW4e)", async () => {
+    const { coordinator, data } = makeCoordinator(new FakeEngine());
+    const submitted: ToolRequest[][] = [];
+    const draft = new ToolDraft({
+      engine: new FakeEngine(),
+      data,
+      enqueueToolAll: async (requests) => {
+        submitted.push([...requests]);
+        return coordinator.enqueueToolAll(requests);
+      },
+      debounceMs: 0,
+    });
+    draft.ensureLoaded();
+    await sleep(20);
+    draft.setFastaPaste('>q\nACGTACGT\n');
+    draft.setOutName('./../c.counts');
+    expect((await draft.submit()).ok).toBe(true);
+    expect((await runEnd(coordinator, coordinator.state.get().runs.find(isToolRun)!.snapshot.runId)).status).toBe('completed');
+    // The FakeEngine names the file as the engine does: `../c.counts`, its path from the run's directory (WW4h).
+    const counts = coordinator.sessionMadeCounts()[0]!;
+    expect(counts.name).toBe('../c.counts');
+    draft.useCountsForMask(counts.runId, counts.runNumber, counts.key, counts.name, counts.size);
+    draft.setFastaPaste('>q\nACGTACGT\n');
+    expect((await draft.submit()).ok).toBe(true);
+    const mask = submitted[1]![0]!;
+    expect(mask.argv).toEqual(['windowmasker', '-ustat', 'c.counts', '-in', 'input.fa']);
+    expect(mask.directory.map((entry) => entry.name)).toEqual(['input.fa', 'c.counts']);
+    draft.setStage('convert');
+    draft.setConvertSession(counts.runId, counts.runNumber, counts.key, '/tmp/c.counts', counts.size);
+    expect((await draft.submit()).ok).toBe(true);
+    expect(submitted[2]![0]!.argv).toEqual(['windowmasker', '-convert', '-in', 'c.counts', '-out', 'wmasker.ascii']);
+  });
 });
 
 describe('Coordinator single queue and DataService tool storage', () => {
@@ -459,14 +741,14 @@ describe('Coordinator single queue and DataService tool storage', () => {
 
     // Release r1 -> r2 -> r4 sequentially.
     await nextGate(gates);
-    await waitTerminal(coordinator, r1);
+    await runEnd(coordinator, r1);
     await nextGate(gates);
-    const run2 = await waitTerminal(coordinator, r2);
+    const run2 = await runEnd(coordinator, r2);
     expect(isToolRun(run2) && run2.status === 'completed' && run2.record.exitStatus === 0).toBe(true);
     expect(coordinator.sessionMadeCounts()).toHaveLength(1);
 
     await nextGate(gates);
-    await waitTerminal(coordinator, r4);
+    await runEnd(coordinator, r4);
 
     expect(order).toEqual([
       `search:${r1}:start`,
@@ -506,7 +788,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
       directory: [],
     });
     const runId = failedQueued.runId!;
-    const finished = await waitTerminal(coordinator, runId);
+    const finished = await runEnd(coordinator, runId);
     expect(finished.status).toBe('failed');
     expect(isToolRun(finished) && finished.record.exitStatus).toBe(3);
 
@@ -525,7 +807,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     const { runId } = await coordinator.enqueueTool(sampleMkCountsRequest());
     await sleep(20);
     coordinator.cancel(runId!);
-    const cancelled = await waitTerminal(coordinator, runId!);
+    const cancelled = await runEnd(coordinator, runId!);
     expect(cancelled.status).toBe('cancelled');
 
     let endWorker!: (err: Error) => void;
@@ -546,7 +828,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     });
     await sleep(20);
     endWorker(new Error('Data worker stopped'));
-    const failed = await waitTerminal(second.coordinator, r2!);
+    const failed = await runEnd(second.coordinator, r2!);
     expect(failed.status).toBe('failed');
     expect(failed.record.error).toContain('Data worker stopped');
   });
@@ -598,8 +880,8 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(coordinator.state.get().runs.find((r) => r.snapshot.runId === second.runId)?.status).toBe('queued');
 
     releaseFirst();
-    expect((await waitTerminal(coordinator, first.runId!)).status).toBe('completed');
-    expect((await waitTerminal(coordinator, second.runId!)).status).toBe('completed');
+    expect((await runEnd(coordinator, first.runId!)).status).toBe('completed');
+    expect((await runEnd(coordinator, second.runId!)).status).toBe('completed');
   });
 
   it('supports POSIX writeAt/truncate on tool output files and OPFS-backed session inflation', async () => {
@@ -668,7 +950,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
       verification: table,
     });
     const supportedId = (await serialCoord.enqueueTool(sampleMkCountsRequest())).runId!;
-    await waitTerminal(serialCoord, supportedId);
+    await runEnd(serialCoord, supportedId);
     await results.open(supportedId);
     await sleep(20);
     expect(results.state.get().toolBadge).toMatchObject({ level: 'certified', label: 'Supported' });
@@ -681,7 +963,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
         directory: [{ name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } }],
       })
     ).runId!;
-    await waitTerminal(serialCoord, outsideId);
+    await runEnd(serialCoord, outsideId);
     await results.open(outsideId);
     await sleep(20);
     expect(results.state.get().toolBadge).toMatchObject({ level: 'outside', label: 'Not yet supported' });
@@ -695,7 +977,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
         prints: 'help',
       })
     ).runId!;
-    await waitTerminal(serialCoord, helpId);
+    await runEnd(serialCoord, helpId);
     await results.open(helpId);
     await sleep(20);
     expect(results.state.get().toolBadge).toBeUndefined();
@@ -709,7 +991,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
       verification: table,
     });
     const fakeId = (await fakeCoord.enqueueTool(sampleMkCountsRequest())).runId!;
-    await waitTerminal(fakeCoord, fakeId);
+    await runEnd(fakeCoord, fakeId);
     await fakeResults.open(fakeId);
     await sleep(20);
     expect(fakeResults.state.get().toolBadge).toMatchObject({ level: 'development', label: 'Development build' });
@@ -779,10 +1061,10 @@ describe('Coordinator single queue and DataService tool storage', () => {
 
     // Release run 1, then run 2 reads g1.fa and completes -> drops exactly once at completion.
     await nextGate(gates);
-    await waitTerminal(coordinator, blockerId);
+    await runEnd(coordinator, blockerId);
     expect(dropped).toEqual([]);
     await nextGate(gates);
-    const run2 = await waitTerminal(coordinator, run2Id);
+    const run2 = await runEnd(coordinator, run2Id);
     expect(run2.status).toBe('completed');
     expect(readContents).toContain('g1.fa:>g1\nACGT\n');
     expect(dropped).toEqual([token1]);
@@ -800,7 +1082,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     coordinator.cancel(q2);
     expect(dropped).toEqual([token1, token2]);
     await nextGate(gates);
-    await waitTerminal(coordinator, blocker2);
+    await runEnd(coordinator, blocker2);
 
     // Case 3: running cancel after removing from form drops exactly once when run ends.
     draft.addFastaFiles([new File([gzipSync('>g3\nCCCC\n')], 'g3.fa.gz')]);
@@ -813,7 +1095,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(dropped).toEqual([token1, token2]);
     coordinator.cancel(r3);
     await nextGate(gates);
-    expect((await waitTerminal(coordinator, r3)).status).toBe('cancelled');
+    expect((await runEnd(coordinator, r3)).status).toBe('cancelled');
     expect(dropped).toEqual([token1, token2, token3]);
   });
 
@@ -877,7 +1159,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     coordinator.cancel(prepId);
     releaseOpen!();
     openGate = undefined;
-    const prepDone = await waitTerminal(coordinator, prepId);
+    const prepDone = await runEnd(coordinator, prepId);
     expect(prepDone.status).toBe('cancelled');
     await sleep(30);
     expect(baseStore.usage()).toBe(0);
@@ -902,7 +1184,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(sealedWaiting).toBe(true);
     expect(coordinator.state.get().runs.find((r) => r.snapshot.runId === finId)?.status).toBe('finalizing');
     coordinator.cancel(finId);
-    const finDone = await waitTerminal(coordinator, finId);
+    const finDone = await runEnd(coordinator, finId);
     expect(finDone.status).toBe('cancelled');
     // Port stays open while commit finishes sealing so commit settles and its .then(deleteRun) cleans up.
     expect(deletedDuringFinalizing).toEqual([]);
@@ -1073,7 +1355,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(dropped.length).toBe(0);
 
     await nextGate(runGates);
-    const combineRun = await waitTerminal(coordinator, combineRes.runIds![0]!);
+    const combineRun = await runEnd(coordinator, combineRes.runIds![0]!);
     expect(combineRun.status).toBe('completed');
     expect(readTexts).toContain('combined_input.fa:>first\nACGT\n>second\nTGCA\n');
     expect(dropped).toEqual([firstTok]);
@@ -1124,7 +1406,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(dropped.length).toBe(1);
 
     await nextGate(runGates);
-    const maskRun = await waitTerminal(coordinator, maskRes.runIds![0]!);
+    const maskRun = await runEnd(coordinator, maskRes.runIds![0]!);
     expect(maskRun.status).toBe('completed');
     expect(readTexts).toContain('mask.fa:>mask_in\nACGT\n');
     expect(dropped).toEqual([firstTok, maskTok]);
@@ -1163,14 +1445,14 @@ describe('tool runs that read saved counts (-ustat from a saved copy)', () => {
     expect(await held()).toBe(1);
     for (let i = 0; i < 100 && finishes.length === 0; i++) await sleep(1);
     finishes[0]!();
-    expect((await waitTerminal(coordinator, first)).status).toBe('completed');
+    expect((await runEnd(coordinator, first)).status).toBe('completed');
     expect(await held()).toBe(0);
     // A tool run that reads no saved copy holds nothing.
     const plain = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
     expect(await held()).toBe(0);
     for (let i = 0; i < 100 && finishes.length < 2; i++) await sleep(1);
     finishes[1]!();
-    await waitTerminal(coordinator, plain);
+    await runEnd(coordinator, plain);
   });
 
   const expectValid = (draft: ToolDraft) => expect(draft.state.get().validation).toEqual({ state: 'ok' });
@@ -1198,7 +1480,7 @@ describe('tool runs that read saved counts (-ustat from a saved copy)', () => {
     expect(res.ok).toBe(true);
     expectValid(draft);
     expect(draft.state.get().message).toBeUndefined();
-    const run = await waitTerminal(coordinator, res.runIds![0]!);
+    const run = await runEnd(coordinator, res.runIds![0]!);
     expect(run.status).toBe('completed');
     return run;
   };

@@ -3,6 +3,7 @@
 // (WQA D12b + RG-D4 W2). Single owner reused by Subject "Database" (-db),
 // BLASTN "Repeats database" (-filtering_db), and WindowMasker (-infmt blastdb).
 import { WINDOW_MASKER_TAXID_FLAG, type DirectoryFile, type ProgramId, type SequenceKind } from 'losat/domain';
+import { seqdbNames } from './list-flags';
 
 export const DB_FLAG = '-db';
 export const FILTERING_DB_FLAG = '-filtering_db';
@@ -176,7 +177,10 @@ export function noTaxidExpansionConflicts(input: {
 }
 
 export interface BlastDbCandidate {
-  /** Exact relative database path passed to `-db` or `-filtering_db` (without `.nal`/`.pal`/`.nin`/`.pin`). */
+  /**
+   * The database's relative path as it is called (without `.nal`/`.pal`/`.nin`/`.pin`), which `-db` or `-filtering_db` names
+   * as the command line reads it (`seqdbNameList`).
+   */
   readonly name: string;
   readonly kind: SequenceKind;
   readonly entry: 'alias' | 'volume';
@@ -224,11 +228,13 @@ export function duplicateRunFileMessage(name: string): string {
 
 /**
  * Normalizes a picked or folder-relative entry name for a run directory: uses `/` separators,
- * trims whitespace, strips leading `./` and `/` segments, and rejects empty, interior `.`, `..`,
- * or NUL-containing paths (matching `RunDirectory`'s path rules in `packages/losat`).
+ * strips leading `./` and `/` segments, and rejects empty, interior `.`, `..`, or NUL-containing
+ * paths (matching `RunDirectory`'s path rules in `packages/losat`). Spaces are part of a name, as
+ * in the user's folder and on the command line: the file is mounted, and named in the argv, as it
+ * is called (line WQA's D33, S4-3).
  */
 export function normalizeRunPath(raw: string): string | undefined {
-  const cleaned = raw.replaceAll('\\', '/').trim();
+  const cleaned = raw.replaceAll('\\', '/');
   if (cleaned === '' || cleaned.includes('\0')) return undefined;
   const parts: string[] = [];
   for (const segment of cleaned.split('/')) {
@@ -335,38 +341,35 @@ export class RunDirectoryBuilder {
   }
 }
 
-/** Parses `TITLE` and `DBLIST` tokens from a BLAST `.nal` or `.pal` alias file. */
+/**
+ * The `TITLE` and the `DBLIST` names of a BLAST `.nal` or `.pal` alias file, as NCBI's SeqDB reads them: its lines by
+ * `aliasValues`, and `DBLIST`'s value as a SeqDB name list (`seqdbNames`: only a space separates two names, a double
+ * quote starts or ends one), each name with its backslashes read as slashes (SeqDB's `SeqDB_ConvertOSPath`).
+ */
 export function parseAliasMetadata(text: string): { readonly title?: string; readonly dblist: readonly string[] } {
-  let title: string | undefined;
-  const dblist: string[] = [];
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
+  const values = aliasValues(text);
+  const title = values.get('TITLE');
+  const dblist = seqdbNames(values.get('DBLIST') ?? '').map((name) => name.replaceAll('\\', '/'));
+  return title === undefined || title === '' ? { dblist } : { title, dblist };
+}
+
+/**
+ * The keys and values of an alias file's lines, as NCBI's SeqDB reads them (LOSAT `seqdb/alias.rs` `read_values`; line
+ * WW, WW4d R1): a line ends at a newline or a carriage return; the spaces before it are skipped, and a line that then
+ * starts with `#` is a comment; the key is the line up to its first space or tab, exactly (`DBLISTX` is another key);
+ * the value is the rest without the spaces and tabs at its ends, each tab read as a space; a key given again replaces
+ * the earlier value.
+ */
+function aliasValues(text: string): ReadonlyMap<string, string> {
+  const values = new Map<string, string>();
+  for (const raw of text.split(/[\r\n]/)) {
+    const line = raw.replace(/^ +/, '');
     if (line === '' || line.startsWith('#')) continue;
-    if (line.startsWith('TITLE')) {
-      const value = line.slice('TITLE'.length).trim();
-      if (value !== '') title = value;
-      continue;
-    }
-    if (!line.startsWith('DBLIST')) continue;
-    const rest = line.slice('DBLIST'.length).trim();
-    let i = 0;
-    while (i < rest.length) {
-      while (i < rest.length && /\s/.test(rest[i]!)) i++;
-      if (i >= rest.length) break;
-      let token: string;
-      if (rest[i] === '"') {
-        const end = rest.indexOf('"', i + 1);
-        token = end < 0 ? rest.slice(i + 1) : rest.slice(i + 1, end);
-        i = end < 0 ? rest.length : end + 1;
-      } else {
-        const start = i;
-        while (i < rest.length && !/\s/.test(rest[i]!)) i++;
-        token = rest.slice(start, i);
-      }
-      if (token !== '') dblist.push(token.replaceAll('\\', '/'));
-    }
+    const key = /^[^ \t]*/.exec(line)![0];
+    if (key === '') continue;
+    values.set(key, line.slice(key.length).replace(/^[ \t]+|[ \t]+$/g, '').replaceAll('\t', ' '));
   }
-  return title === undefined ? { dblist } : { title, dblist };
+  return values;
 }
 
 function parentDir(path: string): string {
@@ -449,15 +452,17 @@ const byShortestName = (a: BlastDbCandidate, b: BlastDbCandidate) => a.name.leng
 
 /**
  * Picks the primary BLAST database name from a list of run-directory paths: an alias file
- * (`.nal`/`.pal`) first, otherwise a volume (`.nin`/`.pin`), shortest name first.
+ * (`.nal`/`.pal`) first, otherwise a volume (`.nin`/`.pin`), shortest name first; of the molecule
+ * kind `kind` where the option that reads it takes one kind (WindowMasker's `-in`: nucleotide), of
+ * either kind where that is not known.
  */
-export function primaryBlastDbName(fileNames: readonly string[]): string | undefined {
-  return primaryBlastDb(fileNames)?.name;
+export function primaryBlastDbName(fileNames: readonly string[], kind?: SequenceKind): string | undefined {
+  return primaryBlastDb(fileNames, kind)?.name;
 }
 
 /** The primary BLAST database of a list of run-directory paths (`primaryBlastDbName`), with its molecule type. */
-export function primaryBlastDb(fileNames: readonly string[]): BlastDbCandidate | undefined {
-  const candidates = discoverBlastDatabaseNames(fileNames);
+export function primaryBlastDb(fileNames: readonly string[], kind?: SequenceKind): BlastDbCandidate | undefined {
+  const candidates = discoverBlastDatabaseNames(fileNames).filter((db) => kind === undefined || db.kind === kind);
   if (candidates.length === 0) return undefined;
   const aliases = candidates.filter((db) => db.entry === 'alias').sort(byShortestName);
   if (aliases.length > 0) return aliases[0]!;
@@ -500,7 +505,9 @@ export async function discoverBlastDatabases(picked: readonly File[], relativeNa
     const aliasFile = filesByName.get(`${item.name}${ext}`);
     if (aliasFile === undefined || aliasFile.size > MAX_ALIAS_BYTES) continue;
     try {
-      const text = await aliasFile.text();
+      // The bytes as SeqDB reads them: a UTF-8 byte order mark stays, as part of the first line's key (`Blob.text()` would
+      // take it off; NCBI BLAST+ 2.17.0 and LOSAT read `<BOM>DBLIST a` as no DBLIST; line WW, WW4d R2).
+      const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(await aliasFile.arrayBuffer());
       const meta = parseAliasMetadata(text);
       aliasMeta.set(`${item.kind}:${item.name}`, meta);
     } catch {

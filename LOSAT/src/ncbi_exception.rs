@@ -12,12 +12,14 @@
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:370-384
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:397-406
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:5624-5646
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:5697-5748
 //! `ReportStd` writes the message with `SDiagMessage::x_OldWrite` (ncbidiag.cpp:5612-): the
 //! thread (`T0`: the report is made in the main thread's `catch`), the source file as
 //! `__FILE__` names it in NCBI's build tree, the line, the severity (`Error`), the class and
 //! error code (`GetType()::GetErrCodeString()`), the function (`module::class::function() - `,
-//! when NCBI knows one) and the message (`GetMsg()`). `CStringException` adds its position
-//! (`ReportExtra` of its base `CParseTemplException<CCoreException>`: `m_Pos = <pos>`,
+//! when NCBI knows one; `module:: - ` without one) and the message (`GetMsg()`).
+//! `CStringException` adds its position (`ReportExtra` of its base
+//! `CParseTemplException<CCoreException>`: `m_Pos = <pos>`,
 //! ncbistr.hpp:4435-4439, 4499).
 
 /// The build tree that NCBI's reports name: that of the official Linux x64 release of BLAST+
@@ -59,8 +61,9 @@ pub struct ThrowSite {
     /// `GetType()::GetErrCodeString()`: `CStringException::eConvert`.
     pub kind: &'static str,
     /// The module, class and function (`NCBI_CURRENT_FUNCTION`, with `NCBI_MODULE` before it
-    /// where the library is built with one): `ncbi::NStr::StringToInt8`. `None` where NCBI's
-    /// report names none.
+    /// where the library is built with one): `ncbi::NStr::StringToInt8`. A place that names a
+    /// module (or a class) but no function ends with `::` (`BLAST::`, which the report writes
+    /// `BLAST:: - `; `SDiagMessage::x_OldWrite`). `None` where NCBI's report names none.
     pub function: Option<&'static str>,
 }
 
@@ -250,7 +253,10 @@ impl NcbiException {
         );
         if let Some(function) = function {
             out.extend_from_slice(function.as_bytes());
-            out.extend_from_slice(b"() - ");
+            if !function.ends_with("::") {
+                out.extend_from_slice(b"()");
+            }
+            out.extend_from_slice(b" - ");
         }
         out.extend_from_slice(&self.text());
     }

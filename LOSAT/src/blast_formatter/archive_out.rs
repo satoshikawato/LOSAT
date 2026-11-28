@@ -33,7 +33,7 @@ use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::asn_types::view::V;
-use crate::report::serial::asn_types::write::write_value;
+use crate::report::serial::asn_types::write::{write_value, ValueWriter};
 use crate::report::serial::asn_types::Value;
 use crate::report::serial::encoder::{Encoder, ReplacedChar, SerialError, Traced};
 use crate::report::serial::xml::XmlEncoder;
@@ -182,9 +182,11 @@ impl ResultsSource for &ResultsOut<'_> {
         enc: &mut E,
         flush: &mut dyn FnMut(&mut E),
     ) -> anyhow::Result<()> {
+        // One `ValueWriter` for the Seq-aligns, as `ArchiveDocument::write_aligns`.
+        let mut writer = ValueWriter::new();
         for align in &self.alignments {
             enc.element();
-            write_value(enc, align.ty, align.value);
+            writer.write(enc, align.ty, align.value);
             flush(enc);
         }
         Ok(())
@@ -308,9 +310,9 @@ fn build_program_options(search_options: &BuiltOptions, has_database: bool) -> V
 pub(super) fn write_archive(
     search: &Search,
     search_options: &BuiltOptions,
-    algo_opts: &mut RemoteOptions,
+    algo_opts: &RemoteOptions,
     database: Option<&[u8]>,
-    psi_step: Option<Result<i32, ()>>,
+    psi_step: Result<u32, ()>,
     output: &mut Output<'_>,
     buf: &mut Vec<u8>,
     diag: &mut Diag,
@@ -328,19 +330,18 @@ pub(super) fn write_archive(
             search.request.query_is_translated()
         })
         .map_err(stop_error)?;
+    // `GetResultSet`'s `SetMatrixName` of rpsblast and rpstblastn is on `algo_opts` already
+    // (`archive::Run::print`).
     let stats = search.results.search_stats(&search.request.service);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2205-2215
-    // `GetResultSet` calls `SetMatrixName` for rpsblast and rpstblastn.
-    if let Some(matrix) = &stats.matrix {
-        algo_opts.set(fields::MATRIX_NAME, ParamValue::Str(matrix.clone()));
-    }
 
     let is_psiblast = search_options.program == EProgram::PsiBlast;
     let step_number = if is_psiblast {
         match psi_step {
-            Some(Err(())) => return Err(invalid_archive()),
-            Some(Ok(step)) if step != 0 && database.is_some() => Some(step),
-            _ => None,
+            Err(()) => return Err(invalid_archive()),
+            // The `unsigned int` of `GetPsiNumberOfIterations`, written as the `int` it was read
+            // as.
+            Ok(step) if step != 0 && database.is_some() => Some(step as i32),
+            Ok(_) => None,
         }
     } else {
         None

@@ -470,7 +470,7 @@ describe('MaskingDraft', () => {
 
   it("checks WindowMasker's argv with its FASTA input and counts under the run's names (review of WW4c, F2)", async () => {
     const fake = new FakeEngine();
-    const validateTool = vi.fn(async (..._args: Parameters<ToolEngine['validateTool']>) => ({ ok: true as const }));
+    const validateTool = vi.fn<ToolEngine['validateTool']>(async () => ({ ok: true as const }));
     const queued: ToolRequest[] = [];
     const draft = new ToolDraft({
       engine: { describeTool: (tool: string) => fake.describeTool(tool), validateTool },

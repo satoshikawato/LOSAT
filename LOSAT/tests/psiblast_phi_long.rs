@@ -13,6 +13,17 @@
 //! `losat makeblastdb`, at 1 and 4 threads. Expected rows in
 //! `tests/fixtures/db_search_long/phi_long.*.6.out` were frozen from official NCBI BLAST+ 2.17.0
 //! on the same inputs (`PHI_LONG_DIR=<dir>` keeps them there; README.md of that folder).
+//!
+//! The second test (`write_merge_inputs`, fix round 1 of PS8a-2) merges HSPs of two parts that
+//! belong to different places of a pattern of variable length (`ZINC_FINGER`, eight places in
+//! TF3A_YEAST): the merged HSP aligns the pattern region from one place's start
+//! with another's length, so its Seq-align (the start plus the edit script) ends elsewhere than
+//! its own ends: past the end of the query (`pz_q1`, NCBI's `qend` 442 of 429, shown with gaps
+//! there) or inside it (`pz_q2`, the same query with 40 more residues that the subject does not
+//! have). Expected bytes in
+//! `tests/fixtures/db_search_long/phi_merge.*.out` (outfmt 6 and 0, `-subject` and `-db`, with
+//! and without `-sum_stats true`), frozen from official NCBI BLAST+ 2.17.0 (`PHI_MERGE_DIR=<dir>`
+//! keeps the inputs).
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -42,11 +53,17 @@ const BACKGROUND: &[u8] = b"ACDEFGHIKLMNPQRSTVY";
 
 /// `length` letters of `BACKGROUND` from a linear congruential generator seeded with `seed`
 /// (bits 16 and up of each state).
-fn background(mut seed: u32, length: usize) -> Vec<u8> {
+fn background(seed: u32, length: usize) -> Vec<u8> {
+    letters_of(BACKGROUND, seed, length)
+}
+
+/// `length` letters of `alphabet` from a linear congruential generator seeded with `seed` (bits
+/// 16 and up of each state).
+fn letters_of(alphabet: &[u8], mut seed: u32, length: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(length);
     for _ in 0..length {
         seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345) & 0x7fff_ffff;
-        out.push(BACKGROUND[(seed >> 16) as usize % BACKGROUND.len()]);
+        out.push(alphabet[(seed >> 16) as usize % alphabet.len()]);
     }
     out
 }
@@ -266,6 +283,150 @@ fn phi_pattern_on_subjects_over_5_000_000_residues_and_with_sum_statistics_match
             output.status.code(),
             output.stdout.len()
         ));
+    }
+    assert!(failed.is_empty(), "mismatches:\n{}", failed.join("\n"));
+}
+
+/// TF3A_YEAST (429 residues): eight places of the zinc-finger pattern `ZINC_FINGER`, of 22 to
+/// 27 residues.
+const TF3A: &[u8] = b"MGGEVLNNEGMPLAELKQETIPISRSESSESLNSLTSTRSSSSNRPKTYFCDYDGCDKAF\
+TRPSILTEHQLSVHQGLRAFQCDKCAKSFVKKSHLERHLYTHSDTKPFQCSYCGKGVTTR\
+QQLKRHEVTHTKSFICPEEGCNLRFYKHPQLRAHILSVHLHKLTCPHCNKSFQRPYRLRN\
+HISKHHDPEVENPYQCTFAGCCKEFRIWSQLQSHIKNDHPKLKCPICSKPCVGENGLQMH\
+MIIHDDSLVTKNWKCHICPDMSFSRKHDLLTHYGSIHTEEDIPLELKYKISDIQQLVQDH\
+GVQLGNSKHSNEQDEEKISNRLRKRRKLTENNNVEFLQNEVDLEKRLESGENGLNLLLNT\
+VGRKYRCFYNNCSRTFKTKEKYEKHIDKHKVHELKLKILQEKEENKTLVDQNHKEPFIIQ\
+KETQSAGDK";
+
+/// The residues after TF3A in the second query, without `C` or `H` (no new place).
+const TF3A_TAIL: &[u8] = b"SNQLTPEVKAGDLSLRSMNEQAPKTIDSVLGNPEVKALAE";
+
+const ZINC_FINGER: &str = "PA  C-x(2,4)-C-x(3)-[LIVMFYWC]-x(8)-H-x(3,5)-H\n";
+
+/// Letters without `C` and `H`, so that the pattern occurs only in the copy of a query.
+const MERGE_BACKGROUND: &[u8] = b"ADEFGIKLMNPQRSTVWY";
+
+/// Writes `pz_q1.faa` (TF3A), `pz_q2.faa` (TF3A and `TF3A_TAIL`), `pz_s.faa` (5,000,300 letters
+/// of `MERGE_BACKGROUND`, TF3A put at 4,999,771, across the end of the first part, so that HSPs of
+/// its places in the first part and in the second merge) and `zf.pat` into `dir`. Some merged
+/// HSPs' Seq-aligns run past their own ends: past the end of `pz_q1`, inside `pz_q2`, whose
+/// letters after TF3A the subject does not have.
+fn write_merge_inputs(dir: &Path) {
+    let q2 = [TF3A, TF3A_TAIL].concat();
+    write_fasta(&dir.join("pz_q1.faa"), &[("pz_q1", TF3A)]);
+    write_fasta(&dir.join("pz_q2.faa"), &[("pz_q2", &q2[..])]);
+    let mut subject = letters_of(MERGE_BACKGROUND, 31, 5_000_300);
+    subject[4_999_771..4_999_771 + TF3A.len()].copy_from_slice(TF3A);
+    write_fasta(&dir.join("pz_s.faa"), &[("pz_s", &subject[..])]);
+    std::fs::write(dir.join("zf.pat"), ZINC_FINGER).unwrap();
+}
+
+/// `output` with its line of the database's date (`Posted date:` of outfmt 0's footer, the date
+/// the database was made) left out.
+fn without_posted_date(output: &[u8]) -> Vec<u8> {
+    output
+        .split_inclusive(|&byte| byte == b'\n')
+        .filter(|line| !line.trim_ascii_start().starts_with(b"Posted date:"))
+        .flatten()
+        .copied()
+        .collect()
+}
+
+const MERGE_OUTFMT: &str = "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart \
+send evalue bitscore score nident positive gaps qcovhsp qcovs";
+
+#[test]
+fn phi_hsps_merged_across_places_of_the_pattern_match_ncbi() {
+    let run_dir = match std::env::var_os("PHI_MERGE_DIR") {
+        Some(dir) => RunDir {
+            path: PathBuf::from(dir),
+            keep: true,
+        },
+        None => RunDir {
+            path: std::env::temp_dir()
+                .join(format!("losat-psiblast-phi-merge-{}", std::process::id())),
+            keep: false,
+        },
+    };
+    let dir = run_dir.path.as_path();
+    std::fs::create_dir_all(dir).unwrap();
+    write_merge_inputs(dir);
+    // The reports name the inputs as given (outfmt 0's database title): relative names in `dir`.
+    let made = losat()
+        .current_dir(dir)
+        .args([
+            "makeblastdb",
+            "-in",
+            "pz_s.faa",
+            "-dbtype",
+            "prot",
+            "-out",
+            "pz",
+        ])
+        .output()
+        .expect("run losat makeblastdb");
+    assert!(
+        made.status.success(),
+        "makeblastdb: {}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    let mut failed = Vec::new();
+    for n in [1, 2] {
+        let query = format!("pz_q{n}.faa");
+        // Outfmt 0 keeps the alignments of the best E-values (the frozen bytes stay under 64 KB),
+        // those of the merged HSPs among them.
+        let sum_stats = ["-sum_stats", "true"];
+        let best = ["-evalue", "1e-180"];
+        let best_sets = ["-evalue", "1e-100", "-sum_stats", "true"];
+        let cases: [(&str, [&str; 2], &str, &[&str]); 6] = [
+            ("sub.6", ["-subject", "pz_s.faa"], MERGE_OUTFMT, &[]),
+            ("db.6", ["-db", "pz"], MERGE_OUTFMT, &[]),
+            (
+                "ss.sub.6",
+                ["-subject", "pz_s.faa"],
+                MERGE_OUTFMT,
+                &sum_stats,
+            ),
+            ("ss.db.6", ["-db", "pz"], MERGE_OUTFMT, &sum_stats),
+            ("sub.0", ["-subject", "pz_s.faa"], "0", &best),
+            ("ss.db.0", ["-db", "pz"], "0", &best_sets),
+        ];
+        for (label, target, outfmt, extra) in cases {
+            let label = format!("q{n}.{label}");
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/db_search_long")
+                .join(format!("phi_merge.{label}.out"));
+            let frozen =
+                std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            // NCBI's words in LOSAT's (outfmt 0's program and version lines).
+            let want = without_posted_date(&losat::wording::losat_output_bytes(&frozen));
+            for threads in [1, 4] {
+                let output = losat()
+                    .current_dir(dir)
+                    .args(["psiblast", "-query", &query])
+                    .args(target)
+                    .args(["-phi_pattern", "zf.pat", "-num_iterations", "1"])
+                    .args(["-outfmt", outfmt])
+                    .args(extra)
+                    .args(["-num_threads", &threads.to_string()])
+                    .output()
+                    .expect("run losat psiblast");
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !output.status.success() || !stderr.is_empty() {
+                    failed.push(format!(
+                        "{label} t{threads}: status {:?}, stderr {stderr:?}",
+                        output.status.code(),
+                    ));
+                } else if without_posted_date(&output.stdout) != want {
+                    failed.push(format!(
+                        "{label} t{threads}: {} bytes vs expected {}:\n{}",
+                        output.stdout.len(),
+                        want.len(),
+                        String::from_utf8_lossy(&output.stdout)
+                    ));
+                }
+            }
+        }
     }
     assert!(failed.is_empty(), "mismatches:\n{}", failed.join("\n"));
 }

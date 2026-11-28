@@ -147,3 +147,27 @@ fn very_long_pattern_region() {
     assert_eq!(consumed(&ops), (9, 11));
     assert_eq!(ops.first(), Some(&GapEditOp::Sub(8)));
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:497-656
+// A long subject's merged HSP aligns the pattern region from one occurrence's start with another
+// occurrence's length; where that passes the end of the query or of the subject, NCBI reads past
+// the sequence, and LOSAT refuses the search instead.
+#[test]
+fn a_pattern_region_past_the_end_is_refused() {
+    let pattern = PhiPattern::compile(b"G-x(1,3)-K").unwrap();
+    let query = encode("AGLKA");
+    let subject = encode("AGLLLKA");
+    let rows = rows_of(&query);
+    for (q_start, s_start, q_len, s_len) in [(1, 1, 5, 5), (1, 3, 3, 5)] {
+        let refused = align_patterns(
+            &rows, &query, &subject, q_start, s_start, q_len, s_len, &pattern, 11, 1,
+        );
+        assert!(
+            matches!(&refused, Err(PhiError::Refusal(message))
+                if message.contains("a pattern region past the end of the query or subject")),
+            "{q_start} {s_start} {q_len} {s_len}"
+        );
+    }
+    // The regions that end at the last letters are aligned.
+    assert!(align_patterns(&rows, &query, &subject, 1, 1, 4, 6, &pattern, 11, 1).is_ok());
+}

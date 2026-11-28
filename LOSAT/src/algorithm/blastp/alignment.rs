@@ -169,10 +169,13 @@ fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
 /// The letter (NCBIstdaa) at `index` of a row's sequence `letters`: past its end, where a
 /// segment of the alignment runs on (a PHI-BLAST HSP's Seq-align past the end of the query,
 /// `BlastpHsp::seqalign_ends`), the gap character that NCBI's alignment vector fills in for the
-/// letters the sequence lacks (the gap residue 0, shown as `-`).
+/// letters the sequence lacks (the gap residue, shown as `-`).
 #[inline]
 fn sequence_letter(letters: &[u8], index: usize) -> u8 {
-    letters.get(index).copied().unwrap_or(0)
+    letters
+        .get(index)
+        .copied()
+        .unwrap_or(crate::utils::matrix::ncbistdaa::GAP)
 }
 
 #[cfg(test)]

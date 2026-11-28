@@ -736,3 +736,36 @@ fn phi_occurrence_round_trips_past_u16_max_and_clears_subject_frame() {
         assert_eq!(hsp.take_phi_occurrence(), None);
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:168-246
+// The Seq-align's ends are the starts plus the edit script's letters, also where the HSP's own
+// ends (a PHI-BLAST HSP of a long subject's merged parts) are elsewhere: before them (the B2
+// shape of review PS8a-2: own 248, Seq-align 258) or past the query (B1: own 429, Seq-align
+// 442); the reports' hit takes them, every step on the HSP keeps its own.
+#[test]
+fn seqalign_ends_walk_the_edit_script_from_the_starts() {
+    let mut hsp = make_blastp_hsp(75, 19, 248, 4_999_875, 5_000_162);
+    assert_eq!(hsp.seqalign_ends(), (248, 5_000_162));
+    hsp.gap_info = Some(Vec::new());
+    assert_eq!(hsp.seqalign_ends(), (248, 5_000_162));
+    hsp.gap_info = Some(vec![
+        GapEditOp::Sub(100),
+        GapEditOp::Ins(4),
+        GapEditOp::Sub(130),
+        GapEditOp::Del(6),
+        GapEditOp::Sub(6),
+    ]);
+    assert_eq!(hsp.seqalign_ends(), (18 + 240, 4_999_874 + 242));
+    assert_eq!(
+        edit_script_ends(18, 4_999_874, hsp.gap_info.as_deref().unwrap()),
+        (258, 5_000_116)
+    );
+    let hit = hsp.clone().into_hit();
+    assert_eq!((hit.q_start, hit.q_end), (19, 258));
+    assert_eq!((hit.s_start, hit.s_end), (4_999_875, 5_000_116));
+    assert_eq!(hsp.offsets(), (19, 248, 4_999_875, 5_000_162));
+
+    let mut past = make_blastp_hsp(1919, 1, 429, 4_999_772, 5_000_210);
+    past.gap_info = Some(vec![GapEditOp::Sub(400), GapEditOp::Ins(42)]);
+    assert_eq!(past.seqalign_ends(), (442, 5_000_171));
+}

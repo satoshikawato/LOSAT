@@ -1,6 +1,6 @@
 use super::*;
 use crate::blastinput::app::{FormatChoice, ReportFormat};
-use crate::common::Hit;
+use crate::common::{GapEditOp, Hit};
 use crate::report::tabular::taxdb_warning_line;
 
 fn hit(q: (usize, usize), s: (usize, usize), s_idx: u32) -> Hit {
@@ -213,5 +213,33 @@ fn an_hsp_of_length_zero_is_a_row_that_covers_nothing() {
     assert_eq!(
         out,
         "q1\ts1\t93.333\t30\t31\t60\t101\t130\t30\t30\nq1\ts1\t0.000\t0\t3\t2\t24\t23\t30\t0\n"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:168-246
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1222-1226
+// A row prints its Seq-align's ends (the starts plus the edit script), `qcovs` covers the
+// Seq-aligns' query ranges, and `qcovhsp` is the HSP's own span (`hsp_percent_coverage` of the
+// BlastHSP): a PHI-BLAST HSP of a long subject's merged parts whose Seq-align runs past the
+// query's end (review PS8a-2 B1: NCBI's `1 442 ... qcovhsp 100 qcovs 103` for a query of 429)
+// or ends after its own ends inside the query (B2).
+#[test]
+fn a_row_prints_its_seqalign_ends_and_its_own_coverage() {
+    let mut past = hit((1, 100), (1, 100), 0);
+    past.gap_info = Some(vec![GapEditOp::Sub(100), GapEditOp::Ins(13)]);
+    past.length = 113;
+    let mut inside = hit((19, 48), (101, 130), 0);
+    inside.gap_info = Some(vec![GapEditOp::Sub(40)]);
+    inside.length = 40;
+    let lists = [Some(hit_list(vec![vec![past, inside]], 1)), None];
+    let (out, _) = report(
+        6,
+        "qseqid qstart qend sstart send qcovs qcovhsp",
+        BlastpApp::Psiblast,
+        &lists,
+    );
+    assert_eq!(
+        out,
+        "q1\t1\t113\t1\t100\t113\t100\nq1\t19\t58\t101\t140\t113\t30\n"
     );
 }

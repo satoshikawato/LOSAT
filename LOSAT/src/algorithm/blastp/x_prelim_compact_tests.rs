@@ -262,9 +262,14 @@ fn x_prelim_hsp_size_stays_64_bytes() {
 fn phi_ordinal_round_trips_and_leaves_default_unset() {
     let base = prelim(57, (4, 90), (10, 97), 0.0);
     assert_eq!(base.phi_ordinal(), None);
+    assert_eq!(PhiPrelimOrdinal::of(&base.hsp), None);
     for index in [0usize, 1, 70_000] {
         let tagged = base.with_phi_ordinal(PhiPrelimOrdinal::new(index));
         assert_eq!(tagged.phi_ordinal(), Some(PhiPrelimOrdinal::new(index)));
+        assert_eq!(
+            PhiPrelimOrdinal::of(&tagged.hsp),
+            Some(PhiPrelimOrdinal::new(index))
+        );
         assert_eq!(tagged.offsets(), base.offsets());
         assert_eq!(tagged.raw_score(), base.raw_score());
         assert_eq!(tagged.e_value().to_bits(), base.e_value().to_bits());

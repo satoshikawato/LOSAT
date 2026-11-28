@@ -952,7 +952,7 @@ fn phi_final_hsp(
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:282-300
 /// `phi_final_hsp` of an edit script that reads up to the 0-based ends `q_end` and `s_end`, past
 /// the last letter of `query` or `subject`: the counts on the letters followed by gap residues
-/// (0) up to those ends, the gap character that NCBI's report shows there. NCBI's core counts no
+/// up to those ends, the gap character that NCBI's report shows there. NCBI's core counts no
 /// identities for PHI-BLAST (`s_PHITracebackFromHSPList`); its report compares the rows, where a
 /// letter past the end facing a gap is an identity, which the reports' recount gives the HSP
 /// (`recount_shown_identities` of a Seq-align past the letters).
@@ -974,7 +974,7 @@ fn padded_final_hsp(
         }
         let mut padded = Vec::with_capacity(end);
         padded.extend_from_slice(letters);
-        padded.resize(end, 0);
+        padded.resize(end, crate::utils::matrix::ncbistdaa::GAP);
         std::borrow::Cow::Owned(padded)
     };
     crate::algorithm::pssm_search::traceback0::final_hsp(

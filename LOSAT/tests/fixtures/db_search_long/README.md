@@ -70,3 +70,28 @@ psiblast -query phl_q2.faa -db phl $P -evalue 1e-138 -sum_stats true > phi_long.
 ```
 
 NCBI's rows at `-num_threads 8` are the same (with `-subject`, NCBI warns that it searches with one thread).
+
+`phi_merge.<case>.out`: NCBI BLAST+ 2.17.0's bytes of the second test of `tests/psiblast_phi_long.rs` (line PS, PS8a-2
+fix round 1): psiblast `-phi_pattern` with the zinc-finger pattern `C-x(2,4)-C-x(3)-[LIVMFYWC]-x(8)-H-x(3,5)-H` (eight
+places of 22 to 27 residues in TF3A_YEAST) on a subject of 5,000,300 residues (`pz_s`, letters without `C` and `H`)
+with TF3A at 4,999,771, across the end of the first part. HSPs of the first and second parts that belong to different
+places merge, and the merged HSP's Seq-align (its start plus its edit script) ends after its own ends: past the end of
+the query `pz_q1` (TF3A, 429 residues: `qend` 442 and 439, `-` in outfmt 0's query row past 429) and inside the query
+`pz_q2` (TF3A and 40 residues that the subject does not have; `qend` 258 where the HSP's own end is 248). `qcovhsp`
+is the HSP's own span, `qcovs` the Seq-aligns'. The test writes `pz_q1.faa`, `pz_q2.faa`, `pz_s.faa` and `zf.pat`
+with a fixed generator; `PHI_MERGE_DIR=<dir>` keeps them. Frozen in that folder with NCBI's own makeblastdb and
+psiblast (`F="6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore score nident
+positive gaps qcovhsp qcovs"`, `P="-phi_pattern zf.pat -num_iterations 1 -num_threads 1"`), for `n` in 1 and 2:
+
+```
+makeblastdb -in pz_s.faa -dbtype prot -out pz
+psiblast -query pz_qn.faa -subject pz_s.faa $P -outfmt "$F" > phi_merge.qn.sub.6.out
+psiblast -query pz_qn.faa -db pz $P -outfmt "$F" > phi_merge.qn.db.6.out
+psiblast -query pz_qn.faa -subject pz_s.faa $P -outfmt "$F" -sum_stats true > phi_merge.qn.ss.sub.6.out
+psiblast -query pz_qn.faa -db pz $P -outfmt "$F" -sum_stats true > phi_merge.qn.ss.db.6.out
+psiblast -query pz_qn.faa -subject pz_s.faa $P -outfmt 0 -evalue 1e-180 > phi_merge.qn.sub.0.out
+psiblast -query pz_qn.faa -db pz $P -outfmt 0 -evalue 1e-100 -sum_stats true > phi_merge.qn.ss.db.0.out
+```
+
+The test compares outfmt 0 in LOSAT's words (`wording::losat_output_bytes`) and without the line of the database's
+`Posted date:`.

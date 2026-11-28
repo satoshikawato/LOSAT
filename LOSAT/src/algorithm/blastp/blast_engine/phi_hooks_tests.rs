@@ -186,3 +186,69 @@ fn split_hit_list_by_occurrence_keeps_indices_past_u16_max_and_reordered_ties_se
         .iter()
         .all(|hsp| hsp.subject_frame == 0));
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:282-300
+// The final HSP of an edit script that reads past the query's last letter (review PS8a-2 B1:
+// 439 > 429, where `final_hsp` sliced past the query) counts on gap residues there: the HSP keeps
+// its own ends and its columns, and a script inside the letters is `final_hsp`'s.
+#[test]
+fn phi_final_hsp_reads_gap_residues_past_the_end() {
+    use crate::utils::matrix::ncbistdaa::{A, K, L, M, V, W};
+    let query = [M, K, V, L, A];
+    let subject = [M, K, V, L, A, W, A];
+    let preliminary = BlastpPreliminaryHsp {
+        query_start: 0,
+        query_end: 5,
+        subject_start: 0,
+        subject_end: 6,
+        gapped_query_start: 0,
+        gapped_subject_start: 0,
+        raw_score: 30,
+        query_context: 0,
+        query_frame: 0,
+        subject_frame: 0,
+        query_length: 5,
+        q_idx: 0,
+        s_idx: 0,
+    };
+    let script = vec![GapEditOp::Sub(6), GapEditOp::Ins(2)];
+    let hsp = phi_final_hsp(
+        &preliminary,
+        script.clone(),
+        &query,
+        &subject,
+        ScoringMatrix::Blosum62,
+    );
+    assert_eq!(
+        (hsp.q_start, hsp.q_end, hsp.s_start, hsp.s_end),
+        (1, 5, 1, 6)
+    );
+    assert_eq!((hsp.length, hsp.num_ident, hsp.gapopen), (8, 5, 1));
+    assert_eq!(hsp.gap_letters(), 2);
+    assert_eq!(hsp.seqalign_ends(), (8, 6));
+    assert_eq!(hsp.gap_info.as_deref(), Some(&script[..]));
+    let inside = vec![GapEditOp::Sub(4), GapEditOp::Del(1), GapEditOp::Sub(1)];
+    let direct = crate::algorithm::pssm_search::traceback0::final_hsp(
+        &preliminary,
+        inside.clone(),
+        &query,
+        &subject,
+        ScoringMatrix::Blosum62,
+    );
+    let hsp = phi_final_hsp(
+        &preliminary,
+        inside,
+        &query,
+        &subject,
+        ScoringMatrix::Blosum62,
+    );
+    assert_eq!(
+        (hsp.num_ident, hsp.num_positives, hsp.mismatch, hsp.length),
+        (
+            direct.num_ident,
+            direct.num_positives,
+            direct.mismatch,
+            direct.length
+        )
+    );
+}

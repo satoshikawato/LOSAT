@@ -3172,3 +3172,77 @@ fn hard_mask_starts_and_ends_move_the_table() {
         assert!(scratch.diag_array.iter().all(|&e| e == entry), "{start:?}");
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:282-300
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1006-1020
+// The recount of an HSP whose Seq-align runs past the end of its query (a PHI-BLAST HSP of a
+// long subject's merged parts, review PS8a-2 B1): the letters the query lacks are the row's gap
+// character, so a column of one facing the subject's gap is an identity and a positive, one
+// facing a subject letter neither; an HSP inside its letters, without O or `-`, keeps its
+// counts.
+#[test]
+fn the_recount_reads_gaps_past_the_end_of_the_query() {
+    let hsp = |q_end: usize, length: usize, ops: Vec<GapEditOp>| {
+        BlastpHsp::from_hit(Hit {
+            identity: 0.0,
+            length,
+            mismatch: 0,
+            gapopen: 1,
+            q_start: 1,
+            q_end,
+            s_start: 1,
+            s_end: 6,
+            e_value: 0.0,
+            bit_score: 0.0,
+            num_ident: 5,
+            query_frame: 0,
+            query_length: 5,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score: 30,
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
+            gap_info: Some(ops),
+            num_positives: 5,
+        })
+    };
+    let mut list = BlastpHspList {
+        oid: 0,
+        query_index: 0,
+        hsps: vec![
+            hsp(5, 8, vec![GapEditOp::Sub(6), GapEditOp::Ins(2)]),
+            hsp(4, 4, vec![GapEditOp::Sub(4)]),
+        ],
+        best_evalue: 0.0,
+    };
+    list.hsps[1].num_ident = 1;
+    let mut hit_list = BlastpHitList::new(10);
+    hit_list.update(list);
+    let mut hit_lists = vec![Some(hit_list)];
+    let queries = vec![FastaRecord::new("q".to_string(), b"", b"MKVLA")];
+    let subjects = vec![FastaRecord::new("s".to_string(), b"", b"MKVLAWG")];
+    let mut engine_counts = super::super::seqalign::EngineCounts::default();
+    recount_shown_identities(
+        &mut hit_lists,
+        ShownQueries {
+            records: &queries,
+            bioseq: None,
+            phi_shown: &[],
+        },
+        ShownSubjects::Records(&subjects),
+        ScoringMatrix::Blosum62,
+        false,
+        &mut engine_counts,
+    );
+    let hsps = &hit_lists[0].as_ref().unwrap().hsplist_array[0].hsps;
+    // MKVLA--- against MKVLAW--: 5 + 2 identities, the `-` against W neither.
+    assert_eq!((hsps[0].num_ident, hsps[0].num_positives), (7, 7));
+    assert_eq!(hsps[0].mismatch, -1);
+    assert_eq!(hsps[0].identity, 87.5);
+    assert_eq!(hsps[0].gap_letters(), 2);
+    assert_eq!(engine_counts.num_ident((0, 0, 0), 0), 5);
+    assert_eq!((hsps[1].num_ident, hsps[1].num_positives), (1, 5));
+}

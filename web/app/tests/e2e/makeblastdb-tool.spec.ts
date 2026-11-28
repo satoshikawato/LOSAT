@@ -10,18 +10,21 @@
 // times (run in a folder of the same files, in the browser's time zone; support/makeblastdb-native.ts), and the searches
 // that "Use as Database (-db)" starts (blastn; blastp with -db_soft_mask 21) on the database in its run's folder
 // (run1/db, run3/pdb) write the native command line's outfmt 0 and 6 on the files that the browser made, in that folder;
+// a database above the run's folder (`-out ../db`, line NP WW4i) is the files that the native command line writes there,
+// listed under the engine's names (`../db.nin`), downloaded and searched under the folder's (`db.nin`, run1/db);
 // and a WindowMasker run's mask data handed over ("Use as -mask_data in makeblastdb") makes the database that the native
 // windowmasker and makeblastdb make on the same files.
 //
 // LOSAT_E2E_SCREENSHOT_DIR=<dir> saves the screens (empty tab, filled form, finished run, Search after "Use as Database
 // (-db)") at 1280 and 390 px, in the light and the dark colour scheme.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { asNative, downloadAll, folderOf, maskedFiles, nativeRun, type Written } from './support/makeblastdb-native';
+import { asNative, downloadAll, folderOf, maskedFiles, nativeRun, treeOf, type Written } from './support/makeblastdb-native';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { described, openSearch, paste, pickRun, result, waitStatus } from './support/search';
 import { test } from './support/test';
@@ -424,6 +427,62 @@ test('real engine: the databases of the tab are the native command line\'s, and 
     );
   }
 
+  expect(external, 'requests outside the origin').toEqual([]);
+});
+
+/**
+ * The native makeblastdb's run of `argv` in a folder `run` of `inputs`, in a folder of its own, in the browser's zone: the
+ * files that it wrote above `run` (`-out ../db`), by their paths there; a run that fails stops the test.
+ */
+function nativeAbove(argv: readonly string[], inputs: ReadonlyMap<string, Buffer>): Map<string, Buffer> {
+  const parent = mkdtempSync(join(tmpdir(), 'losat-makeblastdb-above-'));
+  try {
+    const folder = join(parent, 'run');
+    for (const [name, bytes] of inputs) {
+      mkdirSync(dirname(join(folder, name)), { recursive: true });
+      writeFileSync(join(folder, name), bytes);
+    }
+    const run = spawnSync(NATIVE!, argv, { cwd: folder, env: { ...process.env, TZ: ZONE }, maxBuffer: 1 << 28 });
+    if (run.status !== 0) throw new Error(`native ${argv.join(' ')} exited ${run.status}: ${run.stderr.toString()}`);
+    return new Map([...treeOf(parent)].filter(([name]) => !name.startsWith('run/')));
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+}
+
+test("real engine: a database above the run's folder (-out ../db) is the native command line's, and its search too (WW4i)", async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'requires built Wasm reactors');
+  test.skip(NATIVE === undefined, NO_NATIVE_REASON ?? 'requires the native losat binary');
+  const external = trackNet(page);
+  await openMakeblastdb(page);
+  await page.getByTestId('mk-fasta-input').fill(NUCL_FASTA);
+  await page.getByTestId('mk-param-dbtype-nucl').check();
+  await page.getByTestId('mk-param-out').fill('../db');
+  await expect(page.getByTestId('mk-command')).toHaveText('losat makeblastdb -in input.fa -dbtype nucl -out ../db');
+  const argv = ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-out', '../db'];
+  const inputs = new Map([['input.fa', Buffer.from(NUCL_FASTA)]]);
+  const before = nativeAbove(argv, inputs);
+  await runMakeblastdb(page, 1);
+  await expect(page.getByTestId('tool-output-text')).toContainText('New DB name:   /db');
+  const listed = await page.getByTestId('tool-made-files-list').locator('.source-name').allTextContents();
+  expect(listed.sort(), 'the files of the run, by the engine\'s names').toEqual([...before.keys()].map((name) => `../${name}`).sort());
+  const made = await downloadAll(page);
+  const after = nativeAbove(argv, inputs);
+  expect(made.name).toMatch(/\.db\.tar$/);
+  expect(maskedFiles(made.files)).toEqual(asNative(maskedFiles(made.files), [maskedFiles(before), maskedFiles(after)]));
+
+  const query = readFileSync(join(LOSAT, 'tests/dropin_corpus/nq.fna'));
+  await page.getByTestId('tool-use-as-database').click();
+  await expect(page.getByTestId('subject-db-selected')).toContainText('run1/db');
+  await paste(page, 'query', query.toString('utf8'));
+  await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
+  await page.getByTestId('run-losat').click();
+  await waitStatus(page, 2, 'completed');
+  const files = new Map([...inFolder('run1', made.files), ['q.fna', query]]);
+  for (const format of [0, 6] as const) {
+    const shown = await result(page, 2, format);
+    expect(shown.output, `blastn -db outfmt ${format}`).toBe(nativeSearch(['blastn', '-db', 'run1/db', '-query', 'q.fna'], files, format));
+  }
   expect(external, 'requests outside the origin').toEqual([]);
 });
 

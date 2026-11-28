@@ -5851,6 +5851,15 @@ pub struct HitLoads {
     /// Whether the run ended at the arrival of report `reached`, after its batch's prefetch: the
     /// held report before it threw (`CallReads::held`; [`HitLoads::prefetches`]).
     ended_at_arrival: bool,
+    /// The held reports that NCBI made in the walk, in order (`CallReads::held`).
+    made: Vec<HeldMade>,
+    /// What the loads of the `Hit`s handed on from the calls before gave, by place
+    /// (`CallReads::held_in`; `HitLoad::Loaded` for one not loaded in this call), and the
+    /// exception of one that threw.
+    carried: Vec<HitLoad>,
+    carried_throws: std::collections::HashMap<usize, crate::ncbi_exception::NcbiException>,
+    /// The `Hit`s of the report held at the end of the call, which the call hands on.
+    held_out: Vec<HeldKey>,
     /// What each batch's prefetch gave for each subject of its prefetch set, by key
     /// ([`HitLoads::prefetched`]).
     prefetched: std::collections::HashMap<usize, HitLoad>,
@@ -5869,13 +5878,57 @@ pub struct HitLoads {
 /// after the reports whose lookup stops the run (`common::database::batch_prefetch`): its query
 /// batch and subjects. Empty for a call that loads nothing else. `held`: the call's reports are
 /// held until the next report arrives (psiblast's XML2 and JSON documents,
-/// `blast_xml2::reports_held`), so a report whose `Hit` throws ends the run there.
+/// `blast_xml2::reports_held`): NCBI loads a held report's `Hit`s when it makes the report
+/// ([`HitLoads::made`]), at the arrival of the next report whose results do not join it (`joins`,
+/// by report), after that report's batch's prefetch, or at the epilog (`epilog`: the call's end is
+/// the run's epilog; `later`: a later call makes it, and the call hands the held report on,
+/// [`HitLoads::held_out`]; neither: the run stops after the call, and NCBI never makes it), so a
+/// `Hit` that throws ends the run there; `held_in`: the `Hit`s of the held report that the calls before
+/// handed on (psiblast's rounds and queries, each a call of its own), loaded at this call's first
+/// arrival or its epilog.
 #[derive(Clone, Debug, Default)]
 pub struct CallReads {
     pub prefetched: Vec<Vec<usize>>,
     pub after: Vec<Vec<usize>>,
     pub stop: Option<(Option<usize>, Vec<usize>)>,
     pub held: bool,
+    pub held_in: Vec<HeldHit>,
+    pub joins: Vec<bool>,
+    pub epilog: bool,
+    pub later: bool,
+}
+
+/// A `Hit` of a held report that a call hands on to the next ([`CallReads::held_in`],
+/// [`HitLoads::held_out`]): the subject that its load asks for (the first of the `Hit`'s copies;
+/// `None` for one without parsed Seq-ids, which every load finds as itself) and its ordinal id in
+/// the database (the texts of its load).
+#[derive(Clone, Debug)]
+pub struct HeldHit {
+    pub subject: Option<std::sync::Arc<ParsedSubject>>,
+    pub ordinal: u32,
+}
+
+/// Where the `Hit` of a held report comes from in a call's walk: the key of its first subject in
+/// the call's reports, or its place among the `Hit`s that the calls before handed on
+/// ([`CallReads::held_in`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeldKey {
+    Key(usize),
+    Carried(usize),
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2380-2399
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2205-2216
+/// A held report that NCBI made in a call's walk ([`HitLoads::made`]): at the arrival of report
+/// `at` of those given (after its batch's prefetch; the number of the reports for the epilog), its
+/// `Hit`s in the order of their loads, and the place among them of the `Hit` whose load threw
+/// (`thrown`): no `Hit` after it is loaded, and the report fails there (outfmt 15 and 16 leave it
+/// out with the exception's post, 13 and 14 end the run).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeldMade {
+    pub at: usize,
+    pub hits: Vec<HeldKey>,
+    pub thrown: Option<usize>,
 }
 
 impl CallReads {
@@ -6002,6 +6055,9 @@ impl HitLoads {
             FormatThrow::Refused(why) => {
                 loads.refused = Some(why);
                 loads.unordered(walk, (&reports, call), &parsed);
+                if call.held {
+                    loads.held_unordered(&reports, call, &parsed, why);
+                }
                 return loads;
             }
             FormatThrow::Unread => None,
@@ -6028,11 +6084,17 @@ impl HitLoads {
         // The batch whose prefetch ran last (`ScopeWalk::bulk`), by the index of its first report.
         let mut prefetched = None;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2363-2399
-        // The end of the run that a held report's `Hit` makes (`CallReads::held`, an `EndsRun`
-        // format): NCBI makes that report at the next query's first result, after the prefetch of
-        // its batch, or at the epilog, so the run ends there (`ended_at_arrival`); the prefetch of
-        // a stopping batch after the reports comes first, and the held report is never made.
-        let mut held_end = false;
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:509-517
+        // The held report's `Hit`s not loaded yet (`CallReads::held`): those that the calls before
+        // handed on, then each report's own, with the keys of each `Hit`'s copies. NCBI makes the
+        // report, and loads them, at the next report's arrival whose results do not join it, after
+        // its batch's prefetch and in its scope (the formatter emptied the scope after the query
+        // before, `ResetScopeHistory`), or at the epilog (`HitLoads::make_held`); the prefetch of a
+        // stopping batch after the reports comes first, and the held report is never made.
+        let mut pending: Vec<(HeldKey, Vec<usize>)> = (0..call.held_in.len())
+            .map(|place| (HeldKey::Carried(place), Vec::new()))
+            .collect();
+        loads.carried = vec![HitLoad::Loaded; call.held_in.len()];
         for (report, (read, keys)) in reports.iter().enumerate() {
             // The reads after the report before (psiblast's PSSM), in its batch's scope.
             if let Some(before) = report.checked_sub(1) {
@@ -6068,8 +6130,10 @@ impl HitLoads {
                     let answers = walk.bulk(subjects.iter().copied());
                     for (&key, &answer) in &answers {
                         loads.prefetched.insert(key, answer);
+                        // A held report reads its `Hit`s when it is made, in a later scope
+                        // (`make_held`), not in the cache of its batch's prefetch.
                         if let HitLoad::Shown(shown) = answer {
-                            if shown_keys.contains(&key) {
+                            if shown_keys.contains(&key) && !call.held {
                                 loads.shown.insert(key, shown);
                             }
                         }
@@ -6090,10 +6154,32 @@ impl HitLoads {
                 if !ended.get() {
                     loaded.extend(keys.keys());
                 }
-                loads.end_at_arrival(&mut held_end, ended, report);
+                if !call.held {
+                    continue;
+                }
+            }
+            if call.held {
+                // The arrival of this report's results: NCBI makes the held report before it,
+                // unless they join it; this report's `Hit`s are held in turn.
+                if !ended.get() && !call.joins.get(report).copied().unwrap_or(false) {
+                    loads.make_held(
+                        report,
+                        &mut pending,
+                        (run, call),
+                        (ended, &mut *walk),
+                        &parsed,
+                        (&mut loaded, &mut passed),
+                    );
+                }
+                match keys {
+                    _ if ended.get() => passed.extend(keys.keys()),
+                    ReportKeys::Entries(subjects) => pending.extend(held_hits(subjects, &parsed)),
+                    ReportKeys::Pairwise(_) => {
+                        debug_assert!(false, "only the XML2 and JSON reports are held");
+                    }
+                }
                 continue;
             }
-            loads.end_at_arrival(&mut held_end, ended, report);
             let Some(run) = run else {
                 // No format reads the subjects: a report that reads one by one loads nothing.
                 continue;
@@ -6176,9 +6262,7 @@ impl HitLoads {
                 let ends_run =
                     run.after == AfterThrow::EndsRun || (run.first_row_ends && range.start == 0);
                 thrown = ends_run || run.after == AfterThrow::EndsReport;
-                if ends_run && call.held {
-                    held_end = true;
-                } else if ends_run {
+                if ends_run {
                     ended.set(true);
                 }
                 passed.extend(keys.filter(|&key| key != first));
@@ -6194,10 +6278,27 @@ impl HitLoads {
             walk.enter(*batch);
             let answers = walk.bulk(keys.iter().filter_map(|&key| Some((key, parsed(key)?))));
             loads.prefetched.extend(answers);
-        } else {
-            // The epilog (or a later call: psiblast's next round or query) makes the held report,
-            // which ends the run after the reads after the last report (its PSSM).
-            loads.end_at_arrival(&mut held_end, ended, given);
+        } else if call.held && call.epilog {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2205-2216
+            // The epilog makes the held report, after the reads after the last report (its PSSM)
+            // and the formatter's `ResetScopeHistory` after the last query: a scope of its own.
+            walk.enter(Some(EPILOG_SCOPE));
+            loads.make_held(
+                given,
+                &mut pending,
+                (run, call),
+                (ended, &mut *walk),
+                &parsed,
+                (&mut loaded, &mut passed),
+            );
+        } else if call.held && call.later {
+            // A later call (psiblast's next round or query) makes it.
+            loads.held_out = pending.iter().map(|(hit, _)| *hit).collect();
+            pending.clear();
+        }
+        // A held report that the run never makes (its end, or a stop, comes first) loads nothing.
+        for (_, keys) in pending {
+            passed.extend(keys);
         }
         let (prefetched_only, unread) = passed
             .into_iter()
@@ -6239,21 +6340,83 @@ impl HitLoads {
         keys
     }
 
-    /// The arrival of report `report` (after its batch's prefetch, before its `Hit`s; for the
-    /// number of the reports, the epilog after the reads after the last) where the held report
-    /// before it threw (`held_end`, taken): the run ends here, and no report from `report` on is
-    /// reached, though its batch was prefetched ([`HitLoads::prefetches`]).
-    fn end_at_arrival(
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:356-410
+    /// NCBI makes the held report `pending` (`CallReads::held`) at the arrival of report `at`
+    /// (after its batch's prefetch; for the number of the reports, the epilog): each `Hit` loads its
+    /// subject ([`ScopeWalk::load`], in the scope of that arrival) until one throws, which the
+    /// held report's `Hit` of the XML2 and JSON documents does not catch: no `Hit` after it loads,
+    /// and where the run's formats end it there (`AfterThrow::EndsRun`, outfmt 13 and 14), the
+    /// run ends at this arrival, though its batch was prefetched ([`HitLoads::prefetches`]).
+    /// The report is recorded ([`HitLoads::made`]) also where no format reads the subjects
+    /// (`run` `None`: nothing throws or gives another sequence).
+    fn make_held<'p>(
         &mut self,
-        held_end: &mut bool,
-        ended: &std::cell::Cell<bool>,
-        report: usize,
+        at: usize,
+        pending: &mut Vec<(HeldKey, Vec<usize>)>,
+        (run, call): (Option<RunThrow>, &CallReads),
+        (ended, walk): (&std::cell::Cell<bool>, &mut ScopeWalk),
+        parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
+        (loaded, passed): (
+            &mut std::collections::HashSet<usize>,
+            &mut std::collections::HashSet<usize>,
+        ),
     ) {
-        if std::mem::take(held_end) {
-            ended.set(true);
-            self.reached.get_or_insert(report);
-            self.ended_at_arrival = true;
+        // A held report without `Hit`s loads nothing.
+        if pending.is_empty() {
+            return;
         }
+        let mut thrown = None;
+        let mut hits = Vec::with_capacity(pending.len());
+        for (place, (hit, keys)) in pending.drain(..).enumerate() {
+            hits.push(hit);
+            if thrown.is_some() {
+                passed.extend(keys);
+                continue;
+            }
+            let subject = match hit {
+                HeldKey::Key(key) => parsed(key),
+                HeldKey::Carried(carried) => call.held_in[carried].subject.as_deref(),
+            };
+            let (Some(run), Some(subject)) = (run, subject) else {
+                loaded.extend(keys);
+                continue;
+            };
+            let exception = match walk.load(subject) {
+                HitLoad::Shown(shown) => {
+                    match hit {
+                        HeldKey::Key(key) => {
+                            self.shown.insert(key, shown);
+                        }
+                        HeldKey::Carried(carried) => self.carried[carried] = HitLoad::Shown(shown),
+                    }
+                    loaded.extend(keys);
+                    continue;
+                }
+                HitLoad::Throws => subject.lookup_throws(),
+                _ => None,
+            };
+            let Some(exception) = exception else {
+                loaded.extend(keys);
+                continue;
+            };
+            match hit {
+                HeldKey::Key(key) => {
+                    self.throws.insert(key, exception);
+                    passed.extend(keys.into_iter().filter(|&other| other != key));
+                }
+                HeldKey::Carried(carried) => {
+                    self.carried[carried] = HitLoad::Throws;
+                    self.carried_throws.insert(carried, exception);
+                }
+            }
+            thrown = Some(place);
+            if run.after == AfterThrow::EndsRun {
+                ended.set(true);
+                self.reached.get_or_insert(at);
+                self.ended_at_arrival = true;
+            }
+        }
+        self.made.push(HeldMade { at, hits, thrown });
     }
 
     /// The reads after report `report` (`CallReads::after`, psiblast's PSSM), in the walk `walk`
@@ -6275,6 +6438,47 @@ impl HitLoads {
                     self.after_shown.insert((report, key), shown);
                 }
             }
+        }
+    }
+
+    /// The held reports of a run whose formats refuse a lookup that throws (`FormatThrow::Refused`,
+    /// whose loads [`HitLoads::unordered`] takes in any order): made where `HitLoads::after` makes
+    /// them, with no load of their own; each `Hit` handed on from the calls before is loaded with
+    /// the refusal's reason `why` (`HitLoad::Refused`), as the call's own subjects are.
+    fn held_unordered<'p>(
+        &mut self,
+        reports: &[(ReportRead, ReportKeys)],
+        call: &CallReads,
+        parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
+        why: ThrowRefusal,
+    ) {
+        self.carried = vec![HitLoad::Refused(why); call.held_in.len()];
+        let mut pending: Vec<HeldKey> = (0..call.held_in.len()).map(HeldKey::Carried).collect();
+        for (report, (_, keys)) in reports.iter().enumerate() {
+            if !call.joins.get(report).copied().unwrap_or(false) && !pending.is_empty() {
+                self.made.push(HeldMade {
+                    at: report,
+                    hits: std::mem::take(&mut pending),
+                    thrown: None,
+                });
+            }
+            if let ReportKeys::Entries(subjects) = keys {
+                pending.extend(held_hits(subjects, parsed).into_iter().map(|(hit, _)| hit));
+            }
+        }
+        if call.stop.is_some() {
+            return;
+        }
+        if call.epilog {
+            if !pending.is_empty() {
+                self.made.push(HeldMade {
+                    at: reports.len(),
+                    hits: pending,
+                    thrown: None,
+                });
+            }
+        } else if call.later {
+            self.held_out = pending;
         }
     }
 
@@ -6531,6 +6735,7 @@ impl HitLoads {
     /// These loads with each subject's key renamed by `key` (an ordinal id to its rank; a key
     /// that `key` does not name is dropped, which reads as loaded).
     pub fn renamed(self, key: impl Fn(usize) -> Option<usize>) -> Self {
+        debug_assert!(self.made.is_empty() && self.held_out.is_empty());
         HitLoads {
             throws: self
                 .throws
@@ -6557,6 +6762,12 @@ impl HitLoads {
                 .into_iter()
                 .filter_map(|((report, old), shown)| Some(((report, key(old)?), shown)))
                 .collect(),
+            // Only psiblast holds a database search's reports, and its walk is by rank: the
+            // renamed walks (BLASTN's, TBLASTX's) make none.
+            made: self.made,
+            carried: self.carried,
+            carried_throws: self.carried_throws,
+            held_out: self.held_out,
         }
     }
 
@@ -6647,6 +6858,60 @@ impl HitLoads {
     pub fn any_throws(&self) -> bool {
         !self.throws.is_empty()
     }
+
+    /// The held reports that NCBI made in the walk (`CallReads::held`), in order.
+    pub fn made(&self) -> &[HeldMade] {
+        &self.made
+    }
+
+    /// What the load of the `Hit` at `place` among those that the calls before handed on
+    /// (`CallReads::held_in`) gave: `HitLoad::Loaded` where the call did not make their report.
+    pub fn carried(&self, place: usize) -> HitLoad {
+        self.carried.get(place).copied().unwrap_or_default()
+    }
+
+    /// The exception that the `Hit` at `place` among those that the calls before handed on threw.
+    pub fn carried_thrown(&self, place: usize) -> Option<&crate::ncbi_exception::NcbiException> {
+        self.carried_throws.get(&place)
+    }
+
+    /// The `Hit`s of the report held at the end of the call, which a later call makes
+    /// (`CallReads::epilog` false): keys of the call's reports, and places of those that the calls
+    /// before handed on.
+    pub fn held_out(&self) -> &[HeldKey] {
+        &self.held_out
+    }
+}
+
+/// The query batch of the scope in which the epilog makes the held report (`CallReads::epilog`): no
+/// batch of the run's, whose scope the formatter emptied after the last query.
+const EPILOG_SCOPE: usize = usize::MAX;
+
+/// The `Hit`s of a held report's entries `subjects` (keys in the report's order, `None` for an
+/// entry that shows nothing), as the XML2 and JSON writers make them (`blast_xml::hit_ranges`: a
+/// copy of one record that follows another joins its `Hit`): the key of each `Hit`'s first
+/// subject, which its load asks for, with the keys of all its subjects.
+fn held_hits<'p>(
+    subjects: &[Option<usize>],
+    parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
+) -> Vec<(HeldKey, Vec<usize>)> {
+    super::blast_xml::hit_ranges(
+        subjects,
+        |subject| *subject,
+        |earlier, later| match (parsed(earlier), parsed(later)) {
+            (Some(earlier), Some(later)) => joins_as_copy(earlier, later),
+            _ => false,
+        },
+    )
+    .into_iter()
+    .filter_map(|range| {
+        let first = subjects[range.start]?;
+        Some((
+            HeldKey::Key(first),
+            subjects[range].iter().flatten().copied().collect(),
+        ))
+    })
+    .collect()
 }
 
 /// Whether the reports `one` and `other` (`other` after `one`) of `reports` are of one query

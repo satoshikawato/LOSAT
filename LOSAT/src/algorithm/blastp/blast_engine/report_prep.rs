@@ -445,6 +445,26 @@ pub(super) fn prefetch_reported_subjects(
             )
         }),
         held,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389
+        // A result joins the held report (no report is made at its arrival) where it is a later
+        // round of the query, or of a query of the held report's Seq-id (as the writer's
+        // `XmlQuery::joins_held`).
+        joins: if held {
+            (0..reported_lists.len())
+                .map(|query| {
+                    reports.psi_round.is_some_and(|io| io.state.number() > 1)
+                        || crate::blastinput::query_batch::xml_show_of(reports.query_scopes, query)
+                            .joins_held
+                })
+                .collect()
+        } else {
+            Vec::new()
+        },
+        // The epilog makes the held report of the call's last query; psiblast's round hands it on
+        // to the next round or query, or to the rounds' epilog (`psi_round::write_round_epilogs`).
+        epilog: reports.epilog && reports.psi_round.is_none(),
+        later: reports.psi_round.is_some() || !reports.last_call,
+        held_in: Vec::new(),
     };
     let hit_loads = listed_titles
         .as_ref()

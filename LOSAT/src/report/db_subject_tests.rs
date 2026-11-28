@@ -1305,9 +1305,11 @@ fn a_held_report_that_throws_ends_the_run_at_the_next_arrival() {
     };
     let held = CallReads {
         held: true,
+        epilog: true,
         ..CallReads::default()
     };
-    // Query 0 reads one by one and throws at its first `Hit`; query 1's batch is prefetched.
+    // Query 0 reads one by one and throws at its first `Hit`, which NCBI loads when it makes the
+    // held report: at query 1's arrival, after query 1's prefetch.
     let reports = || vec![report(true, 0, &[0, 1]), report(false, 1, &[2])];
     let loads = walk(reports(), &held);
     assert_eq!(loads.load(0), HitLoad::Throws);
@@ -1315,29 +1317,98 @@ fn a_held_report_that_throws_ends_the_run_at_the_next_arrival() {
     assert!(loads.loaded(2), "query 1's prefetch runs");
     assert!(loads.reaches(0) && !loads.reaches(1));
     assert!(loads.prefetches(1) && !loads.prefetches(2));
+    assert_eq!(
+        loads.made(),
+        &[HeldMade {
+            at: 1,
+            hits: vec![HeldKey::Key(0), HeldKey::Key(1)],
+            thrown: Some(0),
+        }]
+    );
     // Not held (blastp): the run ends at the `Hit`, before query 1's prefetch.
     let written = walk(reports(), &CallReads::default());
     assert_eq!(written.load(2), HitLoad::Unread);
     assert!(!written.reaches(1) && !written.prefetches(1));
-    // The next query reads one by one too: its `Hit`s are not loaded.
+    assert!(written.made().is_empty());
+    // The next query reads one by one too: its `Hit`s are never loaded.
     let loads = walk(vec![report(true, 0, &[0, 1]), report(true, 1, &[2])], &held);
     assert_eq!(loads.load(2), HitLoad::Unread);
     assert!(!loads.reaches(1) && loads.prefetches(1));
-    // A stopping batch after the reports: its prefetch comes first and stops the run.
+    // A stopping batch after the reports: its prefetch comes first and stops the run; the held
+    // report is never made, so nothing of it loads.
     let stop = CallReads {
         held: true,
+        epilog: true,
         stop: Some((Some(1), vec![3])),
         ..CallReads::default()
     };
     let loads = walk(vec![report(true, 0, &[0, 1])], &stop);
     assert!(loads.prefetches(1) && loads.reaches(1));
     assert!(loads.prefetched.contains_key(&3));
-    // The last report: the epilog ends the run, after the reads after the report (its PSSM).
+    assert!(loads.made().is_empty());
+    assert_eq!(loads.load(0), HitLoad::Unread);
+    // The last report: the epilog makes it and ends the run, after the reads after the report
+    // (its PSSM).
     let loads = walk(vec![report(true, 0, &[0, 1])], &held);
     assert!(loads.reaches(0) && !loads.reaches(1));
     assert!(loads.prefetches(1) && !loads.prefetches(2));
     let written = walk(vec![report(true, 0, &[0, 1])], &CallReads::default());
     assert!(!written.reaches(1) && !written.prefetches(1));
+    // A call whose end is not the run's epilog (psiblast's round) hands the held report on.
+    let open = CallReads {
+        held: true,
+        later: true,
+        ..CallReads::default()
+    };
+    let loads = walk(vec![report(true, 0, &[0, 1])], &open);
+    assert!(loads.reaches(1) && loads.made().is_empty());
+    assert_eq!(loads.held_out(), &[HeldKey::Key(0), HeldKey::Key(1)]);
+    // The next call makes it at the arrival of its first report, after that report's prefetch.
+    let carried = |key: usize| crate::report::db_subject::HeldHit {
+        subject: Some(std::sync::Arc::new(parsed[key].clone())),
+        ordinal: key as u32,
+    };
+    let next = CallReads {
+        held: true,
+        epilog: true,
+        held_in: vec![carried(0), carried(1)],
+        ..CallReads::default()
+    };
+    let loads = walk(vec![report(false, 1, &[2])], &next);
+    assert_eq!(loads.carried(0), HitLoad::Throws);
+    assert!(loads.carried_thrown(0).is_some());
+    assert_eq!(loads.carried(1), HitLoad::Loaded);
+    assert!(!loads.reaches(0) && loads.prefetches(0));
+    // A report whose results join it (the query's next round) makes nothing; the epilog makes the
+    // report with that round's `Hit`s too.
+    let joined = CallReads {
+        joins: vec![true],
+        ..next.clone()
+    };
+    let loads = walk(vec![report(true, 0, &[3])], &joined);
+    assert_eq!(
+        loads.made(),
+        &[HeldMade {
+            at: 1,
+            hits: vec![HeldKey::Carried(0), HeldKey::Carried(1), HeldKey::Key(3)],
+            thrown: Some(0),
+        }]
+    );
+    assert_eq!(loads.load(3), HitLoad::Unread);
+    assert!(loads.reaches(0) && !loads.reaches(1));
+    // Outfmt 15 and 16: the held report fails at its `Hit`, and the run goes on.
+    let loads = HitLoads::of_call(
+        LoadsBefore::none(),
+        Some(RunThrow::every_row(AfterThrow::EndsReport)),
+        reports(),
+        subject,
+        none,
+        &held,
+    );
+    assert_eq!(loads.load(0), HitLoad::Throws);
+    assert!(loads.reaches(1) && loads.loaded(2));
+    assert_eq!(loads.made().len(), 2);
+    assert_eq!(loads.made()[1].at, 2);
 }
 
 // Review 3 of line DBID pfoff-3, N2: a call of the library writes several formats with one

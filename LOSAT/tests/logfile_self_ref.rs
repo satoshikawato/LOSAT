@@ -1127,19 +1127,29 @@ fn a_logfile_naming_what_an_imported_strategy_reads_is_refused() {
 /// TBLASTN's `-in_pssm`.
 /// NCBI BLAST+ 2.17.0 posts that they cannot be overridden and runs (exit 0, probe of
 /// 2026-11-27); a `-logfile` naming their files is no input of the run, so LOSAT runs as it does
-/// with a log of its own, and the named file gets what that log gets.
+/// with a log of its own, and the named file gets what that log gets. Review 2 S3: the command
+/// line's `-db` is searched by the strategy's program, so blastn running a TBLASTX strategy reads
+/// no MegaBLAST index file of it (NCBI 2.17.0: exit 0, 18 rows, and no index file opened, probe of
+/// 2026-11-28).
 #[test]
 fn a_logfile_naming_what_a_strategy_run_ignores_is_not_refused() {
     let dir = fresh_dir("strategy-ignored");
     strategy_inputs(
         &dir,
-        &["blastp.db.ss", "bn_rpt.ss", "blastn.db.ss", "tblastn.db.ss"],
+        &[
+            "blastp.db.ss",
+            "bn_rpt.ss",
+            "blastn.db.ss",
+            "tblastn.db.ss",
+            "tblastx.db.ss",
+        ],
         &[
             "arch_sprot",
             "arch_snucl",
             "rpt_d4",
             "wm_s60k",
             "arch_tbn_snucl",
+            "arch_tbx_snucl",
         ],
     );
     fs::write(dir.join("L.txt"), b"x\n").unwrap();
@@ -1188,6 +1198,13 @@ fn a_logfile_naming_what_a_strategy_run_ignores_is_not_refused() {
             "tblastn.db.ss",
             &["-in_pssm", "P.pssm"],
             "P.pssm",
+        ),
+        (
+            "mb_index_of_db",
+            "blastn",
+            "tblastx.db.ss",
+            &["-db", "tests/db_search/arch_tbx_snucl"],
+            "tests/db_search/arch_tbx_snucl.00.idx",
         ),
     ];
     for &(label, program, strategy, more, log_name) in ignored {

@@ -422,11 +422,9 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
                 return;
             }
             if name == "db" {
-                // Opened as the type of the strategy's database (`strategy_database`).
+                // Opened as the type of the strategy's database, its MegaBLAST index files
+                // counted by the strategy's program (below, once the strategy is read).
                 push_db_list(&mut kept_dbs, value);
-                if is_blastn {
-                    push_db_list(&mut blastn_dbs, value);
-                }
                 return;
             }
         }
@@ -479,10 +477,24 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
             run.path
                 .and_then(|path| strategy_names(program, &path, run.database_given))
         });
+        // The command line's `-db` is searched by the strategy's program, as the strategy's own
+        // database is (`add_strategy`): its type, and whether a BLASTN search may read its
+        // MegaBLAST index files (its volumes' and the old-style ones), are the strategy
+        // program's (blastn running a TBLASTX strategy reads none); the running program's where
+        // the strategy does not read.
         for db in &kept_dbs {
-            match &reads {
-                Some(reads) => inputs.add_typed_db(db, reads.database_type, is_blastn),
-                None => inputs.add_db(db),
+            let blastn_search = match &reads {
+                Some(reads) => {
+                    inputs.add_typed_db(db, reads.database_type, reads.blastn_task);
+                    reads.blastn_task
+                }
+                None => {
+                    inputs.add_db(db);
+                    is_blastn
+                }
+            };
+            if blastn_search {
+                push_db_list(&mut blastn_dbs, db);
             }
         }
         if let Some(reads) = &reads {
@@ -491,11 +503,10 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
         let forced = reads.and_then(|reads| reads.mb_index);
         run_index = run.mb_index.run_index(forced).ok().flatten();
     }
-    // BLASTN's `-db` counts its old-style index files unless `-index_name` names the index (an
-    // imported strategy's run: unless its index is the old-style one of `-index_name`).
-    if is_blastn
-        && inputs.mb_indexes.is_empty()
-        && !run_index.as_ref().is_some_and(|&(_, old_style)| old_style)
+    // A BLASTN search's `-db` (blastn's; under a strategy, the strategy program's, above) counts
+    // its old-style index files unless `-index_name` names the index (an imported strategy's run:
+    // unless its index is the old-style one of `-index_name`).
+    if inputs.mb_indexes.is_empty() && !run_index.as_ref().is_some_and(|&(_, old_style)| old_style)
     {
         for db in blastn_dbs {
             inputs.add_mb_index(&db);

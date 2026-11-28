@@ -126,9 +126,7 @@ impl DbBioseq<'_> {
 /// of its label.
 fn target_set(set: &DeflineSet, target_id: &ParsedSeqId) -> Result<DeflineSet, Stop> {
     let Some(index) = set.bioseq_defline(target_id) else {
-        return Err(Stop::Ncbi(
-            "Error: oid headers do not contain target gi/seq_id.".to_string(),
-        ));
+        return Err(Stop::Ncbi(crate::seqdb::NO_TARGET_IN_HEADERS.to_string()));
     };
     Ok(DeflineSet {
         deflines: vec![set.deflines[index].clone()],

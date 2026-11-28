@@ -91,6 +91,36 @@ fn the_hit_of_a_subject_whose_lookup_throws_has_the_catch_names_and_the_exceptio
         HitNames::of(&every, 0, parsed[0].as_deref(), || subjects.names(0, "BLASTP")),
         Ok(HitNames::Names(names)) if names.lookup_throws.is_none()
     ));
+
+    // Line DBID pfoff-9: a `bioseq_load_throws` subject (`GetBioseqNoData` throws while
+    // `GetSequenceLength` succeeds) becomes `unloaded: true` with `lookup_throws: None`, so
+    // outfmt 5 writes `Hit_len` 0 + caught HSPs and XML2/JSON writes the `HitDescr` of the id
+    // alone with the real length and caught HSPs without raising `CaughtException`.
+    let pdb = |chain: i32| {
+        crate::seqid::ParsedSeqId::Pdb(crate::seqid::model::PdbSeqId {
+            mol: b"1AB1".to_vec(),
+            chain: Some(chain),
+            rel: None,
+            chain_id: None,
+        })
+    };
+    let dual = ParsedSubject::new(crate::seqid::DeflineSet {
+        deflines: vec![crate::seqid::BlastDefline {
+            title: Some(b"dual".to_vec()),
+            ids: vec![pdb(321), pdb(65)],
+            ..Default::default()
+        }],
+        utf8: false,
+    })
+    .unwrap();
+    let dual_names = SubjectNames::of_thrown(&dual, dual.lookup_throws().unwrap());
+    assert!(dual_names.unloaded);
+    assert!(dual_names.lookup_throws.is_none());
+    assert_eq!(dual_names.id, b"pdb|1AB1|A");
+    assert_eq!(dual_names.title, b"Unknown");
+    assert_eq!(dual_names.accession, b"Unknown");
+    assert_eq!(dual_names.descriptions.len(), 1);
+    assert_eq!(dual_names.descriptions[0].id, b"pdb|1AB1|A");
 }
 
 // Line DBID N3: following lists of joined subjects, or of one subject, make one `Hit`; a list

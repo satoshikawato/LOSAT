@@ -305,7 +305,7 @@ fn subject_values<'a>(
         ShownSubjects::Database { reported, .. } => {
             // A subject whose load throws where the query's batch has its prefetch off
             // (`report::db_subject::HitLoads::thrown`): NCBI reads none of its own values.
-            if let (Some(exception), Some(subject)) =
+            if let (Some(exception), Some(parsed)) =
                 (reported.loads().thrown(oid), reported.parsed_subject(oid))
             {
                 return SubjectValues {
@@ -315,9 +315,13 @@ fn subject_values<'a>(
                     gi: 0,
                     all_ids: std::borrow::Cow::Borrowed(&[]),
                     titles: None,
-                    length: 0,
+                    length: if parsed.bioseq_load_throws() {
+                        subject.placement().length
+                    } else {
+                        0
+                    },
                     taxonomy: no_taxonomy,
-                    failed: Some(FailedValues::thrown(subject, exception)),
+                    failed: Some(FailedValues::thrown(parsed, exception)),
                 };
             }
             // No ids where the lookup fails (`ReportedSubjects::tabular_ids`).

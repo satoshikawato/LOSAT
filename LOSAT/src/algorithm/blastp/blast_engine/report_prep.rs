@@ -341,10 +341,36 @@ pub(super) fn prefetch_reported_subjects(
             None => database::ListedTitles::reported_ranks(&hit_lists[span]).collect(),
         }
     };
+    // The query records that NCBI's scope holds at the prefetch of the batch of the searched
+    // queries `span` (`shared::PrefetchQueries`, made only where the batch stops): psiblast's round
+    // of a query gives its query's batch (`BlastpReports::prefetch_scope`); the PSSM's query of
+    // `-in_pssm` (`PsiSearch::query_scope`); else the input records that NCBI's reader added for
+    // the batch (`RangedBatch::input`: the records that `-query_loc` drops included, numbered in
+    // the run, `FastaRecord::local_id`), and in outfmt 5, whose scope the formatter keeps
+    // (`ResetScopeHistory`, cited at `shared::stop_lookup_unsure`), those of the batches before.
+    let xml_scope = crate::blastinput::query_batch::outfmts_have_xml(
+        outputs.formats.iter().map(|format| format.outfmt),
+    );
+    let batch_scope = |span: &std::ops::Range<usize>| {
+        if let Some(scope) = reports.prefetch_scope {
+            return scope();
+        }
+        if let Some(psi) = args.psi_search.as_deref() {
+            return psi.query_scope();
+        }
+        let input = query_batches
+            .iter()
+            .find(|batch| batch.searched == *span)
+            .map_or(0..0, |batch| batch.input.clone());
+        let input = if xml_scope { 0..input.end } else { input };
+        crate::blastinput::query_batch::QueryScope::of_shown_records(&ranges.input_records[input])
+    };
     let prefetch_stop = listed_titles
         .as_ref()
         .filter(|_| batches_prefetch)
-        .and_then(|titles| titles.prefetch_stop(batch_ranges, batch_prefetch, prefetched_ranks));
+        .and_then(|titles| {
+            titles.prefetch_stop(batch_ranges, batch_prefetch, prefetched_ranks, &batch_scope)
+        });
     let reported_lists = &hit_lists[..prefetch_stop
         .as_ref()
         .map_or(hit_lists.len(), |span| span.start)];
@@ -514,30 +540,6 @@ pub(super) fn prefetch_reported_subjects(
     // (blast_format.cpp:1523-1541), so they read the subjects in one order.
     let pairwise_first =
         first_report.is_some_and(|format| blastp_pairwise_view_of(format as i32).is_some());
-    // The query records that NCBI's scope holds at the prefetch of the batch of the searched
-    // queries `span` (`shared::PrefetchQueries`, made only where the batch stops): psiblast's round
-    // of a query gives its query's batch (`BlastpReports::prefetch_scope`); the PSSM's query of
-    // `-in_pssm` (`PsiSearch::query_scope`); else the input records that NCBI's reader added for
-    // the batch (`RangedBatch::input`: the records that `-query_loc` drops included, numbered in
-    // the run, `FastaRecord::local_id`), and in outfmt 5, whose scope the formatter keeps
-    // (`ResetScopeHistory`, cited at `shared::stop_lookup_unsure`), those of the batches before.
-    let xml_scope = crate::blastinput::query_batch::outfmts_have_xml(
-        outputs.formats.iter().map(|format| format.outfmt),
-    );
-    let batch_scope = |span: &std::ops::Range<usize>| {
-        if let Some(scope) = reports.prefetch_scope {
-            return scope();
-        }
-        if let Some(psi) = args.psi_search.as_deref() {
-            return psi.query_scope();
-        }
-        let input = query_batches
-            .iter()
-            .find(|batch| batch.searched == *span)
-            .map_or(0..0, |batch| batch.input.clone());
-        let input = if xml_scope { 0..input.end } else { input };
-        crate::blastinput::query_batch::QueryScope::of_shown_records(&ranges.input_records[input])
-    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:677-707
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:331-380
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133

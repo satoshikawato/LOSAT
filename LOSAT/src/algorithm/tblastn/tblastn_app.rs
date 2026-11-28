@@ -2399,6 +2399,7 @@ fn search(
                 &results,
                 &spans,
                 (prefetch_format, resolved.gapped, pssm.is_some()),
+                &batch_scope,
             )
             .filter(|(span, _)| {
                 failed

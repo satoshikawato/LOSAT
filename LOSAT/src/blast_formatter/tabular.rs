@@ -421,9 +421,9 @@ impl<'db> Subjects<'db> {
 /// header read as the search programs read a reported sequence's (`read_header`). Not found is
 /// NCBI's ask of its servers (`Refusal::Database`); a lookup that throws, a header with a
 /// UTF8String, and a parsed header whose Seq-align id NCBI's lookup or scope may not give as it is
-/// (`ParsedSubject::found`, `unfetchable`, `load_throws`, `scope_finds_none`, `ScopeWalk::load`,
-/// or a Seq-align id that NCBI's scope does not find for `id`, `id_scope::scope_finds`) are
-/// refused.
+/// (`ParsedSubject::found`, `unfetchable`, `bioseq_load_throws`, `scope_finds_none`,
+/// `ScopeWalk::load`, or a Seq-align id that NCBI's scope does not find for `id`,
+/// `id_scope::scope_finds`) are refused.
 fn database_subject(
     name: &[u8],
     db: &SeqDb,
@@ -454,7 +454,7 @@ fn database_subject(
     if let ReportedHeader::Parsed(subject) = &header {
         let plain = subject.found().is_none()
             && !subject.unfetchable()
-            && !subject.load_throws()
+            && !subject.bioseq_load_throws()
             && !subject.scope_finds_none()
             && matches!(walk.load(subject), HitLoad::Loaded)
             && scope_finds(subject.alignment_id(), id);

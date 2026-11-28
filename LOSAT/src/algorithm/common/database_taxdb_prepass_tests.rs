@@ -821,11 +821,11 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
             PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref()),
         ];
         assert_eq!(
-            load_before_stop(&db, &subjects).at_first_stop(),
+            stop_order(&db, &subjects).at_first_stop(),
             [want, LoadBeforeStop::No],
             "{names:?}"
         );
-        let before = load_before_stop(&db, &subjects).at_first_stop();
+        let before = stop_order(&db, &subjects).at_first_stop();
         // No load before the batch: the run has reported nothing (its first batch, or batches
         // whose subjects have no parsed Seq-ids), and the scope holds none of its ids.
         assert_eq!(
@@ -851,7 +851,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     let tie = PrefetchSubject::unflipped(2, None);
     let stopping = PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref());
     assert!(matches!(
-        load_before_stop(&db, &[tie, stopping]).at_first_stop()[0],
+        stop_order(&db, &[tie, stopping]).at_first_stop()[0],
         LoadBeforeStop::Unknown(why) if why.contains("same packed number")
     ));
     let unstopped = (**parsed[stop as usize].as_ref().unwrap())
@@ -859,7 +859,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
         .found_instead(None);
     let copy = PrefetchSubject::unflipped(other, Some(&unstopped));
     assert!(matches!(
-        load_before_stop(&db, &[stopping, copy]).at_first_stop()[1],
+        stop_order(&db, &[stopping, copy]).at_first_stop()[1],
         LoadBeforeStop::Unknown(why) if why.contains("the same Seq-align id")
     ));
     // `gnl|BL_ORD_ID|3` and on (packed 3 and more, after the stop): 200 distinct ids in one
@@ -869,7 +869,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
         .collect();
     let mut many = unparsed.clone();
     many.push(stopping);
-    assert!(load_before_stop(&db, &many).at_first_stop()[..201]
+    assert!(stop_order(&db, &many).at_first_stop()[..201]
         .iter()
         .all(|before| matches!(
             before,
@@ -877,16 +877,16 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
         )));
     let mut few = unparsed[..199].to_vec();
     few.push(stopping);
-    assert!(load_before_stop(&db, &few)
+    assert!(stop_order(&db, &few)
         .at_first_stop()
         .iter()
         .all(|before| *before == LoadBeforeStop::No));
     let later = PrefetchSubject::unflipped(other, parsed[other as usize].as_deref());
     assert_eq!(
-        load_before_stop(&db, &[later, tie, stopping]).at_first_stop(),
+        stop_order(&db, &[later, tie, stopping]).at_first_stop(),
         [
             LoadBeforeStop::No,
-            load_before_stop(&db, &[tie, stopping]).at_first_stop()[0],
+            stop_order(&db, &[tie, stopping]).at_first_stop()[0],
             LoadBeforeStop::No
         ]
     );
@@ -907,7 +907,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
             db,
             run,
             subjects,
-            &load_before_stop(db, subjects).at_first_stop(),
+            &stop_order(db, subjects).at_first_stop(),
             &queries,
             stop,
             parsed,
@@ -1806,6 +1806,12 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
 
 /// The batch whose stop names the query `query` and whose scope holds no query (a run whose
 /// queries have none of the ids of the database).
+/// [`load_before_stop`] of a stopping batch whose reported sequences are `subjects`, none of them
+/// hidden by a query (the batch's map is theirs, [`batch_map`]).
+fn stop_order(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> LoadOrder {
+    load_before_stop(db, subjects, batch_map(db, subjects))
+}
+
 fn stop_queries(query: usize) -> PrefetchQueries<'static> {
     PrefetchQueries::new(query, &crate::blastinput::query_batch::QueryScope::default)
 }
@@ -4073,6 +4079,75 @@ fn the_map_of_a_batch_counts_every_seq_align_id_of_it() {
     );
     assert_eq!(map_unknown(&[(2, Some(vec![1]))], 201), Some(MANY_IDS));
     assert_eq!(map_unknown(&[(2, Some(vec![1]))], 200), None);
+}
+
+/// Line DBID pfoff-9 with line NP item O4b2-10 (the merge of both): NCBI's `GetBioseqHandles`
+/// counts every Seq-align id of a batch in its map before its scope resolves any, so a stopping
+/// subject whose id a query of the batch's scope holds (`ParsedSubject::hidden_by_query`) is left
+/// out of the prefetch's lookups and stops and still counts in the one map that orders the batch's
+/// other loads and stops ([`prefetched_subjects`]): 199 other ids and it are 200 in one map, 200
+/// and it are 201 in pieces (`MANY_IDS`). `pdbchain/pdbdual`'s dual record, whose Bioseq's build
+/// throws (`ParsedSubject::bioseq_load_throws`), and a query that holds its Seq-align id.
+#[test]
+fn a_subject_that_a_query_hides_counts_in_the_map_of_its_batch() {
+    let cwd = empty_cwd("pfwhide");
+    let search = SearchPath::new(&cwd, None, None);
+    let path = root().join("db_search/pdbchain/pdbdual");
+    let db = SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search).unwrap();
+    let headers = HeaderReader::new(&db, false);
+    let (ordinal, parsed) = (0..db.num_seqs())
+        .find_map(
+            |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
+                ReportedHeader::Parsed(subject) if subject.bioseq_load_throws() => {
+                    Some((ordinal, subject))
+                }
+                _ => None,
+            },
+        )
+        .expect("the dual record");
+    let stopping = PrefetchSubject::unflipped(ordinal, Some(&*parsed));
+    assert!(stopping.stops());
+    // A query read with -parse_deflines holds the dual record's Seq-align id.
+    let held = || {
+        let mut scope = crate::blastinput::query_batch::QueryScope::default();
+        scope.add_ids_of([
+            &crate::blastinput::fasta_reader::believed::BelievedIds::new(
+                vec![parsed.alignment_id().clone()],
+                crate::report::archive::bioseq::SeqLocStrand::Unknown,
+            ),
+        ]);
+        scope
+    };
+    let scope = held();
+    assert!(parsed.hidden_by_query(|| &scope));
+    let hiding = PrefetchQueries::new(0, &held);
+    // `gnl|BL_ORD_ID|4` and on (sequences without parsed Seq-ids: their ordinal ids, packed 4 and
+    // more; the map does not read them).
+    let unparsed: Vec<PrefetchSubject<'_>> = (4..205)
+        .map(|ordinal| PrefetchSubject::unflipped(ordinal, None))
+        .collect();
+    let batch = |others: usize, queries: &PrefetchQueries<'_>| {
+        let mut all = unparsed[..others].to_vec();
+        all.push(stopping);
+        prefetched_subjects(&db, all, queries)
+    };
+    let (map, reached) = batch(199, &hiding);
+    assert_eq!(map, None);
+    assert_eq!(reached.len(), 199);
+    assert!(!reached.iter().any(PrefetchSubject::stops));
+    let (map, reached) = batch(200, &hiding);
+    assert_eq!(map, Some(MANY_IDS));
+    assert_eq!(reached.len(), 200);
+    assert!(!reached.iter().any(PrefetchSubject::stops));
+    // The map of the subjects reached alone would not count the hidden one.
+    assert_eq!(batch_map(&db, &reached), None);
+    // Without the query the stop is reached, in the same map.
+    for others in [199, 200] {
+        let (map, reached) = batch(others, &stop_queries(0));
+        assert_eq!(map, batch_map(&db, &reached));
+        assert_eq!(reached.len(), others + 1);
+        assert!(reached.iter().any(PrefetchSubject::stops));
+    }
 }
 
 /// Line NP item O4b2-10, review F4 and F6: NCBI posts its warning of a UTF8String header (803.10) once

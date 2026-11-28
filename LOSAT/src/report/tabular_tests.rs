@@ -987,6 +987,7 @@ fn a_load_that_throws_writes_the_kept_row() {
             gi: 5,
             accession: b"BBB00002",
             exception: &exception,
+            bioseq_only: false,
         }),
         index: 1,
     };
@@ -1135,22 +1136,52 @@ fn a_rows_fields_say_what_its_throw_does() {
         spec("qseqid nident").format_throw(Program::Blastx),
         FormatThrow::Writes(RunThrow {
             rows: SubjectFetch::WithIdentities,
+            bioseq_rows: SubjectFetch::WithIdentities,
             ..RunThrow::every_row(AfterThrow::EndsRun)
         })
     );
-    // `slen` and a field of the alignment block read the subject at every row.
-    for every in ["qseqid nident slen", "qseqid nident qstart"] {
-        assert_eq!(spec(every).throw_rows(Program::Blastx), SubjectFetch::Every);
-        assert_eq!(
-            spec(every).format_throw(Program::Blastx),
-            FormatThrow::Writes(RunThrow::every_row(AfterThrow::EndsRun)),
-            "{every}"
-        );
-        assert_eq!(
-            spec(every).row_throw(Program::Blastx, 0),
-            Some(AfterThrow::EndsRun)
-        );
-    }
+    // `slen` and a field of the alignment block read the subject at every row for lookup throws;
+    // for `bioseq_only` (`bioseq_load_throws`, line DBID pfoff-9), `slen` succeeds without
+    // loading the Bioseq so `nident slen` throws only on rows with identities.
+    assert_eq!(
+        spec("qseqid nident slen").throw_rows(Program::Blastx),
+        SubjectFetch::Every
+    );
+    assert_eq!(
+        spec("qseqid nident slen").format_throw(Program::Blastx),
+        FormatThrow::Writes(RunThrow {
+            bioseq_rows: SubjectFetch::WithIdentities,
+            ..RunThrow::every_row(AfterThrow::EndsRun)
+        })
+    );
+    assert_eq!(
+        spec("qseqid nident slen").row_throw(Program::Blastx, 0),
+        Some(AfterThrow::EndsRun)
+    );
+    assert_eq!(
+        spec("qseqid nident slen").row_throw_for(Program::Blastx, 0, true),
+        None
+    );
+    assert_eq!(
+        spec("qseqid nident slen").row_throw_for(Program::Blastx, 1, true),
+        Some(AfterThrow::EndsRun)
+    );
+    assert_eq!(
+        spec("qseqid slen").row_throw_for(Program::Blastp, 1, true),
+        None
+    );
+    assert_eq!(
+        spec("qseqid nident qstart").throw_rows(Program::Blastx),
+        SubjectFetch::Every
+    );
+    assert_eq!(
+        spec("qseqid nident qstart").format_throw(Program::Blastx),
+        FormatThrow::Writes(RunThrow::every_row(AfterThrow::EndsRun))
+    );
+    assert_eq!(
+        spec("qseqid nident qstart").row_throw(Program::Blastx, 0),
+        Some(AfterThrow::EndsRun)
+    );
     // The organism report (outfmt 18) leaves out the HSPs of a throwing subject and goes on.
     let report = blastp_spec(
         ReportFormat::TaxFormat,

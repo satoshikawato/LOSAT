@@ -128,8 +128,9 @@ pub(crate) struct FailedValues<'a> {
     /// (`FailedLookup::all_ids`).
     pub(crate) all_ids: bool,
     /// Where the load of the subject throws before both (`report::tabular::ThrownLookup`): the
-    /// Seq-align id's GI and the exception.
-    pub(crate) thrown: Option<(i64, &'a crate::ncbi_exception::NcbiException)>,
+    /// Seq-align id's GI, the exception, and whether only `GetBioseqNoData` throws
+    /// (`ParsedSubject::bioseq_load_throws`).
+    pub(crate) thrown: Option<(i64, &'a crate::ncbi_exception::NcbiException, bool)>,
     /// Whether the scope's Bioseq handle of the subject is empty (`FailedLookup::empty_handle`).
     pub(crate) empty_handle: bool,
 }
@@ -170,7 +171,11 @@ impl<'a> FailedValues<'a> {
             align_id: [Cow::Owned(full), Cow::Owned(accession)],
             subject_id: false,
             all_ids: false,
-            thrown: Some((subject.alignment_gi(), exception)),
+            thrown: Some((
+                subject.alignment_gi(),
+                exception,
+                subject.bioseq_load_throws(),
+            )),
             empty_handle: false,
         }
     }
@@ -182,12 +187,13 @@ impl<'a> FailedValues<'a> {
         all_ids: &'s [crate::report::tabular::DeflineIds],
     ) -> crate::report::tabular::SubjectLookup<'s> {
         match self.thrown {
-            Some((gi, exception)) => crate::report::tabular::SubjectLookup::Throws(
+            Some((gi, exception, bioseq_only)) => crate::report::tabular::SubjectLookup::Throws(
                 crate::report::tabular::ThrownLookup {
                     full: &self.align_id[0],
                     gi,
                     accession: &self.align_id[1],
                     exception,
+                    bioseq_only,
                 },
             ),
             None => crate::report::tabular::SubjectLookup::Failed(
@@ -211,6 +217,7 @@ impl<'a> SubjectValues<'a> {
     pub(crate) fn thrown(
         subject: &ParsedSubject,
         exception: &'a crate::ncbi_exception::NcbiException,
+        length: usize,
         index: usize,
     ) -> Self {
         SubjectValues {
@@ -220,7 +227,11 @@ impl<'a> SubjectValues<'a> {
             gi: 0,
             all_ids: Vec::new(),
             titles: None,
-            length: 0,
+            length: if subject.bioseq_load_throws() {
+                length
+            } else {
+                0
+            },
             taxonomy: Cow::Owned(TabularTaxonomy::default()),
             failed: Some(FailedValues::thrown(subject, exception)),
             index,
@@ -686,7 +697,8 @@ impl<'a> TabularSubjects<'a> {
                     loads.thrown(s_idx),
                     parsed.get(s_idx).and_then(Option::as_deref),
                 ) {
-                    return Ok(SubjectValues::thrown(subject, exception, s_idx));
+                    let length = lengths.get(s_idx).copied().unwrap_or_default();
+                    return Ok(SubjectValues::thrown(subject, exception, length, s_idx));
                 }
                 let length = lengths.get(s_idx).copied().unwrap_or_default();
                 let taxonomy = match taxonomy.get(s_idx) {

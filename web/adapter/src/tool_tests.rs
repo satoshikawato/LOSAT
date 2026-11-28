@@ -1800,7 +1800,11 @@ fn a_makeblastdb_log_goes_where_the_command_line_writes_it() {
         .map(|word| word.to_string())
         .collect()
     };
+    // Each run makes its database in an empty folder: no run deletes the one before (`Deleted
+    // existing ... BLAST database` in its log).
+    let emptied = || drop(taken(std::path::Path::new(&inside)));
     let library = |log: &str| {
+        emptied();
         let words = words(log);
         let words: Vec<&str> = words.iter().map(String::as_str).collect();
         let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
@@ -1809,6 +1813,7 @@ fn a_makeblastdb_log_goes_where_the_command_line_writes_it() {
         (result.is_ok(), stdout, stderr)
     };
     let tool = |log: &str| {
+        emptied();
         let words = words(log);
         let words: Vec<&str> = words.iter().map(String::as_str).collect();
         run(&[&["makeblastdb"][..], &words].concat()).unwrap();

@@ -337,37 +337,79 @@ pub(crate) fn read_in_pssm(
     psi_search_and_object(pssm, reader)
 }
 
-/// `CPsiBlastValidate::Pssm`'s error for `pssm`, which NCBI raises (`CBlastException`, "BLAST
-/// engine error") when the search is made, after the outfmt 0 prolog.
+/// What `CPsiBlastValidate::Pssm` reads of a `PssmWithParameters` (`require_scores` false), from
+/// the typed PSSM of `-in_pssm` (`PssmChecks::of`) or from the PSSM of an archive's results that
+/// `blast_formatter -outfmt 11` writes back (`blast_formatter::archive_out`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PssmChecks {
+    /// `CanGetPssm`.
+    pub(crate) has_pssm: bool,
+    /// No `finalData`, no `scores`, or no score.
+    pub(crate) missing_scores: bool,
+    /// No `intermediateData`, no `freqRatios`, or no ratio.
+    pub(crate) missing_freq_ratios: bool,
+    /// `finalData.scalingFactor` (`None`: its default 1).
+    pub(crate) scaling_factor: Option<i64>,
+    /// `HasQuery`, and whether the query is the `seq` variant (`IsSeq`).
+    pub(crate) query_is_seq: Option<bool>,
+    /// `isProtein` (default TRUE).
+    pub(crate) is_protein: bool,
+}
+
+impl PssmChecks {
+    /// The checks of the typed PSSM `pssm`.
+    pub(crate) fn of(pssm: &PssmWithParameters) -> Self {
+        let final_data = pssm.pssm.final_data.as_ref();
+        Self {
+            has_pssm: true,
+            missing_scores: final_data.is_none_or(|data| data.scores.is_empty()),
+            missing_freq_ratios: pssm
+                .pssm
+                .intermediate_data
+                .as_ref()
+                .is_none_or(|data| data.freq_ratios.is_empty()),
+            scaling_factor: final_data
+                .and_then(|data| data.scaling_factor)
+                .map(i64::from),
+            query_is_seq: pssm
+                .pssm
+                .query
+                .as_ref()
+                .map(|query| matches!(query, SeqEntry::Seq(_))),
+            is_protein: pssm.pssm.is_protein != Some(false),
+        }
+    }
+}
+
+/// `CPsiBlastValidate::Pssm`'s error for the PSSM of `checks` (`require_scores` false), which NCBI
+/// raises as a `CBlastException` ("BLAST engine error"): psiblast's and tblastn's `-in_pssm` when the
+/// search is made, after the outfmt 0 prolog (their query checks are never reached there: the
+/// application reads the query of the PSSM before, `psi_search_and_object`), and blast_formatter's
+/// `BlastBuildArchive` of a PSSM search's archive.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:569-625
-/// (The query checks between them are never reached from psiblast's application, which reads
-/// the query of the PSSM before; LOSAT refuses those PSSMs, `psi_search_of`.)
-fn validation_error(pssm: &PssmWithParameters) -> Option<String> {
-    let scores = pssm.pssm.final_data.as_ref().map(|data| &data.scores);
-    let missing_scores = scores.is_none_or(|scores| scores.is_empty());
-    let missing_freq_ratios = pssm
-        .pssm
-        .intermediate_data
-        .as_ref()
-        .is_none_or(|data| data.freq_ratios.is_empty());
-    if missing_freq_ratios && missing_scores {
+pub(crate) fn validation_error(checks: &PssmChecks) -> Option<String> {
+    if !checks.has_pssm {
+        return Some("Missing PSSM data".to_string());
+    }
+    if checks.missing_freq_ratios && checks.missing_scores {
         return Some("PSSM data must contain either scores or frequency ratios".to_string());
     }
-    if !missing_scores {
-        if let Some(factor) = pssm
-            .pssm
-            .final_data
-            .as_ref()
-            .and_then(|data| data.scaling_factor)
-            .filter(|&factor| factor != 1)
-        {
+    if !checks.missing_scores {
+        if let Some(factor) = checks.scaling_factor.filter(|&factor| factor != 1) {
             return Some(format!(
                 "PSSM has a scaling factor of {factor}. PSI-BLAST does not accept scaled PSSMs"
             ));
         }
     }
-    if pssm.pssm.is_protein == Some(false) {
+    match checks.query_is_seq {
+        None => return Some("Missing query sequence in PSSM".to_string()),
+        Some(false) => {
+            return Some("Query sequence in ASN.1 PSSM is not a single Bioseq".to_string())
+        }
+        Some(true) => {}
+    }
+    if !checks.is_protein {
         return Some("PSSM does not represent protein scoring matrix".to_string());
     }
     None
@@ -679,7 +721,7 @@ pub(crate) fn psi_search_and_object_of(
             "a PSSM query whose Seq-data is {name} (LOSAT's PSSM search reads iupacaa, ncbieaa and ncbistdaa)"
         )));
     }
-    let validation_error = validation_error(&pssm);
+    let validation_error = validation_error(&PssmChecks::of(&pssm));
     // A PSSM of frequency ratios only: NCBI computes its scores with the PSSM engine
     // (`x_CreatePssmScoresFromFrequencyRatios`, below).
     let scores: &[i32] = match pssm.pssm.final_data.as_ref() {

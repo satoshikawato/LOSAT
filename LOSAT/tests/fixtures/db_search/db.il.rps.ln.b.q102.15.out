@@ -1,0 +1,98 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "rpsblast",
+      "version": "RPSBLAST 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q102",
+          "query_len": 180,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|CDD|102"
+                }
+              ],
+              "len": 180,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 341.337,
+                  "score": 875,
+                  "evalue": 3.19058e-126,
+                  "identity": 180,
+                  "positive": 180,
+                  "query_from": 1,
+                  "query_to": 180,
+                  "hit_from": 1,
+                  "hit_to": 180,
+                  "align_len": 180,
+                  "gaps": 0,
+                  "qseq": "IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDLFMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSARIETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY",
+                  "hseq": "IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDLFMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSARIETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY",
+                  "midline": "IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDLFMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSARIETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|CDD|103",
+                  "accession": "103",
+                  "title": "f103 DNA polymerase [White spot syndrome virus] residues 1101-1290"
+                }
+              ],
+              "len": 190,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 13.9528,
+                  "score": 25,
+                  "evalue": 5.44186,
+                  "identity": 7,
+                  "positive": 9,
+                  "query_from": 50,
+                  "query_to": 63,
+                  "hit_from": 103,
+                  "hit_to": 115,
+                  "align_len": 14,
+                  "gaps": 1,
+                  "qseq": "DLFPAIWVSDLFME",
+                  "hseq": "DYFPEI-VCDINMQ",
+                  "midline": "D FP I V D+ M+"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 560,
+            "hsp_len": 26,
+            "eff_space": 74228,
+            "kappa": 0.04996776,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

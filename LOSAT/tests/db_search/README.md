@@ -3007,13 +3007,14 @@ and formats `6`, `7` and `11` where `-html` is ignored, with the `rc/` directori
 
 `tchar/` (rows `db.tchar.*`): `tchar/make_tchar.py` (run from `LOSAT/` with the directory of NCBI's makeblastdb,
 and the stems to write, or none for all) writes the version 4 databases `tc_p`, `tc_b_p`, `tc_big_p`, `tc_big2_p`,
-`tc_x_p`, `tc_dmg_p`, `tc_ps_p`, `tc_u8_p`, `tc_tax_p`, `tc_fam_p`, `tc_du_p` (proteins) and `tc_n`, `tc_b_n`,
-`tc_big_n`, `tc_big2_n`, `tc_x_n`, `tc_dmg_n`, `tc_ps_n`, `tc_u8_n`, `tc_tax_n`, `tc_fam_n`, `tc_du_n` (their
+`tc_x_p`, `tc_dmg_p`, `tc_ps_p`, `tc_u8_p`, `tc_tax_p`, `tc_fam_p`, `tc_du_p`, `tc_h1_p` (proteins) and `tc_n`,
+`tc_b_n`, `tc_big_n`, `tc_big2_n`, `tc_x_n`, `tc_dmg_n`, `tc_ps_n`, `tc_u8_n`, `tc_tax_n`, `tc_fam_n`, `tc_du_n`,
+`tc_h1_n` (their
 back-translations), the aliases `tc_alias_p.pal` and `tc_alias_n.nal`
 (`tc_*` then `tc_b_*`), `tc_bigal_p.pal` and `tc_bigal_n.nal` (`tc_big_*` then `tc_big2_*`) and the queries
-`tc_q1`, `tc_q2`, `tc_qslot`, `tc_qu8`, `tc_qkeep`, `tc_q260`, `tc_qslotu`, `tc_qslotu1`, `tc_qabc`, `tc_qbac`, `tc_qacb`,
-`tc_qaba` and `tc_qdu` (`.faa`, `.fna`; `make_tchar.write_queries()` writes them alone). makeblastdb stores each byte
-outside ' '..'~' of a FASTA
+`tc_q1`, `tc_q2`, `tc_qslot`, `tc_qu8`, `tc_qkeep`, `tc_q260`, `tc_q200`, `tc_q201`, `tc_qslotu`, `tc_qslotu1`,
+`tc_qabc`, `tc_qbac`, `tc_qacb`, `tc_qaba`, `tc_qdu`, `tc_qh1` and `tc_qh1r` (`.faa`, `.fna`; `make_tchar.write_queries()`
+writes them alone). makeblastdb stores each byte outside ' '..'~' of a FASTA
 title as `#`; the script rewrites those stored titles to raw bytes (0x00, 0x01, 0x1B, 0x7F, 0x80, 0xC3 0xA9, 0xE9,
 0xFF; titles of 133, 300 and 1,100 bytes). `tc_big_*` holds 300 sequences, of which the OIDs 0, 1, 2, 3, 256 and 257
 have such bytes and hit the queries with OID 258 (clean): 0 and 256, 1 and 257, 2 and 258 share a slot of NCBI's
@@ -3028,7 +3029,12 @@ holds `tc_*`'s subjects with taxid 9606 (rows `tax.*`, with the taxonomy databas
 `tc_qabc`, `tc_qbac`, `tc_qacb` and `tc_qaba` take in those orders, a batch each (rows `fam.*`: NCBI's cache of 10 released
 sequences); `tc_du_*` holds a UTF8String title, a title with 0xE9 and a title of tag 0x1B, which `tc_qdu` reads in
 that order (row `psiblast.du.r0.i2`). `tc_q260` holds the letters of `tc_big_*`'s OIDs 0 to 259 (a batch of 260
-Seq-align ids, which NCBI's prefetch loads in pieces of 100, 100 and 60: rows `p260.6t`); `tc_qslotu` reads OID 258
+Seq-align ids, which NCBI's prefetch loads in pieces of 100, 100 and 60: rows `p260.6t`), `tc_q200` and `tc_q201`
+those of OIDs 0 to 197 or 198 and 256 (with OIDs 1 and 257, 200 or 201 Seq-align ids: one map or NCBI's pieces, rows
+`m2.200.6` and `m2.201.6`); `tc_h1_*` holds a clean title and one with 0xFF, taxid 99990 (the last entry of
+`tests/seqdb/taxdb`'s databases), which `tc_qh1` reads in that order and `tc_qh1r` in the other, a batch each with
+`BATCH_SIZE=50` (rows `h1.*`: the batch whose load looks the taxid up first writes the damaged taxonomy database's
+text); `tc_qslotu` reads OID 258
 with OIDs 4 to 13 (11 loads), then OIDs 2 and 258 (rows `slot.r6t`; `tc_qslotu1`, its first query, is the near
 input of BLASTN's, which writes that batch's rows before it refuses).
 NCBI BLAST+ 2.17.0 reads a reported subject's definition line where it makes the Seq-aligns of its query batch, and

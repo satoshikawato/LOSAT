@@ -1056,8 +1056,11 @@
   E1 and E3 under several allocator settings) and a subject whose title posts in the header cache's
   slot of such a subject; LOSAT's refusal, not rule 3, of what NCBI determines and LOSAT does not
   model yet (line RG-KB item 9b-3, review 1 of 2026-11-28): a prefetch that may be off, a database
-  with parsed Seq-ids, `OBJMGR_*` settings, a run whose prefetch's loads of a sequence with a taxid
-  write texts of the taxonomy database (inside each load, among its messages), a query batch whose
+  with parsed Seq-ids, `OBJMGR_*` settings, a query batch whose prefetch's loads write a text of the
+  taxonomy database (in the load that looks a taxid up, after its header read and before its decode:
+  the texts of opening once per run, at its first such load, the offset error at a lookup that the
+  volume's cache does not hold, a null mapping, a file that throws; a later batch whose loads write
+  none, as in rows `db.tchar.*.h1.later.6t`, is written; review 2), a query batch whose
   reads also give NCBI's warning of a UTF8String header, and searches restricted by a list or an
   OID mask; line RG-KB item 9b-2, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.126 at the merge of dev of 2026-11-28 that
@@ -5405,7 +5408,7 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   with `PRE_FETCH_SEQS_LIMIT=2147483647`: rule 3, a subject whose blob NCBI's data source may hold
   or not from an earlier batch, or whose header cache slot such a subject takes; not modelled yet
   (line RG-KB item 9b-3), a prefetch that may be off, a database with parsed Seq-ids, `OBJMGR_*`
-  settings, a run whose prefetch's loads write texts of the taxonomy database, a search restricted
+  settings, a query batch whose prefetch's loads write a text of the taxonomy database, a search restricted
   by a seqid, GI or taxid list, an alias
   file with a list or an OID mask, or a volume with an OID mask type, and a query batch whose headers
   also give NCBI's warning of a UTF8String; except a query batch that ends at a header NCBI cannot

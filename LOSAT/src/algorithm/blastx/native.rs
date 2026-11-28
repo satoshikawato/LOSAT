@@ -525,9 +525,9 @@ fn run_inner(
             program.upper,
         )
         .map(|scopes| {
-            scopes
-                .with_query_range(query_range)
-                .with_minus_strand(options.strand == "minus")
+            scopes.with_query_range(query_range).with_strand(
+                crate::algorithm::blastn::args::QueryStrand::from_option(&options.strand),
+            )
         })
     };
     let mut read_ahead_scopes = None;

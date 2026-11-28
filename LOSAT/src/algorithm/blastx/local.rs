@@ -318,6 +318,15 @@ struct RunReports<'a> {
 /// queries of one scope with one id stops the run at its batch (`QueryScopes::read_ahead`; line WQA
 /// D10 round 4, 2026-11-20), and the batch that a reader error ends adds nothing (review M3,
 /// 2026-11-20).
+/// The strand of the queries that the call's set-up reads (`-strand` of its first options; the
+/// options of a call's formats share the search's), for its scopes (`QueryScopes::with_strand`).
+fn query_strand(resolved: &[ResolvedOptions]) -> crate::algorithm::blastn::args::QueryStrand {
+    resolved.first().map_or(
+        crate::algorithm::blastn::args::QueryStrand::Both,
+        |options| crate::algorithm::blastn::args::QueryStrand::from_option(&options.strand),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn scan_xml_titles(
     resolved: &[ResolvedOptions],
@@ -337,9 +346,7 @@ fn scan_xml_titles(
         .map(|options| options.outfmt)
         .filter(|outfmt| matches!(outfmt, 5 | 13..=16))
         .collect();
-    let minus_strand = resolved
-        .first()
-        .is_some_and(|options| options.strand == "minus");
+    let strand = query_strand(resolved);
     let query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
         parse_deflines,
         subject_set,
@@ -350,7 +357,7 @@ fn scan_xml_titles(
         scopes
             .with_refusal(scope_refusal.cloned())
             .with_query_range(query_range)
-            .with_minus_strand(minus_strand)
+            .with_strand(strand)
             .with_xml_matrix_failure(xml_matrix)
     });
     let count = crate::blastinput::query_batch::BatchCount::of(query_scopes.as_ref());
@@ -682,9 +689,7 @@ fn write_run(
     // two queries with one id stops the run at the batch of the second, after the reports of the
     // batches before (line WQA D10 round 4, 2026-11-20), in the form of every program (round 5).
     let xml = choices.iter().any(|choice| choice.number == 5);
-    let minus_strand = resolved
-        .first()
-        .is_some_and(|options| options.strand == "minus");
+    let strand = query_strand(resolved);
     let query_scopes = std::cell::RefCell::new(read_ahead_scopes.or_else(|| {
         crate::blastinput::query_batch::QueryScopes::of_search(
             parse_deflines,
@@ -696,7 +701,7 @@ fn write_run(
             scopes
                 .with_refusal(scope_refusal.cloned())
                 .with_query_range(query_range)
-                .with_minus_strand(minus_strand)
+                .with_strand(strand)
         })
     }));
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254

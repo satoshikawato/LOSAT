@@ -330,14 +330,16 @@ fn run_scopes(
     if !search.parse_deflines() || inputs.database || inputs.query_file.is_some() {
         return None;
     }
+    // The strand as the call reads `-strand` (`QueryStrand::parse`; a value that it refuses ends
+    // the call before the batch is set up).
     use crate::algorithm::blastn::args::QueryStrand;
-    let minus = |strand: &str| QueryStrand::parse(strand).ok() == Some(QueryStrand::Minus);
-    let minus_strand = match command {
-        Commands::Blastn(a) => minus(&a.strand),
-        Commands::Blastx(a) => minus(&a.strand),
-        Commands::Tblastx(a) => minus(&a.strand),
-        _ => false,
-    };
+    let strand = match command {
+        Commands::Blastn(a) => QueryStrand::parse(&a.strand),
+        Commands::Blastx(a) => QueryStrand::parse(&a.strand),
+        Commands::Tblastx(a) => QueryStrand::parse(&a.strand),
+        _ => Ok(QueryStrand::Both),
+    }
+    .unwrap_or(QueryStrand::Both);
     // BLASTN's filtering of the letters as its call reads `-dust` (`BlastnArgs::resolve_dust`; a
     // value that it refuses ends the call before the batch is set up).
     let query_masks = match command {
@@ -351,7 +353,7 @@ fn run_scopes(
     Some(
         QueryScopes::new(QueryScopeSpan::Run, program_name(search))
             .with_query_range(query_range_of(command))
-            .with_minus_strand(minus_strand)
+            .with_strand(strand)
             .with_query_masks(query_masks),
     )
 }

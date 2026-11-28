@@ -1211,9 +1211,14 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
                       masks: QueryMasks,
                       batches: &[&[u8]]|
      -> anyhow::Error {
+        use crate::algorithm::blastn::args::QueryStrand;
         let mut scopes = QueryScopes::new(QueryScopeSpan::Run, program)
             .with_query_range(range)
-            .with_minus_strand(minus)
+            .with_strand(if minus {
+                QueryStrand::Minus
+            } else {
+                QueryStrand::Both
+            })
             .with_query_masks(masks);
         let mut first = 0;
         for fasta in batches {
@@ -1367,7 +1372,9 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
             "BLASTN",
             None,
             false,
-            QueryMasks::Reads,
+            QueryMasks::Reads {
+                then_repeats: false,
+            },
             &[
                 b">q1\nACGTAC\n>q2\nACGTACGT\n",
                 b">q1\nACGTACGTAC\n>q2\nACGTACGTACGT\n",
@@ -1383,7 +1390,15 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
     );
     expect_native(err, &twice);
     let err = refused_batch_error(
-        run_masked("BLASTN", None, false, QueryMasks::Reads, &mixed),
+        run_masked(
+            "BLASTN",
+            None,
+            false,
+            QueryMasks::Reads {
+                then_repeats: false,
+            },
+            &mixed,
+        ),
         false,
         |_| panic!("no set-up"),
     )
@@ -1394,7 +1409,9 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
             "BLASTN",
             None,
             false,
-            QueryMasks::Reads,
+            QueryMasks::Reads {
+                then_repeats: false,
+            },
             &[b">q1\nACGTAC\n", b">q3\n\n>q1\nACGTACGTAC\n"],
         ),
         false,
@@ -1433,8 +1450,49 @@ fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
     )
     .unwrap_err();
     assert!(ScopeRefusal::of(&err).is_some(), "{err}");
-    assert_eq!(QueryMasks::of_blastn(true, true, true), QueryMasks::Reads);
-    assert_eq!(QueryMasks::of_blastn(false, false, true), QueryMasks::Reads);
+    // DUST, then repeat filtering (NCBI BLAST+ 2.17.0, probe 3 of line RG-KB item 7b,
+    // `blastn.sub.pfE.fd.f6`): a batch that DUST passes (no record past its earlier record's end)
+    // fails the repeat search where every searched record is empty, each record's message the
+    // search's; without repeat filtering, each record's own message.
+    let empty: [&[u8]; 2] = [b">q1\nACGTAC\n", b">q1\n\n>q3\n\n"];
+    let no_data = "Warning: Sequence contains no data Warning: Sequence contains no data ";
+    for (then_repeats, expected) in [
+        (
+            true,
+            format!("{ENGINE_ERROR} Warning: {no_data} Warning: {no_data} \n"),
+        ),
+        (false, format!("{ENGINE_ERROR} {no_data}\n")),
+    ] {
+        let err = refused_batch_error(
+            run_masked(
+                "BLASTN",
+                None,
+                false,
+                QueryMasks::Reads { then_repeats },
+                &empty,
+            ),
+            false,
+            |_| panic!("no set-up"),
+        )
+        .unwrap_err();
+        expect_native(err, &expected);
+    }
+    assert_eq!(
+        QueryMasks::of_blastn(true, true, false),
+        QueryMasks::Reads { then_repeats: true }
+    );
+    assert_eq!(
+        QueryMasks::of_blastn(true, false, true),
+        QueryMasks::Reads {
+            then_repeats: false
+        }
+    );
+    assert_eq!(
+        QueryMasks::of_blastn(false, false, true),
+        QueryMasks::Reads {
+            then_repeats: false
+        }
+    );
     assert_eq!(
         QueryMasks::of_blastn(false, true, false),
         QueryMasks::Repeats

@@ -1277,3 +1277,44 @@ fn linux_online_cpu_parsers_match_sysfs_and_proc_stat() {
     #[cfg(target_os = "linux")]
     assert!(ncbi_online_cpu_count() >= 1);
 }
+
+// Line DBID hr-2 (review 1 M2): one decision of what the tables read of a holder besides its
+// record, for every program: a table whose only field of the subject is `slen` writes the light
+// length; identities counted on the search's letters are TBLASTN's alone (the default fields too),
+// and a table with the aligned letters counts them on its rows.
+#[test]
+fn the_tables_read_of_a_holder_by_one_rule() {
+    use crate::blastinput::app::{FormatChoice, Program, ReportFormat};
+    let spec = |fields: &str| {
+        crate::report::tabular::TabularSpec::of_app(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
+            },
+            crate::report::archive::options::RequestKind::Blastp,
+        )
+        .unwrap()
+    };
+    let (light, ids) = (spec("qseqid slen evalue"), spec("qseqid sseqid pident"));
+    let rows = spec("qseqid pident sseq");
+    for program in [
+        Program::Blastn,
+        Program::Blastp,
+        Program::Blastx,
+        Program::Tblastn,
+        Program::Tblastx,
+    ] {
+        let tables = |specs: &[Option<&crate::report::tabular::TabularSpec>]| {
+            HolderTables::of(program, specs.iter().copied())
+        };
+        assert_eq!(tables(&[]), HolderTables::default());
+        assert!(tables(&[Some(&ids), Some(&light)]).light_length);
+        assert!(!tables(&[Some(&ids), None]).light_length);
+        let search = program == Program::Tblastn;
+        assert_eq!(tables(&[None]).search_identities, search, "{program:?}");
+        assert_eq!(tables(&[Some(&ids)]).search_identities, search);
+        assert!(!tables(&[Some(&rows), Some(&light)]).search_identities);
+    }
+}

@@ -15,7 +15,7 @@ import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { nativeRun } from './support/makeblastdb-native';
 import { NATIVE } from './support/native';
-import { described, openFiles, openParameters, openSearch, paste, pickRun, program, submit, waitStatus } from './support/search';
+import { checked, described, openFiles, openParameters, openSearch, paste, pickRun, program, submit, waitStatus } from './support/search';
 
 test.setTimeout(240_000);
 test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine runs no database search and prints no help or version: the engine build runs these tests');
@@ -138,7 +138,7 @@ test('the button names no count of an older argv after a help or version word is
 
 test('the WindowMasker button names no count for a help or version word, which starts one print request (S4-8, R1 M3)', async ({ page }) => {
   await page.getByTestId('tab-windowmasker').click();
-  await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await described(page, 'wm-panel', 'ready');
   const files = ['a', 'b'].map((name) => ({
     name: `${name}.fa`,
     mimeType: 'application/octet-stream',
@@ -156,7 +156,7 @@ test('the WindowMasker button names no count for a help or version word, which s
   await page.getByTestId('wm-param-extra').fill('');
   await expect(button).toHaveText('Run LOSAT (2 runs)');
   await page.getByTestId('wm-param-extra').fill('-version');
-  await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+  await checked(page, 'wm-panel');
   await button.click();
   await waitStatus(page, 1, 'completed');
   await expect(page.getByTestId('run-2-option')).toHaveCount(0);
@@ -184,7 +184,7 @@ test('the Masking button names no count for a help or version word, which starts
     await expect(button, word).toHaveText('Run LOSAT (2 runs)');
   }
   await page.getByTestId('ms-param-extra').fill('-version-full');
-  await expect(page.getByTestId('ms-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+  await checked(page, 'ms-panel');
   await button.click();
   await waitStatus(page, 1, 'completed');
   await expect(page.getByTestId('run-2-option')).toHaveCount(0);
@@ -192,7 +192,7 @@ test('the Masking button names no count for a help or version word, which starts
 
 /** Runs a tool tab's form (its Run LOSAT button) as run `run` of the session, until it exits 0. */
 async function runTool(page: Page, prefix: 'wm' | 'ms' | 'bf', run: number): Promise<void> {
-  await expect(page.getByTestId(`${prefix}-argv-validation`)).toHaveAttribute('data-state', 'ok', { timeout: 30_000 });
+  await checked(page, `${prefix}-panel`, 'ok');
   await page.getByTestId(`${prefix}-run-losat`).click();
   await waitStatus(page, run, 'completed');
   await expect(page.getByTestId('tool-run-view')).toHaveAttribute('data-run', String(run));

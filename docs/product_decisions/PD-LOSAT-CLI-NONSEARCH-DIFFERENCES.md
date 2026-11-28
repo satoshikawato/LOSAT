@@ -199,11 +199,24 @@ BLAST+.
    is ended by SIGPIPE at its first message (exit status 141 from the shell): the report is
    whole and the messages are lost.
    Version 1.37: `losat blast_formatter` too (the Owner, 2026-11-28 13:36 JST, verbatim:
-   「Q-T8b-N2=A」, line RG's question Q-T8b-N2, option A: add blast_formatter to this sentence,
-   no code change). Its report goes through the search programs' stream (line RG item T8b); where
-   NCBI 2.17.0's blast_formatter is ended by SIGPIPE at an archive's warning on a closed standard
-   error (exit status 141, no report, no `-out` file), LOSAT writes the whole report and ends with
-   the run's exit code (0, or 6 where its standard output is full).
+   「Q-T8b-N2=A」, line RG's question Q-T8b-N2, option A: add blast_formatter to this sentence, no
+   code change). Its report goes through the search programs' stream (line RG item T8b). NCBI
+   2.17.0's blast_formatter keeps SIGPIPE's default action only until it sets up the subjects of
+   the archive's first object, before formatting it: `s_InitializeSubject`
+   (blast_formatter.cpp:398) makes the GenBank loader's `CId2Reader` (blast_formatter.cpp:317),
+   whose connection set-up sets SIGPIPE to `SIG_IGN` (ncbi_socket.c:866-873; seen in gdb). On a
+   closed standard error NCBI is therefore ended by SIGPIPE (exit status 141 from the shell, no
+   report) only at a message posted before that: a message of the archive's first object, posted
+   as the object is read (the archive's `messages`, `CRemoteBlast::LoadFromArchive`,
+   remote_blast.cpp:1667-1699, or the reader's message on a bad character of the text; no `-out`
+   file is made), or a warning on the formatting options, posted as that object's formatting
+   starts (`-max_target_seqs` below 5, `-sorthits` with `-outfmt` above 4,
+   blast_args.cpp:2970-2977; the `-out` file is made, empty). A later object's messages find
+   SIGPIPE ignored: NCBI writes the whole report and ends as LOSAT does. Where NCBI is ended,
+   LOSAT writes the whole report and ends as NCBI's run ends with a full standard error: exit
+   code 0, or 6 where a failed write ends the run (a one-object archive whose report fails only
+   at the stream's close posts 802.4, which is dropped, and exits 0, also on a full standard
+   output). NCBI 2.17.0 observed, line RG item T8b, review 2 N1 and N2, fix 3.
 6. **Standard output closed at the start** (version 1.3, accepted by the maintainer on
    2026-10-03 in Session S08b, plan DW-17). When a program starts with its standard output
    closed (`>&-`), NCBI's first write to `cout` fails: outfmt 0 reports `BLAST failed to

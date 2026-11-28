@@ -6,7 +6,8 @@
 - `losat blast_formatter` writes its output through the stream that the search programs use, so a failed write ends as NCBI's
   `blast_formatter` 2.17.0 ends: a `-out` file that reaches its size limit in a `-outfmt 8` Seq-annot now posts NCBI's
   `Cannot close serializing output stream` and `BLAST failed to write output` with exit status 6 (it exited 0), and a standard
-  output on a full device or a closed pipe after a full standard error exits with status 6 (it aborted).
+  output on a full device or a closed pipe after a full standard error ends with NCBI's exit status, 0, or 6 where a failed
+  write ends the run (it aborted).
   Through the library, a writer of yours that fails ends the call with `BLAST failed to write output` (exit status 6) instead of
   the abort text, also with `-logfile` (it returned exit status 0). The search programs' `-outfmt` 0 to 4 on a standard output
   that fails at the end of the alignments after a failed standard error now exit with status 6, as NCBI's, instead of aborting;

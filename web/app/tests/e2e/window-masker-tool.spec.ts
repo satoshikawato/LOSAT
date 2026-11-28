@@ -14,6 +14,7 @@ import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE, nativeExpectation, NO_NATIVE_REASON } from './support/native';
 import {
+  checked,
   chooseRun,
   described,
   fasta,
@@ -131,14 +132,6 @@ async function expectWmReady(page: Page): Promise<void> {
   await described(page, 'wm-panel', 'ready');
 }
 
-async function waitValidationSettled(page: Page): Promise<void> {
-  await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
-}
-
-async function validIs(page: Page, state: 'ok' | 'invalid'): Promise<void> {
-  await expect(page.getByTestId('wm-argv-validation')).toHaveAttribute('data-state', state, { timeout: 30_000 });
-}
-
 /** Opens the WindowMasker main tab and waits for `-xmlhelp` description to load. */
 async function openWindowMasker(page: Page): Promise<void> {
   await openSearch(page);
@@ -154,7 +147,7 @@ async function openWmOptions(page: Page): Promise<void> {
 
 async function selectWmStage(page: Page, stage: 'mk_counts' | 'mask' | 'convert'): Promise<void> {
   await page.getByTestId(`wm-stage-${stage}`).check();
-  await waitValidationSettled(page);
+  await checked(page, 'wm-panel');
 }
 
 async function setSformat(page: Page, value: 'ascii' | 'binary' | 'oascii' | 'obinary'): Promise<void> {
@@ -244,7 +237,7 @@ async function addWmFastaFiles(page: Page, files: ReadonlyArray<{ name: string; 
 }
 
 async function submitWm(page: Page): Promise<void> {
-  await waitValidationSettled(page);
+  await checked(page, 'wm-panel');
   await page.getByTestId('wm-run-losat').click();
 }
 
@@ -410,7 +403,7 @@ test('WindowMasker tab: stages, -xmlhelp option filtering, -out default, BLASTN 
   // Argument error refused in place by validateTool: -unit 0 and -dust T on Make counts.
   await selectWmStage(page, 'mk_counts');
   await page.getByTestId('wm-param-unit').fill('0');
-  await validIs(page, 'invalid');
+  await checked(page, 'wm-panel', 'invalid');
   await expect(page.getByTestId('wm-param-unit')).toHaveAttribute('aria-invalid', 'true');
   await page.getByTestId('wm-fasta-input').fill('>q\nACGTACGTACGT\n');
   await submitWm(page);
@@ -418,10 +411,10 @@ test('WindowMasker tab: stages, -xmlhelp option filtering, -out default, BLASTN 
 
   await page.getByTestId('wm-param-unit').fill('');
   await setExtra(page, '-dust T');
-  await validIs(page, 'invalid');
+  await checked(page, 'wm-panel', 'invalid');
   await expect(page.getByTestId('wm-param-extra')).toHaveAttribute('aria-invalid', 'true');
   await setExtra(page, '');
-  await validIs(page, 'ok');
+  await checked(page, 'wm-panel', 'ok');
 
   // Submitting opens Results; browser Back returns to WindowMasker.
   await setOutName(page, 'wmasker.ascii');
@@ -806,7 +799,7 @@ test.describe('WindowMasker with real reactors and native CLI', () => {
     await restoreDefaults(page);
     await setSformat(page, 'ascii');
     await page.getByTestId('wm-fasta-input').fill('>tiny\nACGTACGTACGTACGTACGT\n');
-    await waitValidationSettled(page);
+    await checked(page, 'wm-panel');
 
     await page.getByTestId('tab-search').click();
     await program(page, 'blastp');

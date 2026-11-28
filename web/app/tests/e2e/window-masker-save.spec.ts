@@ -16,6 +16,7 @@ import { NATIVE, nativeExpectation, NO_NATIVE_REASON } from './support/native';
 import { reload } from './support/navigate';
 import { E2E_ORIGIN } from './support/origin';
 import {
+  checked,
   chooseRun,
   described,
   openFiles,
@@ -107,7 +108,7 @@ async function openWmOptions(page: Page): Promise<void> {
 }
 
 async function submitWm(page: Page): Promise<void> {
-  await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+  await checked(page, 'wm-panel');
   await page.getByTestId('wm-run-losat').click();
 }
 

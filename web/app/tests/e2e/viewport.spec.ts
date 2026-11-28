@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { described, openParameters, openSearch, pickRun, program, waitStatus } from './support/search';
+import { checked, described, openParameters, openSearch, pickRun, program, waitStatus } from './support/search';
 import { test } from './support/test';
 
 const WIDTHS = [320, 330, 340, 350, 359, 360, 390, 768, 1280] as const;
@@ -271,7 +271,7 @@ async function saveMadeCounts562(page: Page, runNumber: number): Promise<void> {
   if (runNumber === 1) {
     await page.getByTestId('wm-fasta-input').fill('>g1\nACGTTGCAAAGCTTAGGCTAACGTTGCAAAGCTTAGGCTAACGTTGCAAAGCTTAGGCTA\n');
   }
-  await expect(page.getByTestId('wm-argv-validation')).toHaveAttribute('data-state', 'ok', { timeout: 30_000 });
+  await checked(page, 'wm-panel', 'ok');
   await page.getByTestId('wm-run-losat').click();
   await waitStatus(page, runNumber, 'completed', 120_000);
   await pickRun(page, runNumber);

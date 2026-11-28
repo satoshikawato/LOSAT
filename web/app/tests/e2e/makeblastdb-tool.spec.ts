@@ -23,7 +23,7 @@ import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { asNative, downloadAll, folderOf, maskedFiles, nativeRun, type Written } from './support/makeblastdb-native';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { described, openSearch, paste, pickRun, result, waitStatus } from './support/search';
+import { checked, described, openSearch, paste, pickRun, result, waitStatus } from './support/search';
 import { test } from './support/test';
 
 test.setTimeout(300_000);
@@ -57,10 +57,6 @@ async function openOptions(page: Page): Promise<void> {
   const toggle = page.getByTestId('mk-options-toggle');
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await expect(page.getByTestId('mk-parameter-form')).toBeVisible();
-}
-
-async function settled(page: Page): Promise<void> {
-  await expect(page.getByTestId('mk-argv-validation')).not.toHaveAttribute('data-state', 'checking');
 }
 
 /** Saves the page at 1280 and 390 px in the light and the dark colour scheme, back at 1280 px light after. */
@@ -138,8 +134,7 @@ async function expectLayout(page: Page, panel: string, viewport: { readonly widt
 
 /** Runs the makeblastdb form as run `run` and waits until the run's view shows it finished. */
 async function runMakeblastdb(page: Page, run: number): Promise<void> {
-  await settled(page);
-  await expect(page.getByTestId('mk-argv-validation')).toHaveAttribute('data-state', 'ok');
+  await checked(page, 'mk-panel', 'ok');
   await page.getByTestId('mk-run-losat').click();
   await waitStatus(page, run, 'completed');
   await expect(page.getByTestId('tool-run-view')).toHaveAttribute('data-run', String(run));
@@ -166,11 +161,11 @@ test('makeblastdb tab: the options in the groups of -xmlhelp, the command, a mis
 
   // Sequences without -dbtype: the CLI's refusal names -dbtype, whose radio buttons are marked.
   await page.getByTestId('mk-fasta-input').fill(NUCL_FASTA);
-  await expect(page.getByTestId('mk-argv-validation')).toHaveAttribute('data-state', 'invalid', { timeout: 30_000 });
+  await checked(page, 'mk-panel', 'invalid');
   await expect(page.getByTestId('mk-argv-validation')).toContainText('dbtype');
   await expect(page.getByTestId('mk-param-dbtype')).toHaveAttribute('aria-invalid', 'true');
   await page.getByTestId('mk-param-dbtype-nucl').check();
-  await expect(page.getByTestId('mk-argv-validation')).toHaveAttribute('data-state', 'ok', { timeout: 30_000 });
+  await checked(page, 'mk-panel', 'ok');
   await expect(page.getByTestId('mk-param-dbtype')).not.toHaveAttribute('aria-invalid', 'true');
 
   await page.getByTestId('mk-param-out').fill('mydb');
@@ -178,7 +173,7 @@ test('makeblastdb tab: the options in the groups of -xmlhelp, the command, a mis
   await page.getByTestId('mk-param-title').fill('my genome');
   await expect(page.getByTestId('mk-command')).toHaveText("losat makeblastdb -in input.fa -dbtype nucl -title 'my genome' -parse_seqids -out mydb");
   await expect(page.getByTestId('mk-options-changed')).toHaveText('(2 changed)');
-  await settled(page);
+  await checked(page, 'mk-panel');
   await shots(page, 'mk-filled');
   await expectLayout(page, 'mk-panel', MOBILE);
   await page.setViewportSize(DESKTOP);
@@ -207,7 +202,7 @@ test("makeblastdb input: the Input block says why a name is refused, and when th
   await expect(problem).toHaveCount(0);
   await page.getByTestId('mk-fasta-input').fill(NUCL_FASTA);
   await expect(problem).toHaveText(taken);
-  await expect(page.getByTestId('mk-argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await checked(page, 'mk-panel', 'invalid');
   await expect(page.getByTestId('mk-argv-validation')).toHaveText(taken);
   await shots(page, 'mk-input-problem');
   await expectLayout(page, 'mk-panel', MOBILE);
@@ -278,7 +273,7 @@ test("WindowMasker's mask data goes to makeblastdb's -mask_data (Use as -mask_da
   await page.getByTestId('wm-fasta-input').fill('>a\nACGTACGTACGT\n');
   await page.getByTestId('wm-options-toggle').click();
   await page.getByTestId('wm-param-outfmt').selectOption('maskinfo_asn1_bin');
-  await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+  await checked(page, 'wm-panel');
   await page.getByTestId('wm-run-losat').click();
   await waitStatus(page, 1, 'completed');
   await page.getByTestId('tool-use-as-mask-data').click();
@@ -294,7 +289,7 @@ test("WindowMasker's mask data goes to makeblastdb's -mask_data (Use as -mask_da
   await page.getByTestId('wm-out').fill('wm.asnb');
   for (const run of [2, 3]) {
     await page.getByTestId('tab-windowmasker').click();
-    await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+    await checked(page, 'wm-panel');
     await page.getByTestId('wm-run-losat').click();
     await waitStatus(page, run, 'completed');
     await page.getByTestId('tool-use-as-mask-data').click();
@@ -310,7 +305,7 @@ test("WindowMasker's mask data goes to makeblastdb's -mask_data (Use as -mask_da
   await page.getByTestId('mk-run-files-input').setInputFiles({ name: 'wm.asnb', mimeType: 'application/octet-stream', buffer: Buffer.from('mine') });
   await page.getByTestId('mk-fasta-input').fill(NUCL_FASTA);
   await page.getByTestId('mk-param-dbtype-nucl').check();
-  await settled(page);
+  await checked(page, 'mk-panel');
   await page.getByTestId('mk-run-losat-bottom').click();
   await waitStatus(page, 4, 'completed');
   await page.getByTestId('tab-windowmasker').click();
@@ -444,7 +439,7 @@ test("real engine: WindowMasker's mask data handed to makeblastdb's -mask_data m
   await page.getByTestId('wm-options-toggle').click();
   await page.getByTestId('wm-param-outfmt').selectOption('maskinfo_asn1_bin');
   await expect(page.getByTestId('wm-command')).toHaveText('losat windowmasker -ustat dm2L_u9.binary -in multi.fa -outfmt maskinfo_asn1_bin');
-  await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+  await checked(page, 'wm-panel');
   await page.getByTestId('wm-run-losat').click();
   await waitStatus(page, 1, 'completed');
   await page.getByTestId('tool-use-as-mask-data').click();

@@ -44,6 +44,35 @@ export async function described(
   });
 }
 
+/** The tool tabs, whose words the engine checks (`ToolEngine.validateTool`) and shows in `<prefix>-argv-validation`. */
+export type CheckedPanel = Exclude<DescribedPanel, 'search-panel'>;
+
+/** The states of a tool tab's check (`data-state` of `<prefix>-argv-validation`) that end it. */
+export type CheckAnswer = 'idle' | 'ok' | 'invalid' | 'unavailable';
+
+/**
+ * How long a test waits for the answer to a tool tab's check (`checked`). The check runs on the Engine worker, not on
+ * the Data worker that answers the describe: the first check of a page starts that worker (the engine's two files
+ * fetched, their SHA-256 checked and both compiled, then the worker and its serial instance started), and every check
+ * takes its turn there after the run in progress. Playwright's 5 s ran out before the first check reached the worker
+ * under a local load average of 60-97: in WebKit the two files took 3.0 s to arrive and the worker was created 5.0 s
+ * after the check was asked (line WW, WW4j: seqdb-names.spec.ts in WebKit, window-masker-tool.spec.ts in Chromium).
+ */
+export const ENGINE_CHECK_TIMEOUT = 60_000;
+
+/**
+ * Waits until the engine has answered the check of the words of a tool tab (`wm-panel`: WindowMasker, `ms-panel`:
+ * Masking, `mk-panel`: makeblastdb, `bf-panel`: Format Archive): `answered` accepts any answer (no longer `checking`),
+ * the others wait for that one. The one wait for a tool tab's check in the e2e tests (`ENGINE_CHECK_TIMEOUT`;
+ * tests/unit/e2e-waits.test.ts holds the specs to it). A check asked within the last 150 ms (the draft's debounce) has
+ * not started yet: until it does, the state is the answer to the words before.
+ */
+export async function checked(page: Page, panel: CheckedPanel, answer: CheckAnswer | 'answered' = 'answered'): Promise<void> {
+  const check = page.getByTestId(`${panel.slice(0, -'-panel'.length)}-argv-validation`);
+  const state = answer === 'answered' ? /^(idle|ok|invalid|unavailable)$/ : answer;
+  await expect(check).toHaveAttribute('data-state', state, { timeout: ENGINE_CHECK_TIMEOUT });
+}
+
 /** Opens the application at its search form, once the form no longer moves (`described`). */
 export async function openSearch(page: Page): Promise<void> {
   await navigate(page, '/');

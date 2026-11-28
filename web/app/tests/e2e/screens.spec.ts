@@ -13,7 +13,7 @@ import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { navigate } from './support/navigate';
-import { chooseRun, described, fasta, openFiles, openParameters, pickRun, program, showRecords, submit, task, waitStatus } from './support/search';
+import { checked, chooseRun, described, fasta, openFiles, openParameters, pickRun, program, showRecords, submit, task, waitStatus } from './support/search';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
 test.skip(SCREENS === undefined, 'screen records are taken only with LOSAT_WEB_SCREENS');
@@ -432,7 +432,7 @@ async function waitWmFastaReady(page: Page): Promise<void> {
 }
 
 async function waitWmValid(page: Page): Promise<void> {
-  await expect(page.getByTestId('wm-argv-validation')).toHaveAttribute('data-state', 'ok', { timeout: 30_000 });
+  await checked(page, 'wm-panel', 'ok');
 }
 
 async function runWm(page: Page, runNumber: number, expectedStatus: 'completed' | 'failed' = 'completed'): Promise<void> {

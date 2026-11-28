@@ -26,7 +26,7 @@ import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE } from './support/native';
 import { asNative, downloadAll, maskedFiles, nativeRun } from './support/makeblastdb-native';
-import { described, openSearch, waitStatus } from './support/search';
+import { checked, described, openSearch, waitStatus } from './support/search';
 
 const SCREENSHOT_DIR = process.env['LOSAT_E2E_SCREENSHOT_DIR'];
 const FAKE_MARKER = 'FAKE ENGINE OUTPUT';
@@ -59,10 +59,6 @@ async function chooseTool(page: Page, tool: 'dustmasker' | 'segmasker' | 'conver
   await described(page, 'ms-panel', 'ready');
 }
 
-async function validIs(page: Page, state: 'ok' | 'invalid'): Promise<void> {
-  await expect(page.getByTestId('ms-argv-validation')).toHaveAttribute('data-state', state, { timeout: 30_000 });
-}
-
 async function openOptions(page: Page): Promise<void> {
   const toggle = page.getByTestId('ms-options-toggle');
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
@@ -71,7 +67,7 @@ async function openOptions(page: Page): Promise<void> {
 
 /** Runs the form as run `run` of the session and waits until it completes on the Results tab. */
 async function runAndWait(page: Page, run: number): Promise<void> {
-  await validIs(page, 'ok');
+  await checked(page, 'ms-panel', 'ok');
   await page.getByTestId('ms-run-losat').click();
   await waitStatus(page, run, 'completed');
   await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
@@ -219,7 +215,7 @@ test('Masking tab: tool switcher, each tool run on the shared input, outputs and
   await expect(page.getByTestId('ms-required-block')).toBeVisible();
   await expect(page.getByTestId('ms-param-masking_algorithm')).toHaveValue('');
   await expect(page.getByTestId('ms-param-masking_options')).toHaveValue('');
-  await validIs(page, 'invalid');
+  await checked(page, 'ms-panel', 'invalid');
   await expect(page.getByTestId('ms-argv-validation')).toContainText('masking_algorithm');
   await expect(page.getByTestId('ms-param-masking_algorithm')).toHaveAttribute('aria-invalid', 'true');
   await page.getByTestId('ms-run-losat').click();
@@ -278,7 +274,7 @@ test('Masking tab: FASTA files (a .gz read) shared by the tools, Separate runs, 
   await chooseTool(page, 'segmasker');
   await expect(page.getByTestId('ms-fasta-name-1')).toHaveText(B_NAME);
   await expect(page.getByTestId('ms-run-losat')).toHaveText('Run LOSAT (2 runs)');
-  await validIs(page, 'ok');
+  await checked(page, 'ms-panel', 'ok');
   await page.getByTestId('ms-run-losat').click();
   await waitStatus(page, 1, 'completed');
   await waitStatus(page, 2, 'completed');
@@ -399,7 +395,7 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
         }
         await expect(page.getByTestId('ms-run-files-list')).toContainText(folderFile[0]);
       }
-      await validIs(page, 'ok');
+      await checked(page, 'ms-panel', 'ok');
       const inName = c.open ? c.input : 'input.fa';
       const outFile = c.file ?? c.out;
       await expect(page.getByTestId('ms-command')).toHaveText(c.command);
@@ -454,7 +450,7 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
       await expect(page.getByTestId('mk-command')).toHaveText(
         `losat makeblastdb -in input.fa -dbtype ${c.dbtype} -parse_seqids -mask_data ${maskName} -out db`,
       );
-      await expect(page.getByTestId('mk-argv-validation')).toHaveAttribute('data-state', 'ok', { timeout: 30_000 });
+      await checked(page, 'mk-panel', 'ok');
       // The makeblastdb tab with the handed-over mask data, then its finished run (screenshots only).
       if (test.info().project.name === 'chromium') await maybeShot(page, `ms-handover-${c.tool}-1280-light.png`);
       if (first) await shots(page, 'handover');

@@ -17,7 +17,7 @@ import { test } from './support/test';
 import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { described, openSearch, pickRun, waitStatus } from './support/search';
+import { checked, described, openSearch, pickRun, waitStatus } from './support/search';
 
 const MEASURE = process.env['LOSAT_WEB_MEASURE'] === '1';
 const MIB = 1024 * 1024;
@@ -181,7 +181,7 @@ test.describe('WindowMasker -mk_counts -sformat obinary local measurements', () 
       await expect(page.locator('[data-testid="wm-fasta-list"] > li').first()).toHaveAttribute('data-status', 'ready', {
         timeout: 300_000,
       });
-      await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+      await checked(page, 'wm-panel');
 
       // Sample page JS heap inside the page every 250 ms during execution, and browser RSS from Node.
       await page.evaluate(() => {

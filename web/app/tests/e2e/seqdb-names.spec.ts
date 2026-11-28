@@ -23,7 +23,7 @@ import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { nativeRun } from './support/makeblastdb-native';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { described, openParameters, openSearch, paste, pickRun, program, result, submit, waitStatus } from './support/search';
+import { checked, described, openParameters, openSearch, paste, pickRun, program, result, submit, waitStatus } from './support/search';
 import { test } from './support/test';
 
 test.setTimeout(300_000);
@@ -153,7 +153,7 @@ test('a database named with a double quote is refused where it is chosen, with t
   await expect(page.getByTestId('wm-in-refused')).toHaveText(wmRefused);
   await expect(page.getByTestId('wm-in-refused')).not.toHaveAttribute('role', 'alert');
   await expect(page.getByTestId('wm-in-name')).toHaveValue('');
-  await expect(page.getByTestId('wm-argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await checked(page, 'wm-panel', 'invalid');
   await expect(page.getByTestId('wm-argv-validation')).toHaveText(wmRefused);
   await shots(page, 'wm-refused');
   // The refusal lasts as long as its cause (WW4d R1): other edits keep it, and Run LOSAT says it.
@@ -196,7 +196,7 @@ test('a database named with a double quote is refused where it is chosen, with t
   await expect(page.getByTestId('mk-db-in-refused')).toHaveText(mkRefused);
   await expect(page.getByTestId('mk-db-in-refused')).not.toHaveAttribute('role', 'alert');
   await expect(page.getByTestId('mk-db-in')).toHaveValue('');
-  await expect(page.getByTestId('mk-argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await checked(page, 'mk-panel', 'invalid');
   await expect(page.getByTestId('mk-argv-validation')).toHaveText(mkRefused);
   await shots(page, 'mk-refused');
   await page.getByTestId('mk-run-losat').click();
@@ -213,7 +213,7 @@ test('a database named with a double quote is refused where it is chosen, with t
   await expect(page.getByTestId('ms-in-refused')).toHaveText(msRefused);
   await expect(page.getByTestId('ms-in-refused')).not.toHaveAttribute('role', 'alert');
   await expect(page.getByTestId('ms-in-name')).toHaveValue('');
-  await expect(page.getByTestId('ms-argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await checked(page, 'ms-panel', 'invalid');
   await expect(page.getByTestId('ms-argv-validation')).toHaveText(msRefused);
   await shots(page, 'ms-refused');
   await page.getByTestId('ms-run-losat').click();
@@ -341,7 +341,7 @@ test.describe('real engine: database names with a space are the native command l
       await page.getByTestId('wm-param-sformat').selectOption('binary');
       await page.getByTestId('wm-out').fill('-');
       await expect(page.getByTestId('wm-command')).toContainText(`-in '"my db/wm"'`);
-      await expect(page.getByTestId('wm-argv-validation')).toHaveAttribute('data-state', 'ok');
+      await checked(page, 'wm-panel', 'ok');
       await page.getByTestId('wm-run-losat').click();
       const counts = await toolRun(page, 1, 'completed');
       const countsNative = native(['windowmasker', '-mk_counts', '-infmt', 'blastdb', '-in', '"my db/wm"', '-sformat', 'binary'], work);
@@ -359,7 +359,7 @@ test.describe('real engine: database names with a space are the native command l
       await expect(page.getByTestId('mk-command')).toHaveText(`losat makeblastdb -in input.fa -dbtype nucl -out 'my db'`);
       const outNative = nativeRun(['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-out', 'my db'], new Map([['input.fa', nucl]]), ZONE);
       expect(outNative.status).toBe(1);
-      await expect(page.getByTestId('mk-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+      await checked(page, 'mk-panel');
       await page.getByTestId('mk-run-losat').click();
       const out = await toolRun(page, 2, 'failed');
       expect(out.exit).toBe(outNative.status);
@@ -377,7 +377,7 @@ test.describe('real engine: database names with a space are the native command l
       await expect(page.getByTestId('mk-command')).toHaveText(`losat makeblastdb -in '"my dbs/ndb"' -input_type blastdb -dbtype nucl -out copy`);
       const inputs = new Map(ndb.map((name) => [`my dbs/${name}`, readFileSync(join(corpus, name))] as const));
       const dbNative = nativeRun(['makeblastdb', '-in', '"my dbs/ndb"', '-input_type', 'blastdb', '-dbtype', 'nucl', '-out', 'copy'], inputs, ZONE);
-      await expect(page.getByTestId('mk-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+      await checked(page, 'mk-panel');
       await page.getByTestId('mk-run-losat').click();
       const db = await toolRun(page, 3, dbNative.status === 0 ? 'completed' : 'failed');
       expect(db.exit).toBe(dbNative.status);
@@ -391,7 +391,7 @@ test.describe('real engine: database names with a space are the native command l
       await page.getByTestId('ms-in-folder').setInputFiles(join(work, 'my db'));
       await expect(page.getByTestId('ms-in-name')).toHaveValue('"my db/wm"');
       await expect(page.getByTestId('ms-command')).toContainText(`-in '"my db/wm"'`);
-      await expect(page.getByTestId('ms-argv-validation')).toHaveAttribute('data-state', 'ok');
+      await checked(page, 'ms-panel', 'ok');
       await page.getByTestId('ms-run-losat').click();
       const dust = await toolRun(page, 4, 'completed');
       const dustNative = native(['dustmasker', '-in', '"my db/wm"', '-infmt', 'blastdb'], work);

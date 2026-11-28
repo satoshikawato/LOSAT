@@ -13,7 +13,7 @@ import { test } from './support/test';
 import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { described, openSearch, paste, program, submit, waitStatus } from './support/search';
+import { checked, described, openSearch, paste, program, submit, waitStatus } from './support/search';
 
 const BF_DIR = join(REPOSITORY, 'LOSAT/tests/blast_formatter');
 const SCREENSHOT_DIR = process.env['LOSAT_E2E_SCREENSHOT_DIR'];
@@ -187,7 +187,7 @@ test('Format Archive tab layout, -xmlhelp options, responsive viewports and -rid
   // -rid in Additional options is refused in-place by validateTool.
   await resetDesktopViewport(page);
   await page.getByTestId('bf-param-extra').fill('-rid ABCDEFGH01R');
-  await expect(page.getByTestId('bf-argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await checked(page, 'bf-panel', 'invalid');
   await expect(page.getByTestId('bf-argv-validation')).toContainText("BLAST_FORMATTER");
 
   expectNoExternalRequests(external);

@@ -1,0 +1,142 @@
+PHIBLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tests/fasta/psiblast/ps8b_qid_db.faa
+           2 sequences; 479 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+2 occurrence(s) of pattern: 
+[AG]-X(4)-G-K-[ST] at position(s) 20, 209 of query sequence
+pattern probability=8.338e-05
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+YP_009220601.1 same id as the query, first 181 residues               341     5e-103
+XP_000000001.1 unrelated record                                        7.1    0.029 
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+XP_000000001.1 unrelated record                                       581     4e-175
+YP_009220601.1 same id as the query, first 181 residues                7.1    0.029 
+
+
+
+Significant alignments for pattern occurrence 1 at position 20
+
+>YP_009220601.1 same id as the query, first 181 residues
+Length=181
+
+ Score = 341 bits (895),  Expect = 5e-103
+ Identities = 181/181 (100%), Positives = 181/181 (100%), Gaps = 0/181 (0%)
+
+pattern                          ********                                 
+Query    1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+              MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct    1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query    61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+              TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct    61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query    121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+              ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct    121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query    181  A  181
+              A
+Sbjct    181  A  181
+
+
+>XP_000000001.1 unrelated record
+Length=298
+
+ Score =  7.1 bits (23),  Expect = 0.029
+ Identities = 12/44 (27%), Positives = 20/44 (45%), Gaps = 3/44 (7%)
+
+pattern              ********                             
+Query    13   GRVELVTGPMFAGKSTYLKNIYQQENG---GNKHCLFVKHSLET  53
+              G++ ++ G    GKST  K +   +N    G ++  F   S  T
+Sbjct    102  GKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHT  145
+
+
+
+
+Significant alignments for pattern occurrence 2 at position 209
+
+>XP_000000001.1 unrelated record
+Length=298
+
+ Score = 581 bits (1512),  Expect = 4e-175
+ Identities = 298/298 (100%), Positives = 298/298 (100%), Gaps = 0/298 (0%)
+
+Query    101  FTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKE  160
+              FTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKE
+Sbjct    1    FTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKE  60
+
+pattern                                                       ********    
+Query    161  APFTVRFGNDNDNNVICVGGAEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAK  220
+              APFTVRFGNDNDNNVICVGGAEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAK
+Sbjct    61   APFTVRFGNDNDNNVICVGGAEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAK  120
+
+Query    221  LLLTNKNSPLYGGEYMCFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIK  280
+              LLLTNKNSPLYGGEYMCFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIK
+Sbjct    121  LLLTNKNSPLYGGEYMCFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIK  180
+
+Query    281  QLLDDGIHVVMDRYYYSGIVFSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRD  340
+              QLLDDGIHVVMDRYYYSGIVFSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRD
+Sbjct    181  QLLDDGIHVVMDRYYYSGIVFSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRD  240
+
+Query    341  TFGVERFETNSIQERARALFLDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE  398
+              TFGVERFETNSIQERARALFLDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE
+Sbjct    241  TFGVERFETNSIQERARALFLDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE  298
+
+
+>YP_009220601.1 same id as the query, first 181 residues
+Length=181
+
+ Score =  7.1 bits (23),  Expect = 0.029
+ Identities = 12/44 (27%), Positives = 20/44 (45%), Gaps = 3/44 (7%)
+
+pattern              ********                             
+Query    202  GKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHT  245
+              G++ ++ G    GKST  K +   +N    G ++  F   S  T
+Sbjct    13   GRVELVTGPMFAGKSTYLKNIYQQENG---GNKHCLFVKHSLET  53
+
+
+
+
+Lambda      K        H        a         alpha
+   0.270   0.0470     1.00     0.00     0.00 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.270   0.0470     1.00     0.00     0.00     0.00 
+
+Effective search space used: 463
+
+
+  Database: tests/fasta/psiblast/ps8b_qid_db.faa
+    Posted date:  Nov 27, 2026  1:53 PM
+  Number of letters in database: 479
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

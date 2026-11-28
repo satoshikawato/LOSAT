@@ -4086,40 +4086,28 @@ fn the_map_of_a_batch_counts_every_seq_align_id_of_it() {
 /// subject whose id a query of the batch's scope holds (`ParsedSubject::hidden_by_query`) is left
 /// out of the prefetch's lookups and stops and still counts in the one map that orders the batch's
 /// other loads and stops ([`prefetched_subjects`]): 199 other ids and it are 200 in one map, 200
-/// and it are 201 in pieces (`MANY_IDS`).
+/// and it are 201 in pieces (`MANY_IDS`). `pdbchain/pdbdual`'s dual record, whose Bioseq's build
+/// throws (`ParsedSubject::bioseq_load_throws`), and a query that holds its Seq-align id.
 #[test]
 fn a_subject_that_a_query_hides_counts_in_the_map_of_its_batch() {
     let cwd = empty_cwd("pfwhide");
     let search = SearchPath::new(&cwd, None, None);
-    let list: Vec<String> = ["ldp", "ldu"]
-        .iter()
-        .map(|name| {
-            root()
-                .join("db_search/multidb")
-                .join(name)
-                .to_str()
-                .unwrap()
-                .to_owned()
-        })
-        .collect();
-    let db = SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Protein, &search).unwrap();
+    let path = root().join("db_search/pdbchain/pdbdual");
+    let db = SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search).unwrap();
     let headers = HeaderReader::new(&db, false);
     let (ordinal, parsed) = (0..db.num_seqs())
         .find_map(
             |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
-                ReportedHeader::Parsed(subject)
-                    if String::from_utf8_lossy(&subject.alignment_fasta())
-                        .contains("NP_000002.1") =>
-                {
+                ReportedHeader::Parsed(subject) if subject.bioseq_load_throws() => {
                     Some((ordinal, subject))
                 }
                 _ => None,
             },
         )
-        .expect("ref|NP_000002.1|");
+        .expect("the dual record");
     let stopping = PrefetchSubject::unflipped(ordinal, Some(&*parsed));
     assert!(stopping.stops());
-    // A query `ref|NP_000002.1|` read with -parse_deflines holds the stopping id.
+    // A query read with -parse_deflines holds the dual record's Seq-align id.
     let held = || {
         let mut scope = crate::blastinput::query_batch::QueryScope::default();
         scope.add_ids_of([
@@ -4130,9 +4118,12 @@ fn a_subject_that_a_query_hides_counts_in_the_map_of_its_batch() {
         ]);
         scope
     };
+    let scope = held();
+    assert!(parsed.hidden_by_query(|| &scope));
     let hiding = PrefetchQueries::new(0, &held);
-    // `gnl|BL_ORD_ID|3` and on: packed 3 and more.
-    let unparsed: Vec<PrefetchSubject<'_>> = (3..204)
+    // `gnl|BL_ORD_ID|4` and on (sequences without parsed Seq-ids: their ordinal ids, packed 4 and
+    // more; the map does not read them).
+    let unparsed: Vec<PrefetchSubject<'_>> = (4..205)
         .map(|ordinal| PrefetchSubject::unflipped(ordinal, None))
         .collect();
     let batch = |others: usize, queries: &PrefetchQueries<'_>| {
@@ -4148,6 +4139,8 @@ fn a_subject_that_a_query_hides_counts_in_the_map_of_its_batch() {
     assert_eq!(map, Some(MANY_IDS));
     assert_eq!(reached.len(), 200);
     assert!(!reached.iter().any(PrefetchSubject::stops));
+    // The map of the subjects reached alone would not count the hidden one.
+    assert_eq!(batch_map(&db, &reached), None);
     // Without the query the stop is reached, in the same map.
     for others in [199, 200] {
         let (map, reached) = batch(others, &stop_queries(0));

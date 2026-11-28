@@ -77,9 +77,9 @@ test.describe('the folder picked for -db: its taxonomy files stay where the user
     });
   }
 
-  for (const [label, extra, name] of [
+  for (const [label, taxids, name] of [
     ['taxdb.bti, which the search looks for first in its working directory', '', 'taxdb.bti'],
-    ['taxonomy4blast.sqlite3 with -taxids', '-taxids 9606 ', 'taxonomy4blast.sqlite3'],
+    ['taxonomy4blast.sqlite3 with -taxids', '9606', 'taxonomy4blast.sqlite3'],
   ] as const) {
     test(`-logfile ${label} is refused as the shown command is`, async ({ page }) => {
       const work = mkdtempSync(join(tmpdir(), 'losat-d35-e2e-'));
@@ -92,13 +92,14 @@ test.describe('the folder picked for -db: its taxonomy files stay where the user
         await page.getByTestId('subject-source-database').check();
         await page.getByTestId('subject-db-folder-input').setInputFiles(folder);
         await expect(page.getByTestId('subject-db-selected')).toContainText('protdb/tfp');
+        if (taxids) await page.getByTestId('db-filter-taxids').fill(taxids);
         await openParameters(page);
-        await page.getByTestId('param-extra').fill(`${extra}-logfile ${name}`);
+        await page.getByTestId('param-extra').fill(`-logfile ${name}`);
         await submit(page);
         await waitStatus(page, 1, 'failed');
         expect(await runMessage(page, 1)).toContain(`a -logfile file '${name}' that is`);
         // The shown command on the command line: refused before the file is made.
-        const args = ['blastp', '-query', queryPath, '-db', 'protdb/tfp', ...extra.trim().split(' ').filter(Boolean), '-logfile', name];
+        const args = ['blastp', '-query', queryPath, '-db', 'protdb/tfp', ...(taxids ? ['-taxids', taxids] : []), '-logfile', name];
         const cli = native(args, work, 6);
         expect(cli.status, cli.stderr).toBe(1);
         expect(cli.stderr).toContain(`a -logfile file '${name}' that is also an input file read by this run`);

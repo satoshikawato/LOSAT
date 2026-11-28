@@ -405,8 +405,8 @@ fn a_sample_of_the_mask_ids_cases_runs_through_the_command_line() {
 /// run (a range of the same sequence or of a later algorithm past the end, a later sequence, a
 /// later input file without sequences). NCBI's order never reaches a file there, so LOSAT gives
 /// makeblastdb's exit status, messages, log and files. Where nothing else fails (`tie`), LOSAT
-/// refuses at the close, after the log of the whole build, and leaves the files of NCBI's failed
-/// build of the same input (`oob_later_sequence`).
+/// refuses at the close, after the log of the whole build, and leaves no file of the build (a
+/// refusal of LOSAT's; NCBI builds the database).
 #[test]
 fn errors_of_makeblastdb_come_before_the_refusal_of_masks_ordered_by_address() {
     let dir = seqdb_fixtures().join("mask_order");
@@ -456,14 +456,7 @@ fn errors_of_makeblastdb_come_before_the_refusal_of_masks_ordered_by_address() {
                      database\n",
                     "{stem}"
                 );
-                assert_eq!(
-                    left,
-                    read(
-                        &expected_dir,
-                        &format!("oob_later_sequence.v{version}.files")
-                    ),
-                    "{stem}: files left"
-                );
+                assert_eq!(left, "", "{stem}: files left");
                 refused += 1;
             } else {
                 assert_eq!(format!("{}\n", run.status), expected("rc"), "{context}");
@@ -483,8 +476,8 @@ fn errors_of_makeblastdb_come_before_the_refusal_of_masks_ordered_by_address() {
 /// The build `tie` of `tests/seqdb/mask_order`, which LOSAT refuses at its end, with its log on a
 /// pipe whose reader closes after the line "Adding sequences from FASTA": the first line of
 /// `EndBuild` ends the build with exit status 0 and no message (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
-/// exception 10), and its files are removed as the refusal removes them, so that no database whose
-/// masks are in LOSAT's order is left.
+/// exception 10), and its files are removed as the refusal removes them: no file of the build is
+/// left, so no database whose masks are in LOSAT's order.
 #[cfg(not(windows))]
 #[test]
 fn a_refused_build_that_meets_a_closed_pipe_leaves_no_database() {
@@ -529,11 +522,7 @@ fn a_refused_build_that_meets_a_closed_pipe_leaves_no_database() {
             .iter()
             .map(|file| format!("{file}\n"))
             .collect();
-        let expected = read(
-            &dir.join("expected"),
-            &format!("oob_later_sequence.v{version}.files"),
-        );
-        assert_eq!(left, expected, "v{version}: files left");
+        assert_eq!(left, "", "v{version}: files left");
     }
 }
 

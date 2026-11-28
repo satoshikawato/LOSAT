@@ -163,6 +163,20 @@ fn file_states(dir: &Path) -> BTreeMap<String, (u64, SystemTime)> {
     found
 }
 
+/// Sets the time of change of each file below `dir` to the epoch, which no run writes: a file that a
+/// run writes again with the same bytes within one tick of the file system's clock (10 ms on a
+/// kernel of 100 Hz; `mbi_sv5_id0` then `mbi_sv5_gm1` write one index) is still seen as changed by
+/// `made_files`.
+fn age_files(dir: &Path) {
+    for path in file_states(dir).into_keys() {
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join(path))
+            .and_then(|file| file.set_modified(SystemTime::UNIX_EPOCH))
+            .unwrap();
+    }
+}
+
 /// The files below `root` made or changed since `before`: `path<TAB>size<TAB>FNV-1a 64` lines.
 fn made_files(root: &Path, before: &BTreeMap<String, (u64, SystemTime)>) -> String {
     let mut files = String::new();
@@ -211,7 +225,10 @@ fn run(root: &Path, case: &Case, extra: &[&str]) -> Output {
     if let Some((key, value)) = &case.env {
         command.env(key, value.replace("{R}", r));
     }
-    let before = is_makembindex(case).then(|| file_states(root));
+    let before = is_makembindex(case).then(|| {
+        age_files(root);
+        file_states(root)
+    });
     let output = command.output().expect("run losat");
     let files = match &before {
         Some(before) => made_files(root, before),

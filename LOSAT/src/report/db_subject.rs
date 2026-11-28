@@ -5908,6 +5908,16 @@ pub struct HeldHit {
     pub ordinal: u32,
 }
 
+/// What a call of a run whose reports are written by several calls (psiblast's rounds and
+/// queries) hands to the next call's walk, or to the rounds' epilog: the `Hit`s of the report
+/// held at its end ([`HitLoads::held_out`], as [`HeldHit`]s) and the run's answer for a subject
+/// whose lookup throws ([`FormatThrow`], the same for every call of the run).
+#[derive(Clone, Debug, Default)]
+pub struct HeldCarry {
+    pub hits: Vec<HeldHit>,
+    pub run: FormatThrow,
+}
+
 /// Where the `Hit` of a held report comes from in a call's walk: the key of its first subject in
 /// the call's reports, or its place among the `Hit`s that the calls before handed on
 /// ([`CallReads::held_in`]).
@@ -6873,6 +6883,16 @@ impl HitLoads {
     /// The exception that the `Hit` at `place` among those that the calls before handed on threw.
     pub fn carried_thrown(&self, place: usize) -> Option<&crate::ncbi_exception::NcbiException> {
         self.carried_throws.get(&place)
+    }
+
+    /// The exception of the `Hit` among those that the calls before handed on whose load threw
+    /// where this call made their report (`carried_thrown`): the report fails with it where it is
+    /// written (`blast_xml2::Xml2Carry::fail_held`).
+    pub fn held_failure(&self) -> Option<&crate::ncbi_exception::NcbiException> {
+        self.carried_throws
+            .iter()
+            .min_by_key(|(place, _)| **place)
+            .map(|(_, exception)| exception)
     }
 
     /// The `Hit`s of the report held at the end of the call, which a later call makes

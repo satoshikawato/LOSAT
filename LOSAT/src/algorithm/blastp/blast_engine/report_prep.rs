@@ -464,11 +464,24 @@ pub(super) fn prefetch_reported_subjects(
         // to the next round or query, or to the rounds' epilog (`psi_round::write_round_epilogs`).
         epilog: reports.epilog && reports.psi_round.is_none(),
         later: reports.psi_round.is_some() || !reports.last_call,
-        held_in: Vec::new(),
+        // The held report of the query before, which the round before handed on.
+        held_in: match reports.psi_round {
+            Some(io) if held => std::mem::take(&mut io.held.lock().expect("the held report").hits),
+            _ => Vec::new(),
+        },
     };
-    let hit_loads = listed_titles
-        .as_ref()
-        .map_or_else(Default::default, |titles| {
+    let hit_loads = match listed_titles.as_ref() {
+        // A call without listed subjects still makes the held report that the calls before
+        // handed on, at its first arrival.
+        None => match database {
+            Some(database) if !call_reads.held_in.is_empty() => database.held_loads(
+                (ranges.x_ordinal_base, Some(batch_prefetch)),
+                reported_lists.len(),
+                (after_throw, &call_reads),
+            ),
+            _ => Default::default(),
+        },
+        Some(titles) => {
             titles.hit_loads(
                 // The batches numbered from the call's first input record (psiblast's rounds of a
                 // query, one batch, share it).
@@ -489,7 +502,34 @@ pub(super) fn prefetch_reported_subjects(
                     })
                 },
             )
-        });
+        }
+    };
+    // A `Hit` that the calls before handed on and whose load gives another sequence here is
+    // refused as the call's own are (`ListedTitles::check_parsed_reports`).
+    if let Some(database) = database.filter(|_| !call_reads.held_in.is_empty()) {
+        database.check_held_in(&call_reads.held_in, &hit_loads)?;
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:509-517
+    // The report held at the call's end goes to the next round or query, or to the rounds'
+    // epilog (`psi_round::write_round_epilogs`), with the run's answer for a lookup that throws.
+    if let Some(io) = reports.psi_round.filter(|_| held) {
+        let hits = hit_loads
+            .held_out()
+            .iter()
+            .filter_map(|key| match *key {
+                crate::report::db_subject::HeldKey::Key(rank) => {
+                    listed_titles.as_ref().map(|titles| titles.held_hit(rank))
+                }
+                crate::report::db_subject::HeldKey::Carried(place) => {
+                    call_reads.held_in.get(place).cloned()
+                }
+            })
+            .collect();
+        *io.held.lock().expect("the held report") = crate::report::db_subject::HeldCarry {
+            hits,
+            run: after_throw,
+        };
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (cited at
     // `db_subject::RunLoads`)
     // A report whose load ends the run ends NCBI's application there: no batch after it is

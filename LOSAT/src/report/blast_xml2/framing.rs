@@ -310,6 +310,20 @@ pub struct Xml2Carry {
     held: HeldSearches,
 }
 
+impl Xml2Carry {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2216
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2380-2399
+    /// The held report's `Hit` threw where a later call made the report, at the next query's
+    /// arrival or the epilog (`db_subject::HitLoads::held_failure`): the report fails with
+    /// `exception` where it is written (`Xml2Document::report`, `Xml2Document::epilog`), as one
+    /// whose making threw. A report that already failed keeps its first exception.
+    pub fn fail_held(&mut self, exception: crate::ncbi_exception::NcbiException) {
+        if self.has_pending && self.pending_failure.is_none() {
+            self.pending_failure = Some(exception);
+        }
+    }
+}
+
 /// The framing states of a run's output formats (`Xml2Carry`, by the format's place in the run's
 /// outputs), which the run's report calls hand on: a call's document of an XML2 or JSON format
 /// takes the state of its format (`take`) and puts it back after its reports (`put`).

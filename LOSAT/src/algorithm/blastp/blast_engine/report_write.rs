@@ -746,7 +746,13 @@ pub(super) fn write_xml(
             // A psiblast round, and a block of EXPERIMENT (LOSAT_X_BPQBLOCK), continues the
             // document of the calls before it and hands its state on (`Xml2Carries`).
             if let Some(carries) = reports.xml2_carries {
-                document.document_mut().resume(carries.take(format_index));
+                let mut carry = carries.take(format_index);
+                // The report that the calls before held fails where a `Hit` of it threw at this
+                // call's arrival (`HitLoads::held_failure`).
+                if let Some(exception) = hit_loads.held_failure() {
+                    carry.fail_held(exception.clone());
+                }
+                document.document_mut().resume(carry);
             }
             blast_xml::write_blastp_xml(
                 &xml,

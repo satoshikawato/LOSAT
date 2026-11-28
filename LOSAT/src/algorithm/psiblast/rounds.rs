@@ -264,6 +264,10 @@ pub(crate) struct PsiRoundIo {
     /// made (`blast_xml2::queries_dropped`).
     pub(crate) fasta_query: bool,
     pub(crate) outcome: std::sync::Mutex<Option<RoundOutcome>>,
+    /// The XML2 and JSON report held across the run's calls: the `Hit`s that the calls before
+    /// handed on (`db_subject::CallReads::held_in`), and after the round those that it hands on
+    /// (`db_subject::HitLoads::held_out`), made at the next query's arrival or at the epilog.
+    pub(crate) held: std::sync::Mutex<crate::report::db_subject::HeldCarry>,
 }
 
 impl PsiRoundIo {

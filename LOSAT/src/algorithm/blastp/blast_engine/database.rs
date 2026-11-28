@@ -154,6 +154,73 @@ impl BlastpDatabase {
         self.db.oid_map()
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2216
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2380-2399
+    /// The walk of a call whose reports give it no keys of their own (no listed subjects;
+    /// `reports` reports read as `prefetch` says, numbered from `batch_base`), or of the rounds'
+    /// epilog (no report, no prefetch): only the `Hit`s of the held report that the calls before
+    /// handed on (`CallReads::held_in`) load, at the call's first arrival or at the epilog, after
+    /// the loads of the calls before on this database.
+    pub(super) fn held_loads(
+        &self,
+        (batch_base, prefetch): (usize, Option<&shared::BatchPrefetch>),
+        reports: usize,
+        (run, call): (
+            crate::report::db_subject::FormatThrow,
+            &crate::report::db_subject::CallReads,
+        ),
+    ) -> HitLoads {
+        let read = |query: usize| {
+            prefetch.map_or_else(
+                || crate::report::db_subject::ReportRead::from(false),
+                |prefetch| prefetch.report_read(query, batch_base),
+            )
+        };
+        HitLoads::of_call(
+            self.taxdb
+                .loads_before(prefetch.and_then(|_| read(0).batch)),
+            run,
+            (0..reports).map(|query| {
+                (
+                    read(query),
+                    crate::report::db_subject::ReportKeys::Entries(Vec::new()),
+                )
+            }),
+            |_| None,
+            |_, _| 0,
+            call,
+        )
+    }
+
+    /// LOSAT's refusal of a `Hit` of the held report that the calls before handed on (`held_in`,
+    /// `CallReads::held_in`) whose load where this call made the report (`loads`) gives another
+    /// sequence (`HitLoad::Shown`) or is refused (`HitLoad::Refused`: `ParsedSubject::fetched`, as
+    /// `ListedTitles::check_parsed_reports` for a call's own `Hit`s, which checked the others; the
+    /// XML2 and JSON `Hit`s show the taxonomy).
+    pub(super) fn check_held_in(
+        &self,
+        held_in: &[crate::report::db_subject::HeldHit],
+        loads: &HitLoads,
+    ) -> Result<()> {
+        for (place, hit) in held_in.iter().enumerate() {
+            // A load that finds the subject was checked in the call of its report.
+            let load = loads.carried(place);
+            let Some(subject) = hit.subject.as_deref().filter(|_| {
+                matches!(
+                    load,
+                    crate::report::db_subject::HitLoad::Shown(_)
+                        | crate::report::db_subject::HitLoad::Refused(_)
+                )
+            }) else {
+                continue;
+            };
+            subject.fetched(true, load).map_err(|reason| {
+                shared::parsed_refusal(self.oid_map().oid(hit.ordinal), &reason, self.program)
+            })?;
+        }
+        Ok(())
+    }
+
     /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
     pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
         self.db.set_reports_show_gis(show_gis);
@@ -3237,7 +3304,8 @@ impl ListedTitles<'_> {
             })
         };
         // Without a subject of parsed Seq-ids no lookup throws.
-        let run = if self.parsed.is_empty() {
+        let run = if self.parsed.is_empty() && call.held_in.iter().all(|hit| hit.subject.is_none())
+        {
             crate::report::db_subject::FormatThrow::Unread
         } else {
             run
@@ -3279,6 +3347,15 @@ impl ListedTitles<'_> {
             },
             call,
         )
+    }
+
+    /// The `Hit` of the subject of rank `rank` in a held report that the call hands on
+    /// (`HitLoads::held_out`): its parsed Seq-ids and ordinal id.
+    pub(super) fn held_hit(&self, rank: usize) -> crate::report::db_subject::HeldHit {
+        crate::report::db_subject::HeldHit {
+            subject: self.parsed.get(rank).cloned().flatten(),
+            ordinal: self.listed.ordinals[rank],
+        }
     }
 
     /// The number of HSP lists of each of psiblast's traceback hit lists `hit_lists` (in the

@@ -254,6 +254,9 @@ fn run_queries(
     // The XML2 and JSON documents of the run's formats, which every round's call continues: NCBI's
     // formatter holds a query's report across its rounds (`Xml2Carries`).
     let xml2_carries = crate::report::blast_xml2::Xml2Carries::default();
+    // The `Hit`s of the XML2 and JSON report held across the calls, which the next query's first
+    // round or the epilog makes (`HitLoads::held_out`, `CallReads::held_in`).
+    let mut held = crate::report::db_subject::HeldCarry::default();
     for (batch, &(input_start, query)) in batches.starts.iter().enumerate() {
         let records = std::slice::from_ref(&searched_queries[query]);
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-155
@@ -463,6 +466,7 @@ fn run_queries(
                     .and_then(|psi| psi.query_seq_loc_id().cloned()),
                 fasta_query: args.psi_search.is_none(),
                 outcome: std::sync::Mutex::new(None),
+                held: std::sync::Mutex::new(std::mem::take(&mut held)),
             };
             // The library's records of the round (`FormatObserver::round_begin`): the call's hit
             // list and HSP numbers are the round's.
@@ -508,6 +512,7 @@ fn run_queries(
                 },
                 super::x_lookup_ahead::XAheadBlock::none(),
             );
+            held = std::mem::take(&mut *io.held.lock().expect("the held report"));
             // A header file that NCBI cannot read fails the round whose results reach it first,
             // at its prefetch, after the reports of the rounds before (`search`'s rule for the
             // batches): the outfmt 0 prolog if nothing was written, and the reader's messages
@@ -615,6 +620,7 @@ fn run_queries(
         let ends = RoundEnds {
             rounds: calls,
             xml2_carries: &xml2_carries,
+            held: &held,
             xml_fails_at_end: super::blastp_xml_failing_query(
                 args,
                 outputs,
@@ -827,6 +833,8 @@ struct RoundEnds<'a> {
     rounds: usize,
     /// The XML2 and JSON documents of the run's formats, as the rounds' calls left them.
     xml2_carries: &'a crate::report::blast_xml2::Xml2Carries,
+    /// The `Hit`s of the report that the last call held, which the epilog makes.
+    held: &'a crate::report::db_subject::HeldCarry,
     /// Whether the held report of the XML2 and JSON documents fails at the end for a matrix name
     /// that NCBI's XML does not know (`XmlFailingQuery::fails_at_end`: no query of the run made
     /// the report fail before).
@@ -855,6 +863,24 @@ fn write_round_epilogs(
     let taxdb_found = match subject_source.database() {
         Some(database) => database.taxdb_found(),
         None => args.subject_taxdb_found,
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2216
+    // The epilog makes the held report after the last query's `ResetScopeHistory`: its `Hit`s load
+    // their subjects in a new scope, and the first whose lookup throws fails the report
+    // (`Xml2Carry::fail_held`).
+    let held_failure = match subject_source.database() {
+        Some(database) if !ends.held.hits.is_empty() => {
+            let call = crate::report::db_subject::CallReads {
+                held: true,
+                epilog: true,
+                held_in: ends.held.hits.clone(),
+                ..Default::default()
+            };
+            let loads = database.held_loads((0, None), 0, (ends.held.run, &call));
+            database.check_held_in(&call.held_in, &loads)?;
+            loads.held_failure().cloned()
+        }
+        _ => None,
     };
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
         if let Some(spec) = super::super::tabular::custom_tabular_spec(format.outfmt, args.app) {
@@ -903,7 +929,10 @@ fn write_round_epilogs(
                 let kind = crate::blastinput::app::ReportFormat::from_number(number)
                     .and_then(crate::report::blast_xml2::Xml2Kind::of)
                     .expect("outfmt 13 to 16 are the XML2 and JSON documents");
-                let carry = ends.xml2_carries.take(format_index);
+                let mut carry = ends.xml2_carries.take(format_index);
+                if let Some(exception) = held_failure.as_ref() {
+                    carry.fail_held(exception.clone());
+                }
                 let ended = if ends.xml_fails_at_end {
                     Err(crate::report::blast_xml::matrix::unsupported_score_matrix())
                 } else {

@@ -1377,6 +1377,7 @@ fn a_held_report_that_throws_ends_the_run_at_the_next_arrival() {
     let loads = walk(vec![report(false, 1, &[2])], &next);
     assert_eq!(loads.carried(0), HitLoad::Throws);
     assert!(loads.carried_thrown(0).is_some());
+    assert_eq!(loads.held_failure(), loads.carried_thrown(0));
     assert_eq!(loads.carried(1), HitLoad::Loaded);
     assert!(!loads.reaches(0) && loads.prefetches(0));
     // A report whose results join it (the query's next round) makes nothing; the epilog makes the

@@ -190,6 +190,8 @@ impl ReaderBatchShape {
 /// batch that is set up holds two (line WQA D10 round 5, 2026-11-20).
 pub(crate) fn set_up_error(
     queries: &[FastaRecord],
+    batch_query_count: usize,
+    first_query_len: usize,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
 ) -> crate::blastinput::query_batch::BatchSetUp {
@@ -199,7 +201,39 @@ pub(crate) fn set_up_error(
     };
     let mut params = score_block_for(&prepared, options.scoring);
     if !params.iter().any(|p| p.valid) {
-        return BatchSetUp::Unknown;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:105-145
+        // A single-query batch that NCBI splits into chunks stays `Unknown`.
+        if batch_query_count == 1 && options.gapped {
+            let Ok(sizes) = super::split::split_sizes(1) else {
+                return BatchSetUp::Unknown;
+            };
+            let mut chunk_size = sizes.chunk_size;
+            if super::split::calculate_num_chunks(
+                &mut chunk_size,
+                sizes.overlap,
+                first_query_len,
+                1,
+            ) > 1
+            {
+                return BatchSetUp::Unknown;
+            }
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+        if subjects.is_unreadable() {
+            return BatchSetUp::NoValidContext {
+                subjects_pass: false,
+            };
+        }
+        let Ok(numbers) = subjects.numbers() else {
+            return BatchSetUp::Unknown;
+        };
+        // The subjects' failures of a batch with a valid context (`subject_checks`, then the
+        // search's first read), which read the subjects alone: where there is none, NCBI's batch
+        // fails the same whatever the letters that NCBI reads for its repeats.
+        let subjects_pass = super::parameters::subject_checks(options, numbers).is_ok()
+            && subjects.sequence_file_read_error().is_none();
+        return BatchSetUp::NoValidContext { subjects_pass };
     }
     if subjects.is_unreadable() {
         return BatchSetUp::Fails(super::subjects::UnreadableSubjects.into());
@@ -252,6 +286,9 @@ pub(crate) fn prepare_unit(
         let mut word_minima = None;
         let computed = (|| {
             let numbers = subjects.numbers()?;
+            // Without the sum statistics' carry (`batch_valid_before` is false here): exact for
+            // the minimum, as the first valid context's cutoff is the batch's smallest while all
+            // contexts share one block (`PreparedQueryBatch::batch_valid_before`).
             subject_parameters(&prepared, &mut minima, options, numbers, None)?;
             if ungapped_link {
                 if let Some(spaces) = super::parameters::preliminary_spaces(
@@ -326,14 +363,22 @@ pub(crate) fn prepare_lone_unit(
     })
 }
 
-/// The end of phase 1 for the units of a reader batch: the batch's shape replaces the layout.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976 (cited at
+// `stats::cutoffs::SumStatsCutoffs`)
+/// The end of phase 1 for the units `units` of a reader batch, in order: the batch's shape
+/// replaces the layout, and each unit learns whether a context of the batch before it is valid
+/// (`PreparedQueryBatch::batch_valid_before`), as NCBI's sum statistics carry their e-value from
+/// one valid context of the query batch to the next.
 pub(crate) fn attach<'u>(
     units: impl IntoIterator<Item = &'u mut UnitPrep>,
     shape: ReaderBatchShape,
 ) {
     let shape = Arc::new(shape);
+    let mut valid_before = false;
     for unit in units {
         unit.prepared.reader_shape = Some(Arc::clone(&shape));
+        unit.prepared.batch_valid_before = valid_before;
+        valid_before |= unit.params.iter().any(|p| p.valid);
     }
 }
 

@@ -1,0 +1,1 @@
+Error: the tabular output formats (6, 7, 10 and 20) of a BLAST archive with a translated search or a program other than blastn, blastp, psiblast, deltablast, PHI-BLAST of a protein query and rpsblast are not supported by LOSAT's BLAST_FORMATTER

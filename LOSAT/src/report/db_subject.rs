@@ -3460,9 +3460,9 @@ impl ParsedSubject {
     }
 
     /// Whether NCBI's formatters find no Bioseq by the Seq-align id whatever its lookup gives
-    /// (see `new`), so that no lookup is needed. Read by tests only: the engine asks
-    /// `common::database::scope_bioseq`, which looks it up first.
-    #[cfg(test)]
+    /// (see `new`), so that no lookup is needed. The search programs ask
+    /// `common::database::scope_bioseq`, which looks it up first; blast_formatter's tabular
+    /// formats refuse such a subject.
     pub fn unfetchable(&self) -> bool {
         self.unfetchable
     }
@@ -4317,6 +4317,7 @@ impl ParsedSubject {
                 bioseq: false,
                 length: false,
                 lineless,
+                map_length: false,
             }),
         )
     }

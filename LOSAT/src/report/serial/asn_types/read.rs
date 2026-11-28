@@ -479,6 +479,13 @@ impl<I: Input> ObjectStream<I> {
         self.failed || self.reader.inp.end_of_data()
     }
 
+    /// Whether the last object read (`read_object`) may hold an element of a list of `CRef<>`s
+    /// stated as `NULL`: when false, `view::V::holds_null_element` is false for every part of it,
+    /// which a caller need not walk.
+    pub(crate) fn null_element_read(&self) -> bool {
+        self.reader.null_element
+    }
+
     /// The primitives of the stream after the objects read (`stream`: the text after them goes
     /// back to the caller).
     pub(crate) fn into_input(self) -> I {
@@ -573,6 +580,10 @@ pub(crate) struct TypedReader<I: Input, P: PostSink = Vec<Post>> {
     /// The values being read, outermost first (`Open`): NCBI's recursion of `ReadObject` as a list
     /// on the heap, so that a value nested to any depth is read in LOSAT's own stack.
     open: Vec<Open>,
+    /// Whether the object being read keeps an element of a list of `CRef<>`s as `Value::Null` (an
+    /// element stated as `NULL`, `next_element`): when not, no part of it holds one
+    /// (`view::V::holds_null_element` is false for each, `ObjectStream::null_element_read`).
+    null_element: bool,
     /// Whether the warning of a UTF8String tag was posted (`Utf8TagOnce`; one stream is all a
     /// run of LOSAT reads with it).
     utf8_once: Utf8TagOnce,
@@ -711,6 +722,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             unkept: Vec::new(),
             outer: None,
             open: Vec::new(),
+            null_element: false,
             utf8_once: Utf8TagOnce::default(),
             names,
             root: NO_TYPE,
@@ -724,6 +736,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         self.inp.new_object();
         self.frames.clear();
         self.open.clear();
+        self.null_element = false;
         self.root = NO_TYPE;
     }
 
@@ -1314,6 +1327,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             } => {
                 self.inp.end_element()?;
                 if !skip && self.keep {
+                    self.null_element |= refs && matches!(value, Value::Null);
                     values.push(value);
                 }
                 self.next_element(element, refs, skip, values)
@@ -1534,6 +1548,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             };
             if pointee == Pointee::Null {
                 if !skip && self.keep {
+                    self.null_element = true;
                     values.push(Value::Null);
                 }
                 self.inp.end_element()?;

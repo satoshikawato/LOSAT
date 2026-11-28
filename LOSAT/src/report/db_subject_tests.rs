@@ -2174,6 +2174,7 @@ fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
             bioseq: false,
             length: false,
             lineless: false,
+            map_length: false,
         })
     );
     assert_eq!(

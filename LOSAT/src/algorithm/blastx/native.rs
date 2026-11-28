@@ -41,11 +41,7 @@ use run_parts::{read_subjects, ArchiveBatch, RunSetup, SubjectRead};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 pub(crate) fn engine(message: impl fmt::Display) -> anyhow::Error {
-    NativeError {
-        exit: 3,
-        message: format!("{ENGINE_ERROR} {message}\n").into(),
-    }
-    .into()
+    crate::blastinput::app::engine_error(message.to_string())
 }
 
 /// The error of the database's sequences (`BlastxDatabase::x_check_stores`, or a read of
@@ -524,6 +520,11 @@ fn run_inner(
             choice.number == 5,
             program.upper,
         )
+        .map(|scopes| {
+            scopes.with_query_range(query_range).with_strand(
+                crate::algorithm::blastn::args::QueryStrand::from_option(&options.strand),
+            )
+        })
     };
     let mut read_ahead_scopes = None;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (cited at
@@ -1936,7 +1937,13 @@ pub(super) fn add_batch_scope(
                 .filter_map(|(&(_, _, place), &first)| place.filter(|_| first))
                 .map(|place| queries[place].clone())
                 .collect();
-            match super::reader_batch::set_up_error(&records, options, subjects) {
+            match super::reader_batch::set_up_error(
+                &records,
+                queries.len(),
+                queries.first().map_or(0, |record| record.sequence.len()),
+                options,
+                subjects,
+            ) {
                 BatchSetUp::Fails(error) => BatchSetUp::Fails(search_error(error)),
                 other => other,
             }

@@ -240,6 +240,148 @@ impl<'a> SubjectValues<'a> {
 }
 
 impl<'a> SubjectValues<'a> {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:808-871
+    /// The values of the subject `subject` with parsed Seq-ids (subject index `index`) that the
+    /// fields of `spec` show: a database sequence's (`titles`: its definition lines' titles) or a
+    /// `-subject` Bioseq's (no definition lines: `stitle` and `salltitles` `N/A`), of `length`
+    /// letters and the taxonomy `taxonomy`, the ids of a protein's where `protein`
+    /// (`ParsedSubject::tabular_ids`). `refused` is LOSAT's refusal of ids it does not write as
+    /// NCBI. The one maker of such values for blast_formatter (decision F3-16 of line RG); the
+    /// search programs' copies fold onto it (`TabularSubjects::values`, DESIGN_F3_TAB O7).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn of_parsed(
+        subject: &'a ParsedSubject,
+        spec: &TabularSpec,
+        length: usize,
+        taxonomy: Cow<'a, TabularTaxonomy>,
+        protein: bool,
+        titles: bool,
+        index: usize,
+        refused: impl Fn(&str) -> anyhow::Error,
+    ) -> Result<Self> {
+        let ids = subject.tabular_ids(protein).map_err(&refused)?;
+        let all = if spec.needs().all_deflines {
+            subject.all_tabular_ids(protein).map_err(&refused)?
+        } else {
+            Default::default()
+        };
+        let failed = FailedValues::of_parsed(subject, ids.is_none(), all.failed);
+        let [id, accession, accession_version] = ids.unwrap_or_default();
+        Ok(SubjectValues {
+            id: Cow::Owned(id),
+            accession: Cow::Owned(accession),
+            accession_version: Cow::Owned(accession_version),
+            gi: subject.tabular_gi(),
+            all_ids: all.ids,
+            titles: titles.then(|| {
+                subject
+                    .deflines()
+                    .iter()
+                    .map(|defline| defline.title.as_deref().unwrap_or_default())
+                    .collect()
+            }),
+            length: if spec.has(TabularField::SubjectLength) {
+                length
+            } else {
+                0
+            },
+            taxonomy,
+            failed,
+            index,
+        })
+    }
+
+    /// The values of the database sequence `oid` without parsed Seq-ids (subject index `index`)
+    /// that blast_formatter shows: [`SubjectValues::stored`] of the id that its stored title
+    /// `title` gives (`common::database::tabular_subject_id`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn of_stored(
+        title: &'a [u8],
+        source: &crate::report::defline::SourceTaxname,
+        oid: crate::seqdb::Oid,
+        spec: &TabularSpec,
+        length: usize,
+        taxonomy: TabularTaxonomy,
+        protein: bool,
+        index: usize,
+        program: &str,
+    ) -> Result<Self> {
+        use crate::algorithm::common::database::{tabular_subject_id, TabularSubjectId};
+        let found = tabular_subject_id(title, source, oid, protein, program)?;
+        let accession = match found {
+            TabularSubjectId::Unknown(_) => None,
+            found => Some(Cow::Owned(found.accession().into_owned())),
+        };
+        Ok(SubjectValues::stored(
+            accession,
+            title,
+            source,
+            oid,
+            spec,
+            length,
+            Cow::Owned(taxonomy),
+            protein,
+            index,
+        ))
+    }
+
+    /// The values of the database sequence `oid` without parsed Seq-ids (subject index `index`)
+    /// whose stored title `title` (an empty one made from the name of its `source`) gives the
+    /// accession `accession` (`common::database::TabularSubjectId::accession`: the title's first
+    /// word, or the general id's content label), `None` where it gives none: the first word for
+    /// every id, `gnl|BL_ORD_ID|n` for the general id's `sseqid` (`tabular_seqid`,
+    /// `CShowBlastDefline::GetSeqIdList`), the lookup failing where there is no id (`GetSeqIdList`
+    /// throws for the general id, in `SetSubjectId` and `x_SetSubjectIds`), its one definition
+    /// line's title, `length` letters (`slen`) and the taxonomy `taxonomy`. The one maker of such
+    /// values: the search programs' (`TabularSubjects::values`) and blast_formatter's
+    /// (`of_stored`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stored(
+        accession: Option<Cow<'a, [u8]>>,
+        title: &'a [u8],
+        source: &crate::report::defline::SourceTaxname,
+        oid: crate::seqdb::Oid,
+        spec: &TabularSpec,
+        length: usize,
+        taxonomy: Cow<'a, TabularTaxonomy>,
+        protein: bool,
+        index: usize,
+    ) -> Self {
+        let failed = accession.is_none().then(|| {
+            let [full, accession] = crate::algorithm::common::database::failed_general_lookup(oid);
+            FailedValues {
+                align_id: [Cow::Owned(full), Cow::Owned(accession)],
+                subject_id: true,
+                all_ids: true,
+                thrown: None,
+                empty_handle: false,
+            }
+        });
+        let accession = accession.unwrap_or(Cow::Borrowed(&[]));
+        let id = match crate::algorithm::common::database::tabular_seqid(
+            &accession, oid, title, source, protein,
+        ) {
+            Cow::Owned(id) => Cow::Owned(id),
+            Cow::Borrowed(_) => accession.clone(),
+        };
+        SubjectValues {
+            id,
+            accession_version: accession.clone(),
+            accession,
+            gi: 0,
+            all_ids: Vec::new(),
+            titles: Some(vec![title]),
+            length: if spec.has(TabularField::SubjectLength) {
+                length
+            } else {
+                0
+            },
+            taxonomy,
+            failed,
+            index,
+        }
+    }
+
     /// The values of the query Bioseq `bioseq` that NCBI's scope finds for the reported sequence
     /// of subject index `index` (`report::query_bioseq::QueryBioseq`): the query's ids (its one
     /// line for `sall*` where `all_deflines`), no title (`N/A`), the query record's length, no
@@ -294,6 +436,21 @@ impl SubjectValues<'_> {
             qcovus,
             lookup: self.lookup(),
             index: self.index,
+        }
+    }
+
+    /// The subject of the shared writer (`nucleotide_subject`), a nucleotide sequence where
+    /// `nucleotide` (`sstrand` is `N/A` for a protein).
+    pub(crate) fn subject<'s>(
+        &'s self,
+        names: Option<&'s TabularNames>,
+        nucleotide: bool,
+        qcovs: i32,
+        qcovus: i32,
+    ) -> TabularSubject<'s> {
+        TabularSubject {
+            nucleotide,
+            ..self.nucleotide_subject(names, qcovs, qcovus)
         }
     }
 
@@ -475,26 +632,16 @@ impl<'a> TabularSubjects<'a> {
                             String::from_utf8_lossy(&subject.alignment_fasta())
                         )
                     };
-                    let ids = subject.tabular_ids(false).map_err(refused)?;
-                    let all = if needs.all_deflines {
-                        subject.all_tabular_ids(false).map_err(refused)?
-                    } else {
-                        Default::default()
-                    };
-                    let failed = FailedValues::of_parsed(subject, ids.is_none(), all.failed);
-                    let [id, accession, accession_version] = ids.unwrap_or_default();
-                    return Ok(SubjectValues {
-                        id: Cow::Owned(id),
-                        accession: Cow::Owned(accession),
-                        accession_version: Cow::Owned(accession_version),
-                        gi: subject.tabular_gi(),
-                        all_ids: all.ids,
-                        titles: None,
+                    return SubjectValues::of_parsed(
+                        subject,
+                        spec,
                         length,
-                        taxonomy: Cow::Owned(TabularTaxonomy::default()),
-                        failed,
-                        index: s_idx,
-                    });
+                        Cow::Owned(TabularTaxonomy::default()),
+                        false,
+                        false,
+                        s_idx,
+                        refused,
+                    );
                 }
                 let found = ids.get(s_idx).map(Option::as_deref);
                 let id: &[u8] = found.map_or(&b"unknown"[..], Option::unwrap_or_default);
@@ -569,78 +716,32 @@ impl<'a> TabularSubjects<'a> {
                                 program,
                             )
                         };
-                        let ids = subject.tabular_ids(false).map_err(refused)?;
-                        let all = if needs.all_deflines {
-                            subject.all_tabular_ids(false).map_err(refused)?
-                        } else {
-                            Default::default()
-                        };
-                        let failed = FailedValues::of_parsed(subject, ids.is_none(), all.failed);
-                        let [id, accession, accession_version] = ids.unwrap_or_default();
-                        Ok(SubjectValues {
-                            id: Cow::Owned(id),
-                            accession: Cow::Owned(accession),
-                            accession_version: Cow::Owned(accession_version),
-                            gi: subject.tabular_gi(),
-                            all_ids: all.ids,
-                            titles: Some(
-                                subject
-                                    .deflines()
-                                    .iter()
-                                    .map(|defline| defline.title.as_deref().unwrap_or_default())
-                                    .collect(),
-                            ),
-                            length,
-                            taxonomy,
-                            failed,
-                            index: s_idx,
-                        })
+                        SubjectValues::of_parsed(
+                            subject, spec, length, taxonomy, false, true, s_idx, refused,
+                        )
                     }
-                    // A sequence without parsed Seq-ids: the first word of its stored title (an
-                    // empty one made from the name of its source; `gnl|BL_ORD_ID|n` replaced,
-                    // `CShowBlastDefline::GetSeqIdList`) for every id, or where it gives none the
-                    // general id (`TabularSubjectId`), and its one definition line's title.
+                    // A sequence without parsed Seq-ids (`SubjectValues::stored`).
                     None => {
-                        let found = ids.get(s_idx).map(Option::as_deref);
-                        let accession: &[u8] =
-                            found.map_or(&b"unknown"[..], Option::unwrap_or_default);
+                        let accession = match ids.get(s_idx) {
+                            Some(found) => found.as_deref().map(Cow::Borrowed),
+                            None => Some(Cow::Borrowed(&b"unknown"[..])),
+                        };
                         let title = records
                             .get(s_idx)
                             .map_or(&[][..], |record| record.title.as_slice());
-                        let oid = oids.oid(ordinals.get(s_idx).copied().unwrap_or_default());
-                        // No id: `GetSeqIdList` throws for the general id
-                        // (`TabularSubjectId::Unknown`), in `SetSubjectId` and `x_SetSubjectIds`.
-                        let failed = (found == Some(None)).then(|| {
-                            let [full, accession] =
-                                crate::algorithm::common::database::failed_general_lookup(oid);
-                            FailedValues {
-                                align_id: [Cow::Owned(full), Cow::Owned(accession)],
-                                subject_id: true,
-                                all_ids: true,
-                                thrown: None,
-                                empty_handle: false,
-                            }
-                        });
-                        Ok(SubjectValues {
-                            id: crate::algorithm::common::database::tabular_seqid(
-                                accession,
-                                oid,
-                                title,
-                                sources
-                                    .get(s_idx)
-                                    .unwrap_or(&crate::report::defline::UNNAMED_SOURCE),
-                                false,
-                            ),
-                            accession: Cow::Borrowed(accession),
-                            accession_version: Cow::Borrowed(accession),
-                            gi: 0,
-                            all_ids: Vec::new(),
-                            titles: Some(vec![title]),
+                        Ok(SubjectValues::stored(
+                            accession,
+                            title,
+                            sources
+                                .get(s_idx)
+                                .unwrap_or(&crate::report::defline::UNNAMED_SOURCE),
+                            oids.oid(ordinals.get(s_idx).copied().unwrap_or_default()),
+                            spec,
                             length,
                             taxonomy,
-                            failed,
-                            index: s_idx,
-                        })
+                            false,
+                            s_idx,
+                        ))
                     }
                 }
             }

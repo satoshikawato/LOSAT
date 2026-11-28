@@ -1,0 +1,12 @@
+# BLASTN 2.17.0+
+# Query: q1 query one
+# Database: in/db/s3
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+q1	s1	99.167	120	1	0	1	120	101	220	4.48e-61	217
+q1	s2	97.479	119	3	0	2	120	102	220	3.49e-57	204
+# BLASTN 2.17.0+
+# Query: q2 query two
+# Database: in/db/s3
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found

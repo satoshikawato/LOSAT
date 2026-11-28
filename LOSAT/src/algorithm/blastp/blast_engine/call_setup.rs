@@ -772,7 +772,7 @@ pub(super) fn db_extent<'a>(
     // NCBI's `min_subject_length` (c++/src/algo/blast/core/blast_setup.c:969-976, cited at its check in `run_call`),
     // which the hit-saving parameters read: the shortest length with the Gumbel block, else
     // (`-searchsp`, `OLD_FSC`) the statistics' average, which only psiblast's `-sum_stats true`
-    // reads (its cutoff, `sum_stats_hit_cutoff`; the cutoffs without the block read the search
+    // reads (its cutoff, `sum_stats_hit_cutoffs`; the cutoffs without the block read the search
     // space).
     let cutoff_subject_length = match (database, gapped_gumbel.is_some()) {
         // `setup_subject_length` without the block: the average as NCBI's `Int4` (0 where it is
@@ -851,14 +851,15 @@ fn check_setup_count(args: &ResolvedBlastpArgs, setup_numbers: (i64, i32)) -> Re
 /// `stats::setup::SUBJECT_LENGTH_TOO_SHORT` (`setup_subject_length` of the extent's setup
 /// numbers; rpsblast: every unit's, `RpsUnit::setup_subject_length`, one owner with rpstblastn's,
 /// the first unit's numbers being the set-up's), after LOSAT's refusal of its division by a count
-/// of 0 (`check_setup_count`): both only where a query of the call is valid (`contexts`), as NCBI
-/// meets them in a batch (`CLocalBlast::Run`, cited at `setup_count_refused`).
+/// of 0 (`check_setup_count`): both only where a query of the call is valid (`any_valid`), as NCBI
+/// meets them in a batch (`CLocalBlast::Run`, cited at `setup_count_refused`). The checks read
+/// the subjects alone.
 pub(super) fn setup_fails(
     args: &ResolvedBlastpArgs,
     extent: &BlastpDbExtent<'_>,
-    contexts: &[QueryContext],
+    any_valid: bool,
 ) -> Result<bool> {
-    if !contexts.iter().any(|ctx| ctx.is_valid) {
+    if !any_valid {
         return Ok(false);
     }
     let (setup_total, setup_count) = extent.setup_numbers;

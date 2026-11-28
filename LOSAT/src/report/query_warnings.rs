@@ -1670,11 +1670,55 @@ pub fn missing_length_error() -> String {
     setup_error("Cannot get sequence length")
 }
 
-/// The text of the set-up's error of one query whose one message is `message`: its severity
-/// (`Warning`) and a space after it (`TSearchMessages::ToString`, cited at
-/// `invalid_residues_error`).
-fn setup_error(message: &str) -> String {
-    format!("Warning: {message} ")
+/// The text of the set-up's error of one query whose one message is the warning `message`
+/// (`push_search_message`).
+pub(crate) fn setup_error(message: &str) -> String {
+    let mut text = Vec::with_capacity(message.len() + 10);
+    push_search_message(
+        &mut text,
+        crate::ncbi_exception::Severity::Warning,
+        message.as_bytes(),
+    );
+    String::from_utf8(text).expect("a text between two ASCII parts is UTF-8")
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1012-1025
+// NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:180-186
+/// Appends to `text` one message of NCBI's `TSearchMessages::ToString`, the text of the set-up
+/// error of a query batch: the message's severity (`CSearchMessage::GetMessage` puts it first), its
+/// text `message`, and a space after it. The one producer of that item (`setup_error`,
+/// `each_query_error`, the set-up errors of BLASTN's Karlin-Altschul blocks and of a matrix the
+/// score block cannot load).
+pub(crate) fn push_search_message(
+    text: &mut Vec<u8>,
+    severity: crate::ncbi_exception::Severity,
+    message: &[u8],
+) {
+    text.extend_from_slice(match severity {
+        crate::ncbi_exception::Severity::Warning => b"Warning: ",
+        crate::ncbi_exception::Severity::Error => b"Error: ",
+    });
+    text.extend_from_slice(message);
+    text.push(b' ');
+}
+
+/// NCBI's engine error (exit 3) of a query batch whose set-up stops with the warning `message`
+/// posted for each of its `queries` searched queries (`push_search_message`; `BLAST engine error:`,
+/// `blastinput::app::engine_error`): the masks of the batch that its every query's set-up makes
+/// again and fails the same way (the repeat search's error, `blastn::repeat_filter::batch_error`;
+/// WindowMasker's, `blastn::window_masker::batch_error`; a read past a repeated record's earlier
+/// record by DUST or WindowMasker, `blastinput::query_batch::QueryMasks`), or a batch whose queries
+/// all have no letters (`Sequence contains no data`).
+pub(crate) fn each_query_error(message: &[u8], queries: usize) -> crate::cli::NativeError {
+    let mut messages = Vec::with_capacity(queries * (message.len() + 10));
+    for _ in 0..queries {
+        push_search_message(
+            &mut messages,
+            crate::ncbi_exception::Severity::Warning,
+            message,
+        );
+    }
+    crate::blastinput::app::engine_native_error(&messages)
 }
 
 /// The list of residue positions of NCBI's `GetSequenceProtein` messages: the first, then up to

@@ -57,6 +57,8 @@ mod db_unreadable_files;
 mod default_bundle;
 #[path = "../entry_names.rs"]
 mod entry_names;
+#[path = "../exit_reports.rs"]
+mod exit_reports;
 #[path = "../export_search_strategy.rs"]
 mod export_search_strategy;
 #[path = "../function_size_limit.rs"]

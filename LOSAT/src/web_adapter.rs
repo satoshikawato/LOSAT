@@ -558,7 +558,8 @@ pub fn run_dustmasker(
 }
 
 /// Checks `words` (the command line after `dustmasker`) as the command line reads them, up to
-/// `dustmasker`'s opening of `-out` (`dustmasker::check_in`; line NP WW4c, WW4f). `Err` with what the command line
+/// where `dustmasker` reads its input past the start: `-out` opened, the writer made, `-in` opened
+/// (`dustmasker::check_in`; line NP WW4c, WW4f). `Err` with what the command line
 /// writes for the words that it refuses: its standard error, then the file of `-logfile`, without
 /// the last line end.
 pub fn check_dustmasker(words: &[&str]) -> Result<(), String> {

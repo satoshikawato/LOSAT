@@ -714,9 +714,9 @@ fn the_masking_tools_print_and_fail_as_the_command_line() {
 /// arguments with the command line's standard error (an unknown option; convert2blastmask's
 /// mandatory `-masking_algorithm`), and refuse an `-out` that is a file of the run's directory or
 /// the standard error and a `-logfile` that is the tool's input, as the run does once it reaches
-/// `-out` (an input it opens: review of WW4c, F1); nothing emitted. A missing input is the run's
-/// for dustmasker, which opens it after `-out`, and the check's for the others, which open it
-/// first (line NP WW4f: `the_check_ends_as_the_run_s_first_steps_end`).
+/// `-out` (an input it opens: review of WW4c, F1); nothing emitted. A missing input is the
+/// check's too, as the run meets it before it reads (line NP WW4f:
+/// `the_check_ends_as_the_run_s_first_steps_end`).
 #[test]
 fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
     emitted();
@@ -747,9 +747,8 @@ fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
             let words = [&[tool][..], passed, extra].concat();
             assert_eq!(validate(&words), Ok(()), "{tool} {passed:?}");
         }
-        assert_eq!(
-            validate(&[&[tool, "-in", "ww4c-missing.fa"][..], extra].concat()).is_ok(),
-            tool == "dustmasker",
+        assert!(
+            validate(&[&[tool, "-in", "ww4c-missing.fa"][..], extra].concat()).is_err(),
             "{tool}: a missing input"
         );
         for word in ["-h", "-help", "-xmlhelp", "-version"] {
@@ -922,16 +921,17 @@ fn the_check_refuses_out_only_where_the_run_reaches_it() {
     }
 }
 
-/// Line NP WW4f (2026-11-28): the check ends as the run's steps up to its opening of `-out` end,
-/// with the run's standard error (without its last line end) for the run's failure. An `-out` that
-/// does not open (in a folder that the run's directory does not have, also before `..`; through a
-/// file; a name ending in `/`; a folder; `.`) is NCBI's `File is not accessible` in the four tools
-/// that open it there (dustmasker first; segmasker, convert2blastmask and windowmasker's masking
-/// after their input), and an input that the last three open before `-out` and cannot open or read
-/// (missing, a name ending in `/`, a folder, the empty name) is NCBI's error of it. Where the run
-/// passes those steps the check passes: dustmasker's input, which it opens after `-out` and its
-/// writer, and `-mk_counts`, whose counts to an `-out` that does not open are lost without an error,
-/// as NCBI's `ofstream` loses them. Before WW4f the check passed every one of these argvs.
+/// Line NP WW4f (2026-11-28): the check ends as the run's steps before it reads a file past its
+/// start end, with the run's standard error (without its last line end) for the run's failure. An
+/// `-out` that does not open (in a folder that the run's directory does not have, also before `..`;
+/// through a file; a name ending in `/`; a folder; `.`) is NCBI's `File is not accessible` in the
+/// four tools that open it there (dustmasker first; segmasker, convert2blastmask and windowmasker's
+/// masking after their input); an input that they cannot open or read (missing, a name ending in
+/// `/`, a folder, the empty name) is NCBI's error of it (dustmasker's after `-out` and its writer);
+/// dustmasker's `-hard_masking` with `-outfmt interval` is its writer's exception. Where the run
+/// passes those steps the check passes: `-mk_counts`, whose counts to an `-out` that does not open
+/// are lost without an error, as NCBI's `ofstream` loses them. Before WW4f the check passed every
+/// one of these argvs.
 #[test]
 fn the_check_ends_as_the_run_s_first_steps_end() {
     emitted();
@@ -994,17 +994,34 @@ fn the_check_ends_as_the_run_s_first_steps_end() {
             let words = [&[*tool, "-in", name, "-out", "ww4f-m.out"][..], extra].concat();
             let (checked, status, diag, _) = ends(&words);
             assert_ne!(status, "{\"status\":0}", "{tool} -in {name:?}");
-            if *tool == "dustmasker" {
-                assert_eq!(checked, Ok(()), "{tool} -in {name:?}");
-            } else {
-                assert_eq!(
-                    checked,
-                    Err(diag.strip_suffix('\n').unwrap_or(&diag).to_string()),
-                    "{tool} -in {name:?}"
-                );
-            }
+            assert_eq!(
+                checked,
+                Err(diag.strip_suffix('\n').unwrap_or(&diag).to_string()),
+                "{tool} -in {name:?}"
+            );
         }
     }
+    let dust = &tools[0].1;
+    let words = [
+        "dustmasker",
+        "-in",
+        dust,
+        "-outfmt",
+        "interval",
+        "-hard_masking",
+        "-out",
+        "ww4f-m.out",
+    ];
+    let (checked, status, diag, _) = ends(&words);
+    assert_eq!(status, "{\"status\":3}", "{diag}");
+    assert!(
+        diag.contains("Hard masking can only be applied for fasta output"),
+        "{diag}"
+    );
+    assert_eq!(
+        checked,
+        Err(diag.strip_suffix('\n').unwrap_or(&diag).to_string())
+    );
     let fasta = &tools[3].1;
     let words = [
         "windowmasker",

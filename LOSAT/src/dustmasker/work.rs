@@ -181,21 +181,43 @@ pub(super) fn run(
     out: &mut OutputFile<'_>,
     diag: &mut Diag,
 ) -> Result<(), Failure> {
-    let mut writer = writer(options)?;
+    let (mut writer, source) = started(options, stdin)?;
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
-    let result = masks_of_input(options, stdin, &mut writer, out, diag);
+    let result = source.and_then(|source| masks_of_input(options, source, &mut writer, out, diag));
     finish(writer, out, diag, result, options.outfmt, super::PROGRAM)
+}
+
+/// The reader of `-in` (`reader`).
+type Source<'a> = Box<dyn SequenceSource + 'a>;
+
+// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:288-290
+/// The first steps of `run` after `-out` (`app::output`), which LOSAT Web's check takes too
+/// (`check`; line NP WW4f, 2026-11-28): the writer of `-outfmt` made (`writer`), then `-in`
+/// opened and its reader made (`reader`), whose failure the writer outlives (`run` gives it to
+/// `finish`, which writes the writer's object first).
+fn started<'a>(
+    options: &Options<'_>,
+    stdin: &'a mut Cin<'_>,
+) -> Result<(MaskWriter, Result<Source<'a>, Failure>), Failure> {
+    let writer = writer(options)?;
+    Ok((writer, reader(options, stdin)))
+}
+
+// No NCBI counterpart: LOSAT Web's check of the words (line NP WW4f, 2026-11-28).
+/// `run` up to where it reads the input past its start (`started`): the failure that `run` gets
+/// there. The writer's object, which `finish` writes to `-out` for that failure, is the run's.
+pub(super) fn check(options: &Options<'_>, stdin: &mut Cin<'_>) -> Result<(), Failure> {
+    started(options, stdin)?.1.map(drop)
 }
 
 fn masks_of_input(
     options: &Options<'_>,
-    stdin: &mut Cin<'_>,
+    mut source: Source<'_>,
     writer: &mut MaskWriter,
     out: &mut OutputFile<'_>,
     diag: &mut Diag,
 ) -> Result<(), Failure> {
-    let mut source = reader(options, stdin)?;
     let level = options.level as u32;
     let window = options.window as u32;
     let linker = options.linker as u32;

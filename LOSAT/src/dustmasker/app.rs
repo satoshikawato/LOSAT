@@ -10,7 +10,7 @@ use crate::ncbi_app::Diag;
 
 use super::work::{self, report, Options, Report};
 
-// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:134-156
+// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:275-276
 /// The first step of `run`: `-out` opened (`AsOutputFile`, before `-in`), with its error as `run`
 /// reports it (`Err` with the exit status): NCBI's `CArgException` of a name that does not open
 /// (`File is not accessible`), which the application reports as an argument error, and LOSAT Web's
@@ -31,19 +31,54 @@ fn output<'o>(
 }
 
 // No NCBI counterpart: LOSAT Web's check of the words (line NP WW4c; line NP WW4f, 2026-11-28).
-/// `run` up to where it reads a file: its first step (`output`), whose error is the check's, as the
-/// run reports it; 0 where `-out` opens, as `run` then goes on to `-in` and the writer. The check's
-/// files are LOSAT Web's check's (`web_adapter::check_tool_in`), which make no file.
+/// `run` up to where it reads the input past its start: its first steps, `-out` opened (`output`),
+/// then the writer made and `-in` opened and its reader made (`work::check`), whose failure is the
+/// check's, as `run` reports it; 0 where they pass, as `run` then goes on to read the input. The
+/// check's files are LOSAT Web's check's (`web_adapter::check_tool_in`), which make no file.
 pub(super) fn check(
     args: &Args,
-    _settings: &ApplicationSettings,
-    _stdin: &mut Cin<'_>,
+    settings: &ApplicationSettings,
+    stdin: &mut Cin<'_>,
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    match output(args, out, diag) {
-        Ok(_) => 0,
-        Err(status) => status,
+    let output = match output(args, out, diag) {
+        Ok(output) => output,
+        Err(status) => return status,
+    };
+    let checked = work::check(&options(args, settings), stdin);
+    drop(output);
+    match checked {
+        Ok(()) => 0,
+        Err(failure) => reported(failure, diag),
+    }
+}
+
+/// The options of `work::run` and `work::check` from `args` and `settings`.
+fn options<'a>(args: &'a Args, settings: &'a ApplicationSettings) -> Options<'a> {
+    let integer = |name| args.integer(name).expect("an integer key with a default");
+    Options {
+        input: args.os_value("in").expect("-in has a default"),
+        infmt: args.bytes("infmt").expect("-infmt has a default"),
+        outfmt: args.value("outfmt").expect("-outfmt has a default"),
+        window: integer("window"),
+        level: integer("level"),
+        linker: integer("linker"),
+        parse_seqids: args.flag("parse_seqids"),
+        hard_masking: args.flag("hard_masking"),
+        database: settings.database(),
+    }
+}
+
+/// The exit status of the run's `failure`, with what the application writes for it (`report`).
+fn reported(failure: work::Failure, diag: &mut Diag) -> i32 {
+    match report(failure) {
+        Report::Posts { lines, status } => {
+            diag.write_text(&lines);
+            status
+        }
+        Report::Refused(reason) => diag.refuse(&reason),
+        Report::Arg(error) => diag.run_arg_exception(error),
     }
 }
 
@@ -63,27 +98,8 @@ pub(super) fn run(
         Ok(output) => output,
         Err(status) => return status,
     };
-    let integer = |name| args.integer(name).expect("an integer key with a default");
-    let options = Options {
-        input: args.os_value("in").expect("-in has a default"),
-        infmt: args.bytes("infmt").expect("-infmt has a default"),
-        outfmt: args.value("outfmt").expect("-outfmt has a default"),
-        window: integer("window"),
-        level: integer("level"),
-        linker: integer("linker"),
-        parse_seqids: args.flag("parse_seqids"),
-        hard_masking: args.flag("hard_masking"),
-        database: settings.database(),
-    };
-    match work::run(&options, stdin, &mut output, diag) {
+    match work::run(&options(args, settings), stdin, &mut output, diag) {
         Ok(()) => 0,
-        Err(failure) => match report(failure) {
-            Report::Posts { lines, status } => {
-                diag.write_text(&lines);
-                status
-            }
-            Report::Refused(reason) => diag.refuse(&reason),
-            Report::Arg(error) => diag.run_arg_exception(error),
-        },
+        Err(failure) => reported(failure, diag),
     }
 }

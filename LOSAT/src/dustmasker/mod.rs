@@ -74,9 +74,9 @@ pub(crate) fn run_in(
     crate::ncbi_app::run_in(&TOOL, words, files, (input, out, err), app::run)
 }
 
-/// The checks of a dustmasker run up to its opening of `-out`, its first file (LOSAT Web's
-/// validation of the words, `web_adapter::check_dustmasker`; line NP WW4c, WW4f): `run_in` with the
-/// body `app::check`. The standard input is empty; the exit status, with the standard error on
+/// The checks of a dustmasker run up to where it reads its input past the start: `-out` opened,
+/// the writer made, `-in` opened and its reader made (LOSAT Web's validation of the words,
+/// `web_adapter::check_dustmasker`; line NP WW4c, WW4f): `run_in` with the body `app::check`. The standard input is empty; the exit status, with the standard error on
 /// `err` and the file of `-logfile` to `files`.
 pub(crate) fn check_in(
     words: &[OsString],

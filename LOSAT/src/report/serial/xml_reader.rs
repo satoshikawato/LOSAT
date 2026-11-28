@@ -949,10 +949,10 @@ impl<S: AsnSource> XmlReader<S> {
     }
 
     /// `ReadCDSection` of `str`: a CDATA section where character data meets `<` (`cd_section`),
-    /// or `false` there (the end of the character data: the test is made where the data ends,
-    /// the section's reading is not).
+    /// or `false` there. The test is made where the character data ends (every string ends
+    /// here, an empty one at once), the section's reading is not.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1271-1295
-    #[inline]
+    #[inline(always)]
     fn read_cd_section(&mut self, out: &mut Vec<u8>) -> Result<bool> {
         if self.peek(0)? != b'<' || self.peek(1)? != b'!' {
             return Ok(false);

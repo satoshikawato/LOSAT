@@ -1211,24 +1211,26 @@ pub(super) fn pairwise_hits(
                     if html_masks.is_some() {
                         row_masks.clear();
                     }
-                    let stored = &a.subject_stored_gaps;
-                    let subject_row = pair.then(|| crate::report::query_anchored::LocRow {
-                        letters: a.sseq.as_bytes(),
-                        // A stored `-` is a residue of the subject (in order).
-                        residue: |column: usize| {
-                            a.sseq.as_bytes()[column] != b'-'
-                                || stored.binary_search(&(column as u32)).is_ok()
+                    let (sseq, stored) = (a.sseq.as_bytes(), &a.subject_stored_gaps);
+                    let subject_row = (pair && !sseq.is_empty()).then_some(
+                        crate::report::query_anchored::LocRow {
+                            letters: sseq,
+                            // A stored `-` is a residue of the subject (in order).
+                            residue: move |column: usize| {
+                                sseq[column] != b'-'
+                                    || stored.binary_search(&(column as u32)).is_ok()
+                            },
+                            seq_range: (hit.s_start as u32 - 1, hit.s_end as u32 - 1),
+                            plus: true,
+                            width: 1,
                         },
-                        seq_range: (hit.s_start as u32 - 1, hit.s_end as u32 - 1),
-                        plus: true,
-                        width: 1,
-                    });
+                    );
                     let query_seq = query_row_masks(
                         a.qseq,
                         (a.qstart, a.qend),
                         a.frame,
                         &query_masks,
-                        subject_row.filter(|row| !row.letters.is_empty()),
+                        subject_row,
                         &mut row_masks,
                     );
                     if let Some(table) = html_masks.as_deref_mut() {

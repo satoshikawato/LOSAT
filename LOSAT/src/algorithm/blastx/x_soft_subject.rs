@@ -182,7 +182,7 @@ pub(super) fn x_set_subject_row_masks(
             .filter(|row| !row.is_empty() && pairs.matches(hit.hit.q_idx, hit.hit.s_idx))
             .map(|row| LocRow {
                 letters: row.as_bytes(),
-                residue: |column: usize| row.as_bytes()[column] != b'-',
+                residue: move |column: usize| row.as_bytes()[column] != b'-',
                 seq_range: (
                     hit.hit.q_start.min(hit.hit.q_end) as u32 - 1,
                     hit.hit.q_start.max(hit.hit.q_end) as u32 - 1,

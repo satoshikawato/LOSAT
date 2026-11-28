@@ -1115,7 +1115,7 @@ impl<'a> PairwiseRows<'a> {
         let subject = self
             .pairs
             .matches(q_idx as u32, s_idx as u32)
-            .then(|| SubjectRow {
+            .then_some(SubjectRow {
                 letters: &subject_row,
                 low: hit.s_start.min(hit.s_end) as i32 - 1,
                 high: hit.s_start.max(hit.s_end) as i32 - 1,

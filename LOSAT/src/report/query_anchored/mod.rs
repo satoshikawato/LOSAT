@@ -1290,22 +1290,18 @@ fn fill_loc_list(
     masks: &[Mask],
 ) -> Vec<(i64, i64, i8)> {
     let mut list = Vec::new();
-    if masks.is_empty() {
-        return list;
-    }
-    // Whether each row's id matches the mask's, asked once for each sequence of the rows.
+    // Whether the id of another sequence's rows matches the mask's, asked once for each sequence
+    // whose rows a mask meets before its own.
     let mut asked: std::collections::HashMap<SeqKey, bool> = std::collections::HashMap::new();
-    let own: Vec<bool> = (0..map.num_rows())
-        .map(|row| {
-            let row_key = map.seq_key(row);
-            *asked
+    let mut matches = |row_key: SeqKey| {
+        row_key == key
+            || *asked
                 .entry(row_key)
                 .or_insert_with(|| rows_match(key, row_key))
-        })
-        .collect();
+    };
     for &(from, to, frame) in masks {
         for row in 0..map.num_rows() {
-            if own[row] && map.seq_start(row) <= to && from <= map.seq_stop(row) {
+            if map.seq_start(row) <= to && from <= map.seq_stop(row) && matches(map.seq_key(row)) {
                 let (first, last) = if map.is_positive_strand(row) {
                     (from, to)
                 } else {

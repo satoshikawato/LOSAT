@@ -1586,22 +1586,25 @@ fn pairwise_hits(
                         }
                         // The subject's row in its record's nucleotides (`record_coordinates`).
                         let s_shift = ranges.subjects.offset(oid) as u32;
-                        let subject_row = pair.then(|| crate::report::query_anchored::LocRow {
-                            letters: sseq.as_bytes(),
-                            residue: |column: usize| sseq.as_bytes()[column] != b'-',
-                            seq_range: (
-                                (s_start.min(s_end) - 1) as u32 + s_shift,
-                                (s_start.max(s_end) - 1) as u32 + s_shift,
-                            ),
-                            plus: frame > 0,
-                            width: 3,
-                        });
+                        let sbjct_letters = sseq.as_bytes();
+                        let subject_row = (pair && !sbjct_letters.is_empty()).then_some(
+                            crate::report::query_anchored::LocRow {
+                                letters: sbjct_letters,
+                                residue: move |column: usize| sbjct_letters[column] != b'-',
+                                seq_range: (
+                                    (s_start.min(s_end) - 1) as u32 + s_shift,
+                                    (s_start.max(s_end) - 1) as u32 + s_shift,
+                                ),
+                                plus: frame > 0,
+                                width: 3,
+                            },
+                        );
                         let qseq = query_row_masks(
                             qseq,
                             &report_masks,
                             (hsp.q_start, hsp.q_end),
                             ranges.queries.offset(q_idx) as u32,
-                            subject_row.filter(|row| !row.letters.is_empty()),
+                            subject_row,
                             &mut row_masks,
                         )?;
                         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154

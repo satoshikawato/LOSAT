@@ -4282,12 +4282,63 @@ fn held_rows_join_the_row_of_their_holders_own_bioseq() {
     assert_eq!(bulk.anchored_row(2), Some(Some(1)));
     assert_eq!(bulk.anchored_row(3), Some(Some(3)));
     assert_eq!(bulk.anchored_row(4), Some(Some(4)));
-    // Two own loads of one handle (copies of one record) with a held subject: not known.
+    // Two own loads of one handle (copies of one record) with a held subject: the first's row.
     let rows = [
         (5, Some(20), own(0, 0)),
         (6, Some(20), own(0, 0)),
         (7, Some(20), held(0)),
     ];
     bulk.note_rows(rows.into_iter(), true);
-    assert_eq!(bulk.anchored_row(7), Some(None));
+    assert_eq!(bulk.anchored_row(6), Some(Some(5)));
+    assert_eq!(bulk.anchored_row(7), Some(Some(5)));
+    assert_eq!(bulk.anchored_row(5), None);
+}
+
+// Line DBID hr-2b (hr2b3): copies of one record in two databases (one Seq-align id handle) load
+// one Bioseq, whose rows NCBI's `CAlnMix` merges whatever hit sorts between them (probe
+// `R/ad41/hr2b3/bin/copyprobe.py`, cases C1 and B1b): the later copies join the first's row, one
+// by one whatever line LOSAT knows, in the prefetch by handle; own loads of two handles do not.
+#[test]
+fn copies_of_one_record_share_the_first_copys_row() {
+    let a = DbSequence::of_unrestricted(1);
+    let own = |line| AnchoredRow::Own {
+        sequence: Some(a),
+        line,
+        target: 0,
+    };
+    let mut loads = HitLoads::default();
+    loads.note_rows(
+        [
+            (3, Some(40), own(0)),
+            (1, Some(40), own(0)),
+            (2, None, own(1)),
+        ]
+        .into_iter(),
+        false,
+    );
+    assert_eq!(loads.anchored_row(3), Some(Some(1)));
+    assert_eq!(loads.anchored_row(1), None);
+    assert_eq!(loads.anchored_row(2), None);
+    loads.note_rows(
+        [(4, Some(41), own(NO_LINE)), (5, Some(41), own(NO_LINE))].into_iter(),
+        false,
+    );
+    assert_eq!(loads.anchored_row(5), Some(Some(4)));
+    loads.note_rows(
+        [(6, Some(42), own(0)), (7, Some(43), own(0))].into_iter(),
+        false,
+    );
+    assert_eq!(loads.anchored_row(7), None);
+    let mut bulk = HitLoads::default();
+    bulk.note_rows(
+        [
+            (8, Some(44), own(NO_LINE)),
+            (9, Some(44), own(NO_LINE)),
+            (10, Some(45), own(0)),
+        ]
+        .into_iter(),
+        true,
+    );
+    assert_eq!(bulk.anchored_row(9), Some(Some(8)));
+    assert_eq!(bulk.anchored_row(10), None);
 }

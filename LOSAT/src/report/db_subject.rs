@@ -6170,9 +6170,9 @@ pub struct HitLoads {
     /// loads give another sequence ([`HitLoads::described_line`], `ScopeWalk::display_held`), by
     /// key: `None` where LOSAT does not know it, or two descriptions give other lines.
     described: std::collections::HashMap<usize, Option<u32>>,
-    /// The subject whose row of outfmt 1 to 4 a subject's HSPs join where its loads give another
-    /// sequence's Bioseq that another row has ([`HitLoads::anchored_row`]), by key: `None` where
-    /// LOSAT does not merge it as NCBI does.
+    /// The subject whose row of outfmt 1 to 4 a subject's HSPs join where its loads give a Bioseq
+    /// that another row has (another sequence's, or a copy's of its record), by key
+    /// ([`HitLoads::anchored_row`]): `None` where LOSAT does not merge it as NCBI does.
     rows: std::collections::HashMap<usize, Option<usize>>,
     /// Whether the run's formats write the record of the sequence that a load gives for a subject
     /// (`ShownInstead::written`, the record writers of line DBID hr-2a: the tables of outfmt 6,
@@ -7167,11 +7167,12 @@ impl HitLoads {
     /// the subjects whose loads give one Bioseq share its row. One by one, a Bioseq is one
     /// sequence by one line of the scope (step 2 finds it before step 3 could load another blob);
     /// the prefetch skips step 2, so each Seq-align id handle loads a blob of its own, and one
-    /// handle is one Bioseq. Where a subject's load gives another sequence's Bioseq, it joins the
-    /// row of the one subject that loads that Bioseq as its own record (by its record's line),
-    /// or, where none does, of the first of those whose Seq-align id is its handle; where neither
-    /// is so (two own loads, one by another line, two handles, a sequence whose line LOSAT does
-    /// not know), its row is refused ([`HitLoads::anchored_row`]).
+    /// handle is one Bioseq. The copies of one record that load one Bioseq as their own share the
+    /// first's row ([`HitLoads::bioseq_row`]). Where a subject's load gives another sequence's
+    /// Bioseq, it joins the row of the first subject that loads that Bioseq as its own record (by
+    /// its record's line), or, where none does, of the first of those whose Seq-align id is its
+    /// handle; where neither is so (own loads of two handles, one by another line, two handles, a
+    /// sequence whose line LOSAT does not know), its row is refused ([`HitLoads::anchored_row`]).
     fn note_rows(
         &mut self,
         aligned: impl Iterator<Item = (usize, Option<HandleKey>, AnchoredRow)>,
@@ -7219,42 +7220,67 @@ impl HitLoads {
             .map(|(&(sequence, _, _), _)| sequence)
             .collect();
         for ((sequence, _, _), mut rows) in bioseqs {
-            if !rows
+            let held = rows
                 .iter()
-                .any(|(_, _, row)| matches!(row, AnchoredRow::Shown(_)))
-            {
+                .any(|(_, _, row)| matches!(row, AnchoredRow::Shown(_)));
+            if !held && rows.len() < 2 {
                 continue;
             }
             rows.sort_unstable_by_key(|&(key, ..)| key);
-            let own: Vec<(usize, bool)> = rows
-                .iter()
-                .filter_map(|&(key, _, row)| match row {
-                    AnchoredRow::Own { line, target, .. } => Some((key, bulk || line == target)),
-                    AnchoredRow::Shown(_) => None,
-                })
-                .collect();
-            let joined = match own.as_slice() {
-                _ if !bulk && (unknown_own || unsure.contains(&sequence)) => None,
-                &[(own, true)] => Some(own),
-                [] if rows
-                    .iter()
-                    .all(|&(_, handle, _)| handle.is_some() && handle == rows[0].1) =>
-                {
-                    Some(rows[0].0)
-                }
-                _ => None,
-            };
+            let unknown = held && !bulk && (unknown_own || unsure.contains(&sequence));
+            let joined = Self::bioseq_row(&rows, bulk, unknown);
             // The row's own subject keeps its row; one by one, a held subject that no other
             // subject of the section joins is noted only where its holder's own Bioseq is
             // another row of it (`anchored_row` of a subject whose row is not in a section
-            // is its own there, `pairwise::section_hsps`).
+            // is its own there, `pairwise::section_hsps`). The copies of the row's own
+            // subject join it where it is known.
             let noted = bulk || joined.is_none() || rows.len() > 1 || owned.contains(&sequence);
             for (key, _, row) in rows {
-                if matches!(row, AnchoredRow::Shown(_)) && noted {
-                    self.note_row(key, joined);
+                match row {
+                    AnchoredRow::Shown(_) if noted => self.note_row(key, joined),
+                    AnchoredRow::Own { .. } if joined.is_some_and(|joined| joined != key) => {
+                        self.note_row(key, joined)
+                    }
+                    _ => {}
                 }
             }
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:213-260
+    /// The subject whose row the subjects `rows` (sorted by key) of one Bioseq share
+    /// ([`HitLoads::note_rows`]): the first own load of it, where its own loads have one Seq-align
+    /// id handle (copies of one record: the cache, or the bulk, answers that handle once, so
+    /// NCBI's `CAlnMix` takes their Seq-aligns for one sequence's, whatever comes between them)
+    /// and, with a held subject, each is by its record's line (or `bulk`); where none loads it as
+    /// its own record, the first of one handle. `None` where LOSAT does not know that row
+    /// (`unknown`: one by one, an own load of the query whose Bioseq LOSAT does not know may be
+    /// this one).
+    fn bioseq_row(
+        rows: &[(usize, Option<HandleKey>, AnchoredRow)],
+        bulk: bool,
+        unknown: bool,
+    ) -> Option<usize> {
+        if unknown {
+            return None;
+        }
+        let own: Vec<(usize, Option<HandleKey>, bool)> = rows
+            .iter()
+            .filter_map(|&(key, handle, row)| match row {
+                AnchoredRow::Own { line, target, .. } => {
+                    Some((key, handle, bulk || line == target))
+                }
+                AnchoredRow::Shown(_) => None,
+            })
+            .collect();
+        let Some(&(first, handle, _)) = own.first() else {
+            let handle = rows[0].1;
+            return (handle.is_some() && rows.iter().all(|row| row.1 == handle))
+                .then_some(rows[0].0);
+        };
+        let one_handle = own.len() == 1 || (handle.is_some() && own.iter().all(|o| o.1 == handle));
+        let by_line = own.len() == rows.len() || own.iter().all(|&(_, _, by_line)| by_line);
+        (one_handle && by_line).then_some(first)
     }
 
     /// One query's answer `row` for the subject `key` ([`HitLoads::anchored_row`]): where two

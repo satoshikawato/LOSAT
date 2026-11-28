@@ -3654,7 +3654,8 @@ struct BlastpSections<'a> {
 /// get (`parsed`, by subject index: `ParsedSubject::scope_finds_none`) is left out, and counted
 /// among the first `num_alignments`. A subject whose load gives the Bioseq that another subject
 /// loads as its own (`loads`, `HitLoads::anchored_row`) puts its HSPs in that subject's row
-/// (`CAlnMix` tells its sequences apart by Bioseq handle).
+/// (`CAlnMix` tells its sequences apart by Bioseq handle), or in the row of the hit that shows
+/// that subject as a copy of its record (`anchored_section_row`).
 fn section_hsps(
     mut hsps: super::query_anchored::Hsps,
     num_alignments: usize,
@@ -3684,7 +3685,7 @@ fn section_hsps(
         let row = loads
             .and_then(|loads| loads.anchored_row(s_idx as usize).flatten())
             .and_then(|row| u32::try_from(row).ok())
-            .filter(|row| aligned.contains(row))
+            .and_then(|row| anchored_section_row(group, aligned, row))
             .unwrap_or(s_idx);
         for hit in &group.subject_hits[&s_idx] {
             let strands = segments_of(hit, &mut segments);
@@ -3692,6 +3693,25 @@ fn section_hsps(
         }
     }
     hsps
+}
+
+/// The subject of a query-anchored section (`aligned`, the hits that it shows) whose row holds the
+/// Bioseq of the subject `row` (`HitLoads::anchored_row`): `row` where it is one of them, else the
+/// one whose hit shows `row` as a copy of its record (`QueryGroup::new`'s `joins`: one Bioseq);
+/// `None` where the section does not show `row`.
+fn anchored_section_row(
+    group: &super::x_pairwise_par::QueryGroup<'_>,
+    aligned: &[u32],
+    row: u32,
+) -> Option<u32> {
+    if aligned.contains(&row) {
+        return Some(row);
+    }
+    aligned.iter().copied().find(|shown| {
+        group.subject_hits[shown]
+            .iter()
+            .any(|hit| hit.hit.s_idx == row)
+    })
 }
 
 /// `section_hsps` of a BLASTP section (`seqalign::protein_row_segments`: no strands).

@@ -620,10 +620,12 @@ pub(crate) trait ResidueStore {
     }
     /// No residues (`ReadOneSeq`'s reset of `m_SeqData`); what was allocated is kept.
     fn clear(&mut self);
-    /// Stores the residues `run` of a data line, each a byte for which the character switch
-    /// `actions` gives a residue (`first`: the residue of `run[0]`), as NCBI's switch stores each
-    /// (`ParseDataLine`, cited at `RecordState::parse_data_line`).
-    fn push_run(&mut self, first: u8, run: &[u8], actions: &[u8; 256]);
+    /// Stores `residue`, the residue that the character switch gives a byte of a data line
+    /// (`ParseDataLine`, cited at `RecordState::parse_data_line`), alone between other bytes.
+    fn push_one(&mut self, residue: u8);
+    /// Stores the residues `run` of a data line (two or more), each a byte for which the
+    /// character switch `actions` gives a residue, as NCBI's switch stores each.
+    fn push_run(&mut self, run: &[u8], actions: &[u8; 256]);
     /// Keeps the last `kept` residues (the residues since the record's count last wrapped
     /// NCBI's `TSeqPos`, `RecordState::wrap_seq_data`).
     fn keep_last(&mut self, kept: usize);
@@ -670,13 +672,16 @@ impl ResidueStore for Letters {
         self.0.clear();
     }
 
+    #[inline(always)]
+    fn push_one(&mut self, residue: u8) {
+        self.0.push(residue);
+    }
+
     /// The switch stores a residue in upper case (`tests::residue_tests_match_the_tables`); the
     /// residues of a run are stored at once (LOSAT's speed).
     #[inline(always)]
-    fn push_run(&mut self, first: u8, run: &[u8], actions: &[u8; 256]) {
-        if run.len() == 1 {
-            self.0.push(first);
-        } else if run.len() < UPPER_BLOCK {
+    fn push_run(&mut self, run: &[u8], actions: &[u8; 256]) {
+        if run.len() < UPPER_BLOCK {
             self.0
                 .extend(run.iter().map(|&byte| actions[byte as usize]));
         } else {
@@ -738,6 +743,9 @@ pub(crate) struct Ncbi4naResidues {
     staging: Box<[u8; STAGING]>,
     /// The letters at the start of `staging`, after those of `codes`.
     staged: usize,
+    /// The letters of `codes` (`Ncbi4naBuilder::letters`), so that the count of residues, read for
+    /// every data line, is a sum of two fields.
+    converted: usize,
 }
 
 impl ResidueStore for Ncbi4naResidues {
@@ -748,45 +756,61 @@ impl ResidueStore for Ncbi4naResidues {
             codes: Ncbi4naBuilder::default(),
             staging: Box::new([0; STAGING]),
             staged: 0,
+            converted: 0,
         }
     }
 
     #[inline(always)]
     fn len(&self) -> usize {
-        self.codes.letters() + self.staged
+        debug_assert_eq!(self.converted, self.codes.letters());
+        self.converted + self.staged
     }
 
     fn clear(&mut self) {
         self.codes.clear();
         self.staged = 0;
+        self.converted = 0;
+    }
+
+    /// The residue is copied to the buffer (in upper case; the code folds the case); with the
+    /// buffer full it is [`Self::push_past_staging`]'s.
+    #[inline(always)]
+    fn push_one(&mut self, residue: u8) {
+        match self.staging.get_mut(self.staged) {
+            Some(slot) => {
+                *slot = residue;
+                self.staged += 1;
+            }
+            None => self.push_past_staging(&[residue]),
+        }
     }
 
     /// The letters of `run` (residues in either case: the code folds the case, as the switch's
     /// upper case does) are copied to the buffer; a run that does not fit is
     /// [`Self::push_past_staging`]'s.
     #[inline(always)]
-    fn push_run(&mut self, _first: u8, run: &[u8], _actions: &[u8; 256]) {
+    fn push_run(&mut self, run: &[u8], _actions: &[u8; 256]) {
         let staged = self.staged;
-        if run.len() > STAGING - staged {
-            self.push_past_staging(run);
-        } else if let [letter] = run {
-            self.staging[staged] = *letter;
-            self.staged = staged + 1;
-        } else {
-            self.staging[staged..staged + run.len()].copy_from_slice(run);
-            self.staged = staged + run.len();
+        match self.staging.get_mut(staged..staged + run.len()) {
+            Some(room) => {
+                room.copy_from_slice(run);
+                self.staged = staged + run.len();
+            }
+            None => self.push_past_staging(run),
         }
     }
 
     #[cold]
     fn keep_last(&mut self, kept: usize) {
         self.finish();
-        self.codes.drop_front(self.codes.letters() - kept);
+        self.codes.drop_front(self.converted - kept);
+        self.converted = kept;
     }
 
     fn finish(&mut self) {
         if self.staged > 0 {
             self.codes.push_letters(&self.staging[..self.staged]);
+            self.converted += self.staged;
             self.staged = 0;
         }
     }
@@ -804,12 +828,13 @@ impl ResidueStore for Ncbi4naResidues {
                 self.codes.bytes(),
                 self.codes.letters(),
             )),
-            Coding::Ncbi4na => SeqData::Ncbi4na(std::mem::take(&mut self.codes).into_bytes()),
+            Coding::Ncbi4na => SeqData::Ncbi4na(self.take_delta().into_bytes()),
             Coding::Ncbieaa => unreachable!("makeblastdb's nucleotide reader packs no NCBIeaa"),
         }
     }
 
     fn take_delta(&mut self) -> Ncbi4naBuilder {
+        self.converted = 0;
         std::mem::take(&mut self.codes)
     }
 
@@ -837,6 +862,7 @@ impl Ncbi4naResidues {
         self.codes.push_letters(&self.staging[..]);
         let (whole, rest) = run.split_at(run.len() - run.len() % STAGING);
         self.codes.push_letters(whole);
+        self.converted += STAGING + whole.len();
         self.staging[..rest.len()].copy_from_slice(rest);
         self.staged = rest.len();
     }
@@ -1452,7 +1478,11 @@ impl<S: ResidueStore> RecordState<S> {
                     if MASKS {
                         self.mask_run(&s[pos..pos + run]);
                     }
-                    self.residues.push_run(residue, &s[pos..pos + run], actions);
+                    if run == 1 {
+                        self.residues.push_one(residue);
+                    } else {
+                        self.residues.push_run(&s[pos..pos + run], actions);
+                    }
                     pos += run - 1;
                 }
             }

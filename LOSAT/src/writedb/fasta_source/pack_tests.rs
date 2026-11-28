@@ -231,7 +231,7 @@ fn the_codes_of_common_letters_are_the_table() {
 const NUCLEOTIDES: &[u8] = b"ABCDGHKMNRSTUVWYabcdghkmnrstuvwy";
 
 /// The NCBI4na bytes of `push_letters` (blocks by comparisons where every letter is `A`, `C`,
-/// `G`, `T`, `U` or `N`, else by the table; the last letters in a block filled up) are those of
+/// `G`, `T`, `U` or `N`, else by the table; the letters after the last block by the table) are those of
 /// the table one letter at a time, after an even and after an odd count of letters: every residue
 /// letter of the reader (and three other bytes) at every place of the first two blocks (and the
 /// letter after them), in lengths that end at that letter, at the end of the second block and
@@ -393,18 +393,19 @@ fn segments_of_codes_are_those_of_letters() {
 
 /// The NCBI2na bytes of a raw sequence's codes are those of its letters
 /// (`iupacna_to_ncbi2na`), for every length up to 300 and random bases in either case; and each
-/// code of one base gives its NCBI2na code at each of the four places of a pair of bytes.
+/// code of one base gives its NCBI2na code at each of the sixteen places of eight bytes.
 #[test]
 fn ncbi2na_of_codes_is_ncbi2na_of_letters() {
     for (letter, code) in [(b'A', 0u8), (b'C', 1), (b'G', 2), (b'T', 3)] {
         let nibble = ncbi4na_code(letter);
-        for (place, pair) in [[nibble << 4, 0], [nibble, 0], [0, nibble << 4], [0, nibble]]
-            .into_iter()
-            .enumerate()
-        {
+        for place in 0..16 {
+            let mut eight = [0u8; 8];
+            eight[place / 2] = if place % 2 == 0 { nibble << 4 } else { nibble };
+            let mut four = [0u8; 4];
+            four[place / 4] = code << (6 - 2 * (place % 4));
             assert_eq!(
-                ncbi2na_of_pair(pair),
-                code << (6 - 2 * place),
+                ncbi2na_of_eight(u64::from_le_bytes(eight)).to_le_bytes(),
+                four,
                 "{letter} {place}"
             );
         }

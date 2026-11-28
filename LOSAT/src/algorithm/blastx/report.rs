@@ -1101,7 +1101,6 @@ fn write_pairwise(
             sum_stats: options.sum_stats,
             num_descriptions: options.num_descriptions as usize,
             num_alignments: options.num_alignments as usize,
-            app: options.app.name(),
         },
         database,
         records_parsed,
@@ -1119,7 +1118,7 @@ fn write_pairwise(
             ShownSubjects::Database { reported, .. } => reported.loads(),
         },
     )
-    .map_err(crate::report::pairwise::empty_rows_stop)?;
+    .map_err(|error| crate::report::pairwise::empty_rows_stop(error, options.app.name()))?;
     Ok(())
 }
 
@@ -1506,7 +1505,6 @@ pub(crate) fn write_epilog(
                 sum_stats: options.sum_stats,
                 num_descriptions: options.num_descriptions as usize,
                 num_alignments: options.num_alignments as usize,
-                app: options.app.name(),
             },
             shown.pairwise_database(),
             options.html.is_some(),

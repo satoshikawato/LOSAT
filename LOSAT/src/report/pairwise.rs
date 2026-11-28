@@ -522,9 +522,8 @@ pub(crate) enum EmptyRowsStop {
     StdSegLengths,
     /// Not an exception: the merge of a query-anchored section (outfmt 1 to 4) frees a segment
     /// that it still reads (`blastx_anchored_stop`), which LOSAT refuses before the call's first
-    /// byte (`unported_anchored_free`) in the name of the running application it holds
-    /// (`BlastxPairwiseOptions::app`).
-    MergeFreesSegment(&'static str),
+    /// byte (`unported_anchored_free`).
+    MergeFreesSegment,
 }
 
 /// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0 or at a
@@ -535,8 +534,9 @@ pub(crate) enum EmptyRowsStop {
 /// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
 /// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
 /// `x_pairwise_par::alignment_end`); a write error stays. The one map of the writers' stops: BLASTX's
-/// and TBLASTN's outfmt 0 to 4 map their writer's errors with it.
-pub(crate) fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
+/// and TBLASTN's outfmt 0 to 4 map their writer's errors with it, `app` the running application's
+/// name in LOSAT's refusal (`Program::name`: TBLASTX where it runs a BLASTX strategy).
+pub(crate) fn empty_rows_stop(error: std::io::Error, app: &str) -> anyhow::Error {
     match error
         .get_ref()
         .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
@@ -549,7 +549,7 @@ pub(crate) fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
             &super::serial::seqalign::std_seg_lengths_not_accurate(),
         )
         .into(),
-        Some(EmptyRowsStop::MergeFreesSegment(app)) => {
+        Some(EmptyRowsStop::MergeFreesSegment) => {
             EmptyRowsRefusal(unported_anchored_free(app)).into()
         }
         None => crate::cli::NativeError::of_writer(error),
@@ -3853,7 +3853,7 @@ fn blastx_anchored_stop(
             group,
             &[],
         ))?;
-    Ok(frees.then_some(EmptyRowsStop::MergeFreesSegment(options.app)))
+    Ok(frees.then_some(EmptyRowsStop::MergeFreesSegment))
 }
 
 /// Whether NCBI BLAST+ aborts on the query-anchored section (`view`) of query `q_idx` of a
@@ -6568,9 +6568,6 @@ pub struct BlastxPairwiseOptions {
     pub sum_stats: bool,
     pub num_descriptions: usize,
     pub num_alignments: usize,
-    /// The running application's name in LOSAT's refusals (`Program::name`: BLASTX, or TBLASTX
-    /// where it runs a BLASTX strategy; `EmptyRowsStop::MergeFreesSegment`).
-    pub app: &'static str,
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1490-1519
 /// The subjects of a BLASTX `-db` report (`write_blastx_pairwise_report`): the database, and by
@@ -6652,8 +6649,8 @@ pub fn write_blastx_pairwise_report<W: crate::report::ostream::ReportWrite>(
                 continue;
             };
             match blastx_anchored_stop(config, options, &group, database.is_none())? {
-                Some(stop @ EmptyRowsStop::MergeFreesSegment(_)) => {
-                    return Err(io::Error::other(stop))
+                Some(EmptyRowsStop::MergeFreesSegment) => {
+                    return Err(io::Error::other(EmptyRowsStop::MergeFreesSegment))
                 }
                 Some(_) => break,
                 None => {}

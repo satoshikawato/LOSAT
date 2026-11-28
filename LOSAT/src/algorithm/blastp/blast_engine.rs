@@ -10532,8 +10532,9 @@ fn run_call(
     // NCBI frees each table before it builds the next. Where a searched batch of the call is split,
     // its chunks build their own tables now (`search_split_query_batches`) and the call's scan is
     // over, so the call's table goes first (it holds no word of that batch, `CallTableWords`).
-    // EXPERIMENT (LOSAT_X_BPLKPAHEAD): the call's last table is then its last chunk's, whose search
-    // starts the next block's build and gives it its table's vectors (`XAheadBlock::x_last_table`).
+    // EXPERIMENT (LOSAT_X_BPLKPAHEAD): blastp-fast's last table of the call is then its last chunk's,
+    // whose search starts the next block's build and gives it its table's vectors
+    // (`XAheadBlock::x_last_table`).
     let lookup = (!CallTableWords::of(&args, &query_batches, &query_lengths, false)
         .is_ok_and(|words| words.splits()))
     .then_some(lookup);

@@ -592,11 +592,12 @@ pub(super) fn call_lookup(
     };
     // EXPERIMENT (LOSAT_X_BPLKPAHEAD): this block's table is ready; the build of the next block's
     // starts now, on the pool, beside this block's search (`blast_engine/x_lookup_ahead.rs`). Where a
-    // searched batch is split, the block's last table is its last chunk's, which starts it
+    // searched batch is split, blastp-fast's starts at the block's last table, its last chunk's
     // (`XAheadBlock::x_last_table`).
-    if !CallTableWords::of(args, &query_batches, query_lengths, query_chunk)
-        .is_ok_and(|words| words.splits())
-    {
+    if x_ahead.x_starts_at_own_table(
+        CallTableWords::of(args, &query_batches, query_lengths, query_chunk)
+            .is_ok_and(|words| words.splits()),
+    ) {
         x_ahead.lookup_ready(&lookup);
     }
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);

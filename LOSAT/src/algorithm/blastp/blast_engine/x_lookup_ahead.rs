@@ -20,7 +20,7 @@
 //! Item SC2d: blastp-fast's flat table is built ahead in two parts, so that one table is alive at a
 //! time: part 1 (`x_flat_ahead_appends`: the frames, the lookup query, NCBI's tables, the build's
 //! appends pass with the contexts' Karlin blocks as its extra tasks, `tblastx/lookup/x_clut_par.rs`)
-//! starts when block i's table is ready, beside block i's scan; part 2 (`x_flat_ahead_table`: the
+//! starts when block i's last table is ready, beside block i's scan; part 2 (`x_flat_ahead_table`: the
 //! stripes pass, which writes the table) runs on the vectors of block i's table, which block i's
 //! thread gives to the second spare after block i's preliminary stage (`XAheadBlock::after_prelim`,
 //! `x_make_room_flat`), when nothing of block i reads its table any more. Where a searched batch of
@@ -66,8 +66,10 @@
 //! (`AaLookupTable`) where its table is built in place (`x_query_blocks::x_bp_aa_spares`), not
 //! with `LOSAT_DIAGNOSTICS` (whose reference builder prints its phases, which would come earlier).
 //! Not at one thread or for the search of all queries. The query chunks of a split batch build their
-//! own tables inside their block's search; the last of a block's chunks starts the next block's
-//! build (above). The last block starts no build.
+//! own tables inside their block's search; for blastp-fast the last of a block's chunks starts the
+//! next block's build (above); exact blastp's build ahead, sized on the block's own table
+//! (`x_make_room`), starts when that table is ready, as where no batch is split. The last block starts
+//! no build.
 //!
 //! Errors and refusals: the task keeps nothing but a table. A build that fails or refuses (its
 //! `Err` is dropped), that the reference builder would make (`TooLarge`), or whose vectors lack the
@@ -297,15 +299,28 @@ impl<'a> XAheadBlock<'a> {
     // value NCBI computes.
     /// What the search of the block's last table gets where that table is not the block's own: the
     /// last query chunk of a split batch of the block (`search_split_query_batches`), whose table is
-    /// ready after the block's scan and the other chunks' builds: the start of the next block's build
-    /// (`lookup_ready`) and the second part's vectors (`after_prelim`), nothing built ahead.
+    /// ready after the block's scan and the other chunks' builds. Where the next block's build takes
+    /// the vectors of the block's last table (blastp-fast's flat table in two parts, item SC2d): the
+    /// start of that build (`lookup_ready`) and its second part's vectors (`after_prelim`). Exact
+    /// blastp's build ahead takes vectors sized on the block's own table (`x_make_room`, of the
+    /// block's width of hits, which a chunk's table does not have): the block's own table starts it
+    /// (`x_starts_at_own_table`), and the chunk gets nothing. Nothing built ahead.
     pub(super) fn x_last_table(&self) -> XAheadBlock<'a> {
         XAheadBlock {
             prebuilt: None,
-            start_next: self.start_next,
+            start_next: self.after_prelim_flat.and(self.start_next),
             after_prelim_flat: self.after_prelim_flat,
             table_taken_later: self.table_taken_later,
         }
+    }
+
+    // No NCBI counterpart: scheduling only; it changes no value NCBI computes.
+    /// Whether the block's own table, when ready, starts the next block's build where a searched
+    /// batch of the block is split (`chunks_follow`): exact blastp's (its build ahead is sized on the
+    /// block's own table); blastp-fast's flat table waits for the block's last table, its last query
+    /// chunk's (`x_last_table`). Where no batch is split the block's own table is its last.
+    pub(super) fn x_starts_at_own_table(&self, chunks_follow: bool) -> bool {
+        !chunks_follow || self.after_prelim_flat.is_none()
     }
 
     // No NCBI counterpart: scheduling only; it changes no value NCBI computes.

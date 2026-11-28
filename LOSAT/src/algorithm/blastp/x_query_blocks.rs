@@ -816,7 +816,8 @@ pub(crate) fn x_bp_lookup_spares<'p>(
 
 // No NCBI counterpart: buffer reuse between the blocks' flat builds (`XSegmentPool`).
 /// Item SC2d-2: the block search's kept segments of packed appends, where its flat tables take spare
-/// vectors (`x_bp_lookup_spare`): each build's appends pass takes them, its stripes pass keeps its own.
+/// vectors (`x_bp_lookup_spare`): each build's appends pass takes them, its stripes pass keeps its own
+/// (every flat build of the block search: a block's, the next block's ahead of it, a query chunk's).
 pub(crate) fn x_bp_segments<'p>(pool: &SearchPool<'p>) -> Option<&'p XSegmentPool> {
     x_bp_lookup_spare(pool)?;
     pool.x_ext::<XBlockSubjects>()
@@ -867,7 +868,8 @@ pub(crate) fn x_bp_aa_block_spare<'p>(pool: &SearchPool<'p>) -> Option<&'p XAaSp
 pub(crate) enum XLookupFor {
     /// A block's (or a search's) own build: the block spare.
     Search,
-    /// A query chunk of a split batch (`x_query_chunk`): none.
+    /// A query chunk of a split batch (`x_query_chunk`): no spare vectors (the kept segments, as
+    /// every build).
     QueryChunk,
     /// The next block's build ahead of it, on a pool task (LOSAT_X_BPLKPAHEAD): the second spare,
     /// and no vector of the table allocated by the build (`XFlatArgs::x_ahead`).
@@ -903,8 +905,9 @@ impl<'a> XLookupFlat<'a> {
     /// build (no extra tasks). The spare vectors are the same for every matrix (item SC2d-2): a query
     /// chunk of a split batch (`XLookupFor::QueryChunk`, a search that ends after its preliminary
     /// stage, inside its block's search, and drops its table there, or gives its vectors to the next
-    /// block's build where it is the block's last table, `XAheadBlock::x_last_table`) takes none. The build of the next block's table ahead of it (`XLookupFor::Ahead`,
-    /// LOSAT_X_BPLKPAHEAD) takes the second spare's.
+    /// block's build where it is the block's last table, `XAheadBlock::x_last_table`) takes none. The
+    /// build of the next block's table ahead of it (`XLookupFor::Ahead`, LOSAT_X_BPLKPAHEAD) takes the
+    /// second spare's. Every build takes the block search's kept segments (`x_bp_segments`).
     pub(crate) fn lookup_query<'p: 'a>(
         query_frames: &'a [Vec<QueryFrame>],
         word_size: usize,
@@ -922,10 +925,11 @@ impl<'a> XLookupFlat<'a> {
             XLookupFor::Ahead => x_bp_lookup_spares(pool).map(|(_, ahead)| ahead),
         };
         let x_ahead = x_for == XLookupFor::Ahead;
-        let segments = match x_for {
-            XLookupFor::Search | XLookupFor::Ahead => x_bp_segments(pool),
-            XLookupFor::QueryChunk => None,
-        };
+        // Item SC2d-2: every flat build of the block search takes the kept segments, a query chunk's
+        // too (its build is the only one running: the next block's build starts at the block's last
+        // table, `XAheadBlock::x_last_table`), so no chunk writes fresh pieces while the segments of
+        // the build before stay resident.
+        let segments = x_bp_segments(pool);
         if matrix != ScoringMatrix::Blosum62 {
             let (query, locations, contexts) =
                 crate::algorithm::tblastx::lookup::prepare_matrix_lookup_query_for_word_size(

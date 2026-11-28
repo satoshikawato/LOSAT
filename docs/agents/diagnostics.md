@@ -2670,8 +2670,10 @@ Rebuilding less:
   builder prints its phases)) builds the next query block's query frames, lookup
   table and contexts during the block before it, as one task on the search's pool, instead of at the start
   of the next block's own search (`blastp/blast_engine/x_lookup_ahead.rs`, exactness argument in its
-  header): the block loop runs each block's search in a `rayon::in_place_scope`, and when the block's own
-  table is ready (at once when it was itself built ahead) the next block's build is spawned there; the next
+  header): the block loop runs each block's search in a `rayon::in_place_scope`, and when the block's table
+  is ready (at once when it was itself built ahead; for blastp-fast where a batch of the block is split, the
+  block's last table: that of the batch's last query chunk, built after the block's scan and the other
+  chunks', the call's own table freed before the chunks) the next block's build is spawned there; the next
   block's search then takes the values instead of computing them. They are the values of the same calls
   (`blastp_query_frames`, `blastp_compressed_lookup`; exact blastp: `blastp_aa_lookup`, a leaf task without
   rayon) on the same records, batches and pool, so the reports do not change. A build ahead that fails, refuses, would need the reference builder (`TooLarge`) or lacks
@@ -2680,11 +2682,13 @@ Rebuilding less:
   `panic = "abort"`, the release profile, it ends the process when it happens). Memory: one more table
   (`starts`, `hits`, PV array) and one block's frames and contexts are alive while the next block's table
   is built; every vector of that table is allocated by the block search's thread, never by a pool task:
-  that thread keeps a second spare (`x_query_blocks.rs` `XBlockSubjects`) with the room for the largest
-  table so far plus a half (new vectors of twice its hits where they are short; untouched capacity is not
-  resident), which the build ahead takes whole (`XFlatArgs::x_ahead`). Exact blastp: one more table
+  that thread keeps a second spare (`x_query_blocks.rs` `XBlockSubjects`) with the room for the next block's
+  table: the most hits its words can add (`x_block_appends`, counted by the block plan), and at least the
+  largest table so far plus a half (new vectors of twice its hits where they are short; untouched capacity is
+  not resident), which the build ahead takes whole (`XFlatArgs::x_ahead`). Exact blastp: one more table
   (backbone 0.44 MiB, overflow 6-8.5 MiB at 50,000-letter blocks, PV 3.5 KiB), on vectors the block search's
-  thread allocates and recycles (`lookup/x_lut_direct.rs` `XAaSpares`: the same room rule for the overflow;
+  thread allocates and recycles (`lookup/x_lut_direct.rs` `XAaSpares`: the same room rule for the overflow,
+  with the block's words of the standard table;
   each block's table is given back at the end of its search), with that thread's neighbour lists moved to the
   builds ahead (one set; given back to it before a block that builds its own table and at the last block). At
   one thread nothing changes.

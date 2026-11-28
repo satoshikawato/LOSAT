@@ -1291,14 +1291,28 @@ function clearDirectory(directory) {
   }
 }
 
+/**
+ * Whether LOSAT Web's model of a user's Linux has its user make files in `folder`: in a home (`/home/<user>`) or in one of
+ * the directories of `USER_DIRECTORIES` in LOSAT/src/report/run_files.rs (`user_makes`), read from there so that the
+ * model has one owner (review R0 of WW4f, N5).
+ */
+function userMakes(folder) {
+  const source = fs.readFileSync(path.join(ROOT, "LOSAT/src/report/run_files.rs"), "utf8");
+  const list = /\bconst USER_DIRECTORIES: \[&\[u8\]; \d+\] = \[([^\]]*)\];/.exec(source);
+  assert.ok(list, "USER_DIRECTORIES of LOSAT/src/report/run_files.rs: not found");
+  const directories = [...list[1].matchAll(/b"([^"]+)"/g)].map((match) => match[1]);
+  assert.ok(directories.length > 0, "USER_DIRECTORIES of LOSAT/src/report/run_files.rs: no directory read");
+  return /^\/home\/[^/]+\//.test(`${folder}/`) || directories.some((directory) => `${folder}/`.startsWith(`${directory}/`));
+}
+
 async function checkLogfileNames(engine, native, scratch) {
   const differs = hostDiffers();
   assert.ok(differs === undefined, `-logfile names: this host is not a Linux like LOSAT Web's (${differs}); ` +
             "run V-ABI as a user on Ubuntu 24.04 or a Linux like it");
-  // The rows' `<dir>` names are in the scratch folder: one where the model's user makes files (USER_DIRECTORIES and the
-  // homes of LOSAT/src/report/run_files.rs), not under /dev, whose names the rows read as devices (line NP WW4f,
-  // 2026-11-28: TMPDIR=/dev/shm/... and /run/user/1006/... failed here far from the cause).
-  assert.ok(/^\/(tmp|var\/tmp|var\/crash|run\/lock|run\/user\/1000|home\/[^/]+|mnt\/(c|d|wsl|wslg))\//.test(`${scratch}/`),
+  // The rows' `<dir>` names are in the scratch folder: one where the model's user makes files (`userMakes`), not under
+  // /dev, whose names the rows read as devices (line NP WW4f, 2026-11-28: TMPDIR=/dev/shm/... and /run/user/1006/...
+  // failed here far from the cause).
+  assert.ok(userMakes(scratch) && !`${scratch}/`.startsWith("/dev/"),
             `-logfile names: V-ABI's scratch folder ${scratch} (TMPDIR) is not one where LOSAT Web's user makes files ` +
             "outside /dev: use /tmp or the home");
   const inputs = path.join(ROOT, "LOSAT/tests/fasta/outfmt11");

@@ -437,8 +437,8 @@ fn a_tool_run_prints_and_fails_as_the_command_line() {
     assert_eq!(joined(&emitted(), STREAM_PRINTED), stdout);
 }
 
-/// The validation of a tool's argv (D-WW3-7, D-WW3-10): the command line's checks before the tool
-/// reads the contents of a file pass a good argv (also one of a missing input, which the run
+/// The validation of a tool's argv (D-WW3-7, D-WW3-10): the command line's checks up to where the
+/// tool reads an input past its start pass a good argv (also one of a missing input, which the run
 /// reads after `-out`, and one whose error comes after a file: the masking's `-ids` with
 /// `-exclude_ids`, after `-in` and `-out`; `-infmt seqids` after the id list), and refuse the others
 /// with the command line's error: its standard error, without the last line end; nothing emitted.
@@ -1038,6 +1038,80 @@ fn the_check_ends_as_the_run_s_first_steps_end() {
         (checked, status.as_str(), files),
         (Ok(()), "{\"status\":0}", false)
     );
+    // Review R0 of WW4f, N1: where `-in` fails, dustmasker's run writes the object of a `maskinfo_*`
+    // writer to `-out` before it reports the input's error; a write that fails then (`/dev/full`)
+    // is only recorded by NCBI's serial stream, so the run ends with the input's error, as the
+    // check does.
+    for outfmt in ["maskinfo_asn1_text", "maskinfo_asn1_bin", "maskinfo_xml"] {
+        let words = [
+            "dustmasker",
+            "-in",
+            "ww4f-missing.fa",
+            "-outfmt",
+            outfmt,
+            "-out",
+            "/dev/full",
+        ];
+        let (checked, status, diag, _) = ends(&words);
+        assert_eq!(status, "{\"status\":1}", "{outfmt}: {diag}");
+        assert!(
+            diag.ends_with("File is not accessible:  `ww4f-missing.fa'\n"),
+            "{outfmt}: {diag}"
+        );
+        assert_eq!(
+            checked,
+            Err(diag.strip_suffix('\n').unwrap_or(&diag).to_string()),
+            "{outfmt}"
+        );
+    }
+}
+
+/// Review R0 of WW4f, F1: LOSAT Web's form stands in for an input that it does not have yet with an
+/// empty FASTA file (web/app `FastaToolDraft.checkInput`), so that the check, which opens `-in` and
+/// reads its start, reports the form's other errors and not that input. Each masking tool's check
+/// passes an empty input, and its run reads it as the command line does (exit status 0).
+#[test]
+fn an_empty_input_passes_the_check_and_the_run() {
+    emitted();
+    let folder = folder("empty-input");
+    let empty = folder.join("input.fa");
+    std::fs::write(&empty, b"").unwrap();
+    let empty = empty.to_str().unwrap();
+    let counts = fixture("winmask/counts/dm2L_u9.binary");
+    for words in [
+        &["dustmasker", "-in", empty][..],
+        &[
+            "dustmasker",
+            "-in",
+            empty,
+            "-outfmt",
+            "maskinfo_asn1_bin",
+            "-out",
+            "ww4f-m.out",
+        ],
+        &["segmasker", "-in", empty],
+        &[
+            "convert2blastmask",
+            "-in",
+            empty,
+            "-masking_algorithm",
+            "dust",
+            "-masking_options",
+            "o",
+        ],
+        &["windowmasker", "-ustat", counts.as_str(), "-in", empty],
+    ] {
+        assert_eq!(validate(words), Ok(()), "{words:?}");
+        run(words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":0}".to_vec()),
+            "{words:?}: {}",
+            String::from_utf8_lossy(&joined(&calls, STREAM_DIAGNOSTICS))
+        );
+    }
+    std::fs::remove_dir_all(&folder).unwrap();
 }
 
 /// Review of WW4c, F5: the output file names of `tests/standard_output_names.tsv`, which the app's
@@ -1947,6 +2021,70 @@ fn a_makeblastdb_check_ends_where_the_run_opens_its_log() {
         };
         assert!(error.contains(&first), "{log} {out}: {error}");
         assert!(taken(&folder).is_empty(), "{log}: no file at the run");
+    }
+    std::fs::remove_dir_all(&folder).unwrap();
+}
+
+/// Review R0 of WW4f, N5: the check of makeblastdb takes the build's checks of the database's name
+/// and title (`database_names`) with the run's error, before the log's opening (also of a log that
+/// does not open): an input database without `-title` that is missing (the build reads its title
+/// first), one input database named as the database, `-randomize` without `-input_type blastdb`,
+/// and the title `-`. Neither the check nor the run makes a file.
+#[test]
+fn a_makeblastdb_check_takes_the_build_s_name_checks() {
+    emitted();
+    let made = std::path::Path::new("ww4f-names.log");
+    let folder = folder("makeblastdb-names");
+    let db = folder.join("db");
+    let db = db.to_str().unwrap();
+    let prot = fixture("seqdb/prot.faa");
+    let blastdb = ["-input_type", "blastdb", "-dbtype", "prot"];
+    let cases: [(Vec<&str>, &str); 4] = [
+        (
+            [&["-in", "ww4f-missing-db", "-out", db][..], &blastdb].concat(),
+            "No alias or index file found for protein database [ww4f-missing-db]",
+        ),
+        (
+            [&["-in", "ww4f-db", "-out", "ww4f-db"][..], &blastdb].concat(),
+            "Cannot create a BLAST database from an existing one without changing the output name",
+        ),
+        (
+            vec!["-in", &prot, "-dbtype", "prot", "-randomize", "-out", db],
+            "Option randomize is only applicable to blastdb input type",
+        ),
+        (
+            vec!["-in", &prot, "-dbtype", "prot", "-title", "-", "-out", db],
+            "Please provide a title using -title",
+        ),
+    ];
+    for (argv, first) in &cases {
+        for log in [
+            &[][..],
+            &["-logfile", "ww4f-nosub/mk.log"],
+            &["-logfile", "ww4f-names.log"],
+        ] {
+            let words = [&["makeblastdb"][..], argv, log].concat();
+            let _ = std::fs::remove_file(made);
+            let error = validate(&words).unwrap_err();
+            assert!(error.contains(first), "{words:?}: {error}");
+            assert!(
+                taken(&folder).is_empty() && !made.exists(),
+                "{words:?}: no file at the check"
+            );
+            run(&words).unwrap();
+            let calls = emitted();
+            assert_ne!(
+                calls.last().unwrap(),
+                &(STREAM_RESPONSE, b"{\"status\":0}".to_vec()),
+                "{words:?}"
+            );
+            assert!(frames(&calls).is_empty(), "{words:?}: no file of the run's");
+            let mut written = joined(&calls, STREAM_DIAGNOSTICS);
+            written.extend(std::fs::read(made).unwrap_or_default());
+            let _ = std::fs::remove_file(made);
+            assert_eq!(format!("{error}\n").into_bytes(), written, "{words:?}");
+            assert!(taken(&folder).is_empty(), "{words:?}: no database");
+        }
     }
     std::fs::remove_dir_all(&folder).unwrap();
 }

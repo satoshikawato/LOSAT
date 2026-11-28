@@ -51,7 +51,7 @@ pub(super) fn run(
 
 // No NCBI counterpart: LOSAT Web's check of the words (line NP WW3a, D-WW3-10, 2026-11-23; review
 // of WW4c, F1; line NP WW4f, 2026-11-28).
-/// `run` up to where it reads the contents of a file, through `run`'s own steps, whose failure is
+/// `run` up to where it reads an input past its start, through `run`'s own steps, whose failure is
 /// the check's, as `run` reports it (LOSAT Web's validation of the words, `super::check_in`): the
 /// mode (`s_DetermineAppType`); for `-mk_counts` the id lists' exclusion (`exclusive_id_lists`)
 /// and, without an id list to read, its refusal of `-infmt seqids` (`counts::check_mk_counts`) and

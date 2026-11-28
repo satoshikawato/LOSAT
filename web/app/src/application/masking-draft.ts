@@ -8,10 +8,10 @@
 import type { DirectoryFile, PrintedKind } from 'losat/domain';
 import { splitOptions } from '../domain/argv';
 import type { FieldValue, FormValues } from '../domain/parameters';
-import { buildMaskingArgv, namesOption, runFileNames } from '../domain/tool-argv';
+import { buildMaskingArgv, runFileNames } from '../domain/tool-argv';
 import { MASKING_TOOLS, maskingOptionParameters, toolPrintsKind, type MaskingTool, type ToolId } from '../domain/tools';
 import type { ToolRequest } from './coordinator';
-import { EMPTY_FASTA_INPUT, FastaToolDraft, type FastaInputState, type FastaToolDraftDeps } from './fasta-tool-draft';
+import { EMPTY_FASTA_INPUT, FastaToolDraft, withoutInfmt, type FastaInputState, type FastaToolDraftDeps } from './fasta-tool-draft';
 import type { DatabaseOption } from './tool-draft-core';
 
 export interface MaskingDraftState extends FastaInputState {
@@ -134,16 +134,16 @@ export class MaskingDraft extends FastaToolDraft<MaskingDraftState> {
   }
 
   /**
-   * The argv of the check: an input not given yet is named `input.fa` (none where the words name `-in` themselves). A
-   * database of the files of the run that `-in` cannot name (`databaseRefusal`) is the check's refusal, unless the words
-   * print help or the version.
+   * The argv of the check: the form's input, or the stand-in of one not given yet (`checkInput`: `input.fa`, read as
+   * FASTA); none for help and the version. A database of the files of the run that `-in` cannot name (`databaseRefusal`)
+   * is the check's refusal, unless the words print help or the version.
    */
   protected validationArgv(state: MaskingDraftState, extra: readonly string[]): readonly string[] {
-    const prints = this.printsKindOf(state, extra) !== null;
-    const refusal = prints ? undefined : this.databaseRefusal(state);
+    if (this.printsKindOf(state, extra) !== null) return this.argvOf(state, extra, undefined);
+    const refusal = this.databaseRefusal(state);
     if (refusal !== undefined) throw new Error(refusal);
-    const placeholder = prints || namesOption(extra, '-in') ? undefined : 'input.fa';
-    return this.argvOf(state, extra, this.inputNameOf(state, extra) ?? placeholder);
+    const input = this.checkInput(state, extra);
+    return this.argvOf(state, extra, input.name, input.asFasta);
   }
 
   /**
@@ -158,9 +158,10 @@ export class MaskingDraft extends FastaToolDraft<MaskingDraftState> {
     };
   }
 
-  /** The check's directory holds the input that the run reads, under its name (none for help and the version). */
+  /** The check's directory holds the input that the run reads, or its stand-in, under its name (`checkInput`; none for help and the version). */
   protected override validationInputs(state: MaskingDraftState): readonly DirectoryFile[] {
-    return this.printsKindOf(state, this.parseExtra(state)) === null ? this.fastaCheckInputs(state) : [];
+    const extra = this.parseExtra(state);
+    return this.printsKindOf(state, extra) === null ? this.checkInput(state, extra).files : [];
   }
 
   /** A help or version word of Additional options (`toolPrintsKind`): the words that the form does not build. */
@@ -193,13 +194,14 @@ export class MaskingDraft extends FastaToolDraft<MaskingDraftState> {
     return this.printsKindOf(state, extra) === null ? this.fastaInputName(state) : undefined;
   }
 
-  private argvOf(state: MaskingDraftState, extra: readonly string[], inputName: string | undefined): readonly string[] {
+  /** The argv of `inputName`; `asFasta` leaves the form's `-infmt` out (the check's stand-in, `checkInput`). */
+  private argvOf(state: MaskingDraftState, extra: readonly string[], inputName: string | undefined, asFasta = false): readonly string[] {
     const { tool, description } = state;
     return buildMaskingArgv({
       tool,
       ...(inputName === undefined ? {} : { inputName }),
       outName: state.outNames[tool],
-      values: state.values[tool],
+      values: asFasta ? withoutInfmt(state.values[tool]) : state.values[tool],
       ...(description === undefined ? {} : { description }),
       extra,
       fileNames: runFileNames(state.runFiles),

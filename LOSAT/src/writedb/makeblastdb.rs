@@ -25,7 +25,7 @@ use crate::blastinput::ncbi_environment::{
     ApplicationSettings, DiagTarget, PathRules, ReadVerification,
 };
 use crate::ncbi_str::string_to_uint8_data_size_bytes;
-use crate::report::run_files::{LogOutput, OpenFiles, ToolLog, Unopened};
+use crate::report::run_files::{LogOutput, OpenFiles, OpenedFile, ToolLog, Unopened};
 use crate::seqdb::date::iso8601_date_time_exception;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use std::cell::RefCell;
@@ -733,7 +733,7 @@ fn asn_format(args: &MakedbArgs) -> Option<AsnFormat> {
 /// The first steps of `x_BuildDatabase` (`build_database_with_log`), before it opens the log of
 /// `-logfile`: the database version, the checks of the database's name and the title (for
 /// `-input_type blastdb` without `-title`, the title of the input database, which it opens);
-/// `(version, dbname, title)`. LOSAT Web's check takes them too (`check_in`; line NP WW4f,
+/// `(version, dbname, title)`. LOSAT Web's check takes them too (`Steps::Check`; line NP WW4f,
 /// 2026-11-28).
 fn database_names(
     args: &MakedbArgs,
@@ -806,9 +806,10 @@ fn database_names(
 // parsed).
 /// `CMakeBlastDBApp::x_BuildDatabase`. The log goes to `out` (makeblastdb's
 /// standard output, or the file of `-logfile`), warnings and diagnostics to
-/// `err`; `stdin` is read when `-in` is `-`. `now` is the local time for the
-/// database's date (`None` where the platform has no clock), `platform` the
-/// platform whose makeblastdb the files follow ([`Platform::host`] for a build).
+/// `err`; `stdin` is read when `-in` is `-`. `steps` is the build (with the local
+/// time for the database's date, `None` where the platform has no clock, and the
+/// platform whose makeblastdb the files follow, [`Platform::host`] for a build), or
+/// LOSAT Web's check, which ends after the log's opening.
 ///
 /// `logfile_error` is the error of a `-logfile` that could not be opened, raised where
 /// makeblastdb opens the file. `end_messages` gets the messages of `~CBuildDatabase` (no
@@ -817,10 +818,8 @@ fn database_names(
 #[allow(clippy::too_many_arguments)]
 fn build_database_with_log(
     args: &MakedbArgs,
-    env: MakedbEnv,
+    steps: &Steps<'_>,
     settings: &ApplicationSettings,
-    now: Option<&LocalTime>,
-    platform: Platform,
     stdin: &mut dyn Read,
     out: &mut dyn Write,
     cout: Option<&mut dyn Write>,
@@ -837,6 +836,11 @@ fn build_database_with_log(
     if let Some(error) = logfile_error {
         return Err(error);
     }
+    // LOSAT Web's check ends here, at the log's opening, before the writer makes the database's
+    // folders and deletes an older database of its name (`BuildDatabase::new`).
+    let &Steps::Build { env, now, platform } = steps else {
+        return Ok(());
+    };
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1016-1028
     // A first name `-` reads the standard input and nothing else. With no name at
@@ -1604,13 +1608,29 @@ pub(crate) fn run_with_env(
 ) -> i32 {
     run_in(
         args,
-        env,
+        Steps::Build { env, now, platform },
         settings,
-        now,
-        platform,
         (stdin, out, err),
         &OpenFiles::disk(),
     )
+}
+
+/// What `run_in` takes: the build, or LOSAT Web's check of the words (`MakeblastdbCall::WebCheck`
+/// of `api::tools`), which takes the build's own steps up to and with the log's opening of
+/// `-logfile` and ends there (`build_database_with_log`), opening nothing: it resolves the log's
+/// opening as the build opens it (`OpenFiles::log_output_check`) and its diagnostics go where the
+/// start sent them (`target`, which keeps the file of `-logfile` in memory). So a step that the
+/// build takes before the log's opening is the check's too (line NP WW4f, review R0's N2).
+pub(crate) enum Steps<'a> {
+    /// The build, with makeblastdb's own environment, the local time for the database's date
+    /// (`None` where the platform has no clock) and the platform whose makeblastdb the files follow.
+    Build {
+        env: MakedbEnv,
+        now: Option<&'a LocalTime>,
+        platform: Platform,
+    },
+    /// LOSAT Web's check, with the diagnostics' target of its start.
+    Check { target: &'a DiagTarget },
 }
 
 /// [`run_with_env`] whose file of `-logfile` is opened through `files` (`OpenFiles`): the file
@@ -1619,52 +1639,33 @@ pub(crate) fn run_with_env(
 /// the run's directory and the model of a user's Linux for a name outside it and a device
 /// (`report::run_files`: `/dev/stdout` the run's standard output, `/dev/stderr` its standard
 /// error, the null device and `/dev/full` lost, `/tmp/mk.log` a file of the run that the host gets,
-/// as for windowmasker; docs/web/abi_v2.md §4). `streams` are the standard input, output and error.
-#[allow(clippy::too_many_arguments)]
+/// as for windowmasker; docs/web/abi_v2.md §4). `steps` is the build or LOSAT Web's check
+/// (`Steps`); `streams` are the standard input, output and error.
 pub(crate) fn run_in(
     args: &MakedbArgs,
-    env: MakedbEnv,
+    steps: Steps<'_>,
     settings: &ApplicationSettings,
-    now: Option<&LocalTime>,
-    platform: Platform,
     (stdin, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
     files: &OpenFiles,
 ) -> i32 {
     let mut end_messages = Vec::new();
-    let name = match args.logfile.as_deref() {
-        None => {
-            let result = build_database_with_log(
-                args,
-                env,
-                settings,
-                now,
-                platform,
-                stdin,
-                out,
-                None,
-                err,
-                None,
-                &mut end_messages,
-            );
-            return finish(result, &end_messages, err);
-        }
-        Some(name) if crate::utils::os_bytes::os_str_bytes(name).as_ref() == b"-" => {
-            let result = build_database_with_log(
-                args,
-                env,
-                settings,
-                now,
-                platform,
-                stdin,
-                out,
-                None,
-                err,
-                None,
-                &mut end_messages,
-            );
-            return finish(result, &end_messages, err);
-        }
-        Some(name) => name,
+    let Some(name) = args
+        .logfile
+        .as_deref()
+        .filter(|name| crate::utils::os_bytes::os_str_bytes(name).as_ref() != b"-")
+    else {
+        let result = build_database_with_log(
+            args,
+            &steps,
+            settings,
+            stdin,
+            out,
+            None,
+            err,
+            None,
+            &mut end_messages,
+        );
+        return finish(result, &end_messages, err);
     };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201
     // The diagnostics go to the target of `-logfile` (`OpenFiles::log_target`: on `Disk`
@@ -1677,28 +1678,28 @@ pub(crate) fn run_in(
     let (out, err): (&mut dyn Write, &mut dyn Write) = (&mut *out, &mut *err);
     let out = RefCell::new(out);
     let err = RefCell::new(err);
-    let target = match files.log_target(Some(name)) {
-        Ok(ToolLog::Target(target)) => Some(target),
-        Ok(ToolLog::Stdout) => None,
-        Err(reason) => {
-            // A refusal of the start's, which comes first (`api::tools::makeblastdb_call`).
-            let refusal = MakedbError::Unsupported(reason);
-            return finish(Err(refusal), &end_messages, &mut **err.borrow_mut());
-        }
+    let opened_target;
+    let target = match steps {
+        Steps::Check { target } => Some(target),
+        Steps::Build { .. } => match files.log_target(Some(name)) {
+            Ok(ToolLog::Target(target)) => {
+                opened_target = target;
+                Some(&opened_target)
+            }
+            Ok(ToolLog::Stdout) => None,
+            Err(reason) => {
+                // A refusal of the start's, which comes first (`api::tools::makeblastdb_call`).
+                let refusal = MakedbError::Unsupported(reason);
+                return finish(Err(refusal), &end_messages, &mut **err.borrow_mut());
+            }
+        },
     };
     let mut diag = LogDiagnostics {
-        target: target.as_ref(),
+        target,
         out: &out,
         err: &err,
     };
-    let opened = match files.log_output(name) {
-        Ok(LogOutput::File(file)) => Ok(Box::new(file) as Box<dyn Write>),
-        Ok(LogOutput::Stdout) => Ok(Box::new(Shared(&out)) as Box<dyn Write>),
-        Ok(LogOutput::Stderr) => Ok(Box::new(Shared(&err)) as Box<dyn Write>),
-        Ok(LogOutput::Refused(reason)) => Err(MakedbError::Unsupported(reason)),
-        Err(Unopened) => Err(log_unopened(name)),
-    };
-    match opened {
+    let result = match log_opening(files, name, &steps, (&out, &err)) {
         Ok(file) => {
             let mut log = LogLines {
                 file,
@@ -1706,10 +1707,8 @@ pub(crate) fn run_in(
             };
             let result = build_database_with_log(
                 args,
-                env,
+                &steps,
                 settings,
-                now,
-                platform,
                 stdin,
                 &mut log,
                 Some(&mut Shared(&out)),
@@ -1718,24 +1717,54 @@ pub(crate) fn run_in(
                 &mut end_messages,
             );
             let _ = log.flush();
-            finish(result, &end_messages, &mut diag)
+            result
         }
-        Err(error) => {
-            let result = build_database_with_log(
-                args,
-                env,
-                settings,
-                now,
-                platform,
-                stdin,
-                &mut Shared(&out),
-                None,
-                &mut diag,
-                Some(error),
-                &mut end_messages,
-            );
-            finish(result, &end_messages, &mut diag)
-        }
+        Err(error) => build_database_with_log(
+            args,
+            &steps,
+            settings,
+            stdin,
+            &mut Shared(&out),
+            None,
+            &mut diag,
+            Some(error),
+            &mut end_messages,
+        ),
+    };
+    finish(result, &end_messages, &mut diag)
+}
+
+/// The run's two standard streams that makeblastdb's diagnostics, its log and its writer share
+/// (`run_in`).
+type SharedStreams<'a, 'w> = (
+    &'a RefCell<&'w mut dyn Write>,
+    &'a RefCell<&'w mut dyn Write>,
+);
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201
+/// The log's opening of `-logfile` `name` (`AsOutputFile` with `fAppend`): the build opens it
+/// through `files` (`OpenFiles::log_output`); LOSAT Web's check resolves it the same way without
+/// opening it (`OpenFiles::log_output_check`), and its log, which takes no line (the check ends
+/// at the opening), loses what it would get. `Err` with the error that the build raises where it
+/// opens the log (`build_database_with_log`).
+fn log_opening<'a>(
+    files: &'a OpenFiles,
+    name: &std::ffi::OsStr,
+    steps: &Steps<'_>,
+    (out, err): SharedStreams<'a, '_>,
+) -> Result<Box<dyn Write + 'a>, MakedbError> {
+    let opened = match steps {
+        Steps::Build { .. } => files.log_output(name),
+        Steps::Check { .. } => files.log_output_check(name).map(|refused| {
+            refused.map_or(LogOutput::File(OpenedFile::Discard), LogOutput::Refused)
+        }),
+    };
+    match opened {
+        Ok(LogOutput::File(file)) => Ok(Box::new(file)),
+        Ok(LogOutput::Stdout) => Ok(Box::new(Shared(out))),
+        Ok(LogOutput::Stderr) => Ok(Box::new(Shared(err))),
+        Ok(LogOutput::Refused(reason)) => Err(MakedbError::Unsupported(reason)),
+        Err(Unopened) => Err(log_unopened(name)),
     }
 }
 
@@ -1746,47 +1775,6 @@ fn log_unopened(name: &std::ffi::OsStr) -> MakedbError {
     msg.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(name));
     msg.push(b'\'');
     MakedbError::Argument(msg)
-}
-
-// No NCBI counterpart: LOSAT Web's check of makeblastdb's words (line NP WW4f, 2026-11-28).
-/// The steps of `run_in` up to the log's opening, which opens nothing (LOSAT Web's check,
-/// `api::tools::makeblastdb_call` with `MakeblastdbCall::WebCheck`): the log's opening of
-/// `-logfile` as `files` resolves it (`OpenFiles::log_output_check`: NCBI's `File is not
-/// accessible` where it does not open, LOSAT Web's refusal), raised after the first steps of the
-/// build (`database_names`), as `build_database_with_log` raises it. The exit status, with the
-/// error written as `run_in` writes it: to `err`, or with `-logfile` where the diagnostics go
-/// (`target`, the check's target of the start, which keeps the file of `-logfile` in memory).
-pub(crate) fn check_in(
-    args: &MakedbArgs,
-    settings: &ApplicationSettings,
-    files: &OpenFiles,
-    target: &DiagTarget,
-    err: &mut dyn Write,
-) -> i32 {
-    let name = args
-        .logfile
-        .as_deref()
-        .filter(|name| crate::utils::os_bytes::os_str_bytes(name).as_ref() != b"-");
-    let logfile_error = name.and_then(|name| match files.log_output_check(name) {
-        Ok(None) => None,
-        Ok(Some(reason)) => Some(MakedbError::Unsupported(reason)),
-        Err(Unopened) => Some(log_unopened(name)),
-    });
-    let result = database_names(args, settings).and_then(|_| logfile_error.map_or(Ok(()), Err));
-    if name.is_none() {
-        return finish(result, &[], err);
-    }
-    // One lifetime for both streams (`LogDiagnostics`), as in `run_in`.
-    let mut sink = std::io::sink();
-    let (out, err): (&mut dyn Write, &mut dyn Write) = (&mut sink, &mut *err);
-    let out = RefCell::new(out);
-    let err = RefCell::new(err);
-    let mut diag = LogDiagnostics {
-        target: Some(target),
-        out: &out,
-        err: &err,
-    };
-    finish(result, &[], &mut diag)
 }
 
 /// One of the run's standard streams, which makeblastdb's diagnostics, its log and its writer

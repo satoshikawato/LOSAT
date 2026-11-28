@@ -17,11 +17,14 @@ import {
 } from '../domain/tools';
 import type { DataGateway } from '../ports/data';
 import type { ToolDirectoryFile, ToolRequest } from './coordinator';
-import { EMPTY_FASTA_INPUT, FastaToolDraft, type FastaInputState, type FastaToolDraftDeps } from './fasta-tool-draft';
+import { EMPTY_FASTA_INPUT, FastaToolDraft, withoutInfmt, type CheckInput, type FastaInputState, type FastaToolDraftDeps } from './fasta-tool-draft';
 
 import type { DatabaseOption } from './tool-draft-core';
 export type { ToolExtraFile } from './tool-draft-core';
 export type { ToolInputFile } from './fasta-tool-draft';
+
+/** The name under which the check stands in for counts not chosen yet (`-ustat`, Convert's `-in`; `checkInputs`). */
+const COUNTS_STAND_IN = 'counts.ascii';
 
 /** Counts file selected for Mask (`-ustat`) or Convert counts (`-in`). */
 export type ToolCountsChoice =
@@ -264,15 +267,13 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
   }
 
   /**
-   * The argv of the check: the inputs not chosen yet are named `input.fa` and `counts.ascii` (`-in` none where the words
-   * name it themselves). A database of the files of the run that `-in` cannot name (`databaseRefusal`) is the check's
-   * refusal, unless the words print help or the version.
+   * The argv of the check: the stage's inputs, or the stand-ins of those not chosen yet (`checkInputs`). A database of the
+   * files of the run that `-in` cannot name (`databaseRefusal`) is the check's refusal, unless the words print help or the
+   * version.
    */
   protected validationArgv(state: ToolDraftState, extra: readonly string[]): readonly string[] {
-    const placeholder = namesOption(extra, '-in') ? undefined : state.stage === 'convert' ? 'counts.ascii' : 'input.fa';
-    const inputName = this.previewInputName(state) ?? placeholder;
-    const ustatName = state.stage === 'mask' ? (state.ustatSource.kind === 'none' ? 'counts.ascii' : state.ustatSource.name) : undefined;
-    const argv = this.buildArgv(state, extra, { inputName, ustatName });
+    const { input, ustatName } = this.checkInputs(state, extra);
+    const argv = this.buildArgv(state, extra, { inputName: input.name, ustatName }, input.asFasta);
     const refusal = this.databaseRefusal(state);
     if (refusal !== undefined && this.printsKindOf(state, extra) === null) throw new Error(refusal);
     return argv;
@@ -292,16 +293,13 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
   }
 
   /**
-   * The check's directory holds the inputs that the run reads, under their names (review of WW4c, F2): the FASTA
-   * input and, for Mask, the `-ustat` counts; for Convert the counts. A counts file that the form reads only when the
-   * run starts (saved or made in the session) stands in by its name, as the check does not read the counts.
+   * The check's directory holds the inputs that the run reads, under their names (review of WW4c, F2), or their
+   * stand-ins (`checkInputs`): the FASTA input and, for Mask, the `-ustat` counts; for Convert the counts.
    */
   protected override validationInputs(state: ToolDraftState): readonly DirectoryFile[] {
-    if (this.printsKindOf(state, this.parseExtra(state)) !== null) return [];
-    const counts = (choice: ToolCountsChoice): readonly DirectoryFile[] =>
-      choice.kind === 'none' ? [] : [{ name: choice.name, file: choice.kind === 'file' ? choice.file : new Blob([]) }];
-    if (state.stage === 'convert') return counts(state.convertSource);
-    return [...this.fastaCheckInputs(state), ...(state.stage === 'mask' ? counts(state.ustatSource) : [])];
+    const extra = this.parseExtra(state);
+    if (this.printsKindOf(state, extra) !== null) return [];
+    return this.checkInputs(state, extra).files;
   }
 
   /**
@@ -326,10 +324,12 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
 
   // --- internals --------------------------------------------------------------------------
 
+  /** The stage's argv; `asFasta` leaves the form's `-infmt` out (the check's stand-in, `checkInput`). */
   private buildArgv(
     state: ToolDraftState,
     extra: readonly string[],
     names: { readonly inputName?: string | undefined; readonly ustatName?: string | undefined } = {},
+    asFasta = false,
   ): readonly string[] {
     const { stage, outNames, values, description } = state;
     return buildWindowMaskerArgv({
@@ -337,7 +337,7 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
       ...(names.inputName === undefined ? {} : { inputName: names.inputName }),
       ...(names.ustatName === undefined ? {} : { ustatName: names.ustatName }),
       outName: outNames[stage],
-      values: values[stage],
+      values: asFasta ? withoutInfmt(values[stage]) : values[stage],
       ...(description === undefined ? {} : { description }),
       extra,
       fileNames: runFileNames(state.runFiles),
@@ -396,6 +396,28 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
     }
     const file = await this.deps.data.getToolOutputFile(choice.runId, choice.key, choice.name);
     return { name: choice.name, file, origin: { kind: 'made', runNumber: choice.runNumber } };
+  }
+
+  /**
+   * The inputs of the check of the stage and the files of its directory: the FASTA input or its stand-in (`checkInput`),
+   * for Convert the counts (`counts.ascii` until chosen; none where the words name `-in`), and for Mask the `-ustat` counts
+   * (`counts.ascii` until chosen). A counts file not chosen yet, or that the form reads only when the run starts (saved or
+   * made in the session), stands in as an empty file under its name (`standIns`), as the check does not read the counts.
+   */
+  private checkInputs(state: ToolDraftState, extra: readonly string[]): { readonly input: CheckInput; readonly ustatName?: string; readonly files: readonly DirectoryFile[] } {
+    const counts = (choice: ToolCountsChoice): readonly DirectoryFile[] =>
+      choice.kind === 'none'
+        ? this.standIns(state, [COUNTS_STAND_IN])
+        : [{ name: choice.name, file: choice.kind === 'file' ? choice.file : new Blob([]) }];
+    const countsFile = (choice: ToolCountsChoice) => (choice.kind === 'none' ? COUNTS_STAND_IN : choice.name);
+    if (state.stage === 'convert') {
+      const none = state.convertSource.kind === 'none' && namesOption(extra, '-in');
+      const input: CheckInput = { name: none ? undefined : countsFile(state.convertSource), files: [], asFasta: false };
+      return { input, files: none ? [] : counts(state.convertSource) };
+    }
+    const input = this.checkInput(state, extra);
+    if (state.stage !== 'mask') return { input, files: input.files };
+    return { input, ustatName: countsFile(state.ustatSource), files: [...input.files, ...counts(state.ustatSource)] };
   }
 
   private previewInputName(state: ToolDraftState): string | undefined {

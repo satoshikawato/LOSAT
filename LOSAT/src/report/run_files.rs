@@ -706,7 +706,7 @@ impl OpenFiles {
 
     // No NCBI counterpart: LOSAT Web's check of makeblastdb's words (line NP WW4f, 2026-11-28).
     /// What `log_output` of `name` gives, without opening anything (LOSAT Web's check of
-    /// makeblastdb, `writedb::makeblastdb::check_in`): `Err` where the command line cannot open it
+    /// makeblastdb, `writedb::makeblastdb::Steps::Check`): `Err` where the command line cannot open it
     /// (`log_place`, the model of the names), `Ok(Some(reason))` with LOSAT's refusal, `Ok(None)`
     /// where it opens. A file of a working directory that the run writes is taken as opening where
     /// the model finds its folder (the system's other refusals, such as a folder that the user

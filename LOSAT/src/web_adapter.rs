@@ -517,11 +517,13 @@ fn check_tool_in(
     Err(String::from_utf8_lossy(&err).into_owned())
 }
 
-/// Checks `words` (the command line after `windowmasker`) as the command line reads them before
-/// `windowmasker` reads the contents of a file, up to its opening of `-out` (`windowmasker::check_in`;
-/// line NP WW3a, D-WW3-10, 2026-11-23; line NP WW4f). `Err` with what the command line writes for the words that it refuses:
-/// its standard error, then the file of `-logfile` where the argv has one, without the last line
-/// end.
+/// Checks `words` (the command line after `windowmasker`) as the command line reads them, up to
+/// where `windowmasker` reads an input past its start (`windowmasker::check_in`; line NP WW3a,
+/// D-WW3-10, 2026-11-23; line NP WW4f): the masking up to its opening of `-out`, which opens `-in`
+/// and reads its start; `-mk_counts` without an id list up to its opening of `-out`; `-convert` and
+/// `-mk_counts` with an id list before they read the counts or the list. `Err` with what the
+/// command line writes for the words that it refuses: its standard error, then the file of
+/// `-logfile` where the argv has one, without the last line end.
 pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
     check_tool_in(
         words,

@@ -307,7 +307,8 @@ pub(crate) struct MakeblastdbEnd {
 /// makeblastdb with the words `argv` (after the program's name), as the command line runs them
 /// (`cli::main_entry`): the application start, the versions, the configuration load, NCBI's
 /// reader, `-dryrun`, LOSAT's refusals and settings and makeblastdb's checks of the environment and
-/// the registry, then the build (`makeblastdb::run_in`; not for `MakeblastdbCall::WebCheck`).
+/// the registry, then the build (`makeblastdb::run_in`; for `MakeblastdbCall::WebCheck` its steps up
+/// to and with the log's opening, `makeblastdb::Steps::Check`).
 /// `input` is the command line's standard input, `output` its standard output and `diagnostics`
 /// its standard error, which get the bytes that the command line writes there. The files of
 /// `-logfile` go to `files` (`RunFiles::Disk` for the library; for LOSAT Web a `Receiver` whose
@@ -545,19 +546,27 @@ fn makeblastdb_started(
     if let Err(reason) = checked {
         return (1, Err(refused(recorded, reason.as_bytes())));
     }
-    // LOSAT Web's check goes on with the build's steps up to the log's opening of `-logfile`, which
-    // it resolves without opening it (`makeblastdb::check_in`; line NP WW4f, 2026-11-28).
-    if call == MakeblastdbCall::WebCheck {
-        let status = makeblastdb::check_in(&args, &settings, files, &opened.target, &mut recorded);
-        return (status, outcome(status, recorded.bytes));
-    }
-    let now = LocalTime::now();
+    // LOSAT Web's check takes the build's own steps up to and with the log's opening of
+    // `-logfile`, which it resolves without opening it (`makeblastdb::Steps::Check`; line NP WW4f,
+    // 2026-11-28).
+    let now;
+    let steps = match call {
+        MakeblastdbCall::WebCheck => makeblastdb::Steps::Check {
+            target: &opened.target,
+        },
+        MakeblastdbCall::Library | MakeblastdbCall::WebRun => {
+            now = LocalTime::now();
+            makeblastdb::Steps::Build {
+                env: makeblastdb::MakedbEnv::from_env(&|name| std::env::var_os(name)),
+                now: now.as_ref(),
+                platform: Platform::host(),
+            }
+        }
+    };
     let status = makeblastdb::run_in(
         &args,
-        makeblastdb::MakedbEnv::from_env(&|name| std::env::var_os(name)),
+        steps,
         &settings,
-        now.as_ref(),
-        Platform::host(),
         (input, output, &mut recorded),
         files,
     );

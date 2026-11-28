@@ -504,8 +504,9 @@ export interface ToolEngine {
    */
   runTool(argv: readonly string[], options?: ToolRunOptions): Promise<ToolRunResult>;
   /**
-   * Checks the words of a tool as the command line checks them before the tool reads the contents of a file (abi_v2.md
-   * §4: the steps up to a masking tool's opening of `-out` too, with the run's error). It reads the run's registry
+   * Checks the words of a tool as the command line checks them, up to where the tool reads an input past its start
+   * (abi_v2.md §4): a masking tool's run up to its opening of `-out`, which opens `-in` and reads its start, makeblastdb's
+   * up to the log's opening of `-logfile`, which reads the title of an input database, with the run's error. It reads the run's registry
    * files (`-conffile`, `.ncbirc`, `windowmasker.ini`) as the command line does, so give it the same `directory` as
    * `runTool`: it opens them on the instance that the Engine worker has loaded (a threaded runtime that the searches use
    * stays as it is), and takes its turn there like a run (it waits behind a run in progress). It does not make the engine

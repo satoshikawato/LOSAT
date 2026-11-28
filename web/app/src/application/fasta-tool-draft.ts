@@ -9,12 +9,14 @@
 import type { DirectoryFile, PrintedKind } from 'losat/domain';
 import { isUnavailable } from 'losat/ports';
 import { normalizeRunPath } from '../domain/blast-db';
+import type { FormValues } from '../domain/parameters';
 import type { ToolId } from '../domain/tools';
 import type { DataGateway } from '../ports/data';
 import { failureText } from './availability';
 import type { ToolDirectoryFile } from './coordinator';
 import type { InputMode } from './draft';
 import { SessionFiles } from './session-files';
+import { isSeqdbList } from '../domain/list-flags';
 import { namesOption } from '../domain/tool-argv';
 import {
   foundDatabase,
@@ -86,7 +88,20 @@ export interface FastaInputForm {
   dropInputFiles(files: readonly File[]): void;
 }
 
+/**
+ * The input of the check of a form (`FastaToolDraft.checkInput`): the name that `-in` gives (none where the words name
+ * `-in`), the files of the check's directory that hold it, and whether the check reads it as FASTA in place of the form's
+ * BLAST database (a stand-in for a database not named yet).
+ */
+export interface CheckInput {
+  readonly name: string | undefined;
+  readonly files: readonly DirectoryFile[];
+  readonly asFasta: boolean;
+}
+
 const PASTE_NAME = 'input.fa';
+/** The name of the input that stands in for one that the form does not have yet in the check (`checkInput`): a paste's. */
+const STAND_IN_NAME = PASTE_NAME;
 const COMBINED_NAME = 'combined_input.fa';
 const LF = 0x0a;
 
@@ -250,6 +265,37 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
     for (const entry of state.fastaFiles) parts.push({ name: entry.name, file: entry.file });
     if (parts.length <= 1 || state.fastaMode === 'separate') return parts.slice(0, 1);
     return [{ name: COMBINED_NAME, file: new Blob(parts.map((part) => part.file), { type: 'text/plain' }) }];
+  }
+
+  /**
+   * The input of the check (`validationArgv`, `validationInputs`): the form's (`fastaInputName`, `fastaCheckInputs`), or,
+   * while it has none and the words do not name `-in` themselves, a stand-in that the run's first steps open and read as
+   * an empty input — the file `input.fa` of the check's directory, empty (`standIns`), read as FASTA: `asFasta` asks the
+   * argv of the check to leave the form's `-infmt blastdb` out, as no BLAST database is empty. The check, which opens
+   * `-in` as the run does (line NP WW4f), so reports the form's other errors and not the input that it lacks, which Run
+   * LOSAT asks for ("Enter sequences or open FASTA files.", "Enter an input name or open files."); an empty FASTA box with
+   * `-infmt blastdb` in Additional options is checked as an empty paste is (review R0 of WW4f, F1).
+   */
+  protected checkInput(state: S, extra: readonly string[]): CheckInput {
+    const name = this.fastaInputName(state);
+    if (name !== undefined) return { name, files: this.fastaCheckInputs(state), asFasta: false };
+    if (namesOption(extra, '-in')) return { name: undefined, files: [], asFasta: false };
+    const database = this.inDatabase(state);
+    return {
+      name: STAND_IN_NAME,
+      files: this.standIns(state, [STAND_IN_NAME]),
+      asFasta: database !== undefined && isSeqdbList(database.option),
+    };
+  }
+
+  /**
+   * The empty files of the check's directory that stand in for the inputs `names` that the check's argv names and the
+   * form does not have yet (`checkInput`, WindowMasker's counts), none for a name that a file of the run holds or a folder
+   * of them has (the run's file is then the input, as for the run).
+   */
+  protected standIns(state: S, names: readonly string[]): readonly DirectoryFile[] {
+    const claimed = (name: string) => state.runFiles.some((entry) => entry.name === name || entry.name.startsWith(`${name}/`));
+    return names.filter((name) => !claimed(name)).map((name) => ({ name, file: new Blob([]) }));
   }
 
   /** Whether the FASTA input or the files of the run hold anything that a reload would lose. */
@@ -418,6 +464,14 @@ async function combineFastaFiles(parts: readonly ToolDirectoryFile[]): Promise<F
     }
   }
   return new File(blobs, COMBINED_NAME, { type: 'text/plain' });
+}
+
+/**
+ * `values` without `-infmt`, for the check's stand-in of a BLAST database not named yet (`CheckInput.asFasta`): FASTA,
+ * which is `-infmt`'s default for each tool that reads a database.
+ */
+export function withoutInfmt(values: FormValues): FormValues {
+  return Object.fromEntries(Object.entries(values).filter(([flag]) => flag !== '-infmt'));
 }
 
 /** Whether the Input name was typed and is not blank (a blank one is none: the files of the run name `-in` then). */

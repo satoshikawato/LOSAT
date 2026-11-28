@@ -1241,7 +1241,8 @@ fn pairwise_read_order<'l>(
 /// subjects, `pairwise`, after the loads of the calls before, whose loads nothing here records,
 /// `TaxdbRun::calls_before`). The packed subjects are read from the database
 /// (`SubjectLetters::Stream`, one read each) instead of cloned from the copy. `prefetch_limit` is
-/// the run's `PRE_FETCH_SEQS_LIMIT`, read once by the run (`shared::prefetch_seqs_limit`).
+/// the run's `PRE_FETCH_SEQS_LIMIT`, read once by the run (`shared::prefetch_seqs_limit`), and
+/// `shown` what the reports `formats` show at it (`parsed_shown`), made once by the run.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
     database: &TblastnDatabase,
@@ -1250,7 +1251,7 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-    prefetch_limit: Option<i32>,
+    (prefetch_limit, shown): (Option<i32>, shared::ParsedShown),
     call: (&[&str], bool),
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
@@ -1259,7 +1260,6 @@ pub(super) fn reported_subjects(
     seen: crate::report::query_bioseq::SeenFrom<'_>,
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
-    let shown = parsed_shown(formats, prefetch_limit);
     for hitlist in hitlists.iter_mut() {
         hitlist.drop_zero_score_hsps();
     }

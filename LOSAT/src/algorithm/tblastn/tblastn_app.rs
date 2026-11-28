@@ -2044,8 +2044,8 @@ fn search(
         // The first format, whose prefetch each batch asks (`database::prefetch_format`).
         let prefetch_format = super::database::prefetch_format(&outputs.formats);
         // The run's `PRE_FETCH_SEQS_LIMIT`, read once, and what the reports show of the reported
-        // sequences at it (`database::parsed_shown`), for every batch (review 3 of line RG-KB
-        // item 9b-2, R3-L2).
+        // sequences at it (`database::parsed_shown`), made once for every batch and the reported
+        // sequences (`database::reported_subjects`; review 3 of line RG-KB item 9b-2, R3-L2).
         let prefetch_limit = crate::algorithm::common::database::prefetch_seqs_limit();
         let parsed_shown = super::database::parsed_shown(&outputs.formats, prefetch_limit);
         let reads = super::database::CallReads::of(database, parsed_shown.titles, || {
@@ -2524,7 +2524,7 @@ fn search(
                         has_nullb,
                     ),
                     &outputs.formats,
-                    prefetch_limit,
+                    (prefetch_limit, parsed_shown),
                     (outputs.other_outfmts, resolved.html.is_some()),
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,

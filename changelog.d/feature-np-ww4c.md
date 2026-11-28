@@ -11,9 +11,12 @@
 - LOSAT Web's `windowmasker`: the check of a `-logfile` or `-out` that names a file of an
   `-infmt blastdb` input finds the database where the run finds it, through the `BLASTDB` of a
   `windowmasker.ini` in the run's directory too (the check read a `WINDOWMASKER.ini`).
-- Web engine: `validateTool` refuses an `-out` that is the standard error, a device or a file of
-  procfs (`/dev/stderr`, `/proc/self/comm`) for every tool, as `runTool` refuses it, where it
-  accepted the words and the run then refused them.
+- Web engine: `validateTool` refuses an `-out` that `runTool` refuses (a file of the run's
+  directory, or the standard error, a device or a file of procfs such as `/dev/stderr`) where the
+  run would refuse it, after the same steps: a run that first fails on its input (a missing `-in`
+  or `-archive`) gives the command line's error, which `validateTool` leaves to the run instead of
+  refusing the `-out`; `blast_formatter` and windowmasker's `-convert`, which open `-out` only
+  after reading their input, refuse such an `-out` in the run.
 - LOSAT Web's Supported mark of a tool run grades a value typed into a text box by the code path it
   selects, one rule for every tool: convert2blastmask's `-masking_options` by whether its text holds
   a byte outside visible ASCII (which NCBI writes as `#` with an error message) and

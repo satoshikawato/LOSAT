@@ -32,10 +32,12 @@ pub(crate) fn unsupported(what: &str, program: &str) -> String {
 
 // No NCBI counterpart: LOSAT Web's validation of a masking program's words (line NP WW4c,
 // 2026-11-28, as windowmasker's `app::check`, D-WW3-7 and D-WW3-10).
-/// The checks of a run of dustmasker, segmasker or convert2blastmask (`program`, its name in
-/// refusals) before it opens a file: nothing fails there after the arguments, but an `-out` that
-/// names a file which LOSAT Web does not write (`RunFiles::refused_output`) is the refusal that the
-/// run makes when it opens `-out`. 0 otherwise; the standard output `-` is not refused.
+/// The check of `-out` in a run of dustmasker, segmasker or convert2blastmask (`program`, its name
+/// in refusals) that reaches `-out`: an `-out` that names a file which LOSAT Web does not write
+/// (`RunFiles::refused_output`) is the refusal that the run makes when it opens `-out`. 0
+/// otherwise; the standard output `-` is not refused. dustmasker opens `-out` first; segmasker and
+/// convert2blastmask open `-in` and make its reader first, and call this only when those steps pass
+/// (review of WW4c, F1).
 pub(crate) fn check_output(
     args: &crate::ncbi_app::args::Args,
     diag: &mut Diag,

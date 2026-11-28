@@ -712,8 +712,8 @@ fn the_masking_tools_print_and_fail_as_the_command_line() {
 /// tool opens a file pass a good argv (also one of a missing input, which the run opens) and a help
 /// or version word, refuse NCBI's errors of the arguments with the command line's standard error
 /// (an unknown option; convert2blastmask's mandatory `-masking_algorithm`), and refuse an `-out` that
-/// is a file of the run's directory and a `-logfile` that is the tool's input, as the run does;
-/// nothing emitted.
+/// is a file of the run's directory or the standard error and a `-logfile` that is the tool's input,
+/// as the run does once it reaches `-out` (an input it opens: review of WW4c, F1); nothing emitted.
 #[test]
 fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
     emitted();
@@ -723,6 +723,12 @@ fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
         ("segmasker", &[]),
         ("convert2blastmask", &c2b[..]),
     ] {
+        let input = fixture(match tool {
+            "dustmasker" => "dustmasker/in/basic.fa",
+            "segmasker" => "segmasker/in/basic.fa",
+            _ => "convert2blastmask/in/lc.fa",
+        });
+        let input = input.as_str();
         for passed in [
             &["-in", "ww4c-missing.fa"][..],
             &[
@@ -746,7 +752,7 @@ fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
         let (_, stderr) = masking_library(tool, &unknown);
         assert_eq!(format!("{error}\n").as_bytes(), stderr, "{tool}");
         assert!(error.starts_with("USAGE\n"), "{tool}: {error}");
-        let error = validate(&[&[tool, "-in", "x.fa", "-out", "Cargo.toml"][..], extra].concat())
+        let error = validate(&[&[tool, "-in", input, "-out", "Cargo.toml"][..], extra].concat())
             .unwrap_err();
         assert!(
             error.starts_with("Error: an output file 'Cargo.toml'")
@@ -760,7 +766,7 @@ fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
             .unwrap_err();
         assert!(error.contains("a -logfile file 'm.fa'"), "{tool}: {error}");
         // The standard error as -out: the run's refusal, at the check too.
-        let error = validate(&[&[tool, "-in", "x.fa", "-out", "/dev/stderr"][..], extra].concat())
+        let error = validate(&[&[tool, "-in", input, "-out", "/dev/stderr"][..], extra].concat())
             .unwrap_err();
         assert!(
             error.starts_with("Error: an output file '/dev/stderr' that is the standard error"),
@@ -785,6 +791,109 @@ fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
     assert_eq!(format!("{error}\n").as_bytes(), stderr);
     assert!(error.contains("masking_algorithm"), "{error}");
     assert!(emitted().is_empty());
+}
+
+/// Review of WW4c, F1: a run that opens its input before `-out` (segmasker, convert2blastmask,
+/// windowmasker's masking, blast_formatter's `-archive`) ends with NCBI's error of an input that it
+/// cannot open, before it reaches `-out`; the check takes the run's steps in its order, so it leaves
+/// such an argv to the run (D-WW3-10) instead of refusing its `-out`. dustmasker opens `-out` first
+/// and refuses it there, in the check too. Where the run reaches `-out` (an input that opens), the
+/// check refuses what the run refuses (above, and `ustat missing -out same` below).
+#[test]
+fn the_check_refuses_out_only_where_the_run_reaches_it() {
+    emitted();
+    let counts = fixture("winmask/counts/dm2L_u9.binary");
+    let fasta = fixture("winmask/fasta/dm2L_3k.fa");
+    let c2b = ["-masking_algorithm", "dust", "-masking_options", "o"];
+    for out in ["/dev/stderr", "Cargo.toml"] {
+        for (label, words, status) in [
+            (
+                "segmasker",
+                vec!["segmasker", "-in", "f1-missing.fa", "-out", out],
+                1,
+            ),
+            (
+                "convert2blastmask",
+                [
+                    &["convert2blastmask", "-in", "f1-missing.fa", "-out", out][..],
+                    &c2b,
+                ]
+                .concat(),
+                1,
+            ),
+            (
+                "windowmasker",
+                vec![
+                    "windowmasker",
+                    "-ustat",
+                    &counts,
+                    "-in",
+                    "f1-missing.fa",
+                    "-out",
+                    out,
+                ],
+                3,
+            ),
+            (
+                "blast_formatter",
+                vec![
+                    "blast_formatter",
+                    "-archive",
+                    "f1-missing.asn",
+                    "-outfmt",
+                    "8",
+                    "-out",
+                    out,
+                ],
+                1,
+            ),
+        ] {
+            assert_eq!(validate(&words), Ok(()), "{label} {out}: validate");
+            run(&words).unwrap();
+            let calls = emitted();
+            assert_eq!(
+                calls.last().unwrap(),
+                &(STREAM_RESPONSE, format!("{{\"status\":{status}}}").into_bytes()),
+                "{label} {out}: status"
+            );
+            let diag = String::from_utf8_lossy(&joined(&calls, STREAM_DIAGNOSTICS)).into_owned();
+            assert!(
+                diag.contains("f1-missing") && !diag.contains("an output file"),
+                "{label} {out}: {diag}"
+            );
+            assert!(frames(&calls).is_empty(), "{label} {out}: no file");
+        }
+        // dustmasker opens `-out` before `-in`: its refusal, in the check and the run.
+        let words = ["dustmasker", "-in", "f1-missing.fa", "-out", out];
+        let error = validate(&words).unwrap_err();
+        run(&words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            joined(&calls, STREAM_DIAGNOSTICS),
+            format!("{error}\n").as_bytes(),
+            "dustmasker {out}"
+        );
+        // The masking with an input that opens reaches `-out`: the check refuses as the run.
+        let words = [
+            "windowmasker",
+            "-ustat",
+            &counts,
+            "-in",
+            &fasta,
+            "-out",
+            out,
+        ];
+        let error = validate(&words).unwrap_err();
+        assert!(error.contains("an output file"), "windowmasker {out}: {error}");
+        run(&words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            joined(&calls, STREAM_DIAGNOSTICS),
+            format!("{error}\n").as_bytes(),
+            "windowmasker {out}"
+        );
+        assert!(frames(&calls).is_empty(), "windowmasker {out}: no file");
+    }
 }
 
 /// Tool runs and tool validation read `-logfile` against the run's real files (line WQA D19):

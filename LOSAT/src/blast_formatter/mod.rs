@@ -225,8 +225,10 @@ fn run_body(
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:499-545
 /// The checks of `run_body` before opening `-archive` (LOSAT Web's validation, `check_in`):
-/// when `-archive` is given, only checks whether `-out` is a name LOSAT Web refuses to overwrite;
-/// without `-archive`, `run_body`'s own `-rid` steps (`rid`), which open no files.
+/// none when `-archive` is given (the run opens `-out` only once it has read the archive's first
+/// search, so an `-out` that LOSAT Web refuses is the run's refusal, made when the run reaches
+/// `-out`; review of WW4c, F1); without `-archive`, `run_body`'s own `-rid` steps (`rid`), which
+/// open no files.
 fn check_body(
     args: &Args,
     _settings: &ApplicationSettings,
@@ -235,12 +237,6 @@ fn check_body(
     diag: &mut Diag,
 ) -> i32 {
     if args.os_value("archive").is_some() {
-        let out = args.os_value("out").unwrap_or(OsStr::new("-"));
-        if out != OsStr::new("-") {
-            if let Some(reason) = args.files().refused_output(out) {
-                return diag.refuse(&crate::seqmasks_io::run::unsupported(&reason, PROGRAM));
-            }
-        }
         return 0;
     }
     rid(args, diag)

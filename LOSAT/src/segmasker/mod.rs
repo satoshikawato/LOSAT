@@ -91,15 +91,23 @@ pub(crate) fn check_in(
     )
 }
 
-/// `Run` up to where it opens its first file (`seqmasks_io::run::check_output`).
+/// `Run` up to `-out` (LOSAT Web's check of the words, `check_in`): nothing fails after the
+/// arguments until the run's first steps, `-in` opened and its reader made (`work::reaches_out`).
+/// When they fail, the run ends there with NCBI's error, which the check leaves to the run
+/// (D-WW3-10); when they pass, the run opens `-out`, and an `-out` that LOSAT Web refuses is
+/// refused here as the run refuses it (`seqmasks_io::run::check_output`; review of WW4c, F1).
 fn check(
     args: &crate::ncbi_app::args::Args,
-    _settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
-    _stdin: &mut crate::ncbi_app::files::Cin<'_>,
+    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
+    stdin: &mut crate::ncbi_app::files::Cin<'_>,
     _out: &mut dyn Write,
     diag: &mut crate::ncbi_app::Diag,
 ) -> i32 {
-    crate::seqmasks_io::run::check_output(args, diag, PROGRAM)
+    if work::reaches_out(args, settings, stdin) {
+        crate::seqmasks_io::run::check_output(args, diag, PROGRAM)
+    } else {
+        0
+    }
 }
 
 // No NCBI counterpart: LOSAT Web reads `-logfile` and `-out` against the input names the run

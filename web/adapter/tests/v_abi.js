@@ -77,7 +77,9 @@
 // Web does not write (exit status 1, the refusal on stream 3, no output, no file), which the CLI writes. `"validate"`
 // calls `losat_web2_validate` on the argv: valid -> 0 and nothing emitted, else -1 and the CLI's standard error then the
 // file of -logfile without the last line end (abi_v2.md §4); `"expect": "late_failure"` is an argv that the CLI's run
-// refuses after it opened a file, which validate accepts (its checks stop before the files, D-WW3-10).
+// refuses after it opened a file, which validate accepts (its checks stop before the files, D-WW3-10);
+// `"expect": "run_refusal"` is an argv whose -out LOSAT Web's run refuses only once it has read its input's contents
+// (blast_formatter's archive, windowmasker's -convert counts), which validate leaves to the run (review of WW4c, F1).
 //
 // A `makeblastdb` row (line NP WW4b1, 2026-11-27) writes its database into the run's directory with the CLI's file
 // calls (abi_v2.md §3: a tool run's `/work` is writable), so each row runs on an instance of its own, whose `/work` is a
@@ -1730,6 +1732,10 @@ async function checkTool(engine, instance, directory, search, options, scratch) 
       // The command line's run fails after it opened a file, where validation stops (abi_v2.md §4).
       assert.notEqual(cli.status, 0, `${label}: the CLI's run fails`);
       assert.equal(validated.status, 0, `${label}: validate accepts what the command line checks before its files: ${validated.error}`);
+      assert.equal(validated.streams.size, 0, `${label}: nothing emitted`);
+    } else if (search.expect === "run_refusal") {
+      // LOSAT Web's run refuses the -out once it has read its input's contents; validation leaves it to the run.
+      assert.equal(validated.status, 0, `${label}: validate leaves the -out to the run: ${validated.error}`);
       assert.equal(validated.streams.size, 0, `${label}: nothing emitted`);
     } else if (search.expect !== "failure") {
       assert.equal(cli.status, 0, `${label}: the CLI's run of a valid argv (${cli.stderr})`);

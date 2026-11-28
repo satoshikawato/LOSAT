@@ -144,14 +144,7 @@ fn run_masks(
     let outfmt = value("outfmt");
     let parse_seqids = args.flag("parse_seqids");
     let masker = seg_masker(window, locut, hicut);
-    let mut source = reader(
-        value("infmt"),
-        args.os_value("in").expect("-in has a default"),
-        parse_seqids,
-        prints_title(outfmt),
-        settings.database(),
-        stdin,
-    )?;
+    let mut source = source(args, settings, stdin)?;
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
     let mut out = args.output_file("out", out).map_err(file_failure)?;
@@ -258,6 +251,35 @@ struct Record {
 enum Source<'a> {
     Fasta(Box<MaskFastaReader<Box<dyn std::io::Read + 'a>>>),
     Database(Box<MaskBdbReader>),
+}
+
+// No NCBI counterpart: `run_masks` up to `-out`, which LOSAT Web's check takes too (review of
+// WW4c, F1, 2026-11-28).
+/// The first steps of `run_masks`: `-in` opened and its reader made (`reader`), before `-out`.
+fn source<'a>(
+    args: &Args,
+    settings: &ApplicationSettings,
+    stdin: &'a mut Cin<'_>,
+) -> Result<Source<'a>, Failure> {
+    let value = |name| args.value(name).expect("a key with a default");
+    reader(
+        value("infmt"),
+        args.os_value("in").expect("-in has a default"),
+        args.flag("parse_seqids"),
+        prints_title(value("outfmt")),
+        settings.database(),
+        stdin,
+    )
+}
+
+/// Whether the run with `args` reaches `-out`: its first steps (`source`) pass (LOSAT Web's check,
+/// `super::check`, refuses `-out` only then; review of WW4c, F1).
+pub(super) fn reaches_out(
+    args: &Args,
+    settings: &ApplicationSettings,
+    stdin: &mut Cin<'_>,
+) -> bool {
+    source(args, settings, stdin).is_ok()
 }
 
 /// `x_GetReader`: `CMaskFastaReader` of `-in` (a protein reader), or `CMaskBDBReader` of the

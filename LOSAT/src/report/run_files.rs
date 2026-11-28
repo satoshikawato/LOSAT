@@ -539,9 +539,9 @@ impl OpenFiles {
     }
 
     /// LOSAT Web's refusal reason for a tool's `-out` `name` (without opening or creating the
-    /// file, for the checks of `validate`: `windowmasker::app::check`, `blast_formatter`,
-    /// `seqmasks_io::run::check_output`): `Some(reason)` when `self` is a `Receiver` and `create`
-    /// would refuse `name` (`receiver_output_name` resolves it to `OutputName::Existing`, the
+    /// file, for the checks of `validate` where they know that the run reaches `-out`:
+    /// `windowmasker::app::check`, `seqmasks_io::run::check_output`): `Some(reason)` when `self`
+    /// is a `Receiver` and `create` would refuse `name` (`receiver_output_name` resolves it to `OutputName::Existing`, the
     /// case-2 refusal, or to `OutputName::Special`, the standard error, a device or a file of
     /// procfs; line NP WW4c, 2026-11-28), with `create`'s reason; else `None`. Always `None` on
     /// `Disk`.

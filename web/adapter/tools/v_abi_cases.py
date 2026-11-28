@@ -878,7 +878,8 @@ def tool() -> list[dict]:
     not 0 (a check of v_abi.js against the native run), `"late_failure"` for an argv that `validate` accepts though
     the command line's run fails after it opens a file (the checks stop there, D-WW3-10), and `"refusal"` for LOSAT's
     refusal of an output name that LOSAT Web does not write (the command line would write it; exit status 1, no
-    file); `"frames"` is the least number of frames of bytes that the largest file of the run arrives in. Rows are written with the words of the command line (the mode's own
+    file), at the check too where the check knows that the run reaches `-out`, else `"run_refusal"` for the check of an
+    argv whose run refuses its `-out` only once it has read its input's contents (review of WW4c, F1); `"frames"` is the least number of frames of bytes that the largest file of the run arrives in. Rows are written with the words of the command line (the mode's own
     options, the files by their published names)."""
     tests = REPO / "LOSAT/tests"
     directory = REPO / "LOSAT/target/v_abi_tool"
@@ -1095,7 +1096,14 @@ def tool() -> list[dict]:
             ("d19.t3_stdout", "-in fa/dm2L_3k.fa -logfile /dev/stdout", True),
             # The run's refusal of an -out that is the standard error, a device or a file of procfs, at the check too
             # (line NP WW4c, 2026-11-28).
-            ("refusal.out_dev_stderr", f"{mask} -in fa/dm2L_3k.fa -out /dev/stderr", "refusal")):
+            ("refusal.out_dev_stderr", f"{mask} -in fa/dm2L_3k.fa -out /dev/stderr", "refusal"),
+            # The masking opens -in before -out: an input that it cannot open ends the run first with NCBI's error,
+            # which the check leaves to the run; -convert reads its counts before -out, so the run refuses an -out
+            # that LOSAT Web does not write only when it reaches it, and the check leaves it to the run (review of
+            # WW4c, F1, 2026-11-28).
+            ("late_failure.in_missing.out_dev_stderr", f"{mask} -in missing.fa -out /dev/stderr", "late_failure"),
+            ("run_refusal.convert.out_dev_stderr", "-convert -in counts/u4.ascii -sformat obinary -out /dev/stderr",
+             "run_refusal")):
         add(f"validate.{case_id}", words, failure, kind="validate")
 
     # blast_formatter (`losat_web2_tool` and `losat_web2_validate`; line RG-F3p7):
@@ -1158,10 +1166,15 @@ def tool() -> list[dict]:
             ("rid_archive", "-rid X -archive in/bn.asn", True),
             ("unknown_opt", "-archive in/bn.asn -nosuchopt", True),
             ("late_of6", "-archive in/bn.asn -outfmt 6", "late_failure"),
-            ("refusal.out_existing", "-archive in/bn.asn -outfmt 8 -out in/bn.asn", "refusal"),
             ("refusal.logfile_existing", "-archive in/bn.asn -outfmt 8 -logfile in/bn.asn", "refusal"),
             ("refusal.logfile_missing_archive", "-archive missing.asn -outfmt 8 -logfile missing.asn", "refusal"),
-            ("refusal.out_dev_stderr", "-archive in/bn.asn -outfmt 8 -out /dev/stderr", "refusal")):
+            # The run opens -out once it has read the archive's first search: an -out that LOSAT Web does not write
+            # is the run's refusal (`refusal.out_*` above), and a missing archive the run's error, both left to the
+            # run by the check (review of WW4c, F1, 2026-11-28).
+            ("run_refusal.out_existing", "-archive in/bn.asn -outfmt 8 -out in/bn.asn", "run_refusal"),
+            ("run_refusal.out_dev_stderr", "-archive in/bn.asn -outfmt 8 -out /dev/stderr", "run_refusal"),
+            ("late_failure.archive_missing.out_dev_stderr", "-archive missing.asn -outfmt 8 -out /dev/stderr",
+             "late_failure")):
         add_bf(f"validate.{case_id}", words, failure, kind="validate")
     return rows
 
@@ -1274,7 +1287,12 @@ def masking() -> list[dict]:
                 ("refusal.logfile_missing_input", base.replace(base.split()[1], "m.fa", 1) + " -logfile m.fa",
                  "refusal"),
                 ("late_failure.in_missing", f"{base.replace(base.split()[1], 'missing.fa', 1)} -out out.res",
-                 "late_failure")):
+                 "late_failure"),
+                # An input that the run cannot open, with an -out that LOSAT Web does not write: dustmasker opens -out
+                # first and refuses it; segmasker and convert2blastmask end at the input with NCBI's error before -out,
+                # which the check leaves to the run (review of WW4c, F1, 2026-11-28).
+                ("in_missing.out_dev_stderr", f"{base.replace(base.split()[1], 'missing.fa', 1)} -out /dev/stderr",
+                 "refusal" if program == "dustmasker" else "late_failure")):
             add(program, f"validate.{case_id}", words, failure, kind="validate")
     # dustmasker's options, its gzipped input, its database input and its error after `-out` opens.
     add("dustmasker", "options", "-in dm/long.fa -window 32 -level 15 -linker 3 -outfmt maskinfo_asn1_text")

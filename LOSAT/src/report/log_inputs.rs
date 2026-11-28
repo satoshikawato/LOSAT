@@ -131,7 +131,7 @@ pub(crate) fn check_disk_logfile_with<S: AsRef<OsStr>>(
 /// writing:
 /// - NCBI's `log_file_name` path (when its checked directory exists and the path is not a
 ///   directory, matching `ncbi_environment::open_log_file`);
-/// - for `makeblastdb`, also the raw `raw_name` path opened by `makeblastdb::log_of` (which opens
+/// - for `makeblastdb`, also the raw `raw_name` path of its log (`OpenFiles::log_output`, which opens
 ///   the raw OS path directly in addition to `diag_target`).
 fn disk_log_candidates(program: &str, raw_name: &OsStr) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
@@ -358,6 +358,32 @@ fn collect_makembindex_inputs<S: AsRef<OsStr>>(words: &[S], inputs: &mut RunInpu
 /// Collects input files for `dustmasker` and `segmasker`: `-in` (file or BLAST DB when
 /// `-infmt blastdb`).
 fn collect_masker_inputs<S: AsRef<OsStr>>(program: &str, words: &[S], inputs: &mut RunInputs) {
+    let (for_log, _for_out, databases, _databases_for_out) = masker_read_parts(program, words);
+    for path in for_log {
+        push_file(&mut inputs.files, path);
+    }
+    for db in databases {
+        if !inputs.databases.contains(&db) {
+            inputs.databases.push(db);
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:276-317 (the output stream,
+// then `x_GetReader`)
+// NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:206-250 (`x_GetReader`, then the
+// output stream)
+/// Collects the input files of `dustmasker` and `segmasker` (one owner for the command line's
+/// `-logfile` check, D23, and LOSAT Web's tool runs, line NP WW4c, 2026-11-28): `(for_logfile,
+/// for_out, databases, databases_for_out)`. `-in` is a FASTA file (not the standard input `-`) or,
+/// with `-infmt blastdb`, a database. dustmasker opens `-out` before it opens `-in`, so its input
+/// is also read after `-out` opens (`for_out`, `databases_for_out`: a missing `-in` named as `-out`
+/// is the file that the run made); segmasker opens `-in` first, where a missing input ends the run
+/// before `-out` opens.
+pub(crate) fn masker_read_parts<S: AsRef<OsStr>>(
+    program: &str,
+    words: &[S],
+) -> (Vec<PathBuf>, Vec<PathBuf>, Vec<OsString>, bool) {
     let mut infmt_blastdb = false;
     let mut masker_inputs = Vec::new();
     scan_argv_kinds(program, words, |name, _, value| {
@@ -370,13 +396,66 @@ fn collect_masker_inputs<S: AsRef<OsStr>>(program: &str, words: &[S], inputs: &m
             _ => {}
         }
     });
+    let out_first = program == "dustmasker";
+    let (mut for_log, mut for_out, mut databases) = (Vec::new(), Vec::new(), Vec::new());
     for val in masker_inputs {
         if infmt_blastdb {
-            inputs.add_db(&val);
+            push_db_list(&mut databases, &val);
         } else {
-            inputs.add_non_stdin(&val);
+            push_non_stdin_file(&mut for_log, &val);
+            if out_first {
+                push_non_stdin_file(&mut for_out, &val);
+            }
         }
     }
+    (for_log, for_out, databases, out_first)
+}
+
+/// The input file names of a tool's run in LOSAT Web (`FileReceiver::read_files` and
+/// `output_read_files`), from the parts of `windowmasker_read_parts` or `masker_read_parts` of
+/// `program` with `words`: `(for_logfile, for_out)`, each database given as the files that `seqdb`
+/// looks up for it (`seqdb::alias::database_lookup_files`, in the search path of the run's
+/// `BLASTDB` setting), in `for_out` too when `databases_for_out`.
+pub(crate) fn tool_read_files<S: AsRef<OsStr> + Clone>(
+    program: &str,
+    seqtype: SeqType,
+    words: &[S],
+    (log_paths, out_paths, databases, databases_for_out): (
+        Vec<PathBuf>,
+        Vec<PathBuf>,
+        Vec<OsString>,
+        bool,
+    ),
+) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    let encode = |paths: Vec<PathBuf>| -> Vec<Vec<u8>> {
+        paths
+            .into_iter()
+            .map(|p| p.into_os_string().into_encoded_bytes())
+            .collect()
+    };
+    let mut for_log = encode(log_paths);
+    let mut for_out = encode(out_paths);
+    if !databases.is_empty() {
+        let blastdb = ApplicationStart::of_process(program, words)
+            .settings()
+            .ok()
+            .and_then(|s| s.blastdb);
+        for db in databases {
+            for path in crate::seqdb::alias::database_lookup_files(
+                &crate::utils::os_bytes::os_str_bytes(&db),
+                seqtype,
+                blastdb.as_deref(),
+            ) {
+                if !path.is_empty() {
+                    if databases_for_out {
+                        for_out.push(path.clone());
+                    }
+                    for_log.push(path);
+                }
+            }
+        }
+    }
+    (for_log, for_out)
 }
 
 /// Collects input files for search programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`,

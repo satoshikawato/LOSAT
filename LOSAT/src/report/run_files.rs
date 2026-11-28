@@ -67,6 +67,20 @@ pub trait FileReceiver: Send + Sync {
     fn output_read_files(&self) -> &[Vec<u8>] {
         &[]
     }
+
+    /// Whether the run writes the files of its working directory through the file system, which
+    /// is then the command line's directory of the run's files (LOSAT Web's `makeblastdb`, whose
+    /// working directory the host makes writable, docs/web/abi_v2.md §3; line NP WW4b1 R2,
+    /// 2026-11-28): a `-logfile` name of a file in that directory (`log_name`, `output_name`:
+    /// a new file there or one of the run's files) opens there, through the file system, as the
+    /// command line opens it in its directory, and the command line's refusal of a `-logfile`
+    /// naming an input (`report::log_inputs::check_disk_logfile`) applies, as on `Disk`; only the
+    /// names outside it and the devices take the model's reading. Default: `false`, the run reads
+    /// the files of its working directory and writes none of them (LOSAT's refusal of a name of
+    /// one of them, `LogName::Existing`, `OutputName::Existing`).
+    fn writes_working_directory(&self) -> bool {
+        false
+    }
 }
 
 /// The option of a search's argv that names a file of its run besides its outputs
@@ -175,15 +189,19 @@ impl RunFiles {
                         Some(b"/dev/stdout".to_vec()),
                     )
                 },
+                // A file of a working directory that the run writes (`writes_working_directory`):
+                // in memory too, so that a check of the words (`losat_web2_validate` of
+                // makeblastdb) writes nothing; the run opens it through `OpenFiles::log_target`.
+                |_relative| (DiagTarget::Memory(Default::default()), None),
             ),
         }
     }
 
     /// Like [`RunFiles::log_target`], also enforcing the command-line / library self-reference
-    /// refusal on [`RunFiles::Disk`] before opening or creating `-logfile` (line WQA D23,
-    /// `Q-D23=A`): refuses any `-logfile` pointing to an input file read by `start.program()`
-    /// with `words`, the library call's inputs `supplied` (none on the command line) and `start`
-    /// (`report::log_inputs::check_disk_logfile_with`).
+    /// refusal where the run writes on disk (`writes_on_disk`) before opening or creating
+    /// `-logfile` (line WQA D23, `Q-D23=A`): refuses any `-logfile` pointing to an input file read
+    /// by `start.program()` with `words`, the library call's inputs `supplied` (none on the command
+    /// line) and `start` (`report::log_inputs::check_disk_logfile_with`).
     pub(crate) fn log_target_for<S: AsRef<OsStr>>(
         &self,
         words: &[S],
@@ -191,7 +209,7 @@ impl RunFiles {
         start: &crate::blastinput::ncbi_environment::ApplicationStart,
         name: Option<&OsStr>,
     ) -> Result<(DiagTarget, Option<Vec<u8>>), String> {
-        if matches!(self, RunFiles::Disk) {
+        if self.writes_on_disk() {
             crate::report::log_inputs::check_disk_logfile_with(
                 start.program(),
                 words,
@@ -201,6 +219,16 @@ impl RunFiles {
             )?;
         }
         self.log_target(name)
+    }
+
+    /// Whether the run writes its files through the file system: `Disk`, or a `Receiver` whose run
+    /// writes its working directory (`FileReceiver::writes_working_directory`), where the command
+    /// line's refusal of a `-logfile` that names an input applies as on `Disk`.
+    fn writes_on_disk(&self) -> bool {
+        match self {
+            RunFiles::Disk => true,
+            RunFiles::Receiver(receiver) => receiver.writes_working_directory(),
+        }
     }
 
     /// The host file name of the `-logfile` value `name` (what a `Receiver` names the stream 8
@@ -260,7 +288,7 @@ impl RunFiles {
                 "an {option} file that is also the standard output ({}) is not supported by LOSAT's PSIBLAST",
                 name.display()
             )),
-            OutputName::Special => PssmTarget::Refused(format!(
+            OutputName::StandardError | OutputName::Special => PssmTarget::Refused(format!(
                 "an {option} file '{}' that is the standard error, a device or a file of \
                  procfs (LOSAT Web writes no such file)",
                 name.display()
@@ -293,6 +321,7 @@ impl RunFiles {
             OutputName::File { name, .. } => Some(name),
             OutputName::Unopened
             | OutputName::Stdout
+            | OutputName::StandardError
             | OutputName::Discard
             | OutputName::Full
             | OutputName::Special
@@ -339,35 +368,63 @@ fn existing_output_refusal(name: &OsStr) -> String {
     )
 }
 
+/// LOSAT's refusal reason for a tool's `-out` naming the standard error, a device or a file of
+/// procfs (`OutputName::StandardError`, `OutputName::Special`), whose writes LOSAT Web does not
+/// reproduce.
+fn special_output_refusal(name: &OsStr) -> String {
+    format!(
+        "an output file '{}' that is the standard error, a device or a file of \
+         procfs (LOSAT Web writes no such file)",
+        name.display()
+    )
+}
+
 /// The target of the `-logfile` value `name` for a `Receiver` (`RunFiles::log_target`,
 /// `OpenFiles::log_target`): NCBI's special names, then `log_name`'s reading against the run's
 /// real files (`RunView`), plus the case-2 refusal when a new file's `file_key` matches a name in
 /// `FileReceiver::read_files`; `direct` wraps a `DiagTarget` without a new file,
-/// `file` opens a new file given its host name and key (`LogName::File`), and `stdout` handles
-/// `/dev/stdout` (`LogName::Stdout`). `Err` with LOSAT's refusal reason for `LogName::Existing`.
+/// `file` opens a new file given its host name and key (`LogName::File`), `stdout` handles
+/// `/dev/stdout` (`LogName::Stdout`), and `here` a file of the run's working directory (a new one
+/// or one of the run's files) where the run writes that directory
+/// (`FileReceiver::writes_working_directory`), given its path relative to the directory
+/// (`run_directory_path`). `Err` with LOSAT's refusal reason for `LogName::Existing` elsewhere.
 fn received_log_target<T>(
     name: Option<&OsStr>,
     receiver: &dyn FileReceiver,
     direct: impl FnOnce(DiagTarget) -> T,
     file: impl FnOnce(Vec<u8>, Vec<u8>) -> T,
     stdout: impl FnOnce() -> T,
+    here: impl FnOnce(Vec<u8>) -> T,
 ) -> Result<T, String> {
     match (special_log_target(name), name) {
         (Some(target), _) => Ok(direct(target)),
         (None, None) => Ok(direct(DiagTarget::Stderr)),
         (None, Some(name)) => {
             let view = RunView::new(receiver, receiver.read_files());
-            match view.log_name(name.as_encoded_bytes()) {
+            let bytes = name.as_encoded_bytes();
+            // The file's path in the run's working directory, where the run writes it.
+            let written_here = |key: &[u8]| {
+                receiver
+                    .writes_working_directory()
+                    .then(|| run_directory_path(key))
+                    .flatten()
+            };
+            match view.log_name(bytes) {
                 LogName::Unopened => Ok(direct(DiagTarget::Stderr)),
                 LogName::StandardError => Ok(direct(DiagTarget::StderrFile)),
                 LogName::Nowhere => Ok(direct(DiagTarget::Discard)),
                 LogName::Stdout => Ok(stdout()),
-                LogName::Existing => Err(existing_log_refusal(name)),
+                LogName::Existing => match log_key(bytes).as_deref().and_then(written_here) {
+                    Some(path) => Ok(here(path)),
+                    None => Err(existing_log_refusal(name)),
+                },
                 LogName::File {
                     name: host_name,
                     key,
                 } => {
-                    if view.reads(&key) {
+                    if let Some(path) = written_here(&key) {
+                        Ok(here(path))
+                    } else if view.reads(&key) {
                         Err(existing_log_refusal(name))
                     } else {
                         Ok(file(host_name, key))
@@ -538,6 +595,13 @@ impl OpenFiles {
                     )))))
                 },
                 || ToolLog::Stdout,
+                // A file of the working directory that the run writes: the file system's, as
+                // `diag_target` opens it there (`cerr` where it does not open).
+                |path| {
+                    ToolLog::Target(
+                        append_in_run_directory(&path).map_or(DiagTarget::Stderr, DiagTarget::File),
+                    )
+                },
             ),
         }
     }
@@ -550,7 +614,11 @@ impl OpenFiles {
         start: &crate::blastinput::ncbi_environment::ApplicationStart,
         name: Option<&OsStr>,
     ) -> Result<ToolLog, String> {
-        if self.table.is_none() {
+        if self
+            .table
+            .as_ref()
+            .is_none_or(|table| table.receiver.writes_working_directory())
+        {
             crate::report::log_inputs::check_disk_logfile(start.program(), words, start, name)?;
         }
         self.log_target(name)
@@ -588,27 +656,144 @@ impl OpenFiles {
             OutputName::Stdout => Ok(Created::Stdout),
             OutputName::Discard => Ok(Created::File(OpenedFile::Discard)),
             OutputName::Full => Ok(Created::File(OpenedFile::Full)),
-            OutputName::Special => Ok(Created::Refused(format!(
-                "an output file '{}' that is the standard error, a device or a file of \
-                 procfs (LOSAT Web writes no such file)",
-                name.display()
-            ))),
+            OutputName::StandardError | OutputName::Special => {
+                Ok(Created::Refused(special_output_refusal(name)))
+            }
             OutputName::Existing => Ok(Created::Refused(existing_output_refusal(name))),
         }
     }
 
-    /// LOSAT Web's case-2 refusal reason for a tool's `-out` `name` (without opening or creating
-    /// the file, for `windowmasker::app::check` / `validate`): `Some(reason)` when `self` is a
-    /// `Receiver` and `receiver_output_name` resolves `name` to `OutputName::Existing`, else
-    /// `None`. Always `None` on `Disk`.
+    /// LOSAT Web's refusal reason for a tool's `-out` `name` (without opening or creating the
+    /// file, for the checks of `validate` where they know that the run reaches `-out`:
+    /// `windowmasker::app::check`, `seqmasks_io::run::check_output`): `Some(reason)` when `self`
+    /// is a `Receiver` and `create` would refuse `name` (`receiver_output_name` resolves it to
+    /// `OutputName::Existing`, the case-2 refusal, or to `OutputName::StandardError` or
+    /// `OutputName::Special`, the standard error, a device or a file of procfs; line NP WW4c,
+    /// 2026-11-28), with `create`'s reason; else `None`. Always `None` on `Disk`.
     pub(crate) fn refused_output(&self, name: &OsStr) -> Option<String> {
         let table = self.table.as_ref()?;
-        matches!(
-            receiver_output_name(table.receiver.as_ref(), name.as_encoded_bytes()),
-            OutputName::Existing
-        )
-        .then(|| existing_output_refusal(name))
+        match receiver_output_name(table.receiver.as_ref(), name.as_encoded_bytes()) {
+            OutputName::Existing => Some(existing_output_refusal(name)),
+            OutputName::StandardError | OutputName::Special => Some(special_output_refusal(name)),
+            _ => None,
+        }
     }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201 (cited at
+    // `writedb::makeblastdb::run_with`)
+    /// The file of the `-logfile` value `name` that a tool opens as an output to append its log to,
+    /// besides its diagnostics' opening (`log_target`): makeblastdb's `AsOutputFile` with
+    /// `fAppend`, which the system opens under the name as written (line WQA's D11 round 2). On
+    /// `Disk` the file of the file system, made where it is missing (`Err` where it does not open,
+    /// as for the empty name and `logs/`). For a `Receiver`, the name as the command line of a user
+    /// on Linux opens it in the run's working directory (`output_name`): a file of a working
+    /// directory that the run writes (`FileReceiver::writes_working_directory`) through the file
+    /// system, appended to, as there; another file, an opening that appends to the run's file of
+    /// that path (`file_key`), which the diagnostics' opening of the same path shares
+    /// (`-logfile /tmp/mk.log`); the run's standard output (`/dev/stdout`) and standard error
+    /// (`/dev/stderr`), where the log's lines go among the run's other bytes as the system writes
+    /// them; lost writes (the null device) and failing ones (`/dev/full`), which makeblastdb does
+    /// not check; `Err` where that command line cannot open it; and LOSAT's refusal of another
+    /// device, a file of procfs and a file of the run's directory where the run writes none
+    /// (`log_output_refusal`).
+    pub(crate) fn log_output(&self, name: &OsStr) -> Result<LogOutput, Unopened> {
+        let bytes = name.as_encoded_bytes();
+        let Some(table) = &self.table else {
+            if bytes.is_empty() {
+                return Err(Unopened);
+            }
+            return std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(name)
+                .map(|file| LogOutput::File(OpenedFile::Disk(file)))
+                .map_err(|_| Unopened);
+        };
+        let receiver = table.receiver.as_ref();
+        let here = |key: &[u8]| {
+            receiver
+                .writes_working_directory()
+                .then(|| run_directory_path(key))
+                .flatten()
+        };
+        let in_run_directory = |path: Vec<u8>| {
+            append_in_run_directory(&path)
+                .map(|file| LogOutput::File(OpenedFile::Disk(file)))
+                .ok_or(Unopened)
+        };
+        let named = receiver_output_name(receiver, bytes);
+        if let Some(reason) = log_output_refusal(name, &named) {
+            return Ok(LogOutput::Refused(reason));
+        }
+        match named {
+            OutputName::Unopened => Err(Unopened),
+            OutputName::File {
+                name: host_name,
+                key,
+            } => match here(&key) {
+                Some(path) => in_run_directory(path),
+                None => Ok(LogOutput::File(OpenedFile::Shared(table.open(
+                    &host_name,
+                    key,
+                    Opening::Append,
+                )))),
+            },
+            OutputName::Existing => match output_key(bytes).as_deref().and_then(here) {
+                Some(path) => in_run_directory(path),
+                None => Ok(LogOutput::Refused(existing_log_refusal(name))),
+            },
+            OutputName::Stdout => Ok(LogOutput::Stdout),
+            OutputName::StandardError => Ok(LogOutput::Stderr),
+            OutputName::Discard => Ok(LogOutput::File(OpenedFile::Discard)),
+            OutputName::Full => Ok(LogOutput::File(OpenedFile::Full)),
+            OutputName::Special => unreachable!("refused above (`log_output_refusal`)"),
+        }
+    }
+}
+
+impl RunFiles {
+    /// LOSAT's refusal reason for the opening of the `-logfile` value `name` as an output that a
+    /// tool appends its log to (`OpenFiles::log_output`), without opening anything (the checks of
+    /// a tool's words, which refuse what its run refuses, before the run opens a file): `Some` for
+    /// a `Receiver` where the name is a device that LOSAT Web does not write, a file of procfs
+    /// (`OutputName::Special`) or, where the run writes none of its directory's files, one of
+    /// them. Always `None` on `Disk`.
+    pub(crate) fn refused_log_output(&self, name: &OsStr) -> Option<String> {
+        let RunFiles::Receiver(receiver) = self else {
+            return None;
+        };
+        let named = receiver_output_name(receiver.as_ref(), name.as_encoded_bytes());
+        log_output_refusal(name, &named).or_else(|| {
+            (named == OutputName::Existing && !receiver.writes_working_directory())
+                .then(|| existing_log_refusal(name))
+        })
+    }
+}
+
+/// LOSAT's refusal reason of the `-logfile` value `name` as an output that a tool appends its log
+/// to (`OpenFiles::log_output`), which `named` reads: a device whose writes LOSAT Web does not
+/// reproduce or a file of procfs, whose writes change the process (`OutputName::Special`; the
+/// standard error is the run's, `OutputName::StandardError`).
+fn log_output_refusal(name: &OsStr, named: &OutputName) -> Option<String> {
+    (*named == OutputName::Special).then(|| {
+        format!(
+            "a -logfile file '{}' that is a device or a file of procfs (LOSAT Web writes no \
+             such file)",
+            name.display()
+        )
+    })
+}
+
+/// What `OpenFiles::log_output` opened: the file of `-logfile` that a tool appends its log to.
+pub(crate) enum LogOutput {
+    /// A file, appended to (`OpenedFile::Disk` on the file system).
+    File(OpenedFile),
+    /// The run's standard output (`/dev/stdout` of a `Receiver`).
+    Stdout,
+    /// The run's standard error (`/dev/stderr` of a `Receiver`).
+    Stderr,
+    /// LOSAT's refusal of the name, the reason.
+    Refused(String),
 }
 
 /// Resolves `bytes` as an output file name of `receiver` (`output_name` in the run's view,
@@ -906,10 +1091,30 @@ fn output_key(name: &[u8]) -> Option<Vec<u8>> {
 
 /// The path of the file that the `-logfile` name `name` opens (`file_key`), where `log_name` gives
 /// a file: the path that NCBI opens (`log_file_name`); `None` where the system refuses it.
-#[cfg(test)]
 fn log_key(name: &[u8]) -> Option<Vec<u8>> {
     let (cwd, file) = log_file(name);
     Walk::resolve(&file.path, &cwd).map(|path| file_key(&path, &cwd))
+}
+
+/// The path relative to the run's working directory of the file whose path is `key` (`file_key`),
+/// where that file is in the working directory (`file_key`'s `up` 0: `run.log`, `logs/run.log`);
+/// `None` for a file elsewhere (`../x.log`, `/tmp/run.log`) and for the directory itself.
+fn run_directory_path(key: &[u8]) -> Option<Vec<u8>> {
+    key.strip_prefix(b"\x000/")
+        .filter(|rest| !rest.is_empty())
+        .map(<[u8]>::to_vec)
+}
+
+/// Opens the file `path` of the run's working directory (`run_directory_path`) through the file
+/// system, which is the run's working directory, to append to it, made where it is missing, as
+/// NCBI opens the file of `-logfile` (`ncbi_environment::diag_target`) and makeblastdb its log
+/// (`AsOutputFile` with `fAppend`); `None` where the system does not open it.
+fn append_in_run_directory(path: &[u8]) -> Option<File> {
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(crate::utils::os_bytes::path_of_bytes(path))
+        .ok()
 }
 
 /// The working directory of the `-logfile` name `name` (`working_directory`) and the paths that
@@ -1097,13 +1302,17 @@ enum OutputName {
     File { name: Vec<u8>, key: Vec<u8> },
     /// The process's standard output.
     Stdout,
+    /// The process's standard error (`/dev/stderr`, `/dev/fd/2`, `/proc/self/fd/2`), whose writes
+    /// are among the run's messages: LOSAT Web reproduces only a log written there a line at a
+    /// time (`OpenFiles::log_output`) and refuses an output (`OpenFiles::create`).
+    StandardError,
     /// Writes that are lost: the null device and the devices that take writes, and the standard
     /// input, the null device in LOSAT Web's run.
     Discard,
     /// Writes that fail: `/dev/full`.
     Full,
-    /// The standard error, another device or a file of procfs, whose writes LOSAT Web does not
-    /// reproduce (they are among the run's messages, or change the process).
+    /// Another device or a file of procfs, whose writes LOSAT Web does not reproduce (they change
+    /// the process, or no one reads them).
     Special,
     /// A file of the run's working directory, which the command line empties.
     Existing,
@@ -1130,7 +1339,8 @@ const DISCARDING_DEVICES: [&[u8]; 4] =
 /// working directory or one of their ancestors, are directories, which do not open for writing;
 /// a name in a directory of root's does not open (`opens`). The opened file is then the standard
 /// output (`/dev/stdout`, `/dev/fd/1`, `/proc/self/fd/1`), the standard input (the null device of
-/// the run: writes lost), the standard error, a file of procfs or a device of `LOST_DEVICES`
+/// the run: writes lost), the standard error (`StandardError`: `/dev/stderr`, `/dev/fd/2`,
+/// `/proc/self/fd/2`), a file of procfs or a device of `LOST_DEVICES`
 /// (`Special`, but the null device, `/dev/zero` and the random devices, whose writes are lost, and
 /// `/dev/full`, whose writes fail), a queue of `/dev/mqueue` (`Special`), a file of the run's
 /// directory (`Existing`; a folder of it does not open), or a file of that name in the working
@@ -1179,6 +1389,9 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     }
     if stream(b"/fd/0".as_slice()) {
         return OutputName::Discard;
+    }
+    if stream(b"/fd/2".as_slice()) {
+        return OutputName::StandardError;
     }
     if within(&path, SELF) {
         return if is_procfs_file(&path) {
@@ -1930,7 +2143,9 @@ impl RunFiles {
             OutputName::Unopened => return StrategyTarget::Inaccessible,
             OutputName::Stdout => return StrategyTarget::StandardOutput,
             OutputName::Discard => return StrategyTarget::Nowhere,
-            OutputName::Full | OutputName::Special => return StrategyTarget::System,
+            OutputName::Full | OutputName::StandardError | OutputName::Special => {
+                return StrategyTarget::System;
+            }
             // Each name is read in a working directory of its own depth; their paths compare as
             // the run's files' (`file_key`). An existing file of the run is at the path of the
             // same walk (`output_key`).

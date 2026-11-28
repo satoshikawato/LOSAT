@@ -59,25 +59,37 @@ fn open_with<S: AsRef<OsStr> + Clone>(
     files: &RunFiles,
     diagnostics: &mut dyn Write,
 ) -> Result<Opened, Error> {
+    open_logged(start, diagnostics, |start| {
+        files.log_target_for(words, supplied, start, log_file(words))
+    })
+}
+
+/// The start `start` up to its configuration load, whose file of `-logfile` is the target that
+/// `log` opens (with its host file name; `Err` with LOSAT's refusal of the name): `open`, and
+/// makeblastdb's start of LOSAT Web's run and check of its words (`api::tools::makeblastdb_call`).
+pub(super) fn open_logged(
+    start: ApplicationStart,
+    diagnostics: &mut dyn Write,
+    log: impl FnOnce(&ApplicationStart) -> Result<(DiagTarget, Option<Vec<u8>>), String>,
+) -> Result<Opened, Error> {
     match start.usage_report() {
         Ok(text) => {
             let _ = diagnostics.write_all(text.as_bytes());
         }
         Err(reason) => return Err(Error::Search(reason.into())),
     }
-    let (mut target, log_name) =
-        match files.log_target_for(words, supplied, &start, log_file(words)) {
-            Ok(opened) => opened,
-            Err(reason) => {
-                let program = crate::cli::reader::tool(start.program()).map_or_else(
-                    || start.program().to_ascii_uppercase(),
-                    |tool| tool.refusal_name.to_string(),
-                );
-                return Err(Error::Search(
-                    crate::seqmasks_io::run::unsupported(&reason, &program).into(),
-                ));
-            }
-        };
+    let (mut target, log_name) = match log(&start) {
+        Ok(opened) => opened,
+        Err(reason) => {
+            let program = crate::cli::reader::tool(start.program()).map_or_else(
+                || start.program().to_ascii_uppercase(),
+                |tool| tool.refusal_name.to_string(),
+            );
+            return Err(Error::Search(
+                crate::seqmasks_io::run::unsupported(&reason, &program).into(),
+            ));
+        }
+    };
     start.write_log_setup(&mut target, diagnostics);
     Ok(Opened {
         start,

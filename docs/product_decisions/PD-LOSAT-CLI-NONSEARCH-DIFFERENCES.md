@@ -91,7 +91,8 @@
   is NCBI's, the later writes dropped and the run going on to its exit status; rpsbproc's closed
   pipe, of its report, its standard error, its version and its help, in exception 10; makeblastdb's
   volume files at a closed pipe of its log as NCBI's, exception 10; line RG item T8b;
-  Owner-delegated, the same standing instruction)
+  Owner-delegated, the same standing instruction; exception 5's closed standard error also for
+  blast_formatter, the Owner's answer Q-T8b-N2=A of 2026-11-28)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -197,6 +198,12 @@ BLAST+.
    well; NCBI 2.17.0 observed, line RG item T6a, review 2 D2). LOSAT does the same where NCBI
    is ended by SIGPIPE at its first message (exit status 141 from the shell): the report is
    whole and the messages are lost.
+   Version 1.37: `losat blast_formatter` too (the Owner, 2026-11-28 13:36 JST, verbatim:
+   「Q-T8b-N2=A」, line RG's question Q-T8b-N2, option A: add blast_formatter to this sentence,
+   no code change). Its report goes through the search programs' stream (line RG item T8b); where
+   NCBI 2.17.0's blast_formatter is ended by SIGPIPE at an archive's warning on a closed standard
+   error (exit status 141, no report, no `-out` file), LOSAT writes the whole report and ends with
+   the run's exit code (0, or 6 where its standard output is full).
 6. **Standard output closed at the start** (version 1.3, accepted by the maintainer on
    2026-10-03 in Session S08b, plan DW-17). When a program starts with its standard output
    closed (`>&-`), NCBI's first write to `cout` fails: outfmt 0 reports `BLAST failed to

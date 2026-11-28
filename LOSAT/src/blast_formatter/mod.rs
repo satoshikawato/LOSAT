@@ -10,6 +10,7 @@ mod archive_out;
 mod formatting;
 pub(crate) mod refusals;
 mod search_program;
+mod tabular;
 
 use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};

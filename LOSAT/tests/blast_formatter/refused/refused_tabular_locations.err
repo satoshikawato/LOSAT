@@ -1,0 +1,1 @@
+Error: the tabular output formats (6, 7, 10 and 20) of a BLAST archive with queries given as locations, whose sequences NCBI BLAST+ reads from the database are not supported by LOSAT's BLAST_FORMATTER

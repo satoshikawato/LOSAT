@@ -337,6 +337,15 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
                 observer: None,
                 later_warnings: None,
             };
+            // The outfmt 0 prolog comes before the search, as in `search` (line RG item T4b-f).
+            write_pairwise_prologs(
+                &resolved,
+                BlastpSubjectSource::Fasta(&[]),
+                "",
+                &mut outputs,
+                true,
+            )
+            .expect("the prolog");
             write_reports_without_queries(
                 &resolved,
                 BlastpSubjectSource::Fasta(&[]),
@@ -2592,8 +2601,9 @@ fn a_negative_window_is_refused_by_psiblast_and_rpsblast_only() {
 // EXPERIMENT (LOSAT_X_BPQBLOCK): a database search without the Gumbel block (`-searchsp`,
 // `OLD_FSC`) keeps its block plan where the setup counts its sequences, and has none where the
 // count is 0 (`call_setup::setup_count_refused`): that search refuses in the call of all
-// queries, before any output (review E of line RG D1a-4, N3; the bytes are the rows'
-// `db.ak.bp.rej.nseq0.oldfsc.blocks` and `db.ak.bp.nseq0.ssp.allx.7`). Thirty queries of 3,000
+// queries, after the reports of the batches before its first searched one (review E of line RG
+// D1a-4, N3; line RG item bp-SF1; the bytes are the rows' `db.ak.bp.rej.nseq0.oldfsc.blocks` and
+// `db.ak.bp.nseq0.ssp.allx.7`). Thirty queries of 3,000
 // letters, three batches, more than one block of the built-in 50,000 letters.
 #[test]
 fn x_query_block_plan_is_kept_without_the_gumbel_block_but_for_a_count_of_0() {
@@ -2696,6 +2706,83 @@ fn banks_filled_refusal_names_the_batch_of_the_table() {
         );
     }
     assert_eq!(named(&gapped, 0, true), Some(0));
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276 (cited at
+// `call_setup::overflow_failure`): a search space that overflows NCBI's `Int8` is the failure of
+// the batch whose setup computes it, named by the batch's first searched query; an option space
+// (computed before the batch's setup spaces) that overflows for an earlier context names that
+// context's batch (line RG item bp-SF1).
+#[test]
+fn search_space_overflow_names_the_batch_of_its_first_overflowing_context() {
+    let karlin = crate::stats::lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+    let context = |q_idx| QueryContext {
+        q_idx,
+        frame: 0,
+        aa_seq: vec![0; 12],
+        aa_seq_nomask: None,
+        aa_len: 10,
+        orig_len: 10,
+        frame_base: 0,
+        is_valid: true,
+        karlin_params: karlin,
+    };
+    let contexts = [context(0), context(1), context(2), context(3)];
+    let batches = [
+        seq_range::RangedBatch {
+            input: 0..1,
+            searched: 0..1,
+        },
+        seq_range::RangedBatch {
+            input: 1..3,
+            searched: 1..3,
+        },
+        seq_range::RangedBatch {
+            input: 3..4,
+            searched: 3..4,
+        },
+    ];
+    let args = make_blastp_args().resolve().expect("resolved blastp args");
+    let overflow = || crate::stats::setup::SearchSpaceOverflow {
+        db_length: 1 << 55,
+        query_length: 10,
+        program: "BLASTP".to_string(),
+    };
+    type OptionSpace<'f> =
+        Option<&'f dyn Fn(&QueryContext) -> Result<i64, crate::stats::setup::SearchSpaceOverflow>>;
+    let named = |failed: usize, option_space_of: OptionSpace<'_>| {
+        let failure = call_setup::overflow_failure(
+            &args,
+            &batches,
+            &contexts[..failed],
+            option_space_of,
+            (&contexts[failed], overflow().into()),
+        )
+        .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+        .expect("a batch's failure");
+        assert!(
+            failure
+                .error
+                .to_string()
+                .contains("overflows NCBI BLAST+'s 64-bit effective search space"),
+            "{}",
+            failure.error
+        );
+        failure.query
+    };
+    assert_eq!(named(3, None), Some(3));
+    assert_eq!(named(2, None), Some(1));
+    assert_eq!(named(0, None), Some(0));
+    let option_space_of_query_0 = |ctx: &QueryContext| {
+        if ctx.q_idx == 0 {
+            Err(overflow())
+        } else {
+            Ok(5)
+        }
+    };
+    assert_eq!(named(3, Some(&option_space_of_query_0)), Some(0));
+    let option_space_fits = |_: &QueryContext| Ok(5);
+    assert_eq!(named(2, Some(&option_space_fits)), Some(1));
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts of the search of all queries whose preliminary

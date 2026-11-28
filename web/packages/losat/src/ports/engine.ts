@@ -62,6 +62,11 @@ export interface StartInfo {
    * working tree, `/dev/stdout` for `/dev/stdout`; null where `-logfile` never makes a file).
    */
   readonly logFileName?: string | null;
+  /**
+   * The command line's file name under which a run gives the `-export_search_strategy` file on stream 8, if it makes
+   * one (`s.asn` for `s.asn`, `./s.asn`, `in/../s.asn` and `/proc/self/cwd/s.asn`, `/tmp/s.asn` outside the working
+   * tree; line RG item F1w-r2, as `outPssm`); null where no run of the argv makes a file (`/dev/null`, `/etc/s.asn`).
+   */
   readonly strategyFile: string | null;
   readonly dryRun: boolean;
   /**

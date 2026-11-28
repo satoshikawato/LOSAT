@@ -141,11 +141,61 @@ test.describe('local BLAST database (-db) and repeats database (-filtering_db) U
       'Found nucleotide database (only_nuc), not a protein database for BLASTP.',
     );
 
-    // Reloading the page after referencing a DB shows the reload prompt ("Choose the folder again.")
+    // Reloading the page after choosing files asks for the files again, in the picker and by Run LOSAT
+    // (S4-5: it said "folder", the other button).
+    await setSubjectDbFiles(page, [{ name: 'again.pin', mimeType: 'application/octet-stream', buffer: Buffer.from('n') }]);
+    await expect(page.getByTestId('subject-db-selected')).toContainText('again');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('search-panel')).toHaveAttribute('data-describe', /^(ready|failed)$/, { timeout: 30_000 });
     await expect(page.getByTestId('subject-source-database')).toBeChecked();
-    await expect(page.getByTestId('subject-db-reload')).toContainText('Choose the folder again.');
+    await expect(page.getByTestId('subject-db-reload')).toContainText('Previous database: again. Choose the files again.');
+    await paste(page, 'query', '>q\nACGTACGTACGTACGTACGT\n');
+    await page.getByTestId('run-losat').click();
+    await expect(page.getByTestId('search-message')).toHaveText('Choose the files again.');
+  });
+
+  test('asks for the folder again after a reload when a folder was chosen', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Only Chromium lets the test choose a folder (webkitdirectory).');
+    const work = mkdtempSync(join(tmpdir(), 'losat-d31-e2e-'));
+    try {
+      const dir = join(work, 'nucdb');
+      mkdirSync(dir);
+      writeFileSync(join(dir, 'nt.nin'), 'n');
+      await openSearch(page);
+      await chooseDatabaseSource(page);
+      await page.getByTestId('subject-db-folder-input').setInputFiles(dir);
+      await expect(page.getByTestId('subject-db-selected')).toContainText('nucdb/nt');
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.getByTestId('search-panel')).toHaveAttribute('data-describe', /^(ready|failed)$/, { timeout: 30_000 });
+      await expect(page.getByTestId('subject-db-reload')).toContainText('Previous database: nucdb/nt. Choose the folder again.');
+      await paste(page, 'query', '>q\nACGTACGTACGTACGTACGT\n');
+      await page.getByTestId('run-losat').click();
+      await expect(page.getByTestId('search-message')).toHaveText('Choose the folder again.');
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  test('offers the databases an alias lists in its DBLIST, and only the volumes of one database stay hidden (S4-1)', async ({ page }) => {
+    await openSearch(page);
+    await chooseDatabaseSource(page);
+    const bytes = (text: string) => Buffer.from(text);
+    await setSubjectDbFiles(page, [
+      { name: 'na.nin', mimeType: 'application/octet-stream', buffer: bytes('a') },
+      { name: 'nb.nin', mimeType: 'application/octet-stream', buffer: bytes('b') },
+      { name: 'all.nal', mimeType: 'text/plain', buffer: bytes('TITLE both\nDBLIST na nb\n') },
+      { name: 'multi.nal', mimeType: 'text/plain', buffer: bytes('DBLIST multi.00 multi.01\n') },
+      { name: 'multi.00.nin', mimeType: 'application/octet-stream', buffer: bytes('0') },
+      { name: 'multi.01.nin', mimeType: 'application/octet-stream', buffer: bytes('1') },
+    ]);
+    const select = page.getByTestId('subject-db-select');
+    await expect(select).toBeVisible();
+    const options = await select.locator('option').evaluateAll((els) => els.map((el) => (el as HTMLOptionElement).value));
+    expect(options).toEqual(['all', 'multi', 'na', 'nb']);
+    // The pick starts with the alias, not with a database it lists.
+    await expect(select).toHaveValue('all');
+    await select.selectOption('nb');
+    await expect(page.getByTestId('search-summary-line')).toContainText('database nb');
   });
 });
 

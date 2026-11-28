@@ -13,13 +13,12 @@
 //! of a round serially (no `LOSAT_X_PAIRWISEPAR` pieces).
 
 use super::{
-    alignment_id_local, blastp_family_program, database_description_label, shown_hsp, table_scores,
-    write_blast_database_header, write_blastp_database_header_spacing,
+    alignment_id_local, database_description_label, shown_hsp, table_scores,
     write_blastp_query_footer_spacing, write_blastp_query_header, write_blastp_subject_part,
-    write_description_row_start, write_description_table, write_no_hits_found, write_prolog,
-    write_spaces, write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery,
-    BlastpPairwiseReport, HtmlRowMasks, HtmlRows, PairwiseConfig, PairwiseDatabase, PairwiseHit,
-    PairwiseView, RowDecoration,
+    write_description_row_start, write_description_table, write_no_hits_found, write_spaces,
+    write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery, BlastpPairwiseReport,
+    HtmlRowMasks, HtmlRows, PairwiseConfig, PairwiseDatabase, PairwiseHit, PairwiseView,
+    RowDecoration,
 };
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::ostream::ReportWrite;
@@ -71,10 +70,10 @@ pub(crate) struct ReportRound<'a> {
 
 /// The outfmt 0 report of the queries `query_range` of one round of `queries` (the one query of a
 /// round), whose `hits` are those queries' (the rows of a window of queries,
-/// `pairwise::write_blastp_pairwise_window`): the prolog when `prolog` is set (the run's first
-/// round) and the window starts the report, each query's warnings, then its section. No epilog.
-/// `anchored`: the sequences of the query-anchored section of outfmt 1 to 4 (`config.view`;
-/// `None` for outfmt 0).
+/// `pairwise::write_blastp_pairwise_window`): each query's warnings, then its section. No prolog
+/// (the search writes it before the first query batch, `pairwise::write_blastp_pairwise_prolog`)
+/// and no epilog. `anchored`: the sequences of the query-anchored section of outfmt 1 to 4
+/// (`config.view`; `None` for outfmt 0).
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:278-286
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_psiblast_round_report(
@@ -91,38 +90,12 @@ pub(crate) fn write_psiblast_round_report(
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
-    mut warnings: Option<&mut super::super::query_warnings::QueryWarnings<'_>>,
-    prolog: bool,
+    warnings: Option<&mut super::super::query_warnings::QueryWarnings<'_>>,
     round: ReportRound<'_>,
     anchored: Option<&dyn crate::report::query_anchored::ReportSequences>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
-    if prolog && query_range.start == 0 {
-        let prolog_result = write_prolog(
-            writer,
-            blastp_family_program(&config.program),
-            &report.version,
-            false,
-            false,
-            false,
-            super::html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
-        );
-        if let Err(error) = prolog_result {
-            let _ = writer.flush();
-            return Err(error);
-        }
-        match database {
-            Some(database) => write_blast_database_header(writer, database)?,
-            None => write_blastp_database_header_spacing(
-                writer,
-                &report.database_name,
-                report.database_num_sequences,
-                report.database_total_letters,
-                1,
-            )?,
-        }
-    }
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = (hit.hit.q_idx as usize)

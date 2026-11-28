@@ -298,7 +298,7 @@ fn ncbi4na_blocks_to_binary(
                 } else {
                     low
                 };
-                *byte = (high << 4) | low;
+                *byte = pair_byte([high, low]);
             }
         }
     }

@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pslot11_t5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pslot11_t5 (parsed Seq-ids, taxids 99990 and 150)",
+  "number-of-letters": 1560,
+  "number-of-sequences": 13,
+  "last-updated": "2026-11-27T16:06:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 52482,
+  "bytes-to-cache": 1814,
+  "files": [
+    "pslot11_t5.pdb",
+    "pslot11_t5.phr",
+    "pslot11_t5.pin",
+    "pslot11_t5.pog",
+    "pslot11_t5.pos",
+    "pslot11_t5.pot",
+    "pslot11_t5.psq",
+    "pslot11_t5.ptf",
+    "pslot11_t5.pto"
+  ]
+}

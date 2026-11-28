@@ -49,7 +49,7 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 These are on the list for a later release:
 
 - `makeprofiledb -dbtype cobalt`;
-- `blast_formatter` output formats other than `8`, `9` and `12`;
+- `blast_formatter` output formats other than `8`, `9`, `11` and `12`;
 - `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10` and `20`,
   and in the library and pylosat;
 - the `psiblast` output formats `13` to `16`.

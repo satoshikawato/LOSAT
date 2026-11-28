@@ -543,7 +543,7 @@ fn pssm_output_files(words: &[&str]) -> (Option<String>, Option<String>, bool) {
         return (None, None, false);
     };
     let host_name = |raw: Option<&std::path::Path>| {
-        raw.and_then(|name| RunFiles::pssm_host_name(name.as_os_str()))
+        raw.and_then(|name| RunFiles::output_host_name(name.as_os_str()))
             .and_then(|bytes| String::from_utf8(bytes).ok())
     };
     (
@@ -791,9 +791,25 @@ fn started_command(
         .map(|parsed| Next::Search(Box::new(parsed), strategy))
 }
 
-/// A receiver of the files of a run that keeps none (`validate`, which emits nothing), carrying
-/// the search's registered and read file names so `-logfile` is checked against the run's files.
+/// A receiver of the files of a run that keeps none (`validate`, which emits nothing, and the other
+/// searches of a run, `kept_by_no_one`), carrying the search's registered and read file names so
+/// that `-logfile` and the names of the run's files are read against the run's files.
 struct NoFiles(SearchRunFiles);
+
+/// The files of a search of the run whose files are `run_files` that no one keeps (`search_all`:
+/// a search other than the argv's own), with the run's registered and read names (`NoFiles`), so
+/// that the search reads each name of a file (`-export_search_strategy`, psiblast's `-out_pssm`)
+/// against the same run's files as the argv's own search (line RG item F1w-r2).
+fn kept_by_no_one(run_files: &RunFiles) -> RunFiles {
+    let names = match run_files {
+        RunFiles::Receiver(receiver) => SearchRunFiles {
+            registered: receiver.registered_files().to_vec(),
+            read: receiver.read_files().to_vec(),
+        },
+        RunFiles::Disk => SearchRunFiles::default(),
+    };
+    RunFiles::Receiver(Arc::new(NoFiles(names)))
+}
 
 impl losat::web_adapter::FileReceiver for NoFiles {
     fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
@@ -815,13 +831,14 @@ impl losat::web_adapter::FileReceiver for NoFiles {
 /// version word, which the command line prints before it loads the file), the file of `-logfile`
 /// (NCBI's scan of it, `log_file`, and the command line's normalized file name under which a run
 /// gives it on `STREAM_RUN_FILES`, `log_file_name`, `RunFiles::log_host_name`), the file of
-/// `-export_search_strategy` (the name as the argv's parser reads it, `strategy_file`: a run gives
-/// it on `STREAM_RUN_FILES` too; none for an argv that the parser rejects), whether the run is a dry
-/// run, whether the run takes its inputs from `losat_web2_register_inputs` (`inputs_together`: an
-/// argv with `-parse_deflines`), whether it prints a text in place of a search (`prints`:
-/// `"help"` or `"version"`, `STREAM_PRINTED`), which needs no inputs, and whether it searches the
-/// database of `-db` (`searches_database`: its `run` takes no subject handle, and the engine opens
-/// the database from the run's files, line WQA D12a). An unknown program is an error.
+/// `-export_search_strategy` (`strategy_file`: the command line's file name under which a run
+/// gives it on `STREAM_RUN_FILES` too, as `out_pssm`; none for an argv that the parser rejects),
+/// whether the run is a dry run, whether the run takes its inputs from
+/// `losat_web2_register_inputs` (`inputs_together`: an argv with `-parse_deflines`), whether it
+/// prints a text in place of a search (`prints`: `"help"` or `"version"`, `STREAM_PRINTED`), which
+/// needs no inputs, and whether it searches the database of `-db` (`searches_database`: its `run`
+/// takes no subject handle, and the engine opens the database from the run's files, line WQA
+/// D12a). An unknown program is an error.
 pub fn start_json(words: &[&str]) -> Result<String, String> {
     use losat::web_adapter::Preparsed;
     Program::parse(words.first().copied().unwrap_or(""))?;
@@ -868,15 +885,18 @@ pub fn start_json(words: &[&str]) -> Result<String, String> {
     Ok(out)
 }
 
-/// The name of the file of `-export_search_strategy` of the argv `words` (program name first), as
-/// the run gives the file (`losat::web_adapter::open_strategy_file`): the name as the argv's parser
-/// reads it. `None` without the option, for a name that is not UTF-8 (which the run refuses) and
-/// for an argv that the parser rejects or that prints a text.
+/// The name of the file of `-export_search_strategy` of the argv `words` (program name first),
+/// under which a run gives the file if it makes it (`losat::web_adapter::open_strategy_file`,
+/// `run_files::StrategyTarget::File`): the command line's file name (`RunFiles::output_host_name`,
+/// as for `-out_pssm`; `s.asn` for `./s.asn`, `in/../s.asn` and `/proc/self/cwd/s.asn`; line RG
+/// item F1w-r2). `None` without the option, for a name that makes no file (`/dev/null`,
+/// `/dev/stdout`, `/etc/s.asn`), for a name that is not UTF-8 (which the run refuses) and for an
+/// argv that the parser rejects or that prints a text.
 fn strategy_file(words: &[&str]) -> Option<String> {
     let (_, command) = parse_words(words).ok()?;
     losat::web_adapter::export_search_strategy_of(&command)
-        .and_then(|path| path.to_str())
-        .map(str::to_string)
+        .and_then(|path| RunFiles::output_host_name(path.as_os_str()))
+        .and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
 /// `losat_web2_start`: emits the *start* JSON (`start_json`) on stream 2.
@@ -2124,7 +2144,7 @@ pub fn run(
     // The run's files (the file of `-logfile`), after the run, whether it failed or not.
     let handed = started.map_or(Ok(()), CallerStart::finish);
     // The archive closes here, also where the start's files failed: a file handed over later is
-    // refused (`RunFileArchive::receive`).
+    // refused (`RunFileArchive::receive_run_file`).
     let kept = files.close();
     let emitted = handed.and_then(|()| RunFileArchive::emit(kept));
     // The run's import of its search strategy ends with it (`imported`).
@@ -2132,12 +2152,16 @@ pub fn run(
     result.and(emitted.map_err(|error| format!("the files of the run: {error}")))
 }
 
-/// Entries queued in [`RunFileArchive`] before the run emits them on `STREAM_RUN_FILES`.
-type ArchivedEntries = Vec<(Vec<u8>, Vec<u8>)>;
+/// Entries queued in [`RunFileArchive`] before the run emits them on `STREAM_RUN_FILES`: each
+/// one's name, bytes and the option that names it.
+type ArchivedEntries = Vec<(Vec<u8>, Vec<u8>, losat::web_adapter::RunFileOption)>;
 
-/// The files of a run besides its outputs (the file of `-logfile`), which the engine hands over
-/// when the run ends (`RunFiles::Receiver`), emitted as a ZIP archive on `STREAM_RUN_FILES` after
-/// the run, whether it succeeded or failed (docs/web/abi_v2.md §5), and only when there are any.
+/// The files of a run besides its outputs (the file of `-logfile`, the strategy file, the PSSM
+/// files), which the engine hands over when the run ends (`RunFiles::Receiver`), each with the
+/// option that names it (`FileReceiver::receive_run_file`), emitted as a ZIP archive on
+/// `STREAM_RUN_FILES` after the run, whether it succeeded or failed (docs/web/abi_v2.md §5), and
+/// only when there are any: each entry's comment is its option (`RunFileOption::name`), by which
+/// the host labels the file (line RG item F1w-r2, review 3 S1).
 /// The archive closes once, after the run (`close`): a file handed over after it (`None`) is
 /// refused, so that a file that the engine hands over late is its error (LOSAT's internal error of
 /// `-export_search_strategy`, `strategy::end_run`) instead of a file lost without one.
@@ -2177,8 +2201,8 @@ impl RunFileArchive {
             return Ok(());
         }
         let mut zip = crate::zip::ZipStream::new(StreamWriter::new(STREAM_RUN_FILES));
-        for (name, bytes) in &files {
-            zip.add(name, bytes)?;
+        for (name, bytes, option) in &files {
+            zip.add_with_comment(name, bytes, option.name().as_bytes())?;
         }
         zip.finish()?.finish();
         Ok(())
@@ -2186,7 +2210,21 @@ impl RunFileArchive {
 }
 
 impl losat::web_adapter::FileReceiver for RunFileArchive {
-    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+    /// Every file of a search's run comes with its option (`receive_run_file`): one without is
+    /// LOSAT's internal error, not an entry that the host would label by its name alone.
+    fn receive(&self, name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+        Err(std::io::Error::other(format!(
+            "LOSAT's internal error: the run's file {} came without the option that names it",
+            String::from_utf8_lossy(name)
+        )))
+    }
+
+    fn receive_run_file(
+        &self,
+        option: losat::web_adapter::RunFileOption,
+        name: &[u8],
+        bytes: &[u8],
+    ) -> std::io::Result<()> {
         match &mut *self
             .files
             .lock()
@@ -2194,11 +2232,13 @@ impl losat::web_adapter::FileReceiver for RunFileArchive {
         {
             Some(files) => {
                 // Match filesystem semantics: writing the same file name again replaces its bytes
-                // in place so stream 8 holds the final bytes written for each name.
-                if let Some(existing) = files.iter_mut().find(|(n, _)| n.as_slice() == name) {
+                // in place so stream 8 holds the final bytes written for each name, under the
+                // option that wrote them (`-out_ascii_pssm` after `-out_pssm` of one name).
+                if let Some(existing) = files.iter_mut().find(|(n, _, _)| n.as_slice() == name) {
                     existing.1 = bytes.to_vec();
+                    existing.2 = option;
                 } else {
-                    files.push((name.to_vec(), bytes.to_vec()));
+                    files.push((name.to_vec(), bytes.to_vec(), option));
                 }
                 Ok(())
             }
@@ -2329,7 +2369,8 @@ struct Done {
 /// search writes one of the same name whose bytes no one keeps, so that it reads its records and
 /// refuses the file as the argv's search does. For `psiblast`, PSSM outputs (`-out_pssm`,
 /// `-out_ascii_pssm`) follow the same rule: the argv's own search receives `context.run_files`
-/// (`losat::web_adapter::give_pssm_run_files`), while any other search writes to `NoFiles`. The
+/// (`losat::web_adapter::give_pssm_run_files`), while any other search writes to `NoFiles` with
+/// the run's names (`kept_by_no_one`). The
 /// messages that the command line writes to its standard error for the argv go to `diagnostics`,
 /// and what the other formats' standard error adds to them goes to stream 3 after them
 /// (`CallerSink::add`); for an error that ends the run, `posted` gets the NCBI message that the
@@ -2396,7 +2437,7 @@ fn search_all(
                 let pssm_files = if position == own {
                     run_files.clone()
                 } else {
-                    RunFiles::Receiver(Arc::new(NoFiles(SearchRunFiles::default())))
+                    kept_by_no_one(run_files)
                 };
                 losat::web_adapter::give_pssm_run_files(&mut blastp, pssm_files);
                 command = Commands::Blastp(blastp);
@@ -2407,7 +2448,7 @@ fn search_all(
                 false => losat::web_adapter::open_strategy_file(
                     &command,
                     &words[1..],
-                    &RunFiles::Receiver(Arc::new(NoFiles(SearchRunFiles::default()))),
+                    &kept_by_no_one(run_files),
                 )
                 .map_err(|error| format!("{error:#}"))?,
             };

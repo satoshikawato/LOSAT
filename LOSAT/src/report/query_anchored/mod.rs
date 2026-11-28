@@ -1902,7 +1902,10 @@ struct Insert {
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1629-1677
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3099-3120
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3076-3096
+/// Inlined into each instance of its one caller (`display_row_data_set`), as
+/// `display_sequence_line`.
 #[allow(clippy::too_many_arguments)]
+#[inline(always)]
 fn display_inserts(
     out: &mut Vec<u8>,
     map: &AlnMap<'_>,

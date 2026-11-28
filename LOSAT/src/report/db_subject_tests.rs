@@ -1363,6 +1363,10 @@ fn a_held_report_that_throws_ends_the_run_at_the_next_arrival() {
     let loads = walk(vec![report(true, 0, &[0, 1])], &open);
     assert!(loads.reaches(1) && loads.made().is_empty());
     assert_eq!(loads.held_out(), &[HeldKey::Key(0), HeldKey::Key(1)]);
+    // Until then its bytes are made as the lookups give them: the first `Hit` throws, the next
+    // loads nothing.
+    assert_eq!(loads.load(0), HitLoad::Throws);
+    assert_eq!(loads.load(1), HitLoad::Unread);
     // The next call makes it at the arrival of its first report, after that report's prefetch.
     let carried = |key: usize| crate::report::db_subject::HeldHit {
         subject: Some(std::sync::Arc::new(parsed[key].clone())),

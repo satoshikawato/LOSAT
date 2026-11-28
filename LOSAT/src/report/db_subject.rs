@@ -6303,8 +6303,7 @@ impl HitLoads {
             );
         } else if call.held && call.later {
             // A later call (psiblast's next round or query) makes it.
-            loads.held_out = pending.iter().map(|(hit, _)| *hit).collect();
-            pending.clear();
+            loads.hand_held_on(&mut pending, run, walk, &parsed, &mut passed);
         }
         // A held report that the run never makes (its end, or a stop, comes first) loads nothing.
         for (_, keys) in pending {
@@ -6427,6 +6426,49 @@ impl HitLoads {
             }
         }
         self.made.push(HeldMade { at, hits, thrown });
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2380-2399
+    /// Hands the held report's `Hit`s `pending` on to a later call (`held_out`), which makes the
+    /// report at its arrival or epilog. Until then the call makes the report's bytes as the `Hit`s'
+    /// own lookups give them now, without loading anything ([`ScopeWalk::peek`]): another
+    /// sequence (`HitLoad::Shown`, refused), or the exception of a lookup that throws, after
+    /// which the report's later `Hit`s load nothing; the arrival's walk refuses a `Hit` for which
+    /// it gives another sequence and fails the report at the first that throws there.
+    fn hand_held_on<'p>(
+        &mut self,
+        pending: &mut Vec<(HeldKey, Vec<usize>)>,
+        run: Option<RunThrow>,
+        walk: &ScopeWalk,
+        parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
+        passed: &mut std::collections::HashSet<usize>,
+    ) {
+        let mut thrown = false;
+        for (hit, keys) in pending.iter() {
+            let HeldKey::Key(key) = *hit else {
+                continue;
+            };
+            if thrown {
+                passed.extend(keys.iter().copied());
+                continue;
+            }
+            let Some(subject) = run.and(parsed(key)) else {
+                continue;
+            };
+            match walk.peek(subject) {
+                HitLoad::Shown(shown) => {
+                    self.shown.insert(key, shown);
+                }
+                _ => {
+                    if let Some(exception) = subject.lookup_throws() {
+                        self.throws.insert(key, exception);
+                        passed.extend(keys.iter().copied().filter(|&other| other != key));
+                        thrown = true;
+                    }
+                }
+            }
+        }
+        self.held_out = pending.drain(..).map(|(hit, _)| hit).collect();
     }
 
     /// The reads after report `report` (`CallReads::after`, psiblast's PSSM), in the walk `walk`

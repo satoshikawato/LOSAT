@@ -21,7 +21,9 @@ use super::time::LocalTime;
 use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
-use crate::blastinput::ncbi_environment::{ApplicationSettings, DiagTarget, ReadVerification};
+use crate::blastinput::ncbi_environment::{
+    ApplicationSettings, DiagTarget, PathRules, ReadVerification,
+};
 use crate::ncbi_str::string_to_uint8_data_size_bytes;
 use crate::report::run_files::{LogOutput, OpenFiles, ToolLog, Unopened};
 use crate::seqdb::date::iso8601_date_time_exception;
@@ -660,10 +662,16 @@ fn compressed_fault_error(name: &[u8], compression: Compression, fault: &str) ->
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:792-836
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:296-313
 // Every file is checked, in the order of `-in`, before the first one is read.
 // `CFile::Exists` is true for a regular file, also through a link; anything
-// else "does not exist". The test of the format opens the file again, so the
-// build reads it from its start. `ERR_POST` ends the message with a line feed.
+// else "does not exist". `CFile` keeps the name without its trailing separators
+// (`CDirEntry::Reset`, `PathRules::reset`), so `Exists` and `GetLength` look at
+// `in.fa` for `in.fa/`, while the test of the format opens the name as written:
+// a name that does not open is "NOT FASTA", and the build adds nothing from it
+// (makeblastdb 2.17.0, probe of 2026-11-28, line NP WW4f). The test of the format
+// opens the file again, so the build reads it from its start. `ERR_POST` ends the
+// message with a line feed.
 /// `x_VerifyInputFilesType` for FASTA and ASN.1 inputs (`check_fasta` is true only for FASTA).
 fn verify_input_files(
     names: &[&[u8]],
@@ -672,7 +680,8 @@ fn verify_input_files(
 ) -> Result<(), MakedbError> {
     for &seq_file in names {
         let path = crate::utils::os_bytes::path_of_bytes(seq_file);
-        match std::fs::metadata(&path) {
+        let entry = crate::utils::os_bytes::path_of_bytes(PathRules::HOST.reset(seq_file));
+        match std::fs::metadata(&entry) {
             Ok(meta) if meta.is_file() && meta.len() == 0 => {
                 return Err(options_error_bytes(
                     [b"File ".as_slice(), seq_file, b" is empty"].concat(),

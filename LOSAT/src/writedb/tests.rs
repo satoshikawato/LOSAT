@@ -1075,6 +1075,47 @@ fn an_empty_in_is_refused_where_makeblastdb_reads_the_list() {
     assert_eq!(files_named(&tmp, ""), [] as [&str; 0]);
 }
 
+/// `-in NAME/`, a FASTA file's name with a trailing `/`: makeblastdb 2.17.0's `CFile` drops the
+/// trailing separators (`CDirEntry::Reset`), so the file exists and is not empty, while the test of
+/// the format and the build open the name as written, which does not open: the warning that it
+/// does "NOT appear to be FASTA", nothing added, "No volumes were created." and exit status 0; a
+/// missing file's name with a `/` "does not exist" (probe of 2026-11-28, line NP WW4f:
+/// `makeblastdb -in prot.faa/ -dbtype prot -title t -out db -blastdb_version 4 -max_file_sz 3GB`,
+/// the official Linux x64 release). LOSAT read the name with its `/` and said that it does not
+/// exist (exit status 1).
+#[test]
+fn an_input_name_ending_in_a_separator_is_the_file_to_cfile() {
+    let tmp = TempDir::unique("writedb-inslash");
+    let db = base_in(&tmp, "db");
+    let input = format!("{}/", prot_fasta());
+    let (status, log, messages) = makedb(&input, &db, "3GB", b"");
+    assert_eq!(
+        (status, messages),
+        (
+            0,
+            format!(
+                "Warning: [makeblastdb] \nInput file {input} does NOT appear to be FASTA \
+                 (processing anyway).\nAdvise validating database with 'blastdbcheck -dbtype \
+                 [prot|nucl] -db ${{DBNAME}}'\n\n"
+            )
+        )
+    );
+    assert_eq!(
+        String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+        format!("{LOG_HEAD}Maximum file size: 3000000000B\n\nNo volumes were created.\n\n")
+    );
+    assert_eq!(files_named(&tmp, ""), [] as [&str; 0]);
+    let missing = base_in(&tmp, "none.faa/");
+    let (status, _, messages) = makedb(&missing, &db, "3GB", b"");
+    assert_eq!(
+        (status, messages),
+        (
+            1,
+            format!("LOSAT options error: File {missing} does not exist\n")
+        )
+    );
+}
+
 /// An output name whose LMDB lock file (`NAME.pdb-lock`) passes the file system's limit of a
 /// file name, 255 bytes (an output name of 247 bytes and more), stops a version 5 build where
 /// LMDB's open of that file fails, as in makeblastdb 2.17.0 (probe of 2026-11-08): when the

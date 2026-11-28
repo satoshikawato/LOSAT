@@ -836,7 +836,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
         assert_eq!(
             stop_lookup_unsure(
                 &db,
-                &TaxdbRun::default(),
+                &TaxdbRun::default().loads_before(None),
                 &subjects,
                 &before,
                 &stop_queries(0),
@@ -910,7 +910,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
                   parsed: &crate::report::db_subject::ParsedSubject| {
         stop_lookup_unsure(
             db,
-            run,
+            &run.loads_before(None),
             subjects,
             &load_before_stop(db, subjects).at_first_stop(),
             &queries,
@@ -1072,7 +1072,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     )];
     let given = stop_lookup_unsure(
         &db,
-        &recorded,
+        &recorded.loads_before(None),
         &stopping,
         &[LoadBeforeStop::No],
         &stop_queries(1),
@@ -1720,6 +1720,7 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
                     .collect::<Vec<u32>>()
             },
         )
+        .map(|(_, ordinal)| ordinal)
         .collect()
     };
     let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
@@ -1728,7 +1729,7 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
         batch_prefetch(
             &db,
             &TaxdbRun::default(),
-            loaded.iter().map(|&ordinal| subject(ordinal)),
+            loaded.iter().map(|&ordinal| (0, subject(ordinal))),
             [subject(s2)],
             "BLASTP",
             queries,

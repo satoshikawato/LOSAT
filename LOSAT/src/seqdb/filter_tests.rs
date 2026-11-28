@@ -411,7 +411,7 @@ fn a_negative_seqid_list_excludes_an_oid_only_when_every_id_is_covered() {
     assert_eq!(db.num_seqs(), whole - 1);
     // A definition line whose only ids are gis or `ti` general ids is dropped by a
     // negative seqid list (`CSeqDBNegativeList::FindId` matches no type): an OID of such
-    // lines alone keeps none: its hits get no Seq-align (`keeps_line`), and a read of its
+    // lines alone keeps none: its hits get no Seq-align (`SeqDb::line_read`), and a read of its
     // lines still refuses (no report reads it); every other kept OID reads.
     let unrestricted = ids_db("prot_v5", SeqType::Protein);
     let gi_only: Vec<u32> = (0..unrestricted.num_seqs())
@@ -435,7 +435,10 @@ fn a_negative_seqid_list_excludes_an_oid_only_when_every_id_is_covered() {
         match db.volumes[at.volume].defline_set(at.vol_oid) {
             Ok(set) => {
                 assert!(!gi_only.contains(&oid), "{oid}");
-                assert!(db.keeps_line(ordinal).unwrap(), "{oid}");
+                assert!(
+                    db.line_read(ordinal).map(|(kept, _)| kept).unwrap(),
+                    "{oid}"
+                );
                 assert!(set.deflines.iter().all(|d| {
                     d.ids.iter().all(|id| {
                         let mut out = Vec::new();
@@ -447,7 +450,10 @@ fn a_negative_seqid_list_excludes_an_oid_only_when_every_id_is_covered() {
             Err(error) => {
                 assert!(gi_only.contains(&oid), "{oid}: {error}");
                 assert!(error.to_string().contains("none of its definition lines"));
-                assert!(!db.keeps_line(ordinal).unwrap(), "{oid}");
+                assert!(
+                    !db.line_read(ordinal).map(|(kept, _)| kept).unwrap(),
+                    "{oid}"
+                );
             }
         }
     }
@@ -606,7 +612,7 @@ fn a_binary_list_selects_what_its_text_list_selects() {
 fn a_sequence_kept_without_a_definition_line_gets_no_seq_align() {
     // `lcl|Subject_29|pdb|3ABC|C`: the molecule name is a lookup key, no line's id. The
     // list keeps the sequence (it is searched and counted), but none of its lines: NCBI
-    // makes no Seq-align of its hits (`keeps_line`); a read of its lines refuses.
+    // makes no Seq-align of its hits (`SeqDb::line_read`); a read of its lines refuses.
     let mut db = ids_db("prot_v5", SeqType::Protein);
     db.restrict(
         &DbList::Seqids(list_of(b"3ABC\nDAA10001.1\n", false)),
@@ -616,7 +622,7 @@ fn a_sequence_kept_without_a_definition_line_gets_no_seq_align() {
     assert_eq!(db.num_seqs(), 2);
     assert!(db.drops_lineless_hits());
     let kept: Vec<bool> = (0..2)
-        .map(|ordinal| db.keeps_line(ordinal).unwrap())
+        .map(|ordinal| db.line_read(ordinal).map(|(kept, _)| kept).unwrap())
         .collect();
     assert_eq!(kept.iter().filter(|&&kept| kept).count(), 1, "{kept:?}");
     let lineless = kept.iter().position(|&kept| !kept).unwrap() as u32;
@@ -631,7 +637,7 @@ fn a_sequence_kept_without_a_definition_line_gets_no_seq_align() {
     // Without a seqid list every sequence keeps its lines, and none is read.
     let whole = ids_db("prot_v5", SeqType::Protein);
     assert!(!whole.drops_lineless_hits());
-    assert!(whole.keeps_line(0).unwrap());
+    assert!(whole.line_read(0).map(|(kept, _)| kept).unwrap());
 }
 
 #[test]
@@ -648,7 +654,7 @@ fn a_sequence_whose_lines_hold_no_seqid_keeps_no_line_without_a_list() {
         let db = SeqDb::open(idlist.join(name).to_str().unwrap(), seqtype).unwrap();
         assert!(!db.drops_lineless_hits());
         let read: Vec<bool> = (0..db.num_seqs())
-            .map(|ordinal| db.keeps_line(ordinal).unwrap())
+            .map(|ordinal| db.line_read(ordinal).map(|(kept, _)| kept).unwrap())
             .collect();
         assert_eq!(read, kept, "{name}");
         // The walk reads no string, so it reports no UTF8String.
@@ -673,7 +679,7 @@ fn every_negative_list_excludes_its_lineless_sequences_at_the_fetches() {
     assert!(db.drops_lineless_hits());
     assert!(db.excludes_lineless_at_fetch());
     let lineless: Vec<u32> = (0..db.num_seqs() as u32)
-        .filter(|&ordinal| !db.keeps_line(ordinal).unwrap())
+        .filter(|&ordinal| !db.line_read(ordinal).map(|(kept, _)| kept).unwrap())
         .collect();
     assert_eq!(lineless, [11, 14, 28]);
     // A positive list leaves NCBI's id set blank: its sequences without a line are not
@@ -701,7 +707,8 @@ fn every_negative_list_excludes_its_lineless_sequences_at_the_fetches() {
         .unwrap();
         assert!(gis.drops_lineless_hits());
         assert_eq!(gis.excludes_lineless_at_fetch(), negative);
-        assert!((0..gis.num_seqs() as u32).all(|ordinal| gis.keeps_line(ordinal).unwrap()));
+        assert!((0..gis.num_seqs() as u32)
+            .all(|ordinal| gis.line_read(ordinal).map(|(kept, _)| kept).unwrap()));
     }
 }
 
@@ -832,7 +839,7 @@ fn every_list_tests_each_line_as_ncbis() {
         Ok(Some(vec![true, true]))
     );
     // A sequence of lines without Seq-ids keeps none: a seqid list's reads refuse it, a taxid
-    // list's give no line (both drop its hits, `SeqDb::keeps_line`).
+    // list's give no line (both drop its hits, `SeqDb::line_read`).
     let lineless = DeflineSet {
         deflines: vec![defline(Some(5), None)],
         utf8: false,

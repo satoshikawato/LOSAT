@@ -1935,7 +1935,7 @@ impl std::error::Error for FetchRefusal {}
 /// NCBI's Seq-aligns of the final hit lists of a database search (line DBID item lineless):
 /// a hit on a sequence that the database's list keeps without any of its definition
 /// lines, or whose lines hold no Seq-id (an edited header, without a list too; line RG
-/// D1c-1c-b), gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
+/// D1c-1c-b), gets none (`SeqDb::line_read`, blast_seqalign.cpp:1582-1586), so it leaves every
 /// report, the prefetch, the taxonomy lookups and psiblast's PSSM, while it was searched, took
 /// its place in the hit list before the cut to `-max_target_seqs` and counts in the
 /// statistics. Each program drops such hit lists right after that cut, before the reads of
@@ -2357,14 +2357,15 @@ impl<'a, T> LoadedBefore<'a, T> {
     // `report::query_warnings::ReadCursor::cut`: an `Iteration` that the stream cut makes no
     // `Hit`, so it loads nothing)
     /// What NCBI's BLAST database data loader loaded for each held batch, in the order of the
-    /// batches: `loaded(span, hits, loads)` of the batch of the queries `span`, whose hits
-    /// `batch` gives (`None`: the call does not hold them) and whose loads are [`batch_loads`] of
-    /// their Seq-aligns (`seq_aligns(span, hits)`, [`subject_seq_aligns`]); where they are the
-    /// reports' reads ([`BatchLoads::Read`]), of each query of the batch whose report NCBI writes
-    /// (`span` its query alone; not one whose outfmt 5 report the stream cut before its hits,
-    /// `cuts`, which loads nothing: review 6 of line DBID loadord, H2). The walk over the
-    /// batches and the one question whether a batch's prefetch is off are here, which of its
-    /// reports load is [`BatchLoads::report_spans`]; how each program counts its Seq-aligns and
+    /// batches, each with the batch's number (its first query, as the stream numbers it for
+    /// [`TaxdbRun::note_loaded`]): `loaded(span, hits, loads)` of the batch of the queries `span`,
+    /// whose hits `batch` gives (`None`: the call does not hold them) and whose loads are
+    /// [`batch_loads`] of their Seq-aligns (`seq_aligns(span, hits)`, [`subject_seq_aligns`]);
+    /// where they are the reports' reads ([`BatchLoads::Read`]), of each query of the batch whose
+    /// report NCBI writes (`span` its query alone; not one whose outfmt 5 report the stream cut
+    /// before its hits, `cuts`, which loads nothing: review 6 of line DBID loadord, H2). The walk
+    /// over the batches and the one question whether a batch's prefetch is off are here, which of
+    /// its reports load is [`BatchLoads::report_spans`]; how each program counts its Seq-aligns and
     /// which of its subjects a batch's loads read stay with its hit lists (review 4 of line DBID
     /// loadord, L4; [`BatchLoads::reported_rows`] where its prefetched set is its reported set).
     pub(crate) fn subjects<I>(
@@ -2372,7 +2373,7 @@ impl<'a, T> LoadedBefore<'a, T> {
         batch: impl Fn(&'a [T], std::ops::Range<usize>) -> Option<&'a [T]> + 'a,
         seq_aligns: impl Fn(std::ops::Range<usize>, &'a [T]) -> usize + 'a,
         loaded: impl Fn(std::ops::Range<usize>, &'a [T], BatchLoads) -> I + 'a,
-    ) -> impl Iterator<Item = I::Item> + 'a
+    ) -> impl Iterator<Item = (usize, I::Item)> + 'a
     where
         I: IntoIterator + 'a,
         I::IntoIter: 'a,
@@ -2387,7 +2388,7 @@ impl<'a, T> LoadedBefore<'a, T> {
         batch: impl Fn(&'a [T], std::ops::Range<usize>) -> Option<&'a [T]> + 'a,
         seq_aligns: impl Fn(std::ops::Range<usize>, &'a [T]) -> usize + 'a,
         loaded: impl Fn(std::ops::Range<usize>, &'a [T], BatchLoads) -> I + 'a,
-    ) -> impl Iterator<Item = I::Item> + 'a
+    ) -> impl Iterator<Item = (usize, I::Item)> + 'a
     where
         I: IntoIterator + 'a,
         I::IntoIter: 'a,
@@ -2408,10 +2409,16 @@ impl<'a, T> LoadedBefore<'a, T> {
                 let loads = batch_loads_at(limit, format, seq_aligns(span.clone(), held), rows);
                 loads
                     .report_spans(cuts, span.clone())
-                    .filter_map(|queries| Some((queries.clone(), batch(hits, queries)?, loads)))
+                    .filter_map(|queries| {
+                        Some((span.start, queries.clone(), batch(hits, queries)?, loads))
+                    })
                     .collect()
             })
-            .flat_map(move |(span, hits, loads)| loaded(span, hits, loads))
+            .flat_map(move |(number, span, hits, loads)| {
+                loaded(span, hits, loads)
+                    .into_iter()
+                    .map(move |subject| (number, subject))
+            })
     }
 }
 
@@ -5067,6 +5074,22 @@ pub(crate) struct TaxdbRun {
     separate_xml2: bool,
 }
 
+/// The note of the loads of the query batch `batch`, `subjects`, in the record `record`
+/// ([`TaxdbRun::note_loaded`]): its sequences with parsed Seq-ids, none where it has none.
+fn note_batch<'s>(
+    record: &mut crate::report::db_subject::ScopeRecord,
+    batch: usize,
+    subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
+) {
+    let parsed: Vec<&crate::report::db_subject::ParsedSubject> = subjects
+        .into_iter()
+        .filter_map(|subject| subject.parsed)
+        .collect();
+    if !parsed.is_empty() {
+        record.note(batch, parsed);
+    }
+}
+
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct PrefetchTexts {
@@ -6199,38 +6222,53 @@ impl TaxdbRun {
     /// caller that searches the queries of a run in several calls, or writes each batch's reports
     /// before it searches the next (BLASTX), records each batch that does not stop; the callers
     /// that hold a call's batches give the loads of the batches before to the stop itself
-    /// ([`batch_prefetch`]'s `before`). Only the sequences with parsed Seq-ids are kept (one
-    /// without them holds no id that a load can find), each as `ScopeRecord::note` keeps it; the
-    /// callers ask it only of a database with parsed Seq-ids. `batch`: the query batch of these
-    /// loads, as the program numbers its batches for its walks of the reports' loads
-    /// (`BatchPrefetch::report_read`; psiblast's rounds of a query, its batch, share the number),
-    /// whose scope holds them until a record of another batch ([`TaxdbRun::loads_before`]).
+    /// ([`batch_prefetch`]'s `before`, [`TaxdbRun::loads_at_stop`]). Only the sequences with
+    /// parsed Seq-ids are kept (one without them holds no id that a load can find), each as
+    /// `ScopeRecord::note` keeps it; the callers ask it only of a database with parsed Seq-ids.
+    /// `batch`: the query batch of these loads, as the program numbers its batches for its walks
+    /// of the reports' loads (`BatchPrefetch::report_read`; psiblast's rounds of a query, its
+    /// batch, share the number), whose scope holds them until a record of another batch
+    /// ([`TaxdbRun::loads_before`]).
     pub(crate) fn note_loaded<'s, I>(&self, batch: usize, subjects: impl FnOnce() -> I)
     where
         I: IntoIterator<Item = PrefetchSubject<'s>>,
     {
-        self.keep_loaded(Some(batch), subjects());
+        note_batch(
+            &mut self.loaded.write().expect("the run's record"),
+            batch,
+            subjects(),
+        );
     }
 
-    /// The record of [`TaxdbRun::note_loaded`], also at a stop ([`batch_prefetch`]): the subjects
-    /// that the call's batches before loaded (`batch` `None`: the loader's alone; the run ends at
-    /// the stop).
-    fn keep_loaded<'s>(
+    /// The loads before the stop of a batch's prefetch ([`batch_prefetch`]): the run's record
+    /// after the loads of the call's batches before that the caller still holds (`before`, each
+    /// subject with its batch's number, the batches in order), each batch a note of its own as
+    /// [`TaxdbRun::note_loaded`] makes it where the batch's reports are written before the next
+    /// batch, in a copy of the record. The record itself is left as it was: the held batches'
+    /// reports, written after the stop one batch at a time, each walk from the record that the
+    /// stream's walk had and record their batch ([`TaxdbRun::loads_before`]), so that both paths
+    /// write the same bytes (review of line RG D-SO-5, H1). Without held batches, the record.
+    pub(crate) fn loads_at_stop<'s>(
         &self,
-        batch: Option<usize>,
-        subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
-    ) {
-        let parsed: Vec<&crate::report::db_subject::ParsedSubject> = subjects
-            .into_iter()
-            .filter_map(|subject| subject.parsed)
-            .collect();
-        if parsed.is_empty() {
-            return;
+        before: impl IntoIterator<Item = (usize, PrefetchSubject<'s>)>,
+    ) -> crate::report::db_subject::LoadsBefore {
+        let mut before = before.into_iter().peekable();
+        if before.peek().is_none() {
+            return self.loads_before(None);
         }
-        self.loaded
-            .write()
-            .expect("the run's record")
-            .note(batch, parsed);
+        let mut copy = self.loaded.read().expect("the run's record").clone();
+        while let Some((batch, first)) = before.next() {
+            let mut subjects = vec![first];
+            while let Some((_, subject)) = before.next_if(|(next, _)| *next == batch) {
+                subjects.push(subject);
+            }
+            note_batch(&mut copy, batch, subjects);
+        }
+        crate::report::db_subject::LoadsBefore::new(
+            &std::sync::Arc::new(std::sync::RwLock::new(copy)),
+            None,
+            self.calls_before,
+        )
     }
 
     /// Records that calls of the run before this one loaded sequences that no record here holds
@@ -6385,8 +6423,9 @@ impl TaxdbRun {
     /// the offset error's taxid and another taxid of its slot ([`TaxdbRun::cache_collision`]).
     /// Such a run refuses a batch's prefetch or a report's read (in every format) where NCBI's
     /// order of its loads, or its keeping of a sequence read before, decides the texts ([`prefetch_slot_plan`], [`load_read_texts`]), which can be a later batch: BLASTX holds its XML document (outfmt 5, and 13 to 16) then, which
-    /// the refusal drops; TBLASTX turns its report stream off and BLASTP takes the search of all
-    /// queries, which make every batch's lookups before the first byte.
+    /// the refusal drops; BLASTP takes the search of all queries, which makes every batch's
+    /// lookups before the first byte; BLASTN's and TBLASTX's report streams write the refusal in
+    /// the batch that meets it, after the reports of the batches before.
     pub(crate) fn cache_may_refuse(&self, db: &SeqDb) -> bool {
         self.cache_collision(db).is_some()
     }
@@ -7477,10 +7516,10 @@ pub(crate) fn tabular_names<'t>(
 /// they ask: BLASTX, which writes each batch's reports before it searches the next, calls it
 /// from its first batch on, unless no batch can fetch a subject (`prefetch_always_off` with
 /// rows that read none); BLASTN, TBLASTN and TBLASTX call it only where NCBI fetches a subject,
-/// so a run that fetches none is not refused: TBLASTN, and TBLASTX, whose report stream is off
-/// for a run with this refusal, make every batch's lookups before any report, and BLASTN's
-/// report stream writes a later batch's refusal after the reports of the batches before, as
-/// its other refusals of a batch's reported subjects (`x_rpt_stream`). The caller writes the
+/// so a run that fetches none is not refused: TBLASTN makes every batch's lookups before any
+/// report, and BLASTN's and TBLASTX's report streams write a later batch's refusal after the
+/// reports of the batches before, as their other refusals of a batch's reported subjects
+/// (BLASTN's `x_rpt_stream`, TBLASTX's `report_stream`). The caller writes the
 /// text after the reader's messages of the batch and before the warnings of its first query,
 /// where NCBI's prefetch comes. Empty, and nothing read, without `taxdb.bti` on the search
 /// path. A taxonomy database that LOSAT cannot read as NCBI does is refused as in
@@ -8583,22 +8622,24 @@ impl XmlReportsBefore<'_> {
 /// prefetch catches that one and ends its loads); where the batch has several stopping ids, its
 /// loads end at the first lookup that NCBI makes ([`prefetch_stop`]). `before`: the subjects that
 /// NCBI's BLAST database data loader loaded for the batches of the call before this one
-/// ([`batch_loads`]), read only where the batch stops (the run's record of what its loader may
-/// hold, [`TaxdbRun::note_loaded`]); a caller that records each batch itself gives none. The
-/// outfmt 5 reports of the queries before the batch, for that stop, are the queries'
-/// ([`PrefetchQueries::after_xml_reports`], [`XmlReportsBefore`]).
+/// ([`batch_loads`]), each with its batch's number ([`LoadedBefore::subjects`]), read only where
+/// the batch stops, after the run's record of what its loader may hold
+/// ([`TaxdbRun::loads_at_stop`], which leaves the record as it was); a caller that records each
+/// batch itself ([`TaxdbRun::note_loaded`]) gives none. The outfmt 5 reports of the queries
+/// before the batch, for that stop, are the queries' ([`PrefetchQueries::after_xml_reports`],
+/// [`XmlReportsBefore`]).
 pub(crate) fn batch_prefetch<'s, 'b>(
     db: &SeqDb,
     run: &TaxdbRun,
-    before: impl IntoIterator<Item = PrefetchSubject<'b>>,
+    before: impl IntoIterator<Item = (usize, PrefetchSubject<'b>)>,
     subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
     program: &str,
     queries: &PrefetchQueries<'_>,
 ) -> Result<crate::report::diag_log::Posts> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
     if stops(&subjects) {
-        run.keep_loaded(None, before);
-        return Err(prefetch_stop(db, run, &subjects, program, queries));
+        let loads = run.loads_at_stop(before);
+        return Err(prefetch_stop(db, run, &loads, &subjects, program, queries));
     }
     let mut failed_lookup: Option<(u32, String)> = None;
     let mut failing = Vec::new();
@@ -9329,7 +9370,7 @@ impl LoadOrder {
 ///   id's lookup, `x_GetOid`; an unparsed subject's own) that holds an id of the stopping id's
 ///   Seq-id handle;
 /// - another sequence of the database that holds such an id may have been loaded before the batch:
-///   the run's record of its loads holds it (`record`, [`TaxdbRun::note_loaded`]: the prefetches,
+///   the run's record of its loads holds it (`record`, [`TaxdbRun::loads_at_stop`]: the prefetches,
 ///   the reads of the reports where a prefetch is off and the PSSMs' reads of the batches,
 ///   queries and rounds before) and its own Seq-align id's lookup does not fail (a sequence whose
 ///   own lookup fails loads nothing, and a copy with the same Seq-align id is the same lookup,
@@ -9344,7 +9385,7 @@ impl LoadOrder {
 /// stop ([`prefetch_stop`]). `None`: NCBI looks it up.
 fn stop_lookup_unsure(
     db: &SeqDb,
-    record: &TaxdbRun,
+    record: &crate::report::db_subject::LoadsBefore,
     subjects: &[PrefetchSubject<'_>],
     before: &[LoadBeforeStop],
     queries: &PrefetchQueries<'_>,
@@ -9394,7 +9435,7 @@ fn stop_lookup_unsure(
     // The data loader's record of the run's loads before the batch (`ScopeRecord`): the
     // sequences that registered the id's handle there, the last one (each where a note of
     // several registered it).
-    for sequence in record.loads_before(None).registrants_of(parsed) {
+    for sequence in record.registrants_of(parsed) {
         let oid = db.oid(sequence.ordinal()).get();
         if oid != own {
             give(oid, &|| {
@@ -9405,7 +9446,7 @@ fn stop_lookup_unsure(
     // After calls whose loads nothing recorded, every other holder whose own lookup does not
     // fail (`HeaderReader::unrecorded_holders`, found in the LMDB files that have the accession
     // table).
-    if record.unrecorded_calls() {
+    if record.after_unrecorded_calls() {
         match parsed.unrecorded_loader() {
             Ok(holders) => {
                 for oid in holders.iter().map(|holder| db.oid(holder.ordinal()).get()) {
@@ -9452,9 +9493,10 @@ struct StopUnsure {
 // map in its order, `m_Ids.find` first, then `SeqidToOid`, whose exception ends the loads; the
 // handles after it are never looked up.
 /// The end of a batch's prefetch whose subjects `subjects` hold one or more whose lookups fail on
-/// a file with NCBI's exception ([`batch_prefetch`]), after the lookups and the loads that `run`
-/// records ([`TaxdbRun::note_loaded`]): the [`ErrorAfterBatchReports`] of `queries` (its `error_query`) with
-/// the texts of the loads before the stop in NCBI's order ([`load_before_stop`]; with the texts
+/// a file with NCBI's exception ([`batch_prefetch`]), after the lookups and the loads that
+/// `record` holds ([`TaxdbRun::loads_at_stop`]): the [`ErrorAfterBatchReports`] of `queries`
+/// (its `error_query`) with the texts of the loads before the stop in NCBI's order
+/// ([`load_before_stop`]; with the texts
 /// that loads NCBI did not make left to them, `report::query_warnings::ReadLoad::place`: those
 /// of an outfmt 5 report before the batch that NCBI's XML stream cut, also where the program
 /// writes that report after the stop, [`PrefetchQueries::after_xml_reports`], line RG K4h) and
@@ -9474,6 +9516,7 @@ struct StopUnsure {
 fn prefetch_stop(
     db: &SeqDb,
     run: &TaxdbRun,
+    record: &crate::report::db_subject::LoadsBefore,
     subjects: &[PrefetchSubject<'_>],
     program: &str,
     queries: &PrefetchQueries<'_>,
@@ -9518,7 +9561,7 @@ fn prefetch_stop(
         let (ordinal, parsed, _) = stopping(index);
         match stop_lookup_unsure(
             db,
-            run,
+            record,
             subjects,
             &order.before(first, key),
             queries,

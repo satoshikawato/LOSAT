@@ -2539,15 +2539,7 @@ fn unchecked_reads_of_a_record_without_its_seqid_are_refused() {
             db.read_header(0).unwrap_err(),
             db.defline_set(0).unwrap_err(),
         ];
-        let mut visited = Vec::new();
-        db.visit_sequence_headers(db.header_ranges(10)[0], |ordinal, header| {
-            visited.push((ordinal, header.map(|_| 1)));
-            true
-        });
-        for error in errors
-            .iter()
-            .chain(visited.iter().filter_map(|(_, r)| r.as_ref().err()))
-        {
+        for error in &errors {
             match error {
                 SeqDbError::Setting(text) => {
                     assert!(refused, "{read:?} {get:?}");
@@ -2565,8 +2557,7 @@ fn unchecked_reads_of_a_record_without_its_seqid_are_refused() {
                 other => panic!("{other:?}"),
             }
         }
-        assert!(matches!(visited[0], (0, Err(_))));
-        assert!(visited[1..].iter().all(|(_, lines)| matches!(lines, Ok(1))));
+        assert!(db.read_header(1).is_ok());
         assert_eq!(db.deflines(1).unwrap().len(), 1);
     }
     std::fs::remove_dir_all(&dir).unwrap();

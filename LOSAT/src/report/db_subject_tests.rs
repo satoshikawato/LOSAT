@@ -282,7 +282,7 @@ fn sequence(ids: Vec<ParsedSeqId>, ordinal: u32) -> ParsedSubject {
 /// the query batch `noted` ([`ScopeRecord::note`]), after calls of which no record holds anything
 /// where `unrecorded`.
 fn recorded(
-    noted: Option<usize>,
+    noted: usize,
     loads: &[&ParsedSubject],
     batch: Option<usize>,
     unrecorded: bool,
@@ -3237,7 +3237,8 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
     // The run's record of the batches and rounds before, and calls before of which nothing here
     // holds a record (the holders listed from the database, `ScopeHolders`).
     for (before, want) in [
-        (recorded(None, &[&parsed[0]], None, false), held),
+        // A batch before the walk's (its scope is not the walk's): the loader's ids alone.
+        (recorded(0, &[&parsed[0]], Some(1), false), held),
         (
             LoadsBefore::after_calls(true),
             shown(Some(10), ShownBy::Calls),
@@ -3255,7 +3256,7 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
     }
     assert_eq!(
         loads(
-            recorded(None, &[&parsed[4]], None, false),
+            recorded(0, &[&parsed[4]], Some(1), false),
             AfterThrow::WritesRow,
             vec![entries(&[1])]
         )[1],
@@ -3502,7 +3503,7 @@ fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_ba
     // The run's record: its loads of the batch named, which share the scope (psiblast's rounds
     // before), and of other batches, which hold only in the loader.
     let holders = [&parsed[0], &parsed[1]];
-    let before = |noted| recorded(Some(noted), &holders, Some(2), false);
+    let before = |noted| recorded(noted, &holders, Some(2), false);
     check(
         "record, same batch",
         &loads(before(2), AfterThrow::WritesRow, vec![report(2, &[2, 3])])[2..4],
@@ -3645,18 +3646,18 @@ fn an_id_that_resolved_to_nothing_stays_unresolved_in_its_scope() {
     assert_eq!(walk.load(&a), shown(Some(2), ShownBy::Holder));
     // A record: a note of A alone keeps it unresolved for the batch's scope (psiblast's rounds
     // of a query), not for another batch's.
-    let before = recorded(Some(0), &[&a], Some(0), false);
+    let before = recorded(0, &[&a], Some(0), false);
     let mut walk = ScopeWalk::new(before, Some(false));
     assert_eq!(walk.load(&z), HitLoad::Loaded);
     assert_eq!(walk.load(&a), HitLoad::Loaded);
-    let before = recorded(Some(0), &[&a], Some(1), false);
+    let before = recorded(0, &[&a], Some(1), false);
     let mut walk = ScopeWalk::new(before, Some(false));
     walk.enter(Some(1));
     assert_eq!(walk.load(&z), HitLoad::Loaded);
     assert_eq!(walk.load(&a), shown(Some(2), ShownBy::Holder));
     // A note where Z registers the handle too: the order of the note's loads decides, which
     // LOSAT does not know, so the later read asks the loader (`m_Ids` holds Z).
-    let before = recorded(Some(0), &[&a, &z], Some(0), false);
+    let before = recorded(0, &[&a, &z], Some(0), false);
     let mut walk = ScopeWalk::new(before, Some(false));
     assert_ne!(walk.load(&a), HitLoad::Loaded);
 }
@@ -3727,7 +3728,7 @@ fn scope_record_drops_earlier_batches_when_not_keeping_scope() {
             let acc = format!("AAA{:06}", ord + 1);
             batch_seqs.push(sequence(vec![gb(&acc, 1)], ord));
         }
-        record.note(Some(b), batch_seqs.iter());
+        record.note(b, batch_seqs.iter());
         assert!(record.all_scope.is_none());
         let current = record.current_batch.as_ref().expect("current batch");
         assert_eq!(current.batch, b);
@@ -3757,8 +3758,8 @@ fn scope_record_drops_earlier_batches_when_not_keeping_scope() {
     kept.set_keeps_scope(Some(true));
     let s0 = sequence(vec![pdb("1ABC", "A")], 0);
     let s1 = sequence(vec![pdb("1DEF", "A")], 1);
-    kept.note(Some(0), [&s0]);
-    kept.note(Some(1), [&s1]);
+    kept.note(0, [&s0]);
+    kept.note(1, [&s1]);
     assert!(kept.current_batch.is_none());
     assert_eq!(kept.all_scope.as_ref().unwrap().places.loads.len(), 2);
 }
@@ -4032,4 +4033,43 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
         });
     assert!(nucl_source_throwing.description_may_throw());
     assert_long_id(&nucl_source_throwing, false, "BLASTN");
+}
+
+// Review of line RG series D's D-SO-5, H1 and L6: the run's record notes each query batch alone
+// (the stream's notes, and the stop's copy of the batches that the loop holds,
+// `common::database::TaxdbRun::loads_at_stop`), so a later batch's load registers a handle after
+// the batches before; one note of both leaves their order unknown. A later load of the subject
+// whose own sequence may have registered the handle names the other sequence.
+#[test]
+fn each_batch_of_the_record_registers_after_the_batches_before() {
+    let a = sequence(vec![gb("AAA00001", 1)], 0);
+    let b = lines(vec![vec![gb("BBB00002", 1)], vec![gb("AAA00001", 1)]])
+        .in_database(DbSequence::of_unrestricted(1));
+    let mut each = ScopeRecord::default();
+    each.note(0, [&a]);
+    each.note(1, [&b]);
+    let mut both = ScopeRecord::default();
+    both.note(0, [&a, &b]);
+    let before = |record: &ScopeRecord| {
+        LoadsBefore::new(
+            &std::sync::Arc::new(std::sync::RwLock::new(record.clone())),
+            Some(2),
+            false,
+        )
+    };
+    let ordinals = |record: &ScopeRecord| -> Vec<u32> {
+        before(record)
+            .registrants_of(&a)
+            .iter()
+            .map(|sequence| sequence.ordinal())
+            .collect()
+    };
+    assert_eq!(ordinals(&each), [1]);
+    assert_eq!(ordinals(&both), [0, 1]);
+    let mut walk = ScopeWalk::new(before(&each), Some(false));
+    walk.enter(Some(2));
+    assert_eq!(walk.load(&a), shown(Some(1), ShownBy::Holder));
+    let mut walk = ScopeWalk::new(before(&both), Some(false));
+    walk.enter(Some(2));
+    assert_eq!(walk.load(&a), shown(Some(1), ShownBy::Order));
 }

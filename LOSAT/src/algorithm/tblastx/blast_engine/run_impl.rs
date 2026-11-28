@@ -3397,7 +3397,8 @@ fn run_in_pool(
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
     // The loop writes each batch's reports when it takes the batch where one format of the
     // command line's kind is written (`report_stream`); otherwise after the loop, one batch at a
-    // time where only the debugging output keeps them there (`report_stream::held`).
+    // time where only the debugging output keeps them there (`report_stream::Writes::Held`,
+    // `BatchReports::write_batches`).
     let x_check = Instant::now();
     let stream = report_stream::check(outputs, query_runs.input, sizes.current());
     reports.writes.set(report_stream::Writes::of(stream));
@@ -5022,10 +5023,11 @@ impl BatchReports<'_> {
     /// between its search and its reports (`run_batch_loop`): the reports of the batches before
     /// (`done`), where the loop writes each batch's reports as its own call (the stream wrote them
     /// already; the held writes write them now, `write_batches`), so that the refusal comes after
-    /// them in both, as NCBI's error of a later batch (the Owner's decision of 2026-11-16 on line
-    /// RG's Q-X2c: "the results of the query batches before are written"). Nothing of the refused
-    /// batch, and nothing in a search whose reports are one call after the loop
-    /// (`report_stream::Writes::Whole`), whose refusals come before its first byte.
+    /// them in both, as NCBI's error of a later batch (drop-in survey DECISIONS 44, the Owner's
+    /// 2026-11-03 (b), extended to TBLASTX, Owner-delegated, by line RG series D's D-SO-5; the form
+    /// the Owner chose for TBLASTX's X2c refusal, Q-X2c). Nothing of the refused batch, and nothing
+    /// in a search whose reports are one call after the loop (`report_stream::Writes::Whole`),
+    /// whose refusals come before its first byte.
     fn write_before_refusal(
         &self,
         outputs: &mut ReportOutputs<'_>,

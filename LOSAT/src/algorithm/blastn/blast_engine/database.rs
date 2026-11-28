@@ -784,19 +784,20 @@ impl BlastnDatabase {
                     },
                     gapped,
                 )
+                .map(|(_, subject)| subject)
             });
         }
     }
 
-    /// The sequences that NCBI's BLAST database data loader loaded for the batches `before`
-    /// (`shared::LoadedBefore::subjects`: the subjects of each batch's Seq-aligns where its
-    /// prefetch is on, else those that the rows of the reports NCBI writes read,
-    /// `shared::BatchLoads::reported_rows`; review 3 of line DBID loadord, H2; review 6, H2).
+    /// The sequences that NCBI's BLAST database data loader loaded for the batches `before`, each
+    /// with its batch's number (`shared::LoadedBefore::subjects`: the subjects of each batch's
+    /// Seq-aligns where its prefetch is on, else those that the rows of the reports NCBI writes
+    /// read, `shared::BatchLoads::reported_rows`; review 3 of line DBID loadord, H2; review 6, H2).
     fn loaded_subjects<'s>(
         titles: &'s DatabaseTitles,
         before: LoadedBefore<'s>,
         gapped: bool,
-    ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+    ) -> impl Iterator<Item = (usize, shared::PrefetchSubject<'s>)> + 's {
         before.subjects(
             |hit_lists, span| hit_lists.get(span),
             move |_, hit_lists| seq_aligns_of(hit_lists, gapped),

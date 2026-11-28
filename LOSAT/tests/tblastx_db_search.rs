@@ -50,6 +50,19 @@ fn letters(name: &str) -> String {
         .collect()
 }
 
+/// `count` letters of `ACGT` drawn from a linear congruential generator seeded with `seed`.
+fn random_letters(seed: u64, count: usize) -> String {
+    let mut state = seed;
+    (0..count)
+        .map(|_| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            char::from(b"ACGT"[(state >> 62) as usize])
+        })
+        .collect()
+}
+
 /// A FASTA record of `letters` in lines of 70.
 fn record(defline: &str, letters: &str) -> String {
     let mut text = format!(">{defline}\n");
@@ -457,6 +470,14 @@ fn each_query_batch_is_reported_as_the_loop_takes_it() {
             .unwrap()
             .to_string()
     };
+    // A database of `tests/db_search/ids` by name, or a list of paths as given.
+    let db_list = |db: &str| {
+        if db.contains('/') {
+            db.to_string()
+        } else {
+            ids(db)
+        }
+    };
     let qnucl = manifest.join("tests/seqid/fasta/qnucl.fa");
     let queries = manifest.join("tests/db_search/ids/nucl.fna");
     let run = |query: &Path, db: &str, outfmt: &str, extra: &[&str], env: &[(&str, &str)]| {
@@ -465,7 +486,14 @@ fn each_query_batch_is_reported_as_the_loop_takes_it() {
             .arg("tblastx")
             .arg("-query")
             .arg(query)
-            .args(["-db", &ids(db), "-max_hsps", "1", "-max_target_seqs", "5"])
+            .args([
+                "-db",
+                &db_list(db),
+                "-max_hsps",
+                "1",
+                "-max_target_seqs",
+                "5",
+            ])
             .args(["-outfmt", outfmt])
             .args(extra)
             .env("LOSAT_X_STATS", "1")
@@ -623,6 +651,103 @@ fn each_query_batch_is_reported_as_the_loop_takes_it() {
             "{stderr:?}"
         );
     }
+    // Review of D-SO-5, H1 and M2: the run's record of the loads of the batches before is not
+    // empty at a later batch's stop or refusal. Two databases with parsed Seq-ids whose second
+    // sequence also holds the first's `gi|7001` (`pa`, `pb`).
+    let a = random_letters(7, 600);
+    let b = random_letters(11, 600);
+    let parsed_db = |name: &str, defline: &str, letters: &str| {
+        let fasta = dir.join(format!("{name}.fa"));
+        std::fs::write(&fasta, record(defline, letters)).unwrap();
+        let db = dir.join(name).to_str().unwrap().to_string();
+        let output = losat()
+            .arg("makeblastdb")
+            .arg("-in")
+            .arg(&fasta)
+            .args(["-dbtype", "nucl", "-parse_seqids", "-blastdb_version", "5"])
+            .args(["-out", &db])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        db
+    };
+    let pa = parsed_db("pa", "gi|7001|ref|XA_000001.1| seq A", &a);
+    let pb = parsed_db(
+        "pb",
+        "gi|7002|ref|XB_000001.1| seq B\u{1}gi|7001|ref|XA_000001.1| seq B second line",
+        &b,
+    );
+    let mix2 =
+        std::fs::read_to_string(manifest.join("tests/db_search/multidb/mix2_q.fna")).unwrap();
+    let second = mix2.find("\n>").unwrap() + 1;
+    // H1: the batches of `qa` and `qb` report `pa` and `pb`, then the batch of the record whose
+    // subject's lookup stops NCBI's prefetch (a list of version 5 databases with and without the
+    // accession table, `multidb`): NCBI's error after the reports of the three batches before, in
+    // both paths (the held path's walks of the batches before had read the stop's record of all
+    // of them, and refused `pa` for the load of `pb` of the batch after).
+    let stop = dir.join("stop.fna");
+    std::fs::write(
+        &stop,
+        format!(
+            "{}{}{}{}",
+            &mix2[..second],
+            record("qa query of A", &a),
+            record("qb query of B", &b),
+            &mix2[second..]
+        ),
+    )
+    .unwrap();
+    let multidb = "tests/db_search/multidb";
+    let stop_dbs = format!("{pa} {pb} {multidb}/lddn {multidb}/ldan {multidb}/ldpn {multidb}/ldrn");
+    for outfmt in ["6", "0"] {
+        let output = both(
+            &stop,
+            &stop_dbs,
+            outfmt,
+            &["-evalue", "1e-10"],
+            &[
+                ("BATCH_SIZE", "1"),
+                ("BLASTDB", "tests/seqdb/taxdb/bad_magic"),
+            ],
+        );
+        assert_eq!(output.status.code(), Some(2), "outfmt {outfmt}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("qa") && stdout.contains("qb"), "{stdout}");
+        assert_eq!(
+            other_lines(&output.stderr).last().map(String::as_str),
+            Some("LOSAT database error: DB contains no accession info."),
+            "outfmt {outfmt}"
+        );
+    }
+    // M2 and L6: rule 3 in a later batch. The batch of `qab` reports both, then the batch of `qa`
+    // reports `pa`, whose Seq-align id the load of `pb` may have registered last (NCBI writes `pb`'s
+    // letters for it): LOSAT's refusal after the first batch's report, naming `pb`.
+    let rule3 = dir.join("rule3.fna");
+    std::fs::write(
+        &rule3,
+        record("qab query of A and B", &format!("{a}{b}")) + &record("qa query of A", &a),
+    )
+    .unwrap();
+    let output = both(
+        &rule3,
+        &format!("{pa} {pb}"),
+        "6",
+        &["-evalue", "1e-10"],
+        &[("BATCH_SIZE", "1")],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("qab\t") && !stdout.contains("\nqa\t"),
+        "{stdout}"
+    );
+    let stderr = other_lines(&output.stderr);
+    assert!(
+        stderr.last().unwrap().contains(
+            "the Seq-align id gi|7001, for which LOSAT cannot list whether database sequence 1, which also holds it, is loaded before it"
+        ),
+        "{stderr:?}"
+    );
     // A search space overflow in a later batch (`aliaskeys/n_nseq1_l62p3` with `alln_q.fna`,
     // `BATCH_SIZE=1`) streams (`off=none`) and writes the exact bytes of the off path (reports of
     // earlier batches, then the overflow refusal).

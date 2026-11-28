@@ -912,7 +912,9 @@ pub(super) fn prefetch_reported_subjects(
         // (`shared::TaxdbRun::note_loaded`, on the database that the rounds share). The call
         // reaches here where its prefetch did not stop.
         if reports.psi_round.is_some() {
-            titles.note_loaded(database, ranges.x_ordinal_base, || loaded(hit_lists.len()));
+            titles.note_loaded(database, ranges.x_ordinal_base, || {
+                loaded(hit_lists.len()).map(|(_, rank)| rank)
+            });
         }
     }
     // NCBI's posts of the titles that the batches' Seq-aligns read come before their prefetches'

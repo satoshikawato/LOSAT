@@ -2371,19 +2371,22 @@ impl ListedTitles<'_> {
     /// where the prefetch fails at a subject whose lookup fails (a protein has no strand); the
     /// stop of the batch of `queries` (`shared::batch_prefetch`), after the batches of the call
     /// before it, for which NCBI's BLAST database data loader loaded the subjects of ranks
-    /// `before` (read only where the batch stops; `shared::batch_loads`; the outfmt 5 reports
-    /// before it, `shared::PrefetchQueries::after_xml_reports`).
+    /// `before`, each with its batch's number (read only where the batch stops;
+    /// `shared::batch_loads`, `shared::LoadedBefore::subjects`; the outfmt 5 reports before it,
+    /// `shared::PrefetchQueries::after_xml_reports`).
     pub(super) fn batch_prefetch(
         &self,
         database: &BlastpDatabase,
-        before: impl IntoIterator<Item = usize>,
+        before: impl IntoIterator<Item = (usize, usize)>,
         ranks: impl IntoIterator<Item = usize>,
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<crate::report::diag_log::Posts> {
         shared::batch_prefetch(
             &database.db,
             &database.taxdb,
-            before.into_iter().map(|rank| self.prefetch_subject(rank)),
+            before
+                .into_iter()
+                .map(|(batch, rank)| (batch, self.prefetch_subject(rank))),
             ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
             self.program,
             queries,

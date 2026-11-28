@@ -2137,7 +2137,7 @@ impl SeqDb {
     /// Whether the database's reads may keep a sequence without any of its lines (a list of any
     /// kind, or the alias files' erasure of model lines): such a sequence is
     /// searched and counts in the statistics, and its hits that reach NCBI's Seq-aligns leave the
-    /// reports there (`keeps_line`, `algorithm::common::database::SeqAligned`).
+    /// reports there (`line_read`, `algorithm::common::database::SeqAligned`).
     pub fn drops_lineless_hits(&self) -> bool {
         self.volumes.iter().any(|volume| volume.filters_lines())
     }
@@ -2165,7 +2165,7 @@ impl SeqDb {
     // protein subject of an ungapped search is fetched by none of them and reaches the
     // Seq-align (`drops_lineless_hits`).
     /// Whether NCBI's fetches with `check_oid_exclusion` exclude the sequences that keep no
-    /// line (`keeps_line`): the database's rule fills NCBI's `CSeqDBIdSet` (`x_InitIdSet`: a
+    /// line (`line_read`): the database's rule fills NCBI's `CSeqDBIdSet` (`x_InitIdSet`: a
     /// negative seqid list, a positive GI list, or a negative GI list;
     /// `algorithm::common::database::FetchExcluded`).
     pub fn excludes_lineless_at_fetch(&self) -> bool {
@@ -2174,18 +2174,13 @@ impl SeqDb {
             .any(|volume| volume.has_fetch_exclusion_list())
     }
 
-    /// Whether NCBI turns a hit on `ordinal` into a Seq-align: false where the database's list
-    /// or its erasure of model lines (`OID_MASK_TYPE`) keeps the sequence but none of its
-    /// definition lines, and where no line it keeps holds a Seq-id (an edited header; the lists
-    /// erase such lines); the reader's error where a tag cannot be read as NCBI's header read
-    /// adjusts it.
-    pub fn keeps_line(&self, ordinal: u32) -> Result<bool, SeqDbError> {
-        self.line_read(ordinal).map(|(kept, _)| kept)
-    }
-
-    /// [`SeqDb::keeps_line`], read as NCBI's `GetSeqIDs` reads the header, with whether the
-    /// record holds a UTF8String where a VisibleString is expected (NCBI's read then posts its
-    /// warning, `Utf8Reads`): false where the volume filters no line, whose walk of the record
+    /// Whether NCBI turns a hit on `ordinal` into a Seq-align (the first answer): false where the
+    /// database's list or its erasure of model lines (`OID_MASK_TYPE`) keeps the sequence but
+    /// none of its definition lines, and where no line it keeps holds a Seq-id (an edited header;
+    /// the lists erase such lines); the reader's error where a tag cannot be read as NCBI's header
+    /// read adjusts it. Read as NCBI's `GetSeqIDs` reads the header, with whether the record holds
+    /// a UTF8String where a VisibleString is expected (the second answer: NCBI's read then posts
+    /// its warning, `Utf8Reads`): false where the volume filters no line, whose walk of the record
     /// reads no string (`Volume::line_read`).
     pub fn line_read(&self, ordinal: u32) -> Result<(bool, bool), SeqDbError> {
         let at = self.find_volume(ordinal)?;
@@ -2202,8 +2197,8 @@ impl SeqDb {
         Some(file.path().to_path_buf())
     }
 
-    /// [`SeqDb::keeps_line`] of the sequence of OID `oid`, included or not (the Seq-aligns of an
-    /// RPS search read their profiles' headers by OID).
+    /// [`SeqDb::line_read`]'s first answer of the sequence of OID `oid`, included or not (the
+    /// Seq-aligns of an RPS search read their profiles' headers by OID).
     pub fn keeps_line_of_oid(&self, oid: u32) -> Result<bool, SeqDbError> {
         let at = self.locate_oid(oid)?;
         self.volumes[at.volume]

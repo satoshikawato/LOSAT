@@ -558,6 +558,32 @@ impl LoaderIds {
         }
     }
 
+    /// The sequence that a refusal of `subject` names for `handle`, whose registrant
+    /// `registrant` LOSAT does not know to have registered it last (`!registrant.sure`): that
+    /// registrant, or, where it is the subject's own sequence, another sequence that may have
+    /// registered it last (`ambiguous`; one note of a batch registers its loads as a set,
+    /// `ScopeRecord::note`), so that the refusal names the other sequence that holds the id
+    /// (review of line RG D-SO-5, L6).
+    fn other_registrant(
+        &self,
+        handle: HandleKey,
+        registrant: Registrant,
+        subject: &ParsedSubject,
+    ) -> DbSequence {
+        if !subject.mine(registrant.sequence) {
+            return registrant.sequence;
+        }
+        self.ambiguous
+            .get(&handle)
+            .and_then(|sequences| {
+                sequences
+                    .iter()
+                    .copied()
+                    .find(|&sequence| !subject.mine(sequence))
+            })
+            .unwrap_or(registrant.sequence)
+    }
+
     /// Whether `m_Ids` holds `handle` now.
     fn held(&self, handle: HandleKey) -> Held {
         let Some(entry) = self.entries.get(&handle) else {
@@ -1118,7 +1144,7 @@ impl RecordedBatchScope {
 ///   `keeps_scope == Some(false)` so memory and lookup time stay bounded per batch), and the
 ///   run-wide scope (`all_scope`: populated only when `keeps_scope != Some(false)`, i.e. outfmt 5
 ///   or unknown, where lookups never filter out earlier batches).
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ScopeRecord {
     /// Whether the run keeps one scope across query batches (`Some(false)` for every format that
     /// calls `ResetScopeHistory`, `Some(true)` for outfmt 5, `None` when unknown / tests).
@@ -1149,8 +1175,8 @@ impl ScopeRecord {
         self.keeps_scope = keeps;
     }
 
-    /// Records the loads `loads` of the query batch `batch` (`None`: the loader's alone, as the
-    /// loads before a stop), each by the subject's own Seq-align id: its lookup in `m_Ids`, then
+    /// Records the loads `loads` of the query batch `batch`, each by the subject's own Seq-align
+    /// id: its lookup in `m_Ids`, then
     /// the blob that it gives ([`ParsedSubject::loaded_blob_ref`]), whose lines register every
     /// handle where its blob id is new (where it is not, and the run has more than
     /// [`BLOBS_KEPT`] blob ids, they may register again), and its id resolves to it; an id whose
@@ -1159,7 +1185,7 @@ impl ScopeRecord {
     /// the note's loads decides, which LOSAT does not know: a later read asks the loader).
     pub fn note<'p>(
         &mut self,
-        batch: Option<usize>,
+        batch: usize,
         subjects: impl IntoIterator<Item = &'p ParsedSubject>,
     ) {
         let mut loads: Vec<(&ParsedSubject, LoadedBlobRef)> = Vec::new();
@@ -1253,9 +1279,6 @@ impl ScopeRecord {
         if self.many_blobs.is_none() && self.blob_ids.len() > BLOBS_KEPT {
             self.many_blobs = Some(note);
         }
-        let Some(batch) = batch else {
-            return;
-        };
         unresolved.retain(|&handle| self.ids.held(handle) == Held::Absent);
         if loads.is_empty() && unresolved.is_empty() {
             return;
@@ -1446,6 +1469,11 @@ impl LoadsBefore {
     /// The query batch of the reports (`None`: not named).
     pub fn batch(&self) -> Option<usize> {
         self.batch
+    }
+
+    /// Whether calls of the run before this one loaded sequences that no record here holds.
+    pub fn after_unrecorded_calls(&self) -> bool {
+        self.unrecorded
     }
 
     /// The sequences that the loader's record held for the handle of `subject`'s Seq-align id
@@ -1966,7 +1994,8 @@ impl ScopeWalk {
                 // The find marks the handle used.
                 self.ids.use_now(handle, registrant);
                 if !registrant.sure {
-                    return Some(Resolved::Unknown(Some(registrant.sequence), ShownBy::Order));
+                    let other = self.ids.other_registrant(handle, registrant, subject);
+                    return Some(Resolved::Unknown(Some(other), ShownBy::Order));
                 }
                 if subject.mine(registrant.sequence) {
                     // The subject's own blob, loaded before in the run: its Bioseq enters this

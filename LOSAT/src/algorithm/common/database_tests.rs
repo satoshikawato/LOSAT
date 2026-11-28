@@ -487,6 +487,13 @@ fn a_batch_loads_its_seq_aligns_subjects_or_what_its_reports_read() {
             },
             |span, hits, loads| [(span, hits.to_vec(), loads)],
         )
+        .map(|(batch, (span, hits, loads))| {
+            // Each subject carries its batch's number, the batch's first query (`TaxdbRun::
+            // loads_at_stop` notes each batch alone), also a query's reads of a batch whose
+            // prefetch is off.
+            assert_eq!(batch, span.start - span.start % 2, "{span:?}");
+            (span, hits, loads)
+        })
         .collect()
     };
     assert_eq!(

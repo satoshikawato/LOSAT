@@ -45,7 +45,7 @@ fn bit_zero_of_the_type_erases_the_lines_of_predicted_ids() {
         assert_eq!(lines(&db), MASKED_ERASED, "{name}");
         assert!(db.drops_lineless_hits(), "{name}");
         let kept: Vec<bool> = (0..db.num_seqs())
-            .map(|at| db.keeps_line(at).unwrap())
+            .map(|at| db.line_read(at).map(|(kept, _)| kept).unwrap())
             .collect();
         assert_eq!(kept, [true, false, true, true, true, true], "{name}");
     }
@@ -176,7 +176,7 @@ fn a_removed_line_with_bytes_ncbi_reads_as_hash_is_refused() {
         error.contains("removes, with bytes NCBI reads as '#'"),
         "{error}"
     );
-    assert!(db.keeps_line(0).is_err());
+    assert!(db.line_read(0).is_err());
     assert_eq!(db.defline_set(1).unwrap().deflines.len(), 1);
 }
 
@@ -767,9 +767,9 @@ fn v5_alias_seqidlist_and_taxidlist_filter_oids_and_lines() {
     // erases every line of OIDs 1 and 2, and marks them as dropped hits.
     let db_lx = open_id("lx_tx", SeqType::Protein);
     assert_eq!(lines(&db_lx), [(1, 0), (2, 0), (3, 1)]);
-    assert!(!db_lx.keeps_line(0).unwrap());
-    assert!(!db_lx.keeps_line(1).unwrap());
-    assert!(db_lx.keeps_line(2).unwrap());
+    assert!(!db_lx.line_read(0).map(|(kept, _)| kept).unwrap());
+    assert!(!db_lx.line_read(1).map(|(kept, _)| kept).unwrap());
+    assert!(db_lx.line_read(2).map(|(kept, _)| kept).unwrap());
 
     // Nucleotide v5 SEQIDLIST (LMDB acc2oid is case-sensitive, so lowercase ab000207.1 misses)
     // and TAXIDLIST.

@@ -709,6 +709,7 @@ pub(crate) fn note_loaded(
                 },
                 titles,
             )
+            .map(|(_, subject)| subject)
         });
     }
 }
@@ -777,13 +778,13 @@ fn batch_loaded<'s>(
     prefetch_subjects(loaded, titles)
 }
 
-/// The sequences that NCBI's BLAST database data loader loaded for the batches `before`
-/// (`shared::LoadedBefore::subjects`, [`batch_loaded`] of each; none of an outfmt 5 report that
-/// NCBI's XML stream cut, review 6 of line DBID loadord, H2).
+/// The sequences that NCBI's BLAST database data loader loaded for the batches `before`, each
+/// with its batch's number (`shared::LoadedBefore::subjects`, [`batch_loaded`] of each; none of
+/// an outfmt 5 report that NCBI's XML stream cut, review 6 of line DBID loadord, H2).
 fn loaded_subjects<'s>(
     before: LoadedBefore<'s>,
     titles: &'s DatabaseTitles,
-) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+) -> impl Iterator<Item = (usize, shared::PrefetchSubject<'s>)> + 's {
     before.subjects(
         |hits, span| Some(query_hits(hits, span)),
         |_, hits| seq_aligns_of(hits),

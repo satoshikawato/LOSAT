@@ -54,10 +54,12 @@
 //!   `check_diag_table_window`, and a `-db` whose sequences could not be read before the search,
 //!   where the read error of the first batch with a valid context is LOSAT's refusal: both after
 //!   the batch's reader messages too, as NCBI's errors of the batch's search). LOSAT's other
-//!   refusals of a batch (the Owner's decision of 2026-11-16 on line RG's Q-X2c: "the results of
-//!   the query batches before are written") come after the reports of the batches before and
-//!   nothing of the batch, as in the first batch, where they come before its first byte: those of
-//!   its reports, made by the batch's report call before it writes (a `-subject` record without a
+//!   refusals of a batch (drop-in survey DECISIONS 44, the Owner's 2026-11-03 (b): no check before
+//!   the search, the reported subjects checked when they are reported; extended to TBLASTX,
+//!   Owner-delegated, by line RG series D's D-SO-5, in the form the Owner chose for TBLASTX's X2c
+//!   refusal, Q-X2c) come after the reports of the batches before and nothing of the batch, as
+//!   in the first batch, where they come before its first byte: those of its reports, made by
+//!   the batch's report call before it writes (a `-subject` record without a
 //!   tabular id, `tabular_subject_ids`; with `-db` a sequence's stored data as the reports read
 //!   it, `database::reported_subjects`: the header, the stored title, the tabular id, the parsed
 //!   Seq-ids, two sequences that the reports would join, a load that NCBI's places give another
@@ -130,7 +132,7 @@ pub(super) enum Off {
     /// doc).
     CustomTabular,
     /// The debugging output of the search: the loop holds the reports and writes them after it,
-    /// one batch at a time (`held`).
+    /// one batch at a time (`Writes::Held`, `BatchReports::write_batches`).
     Debug,
 }
 

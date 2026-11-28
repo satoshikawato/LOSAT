@@ -500,14 +500,15 @@ impl TblastnDatabase {
             })
     }
 
-    /// The sequences that NCBI's BLAST database data loader loaded for the query batches `before`
-    /// (`shared::LoadedBefore::subjects`: the subjects of each batch's Seq-aligns where its
-    /// prefetch is on, else those that the rows of the reports NCBI writes read,
-    /// `shared::BatchLoads::reported_rows`; review 3 of line DBID loadord, H2; review 6, H2).
+    /// The sequences that NCBI's BLAST database data loader loaded for the query batches `before`,
+    /// each with its batch's number (`shared::LoadedBefore::subjects`: the subjects of each
+    /// batch's Seq-aligns where its prefetch is on, else those that the rows of the reports NCBI
+    /// writes read, `shared::BatchLoads::reported_rows`; review 3 of line DBID loadord, H2;
+    /// review 6, H2).
     fn loaded_subjects<'s>(
         reported: &'s ReportedSubjects,
         before: LoadedBefore<'s>,
-    ) -> impl Iterator<Item = shared::PrefetchSubject<'s>> + 's {
+    ) -> impl Iterator<Item = (usize, shared::PrefetchSubject<'s>)> + 's {
         let gapped = reported.gapped;
         before.subjects(
             |hitlists, span| hitlists.get(span),

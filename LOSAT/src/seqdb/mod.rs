@@ -3960,39 +3960,6 @@ impl SeqDb {
             },
         )
     }
-
-    /// `visit(ordinal, self.read_header(ordinal))` for the sequences of `range` in order until
-    /// `visit` returns false; returns whether every call returned true. The headers of the range
-    /// are read as [`SeqDb::visit_deflines`] reads them (one read of the index file and one read
-    /// of the header file per MiB).
-    pub fn visit_sequence_headers(
-        &self,
-        range: BlockRange,
-        mut visit: impl FnMut(u32, Result<SequenceHeader, SeqDbError>) -> bool,
-    ) -> bool {
-        let Some(vol) = self.volumes.get(range.volume) else {
-            return if range.is_empty() {
-                true
-            } else {
-                visit(range.first_ordinal, Err(volume_range_error(range, self)))
-            };
-        };
-        if self.excludes_all(range) {
-            return true;
-        }
-        vol.visit_sequence_headers(
-            range.first,
-            range.end,
-            header_piece_bytes(),
-            &mut |oid, header| match self.range_ordinal(range, oid) {
-                Some(ordinal) => {
-                    let oid = self.volume_starts[range.volume] + oid;
-                    visit(ordinal, self.sequence_header(range.volume, oid, header))
-                }
-                None => true,
-            },
-        )
-    }
 }
 
 fn volume_range_error(range: BlockRange, db: &SeqDb) -> SeqDbError {

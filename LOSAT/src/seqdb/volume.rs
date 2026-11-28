@@ -1579,13 +1579,13 @@ impl Volume {
     // `MEMB_BIT` runs first, then the lists' tests on the lines it keeps, and the erasure of model
     // lines last on the lines they keep; a line whose every test passes is kept. A sequence whose
     // every line is erased is read with none, as NCBI's `GetHdr` gives it (probes A2, A7a of line
-    // RG D1b): its hits get no Seq-align (`keeps_line`), and `GetBioseq` gives none. The accession
-    // guide's warning about an id (`oid_mask::is_predicted`) is posted at each of NCBI's header
-    // reads that is not served by its cache of filtered headers (seqdbvol.cpp:1977-1988, a cache
-    // of the main thread): LOSAT does not count those reads and refuses such an id. NCBI decodes
-    // the whole header before it removes a line (seqdbvol.cpp:1993, then 2057), and its decoder
-    // writes an error for each byte it reads as '#' in a line it then removes too (probe b1 of
-    // line RG D1b-2): refused as the bytes of a kept line are where they are read.
+    // RG D1b): its hits get no Seq-align (`SeqDb::line_read`), and `GetBioseq` gives none. The
+    // accession guide's warning about an id (`oid_mask::is_predicted`) is posted at each of NCBI's
+    // header reads that is not served by its cache of filtered headers (seqdbvol.cpp:1977-1988, a
+    // cache of the main thread): LOSAT does not count those reads and refuses such an id. NCBI
+    // decodes the whole header before it removes a line (seqdbvol.cpp:1993, then 2057), and its
+    // decoder writes an error for each byte it reads as '#' in a line it then removes too (probe b1
+    // of line RG D1b-2): refused as the bytes of a kept line are where they are read.
     /// Which definition lines of the sequence `oid` (volume-relative), decoded as `set`, the reads
     /// keep, as NCBI's filtered header read tests them (`MEMB_BIT`, then the search's list rule
     /// and the alias files' id lists, `list_mask`, then the erasure of model lines): `None` where
@@ -2156,24 +2156,6 @@ impl Volume {
             piece_bytes,
             &|oid| self.defline_set(oid).map(taxids),
             &|oid, record, path| self.decode_kept_set(oid, record, path).map(taxids),
-            visit,
-        )
-    }
-
-    /// `visit_deflines` for `header`: the same pieces and fallbacks, with its decoder.
-    pub(super) fn visit_sequence_headers(
-        &self,
-        first: u32,
-        end: u32,
-        piece_bytes: u64,
-        visit: &mut dyn FnMut(u32, Result<VolumeHeader, SeqDbError>) -> bool,
-    ) -> bool {
-        self.visit_headers(
-            first,
-            end,
-            piece_bytes,
-            &|oid| self.header(oid),
-            &|oid, record, path| self.decode_header(oid, record, path),
             visit,
         )
     }

@@ -8,7 +8,7 @@ import { splitOptions } from '../domain/argv';
 import { normalizeRunPath } from '../domain/blast-db';
 import { countsName } from '../domain/counts';
 import type { FieldValue, FormValues } from '../domain/parameters';
-import { buildWindowMaskerArgv, handedOverName, runFileNames } from '../domain/tool-argv';
+import { buildWindowMaskerArgv, handedOverName, namesOption, runFileNames } from '../domain/tool-argv';
 import {
   defaultCountsOutName,
   stageOptionParameters,
@@ -19,6 +19,7 @@ import type { DataGateway } from '../ports/data';
 import type { ToolDirectoryFile, ToolRequest } from './coordinator';
 import { EMPTY_FASTA_INPUT, FastaToolDraft, type FastaInputState, type FastaToolDraftDeps } from './fasta-tool-draft';
 
+import type { DatabaseOption } from './tool-draft-core';
 export type { ToolExtraFile } from './tool-draft-core';
 export type { ToolInputFile } from './fasta-tool-draft';
 
@@ -262,11 +263,32 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
     return state.values[state.stage][flag];
   }
 
-  /** The argv of the check: the inputs not chosen yet are named `input.fa` and `counts.ascii`. */
+  /**
+   * The argv of the check: the inputs not chosen yet are named `input.fa` and `counts.ascii` (`-in` none where the words
+   * name it themselves). A database of the files of the run that `-in` cannot name (`databaseRefusal`) is the check's
+   * refusal, unless the words print help or the version.
+   */
   protected validationArgv(state: ToolDraftState, extra: readonly string[]): readonly string[] {
-    const inputName = this.previewInputName(state) ?? (state.stage === 'convert' ? 'counts.ascii' : 'input.fa');
+    const placeholder = namesOption(extra, '-in') ? undefined : state.stage === 'convert' ? 'counts.ascii' : 'input.fa';
+    const inputName = this.previewInputName(state) ?? placeholder;
     const ustatName = state.stage === 'mask' ? (state.ustatSource.kind === 'none' ? 'counts.ascii' : state.ustatSource.name) : undefined;
-    return this.buildArgv(state, extra, { inputName, ustatName });
+    const argv = this.buildArgv(state, extra, { inputName, ustatName });
+    const refusal = this.databaseRefusal(state);
+    if (refusal !== undefined && this.printsKindOf(state, extra) === null) throw new Error(refusal);
+    return argv;
+  }
+
+  /**
+   * WindowMasker's `-in` with the stage's `-infmt` (`isSeqdbList`), which reads a nucleotide database; Convert's `-in`
+   * is its counts file.
+   */
+  protected override inDatabase(state: ToolDraftState): DatabaseOption | undefined {
+    if (state.stage === 'convert') return undefined;
+    const infmt = state.values[state.stage]['-infmt'];
+    return {
+      option: { command: 'windowmasker', flag: '-in', inputFormat: typeof infmt === 'string' ? infmt : 'fasta' },
+      kind: 'nucleotide',
+    };
   }
 
   /**

@@ -8,10 +8,11 @@
 import type { DirectoryFile, PrintedKind } from 'losat/domain';
 import { splitOptions } from '../domain/argv';
 import type { FieldValue, FormValues } from '../domain/parameters';
-import { buildMaskingArgv, runFileNames } from '../domain/tool-argv';
+import { buildMaskingArgv, namesOption, runFileNames } from '../domain/tool-argv';
 import { MASKING_TOOLS, maskingOptionParameters, toolPrintsKind, type MaskingTool, type ToolId } from '../domain/tools';
 import type { ToolRequest } from './coordinator';
 import { EMPTY_FASTA_INPUT, FastaToolDraft, type FastaInputState, type FastaToolDraftDeps } from './fasta-tool-draft';
+import type { DatabaseOption } from './tool-draft-core';
 
 export interface MaskingDraftState extends FastaInputState {
   /** The tool chosen in the tool switcher. */
@@ -132,9 +133,29 @@ export class MaskingDraft extends FastaToolDraft<MaskingDraftState> {
     return splitOptions(state.extra[state.tool]);
   }
 
-  /** The argv of the check: an input not given yet is named `input.fa`. */
+  /**
+   * The argv of the check: an input not given yet is named `input.fa` (none where the words name `-in` themselves). A
+   * database of the files of the run that `-in` cannot name (`databaseRefusal`) is the check's refusal, unless the words
+   * print help or the version.
+   */
   protected validationArgv(state: MaskingDraftState, extra: readonly string[]): readonly string[] {
-    return this.argvOf(state, extra, this.inputNameOf(state, extra) ?? (this.printsKindOf(state, extra) === null ? 'input.fa' : undefined));
+    const prints = this.printsKindOf(state, extra) !== null;
+    const refusal = prints ? undefined : this.databaseRefusal(state);
+    if (refusal !== undefined) throw new Error(refusal);
+    const placeholder = prints || namesOption(extra, '-in') ? undefined : 'input.fa';
+    return this.argvOf(state, extra, this.inputNameOf(state, extra) ?? placeholder);
+  }
+
+  /**
+   * The tool's `-in` with its `-infmt` (`isSeqdbList`: dustmasker's and segmasker's with `-infmt blastdb`), and the kind
+   * of the database that it reads: protein for segmasker, nucleotide for dustmasker.
+   */
+  protected override inDatabase(state: MaskingDraftState): DatabaseOption {
+    const infmt = state.values[state.tool]['-infmt'];
+    return {
+      option: { command: state.tool, flag: '-in', inputFormat: typeof infmt === 'string' ? infmt : 'fasta' },
+      kind: state.tool === 'segmasker' ? 'protein' : 'nucleotide',
+    };
   }
 
   /** The check's directory holds the input that the run reads, under its name (none for help and the version). */

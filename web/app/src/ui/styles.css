@@ -2831,7 +2831,8 @@ pre.range-text {
 .db-privacy,
 .db-status,
 .db-reload,
-.db-mismatch {
+.db-mismatch,
+.db-refused {
   margin: 0;
   overflow-wrap: anywhere;
 }

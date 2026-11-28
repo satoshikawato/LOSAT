@@ -33,6 +33,7 @@ import {
   type ValidationResult,
 } from 'losat/ports';
 import { optionValue } from '../../domain/argv';
+import { seqdbNames } from '../../domain/list-flags';
 import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
 import { PROGRAMS } from '../../domain/programs';
 import { toolOptionValue } from '../../domain/tool-argv';
@@ -254,8 +255,8 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     checkAborted();
 
     if (toolName === 'makeblastdb') {
-      // The volume's three files under `-out` (or the first name of `-in`), each the marker: no database is made.
-      const db = outName ?? (toolOptionValue(argv, '-in') ?? 'db').split(' ')[0]!.replace(/^"|"$/g, '');
+      // The volume's three files under `-out` (or the first name of `-in`'s list, `seqdbNames`), each the marker: no database is made.
+      const db = outName ?? seqdbNames(toolOptionValue(argv, '-in') ?? '')[0] ?? 'db';
       const letter = toolOptionValue(argv, '-dbtype') === 'prot' ? 'p' : 'n';
       for (const ext of ['hr', 'in', 'sq']) await writeFile(`${db}.${letter}${ext}`, [bodyText]);
       if (logName !== undefined) await writeFile(logName, [logText]);

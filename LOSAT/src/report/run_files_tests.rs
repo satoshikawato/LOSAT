@@ -1086,6 +1086,11 @@ fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
             OutputName::Unopened(OpenFailure::NotADirectory),
         ),
         (
+            "/proc/cpuinfo/x/y",
+            OutputName::Unopened(OpenFailure::NotADirectory),
+        ),
+        ("/proc/x/y/z", OutputName::Unopened(OpenFailure::NotFound)),
+        (
             "/sys/x.asn",
             OutputName::Unopened(OpenFailure::PermissionDenied),
         ),

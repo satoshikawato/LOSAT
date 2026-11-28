@@ -1309,8 +1309,7 @@ fn folder_present(
 /// directory, `/dev/null`), a folder that is not there (`ENOENT`), and a folder of root's that the
 /// model does not list as one where the user makes files (`EACCES`: the model cannot tell a
 /// folder of root's there that is not there from one that is, and takes the one that a name in it
-/// would be refused in; in procfs, which makes no file, a folder whose entries the model does not
-/// list gives `ENOENT`, `procfs_entry`). `None` where the folder is present.
+/// would be refused in). `None` where the folder is present.
 fn folder_failure(
     path: &[u8],
     cwd: &[u8],
@@ -1321,15 +1320,6 @@ fn folder_failure(
         Some(Entry::Directory) => None,
         Some(Entry::File) => Some(OpenFailure::NotADirectory),
         Some(Entry::Missing) => Some(OpenFailure::NotFound),
-        None if within(path, b"/proc") => match procfs_entry(path) {
-            ProcEntry::Directory => None,
-            ProcEntry::File => Some(OpenFailure::NotADirectory),
-            ProcEntry::Missing => Some(OpenFailure::NotFound),
-            // A folder of procfs whose entries the model does not list: a name in it is one that
-            // procfs does not have, as `ProcEntry::Missing` (`procfs_entry`).
-            ProcEntry::Unlisted if final_dir => Some(OpenFailure::NotFound),
-            ProcEntry::Unlisted => None,
-        },
         None => match directory_at(path) {
             Directory::Known => None,
             Directory::Unknown if final_dir => Some(OpenFailure::PermissionDenied),
@@ -1449,7 +1439,16 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
             directories.push(walk.path().to_vec());
         }
     }
-    if let Some(failure) = folder_failure(walk.path(), &cwd, Some(entry), true) {
+    // A folder of procfs gives the reason of procfs's lookups (`procfs_folder_failure`). Whether a
+    // name of `log_name` walks through a folder stays `folder_present`'s: the model carries no list
+    // of the system's directories for that (line WQA DECISIONS 39, Q-D11 = B, the Owner's choice
+    // of 2026-11-21).
+    let failure = if within(walk.path(), b"/proc") {
+        procfs_folder_failure(walk.path())
+    } else {
+        folder_failure(walk.path(), &cwd, Some(entry), true)
+    };
+    if let Some(failure) = failure {
         return OutputName::Unopened(failure);
     }
     // The system looks the last component up in that folder whatever it is (`x`, `.`, `..`, or a
@@ -1980,7 +1979,8 @@ const ATTR_ENTRIES: [&[u8]; 6] = [
     b"sockcreate",
 ];
 
-/// What procfs has at `path`, a path without links in `/proc` (`folder_failure`, `output_name`).
+/// What procfs has at `path`, a path without links in `/proc` (`output_name`,
+/// `procfs_folder_failure`).
 #[derive(Debug, PartialEq, Eq)]
 enum ProcEntry {
     /// A directory: `/proc`, a process (`/proc/<pid>`, `SELF`) or a thread of it, or a directory
@@ -2046,6 +2046,29 @@ fn procfs_entry(path: &[u8]) -> ProcEntry {
         [pid, b"attr", name] if id(pid) => of(&[], &ATTR_ENTRIES, name),
         [pid, b"task", tid, b"attr", name] if id(pid) && id(tid) => of(&[], &ATTR_ENTRIES, name),
         _ => ProcEntry::Unlisted,
+    }
+}
+
+/// Why a name in `folder`, a path without links in `/proc`, does not open (`output_name`): procfs
+/// looks each component up, so a file on the way is no folder (`ENOTDIR`: `/proc/cpuinfo/x`), and
+/// a name that it does not have (`ProcEntry::Missing`), or one in a directory whose entries the
+/// model does not list (`ProcEntry::Unlisted`: `/proc/sys/kernel/x`), is not found (`ENOENT`).
+/// `None` where `folder` is a directory of procfs.
+fn procfs_folder_failure(folder: &[u8]) -> Option<OpenFailure> {
+    let mut end = b"/proc".len();
+    loop {
+        match procfs_entry(&folder[..end]) {
+            ProcEntry::Directory => {}
+            ProcEntry::File => return Some(OpenFailure::NotADirectory),
+            ProcEntry::Missing | ProcEntry::Unlisted => return Some(OpenFailure::NotFound),
+        }
+        if end == folder.len() {
+            return None;
+        }
+        end = folder[end + 1..]
+            .iter()
+            .position(|byte| *byte == b'/')
+            .map_or(folder.len(), |at| end + 1 + at);
     }
 }
 

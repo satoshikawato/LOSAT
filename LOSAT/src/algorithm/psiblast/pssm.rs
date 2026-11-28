@@ -1212,8 +1212,9 @@ fn owner(_metadata: &std::fs::Metadata) -> u32 {
 ///   query of some thousand residues) and written by `commit`. A device that takes zero bytes but
 ///   not the PSSM's would fail only after the reports;
 /// - a directory or a socket: NCBI's open fails, and so does LOSAT's;
-/// - a name that ends in a directory by its form (`sub/`, `sub/.`, `nodir/..`: `ends_in_directory`):
-///   opened as NCBI opens it, which fails without making a file (`EISDIR`, or a folder's error);
+/// - a name that ends in a directory by its form (`sub/`, `sub/.`, `nodir/..`,
+///   `ends_in_directory`): opened as NCBI opens it, which fails without making a file (`EISDIR`,
+///   or a folder's error);
 /// - a named pipe, a block device, a symbolic link to no file: refused (also before the search,
 ///   `check_pssm_files`).
 ///

@@ -60,7 +60,7 @@ export interface AttentionDeps {
   readonly runs: Store<AppState>;
   /** The search form, whose inputs a reload would lose. */
   readonly draft?: Store<DraftState>;
-  /** The tool tabs' forms (WindowMasker, Format Archive), whose inputs a reload would lose. */
+  /** The tool tabs' forms (WindowMasker, Masking, Format Archive), whose inputs a reload would lose. */
   readonly tools?: readonly ToolForm[];
   /** A call that the Data worker answers at once (its storage status): whether it still answers. */
   readonly probe: () => Promise<unknown>;

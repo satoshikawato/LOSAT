@@ -359,3 +359,12 @@ access_maskinfo_asn1_text_ps	-in in/access.fa -outfmt maskinfo_asn1_text -parse_
 access_gi0_int_ps	-in in/access_gi0.fa -parse_seqids
 access_gi0_seqloc_asn1_text_ps	-in in/access_gi0.fa -outfmt seqloc_asn1_text -parse_seqids
 access_gi0_maskinfo_asn1_text_ps	-in in/access_gi0.fa -outfmt maskinfo_asn1_text -parse_seqids
+# ww4c_* (line WW item WW4c, the Supported mark of LOSAT Web's Masking tab): a row for each combination of -infmt, -hard_masking, -parse_seqids and -outfmt that NCBI ends with exit status 0 and no row had (-hard_masking with an -outfmt other than fasta is refused, exit 3: basic_int_hard, basic_mask_hard), in/deflines.fa or db/mdefl_ps. Frozen 2026-11-28 by ad-WW-21 (WW4c) with the local official NCBI BLAST+ 2.17.0 release.
+ww4c_fa_fasta_hard_ps	-in in/deflines.fa -hard_masking -outfmt fasta -parse_seqids
+ww4c_db_acclist_ps	-infmt blastdb -in db/mdefl_ps -outfmt acclist -parse_seqids
+ww4c_db_fasta_ps	-infmt blastdb -in db/mdefl_ps -outfmt fasta -parse_seqids
+ww4c_db_mibin_ps	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_db_mixml_ps	-infmt blastdb -in db/mdefl_ps -outfmt maskinfo_xml -parse_seqids
+ww4c_db_slbin_ps	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_asn1_bin -parse_seqids
+ww4c_db_slxml_ps	-infmt blastdb -in db/mdefl_ps -outfmt seqloc_xml -parse_seqids
+ww4c_db_fasta_hard_ps	-infmt blastdb -in db/mdefl_ps -hard_masking -outfmt fasta -parse_seqids

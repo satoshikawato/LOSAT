@@ -281,6 +281,8 @@ export interface ToolRunSnapshot {
   readonly argv: readonly string[];
   readonly directory: readonly ToolDirectoryEntry[];
   readonly prints?: PrintedKind;
+  /** A masking run's `-outfmt` default from `-xmlhelp`, kept for the run's mask data (`domain/tool-argv.ts` `maskDataName`). */
+  readonly outfmtDefault?: string;
   readonly queuedAt: number;
   readonly group?: RunGroup;
 }

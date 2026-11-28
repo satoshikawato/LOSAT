@@ -65,6 +65,55 @@ fn the_shape_of_the_units_is_the_shape_of_the_batch_as_one_unit() {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976
+/// NCBI's sum statistics carry their e-value over the contexts of the query batch: the units of a
+/// reader batch take the cutoffs of the batch set up as one unit, also a unit whose first valid
+/// context follows valid contexts of earlier units. The subjects' length of 5 residues makes the
+/// carried cutoff (2) differ from the first context's (1).
+#[test]
+fn the_units_carry_the_sum_statistics_of_their_reader_batch() {
+    use super::super::parameters::SubjectNumbers;
+    let records: Vec<_> = [3000, 301, 7000, 2, 5000, 1, 4999, 90].map(record).to_vec();
+    let ranges = super::super::query_setup::batch_ranges(&records, 6000);
+    assert!(ranges.len() > 2);
+    let pool = crate::utils::threading::SearchPool::x_serial();
+    let mut options = super::super::stage_c_tests::options();
+    options.evalue = 1e-5;
+    let numbers = SubjectNumbers {
+        total: 5,
+        count: 1,
+        gumbel_total: 5,
+        shortest: 5,
+        average: 5,
+        request_count: 1,
+    };
+    let subjects: Subjects<'_> = (&records[..1]).into();
+    let units = prepare_reader_batch(&records, &ranges, &options, subjects, &pool).unwrap();
+    let layout = Arc::new(ReaderBatchShape::layout(&records, &options));
+    let whole = prepare_unit(&records, &layout, &options, subjects).unwrap();
+    let cutoffs = |prep: &UnitPrep| {
+        let mut params = prep.params.clone();
+        subject_parameters(&prep.prepared, &mut params, &options, numbers, None).unwrap();
+        params
+            .iter()
+            .map(|p| (p.valid, p.hit_cutoff))
+            .collect::<Vec<_>>()
+    };
+    let batch = cutoffs(&whole);
+    let first = batch.iter().position(|&(valid, _)| valid).unwrap();
+    assert_eq!(batch[first].1, 1);
+    assert!(batch[first + 1..]
+        .iter()
+        .filter(|&&(valid, _)| valid)
+        .all(|&(_, cutoff)| cutoff == 2));
+    assert!(!units[0].prepared.batch_valid_before);
+    assert!(units[1..]
+        .iter()
+        .all(|unit| unit.prepared.batch_valid_before));
+    let by_units: Vec<_> = units.iter().flat_map(cutoffs).collect();
+    assert_eq!(by_units, batch);
+}
+
 /// NCBI validates the query batch as a whole: a unit of only empty records is prepared when
 /// another unit of its reader batch has a valid context, and in a reader batch without one
 /// every unit fails with one message per empty record of the batch.

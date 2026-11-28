@@ -772,7 +772,7 @@ pub(super) fn db_extent<'a>(
     // NCBI's `min_subject_length` (c++/src/algo/blast/core/blast_setup.c:969-976, cited at its check in `run_call`),
     // which the hit-saving parameters read: the shortest length with the Gumbel block, else
     // (`-searchsp`, `OLD_FSC`) the statistics' average, which only psiblast's `-sum_stats true`
-    // reads (its cutoff, `sum_stats_hit_cutoff`; the cutoffs without the block read the search
+    // reads (its cutoff, `sum_stats_hit_cutoffs`; the cutoffs without the block read the search
     // space).
     let cutoff_subject_length = match (database, gapped_gumbel.is_some()) {
         // `setup_subject_length` without the block: the average as NCBI's `Int4` (0 where it is

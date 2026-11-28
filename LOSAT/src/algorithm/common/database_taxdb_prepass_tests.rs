@@ -1036,6 +1036,56 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
         ),
         None
     );
+    // Review of line RG series D's D-SO-5, L3: the stopping id's holders `ldd`
+    // (`gi|9000|ref|NP_000002.1|`) and `ldx` (`gi|9001|ref|NP_000002.1|`) reported by two batches
+    // that the call still holds at the stop (`TaxdbRun::loads_at_stop`, as BLASTP, TBLASTN and
+    // BLASTN's `LOSAT_X_RPTSTREAM=0` hold them). Each batch is a note of its own, so the later
+    // batch's holder registered the id last, the sequence that NCBI's data loader gives for it
+    // (the review's probe: NCBI goes on and writes the later holder's letters for the stopping
+    // subject); one note of both leaves their order unknown. The run's record stays as it was.
+    let db = open(&["ldd", "ldx", "lda", "ldp"]);
+    let parsed = headers_of(&db);
+    let stop = accession(&parsed, "NP_000002.1");
+    let holder = |gi: &str| {
+        parsed
+            .iter()
+            .position(|header| {
+                header.as_ref().is_some_and(|subject| {
+                    String::from_utf8_lossy(&subject.alignment_fasta()).contains(gi)
+                })
+            })
+            .unwrap() as u32
+    };
+    let (first, second) = (holder("gi|9000"), holder("gi|9001"));
+    let held =
+        |ordinal: u32| PrefetchSubject::unflipped(ordinal, parsed[ordinal as usize].as_deref());
+    let run = TaxdbRun::default();
+    let stop_after = |batches: [usize; 2]| {
+        let loads = run.loads_at_stop([(batches[0], held(first)), (batches[1], held(second))]);
+        let mut unsure = stop_lookup_unsure(
+            &db,
+            &loads,
+            &[held(stop)],
+            &load_before_stop(&db, &[held(stop)]).at_first_stop(),
+            &stop_queries(2),
+            stop,
+            parsed[stop as usize].as_ref().unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        if let Some(instead) = unsure.instead.as_mut() {
+            instead.sort_unstable();
+        }
+        (unsure.why, unsure.instead)
+    };
+    let oid = |ordinal: u32| db.oid(ordinal).get();
+    let (why, instead) = stop_after([0, 1]);
+    assert!(why.contains(&format!("(OID {})", oid(second))), "{why}");
+    assert_eq!(instead, Some(vec![oid(second)]));
+    let (why, instead) = stop_after([0, 0]);
+    assert!(why.contains("the run loaded that sequence"), "{why}");
+    assert_eq!(instead, Some(vec![oid(first), oid(second)]));
+    assert!(run.loaded().is_empty());
     // Line DBID hr-1: the run's record is made in every run (the walks of the reports' loads
     // read it, not only a prefetch's stop), each record's subjects made once; whether a
     // prefetch of the run can stop is still asked of the database (BLASTX's scopes).

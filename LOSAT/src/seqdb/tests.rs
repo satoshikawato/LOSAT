@@ -2495,9 +2495,8 @@ fn header_members_lengths_and_bytes() {
 
 // D3c-3d: a header record without its mandatory seqid, read under `SERIAL_VERIFY_DATA_READ`.
 // NCBI's default read throws "member seqid expected"; with the check off it posts the member as
-// missing and reads on, which LOSAT refuses at that read (`SeqDbError::Setting`), alone
-// (`read_header`, `defline_set`) and in a piece (`visit_sequence_headers`). The decoder of the
-// ordinal ids takes such a record for one of parsed Seq-ids under every setting, and its readers
+// missing and reads on, which LOSAT refuses at that read (`SeqDbError::Setting`; `read_header`,
+// `defline_set`). The decoder of the ordinal ids takes such a record for one of parsed Seq-ids under every setting, and its readers
 // then read the whole set (`Volume::decode_header`). The other variable, the values that keep the
 // check, and the other records read as before.
 #[test]

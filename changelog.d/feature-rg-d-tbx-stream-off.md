@@ -14,3 +14,6 @@
   refusals now come after what NCBI BLAST+ writes before its error there: the `-outfmt 0` header, the
   XML2 and JSON prologs (`-outfmt 13` to `16`), the `-outfmt 20` header line and the batch's query
   messages. Before, LOSAT wrote nothing before them.
+- `blastp`, `tblastn` and `blastn`: where the Seq-id of a subject whose lookup stops NCBI BLAST+'s
+  prefetch is also held by sequences that two earlier query batches reported, LOSAT's refusal now
+  names the sequence of the later of those batches, which NCBI BLAST+ gives for the id.

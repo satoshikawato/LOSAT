@@ -5075,8 +5075,9 @@ pub(crate) struct TaxdbRun {
     separate_xml2: bool,
 }
 
-/// The note of the loads of the query batch `batch`, `subjects`, in the record `record`
-/// ([`TaxdbRun::note_loaded`]): its sequences with parsed Seq-ids, none where it has none.
+/// The note of the loads of the query batch `batch`, `subjects`, in the record `record` (the
+/// run's, [`TaxdbRun::note_loaded`], or a stop's copy, [`TaxdbRun::loads_at_stop`]): its sequences
+/// with parsed Seq-ids, none where it has none; the one producer of a record's notes of batches.
 fn note_batch<'s>(
     record: &mut crate::report::db_subject::ScopeRecord,
     batch: usize,
@@ -6557,11 +6558,7 @@ impl TaxdbRun {
             }
             note_batch(&mut copy, batch, subjects);
         }
-        crate::report::db_subject::LoadsBefore::new(
-            &std::sync::Arc::new(std::sync::RwLock::new(copy)),
-            None,
-            self.calls_before,
-        )
+        self.loads_of(&std::sync::Arc::new(std::sync::RwLock::new(copy)), None)
     }
 
     /// Records that calls of the run before this one loaded sequences that no record here holds
@@ -6599,15 +6596,25 @@ impl TaxdbRun {
     }
 
     /// The loads before a walk of the reports' loads whose first report is of the query batch
-    /// `batch` (`db_subject::LoadsBefore`, the one producer): the run's record as it is now, whose
-    /// last batch's scope the reports share where it is `batch` (psiblast's rounds before of the
-    /// query; `None`: the record's last batch), after the calls of the run before
-    /// ([`TaxdbRun::note_calls_before`]).
+    /// `batch` ([`TaxdbRun::loads_of`]): the run's record as it is now, whose last batch's scope
+    /// the reports share where it is `batch` (psiblast's rounds before of the query; `None`: the
+    /// record's last batch), after the calls of the run before ([`TaxdbRun::note_calls_before`]).
     pub(crate) fn loads_before(
         &self,
         batch: Option<usize>,
     ) -> crate::report::db_subject::LoadsBefore {
-        crate::report::db_subject::LoadsBefore::new(&self.loaded, batch, self.calls_before)
+        self.loads_of(&self.loaded, batch)
+    }
+
+    /// The loads before in the record `record` (the run's, [`TaxdbRun::loads_before`], or a stop's
+    /// copy, [`TaxdbRun::loads_at_stop`]) for the query batch `batch`, after the calls of the run
+    /// before: the one producer of a `db_subject::LoadsBefore` from a record.
+    fn loads_of(
+        &self,
+        record: &crate::report::db_subject::SharedRecord,
+        batch: Option<usize>,
+    ) -> crate::report::db_subject::LoadsBefore {
+        crate::report::db_subject::LoadsBefore::new(record, batch, self.calls_before)
     }
 
     /// [`SeqDb::taxdb_found`] of the run's database, asked once: the search path is not

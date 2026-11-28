@@ -558,30 +558,30 @@ impl LoaderIds {
         }
     }
 
-    /// The sequence that a refusal of `subject` names for `handle`, whose registrant
-    /// `registrant` LOSAT does not know to have registered it last (`!registrant.sure`): that
-    /// registrant, or, where it is the subject's own sequence, another sequence that may have
-    /// registered it last (`ambiguous`; one note of a batch registers its loads as a set,
-    /// `ScopeRecord::note`), so that the refusal names the other sequence that holds the id
-    /// (review of line RG D-SO-5, L6).
-    fn other_registrant(
+    /// What a load of `subject` by `handle` gives where `m_Ids` holds the handle with the
+    /// registrant `registrant`, which LOSAT does not know to have registered it last
+    /// (`!registrant.sure`): that registrant, in an order LOSAT does not know, as every check of
+    /// the holder takes it; where it is the subject's own sequence, with another sequence that may
+    /// have registered the handle last (`ambiguous`; one note of a batch registers its loads as a
+    /// set, `ScopeRecord::note`) for the words of LOSAT's refusal alone (review of line RG D-SO-5,
+    /// L6; re-review M1, D-SO-10).
+    fn unsure(
         &self,
         handle: HandleKey,
         registrant: Registrant,
         subject: &ParsedSubject,
-    ) -> DbSequence {
-        if !subject.mine(registrant.sequence) {
-            return registrant.sequence;
-        }
-        self.ambiguous
-            .get(&handle)
+    ) -> Resolved {
+        let named = subject
+            .mine(registrant.sequence)
+            .then(|| self.ambiguous.get(&handle))
+            .flatten()
             .and_then(|sequences| {
                 sequences
                     .iter()
                     .copied()
                     .find(|&sequence| !subject.mine(sequence))
-            })
-            .unwrap_or(registrant.sequence)
+            });
+        Resolved::Unknown(Some(registrant.sequence), ShownBy::Order, named)
     }
 
     /// Whether `m_Ids` holds `handle` now.
@@ -818,11 +818,12 @@ impl LoaderIds {
 /// What a load of a Seq-align id gave in [`ScopeWalk`], as the scope's cache (`m_Seq_idMap`)
 /// keeps it: the sequence whose blob it holds and how it came to it, or a sequence whose place
 /// LOSAT does not know (`Unknown`: another sequence, `None` where LOSAT does not name it, may have
-/// come first), or a lookup that throws (never kept).
+/// come first; with the sequence that the words of LOSAT's refusal name, [`ShownInstead::named`]),
+/// or a lookup that throws (never kept).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Resolved {
     Blob(DbSequence, ShownBy),
-    Unknown(Option<DbSequence>, ShownBy),
+    Unknown(Option<DbSequence>, ShownBy, Option<DbSequence>),
     Throws,
     /// No Bioseq (the loader gave none: the lookup found nothing, or a sequence whose lines do
     /// not hold the id), which the scope keeps as unresolved: a later load of the id in the
@@ -857,6 +858,12 @@ pub enum ShownBy {
 pub struct ShownInstead {
     pub holder: Option<DbSequence>,
     pub by: ShownBy,
+    /// Where `holder` is `None` because the sequence that may have registered the id's handle
+    /// last is the subject's own, though one note of a batch registered it with others
+    /// ([`ScopeRecord::note`]): one of those others, which the words of LOSAT's refusal name
+    /// ([`ParsedSubject::shown_reason`]). The checks that decide by the holder never read it
+    /// (review of line RG D-SO-5, L6; re-review M1, D-SO-10).
+    pub named: Option<DbSequence>,
 }
 
 /// Inverted index built lazily for [`ScopePlaces`] only when `holders()` is actually queried
@@ -1044,7 +1051,10 @@ impl ScopePlaces {
             .iter()
             .any(|&(at, _)| self.sequence(at) != sequence)
         {
-            return Some((Resolved::Unknown(Some(sequence), ShownBy::Order), definite));
+            return Some((
+                Resolved::Unknown(Some(sequence), ShownBy::Order, None),
+                definite,
+            ));
         }
         Some((Resolved::Blob(sequence, by), definite))
     }
@@ -1107,7 +1117,7 @@ impl RecordedBatchScope {
         Some(if !unresolved && found.all(|sequence| sequence == first) {
             Resolved::Blob(first, ShownBy::Holder)
         } else {
-            Resolved::Unknown(None, ShownBy::Order)
+            Resolved::Unknown(None, ShownBy::Order, None)
         })
     }
 
@@ -1127,14 +1137,15 @@ impl RecordedBatchScope {
             {
                 Resolved::Blob(sequence, by)
             } else {
-                Resolved::Unknown(Some(sequence), ShownBy::Order)
+                Resolved::Unknown(Some(sequence), ShownBy::Order, None)
             },
         )
     }
 }
 
-/// What a run loaded before a walk of its reports' loads ([`LoadsBefore`], kept by
-/// `common::database::TaxdbRun::note_loaded`, the one producer):
+/// What a run loaded before a walk of its reports' loads ([`LoadsBefore`], noted batch by batch
+/// by `common::database::note_batch`, the one producer: the run's record,
+/// `TaxdbRun::note_loaded`, and a stop's copy, `TaxdbRun::loads_at_stop`):
 /// - the data loader's `m_Ids` ([`LoaderIds`], copy-on-write via `Arc`);
 /// - the compact `BlobKeys` of sequences that `m_Ids` may still hold as registrants (plus kept
 ///   scope sequences when the run keeps one scope, `keeps_scope != Some(false)`);
@@ -1388,7 +1399,8 @@ impl ScopeRecord {
 pub type SharedRecord = std::sync::Arc<std::sync::RwLock<ScopeRecord>>;
 
 /// What a run loaded before the reports that [`HitLoads::of`] walks
-/// (`common::database::TaxdbRun::loads_before`, the one producer): the record of the batches,
+/// (`common::database::TaxdbRun::loads_of`, the one producer from a record, of the run's record or
+/// a stop's copy; `LoadsBefore::after_calls` without one): the record of the batches,
 /// psiblast's rounds and their PSSM reads before ([`ScopeRecord`], as it was: its first `notes`
 /// notes and `loads` loads), the query batch of the reports' first report (`batch`, whose scope
 /// the record's last batch is where they are the same; `None`: the record's last batch), and
@@ -1771,7 +1783,7 @@ impl ScopeWalk {
     fn place(registrant: Registrant) -> Resolved {
         match registrant.sure {
             true => Resolved::Blob(registrant.sequence, ShownBy::Holder),
-            false => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
+            false => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order, None),
         }
     }
 
@@ -1797,15 +1809,15 @@ impl ScopeWalk {
             (Some((exact, false)), Some((weak, _))) => {
                 let (holder, by) = match weak {
                     Resolved::Blob(sequence, by) => (Some(sequence), by),
-                    Resolved::Unknown(holder, by) => (holder, by),
+                    Resolved::Unknown(holder, by, _) => (holder, by),
                     Resolved::Throws | Resolved::Nothing => (None, ShownBy::Order),
                 };
                 let holder = holder.or(match exact {
                     Resolved::Blob(sequence, _) => Some(sequence),
-                    Resolved::Unknown(holder, _) => holder,
+                    Resolved::Unknown(holder, _, _) => holder,
                     Resolved::Throws | Resolved::Nothing => None,
                 });
-                Some((Resolved::Unknown(holder, by), true))
+                Some((Resolved::Unknown(holder, by, None), true))
             }
             (Some((_, true)), _) => unreachable!("definite exact match returned above"),
         }
@@ -1941,7 +1953,7 @@ impl ScopeWalk {
     /// lines ([`LoaderIds::maybe_use`]). When `subject.mine(sequence)`, reads `subject` directly
     /// with zero lookup or allocation.
     fn relock(&mut self, subject: &ParsedSubject, resolved: Option<Resolved>) {
-        let Some(Resolved::Blob(sequence, _) | Resolved::Unknown(Some(sequence), _)) = resolved
+        let Some(Resolved::Blob(sequence, _) | Resolved::Unknown(Some(sequence), _, _)) = resolved
         else {
             return;
         };
@@ -1984,7 +1996,7 @@ impl ScopeWalk {
                 Held::Maybe(registrant) => {
                     self.ids.maybe_use(handle, registrant);
                     return Some(match subject.mine(registrant.sequence) {
-                        true => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
+                        true => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order, None),
                         false => Self::place(registrant),
                     });
                 }
@@ -1994,8 +2006,7 @@ impl ScopeWalk {
                 // The find marks the handle used.
                 self.ids.use_now(handle, registrant);
                 if !registrant.sure {
-                    let other = self.ids.other_registrant(handle, registrant, subject);
-                    return Some(Resolved::Unknown(Some(other), ShownBy::Order));
+                    return Some(self.ids.unsure(handle, registrant, subject));
                 }
                 if subject.mine(registrant.sequence) {
                     // The subject's own blob, loaded before in the run: its Bioseq enters this
@@ -2013,7 +2024,7 @@ impl ScopeWalk {
         }
         if self.before.unrecorded {
             if let Some(holder) = subject.resolution.unrecorded.loader.first() {
-                return Some(Resolved::Unknown(holder, ShownBy::Calls));
+                return Some(Resolved::Unknown(holder, ShownBy::Calls, None));
             }
         }
         if matches!(
@@ -2101,6 +2112,7 @@ impl ScopeWalk {
         Some(ShownInstead {
             holder: one.or(other).and_then(|shown| shown.holder),
             by: ShownBy::Display,
+            named: None,
         })
     }
 
@@ -2117,6 +2129,7 @@ impl ScopeWalk {
             HitLoad::Shown(shown) => Some(ShownInstead {
                 holder: shown.holder,
                 by: ShownBy::Display,
+                named: None,
             }),
             _ => None,
         }
@@ -2127,13 +2140,16 @@ impl ScopeWalk {
         if one == other {
             return one;
         }
-        let holder = [one, other].into_iter().find_map(|load| match load {
-            HitLoad::Shown(shown) => shown.holder,
-            _ => None,
-        });
+        let shown = |part: fn(ShownInstead) -> Option<DbSequence>| {
+            [one, other].into_iter().find_map(|load| match load {
+                HitLoad::Shown(shown) => part(shown),
+                _ => None,
+            })
+        };
         HitLoad::Shown(ShownInstead {
-            holder,
+            holder: shown(|shown| shown.holder),
             by: ShownBy::Order,
+            named: shown(|shown| shown.named),
         })
     }
 
@@ -2168,12 +2184,16 @@ impl ScopeWalk {
                                     Some(resolved)
                                 }
                                 other => {
-                                    let (holder, by) = match other {
-                                        Some(Resolved::Blob(holder, by)) => (Some(holder), by),
-                                        Some(Resolved::Unknown(holder, by)) => (holder, by),
-                                        _ => (Some(sequence), ShownBy::Order),
+                                    let (holder, by, named) = match other {
+                                        Some(Resolved::Blob(holder, by)) => {
+                                            (Some(holder), by, None)
+                                        }
+                                        Some(Resolved::Unknown(holder, by, named)) => {
+                                            (holder, by, named)
+                                        }
+                                        _ => (Some(sequence), ShownBy::Order, None),
                                     };
-                                    Some(Resolved::Unknown(holder, by))
+                                    Some(Resolved::Unknown(holder, by, named))
                                 }
                             }
                         }
@@ -2220,7 +2240,7 @@ impl ScopeWalk {
         // of may hold a holder that LOSAT lists from the database (`ScopeHolders::scope`).
         if scope && self.keeps_scope && self.before.unrecorded {
             if let Some(holder) = subject.resolution.unrecorded.scope.first() {
-                return Some(Resolved::Unknown(holder, ShownBy::Calls));
+                return Some(Resolved::Unknown(holder, ShownBy::Calls, None));
             }
         }
         self.loader(subject, handle)
@@ -2235,10 +2255,12 @@ impl ScopeWalk {
             Some(Resolved::Blob(sequence, by)) => HitLoad::Shown(ShownInstead {
                 holder: Some(sequence),
                 by,
+                named: None,
             }),
-            Some(Resolved::Unknown(holder, by)) => HitLoad::Shown(ShownInstead {
+            Some(Resolved::Unknown(holder, by, named)) => HitLoad::Shown(ShownInstead {
                 holder: holder.filter(|&holder| !subject.mine(holder)),
                 by,
+                named,
             }),
         }
     }
@@ -2473,7 +2495,7 @@ impl ScopeWalk {
                 }
                 let blob_load = if self.many_blobs() {
                     match resolved {
-                        Resolved::Blob(seq, _) | Resolved::Unknown(Some(seq), _) => {
+                        Resolved::Blob(seq, _) | Resolved::Unknown(Some(seq), _, _) => {
                             if subject.mine(seq) {
                                 Some(AloneBlobLoad {
                                     sequence: seq,
@@ -2532,7 +2554,9 @@ impl ScopeWalk {
                 Held::Maybe(registrant) => {
                     return AloneResult {
                         resolved: Some(match subject.mine(registrant.sequence) {
-                            true => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
+                            true => {
+                                Resolved::Unknown(Some(registrant.sequence), ShownBy::Order, None)
+                            }
                             false => Self::place(registrant),
                         }),
                         requested_use: Some((handle, registrant, true)),
@@ -2544,10 +2568,7 @@ impl ScopeWalk {
             if let Some(registrant) = registrant {
                 if !registrant.sure {
                     return AloneResult {
-                        resolved: Some(Resolved::Unknown(
-                            Some(registrant.sequence),
-                            ShownBy::Order,
-                        )),
+                        resolved: Some(self.ids.unsure(handle, registrant, subject)),
                         requested_use: Some((handle, registrant, false)),
                         blob_load: None,
                     };
@@ -2576,7 +2597,7 @@ impl ScopeWalk {
         if self.before.unrecorded {
             if let Some(holder) = subject.resolution.unrecorded.loader.first() {
                 return AloneResult {
-                    resolved: Some(Resolved::Unknown(holder, ShownBy::Calls)),
+                    resolved: Some(Resolved::Unknown(holder, ShownBy::Calls, None)),
                     requested_use: None,
                     blob_load: None,
                 };
@@ -3361,7 +3382,7 @@ impl ParsedSubject {
                     || "the sequences that the calls of the run before loaded".to_owned(),
                     str::to_owned,
                 ),
-            ShownBy::Order | ShownBy::Holder | ShownBy::Weak | ShownBy::Display => match shown.holder {
+            ShownBy::Order | ShownBy::Holder | ShownBy::Weak | ShownBy::Display => match shown.holder.or(shown.named) {
                 Some(other) => format!(
                     "whether database sequence {other}, which also holds it, is loaded before it (an order of NCBI BLAST+'s loads that their Seq-ids do not decide)"
                 ),
@@ -6248,6 +6269,7 @@ impl HitLoads {
             let mut shown = others.next().map(|holder| ShownInstead {
                 holder: Some(holder),
                 by: ShownBy::Order,
+                named: None,
             });
             // A description line's second lookup by the display id (`ScopeWalk::display`).
             if shown.is_none() {
@@ -6260,6 +6282,7 @@ impl HitLoads {
                         .map(|holder| ShownInstead {
                             holder: Some(holder),
                             by: ShownBy::Display,
+                            named: None,
                         })
                 });
             }

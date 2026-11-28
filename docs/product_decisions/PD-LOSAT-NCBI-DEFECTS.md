@@ -2605,7 +2605,7 @@ file would differ, and NCBI's programs still could not open the database).
   made of the longer preliminary hit list, so its cut comes after: they take none there). Versions
   1.6 and 1.29 made this an explicit rejection; version 1.32 reproduces it in the six search
   programs, each of which drops such hit lists where NCBI makes the Seq-aligns
-  (`SeqDb::keeps_line`, `algorithm::common::database::SeqAligned`; line DBID item lineless, probe of
+  (`SeqDb::line_read`, `algorithm::common::database::SeqAligned`; line DBID item lineless, probe of
   1,375 runs: 6 programs, 15 lists of the five kinds, 20 formats, `-max_target_seqs` 1 and 3, a
   query without hits). A read of such a sequence's lines still refuses, and no report reaches it.
 

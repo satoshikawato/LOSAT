@@ -301,6 +301,17 @@ fn shown(holder: Option<u32>, by: ShownBy) -> HitLoad {
     HitLoad::Shown(ShownInstead {
         holder: holder.map(DbSequence::of_unrestricted),
         by,
+        named: None,
+    })
+}
+
+/// The answer of a load whose own sequence may have registered the handle last, in an order that
+/// LOSAT does not know: no holder for the checks, and `named` for the words of the refusal.
+fn shown_named(named: u32) -> HitLoad {
+    HitLoad::Shown(ShownInstead {
+        holder: None,
+        by: ShownBy::Order,
+        named: Some(DbSequence::of_unrestricted(named)),
     })
 }
 
@@ -1526,6 +1537,7 @@ fn the_pssm_refuses_reads_that_losat_does_not_make_as_ncbi() {
     let error = shown_line.shown_reason(ShownInstead {
         holder: Some(DbSequence::of_unrestricted(2)),
         by: ShownBy::Holder,
+        named: None,
     });
     assert!(
         error.contains("which database sequence 2 also holds"),
@@ -4039,7 +4051,8 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
 // (the stream's notes, and the stop's copy of the batches that the loop holds,
 // `common::database::TaxdbRun::loads_at_stop`), so a later batch's load registers a handle after
 // the batches before; one note of both leaves their order unknown. A later load of the subject
-// whose own sequence may have registered the handle names the other sequence.
+// whose own sequence may have registered the handle gives no holder, and its refusal's words name
+// the other sequence (re-review M1, D-SO-10).
 #[test]
 fn each_batch_of_the_record_registers_after_the_batches_before() {
     let a = sequence(vec![gb("AAA00001", 1)], 0);
@@ -4071,5 +4084,54 @@ fn each_batch_of_the_record_registers_after_the_batches_before() {
     assert_eq!(walk.load(&a), shown(Some(1), ShownBy::Holder));
     let mut walk = ScopeWalk::new(before(&both), Some(false));
     walk.enter(Some(2));
-    assert_eq!(walk.load(&a), shown(Some(1), ShownBy::Order));
+    assert_eq!(walk.load(&a), shown_named(1));
+}
+
+// Re-review of line RG series D's D-SO-5, M1 (D-SO-10): three sequences of one note hold the
+// subject's Seq-align id, and the subject's own may have registered it last. The checks that
+// decide by the holder (`common::database::check_prefetched_parsed`, `check_pssm_holds` of
+// BLASTP) see no holder, as before the words named another sequence, so they refuse the subject
+// whichever of the others NCBI's order gives; the refusal names one of them. A later load of the
+// handle (the scope's cache) gives the same.
+#[test]
+fn an_unsure_own_registrant_names_another_holder_in_the_words_alone() {
+    let a = sequence(vec![gb("AAA00001", 1)], 0);
+    let b = lines(vec![vec![gb("BBB00002", 1)], vec![gb("AAA00001", 1)]])
+        .in_database(DbSequence::of_unrestricted(1));
+    let c = lines(vec![vec![gb("CCC00003", 1)], vec![gb("AAA00001", 1)]])
+        .in_database(DbSequence::of_unrestricted(2));
+    let mut record = ScopeRecord::default();
+    record.note(0, [&a, &b, &c]);
+    let before = LoadsBefore::new(
+        &std::sync::Arc::new(std::sync::RwLock::new(record)),
+        Some(1),
+        false,
+    );
+    let ordinals: Vec<u32> = before
+        .registrants_of(&a)
+        .iter()
+        .map(|sequence| sequence.ordinal())
+        .collect();
+    assert_eq!(ordinals, [0, 1, 2]);
+    let mut walk = ScopeWalk::new(before, Some(false));
+    walk.enter(Some(1));
+    let load = walk.load(&a);
+    assert_eq!(load, shown_named(1));
+    let HitLoad::Shown(shown) = load else {
+        unreachable!()
+    };
+    assert_eq!(shown.holder, None);
+    let words = a.shown_reason(shown);
+    assert!(
+        words.contains(
+            "for which LOSAT cannot list whether database sequence 1, which also holds it, is loaded before it"
+        ),
+        "{words}"
+    );
+    let pssm = a.pssm_held_reason(shown);
+    assert!(
+        pssm.contains("cannot list whether database sequence 1, which also holds it"),
+        "{pssm}"
+    );
+    assert_eq!(walk.load(&a), shown_named(1));
 }

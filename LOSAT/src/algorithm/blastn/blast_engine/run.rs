@@ -6867,11 +6867,9 @@ struct ReportRanges<'a> {
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
     if subjects.is_empty() {
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
-        }
-        .into());
+        return Err(crate::blastinput::app::engine_error(
+            "Empty CBlastQueryVector",
+        ));
     }
     Ok(())
 }
@@ -8444,11 +8442,9 @@ fn run_in_pool(
     // 0) reads no query, so the first batch fails after the prolog (outfmt 0).
     if batching.batch_size == 0 {
         write_pairwise_prologs(outputs, &output_formats, intro, &shown, false)?;
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
-        }
-        .into());
+        return Err(crate::blastinput::app::engine_error(
+            "Empty CBlastQueryVector",
+        ));
     }
 
     // The lengths of the searched queries (their intervals with `-query_loc`; with
@@ -8648,11 +8644,9 @@ fn run_in_pool(
         if start == end {
             write_reports_before!();
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
-            }
-            .into());
+            return Err(crate::blastinput::app::engine_error(
+                "Empty CBlastQueryVector",
+            ));
         }
         // LOSAT's refusal of two queries of the batch's scope with one id, in the one form of every
         // program (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with

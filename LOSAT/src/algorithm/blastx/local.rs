@@ -305,6 +305,15 @@ struct RunReports<'a> {
     xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 }
 
+/// The strand of the queries that the call's set-up reads (`-strand` of its first options; the
+/// options of a call's formats share the search's), for its scopes (`QueryScopes::with_strand`).
+fn query_strand(resolved: &[ResolvedOptions]) -> crate::algorithm::blastn::args::QueryStrand {
+    resolved.first().map_or(
+        crate::algorithm::blastn::args::QueryStrand::Both,
+        |options| crate::algorithm::blastn::args::QueryStrand::from_option(&options.strand),
+    )
+}
+
 /// BLAST XML and the XML2 and JSON documents refuse a query title that NCBI crashes on
 /// (`names::Refusal`) before the first byte, in the reports that they write; a `-subject` XML2 or
 /// JSON document never writes
@@ -318,14 +327,6 @@ struct RunReports<'a> {
 /// queries of one scope with one id stops the run at its batch (`QueryScopes::read_ahead`; line WQA
 /// D10 round 4, 2026-11-20), and the batch that a reader error ends adds nothing (review M3,
 /// 2026-11-20).
-/// The strand of the queries that the call's set-up reads (`-strand` of its first options; the
-/// options of a call's formats share the search's), for its scopes (`QueryScopes::with_strand`).
-fn query_strand(resolved: &[ResolvedOptions]) -> crate::algorithm::blastn::args::QueryStrand {
-    resolved.first().map_or(
-        crate::algorithm::blastn::args::QueryStrand::Both,
-        |options| crate::algorithm::blastn::args::QueryStrand::from_option(&options.strand),
-    )
-}
 
 #[allow(clippy::too_many_arguments)]
 fn scan_xml_titles(

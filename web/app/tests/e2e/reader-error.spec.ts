@@ -2,9 +2,12 @@
 // 2026-11-19; docs/web/abi_v2.md §4 `losat_web2_register`): the command line reads its queries one
 // batch at a time and ends with the reader's error in the batch that reads the record, after the
 // reports of the batches before, so the input is not refused before the run. Its card lists the records
-// before the error and warns with the command line's message; the run ends with that message (a failed
-// run keeps no results). Under -parse_deflines an error of an earlier batch (two records of one id)
-// comes first, as on the command line. A query of comment lines only is a batch without a query: the
+// before the error and warns with the command line's message; a run that reads that far ends with that
+// message and keeps the outputs written before it, the reports of the batches before (line WQA's D28,
+// 2026-11-27): the records of the error's batch have none, so with the error in the first batch no record has
+// results (PSI-BLAST searches one query at a time: the records before the error keep theirs), outfmt 0 keeps its prolog
+// (-html its page's head, outfmt 15 the start of its JSON), and outfmt 5, 6 and 7 are empty. Under -parse_deflines an
+// error of an earlier batch (two records of one id) comes first, as on the command line. A query of comment lines only is a batch without a query: the
 // card says that it has no sequence, and the run ends with NCBI's `Empty CBlastQueryVector`.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -13,7 +16,7 @@ import { expect, type Page } from '@playwright/test';
 import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { openFiles, openParameters, openSearch, paste, pickRun, program, submit, waitStatus } from './support/search';
+import { openFiles, openParameters, openSearch, paste, pickRun, program, settled, submit, waitStatus } from './support/search';
 
 test.setTimeout(180_000);
 
@@ -36,10 +39,18 @@ const DNA = letters('ACGT', 7, 300);
 const SUBJECT = `>s1 subject\n${DNA}\n`;
 const NOT_PLAUSIBLE = (line: number) =>
   `LOSAT query error: CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.`;
-/** The warning: a failed run keeps no results, whatever records come before the error (review M-a, 2026-11-20). */
-const WARNING = 'A run of this input ends with this error, as the command line does, and gives no results: ';
-/** What the warning says to do (review L2), with the input's own line where the run's differs (review L-b, 2026-11-20). */
-const REMEDY = (own?: string) => ` Correct that line${own === undefined ? '' : ` (${own})`} to search this input.`;
+/**
+ * The warning (review M-a, 2026-11-20; line WQA's D28, 2026-11-27): a run that reaches the error fails there; an error before
+ * it (an ID repeated in an earlier batch under -parse_deflines) ends the run first.
+ */
+const WARNING = 'A run that reaches this error fails there, as the command line does: ';
+/**
+ * What the warning says that the run keeps (line WQA's D28 and its reviews r1 L1 and r2 M1, 2026-11-27: the reports of the
+ * query batches before the error's; the records of the error's batch have none, one record in PSI-BLAST) and what to do (review L2), with the input's own line where the
+ * run's differs (review L-b, 2026-11-20).
+ */
+const REMEDY = (own?: string) =>
+  ` The records searched before it keep their results; the records read together with it have none (PSI-BLAST reads one record at a time). Correct that line${own === undefined ? '' : ` (${own})`} to search this input.`;
 
 /** The native CLI's run of `words` (program first) on the inputs as query.fa and subject.fa, one thread. */
 function nativeRun(words: readonly string[], query: string, subject: string): { status: number | null; stdout: string; stderr: string } {
@@ -105,6 +116,14 @@ test('under -parse_deflines an error of an earlier query batch comes before the 
   await openParameters(page);
   await page.getByTestId('param-extra').fill('-parse_deflines');
   await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  // The validation of -parse_deflines comes after a pause in typing (the state above is still the earlier argv's), and
+  // the engine then reads both inputs again; the query's check under it finds the reader's error of the last record,
+  // which the card shows (it does not without the option). Run LOSAT is pressed once the page shows that, as a user
+  // sees it: a press while the card's warning came was a press while the button moved (line WQA's D25, 2026-11-27).
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-reader-error', '', { timeout: 30_000 });
+  // The card's warning holds only if the run reads that far: it does not say that the run ends with it (line WQA's D28).
+  await expect(page.getByTestId('query-source-0-check')).toContainText(WARNING);
+  await settled(page, 'subject');
   const status = await failedRun(page, 1);
   await expect(status).toContainText(message);
   if (NATIVE === undefined) {
@@ -114,6 +133,72 @@ test('under -parse_deflines an error of an earlier query batch comes before the 
   const cli = nativeRun(['blastp', '-parse_deflines', '-outfmt', '6'], query, subject);
   expect(cli.status).toBe(1);
   expect(cli.stderr).toBe(`Error: ${message}\n`);
+});
+
+// A reader's error in a later query batch (line WQA's D28, 2026-11-27): BLASTP reads 10000 letters a batch, so ten records
+// of 1100 fill the first and the record that the reader refuses is in the second. The command line writes the first
+// batch's hits and then fails with the reader's error; the run does the same and keeps those outputs, as its card says.
+test("a query whose reader fails in a later batch: the run fails with the reader's error and keeps the outputs written before it", async ({ page }, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, "the engine writes the first batch's hits: the engine build runs this test");
+  const protein = letters('ACDEFGHIKLMNPQRSTVWY', 11, 1100);
+  const query = `${Array.from({ length: 10 }, (_, i) => `>q${i + 1}\n${protein}\n`).join('')}>bad\nACDEF%%%%\n>q12\nACDEFG\n`;
+  const subject = `>s1\n${protein.slice(0, 300)}\n`;
+  await program(page, 'blastp');
+  await paste(page, 'subject', subject);
+  await paste(page, 'query', query);
+  const check = page.getByTestId('query-source-0-check');
+  await expect(check).toHaveAttribute('data-reader-error', '');
+  await expect(check).toHaveText(`${WARNING}${NOT_PLAUSIBLE(22)}${REMEDY()}`);
+  await openParameters(page);
+  await page.getByTestId('param-extra').fill('-outfmt 6');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  const status = await failedRun(page, 1);
+  await expect(status).toContainText(NOT_PLAUSIBLE(22));
+  await expect(status).toContainText('It keeps the outputs written before the error.');
+  const shown = page.getByTestId('results-failed-outputs').getByTestId('result-output');
+  await expect(shown).toContainText('q1\ts1\t');
+  await expect(shown).toContainText('q10\ts1\t');
+  if (NATIVE === undefined) {
+    testInfo.annotations.push({ type: 'skip', description: `The CLI's output: ${NO_NATIVE_REASON}` });
+    return;
+  }
+  const cli = nativeRun(['blastp', '-outfmt', '6'], query, subject);
+  expect(cli.status).toBe(1);
+  expect(cli.stderr).toBe(`${NOT_PLAUSIBLE(22)}\n`);
+  expect((await shown.textContent()) ?? '').toBe(cli.stdout);
+});
+
+// PSI-BLAST searches one query at a time (line WQA's D28, review r2 M1, 2026-11-27): its first batch is one record, so the
+// records before the error keep their results, as the command line writes them, where BLASTP's short query keeps none.
+test("a PSI-BLAST query whose reader fails on a later record: the run keeps the hits of the records before it", async ({ page }, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, "the engine writes the records' hits: the engine build runs this test");
+  const protein = letters('ACDEFGHIKLMNPQRSTVWY', 11, 200);
+  const query = `${Array.from({ length: 3 }, (_, i) => `>q${i + 1}\n${protein}\n`).join('')}>bad\nACDEF%%%%\n`;
+  const subject = `>s1\n${protein}\n`;
+  await program(page, 'psiblast');
+  await paste(page, 'subject', subject);
+  await paste(page, 'query', query);
+  const check = page.getByTestId('query-source-0-check');
+  await expect(check).toHaveAttribute('data-reader-error', '');
+  await expect(check).toHaveText(`${WARNING}${NOT_PLAUSIBLE(8)}${REMEDY()}`);
+  await openParameters(page);
+  await page.getByTestId('param-extra').fill('-outfmt 6');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  const status = await failedRun(page, 1);
+  await expect(status).toContainText(NOT_PLAUSIBLE(8));
+  await expect(status).toContainText('It keeps the outputs written before the error.');
+  const shown = page.getByTestId('results-failed-outputs').getByTestId('result-output');
+  await expect(shown).toContainText('q1\ts1\t');
+  await expect(shown).toContainText('q3\ts1\t');
+  if (NATIVE === undefined) {
+    testInfo.annotations.push({ type: 'skip', description: `The CLI's output: ${NO_NATIVE_REASON}` });
+    return;
+  }
+  const cli = nativeRun(['psiblast', '-outfmt', '6'], query, subject);
+  expect(cli.status).toBe(1);
+  expect(cli.stderr).toBe(`${NOT_PLAUSIBLE(8)}\n`);
+  expect(cli.stdout).toContain('q3\ts1\t');
+  expect((await shown.textContent()) ?? '').toBe(cli.stdout);
 });
 
 // One Combined query input reads its sources in turn (review of D10, 2026-11-20): the warning names the
@@ -139,7 +224,7 @@ test("a Combined query input reads up to a source's reader's error, and the warn
   const later = page.getByTestId('query-source-2-check');
   await expect(later).toHaveAttribute('data-not-searched', '');
   await expect(later).toHaveText(
-    'Not searched: the search stops at the error in bad.fa, before this input. Correct that error, or choose Separate to search each input alone.',
+    'Not searched: a run does not read past the error in bad.fa, before this input. Correct that error, or choose Separate to search each input alone.',
   );
   await page.getByTestId('query-mode-separate').check();
   await expect(check).toHaveText(`${WARNING}${NOT_PLAUSIBLE(4)}${REMEDY()}`);

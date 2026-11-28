@@ -193,7 +193,14 @@ fn command(binary: &Path, program: &str, case: &Case) -> Command {
     let mut command = Command::new(binary);
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
-        if text.starts_with("LOSAT_") || text.starts_with("NCBI_") || text.starts_with("BLAST") {
+        if text.starts_with("LOSAT_")
+            || text.starts_with("NCBI_")
+            || text.starts_with("BLAST")
+            || matches!(
+                text.as_ref(),
+                "ARCHIVE_FORMAT" | "PRE_FETCH_SEQS_LIMIT" | "BL2SEQ_LEGACY"
+            )
+        {
             command.env_remove(&name);
         }
     }
@@ -495,11 +502,58 @@ fn expected_row(program: &str, name: &str) -> Streams {
         }
         _ => err,
     };
+    let out = fs::read(file("out")).unwrap();
     (
-        losat::wording::losat_output_bytes(&fs::read(file("out")).unwrap()).into_owned(),
+        map_output_with_files(&out),
         losat::wording::losat_bytes(&err).into_owned(),
         status.trim().parse().unwrap(),
     )
+}
+
+/// [`losat::wording::losat_output_bytes`] of a frozen `.out` file, mapping each `@OUT@/<name>
+/// <length>\n<bytes>` section written by [`with_files`] on its own so archive wording and BER
+/// length updates also update the recorded byte length.
+fn map_output_with_files(bytes: &[u8]) -> Vec<u8> {
+    let marker = b"\n@OUT@/";
+    let Some(first) = bytes.windows(marker.len()).position(|w| w == marker) else {
+        return losat::wording::losat_output_bytes(bytes).into_owned();
+    };
+    let mut out = losat::wording::losat_output_bytes(&bytes[..first]).into_owned();
+    let mut i = first;
+    while i < bytes.len() {
+        let Some(rest) = bytes[i..].strip_prefix(marker) else {
+            return losat::wording::losat_output_bytes(bytes).into_owned();
+        };
+        let Some(nl) = rest.iter().position(|&b| b == b'\n') else {
+            return losat::wording::losat_output_bytes(bytes).into_owned();
+        };
+        let header = &rest[..nl];
+        let Some(sp) = header.iter().rposition(|&b| b == b' ') else {
+            return losat::wording::losat_output_bytes(bytes).into_owned();
+        };
+        let Ok(len) = std::str::from_utf8(&header[sp + 1..])
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .ok_or(())
+        else {
+            return losat::wording::losat_output_bytes(bytes).into_owned();
+        };
+        let body_start = i + marker.len() + nl + 1;
+        let Some(body_end) = body_start.checked_add(len) else {
+            return losat::wording::losat_output_bytes(bytes).into_owned();
+        };
+        let Some(body) = bytes.get(body_start..body_end) else {
+            return losat::wording::losat_output_bytes(bytes).into_owned();
+        };
+        let mapped = losat::wording::losat_output_bytes(body);
+        out.extend_from_slice(marker);
+        out.extend_from_slice(&header[..sp + 1]);
+        out.extend_from_slice(mapped.len().to_string().as_bytes());
+        out.push(b'\n');
+        out.extend_from_slice(&mapped);
+        i = body_end;
+    }
+    out
 }
 
 /// A row that LOSAT refuses by name (`refused/<name>.err`): the kind of its refusal, the exit
@@ -516,7 +570,7 @@ struct RefusedRow {
 }
 
 /// The rows that LOSAT refuses by name.
-const REFUSED_ROWS: [RefusedRow; 4] = [
+const REFUSED_ROWS: [RefusedRow; 12] = [
     // NCBI's database reader does not open it: NCBI then asks its servers (its remote loader's
     // failure under `unshare -rn`).
     RefusedRow {
@@ -536,14 +590,45 @@ const REFUSED_ROWS: [RefusedRow; 4] = [
         ncbi_err: "Note[F]",
         losat_err: "severity Fatal",
     },
-    // An output format outside what LOSAT's blast_formatter writes (8, 9 and 12): NCBI writes it.
+    // An output format outside what LOSAT's blast_formatter writes (6 to 12 and 20): NCBI writes
+    // it.
     RefusedRow {
         program: "blast_formatter",
-        name: "refused_of6",
+        name: "refused_of5",
         kind: "OutputFormat",
         ncbi_status: 0,
         ncbi_err: "",
-        losat_err: "output format 6 is not supported",
+        losat_err: "output format 5 is not supported",
+    },
+    // The tabular formats of a translated search's archive (PR 3b of line RG-F3): NCBI writes
+    // them.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_tabular_rpstblastn",
+        kind: "Tabular",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "a translated search",
+    },
+    // `-subject` sequences, `BL2SEQ_LEGACY` and outfmt 7: NCBI writes a `# Subject:` line of each
+    // subject.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_tabular_bl2seq_legacy_7",
+        kind: "Tabular",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "BL2SEQ_LEGACY set and outfmt 7",
+    },
+    // Queries given as locations: NCBI reads their sequences from the database or asks its
+    // servers for them (its remote loader's failure under `unshare -rnu`).
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_tabular_locations",
+        kind: "Tabular",
+        ncbi_status: 255,
+        ncbi_err: "www.ncbi.nlm.nih.gov",
+        losat_err: "queries given as locations",
     },
     // A NaN or an infinite real number in the results: NCBI stops at it in JSON with an error of
     // its stream (in ASN.1 binary it writes its one special octet, as LOSAT does: row
@@ -555,6 +640,51 @@ const REFUSED_ROWS: [RefusedRow; 4] = [
         ncbi_status: 1,
         ncbi_err: "invalid double: not a number",
         losat_err: "output format 12 of a BLAST archive with a NaN or an infinite real number",
+    },
+    // The same two refusals of the database and of a Fatal message with `-outfmt 11`.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_database_11",
+        kind: "Database",
+        ncbi_status: 255,
+        ncbi_err: "s_InitializeSubject",
+        losat_err: "asks NCBI's servers",
+    },
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_fatal_message_11",
+        kind: "FatalMessage",
+        ncbi_status: 255,
+        ncbi_err: "Note[F]",
+        losat_err: "severity Fatal",
+    },
+    // A FilterString number that NCBI's `sscanf` does not store (`D abc 64 1`, `S 10 abc 2.5`), where
+    // `-outfmt 11` records it and no later setter sets it again (a second FilterString `F` does
+    // not, refused_filter_dust_abc_F_11): NCBI writes a variable it never set (its bytes,
+    // `ncbi/<name>.out`, vary). A later setter of the value decides it (rows fs_*abc_*_11).
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_filter_dust_abc_11",
+        kind: "Undecided",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "a FilterString number that NCBI's sscanf does not read",
+    },
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_filter_seg_abc_11",
+        kind: "Undecided",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "a FilterString number that NCBI's sscanf does not read",
+    },
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_filter_dust_abc_F_11",
+        kind: "Undecided",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "a FilterString number that NCBI's sscanf does not read",
     },
 ];
 
@@ -855,7 +985,7 @@ fn blast_formatter_standard_output_failure_aborts() {
     let want: &[u8] = b"terminate called after throwing an instance of 'std::__ios_failure'\n  \
         what():  basic_ios::clear: iostream error\n";
     let dir = fixtures("blast_formatter");
-    for (archive, outfmt) in [("db", "8"), ("bn", "12")] {
+    for (archive, outfmt) in [("db", "8"), ("db", "11"), ("bn", "12")] {
         let words = format!("{archive}.asn -outfmt {outfmt}");
         let case = Case {
             name: "standard_output_failure".to_string(),

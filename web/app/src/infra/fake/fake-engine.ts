@@ -33,17 +33,32 @@ import {
   type ValidationResult,
 } from 'losat/ports';
 import { optionValue } from '../../domain/argv';
+import { seqdbNames } from '../../domain/list-flags';
 import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
 import { PROGRAMS } from '../../domain/programs';
-import { toolOptionValue } from '../../domain/tool-argv';
-import { WINDOWMASKER_HELP_FLAGS, WINDOWMASKER_VERSION_FLAGS } from '../../domain/tools';
+import { isStandardOutputName, runFileName, toolOptionValue } from '../../domain/tool-argv';
+import { toolHelpFlag, toolPrintsKind } from '../../domain/tools';
 import DESCRIBE from './describe.json';
 import BLAST_FORMATTER_XMLHELP_DOC from './blast_formatter-xmlhelp.json';
+import CONVERT2BLASTMASK_XMLHELP_DOC from './convert2blastmask-xmlhelp.json';
+import DUSTMASKER_XMLHELP_DOC from './dustmasker-xmlhelp.json';
+import MAKEBLASTDB_XMLHELP_DOC from './makeblastdb-xmlhelp.json';
+import SEGMASKER_XMLHELP_DOC from './segmasker-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from './windowmasker-xmlhelp.json';
 import { fakeReaderError, fakeRecordKeys } from './fake-fasta';
 
-const WINDOWMASKER_XMLHELP: string = WINDOWMASKER_XMLHELP_DOC.xml;
-const BLAST_FORMATTER_XMLHELP: string = BLAST_FORMATTER_XMLHELP_DOC.xml;
+/**
+ * Each tool's `-xmlhelp`, as the engine prints it (file snapshots of tests/unit/engine-runtime.test.ts:
+ * compared with the reactor when one is built, and written again with `vitest -u`).
+ */
+const TOOL_XMLHELP: Readonly<Record<string, string>> = {
+  windowmasker: WINDOWMASKER_XMLHELP_DOC.xml,
+  blast_formatter: BLAST_FORMATTER_XMLHELP_DOC.xml,
+  makeblastdb: MAKEBLASTDB_XMLHELP_DOC.xml,
+  dustmasker: DUSTMASKER_XMLHELP_DOC.xml,
+  segmasker: SEGMASKER_XMLHELP_DOC.xml,
+  convert2blastmask: CONVERT2BLASTMASK_XMLHELP_DOC.xml,
+};
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
 
@@ -55,8 +70,7 @@ export interface FakeEngineOptions {
 export class FakeEngine implements EngineGateway, ToolEngine {
   private readonly cancelled = new Set<string>();
   private readonly phaseDelayMs: number;
-  private windowMaskerDescription: ToolDescription | undefined;
-  private blastFormatterDescription: ToolDescription | undefined;
+  private readonly toolDescriptions = new Map<string, ToolDescription>();
 
   constructor(options: FakeEngineOptions = {}) {
     this.phaseDelayMs = options.phaseDelayMs ?? 0;
@@ -75,20 +89,24 @@ export class FakeEngine implements EngineGateway, ToolEngine {
   }
 
   async describeTool(tool: string): Promise<ToolDescription> {
-    if (tool === 'windowmasker') {
-      this.windowMaskerDescription ??= parseToolDescription(WINDOWMASKER_XMLHELP);
-      return this.windowMaskerDescription;
+    const xml = Object.hasOwn(TOOL_XMLHELP, tool) ? TOOL_XMLHELP[tool] : undefined;
+    if (xml === undefined) throw new Error(`unknown tool: ${tool}`);
+    let description = this.toolDescriptions.get(tool);
+    if (description === undefined) {
+      description = parseToolDescription(xml);
+      this.toolDescriptions.set(tool, description);
     }
-    if (tool === 'blast_formatter') {
-      this.blastFormatterDescription ??= parseToolDescription(BLAST_FORMATTER_XMLHELP);
-      return this.blastFormatterDescription;
-    }
-    throw new Error(`unknown tool: ${tool}`);
+    return description;
   }
 
+  /**
+   * Refuses an unknown tool, a word that is not an option of the tool's `-xmlhelp`, a value outside its
+   * list or range, options that exclude each other, and a required option left out (NCBI's message);
+   * the engine's other checks are not imitated.
+   */
   async validateTool(argv: readonly string[]): Promise<ToolValidation> {
     const tool = argv[0];
-    if (tool !== 'windowmasker' && tool !== 'blast_formatter') return { ok: false, message: `unknown tool: ${tool}` };
+    if (tool === undefined || !Object.hasOwn(TOOL_XMLHELP, tool)) return { ok: false, message: `unknown tool: ${tool}` };
     const description = await this.describeTool(tool);
     const byFlag = new Map(description.parameters.map((param) => [param.flag, param]));
     const seen = new Set<string>();
@@ -96,7 +114,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     for (let i = 1; i < argv.length; i++) {
       const word = argv[i]!;
       const [flag, inline] = word.split(/=(.*)/s, 2);
-      if (WINDOWMASKER_HELP_FLAGS.has(flag!) || WINDOWMASKER_VERSION_FLAGS.has(flag!)) return { ok: true };
+      if (toolPrintsKind([tool, flag!]) !== null) return { ok: true };
       const param = byFlag.get(flag!);
       const extraValued = flag === '-logfile' || flag === '-conffile' || (tool === 'blast_formatter' && flag === '-rid');
       if (param === undefined && !extraValued) {
@@ -133,8 +151,20 @@ export class FakeEngine implements EngineGateway, ToolEngine {
         return { ok: false, message: `Argument error: ${first} and ${second} are mutually exclusive` };
       }
     }
+    for (const param of description.parameters) {
+      if (param.mandatory && !seen.has(param.flag)) {
+        const name = param.flag.slice(1);
+        return {
+          ok: false,
+          message: `Error: (CArgException::eNoArg) Argument "${name}". Mandatory value is missing:  \`${param.kind}'`,
+        };
+      }
+    }
     if (tool === 'windowmasker' && !seen.has('-mk_counts') && !seen.has('-convert') && !seen.has('-ustat')) {
       return { ok: false, message: 'Argument error: One of -mk_counts, -convert, or -ustat must be specified' };
+    }
+    if (tool === 'makeblastdb' && !seen.has('-dbtype')) {
+      return { ok: false, message: "Command line argument error: Argument \"dbtype\". Mandatory value is missing:  `String, `nucl', `prot'" };
     }
     if (tool === 'blast_formatter') {
       if (seen.has('-rid') && seen.has('-archive')) {
@@ -190,17 +220,14 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     }
 
     const toolName = argv[0] ?? 'windowmasker';
-    const words = argv.slice(1).map((word) => word.split('=', 1)[0]!);
-    if (words.includes('-xmlhelp')) {
-      await writeStdout(toolName === 'blast_formatter' ? BLAST_FORMATTER_XMLHELP : WINDOWMASKER_XMLHELP);
-      return finish(0);
-    }
-    if (words.some((w) => WINDOWMASKER_HELP_FLAGS.has(w))) {
-      await writeStdout(`USAGE\n  ${toolName} ... (${FAKE_MARKER})\n`);
-      return finish(0);
-    }
-    if (words.some((w) => WINDOWMASKER_VERSION_FLAGS.has(w))) {
+    const prints = toolPrintsKind(argv);
+    if (prints === 'version') {
       await writeStdout(`${toolName}: 0.2.0 (${FAKE_MARKER})\n`);
+      return finish(0);
+    }
+    if (prints === 'help') {
+      if (toolHelpFlag(argv) === '-xmlhelp') await writeStdout(TOOL_XMLHELP[toolName] ?? '');
+      else await writeStdout(`USAGE\n  ${toolName} ... (${FAKE_MARKER})\n`);
       return finish(0);
     }
 
@@ -208,6 +235,14 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     const logName = toolOptionValue(argv, '-logfile');
     const bodyText = `# ${FAKE_MARKER}\n# losat ${argv.join(' ')}\n`;
     const logText = `Warning: ${FAKE_MARKER}\n`;
+    // The run's files are named as the engine names them (`runFileName`), in the run's directory (`options.directory`;
+    // none given is an empty directory, as the engine's): `-out sub/../m.asnb` makes `m.asnb` where the run has a folder
+    // `sub`, and fails where it has none (WW4h, 2026-11-28).
+    const directory = (options.directory ?? []).map((file) => file.name);
+    // The file of -logfile; without one, the messages go to the standard error (`-`, a name that opens no file), or
+    // nowhere for NCBI's names that keep none (`""`, `/dev/null`).
+    const logFile = logName === undefined ? undefined : runFileName('-logfile', logName, directory);
+    const logLost = logName === '' || logName === '/dev/null';
 
     const writeFile = async (name: string, chunks: readonly string[]) => {
       const sink = options.sinks?.onFile !== undefined ? await options.sinks.onFile(name) : undefined;
@@ -227,14 +262,48 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     await pause();
     checkAborted();
 
-    const sameOutAndLog = outName !== undefined && outName !== '-' && logName !== undefined && outName === logName;
-    if (sameOutAndLog) {
-      await writeFile(outName, [bodyText, logText]);
+    if (toolName === 'makeblastdb') {
+      // makeblastdb also opens its log as an output file, the name as the system opens it (`AsOutputFile`): where that
+      // opens no file, the run ends with NCBI's error, in the file of -logfile where NCBI's reading of the name made one
+      // (`run.log/`), else on the standard error (the engine's run, WW4h probe).
+      if (logName !== undefined && logName !== '-' && logName !== '/dev/null' && !isStandardOutputName(logName) && runFileName('-out', logName, directory) === undefined) {
+        const error = `Command line argument error: Argument "logfile". File is not accessible:  \`${logName}'\n`;
+        if (logFile !== undefined) await writeFile(logFile, [error]);
+        else if (!logLost) await writeStderr(error);
+        return finish(1);
+      }
+      // The volume's three files under `-out` (or the first name of `-in`'s list, `seqdbNames`), each the marker: no
+      // database is made. They are named by their path in the run's directory (`runFileName`); makeblastdb makes the
+      // folders that the name gives (`nosub/db`), so none is looked up, and reads the name without its `/`s at the end
+      // (`db/` is `db`).
+      const db = outName ?? seqdbNames(toolOptionValue(argv, '-in') ?? '')[0] ?? 'db';
+      const base = db === '/' ? db : db.replace(/\/+$/, '');
+      const letter = toolOptionValue(argv, '-dbtype') === 'prot' ? 'p' : 'n';
+      for (const ext of ['hr', 'in', 'sq']) {
+        const volume = `${base}.${letter}${ext}`;
+        await writeFile(runFileName('-out', volume) ?? volume, [bodyText]);
+      }
+      if (logFile !== undefined) await writeFile(logFile, [logText]);
+      await writeStdout(`\n\nBuilding a new DB, current time: (${FAKE_MARKER})\nNew DB name:   ${db}\n`);
+      return finish(0);
+    }
+
+    const toStdout = outName === undefined || outName === '-' || isStandardOutputName(outName);
+    const outFile = toStdout ? undefined : runFileName('-out', outName, directory);
+    if (!toStdout && outFile === undefined) {
+      const error = outputNotAccessible(argv, outName);
+      if (error !== undefined) {
+        await writeStderr(error);
+        return finish(1);
+      }
+    }
+    if (outFile !== undefined && outFile === logFile) {
+      await writeFile(outFile, [bodyText, logText]);
     } else {
-      if (outName !== undefined && outName !== '-') await writeFile(outName, [bodyText]);
-      else await writeStdout(bodyText);
-      if (logName !== undefined) await writeFile(logName, [logText]);
-      else await writeStderr(logText);
+      if (outFile !== undefined) await writeFile(outFile, [bodyText]);
+      else if (toStdout) await writeStdout(bodyText);
+      if (logFile !== undefined) await writeFile(logFile, [logText]);
+      else if (!logLost) await writeStderr(logText);
     }
 
     return finish(0);
@@ -533,6 +602,41 @@ function unknownArgument(program: ProgramId, word: string): string {
     `Error:  ${post}`,
     '',
   ].join('\n');
+}
+
+/**
+ * What a tool's run writes to its standard error when its `-out` opens no file (`runFileName`: through a folder that the
+ * run's directory does not have, a name ending in `/`, a folder), with exit status 1, as the engine's run (WW4h probe,
+ * 2026-11-28: the reactors of Web run 46124737526): NCBI's "File is not accessible" after a short usage, a line of 72
+ * `=` and an empty line for dustmasker and windowmasker's mask (`-ustat`; the engine prints the tool's usage there),
+ * alone for segmasker and convert2blastmask, as a command line argument error for blast_formatter. Undefined for
+ * windowmasker's `-mk_counts` and `-convert`, which open `-out` without checking it, write no file and end as usual.
+ */
+function outputNotAccessible(argv: readonly string[], name: string): string | undefined {
+  const post = `Argument "out". File is not accessible:  \`${name}'`;
+  const tool = argv[0]!;
+  switch (tool) {
+    case 'segmasker':
+    case 'convert2blastmask':
+      return `${post}\n\n`;
+    case 'blast_formatter':
+      return `Command line argument error: ${post}\n`;
+    case 'dustmasker':
+    case 'windowmasker':
+      if (tool === 'windowmasker' && toolOptionValue(argv, '-ustat') === undefined) return undefined;
+      return [
+        'USAGE',
+        `  ${tool} [-h] [-help] [-in input_file_name] [-out output_file_name] (${FAKE_MARKER})`,
+        '='.repeat(72),
+        '',
+        `Error: ${post}`,
+        "Error: Application's execution failed",
+        `Error:  ${post}`,
+        '',
+      ].join('\n');
+    default:
+      return undefined;
+  }
 }
 
 /** The output that the CLI's run of the argv writes: the argv's own -outfmt output, else the format of its number (0 without one). */

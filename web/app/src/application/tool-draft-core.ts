@@ -1,15 +1,21 @@
 // The parts of a tool tab's form draft that do not depend on the tool (WindowMasker's `ToolDraft`,
-// Format Archive's `BlastFormatterDraft`; RG-F3p7 review R1 #3): the tool's `-xmlhelp`, the files of
-// the run (refusing a second file under a name already there), the check of the argv by
+// Format Archive's `BlastFormatterDraft`, makeblastdb's `MakeblastdbDraft`, Masking's `MaskingDraft`; RG-F3p7
+// review R1 #3): the `-xmlhelp` of the tool shown (each tool's asked once; the Masking tab shows one of three),
+// the files of the run (refusing a second file under a name already there; a file chosen for an option, which
+// the option then names), the check of the argv by
 // `validateTool` (debounced, one at a time, an older answer dropped; it runs while the engine is busy,
 // behind the run), the run directory (one builder for the check and the run), and the submit that
-// waits for the check before it queues the runs on the shared Coordinator queue. A tool supplies its
-// inputs and its argv through the abstract members.
-import type { DirectoryFile, ToolDescription } from 'losat/domain';
+// waits for the check before it queues the runs on the shared Coordinator queue, recording on each run that
+// can write masking information the `-outfmt` default of its tool's `-xmlhelp` (`maskOutfmtDefault`). A tool supplies its inputs
+// and its argv through the abstract members.
+import type { DirectoryFile, SequenceKind, ToolDescription } from 'losat/domain';
 import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports';
-import { duplicateRunFileMessage, pickedFilePath, RunDirectoryBuilder } from '../domain/blast-db';
-import { toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
-import type { ToolId } from '../domain/tools';
+import { duplicateRunFileMessage, normalizeRunPath, pickedFilePath, primaryBlastDbName, RunDirectoryBuilder } from '../domain/blast-db';
+import type { FieldValue } from '../domain/parameters';
+import type { ToolFileOrigin } from '../domain/run';
+import { isSeqdbList, listNameRefusal, seqdbNameList, type ListOption } from '../domain/list-flags';
+import { fileListNames, maskOutfmtDefault, namesOption, runFileNames, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
+import { TOOL_FILE_LIST_FLAGS, type ToolId } from '../domain/tools';
 import { failureText } from './availability';
 import type { EnqueueAllResult, ToolDirectoryFile, ToolRequest } from './coordinator';
 import type { SubmitResult, Validation } from './draft';
@@ -22,14 +28,17 @@ export interface ToolExtraFile {
   readonly name: string;
   readonly size: number;
   readonly file: File;
-  /** Option flag that picked this file via `Choose file…` (`-ids`, `-exclude_ids`), if any. */
+  /** Option flag that picked this file via `Choose file…` (`-ids`, `-exclude_ids`, `-mask_data`), if any. */
   readonly flag?: string;
+  /** Where the file came from, for Run details (`made by run N`); a file that the user opened when absent. */
+  readonly origin?: ToolFileOrigin;
 }
 
 /** The state that every tool draft holds. */
 export interface ToolFormState {
   readonly runFiles: readonly ToolExtraFile[];
   readonly runFilesError?: string;
+  /** The `-xmlhelp` of the tool that the form shows (`shownTool`), and why it could not be read. */
   readonly description?: ToolDescription;
   readonly descriptionError?: string;
   readonly descriptionUnavailable?: true;
@@ -71,7 +80,11 @@ interface Check {
 export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm {
   readonly state: Store<S>;
   protected nextKey = 1;
-  private descriptionRequest: Promise<ToolDescription> | undefined;
+  /** Each tool's `-xmlhelp` once read, and the request of each tool being asked. */
+  private readonly descriptions = new Map<ToolId, ToolDescription>();
+  private readonly descriptionRequests = new Map<ToolId, Promise<ToolDescription>>();
+  /** Why each tool's `-xmlhelp` could not be read, until it is read. */
+  private readonly descriptionErrors = new Map<ToolId, { readonly message: string; readonly unavailable: boolean }>();
   private validationTimer: ReturnType<typeof setTimeout> | undefined;
   private validationGeneration = 0;
   private validationTurn: Promise<void> = Promise.resolve();
@@ -90,6 +103,15 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
 
   /** The words of Additional options; throws the message of words that cannot be read. */
   protected abstract parseExtra(state: S): readonly string[];
+
+  /** The words of Additional options as `parseExtra` reads them; none when they cannot be read (the check says why). */
+  protected wordsOf(state: S): readonly string[] {
+    try {
+      return this.parseExtra(state);
+    } catch {
+      return [];
+    }
+  }
 
   /**
    * The argv that the check sends (with placeholder names for inputs not chosen yet), or undefined
@@ -115,15 +137,25 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
   /** The message of an input that could not be read because a part of LOSAT is unavailable. */
   protected inputsUnavailable?(state: S): string | undefined;
 
-  /** What else changes when files are added to the run directory (WindowMasker's `-in` name). */
+  /** What else changes when files are added to the run directory (a name of WindowMasker's or makeblastdb's `-in`). */
   protected runFilesAdded?(state: S, runFiles: readonly ToolExtraFile[]): StatePatch<S>;
+
+  /** The tool whose `-xmlhelp` the form shows when it is not the tab's own tool (the tool chosen on the Masking tab). */
+  protected shownTool?(state: S): ToolId;
+
+  /** The value of an option of the form (of the stage shown, for WindowMasker). */
+  protected abstract optionValue(state: S, flag: string): FieldValue | undefined;
+
+  /** Sets an option of the form; an empty value or `false` leaves it out. */
+  abstract setField(flag: string, value: FieldValue): void;
 
   // --- the tool's description ---------------------------------------------------------------
 
-  /** Loads the tool's `-xmlhelp` once, when its tab is first opened. */
+  /** Loads the `-xmlhelp` of the tool shown once, when its tab is first opened (or the tool is first chosen). */
   ensureLoaded(): void {
-    if (this.state.get().description === undefined && this.descriptionRequest === undefined) {
-      void this.loadDescription();
+    const tool = this.describedTool(this.state.get());
+    if (!this.descriptions.has(tool) && !this.descriptionRequests.has(tool)) {
+      void this.loadDescription(tool);
     }
   }
 
@@ -132,7 +164,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
     const state = this.state.get();
     const tasks: Array<Promise<unknown>> = [...this.asking];
     if (state.descriptionUnavailable === true) {
-      const task = this.loadDescription(true);
+      const task = this.loadDescription(this.describedTool(state), true);
       this.trackAsking(task);
       tasks.push(task);
     }
@@ -177,19 +209,80 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
       added.push({ key: `rf-${this.nextKey++}`, name, size: file.size, file });
     }
     const runFiles = Object.freeze([...state.runFiles, ...added]);
-    this.set({ ...this.runFilesAdded?.(state, runFiles), ...common<S>({ runFiles, runFilesError: duplicateError, message: undefined }) });
+    const found = this.runFilesAdded?.(state, runFiles);
+    this.set({ ...found, ...common<S>({ runFiles, runFilesError: duplicateError, message: undefined }) });
     this.scheduleValidation();
   }
 
+  /** Removes a file of the run; a file chosen for an option (`-ids`) also leaves the option (its name leaves a list's). */
   removeRunFile(key: string): void {
     const state = this.state.get();
-    if (!state.runFiles.some((entry) => entry.key === key)) return;
+    const target = state.runFiles.find((entry) => entry.key === key);
+    if (target === undefined) return;
     this.patch({
       runFiles: Object.freeze(state.runFiles.filter((entry) => entry.key !== key)),
       runFilesError: undefined,
       message: undefined,
     });
     this.scheduleValidation();
+    if (target.flag === undefined) return;
+    const value = this.optionValue(state, target.flag);
+    if (TOOL_FILE_LIST_FLAGS.has(target.flag)) {
+      const names = fileListNames(value, runFileNames(state.runFiles));
+      if (names.includes(target.name)) this.setField(target.flag, names.filter((name) => name !== target.name).join(','));
+    } else if (value === target.name) {
+      this.setField(target.flag, '');
+    }
+  }
+
+  /**
+   * Attaches a file chosen for a file-typed option (`-ids`, `-taxid_map`) and puts it in Files of the run under its
+   * name (or `options.name`), which the option then names; undefined lets the option's files go. A file chosen again
+   * replaces the option's file, except for an option that lists files (`-mask_data`, `TOOL_FILE_LIST_FLAGS`), whose list
+   * it joins (the same file twice is one).
+   */
+  setOptionFile(flag: string, file: File | undefined, options: { readonly name?: string; readonly origin?: ToolFileOrigin } = {}): void {
+    const state = this.state.get();
+    if (file === undefined) {
+      this.patch({ runFiles: Object.freeze(state.runFiles.filter((entry) => entry.flag !== flag)), runFilesError: undefined });
+      this.setField(flag, '');
+      return;
+    }
+    const given = options.name ?? file.name;
+    const name = normalizeRunPath(given);
+    if (name === undefined) {
+      this.patch({ runFilesError: `Invalid file name: "${given}".` });
+      return;
+    }
+    const refusal = listNameRefusal({ command: this.describedTool(state), flag }, name);
+    if (refusal !== undefined) {
+      this.patch({ runFilesError: refusal });
+      return;
+    }
+    const list = TOOL_FILE_LIST_FLAGS.has(flag);
+    const kept = list ? state.runFiles : state.runFiles.filter((entry) => entry.flag !== flag);
+    const names = list ? fileListNames(this.optionValue(state, flag), runFileNames(state.runFiles)) : [];
+    const value = list ? [...names.filter((entry) => entry !== name), name].join(',') : name;
+    const existing = kept.find((entry) => entry.name === name);
+    if (existing !== undefined) {
+      if (list && existing.flag === flag && sameRunFile(name, existing.file, file)) {
+        this.patch({ runFilesError: undefined });
+        this.setField(flag, value);
+        return;
+      }
+      this.patch({ runFilesError: duplicateRunFileMessage(name) });
+      return;
+    }
+    const entry: ToolExtraFile = {
+      key: `rf-${this.nextKey++}`,
+      name,
+      size: file.size,
+      file,
+      flag,
+      ...(options.origin === undefined ? {} : { origin: options.origin }),
+    };
+    this.patch({ runFiles: Object.freeze([...kept, entry]), runFilesError: undefined });
+    this.setField(flag, value);
   }
 
   // --- the command line, the check and the submit --------------------------------------------
@@ -255,7 +348,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
       const state = this.state.get();
       // Hold every inflated session file before any await of buildRequests, so that Remove during the
       // submit cannot drop an OPFS session file out from under it.
-      const holder = `submit:${this.nextKey++}`;
+      const holder = this.holder('submit', String(this.nextKey++));
       const stateTokens = this.heldTokens?.(state) ?? [];
       if (stateTokens.length > 0) this.core.sessionFiles?.set(holder, stateTokens);
       try {
@@ -274,7 +367,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
           this.reportError(text);
           return { ok: false, message: text };
         }
-        const requests = await this.buildRequests(state, extra);
+        const requests = (await this.buildRequests(state, extra)).map((request) => this.recordMaskOutfmt(request));
         const requestTokens = requests.flatMap((request) => request.sessionTokens ?? []);
         if (requestTokens.length > 0) this.core.sessionFiles?.set(holder, new Set([...stateTokens, ...requestTokens]));
         const result = await this.core.enqueueToolAll(requests);
@@ -305,6 +398,27 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
 
   // --- for the tools ------------------------------------------------------------------------
 
+  /** The name under which the draft holds inflated session files (`SessionFiles`), apart from every other draft's. */
+  protected holder(kind: 'form' | 'submit', key: string): string {
+    return `${kind}:${this.tool}:${key}`;
+  }
+
+  /**
+   * Shows the `-xmlhelp` of the tool shown now (`shownTool`) after the tool changed: as read, or
+   * why it could not be, or asks for it.
+   */
+  protected showDescription(): void {
+    const tool = this.describedTool(this.state.get());
+    const description = this.descriptions.get(tool);
+    const error = this.descriptionErrors.get(tool);
+    this.patch({
+      description,
+      descriptionError: error?.message,
+      descriptionUnavailable: error?.unavailable === true ? true : undefined,
+    });
+    this.ensureLoaded();
+  }
+
   /** The run directory of `inputs` and the files of the run; throws `duplicateRunFileMessage` when two files claim one name. */
   protected runDirectory<E extends DirectoryFile>(state: S, inputs: readonly E[], origin: (entry: ToolExtraFile) => E): readonly E[] {
     const builder = new RunDirectoryBuilder();
@@ -319,7 +433,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
 
   /** The run directory of a run: `inputs` and the files of the run, as picked files. */
   protected runDirectoryOf(state: S, inputs: readonly ToolDirectoryFile[]): readonly ToolDirectoryFile[] {
-    return this.runDirectory(state, inputs, (entry) => ({ name: entry.name, file: entry.file, origin: { kind: 'picked' } }));
+    return this.runDirectory(state, inputs, (entry) => ({ name: entry.name, file: entry.file, origin: entry.origin ?? { kind: 'picked' } }));
   }
 
   protected scheduleValidation(): void {
@@ -383,25 +497,51 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
     }
   }
 
-  private loadDescription(force = false): Promise<ToolDescription | undefined> {
-    if (!force && this.descriptionRequest !== undefined) return this.descriptionRequest;
-    const request = this.core.engine.describeTool(this.tool);
-    this.descriptionRequest = request;
+  private loadDescription(tool: ToolId, force = false): Promise<ToolDescription | undefined> {
+    const pending = this.descriptionRequests.get(tool);
+    if (!force && pending !== undefined) return pending;
+    const request = this.core.engine.describeTool(tool);
+    this.descriptionRequests.set(tool, request);
+    const shown = () => this.describedTool(this.state.get()) === tool;
     return request.then(
       (description) => {
-        this.patch({ description, descriptionError: undefined, descriptionUnavailable: undefined });
-        this.scheduleValidation();
+        this.descriptions.set(tool, description);
+        this.descriptionErrors.delete(tool);
+        if (shown()) {
+          this.patch({ description, descriptionError: undefined, descriptionUnavailable: undefined });
+          this.scheduleValidation();
+        }
         return description;
       },
       (error: unknown) => {
-        if (this.descriptionRequest === request) this.descriptionRequest = undefined;
-        this.patch({
-          descriptionError: errorMessage(error),
-          ...(isUnavailable(error) ? { descriptionUnavailable: true as const } : {}),
-        });
+        if (this.descriptionRequests.get(tool) === request) this.descriptionRequests.delete(tool);
+        const message = errorMessage(error);
+        const unavailable = isUnavailable(error);
+        this.descriptionErrors.set(tool, { message, unavailable });
+        if (shown()) {
+          this.patch({
+            descriptionError: message,
+            ...(unavailable ? { descriptionUnavailable: true as const } : {}),
+          });
+        }
         return undefined;
       },
     );
+  }
+
+  /**
+   * Records on a run that can write masking information the `-outfmt` default of its tool's `-xmlhelp`
+   * (`maskOutfmtDefault`), so that the run's output is judged mask data (`maskDataName`) from the run alone.
+   */
+  private recordMaskOutfmt(request: ToolRequest): ToolRequest {
+    if (request.prints !== undefined) return request;
+    const outfmtDefault = maskOutfmtDefault(request.tool, request.stage, this.descriptions.get(request.tool));
+    return outfmtDefault === undefined ? request : { ...request, outfmtDefault };
+  }
+
+  /** The tool whose `-xmlhelp` the form shows: the tab's own tool, or the one that `shownTool` names. */
+  private describedTool(state: S): ToolId {
+    return this.shownTool?.(state) ?? this.tool;
   }
 
   private trackAsking(promise: Promise<unknown>): void {
@@ -410,9 +550,55 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
   }
 }
 
+/** The BLAST database that files of the run hold, as an option's list writes its name, or why the list cannot carry it. */
+export type FoundDatabase = { readonly written: string; readonly refusal?: undefined } | { readonly written?: undefined; readonly refusal: string };
+
+/**
+ * An option whose value the files of the run may name (`foundDatabase`): the option, and the molecule kind of the
+ * database that it reads (WindowMasker's and dustmasker's `-in`: nucleotide, segmasker's: protein, makeblastdb's: its
+ * `-dbtype`'s), undefined while it is not known (makeblastdb before `-dbtype` is chosen: then either kind).
+ */
+export interface DatabaseOption {
+  readonly option: ListOption;
+  readonly kind: SequenceKind | undefined;
+}
+
+/**
+ * The BLAST database that the files of the run hold (`primaryBlastDbName`, of the option's kind), for an option whose
+ * value is a SeqDB name list (`isSeqdbList`: the `-in` of WindowMasker, dustmasker and segmasker with `-infmt blastdb`,
+ * makeblastdb's `-in`): its name as the list writes it (`seqdbNameList`: `"my dbs/wm"`), or why the list cannot carry it
+ * (`listNameRefusal`); undefined when the files hold none, the option takes one file's name, or the words of Additional
+ * options name the option themselves (`namesOption`: they give its value). The drafts work out from it, every time, the
+ * name that `-in` shows until one is typed and the refusal that the Input block, the check and "Run LOSAT" say while its
+ * files are in the run (line WW, WW4d R1 and R2).
+ */
+export function foundDatabase(
+  { option, kind }: DatabaseOption,
+  runFiles: readonly ToolExtraFile[],
+  words: readonly string[],
+): FoundDatabase | undefined {
+  if (!isSeqdbList(option) || namesOption(words, option.flag)) return undefined;
+  const name = primaryBlastDbName(runFiles.map((entry) => entry.name), kind);
+  if (name === undefined) return undefined;
+  const refusal = listNameRefusal(option, name, 'database');
+  return refusal === undefined ? { written: seqdbNameList(option.flag, [name]) } : { refusal };
+}
+
 /** A change of the common state as a change of a tool draft's state (whose type extends it). */
 function common<S extends ToolFormState>(change: StatePatch<ToolFormState>): StatePatch<S> {
   return change as StatePatch<S>;
+}
+
+/** Whether two files under one name are one file (the same File, or a second pick of one file), as the run directory takes them. */
+function sameRunFile(name: string, a: File, b: File): boolean {
+  const builder = new RunDirectoryBuilder();
+  builder.add(name, a);
+  try {
+    builder.add(name, b);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** The key of a check: its argv and the names of its run directory. */

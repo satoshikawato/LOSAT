@@ -103,15 +103,27 @@ const EDITED: [&str; 2] = [
 /// The archives of blast_formatter's rows that are broken or edited by hand on purpose
 /// (`blast_formatter/cases.tsv`): a line of garbage after the archive, a file cut in its second
 /// object (the rows of NCBI's read errors), a byte that NCBI posts in a title of the first or the
-/// second object (the line of its post), and the review's requests with both taxid lists (written
-/// by hand, a list on one line).
-const BROKEN: [&str; 6] = [
+/// second object (the line of its post), the review's requests with both taxid lists (written
+/// by hand, a list on one line), and two FilterString setters longer than a line, written on one
+/// line (the ends of the 128-byte buffers of NCBI's parser, line RG-F3 P6F).
+const BROKEN: [&str; 8] = [
     "blast_formatter/in/garbage.asn",
     "blast_formatter/in/cut2.asn",
     "blast_formatter/in/bad1.asn",
     "blast_formatter/in/bad2.asn",
     "blast_formatter/in/tax_both.asn",
     "blast_formatter/in/tx5_both.asn",
+    "blast_formatter/in/fs_bn_Rlong.asn",
+    "blast_formatter/in/fs_bn_Dlate.asn",
+];
+
+/// The archives with a subnormal real (`{ 145968789957799, 10, -330 }`), which the reader makes
+/// `DBL_MIN` as NCBI's does: written back, it is `{ 22250738585072, 10, -321 }`, as NCBI BLAST+
+/// 2.17.0's `-outfmt 11` writes it (row `real_subnormal_11` of `blast_formatter/cases.tsv`). NCBI
+/// wrote the value for the unset SEG locut of row `refused_filter_seg_abc_11`.
+const CLAMPED: [&str; 2] = [
+    "blast_formatter/in/real_subnormal.asn",
+    "blast_formatter/ncbi/refused_filter_seg_abc_11.out",
 ];
 
 /// Whether a fixture holds a placeholder that its test replaces by a path (`@CWD@`, `{db_dir}`: an
@@ -164,7 +176,8 @@ fn unwrapped(text: &[u8]) -> Vec<u8> {
 /// header: NCBI's `-outfmt 11` output and the files that LOSAT's tests freeze as NCBI's) is read
 /// whole, object by object, and its values written back are its bytes. Left out: the malformed
 /// archives of rpsbproc's tests (`fixtures/rpsbproc/arch/bad`) and of blast_formatter's (`BROKEN`),
-/// rpsbproc's copies edited by hand (`EDITED`), the `.merged` files of `archive_replaced` (a run's
+/// rpsbproc's copies edited by hand (`EDITED`), the archives with a subnormal real (`CLAMPED`,
+/// whose rows freeze NCBI's writing of it), the `.merged` files of `archive_replaced` (a run's
 /// stdout and stderr in one file, with NCBI's messages inside the archive's text), and the archives
 /// that their writer cut (`cut_by_its_writer`), whose first object must end with the reader's
 /// error. An archive whose paths the tests replaced by a placeholder (`has_placeholder`) is
@@ -196,6 +209,7 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
             if EDITED
                 .iter()
                 .chain(&BROKEN)
+                .chain(&CLAMPED)
                 .any(|name| path.ends_with(name))
             {
                 continue;
@@ -1288,11 +1302,17 @@ fn the_stored_messages_are_read_by_their_code() {
         }]
     );
 
+    // (`true`: the archive's NULL elements are looked for, as when the reader kept one.)
     let archive = |body: &str, messages: &str| {
-        Archive::from_value(value(
-            named::BLAST4_ARCHIVE,
-            &format!("Blast4-archive ::= {{ request {{ body {body} }}, results {{ }}{messages} }}"),
-        ))
+        Archive::from_value(
+            value(
+                named::BLAST4_ARCHIVE,
+                &format!(
+                    "Blast4-archive ::= {{ request {{ body {body} }}, results {{ }}{messages} }}"
+                ),
+            ),
+            true,
+        )
     };
     let error = "get-request-info { request-id \"Error\" }";
     let coded = archive(

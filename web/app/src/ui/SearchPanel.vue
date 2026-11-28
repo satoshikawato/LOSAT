@@ -106,8 +106,9 @@ const proteinAlgorithmLabel = (choice: string): string =>
 const activeModeTab = computed(() => modeTabOf(state.value.program));
 const summaryParts = computed(() => {
   void state.value; // recompute with the draft
-  // A draft whose argv prints the command line's help or version says so, not that it searches (line WQA's D20, 2026-11-23).
-  const prints = props.draft.printsKind();
+  // A draft whose argv prints the command line's help or version says so, not that it searches (line WQA's D20, 2026-11-23),
+  // from the answer that the button's count reads, so both change together (line WQA's D33, R2 L-c).
+  const prints = props.draft.shownPrintsKind();
   if (prints !== null) return printSummaryParts(program.value, prints);
   const database =
     state.value.subjectSource === 'database'
@@ -189,7 +190,21 @@ async function focusRepeats(): Promise<void> {
   target?.scrollIntoView({ block: 'center' });
   target?.focus({ preventScroll: true });
 }
-defineExpose({ focusRepeats });
+/** Moves focus to the subject's database ("Use as Database (-db)" on a makeblastdb run): its source, with the database in view. */
+function focusDatabase(): void {
+  document.querySelector('[data-testid="subject-db-block"]')?.scrollIntoView({ block: 'center' });
+  document.querySelector<HTMLElement>('[data-testid="subject-source-database"]')?.focus({ preventScroll: true });
+}
+
+/** Opens Algorithm parameters and moves focus to BLASTN's repeats database ("Use as Repeats database (-filtering_db)"). */
+async function focusFilteringDb(): Promise<void> {
+  open.value = true;
+  await nextTick();
+  const target = document.getElementById('param-filtering_db');
+  target?.scrollIntoView({ block: 'center' });
+  target?.focus({ preventScroll: true });
+}
+defineExpose({ focusRepeats, focusDatabase, focusFilteringDb });
 </script>
 
 <template>

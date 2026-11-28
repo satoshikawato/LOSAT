@@ -405,6 +405,183 @@ impl<'d> AlnMap<'d> {
         self.b.aln_starts[seg.aln_seg as usize].wrapping_add(delta) as i32
     }
 
+    /// `GetAlnPosFromSeqPos` of `row` and `seq_pos` with its defaults (`eNone`): the alignment
+    /// position of the row's letter `seq_pos`, -1 where no segment of the row holds it (outside
+    /// the row's letters, or between two of its segments). A map without an anchor has no
+    /// insertions, so the letter's segment is its alignment segment.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:527-541
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:589-596
+    /// `GetRawSeg` with `eNone` (alnmap.cpp:400-524) runs the search of `raw_seg_backwards` and
+    /// returns -1 where that search gives a segment that does not hold `seq_pos` (out of the
+    /// row's range, or the closest segment of an unaligned letter): the segment it gives where one
+    /// holds the letter is the same, as both return from the same loop there.
+    pub(crate) fn aln_pos_from_seq_pos_none(&self, row: usize, seq_pos: u32) -> i32 {
+        debug_assert!(self.anchor.is_none(), "a map without an anchor");
+        let sseq_pos = seq_pos as i32;
+        if sseq_pos < self.seq_start(row) as i32 || sseq_pos > self.seq_stop(row) as i32 {
+            return -1;
+        }
+        let raw_seg = self.raw_seg_backwards(row, seq_pos);
+        let start = self.raw_start(row, raw_seg);
+        let holds = start >= 0
+            && sseq_pos >= start
+            && i64::from(seq_pos) < i64::from(start) + i64::from(self.x_get_len(row, raw_seg));
+        if !holds {
+            return -1;
+        }
+        let delta = (seq_pos - start as u32) / self.width(row);
+        let delta = if self.is_positive_strand(row) {
+            delta
+        } else {
+            self.ds.lens[raw_seg].wrapping_sub(1).wrapping_sub(delta)
+        };
+        self.b.aln_starts[raw_seg].wrapping_add(delta) as i32
+    }
+
+    /// `GetSeg`: the alignment segment of the alignment position `aln_pos`, which is at most
+    /// `aln_stop` (a map without an anchor: the raw segment).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:373-396
+    fn seg_of(&self, aln_pos: u32) -> usize {
+        let (mut btm, mut top) = (0usize, self.b.aln_starts.len() - 1);
+        while btm < top {
+            let mid = (top + btm) / 2;
+            if self.b.aln_starts[mid] as i32 == aln_pos as i32 {
+                return mid;
+            }
+            if self.b.aln_starts[mid + 1] as i32 <= aln_pos as i32 {
+                btm = mid + 1;
+            } else {
+                top = mid;
+            }
+        }
+        top
+    }
+
+    /// `GetSeqPosFromAlnPos` of `row` and `aln_pos` with its defaults (`eNone`): the row's letter
+    /// in the column `aln_pos` (a position past the alignment's end taken as its last column),
+    /// -1 where the row has a gap there.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:663-686
+    pub(crate) fn seq_pos_from_aln_pos(&self, row: usize, aln_pos: u32) -> i32 {
+        debug_assert!(self.anchor.is_none(), "a map without an anchor");
+        let aln_pos = aln_pos.min(self.aln_stop());
+        let seg = self.seg_of(aln_pos);
+        let pos = self.raw_start(row, seg);
+        if pos < 0 {
+            return -1;
+        }
+        let delta = aln_pos
+            .wrapping_sub(self.aln_start(seg))
+            .wrapping_mul(self.width(row));
+        let pos = pos as u32;
+        (if self.is_positive_strand(row) {
+            pos.wrapping_add(delta)
+        } else {
+            pos.wrapping_add(self.x_get_len(row, seg))
+                .wrapping_sub(1)
+                .wrapping_sub(delta)
+        }) as i32
+    }
+
+    /// `CAlignFormatUtil::GetAlignLengths` of the map (no anchor): the alignment's length (the
+    /// columns of row 0's chunks), its gap letters and its gap openings (the gap chunks of every
+    /// row), over `GetAlnChunks` of the row in row 0's `GetSeqAlnRange`, with the default flags
+    /// (`fAlnSegsOnly`). A chunk is a run of adjacent segments that all hold letters of the row
+    /// or all hold none, cut where its first segment has unaligned letters of the row on its
+    /// right or the next segment has some on its left (`x_SetRawSegTypes`); without an anchor no
+    /// segment is skipped, and row 0's range starts and ends at whole segments.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1098-1121
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:1000-1031
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:1081-1208
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:234-367
+    pub(crate) fn align_lengths(&self) -> (i64, i64, i64) {
+        debug_assert!(self.anchor.is_none(), "a map without an anchor");
+        const SEQ: u8 = 1;
+        const UNALIGNED_LEFT: u8 = 2;
+        const UNALIGNED_RIGHT: u8 = 4;
+        let (left, right) = (self.b.left_segs[0], self.b.right_segs[0]);
+        let (mut length, mut gaps, mut gap_opens) = (0i64, 0i64, 0i64);
+        let mut types = vec![0u8; self.num_segs];
+        for row in 0..self.num_rows {
+            let plus = self.is_positive_strand(row);
+            types.fill(0);
+            let mut left_seq_pos: i32 = -1;
+            for (seg, flags) in types.iter_mut().enumerate() {
+                let start = self.raw_start(row, seg);
+                if start >= 0 {
+                    *flags |= SEQ;
+                    let len = self.x_get_len(row, seg);
+                    if left_seq_pos > 0
+                        && if plus {
+                            start > left_seq_pos
+                        } else {
+                            (start as u32).wrapping_add(len) < left_seq_pos as u32
+                        }
+                    {
+                        *flags |= UNALIGNED_LEFT;
+                    }
+                    left_seq_pos = if plus {
+                        (start as u32).wrapping_add(len) as i32
+                    } else {
+                        start
+                    };
+                }
+            }
+            let mut right_seq_pos: i32 = -1;
+            for (seg, flags) in types.iter_mut().enumerate().rev() {
+                let start = self.raw_start(row, seg);
+                if start >= 0 {
+                    let len = self.x_get_len(row, seg);
+                    if right_seq_pos > 0
+                        && if plus {
+                            (start as u32).wrapping_add(len) < right_seq_pos as u32
+                        } else {
+                            start > right_seq_pos
+                        }
+                    {
+                        *flags |= UNALIGNED_RIGHT;
+                    }
+                    right_seq_pos = if plus {
+                        start
+                    } else {
+                        (start as u32).wrapping_add(len) as i32
+                    };
+                }
+            }
+            let mut seg = left;
+            while seg <= right {
+                let first = types[seg];
+                let mut stop = seg;
+                while stop < right {
+                    let next = types[stop + 1];
+                    if (first & SEQ) != (next & SEQ)
+                        || first & UNALIGNED_RIGHT != 0
+                        || next & UNALIGNED_LEFT != 0
+                    {
+                        break;
+                    }
+                    stop += 1;
+                }
+                let chunk = i64::from(self.seg_aln_stop(stop) as i32)
+                    - i64::from(self.aln_start(seg) as i32)
+                    + 1;
+                let chunk = chunk.max(0);
+                if first & SEQ == 0 {
+                    gap_opens += 1;
+                    gaps += chunk;
+                }
+                if row == 0 {
+                    length += chunk;
+                }
+                seg = stop + 1;
+            }
+        }
+        (length, gaps, gap_opens)
+    }
+
     /// `GetWholeAlnSeqString` of `row` and `buffer`, with the insert alignment starts, starts and
     /// lengths, `scrn_width`, and the screen lefts and rights (`whole_aln_seq_string`, outfmt 1-4), the
     /// letters read by `seq_string` (`GetSeqString`), or, without `letters`, its per-line
@@ -599,6 +776,28 @@ impl<'d> AlnMap<'d> {
             rights.push_back(right);
         })?;
         Ok(out)
+    }
+
+    /// The reads of `GetWholeAlnSeqString` of row `row` of a map without an anchor (the tabular
+    /// formats'): `GetSeqString` of each segment that the row is in, in order, from its start to
+    /// its start plus its length less 1 (`seq_from - 1` for a segment of 0 letters, in the
+    /// unsigned `TSeqPos`), given to `read` (`aln_seq_string`'s calls of `seq_string`).
+    pub(crate) fn seq_string_reads<E>(
+        &self,
+        row: usize,
+        mut read: impl FnMut(u32, u32) -> Result<(), E>,
+    ) -> Result<(), E> {
+        debug_assert!(self.anchor.is_none(), "a map without an anchor");
+        let width = self.width(row);
+        for seg in 0..self.num_segs {
+            let start = self.raw_start(row, seg);
+            if start >= 0 {
+                let len = self.ds.lens[seg].wrapping_mul(width);
+                let stop = start.wrapping_add(len as i32).wrapping_sub(1);
+                read(start as u32, stop as u32)?;
+            }
+        }
+        Ok(())
     }
 
     /// The per-line coordinates of row `row` alone (`aln_seq_string` without the letters): each

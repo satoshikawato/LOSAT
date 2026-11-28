@@ -378,6 +378,41 @@ pub(crate) fn string_to_double_posix(text: &[u8], finite: bool) -> PosixDouble {
     PosixDouble { value, end: ptr }
 }
 
+/// glibc `sscanf` of `s` with the conversion `%le`: the value stored, or `None` where the
+/// conversion stores nothing (it returns 0 or `EOF`; NCBI's callers then read the variable they
+/// did not set). After the white space, `strtod`'s number (`strtod_prefix`) but where scanf reads
+/// the text itself first, as glibc 2.39 does (`LOSAT/tests/unit/sscanf_le_ld_vectors.tsv`): `0x`
+/// stores nothing unless a hexadecimal digit or a point follows (`0x.` is 0); `inf` followed by an
+/// `i` stores nothing unless the whole `infinity` follows; `nan` is the quiet NaN of its sign,
+/// without the payload of a `(...)` that follows (which scanf does not read).
+pub(crate) fn scan_double(s: &[u8]) -> Option<f64> {
+    let start = s.iter().take_while(|&&c| super::is_space(c)).count();
+    let text = &s[start..];
+    let at = |pos: usize| text.get(pos).copied().unwrap_or(0);
+    let lower = |pos: usize| at(pos).to_ascii_lowercase();
+    let sign = usize::from(matches!(at(0), b'+' | b'-'));
+    let signed = |value: f64| if at(0) == b'-' { -value } else { value };
+    if lower(sign) == b'0' && lower(sign + 1) == b'x' {
+        return match hex_prefix(text, sign + 2) {
+            Some((value, _)) => Some(signed(value)),
+            None if at(sign + 2) == b'.' => Some(signed(0.0)),
+            None => None,
+        };
+    }
+    if (0..3).all(|k| lower(sign + k) == b"inf"[k]) {
+        let rest = sign + 3;
+        if lower(rest) == b'i' && !(0..5).all(|k| lower(rest + k) == b"inity"[k]) {
+            return None;
+        }
+        return Some(signed(f64::INFINITY));
+    }
+    if (0..3).all(|k| lower(sign + k) == b"nan"[k]) {
+        return Some(signed(f64::NAN));
+    }
+    let (value, read) = strtod_prefix(text);
+    (read > 0).then_some(value)
+}
+
 /// glibc `strtod` of the start of `text` (no leading white space here) in the C locale and the
 /// default rounding: the value and the bytes read (0 when no number starts there).
 fn strtod_prefix(text: &[u8]) -> (f64, usize) {

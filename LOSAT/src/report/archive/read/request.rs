@@ -231,7 +231,6 @@ impl Request {
 
     /// `GetParamByName` of the list `set`: its first parameter named `name`.
     // NCBI reference (598d8ae6): c++/src/objects/blast/Blast4_parameters.cpp:186-198
-    #[cfg(test)]
     pub(crate) fn param(&self, set: ParamSet, name: &[u8]) -> Option<&Param> {
         self.params
             .iter()
@@ -284,6 +283,14 @@ impl Queries {
             Queries::Pssm(_) => 1,
             Queries::SeqLocList(locs) => locs.len(),
             Queries::BioseqSet(set) => V::new(named::BIOSEQ_SET, set).field("seq-set").len(),
+        }
+    }
+
+    /// The Bioseq-set of `bioseq-set` queries.
+    pub(crate) fn bioseq_set(&self) -> Option<V<'_>> {
+        match self {
+            Queries::BioseqSet(set) => Some(V::new(named::BIOSEQ_SET, set)),
+            _ => None,
         }
     }
 
@@ -397,7 +404,7 @@ pub(crate) struct Bioseq<'a>(V<'a>);
 
 impl<'a> Bioseq<'a> {
     /// The Bioseq of a value of type `Bioseq` (a subject of a request).
-    pub(super) fn of(value: V<'a>) -> Self {
+    pub(crate) fn of(value: V<'a>) -> Self {
         Bioseq(value)
     }
 
@@ -424,6 +431,13 @@ impl<'a> Bioseq<'a> {
             .into_iter()
             .flat_map(|descr| descr.items())
             .map(|desc| desc.choice())
+    }
+
+    /// The `title` descriptors in order, as stored.
+    pub(crate) fn titles(self) -> impl Iterator<Item = &'a [u8]> {
+        self.descriptors()
+            .filter(|(variant, _)| *variant == "title")
+            .map(|(_, title)| title.str())
     }
 
     /// The first `title` descriptor, as stored.

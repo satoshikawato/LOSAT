@@ -1,0 +1,469 @@
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: hba
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+hba	P69905.2	100.000	142	0	0	1	142	1	142	2.19e-81	270
+hba	P01923.1	99.291	141	1	0	2	142	1	141	1.88e-80	267
+hba	Q9TS35.2	98.592	142	2	0	1	142	1	142	3.22e-80	266
+hba	P63107.2	97.183	142	4	0	1	142	1	142	6.18e-79	262
+hba	P67818.1	96.454	141	5	0	2	142	1	141	2.37e-78	260
+hba	P01935.1	88.652	141	16	0	2	142	1	141	7.46e-75	249
+hba	P01966.2	88.028	142	17	0	1	142	1	142	5.25e-71	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	1	142	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	2	142	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	1	142	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	1	142	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	2	142	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	2	142	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	1	142	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	143	284	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	144	284	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	143	284	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	143	284	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	144	284	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	144	284	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	143	284	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	285	426	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	286	426	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	285	426	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	285	426	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	286	426	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	286	426	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	285	426	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	427	568	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	428	568	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	427	568	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	427	568	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	428	568	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	428	568	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	427	568	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	569	710	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	570	710	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	569	710	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	569	710	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	570	710	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	570	710	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	569	710	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	711	852	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	712	852	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	711	852	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	711	852	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	712	852	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	712	852	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	711	852	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	853	994	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	854	994	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	853	994	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	853	994	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	854	994	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	854	994	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	853	994	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	995	1136	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	996	1136	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	995	1136	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	995	1136	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	996	1136	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	996	1136	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	995	1136	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	1137	1278	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	1138	1278	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	1137	1278	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	1137	1278	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	1138	1278	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	1138	1278	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	1137	1278	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	1279	1420	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	1280	1420	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	1279	1420	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	1279	1420	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	1280	1420	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	1280	1420	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	1279	1420	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	1421	1562	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	1422	1562	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	1421	1562	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	1421	1562	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	1422	1562	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	1422	1562	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	1421	1562	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	1563	1704	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	1564	1704	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	1563	1704	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	1563	1704	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	1564	1704	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	1564	1704	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	1563	1704	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	1705	1846	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	1706	1846	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	1705	1846	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	1705	1846	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	1706	1846	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	1706	1846	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	1705	1846	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	1847	1988	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	1848	1988	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	1847	1988	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	1847	1988	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	1848	1988	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	1848	1988	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	1847	1988	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	1989	2130	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	1990	2130	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	1989	2130	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	1989	2130	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	1990	2130	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	1990	2130	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	1989	2130	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	2131	2272	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	2132	2272	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	2131	2272	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	2131	2272	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	2132	2272	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	2132	2272	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	2131	2272	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	2273	2414	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	2274	2414	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	2273	2414	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	2273	2414	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	2274	2414	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	2274	2414	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	2273	2414	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	2415	2556	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	2416	2556	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	2415	2556	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	2415	2556	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	2416	2556	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	2416	2556	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	2415	2556	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	2557	2698	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	2558	2698	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	2557	2698	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	2557	2698	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	2558	2698	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	2558	2698	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	2557	2698	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	2699	2840	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	2700	2840	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	2699	2840	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	2699	2840	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	2700	2840	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	2700	2840	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	2699	2840	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	2841	2982	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	2842	2982	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	2841	2982	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	2841	2982	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	2842	2982	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	2842	2982	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	2841	2982	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	2983	3124	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	2984	3124	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	2983	3124	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	2983	3124	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	2984	3124	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	2984	3124	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	2983	3124	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	3125	3266	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	3126	3266	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	3125	3266	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	3125	3266	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	3126	3266	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	3126	3266	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	3125	3266	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	3267	3408	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	3268	3408	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	3267	3408	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	3267	3408	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	3268	3408	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	3268	3408	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	3267	3408	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	3409	3550	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	3410	3550	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	3409	3550	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	3409	3550	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	3410	3550	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	3410	3550	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	3409	3550	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	3551	3692	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	3552	3692	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	3551	3692	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	3551	3692	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	3552	3692	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	3552	3692	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	3551	3692	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	3693	3834	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	3694	3834	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	3693	3834	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	3693	3834	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	3694	3834	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	3694	3834	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	3693	3834	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	3835	3976	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	3836	3976	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	3835	3976	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	3835	3976	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	3836	3976	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	3836	3976	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	3835	3976	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	3977	4118	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	3978	4118	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	3977	4118	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	3977	4118	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	3978	4118	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	3978	4118	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	3977	4118	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	4119	4260	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	4120	4260	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	4119	4260	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	4119	4260	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	4120	4260	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	4120	4260	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	4119	4260	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	4261	4402	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	4262	4402	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	4261	4402	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	4261	4402	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	4262	4402	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	4262	4402	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	4261	4402	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	4403	4544	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	4404	4544	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	4403	4544	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	4403	4544	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	4404	4544	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	4404	4544	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	4403	4544	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	4545	4686	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	4546	4686	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	4545	4686	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	4545	4686	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	4546	4686	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	4546	4686	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	4545	4686	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	4687	4828	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	4688	4828	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	4687	4828	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	4687	4828	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	4688	4828	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	4688	4828	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	4687	4828	1	142	1.84e-69	236
+# PHIBLASTP 2.17.0+
+# Iteration: 1
+# Query: long
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+long	P69905.2	100.000	142	0	0	4829	4970	1	142	7.68e-80	270
+long	P01923.1	99.291	141	1	0	4830	4970	1	141	6.59e-79	267
+long	Q9TS35.2	98.592	142	2	0	4829	4970	1	142	1.13e-78	266
+long	P63107.2	97.183	142	4	0	4829	4970	1	142	2.16e-77	262
+long	P67818.1	96.454	141	5	0	4830	4970	1	141	8.28e-77	260
+long	P01935.1	88.652	141	16	0	4830	4970	1	141	2.61e-73	249
+long	P01966.2	88.028	142	17	0	4829	4970	1	142	1.84e-69	236
+# BLAST processed 0 queries

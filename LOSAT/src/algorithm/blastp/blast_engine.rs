@@ -767,12 +767,13 @@ fn blastp_cutoff_score_max(
             subject_length_for_hit_cutoff,
         ),
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:942-944
-        None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
+        None => crate::stats::cutoffs::cutoff_score(
             expect_value,
-            search_space,
             gapped_params,
-        )
-        .max(1),
+            search_space,
+            None,
+            crate::stats::cutoffs::CutoffConversion::PROTEIN,
+        ),
     }
 }
 
@@ -1172,36 +1173,48 @@ fn blastp_ungapped_word_cutoff_score_for_context(
         0.0,
         &ctx.karlin_params,
         1.0,
+        crate::stats::cutoffs::CutoffConversion::PROTEIN,
     )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976
-/// The sum statistics' cutoff score of a context (`BLAST_Cutoffs` with the gap decay, from an
-/// e-value of 1 in the search space of the average query and subject lengths); `BLAST_Cutoffs`
-/// keeps the `new_cutoff` of 1 when its score is lower (blast_stat.c:4108-4129).
-pub(super) fn sum_stats_hit_cutoff(
+/// The sum statistics' cutoff score of each context (`stats::cutoffs::SumStatsCutoffs`:
+/// `BLAST_Cutoffs` with the gap decay, from a cutoff of 1, in the search space of the average
+/// query and subject lengths, the e-value carried from one valid context to the next), `i32::MAX`
+/// for an invalid context (NCBI skips it).
+pub(super) fn sum_stats_hit_cutoffs(
     contexts: &[QueryContext],
     avg_subject_length: i32,
     gapped_params: &KarlinParams,
-) -> i32 {
+) -> Vec<i32> {
     let concat_qlen = contexts
         .last()
         .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
         .unwrap_or(0);
     let avg_qlen = concat_qlen / contexts.len().max(1) as i32;
-    crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_sum_stats(
+    let mut sum_stats = crate::stats::cutoffs::SumStatsCutoffs::new(
         avg_qlen,
         avg_subject_length,
         crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED,
-        gapped_params,
-    )
+        crate::stats::cutoffs::CutoffConversion::PROTEIN,
+    );
+    contexts
+        .iter()
+        .map(|ctx| {
+            if ctx.is_valid {
+                sum_stats.next_valid_context(gapped_params)
+            } else {
+                i32::MAX
+            }
+        })
+        .collect()
 }
 
 /// psiblast's `-sum_stats true` in a search with the matrix (round 1): the lowered cutoff of the
 /// HSPs the search keeps and the linking parameters of the preliminary stage.
 pub(super) struct BlastpSumStats {
-    /// The sum statistics' cutoff (`sum_stats_hit_cutoff`).
-    hit_cutoff: i32,
+    /// The sum statistics' cutoff of each context (`sum_stats_hit_cutoffs`).
+    hit_cutoffs: Vec<i32>,
     /// The preliminary stage's linking parameters (`cutoff_small_gap` = the words' smallest
     /// cutoff, `word_params->cutoff_score_min`).
     pub(super) preliminary: crate::core::link_hsps::EvenGapLinkParams,
@@ -1223,7 +1236,7 @@ impl BlastpSumStats {
             .min()
             .unwrap_or(i32::MAX);
         Self {
-            hit_cutoff: sum_stats_hit_cutoff(contexts, avg_subject_length, gapped_params),
+            hit_cutoffs: sum_stats_hit_cutoffs(contexts, avg_subject_length, gapped_params),
             preliminary: crate::core::link_hsps::EvenGapLinkParams::preliminary(
                 word_cutoff_score_min,
             ),
@@ -1236,9 +1249,10 @@ impl BlastpSumStats {
         contexts: &[QueryContext],
         mut cutoffs: Vec<i32>,
     ) -> Vec<i32> {
-        for (cutoff, ctx) in cutoffs.iter_mut().zip(contexts) {
+        for ((cutoff, ctx), &sum_cutoff) in cutoffs.iter_mut().zip(contexts).zip(&self.hit_cutoffs)
+        {
             if ctx.is_valid {
-                *cutoff = (*cutoff).min(self.hit_cutoff);
+                *cutoff = (*cutoff).min(sum_cutoff);
             }
         }
         cutoffs
@@ -6205,16 +6219,17 @@ fn psiblast_check_subject_letters(subjects: &[FastaRecord]) -> Result<()> {
 }
 
 /// psiblast `-in_pssm`: what stops the run at its one query batch before the PSSM's search, after
-/// the outfmt 0 prolog, with NCBI's error (`PsiSearch::stop_before_search`, the rule tblastn's
-/// `-in_pssm` shares): with `-export_search_strategy` and `-subject` (no database, `database`) the
-/// search strategy's "Remote PSI-BL2SEQ is not supported" (the options error, exit status 1; without
-/// the strategy NCBI runs the search), else a PSSM that NCBI's `CPsiBlastValidate::Pssm` refuses
-/// (the engine error; the PSSM is checked before the query's Karlin-Altschul parameters,
-/// `psiblast_stop_at_invalid_query`), else the PSSM engine's error for the scores of a PSSM of
-/// frequency ratios only. The first two write no request (`QueryBatches::stop_batch` cleared); the
-/// last stops after the request (`stop_batch`: the PSSM query's batch), as NCBI's
-/// `SaveSearchStrategy` comes before `CPsiBlast` (psiblast_app.cpp:340; the local rounds make
-/// `CPsiBlast` later, psiblast_app.cpp:239).
+/// the outfmt 0 prolog, with NCBI's error or LOSAT's refusal (`PsiSearch::stop_before_search`, the
+/// rule tblastn's `-in_pssm` shares): with `-export_search_strategy` and `-subject` (no database,
+/// `database`) the search strategy's "Remote PSI-BL2SEQ is not supported" (the options error, exit
+/// status 1; without the strategy NCBI runs the search), else a PSSM that NCBI's
+/// `CPsiBlastValidate::Pssm` refuses (the engine error; the PSSM is checked before the query's
+/// Karlin-Altschul parameters, `psiblast_stop_at_invalid_query`), else LOSAT's refusal of a request
+/// whose write NCBI stops in with its exception (`PssmQueryStop::RequestRefused`, exit status 1),
+/// else the PSSM engine's error for the scores of a PSSM of frequency ratios only. The first three
+/// write no request (`QueryBatches::stop_batch` cleared); the last stops after the request
+/// (`stop_batch`: the PSSM query's batch), as NCBI's `SaveSearchStrategy` comes before `CPsiBlast`
+/// (psiblast_app.cpp:340; the local rounds make `CPsiBlast` later, psiblast_app.cpp:239).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:58-67 (cited at
 /// `PsiSearch::stop_before_search`)
@@ -6461,6 +6476,9 @@ fn search(
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.queries_begin();
     }
+    // The outfmt 0 to 4 prolog, before the first batch is read and its request written
+    // (`write_pairwise_prologs`), as in every program.
+    write_pairwise_prologs(&args, subject_source, subject_label, outputs, true)?;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`); with
     // `-in_pssm`, of the PSSM's query when the reports show its ids (`PsiSearch::query_record`).
     let believed_queries = crate::blastinput::query_batch::believed_queries(
@@ -6541,10 +6559,11 @@ fn search(
     // search writes the requests where its call ends, after the searches, which would hold the
     // reports). A batch that stops with LOSAT's refusal of an id is read first too.
     if batches.first_request_end().is_some() {
-        // NCBI's prolog comes before that request (`StrategyExport::refused`).
+        // NCBI's prologs come before that request (`StrategyExport::refused`): outfmt 0 to 4 was
+        // written before the search above; `false` writes the remaining formats' (XML2/JSON, 20).
         let refused = crate::report::archive::strategy::StrategyExport::refused;
         if args.strategy.as_ref().is_some_and(refused) {
-            write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+            write_pairwise_prologs(&args, subject_source, subject_label, outputs, false)?;
         }
         crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     }
@@ -7176,12 +7195,12 @@ fn search(
                 let (input_start, searched_start) = batches.start_of(failed);
                 // The failed batch's search strategy request, which NCBI writes before its
                 // search: after the requests of the batches before, which their search again
-                // releases with it (`NextRequest`), or alone, before any output.
+                // releases with it (`NextRequest`), or alone, after the prologs.
                 let span = batches.searched_span(failed);
                 let failed_end = span.end;
                 if searched_start == 0 {
+                    write_pairwise_prologs(&args, subject_source, subject_label, outputs, false)?;
                     write_alone(span)?;
-                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
                     break (searched_start, failed_end);
                 }
                 // The first search looked the taxonomy up for the batches before (their
@@ -7230,22 +7249,17 @@ fn search(
         })?;
     } else if batches.stop.is_some() {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253
-        // The first batch fails after the outfmt 0 prolog. A batch whose set-up fails (every query
-        // without letters) has its search strategy request: NCBI made its query factory before
-        // the search (`QueryBatches::stop_batch`); it is written before the prolog.
+        // The first batch fails after the prologs (those of the first report here). A batch whose
+        // set-up fails (every query without letters) has its search strategy request: NCBI made
+        // its query factory before the search (`QueryBatches::stop_batch`).
+        write_pairwise_prologs(&args, subject_source, subject_label, outputs, false)?;
         if let Some(span) = batches.stop_batch.clone() {
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 340
             // NCBI's stream that throws while it writes the request (an empty descriptor of a
             // PSSM query, `encoder::NullElement`) ends the run after the prolog (NCBI BLAST+
             // 2.17.0, probe D3c-3b `probe5` `t_dn1.strat0`).
-            if let Err(error) = write_alone(span) {
-                if error.is::<crate::cli::NativeError>() {
-                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
-                }
-                return Err(error);
-            }
+            write_alone(span)?;
         }
-        write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {
         // A reader at the end of its input reads no batch (its `End()` is true): the reports of
         // no query (an empty pipe, or `-query -` after `-subject -`).
@@ -7312,7 +7326,9 @@ fn x_bp_encode_block_subjects(
 // `x_block_xml_run_allowed`; each check where any output is of its kind),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
 // (`blastp_database_search_space`, with `-db` or `-dbsize`), no database whose setup count the
-// reference path refuses (`call_setup::setup_count_refused`), no query that is also a subject under
+// reference path refuses (`call_setup::setup_count_refused`; the search of all queries refuses
+// both after the reports of the batches before the failing one, `split_steps::batch_failure`, the
+// one place of those refusals), no query that is also a subject under
 // `-parse_deflines` where outfmt 0 can fail alone (its refusal of such a record's masks is outfmt
 // 0's alone, `believed::refuse_shared_masks_in`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
@@ -7364,11 +7380,10 @@ fn x_query_block_plan(
     // output of several is a writer of the caller: the search of all queries writes each output's
     // whole report in turn and opens its sink just before (`OutputSink::open`), while the block
     // search opens every sink once and writes them block by block, so two outputs on standard
-    // output would get each block's formats in turn, two outputs to one file would write over each
-    // other through two handles (the search of all queries leaves the last report), and a file that
-    // cannot be created would stop the run after the first block's part of the outputs before it
-    // instead of after their whole reports (test
-    // `several_file_outputs_are_written_one_after_the_other`); no `-db` (the records' `s_idx` of a
+    // output or to one file (one handle, `KeptFile`; the search of all queries leaves the reports
+    // one after the other) would get each block's formats in turn, and a file that cannot be
+    // created would stop the run after the first block's part of the outputs before it instead of
+    // after their whole reports (test `several_file_outputs_are_written_one_after_the_other`); no `-db` (the records' `s_idx` of a
     // database search rank the subjects that the call's lists name); an observer only with the hit
     // records, which count the HSPs of each block for the observer's indices (`XOffsetObserver`).
     let x_web = outputs.formats.len() > 1 || outputs.hits.is_some() || outputs.observer.is_some();
@@ -7491,9 +7506,9 @@ fn x_query_block_plan(
         // A database without sequences fails in the first batch (`run_call`). A setup count that
         // LOSAT refuses (`call_setup::setup_count_refused`, with the setup count of a search
         // without RPS, `db_extent`'s: the statistics' count) is refused by the call that holds a
-        // valid query: the call of all queries refuses before any output, a block only after the
-        // reports of the blocks before, whose queries were invalid (review D of line RG D1a-4,
-        // SF1).
+        // valid query, after the reports of the batches before its first searched one
+        // (`split_steps::first_batch_setup`): the plan leaves it to the call of all queries, the
+        // one place of the refusal (review D of line RG D1a-4, SF1; line RG item bp-SF1).
         BlastpSubjectSource::Database(database) => {
             if database.num_sequences() == 0
                 || call_setup::setup_count_refused(args, {
@@ -7993,16 +8008,26 @@ fn blastp_subject_tag(args: &ResolvedBlastpArgs, subject_label: &str) -> Vec<u8>
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 340
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:191-199
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-/// Writes and flushes the prolog of every outfmt 0 to 4, 15, 16 and 20 format (`PrintProlog`;
-/// 0 to 4 are `blastp_pairwise_view_of`'s), for a run that stops at its first query batch
-/// (outfmt 20's line of the field names; its formatter's warning came before the search,
-/// `search`).
+/// Writes the prologs of the formats (`PrintProlog`). `before_search`: the outfmt 0 to 4 prolog
+/// (`blastp_pairwise_view_of`) of every sink (a library `File` sink is kept for the run,
+/// `api::local_blast::KeptFile`), where NCBI writes it in blastp, psiblast and rpsblast: before
+/// the first query batch and its search strategy request, so that the prolog's error (a malformed
+/// `./.ncbirc` under `-html`) and a failed write end the run there, before LOSAT's refusal of a
+/// strategy file on the report stream; written through `cli::NcbiOstream::sink`, whose `NcbiEndl`
+/// pair flushes NCBI's stream. Otherwise, for a run that stops at its first query batch, the
+/// prologs that come with the first report, written and flushed: the start of the XML2 and JSON
+/// documents, and outfmt 20's line of the field names (its formatter's warning came before the
+/// search, `search`).
 fn write_pairwise_prologs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
+    before_search: bool,
 ) -> Result<()> {
     let (num_sequences, total_letters) = subject_source.shown_totals();
     let pairwise_database = subject_source
@@ -8011,6 +8036,9 @@ fn write_pairwise_prologs(
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
         if blastp_pairwise_view_of(number).is_some() {
+            if !before_search {
+                continue;
+            }
             let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
@@ -8029,6 +8057,8 @@ fn write_pairwise_prologs(
                 }),
             )?;
             writer.flush()?;
+        } else if before_search {
+            // The other formats' prologs come with the first report.
         } else if let Some(kind) = blastp_xml2_kind(format.outfmt) {
             // The XML2 and JSON documents start with their prolog too.
             let mut writer = format.sink.open()?;
@@ -8047,8 +8077,9 @@ fn write_pairwise_prologs(
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259,294-295
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1322-1325
-/// The reports of a run without a query batch: the outfmt 0 prolog and epilog, the outfmt
-/// 7 count of 0 queries, nothing for outfmt 6.
+/// The reports of a run without a query batch: the outfmt 0 epilog (after the prolog that the
+/// search wrote before, `write_pairwise_prologs`), the outfmt 7 count of 0 queries, nothing for
+/// outfmt 6.
 fn write_reports_without_queries(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -8166,19 +8197,8 @@ fn write_reports_without_queries(
                         .map(|links| crate::report::html_ids::HtmlReport::new(links, [])),
                     unreadable_query: None,
                 };
-                // No query writes warnings; an `-html` prolog's references post on the
-                // diagnostics (`pairwise::html_with_diagnostics`).
-                let mut warnings = crate::report::query_warnings::QueryWarnings::of_posts(
-                    &[],
-                    None,
-                    &mut *outputs.diagnostics,
-                )
-                .with_html_posts(
-                    outputs
-                        .html_posts
-                        .as_deref_mut()
-                        .map(|posts| posts as &mut dyn std::io::Write),
-                );
+                // No query writes warnings, and the search wrote the prolog before
+                // (`write_pairwise_prologs`): the epilog alone.
                 write_blastp_pairwise_report(
                     &[],
                     &mut writer,
@@ -8192,8 +8212,7 @@ fn write_reports_without_queries(
                     None,
                     pairwise_database.as_ref(),
                     None,
-                    Some(&mut warnings),
-                    true,
+                    None,
                     true,
                     None,
                     &crate::report::db_subject::HitLoads::default(),
@@ -8218,7 +8237,12 @@ fn write_reports_without_queries(
 /// <text>`, exit status 3. LOSAT searches all batches together, so the failure is the first
 /// searched batch's: the call's first batch, or, when that batch holds invalid queries only,
 /// which NCBI does not search (local_blast.cpp:177-180), a later one, after the reports of the
-/// batches before it (`unsearched_batches_then_engine_error`). `first_batch` is an error of the
+/// batches before it, every format's (`reports_then_engine_error`; NCBI 2.17.0 blastp
+/// `BATCH_SIZE=1`, an all-X query before tk, with `-subject` of `MK`, ``, `` and `-searchsp 1000`,
+/// or `-db` of an empty database: outfmt 0 and 7, exit 3, line PS DECISIONS 28 and 30; `OLD_FSC`
+/// and `BATCH_SIZE=1` with two all-X queries before a valid one, blastp `-subject` of `MK`, ``, ``
+/// (outfmt 0, 5, 7 and 11) and rpsblast's `n1000rps` (outfmt 0, 5 and 7): exit 3, line RG item
+/// bp-SF2). `first_batch` is an error of the
 /// call's first batch whatever its queries' validity: a split query's chunk (its batch is
 /// searched; its call has no search strategy requests, `search_split_query_batches` writes them),
 /// or RPS-BLAST's files, which NCBI sets up before it checks the batch's queries
@@ -8240,7 +8264,24 @@ fn preliminary_search_error(
     text: &[u8],
 ) -> anyhow::Error {
     if !(first_batch || query_batch_skipped.first() == Some(&false)) {
-        return unsearched_batches_then_engine_error(
+        // The call's first searched batch, which meets the error: a batch with a valid context
+        // (no other batch's search reads the subjects or sets them up).
+        let Some(batch) = query_batches
+            .iter()
+            .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start])
+        else {
+            let searched = if database_name.is_empty() {
+                "the subjects".to_string()
+            } else {
+                format!("the database {}", String::from_utf8_lossy(database_name))
+            };
+            return anyhow::anyhow!(
+                "a search of {searched} that fails with NCBI BLAST+'s error \"{}\" without a query batch that NCBI BLAST+ searches is not supported by LOSAT's {}",
+                String::from_utf8_lossy(text),
+                args.app.name()
+            );
+        };
+        return reports_then_engine_error(
             args,
             query_records,
             subject_source,
@@ -8249,15 +8290,18 @@ fn preliminary_search_error(
             pool,
             ranges,
             reports,
-            query_batches,
-            query_batch_skipped,
-            database_name,
+            batch,
             text,
         );
     }
     let written = (|| -> Result<()> {
+        // The prologs of the first report (EXPERIMENT (LOSAT_X_BPQBLOCK): a block after the first
+        // of the block search follows those that the first block wrote).
+        if reports.x_prolog {
+            write_pairwise_prologs(args, subject_source, subject_label, outputs, false)?;
+        }
         // The failed batch's search strategy request: the call's first, whose search fails; it is
-        // written before the prolog, and NCBI's posts of the bytes replaced in it after the
+        // written after the prologs, and NCBI's posts of the bytes replaced in it after the
         // batch's reader messages.
         if let (Some(call), Some(batch)) = (
             reports.call_requests,
@@ -8266,11 +8310,6 @@ fn preliminary_search_error(
                 .find(|batch| !batch.searched.is_empty()),
         ) {
             call.end_at(batch.searched.end)?;
-        }
-        // EXPERIMENT (LOSAT_X_BPQBLOCK): a block after the first of the block search follows
-        // the prolog that the first block wrote.
-        if reports.x_prolog {
-            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
         }
         if let Some(first_batch_messages) = reports.reader_warnings.first() {
             outputs.diagnostics.write_all(first_batch_messages)?;
@@ -8730,70 +8769,15 @@ fn write_request_posts(args: &ResolvedBlastpArgs, diagnostics: &mut dyn Write) -
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-/// The error `text` of a query batch's search (`BLAST engine error: <text>`, exit status 3) when
-/// the call's first batch holds invalid queries only: NCBI does not search such a batch and
-/// reports its queries, so the reports of the batches before the first searched one come first
-/// (searched again here, alone and without the epilog: none of their queries is searched), then
-/// that batch's reader messages and the error (NCBI 2.17.0 blastp `BATCH_SIZE=1`, an all-X query
-/// before tk, with `-subject` of `MK`, ``, `` and `-searchsp 1000`, or `-db` of an empty
-/// database: outfmt 0 and 7, exit 3; line PS DECISIONS 28 and 30). LOSAT refuses where this is
-/// not ported: no searched batch, another program, or a format other than 0 to 4, 6, 7 and 10.
+/// The engine error of the search of `batch` (`text`, `BLAST engine error: <text>`, exit status 3),
+/// after the reports of the batches before it, which the search of that prefix of the queries
+/// writes without the epilog, in this call (a block of the block search too, LOSAT_X_BPQBLOCK:
+/// the prefix is the block's, after the blocks before), then that batch's reader messages: the
+/// call's first batch holds invalid queries only, which NCBI does not search and reports
+/// (`preliminary_search_error`), or psiblast's PHI-BLAST batch after the first
+/// (`phi_setup_error`). Cold and out of line (no NCBI counterpart: code placement only).
 #[cold]
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
-fn unsearched_batches_then_engine_error(
-    args: &ResolvedBlastpArgs,
-    query_records: &[FastaRecord],
-    subject_source: BlastpSubjectSource<'_>,
-    subject_label: &str,
-    outputs: &mut ReportOutputs<'_>,
-    pool: &crate::utils::threading::SearchPool<'_>,
-    ranges: &BlastpRanges<'_>,
-    reports: &BlastpReports<'_>,
-    query_batches: &[seq_range::RangedBatch],
-    query_batch_skipped: &[bool],
-    database_name: &[u8],
-    text: &[u8],
-) -> anyhow::Error {
-    let first_searched = query_batches
-        .iter()
-        .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start]);
-    let ported_formats = outputs.formats.iter().all(|format| {
-        crate::blastinput::app::parse_formatting_string(format.outfmt).is_ok_and(|choice| {
-            matches!(choice.number, 6 | 7 | 10) || blastp_pairwise_view_of(choice.number).is_some()
-        })
-    });
-    let Some(batch) = first_searched
-        .filter(|_| ported_formats && args.app == BlastpApp::Blastp && args.archive.is_none())
-    else {
-        let searched = if database_name.is_empty() {
-            "the subjects".to_string()
-        } else {
-            format!("the database {}", String::from_utf8_lossy(database_name))
-        };
-        return anyhow::anyhow!(
-            "a search of {searched} that fails with NCBI BLAST+'s error \"{}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
-            String::from_utf8_lossy(text),
-            args.app.name()
-        );
-    };
-    reports_then_engine_error(
-        args,
-        query_records,
-        subject_source,
-        subject_label,
-        outputs,
-        pool,
-        ranges,
-        reports,
-        batch,
-        text,
-    )
-}
-
-/// The engine error of the search of `batch` (`text`, `unsearched_batches_then_engine_error`),
-/// after the reports of the batches before it, which the search of that prefix of the queries
-/// writes without the epilog.
 #[allow(clippy::too_many_arguments)]
 fn reports_then_engine_error(
     args: &ResolvedBlastpArgs,
@@ -8850,7 +8834,7 @@ fn reports_then_engine_error(
         x_queries_before: reports.x_queries_before,
         x_xml2_carry: reports.x_xml2_carry,
         // The engine error follows this report and ends the run: it is the run's last report
-        // call (the XML formats, the only readers of `last_call`, keep the refusal before here).
+        // call (`BlastpXml::stops`: an XML2 or JSON report that NCBI holds back is not written).
         last_call: true,
         psi_round: None,
         // BLASTP and psiblast's PHI-BLAST round (no PSSM): no psiblast PSSM stops here.
@@ -8898,8 +8882,10 @@ struct BlastpReports<'a> {
     /// when IDENTITY reset the composition mode, none otherwise.
     identity_warned: usize,
     epilog: bool,
-    /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the outfmt 0 report starts with the prolog
-    /// (false for the blocks after the first of the block search, `x_query_blocks.rs`).
+    /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the call's reports start with the prologs that
+    /// come with the first report (the start of the XML2 and JSON documents, the tabular
+    /// reports' header lines; outfmt 0 to 4's came before the search, `write_pairwise_prologs`):
+    /// false for the blocks after the first of the block search (`x_query_blocks.rs`).
     x_prolog: bool,
     /// EXPERIMENT (LOSAT_X_BPQBLOCK): the queries of the blocks before this one, which outfmt
     /// 7's last line counts with this call's (0 outside the block search).
@@ -9782,7 +9768,7 @@ enum UngappedSetupFailure {
     /// NCBI's error of the first batch (`preliminary_search_error` writes it after the outfmt 0
     /// prolog), or LOSAT's refusal of the matrix file that NCBI reads, in its place.
     Engine(String),
-    /// LOSAT's refusal before any output.
+    /// LOSAT's refusal of the first searched batch (after the reports of the batches before).
     Refusal(anyhow::Error),
 }
 
@@ -10104,7 +10090,14 @@ fn run_call(
     if let Some(failure) = failure {
         return Err(match failure {
             UngappedSetupFailure::Engine(text) => setup_error(outputs, true, b"", &text),
-            UngappedSetupFailure::Refusal(error) => error,
+            // The refusal of the first searched batch, after the reports of the batches before,
+            // of invalid queries only, which NCBI writes before it searches that batch
+            // (`split_steps::batch_failure`, line RG item bp-SF1).
+            UngappedSetupFailure::Refusal(error) => split_steps::batch_failure(
+                &args,
+                split_steps::first_searched_query(&query_batches, &query_batch_skipped),
+                error,
+            ),
         });
     }
 
@@ -10161,7 +10154,7 @@ fn run_call(
         option_space_of,
         preliminary_option_spaces,
         preliminary_spaces,
-    } = call_setup::call_search_spaces(&call_statistics)?;
+    } = call_setup::call_search_spaces(&call_statistics, &query_batches)?;
     let (preliminary_search_spaces, preliminary_exact_spaces) = match &preliminary_spaces {
         Some((spaces, exact)) => (spaces, exact),
         None => (&search_spaces, &exact_search_spaces),

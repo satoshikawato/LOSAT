@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { openParameters, openSearch, pickRun, program, waitStatus } from './support/search';
+import { described, openParameters, openSearch, pickRun, program, waitStatus } from './support/search';
 import { test } from './support/test';
 
 const WIDTHS = [320, 330, 340, 350, 359, 360, 390, 768, 1280] as const;
@@ -258,7 +258,7 @@ async function expectWmCheckboxSharesLine(page: Page, context: string): Promise<
 
 async function openWmTab(page: Page): Promise<void> {
   await page.getByTestId('tab-windowmasker').click();
-  await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await described(page, 'wm-panel', 'ready');
 }
 
 async function openWmOptions(page: Page): Promise<void> {

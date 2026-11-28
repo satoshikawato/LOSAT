@@ -4,6 +4,7 @@
 // Nothing here checks BLAST's rules: the engine's `validate` reads the argv as the command
 // line does, and the engine's `describe` gives the defaults it resolves.
 import type { ResolvedDefault } from 'losat/domain';
+import { seqdbNameList } from './list-flags';
 import type { PairSelect, ParameterField, ParameterSection, ProgramDescriptor, SectionPlacement } from './programs';
 
 /** What `describe` says about one option (the fields of ports/engine ParameterDescription). */
@@ -202,11 +203,17 @@ export function normalizeBooleanDefault(value: string | undefined): 'true' | 'fa
  * What the form writes to the argv for a field: `true` for a set flag, or a value other than
  * '' and the default (white space around it dropped; a `given` option's value even when it
  * equals the default); undefined when it writes nothing. A written value is a value that
- * differs from the default ("♦"), since a value equal to the default is not written.
+ * differs from the default ("♦"), since a value equal to the default is not written. A
+ * database (`-filtering_db`), which the form keeps as it is called, is written as the command
+ * line reads it (`seqdbNameList`: a name with a space between double quotes; line WW, WW4d).
  */
 export function writtenValue(field: ParameterField, value: FieldValue | undefined, known: KnownDefault | undefined): string | true | undefined {
   if (field.kind === 'flag') return value === true ? true : undefined;
   if (typeof value !== 'string') return undefined;
+  if (field.kind === 'database') {
+    const list = seqdbNameList(field.flag, [value]);
+    return list === '' ? undefined : list;
+  }
   const text = value.trim();
   if (text === '') return undefined;
   if (known?.given !== true) {

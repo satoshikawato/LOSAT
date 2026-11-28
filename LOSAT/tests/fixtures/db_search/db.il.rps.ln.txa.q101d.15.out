@@ -1,0 +1,92 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "rpsblast",
+      "version": "RPSBLAST 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_mini3v.00"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q101d",
+          "query_len": 410,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|CDD|101",
+                  "accession": "101",
+                  "title": "f101 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] residues 1-190",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                },
+                {
+                  "id": "gnl|CDD|101"
+                }
+              ],
+              "len": 190,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 315.552,
+                  "score": 808,
+                  "evalue": 1.22853e-112,
+                  "identity": 190,
+                  "positive": 190,
+                  "query_from": 1,
+                  "query_to": 190,
+                  "hit_from": 1,
+                  "hit_to": 190,
+                  "align_len": 190,
+                  "gaps": 0,
+                  "qseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "hseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "midline": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 315.552,
+                  "score": 808,
+                  "evalue": 1.22853e-112,
+                  "identity": 190,
+                  "positive": 190,
+                  "query_from": 221,
+                  "query_to": 410,
+                  "hit_from": 1,
+                  "hit_to": 190,
+                  "align_len": 190,
+                  "gaps": 0,
+                  "qseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "hseq": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD",
+                  "midline": "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 1,
+            "db_len": 190,
+            "hsp_len": 25,
+            "eff_space": 63525,
+            "kappa": 0.050373036,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

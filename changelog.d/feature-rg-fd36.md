@@ -29,8 +29,8 @@
   refuses. A run that NCBI ends before that point now ends as NCBI's, with NCBI's prolog, error and exit status: an
   empty or white-space query gives `Query is Empty!` with exit status 0, a missing database NCBI's database error, an
   option error NCBI's error, and so do `BATCH_SIZE=abc`, a `-query_loc` past the end, a first query record NCBI cannot
-  read, and a PSSM run (`psiblast -in_pssm`, PSI-TBLASTN) with `-subject` (before: LOSAT's refusal, exit status 1). Runs
-  without a search strategy on a report stream hold nothing (line RG, series F, D-36 reviews 2b and 2c).
+  read, and a PSSM run (`psiblast -in_pssm`, PSI-TBLASTN) with `-subject`. Runs without a search strategy on a report
+  stream hold nothing (line RG, series F, D-36 reviews 2b and 2c).
 - With a strategy file and an `-outfmt` value that NCBI cannot read (`99`, `abc`, `"6 delimx"`, `" -1"`), every
   program now raises that error where NCBI's formatting handler does, after the errors of `-subject`, `-subject_loc`,
   `-query`, `-out` and `-query_loc` (NCBI skips its early `-outfmt` read then): NCBI's message, exit status and files

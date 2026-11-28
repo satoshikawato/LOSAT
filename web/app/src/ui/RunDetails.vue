@@ -7,7 +7,7 @@ import { computed } from 'vue';
 import { CUSTOM_OUTPUT } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
 import { optionGrammar, type LoadedRun } from '../application/results';
-import { commandWords, shellWord, userArgv } from '../domain/argv';
+import { commandWords, shellWord, shellWords, userArgv } from '../domain/argv';
 import { COUNTS_FILE } from '../domain/counts';
 import { dateOf } from '../domain/download-sentences';
 import { fromText, readDifferenceText, worthSaying } from '../domain/input-parts';
@@ -94,8 +94,9 @@ const inputs = computed(() => {
         <dd><code data-testid="run-argv"><CommandText :words="userArgv(snapshot)" :takes-value="takesValue" /></code></dd>
         <template v-if="searched && snapshot.queryFile">
           <dt>Query file</dt>
+          <!-- The option and the file's name as the command row writes them (quoted where a shell needs it: line WQA's D33, R2 L-d). -->
           <dd data-testid="run-query-file">
-            <code>{{ snapshot.queryFile.flag }} {{ snapshot.queryFile.name }}</code> ({{ formatBytes(snapshot.queryFile.size) }})
+            <code>{{ shellWords([snapshot.queryFile.flag, snapshot.queryFile.name]) }}</code> ({{ formatBytes(snapshot.queryFile.size) }})
           </dd>
         </template>
         <template v-for="{ key, role, input, records, readDiff } in searched ? inputs : []" :key="key">
@@ -129,7 +130,7 @@ const inputs = computed(() => {
               <br />
               <span class="muted small" data-testid="run-database-filters">
                 Filter lists:
-                {{ snapshot.database.filterFiles.map((f) => `${f.flag} ${shellWord(f.name)} (${formatBytes(f.size)})`).join(', ') }}
+                {{ snapshot.database.filterFiles.map((f) => `${shellWords([f.flag, f.name])} (${formatBytes(f.size)})`).join(', ') }}
               </span>
             </template>
           </dd>

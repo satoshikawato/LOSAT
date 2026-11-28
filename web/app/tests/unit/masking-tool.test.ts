@@ -542,6 +542,50 @@ describe('MaskingDraft', () => {
     expect(queued[1]!.outfmtDefault).toBeUndefined();
   });
 
+  // Line WQA's D33 R2 (H1): the button's count is the number of runs that the press queues, for every tool of the tab: one print
+  // request for a help or version word (the one answer of `printsKindOf`, which the press reads too), else one run per input.
+  it('counts the runs that the press queues: one for a help or version word, one per input in Separate', async () => {
+    const { draft, queued } = setup({ validate: 'ok' });
+    draft.ensureLoaded();
+    await described(draft, 'dustmasker');
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa'), new File(['>b\nACGT\n'], 'b.fa')]);
+    await vi.waitFor(() => expect(draft.state.get().fastaFiles.every((entry) => entry.status === 'ready')).toBe(true));
+    draft.setFastaMode('separate');
+    for (const tool of ['dustmasker', 'segmasker'] as const) {
+      draft.setTool(tool);
+      await described(draft, tool);
+      for (const extra of ['', '-version', '-version-full', '-h', '-help-full', '-xmlhelp', '-outfmt fasta']) {
+        draft.setExtra(extra);
+        await settled(draft);
+        const count = draft.runCount();
+        queued.length = 0;
+        expect((await draft.submit()).ok, `${tool} ${extra}`).toBe(true);
+        expect(count, `${tool} ${extra}`).toBe(queued.length);
+        expect(count, `${tool} ${extra}`).toBe(toolPrintsKind([tool, extra]) === null ? 2 : 1);
+      }
+    }
+    // Words that cannot be read start no run: the count is the inputs'.
+    draft.setExtra("-outfmt 'fasta");
+    expect(draft.runCount()).toBe(2);
+  });
+
+  // Line WQA's D33 R2 (H2): a FASTA file named with a space at its start or end is named so in -in, as the run directory holds it.
+  it('names a FASTA file in -in as the run directory holds it, a space at its start or end included', async () => {
+    const { draft, queued } = setup({ validate: 'ok' });
+    draft.ensureLoaded();
+    await described(draft, 'dustmasker');
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa '), new File(['>b\nACGT\n'], ' b.fa')]);
+    await vi.waitFor(() => expect(draft.state.get().fastaFiles.every((entry) => entry.status === 'ready')).toBe(true));
+    draft.setFastaMode('separate');
+    expect(draft.previewArgv()).toEqual(['dustmasker', '-in', 'a.fa ']);
+    await settled(draft);
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued.map((request) => [request.argv, request.directory.map((entry) => entry.name)])).toEqual([
+      [['dustmasker', '-in', 'a.fa '], ['a.fa ']],
+      [['dustmasker', '-in', ' b.fa'], [' b.fa']],
+    ]);
+  });
+
   it("checks the argv in a directory that holds the run's input under the run's name (review of WW4c, F2)", async () => {
     const { draft, queued, validateTool } = setup({ validate: 'ok' });
     draft.ensureLoaded();

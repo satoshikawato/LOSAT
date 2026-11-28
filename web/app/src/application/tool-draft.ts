@@ -3,12 +3,12 @@
 // through the tool drafts' shared core (`ToolDraftCore`: files of the run, check, submit). Its
 // FASTA input (paste, files inflated into session OPFS, Combined or Separate runs, the `-in` name of
 // a BLAST database) is the one that the Masking tab reads too (`FastaToolDraft`).
-import type { DirectoryFile } from 'losat/domain';
+import type { DirectoryFile, PrintedKind } from 'losat/domain';
 import { splitOptions } from '../domain/argv';
 import { normalizeRunPath } from '../domain/blast-db';
 import { countsName } from '../domain/counts';
 import type { FieldValue, FormValues } from '../domain/parameters';
-import { buildWindowMaskerArgv, handedOverName } from '../domain/tool-argv';
+import { buildWindowMaskerArgv, handedOverName, runFileNames } from '../domain/tool-argv';
 import {
   defaultCountsOutName,
   stageOptionParameters,
@@ -219,17 +219,6 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
 
   // --- command line & validation ----------------------------------------------------------
 
-  /**
-   * The runs that "Run LOSAT" starts now: one for each input of a FASTA box in "separate" mode, and one print request for a help
-   * or version word of the Additional options, as `buildRequests` makes them (the same `toolPrintsKind`; line WQA's D33, M3).
-   */
-  runCount(state: ToolDraftState = this.state.get()): number {
-    if (!this.usesFastaBox(state)) return 1;
-    if (toolPrintsKind(this.previewArgv(state)) !== null) return 1;
-    const count = (state.fastaPaste.trim() !== '' ? 1 : 0) + state.fastaFiles.length;
-    return state.fastaMode === 'separate' && count > 1 ? count : 1;
-  }
-
   /** Whether the active stage currently reads `-in` as FASTA files/paste rather than a named blastdb/seqids/fa_list. */
   usesFastaBox(state: ToolDraftState = this.state.get()): boolean {
     if (state.stage === 'convert') return false;
@@ -286,15 +275,20 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
    * run starts (saved or made in the session) stands in by its name, as the check does not read the counts.
    */
   protected override validationInputs(state: ToolDraftState): readonly DirectoryFile[] {
-    if (toolPrintsKind(this.buildArgv(state, this.parseExtra(state))) !== null) return [];
+    if (this.printsKindOf(state, this.parseExtra(state)) !== null) return [];
     const counts = (choice: ToolCountsChoice): readonly DirectoryFile[] =>
       choice.kind === 'none' ? [] : [{ name: choice.name, file: choice.kind === 'file' ? choice.file : new Blob([]) }];
     if (state.stage === 'convert') return counts(state.convertSource);
     return [...this.fastaCheckInputs(state), ...(state.stage === 'mask' ? counts(state.ustatSource) : [])];
   }
 
+  /** A help or version word anywhere in the argv of the stage (`toolPrintsKind`), its input names left out. */
+  protected printsKindOf(state: ToolDraftState, extra: readonly string[]): PrintedKind | null {
+    return toolPrintsKind(this.buildArgv(state, extra));
+  }
+
   protected async buildRequests(state: ToolDraftState, extra: readonly string[]): Promise<readonly ToolRequest[]> {
-    const prints = toolPrintsKind(this.buildArgv(state, extra));
+    const prints = this.printsKindOf(state, extra);
     return prints !== null ? [this.buildPrintRequest(state, extra, prints)] : this.buildStageRequests(state, extra);
   }
 
@@ -314,6 +308,7 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
       values: values[stage],
       ...(description === undefined ? {} : { description }),
       extra,
+      fileNames: runFileNames(state.runFiles),
     });
   }
 

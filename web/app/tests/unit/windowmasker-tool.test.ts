@@ -334,6 +334,65 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     expect(submitted.at(-1)).toHaveLength(1);
   });
 
+  // Line WQA's D33 R2 (H2): a name that comes from a file reaches the argv as the run directory holds it, a space at its start or
+  // end included, so the run opens it (and the shown command, quoted, runs on the command line with the same bytes): the FASTA
+  // input, a file chosen for -ids, -ustat and Convert's -in. Only text that the user types is trimmed.
+  it('names each file in the argv as the run directory holds it, a space at its start or end included', async () => {
+    const valueOf = (request: ToolRequest, flag: string) => request.argv[request.argv.indexOf(flag) + 1];
+    const namesOf = (request: ToolRequest) => request.directory.map((entry) => entry.name);
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa ')]);
+      draft.setOptionFile('-ids', new File(['a\n'], ' ids.txt'));
+      await sleep(30);
+      expect((await draft.submit()).ok).toBe(true);
+      const request = submitted.at(-1)![0]!;
+      expect(valueOf(request, '-in')).toBe('a.fa ');
+      expect(valueOf(request, '-ids')).toBe(' ids.txt');
+      expect(namesOf(request)).toEqual(['a.fa ', ' ids.txt']);
+      expect(draft.previewArgv()).toEqual(request.argv);
+      // A name typed in the box of -ids is typed text: without the white space around it.
+      draft.setField('-ids', '  typed.txt ');
+      expect(valueOf({ ...request, argv: draft.previewArgv() }, '-ids')).toBe('typed.txt');
+    }
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.addFastaFiles([new File(['>b\nACGT\n'], ' b.fa'), new File(['>c\nACGT\n'], 'c.fa ')]);
+      await sleep(30);
+      draft.setFastaMode('separate');
+      expect((await draft.submit()).ok).toBe(true);
+      expect(submitted.at(-1)!.map((request) => [valueOf(request, '-in'), namesOf(request)])).toEqual([
+        [' b.fa', [' b.fa']],
+        ['c.fa ', ['c.fa ']],
+      ]);
+    }
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.setStage('mask');
+      draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa')]);
+      draft.setUstatFile(new File(['>x\n'], 'c.ascii '));
+      await sleep(30);
+      expect((await draft.submit()).ok).toBe(true);
+      const request = submitted.at(-1)![0]!;
+      expect(valueOf(request, '-ustat')).toBe('c.ascii ');
+      expect(namesOf(request)).toEqual(['a.fa', 'c.ascii ']);
+    }
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.setStage('convert');
+      draft.setConvertFile(new File(['>x\n'], ' c.ascii'));
+      await sleep(30);
+      expect((await draft.submit()).ok).toBe(true);
+      const request = submitted.at(-1)![0]!;
+      expect(valueOf(request, '-in')).toBe(' c.ascii');
+      expect(namesOf(request)).toEqual([' c.ascii']);
+    }
+  });
+
   it('refuses duplicate filenames and detects blastdb names from opened folder files', async () => {
     const { draft } = setupDraft();
     draft.setField('-infmt', 'blastdb');

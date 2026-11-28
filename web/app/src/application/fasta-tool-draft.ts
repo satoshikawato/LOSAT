@@ -5,7 +5,7 @@
 // several inputs as one run (`combined_input.fa`, joined as Blob references, checking only the last
 // byte of each file so page JS heap never holds the sequences) or one run each, and, for an input
 // that is not FASTA (`-infmt blastdb`), the `-in` name with the files of the run that it names.
-import type { DirectoryFile } from 'losat/domain';
+import type { DirectoryFile, PrintedKind } from 'losat/domain';
 import { isUnavailable } from 'losat/ports';
 import { normalizeRunPath, primaryBlastDbName } from '../domain/blast-db';
 import type { ToolId } from '../domain/tools';
@@ -94,6 +94,13 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
   /** Whether the form reads `-in` from the FASTA box (paste and files) rather than as a name (a BLAST database). */
   abstract usesFastaBox(state?: S): boolean;
 
+  /**
+   * What a press of `state` with the words `extra` of Additional options prints in place of a run (help or the version),
+   * or null when it runs the tool: the one answer that the press (`buildRequests`, which then starts one print request)
+   * and the count of runs (`runCount`) read.
+   */
+  protected abstract printsKindOf(state: S, extra: readonly string[]): PrintedKind | null;
+
   // --- the FASTA box and the -in name ---------------------------------------------------------
 
   setFastaPaste(text: string): void {
@@ -154,11 +161,23 @@ export abstract class FastaToolDraft<S extends FastaInputState> extends ToolDraf
     else this.addRunFiles(files);
   }
 
-  /** How many runs Run LOSAT starts: one, or one for each FASTA input when Separate is chosen. */
+  /**
+   * How many runs Run LOSAT starts, for every tab with a FASTA box (WindowMasker, Masking): one, or one for each FASTA
+   * input when Separate is chosen, and one for a help or version word, as the press starts one print request
+   * (`printsKindOf`; line WQA's D33, S4-8, R1 M3 and R2 H1). Words that cannot be read start no run; the count is then
+   * the inputs' (the check says why).
+   */
   runCount(state: S = this.state.get()): number {
     if (!this.usesFastaBox(state)) return 1;
     const count = (state.fastaPaste.trim() !== '' ? 1 : 0) + state.fastaFiles.length;
-    return state.fastaMode === 'separate' && count > 1 ? count : 1;
+    if (state.fastaMode !== 'separate' || count <= 1) return 1;
+    let extra: readonly string[];
+    try {
+      extra = this.parseExtra(state);
+    } catch {
+      return count;
+    }
+    return this.printsKindOf(state, extra) === null ? count : 1;
   }
 
   // --- for the tools --------------------------------------------------------------------------

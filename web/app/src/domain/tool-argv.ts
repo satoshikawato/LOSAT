@@ -19,6 +19,7 @@ import {
   makeblastdbParameters,
   stageOptionParameters,
   toToolParameterField,
+  TOOL_FILE_LIST_FLAGS,
   TOOL_WRITTEN_TEXT_FLAGS,
   WINDOWMASKER_BLOCK_FLAGS,
   type MaskingTool,
@@ -29,9 +30,12 @@ import {
 
 export interface WindowMaskerArgvInput {
   readonly stage: WindowMaskerStage;
-  /** Value for `-in` (FASTA file name, combined_input.fa, counts file for Convert, or blastdb name). */
+  /**
+   * Value for `-in` (FASTA file name, combined_input.fa, counts file for Convert, or blastdb name), written as it is: a
+   * file's name as the run directory holds it (the draft trims a name that the user types).
+   */
   readonly inputName?: string;
-  /** Value for `-ustat` (Mask stage only). */
+  /** Value for `-ustat` (Mask stage only): the counts file's name as the run directory holds it, written as it is. */
   readonly ustatName?: string;
   /**
    * Value for `-out`: undefined uses the stage default (`wmasker.<sformat>` for `mk_counts`/`convert`,
@@ -44,17 +48,42 @@ export interface WindowMaskerArgvInput {
   readonly description?: ToolDescription;
   /** Extra words parsed from "Additional options" (`splitOptions`). */
   readonly extra?: readonly string[];
+  /** The names of the files of the run (`runFileNames`): an option's value that names them is written as it is. */
+  readonly fileNames?: ReadonlySet<string>;
+}
+
+const NO_FILES: ReadonlySet<string> = new Set();
+
+/**
+ * Whether an option's value names files of the run as they are (`fileNames`: the files chosen for an option or added to
+ * the run directory, under the names that the run directory holds): the value is one of those names, or for an option
+ * that lists files (`TOOL_FILE_LIST_FLAGS`) each of its entries between commas is. Such a value comes from the files, not
+ * from typing (line WQA's D33, R2 H2).
+ */
+function namesRunFiles(flag: string, value: string, fileNames: ReadonlySet<string>): boolean {
+  if (fileNames.size === 0) return false;
+  return (TOOL_FILE_LIST_FLAGS.has(flag) ? value.split(',') : [value]).every((name) => fileNames.has(name));
 }
 
 /**
  * What a tool form writes for an option: a text that the tool writes or stores as given (`TOOL_WRITTEN_TEXT_FLAGS`)
- * as typed, white space and all, as the command line passes it; any other field as the search forms write it
- * (`writtenValue`: names, numbers and keywords without the white space around them). An empty box writes nothing;
- * an empty value is given in Additional options (`-title ''`; review of WW4c, F3).
+ * as typed, white space and all, as the command line passes it; a value that names files of the run (`namesRunFiles`)
+ * as it is, so that the argv names a file as the run directory holds it, a space at its start or end included (the one
+ * rule for the names of every tool tab: a name that comes from a file is written unchanged; line WQA's D33, R2 H2);
+ * any other field as the search forms write it (`writtenValue`: names, numbers and keywords that the user types
+ * without the white space around them). An empty box writes nothing; an empty value is given in Additional options
+ * (`-title ''`; review of WW4c, F3).
  */
-function toolWrittenValue(param: ToolParameterDescription, value: FieldValue | undefined): string | boolean | undefined {
+function toolWrittenValue(
+  param: ToolParameterDescription,
+  value: FieldValue | undefined,
+  fileNames: ReadonlySet<string> = NO_FILES,
+): string | boolean | undefined {
   const field = toToolParameterField(param);
-  if (field.kind === 'text' && TOOL_WRITTEN_TEXT_FLAGS.has(param.flag)) {
+  if (
+    (field.kind === 'text' && TOOL_WRITTEN_TEXT_FLAGS.has(param.flag)) ||
+    (typeof value === 'string' && namesRunFiles(param.flag, value, fileNames))
+  ) {
     return typeof value === 'string' && value !== '' && value !== param.defaultValue ? value : undefined;
   }
   const known = param.defaultValue === undefined ? undefined : { defaultValue: param.defaultValue };
@@ -70,10 +99,11 @@ function pushOptionWords(
   ordered: readonly ToolParameterDescription[],
   values: FormValues,
   skip: ReadonlySet<string>,
+  fileNames: ReadonlySet<string> = NO_FILES,
 ): void {
   if (ordered.length > 0) {
     for (const param of ordered) {
-      const written = toolWrittenValue(param, values[param.flag]);
+      const written = toolWrittenValue(param, values[param.flag], fileNames);
       if (written === true) argv.push(param.flag);
       else if (typeof written === 'string') argv.push(param.flag, written);
     }
@@ -83,7 +113,7 @@ function pushOptionWords(
     if (skip.has(flag)) continue;
     if (val === true) argv.push(flag);
     else if (typeof val === 'string') {
-      const text = TOOL_WRITTEN_TEXT_FLAGS.has(flag) ? val : val.trim();
+      const text = TOOL_WRITTEN_TEXT_FLAGS.has(flag) || namesRunFiles(flag, val, fileNames) ? val : val.trim();
       if (text !== '') argv.push(flag, text);
     }
   }
@@ -125,11 +155,11 @@ export function buildWindowMaskerArgv(input: WindowMaskerArgvInput): readonly st
   } else if (stage === 'convert') {
     argv.push('-convert');
   } else {
-    const ustat = input.ustatName?.trim() ?? '';
+    const ustat = input.ustatName ?? '';
     if (ustat !== '') argv.push('-ustat', ustat);
   }
 
-  const inputName = input.inputName?.trim() ?? '';
+  const inputName = input.inputName ?? '';
   if (inputName !== '' && (stage !== 'mask' || inputName !== '-')) {
     argv.push('-in', inputName);
   }
@@ -147,7 +177,7 @@ export function buildWindowMaskerArgv(input: WindowMaskerArgvInput): readonly st
 
   // Remaining block selects (-infmt, -sformat, -outfmt) and WindowMasker options in usage order.
   const ordered = allStageParameters(description, stage).filter((param) => !WINDOWMASKER_NAMED_FLAGS.has(param.flag));
-  pushOptionWords(argv, ordered, values, WINDOWMASKER_NAMED_FLAGS);
+  pushOptionWords(argv, ordered, values, WINDOWMASKER_NAMED_FLAGS, input.fileNames);
   pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
 }
@@ -156,7 +186,7 @@ export function buildWindowMaskerArgv(input: WindowMaskerArgvInput): readonly st
 const WINDOWMASKER_NAMED_FLAGS: ReadonlySet<string> = new Set(['-in', '-out', '-ustat']);
 
 export interface BlastFormatterArgvInput {
-  /** Archive file name in the run directory (`-archive`), omitted when empty. */
+  /** Archive file name in the run directory (`-archive`), written as it is, omitted when empty. */
   readonly archiveName?: string;
   /** Output format string (`-outfmt`), omitted when empty or NCBI's default `'0'`. */
   readonly outfmt?: string;
@@ -168,6 +198,8 @@ export interface BlastFormatterArgvInput {
   readonly description?: ToolDescription;
   /** Extra words parsed from "Additional options" (`splitOptions`). */
   readonly extra?: readonly string[];
+  /** The names of the files of the run (`runFileNames`): an option's value that names them is written as it is. */
+  readonly fileNames?: ReadonlySet<string>;
 }
 
 /**
@@ -176,7 +208,7 @@ export interface BlastFormatterArgvInput {
  */
 export function buildBlastFormatterArgv(input: BlastFormatterArgvInput): readonly string[] {
   const argv: string[] = ['blast_formatter'];
-  const archiveName = input.archiveName?.trim() ?? '';
+  const archiveName = input.archiveName ?? '';
   if (archiveName !== '') argv.push('-archive', archiveName);
 
   const outfmt = input.outfmt?.trim() ?? '';
@@ -185,7 +217,7 @@ export function buildBlastFormatterArgv(input: BlastFormatterArgvInput): readonl
   const outName = input.outName?.trim() ?? '';
   if (outName !== '' && outName !== '-') argv.push('-out', outName);
 
-  pushOptionWords(argv, blastFormatterOptionParameters(input.description), input.values, BLAST_FORMATTER_BLOCK_FLAGS);
+  pushOptionWords(argv, blastFormatterOptionParameters(input.description), input.values, BLAST_FORMATTER_BLOCK_FLAGS, input.fileNames);
   pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
 }
@@ -201,7 +233,10 @@ export function changedBlastFormatterOptionsCount(
 
 export interface MaskingArgvInput {
   readonly tool: MaskingTool;
-  /** Value for `-in` (a FASTA file name, `combined_input.fa`, or a BLAST database name), omitted when empty. */
+  /**
+   * Value for `-in` (a FASTA file name, `combined_input.fa`, or a BLAST database name), written as it is (the draft
+   * trims a name that the user types), omitted when empty.
+   */
   readonly inputName?: string;
   /** Value for `-out`, omitted when empty or `'-'` (standard output, the command line's default). */
   readonly outName?: string;
@@ -211,6 +246,8 @@ export interface MaskingArgvInput {
   readonly description?: ToolDescription;
   /** Extra words parsed from "Additional options" (`splitOptions`). */
   readonly extra?: readonly string[];
+  /** The names of the files of the run (`runFileNames`): an option's value that names them is written as it is. */
+  readonly fileNames?: ReadonlySet<string>;
 }
 
 export interface MakeblastdbArgvInput {
@@ -225,6 +262,8 @@ export interface MakeblastdbArgvInput {
   readonly description?: ToolDescription;
   /** Extra words parsed from "Additional options" (`splitOptions`). */
   readonly extra?: readonly string[];
+  /** The names of the files of the run (`runFileNames`): an option's value that names them is written as it is. */
+  readonly fileNames?: ReadonlySet<string>;
 }
 
 /** The words that the Masking builder writes from the blocks (the file names). */
@@ -237,12 +276,12 @@ const MASKING_NAMED_FLAGS: ReadonlySet<string> = new Set(['-in', '-out']);
  */
 export function buildMaskingArgv(input: MaskingArgvInput): readonly string[] {
   const argv: string[] = [input.tool];
-  const inputName = input.inputName?.trim() ?? '';
+  const inputName = input.inputName ?? '';
   if (inputName !== '') argv.push('-in', inputName);
   const outName = input.outName?.trim() ?? '';
   if (outName !== '' && outName !== '-') argv.push('-out', outName);
   const ordered = allMaskingParameters(input.description, input.tool).filter((param) => !MASKING_NAMED_FLAGS.has(param.flag));
-  pushOptionWords(argv, ordered, input.values, MASKING_NAMED_FLAGS);
+  pushOptionWords(argv, ordered, input.values, MASKING_NAMED_FLAGS, input.fileNames);
   pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
 }
@@ -277,7 +316,7 @@ const COMMA_LIST_SPLIT: ListSplit = { mark: ',', reason: 'a comma separates its 
  */
 export function makeblastdbInputList(names: readonly string[]): string {
   return names
-    .filter((name) => name.trim() !== '')
+    .filter((name) => name !== '')
     .map((name) => (name.includes(' ') ? `"${name}"` : name))
     .join(' ');
 }
@@ -291,7 +330,7 @@ export function buildMakeblastdbArgv(input: MakeblastdbArgvInput): readonly stri
   const argv: string[] = ['makeblastdb'];
   if (input.input.trim() !== '') argv.push('-in', input.input);
   const ordered = makeblastdbParameters(input.description).filter((param) => param.flag !== '-in');
-  pushOptionWords(argv, ordered, input.values, MAKEBLASTDB_NAMED_FLAGS);
+  pushOptionWords(argv, ordered, input.values, MAKEBLASTDB_NAMED_FLAGS, input.fileNames);
   pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
 }
@@ -314,13 +353,22 @@ export function changedMakeblastdbOptionsCount(values: FormValues, extra: string
   return changedOptionsCount(makeblastdbOptionParameters(description), values, extra);
 }
 
-/** The names of a comma-separated list of files (`-mask_data a.asnb,b.asnb`), without empty entries. */
-export function fileListNames(value: unknown): readonly string[] {
+/**
+ * The names of a comma-separated list of files (`-mask_data a.asnb,b.asnb`), without empty entries: an entry that names a
+ * file of the run (`fileNames`) as it is, a space at its start or end included, any other (typed) entry without the white
+ * space around it (`namesRunFiles`; line WQA's D33, R2 H2).
+ */
+export function fileListNames(value: unknown, fileNames: ReadonlySet<string> = NO_FILES): readonly string[] {
   if (typeof value !== 'string') return [];
   return value
     .split(',')
-    .map((name) => name.trim())
+    .map((name) => (fileNames.has(name) ? name : name.trim()))
     .filter((name) => name !== '');
+}
+
+/** The names of the files of the run (`ToolExtraFile`s), which an option's value names as they are (`namesRunFiles`). */
+export function runFileNames(files: readonly { readonly name: string }[]): ReadonlySet<string> {
+  return new Set(files.map((file) => file.name));
 }
 
 /** The command words as shown beside Run LOSAT and in Run details (`losat windowmasker ...`). */

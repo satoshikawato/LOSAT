@@ -1645,6 +1645,54 @@ describe('SearchDraft submit', () => {
     expect(draft.runCount()).toBe(1);
   });
 
+  // Line WQA's D33 R2 (L-c): the line under Run LOSAT and the button's count read one answer of the engine's start, so they change
+  // in one render: the line says the run prints as soon as the count drops to one run for the word, not after the validation.
+  it("shows the line's print and the button's count from one answer, before the validation has run", async () => {
+    let release: (() => void) | undefined;
+    let hold = false;
+    const { draft } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+      validate: async () => {
+        if (hold) await new Promise<void>((resolve) => void (release = resolve));
+        return { ok: true, dataLoaders: true, parseDeflines: false };
+      },
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setMode('query', 'separate');
+    await draft.idle();
+    expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([2, null]);
+    hold = true;
+    // A round trip of the engine's start (a few microtask turns of the fake engine), not the validation's.
+    const roundTrip = async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+    draft.setExtra('-version');
+    await roundTrip();
+    // The start has answered for the word; the validation has not (printsKind waits for it): the line reads the count's answer.
+    expect(draft.printsKind()).toBeNull();
+    expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([1, 'version']);
+    release?.();
+    hold = false;
+    await draft.idle();
+    expect([draft.runCount(), draft.shownPrintsKind(), draft.printsKind()]).toEqual([1, 'version', 'version']);
+    // Taken out: until the start answers, the button names no count and the line keeps the older answer; then both change.
+    hold = true;
+    draft.setExtra('');
+    expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([1, 'version']);
+    await roundTrip();
+    expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([2, null]);
+    release?.();
+    hold = false;
+    await draft.idle();
+    // Words that cannot be read print nothing, and the count is the inputs'.
+    draft.setExtra("-version '");
+    expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([2, null]);
+  });
+
   // Line WQA's D33 R1: a press in the gap between the word and the engine's answer starts the one run that prints (the
   // validation settles first), whatever the button said.
   it('starts one run for a print word pressed before the engine has answered', async () => {

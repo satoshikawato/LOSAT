@@ -13,7 +13,7 @@ import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports
 import { duplicateRunFileMessage, normalizeRunPath, pickedFilePath, RunDirectoryBuilder } from '../domain/blast-db';
 import type { FieldValue } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
-import { fileListNames, listNameRefusal, maskOutfmtDefault, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
+import { fileListNames, listNameRefusal, maskOutfmtDefault, runFileNames, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
 import { TOOL_FILE_LIST_FLAGS, type ToolId } from '../domain/tools';
 import { failureText } from './availability';
 import type { EnqueueAllResult, ToolDirectoryFile, ToolRequest } from './coordinator';
@@ -221,7 +221,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
     if (target.flag === undefined) return;
     const value = this.optionValue(state, target.flag);
     if (TOOL_FILE_LIST_FLAGS.has(target.flag)) {
-      const names = fileListNames(value);
+      const names = fileListNames(value, runFileNames(state.runFiles));
       if (names.includes(target.name)) this.setField(target.flag, names.filter((name) => name !== target.name).join(','));
     } else if (value === target.name) {
       this.setField(target.flag, '');
@@ -254,7 +254,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
     }
     const list = TOOL_FILE_LIST_FLAGS.has(flag);
     const kept = list ? state.runFiles : state.runFiles.filter((entry) => entry.flag !== flag);
-    const names = list ? fileListNames(this.optionValue(state, flag)) : [];
+    const names = list ? fileListNames(this.optionValue(state, flag), runFileNames(state.runFiles)) : [];
     const value = list ? [...names.filter((entry) => entry !== name), name].join(',') : name;
     const existing = kept.find((entry) => entry.name === name);
     if (existing !== undefined) {

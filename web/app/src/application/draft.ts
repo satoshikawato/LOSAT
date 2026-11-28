@@ -1468,6 +1468,17 @@ export class SearchDraft {
     });
   }
 
+  /**
+   * What the line under Run LOSAT says the run of the draft's words prints in place of a search (help or version), or null
+   * for a search: the engine's latest answer of its start (`answered`), the answer that the count of runs (`runCount`) reads,
+   * so that the line and the button's label change in one render (line WQA's D33, R2 L-c; `printsKind` waits for the
+   * validation's pause). Between an edit and its answer the older answer stands, as it does for `printsKind` (D20 round 4);
+   * words that cannot be read print nothing (no run starts; the check says why).
+   */
+  shownPrintsKind(): PrintedKind | null {
+    return this.extraKey() === undefined ? null : (this.answered?.prints ?? null);
+  }
+
   /** Records the engine's answer of the start for the program and words `key`, if the draft still has them. */
   private noteStart(key: string, prints: PrintedKind | null): void {
     if (key !== this.extraKey() || (this.answered?.key === key && this.answered.prints === prints)) return;
@@ -1687,11 +1698,11 @@ export class SearchDraft {
 
   /**
    * What the run of the draft's argv prints in place of a search (`printsText`): help or version, or null for a search, as the
-   * engine's latest answer says (`start.prints`, validation ok). The page reads it for the line under the button and the run
-   * count, and Run LOSAT reads it once the validation is idle. Between an edit and its answer the older answer stands (the
-   * app cannot know before the engine answers that a word makes the argv print or not); it is not set aside at every edit,
-   * which would flip the line on each edit of an ordinary search (line WQA's D20 round 4, 2026-11-23). The run count does not
-   * take the older answer for other words (`runCount`).
+   * engine's latest answer says (`start.prints`, validation ok). Run LOSAT reads it once the validation is idle. Between an
+   * edit and its answer the older answer stands (the app cannot know before the engine answers that a word makes the argv
+   * print or not); it is not set aside at every edit, which would flip the line on each edit of an ordinary search (line
+   * WQA's D20 round 4, 2026-11-23). The run count does not take the older answer for other words (`runCount`); the line
+   * under the button reads the answer that the count reads (`shownPrintsKind`, line WQA's D33 R2 L-c).
    */
   printsKind(): PrintedKind | null {
     const { start, validation } = this.state.get();

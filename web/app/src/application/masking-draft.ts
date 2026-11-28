@@ -5,10 +5,10 @@
 // the tools; each tool keeps its own option values, Additional options and `-out` name (empty: no
 // `-out` word, the standard output, as on the command line). Each tool's `-xmlhelp` is read when the
 // tool is first shown.
-import type { DirectoryFile } from 'losat/domain';
+import type { DirectoryFile, PrintedKind } from 'losat/domain';
 import { splitOptions } from '../domain/argv';
 import type { FieldValue, FormValues } from '../domain/parameters';
-import { buildMaskingArgv } from '../domain/tool-argv';
+import { buildMaskingArgv, runFileNames } from '../domain/tool-argv';
 import { MASKING_TOOLS, maskingOptionParameters, toolPrintsKind, type MaskingTool, type ToolId } from '../domain/tools';
 import type { ToolRequest } from './coordinator';
 import { EMPTY_FASTA_INPUT, FastaToolDraft, type FastaInputState, type FastaToolDraftDeps } from './fasta-tool-draft';
@@ -134,16 +134,21 @@ export class MaskingDraft extends FastaToolDraft<MaskingDraftState> {
 
   /** The argv of the check: an input not given yet is named `input.fa`. */
   protected validationArgv(state: MaskingDraftState, extra: readonly string[]): readonly string[] {
-    return this.argvOf(state, extra, this.inputNameOf(state, extra) ?? (toolPrintsKind([state.tool, ...extra]) === null ? 'input.fa' : undefined));
+    return this.argvOf(state, extra, this.inputNameOf(state, extra) ?? (this.printsKindOf(state, extra) === null ? 'input.fa' : undefined));
   }
 
   /** The check's directory holds the input that the run reads, under its name (none for help and the version). */
   protected override validationInputs(state: MaskingDraftState): readonly DirectoryFile[] {
-    return toolPrintsKind([state.tool, ...this.parseExtra(state)]) === null ? this.fastaCheckInputs(state) : [];
+    return this.printsKindOf(state, this.parseExtra(state)) === null ? this.fastaCheckInputs(state) : [];
+  }
+
+  /** A help or version word of Additional options (`toolPrintsKind`): the words that the form does not build. */
+  protected printsKindOf(state: MaskingDraftState, extra: readonly string[]): PrintedKind | null {
+    return toolPrintsKind([state.tool, ...extra]);
   }
 
   protected async buildRequests(state: MaskingDraftState, extra: readonly string[]): Promise<readonly ToolRequest[]> {
-    const prints = toolPrintsKind([state.tool, ...extra]);
+    const prints = this.printsKindOf(state, extra);
     if (prints !== null) {
       // Help and version read no input; the files of the run are there, as in the directory where the command line runs.
       return [{ tool: state.tool, stage: STAGE, argv: this.argvOf(state, extra, undefined), directory: this.runDirectoryOf(state, []), prints }];
@@ -164,7 +169,7 @@ export class MaskingDraft extends FastaToolDraft<MaskingDraftState> {
 
   /** The `-in` name of the argv shown: none for a run that prints help or the version. */
   private inputNameOf(state: MaskingDraftState, extra: readonly string[]): string | undefined {
-    return toolPrintsKind([state.tool, ...extra]) === null ? this.fastaInputName(state) : undefined;
+    return this.printsKindOf(state, extra) === null ? this.fastaInputName(state) : undefined;
   }
 
   private argvOf(state: MaskingDraftState, extra: readonly string[], inputName: string | undefined): readonly string[] {
@@ -176,6 +181,7 @@ export class MaskingDraft extends FastaToolDraft<MaskingDraftState> {
       values: state.values[tool],
       ...(description === undefined ? {} : { description }),
       extra,
+      fileNames: runFileNames(state.runFiles),
     });
   }
 }

@@ -378,6 +378,40 @@ describe('MakeblastdbDraft', () => {
     expect(state.values['-mask_data']).toBeUndefined();
     expect(state.runFiles).toHaveLength(0);
   });
+  // Line WQA's D33 R2 (H2): a file chosen for an option, or a file of the run whose name the option names, is named in the argv
+  // as the run directory holds it, a space at its start or end included: -taxid_map, and each file of -mask_data's list, also
+  // when the list is built again (a file added or taken away). Text typed in an option's box is trimmed.
+  it("names the files of options as the run directory holds them, and keeps those names in -mask_data's list", async () => {
+    const { draft, queued } = setup();
+    await loaded(draft);
+    draft.setFastaPaste('>s1\nACGT\n');
+    draft.setField('-dbtype', 'nucl');
+    draft.setField('-parse_seqids', true);
+    draft.setOptionFile('-taxid_map', new File(['1\t9606\n'], 'taxmap.txt '));
+    draft.setOptionFile('-mask_data', new File(['a'], ' a.asnb'));
+    draft.setOptionFile('-mask_data', new File(['b'], 'b.asnb '));
+    draft.setOptionFile('-mask_data', new File(['c'], 'c.asnb'));
+    const valueOf = (argv: readonly string[], flag: string) => argv[argv.indexOf(flag) + 1];
+    let argv = draft.previewArgv();
+    expect(valueOf(argv, '-taxid_map')).toBe('taxmap.txt ');
+    expect(valueOf(argv, '-mask_data')).toBe(' a.asnb,b.asnb ,c.asnb');
+    draft.removeRunFile(draft.state.get().runFiles.find((entry) => entry.name === 'c.asnb')!.key);
+    argv = draft.previewArgv();
+    expect(valueOf(argv, '-mask_data')).toBe(' a.asnb,b.asnb ');
+    draft.removeRunFile(draft.state.get().runFiles.find((entry) => entry.name === ' a.asnb')!.key);
+    expect(valueOf(draft.previewArgv(), '-mask_data')).toBe('b.asnb ');
+    draft.setOptionFile('-mask_data', new File(['a'], ' a.asnb'));
+    argv = draft.previewArgv();
+    expect(valueOf(argv, '-mask_data')).toBe('b.asnb , a.asnb');
+    await vi.waitFor(() => expect(draft.state.get().validation.state).not.toBe('checking'));
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued.at(-1)!.argv).toEqual(argv);
+    expect(queued.at(-1)!.directory.map((entry) => entry.name)).toEqual(['input.fa', 'taxmap.txt ', 'b.asnb ', ' a.asnb']);
+    // Typed in the box: without the white space around it, as before.
+    draft.setField('-taxid_map', ' typed.map ');
+    expect(valueOf(draft.previewArgv(), '-taxid_map')).toBe('typed.map');
+  });
+
   it("replaces the mask data of an earlier run handed over under the same name, in its place (WW4b2 R1 finding 4)", async () => {
     const { draft, queued } = setup();
     await loaded(draft);

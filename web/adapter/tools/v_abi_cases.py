@@ -1160,6 +1160,168 @@ def tool() -> list[dict]:
     return rows
 
 
+# The files of a makeblastdb run's directory (`makeblastdb`): published path -> source file under LOSAT/tests, the
+# same for every row, as every file of a folder is there for the command line.
+MAKEBLASTDB_FILES = {
+    "ns.fna": "dropin_corpus/ns.fna", "nq.fna": "dropin_corpus/nq.fna", "pq.faa": "dropin_corpus/pq.faa",
+    "taxmap.txt": "dropin_corpus/taxmap.txt",
+    "mask/nucl.fna": "seqdb/mask_nucl.fna", "mask/prot.faa": "seqdb/mask_prot.faa",
+    "mask/dust.asnb": "seqdb/mask_dust.asnb", "mask/seg.asnb": "seqdb/mask_seg.asnb",
+    "mask/wm.asnt": "seqdb/mask_wm.asnt", "mask/wm_opts.asnt": "seqdb/mask_wm_opts.asnt",
+    "gi/nucl.fa": "seqdb/gi_mask/in/nucl.fa", "gi/dust.asnb": "seqdb/gi_mask/in/dust_nucl.asnb",
+    "gi/dust10.asnb": "seqdb/gi_mask/in/dust10_nucl.asnb",
+    "asn/multi.asn": "fixtures/asn1/multi.asn", "asn/multi.asnb": "fixtures/asn1/multi.asnb",
+    **{f"old/ndb.{extension}": f"dropin_corpus/ndb.{extension}" for extension in "ndb nhr nin njs not nsq ntf nto".split()},
+}
+# The POSIX rules of `TZ` that the rows run in, as LOSAT Web's host makes them from the browser's zone (time-zone.ts):
+# a zone with summer time, and one without.
+MAKEBLASTDB_TZ = "<-05>5<-04>4,M3.2.0/2,M11.1.0/2"
+MAKEBLASTDB_TZ_FIXED = "<+09>-9"
+
+
+def makeblastdb() -> list[dict]:
+    """The runs of `makeblastdb` (`"tool": "run"`) and the checks of its argv (`"tool": "validate"`), compared with the
+    command line's run of the same words in a folder of the same files with the same `TZ` (line NP WW4b1, D-WW4b-1 to
+    D-WW4b-3, 2026-11-27): nucleotide and protein, versions 4 and 5, `-parse_seqids`, `-hash_index`, volumes of
+    `-max_file_sz`, `-mask_data` (dust, seg and windowmasker masks, binary and text, `-mask_id`, `-mask_desc`,
+    `-gi_mask`, `-gi_mask_name`, and the refusal of two GI masks in one file under two spellings), `-taxid` and
+    `-taxid_map`, the inputs `blastdb`, `asn1_txt`, `asn1_bin` and a gzipped FASTA file, an `-out` with folders, a
+    database that replaces an older one of its name, `-logfile` (new, and appended to; the device model of
+    docs/web/abi_v2.md §4: the null device, `/dev/stdout`, `/dev/stderr`, `/dev/full`, a file outside the run's folder,
+    which comes on stream 12 (`<id>`: a name of the harness's run), a name in a missing folder and a folder; line NP
+    WW4b1 R2, findings 1 and 2, 2026-11-28), the errors, and the help and version words. The engine writes its database into the run's folder as the command line writes into its own
+    (`"tz"`: the run's `TZ`; `"threaded"`: the row also runs on the threaded module's `losat_web2_tool`); `"expect"` is
+    `"failure"` for a run whose exit status is not 0, `"late_failure"` for an argv that `validate` accepts though the run
+    fails after it starts reading, and `"names"` for a run whose bytes depend on the time (`-randomize`), of which the
+    names and sizes of the files are compared."""
+    tests = REPO / "LOSAT/tests"
+    directory = REPO / "LOSAT/target/v_abi_makeblastdb"
+    directory.mkdir(parents=True, exist_ok=True)
+    files = {name: str(tests / source) for name, source in MAKEBLASTDB_FILES.items()}
+    # A gzipped FASTA file (the same bytes in every run: no time or name in its header) and a mask file that is none.
+    import gzip
+    with gzip.GzipFile(directory / "ns.fna.gz", "wb", mtime=0) as packed:
+        packed.write((tests / "dropin_corpus/ns.fna").read_bytes())
+    files["ns.fna.gz"] = str(directory / "ns.fna.gz")
+    (directory / "bad.asnb").write_bytes(b"not mask data\n")
+    files["bad.asnb"] = str(directory / "bad.asnb")
+    # A database of the name that a run writes, made from other options (`-parse_seqids`: its `.nog`/`.nos`, which the
+    # new one does not have), and a log that a run appends to.
+    older = {**files, **{f"db.{extension}": str(tests / f"dropin_corpus/ndbp.{extension}")
+                         for extension in "ndb nhr nin njs nog nos not nsq ntf nto".split()}}
+    (directory / "old.log").write_text("an earlier run\n")
+    with_log = {**files, "mk.log": str(directory / "old.log")}
+    # A folder of the run's folder, `sub`, which a `-logfile sub` names.
+    with_folder = {**files, "sub/ns.fna": str(tests / "dropin_corpus/ns.fna")}
+    rows: list[dict] = []
+
+    def add(case_id: str, words: str, expect: str | None = None, kind: str = "run", published: dict | None = None,
+            tz: str = MAKEBLASTDB_TZ, threaded: bool = False) -> None:
+        row = {"program": "makeblastdb", "tool": kind, "argv": shlex.split(words), "cwd": str(tests),
+               "files": published or files, "cases": [f"makeblastdb.{case_id}"], "frozen": {}, "tz": tz}
+        if expect is not None:
+            row["expect"] = expect
+        if threaded:
+            row["threaded"] = True
+        rows.append(row)
+
+    add("nucl.v5", "-in ns.fna -dbtype nucl -out db")
+    add("nucl.v5.tz_fixed", "-in ns.fna -dbtype nucl -out db", tz=MAKEBLASTDB_TZ_FIXED)
+    add("nucl.v4", "-in ns.fna -dbtype nucl -blastdb_version 4 -out db")
+    add("prot.v5", "-in pq.faa -dbtype prot -out db")
+    add("prot.v4", "-in pq.faa -dbtype prot -blastdb_version 4 -out db")
+    add("nucl.parse_seqids.hash_index", "-in ns.fna -dbtype nucl -parse_seqids -hash_index -title 'my db' -out db")
+    add("prot.parse_seqids.v4", "-in pq.faa -dbtype prot -parse_seqids -blastdb_version 4 -out db")
+    add("prot.hash_index", "-in pq.faa -dbtype prot -hash_index -out db")
+    add("nucl.volumes", "-in ns.fna -dbtype nucl -max_file_sz 4000 -out vol/db")
+    add("nucl.volumes.v4", "-in ns.fna -dbtype nucl -parse_seqids -max_file_sz 4000 -blastdb_version 4 -out db")
+    add("prot.volumes", "-in pq.faa -dbtype prot -max_file_sz 1000 -out db")
+    add("nucl.default_out", "-in ns.fna -dbtype nucl")
+    add("prot.out_folders", "-in pq.faa -dbtype prot -out sub/dir/db")
+    add("nucl.two_inputs", "-in 'ns.fna nq.fna' -dbtype nucl -title two -out db")
+    add("mask.dust_wm", "-in mask/nucl.fna -dbtype nucl -mask_data mask/dust.asnb,mask/wm.asnt -out db", threaded=True)
+    add("mask.dust_wm.tz_fixed", "-in mask/nucl.fna -dbtype nucl -mask_data mask/dust.asnb,mask/wm.asnt -out db",
+        tz=MAKEBLASTDB_TZ_FIXED)
+    add("mask.ids", "-in mask/nucl.fna -dbtype nucl -mask_data mask/dust.asnb,mask/wm_opts.asnt -mask_id my_dust,my_wm "
+        "-mask_desc 'd1:x,d2' -out db")
+    add("mask.seg.v4", "-in mask/prot.faa -dbtype prot -mask_data mask/seg.asnb -blastdb_version 4 -out db")
+    add("mask.volumes", "-in mask/nucl.fna -dbtype nucl -mask_data mask/dust.asnb -max_file_sz 400 -out db")
+    add("gi_mask", "-in gi/nucl.fa -dbtype nucl -parse_seqids -title t -mask_data gi/dust.asnb -gi_mask -out db")
+    add("gi_mask.names", "-in gi/nucl.fa -dbtype nucl -parse_seqids -title t -mask_data gi/dust.asnb,gi/dust10.asnb "
+        "-gi_mask -gi_mask_name m1,m2 -out db")
+    # Two spellings of one GI-mask file: LOSAT refuses it on the command line and in the browser alike (the engine
+    # resolves the names of the run's folder as `canonicalize` does, D-WW4b §4).
+    for case_id, names in (("same", "m1,m1"), ("dot", "m1,./m1"), ("up", "m1,gi/../m1")):
+        add(f"gi_mask.shared.{case_id}", "-in gi/nucl.fa -dbtype nucl -parse_seqids -title t "
+            f"-mask_data gi/dust.asnb,gi/dust10.asnb -gi_mask -gi_mask_name {names} -out db", "failure")
+    add("taxid", "-in ns.fna -dbtype nucl -parse_seqids -taxid 9606 -out db")
+    add("taxid_map", "-in ns.fna -dbtype nucl -parse_seqids -taxid_map taxmap.txt -out db")
+    add("input.blastdb", "-in old/ndb -input_type blastdb -dbtype nucl -out copy")
+    add("input.blastdb.randomize", "-in old/ndb -input_type blastdb -dbtype nucl -randomize -out copy", "names")
+    add("input.asn1_txt", "-in asn/multi.asn -input_type asn1_txt -dbtype nucl -out db")
+    add("input.asn1_bin", "-in asn/multi.asnb -input_type asn1_bin -dbtype nucl -out db")
+    add("input.gz", "-in ns.fna.gz -dbtype nucl -out db")
+    # The standard input is the null device, as LOSAT Web's run has none: no title, then no sequence.
+    add("input.stdin", "-in - -dbtype nucl -out db", "failure")
+    add("input.stdin.title", "-in - -dbtype nucl -title t -out db", "failure")
+    add("replace", "-in ns.fna -dbtype nucl -out db", published=older)
+    add("logfile", "-in pq.faa -dbtype prot -out db -logfile mk.log")
+    add("logfile.append", "-in pq.faa -dbtype prot -out db -logfile mk.log", published=with_log)
+    # The device model of `-logfile` (abi_v2.md §4): devices, a file outside the run's folder, names that do not open.
+    for case_id, name in (("dev_null", "/dev/null"), ("dev_stdout", "/dev/stdout"), ("dev_stderr", "/dev/stderr"),
+                          ("dev_full", "/dev/full"), ("outside", "/tmp/<id>.log")):
+        add(f"logfile.{case_id}", f"-in pq.faa -dbtype prot -out db -logfile {name}")
+    add("logfile.outside.threaded", "-in pq.faa -dbtype prot -out db -logfile /tmp/<id>.log", threaded=True)
+    add("logfile.nodir", "-in pq.faa -dbtype prot -out db -logfile nodir/mk.log", "failure")
+    add("logfile.folder", "-in pq.faa -dbtype prot -out db -logfile sub", "failure", published=with_folder)
+    # The other names outside the run's folder, in a folder that neither machine has: the CLI's answer there (§3, §4;
+    # a missing mask file is ignored with a message, and the GI-mask and metadata files that do not open are not
+    # written, exit status 0, as on the command line).
+    missing = "/losat-v-abi-missing"
+    for case_id, words, expect in (
+            ("in", f"-in {missing}/x.fna -dbtype nucl -out db", "failure"),
+            ("out", f"-in pq.faa -dbtype prot -out {missing}/db", "failure"),
+            ("mask_data", f"-in mask/nucl.fna -dbtype nucl -mask_data {missing}/d.asnb -out db", None),
+            ("taxid_map", f"-in ns.fna -dbtype nucl -parse_seqids -taxid_map {missing}/t.txt -out db", "failure"),
+            ("gi_mask_name", f"-in gi/nucl.fa -dbtype nucl -parse_seqids -title t -mask_data gi/dust.asnb -gi_mask "
+                             f"-gi_mask_name {missing}/m -out db", None),
+            ("metadata_output_prefix", f"-in pq.faa -dbtype prot -out db -metadata_output_prefix {missing}/", None)):
+        add(f"outside_missing.{case_id}", words, expect)
+    # Errors: NCBI's reader (no -dbtype, a bad value, an unknown option), the options (a missing input, mask data that
+    # is none, a numeric -mask_id, -randomize of FASTA), with -logfile too.
+    add("error.no_dbtype", "-in ns.fna -out db", "failure")
+    add("error.no_dbtype.logfile", "-in ns.fna -out db -logfile mk.log", "failure")
+    add("error.dbtype", "-in ns.fna -dbtype nope -out db", "failure")
+    add("error.unknown_option", "-in ns.fna -dbtype nucl -nosuchoption", "failure")
+    add("error.in_missing", "-in none.fna -dbtype nucl -out db", "failure")
+    add("error.mask_data", "-in mask/nucl.fna -dbtype nucl -mask_data bad.asnb -out db", "failure")
+    add("error.mask_id_numeric", "-in mask/nucl.fna -dbtype nucl -mask_data mask/dust.asnb -mask_id 100 -out db", "failure")
+    add("error.randomize_fasta", "-in pq.faa -dbtype prot -randomize -out db", "failure")
+    for word in ("-h", "-help", "-version", "-xmlhelp"):
+        add(f"print{word}", word)
+    # losat_web2_validate of makeblastdb's argv: the checks before the run (D-WW4b-3); the folder is not written.
+    for case_id, words, expect in (
+            ("valid", "-in ns.fna -dbtype nucl -out db", None),
+            ("mask", "-in mask/nucl.fna -dbtype nucl -mask_data mask/dust.asnb,mask/wm.asnt -out db", None),
+            ("logfile", "-in pq.faa -dbtype prot -out db -logfile mk.log", None),
+            ("help", "-h", None), ("xmlhelp", "-xmlhelp", None), ("version", "-version", None),
+            ("no_dbtype", "-in ns.fna -out db", "failure"),
+            ("no_dbtype.logfile", "-in ns.fna -out db -logfile mk.log", "failure"),
+            ("dbtype", "-in ns.fna -dbtype nope", "failure"),
+            ("unknown_option", "-in ns.fna -dbtype nucl -nosuchoption", "failure"),
+            ("in_missing", "-in none.fna -dbtype nucl -out db", "late_failure"),
+            ("mask_data", "-in mask/nucl.fna -dbtype nucl -mask_data bad.asnb -out db", "late_failure"),
+            ("logfile.dev_stdout", "-in pq.faa -dbtype prot -out db -logfile /dev/stdout", None),
+            ("logfile.outside", "-in pq.faa -dbtype prot -out db -logfile /tmp/<id>.log", None),
+            ("no_dbtype.logfile.dev_stderr", "-in ns.fna -out db -logfile /dev/stderr", "failure"),
+            ("no_dbtype.logfile.nodir", "-in ns.fna -out db -logfile nodir/mk.log", "failure")):
+        add(f"validate.{case_id}", words, expect, kind="validate")
+    # A `-logfile` that names a folder of the run's folder (finding 2): its messages stay on the standard error.
+    add("validate.no_dbtype.logfile.folder", "-in ns.fna -out db -logfile sub", "failure", kind="validate",
+        published=with_folder)
+    return rows
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--suite", choices=["quick", "full"], default="quick")
@@ -1183,6 +1345,7 @@ def main() -> int:
         searches += scan_d13()
         searches += failed_outputs()
         searches += tool()
+        searches += makeblastdb()
     args.out.write_text(json.dumps(searches, indent=2) + "\n")
     print(f"{len(searches)} searches -> {args.out}")
     return 0

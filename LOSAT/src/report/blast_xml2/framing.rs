@@ -28,18 +28,19 @@ use anyhow::Result;
 
 use super::files::{run_side_files, SideFileSink};
 use crate::report::blast_xml::writer::{DocumentPost, DocumentPosts};
-use crate::report::serial::xml::{XmlThrow, XML2_ROOT_ATTRIBUTES};
+use crate::report::serial::xml::XML2_ROOT_ATTRIBUTES;
 
 /// What a report's writer hands the framing with the report's bytes (`Xml2Document::report`):
 /// what NCBI posts while it writes the report (`DocumentPost`, at offsets of the report), and the
-/// exception of a 14 side file, which ends the run when the report is written (blastxml2_format.cpp:
-/// 768-778 has no `catch`; outfmt 16's report catches its exception and posts it,
-/// `report::blast_xml2::writer`). Dropping it loses them, so it is `must_use`.
+/// exception of a 14 or 13 side file, which ends the run when the report is written
+/// (blastxml2_format.cpp:768-778 and 859-869 have no `catch`; outfmt 16's and 15's reports catch
+/// their exceptions and post them, `report::blast_xml2::writer`). Dropping it loses them, so it is
+/// `must_use`.
 #[derive(Clone, Debug, Default)]
 #[must_use = "a report's posts and the side file's exception go to the framing (Xml2Document::report)"]
 pub struct MadeReport {
     pub posts: Vec<DocumentPost>,
-    pub ends_run: Option<Box<XmlThrow>>,
+    pub ends_run: Option<Box<crate::ncbi_exception::NcbiException>>,
 }
 
 /// Which of NCBI's four document forms a run writes.
@@ -534,9 +535,9 @@ impl<F: SideFiles> Xml2Document<F> {
             }));
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:775-777
         // The subjects' loads (`s_FillBlastOutput`) and the posts come before the exception.
-        if let Some(thrown) = ends_run {
+        if let Some(exception) = ends_run {
             self.files.write_file(self.written, report)?;
-            self.posts.ends_run = Some(Box::new(thrown.exception()));
+            self.posts.ends_run = Some(exception);
             return Ok(());
         }
         match self.kind {

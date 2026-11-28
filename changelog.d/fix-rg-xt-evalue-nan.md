@@ -18,3 +18,8 @@
 - Fixed: LOSAT Web's ABI v1 reads the `-evalue` of BLASTP and TBLASTX as the command line and
   NCBI BLAST+ do: `+inf`, `-nan`, `+nan(1)` and `1e999` are read, a bare `inf` or `nan` is an
   argument error (line RG, X-evalue-nan).
+- Fixed: `-outfmt 15` (BLAST JSON) and `-outfmt 13` with an `-evalue` of NaN or infinite give
+  NCBI's output in every program: each report ends after `"expect": ` with NCBI's two error posts
+  and the run goes on to the document's end (exit status 0); `-outfmt 13` ends its first side file
+  there and the run with NCBI's error (exit status 255). LOSAT stopped after the document's first
+  line with an error of its own (line RG, X-evalue-nan).

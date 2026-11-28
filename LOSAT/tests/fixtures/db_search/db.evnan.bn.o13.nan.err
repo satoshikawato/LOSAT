@@ -1,0 +1,5 @@
+Warning: [blastn] Examining 5 or more matches is recommended
+Error: (802.5) [blastn] CObjectOStream: error at line 11: BlastOutput2.report.params.expect: invalid double: not a number
+Error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrjson.cpp", line 213: Error: (CSerialException::eInvalidData) ncbi::CObjectOStreamJson::WriteDouble2() - line 11: invalid double: not a number ( at BlastOutput2.report.params.expect)
+

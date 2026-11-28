@@ -1634,3 +1634,104 @@ fn a_joined_result_is_the_next_search_of_the_held_report() {
         assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:210-217
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:879-890
+#[test]
+fn a_json_report_of_a_nan_or_infinite_expect_is_cut_at_its_key_with_ncbis_two_posts() {
+    // NCBI 2.17.0 `-outfmt 15 -evalue -nan` (line RG item X-evalue-nan; rows db.evnan.*.o15.*):
+    // each report ends after `"expect": `, the next one follows its separator, the document ends,
+    // and each report posts the stream's failure (802.5) and the exception that the report
+    // function catches. +inf throws at the stream's other branch (line 216).
+    let message = invalid_message();
+    for (expect, words) in [(f64::NAN, "not a number"), (f64::INFINITY, "infinite")] {
+        let run = XmlRun {
+            expect,
+            ..run(None, "")
+        };
+        let mut writer = Xml2Writer::new(Xml2Kind::Single15, params(Xml2Target::Database));
+        let mut out = Vec::new();
+        for _ in 0..2 {
+            writer
+                .query(&run, &invalid_query(&message), &mut out, |_| {
+                    panic!("a query of an unsearched batch has no hits")
+                })
+                .unwrap();
+        }
+        writer.finish(&mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        let cut = "      \"params\": {\n        \"matrix\": \"BLOSUM62\",\n        \"expect\": ";
+        assert!(out.ends_with(&format!("{cut}]\n}}\n")), "{out}");
+        assert_eq!(out.matches(&format!("{cut},\n{{\n")).count(), 1, "{out}");
+        let posts = writer.take_posts();
+        assert!(posts.ends_run.is_none());
+        let thrown: Vec<&crate::report::blast_xml::writer::DocumentPost> = posts
+            .posts
+            .iter()
+            .filter(|post| post.text.windows(14).any(|w| w == b"invalid double"))
+            .collect();
+        let texts: Vec<String> = thrown
+            .iter()
+            .map(|post| String::from_utf8_lossy(&post.text).into_owned())
+            .collect();
+        assert_eq!(texts.len(), 4, "{texts:?}");
+        let stream = format!(
+            "Error: (802.5) [blastp] CObjectOStream: error at line 11: \
+             BlastOutput2.report.params.expect: invalid double: {words}\n"
+        );
+        assert_eq!(texts[0], stream);
+        assert_eq!(texts[2], stream);
+        let caught = &texts[1];
+        assert!(
+            caught.starts_with(&format!("Error: [blastp] line 11: invalid double: {words}"))
+                && caught.contains("( at BlastOutput2.report.params.expect)"),
+            "{caught}"
+        );
+        assert_eq!(&texts[3], caught);
+        // the posts follow the report's bytes: the first after the first report's cut
+        let first_cut = out.find(&format!("{cut},")).unwrap() + cut.len();
+        assert_eq!(thrown[0].at, first_cut);
+        assert_eq!(thrown[1].at, first_cut);
+    }
+}
+
+#[test]
+fn the_json_streams_throw_names_its_frames_as_ncbis_object_stack() {
+    // `GetStackTrace()` names members and elements (`.E`), `AddFrameInfo` the frames (`[]` for
+    // a container and its element), the position is the stream's line.
+    let mut out = b"before\n".to_vec();
+    let mut enc = JsonEncoder::new(&mut out);
+    enc.begin_document("Doc");
+    enc.begin_sequence("Doc");
+    enc.member("a-list", 0);
+    enc.begin_list(false);
+    enc.element();
+    enc.begin_sequence("Item");
+    enc.member("x", 0);
+    enc.real(1.5);
+    enc.end_member();
+    enc.end_sequence();
+    enc.element();
+    enc.variant("Choice", "pick", 1);
+    enc.real(f64::NEG_INFINITY);
+    enc.real(f64::NAN);
+    let thrown = enc.take_thrown().expect("the stream threw");
+    assert_eq!(thrown.trace, "Doc.a-list.E.pick");
+    assert_eq!(thrown.line, 8);
+    assert_eq!(
+        String::from_utf8(thrown.post(Some("blastp"))).unwrap(),
+        "Error: (802.5) [blastp] CObjectOStream: error at line 8: Doc.a-list.E.pick: invalid \
+         double: infinite\n"
+    );
+    let exception = thrown.exception();
+    assert_eq!(exception.get_msg(), b"line 8: invalid double: infinite");
+    assert_eq!(
+        exception.text(),
+        b"line 8: invalid double: infinite ( at Doc.a-list.[].[].pick)"
+    );
+    assert!(String::from_utf8(exception.ncbi_what())
+        .unwrap()
+        .contains("objostrjson.cpp\", line 216: Error: (CSerialException::eInvalidData) ncbi::CObjectOStreamJson::WriteDouble2() - "));
+    // the bytes before the value stay
+    assert_eq!(&out[7 + thrown.at - 8..7 + thrown.at], b"\"pick\": ");
+}

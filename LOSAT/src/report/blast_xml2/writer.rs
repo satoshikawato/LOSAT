@@ -538,13 +538,14 @@ fn xml_report_made(
     posts: Vec<crate::report::serial::xml::XmlPost>,
     thrown: Option<Box<crate::report::serial::xml::XmlThrow>>,
 ) -> Result<MadeReport> {
+    let thrown = thrown.map(StreamThrow::Xml);
     match (result, thrown) {
-        (result, thrown) if hands_on_error(&result, thrown.is_some()) => {
+        (result, thrown) if hands_on_error(&result, thrown.as_ref()) => {
             Err(result.expect_err("an error that the report hands on"))
         }
         (_, thrown) => {
             if let Some(thrown) = &thrown {
-                report.truncate(thrown.at);
+                report.truncate(thrown.at());
             }
             let written: Vec<u64> = if kind == Xml2Kind::Single16 && !posts.is_empty() {
                 let at: Vec<usize> = posts.iter().map(|post| post.at).collect();
@@ -565,38 +566,100 @@ fn xml_report_made(
     }
 }
 
-/// The exception `thrown` of the stream of an XML report of outfmt 16 or 14 cut after `at` bytes
-/// (`xml_report_made`): 16 posts it after them, 14 ends the run with it.
+/// The throw of NCBI's object stream in a report: the XML stream's at a byte that US-ASCII cannot
+/// write (`XmlThrow`, outfmt 16 and 14), the JSON stream's at a NaN or an infinity (`JsonThrow`,
+/// outfmt 15 and 13: an `-evalue` of NaN or infinite, the report's `params.expect`).
+enum StreamThrow {
+    Xml(Box<crate::report::serial::xml::XmlThrow>),
+    Json(Box<crate::report::serial::json::JsonThrow>),
+}
+
+impl StreamThrow {
+    /// The bytes of the report that NCBI's stream wrote before it threw.
+    fn at(&self) -> usize {
+        match self {
+            StreamThrow::Xml(thrown) => thrown.at,
+            StreamThrow::Json(thrown) => thrown.at,
+        }
+    }
+
+    /// Whether `error`, the error of the report's writer, is the stream's throw.
+    fn is_error(&self, error: &anyhow::Error) -> bool {
+        match (self, error.downcast_ref::<SerialError>()) {
+            (StreamThrow::Xml(_), Some(SerialError::Utf8(_))) => true,
+            (StreamThrow::Json(_), Some(SerialError::JsonDouble(_))) => true,
+            _ => false,
+        }
+    }
+}
+
+/// What a JSON report of outfmt 15 or 13 hands the framing (`MadeReport`) after its writer's
+/// `result`: when NCBI's stream threw (`JsonThrow`), the report cut at the value and the posts and
+/// the exception of the throw (`stream_threw`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:859-890
+/// (15's report function catches the exception, 13's does not.)
+fn json_report_made(
+    report: &mut Vec<u8>,
+    kind: Xml2Kind,
+    program: &str,
+    result: Result<()>,
+    thrown: Option<Box<crate::report::serial::json::JsonThrow>>,
+) -> Result<MadeReport> {
+    let thrown = thrown.map(StreamThrow::Json);
+    if hands_on_error(&result, thrown.as_ref()) {
+        return Err(result.expect_err("an error that the report hands on"));
+    }
+    let mut made = MadeReport::default();
+    if let Some(thrown) = thrown {
+        report.truncate(thrown.at());
+        stream_threw(&mut made, kind, program, thrown, report.len());
+    }
+    Ok(made)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:749-766
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:879-890
+/// The exception `thrown` of the stream of a report of outfmt 16, 15, 14 or 13 cut after `at`
+/// bytes: the JSON stream's own post first (`JsonThrow::post`, at the throw; the bytes written
+/// before it come before it on a shared pipe, the error stream being tied to the output); then 16
+/// and 15 post the exception after the bytes (`GetMsg()` and `what()`), 14 and 13 end the run with
+/// it.
 fn stream_threw(
     made: &mut MadeReport,
     kind: Xml2Kind,
     program: &str,
-    thrown: Box<crate::report::serial::xml::XmlThrow>,
+    thrown: StreamThrow,
     at: usize,
 ) {
-    if kind == Xml2Kind::Single16 {
-        let exception = thrown.exception();
+    let exception = match &thrown {
+        StreamThrow::Xml(thrown) => thrown.exception(),
+        StreamThrow::Json(thrown) => {
+            made.posts.push(DocumentPost {
+                at,
+                text: thrown.post(Some(program)),
+            });
+            thrown.exception()
+        }
+    };
+    if matches!(kind, Xml2Kind::Single16 | Xml2Kind::Single15) {
         let message = exception.what_after(exception.get_msg());
         made.posts.push(DocumentPost {
             at,
             text: crate::ncbi_exception::error_post_line(None, Some(program), &message),
         });
     } else {
-        made.ends_run = Some(thrown);
+        made.ends_run = Some(Box::new(exception));
     }
 }
 
 /// Whether the `result` of a report's writer is an error that the report hands on (`Err`): any
-/// but the UTF-8 error of an XML stream that threw (`thrown`), which cuts the report
-/// (`xml_report_made`).
-fn hands_on_error(result: &Result<()>, thrown: bool) -> bool {
-    result.as_ref().is_err_and(|error| {
-        !thrown
-            || !matches!(
-                error.downcast_ref::<SerialError>(),
-                Some(SerialError::Utf8(_))
-            )
-    })
+/// but the error of a stream that threw (`thrown`: an XML stream's UTF-8 error, the JSON stream's
+/// NaN or infinity), which cuts the report (`xml_report_made`, `json_report_made`).
+fn hands_on_error(result: &Result<()>, thrown: Option<&StreamThrow>) -> bool {
+    result
+        .as_ref()
+        .is_err_and(|error| !thrown.is_some_and(|thrown| thrown.is_error(error)))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2376-2378
@@ -665,7 +728,11 @@ where
                 &mut search,
                 hits,
             );
-            (result, enc.take_posts(), enc.take_thrown())
+            (
+                result,
+                enc.take_posts(),
+                enc.take_thrown().map(StreamThrow::Xml),
+            )
         }
         Xml2Kind::Single15 | Xml2Kind::Files13 => {
             let mut enc = if kind == Xml2Kind::Single15 {
@@ -684,10 +751,10 @@ where
                 &mut search,
                 hits,
             );
-            (result, Vec::new(), None)
+            (result, Vec::new(), enc.take_thrown().map(StreamThrow::Json))
         }
     };
-    if hands_on_error(&result, thrown.is_some()) {
+    if hands_on_error(&result, thrown.as_ref()) {
         *held.searches = searches;
         report.clear();
         let error = result.expect_err("an error that the report hands on");
@@ -704,7 +771,7 @@ where
         let end = search.end.max(search.start);
         let end = thrown
             .as_ref()
-            .map_or(end, |thrown| thrown.at.clamp(search.start, end));
+            .map_or(end, |thrown| thrown.at().clamp(search.start, end));
         let lines = |bytes: &[u8]| bytes.iter().filter(|&&byte| byte == b'\n').count() as i64;
         let line_shift = match posts.is_empty() {
             true => 0,
@@ -870,9 +937,13 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
                     threw = thrown.is_some();
                     xml_report_made(report, kind, run.app, result, posts, thrown)
                 }
-                Xml2Kind::Single15 => {
-                    let mut enc = JsonEncoder::array_element(report);
-                    write_report(
+                Xml2Kind::Single15 | Xml2Kind::Files13 => {
+                    let mut enc = if kind == Xml2Kind::Single15 {
+                        JsonEncoder::array_element(report)
+                    } else {
+                        JsonEncoder::new(report)
+                    };
+                    let result = write_report(
                         &mut enc,
                         run,
                         params,
@@ -882,23 +953,10 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
                         start,
                         &mut search,
                         hits,
-                    )
-                    .map(|()| MadeReport::default())
-                }
-                Xml2Kind::Files13 => {
-                    let mut enc = JsonEncoder::new(report);
-                    write_report(
-                        &mut enc,
-                        run,
-                        params,
-                        query,
-                        masks,
-                        scratch,
-                        start,
-                        &mut search,
-                        hits,
-                    )
-                    .map(|()| MadeReport::default())
+                    );
+                    let thrown = enc.take_thrown();
+                    threw = thrown.is_some();
+                    json_report_made(report, kind, run.app, result, thrown)
                 }
             });
         // The report just made is held: what the results that join it show (`join_search`).

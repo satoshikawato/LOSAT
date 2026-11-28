@@ -23,6 +23,88 @@ pub struct JsonEncoder<'b> {
     /// one level in (`array_element`).
     array_element: bool,
     error: Option<SerialError>,
+    /// The length of `out` before the document (`JsonThrow::line` counts from there).
+    start: usize,
+    /// The document's type (`begin_document`), the root of the object stack.
+    root: String,
+    /// The frames of NCBI's object stack that its path names (`JsonThrow`), their member names
+    /// in `names`.
+    frames: Vec<JsonFrame>,
+    names: Vec<u8>,
+    /// NCBI's throw at a NaN or an infinity (`real`), after which the stream writes nothing.
+    thrown: Option<Box<JsonThrow>>,
+}
+
+/// A frame of NCBI's object stack in the JSON stream: a member or a variant (its name in
+/// `JsonEncoder::names`), a container, an element of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JsonFrame {
+    Named { from: usize, to: usize },
+    List,
+    Element,
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:210-217
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:522-555
+/// NCBI's throw of its JSON stream at a NaN or an infinity (`WriteDouble2`'s `ThrowError` of
+/// `fInvalidData`): the stream posts its failure (`SetFailFlags`: error 802.5, `Serial_OStream`)
+/// and throws `CSerialException::eInvalidData`, which each frame it leaves names
+/// (`CSerialException::AddFrameInfo`). The bytes written before it stay (`at`): the member's key
+/// and its separator.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JsonThrow {
+    pub error: super::real::JsonDoubleError,
+    /// The bytes of the document before the value (from the encoder's start).
+    pub at: usize,
+    /// `GetPosition()`: the stream's line (1 at its start and one more for each end of line).
+    pub line: u64,
+    /// `GetStackTrace()` (`encoder::object_stack_trace`).
+    pub trace: String,
+    /// `GetFrameName()` of each frame the exception leaves, from the root to the value.
+    frames: Vec<String>,
+}
+
+impl JsonThrow {
+    /// The error code of the post (`Serial_OStream`, include/serial/error_codes.hpp:46).
+    pub const ERR_CODE: &'static str = "802.5";
+
+    /// The post of the stream's failure: `Error: (802.5) [<prefix>] CObjectOStream: error at
+    /// line <n>: <stack trace>: <message>` and an end of line.
+    pub fn post(&self, prefix: Option<&str>) -> Vec<u8> {
+        crate::ncbi_exception::error_post_line(
+            Some(Self::ERR_CODE),
+            prefix,
+            format!(
+                "CObjectOStream: error at line {}: {}: {}",
+                self.line,
+                self.trace,
+                self.error.message()
+            )
+            .as_bytes(),
+        )
+    }
+
+    /// The exception as it leaves the stream: thrown by `WriteDouble2` (its NaN or its infinity
+    /// branch) with the position and the message, the frames' names added.
+    pub fn exception(&self) -> crate::ncbi_exception::NcbiException {
+        let line = match self.error {
+            super::real::JsonDoubleError::NotANumber => 213,
+            super::real::JsonDoubleError::Infinite => 216,
+        };
+        let mut exception = crate::ncbi_exception::NcbiException::new(
+            crate::ncbi_exception::ThrowSite {
+                file: "src/serial/objostrjson.cpp",
+                line,
+                kind: "CSerialException::eInvalidData",
+                function: Some("ncbi::CObjectOStreamJson::WriteDouble2"),
+            },
+            format!("line {}: {}", self.line, self.error.message()),
+        );
+        let names: Vec<&str> = self.frames.iter().rev().map(String::as_str).collect();
+        exception.add_frame_infos(&names);
+        exception
+    }
 }
 
 impl<'b> JsonEncoder<'b> {
@@ -37,11 +119,16 @@ impl<'b> JsonEncoder<'b> {
     /// An encoder that appends a document to `out`.
     pub fn new(out: &'b mut Vec<u8>) -> Self {
         Self {
-            out,
             indent: 0,
             block_start: false,
             array_element: false,
             error: None,
+            start: out.len(),
+            root: String::new(),
+            frames: Vec::new(),
+            names: Vec::new(),
+            thrown: None,
+            out,
         }
     }
 
@@ -54,6 +141,63 @@ impl<'b> JsonEncoder<'b> {
         encoder.indent = 2;
         encoder.array_element = true;
         encoder
+    }
+
+    /// The throw of NCBI's stream at a NaN or an infinity, if any (`JsonThrow`; the error is then
+    /// `SerialError::JsonDouble`).
+    pub fn take_thrown(&mut self) -> Option<Box<JsonThrow>> {
+        self.thrown.take()
+    }
+
+    /// Enters a member or a variant `name` of the object stack.
+    fn push_named(&mut self, name: &str) {
+        let from = self.names.len();
+        self.names.extend_from_slice(name.as_bytes());
+        self.frames.push(JsonFrame::Named {
+            from,
+            to: self.names.len(),
+        });
+    }
+
+    /// Leaves the innermost frame.
+    fn pop_frame(&mut self) {
+        if let Some(JsonFrame::Named { from, .. }) = self.frames.pop() {
+            self.names.truncate(from);
+        }
+    }
+
+    /// The throw at a NaN or an infinity (`JsonThrow`) where the stream stands.
+    fn throw(&mut self, error: super::real::JsonDoubleError) {
+        use super::encoder::{object_stack_trace, StackStep};
+        use super::object_frame::{frame_name, FrameKind};
+        let name =
+            |from: usize, to: usize| std::str::from_utf8(&self.names[from..to]).unwrap_or("");
+        let trace = object_stack_trace(
+            &self.root,
+            self.frames.iter().filter_map(|frame| match *frame {
+                JsonFrame::Named { from, to } => Some(StackStep::Member(name(from, to))),
+                JsonFrame::Element => Some(StackStep::Element),
+                JsonFrame::List => None,
+            }),
+        );
+        let frames = std::iter::once(frame_name(FrameKind::Named, Some(&self.root), None))
+            .chain(self.frames.iter().map(|frame| match *frame {
+                JsonFrame::Named { from, to } => {
+                    frame_name(FrameKind::ClassMember, None, Some(name(from, to)))
+                }
+                JsonFrame::List => frame_name(FrameKind::Array, None, None),
+                JsonFrame::Element => frame_name(FrameKind::ArrayElement, None, None),
+            }))
+            .map(str::to_string)
+            .collect();
+        let held = &self.out[self.start..];
+        self.thrown = Some(Box::new(JsonThrow {
+            error,
+            at: held.len(),
+            line: 1 + held.iter().filter(|&&byte| byte == b'\n').count() as u64,
+            trace,
+            frames,
+        }));
     }
 
     /// The length of the output written so far (`XmlEncoder::written`).
@@ -157,6 +301,8 @@ impl Encoder for JsonEncoder<'_> {
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:137-150
     fn begin_document(&mut self, type_name: &str) {
+        self.root.clear();
+        self.root.push_str(type_name);
         if self.array_element {
             return;
         }
@@ -189,15 +335,19 @@ impl Encoder for JsonEncoder<'_> {
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:517-521
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:715-719
     fn member(&mut self, name: &str, _tag: u8) {
+        self.push_named(name);
         self.next_element();
         self.write_key(name);
     }
 
-    fn end_member(&mut self) {}
+    fn end_member(&mut self) {
+        self.pop_frame();
+    }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:442-452
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:840-847
     fn begin_list(&mut self, _set: bool) {
+        self.frames.push(JsonFrame::List);
         self.out.push(b'[');
         self.indent += 2;
         self.block_start = true;
@@ -205,11 +355,19 @@ impl Encoder for JsonEncoder<'_> {
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:463-466
     fn element(&mut self) {
+        if self.frames.last() == Some(&JsonFrame::Element) {
+            self.frames.pop();
+        }
+        self.frames.push(JsonFrame::Element);
         self.next_element();
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:849-856
     fn end_list(&mut self) {
+        if self.frames.last() == Some(&JsonFrame::Element) {
+            self.frames.pop();
+        }
+        self.frames.pop();
         self.indent -= 2;
         self.eol();
         self.out.push(b']');
@@ -220,6 +378,7 @@ impl Encoder for JsonEncoder<'_> {
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:533-559
     fn variant(&mut self, _type_name: &str, name: &str, _tag: u8) {
+        self.push_named(name);
         self.start_block();
         self.next_element();
         self.write_key(name);
@@ -228,6 +387,7 @@ impl Encoder for JsonEncoder<'_> {
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:541-547
     fn end_variant(&mut self) {
         self.end_block();
+        self.pop_frame();
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:180-183
@@ -294,11 +454,12 @@ impl Encoder for JsonEncoder<'_> {
     }
 
     /// `WriteDouble2` of `data` with `DBL_DIG` (`real::write_json_double`), which raises an error
-    /// for a NaN or an infinity.
+    /// for a NaN or an infinity: NCBI's throw there (`JsonThrow`), the first error of the document.
     fn real(&mut self, value: f64) {
         if let Err(error) = write_json_double(value, self.out) {
             if self.error.is_none() {
                 self.error = Some(SerialError::JsonDouble(error));
+                self.throw(error);
             }
         }
     }

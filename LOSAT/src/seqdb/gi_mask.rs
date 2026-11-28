@@ -293,12 +293,27 @@ fn check_range(file: &DbFile, start: i64, end: i64, what: &str) -> Result<(), Se
     if start < end && end as u64 <= file.len() && end >= 0 {
         return Ok(());
     }
+    const SEQDBFILE_HPP: &str = "include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp";
+    let assert = if start >= end {
+        super::SeqDbAssert {
+            cond: "start < end",
+            file: SEQDBFILE_HPP,
+            line: 128,
+        }
+    } else {
+        super::SeqDbAssert {
+            cond: "m_Length >= end",
+            file: SEQDBFILE_HPP,
+            line: 129,
+        }
+    };
     Err(SeqDbError::Integrity {
         path: file.path().to_path_buf(),
         message: format!(
             "{what} (bytes {start}..{end}) is empty or passes the end of the file ({} bytes)",
             file.len()
         ),
+        assert: Some(assert),
     })
 }
 
@@ -441,20 +456,33 @@ fn read_fields(index: &MappedFile) -> Result<Fields, SeqDbError> {
     let num_index = field()?;
     let num_gis = field()?;
     let index_start = field()?;
-    let integrity = |message: String| SeqDbError::Integrity {
+    let integrity = |message: String, assert: super::SeqDbAssert| SeqDbError::Integrity {
         path: index.path().to_path_buf(),
         message,
+        assert: Some(assert),
     };
     if index_start < 0 {
-        return Err(integrity(format!(
-            "the GI-mask index states a negative start of its arrays ({index_start})"
-        )));
+        return Err(integrity(
+            format!("the GI-mask index states a negative start of its arrays ({index_start})"),
+            super::SeqDbAssert {
+                cond: "m_IndexStart >= 0",
+                file: "src/objtools/blast/seqdb_reader/seqdbgimask.cpp",
+                line: 229,
+            },
+        ));
     }
     if index.len() < index_start as u64 {
-        return Err(integrity(format!(
-            "the GI-mask index has {} bytes, fewer than the start of its arrays ({index_start})",
-            index.len()
-        )));
+        return Err(integrity(
+            format!(
+                "the GI-mask index has {} bytes, fewer than the start of its arrays ({index_start})",
+                index.len()
+            ),
+            super::SeqDbAssert {
+                cond: "m_IndexFile.GetFileLength() >= m_IndexStart",
+                file: "src/objtools/blast/seqdb_reader/seqdbgimask.cpp",
+                line: 230,
+            },
+        ));
     }
     index.check_range(0, i64::from(index_start), "the header of the GI-mask index")?;
     let mut head = vec![0u8; index_start as usize];
@@ -462,9 +490,24 @@ fn read_fields(index: &MappedFile) -> Result<Fields, SeqDbError> {
     let mut blob = Blob::new(&head, FIXED_FIELD_BYTES as i64);
     let desc = blob.read_string_var().map_err(format)?.to_vec();
     let date = blob.read_string_var().map_err(format)?;
-    if desc.is_empty() || date.is_empty() {
+    if desc.is_empty() {
         return Err(integrity(
             "the GI-mask index has an empty description or date".to_string(),
+            super::SeqDbAssert {
+                cond: "m_Desc.size()",
+                file: "src/objtools/blast/seqdb_reader/seqdbgimask.cpp",
+                line: 243,
+            },
+        ));
+    }
+    if date.is_empty() {
+        return Err(integrity(
+            "the GI-mask index has an empty description or date".to_string(),
+            super::SeqDbAssert {
+                cond: "m_Date.size()",
+                file: "src/objtools/blast/seqdb_reader/seqdbgimask.cpp",
+                line: 244,
+            },
         ));
     }
     let begin = i64::from(index_start);

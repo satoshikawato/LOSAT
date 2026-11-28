@@ -1,6 +1,6 @@
 // Holder tracking for inflated OPFS-backed session files (`tool-inputs/<token>/data`):
-// each session file is held by its WindowMasker form item (`form:<key>`), briefly while a submit
-// queues (`submit:<n>`), and by each queued or running tool run (`run:<runId>`) that reads it
+// each session file is held by its form item (WindowMasker, Masking: `form:<tool>:<key>`), briefly while a submit
+// queues (`submit:<tool>:<n>`), and by each queued or running tool run (`run:<runId>`) that reads it
 // directly or inside `combined_input.fa`. It is dropped via `DataGateway.dropSessionFile` only
 // when the last holder releases it.
 import { SourceRefs } from './source-refs';

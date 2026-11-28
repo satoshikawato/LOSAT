@@ -1,0 +1,3 @@
+Error: (803.7) Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x7] in string at byte 1765
+q2 uery two

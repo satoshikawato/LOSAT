@@ -1,0 +1,160 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= q101d
+
+Length=1230
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 Unknown                                                       349     2e-125
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  18.1    0.75  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  15.0    5.8   
+
+
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 18.1 bits (35),  Expect = 0.75
+ Identities = 7/17 (41%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
+ Frame = -1
+
+Query  1065  MNRRKHLLIRGTIQSSN  1015
+             +NR+ +    G I+SSN
+Sbjct  134   INRKSNQENVGIIKSSN  150
+
+
+ Score = 18.1 bits (35),  Expect = 0.75
+ Identities = 7/17 (41%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
+ Frame = -1
+
+Query  405  MNRRKHLLIRGTIQSSN  355
+            +NR+ +    G I+SSN
+Sbjct  134  INRKSNQENVGIIKSSN  150
+
+
+ Score = 15.0 bits (27),  Expect = 5.7
+ Identities = 6/10 (60%), Positives = 7/10 (70%), Gaps = 0/10 (0%)
+ Frame = +3
+
+Query  84   LSEKYLSAGK  113
+            L EKY + GK
+Sbjct  93   LYEKYEAEGK  102
+
+
+ Score = 15.0 bits (27),  Expect = 5.7
+ Identities = 6/10 (60%), Positives = 7/10 (70%), Gaps = 0/10 (0%)
+ Frame = +3
+
+Query  744  LSEKYLSAGK  773
+            L EKY + GK
+Sbjct  93   LYEKYEAEGK  102
+
+
+ Score = 14.2 bits (25),  Expect = 8.8
+ Identities = 3/7 (43%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  259  PEVVDVI  279
+             +V D I
+Sbjct  29   LDVKDFI  35
+
+
+ Score = 14.2 bits (25),  Expect = 8.8
+ Identities = 3/7 (43%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  919  PEVVDVI  939
+             +V D I
+Sbjct  29   LDVKDFI  35
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 15.0 bits (27),  Expect = 5.8
+ Identities = 7/22 (32%), Positives = 8/22 (36%), Gaps = 0/22 (0%)
+ Frame = -3
+
+Query  1087  NWYTAAVYESEKTSADQRYHPE  1022
+              W T        T+A   Y PE
+Sbjct  86    TWCTNTSPNMNVTAAGMDYFPE  107
+
+
+ Score = 15.0 bits (27),  Expect = 5.8
+ Identities = 7/22 (32%), Positives = 8/22 (36%), Gaps = 0/22 (0%)
+ Frame = -3
+
+Query  427  NWYTAAVYESEKTSADQRYHPE  362
+             W T        T+A   Y PE
+Sbjct  86   TWCTNTSPNMNVTAAGMDYFPE  107
+
+
+ Score = 14.6 bits (26),  Expect = 6.9
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = +1
+
+Query  538  GAEMYAAACR  567
+            GA + A  CR
+Sbjct  149  GAHITAGKCR  158
+
+
+ Score = 14.6 bits (26),  Expect = 6.9
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = +1
+
+Query  1198  GAEMYAAACR  1227
+             GA + A  CR
+Sbjct  149   GAHITAGKCR  158
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 173797
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

@@ -118,7 +118,7 @@ impl Packer {
     /// `new_coding` is `None` for `kNoCoding` (the end of the residues).
     ///
     /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1194-1249
-    /// Inlined into the loop of each scan (`pack_runs` of letters and of codes), as into the one
+    /// Inlined into each scan (`pack_runs` of letters, `pack_ncbi4na` of codes), as into the one
     /// scan before there were two (LOSAT's speed: a call for each boundary).
     #[inline(always)]
     fn add_boundary(&mut self, pos: u32, new_coding: Option<Coding>) {
@@ -267,71 +267,86 @@ const PAIR_CLASSES: [u8; 256] = {
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1058-1063,1078-1080,1105-1107
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1124-1192
 /// NCBI's scan reads a byte of two codes at a time and adds the boundary of each half where the
-/// two differ; LOSAT scans the codes from `start`, which may be the low half of a byte. A run
-/// ends at a residue of the other class, so each run after the first has the class that the
-/// one before it does not.
+/// two differ; so does LOSAT's, from `start` (which may be the low half of a byte), with the
+/// classes of both codes of a byte from [`PAIR_CLASSES`]. While twelve or more bytes are left,
+/// the bytes after two bytes in a row of the run's class are searched for the next byte with a
+/// code of the other class ([`find_first`], LOSAT's speed: four letters, then a search when
+/// twenty or more are left, as `pack_iupacna` scans letters).
 pub(crate) fn pack_ncbi4na(src: &[u8], start: usize, end: usize) -> Vec<Segment> {
+    // The class bits of a byte inside the current run (`inside`) are 3 (codes that are not one
+    // base) or 0; `flip` starts a run of the other class at residue `pos`.
+    #[inline(always)]
+    fn flip(packer: &mut Packer, start: usize, pos: usize, inside: &mut u8) {
+        *inside ^= 3;
+        packer.add_boundary((pos - start) as u32, Some(coding_of_class(*inside == 3)));
+    }
+    // The boundaries in the whole byte `j` whose class bits differ from the run's by `differs`:
+    // 1, the low half; 2, the high half alone (the low half is of the class before it again);
+    // 3, both, a new class from the high half on. Inlined into both loops below (LOSAT's speed:
+    // a call for each byte that differs).
+    #[inline(always)]
+    fn flip_byte(packer: &mut Packer, start: usize, j: usize, inside: &mut u8, differs: u8) {
+        if differs & 2 != 0 {
+            flip(packer, start, 2 * j, inside);
+        }
+        if differs != 3 {
+            flip(packer, start, 2 * j + 1, inside);
+        }
+    }
     if start == end {
         return Vec::new();
     }
-    let mut wide = !is_one_base(nibble(src, start));
-    pack_runs(end - start, |pos| {
-        let run = wide;
-        wide = !wide;
-        (run, nibble_run_end(src, start + pos + 1, end, run) - start)
-    })
-}
-
-/// The first residue of `src` from `from` up to `end` whose class differs from that of a run of
-/// `wide` codes (true: codes that are not one base; false: codes of one base), or `end`: the
-/// classes of the codes a byte at a time ([`PAIR_CLASSES`]), after the low half of the byte of an
-/// odd `from`. The first bytes are tested one at a time, and so are all of them when they are
-/// few, so that a near boundary is found without a search; the bytes after them with one search
-/// ([`find_first`], LOSAT's speed), as `pack_iupacna` does with letters.
-#[inline(always)]
-fn nibble_run_end(src: &[u8], from: usize, end: usize, wide: bool) -> usize {
-    // The class bits of a byte inside the run.
-    let inside = if wide { 3 } else { 0 };
-    let mut first = from / 2;
-    if from % 2 == 1 {
-        if from == end {
-            return end;
-        }
-        if PAIR_CLASSES[src[first] as usize] & 1 != inside & 1 {
-            return from;
-        }
-        first += 1;
-    }
-    let last = end / 2;
-    let bytes = &src[first..last];
-    let differs = |&byte: &u8| PAIR_CLASSES[byte as usize] != inside;
-    let found = if bytes.len() < 10 {
-        bytes.iter().position(differs)
-    } else if let Some(at) = bytes[..2].iter().position(differs) {
-        Some(at)
+    let mut packer = Packer::new();
+    let mut inside = if is_one_base(nibble(src, start)) {
+        0
     } else {
-        let tail = &bytes[2..];
-        let at = if wide {
-            find_first(tail, holds_one_base)
-        } else {
-            find_first(tail, holds_ambiguous)
-        };
-        at.map(|at| at + 2)
+        3
     };
-    match found {
-        // The first residue of the byte, or else the second, has the other class.
-        Some(at) => {
-            let index = 2 * (first + at);
-            if PAIR_CLASSES[bytes[at] as usize] >> 1 != inside & 1 {
-                index
-            } else {
-                index + 1
-            }
-        }
-        // With `end` odd, the high half of the byte `last` is the last residue.
-        None if end % 2 == 1 && PAIR_CLASSES[src[last] as usize] >> 1 != inside & 1 => 2 * last,
-        None => end,
+    packer.add_boundary(0, Some(coding_of_class(inside == 3)));
+    // The residue after `start`: the low half of its byte when `start` is even.
+    let mut j = start / 2;
+    if start % 2 == 0 && start + 1 < end && (PAIR_CLASSES[src[j] as usize] ^ inside) & 1 != 0 {
+        flip(&mut packer, start, start + 1, &mut inside);
     }
+    j += 1;
+    // The whole bytes up to `end`, in each the high half, then the low half. While twelve or
+    // more are left, two bytes of the run's class in a row are followed by a search for the next
+    // byte with a code of the other class.
+    let last = end / 2;
+    let mut quiet = false;
+    while j + 12 <= last {
+        let differs = PAIR_CLASSES[src[j] as usize] ^ inside;
+        j += 1;
+        if differs != 0 {
+            quiet = false;
+            flip_byte(&mut packer, start, j - 1, &mut inside, differs);
+        } else if quiet {
+            let bytes = &src[j..last];
+            let found = if inside == 3 {
+                find_first(bytes, holds_one_base)
+            } else {
+                find_first(bytes, holds_ambiguous)
+            };
+            j += found.unwrap_or(bytes.len());
+            quiet = false;
+        } else {
+            quiet = true;
+        }
+    }
+    // The bytes left, one at a time.
+    while j < last {
+        let differs = PAIR_CLASSES[src[j] as usize] ^ inside;
+        if differs != 0 {
+            flip_byte(&mut packer, start, j, &mut inside, differs);
+        }
+        j += 1;
+    }
+    // With `end` odd, the high half of the byte `last` is the last residue.
+    if end % 2 == 1 && j == last && (PAIR_CLASSES[src[last] as usize] ^ inside) & 2 != 0 {
+        flip(&mut packer, start, 2 * last, &mut inside);
+    }
+    packer.add_boundary((end - start) as u32, None);
+    packer.segments()
 }
 
 /// `CPacker::Pack` once its scan has found the runs of one best coding: `next_run(pos)` gives
@@ -343,65 +358,78 @@ fn pack_runs(length: usize, mut next_run: impl FnMut(usize) -> (bool, usize)) ->
     if length == 0 {
         return Vec::new();
     }
-    let mut packer = Packer {
-        boundaries: Vec::new(),
-        steps: Vec::new(),
-        narrow_cost: 0,
-        wide_cost: 0,
-        last_narrow: WIDE_CODING,
-    };
+    let mut packer = Packer::new();
     let mut pos = 0;
     while pos < length {
         let (wide, end) = next_run(pos);
-        let coding = if wide {
-            Coding::Ncbi4na
-        } else {
-            Coding::Ncbi2na
-        };
-        packer.add_boundary(pos as u32, Some(coding));
+        packer.add_boundary(pos as u32, Some(coding_of_class(wide)));
         pos = end;
     }
     packer.add_boundary(length as u32, None);
+    packer.segments()
+}
 
-    // The best arrangement's codings, from the last segment back: each step becomes 1
-    // where the segment it starts is NCBI4na.
-    let mut narrow = packer.narrow_cost < packer.wide_cost;
-    for step in packer.steps.iter_mut().rev() {
-        let bits = *step;
-        let wide = !narrow || bits & STEP_NEW_WIDE != 0;
-        narrow = if narrow {
-            bits & STEP_NARROW_FROM_WIDE == 0
-        } else {
-            bits & STEP_WIDE_FROM_NARROW != 0 && bits & STEP_NARROW_FROM_WIDE == 0
-        };
-        *step = u8::from(wide);
+/// The coding of a residue of the class `wide` (not one base: NCBI4na; one base: NCBI2na).
+#[inline(always)]
+fn coding_of_class(wide: bool) -> Coding {
+    if wide {
+        Coding::Ncbi4na
+    } else {
+        Coding::Ncbi2na
     }
-    let coding_of = |wide: u8| {
-        if wide == 1 {
-            Coding::Ncbi4na
-        } else {
-            Coding::Ncbi2na
-        }
-    };
+}
 
-    let steps = &packer.steps;
-    let n = steps.len();
-    let mut segments = Vec::new();
-    let mut i = 0;
-    while i < n {
-        let wide = steps[i];
-        let start = packer.boundaries[i];
-        while i < n - 1 && steps[i + 1] == wide {
+impl Packer {
+    fn new() -> Self {
+        Self {
+            boundaries: Vec::new(),
+            steps: Vec::new(),
+            narrow_cost: 0,
+            wide_cost: 0,
+            last_narrow: WIDE_CODING,
+        }
+    }
+
+    /// The segments of the best arrangement, once the last boundary (the end of the residues)
+    /// is added: each of the codings of its runs.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:1124-1192
+    /// Inlined into each scan, as `add_boundary` (LOSAT's speed: a short record's call and copy
+    /// of the packer cost more than its steps).
+    #[inline(always)]
+    fn segments(mut self) -> Vec<Segment> {
+        // The best arrangement's codings, from the last segment back: each step becomes 1
+        // where the segment it starts is NCBI4na.
+        let mut narrow = self.narrow_cost < self.wide_cost;
+        for step in self.steps.iter_mut().rev() {
+            let bits = *step;
+            let wide = !narrow || bits & STEP_NEW_WIDE != 0;
+            narrow = if narrow {
+                bits & STEP_NARROW_FROM_WIDE == 0
+            } else {
+                bits & STEP_WIDE_FROM_NARROW != 0 && bits & STEP_NARROW_FROM_WIDE == 0
+            };
+            *step = u8::from(wide);
+        }
+        let steps = &self.steps;
+        let n = steps.len();
+        let mut segments = Vec::new();
+        let mut i = 0;
+        while i < n {
+            let wide = steps[i];
+            let start = self.boundaries[i];
+            while i < n - 1 && steps[i + 1] == wide {
+                i += 1;
+            }
+            segments.push(Segment {
+                coding: coding_of_class(wide == 1),
+                start,
+                length: self.boundaries[i + 1] - start,
+            });
             i += 1;
         }
-        segments.push(Segment {
-            coding: coding_of(wide),
-            start,
-            length: packer.boundaries[i + 1] - start,
-        });
-        i += 1;
+        segments
     }
-    segments
 }
 
 /// The NCBI2na code of the unambiguous upper-case IUPACna letters (`A`: 0, `C`: 1, `G`: 2, `T`

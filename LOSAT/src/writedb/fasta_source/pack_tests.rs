@@ -330,7 +330,7 @@ fn codes_of(letters: &[u8]) -> Vec<u8> {
 
 /// The segments of `pack_ncbi4na` over the codes of any span of residues are those of
 /// `pack_iupacna` over the span's letters: runs of every class of every length around the
-/// search's edges and the block sizes (1 to 5, 19 to 21, 63 to 65, 4,095 to 4,097), boundaries
+/// search's edges and the block sizes (1 to 5, 19 to 25, 63 to 65, 4,095 to 4,097), boundaries
 /// at even and odd places, spans that start and end in either half of a byte, and every length
 /// up to 300.
 #[test]
@@ -342,7 +342,9 @@ fn segments_of_codes_are_those_of_letters() {
         state ^= state << 17;
         state % bound
     };
-    const RUNS: [usize; 15] = [1, 2, 3, 4, 5, 19, 20, 21, 63, 64, 65, 4095, 4096, 4097, 600];
+    const RUNS: [usize; 19] = [
+        1, 2, 3, 4, 5, 19, 20, 21, 22, 23, 24, 25, 63, 64, 65, 4095, 4096, 4097, 600,
+    ];
     let check = |letters: &[u8], start: usize, end: usize| {
         let codes = codes_of(letters);
         assert_eq!(

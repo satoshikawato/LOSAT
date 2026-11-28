@@ -106,8 +106,9 @@ const proteinAlgorithmLabel = (choice: string): string =>
 const activeModeTab = computed(() => modeTabOf(state.value.program));
 const summaryParts = computed(() => {
   void state.value; // recompute with the draft
-  // A draft whose argv prints the command line's help or version says so, not that it searches (line WQA's D20, 2026-11-23).
-  const prints = props.draft.printsKind();
+  // A draft whose argv prints the command line's help or version says so, not that it searches (line WQA's D20, 2026-11-23),
+  // from the answer that the button's count reads, so both change together (line WQA's D33, R2 L-c).
+  const prints = props.draft.shownPrintsKind();
   if (prints !== null) return printSummaryParts(program.value, prints);
   const database =
     state.value.subjectSource === 'database'

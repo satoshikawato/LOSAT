@@ -6,7 +6,7 @@ import type { DirectoryFile } from 'losat/domain';
 import { splitOptions } from '../domain/argv';
 import { normalizeRunPath } from '../domain/blast-db';
 import type { FieldValue, FormValues } from '../domain/parameters';
-import { buildBlastFormatterArgv } from '../domain/tool-argv';
+import { buildBlastFormatterArgv, runFileNames } from '../domain/tool-argv';
 import { BLAST_FORMATTER_DEFAULT_OUTFMT, blastFormatterOptionParameters, toolPrintsKind } from '../domain/tools';
 import type { SessionArchiveEntry, ToolDirectoryFile, ToolRequest } from './coordinator';
 import { ToolDraftCore, type ToolDraftCoreDeps, type ToolFormState } from './tool-draft-core';
@@ -211,6 +211,7 @@ export class BlastFormatterDraft extends ToolDraftCore<BlastFormatterDraftState>
       values: state.values,
       ...(state.description === undefined ? {} : { description: state.description }),
       extra,
+      fileNames: runFileNames(state.runFiles),
     });
   }
 

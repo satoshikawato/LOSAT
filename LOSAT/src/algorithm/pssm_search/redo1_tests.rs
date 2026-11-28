@@ -68,3 +68,22 @@ fn the_preliminary_near_identical_test_is_ncbis() {
     assert!(!preliminary_test_near_identical(100, &short, 1.0));
     assert!(preliminary_test_near_identical(20, &short, 1.0));
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-116
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687-3733
+/// A significant list's scores are divided by the scaling factor and get bit scores; RPS-BLAST's
+/// list that is not (every list under an `-evalue` of NaN) keeps the redo's scaled scores and the
+/// bit score 0, as NCBI's rpsblast writes them (`0.0 bits (880)` where the significant score is
+/// 28).
+#[test]
+fn a_raw_list_keeps_the_scaled_score_and_a_bit_score_of_0() {
+    use super::Kept;
+    assert_eq!(Kept::Normalized.score(880), 28);
+    assert_eq!(Kept::Raw.score(880), 880);
+    assert_eq!(Kept::Raw.bit_score(880, 0.267, -3.34), 0.0);
+    let bits = Kept::Normalized.bit_score(28, 0.267 / 32.0, -3.34);
+    assert_eq!(
+        bits,
+        (28.0 * (0.267 / 32.0) * 32.0 - -3.34) / std::f64::consts::LN_2
+    );
+}

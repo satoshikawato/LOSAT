@@ -1,0 +1,565 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= allx a query of X only
+
+Length=60
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= oj_tk TK-TMK with an O at 30 and a J at 60
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...   0.0    0.0  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...   0.0    0.0  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...   0.0    0.0  
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score =  0.0 bits (25607),  Expect = 3e-111, Method: Composition-based stats.
+ Identities = 188/190 (99%), Positives = 188/190 (99%), Gaps = 0/190 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYOKNIYQQENGGNKHCLFVKHSLETRYGCGTJ  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTY KNIYQQENGGNKHCLFVKHSLETRYGCGT 
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  181  AEMYAAACRD  190
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score =  0.0 bits (758),  Expect = 17, Method: Composition-based stats.
+ Identities = 4/27 (15%), Positives = 10/27 (37%), Gaps = 0/27 (0%)
+
+Query  290  VMDRYYYSGIVFSLARGVDTVEWCSAS  316
+             ++  Y  G    +    + +E C+  
+Sbjct  50   SLETRYGCGTGTIVTHAGEVIEGCTTV  76
+
+
+ Score =  0.0 bits (692),  Expect = 31, Method: Composition-based stats.
+ Identities = 6/14 (43%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+
+Query  214  GKSTQAKLLLTNKN  227
+            GKST  K +   +N
+Sbjct  25   GKSTYLKNIYQQEN  38
+
+
+ Score =  0.0 bits (375),  Expect = 510, Method: Composition-based stats.
+ Identities = 1/3 (33%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+
+Query  271  NRW  273
+             R+
+Sbjct  53   TRY  55
+
+
+ Score =  0.0 bits (237),  Expect = 1715, Method: Composition-based stats.
+ Identities = 3/6 (50%), Positives = 3/6 (50%), Gaps = 0/6 (0%)
+
+Query  317  DEGLPQ  322
+            DEG   
+Sbjct  96   DEGQFF  101
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score =  0.0 bits (1216),  Expect = 0.30, Method: Composition-based stats.
+ Identities = 10/35 (29%), Positives = 15/35 (43%), Gaps = 6/35 (17%)
+
+Query  216  STQAKLLLTNKNSPLY--GGEYMCFPD----RSSH  244
+              +A+ L    NS     G  Y+CF D    +S+ 
+Sbjct  106  VVKARALFDQINSARIETGTPYVCFKDTINRKSNQ  140
+
+
+ Score =  0.0 bits (856),  Expect = 7.4, Method: Composition-based stats.
+ Identities = 5/11 (45%), Positives = 8/11 (73%), Gaps = 0/11 (0%)
+
+Query  355  RARALFLDLAN  365
+            +ARALF  + +
+Sbjct  108  KARALFDQINS  118
+
+
+ Score =  0.0 bits (848),  Expect = 7.9, Method: Composition-based stats.
+ Identities = 5/20 (25%), Positives = 10/20 (50%), Gaps = 0/20 (0%)
+
+Query  228  SPLYGGEYMCFPDRSSHTGK  247
+            S ++G E+    ++    GK
+Sbjct  83   SDVHGEEFKALYEKYEAEGK  102
+
+
+ Score =  0.0 bits (813),  Expect = 11, Method: Composition-based stats.
+ Identities = 3/7 (43%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
+
+Query  87  PEVVDVI  93
+            +V D I
+Sbjct  29  LDVKDFI  35
+
+
+ Score =  0.0 bits (759),  Expect = 17, Method: Composition-based stats.
+ Identities = 2/9 (22%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+
+Query  169  NDNDNNVIC  177
+            +D++   +C
+Sbjct  159  SDSEETAVC  167
+
+
+ Score =  0.0 bits (753),  Expect = 18, Method: Composition-based stats.
+ Identities = 5/24 (21%), Positives = 10/24 (42%), Gaps = 4/24 (17%)
+
+Query  31   KNIYQQENGGNKHCLFVKHSLETR  54
+            K +Y++     K     K  ++ R
+Sbjct  91   KALYEKYEAEGK----GKEVVKAR  110
+
+
+ Score =  0.0 bits (692),  Expect = 32, Method: Composition-based stats.
+ Identities = 3/4 (75%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
+
+Query  39  GGNK  42
+           GG+K
+Sbjct  12  GGDK  15
+
+
+ Score =  0.0 bits (630),  Expect = 55, Method: Composition-based stats.
+ Identities = 10/49 (20%), Positives = 20/49 (41%), Gaps = 13/49 (27%)
+
+Query  349  TNSIQERARAL-------------FLDLANKDEKNVWIKVDARGTIEEV  384
+            ++   ER +A                D+  ++ K ++ K +A G  +EV
+Sbjct  58   SDLFMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEV  106
+
+
+ Score =  0.0 bits (576),  Expect = 88, Method: Composition-based stats.
+ Identities = 3/6 (50%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+
+Query  153  ICKIDT  158
+            +C  DT
+Sbjct  128  VCFKDT  133
+
+
+ Score =  0.0 bits (518),  Expect = 147, Method: Composition-based stats.
+ Identities = 4/5 (80%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
+
+Query  36   QENGG  40
+            QEN G
+Sbjct  140  QENVG  144
+
+
+ Score =  0.0 bits (484),  Expect = 199, Method: Composition-based stats.
+ Identities = 3/7 (43%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
+
+Query  308  DTVEWCS  314
+            DT+   S
+Sbjct  132  DTINRKS  138
+
+
+ Score =  0.0 bits (441),  Expect = 290, Method: Composition-based stats.
+ Identities = 2/2 (100%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+
+Query  139  PY  140
+            PY
+Sbjct  126  PY  127
+
+
+ Score =  0.0 bits (431),  Expect = 317, Method: Composition-based stats.
+ Identities = 2/15 (13%), Positives = 7/15 (47%), Gaps = 0/15 (0%)
+
+Query  153  ICKIDTKEAPFTVRF  167
+            +C + +      V++
+Sbjct  166  VCNLASIAVNKFVKY  180
+
+
+ Score =  0.0 bits (391),  Expect = 451, Method: Composition-based stats.
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+
+Query  88   EVV  90
+            E+V
+Sbjct  154  EIV  156
+
+
+ Score =  0.0 bits (352),  Expect = 636, Method: Composition-based stats.
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+
+Query  176  IC  177
+            +C
+Sbjct  151  LC  152
+
+
+ Score =  0.0 bits (331),  Expect = 765, Method: Composition-based stats.
+ Identities = 1/3 (33%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+
+Query  209  GGD  211
+            G +
+Sbjct  42   GNE  44
+
+
+ Score =  0.0 bits (214),  Expect = 2142, Method: Composition-based stats.
+ Identities = 2/7 (29%), Positives = 2/7 (29%), Gaps = 0/7 (0%)
+
+Query  186  AACRDCY  192
+            A C    
+Sbjct  165  AVCNLAS  171
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score =  0.0 bits (834),  Expect = 8.8, Method: Composition-based stats.
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+
+Query  180  GAEMYAAACR  189
+            GA + A  CR
+Sbjct  149  GAHITAGKCR  158
+
+
+ Score =  0.0 bits (701),  Expect = 29, Method: Composition-based stats.
+ Identities = 3/8 (38%), Positives = 3/8 (38%), Gaps = 0/8 (0%)
+
+Query  360  FLDLANKD  367
+             L    KD
+Sbjct  163  ILSELEKD  170
+
+
+ Score =  0.0 bits (691),  Expect = 31, Method: Composition-based stats.
+ Identities = 4/13 (31%), Positives = 6/13 (46%), Gaps = 0/13 (0%)
+
+Query  160  EAPFTVRFGNDND  172
+            E    +RF  + D
+Sbjct  66   EESLGLRFIENLD  78
+
+
+ Score =  0.0 bits (682),  Expect = 34, Method: Composition-based stats.
+ Identities = 6/16 (38%), Positives = 7/16 (44%), Gaps = 0/16 (0%)
+
+Query  249  INDYLTKKIELDDHAA  264
+            IN     K+  D H A
+Sbjct  112  INMQFAAKVNDDMHIA  127
+
+
+ Score =  0.0 bits (587),  Expect = 78, Method: Composition-based stats.
+ Identities = 4/10 (40%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+
+Query  361  LDLANKDEKN  370
+            +D+A    KN
+Sbjct  44   IDIAVASWKN  53
+
+
+ Score =  0.0 bits (550),  Expect = 108, Method: Composition-based stats.
+ Identities = 7/19 (37%), Positives = 10/19 (53%), Gaps = 2/19 (11%)
+
+Query  205  VVLEGGDRCGKSTQAKLLL  223
+            +VLE       +T + LLL
+Sbjct  11   LVLEKMKNK--TTDSLLLL  27
+
+
+ Score =  0.0 bits (546),  Expect = 112, Method: Composition-based stats.
+ Identities = 3/4 (75%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
+
+Query  94  LIDE  97
+           +IDE
+Sbjct  29  VIDE  32
+
+
+ Score =  0.0 bits (507),  Expect = 158, Method: Composition-based stats.
+ Identities = 10/40 (25%), Positives = 16/40 (40%), Gaps = 2/40 (5%)
+
+Query  275  VCSKIKQLLDDGIHVVMDRYYYSGIVFSLARGVDTV--EW  312
+            V  K+K    D + ++      + IV S  R +D     W
+Sbjct  12   VLEKMKNKTTDSLLLLDVIDECNQIVLSEYRPIDIAVASW  51
+
+
+ Score =  0.0 bits (402),  Expect = 399, Method: Composition-based stats.
+ Identities = 1/3 (33%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+
+Query  313  CSA  315
+             +A
+Sbjct  116  FAA  118
+
+
+ Score =  0.0 bits (389),  Expect = 447, Method: Composition-based stats.
+ Identities = 3/3 (100%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+
+Query  381  IEE  383
+            IEE
+Sbjct  65   IEE  67
+
+
+ Score =  0.0 bits (361),  Expect = 572, Method: Composition-based stats.
+ Identities = 1/1 (100%), Positives = 1/1 (100%), Gaps = 0/1 (0%)
+
+Query  273  W  273
+            W
+Sbjct  184  W  184
+
+
+ Score =  0.0 bits (318),  Expect = 835, Method: Composition-based stats.
+ Identities = 0/3 (0%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+
+Query  172  DNN  174
+            + +
+Sbjct  76   NLD  78
+
+
+ Score =  0.0 bits (62),  Expect = 7897, Method: Composition-based stats.
+ Identities = 2/6 (33%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+
+Query  323  PDLVLL  328
+            P++V  
+Sbjct  106  PEIVCD  111
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.405    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 169824
+
+
+Query= rr_part ribonucleotide reductase residues 281-520
+
+Length=240
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...   0.0    0.0  
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...   0.0    0.0  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...   0.0    0.0  
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score =  0.0 bits (28431),  Expect = 3e-127, Method: Composition-based stats.
+ Identities = 180/180 (100%), Positives = 180/180 (100%), Gaps = 0/180 (0%)
+
+Query  21   IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDL  80
+            IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDL
+Sbjct  1    IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDL  60
+
+Query  81   FMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSAR  140
+            FMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSAR
+Sbjct  61   FMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSAR  120
+
+Query  141  IETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY  200
+            IETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY
+Sbjct  121  IETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY  180
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score =  0.0 bits (1106),  Expect = 0.45, Method: Composition-based stats.
+ Identities = 10/29 (34%), Positives = 13/29 (45%), Gaps = 1/29 (3%)
+
+Query  200  YSPIPSLRPYVDYREMKRVVKIMTRNLDK  228
+            +SPI  L PY +    K   K M   +D 
+Sbjct  131  FSPIHKLLPYTNSIV-KLASKCMICKIDT  158
+
+
+ Score =  0.0 bits (591),  Expect = 45, Method: Composition-based stats.
+ Identities = 4/5 (80%), Positives = 5/5 (100%), Gaps = 0/5 (0%)
+
+Query  197  FVKYS  201
+            FVK+S
+Sbjct  46   FVKHS  50
+
+
+ Score =  0.0 bits (528),  Expect = 80, Method: Composition-based stats.
+ Identities = 8/36 (22%), Positives = 12/36 (33%), Gaps = 0/36 (0%)
+
+Query  112  ALYEKYEAEGKGKEVVKARALFDQINSARIETGTPY  147
+             L  +   +GK   +       DQ   + I    PY
+Sbjct  105  VLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPY  140
+
+
+ Score =  0.0 bits (523),  Expect = 83, Method: Composition-based stats.
+ Identities = 2/9 (22%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+
+Query  179  SDSEETAVC  187
+            +D++   +C
+Sbjct  169  NDNDNNVIC  177
+
+
+ Score =  0.0 bits (434),  Expect = 184, Method: Composition-based stats.
+ Identities = 3/27 (11%), Positives = 10/27 (37%), Gaps = 0/27 (0%)
+
+Query  69   RDLFPAIWVSDLFMERVKAGKNWSLMC  95
+            + +F  I     +   +    +  ++C
+Sbjct  128  QQMFSPIHKLLPYTNSIVKLASKCMIC  154
+
+
+ Score =  0.0 bits (429),  Expect = 192, Method: Composition-based stats.
+ Identities = 5/14 (36%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+
+Query  227  DKVIDVNFYAVDKT  240
+            DK   +   A+D T
+Sbjct  112  DKGKRIVIAALDGT  125
+
+
+ Score =  0.0 bits (420),  Expect = 208, Method: Composition-based stats.
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+
+Query  208  PY  209
+            P+
+Sbjct  162  PF  163
+
+
+ Score =  0.0 bits (403),  Expect = 242, Method: Composition-based stats.
+ Identities = 1/4 (25%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+
+Query  31   QGGD  34
+            + G+
+Sbjct  166  RFGN  169
+
+
+ Score =  0.0 bits (354),  Expect = 374, Method: Composition-based stats.
+ Identities = 2/4 (50%), Positives = 2/4 (50%), Gaps = 0/4 (0%)
+
+Query  65   DLRT  68
+            DL  
+Sbjct  103  DLVL  106
+
+
+ Score =  0.0 bits (344),  Expect = 409, Method: Composition-based stats.
+ Identities = 1/2 (50%), Positives = 2/2 (100%), Gaps = 0/2 (0%)
+
+Query  171  LC  172
+            +C
+Sbjct  176  IC  177
+
+
+ Score =  0.0 bits (299),  Expect = 610, Method: Composition-based stats.
+ Identities = 1/3 (33%), Positives = 2/3 (67%), Gaps = 0/3 (0%)
+
+Query  172  CTE  174
+            C +
+Sbjct  188  CRD  190
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score =  0.0 bits (801),  Expect = 6.9, Method: Composition-based stats.
+ Identities = 7/14 (50%), Positives = 9/14 (64%), Gaps = 1/14 (7%)
+
+Query  70   DLFPAIWVSDLFME  83
+            D FP I V D+ M+
+Sbjct  103  DYFPEI-VCDINMQ  115
+
+
+ Score =  0.0 bits (640),  Expect = 29, Method: Composition-based stats.
+ Identities = 8/36 (22%), Positives = 16/36 (44%), Gaps = 5/36 (14%)
+
+Query  98   ECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALF  133
+            +C  L     E+  +  EK  +  K +E+++    F
+Sbjct  156  KCRTL-----EDILSELEKDFSVEKDEEIIRTHWTF  186
+
+
+ Score =  0.0 bits (617),  Expect = 36, Method: Composition-based stats.
+ Identities = 10/28 (36%), Positives = 14/28 (50%), Gaps = 3/28 (11%)
+
+Query  49  LDVKDFIDCRKNAGNEDLRTRDLFPAIW  76
+           LDV D  +C +   +E  R  D+  A W
+Sbjct  27  LDVID--ECNQIVLSE-YRPIDIAVASW  51
+
+
+ Score =  0.0 bits (609),  Expect = 38, Method: Composition-based stats.
+ Identities = 4/9 (44%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+
+Query  81  FMERVKAGK  89
+           F+E + A K
+Sbjct  73  FIENLDAEK  81
+
+
+ Score =  0.0 bits (567),  Expect = 56, Method: Composition-based stats.
+ Identities = 4/9 (44%), Positives = 5/9 (56%), Gaps = 1/9 (11%)
+
+Query  52   KDFIDCRKN  60
+            KDF    K+
+Sbjct  169  KDF-SVEKD  176
+
+
+ Score =  0.0 bits (532),  Expect = 76, Method: Composition-based stats.
+ Identities = 5/19 (26%), Positives = 6/19 (32%), Gaps = 3/19 (16%)
+
+Query  192  IAVNKFVKY---SPIPSLR  207
+            IAV  +         P  R
+Sbjct  46   IAVASWKNSNSNRQTPITR  64
+
+
+ Score =  0.0 bits (439),  Expect = 174, Method: Composition-based stats.
+ Identities = 1/4 (25%), Positives = 3/4 (75%), Gaps = 0/4 (0%)
+
+Query  90   NWSL  93
+            +W+ 
+Sbjct  183  HWTF  186
+
+
+ Score =  0.0 bits (430),  Expect = 189, Method: Composition-based stats.
+ Identities = 2/3 (67%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+
+Query  211  DYR  213
+            +YR
+Sbjct  40   EYR  42
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.404    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 99803
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

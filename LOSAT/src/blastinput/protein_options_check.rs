@@ -45,8 +45,9 @@ pub struct ProteinOptionsCheck<'a> {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3266
 /// LOSAT's limit of `-evalue` for blastp, psiblast, rpsblast and tblastn (`program`, in
 /// capitals), checked where NCBI starts the search (decision D12 of
-/// docs/evidence/losat_web_e2e/AUTHORITY.md), with the composition-based redo
-/// (`composition_redo`: modes 1 to 3 after IDENTITY's reset):
+/// docs/evidence/losat_web_e2e/AUTHORITY.md), with a composition-based redo that can put a list
+/// without HSPs into the hit list (`composition_redo`: modes 1 to 3 after IDENTITY's reset, not
+/// RPSBLAST's; `composition_redo_reads_empty_lists`):
 ///
 /// - An infinite value (`+inf`, `1e999`): `check_infinite_evalue`.
 /// - Exactly DBL_MAX (1.7976931348623157e308): a list whose HSPs all fail the redo keeps the best
@@ -58,7 +59,8 @@ pub struct ProteinOptionsCheck<'a> {
 ///   it.
 ///
 /// An `-evalue` of NaN, which NCBI's option check (`<= 0`) lets pass, runs in every mode: the
-/// redo's test of the best e-value against it is false, so NCBI keeps no match there.
+/// redo's test of the best e-value against it is false, so a database search keeps no match there
+/// and RPS-BLAST's traceback keeps every list as the redo made it (`redo1::Kept::Raw`).
 pub(crate) fn check_evalue_limit(
     evalue: f64,
     composition_redo: bool,
@@ -72,6 +74,18 @@ pub(crate) fn check_evalue_limit(
         );
     }
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1238-1275
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3724-3733
+/// Whether a search's composition-based redo (`composition_redo`) can put a list without HSPs
+/// into the hit list, where NCBI crashes on some inputs with an `-evalue` of DBL_MAX or an
+/// infinite one (decision D12): the database searches of BLASTP, PSIBLAST, TBLASTN and BLASTX.
+/// RPS-BLAST's traceback (`rps`: RPSBLAST and RPSTBLASTN) gives the redo no sequence source, so
+/// the redo hands every list back, and the traceback drops a list without HSPs before the hit
+/// list; NCBI runs both values there (line RG item X-evalue-nan).
+pub(crate) fn composition_redo_reads_empty_lists(composition_redo: bool, rps: bool) -> bool {
+    composition_redo && !rps
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687

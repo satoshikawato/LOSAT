@@ -300,7 +300,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A hit on a profile whose consensus letters in `.psq` are more or fewer than its score columns in `.rps`, where NCBI's traceback then reads past the profile's rows, composition tables, copy of the consensus or score matrix, or starts an alignment past the consensus | Refused, for the query batch of that hit. NCBI crashes or reads memory it does not own. Other hits on such a profile are searched as NCBI searches them. `makeprofiledb` writes such a profile from a scored profile whose sequence is nucleotide-coded or of another length. |
 | `rpsblast` in the library API and the Web engine | Refused. |
 | The profile-database cases named in Alias files above | Refused. |
-| An infinite `-evalue` or one of 1.7976931348623157e308 with composition-based statistics (the default of `rpsblast`) | Refused, as in `blastp`. |
 | `-db` with a reported profile whose stored title holds a byte outside `' '` to `'~'` | Refused in every format, including `-outfmt` 8, 9, 11 and 12 (NCBI's `CLocalRPSBlast` opens a fresh `CSeqDB` per query batch and per volume and merges volume alignments before `PruneSeqalign`), except for a query batch that ends at a header NCBI cannot read (which writes NCBI's messages for the titles read before it, then NCBI's error, in any format). |
 
 NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number or an empty `.aux` come as in NCBI (exit status 3).
@@ -314,7 +313,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-outfmt` 17, 19 and 21, and 13 and 14 without `-out` | NCBI's own errors. |
 | `-ungapped` without composition-based statistics | Refused. NCBI's `rpstblastn` crashes after the search. With composition-based statistics it gets NCBI's own error. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
-| An infinite `-evalue` with composition-based statistics (the default of `rpstblastn`) | Refused, as in `blastx`. |
 | `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-subject` | NCBI's argument error, as in NCBI (usage and `Unknown argument: "subject"`, exit status 1). It is not an `rpstblastn` option. |
 | `-outfmt 1` to `5` or `13` to `16`, `-outfmt 18` when the profile has a taxid, or `-outfmt 20` with a field of the alignment (such as `qstart`, `length` or the default fields) or a field that shows more of the profile than its id (`sallseqid`, `sallacc`, `stitle`, `salltitles`, `staxids`, `slen`, or a taxonomy field when the profile has a taxid), with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI stops with an exception (after half a document in BLAST XML, after the header line in `-outfmt 20`) or takes the query for the entry. `-outfmt 8`, `9`, `11` and `12`, and `-outfmt 18` and `20` otherwise (such as `20 qseqid sseqid sacc evalue`), write NCBI's bytes (outfmt 11 apart from its `ident`: `LOSAT 0.2.0` where NCBI writes `2.17.0+`). |

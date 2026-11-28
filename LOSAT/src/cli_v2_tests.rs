@@ -2192,8 +2192,8 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
 
 // Line RG item X-evalue-nan: BLASTX and RPSTBLASTN search an `-evalue` of NaN, which NCBI's option
 // check lets pass (they refused it), and an infinite one without the composition-based redo; with
-// the redo (BLASTX's default mode 2, RPSTBLASTN's 1) an infinite one is refused as in blastp
-// (decision D12, `protein_options_check::check_infinite_evalue`). `-inf` stops at NCBI's check.
+// BLASTX's redo (its default mode 2) an infinite one is refused as in blastp (decision D12,
+// `protein_options_check::check_infinite_evalue`); RPSTBLASTN's redo takes it. `-inf` stops at NCBI's check.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518-1523
 #[test]
 fn blastx_and_rpstblastn_search_a_nan_evalue_and_an_infinite_one_without_the_redo() {
@@ -2222,9 +2222,14 @@ fn blastx_and_rpstblastn_search_a_nan_evalue_and_an_infinite_one_without_the_red
     ] {
         blastx(words).unwrap_or_else(|e| panic!("{words:?}: {e:#}"));
     }
+    // RPS-BLAST's traceback drops a list without HSPs itself: its redo takes an infinite
+    // `-evalue` and DBL_MAX too (`protein_options_check::composition_redo_reads_empty_lists`).
     for words in [
         &["-evalue", "-nan"][..],
         &["-evalue", "+inf", "-comp_based_stats", "0"],
+        &["-evalue", "+inf"],
+        &["-evalue", "1e999", "-comp_based_stats", "2"],
+        &["-evalue", "1.7976931348623157e308"],
     ] {
         rpstblastn(words).unwrap_or_else(|e| panic!("{words:?}: {e:#}"));
     }
@@ -2239,12 +2244,6 @@ fn blastx_and_rpstblastn_search_a_nan_evalue_and_an_infinite_one_without_the_red
             "{words:?}: {error}"
         );
     }
-    let error = format!("{:#}", rpstblastn(&["-evalue", "+inf"]).unwrap_err());
-    assert!(
-        error.contains("an infinite -evalue (inf) with composition-based statistics")
-            && error.contains("not supported by LOSAT's RPSTBLASTN"),
-        "{error}"
-    );
     for words in [
         &["-evalue", "-inf"][..],
         &["-evalue", "-1e999", "-comp_based_stats", "0"],

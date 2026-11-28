@@ -2084,11 +2084,15 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
     // LOSAT's blastp engine does not implement. `-ungapped` is searched (series NP, O4b: the
     // ungapped search, `prelim_kernel::BlastpPrelimKernel::ungapped_subject`).
-    // An infinite -evalue, or DBL_MAX with the composition-based redo (decision D12;
-    // `protein_options_check::check_evalue_limit`). A smaller -evalue such as 1e308 runs.
+    // An infinite -evalue or DBL_MAX with the composition-based redo of BLASTP and PSIBLAST
+    // (decision D12; `protein_options_check::check_evalue_limit`). A smaller -evalue such as
+    // 1e308 runs, and RPSBLAST's redo takes both (line RG item X-evalue-nan).
     crate::blastinput::protein_options_check::check_evalue_limit(
         args.evalue,
-        args.comp_based_stats.is_enabled(),
+        crate::blastinput::protein_options_check::composition_redo_reads_empty_lists(
+            args.comp_based_stats.is_enabled(),
+            args.app == BlastpApp::Rpsblast,
+        ),
         program,
     )?;
     // psiblast `-phi_pattern` (item PS8a): LOSAT's refusals of a pattern whose compilation
@@ -3521,13 +3525,19 @@ fn x_tested_once(memo: &mut Vec<u8>, index: usize, test: impl FnOnce() -> bool) 
 /// `num_positives` of the search's letters (blast_seqalign.cpp:1199-1222), and the outfmt 0
 /// report reads that `num_ident` back for `-sorthits` and `-sorthsps`
 /// (`PairwiseHit::seqalign_num_ident`): the counts of each HSP that the recount changes are
-/// kept in `engine_counts` first.
+/// kept in `engine_counts` first. With `engine_uncounted` (rpsblast's composition-based redo
+/// under an `-evalue` of NaN, whose lists all come back raw, `redo1::Kept::Raw`) the engine
+/// counted no HSP's identities and positives: every HSP's engine counts are 0 and its counts
+/// stay those of its letters.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687-3733
 fn recount_shown_identities(
     hit_lists: &mut [Option<BlastpHitList>],
     queries: ShownQueries<'_>,
     subjects: ShownSubjects<'_>,
     matrix: ScoringMatrix,
     searched_other_letters: bool,
+    engine_uncounted: bool,
     engine_counts: &mut super::seqalign::EngineCounts,
 ) {
     // EXPERIMENT (LOSAT_X_BPRECOUNTO): the answers of the tests by query and by subject index
@@ -3551,6 +3561,9 @@ fn recount_shown_identities(
                     .map(move |(hsp_index, hsp)| (list_index, hsp_index, hsp))
             })
         {
+            if engine_uncounted {
+                engine_counts.save((q_idx as u32, list_index as u32, hsp_index as u32), (0, 0));
+            }
             let (Some(query), Some(subject)) = (
                 queries.letters(hsp.q_idx as usize),
                 subjects.letters(hsp.s_idx as usize),
@@ -3626,7 +3639,8 @@ fn recount_shown_identities(
                 matrix,
                 query.case(),
             );
-            if (num_ident, num_positives) != (hsp.num_ident, hsp.num_positives) {
+            if !engine_uncounted && (num_ident, num_positives) != (hsp.num_ident, hsp.num_positives)
+            {
                 engine_counts.save(
                     (q_idx as u32, list_index as u32, hsp_index as u32),
                     (hsp.num_ident, hsp.num_positives),

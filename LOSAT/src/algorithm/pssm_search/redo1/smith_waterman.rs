@@ -14,9 +14,9 @@
 //! machine code (DECISIONS 11 and 63 of line PS); the evaluation is a copy (`evaluate`).
 
 use super::{
-    blast_nint, frame_range, frame_windows, old_test_near_identical,
-    preliminary_test_near_identical, reap_contained, score_compare, window_composition, Align,
-    FrameSubject, RedoMatch, RedoRun, Redone, SCALING_FACTOR,
+    frame_range, frame_windows, old_test_near_identical, preliminary_test_near_identical,
+    reap_contained, score_compare, window_composition, Align, FrameSubject, RedoMatch, RedoRun,
+    Redone, SCALING_FACTOR,
 };
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{BlastCompoHeap, BlastpHspList};
@@ -435,7 +435,7 @@ impl RedoMatch<'_> {
             hsp.e_value = self.stats.e_value(hsp.align.score, &run.karlin, m, n);
             best_evalue = best_evalue.min(hsp.e_value);
         }
-        let best_score = self.reap_by_expect(&mut redone, best_evalue)?;
+        let (best_score, kept) = self.reap_by_expect(&mut redone, best_evalue)?;
         let template = &hsps[0];
         let mut hsp_list = BlastpHspList {
             oid,
@@ -449,7 +449,7 @@ impl RedoMatch<'_> {
             num,
         } in redone
         {
-            let score = blast_nint(align.score as f64 / SCALING_FACTOR);
+            let score = kept.score(align.score);
             let traced = BlastpPreliminaryHsp {
                 query_start: align.query_start,
                 query_end: align.query_end,
@@ -474,8 +474,7 @@ impl RedoMatch<'_> {
             );
             hsp.e_value = e_value;
             hsp.num = num;
-            hsp.bit_score = (score as f64 * run.karlin.lambda * SCALING_FACTOR - run.log_k)
-                / std::f64::consts::LN_2;
+            hsp.bit_score = kept.bit_score(score, run.karlin.lambda, run.log_k);
             hsp.comp_adjustment_method = match align.rule {
                 EMatrixAdjustRule::DontAdjustMatrix => 0,
                 EMatrixAdjustRule::CompoScaleOldMatrix => 1,

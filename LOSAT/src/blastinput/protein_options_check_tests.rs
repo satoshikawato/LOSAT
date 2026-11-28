@@ -45,3 +45,25 @@ fn psiblast_takes_word_sizes_below_5_and_the_standard_matrices() {
     );
     assert!(!identity.contains("\nIDENTITY \n"), "{identity}");
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1238-1275
+/// Line RG item X-evalue-nan: only a database search's composition-based redo can put a list
+/// without HSPs into the hit list (decision D12); RPS-BLAST's traceback drops one itself, so its
+/// redo takes an infinite `-evalue` and DBL_MAX, and no redo takes them all.
+#[test]
+fn only_a_database_search_s_redo_limits_an_infinite_evalue() {
+    use super::{check_evalue_limit, check_infinite_evalue, composition_redo_reads_empty_lists};
+    assert!(composition_redo_reads_empty_lists(true, false));
+    assert!(!composition_redo_reads_empty_lists(true, true));
+    assert!(!composition_redo_reads_empty_lists(false, false));
+    assert!(!composition_redo_reads_empty_lists(false, true));
+    for evalue in [f64::INFINITY, f64::MAX] {
+        assert!(check_evalue_limit(evalue, true, "BLASTP").is_err());
+        assert!(check_evalue_limit(evalue, false, "RPSBLAST").is_ok());
+    }
+    assert!(check_infinite_evalue(f64::INFINITY, true, "BLASTX").is_err());
+    assert!(check_infinite_evalue(f64::MAX, true, "BLASTX").is_ok());
+    for evalue in [f64::NAN, -f64::NAN, 1e308] {
+        assert!(check_evalue_limit(evalue, true, "BLASTP").is_ok());
+    }
+}

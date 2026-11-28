@@ -1,0 +1,3489 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "tblastn",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qn1"
+                  }
+                }
+              },
+              title "qn1"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 420,
+              seq-data ncbi2na '3A7ADBBE07AF16B58EFE7AC0245CDE0033F3410803AEB0
+C04FB7BFBC04C97A015BCEBEEB16B14FBC54E7AE0BCF82BEC516F2493C081E3C9BDE5A0BEF8EF3
+DE3E382B43FFC58DEBDEBC36DE9E302B01B3EF3E79DE8EB1498D040EFC958F4C079E5B314324FB
+C07A7240'H
+            }
+          }
+        }
+      },
+      subject database "rps_mini",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value NOT-A-NUMBER
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 1
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "MatrixName",
+          value string "BLOSUM62"
+        },
+        {
+          name "GapOpeningCost",
+          value integer 11
+        },
+        {
+          name "GapExtensionCost",
+          value integer 1
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 55775
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 18552
+          },
+          {
+            id str "blast_score",
+            value int 18552
+          },
+          {
+            id str "e_value",
+            value real { 692879283188385, 10, -96 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 419,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 10,
+                to 149,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 817
+          },
+          {
+            id str "blast_score",
+            value int 817
+          },
+          {
+            id str "e_value",
+            value real { 325344664279503, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 169285714285714, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 351,
+                to 419,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 22,
+                to 44,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 799
+          },
+          {
+            id str "blast_score",
+            value int 799
+          },
+          {
+            id str "e_value",
+            value real { 383847973989493, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 162142857142857, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 33,
+                to 98,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 21,
+                to 42,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 747
+          },
+          {
+            id str "blast_score",
+            value int 747
+          },
+          {
+            id str "e_value",
+            value real { 618509102022402, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 247857142857143, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 15,
+                to 116,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 21,
+                to 54,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 622
+          },
+          {
+            id str "blast_score",
+            value int 622
+          },
+          {
+            id str "e_value",
+            value real { 193989351769209, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 105, 10, -1 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 29,
+                to 70,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 147,
+                to 160,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 497
+          },
+          {
+            id str "blast_score",
+            value int 497
+          },
+          {
+            id str "e_value",
+            value real { 605494179871678, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 147857142857143, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 172,
+                to 231,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 135,
+                to 154,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 444
+          },
+          {
+            id str "blast_score",
+            value int 444
+          },
+          {
+            id str "e_value",
+            value real { 979764314333004, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 105, 10, -1 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 74,
+                to 115,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 43,
+                to 56,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 444
+          },
+          {
+            id str "blast_score",
+            value int 444
+          },
+          {
+            id str "e_value",
+            value real { 979764314333004, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 264285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 338,
+                to 346,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 136,
+                to 138,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 412
+          },
+          {
+            id str "blast_score",
+            value int 412
+          },
+          {
+            id str "e_value",
+            value real { 130965656722453, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 907142857142857, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 91,
+                to 126,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 22,
+                to 33,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 388
+          },
+          {
+            id str "blast_score",
+            value int 388
+          },
+          {
+            id str "e_value",
+            value real { 162782375639634, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 192857142857143, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 398,
+                to 403,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 42,
+                to 43,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 363
+          },
+          {
+            id str "blast_score",
+            value int 363
+          },
+          {
+            id str "e_value",
+            value real { 204138087605469, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 192857142857143, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 101
+              }
+            },
+            loc {
+              int {
+                from 100,
+                to 105,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 186,
+                to 187,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 101
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 987
+          },
+          {
+            id str "blast_score",
+            value int 987
+          },
+          {
+            id str "e_value",
+            value real { 6865019125197, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 126428571428571, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 324,
+                to 374,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 133,
+                to 149,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 869
+          },
+          {
+            id str "blast_score",
+            value int 869
+          },
+          {
+            id str "e_value",
+            value real { 2034769018811, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 692857142857143, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 14,
+                to 40,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 140,
+                to 148,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 824
+          },
+          {
+            id str "blast_score",
+            value int 824
+          },
+          {
+            id str "e_value",
+            value real { 30814209368097, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 55, 10, -1 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 228,
+                to 248,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 28,
+                to 34,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 779
+          },
+          {
+            id str "blast_score",
+            value int 779
+          },
+          {
+            id str "e_value",
+            value real { 466286031414903, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 183571428571429, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 57,
+                to 95,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 89,
+                to 101,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 96,
+                to 107,
+                strand plus,
+                id local str "Query_1"
+              },
+              empty general {
+                db "CDD",
+                tag id 102
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 108,
+                to 131,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 102,
+                to 109,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 658
+          },
+          {
+            id str "blast_score",
+            value int 658
+          },
+          {
+            id str "e_value",
+            value real { 141522434064297, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 105, 10, -1 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 318,
+                to 359,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 27,
+                to 40,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 652
+          },
+          {
+            id str "blast_score",
+            value int 652
+          },
+          {
+            id str "e_value",
+            value real { 149512752649299, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 55, 10, -1 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 105,
+                to 125,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 89,
+                to 95,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 635
+          },
+          {
+            id str "blast_score",
+            value int 635
+          },
+          {
+            id str "e_value",
+            value real { 174676208696506, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 764285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 331,
+                to 360,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 69,
+                to 78,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 608
+          },
+          {
+            id str "blast_score",
+            value int 608
+          },
+          {
+            id str "e_value",
+            value real { 223585887463465, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 112142857142857, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 179,
+                to 223,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 144,
+                to 158,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 525
+          },
+          {
+            id str "blast_score",
+            value int 525
+          },
+          {
+            id str "e_value",
+            value real { 476867701783658, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 407142857142857, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 75,
+                to 89,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 139,
+                to 143,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 486
+          },
+          {
+            id str "blast_score",
+            value int 486
+          },
+          {
+            id str "e_value",
+            value real { 680229964495182, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 119285714285714, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 41,
+                to 88,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 55,
+                to 70,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 466
+          },
+          {
+            id str "blast_score",
+            value int 466
+          },
+          {
+            id str "e_value",
+            value real { 815996104602778, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 264285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 203,
+                to 211,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 71,
+                to 73,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 462
+          },
+          {
+            id str "blast_score",
+            value int 462
+          },
+          {
+            id str "e_value",
+            value real { 846230365922363, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 264285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 161,
+                to 169,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 24,
+                to 26,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 452
+          },
+          {
+            id str "blast_score",
+            value int 452
+          },
+          {
+            id str "e_value",
+            value real { 926789935295641, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 55, 10, -1 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 18,
+                to 38,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 37,
+                to 43,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 446
+          },
+          {
+            id str "blast_score",
+            value int 446
+          },
+          {
+            id str "e_value",
+            value real { 978748401794144, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 192857142857143, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 384,
+                to 389,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 125,
+                to 126,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 439
+          },
+          {
+            id str "blast_score",
+            value int 439
+          },
+          {
+            id str "e_value",
+            value real { 104304630364188, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 264285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 131,
+                to 139,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 54,
+                to 56,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 423
+          },
+          {
+            id str "blast_score",
+            value int 423
+          },
+          {
+            id str "e_value",
+            value real { 120626144862992, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 335714285714286, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 122,
+                to 133,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 41,
+                to 44,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 422
+          },
+          {
+            id str "blast_score",
+            value int 422
+          },
+          {
+            id str "e_value",
+            value real { 121726895355893, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 478571428571429, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 50,
+                to 67,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 59,
+                to 64,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 396
+          },
+          {
+            id str "blast_score",
+            value int 396
+          },
+          {
+            id str "e_value",
+            value real { 154140740097063, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 192857142857143, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 277,
+                to 282,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 28,
+                to 29,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 395
+          },
+          {
+            id str "blast_score",
+            value int 395
+          },
+          {
+            id str "e_value",
+            value real { 155546178459499, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 264285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 231,
+                to 239,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 153,
+                to 155,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 354
+          },
+          {
+            id str "blast_score",
+            value int 354
+          },
+          {
+            id str "e_value",
+            value real { 225620073722119, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 192857142857143, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 8,
+                to 13,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 47,
+                to 48,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 329
+          },
+          {
+            id str "blast_score",
+            value int 329
+          },
+          {
+            id str "e_value",
+            value real { 28298963759034, 10, -11 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 335714285714286, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 263,
+                to 274,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 58,
+                to 61,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 309
+          },
+          {
+            id str "blast_score",
+            value int 309
+          },
+          {
+            id str "e_value",
+            value real { 339183360068255, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 264285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 101,
+                to 109,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 149,
+                to 151,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 299
+          },
+          {
+            id str "blast_score",
+            value int 299
+          },
+          {
+            id str "e_value",
+            value real { 371321431537525, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 264285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 102
+              }
+            },
+            loc {
+              int {
+                from 226,
+                to 234,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 128,
+                to 130,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 102
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 662
+          },
+          {
+            id str "blast_score",
+            value int 662
+          },
+          {
+            id str "e_value",
+            value real { 133551915780088, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 478571428571429, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 175,
+                to 192,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 133,
+                to 138,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 628
+          },
+          {
+            id str "blast_score",
+            value int 628
+          },
+          {
+            id str "e_value",
+            value real { 182175754720051, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 692857142857143, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 332,
+                to 358,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 48,
+                to 56,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 619
+          },
+          {
+            id str "blast_score",
+            value int 619
+          },
+          {
+            id str "e_value",
+            value real { 19776861267935, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 335714285714286, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 331,
+                to 342,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 103,
+                to 106,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 569
+          },
+          {
+            id str "blast_score",
+            value int 569
+          },
+          {
+            id str "e_value",
+            value real { 311968568699475, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 105, 10, -1 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 16,
+                to 57,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 30,
+                to 43,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 558
+          },
+          {
+            id str "blast_score",
+            value int 558
+          },
+          {
+            id str "e_value",
+            value real { 344839481120695, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 335714285714286, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 249,
+                to 260,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 28,
+                to 31,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 536
+          },
+          {
+            id str "blast_score",
+            value int 536
+          },
+          {
+            id str "e_value",
+            value real { 421291878288629, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 621428571428571, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 5,
+                to 28,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 138,
+                to 145,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 436
+          },
+          {
+            id str "blast_score",
+            value int 436
+          },
+          {
+            id str "e_value",
+            value real { 104504126481737, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 335714285714286, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 224,
+                to 235,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 152,
+                to 155,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 425
+          },
+          {
+            id str "blast_score",
+            value int 425
+          },
+          {
+            id str "e_value",
+            value real { 115467933600627, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 192857142857143, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 272,
+                to 277,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 40,
+                to 41,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 402
+          },
+          {
+            id str "blast_score",
+            value int 402
+          },
+          {
+            id str "e_value",
+            value real { 142236565089275, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 55, 10, -1 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 118,
+                to 138,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 49,
+                to 55,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 396
+          },
+          {
+            id str "blast_score",
+            value int 396
+          },
+          {
+            id str "e_value",
+            value real { 150183788316195, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 55, 10, -1 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 279,
+                to 299,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 51,
+                to 57,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 385
+          },
+          {
+            id str "blast_score",
+            value int 385
+          },
+          {
+            id str "e_value",
+            value real { 165920792484527, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 764285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 32,
+                to 61,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 30,
+                to 39,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 372
+          },
+          {
+            id str "blast_score",
+            value int 372
+          },
+          {
+            id str "e_value",
+            value real { 186650774995333, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 335714285714286, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 32,
+                to 43,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 91,
+                to 94,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 364
+          },
+          {
+            id str "blast_score",
+            value int 364
+          },
+          {
+            id str "e_value",
+            value real { 200670928574562, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 192857142857143, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 283,
+                to 288,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 105,
+                to 106,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 347
+          },
+          {
+            id str "blast_score",
+            value int 347
+          },
+          {
+            id str "e_value",
+            value real { 234046547063766, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 264285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 373,
+                to 381,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 107,
+                to 109,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 336
+          },
+          {
+            id str "blast_score",
+            value int 336
+          },
+          {
+            id str "e_value",
+            value real { 258535671386161, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 264285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 149,
+                to 157,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 170,
+                to 172,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 290
+          },
+          {
+            id str "blast_score",
+            value int 290
+          },
+          {
+            id str "e_value",
+            value real { 391841810742972, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 264285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 280,
+                to 288,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 58,
+                to 60,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 273
+          },
+          {
+            id str "blast_score",
+            value int 273
+          },
+          {
+            id str "e_value",
+            value real { 456871719737852, 10, -12 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 264285714285714, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 209,
+                to 217,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 19,
+                to 21,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 141
+          },
+          {
+            id str "blast_score",
+            value int 141
+          },
+          {
+            id str "e_value",
+            value real { 150169638003848, 10, -11 }
+          },
+          {
+            id str "bit_score",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "num_ident",
+            value int 0
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 197857142857143, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 273,
+                to 326,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 52,
+                to 69,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 70,
+                to 73,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "CDD",
+                tag id 103
+              }
+            },
+            loc {
+              int {
+                from 246,
+                to 272,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 74,
+                to 82,
+                strand unknown,
+                id general {
+                  db "CDD",
+                  tag id 103
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 4996776, 10, -8 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 55775",
+      "Effective search space used: 55775",
+      "Length adjustment: 25"
+    }
+  }
+}

@@ -711,16 +711,59 @@ pub(crate) struct RedoMatch<'a> {
     pub(crate) link: Option<RedoLink>,
 }
 
+/// How the redo hands back a list that kept HSPs.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687-3733
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Kept {
+    /// A significant list: the scores divided by the scaling factor, the bit scores and the
+    /// identities and positives counted (`s_HSPListNormalizeScores`, `s_ComputeNumIdentities`).
+    Normalized,
+    /// RPS-BLAST's list that is not significant (every list under an `-evalue` of NaN): NCBI
+    /// swaps it back without either step, so its scores stay scaled, its bit scores 0 and its
+    /// identities and positives uncounted (0; the reports count them from the letters where
+    /// they show them, the Seq-aligns write `num_ident` 0 and no `num_positives`).
+    Raw,
+}
+
+impl Kept {
+    /// An HSP's score: the redo's scaled score, divided by the scaling factor for a significant
+    /// list.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-116
+    #[inline(always)]
+    fn score(self, scaled: i32) -> i32 {
+        match self {
+            Self::Normalized => blast_nint(scaled as f64 / SCALING_FACTOR),
+            Self::Raw => scaled,
+        }
+    }
+
+    /// An HSP's bit score from its `score`: 0 (`Blast_HSPInit`'s) for a raw list.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-116
+    #[inline(always)]
+    fn bit_score(self, score: i32, lambda: f64, log_k: f64) -> f64 {
+        match self {
+            Self::Normalized => {
+                (score as f64 * lambda * SCALING_FACTOR - log_k) / std::f64::consts::LN_2
+            }
+            Self::Raw => 0.0,
+        }
+    }
+}
+
 impl RedoMatch<'_> {
     /// Reaps redone HSPs whose E-value exceeds `-evalue` (keeping NaN E-values, because C's
-    /// greater-than test is false for NaN) and verifies that the list's `best_evalue` is at most
-    /// `-evalue`, returning the first surviving HSP's scaled score or `None` when none passes.
+    /// greater-than test is false for NaN) and tests that the list's `best_evalue` is at most
+    /// `-evalue`: the first surviving HSP's scaled score and the list's [`Kept`], or `None` when
+    /// no HSP survives or a database search's list fails the test.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1976-2005
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:437-443
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687-3733
     #[inline(always)]
-    fn reap_by_expect(&self, redone: &mut Vec<Redone>, best_evalue: f64) -> Option<i32> {
+    fn reap_by_expect(&self, redone: &mut Vec<Redone>, best_evalue: f64) -> Option<(i32, Kept)> {
         // NCBI drops an HSP whose e-value is above `-evalue`: a NaN e-value stays, and an
         // `-evalue` of NaN (NCBI's option check lets it pass) keeps every HSP.
         #[expect(
@@ -729,20 +772,24 @@ impl RedoMatch<'_> {
         )]
         redone.retain(|hsp| !(hsp.e_value > self.expect_value));
         let first = redone.first()?;
-        // The list is kept when its best E-value is at most `-evalue` (NCBI's test): NaN E-values
-        // (a PSSM whose gapped block gives them) pass the reaping above but leave it at
-        // `INT4_MAX`, and an `-evalue` of NaN keeps no list.
+        // The list is significant when its best E-value is at most `-evalue` (NCBI's test): NaN
+        // E-values (a PSSM whose gapped block gives them) pass the reaping above but leave it at
+        // `INT4_MAX`, and under an `-evalue` of NaN no list is. A database search drops a list
+        // that is not; RPS-BLAST's traceback, which gives the redo no sequence source, gets it
+        // back as the redo made it (`Kept::Raw`).
         let significant = best_evalue <= self.expect_value;
-        if !significant {
-            return None;
+        match (significant, self.rps_roles) {
+            (true, _) => Some((first.align.score, Kept::Normalized)),
+            (false, true) => Some((first.align.score, Kept::Raw)),
+            (false, false) => None,
         }
-        Some(first.align.score)
     }
 
     /// The redo of one match (the HSPs of the query and one subject): `Blast_RedoOneMatch`, then
     /// `s_HSPListFromDistinctAlignments`, `s_HitlistReapContained`, `s_HitlistEvaluateAndPurge`,
     /// and for a list whose best e-value passes `-evalue`, `s_HSPListNormalizeScores` and
-    /// `s_ComputeNumIdentities`. `None` when no HSP passes.
+    /// `s_ComputeNumIdentities` (RPS-BLAST's other lists come back raw, [`Kept::Raw`]). `None`
+    /// when no HSP passes.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3670-3707
     pub(crate) fn redo_match(
@@ -789,9 +836,7 @@ impl RedoMatch<'_> {
                 best_evalue
             }
         };
-        let best_score = self.reap_by_expect(&mut redone, best_evalue)?;
-        // The list passed NCBI's test that `best_evalue` is at most
-        // `hitParams->options->expect_value` (above).
+        let (best_score, kept) = self.reap_by_expect(&mut redone, best_evalue)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-116
         let template = &hsps[0];
         let mut hsp_list = BlastpHspList {
@@ -806,7 +851,7 @@ impl RedoMatch<'_> {
             num,
         } in redone
         {
-            let score = blast_nint(align.score as f64 / SCALING_FACTOR);
+            let score = kept.score(align.score);
             let traced = BlastpPreliminaryHsp {
                 query_start: align.query_start,
                 query_end: align.query_end,
@@ -831,8 +876,7 @@ impl RedoMatch<'_> {
             );
             hsp.e_value = e_value;
             hsp.num = num;
-            hsp.bit_score = (score as f64 * run.karlin.lambda * SCALING_FACTOR - run.log_k)
-                / std::f64::consts::LN_2;
+            hsp.bit_score = kept.bit_score(score, run.karlin.lambda, run.log_k);
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:332-342
             hsp.comp_adjustment_method = match align.rule {
                 EMatrixAdjustRule::DontAdjustMatrix => 0,
@@ -1035,7 +1079,7 @@ impl RedoMatch<'_> {
                 best_evalue
             }
         };
-        let best_score = self.reap_by_expect(&mut redone, best_evalue)?;
+        let (best_score, kept) = self.reap_by_expect(&mut redone, best_evalue)?;
         let template = &hsps[0];
         let mut hsp_list = BlastpHspList {
             oid,
@@ -1049,7 +1093,7 @@ impl RedoMatch<'_> {
             num,
         } in redone
         {
-            let score = blast_nint(align.score as f64 / SCALING_FACTOR);
+            let score = kept.score(align.score);
             let traced = BlastpPreliminaryHsp {
                 query_start: align.query_start,
                 query_end: align.query_end,
@@ -1078,14 +1122,17 @@ impl RedoMatch<'_> {
                 self.matrix,
             );
             if C::SUBJECT_IS_TRANSLATED {
-                // The Seq-align's counts (see `translation_buffer_counts`).
-                (hsp.num_ident, hsp.num_positives) =
-                    translation_buffer_counts::<C>(&hsp, run.query_nomask, subject, self.matrix);
+                // The Seq-align's counts (see `translation_buffer_counts`), none for a raw list.
+                (hsp.num_ident, hsp.num_positives) = match kept {
+                    Kept::Normalized => {
+                        translation_buffer_counts::<C>(&hsp, run.query_nomask, subject, self.matrix)
+                    }
+                    Kept::Raw => (0, 0),
+                };
             }
             hsp.e_value = e_value;
             hsp.num = num;
-            hsp.bit_score = (score as f64 * run.karlin.lambda * SCALING_FACTOR - run.log_k)
-                / std::f64::consts::LN_2;
+            hsp.bit_score = kept.bit_score(score, run.karlin.lambda, run.log_k);
             hsp.comp_adjustment_method = match align.rule {
                 EMatrixAdjustRule::DontAdjustMatrix => 0,
                 EMatrixAdjustRule::CompoScaleOldMatrix => 1,

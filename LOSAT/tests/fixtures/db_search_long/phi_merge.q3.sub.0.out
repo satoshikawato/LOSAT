@@ -1,0 +1,121 @@
+PHIBLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set.
+           1 sequences; 5,000,300 total letters
+
+Results from round 1
+
+
+Query= pz_q3
+
+Length=103
+3 occurrence(s) of pattern: 
+C-X(2,4)-C-X(3)-[LIVMFYWC]-X(8)-H-X(3,5)-H at position(s) 51, 82, 82 of query sequence
+pattern probability=2.37763e-07
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pz_r                                                                  156     6e-47
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pz_r                                                                  74.7    3e-22
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pz_r                                                                  74.7    3e-22
+
+
+
+Significant alignments for pattern occurrence 1 at position 51
+
+> pz_r
+Length=5000300
+
+ Score = 156 bits (417),  Expect = 6e-47
+ Identities = 103/115 (90%), Positives = 103/115 (90%), Gaps = 0/115 (0%)
+
+pattern                                                             **********
+Query    1        MGGEVLNNEGMPLAELKQETIPISRSESSESLNSLTSTRSSSSNRPKTYFCDYDGCDKAF  60
+                  MGGEVLNNEGMPLAELKQETIPISRSESSESLNSLTSTRSSSSNRPKTYFCDYDGCDKAF
+Sbjct    4999910  MGGEVLNNEGMPLAELKQETIPISRSESSESLNSLTSTRSSSSNRPKTYFCDYDGCDKAF  4999969
+
+pattern           **************                                         
+Query    61       TRPSILTEHQLSVHQGLRAFQCPHCNKSFQRPYRLRNHISKHH------------  115
+                  TRPSILTEHQLSVHQGLRAFQCPHCNKSFQRPYRLRNHISKHH            
+Sbjct    4999970  TRPSILTEHQLSVHQGLRAFQCPHCNKSFQRPYRLRNHISKHHQVQRAYDFSYND  5000024
+
+
+
+
+Significant alignments for pattern occurrence 2 at position 82
+
+> pz_r
+Length=5000300
+
+ Score = 74.7 bits (204),  Expect = 3e-22
+ Identities = 60/105 (57%), Positives = 64/105 (61%), Gaps = 34/105 (32%)
+
+Query    1        MGGEVLNNEGMPLAELKQETIPISRSESSESLNSLTSTRSSSSNRPKTYFCDYDGCDKAF  60
+                  MGGEVLNNEGMPLAELKQETIPISRSESSESLNSLTSTRSSSSNRPKTYF          
+Sbjct    4999910  MGGEVLNNEGMPLAELKQETIPISRSESSESLNSLTSTRSSSSNRPKTYF----------  4999959
+
+pattern                                ************************
+Query    61       TRPSILTEHQLSVHQGLRAFQCPH--CNKSFQRPYRLRNH-ISKH  102
+                                       C +  C+K+F RP  L  H +S H
+Sbjct    4999960  ---------------------CDYDGCDKAFTRPSILTEHQLSVH  4999983
+
+
+
+
+Significant alignments for pattern occurrence 3 at position 82
+
+> pz_r
+Length=5000300
+
+ Score = 74.7 bits (204),  Expect = 3e-22
+ Identities = 59/105 (56%), Positives = 62/105 (59%), Gaps = 33/105 (31%)
+
+Query    1        MGGEVLNNEGMPLAELKQETIPISRSESSESLNSLTSTRSSSSNRPKTYFCDYDGCDKAF  60
+                  MGGEVLNNEGMPLAELKQETIPISRSESSESLNSLTSTRSSSSNRPKTYF          
+Sbjct    4999910  MGGEVLNNEGMPLAELKQETIPISRSESSESLNSLTSTRSSSSNRPKTYF----------  4999959
+
+pattern                                ************************
+Query    61       TRPSILTEHQLSVHQGLRAFQCPH--CNKSFQRPYRLRNHISKHH  103
+                                       C +  C+K+F RP  L  H    H
+Sbjct    4999960  ---------------------CDYDGCDKAFTRPSILTEHQLSVH  4999983
+
+
+
+
+Lambda      K        H        a         alpha
+   0.270   0.0470     1.00     0.00     0.00 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.270   0.0470     1.00     0.00     0.00     0.00 
+
+Effective search space used: 5000279
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 5,000,300
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

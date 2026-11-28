@@ -25,6 +25,38 @@ fn rows_of(query: &[u8]) -> QueryPssm {
     }
 }
 
+/// The scores of the gap residue (the zero bytes after the query's letters) against each letter.
+fn gap_row() -> [i32; BLASTAA_SIZE] {
+    let matrix = crate::utils::matrix::protein_score_rows(ScoringMatrix::Blosum62);
+    std::array::from_fn(|s| matrix.score(crate::utils::matrix::ncbistdaa::GAP, s as u8))
+}
+
+/// `align_patterns` of the query region `(q_start, q_len)` against the subject region
+/// `(s_start, s_len)` with BLOSUM62's rows of `letters` and gap costs 11/1.
+fn align(
+    letters: &[u8],
+    query: &[u8],
+    subject: &[u8],
+    (q_start, q_len): (usize, usize),
+    (s_start, s_len): (usize, usize),
+    pattern: &PhiPattern,
+) -> Result<Vec<GapEditOp>, PhiError> {
+    let rows = rows_of(letters);
+    align_patterns(
+        &rows,
+        &gap_row(),
+        query,
+        subject,
+        q_start,
+        s_start,
+        q_len,
+        s_len,
+        pattern,
+        11,
+        1,
+    )
+}
+
 fn costs(x_drop: i32) -> PhiGapCosts {
     PhiGapCosts {
         gap_open: 11,
@@ -55,6 +87,7 @@ fn self_hit_prelim_and_traceback() {
     assert_eq!((prelim.query_stop, prelim.subject_stop), (9, 9));
     let full = traceback(
         &rows,
+        &gap_row(),
         &query,
         &query,
         10,
@@ -87,8 +120,7 @@ fn unequal_wildcard_runs_are_aligned_in_their_band() {
     let pattern = PhiPattern::compile(b"G-x(1,3)-K").unwrap();
     let query = encode("AGLKA");
     let subject = encode("AGLLLKA");
-    let rows = rows_of(&query);
-    let ops = align_patterns(&rows, &query, &subject, 1, 1, 3, 5, &pattern, 11, 1).unwrap();
+    let ops = align(&query, &query, &subject, (1, 3), (1, 5), &pattern).unwrap();
     assert_eq!(consumed(&ops), (3, 5));
     // G, then the run of one L against three (one substitution, two deletions; a substitution
     // at either end of the run merges into G's or K's), then K.
@@ -103,7 +135,7 @@ fn unequal_wildcard_runs_are_aligned_in_their_band() {
     assert!(matches!(ops.first(), Some(GapEditOp::Sub(_))));
     assert!(matches!(ops.last(), Some(GapEditOp::Sub(_))));
     // Equal runs are substitutions.
-    let ops = align_patterns(&rows, &query, &query, 1, 1, 3, 3, &pattern, 11, 1).unwrap();
+    let ops = align(&query, &query, &query, (1, 3), (1, 3), &pattern).unwrap();
     assert_eq!(ops, vec![GapEditOp::Sub(3)]);
 }
 
@@ -112,8 +144,10 @@ fn banded_runs_at_the_edges() {
     let query = encode("LLLLLL");
     let subject = encode("LLLLLLLLL");
     let rows = rows_of(&query);
+    let gaps = gap_row();
     let segments = Segments {
         rows: &rows,
+        gap_row: &gaps,
         subject: &subject,
         query_base: 0,
         subject_base: 0,
@@ -142,32 +176,61 @@ fn very_long_pattern_region() {
     let pattern = PhiPattern::compile(b"[AG]-x(4)-G-K-[ST]-x(0,25)-L").unwrap();
     let query = encode("ALLLLGKSL");
     let subject = encode("ALLLLGKSWWL");
-    let rows = rows_of(&query);
-    let ops = align_patterns(&rows, &query, &subject, 0, 0, 9, 11, &pattern, 11, 1).unwrap();
+    let ops = align(&query, &query, &subject, (0, 9), (0, 11), &pattern).unwrap();
     assert_eq!(consumed(&ops), (9, 11));
     assert_eq!(ops.first(), Some(&GapEditOp::Sub(8)));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:497-656
 // A long subject's merged HSP aligns the pattern region from one occurrence's start with another
-// occurrence's length; where that passes the end of the query or of the subject, NCBI reads past
-// the sequence, and LOSAT refuses the search instead.
+// occurrence's length. Where that passes the end of the query, NCBI reads the two zero bytes after
+// its letters (the sentinel and the byte the buffer's allocation adds), and after the subject's
+// letters its sentinel; past those it reads outside its buffer (or a database's next sequence),
+// and LOSAT refuses the search.
 #[test]
-fn a_pattern_region_past_the_end_is_refused() {
+fn a_pattern_region_reads_the_zero_bytes_after_the_letters_and_no_further() {
     let pattern = PhiPattern::compile(b"G-x(1,3)-K").unwrap();
-    let query = encode("AGLKA");
-    let subject = encode("AGLLLKA");
-    let rows = rows_of(&query);
-    for (q_start, s_start, q_len, s_len) in [(1, 1, 5, 5), (1, 3, 3, 5)] {
-        let refused = align_patterns(
-            &rows, &query, &subject, q_start, s_start, q_len, s_len, &pattern, 11, 1,
-        );
+    let letters = encode("AGLK");
+    let mut query = letters.clone();
+    query.extend([0; QUERY_ZEROS_PAST_END]);
+    let mut subject = encode("AGLLLK");
+    subject.push(0);
+    for (q_len, s_len) in [(5, 6), (4, 5), (3, 6)] {
+        let aligned = align(&letters, &query, &subject, (1, q_len), (1, s_len), &pattern);
+        assert!(aligned.is_ok(), "{q_len} {s_len}: {aligned:?}");
+    }
+    for (q_len, s_len) in [(6, 5), (4, 7)] {
+        let refused = align(&letters, &query, &subject, (1, q_len), (1, s_len), &pattern);
         assert!(
             matches!(&refused, Err(PhiError::Refusal(message))
-                if message.contains("a pattern region past the end of the query or subject")),
-            "{q_start} {s_start} {q_len} {s_len}"
+                if message.contains("a pattern region past the bytes after the query or subject")),
+            "{q_len} {s_len}"
         );
     }
-    // The regions that end at the last letters are aligned.
-    assert!(align_patterns(&rows, &query, &subject, 1, 1, 4, 6, &pattern, 11, 1).is_ok());
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1579
+// The banded aligner scores a query position past the letters with the gap residue's row
+// (`gap_row`: NCBI's matrix row of `-`, BLAST_SCORE_MIN against every letter).
+#[test]
+fn the_banded_aligner_scores_past_the_letters_with_the_gap_row() {
+    let rows = rows_of(&encode("AG"));
+    let gaps = gap_row();
+    assert!(gaps
+        .iter()
+        .all(|&score| score == crate::utils::matrix::BLAST_SCORE_MIN));
+    let subject = encode("LLLK");
+    let segments = Segments {
+        rows: &rows,
+        gap_row: &gaps,
+        subject: &subject,
+        query_base: 2,
+        subject_base: 0,
+        gap_open: 11,
+        gap_extend: 1,
+    };
+    assert_eq!(segments.score(1, 1), crate::utils::matrix::BLAST_SCORE_MIN);
+    let mut ops = Vec::new();
+    banded_align(&segments, 1, 3, &mut ops);
+    assert_eq!(consumed(&ops), (1, 3));
 }

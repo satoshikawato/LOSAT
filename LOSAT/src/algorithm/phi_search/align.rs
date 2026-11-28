@@ -14,6 +14,15 @@ use crate::algorithm::pssm_search::gapalign::{
 };
 use crate::algorithm::pssm_search::rows::{PssmRows, QueryPssm};
 use crate::common::GapEditOp;
+use crate::core::blast_util::BLASTAA_SIZE;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:246-250
+/// The zero bytes after the last letter of NCBI's query buffer: the query's sentinel and the byte
+/// that the buffer's allocation adds after it. A long subject's merged HSP whose pattern region
+/// passes the query's end reads them in its pattern alignment (`align_patterns`); past them NCBI
+/// reads outside its buffer.
+pub(crate) const QUERY_ZEROS_PAST_END: usize = 2;
 
 /// The ends and score of an alignment (`BlastGapAlignStruct`'s): starts inclusive, stops as NCBI
 /// sets them for each stage.
@@ -127,6 +136,8 @@ fn add_op(ops: &mut Vec<GapEditOp>, op: GapEditOp) {
 /// `subject_base + j - 1`.
 struct Segments<'a> {
     rows: &'a QueryPssm,
+    /// The scores of the zero byte after the query's letters (`QUERY_ZEROS_PAST_END`).
+    gap_row: &'a [i32; BLASTAA_SIZE],
     subject: &'a [u8],
     query_base: usize,
     subject_base: usize,
@@ -137,7 +148,12 @@ struct Segments<'a> {
 impl Segments<'_> {
     fn score(&self, i: i32, j: i32) -> i32 {
         let letter = self.subject[self.subject_base + j as usize - 1];
-        self.rows.row(self.query_base + i as usize - 1)[letter as usize]
+        let row = self
+            .rows
+            .rows
+            .get(self.query_base + i as usize - 1)
+            .unwrap_or(self.gap_row);
+        row[letter as usize]
     }
 }
 
@@ -449,10 +465,13 @@ fn extra_long_offsets(pattern: &PhiPattern, seq: &[u8]) -> Result<Vec<i32>, PhiE
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:497-656
 /// `s_PHIBlastAlignPatterns`: the operations of the pattern region `query[q_start..][..q_len]`
-/// against `subject[s_start..][..s_len]`.
+/// against `subject[s_start..][..s_len]`. `query` and `subject` are the letters as NCBI's buffers
+/// hold them, with the bytes NCBI reads after them (`traceback`); `gap_row` scores those after
+/// the query's letters.
 #[allow(clippy::too_many_arguments)]
 fn align_patterns(
     rows: &QueryPssm,
+    gap_row: &[i32; BLASTAA_SIZE],
     query: &[u8],
     subject: &[u8],
     q_start: usize,
@@ -466,19 +485,20 @@ fn align_patterns(
     let mut ops = Vec::new();
     // A long subject's merged HSP aligns the pattern region from one occurrence's start with the
     // length of another (`phi_hooks::long_subject_prelim`), which can pass the last letter of
-    // the query or subject: NCBI then reads past the sequence (its sentinel byte and what follows
-    // in the buffer).
+    // the query or subject: NCBI reads the zero bytes after the letters in its buffers, and past
+    // them outside the buffer or the next sequence of a database.
     let (Some(query_region), Some(subject_region)) = (
         query.get(q_start..q_start + q_len),
         subject.get(s_start..s_start + s_len),
     ) else {
         return Err(refusal_because(
-            "a pattern region past the end of the query or subject",
-            "reads past the sequence",
+            "a pattern region past the bytes after the query or subject",
+            "reads past the sequence's buffer",
         ));
     };
     let segments = |query_base: usize, subject_base: usize| Segments {
         rows,
+        gap_row,
         subject,
         query_base,
         subject_base,
@@ -598,9 +618,13 @@ fn align_patterns(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/phi_gapalign.c:837-906
 /// `PHIGappedAlignmentWithTraceback`: `ALIGN_EX` left of the pattern starts (also at 0), the
 /// pattern region, `ALIGN_EX` right of the pattern ends; the score is the two extensions'.
+/// `query` is the query's letters followed by the zero bytes after them in NCBI's buffer
+/// (`QUERY_ZEROS_PAST_END`), `gap_row` their scores; `subject` the subject's letters followed by
+/// its sentinel, both read by a pattern region that passes their ends (`align_patterns`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn traceback(
     rows: &QueryPssm,
+    gap_row: &[i32; BLASTAA_SIZE],
     query: &[u8],
     subject: &[u8],
     subject_length: usize,
@@ -630,6 +654,7 @@ pub(crate) fn traceback(
     let subject_start = s_start as i32 - b as i32;
     for op in align_patterns(
         rows,
+        gap_row,
         query,
         subject,
         q_start,

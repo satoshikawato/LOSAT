@@ -20,7 +20,9 @@
 //! with another's length, so its Seq-align (the start plus the edit script) ends elsewhere than
 //! its own ends: past the end of the query (`pz_q1`, NCBI's `qend` 442 of 429, shown with gaps
 //! there) or inside it (`pz_q2`, the same query with 40 more residues that the subject does not
-//! have). Expected bytes in
+//! have). A third query (`pz_q3`) ends with a place of the pattern two residues shorter than
+//! the place it merges with, so the merged HSP's pattern region runs two letters past its end,
+//! into the zero bytes after the query in NCBI's buffer. Expected bytes in
 //! `tests/fixtures/db_search_long/phi_merge.*.out` (outfmt 6 and 0, `-subject` and `-db`, with
 //! and without `-sum_stats true`), frozen from official NCBI BLAST+ 2.17.0 (`PHI_MERGE_DIR=<dir>`
 //! keeps the inputs).
@@ -287,8 +289,8 @@ fn phi_pattern_on_subjects_over_5_000_000_residues_and_with_sum_statistics_match
     assert!(failed.is_empty(), "mismatches:\n{}", failed.join("\n"));
 }
 
-/// TF3A_YEAST (429 residues): eight places of the zinc-finger pattern `ZINC_FINGER`, of 22 to
-/// 27 residues.
+/// TF3A_YEAST (429 residues): eight places of the zinc-finger pattern `ZINC_FINGER`, of 21 to
+/// 24 residues.
 const TF3A: &[u8] = b"MGGEVLNNEGMPLAELKQETIPISRSESSESLNSLTSTRSSSSNRPKTYFCDYDGCDKAF\
 TRPSILTEHQLSVHQGLRAFQCDKCAKSFVKKSHLERHLYTHSDTKPFQCSYCGKGVTTR\
 QQLKRHEVTHTKSFICPEEGCNLRFYKHPQLRAHILSVHLHKLTCPHCNKSFQRPYRLRN\
@@ -308,16 +310,23 @@ const MERGE_BACKGROUND: &[u8] = b"ADEFGIKLMNPQRSTVWY";
 
 /// Writes `pz_q1.faa` (TF3A), `pz_q2.faa` (TF3A and `TF3A_TAIL`), `pz_s.faa` (5,000,300 letters
 /// of `MERGE_BACKGROUND`, TF3A put at 4,999,771, across the end of the first part, so that HSPs of
-/// its places in the first part and in the second merge) and `zf.pat` into `dir`. Some merged
+/// its places in the first part and in the second merge), `pz_q3.faa` (TF3A's first 81 residues,
+/// with its place at 50 of 24 residues, then its place at 164 of 22, which ends the query),
+/// `pz_r.faa` (as `pz_s`, with `pz_q3` put at 4,999,909) and `zf.pat` into `dir`. Some merged
 /// HSPs' Seq-aligns run past their own ends: past the end of `pz_q1`, inside `pz_q2`, whose
-/// letters after TF3A the subject does not have.
+/// letters after TF3A the subject does not have. `pz_q3`'s merged HSP aligns its pattern region
+/// from its last place's start with the first place's length, two letters past its end.
 fn write_merge_inputs(dir: &Path) {
     let q2 = [TF3A, TF3A_TAIL].concat();
+    let q3 = [&TF3A[..81], &TF3A[164..186]].concat();
     write_fasta(&dir.join("pz_q1.faa"), &[("pz_q1", TF3A)]);
     write_fasta(&dir.join("pz_q2.faa"), &[("pz_q2", &q2[..])]);
-    let mut subject = letters_of(MERGE_BACKGROUND, 31, 5_000_300);
-    subject[4_999_771..4_999_771 + TF3A.len()].copy_from_slice(TF3A);
-    write_fasta(&dir.join("pz_s.faa"), &[("pz_s", &subject[..])]);
+    write_fasta(&dir.join("pz_q3.faa"), &[("pz_q3", &q3[..])]);
+    for (name, at, copy) in [("pz_s", 4_999_771, TF3A), ("pz_r", 4_999_909, &q3[..])] {
+        let mut subject = letters_of(MERGE_BACKGROUND, 31, 5_000_300);
+        subject[at..at + copy.len()].copy_from_slice(copy);
+        write_fasta(&dir.join(format!("{name}.faa")), &[(name, &subject[..])]);
+    }
     std::fs::write(dir.join("zf.pat"), ZINC_FINGER).unwrap();
 }
 
@@ -352,79 +361,94 @@ fn phi_hsps_merged_across_places_of_the_pattern_match_ncbi() {
     std::fs::create_dir_all(dir).unwrap();
     write_merge_inputs(dir);
     // The reports name the inputs as given (outfmt 0's database title): relative names in `dir`.
-    let made = losat()
-        .current_dir(dir)
-        .args([
-            "makeblastdb",
-            "-in",
-            "pz_s.faa",
-            "-dbtype",
-            "prot",
-            "-out",
-            "pz",
-        ])
-        .output()
-        .expect("run losat makeblastdb");
-    assert!(
-        made.status.success(),
-        "makeblastdb: {}",
-        String::from_utf8_lossy(&made.stderr)
-    );
-    let mut failed = Vec::new();
+    for (input, db) in [("pz_s.faa", "pz"), ("pz_r.faa", "pr")] {
+        let made = losat()
+            .current_dir(dir)
+            .args(["makeblastdb", "-in", input, "-dbtype", "prot", "-out", db])
+            .output()
+            .expect("run losat makeblastdb");
+        assert!(
+            made.status.success(),
+            "makeblastdb {input}: {}",
+            String::from_utf8_lossy(&made.stderr)
+        );
+    }
+    const NONE: &[&str] = &[];
+    const SUM_STATS: &[&str] = &["-sum_stats", "true"];
+    // Outfmt 0 keeps the alignments of the best E-values (the frozen bytes stay under 64 KB),
+    // those of the merged HSPs among them.
+    const BEST: &[&str] = &["-evalue", "1e-180"];
+    const BEST_SETS: &[&str] = &["-evalue", "1e-100", "-sum_stats", "true"];
+    let mut cases: Vec<(String, String, [&str; 2], &str, &[&str])> = Vec::new();
     for n in [1, 2] {
-        let query = format!("pz_q{n}.faa");
-        // Outfmt 0 keeps the alignments of the best E-values (the frozen bytes stay under 64 KB),
-        // those of the merged HSPs among them.
-        let sum_stats = ["-sum_stats", "true"];
-        let best = ["-evalue", "1e-180"];
-        let best_sets = ["-evalue", "1e-100", "-sum_stats", "true"];
-        let cases: [(&str, [&str; 2], &str, &[&str]); 6] = [
-            ("sub.6", ["-subject", "pz_s.faa"], MERGE_OUTFMT, &[]),
-            ("db.6", ["-db", "pz"], MERGE_OUTFMT, &[]),
-            (
-                "ss.sub.6",
-                ["-subject", "pz_s.faa"],
-                MERGE_OUTFMT,
-                &sum_stats,
-            ),
-            ("ss.db.6", ["-db", "pz"], MERGE_OUTFMT, &sum_stats),
-            ("sub.0", ["-subject", "pz_s.faa"], "0", &best),
-            ("ss.db.0", ["-db", "pz"], "0", &best_sets),
-        ];
-        for (label, target, outfmt, extra) in cases {
-            let label = format!("q{n}.{label}");
-            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/db_search_long")
-                .join(format!("phi_merge.{label}.out"));
-            let frozen =
-                std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-            // NCBI's words in LOSAT's (outfmt 0's program and version lines).
-            let want = without_posted_date(&losat::wording::losat_output_bytes(&frozen));
-            for threads in [1, 4] {
-                let output = losat()
-                    .current_dir(dir)
-                    .args(["psiblast", "-query", &query])
-                    .args(target)
-                    .args(["-phi_pattern", "zf.pat", "-num_iterations", "1"])
-                    .args(["-outfmt", outfmt])
-                    .args(extra)
-                    .args(["-num_threads", &threads.to_string()])
-                    .output()
-                    .expect("run losat psiblast");
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if !output.status.success() || !stderr.is_empty() {
-                    failed.push(format!(
-                        "{label} t{threads}: status {:?}, stderr {stderr:?}",
-                        output.status.code(),
-                    ));
-                } else if without_posted_date(&output.stdout) != want {
-                    failed.push(format!(
-                        "{label} t{threads}: {} bytes vs expected {}:\n{}",
-                        output.stdout.len(),
-                        want.len(),
-                        String::from_utf8_lossy(&output.stdout)
-                    ));
-                }
+        let (sub, db) = (["-subject", "pz_s.faa"], ["-db", "pz"]);
+        for (label, target, outfmt, extra) in [
+            ("sub.6", sub, MERGE_OUTFMT, NONE),
+            ("db.6", db, MERGE_OUTFMT, NONE),
+            ("ss.sub.6", sub, MERGE_OUTFMT, SUM_STATS),
+            ("ss.db.6", db, MERGE_OUTFMT, SUM_STATS),
+            ("sub.0", sub, "0", BEST),
+            ("ss.db.0", db, "0", BEST_SETS),
+        ] {
+            cases.push((
+                format!("q{n}.{label}"),
+                format!("pz_q{n}.faa"),
+                target,
+                outfmt,
+                extra,
+            ));
+        }
+    }
+    // The third query's merged HSP aligns its pattern region two letters past the query's end:
+    // NCBI reads the zero bytes after the query's letters there.
+    let (sub, db) = (["-subject", "pz_r.faa"], ["-db", "pr"]);
+    for (label, target, outfmt, extra) in [
+        ("sub.6", sub, MERGE_OUTFMT, NONE),
+        ("db.6", db, MERGE_OUTFMT, NONE),
+        ("ss.sub.6", sub, MERGE_OUTFMT, SUM_STATS),
+        ("sub.0", sub, "0", NONE),
+    ] {
+        cases.push((
+            format!("q3.{label}"),
+            "pz_q3.faa".to_string(),
+            target,
+            outfmt,
+            extra,
+        ));
+    }
+    let mut failed = Vec::new();
+    for (label, query, target, outfmt, extra) in cases {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/db_search_long")
+            .join(format!("phi_merge.{label}.out"));
+        let frozen =
+            std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        // NCBI's words in LOSAT's (outfmt 0's program and version lines).
+        let want = without_posted_date(&losat::wording::losat_output_bytes(&frozen));
+        for threads in [1, 4] {
+            let output = losat()
+                .current_dir(dir)
+                .args(["psiblast", "-query", &query])
+                .args(target)
+                .args(["-phi_pattern", "zf.pat", "-num_iterations", "1"])
+                .args(["-outfmt", outfmt])
+                .args(extra)
+                .args(["-num_threads", &threads.to_string()])
+                .output()
+                .expect("run losat psiblast");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !output.status.success() || !stderr.is_empty() {
+                failed.push(format!(
+                    "{label} t{threads}: status {:?}, stderr {stderr:?}",
+                    output.status.code(),
+                ));
+            } else if without_posted_date(&output.stdout) != want {
+                failed.push(format!(
+                    "{label} t{threads}: {} bytes vs expected {}:\n{}",
+                    output.stdout.len(),
+                    want.len(),
+                    String::from_utf8_lossy(&output.stdout)
+                ));
             }
         }
     }

@@ -3,7 +3,7 @@
 //! traceback with e-values, reaping and bit scores. The driver (subjects, hit lists, the split
 //! per occurrence, report) is blastp's (`blastp::blast_engine::phi_hooks`).
 
-use super::align::{prelim_alignment, traceback, PhiGapCosts};
+use super::align::{prelim_alignment, traceback, PhiGapCosts, QUERY_ZEROS_PAST_END};
 use super::pattern::{PhiError, PhiPattern};
 use super::scan::{query_occurrences, subject_hits, Occurrence, Occurrences};
 use super::stats::{self, PhiKarlin};
@@ -11,6 +11,7 @@ use crate::algorithm::pssm_search::gapalign::PssmGapScratch;
 use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::common::GapEditOp;
 use crate::core::blast_util::BLASTAA_SIZE;
+use crate::utils::matrix::ncbistdaa;
 
 /// An HSP of a PHI search (`BlastHSP` with its `pat_info`).
 #[derive(Debug, Clone, PartialEq)]
@@ -97,8 +98,13 @@ pub(crate) struct PhiLink {
 /// The search of one query: its letters, matrix rows, occurrences and the stage parameters.
 pub(crate) struct PhiSearch<'p> {
     pub(crate) pattern: &'p PhiPattern,
+    /// The query's letters followed by the zero bytes after them in NCBI's buffer
+    /// (`QUERY_ZEROS_PAST_END`), which the traceback reads where a pattern region passes the
+    /// query's end.
     pub(crate) query: Vec<u8>,
     pub(crate) rows: QueryPssm,
+    /// The scores of those zero bytes, the gap residue, against each letter.
+    pub(crate) gap_row: [i32; BLASTAA_SIZE],
     pub(crate) occurrences: Vec<Occurrence>,
     pub(crate) karlin: PhiKarlin,
     pub(crate) effective_occurrences: i32,
@@ -203,10 +209,14 @@ pub(crate) fn setup<'p>(params: &PhiSetup<'p, '_>) -> Result<PhiSearch<'p>, PhiS
         gap_extend: params.gap_extend,
         x_drop,
     };
+    let mut query = Vec::with_capacity(params.query.len() + QUERY_ZEROS_PAST_END);
+    query.extend_from_slice(params.query);
+    query.resize(params.query.len() + QUERY_ZEROS_PAST_END, ncbistdaa::GAP);
     Ok(PhiSearch {
         pattern,
-        query: params.query.to_vec(),
+        query,
         rows,
+        gap_row: std::array::from_fn(|s| (params.score)(ncbistdaa::GAP, s as u8)),
         occurrences,
         karlin: params.karlin,
         effective_occurrences: effective,
@@ -324,6 +334,7 @@ impl PhiSearch<'_> {
             let occurrence = self.occurrences[hsp.occurrence];
             let aligned = traceback(
                 &self.rows,
+                &self.gap_row,
                 &self.query,
                 subject,
                 subject_length,

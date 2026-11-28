@@ -73,7 +73,7 @@ NCBI's rows at `-num_threads 8` are the same (with `-subject`, NCBI warns that i
 
 `phi_merge.<case>.out`: NCBI BLAST+ 2.17.0's bytes of the second test of `tests/psiblast_phi_long.rs` (line PS, PS8a-2
 fix round 1): psiblast `-phi_pattern` with the zinc-finger pattern `C-x(2,4)-C-x(3)-[LIVMFYWC]-x(8)-H-x(3,5)-H` (eight
-places of 22 to 27 residues in TF3A_YEAST) on a subject of 5,000,300 residues (`pz_s`, letters without `C` and `H`)
+places of 21 to 24 residues in TF3A_YEAST) on a subject of 5,000,300 residues (`pz_s`, letters without `C` and `H`)
 with TF3A at 4,999,771, across the end of the first part. HSPs of the first and second parts that belong to different
 places merge, and the merged HSP's Seq-align (its start plus its edit script) ends after its own ends: past the end of
 the query `pz_q1` (TF3A, 429 residues: `qend` 442 and 439, `-` in outfmt 0's query row past 429) and inside the query
@@ -91,6 +91,19 @@ psiblast -query pz_qn.faa -subject pz_s.faa $P -outfmt "$F" -sum_stats true > ph
 psiblast -query pz_qn.faa -db pz $P -outfmt "$F" -sum_stats true > phi_merge.qn.ss.db.6.out
 psiblast -query pz_qn.faa -subject pz_s.faa $P -outfmt 0 -evalue 1e-180 > phi_merge.qn.sub.0.out
 psiblast -query pz_qn.faa -db pz $P -outfmt 0 -evalue 1e-100 -sum_stats true > phi_merge.qn.ss.db.0.out
+```
+
+The third query `pz_q3` (TF3A's first 81 residues, with its place at 50 of 24 residues, then its place at 164 of 22,
+which ends the query: 103 residues) is put at 4,999,909 of `pz_r` (the same letters as `pz_s` otherwise). The merged
+HSP aligns its pattern region from the last place's start with the first place's length, two letters past the query's
+end: NCBI reads the query's sentinel and the zero byte after it there (`qend` 115, `-` in outfmt 0's query row):
+
+```
+makeblastdb -in pz_r.faa -dbtype prot -out pr
+psiblast -query pz_q3.faa -subject pz_r.faa $P -outfmt "$F" > phi_merge.q3.sub.6.out
+psiblast -query pz_q3.faa -db pr $P -outfmt "$F" > phi_merge.q3.db.6.out
+psiblast -query pz_q3.faa -subject pz_r.faa $P -outfmt "$F" -sum_stats true > phi_merge.q3.ss.sub.6.out
+psiblast -query pz_q3.faa -subject pz_r.faa $P -outfmt 0 > phi_merge.q3.sub.0.out
 ```
 
 The test compares outfmt 0 in LOSAT's words (`wording::losat_output_bytes`) and without the line of the database's

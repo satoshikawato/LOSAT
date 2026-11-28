@@ -3316,8 +3316,8 @@ impl SeqDb {
         self.volumes[at.volume].nucleotide_length(at.vol_oid, self.location_oid(&at))
     }
 
-    /// Signed 32-bit length of nucleotide `ordinal` as NCBI's `GetSeqLengthExact` /
-    /// `x_GetSequence` compute it (`Volume::nucleotide_length_i32`).
+    /// Signed 32-bit length of nucleotide `ordinal` as NCBI's `GetSeqLengthExact` computes it
+    /// (`Volume::nucleotide_length_i32`).
     pub fn nucleotide_length_i32(&self, ordinal: u32) -> Result<i32, SeqDbError> {
         self.nucleotide_length_i32_at(self.find_volume(ordinal)?)
     }
@@ -3325,6 +3325,12 @@ impl SeqDb {
     /// [`SeqDb::nucleotide_length_i32`] of the nucleotide at `at`.
     pub fn nucleotide_length_i32_at(&self, at: SeqLocation) -> Result<i32, SeqDbError> {
         self.volumes[at.volume].nucleotide_length_i32(at.vol_oid, self.location_oid(&at))
+    }
+
+    /// Signed 32-bit length of the nucleotide at `at` as NCBI's `x_GetSequence` gives it to the
+    /// readers of the letters (`Volume::nucleotide_sequence_len_i32`).
+    pub fn nucleotide_sequence_len_i32_at(&self, at: SeqLocation) -> Result<i32, SeqDbError> {
+        self.volumes[at.volume].nucleotide_sequence_len_i32(at.vol_oid, self.location_oid(&at))
     }
 
     /// [`SeqDb::nucleotide_iupac_range_at`] of nucleotide `ordinal`.

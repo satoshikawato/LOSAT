@@ -1203,7 +1203,8 @@ fn alias_taxid_list_rescues_lines_before_negative_user_taxids() {
 /// arithmetic, which wraps past `2^29` whole bytes; `ScanTotals::add_length` adds it as
 /// `x_ScanTotals` does (`total` wraps a negative one, `shortest` takes it, `longest` and
 /// `searchable_total` take only a positive one). The offsets past `2^29` are those of the frozen
-/// blastdbcmd `-info` rows `ap_*` of `nonasc_xprog` (OID 2 of `mv3db/v0`: start 55, oid & 3 = 2,
+/// blastdbcmd `-info` rows `ap_*` of `nonasc_xprog` (test `nonasc_approx_length_info_parity`;
+/// OID 2 of `mv3db/v0`: start 55, oid & 3 = 2,
 /// the other four OIDs 432 bases): NCBI BLAST+ 2.17.0 prints the totals of the wrapped lengths.
 #[test]
 fn approx_nucleotide_length_is_ncbis_32_bit_int_and_totals_add_it() {

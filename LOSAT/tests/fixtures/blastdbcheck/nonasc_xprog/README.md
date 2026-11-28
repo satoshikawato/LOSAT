@@ -125,3 +125,22 @@ standard error and exit status (a signal as `-N`) are the row's `.out`, `.err` a
   `repa` with its ambiguity offset 4 bytes past the next start: the search of the repeats cannot
   read its ambiguity data, and NCBI stops with `BLAST engine error: Warning: File error: could not
   get ambiguity data. ` (exit status 3) at both thread counts.
+- blastdbcmd on a sequence file of no bytes (RG-D2 tail R6, review R5 findings 1 and 5, frozen
+  2026-11-28; test `nonasc_blastdbcmd_empty_sequence_file_parity`). `mv3z_dbcmd_<row>`: `mv3db` of
+  kind `zero` (`v1.nsq` of no bytes, the first sequence offset of `v1` 0) under the alias `n`,
+  NCBI `blastdbcmd -db n`: `e606` (`-entry 606`, OID 5 at offset 0): no output, exit status 0;
+  `e606_s` (`-outfmt %s`): `Error: [blastdbcmd] Error: could not get sequence or range.`, exit
+  status 1; `e606_al` (`-outfmt "%a %l"`, the exact length) and `e607` (`-entry 607`, OID 6 at
+  offset 28): `SIGSEGV`; `e605_606` (`-entry 605,606`): OID 4's FASTA only. `p2_dbcmd_<row>`:
+  `p2db` with OID 0 of `pv1` of length -1 and `pv1.psq` of no bytes under the alias `p`, NCBI
+  `blastdbcmd -db p`: `e7004`: no output; `e7004_als` (`-outfmt "%a %l %s"`): the same error;
+  `e7001_7004`: OID 0's FASTA only; `e7005` (a positive length): `SIGSEGV`. LOSAT matches every
+  row (the crashes refused).
+- `ap_<row>_info{,_t}` (RG-D2 tail R5 finding 6, frozen 2026-11-28 for review R5 finding 2; test
+  `nonasc_approx_length_info_parity`): NCBI `blastdbcmd -db g -info` (`_t`: and `-exact_length`)
+  of the alias `g` (`DBLIST v0`, `GILIST g.gil`, `ap_g.gil` made by NCBI `blastdb_aliastool
+  -gi_file_in` from GIs 601-605) over `mv3db/v0` whose OID 2 has its ambiguity offset at its
+  start plus 2^29 + 6 (`pos29`), 2^30 + 6 (`pos30`), 2^31 + 2^30 (`neg30`), 2^31 + 6 (`neg31`) or
+  0 (`eq`): the totals are those of NCBI's 32-bit `int` approximate lengths (454, 430, or near
+  2^64 for `pos29`, printed with NCBI's lost digit); `-exact_length` crashes (`SIGSEGV`) except
+  for `eq`. The run directory is `<RUN>`.

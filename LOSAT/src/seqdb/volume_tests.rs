@@ -1189,4 +1189,14 @@ fn empty_sequence_file_block_of_sequences_that_read_nothing() {
         assert_eq!(block.stopped_at_negative(), mt);
         assert_eq!(block.len(), if mt { 0 } else { 1 });
     }
+    // The readers of the letters take `x_GetSequence`'s length (-1 at offset 0); the exact
+    // length (`GetSeqLengthExact`) copies a byte out of the empty file, NCBI's crash.
+    let db = SeqDb::open_search_in(b"nz", SeqType::Nucleotide, &path).unwrap();
+    let volume = &db.volumes()[0];
+    assert_eq!(volume.nucleotide_sequence_len_i32(0, 0).unwrap(), -1);
+    assert_eq!(volume.nucleotide_ambiguity(0, 0).unwrap().length, 0);
+    assert!(matches!(
+        volume.nucleotide_length_i32(0, 0),
+        Err(SeqDbError::NcbiCrashes { .. })
+    ));
 }

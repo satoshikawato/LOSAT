@@ -2688,7 +2688,8 @@ fn approx_protein_length(seq: &[u32], i: usize) -> i32 {
 /// signed 32-bit `int`, then four bases a byte and `oid & 3` in NCBI's 32-bit `int` arithmetic,
 /// as its build computes it (`x_GetSequence`'s same length, `Volume::x_first_negative_nucleotide_in`):
 /// it wraps where the whole bytes pass `2^29` (blastdbcmd `-info` of a GI-list alias over such
-/// offsets prints the totals of the wrapped lengths: RG-D2 tail R5, fixture rows `ap_*`). It is
+/// offsets prints the totals of the wrapped lengths: the frozen rows `ap_*` of `nonasc_xprog`,
+/// test `nonasc_approx_length_info_parity`). It is
 /// negative where the ambiguity offset is not past the sequence's start (`amb == seq` gives
 /// `oid & 3 - 4`) or the wrapped product is.
 fn approx_nucleotide_length(seq: &[u32], amb: &[u32], i: usize, oid: u32) -> i32 {

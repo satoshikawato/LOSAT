@@ -2450,3 +2450,165 @@ fn nonasc_filtering_db_repeat_search_runs_one_thread() {
     }
     let _ = fs::remove_dir_all(&root);
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:302-323
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1619-1628
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1841
+/// blastdbcmd on a sequence file of no bytes (RG-D2 tail R6, review R5 findings 1 and 5). NCBI's
+/// readers of the letters (`GetBioseq`, `x_GetAmbigSeq`) take `x_GetSequence`'s length, which
+/// reads nothing for a nucleotide at offset 0 (the null pointer's -1) or a protein of index
+/// length 0 or less, while the exact length of `-outfmt %l` (`GetSeqLengthExact`) copies a byte
+/// out of the empty file and crashes. `mv3z_dbcmd_<row>`: `mv3db` of kind `zero` (`v1.nsq` of
+/// no bytes, the first sequence offset of `v1` 0) under the alias `n`; `-entry 606` (OID 5, at
+/// offset 0) gives no output (the FASTA path), NCBI's error with `-outfmt %s`, and the crash
+/// with `%l`; `-entry 607` (OID 6, at offset 28) crashes; `-entry 605,606` writes OID 4 only.
+/// `p2_dbcmd_<row>`: `p2db` with OID 0 of `pv1` of length -1 and `pv1.psq` of no bytes under
+/// the alias `p`: `-entry 7004` gives no output, NCBI's error with `-outfmt "%a %l %s"`,
+/// `-entry 7001,7004` writes OID 0 only, and `-entry 7005` (a positive length) crashes. LOSAT
+/// is byte-identical and refuses the crashes.
+#[test]
+fn nonasc_blastdbcmd_empty_sequence_file_parity() {
+    let root = scratch("dbcmd-empty-seq-file");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let base = fixtures().join("nonasc_xprog");
+    let copy_db = |name: &str, db: &str| -> PathBuf {
+        let dir = root.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        for entry in fs::read_dir(base.join(db)).unwrap() {
+            let entry = entry.unwrap();
+            fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
+        }
+        dir
+    };
+    let mv3z = copy_db("run_mv3z", "mv3db");
+    fs::write(mv3z.join("n.nal"), "TITLE n\nDBLIST v0 v1 v2\n").unwrap();
+    fs::write(mv3z.join("v1.nsq"), b"").unwrap();
+    let mut nin = fs::read(mv3z.join("v1.nin")).unwrap();
+    let (_, _, seq, _) = nin_v4_layout(&nin);
+    nin[seq..seq + 4].copy_from_slice(&0u32.to_be_bytes());
+    fs::write(mv3z.join("v1.nin"), nin).unwrap();
+    let p2z = copy_db("run_p2z", "p2db");
+    fs::write(p2z.join("p.pal"), "TITLE p\nDBLIST pv0 pv1\n").unwrap();
+    fs::write(p2z.join("pv1.psq"), b"").unwrap();
+    let mut pin = fs::read(p2z.join("pv1.pin")).unwrap();
+    let (_, _, seq, _) = nin_v4_layout(&pin);
+    let start: [u8; 4] = pin[seq..seq + 4].try_into().unwrap();
+    pin[seq + 4..seq + 8].copy_from_slice(&start);
+    fs::write(p2z.join("pv1.pin"), pin).unwrap();
+    let rows: [(&str, &Path, &[&str]); 9] = [
+        ("mv3z_dbcmd_e606", &mv3z, &["-db", "n", "-entry", "606"]),
+        (
+            "mv3z_dbcmd_e606_s",
+            &mv3z,
+            &["-db", "n", "-entry", "606", "-outfmt", "%s"],
+        ),
+        (
+            "mv3z_dbcmd_e606_al",
+            &mv3z,
+            &["-db", "n", "-entry", "606", "-outfmt", "%a %l"],
+        ),
+        ("mv3z_dbcmd_e607", &mv3z, &["-db", "n", "-entry", "607"]),
+        (
+            "mv3z_dbcmd_e605_606",
+            &mv3z,
+            &["-db", "n", "-entry", "605,606"],
+        ),
+        ("p2_dbcmd_e7004", &p2z, &["-db", "p", "-entry", "7004"]),
+        (
+            "p2_dbcmd_e7004_als",
+            &p2z,
+            &["-db", "p", "-entry", "7004", "-outfmt", "%a %l %s"],
+        ),
+        (
+            "p2_dbcmd_e7001_7004",
+            &p2z,
+            &["-db", "p", "-entry", "7001,7004"],
+        ),
+        ("p2_dbcmd_e7005", &p2z, &["-db", "p", "-entry", "7005"]),
+    ];
+    let mut results = BTreeMap::new();
+    for (label, dir, args) in rows {
+        let ncbi = frozen_tail_row(label);
+        let got = run_losat_sub(&root, dir, "blastdbcmd", args);
+        assert_tail_row(label, &got, (ncbi.0, &ncbi.1, &ncbi.2));
+        results.insert(label, losat_status(&got));
+    }
+    // LOSAT's results: nothing for the sequences that read nothing, NCBI's error where `%s`
+    // needs letters, the refusal of NCBI's crashes.
+    assert_eq!(results["mv3z_dbcmd_e606"], (0, 0));
+    assert_eq!(results["mv3z_dbcmd_e606_s"], (1, 0));
+    assert_eq!(results["mv3z_dbcmd_e606_al"], (1, 0));
+    assert_eq!(results["mv3z_dbcmd_e605_606"], (0, 3));
+    assert_eq!(results["p2_dbcmd_e7004"], (0, 0));
+    assert_eq!(results["p2_dbcmd_e7001_7004"], (0, 3));
+    assert_eq!(results["p2_dbcmd_e7005"], (1, 0));
+    let _ = fs::remove_dir_all(&root);
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:325-344
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1557-1610
+/// The totals of a list-filtered nucleotide database (RG-D2 tail R5 decision D2, review R5
+/// finding 2): blastdbcmd `-info` of the alias `g` (`GILIST` of `ap_g.gil`, GIs 601-605, over
+/// `mv3db/v0`) whose OID 2 (start 55, `oid & 3` 2) has its ambiguity offset at `start + delta`.
+/// NCBI adds each approximate length as 32-bit `int` arithmetic computes it (`ap_<row>_info`):
+/// `pos29` (`delta` 2^29 + 6) prints 432 plus a length wrapped to -2^31 + 22 (a total near
+/// 2^64, with NCBI's lost digit), `pos30` (2^30 + 6) and `neg31` (2^31 + 6) 454, `neg30`
+/// (2^31 + 2^30) and `eq` (0) 430. With `-exact_length` (`ap_<row>_info_t`) NCBI reads the
+/// sequence's last byte, past the file or before it (`SIGSEGV`, refused by LOSAT), except for
+/// `eq`. LOSAT is byte-identical.
+#[test]
+fn nonasc_approx_length_info_parity() {
+    let root = scratch("approx-length-info");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let base = fixtures().join("nonasc_xprog");
+    let mut results = BTreeMap::new();
+    for (name, delta) in [
+        ("pos29", (1u64 << 29) + 6),
+        ("pos30", (1 << 30) + 6),
+        ("neg30", (1 << 31) + (1 << 30)),
+        ("neg31", (1 << 31) + 6),
+        ("eq", 0),
+    ] {
+        let dir = root.join(format!("run_ap_{name}"));
+        fs::create_dir_all(&dir).unwrap();
+        for entry in fs::read_dir(base.join("mv3db")).unwrap() {
+            let entry = entry.unwrap();
+            fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
+        }
+        fs::copy(base.join("ap_g.gil"), dir.join("g.gil")).unwrap();
+        fs::write(dir.join("g.nal"), "TITLE g\nDBLIST v0\nGILIST g.gil\n").unwrap();
+        let nin = dir.join("v0.nin");
+        let mut bytes = fs::read(&nin).unwrap();
+        let (_, _, seq, amb) = nin_v4_layout(&bytes);
+        let start = u32::from_be_bytes(bytes[seq + 8..seq + 12].try_into().unwrap());
+        let poked = (u64::from(start) + delta) as u32;
+        bytes[amb + 8..amb + 12].copy_from_slice(&poked.to_be_bytes());
+        fs::write(&nin, bytes).unwrap();
+        for (suffix, args) in [
+            ("info", &["-db", "g", "-info"][..]),
+            ("info_t", &["-db", "g", "-info", "-exact_length"][..]),
+        ] {
+            let label = format!("ap_{name}_{suffix}");
+            let ncbi = frozen_tail_row(&label);
+            let got = run_losat_sub(&root, &dir, "blastdbcmd", args);
+            assert_tail_row(&label, &got, (ncbi.0, &ncbi.1, &ncbi.2));
+            results.insert(label, got);
+        }
+    }
+    // LOSAT's totals, as NCBI prints them.
+    let total = |label: &str| text(&results[label].0).lines().nth(1).unwrap().to_string();
+    assert_eq!(
+        total("ap_pos29_info"),
+        "\t5 sequences; 1,846,744,071,562,068,422 total bases"
+    );
+    assert_eq!(total("ap_pos30_info"), "\t5 sequences; 454 total bases");
+    assert_eq!(total("ap_neg30_info"), "\t5 sequences; 430 total bases");
+    assert_eq!(total("ap_eq_info_t"), "\t5 sequences; 433 total bases");
+    assert_eq!(results["ap_neg31_info_t"].2, 1);
+    let _ = fs::remove_dir_all(&root);
+}

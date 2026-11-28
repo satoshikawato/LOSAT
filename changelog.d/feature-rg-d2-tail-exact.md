@@ -7,8 +7,9 @@
   sequence, that error replaces the warning of an empty database, as in NCBI BLAST+.
 - An empty (0-byte) sequence file: NCBI BLAST+ reads nothing from it for a protein whose length in the index is 0 or less
   or for a nucleotide that starts at offset 0, and LOSAT no longer refuses such sequences: `blastp` and `blastx` complete
-  where the scan stops at such a protein or the list leaves out the others, and `blastn -num_threads 1` skips such a
-  nucleotide as NCBI BLAST+ does.
+  where the scan stops at such a protein or the list leaves out the others, `blastn -num_threads 1` skips such a
+  nucleotide, and `blastdbcmd -entry` writes nothing for such a sequence (`-outfmt %s`: NCBI BLAST+'s error `could not get
+  sequence or range.`), as NCBI BLAST+ does. `-outfmt %l` of such a nucleotide stays refused (NCBI BLAST+ crashes).
 - A database with a list or an OID range whose nucleotide index gives a sequence a negative approximate length, or a
   sequence of 2^31 bases or more: its total, longest and shortest length (`blastdbcmd -info` and the search's statistics)
   now follow NCBI BLAST+'s 32-bit arithmetic.

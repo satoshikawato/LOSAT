@@ -176,7 +176,10 @@ export function noTaxidExpansionConflicts(input: {
 }
 
 export interface BlastDbCandidate {
-  /** Exact relative database path passed to `-db` or `-filtering_db` (without `.nal`/`.pal`/`.nin`/`.pin`). */
+  /**
+   * The database's relative path as it is called (without `.nal`/`.pal`/`.nin`/`.pin`), which `-db` or `-filtering_db` names
+   * as the command line reads it (`seqdbNameList`).
+   */
   readonly name: string;
   readonly kind: SequenceKind;
   readonly entry: 'alias' | 'volume';

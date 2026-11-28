@@ -225,7 +225,7 @@ function onInFiles(event: Event): void {
         <p v-if="state.runFiles.length > 0" class="muted small wm-in-count" data-testid="wm-in-files-count">
           {{ state.runFiles.length }} {{ state.runFiles.length === 1 ? 'file' : 'files' }} in the run directory.
         </p>
-        <p v-if="state.runFilesError" class="error small">{{ state.runFilesError }}</p>
+        <p v-if="state.runFilesError" class="error small" data-testid="wm-in-error">{{ state.runFilesError }}</p>
       </template>
     </template>
   </fieldset>

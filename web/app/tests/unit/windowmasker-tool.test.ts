@@ -330,6 +330,31 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     expect(draft.state.get().runFiles).toHaveLength(2);
   });
 
+  it('writes a found BLAST database with a space as -in "my dbs/wm" for -infmt blastdb, and refuses one with a double quote (line WW, WW4d)', async () => {
+    const { draft, submitted } = setupDraft();
+    draft.setStage('mask');
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(
+      ['nin', 'nhr', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)),
+      ['my dbs/wm.nin', 'my dbs/wm.nhr', 'my dbs/wm.nsq'],
+    );
+    expect(draft.state.get().blastDbIn).toBe('"my dbs/wm"');
+    expect(draft.state.get().runFilesError).toBeUndefined();
+    expect(draft.previewArgv()).toEqual(expect.arrayContaining(['-infmt', 'blastdb', '-in', '"my dbs/wm"']));
+    draft.setUstatFile(new File(['counts'], 'c.ustat'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect((await draft.submit()).ok).toBe(true);
+    const req = submitted[0]![0]!;
+    expect(req.argv).toEqual(expect.arrayContaining(['-in', '"my dbs/wm"', '-ustat', 'c.ustat']));
+    expect(req.directory.map((entry) => entry.name).sort()).toEqual(['c.ustat', 'my dbs/wm.nhr', 'my dbs/wm.nin', 'my dbs/wm.nsq']);
+
+    const { draft: other } = setupDraft();
+    other.setField('-infmt', 'blastdb');
+    other.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['q"d/wm.nin', 'q"d/wm.nsq']);
+    expect(other.state.get().blastDbIn).toBe('');
+    expect(other.state.get().runFilesError).toBe('A database named "q"d/wm" cannot be in -in: a double quote there starts or ends a name.');
+  });
+
   it('SearchDraft.useCounts switches to BLASTN with -window_masker_db file attached', () => {
     const { data } = makeData();
     const draft = new SearchDraft({

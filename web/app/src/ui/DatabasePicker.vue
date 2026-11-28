@@ -8,12 +8,15 @@ import { computed, ref, useId } from 'vue';
 import type { SequenceKind } from 'losat/domain';
 import type { DatabasePickDraft } from '../application/draft';
 import { chooseAgainMessage, databaseTaxonomy, defaultDatabase, matchingDatabases, noMatchingDatabaseMessage, rememberedPickKind } from '../domain/blast-db';
+import { listNameRefusal } from '../domain/list-flags';
 import { formatBytes } from './format';
 import LosatLoader from './LosatLoader.vue';
 
 const props = withDefaults(
   defineProps<{
     pick: DatabasePickDraft;
+    /** The option that the chosen database is written in (`-db`, `-filtering_db`), whose list cannot carry every name. */
+    flag: string;
     moleculeKind: SequenceKind;
     contextLabel: string;
     testIdPrefix: string;
@@ -40,6 +43,8 @@ const mismatch = computed(() =>
     ? noMatchingDatabaseMessage(discovery.value, props.moleculeKind, props.contextLabel)
     : undefined,
 );
+/** Why the chosen database cannot be written in the option (a name with a double quote, line WW, WW4d), as "Run LOSAT" says it. */
+const refusal = computed(() => (selected.value === undefined ? undefined : listNameRefusal({ flag: props.flag }, selected.value.name, 'database')));
 const taxonomySummary = computed(() => {
   if (discovery.value === undefined || selected.value === undefined) return '';
   const tax = databaseTaxonomy(discovery.value, selected.value.name);
@@ -137,6 +142,9 @@ function optionText(db: (typeof matches.value)[number]): string {
           <span v-if="selected.volumes && selected.volumes.length > 1" class="muted"> ({{ selected.volumes.length }} volumes)</span>
           <span v-else-if="selected.entry === 'alias'" class="muted"> (alias)</span>
           <span v-if="selected.title && selected.title !== selected.name" class="muted"> — {{ selected.title }}</span>
+        </p>
+        <p v-if="refusal !== undefined" class="error db-refused" role="alert" :data-testid="`${testIdPrefix}-refused`">
+          {{ refusal }}
         </p>
         <p class="db-meta muted" :data-testid="`${testIdPrefix}-meta`">
           {{ discovery.files.length }} {{ discovery.files.length === 1 ? 'file' : 'files' }} ({{ formatBytes(discovery.totalBytes) }})<template

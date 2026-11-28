@@ -11,7 +11,8 @@ import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports
 import { duplicateRunFileMessage, normalizeRunPath, pickedFilePath, RunDirectoryBuilder } from '../domain/blast-db';
 import type { FieldValue } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
-import { fileListNames, listNameRefusal, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
+import { listNameRefusal } from '../domain/list-flags';
+import { fileListNames, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
 import { TOOL_FILE_LIST_FLAGS, type ToolId } from '../domain/tools';
 import { failureText } from './availability';
 import type { EnqueueAllResult, ToolDirectoryFile, ToolRequest } from './coordinator';
@@ -236,7 +237,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
       this.patch({ runFilesError: `Invalid file name: "${given}".` });
       return;
     }
-    const refusal = listNameRefusal(flag, name);
+    const refusal = listNameRefusal({ command: this.tool, flag }, name);
     if (refusal !== undefined) {
       this.patch({ runFilesError: refusal });
       return;

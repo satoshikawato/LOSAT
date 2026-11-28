@@ -125,6 +125,21 @@ describe('buildArgv', () => {
     expect(userArgv({ argv, prints: 'version' })).toEqual(['blastn', '-seqidlist', 'ids.txt', '-filtering_db', 'repeats/rep']);
   });
 
+  it('writes -db as the command line reads it: a database whose path holds a space between double quotes, shown so that it pastes (line WW, WW4d)', () => {
+    const argv = buildArgv({ program: 'blastn', queryName: 'q.fa', databaseName: 'my dbs/ndb', parameters: [['-filtering_db', '"rep dbs/rep"']] });
+    expect(argv).toEqual(['blastn', '-query', 'q.fa', '-db', '"my dbs/ndb"', '-filtering_db', '"rep dbs/rep"']);
+    // The shell gives the engine the word "my dbs/ndb" with its quotes, as native `losat blastn -db '"my dbs/ndb"'` reads it.
+    expect(toShellCommand(argv, 0)).toBe(`losat blastn -query q.fa -db '"my dbs/ndb"' -filtering_db '"rep dbs/rep"' -outfmt 0`);
+    expect(splitOptions(shellWords(argv.slice(1)))).toEqual(argv.slice(1));
+    expect(commandWords(argv, 6, { blastdb: 'my dbs' })).toEqual(['BLASTDB=my dbs', 'losat', ...argv, '-outfmt', '6']);
+    expect(optionNames(commandWords(argv, 6), () => true).filter((part) => part.name).map((part) => part.text)).toEqual(['-query', '-db', '-filtering_db', '-outfmt']);
+    expect(userArgv({ argv, prints: 'version' })).toEqual(['blastn', '-filtering_db', '"rep dbs/rep"']);
+    // A name that the list cannot carry is no argv, with the reason.
+    expect(() => buildArgv({ program: 'blastp', queryName: 'q.fa', databaseName: 'q"d/pdb', parameters: [] })).toThrow(
+      'A database named "q"d/pdb" cannot be in -db: a double quote there starts or ends a name.',
+    );
+  });
+
   it('directs -db typed in Additional options to the Subject control, and lets database filter options pass through to the engine (WQA D12b + RG-D4 W2)', () => {
     for (const program of PROGRAMS) {
       expect(extra(program.id, ['-db', 'nt']), program.id).toThrow(/^-db is set in the form: Subject$/);

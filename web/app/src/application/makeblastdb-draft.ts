@@ -12,10 +12,14 @@ import { splitOptions } from '../domain/argv';
 import { duplicateRunFileMessage, normalizeRunPath, primaryBlastDbName } from '../domain/blast-db';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
-import { buildMakeblastdbArgv, fileListNames, listNameRefusal, makeblastdbInputList } from '../domain/tool-argv';
+import { listNameRefusal, seqdbNameList } from '../domain/list-flags';
+import { buildMakeblastdbArgv, fileListNames } from '../domain/tool-argv';
 import { makeblastdbInputType, makeblastdbOptionParameters, toolPrintsKind, type MakeblastdbInputType } from '../domain/tools';
 import type { ToolDirectoryFile, ToolRequest } from './coordinator';
 import { ToolDraftCore, type StatePatch, type ToolDraftCoreDeps, type ToolExtraFile, type ToolFormState } from './tool-draft-core';
+
+/** makeblastdb's `-in`: a SeqDB name list, of FASTA or ASN.1 files or of BLAST databases (`isSeqdbList`). */
+const MAKEBLASTDB_IN = { command: 'makeblastdb', flag: '-in' } as const;
 
 export interface MakeblastdbDraftState extends ToolFormState {
   /** Option values keyed by `-flag` (`-input_type`, `-dbtype`, `-out`, and the options of the groups). */
@@ -140,7 +144,7 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
         error ??= `Invalid file name: "${file.name}".`;
         continue;
       }
-      const refusal = taken.has(name) ? duplicateRunFileMessage(name) : listNameRefusal('-in', name);
+      const refusal = taken.has(name) ? duplicateRunFileMessage(name) : listNameRefusal(MAKEBLASTDB_IN, name);
       if (refusal !== undefined) {
         error ??= refusal;
         continue;
@@ -220,8 +224,8 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     if (state.dbInEdited && state.dbIn.trim() !== '') return {};
     const detected = primaryBlastDbName(runFiles.map((entry) => entry.name));
     if (detected === undefined) return {};
-    const refusal = listNameRefusal('-in', detected, 'database');
-    return refusal === undefined ? { dbIn: makeblastdbInputList([detected]), dbInEdited: false } : { runFilesError: refusal };
+    const refusal = listNameRefusal(MAKEBLASTDB_IN, detected, 'database');
+    return refusal === undefined ? { dbIn: seqdbNameList('-in', [detected]), dbInEdited: false } : { runFilesError: refusal };
   }
 
   /**
@@ -266,7 +270,7 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
   /** `-in`'s value for the input type chosen: `dbIn` for a BLAST database, the files of FASTA and ASN.1 input as one list. */
   private inputValue(state: MakeblastdbDraftState): string {
     if (this.inputType(state) === 'blastdb') return state.dbIn.trim();
-    return makeblastdbInputList(this.inputEntries(state).map((entry) => entry.name));
+    return seqdbNameList('-in', this.inputEntries(state).map((entry) => entry.name), 'file');
   }
 
   /** The files that `-in` names for FASTA and ASN.1 input: the pasted FASTA (`input.fa`), then the files opened. */

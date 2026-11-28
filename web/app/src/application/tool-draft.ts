@@ -8,6 +8,7 @@ import { isUnavailable } from 'losat/ports';
 import { splitOptions } from '../domain/argv';
 import { normalizeRunPath, primaryBlastDbName } from '../domain/blast-db';
 import { countsName } from '../domain/counts';
+import { listNameRefusal, seqdbNameList } from '../domain/list-flags';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import { buildWindowMaskerArgv } from '../domain/tool-argv';
 import {
@@ -57,6 +58,9 @@ export type ToolCountsChoice =
     }
   | { readonly kind: 'saved'; readonly taxid: number; readonly name: string; readonly size: number }
   | { readonly kind: 'file'; readonly file: File; readonly name: string; readonly size: number };
+
+/** WindowMasker's `-in` with `-infmt blastdb`: a SeqDB name list (`isSeqdbList`). */
+const WINDOWMASKER_BLASTDB_IN = { command: 'windowmasker', flag: '-in', inputFormat: 'blastdb' } as const;
 
 export interface ToolDraftState extends ToolFormState {
   readonly stage: WindowMaskerStage;
@@ -314,11 +318,17 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
     this.scheduleValidation();
   }
 
-  /** The `-in` name that files added to the run directory name, until the user edits it (a BLAST database). */
+  /**
+   * The `-in` value of the BLAST database that files added to the run directory hold, until the user edits it: `-in` of
+   * `-infmt blastdb`, a SeqDB name list (`seqdbNameList`: `"my dbs/wm"`; line WW, WW4d), as makeblastdb's `dbIn` is. A
+   * name that the list cannot carry (`listNameRefusal`) is not written, and the Input block says why.
+   */
   protected override runFilesAdded(state: ToolDraftState, runFiles: readonly ToolExtraFile[]): StatePatch<ToolDraftState> {
     if (state.blastDbInEdited && state.blastDbIn.trim() !== '') return {};
     const detected = primaryBlastDbName(runFiles.map((entry) => entry.name));
-    return detected === undefined ? {} : { blastDbIn: detected };
+    if (detected === undefined) return {};
+    const refusal = listNameRefusal(WINDOWMASKER_BLASTDB_IN, detected, 'database');
+    return refusal === undefined ? { blastDbIn: seqdbNameList('-in', [detected]) } : { runFilesError: refusal };
   }
 
   // --- command line & validation ----------------------------------------------------------

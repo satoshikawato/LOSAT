@@ -51,6 +51,7 @@ import {
   ALL_DB_FILTER_FIELDS,
   ALL_DB_FILTER_FLAGS,
   DB_FILE_FILTER_FIELDS,
+  DB_FLAG,
   DB_HARD_MASK_FLAG,
   DB_SOFT_MASK_FLAG,
   FILTERING_DB_FLAG,
@@ -77,6 +78,7 @@ import {
 } from '../domain/blast-db';
 import type { DatabaseFilterFileSnapshot, DatabaseSnapshot, InputPart, QueryFileSnapshot } from '../domain/run';
 import { buildArgv, PASTED_NAMES, splitOptions } from '../domain/argv';
+import { listNameRefusal } from '../domain/list-flags';
 import {
   endsInput,
   excludedIndicesFor,
@@ -829,8 +831,13 @@ export class SearchDraft {
     await scan;
   }
 
+  /**
+   * The option's value for the repeats database chosen: its name, or `true` (on, no database) when none is chosen or its
+   * name cannot be written in `-filtering_db` (`filteringDbRefusal`, which "Run LOSAT" and the picker then show).
+   */
   private setFilteringDbField(selected: string | undefined): void {
-    this.setFieldForProgram('blastn', FILTERING_DB_FLAG, selected ?? true);
+    const written = selected !== undefined && filteringDbRefusal(selected) === undefined;
+    this.setFieldForProgram('blastn', FILTERING_DB_FLAG, written ? selected : true);
   }
 
   /** Selects one discovered nucleotide database name for BLASTN `-filtering_db`. */
@@ -841,7 +848,7 @@ export class SearchDraft {
     const next = Object.freeze({ ...filteringDb, selected: name });
     this.rememberDb('filtering', next);
     this.set({ filteringDb: next });
-    this.setFieldForProgram('blastn', FILTERING_DB_FLAG, name);
+    this.setFilteringDbField(name);
   }
 
   /** Clears the chosen BLASTN `-filtering_db` folder/files while keeping the option ready to pick again. */
@@ -1715,6 +1722,8 @@ export class SearchDraft {
         if (field.kind === 'database') {
           if (values[program][field.flag] === true) {
             if (filteringDb.scanning !== undefined) return readingDatabaseMessage('repeats database', filteringDb.scanning);
+            const refusal = filteringDb.selected === undefined ? undefined : filteringDbRefusal(filteringDb.selected);
+            if (refusal !== undefined) return refusal;
             if (filteringDb.discovery !== undefined && filteringDb.selected === undefined) {
               return noMatchingDatabaseMessage(filteringDb.discovery, field.database?.kind ?? 'nucleotide', field.label);
             }
@@ -1824,6 +1833,8 @@ export class SearchDraft {
         const message = noMatchingDatabaseMessage(database.discovery, desc.subject, desc.label);
         return { message, short: message };
       }
+      const refusal = listNameRefusal({ flag: DB_FLAG }, database.selected, 'database');
+      if (refusal !== undefined) return { message: refusal, short: refusal };
       return undefined;
     }
     const draft = this.role(role);
@@ -2758,4 +2769,9 @@ function headText(bytes: Uint8Array): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Why a repeats database cannot be BLASTN's `-filtering_db`: a name that the option's list cannot carry (`listNameRefusal`). */
+function filteringDbRefusal(name: string): string | undefined {
+  return listNameRefusal({ flag: FILTERING_DB_FLAG }, name, 'database');
 }

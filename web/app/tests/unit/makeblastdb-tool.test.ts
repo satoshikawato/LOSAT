@@ -7,13 +7,12 @@ import type { ToolEngine } from 'losat/ports';
 import { Coordinator, madeDatabaseFolder, type EnqueueAllResult, type ToolRequest } from '../../src/application/coordinator';
 import { MakeblastdbDraft } from '../../src/application/makeblastdb-draft';
 import { assembleSearchDirectory, discoverBlastDatabases, primaryBlastDb } from '../../src/domain/blast-db';
+import { listNameRefusal, seqdbNameList } from '../../src/domain/list-flags';
 import { tarArchive } from '../../src/domain/tar';
 import {
   buildMakeblastdbArgv,
   changedMakeblastdbOptionsCount,
   fileListNames,
-  listNameRefusal,
-  makeblastdbInputList,
   maskDataName,
   refusedToolFields,
 } from '../../src/domain/tool-argv';
@@ -48,7 +47,7 @@ describe('makeblastdb domain helpers', () => {
   it('writes -in as the command line takes a list (spaces separate, quotes keep a name with spaces)', () => {
     expect(
       buildMakeblastdbArgv({
-        input: makeblastdbInputList(['input.fa', 'my genome.fa.gz']),
+        input: seqdbNameList('-in', ['input.fa', 'my genome.fa.gz'], 'file'),
         values: { '-dbtype': 'nucl', '-parse_seqids': true, '-out': 'db', '-mask_data': 'a.asnb, b.asnb' },
         description: MK_DESC,
         extra: ['-logfile', 'run.log'],
@@ -112,6 +111,13 @@ describe('makeblastdb domain helpers', () => {
     expect(await printed(['makeblastdb', '-xmlhelp', '-help'])).toEqual({ status: 0, text: expect.stringMatching(/^<\?xml/) });
     expect((await engine.validateTool(['makeblastdb', '-help-full', '-no_such_option'])).ok).toBe(true);
     expect((await engine.validateTool(['windowmasker', '-help-full'])).ok).toBe(false);
+  });
+
+  it("names FakeEngine's database without -out after the first name of -in's list as the command line reads it (line WW, WW4d)", async () => {
+    const engine = new FakeEngine();
+    const made = async (input: string) => (await engine.runTool(['makeblastdb', '-in', input, '-dbtype', 'nucl'])).files.map((file) => file.name).sort();
+    expect(await made('"my seqs.fa" b.fa')).toEqual(['my seqs.fa.nhr', 'my seqs.fa.nin', 'my seqs.fa.nsq']);
+    expect(await made('a.fa "my seqs.fa"')).toEqual(['a.fa.nhr', 'a.fa.nin', 'a.fa.nsq']);
   });
 
   it("offers a masking run's maskinfo output as -mask_data: the -out file, or the standard output under a name", () => {
@@ -282,10 +288,10 @@ describe('MakeblastdbDraft', () => {
     expect(draft.state.get().dbIn).toBe('');
     expect(draft.state.get().runFilesError).toBe('A database named "old"db" cannot be in -in: a double quote there starts or ends a name.');
     // The one rule for every list option: a comma in -mask_data's list.
-    expect(listNameRefusal('-mask_data', 'a,b.asnb')).toBe('A file named "a,b.asnb" cannot be in -mask_data: a comma separates its files.');
-    expect(listNameRefusal('-mask_data', 'a"b.asnb')).toBeUndefined();
-    expect(listNameRefusal('-in', 'a,b.fa')).toBeUndefined();
-    expect(listNameRefusal('-taxid_map', 'a,"b.txt')).toBeUndefined();
+    expect(listNameRefusal({ command: 'makeblastdb', flag: '-mask_data' }, 'a,b.asnb')).toBe('A file named "a,b.asnb" cannot be in -mask_data: a comma separates its files.');
+    expect(listNameRefusal({ command: 'makeblastdb', flag: '-mask_data' }, 'a"b.asnb')).toBeUndefined();
+    expect(listNameRefusal({ command: 'makeblastdb', flag: '-in' }, 'a,b.fa')).toBeUndefined();
+    expect(listNameRefusal({ command: 'makeblastdb', flag: '-taxid_map' }, 'a,"b.txt')).toBeUndefined();
   });
 
   it('checks nothing before an input is given, then reports a missing -dbtype in its field', async () => {

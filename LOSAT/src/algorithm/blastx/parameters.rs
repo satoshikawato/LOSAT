@@ -524,7 +524,7 @@ fn word_cutoff(
             &p.ungapped,
             searchsp,
             Some(decay),
-            CutoffConversion::FiniteQuotient,
+            CutoffConversion::PROTEIN,
         )
         .min(trigger)
     }
@@ -590,7 +590,7 @@ pub(crate) fn subject_word_cutoff_min(
                 &ungapped,
                 lengths.eff_searchsp,
                 None,
-                CutoffConversion::FiniteQuotient,
+                CutoffConversion::PROTEIN,
             ),
         };
         let cutoff = word_cutoff(options, query_length, average, decay, &p);
@@ -626,7 +626,7 @@ fn context_cutoffs(
     // (`PreparedQueryBatch::batch_valid_before`). They all read the gapped block and the space
     // of `avg_q` and `n`, so one step gives the state after any number of them
     // (`SumStatsCutoffs::next_valid_context`).
-    let mut sum_stats = SumStatsCutoffs::new(avg_q, n, decay, CutoffConversion::FiniteQuotient);
+    let mut sum_stats = SumStatsCutoffs::new(avg_q, n, decay, CutoffConversion::PROTEIN);
     if options.gapped && decay != 0.0 && batch.batch_valid_before {
         sum_stats.next_valid_context(&gapped);
     }
@@ -653,7 +653,7 @@ fn context_cutoffs(
                 &ka,
                 p.search_space,
                 None,
-                CutoffConversion::FiniteQuotient,
+                CutoffConversion::PROTEIN,
             )
         };
         p.hit_cutoff = p.hit_cutoff_max;

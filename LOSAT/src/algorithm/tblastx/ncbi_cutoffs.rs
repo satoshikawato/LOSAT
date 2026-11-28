@@ -176,6 +176,7 @@ pub fn cutoff_score_for_update_tblastx(
         gap_decay_rate,
         ungapped_params,
         scale_factor,
+        CutoffConversion::TBLASTX,
     )
 }
 
@@ -190,6 +191,7 @@ pub fn cutoff_score_for_update_tblastx(
 /// BLASTX's word cutoff (`blastx::parameters::word_cutoff`, the E-value 1.0 of `CUTOFF_E_BLASTX`)
 /// and TBLASTN's (`tblastn::stage_d_stats::ungapped_word_cutoff`) are the same lines with their
 /// programs' lengths; all three call `stats::cutoffs::cutoff_score` for `BLAST_Cutoffs`.
+/// `conversion` is the program's rule (`CutoffConversion::TBLASTX` or `PROTEIN`).
 #[allow(clippy::too_many_arguments)]
 pub fn word_cutoff_score_for_update(
     cutoff_e: f64,
@@ -200,6 +202,7 @@ pub fn word_cutoff_score_for_update(
     gap_decay_rate: f64,
     ungapped_params: &KarlinParams,
     scale_factor: f64,
+    conversion: CutoffConversion,
 ) -> i32 {
     // Search space is the smaller of `subj_length` and `query_length` multiplied by `subj_length`.
     // NOTE: This intentionally mixes AA (query_len_aa) and nucleotide (subject_len_nucl) lengths!
@@ -229,13 +232,13 @@ pub fn word_cutoff_score_for_update(
     // cutoff is the same: 1e-300 and 1e-300 * (1 - 0.5) are both below the 1e-297 that
     // `BlastKarlinEtoS_simple` takes at least (blast_stat.c:4049,4059, `stats::cutoffs::K_SMALL_FLOAT`),
     // so the callers pass `BLAST_GAP_DECAY_RATE` in both modes. The cutoff starts at 1
-    // (blast_parameters.c:321): `stats::cutoffs::cutoff_score`, with exception 8's conversion.
+    // (blast_parameters.c:321): `stats::cutoffs::cutoff_score`, with the program's `conversion`.
     let mut new_cutoff = cutoff_score(
         cutoff_e,
         ungapped_params,
         searchsp,
         Some(gap_decay_rate),
-        CutoffConversion::FiniteQuotient,
+        conversion,
     );
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:365-373
@@ -298,7 +301,7 @@ pub fn cutoff_score_max_for_tblastx(
         ungapped_params,
         eff_searchsp,
         None,
-        CutoffConversion::FiniteQuotient,
+        CutoffConversion::TBLASTX,
     )
 }
 

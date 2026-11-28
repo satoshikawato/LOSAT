@@ -326,7 +326,7 @@ pub(super) fn local_parameters_for_blocks(
                 params,
                 lengths[context].eff_searchsp,
                 None,
-                CutoffConversion::FiniteQuotient,
+                CutoffConversion::PROTEIN,
             )
         };
         hit.push((max_cutoff, max_cutoff));
@@ -349,7 +349,7 @@ pub(super) fn local_parameters_for_blocks(
             avg_qlen,
             hit_subject_length,
             link_params.gap_decay_rate,
-            CutoffConversion::FiniteQuotient,
+            CutoffConversion::PROTEIN,
         );
         for (context, (&(_, valid), params)) in query_contexts.iter().zip(gapped_params).enumerate()
         {
@@ -458,7 +458,7 @@ fn ungapped_word_cutoff(
         kbp,
         searchsp,
         Some(gap_decay_rate),
-        CutoffConversion::FiniteQuotient,
+        CutoffConversion::PROTEIN,
     )
 }
 

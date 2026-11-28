@@ -1,0 +1,25 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: ntagx_t5 (parsed Seq-ids, taxid 99990)
+           2 sequences; 1,260 total letters
+
+
+
+Query= qa part of the sequence with the text tag
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+Unknown                                                               245     4e-69  2
+FFF00094.1 an accession of another sequence                           13.9    4.1    1
+
+

@@ -10,12 +10,6 @@
 use crate::stats::cutoffs::{cutoff_score, CutoffConversion};
 use crate::stats::KarlinParams;
 
-/// BLASTN's rule for a cutoff score that C does not define (a quotient `K * searchsp / E` past
-/// the double, a score past `Int4`): NCBI's x86-64 `INT_MIN`, so `BLAST_Cutoffs` keeps the cutoff
-/// of 1 (PD-LOSAT-NCBI-DEFECTS, "Reproduced as NCBI": the out-of-range conversion to `Int4`;
-/// exception 8's finite value covers the other programs; `stats::cutoffs::CutoffConversion`).
-pub const BLASTN_CUTOFF_CONVERSION: CutoffConversion = CutoffConversion::X86Int4;
-
 /// Default gap trigger bit score for nucleotide searches
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:140
 pub const GAP_TRIGGER_BIT_SCORE_NUCL: f64 = 27.0;
@@ -60,7 +54,7 @@ pub fn cutoff_score_max_from_evalue(
         gapped_params,
         eff_searchsp,
         None,
-        BLASTN_CUTOFF_CONVERSION,
+        CutoffConversion::BLASTN,
     )
 }
 
@@ -136,7 +130,7 @@ pub fn compute_blastn_cutoff_score_ungapped(
         ungapped_params,
         searchsp,
         Some(gap_decay_rate),
-        BLASTN_CUTOFF_CONVERSION,
+        CutoffConversion::BLASTN,
     );
 
     // Non-blastn programs cap the cutoff at `gap_trigger` here; blastn skips that cap.

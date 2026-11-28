@@ -22,23 +22,38 @@ pub const K_SMALL_FLOAT: f64 = 1.0e-297;
 
 /// How `BlastKarlinEtoS_simple` turns `ceil(log(K * searchsp / E) / Lambda)` into an `Int4` where C
 /// does not define the conversion: a quotient `K * searchsp / E` past the range of a double
-/// (+inf), NaN, or a score past `Int4`. The caller names its program's rule.
+/// (+inf), NaN, or a score past `Int4`. Each caller passes its program's rule, one of the three
+/// consts below; which program takes which rule is an Owner decision, not this module's.
 ///
-/// Which programs take which rule is the scope of PD-LOSAT-NCBI-DEFECTS exception 8 (approved
-/// 2026-11-12, line PS DECISIONS 36): an Owner decision, not this module's.
+/// - `TBLASTX` takes the finite value: PD-LOSAT-NCBI-DEFECTS exception 8, the Owner's answer
+///   「Q1=A」 of 2026-11-12 (line PS DECISIONS 36), which names TBLASTX only.
+/// - `PROTEIN` (TBLASTN, BLASTX, BLASTP, PSI-BLAST, RPS-BLAST and RPSTBLASTN) takes the finite
+///   value under line PS DECISIONS 28, Owner-delegated, which applied the Owner's rule of
+///   2026-10-10 (LOSAT does not reproduce NCBI's undefined behaviour). Its known difference from
+///   NCBI (BLASTX `-ungapped`: NCBI 17 rows, LOSAT 16) is the open Owner question Q-ETOS8 (line
+///   RG item X-etos-owner).
+/// - `BLASTN` takes NCBI's x86-64 `INT_MIN` (PD-LOSAT-NCBI-DEFECTS rule 2, as decision D4
+///   reproduces the conversions of `-threshold` and the X-drops), also pending Q-ETOS8.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CutoffConversion {
-    /// Exception 8: a quotient past the double takes the mathematically equal finite
+    /// The finite value: a quotient past the double takes the mathematically equal
     /// `ln K + ln searchsp - ln E` (NCBI's x86-64 build gives `INT_MIN` there, so its cutoff stays
     /// 1); a finite quotient keeps NCBI's order of operations, and the score converts with
-    /// Rust's saturating `as` (NaN 0). TBLASTX, whose rows it changes (line PS DECISIONS 30/36),
-    /// and the programs that have shared its port since line PS DECISIONS 28: TBLASTN, BLASTX,
-    /// BLASTP, PSI-BLAST, RPS-BLAST and RPSTBLASTN.
+    /// Rust's saturating `as` (NaN 0).
     FiniteQuotient,
     /// NCBI's x86-64 conversion (`core::blast_util::ncbi_int4_from_double`): `INT_MIN` for NaN,
-    /// infinity and any value past `Int4`, so `BLAST_Cutoffs` keeps its caller's cutoff. BLASTN
-    /// (PD-LOSAT-NCBI-DEFECTS, "Reproduced as NCBI": the out-of-range conversion to `Int4`).
+    /// infinity and any value past `Int4`, so `BLAST_Cutoffs` keeps its caller's cutoff.
     X86Int4,
+}
+
+impl CutoffConversion {
+    /// BLASTN's rule: NCBI's `INT_MIN` (rule 2; Q-ETOS8 open).
+    pub const BLASTN: Self = Self::X86Int4;
+    /// TBLASTX's rule: the finite value (exception 8, Owner 2026-11-12).
+    pub const TBLASTX: Self = Self::FiniteQuotient;
+    /// The rule of TBLASTN, BLASTX, BLASTP, PSI-BLAST, RPS-BLAST and RPSTBLASTN, with their PSSM
+    /// searches: the finite value (line PS DECISIONS 28, Owner-delegated; Q-ETOS8 open).
+    pub const PROTEIN: Self = Self::FiniteQuotient;
 }
 
 /// `BlastKarlinEtoS_simple`: the score whose e-value is `evalue` in the search space `searchsp`
@@ -48,7 +63,7 @@ pub enum CutoffConversion {
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4041-4064
 #[inline]
-pub fn karlin_etos_simple(
+fn karlin_etos_simple(
     evalue: f64,
     kbp: &KarlinParams,
     searchsp: i64,
@@ -57,8 +72,8 @@ pub fn karlin_etos_simple(
     if kbp.lambda < 0.0 || kbp.k < 0.0 || kbp.h < 0.0 {
         return BLAST_SCORE_MIN;
     }
-    // C's `MAX`: a NaN e-value becomes `kSmallFloat` too (only a caller without `BLAST_Cutoffs`'
-    // check of `e > 0` can pass one).
+    // C's `MAX`, under which a NaN e-value would become `kSmallFloat` too; none arrives here (the
+    // one caller, `raise_cutoff`, comes only for `e > 0`, as `BLAST_Cutoffs` does).
     let e = evalue.max(K_SMALL_FLOAT);
     let searchsp_f = searchsp as f64;
     let quotient = kbp.k * searchsp_f / e;
@@ -154,7 +169,7 @@ fn raise_cutoff(
 /// changes neither. `conversion` is the caller's program's rule (`CutoffConversion`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4090-4150
-pub fn blast_cutoffs(
+fn blast_cutoffs(
     score: &mut i32,
     evalue: &mut f64,
     kbp: &KarlinParams,

@@ -252,6 +252,9 @@ pub(crate) fn prepare_unit(
         let mut word_minima = None;
         let computed = (|| {
             let numbers = subjects.numbers()?;
+            // Without the sum statistics' carry (`batch_valid_before` is false here): exact for
+            // the minimum, as the first valid context's cutoff is the batch's smallest while all
+            // contexts share one block (`PreparedQueryBatch::batch_valid_before`).
             subject_parameters(&prepared, &mut minima, options, numbers, None)?;
             if ungapped_link {
                 if let Some(spaces) = super::parameters::preliminary_spaces(

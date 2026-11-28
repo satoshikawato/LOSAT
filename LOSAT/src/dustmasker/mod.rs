@@ -108,8 +108,8 @@ fn check(
 // opens for reading, so a write name equal to a missing input is refused instead of diverging
 // from the command line, which makes the file and then reads it (line WQA D19; line NP WW4c).
 /// The input file names that a `dustmasker` run with `words` opens for reading: `(for_logfile,
-/// for_out)` (`log_inputs::masker_read_parts`: `-in`, or the files that `seqdb` looks up for the
-/// database of `-infmt blastdb`).
+/// for_out)` (`log_inputs::masker_read_parts`: `-in`, or the files that reading the database of
+/// `-infmt blastdb` checks or opens, `log_inputs::tool_read_files`).
 pub(crate) fn read_files<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     crate::report::log_inputs::tool_read_files(
         TOOL.program,

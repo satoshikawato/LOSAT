@@ -62,15 +62,12 @@ impl RunInputs {
     }
 }
 
-/// What the run of `program` with `words` can open of the files of its databases: for a search
-/// (`db_seqtypes` names them, `rpsblast` and `rpstblastn` among them) what its options ask for
-/// ([`DbUse::note_option`]), for any other program (a tool) every file of the database that a
-/// tool may open. The one reader of the options, for the command line and for LOSAT Web.
+/// What the run of `program` with `words` can open of the files of its databases: what the
+/// program opens ([`DbUse::of_program`]: a search, a tool that reads the sequences in OID order,
+/// makeblastdb's copy, any other tool) and what its options ask for ([`DbUse::note_option`]). The
+/// one reader of the options, for the command line and for LOSAT Web.
 pub(crate) fn db_use<S: AsRef<OsStr>>(program: &str, words: &[S]) -> DbUse {
-    if !SEARCH_PROGRAMS.contains(&program) {
-        return DbUse::TOOL;
-    }
-    let mut db_use = DbUse::search(program);
+    let mut db_use = DbUse::of_program(program);
     scan_argv_kinds(program, words, |name, _, value| {
         if value.is_some() {
             db_use.note_option(name);
@@ -78,18 +75,6 @@ pub(crate) fn db_use<S: AsRef<OsStr>>(program: &str, words: &[S]) -> DbUse {
     });
     db_use
 }
-
-/// The programs that search a database.
-const SEARCH_PROGRAMS: [&str; 8] = [
-    "blastn",
-    "blastp",
-    "blastx",
-    "tblastn",
-    "tblastx",
-    "psiblast",
-    "rpsblast",
-    "rpstblastn",
-];
 
 /// The names of the MegaBLAST index that NCBI's handler asks the loader for
 /// (`BlastnArgs::megablast_index_name`, cited at `blast_engine::mb_index::megablast_index`).

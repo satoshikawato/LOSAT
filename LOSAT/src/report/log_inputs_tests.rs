@@ -635,6 +635,152 @@ fn gi_mask_data_files_are_refused_only_where_the_run_reads_them() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// Line WQA D26 (merge of WW4c, which runs dustmasker and segmasker in LOSAT Web): a tool refuses
+// the files of its database that it reads. dustmasker, segmasker, windowmasker and makembindex
+// read the sequences in OID order (the alias, index, header, sequence and LMDB files);
+// makeblastdb's copy of a database and makembindex's `-db_mask` also read its masks; the string
+// index, the GI index, the id-lookup files and the masks that such a run never opens are its log.
+// A tool that looks the database up by its options (blastdbcmd) refuses them all.
+#[test]
+fn tools_refuse_the_database_files_that_they_read() {
+    let dir = fresh_dir("d26-tools");
+    for ext in [
+        "nin", "nhr", "nsq", "nsi", "nsd", "nog", "naa", "nni", "nhd",
+    ] {
+        std::fs::write(dir.join(format!("v.{ext}")), b"x").unwrap();
+    }
+    for ext in ["pin", "phr", "psq", "psi", "psd", "pog"] {
+        std::fs::write(dir.join(format!("w.{ext}")), b"x").unwrap();
+    }
+    std::fs::write(
+        dir.join("m.nal"),
+        format!("TITLE m\nDBLIST v\nMASKLIST {}\n", dir.join("mk").display()),
+    )
+    .unwrap();
+    std::fs::write(dir.join("mk.gni"), gi_mask_index_header(1)).unwrap();
+    let nucl = dir.join("m");
+    let prot = dir.join("w");
+    let words = |db: &std::path::Path, before: &[&str], after: &[&str]| -> Vec<OsString> {
+        let mut words: Vec<OsString> = before.iter().map(OsString::from).collect();
+        words.push(db.as_os_str().to_os_string());
+        words.extend(after.iter().map(OsString::from));
+        words
+    };
+    let sequences = ["m.nal", "v.nin", "v.nhr", "v.nsq", "v.ndb"];
+    let masks = ["v.naa", "v.nab", "v.nba", "v.nog", "mk.gni", "mk.gnd"];
+    let unread = ["v.nsi", "v.nsd", "v.nni", "v.nhd", "v.njs", "m.njs"];
+    let readers = [
+        ("dustmasker", words(&nucl, &["-in"], &["-infmt", "blastdb"])),
+        (
+            "windowmasker",
+            words(&nucl, &["-mk_counts", "-in"], &["-infmt", "blastdb"]),
+        ),
+        (
+            "windowmasker",
+            words(
+                &nucl,
+                &["-ustat", "u.counts", "-in"],
+                &["-infmt", "blastdb"],
+            ),
+        ),
+        (
+            "makembindex",
+            words(&nucl, &["-input"], &["-iformat", "blastdb"]),
+        ),
+    ];
+    for (program, words) in &readers {
+        for name in sequences {
+            assert!(refused(program, words, &dir.join(name)), "{program} {name}");
+        }
+        for name in masks.iter().chain(&unread) {
+            assert!(
+                !refused(program, words, &dir.join(name)),
+                "{program} {name}"
+            );
+        }
+    }
+    let copies = [
+        (
+            "makeblastdb",
+            words(
+                &nucl,
+                &["-in"],
+                &["-input_type", "blastdb", "-dbtype", "nucl", "-out", "x"],
+            ),
+        ),
+        (
+            "makembindex",
+            words(
+                &nucl,
+                &["-input"],
+                &["-iformat", "blastdb", "-db_mask", "1"],
+            ),
+        ),
+    ];
+    for (program, words) in &copies {
+        for name in sequences.iter().chain(&masks) {
+            assert!(refused(program, words, &dir.join(name)), "{program} {name}");
+        }
+        for name in unread {
+            assert!(
+                !refused(program, words, &dir.join(name)),
+                "{program} {name}"
+            );
+        }
+    }
+    let segmasker = words(&prot, &["-in"], &["-infmt", "blastdb"]);
+    for name in ["w.pin", "w.phr", "w.psq", "w.pdb"] {
+        assert!(refused("segmasker", &segmasker, &dir.join(name)), "{name}");
+    }
+    for name in ["w.psi", "w.psd", "w.pog"] {
+        assert!(!refused("segmasker", &segmasker, &dir.join(name)), "{name}");
+    }
+    let blastdbcmd = words(&nucl, &["-db"], &["-entry", "all"]);
+    for name in sequences.iter().chain(&masks).chain(&unread) {
+        assert!(
+            refused("blastdbcmd", &blastdbcmd, &dir.join(name)),
+            "{name}"
+        );
+    }
+    // LOSAT Web's tool runs read the same files (`FileReceiver::read_files`); dustmasker opens
+    // `-out` before its database, which then counts the files that the resolution looks up only.
+    let has = |files: &[Vec<u8>], name: &str| {
+        let want = dir.join(name);
+        files
+            .iter()
+            .any(|file| file.as_slice() == want.as_os_str().as_encoded_bytes())
+    };
+    let (dust_log, dust_out) = crate::dustmasker::read_files(&readers[0].1);
+    let (wm_log, _) = crate::windowmasker::read_files(&readers[1].1);
+    for name in sequences {
+        assert!(has(&dust_log, name), "dustmasker {name} in {dust_log:?}");
+        assert!(has(&wm_log, name), "windowmasker {name} in {wm_log:?}");
+    }
+    for name in masks.iter().chain(&unread) {
+        assert!(!has(&dust_log, name), "dustmasker {name} in {dust_log:?}");
+        assert!(!has(&wm_log, name), "windowmasker {name} in {wm_log:?}");
+        assert!(!has(&dust_out, name), "dustmasker {name} in {dust_out:?}");
+    }
+    for name in ["m.nal", "v.nin"] {
+        assert!(has(&dust_out, name), "dustmasker {name} in {dust_out:?}");
+    }
+    for name in ["v.nhr", "v.nsq", "v.ndb"] {
+        assert!(!has(&dust_out, name), "dustmasker {name} in {dust_out:?}");
+    }
+    let (seg_log, seg_out) = crate::segmasker::read_files(&segmasker);
+    for name in ["w.pin", "w.phr", "w.psq", "w.pdb"] {
+        assert!(has(&seg_log, name), "segmasker {name} in {seg_log:?}");
+    }
+    for name in ["w.psi", "w.psd", "w.pog"] {
+        assert!(!has(&seg_log, name), "segmasker {name} in {seg_log:?}");
+    }
+    assert!(
+        seg_out.is_empty(),
+        "segmasker opens -in before -out: {seg_out:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn version_request_does_not_collect_argv_inputs() {
     let dir = fresh_dir("version-run");

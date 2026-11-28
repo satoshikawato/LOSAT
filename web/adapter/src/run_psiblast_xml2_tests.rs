@@ -155,7 +155,10 @@ fn psiblast_writes_ncbis_xml2_and_json_of_a_subject_search() {
 // `.16`): the query's report is made after NCBI drops the query from its scope (its Seq-loc's id,
 // no title, each Hsp without rows). Outfmt 13 and 14 are a ZIP archive on stream 4: NCBI's side
 // files, named as the CLI names them for `-out results`, and NCBI's master file
-// (`results.json` / `results.xml`), which lists them by those names.
+// (`results.json` / `results.xml`), which lists them by those names. The documents name the
+// database as the argv does (`search_target`); `database_run` gives the run the absolute path of
+// that name (the host's preopened `.` is `LOSAT/` there), which the comparison maps back
+// (`as_typed`).
 #[test]
 fn psiblast_writes_ncbis_xml2_and_json_of_a_database_search() {
     let query = "tests/fasta/psiblast/tk.faa";
@@ -168,6 +171,11 @@ fn psiblast_writes_ncbis_xml2_and_json_of_a_database_search() {
         "-num_iterations",
         "3",
     ];
+    let absolute = losat_dir()
+        .join("tests/db_search/paja")
+        .to_string_lossy()
+        .into_owned();
+    let as_typed = |bytes: &[u8]| text(bytes).replace(&absolute, "tests/db_search/paja");
     let (plain_result, plain) = database_run(&words, query);
     plain_result.unwrap();
     for outfmt in ["13", "14", "15", "16"] {
@@ -180,7 +188,11 @@ fn psiblast_writes_ncbis_xml2_and_json_of_a_database_search() {
         let stream = with.get(&STREAM_CUSTOM).cloned().unwrap_or_default();
         let number: u32 = outfmt.parse().unwrap();
         if matches!(number, 15 | 16) {
-            assert_eq!(text(&stream), text(&frozen(&format!("{row}.out"))), "{row}");
+            assert_eq!(
+                as_typed(&stream),
+                text(&frozen(&format!("{row}.out"))),
+                "{row}"
+            );
         } else {
             let extension = if number == 13 { "json" } else { "xml" };
             let mut expected = Vec::new();
@@ -202,7 +214,7 @@ fn psiblast_writes_ncbis_xml2_and_json_of_a_database_search() {
             assert_eq!(files.len(), expected.len(), "{row}: entries");
             for ((name, bytes), (want_name, want)) in files.iter().zip(&expected) {
                 assert_eq!(text(name), *want_name, "{row}");
-                assert!(bytes == want, "{row}: {want_name}: {}", text(bytes));
+                assert_eq!(as_typed(bytes), text(want), "{row}: {want_name}");
             }
         }
         others_are_those_of_the_plain_run(&row, &with, &plain);

@@ -354,6 +354,13 @@ impl BlastxDatabase {
             return Err(PreliminaryReadError::from_static("Database memory map file error").into());
         }
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+        // A list that includes no OID leaves no block, but NCBI's multithreaded DB-split scan
+        // still reads the raw OIDs of the iteration range (`SeqDb::mt_check_scan_without_blocks`),
+        // whose error replaces the warning of the empty database.
+        self.db
+            .mt_check_scan_without_blocks()
+            .map_err(|error| shared::search_read_error(error, self.program))?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
         let stop_at_negative = self.db.mt_stop_at_negative();
         let limit = self.db.num_seqs();
         let mut longest = 0;

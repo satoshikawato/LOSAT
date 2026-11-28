@@ -2544,14 +2544,10 @@ impl SeqDb {
                     if !list.listed(start + oid) {
                         continue;
                     }
-                    match self.seqtype {
-                        SeqType::Protein => {
-                            totals.add_protein(approx_protein_length(&seq, i));
-                        }
-                        SeqType::Nucleotide => {
-                            totals.add_nucleotide(approx_nucleotide_length(&seq, &amb, i, oid));
-                        }
-                    }
+                    totals.add_length(match self.seqtype {
+                        SeqType::Protein => approx_protein_length(&seq, i),
+                        SeqType::Nucleotide => approx_nucleotide_length(&seq, &amb, i, oid),
+                    });
                 }
                 first = end;
             }
@@ -2613,10 +2609,10 @@ impl SeqDb {
                         continue;
                     }
                     let length = match self.seqtype {
-                        SeqType::Protein => approx_protein_length(&seq, i).max(0) as u32,
+                        SeqType::Protein => approx_protein_length(&seq, i),
                         SeqType::Nucleotide => approx_nucleotide_length(&seq, &amb, i, oid),
                     };
-                    visit(length);
+                    visit(length.max(0) as u32);
                 }
                 first = end;
             }
@@ -2630,9 +2626,10 @@ impl SeqDb {
 struct ScanTotals {
     count: u32,
     total: u64,
-    /// Non-negative sum of searchable sequence lengths for LOSAT's parallel scheduling
-    /// (`SeqDb::included_length`); differs from `total` only when a protein has `>= 2^31`
-    /// residues and wraps negative in NCBI's `Uint8` `base_count`.
+    /// The sum of the positive lengths, for LOSAT's parallel scheduling
+    /// (`SeqDb::included_length`); differs from `total` where NCBI's `Uint8` `base_count` adds a
+    /// negative `int` length (a protein of `2^31` residues or more, offsets of a damaged index of
+    /// either type).
     searchable_total: u64,
     longest: u32,
     shortest: i32,
@@ -2652,7 +2649,11 @@ impl Default for ScanTotals {
 
 impl ScanTotals {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1557-1610
-    fn add_protein(&mut self, length: i32) {
+    /// The `int` length of an OID that the scan visits (`approx_protein_length`,
+    /// `approx_nucleotide_length`): `base_count` adds it sign-extended into its `Uint8`, so a
+    /// negative one wraps `total`; `min_count` takes it; `max_count`, which starts at 0, and
+    /// `searchable_total` take only a positive one.
+    fn add_length(&mut self, length: i32) {
         self.count += 1;
         self.total = self.total.wrapping_add(i64::from(length) as u64);
         if length > 0 {
@@ -2661,16 +2662,6 @@ impl ScanTotals {
             self.longest = self.longest.max(positive);
         }
         self.shortest = self.shortest.min(length);
-    }
-
-    fn add_nucleotide(&mut self, length: u32) {
-        self.count += 1;
-        self.total += u64::from(length);
-        self.searchable_total = self.searchable_total.saturating_add(u64::from(length));
-        self.longest = self.longest.max(length);
-        if let Ok(signed) = i32::try_from(length) {
-            self.shortest = self.shortest.min(signed);
-        }
     }
 
     fn add(&mut self, other: ScanTotals) {
@@ -2690,12 +2681,20 @@ fn approx_protein_length(seq: &[u32], i: usize) -> i32 {
     super::ncbi_protein_length(raw)
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:325-344
 /// The approximate length of nucleotide `i` of a window of the index (`seq`, `amb`: its sequence
-/// and ambiguity offsets; `oid`: its volume-relative OID) as NCBI's `GetSeqLengthApprox` computes
-/// it, widened without signed overflow (`scan_totals`).
-fn approx_nucleotide_length(seq: &[u32], amb: &[u32], i: usize, oid: u32) -> u32 {
-    let length = 4 * (i64::from(amb[i]) - i64::from(seq[i]) - 1) + i64::from(oid & 3);
-    u32::try_from(length.max(0)).unwrap_or(u32::MAX)
+/// and ambiguity offsets; `oid`: its volume-relative OID) as NCBI's `GetSeqLengthApprox` returns
+/// it (`scan_totals`): the whole bytes, the offsets' 64-bit difference less one, narrowed to a
+/// signed 32-bit `int`, then four bases a byte and `oid & 3` in NCBI's 32-bit `int` arithmetic,
+/// as its build computes it (`x_GetSequence`'s same length, `Volume::x_first_negative_nucleotide_in`):
+/// it wraps where the whole bytes pass `2^29` (blastdbcmd `-info` of a GI-list alias over such
+/// offsets prints the totals of the wrapped lengths: the frozen rows `ap_*` of `nonasc_xprog`,
+/// test `nonasc_approx_length_info_parity`). It is
+/// negative where the ambiguity offset is not past the sequence's start (`amb == seq` gives
+/// `oid & 3 - 4`) or the wrapped product is.
+fn approx_nucleotide_length(seq: &[u32], amb: &[u32], i: usize, oid: u32) -> i32 {
+    let whole_bytes = (i64::from(amb[i]) - i64::from(seq[i]) - 1) as i32;
+    whole_bytes.wrapping_mul(4).wrapping_add((oid & 3) as i32)
 }
 
 #[cfg(test)]

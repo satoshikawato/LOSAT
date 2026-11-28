@@ -128,7 +128,13 @@ impl FormatSpec {
             .iter()
             .map(|&algo| Ok(masks_string(&source.masks(oid, algo)?)))
             .collect::<Result<Vec<String>, Stop>>()?;
-        let length = source.length(oid)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:199-201
+        // Only `%l` reads the length (`GetSeqLength`); a line without it never does.
+        let length = if self.types.contains(&b'l') {
+            source.length(oid)?
+        } else {
+            0
+        };
         let mut line = self.line.borrow_mut();
         let mut print =
             |defline: Option<&BlastDefline>, line: &mut CutBuffer| -> Result<(), Stop> {
@@ -290,8 +296,13 @@ fn masks_string(masks: &[(u32, u32)]) -> String {
 /// one).
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:286-290
 fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop> {
-    // NCBI converts the signed `GetSeqLength` result to `TSeqPos` before clipping the range.
-    let range = config.range.clipped(source.length(oid)? as u32);
+    // NCBI converts the signed `GetSeqLength` result to `TSeqPos` before clipping the range, and
+    // reads it only for a range (`-range`, a batch line's).
+    let range = if config.range.is_empty() {
+        None
+    } else {
+        config.range.clipped(source.length(oid)? as u32)
+    };
     let mut seq = source.string_letters(oid, range)?;
     if config.filt_algo >= 0 {
         let masks = source.masks(oid, config.filt_algo)?;

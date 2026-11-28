@@ -5,6 +5,13 @@ Frozen outputs of official NCBI BLAST+ 2.17.0 (`blastdbcmd`, `blastp`, `blastx`,
 `tests/blastdbcheck_fixtures.rs` (`nonasc_cross_program_parity`) under `[profile.test]`
 (integer overflow checks enabled).
 
+How the rows of `n6db`, `mv3db`, `p2db` and `fdb` were made: the test of each row sets up its
+run directory (the database copied, the poke, the alias, the list) and names the program and its
+arguments; NCBI's program ran with the same arguments in a directory set up the same way, with
+the environment of the test's LOSAT run (`PATH=/usr/bin:/bin`, `TZ=UTC`, `LC_ALL=C`, `HOME` and
+`NCBI_CONFIG_PATH` an empty directory, `BLAST_USAGE_REPORT=false`), and its standard output,
+standard error and exit status (a signal as `-N`) are the row's `.out`, `.err` and `.rc`.
+
 ## Variants
 - `d_p4_nonasc_seq`: `p4` with `p4.pin` offset 106 poked to `01f4`, setting
   `seq_offsets = [1, 62, 500, 179, ...]` (OID 1 spans 437 residues across the rest of `.psq`
@@ -62,3 +69,91 @@ Frozen outputs of official NCBI BLAST+ 2.17.0 (`blastdbcmd`, `blastp`, `blastx`,
   one, up to the iteration range's end, every OID of a list that includes none, and the OID at
   the range's end when it is inside a volume (it reads the next OID before it compares it with
   the end) (frozen 2026-11-27 for review R5 F1 of PR #1660).
+- `n6db` (PR #1660 review R6; test `nonasc_gap_stop_before_crash_parity`): six sequences made
+  with NCBI `makeblastdb` (v4, GIs 601..606), `n6.nin` poked so that OID 1 has `amb == start`
+  (signed length `-4`) and OID 5 has `amb = 2^28` (last byte far past the file).
+  `n6_<row>_t<T>.{out,err,rc}` are NCBI BLAST+ 2.17.0 `blastn -db n6 -outfmt 6` at
+  `-num_threads` 1, 2 and 4, without a list (`n6_t<T>`) or with the `-negative_gilist` of GIs
+  602, 604 and 606 (`neg135`), 604 and 606 (`neg35`) or 606 (`neg5`): `t1` crashes (`rc=-11`,
+  refused by LOSAT); at 2 and 4 threads only OID 0's rows (the scan stops at OID 1); the other
+  rows complete and LOSAT matches them byte-for-byte (frozen 2026-11-27, RG-D2 tail item 4; the
+  2-thread rows and `neg35_t1` frozen 2026-11-28 for review R4 finding 4).
+- `mv3db` (RG-D2 tail item 3, 2026-11-27): three volumes `v0` (5 OIDs), `v1` (6), `v2` (4), GIs
+  601..615, made with NCBI `makeblastdb`. `mv3e_rows.tsv` and `mv3e_o*.out`, `mv3e_e6.err` (test
+  `nonasc_empty_later_volume_sequence_file_parity`): `v1.nsq` of 0 bytes (`empty`), also OID 2 of
+  `v0` with signed length `-4` (`neg`), also the first sequence offset of `v1` 0 (`zero`,
+  `negzero`); aliases `n`, `r_head`, `r_tail`, `r_pre`; lists none/GI lists; 1, 2 and 4 threads.
+  NCBI's read of an OID of the empty file that starts at 0 gives the length -1, which stops the
+  multithreaded scan and which one thread skips, and it crashes (`SIGSEGV`) at any other start.
+  The rows of the lists `posv1first` (`-gilist` of GI 606, the first OID of `v1`) and
+  `posv1first2` (606 and 607), kinds `zero` and `empty` (frozen 2026-11-28 for review R4 finding
+  3(a)): with `zero`, `posv1first` completes without rows at every thread count, and
+  `posv1first2` crashes at one thread (OID 6 is read) and completes at 2 and 4. LOSAT matches all
+  204 rows (59 refused, 145 identical). Each crash is NCBI's
+  first read of a sequence of `v1`, inside the iteration range of its row (`r_head`'s range ends
+  at OID 7, inside `v1`, after OIDs 5 and 6; with a `-gilist` or `-negative_gilist` NCBI's range is
+  the whole database), so no row depends on NCBI's reads past the end of a range.
+- `p2db` (RG-D2 tail R2, review finding 8, 2026-11-28): two protein volumes `pv0` (GIs
+  7001-7003) and `pv1` (7004-7006), made with NCBI `makeblastdb`; the test
+  `nonasc_protein_scan_stop_parity` adds the alias `p` (`DBLIST pv0 pv1`) and a GI list `gl.txt`.
+  `p2_<case>_t<T>.{out,err,rc}`: NCBI `blastp -db p -outfmt 6 -gilist gl.txt` at 1 and 2 threads
+  (`p2x_`: `blastx` with the query of the codons of the protein query). A protein of length -1
+  has its end (the next start) set to its start. `gapstop`: OID 1 of `pv0` of length -1, left out
+  by the list before the block of `pv1`; with `pv1.psq` empty or missing, NCBI's 2-thread scan
+  stops before `pv1` and completes. `v1gap`: the negative OID is OID 1 of `pv1`, after its first
+  OID (a missing file is NCBI's memory map error). `emptyv1_skipfirst`: no stop before the empty
+  `pv1.psq` (`SIGSEGV`). Review R4 finding 1 (frozen 2026-11-28, blastp and
+  blastx): `trail_missingv1` (list 7001, `pv1.psq` missing): the 2-thread scan reads the excluded
+  OIDs after OID 0 and stops with NCBI's memory map error (`rc=3`) where one thread completes;
+  `trail_neg_missingv1` (and OID 1 of `pv0` of length -1, which stops that scan first) and
+  `trail_emptyv1` (`pv1.psq` empty: a protein's length comes from the index) complete;
+  `none_missingv1` (list 9999, no OID included): one thread warns that the filtering left an
+  empty database, two threads give the memory map error without the warning;
+  `none_neg_missingv1`: the warning at both. Review R4 finding 2 (frozen 2026-11-28):
+  `v1firstneg_emptyv1` (no list; OID 0 of `pv1` of length -1, `pv1.psq` empty): the 2-thread scan
+  stops at that OID (`pv0`'s rows), one thread skips it and crashes at OID 4 (`SIGSEGV`);
+  `v1firstneg_emptyv1_list` (list 7001 and 7004): nothing is read from the empty file (blastp:
+  OID 0's row; blastx: `BLAST engine error: Unknown error code 1`, `rc=3`, at both thread
+  counts). LOSAT matches every row (the crashes refused).
+- `fdb` (RG-D2 tail R4 item 5, 2026-11-28; test `nonasc_filtering_db_repeat_search_runs_one_thread`):
+  NCBI `makeblastdb` v4 databases `main` (`s0` holds R,
+  the first 150 bases of the query `fdb_q.fna`; `s1` holds U, its last 150), and the repeat
+  databases `rep` (`r2` holds R) and `repa` (`r1` holds R). `fdb_<case>_t<T>.{out,err,rc}`: NCBI
+  `blastn -db main -filtering_db rep|repa -outfmt 6` at 1 and 2 threads. `clean`: R is masked, only
+  `s1` is reported. `neg`: OID 1 of `rep` with `amb == start` (signed length -3): NCBI's search of
+  the repeats runs one thread, reads past it and still masks R (the same rows). `ambnext`: OID 1 of
+  `repa` with its ambiguity offset 4 bytes past the next start: the search of the repeats cannot
+  read its ambiguity data, and NCBI stops with `BLAST engine error: Warning: File error: could not
+  get ambiguity data. ` (exit status 3) at both thread counts.
+- blastdbcmd on a sequence file of no bytes (RG-D2 tail R6, review R5 findings 1 and 5, frozen
+  2026-11-28; test `nonasc_blastdbcmd_empty_sequence_file_parity`). `mv3z_dbcmd_<row>`: `mv3db` of
+  kind `zero` (`v1.nsq` of no bytes, the first sequence offset of `v1` 0) under the alias `n`,
+  NCBI `blastdbcmd -db n`: `e606` (`-entry 606`, OID 5 at offset 0): no output, exit status 0;
+  `e606_s` (`-outfmt %s`): `Error: [blastdbcmd] Error: could not get sequence or range.`, exit
+  status 1; `e606_al` (`-outfmt "%a %l"`, the exact length) and `e607` (`-entry 607`, OID 6 at
+  offset 28): `SIGSEGV`; `e605_606` (`-entry 605,606`): OID 4's FASTA only. `p2_dbcmd_<row>`:
+  `p2db` with OID 0 of `pv1` of length -1 and `pv1.psq` of no bytes under the alias `p`, NCBI
+  `blastdbcmd -db p`: `e7004`: no output; `e7004_als` (`-outfmt "%a %l %s"`): the same error;
+  `e7001_7004`: OID 0's FASTA only; `e7005` (a positive length): `SIGSEGV`. A `-outfmt` line
+  without `%l`, `%s` or `%h` reads neither the length nor the letters: `mv3z_dbcmd_e607_a`,
+  `_e607_aot` (`"%a %o %g %t"`), `_e606_a` and `_e607_a_range` (`-range 1-5`) print the line,
+  `_e606_h` gives the same error, `_e607_h` and `_e607_s` crash; `far_dbcmd_e603_<row>`: `mv3db/v0`
+  under the alias `n` (`DBLIST v0`) whose OID 2 (GI 603) has its ambiguity offset at 2^28, so
+  its last byte lies far past `v0.nsq`: `a` (`%a`) prints the accession, `l`, `s`, `h` and `f`
+  (the FASTA) crash. LOSAT matches every row (the crashes refused).
+- `ap_<row>_info{,_t}` (RG-D2 tail R5 finding 6, frozen 2026-11-28 for review R5 finding 2; test
+  `nonasc_approx_length_info_parity`): NCBI `blastdbcmd -db g -info` (`_t`: and `-exact_length`)
+  of the alias `g` (`DBLIST v0`, `GILIST g.gil`, `ap_g.gil` made by NCBI `blastdb_aliastool
+  -gi_file_in` from GIs 601-605) over `mv3db/v0` whose OID 2 has its ambiguity offset at its
+  start plus 2^29 + 6 (`pos29`), 2^30 + 6 (`pos30`), 2^31 + 2^30 (`neg30`), 2^31 + 6 (`neg31`) or
+  0 (`eq`): the totals are those of NCBI's 32-bit `int` approximate lengths (454, 430, or near
+  2^64 for `pos29`, printed with NCBI's lost digit); `-exact_length` crashes (`SIGSEGV`) except
+  for `eq`. The run directory is `<RUN>`.
+- `mv3z_wm_counts`, `mv3z_dust_iv`, `wmnull_*` (RG-D2 tail R6, test
+  `nonasc_masker_entry_without_bioseq_parity`): NCBI BLAST+ 2.17.0 windowmasker `-mk_counts`
+  (also with `-checkdup true`) and dustmasker `-outfmt interval` of `-infmt blastdb` over an OID
+  whose `GetBioseq` gives no Bioseq: OID 606 of `run_mv3z` (above), or OID 0 or 2 of `mv3db/v0`
+  (alias `n`, `DBLIST v0`) whose ambiguity offset is its sequence's start (`wmnull_k0`,
+  `wmnull_k2`). `CMaskBDBReader` gives an empty Seq-entry for it, and the readers' request for
+  its Bioseq (windowmasker's `CInputBioseq_CI`: `Seq_entry.seq`) or Bioseq set (dustmasker:
+  `Seq_entry.set`) ends the run with exit status 3, after the output of the earlier sequences.

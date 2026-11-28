@@ -96,6 +96,36 @@ pub(crate) struct MaskBdbReader {
     kept_set: DeflineSet,
 }
 
+/// What a reader of `CMaskBDBReader`'s Seq-entries asks of one: its Bioseq set (dustmasker) or
+/// its Bioseq (windowmasker's `CWinMaskUtil::CInputBioseq_CI`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SeqEntryAsked {
+    Seq,
+    Set,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_bdb_reader.cpp:44-55
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_entry_info.cpp:112-123
+/// The exception of the object manager's check of the choice of the empty Seq-entry that
+/// `CMaskBDBReader` gives for an OID whose `GetBioseq` gives no Bioseq (a [`BdbRecord`] without
+/// residues: no letters, or every definition line erased by the alias files' `OID_MASK_TYPE`),
+/// when a reader asks it for `asked`.
+pub(crate) fn unset_seq_entry(asked: SeqEntryAsked) -> NcbiException {
+    let (line, message) = match asked {
+        SeqEntryAsked::Seq => (117, "Seq_entry.seq"),
+        SeqEntryAsked::Set => (119, "Seq_entry.set"),
+    };
+    NcbiException::new(
+        ThrowSite {
+            file: "src/objmgr/seq_entry_info.cpp",
+            line,
+            kind: "CUnassignedMember::eGet",
+            function: None,
+        },
+        message,
+    )
+}
+
 /// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
 pub(crate) fn prints_title(outfmt: &str) -> bool {
     matches!(outfmt, "interval" | "acclist" | "fasta")
@@ -255,9 +285,10 @@ impl MaskBdbReader {
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1362-1366
         // `GetBioseq` gives no Bioseq for a sequence whose every definition line the alias files'
         // `OID_MASK_TYPE` erased (line RG D1b-2), before it reads the letters: the record of a
-        // sequence without letters, which segmasker and windowmasker skip (probe S2_seg_walk of
-        // line RG D1b), dustmasker stops at (probes dust_omnx_int, dust_ntall_fasta of D1b-2) and
-        // makembindex refuses.
+        // sequence without letters, which segmasker and windowmasker's masking skip (probe
+        // S2_seg_walk of line RG D1b), dustmasker and windowmasker's counts stop at
+        // (`unset_seq_entry`; probes dust_omnx_int, dust_ntall_fasta of D1b-2, rows wmnull_* of
+        // `nonasc_xprog`) and makembindex refuses.
         if set.deflines.is_empty() {
             let record = BdbRecord {
                 ids: Vec::new(),
@@ -338,7 +369,8 @@ impl MaskBdbReader {
             None
         };
         // `GetBioseq` gives no Bioseq for a sequence without letters, before its lookups: none
-        // is made, and the callers skip the record (windowmasker) or refuse it (makembindex).
+        // is made, and the callers skip the record (windowmasker's masking), stop at it
+        // (`unset_seq_entry`) or refuse it (makembindex).
         let get_title = if self.get_title && has_letters {
             Some(crate::sequence::title::get_title(
                 &ids,

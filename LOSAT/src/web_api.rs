@@ -304,6 +304,7 @@ fn parse_blastn_args(
         progress_bar: false,
         one_query_batch: false,
         hits_only: false,
+        db_reader_one_thread: false,
         first_query_ordinal: 0,
         scope_refusal: None,
     };

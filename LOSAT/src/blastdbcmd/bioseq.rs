@@ -80,7 +80,7 @@ impl DbBioseq<'_> {
         let length = if set.deflines.is_empty() {
             0i64
         } else {
-            source.length(oid)?
+            source.sequence_length(oid)?
         };
         let made = length >= 1;
         if !made && !set.deflines.is_empty() {

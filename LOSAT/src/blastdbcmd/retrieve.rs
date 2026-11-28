@@ -236,6 +236,22 @@ impl<'a> Source<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1841
+    /// The length that `GetBioseq` takes from `x_GetSequence` for `oid`: a protein's from the
+    /// index (`GetSeqLengthProt`), a nucleotide's from the last byte of its packed bases, or -1
+    /// for one at offset 0 of a sequence file of no bytes
+    /// (`SeqDb::nucleotide_sequence_len_i32_at`), where [`Source::length`] (`GetSeqLengthExact`)
+    /// crashes NCBI.
+    pub fn sequence_length(&self, oid: u32) -> Result<i64, Stop> {
+        let at = self.at(oid)?;
+        if self.protein {
+            Ok(i64::from(self.db.protein_length_i32_at(at)?))
+        } else {
+            Ok(i64::from(self.db.nucleotide_sequence_len_i32_at(at)?))
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1804
     /// Validates the protein `.psq` open and range for a sequence whose signed 32-bit length is
     /// below 1, matching `GetBioseq`'s `x_GetSequence` call before it returns an empty Bioseq.
@@ -387,7 +403,8 @@ impl<'a> Source<'a> {
     ) -> Result<Vec<u8>, Stop> {
         let at = self.at(oid)?;
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1627-1628
-        if self.db.nucleotide_length_i32_at(at)? < 1 {
+        // `x_GetAmbigSeq` takes the length of `x_GetSequence`.
+        if self.db.nucleotide_sequence_len_i32_at(at)? < 1 {
             return if error_when_empty {
                 Err(Stop::Ncbi(
                     "Error: could not get sequence or range.".to_string(),

@@ -1027,3 +1027,176 @@ fn mt_scan_reads_the_excluded_oids_after_the_last_included_one() {
     assert!(block.stopped_at_negative());
     assert_eq!(block.len(), 1);
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1841
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:684-710
+/// A sequence file of no bytes maps a null pointer: the multithreaded scan stops at a first
+/// sequence that starts at offset 0 (its length is -1), and NCBI crashes on any other start (the
+/// refusal), as it does at one thread. A block after the scan's stop opens no file of its
+/// volume, so a missing sequence file there fails nothing.
+#[test]
+fn mt_scan_stops_at_an_empty_sequence_file_and_before_a_missing_one() {
+    use crate::seqdb::{SearchPath, SeqDb, SeqDbError};
+    use crate::utils::test_dir::TempDir;
+
+    let dir = TempDir::unique("mt-empty-seq-file");
+    let root: &std::path::Path = &dir;
+    let path = SearchPath::new(root, None, None);
+    let write = |name: &str, seq: &[u32], amb: &[u32], nsq: Option<&[u8]>| {
+        write_v4_index(
+            &root.join(format!("{name}.nin")),
+            SeqType::Nucleotide,
+            8,
+            4,
+            seq,
+            Some(amb),
+        );
+        if let Some(bytes) = nsq {
+            std::fs::write(root.join(format!("{name}.nsq")), bytes).unwrap();
+        }
+        std::fs::write(root.join(format!("{name}.nhr")), b"").unwrap();
+    };
+    for (name, seq, stops) in [("ezero", [0u32, 2, 4], true), ("eone", [1u32, 3, 5], false)] {
+        write(name, &seq, &[seq[1], seq[2], seq[2]], Some(b""));
+        for mt in [true, false] {
+            let mut db =
+                SeqDb::open_search_in(name.as_bytes(), SeqType::Nucleotide, &path).unwrap();
+            db.set_mt_stop_at_negative(mt);
+            let range = db.next_block(0, 1 << 20).unwrap();
+            match db.read_nucleotide_search_block(range) {
+                Ok(block) => {
+                    assert!(mt && stops, "{name} mt {mt}");
+                    assert!(block.stopped_at_negative());
+                    assert_eq!(block.len(), 0);
+                }
+                Err(error) => {
+                    assert!(!(mt && stops), "{name} mt {mt}: {error:?}");
+                    // NCBI's crash: a read of a sequence of the empty file.
+                    assert!(
+                        matches!(
+                            error,
+                            SeqDbError::NcbiCrashes { .. } | SeqDbError::Format { .. }
+                        ),
+                        "{name} mt {mt}: {error:?}"
+                    );
+                }
+            }
+        }
+    }
+    // `w0`'s OID 1 (excluded) has the signed length -4; `w1` has no sequence file.
+    write("w0", &[0, 2, 4], &[2, 2, 4], Some(&[0u8; 4]));
+    write("w1", &[0, 2, 4], &[2, 4, 4], None);
+    std::fs::write(root.join("wp.nal"), "TITLE wp\nDBLIST w0 w1\n").unwrap();
+    for mt in [true, false] {
+        let mut db = SeqDb::open_search_in(b"wp", SeqType::Nucleotide, &path).unwrap();
+        db.x_keep_oids(|oid| oid != 1);
+        db.set_mt_stop_at_negative(mt);
+        let mut first = 0;
+        let mut stopped = false;
+        let mut failed = false;
+        while let Some(range) = db.next_block(first, 1 << 20) {
+            first = range.end_ordinal();
+            match db.read_nucleotide_search_block(range) {
+                Ok(block) => stopped |= block.stopped_at_negative(),
+                Err(_) => failed = true,
+            }
+        }
+        // The scan stops before `w1` and completes; one thread reads `w1` and fails on it.
+        assert_eq!((stopped, failed), (mt, !mt), "mt {mt}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1838
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:375-378
+/// A block of sequences that read nothing of a sequence file of no bytes: a nucleotide at offset
+/// 0 (the null pointer's length -1) and a protein of length -1 or 0 (its length comes from the
+/// index). The multithreaded scan stops at a negative length; one thread reads the block (the
+/// engine skips each such entry). A protein of positive length reads the empty file, NCBI's
+/// crash (the refusal).
+#[test]
+fn empty_sequence_file_block_of_sequences_that_read_nothing() {
+    use crate::seqdb::{SearchPath, SeqDb, SeqDbError};
+    use crate::utils::test_dir::TempDir;
+
+    let dir = TempDir::unique("empty-seq-file-unread");
+    let root: &std::path::Path = &dir;
+    let path = SearchPath::new(root, None, None);
+    write_v4_index(
+        &root.join("nz.nin"),
+        SeqType::Nucleotide,
+        8,
+        4,
+        &[0, 2],
+        Some(&[2, 2]),
+    );
+    std::fs::write(root.join("nz.nsq"), b"").unwrap();
+    std::fs::write(root.join("nz.nhr"), b"").unwrap();
+    // (database, sequence offsets, the multithreaded scan stops, one thread fails)
+    for (name, seq, mt_stops, fails) in [
+        ("pneg", &[1u32, 1][..], true, false),
+        ("pzero", &[1, 2][..], false, false),
+        ("ppos", &[1, 1, 5][..], true, true),
+    ] {
+        write_v4_index(
+            &root.join(format!("{name}.pin")),
+            SeqType::Protein,
+            8,
+            4,
+            seq,
+            None,
+        );
+        std::fs::write(root.join(format!("{name}.psq")), b"").unwrap();
+        std::fs::write(root.join(format!("{name}.phr")), b"").unwrap();
+        for mt in [true, false] {
+            let mut db = SeqDb::open_search_in(name.as_bytes(), SeqType::Protein, &path).unwrap();
+            db.set_mt_stop_at_negative(mt);
+            let range = db.next_block(0, 1 << 20).unwrap();
+            match db.read_protein_search_block(range) {
+                Ok(block) => {
+                    assert!(mt || !fails, "{name} mt {mt}");
+                    let stops = mt && mt_stops;
+                    assert_eq!(block.stopped_at_negative(), stops, "{name} mt {mt}");
+                    assert_eq!(block.len(), if stops { 0 } else { seq.len() - 1 });
+                }
+                Err(error) => {
+                    assert!(!mt && fails, "{name} mt {mt}: {error:?}");
+                    assert!(
+                        matches!(error, SeqDbError::NcbiCrashes { .. }),
+                        "{name}: {error:?}"
+                    );
+                }
+            }
+        }
+        // The length of OID 0 comes from the index (-1 or 0) and reads nothing.
+        let db = SeqDb::open_search_in(name.as_bytes(), SeqType::Protein, &path).unwrap();
+        let volume = &db.volumes()[0];
+        let length = seq[1] as i32 - 1 - seq[0] as i32;
+        assert_eq!(volume.protein_sequence_len_i32(0).unwrap(), length);
+        volume.check_protein_range(0).unwrap();
+        if fails {
+            assert!(matches!(
+                volume.protein_sequence_len_i32(1),
+                Err(SeqDbError::NcbiCrashes { .. })
+            ));
+            assert!(volume.check_protein_range(1).is_err());
+        }
+    }
+    for mt in [true, false] {
+        let mut db = SeqDb::open_search_in(b"nz", SeqType::Nucleotide, &path).unwrap();
+        db.set_mt_stop_at_negative(mt);
+        let range = db.next_block(0, 1 << 20).unwrap();
+        let block = db.read_nucleotide_search_block(range).unwrap();
+        assert_eq!(block.stopped_at_negative(), mt);
+        assert_eq!(block.len(), if mt { 0 } else { 1 });
+    }
+    // The readers of the letters take `x_GetSequence`'s length (-1 at offset 0); the exact
+    // length (`GetSeqLengthExact`) copies a byte out of the empty file, NCBI's crash.
+    let db = SeqDb::open_search_in(b"nz", SeqType::Nucleotide, &path).unwrap();
+    let volume = &db.volumes()[0];
+    assert_eq!(volume.nucleotide_sequence_len_i32(0, 0).unwrap(), -1);
+    assert_eq!(volume.nucleotide_ambiguity(0, 0).unwrap().length, 0);
+    assert!(matches!(
+        volume.nucleotide_length_i32(0, 0),
+        Err(SeqDbError::NcbiCrashes { .. })
+    ));
+}

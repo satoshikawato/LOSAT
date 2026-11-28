@@ -165,6 +165,7 @@ impl RepeatFilter {
         args.num_threads = threads;
         args.one_query_batch = true;
         args.hits_only = true;
+        args.db_reader_one_thread = true;
         Ok(args)
     }
 

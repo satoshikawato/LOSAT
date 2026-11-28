@@ -333,7 +333,7 @@ fn a_generated_id_is_refused_where_a_report_differs() {
     let found = subject("lcl|Query_1");
     let differs = FoundMatch::default;
     let effect = |program, writer| {
-        writers(program, vec![writer]).generated_effect(&found, 1, false, &differs)
+        writers(program, vec![writer]).generated_effect(&found, 1, (false, true, false), &differs)
     };
     let same = || FoundMatch {
         length: true,
@@ -349,7 +349,7 @@ fn a_generated_id_is_refused_where_a_report_differs() {
         writers(Program::Blastn, vec![FoundWriter::Sam { target_letters }]).generated_effect(
             &subject("lcl|Query_1"),
             1,
-            false,
+            (false, true, false),
             found,
         )
     };
@@ -407,7 +407,7 @@ fn a_generated_id_is_refused_where_a_report_differs() {
         writers(program, vec![FoundWriter::Table(None)]).generated_effect(
             &subject("lcl|Query_1"),
             1,
-            false,
+            (false, true, false),
             found,
         )
     };
@@ -425,6 +425,86 @@ fn a_generated_id_is_refused_where_a_report_differs() {
         effect(Program::Blastn, FoundWriter::Table(Some(&titled))),
         Some(TABLE_EFFECT)
     );
+    // A generated id in another letter case (`lcl|query_1`): the found query's id is `Query_1`,
+    // which the default fields' `saccver`, `sseqid`, `sacc` and `saccver` show (review 2 of X7-1,
+    // B1: `bn.case.f6`, `bp.case.f6id`); its letters do not change that.
+    let case = |program, writer: FoundWriter<'_>, found: &dyn Fn() -> FoundMatch| {
+        writers(program, vec![writer]).generated_effect(
+            &subject("lcl|query_1"),
+            1,
+            (false, false, false),
+            found,
+        )
+    };
+    for program in [Program::Blastn, Program::Blastp, Program::Tblastx] {
+        assert_eq!(
+            case(program, FoundWriter::Table(None), &same),
+            Some(TABLE_EFFECT)
+        );
+        assert_eq!(
+            case(program, FoundWriter::Table(Some(&ids)), &same),
+            Some(TABLE_EFFECT)
+        );
+        // The Seq-annots write the Seq-align id.
+        assert_eq!(case(program, FoundWriter::Annots, &same), None);
+    }
+    let length = spec("6 qseqid slen evalue", kind);
+    assert_eq!(
+        case(Program::Blastn, FoundWriter::Table(Some(&length)), &same),
+        None
+    );
+    // TBLASTN's `sstrand`: `N/A` for the protein query that NCBI finds (B2, `tn.sstrand`), in any
+    // case of the id; its other fields of the default form are refused as before.
+    let tn_kind = crate::report::archive::options::RequestKind::Tblastn;
+    let strand = spec("6 qseqid sseqid sstrand sstart send", tn_kind);
+    let starts = spec("6 qseqid sseqid sstart send", tn_kind);
+    assert_eq!(
+        effect(Program::Tblastn, FoundWriter::Table(Some(&strand))),
+        Some(TABLE_EFFECT)
+    );
+    assert_eq!(
+        effect(Program::Tblastn, FoundWriter::Table(Some(&starts))),
+        None
+    );
+    assert_eq!(
+        effect(Program::Tblastx, FoundWriter::Table(Some(&strand))),
+        None
+    );
+    // The subject frames: a plus-strand frame reads only the HSP's start, a minus-strand one the
+    // found query's length (`GetFrame`), where the alignment block opens (`tn.n_exact.f6frame`).
+    let frame = |program, kind, minus, compared: &dyn Fn() -> FoundMatch| {
+        writers(
+            program,
+            vec![FoundWriter::Table(Some(&spec(
+                "6 qseqid sseqid sstart sframe",
+                kind,
+            )))],
+        )
+        .generated_effect(&found, 5, (false, true, minus), compared)
+    };
+    // Without a field that opens the block NCBI writes `0` (`tn.n_exact.f6frame`).
+    let closed = spec("6 qseqid sseqid sframe frames", tn_kind);
+    assert_eq!(
+        writers(Program::Tblastn, vec![FoundWriter::Table(Some(&closed))]).generated_effect(
+            &found,
+            5,
+            (false, true, true),
+            &differs
+        ),
+        None
+    );
+    let tx_kind = crate::report::archive::options::RequestKind::Tblastx;
+    assert_eq!(frame(Program::Tblastn, tn_kind, false, &differs), None);
+    assert_eq!(
+        frame(Program::Tblastn, tn_kind, true, &differs),
+        Some(TABLE_EFFECT)
+    );
+    assert_eq!(frame(Program::Tblastx, tx_kind, false, &differs), None);
+    assert_eq!(
+        frame(Program::Tblastx, tx_kind, true, &differs),
+        Some(TABLE_EFFECT)
+    );
+    assert_eq!(frame(Program::Tblastx, tx_kind, true, &same), None);
     // The first report that differs names the effect; psiblast's rounds that make a PSSM differ
     // in every format (`it2.ps.qid`).
     let both = writers(
@@ -432,7 +512,7 @@ fn a_generated_id_is_refused_where_a_report_differs() {
         vec![FoundWriter::Annots, FoundWriter::Structured],
     );
     assert_eq!(
-        both.generated_effect(&found, 1, false, &differs),
+        both.generated_effect(&found, 1, (false, true, false), &differs),
         Some(XML_EFFECT)
     );
     let rounds = FoundWriters {
@@ -441,11 +521,25 @@ fn a_generated_id_is_refused_where_a_report_differs() {
         search_reads: true,
     };
     assert_eq!(
-        rounds.generated_effect(&found, 1, false, &differs),
+        rounds.generated_effect(&found, 1, (false, true, false), &differs),
         Some(SEARCH_EFFECT)
     );
     // The PSSM reads the found query's letters over the HSPs only (`ps1.ptail.save`).
-    assert_eq!(rounds.generated_effect(&found, 1, false, &aligned), None);
+    assert_eq!(
+        rounds.generated_effect(&found, 1, (false, true, false), &aligned),
+        None
+    );
+    // A report that differs comes first: NCBI writes the round's report before its next PSSM
+    // (review 2 of X7-1, S4).
+    let reported = FoundWriters {
+        program: Program::Blastp,
+        writers: vec![FoundWriter::Structured],
+        search_reads: true,
+    };
+    assert_eq!(
+        reported.generated_effect(&found, 1, (false, true, false), &differs),
+        Some(XML_EFFECT)
+    );
     assert!(!rounds.shows_shown());
     // KB-12's substitution of a `-parse_deflines` id: the tables of ids and the Seq-annots.
     assert!(writers(
@@ -489,13 +583,20 @@ fn the_generated_ids_of_a_batch_find_a_local_id_of_its_queries() {
     let kept = GeneratedQueries::new(&make, Some(3..5));
     assert!(kept.finds(&subject("lcl|Query_4")));
     assert!(!kept.finds(&subject("lcl|Query_5")));
+    // The found query's own spelling (review 2 of X7-1, B1): the reports show `Query_1` for a
+    // sequence `lcl|query_1`.
+    assert!(batch.spells(&subject("lcl|Query_2")));
+    assert!(!batch.spells(&subject("lcl|query_1")));
+    assert!(!batch.spells(&subject("lcl|QUERY_2")));
+    assert!(kept.spells(&subject("lcl|Query_4")));
+    assert!(!kept.spells(&subject("lcl|query_4")));
 }
 
 /// `compare_found`: a query record has the database sequence's length where it is as long, and
 /// its letters over the HSPs where its letters there (upper-cased, as NCBI's reader keeps them)
-/// are the sequence's; a protein's `X` never is (a `>?` gap line), and a range past the record's
-/// end is not (`tests/non_utf8_names` R3_7 and R7: `q` against its copy `lcl|Query_1` of
-/// `q1_sq1`; `x71/fix2/ev2` `bp.tail`, `tx.tail`).
+/// are the sequence's; a protein's `X` is a letter as any other (a `>?` gap line's too, probe
+/// `x71/fix3/gap`), and a range past the record's end is not (`tests/non_utf8_names` R3_7 and
+/// R7: `q` against its copy `lcl|Query_1` of `q1_sq1`; `x71/fix2/ev2` `bp.tail`, `tx.tail`).
 #[test]
 fn a_query_record_has_the_database_sequence_letters_over_the_hsps() {
     use crate::seqdb::{SeqDb, SeqType};
@@ -549,10 +650,17 @@ LSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR";
             unstraddled: true,
         }
     );
-    let mut gap = q.to_vec();
-    gap[10] = b'X';
-    assert!(!compare_found(&gap, gap.len(), &protein, 0, &[5..20]).aligned);
-    assert!(compare_found(&gap, gap.len(), &protein, 0, &[20..60]).aligned);
+    // An `X` where the sequence has another letter differs there only; where both have `X` it is
+    // the sequence's (`compare_found_letters`; review 2 of X7-1, S1: `bp.x.f6`).
+    let mut with_x = q.to_vec();
+    with_x[10] = b'X';
+    assert!(!compare_found(&with_x, with_x.len(), &protein, 0, &[5..20]).aligned);
+    assert!(compare_found(&with_x, with_x.len(), &protein, 0, &[20..60]).aligned);
+    assert!(compare_found_letters(&with_x, with_x.len(), Some(&with_x), &whole).aligned);
+    assert_eq!(
+        compare_found_letters(q, q.len(), None, &whole),
+        FoundMatch::default()
+    );
     let nucleotide =
         SeqDb::open(dir.join("of1/bnqid").to_str().unwrap(), SeqType::Nucleotide).unwrap();
     let copy = std::fs::read(dir.join("of1/bnqid.fa")).unwrap();

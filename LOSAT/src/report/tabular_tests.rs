@@ -1552,7 +1552,7 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
             Some(spec),
             program,
             ident,
-            (taxid, taxdb),
+            (taxid, taxdb, true, false),
             &crate::report::query_bioseq::FoundMatch::default,
         )
     };
@@ -1642,7 +1642,7 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
             spec,
             program,
             5,
-            (true, true),
+            (true, true, true, false),
             &both,
         )
     };
@@ -1680,7 +1680,7 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
             Some(&csv(fields)),
             Program::Blastp,
             5,
-            (false, false),
+            (false, false, true, false),
             &aligned,
         )
     };

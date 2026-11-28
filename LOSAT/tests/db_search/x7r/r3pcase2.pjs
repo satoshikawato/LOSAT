@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "r3pcase2",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "r3pcase2.fa",
+  "number-of-letters": 330,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-28T13:24:00",
+  "number-of-volumes": 1,
+  "bytes-total": 678,
+  "bytes-to-cache": 421,
+  "files": [
+    "r3pcase2.phr",
+    "r3pcase2.pin",
+    "r3pcase2.pog",
+    "r3pcase2.psd",
+    "r3pcase2.psi",
+    "r3pcase2.psq"
+  ]
+}

@@ -1601,6 +1601,7 @@ impl ReportedSubjects {
                         &crate::report::query_bioseq::ReportedHsps {
                             num_ident: 1,
                             ranges: &Vec::<std::ops::Range<usize>>::new,
+                            minus: false,
                         },
                         queries,
                         run,

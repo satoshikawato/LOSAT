@@ -1729,6 +1729,7 @@ impl FoundCheck<'_, '_> {
                             range.start + index,
                             u32::try_from(list.oid).ok()?,
                             Vec::<std::ops::Range<usize>>::new,
+                            list.hsps.hsps.iter().any(|linked| linked.hsp.frame < 0),
                         ))
                     })
                 }),
@@ -2169,7 +2170,7 @@ fn search(
         // The first batch's refusal of a sequence found by a generated id (line RG item X7), held
         // until the stop of the prefetches is known (`BatchQueries::held`): the batch's first
         // query and the refusal.
-        let mut found_refusal: Option<(usize, anyhow::Error)> = None;
+        let mut found_refusal: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
         // NCBI's fetches with `check_oid_exclusion` of the redo and the traceback, one check for
         // the search's batches (`database::fetch_excluded`), and their reads of headers.
         // The first format, whose prefetch each batch asks (`database::prefetch_format`).
@@ -2404,7 +2405,7 @@ fn search(
                 if let Some(refusal) =
                     found.check(batch, queries, &batch_results, &mut query_bioseqs)?
                 {
-                    found_refusal.get_or_insert((range.start, refusal));
+                    found_refusal.get_or_insert((range.clone(), refusal));
                 }
             }
             results.append(&mut batch_results);
@@ -2495,12 +2496,17 @@ fn search(
                 anyhow::anyhow!("the prefetch of the batch stops (its error is made below)"),
             ));
         }
-        // The held refusal of a sequence found by a generated id (above), before any byte, where
-        // NCBI formats its batch: a batch whose prefetch stops, or that a database file failed, is
-        // not formatted (its error or refusal comes below), nor are the batches after it.
-        if let Some((first, refusal)) = found_refusal {
-            if failed.as_ref().is_none_or(|(range, _)| first < range.start) {
-                return Err(refusal);
+        // The held refusal of a sequence found by a generated id (above), where NCBI formats its
+        // batch: as a failed batch, after the reports of the batches before and the batch's reader
+        // messages (review 2 of line RG item X7-1, S4). A batch whose prefetch stops, or that a
+        // database file failed, is not formatted (its error or refusal comes below), nor are the
+        // batches after it.
+        if let Some((range, refusal)) = found_refusal {
+            if failed
+                .as_ref()
+                .is_none_or(|(failed, _)| range.start < failed.start)
+            {
+                failed = Some((range, refusal));
             }
         }
         // A batch that a database file failed is not reported, nor are the batches after it.

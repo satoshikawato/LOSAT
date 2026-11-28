@@ -322,6 +322,10 @@ pub(crate) struct QueryScope {
     /// The forms of the scope's ids (`id_scope::match_form`), by which an earlier id may be one of
     /// a record's in another form (`add_version_form`).
     forms: u8,
+    /// The generated local ids of the scope's queries as their records spell them
+    /// (`of_generated_ids`): the scope finds such an id in any case, and NCBI's reports show the
+    /// found query's own spelling (`spells`).
+    spellings: std::collections::HashSet<Box<[u8]>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
@@ -465,15 +469,27 @@ impl QueryScope {
     pub(crate) fn of_generated_ids<'r>(local_ids: impl IntoIterator<Item = &'r str>) -> Self {
         let mut scope = Self::default();
         let mut keys = Vec::new();
-        for id in local_ids
-            .into_iter()
-            .flat_map(crate::blastinput::fasta_reader::believed::generated_ids)
-        {
-            keys.clear();
-            crate::seqid::defline_set::scope_keys(&id, &mut keys);
-            scope.keys.extend(keys.iter().copied());
+        for local_id in local_ids {
+            for id in crate::blastinput::fasta_reader::believed::generated_ids(local_id) {
+                keys.clear();
+                crate::seqid::defline_set::scope_keys(&id, &mut keys);
+                scope.keys.extend(keys.iter().copied());
+            }
+            scope.spellings.insert(local_id.as_bytes().into());
         }
         scope
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:767 (`PHashNocase`: the
+    // scope finds a local string id in any case)
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-840, 522-530 (the
+    // subject's ids are those of the Bioseq that the scope finds by the Seq-align id)
+    /// Whether a generated local id of the scope (`of_generated_ids`) is the local string id
+    /// `text` byte for byte: the reports of a sequence that the scope finds by it show the found
+    /// query's id, which is then the sequence's own (review 2 of line RG item X7-1, B1: a
+    /// sequence `lcl|query_1` shows as `Query_1`).
+    pub(crate) fn spells(&self, text: &[u8]) -> bool {
+        self.spellings.contains(text)
     }
 
     /// Whether a query of the scope has an id with one of the keys `keys`.
@@ -574,6 +590,7 @@ impl QueryScope {
     pub(crate) fn extend(&mut self, other: &QueryScope) {
         self.keys.extend(other.keys.iter().copied());
         self.forms |= other.forms;
+        self.spellings.extend(other.spellings.iter().cloned());
     }
 }
 
@@ -756,22 +773,38 @@ impl<'a> GeneratedQueries<'a> {
         }
     }
 
+    /// The scope of the batch's records, made at its first use.
+    pub(crate) fn scope(&self) -> &QueryScope {
+        self.scope.get_or_init(|| (self.make)())
+    }
+
     /// Whether the scope finds a query for the reported database sequence `subject` by its
     /// Seq-align id (`QueryScopeKeys::own`; a local id has no weak keys).
     pub(crate) fn finds(&self, subject: &crate::report::db_subject::ParsedSubject) -> bool {
         if !subject.alignment_id_is_local() {
             return false;
         }
-        if self
-            .scope
-            .get_or_init(|| (self.make)())
-            .has_key(&subject.query_scope_keys().own)
-        {
+        if self.scope().has_key(&subject.query_scope_keys().own) {
             return true;
         }
         self.later.as_ref().is_some_and(|later| {
             generated_number(subject.alignment_id()).is_some_and(|number| later.contains(&number))
         })
+    }
+
+    /// Whether the query that the scope finds for `subject` (`finds`) has the Seq-align id's local
+    /// string byte for byte (`QueryScope::spells`; a later batch's query of outfmt 5 is
+    /// `Query_N`): the reports that show the found query's id show the sequence's own there.
+    pub(crate) fn spells(&self, subject: &crate::report::db_subject::ParsedSubject) -> bool {
+        let id = subject.alignment_id();
+        let crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(text)) = id else {
+            return false;
+        };
+        self.scope().spells(text)
+            || (text.starts_with(b"Query_")
+                && self.later.as_ref().is_some_and(|later| {
+                    generated_number(id).is_some_and(|number| later.contains(&number))
+                }))
     }
 }
 

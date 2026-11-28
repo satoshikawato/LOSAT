@@ -1962,6 +1962,7 @@ impl ListedTitles<'_> {
                         &crate::report::query_bioseq::ReportedHsps {
                             num_ident: 1,
                             ranges: &Vec::<std::ops::Range<usize>>::new,
+                            minus: false,
                         },
                         &crate::blastinput::query_batch::BatchQueries::Shown(scopes.run()),
                         run,
@@ -1989,7 +1990,9 @@ impl ListedTitles<'_> {
     /// finds such a subject there: its reports show the query's title and letters in the
     /// subject's place, and the query-anchored merge of the query's own Bioseq can abort (`double
     /// free or corruption`, as `pairwise::blastp_section_aborts`). A weak match
-    /// (`QueryScopeKeys::weak`, of text Seq-ids) never meets a local id.
+    /// (`QueryScopeKeys::weak`, of text Seq-ids) never meets a local id. A refusal of a report
+    /// stops the check; the first refusal of psiblast's next PSSM alone
+    /// (`query_bioseq::AfterRoundReport`) is held and given (`Ok(Some)`) where no report differs.
     pub(super) fn refuse_generated_ids(
         &self,
         hit_lists: &[Option<BlastpHitList>],
@@ -1997,12 +2000,13 @@ impl ListedTitles<'_> {
         queries: &crate::blastinput::query_batch::BatchQueries<'_>,
         run: &crate::report::query_bioseq::SeenRun<'_, '_>,
         num_ident: impl Fn((u32, u32, u32), &super::super::hsp::BlastpHsp) -> usize,
-    ) -> Result<()> {
+    ) -> Result<Option<anyhow::Error>> {
         if self.parsed.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         // The generated path notes nothing (`check`).
         let mut seen = crate::report::query_bioseq::QueryBioseqs::default();
+        let mut after_report = None;
         for query in searched {
             let Some(Some(hit_list)) = hit_lists.get(query) else {
                 continue;
@@ -2017,7 +2021,7 @@ impl ListedTitles<'_> {
                 for (index, hsp) in hsp_list.hsps.iter().enumerate() {
                     let range =
                         hsp.s_start.min(hsp.s_end).saturating_sub(1)..hsp.s_start.max(hsp.s_end);
-                    crate::report::query_bioseq::check(
+                    let checked = crate::report::query_bioseq::check(
                         &mut seen,
                         subject,
                         || self.oids.oid(ordinal),
@@ -2028,15 +2032,24 @@ impl ListedTitles<'_> {
                                 hsp,
                             ),
                             ranges: &|| vec![range.clone()],
+                            minus: false,
                         },
                         queries,
                         run,
                         self.program,
-                    )?;
+                    );
+                    if let Err(error) = checked {
+                        match error.downcast::<crate::report::query_bioseq::AfterRoundReport>() {
+                            Ok(held) => {
+                                after_report.get_or_insert(held.0);
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    }
                 }
             }
         }
-        Ok(())
+        Ok(after_report)
     }
 
     /// With `-parse_deflines` (or a PSSM query shown with its ids) and a description table
@@ -2050,12 +2063,19 @@ impl ListedTitles<'_> {
         scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
         described: impl FnMut(usize) -> Result<Vec<u32>>,
     ) -> Result<()> {
-        self.refuse_display_ids(hit_lists, |query| scopes.of_query(query), false, described)
+        self.refuse_display_ids(
+            hit_lists,
+            0..hit_lists.len(),
+            |query| scopes.of_query(query),
+            false,
+            described,
+        )
     }
 
     /// `common::database::refuse_display_id_of_a_query` (`generated` as there) of each subject
-    /// with parsed Seq-ids of the final hit lists `hit_lists` whose description line a report
-    /// shows, with the scope `scope_of` of the query whose list reaches it: `described(query)`
+    /// with parsed Seq-ids of the final hit lists `hit_lists` of the queries `queries` whose
+    /// description line a report shows, with the scope `scope_of` of the query whose list reaches
+    /// it: `described(query)`
     /// gives the subjects (by rank) of the query's description table
     /// (`pairwise::blastp_described_subjects`), asked only for a query whose list holds a subject
     /// whose display id the scope has (`QueryScopeKeys::display`). The scope is asked for only
@@ -2064,6 +2084,7 @@ impl ListedTitles<'_> {
     pub(super) fn refuse_display_ids<'s>(
         &self,
         hit_lists: &[Option<BlastpHitList>],
+        queries: std::ops::Range<usize>,
         scope_of: impl Fn(usize) -> &'s crate::blastinput::query_batch::QueryScope,
         generated: bool,
         mut described: impl FnMut(usize) -> Result<Vec<u32>>,
@@ -2071,8 +2092,8 @@ impl ListedTitles<'_> {
         if self.parsed.is_empty() {
             return Ok(());
         }
-        for (query, hit_list) in hit_lists.iter().enumerate() {
-            let Some(hit_list) = hit_list else {
+        for query in queries {
+            let Some(Some(hit_list)) = hit_lists.get(query) else {
                 continue;
             };
             let mut asked = None;

@@ -1105,21 +1105,20 @@ pub(super) fn refuse_unreportable(
     // in psiblast makes the next round's PSSM, or the one it saves, from its letters: the batch's
     // check (`report::query_bioseq::check`, HSP by HSP, against `ReportPrep::batch_scope`, the
     // prefetch's scope) refuses where a report differs for it (`FoundWriters::generated_effect`;
-    // the Seq-annots, the archive, tables of fields that read nothing of it, or only letters and a
-    // length that are its own where the found query's record has them, and the organism report of
-    // a sequence without a taxid are NCBI's bytes), and one whose description line shows such an
-    // id as its display id (outfmt 0 to 4: NCBI shows the query's title there,
+    // the Seq-annots, the archive, tables of fields that read nothing of it, or only an id,
+    // letters and a length that are its own where the found query's record has them, and the
+    // organism report of a sequence without a taxid are NCBI's bytes), and one whose description
+    // line shows such an id as its display id (outfmt 0 to 4: NCBI shows the query's title there,
     // `ListedTitles::refuse_display_ids`). Under `-parse_deflines` (or a PSSM query shown with its
     // ids) the scopes of the batches refuse (`ListedTitles::refuse_ids_of_queries`, and below by
     // the display id). A `-subject` search cannot meet it: without `-parse_deflines` the subjects
     // are `lcl|Subject_N`, and with it a subject with a query's id is the reader's refusal
-    // (`id_scope`) unless it is the query's own record (the abort above). The refusal of a
-    // generated id fails its batch (`ErrorAfterBatchReports` of the batch's first query): the
+    // (`id_scope`) unless it is the query's own record (the abort above). Both refusals of a
+    // generated id fail its batch (`ErrorAfterBatchReports` of the batch's first query): the
     // reports of the batches before are written first, as NCBI formats batch by batch (review 1
-    // of X7-1, S5); the display ids' refusal runs before any byte of the call's reports (in a
-    // psiblast round after the first, after the earlier rounds' output): such a sequence has
-    // parsed Seq-ids, and the block search never takes a database with them
-    // (`database::x_titles_allow_blocks`).
+    // of X7-1, S5; review 2, S4); in a psiblast round after the first, after the earlier rounds'
+    // output. Such a sequence has parsed Seq-ids, and the block search never takes a database
+    // with them (`database::x_titles_allow_blocks`).
     if let (None, Some(titles)) = (reports.query_scopes, listed_titles.as_ref()) {
         let writers = BlastpReport::found_writers(args, format_plans, reports.psi_round);
         let taxdb = database.is_some_and(database::BlastpDatabase::taxdb_found);
@@ -1130,23 +1129,37 @@ pub(super) fn refuse_unreportable(
         // range (`blast_fasta_input.cpp:395, 458-460`).
         let compares = args.psi_search.is_none();
         let no_record = |_: usize| None;
+        // The letters of the sequence compared last: the check runs HSP by HSP (review 2 of
+        // X7-1, N2), and a sequence's HSPs are checked one after another.
+        let letters: std::cell::RefCell<Option<(u32, Option<Vec<u8>>)>> =
+            std::cell::RefCell::new(None);
         for batch in query_batches {
             let records = prep.scope_records(&batch.searched, true);
             let found = |subject: &crate::report::db_subject::ParsedSubject,
                          ordinal: u32,
                          ranges: &[Range<usize>]| {
-                database
-                    .filter(|_| compares)
-                    .zip(crate::report::query_bioseq::found_record(subject, records))
-                    .map_or_else(Default::default, |(database, record)| {
-                        crate::report::query_bioseq::compare_found(
-                            &record.sequence,
-                            record.sequence.len(),
-                            database.seqdb(),
-                            ordinal,
-                            ranges,
-                        )
-                    })
+                let (Some(database), Some(record)) = (
+                    database.filter(|_| compares),
+                    crate::report::query_bioseq::found_record(subject, records),
+                ) else {
+                    return crate::report::query_bioseq::FoundMatch::default();
+                };
+                let mut last = letters.borrow_mut();
+                if last
+                    .as_ref()
+                    .is_none_or(|(compared, _)| *compared != ordinal)
+                {
+                    *last = Some((
+                        ordinal,
+                        crate::report::query_bioseq::found_letters(database.seqdb(), ordinal),
+                    ));
+                }
+                crate::report::query_bioseq::compare_found_letters(
+                    &record.sequence,
+                    record.sequence.len(),
+                    last.as_ref().and_then(|(_, letters)| letters.as_deref()),
+                    ranges,
+                )
             };
             let run = crate::report::query_bioseq::SeenRun {
                 shows: false,
@@ -1158,11 +1171,18 @@ pub(super) fn refuse_unreportable(
                 load_texts,
                 found: &found,
             };
+            // One scope of the batch for both checks (review 2 of X7-1, N3).
             let scope = || prep.batch_scope(&batch.searched, true);
             let queries = crate::blastinput::query_batch::BatchQueries::Generated(
                 crate::blastinput::query_batch::GeneratedQueries::new(&scope, None),
             );
-            titles
+            let fail = |error| {
+                anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::of_batch(
+                    batch.searched.start,
+                    error,
+                ))
+            };
+            let after_report = titles
                 .refuse_generated_ids(
                     hit_lists,
                     batch.searched.clone(),
@@ -1170,32 +1190,41 @@ pub(super) fn refuse_unreportable(
                     &run,
                     |key, hsp| engine_counts.num_ident(key, hsp.num_ident),
                 )
-                .map_err(|error| {
-                    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::of_batch(
-                        batch.searched.start,
-                        error,
-                    ))
-                })?;
-        }
-        if !pairwise_views.is_empty() {
-            // Each batch's scope, made where the refusal first asks for it.
-            let scopes: Vec<(
-                &Range<usize>,
-                std::cell::OnceCell<crate::blastinput::query_batch::QueryScope>,
-            )> = query_batches
-                .iter()
-                .map(|batch| (&batch.searched, std::cell::OnceCell::new()))
-                .collect();
-            let none = crate::blastinput::query_batch::QueryScope::default();
-            let scope_of = |query: usize| {
-                scopes
-                    .get(scopes.partition_point(|(searched, _)| searched.end <= query))
-                    .map_or(&none, |(searched, scope)| {
-                        scope.get_or_init(|| prep.batch_scope(searched, true))
-                    })
-            };
-            titles
-                .refuse_display_ids(hit_lists, scope_of, true, |q_idx| described(q_idx, false))?;
+                .map_err(fail)?;
+            if !pairwise_views.is_empty() {
+                let none = crate::blastinput::query_batch::QueryScope::default();
+                let batch_scope = match &queries {
+                    crate::blastinput::query_batch::BatchQueries::Generated(generated) => {
+                        generated.scope()
+                    }
+                    crate::blastinput::query_batch::BatchQueries::Shown(_) => &none,
+                };
+                titles
+                    .refuse_display_ids(
+                        hit_lists,
+                        batch.searched.clone(),
+                        |_| batch_scope,
+                        true,
+                        |q_idx| described(q_idx, false),
+                    )
+                    .map_err(fail)?;
+            }
+            // A refusal of psiblast's next PSSM alone comes where the round makes that PSSM, after
+            // its report (`rounds::RoundOutcome::next`; none where it makes none); in the one
+            // round of `-save_pssm_after_last_round` without rounds, at its batch, as before.
+            if let Some(refusal) = after_report {
+                match reports.psi_round {
+                    Some(io) => {
+                        let mut outcome = io.outcome.lock().expect("the round's outcome");
+                        if let Some(next) =
+                            outcome.as_mut().and_then(|outcome| outcome.next.as_mut())
+                        {
+                            *next = Err(refusal);
+                        }
+                    }
+                    None => return Err(fail(refusal)),
+                }
+            }
         }
     }
     // Outfmt 0 to 4 of a database search with queries whose ids the reports show

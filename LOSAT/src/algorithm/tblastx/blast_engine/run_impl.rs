@@ -3641,9 +3641,12 @@ fn check_found_queries(
             ordered.iter().map(|hsp| {
                 let range = hsp.hit.s_start.min(hsp.hit.s_end).saturating_sub(1)
                     ..hsp.hit.s_start.max(hsp.hit.s_end);
-                (start + hsp.hit.q_idx as usize, hsp.hit.s_idx, move || {
-                    vec![range.clone()]
-                })
+                (
+                    start + hsp.hit.q_idx as usize,
+                    hsp.hit.s_idx,
+                    move || vec![range.clone()],
+                    hsp.subject_frame < 0,
+                )
             }),
             database.oid_map(),
             &queries,
@@ -4556,8 +4559,12 @@ fn run_batch_loop(
                 database.reset_scope();
             }
             // The held refusal of a sequence found by a generated id (above), after the prefetch's
-            // error or refusal and its posts, before the batch's reports.
+            // error or refusal: after the reports of the batches before, the batch's reader
+            // messages and its prefetch's posts (`warnings[start]`), where NCBI formats the batch
+            // (review 2 of line RG item X7-1, S4).
             if let Some(refusal) = found_refusal {
+                reports.write_before_failed_batch(outputs, done, &warnings)?;
+                warnings[start].write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                 return Err(refusal);
             }
         }

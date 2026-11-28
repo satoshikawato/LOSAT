@@ -1050,7 +1050,10 @@
   XT-X7-1f, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; in its fix
   round 2 of 2026-11-28 (review 1) the letters and the length are compared over the HSPs, SAM,
   psiblast's saved PSSM and a damaged taxonomy database's texts refuse, the organism report only
-  with a taxonomy database found, decisions XT-X7-1n to XT-X7-1t; numbered after
+  with a taxonomy database found, decisions XT-X7-1n to XT-X7-1t; in its fix round 3 of
+  2026-11-28 (review 2) the found query's id in another letter case and TBLASTN's `sstrand`
+  refuse, a protein `X` counts as a letter, and BLASTN, TBLASTN, TBLASTX and psiblast's next PSSM
+  refuse after the reports before them, decisions XT-X7-1ae to XT-X7-1aj; numbered after
   1.126 at the merge of dev of 2026-11-28 that brought line RG item T4b-f's 1.126; first 1.123,
   then 1.124 at the merge of dev of 2026-11-27 that brought line RG-KB item 18b's 1.123, then
   1.126 at the merge of dev of 2026-11-28 that brought line RG-D2's 1.124 and 1.125)
@@ -5377,10 +5380,15 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   as the Seq-align id in outfmt 0 to 5 and 13 to 16 (with outfmt 5, whose scope NCBI keeps for
   the run, also the id of a later batch's query, which NCBI then searches as the database
   sequence, probe `b1.bp.q2x.f5`), in the tables (outfmt 6, 7, 10 and 20) whose fields show what
-  NCBI finds by that id (its ids and titles; its length where the found query's is not the
-  sequence's; its letters, the default fields outside BLASTN among them, where the found query's
-  letters differ from the sequence's over an HSP or an HSP passes its end; `staxid` of a sequence
-  with a taxid and, with a taxonomy database found, its taxonomy names), in the organism report
+  NCBI finds by that id (its ids and titles; its own id, `sseqid`, `sacc` and `saccver`, the
+  default fields among them, where the sequence's id is not the query's byte for byte, as NCBI's
+  scope finds a local id in any letter case: `lcl|query_1` shows as `Query_1`; TBLASTN's
+  `sstrand`, `N/A` for the protein query; its length where the found query's is not the
+  sequence's, and so TBLASTN's and TBLASTX's frames of an HSP on the sequence's minus strand
+  where the alignment block opens, which NCBI takes from that length; its letters, the default fields outside BLASTN among them, where the found query's
+  letters differ from the sequence's over an HSP or an HSP passes its end, a protein's `X` and a
+  gap line's letters counting as letters; `staxid` of a sequence with a taxid and, with a taxonomy
+  database found, its taxonomy names), in the organism report
   (outfmt 18) of a sequence with a taxid when a taxonomy database is found, in SAM (17) where the
   found query's length is not the sequence's or, with `SQ` without `SR`, its letters differ over
   an HSP (rows `db.x7.bn.tail.f17*`), in psiblast's PSSM of the next round or of
@@ -5391,13 +5399,16 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   and TBLASTX's merges of the query's rows with the sequence's throw, exit 255, probes
   `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`, as BLASTX's and RPSTBLASTN's tables of a field of the
   alignment): NCBI shows the query's title and letters for the id (its second lookup, by the
-  display id, the query's title in that line). The Seq-annots (outfmt 8, 9, 11 and 12), SAM and
-  the tables of fields that read nothing of the sequence, or only its letters and length where the
-  found query has them (a database copy of the query, or the query with more letters after it:
-  NCBI reads the same letters over the HSPs, rows `db.x7.bp.qid.same.*`, `db.x7.bp.tail.*`), and
-  the organism report of a sequence without a taxid, or without a taxonomy database, are NCBI's
-  bytes. BLASTP, PSIBLAST and RPSBLAST refuse after the reports of the query batches before (review
-  1 of line RG item X7-1, S5).
+  display id, the query's title in that line). The Seq-annots (outfmt 8, 9, 11 and 12), SAM where
+  the found query has the sequence's length (and with `SQ` without `SR` its letters over the
+  HSPs), the tables of fields that read nothing of the sequence, or only its id, letters and
+  length where the found query has them (a database copy of the query with the query's id, or the
+  query with more letters after it: NCBI reads the same id and letters over the HSPs, rows
+  `db.x7.bp.qid.same.*`, `db.x7.bp.tail.*`, `db.x7.bp.qidx.same.f6`), and the organism report of
+  a sequence without a taxid, or without a taxonomy database, are NCBI's bytes. Every program
+  refuses after the reports of the query batches before (review 1 of line RG item X7-1, S5, and
+  review 2, S4), and psiblast's rounds refuse a difference of the next PSSM alone after the
+  round's report; the one round of `-save_pssm_after_last_round` refuses at its batch.
 - A stored Seq-id with a byte outside ' ' to '~', and a stored title with such a byte in the
   cases narrowed by version 1.120 (line RG-KB item 9(b), Owner-delegated: `psiblast`, `rpsblast`
   and `rpstblastn`; a format other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with

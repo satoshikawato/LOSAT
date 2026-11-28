@@ -130,6 +130,12 @@ pub(super) struct Rule<'a> {
     pub hit_records: bool,
     /// The run writes the search strategy, whose requests hold the queries' letters.
     pub strategy: bool,
+    /// The run searches a database with parsed Seq-ids (`BlastnDatabase::parsed_seqids`) without
+    /// `-parse_deflines`: a reported sequence can have a query's generated id, whose letters a
+    /// report reads in its place (`BlastnOutputFormat::reads_found_letters`). A sequence with
+    /// such an id in a volume whose first header has none finds no letters kept, and LOSAT
+    /// refuses it there (`report::query_bioseq::compare_found`).
+    pub found_queries: bool,
 }
 
 impl Rule<'_> {
@@ -138,10 +144,9 @@ impl Rule<'_> {
         !self.query_range
             && !self.hit_records
             && !self.strategy
-            && !self
-                .formats
-                .iter()
-                .any(|format| format.reads_query_letters())
+            && !self.formats.iter().any(|format| {
+                format.reads_query_letters() || (self.found_queries && format.reads_found_letters())
+            })
     }
 }
 

@@ -6707,6 +6707,10 @@ fn search_cli(
         query_range: query_range.is_some(),
         hit_records: outputs.hits.is_some(),
         strategy: args.strategy.is_some(),
+        found_queries: !args.parse_deflines
+            && database
+                .as_ref()
+                .is_some_and(database::BlastnDatabase::parsed_seqids),
     }
     .acts();
     let x_store_acts = !x_opening.acts() && x_query_drop::on() && x_store_rule;
@@ -9153,8 +9157,8 @@ fn run_in_pool(
             // (`blast_fasta_input.cpp:395, 458-460`). Their lengths are the input lengths read
             // before the search: a run whose reports read no query letter drops the records'
             // letters after the encoding (`x_query_drop`, `reads_query_letters`), and keeps them
-            // where a report reads the found query's letters (the fields of the letters, SAM's
-            // `SQ`).
+            // where a report reads the found query's letters (the fields of the letters; SAM's
+            // `SQ` with a database with parsed Seq-ids, `Rule::found_queries`).
             let input_records = batch_records.input();
             let found = |subject: &crate::report::db_subject::ParsedSubject,
                          ordinal: u32,
@@ -9219,7 +9223,7 @@ fn run_in_pool(
                                         })
                                         .collect()
                                 };
-                                (start + query, hsp_list.oid, ranges)
+                                (start + query, hsp_list.oid, ranges, false)
                             })
                         })
                     }),
@@ -9460,14 +9464,18 @@ fn run_in_pool(
                 }
                 Some(Err(error)) => Some(error),
             };
-            // The held refusal of a sequence found by a generated id (above), after the prefetch's
-            // error or refusal and its posts, before the batch's reports.
-            if let Some(error) = prefetch_error.or(found_refusal) {
+            if let Some(error) = prefetch_error {
                 let written = if stream.acting() { start } else { 0 };
                 for query_warnings in &warnings[written..=start] {
                     query_warnings.write(&mut *outputs.diagnostics, archive)?;
                 }
                 return Err(error);
+            }
+            // The held refusal of a sequence found by a generated id (above), after the prefetch's
+            // error or refusal and its posts: after the reports of the batches before and the
+            // batch's messages, where NCBI formats the batch (review 2 of line RG item X7-1, S4).
+            if let Some(error) = found_refusal {
+                fail_batch!(error);
             }
             // EXPERIMENT (LOSAT_X_RPTSTREAM): the loop writes the batch's reports below and drops
             // its lists, so a later batch's stop does not find them among those it holds (the

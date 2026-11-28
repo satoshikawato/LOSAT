@@ -3841,8 +3841,9 @@ pub(crate) fn reports_parsed(
 
 /// The check of line RG item X7 (`report::query_bioseq::check` with `run`) of each reported
 /// sequence of `reported` (a searched query, by its index in the run, a sequence that its report
-/// names, by ordinal id, and the subject ranges of the HSPs of that report, asked only where a
-/// report reads the letters of a query found by a generated id; `oids` the database's OIDs) whose
+/// names, by ordinal id, the subject ranges of the HSPs of that report, asked only where a report
+/// reads the letters of a query found by a generated id, and whether an HSP is on the subject's
+/// minus strand, `ReportedHsps::minus`; `oids` the database's OIDs) whose
 /// header `titles` holds with
 /// parsed Seq-ids, against the queries that NCBI's scope holds for that query's batch
 /// (`queries`), where the reports `shown` resolve the sequences' Seq-align ids
@@ -3851,7 +3852,7 @@ pub(crate) fn reports_parsed(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refuse_reported_ids_of_queries<R: Fn() -> Vec<std::ops::Range<usize>>>(
     titles: &std::collections::BTreeMap<u32, ReportedHeader>,
-    reported: impl IntoIterator<Item = (usize, u32, R)>,
+    reported: impl IntoIterator<Item = (usize, u32, R, bool)>,
     oids: crate::seqdb::OidMap<'_>,
     queries: &crate::blastinput::query_batch::BatchQueries<'_>,
     shown: ParsedShown,
@@ -3862,7 +3863,7 @@ pub(crate) fn refuse_reported_ids_of_queries<R: Fn() -> Vec<std::ops::Range<usiz
     if !shown.resolves_subject() {
         return Ok(());
     }
-    for (query, ordinal, ranges) in reported {
+    for (query, ordinal, ranges, minus) in reported {
         if let Some(ReportedHeader::Parsed(subject)) = titles.get(&ordinal) {
             crate::report::query_bioseq::check(
                 seen,
@@ -3872,6 +3873,7 @@ pub(crate) fn refuse_reported_ids_of_queries<R: Fn() -> Vec<std::ops::Range<usiz
                 &crate::report::query_bioseq::ReportedHsps {
                     num_ident: 1,
                     ranges: &ranges,
+                    minus,
                 },
                 queries,
                 run,

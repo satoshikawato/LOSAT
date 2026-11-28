@@ -1,0 +1,5 @@
+Seq-entry ::= seq {
+  id { genbank { accession "AB009016", version 1 } },
+  descr { molinfo { biomol peptide } },
+  inst { repr seg, mol aa, length 10, ext seg { int { from 0, to 9, id genbank { accession "AB009099", version 1 } } } }
+}

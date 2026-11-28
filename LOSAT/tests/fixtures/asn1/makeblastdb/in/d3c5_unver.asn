@@ -1,0 +1,93 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { local str "u0" },
+      descr { title "my seq", user { type str "Unverified", data {} } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "u1" },
+      descr { title "my seq", user { type str "Unverified", data { { label str "Type", data str "Features" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "u2" },
+      descr { title "my seq", user { type str "Unverified", data { { label str "Type", data str "Misassembled" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "u3" },
+      descr { title "my seq", user { type str "Unverified", data { { label str "Type", data str "Contaminant" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "u4" },
+      descr { title "my seq", user { type str "Unverified", data { { label str "Type", data str "Organism" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "u5" },
+      descr {
+        title "my seq",
+        user {
+          type str "Unverified",
+          data {
+            { label str "Type", data str "Features" },
+            { label str "Type", data str "Misassembled" },
+            { label str "Type", data str "Contaminant" },
+            { label str "Type", data str "Organism" }
+          }
+        }
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "u6" },
+      descr { title "some UNVERIFIED entry", user { type str "Unverified", data { { label str "Type", data str "Organism" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "u7" },
+      descr { title "UNVERIFIED: some entry", user { type str "Unverified", data { { label str "Type", data str "Organism" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "ur0" },
+      descr { title "my seq", user { type str "Unreviewed", data {} } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "ur1" },
+      descr { title "my seq", user { type str "Unreviewed", data { { label str "Type", data str "Unannotated" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "ur2" },
+      descr {
+        title "my seq",
+        user { type str "Unreviewed", data {} },
+        user { type str "Unverified", data { { label str "Type", data str "Contaminant" } } }
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "ps1" },
+      descr { title "alpha", comment "note [CAUTION] Could be the product of a pseudogene end" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "mg1" },
+      descr { title "contig 1", source { org { taxname "Bacteria", orgname { mod { { subtype metagenome-source, subname "soil metagenome" } } } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "mg2" },
+      descr {
+        title "transcript 1",
+        molinfo { biomol mRNA, tech tsa },
+        source { org { taxname "Bacteria", orgname { mod { { subtype metagenome-source, subname "marine" } } } } }
+      },
+      inst { repr raw, mol rna, length 4, seq-data iupacna "ACGT" }
+    }
+  }
+}

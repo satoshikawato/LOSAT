@@ -1,0 +1,45 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { genbank { accession "AAAA01000001", version 1 }, general { db "WGS:AAAA01", tag str "contig001" }, general { db "BankIt", tag str "skip_me" } },
+      descr {
+        molinfo { tech wgs },
+        source {
+          genome mitochondrion,
+          org { taxname "Escherichia coli", orgname { mod { { subtype strain, subname "K-12" }, { subtype substrain, subname "MG1655" } } } },
+          subtype { { subtype plasmid-name, name "p1" } }
+        }
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { genbank { accession "AAAA01000000", version 1 } },
+      descr { molinfo { tech wgs }, source { org { taxname "Escherichia coli" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { genbank { accession "AAAA01000002", version 1 } },
+      descr { molinfo { tech wgs }, source { org { taxname "Bacillus subtilis" }, subtype { { subtype chromosome, name "I" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { genbank { accession "GAAA01000001", version 1 }, general { db "TSA:GAAA01", tag str "comp1" } },
+      descr { molinfo { biomol rRNA, tech tsa }, source { org { taxname "Arabidopsis thaliana", orgname { mod { { subtype cultivar, subname "Col-0" } } } } } },
+      inst { repr raw, mol rna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { genbank { accession "KAAA01000001", version 1 } },
+      descr {
+        molinfo { tech targeted },
+        user { type str "AutodefOptions", data { { label str "Targeted Locus Name", data str "16S ribosomal RNA" } } },
+        source { org { taxname "Bacillus sp." } }
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NT_000001", version 1 } },
+      descr { user { type str "AutodefOptions", data {} }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    }
+  }
+}

@@ -1,5 +1,22 @@
+use super::html::{guess_encoding, Encoding};
+use super::prefix_suffix::title_ends_in_organism;
 use super::*;
 use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
+
+fn title_before_decoding_of(
+    title: &[u8],
+    protein: bool,
+    leave_prefix_suffix: bool,
+    ids: &BioseqFacts,
+) -> Vec<u8> {
+    let inp = ids.to_defline_input(title, protein, leave_prefix_suffix);
+    build_main_title_before_decoding(&inp, None).0
+}
+
+fn source_title(protein: bool, ids: &BioseqFacts) -> Vec<u8> {
+    let inp = ids.to_defline_input(b"", protein, false);
+    build_empty_source_title(&inp, None).0
+}
 
 // NCBI BLAST+ 2.17.0 `blastp -db DB -outfmt "6 sseqid sacc saccver stitle"
 // -num_threads 1` on databases that makeblastdb made (without -parse_seqids) from
@@ -1053,4 +1070,27 @@ fn a_title_whose_first_word_needs_no_source_gives_it_with_any_source() {
         assert!(protein_title_word_needs_source(title), "{title:?}");
     }
     assert!(!protein_title_word_needs_source(b"no bracket"));
+}
+
+#[test]
+fn prefix_and_suffix_inspect_pre_decoded_main_title() {
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2799-3047,4066-4093
+    let inp_est = super::flags::DeflineInput {
+        is_na: true,
+        mi_tech: super::flags::mol_info::TECH_EST,
+        main_title: b"abc mRNA sequ&#101;nce",
+        ..super::flags::DeflineInput::default()
+    };
+    let out_est = super::generate_defline_core(&inp_est, None).unwrap();
+    assert_eq!(out_est.text, b"abc mRNA sequence, mRNA sequence");
+
+    let inp_unver = super::flags::DeflineInput {
+        is_na: true,
+        is_unverified: true,
+        unverified_prefix: b"UNVERIFIED: ",
+        main_title: b"UNVERIF&#73;ED test sequence",
+        ..super::flags::DeflineInput::default()
+    };
+    let out_unver = super::generate_defline_core(&inp_unver, None).unwrap();
+    assert_eq!(out_unver.text, b"UNVERIFIED: UNVERIFIED test sequence");
 }

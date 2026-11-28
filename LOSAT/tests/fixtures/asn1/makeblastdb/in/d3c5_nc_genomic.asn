@@ -1,0 +1,75 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { other { accession "NC_000011", version 1 } },
+      descr { molinfo { biomol genomic }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol dna, length 4, topology circular, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000012", version 1 } },
+      descr { molinfo { biomol genomic, completeness partial }, source { genome plasmid, org { taxname "Escherichia coli" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000013", version 1 } },
+      descr { molinfo { biomol genomic }, source { genome mitochondrion, org { taxname "Zea mays" }, subtype { { subtype plasmid-name, name "S1" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000014", version 1 } },
+      descr { molinfo { biomol genomic }, source { genome mitochondrion, org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000015", version 1 } },
+      descr { molinfo { biomol genomic }, source { org { taxname "Influenza A virus" }, subtype { { subtype segment, name "4" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000016", version 1 } },
+      descr { molinfo { biomol genomic }, source { org { taxname "Homo sapiens" }, subtype { { subtype chromosome, name "1" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000017", version 1 } },
+      descr { molinfo { biomol genomic }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NR_000011", version 1 } },
+      descr { molinfo { biomol rRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 4, seq-data iupacna "ACGT" },
+      annot { { data ftable { { data gene { locus "RN18S1" }, location int { from 0, to 3, id other { accession "NR_000011", version 1 } } } } } }
+    },
+    seq {
+      id { other { accession "NR_000012", version 1 } },
+      descr { molinfo { biomol tRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 4, seq-data iupacna "ACGT" },
+      annot { { data ftable { { data gene { locus "TRNA1" }, location int { from 0, to 3, id other { accession "NR_000012", version 1 } } } } } }
+    },
+    seq {
+      id { other { accession "NR_000013", version 1 } },
+      descr { molinfo { biomol snRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 4, seq-data iupacna "ACGT" },
+      annot { { data ftable { { data gene { locus "RNU1" }, location int { from 0, to 3, id other { accession "NR_000013", version 1 } } } } } }
+    },
+    seq {
+      id { other { accession "NR_000014", version 1 } },
+      descr { molinfo { biomol scRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 4, seq-data iupacna "ACGT" },
+      annot { { data ftable { { data gene { locus "RNY1" }, location int { from 0, to 3, id other { accession "NR_000014", version 1 } } } } } }
+    },
+    seq {
+      id { other { accession "NR_000015", version 1 } },
+      descr { molinfo { biomol tmRNA }, source { org { taxname "Escherichia coli" } } },
+      inst { repr raw, mol rna, length 4, seq-data iupacna "ACGT" },
+      annot { { data ftable { { data gene { locus "ssrA" }, location int { from 0, to 3, id other { accession "NR_000015", version 1 } } } } } }
+    },
+    seq {
+      id { other { accession "NR_000016", version 1 } },
+      descr { molinfo { biomol transcribed-RNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 4, seq-data iupacna "ACGT" },
+      annot { { data ftable { { data gene { locus "LINC1" }, location int { from 0, to 3, id other { accession "NR_000016", version 1 } } } } } }
+    }
+  }
+}

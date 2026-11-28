@@ -1,0 +1,44 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { pdb { mol "1ABC", chain-id "AA" } },
+      descr { pdb { deposition std { year 2020 }, class "transport", compound { "Hemoglobin subunit alpha" }, source { "human" } } },
+      inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+    },
+    seq {
+      id { pdb { mol "1ABD", chain 66 } },
+      descr { comment "123 Crystal structure of lysozyme", pdb { deposition std { year 2020 }, class "hydrolase", compound { "Lysozyme" }, source { "egg" } } },
+      inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+    },
+    seq {
+      id { pdb { mol "1ABE", chain 67 } },
+      descr { comment "hypothetical protein foo", pdb { deposition std { year 2020 }, class "unknown", compound { "Real compound" }, source { "x" } } },
+      inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+    },
+    seq {
+      id { pdb { mol "1ABF" } },
+      descr { pdb { deposition std { year 2020 }, class "other", compound { "No chain compound" }, source { "x" } } },
+      inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+    },
+    seq {
+      id { pdb { mol "1ABG", chain 0 } },
+      descr { pdb { deposition std { year 2020 }, class "other", compound { "Nonprint chain compound" }, source { "x" } } },
+      inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+    },
+    set {
+      descr { title "inherited pdb title" },
+      seq-set {
+        seq { id { pdb { mol "2ABC", chain-id "A" } }, inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" } },
+        seq { id { local str "nonpdb" }, inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" } }
+      }
+    },
+    seq {
+      id { patent { seqid 7, cit { country "US", id number "1234567" } } },
+      inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+    },
+    seq {
+      id { patent { seqid 8, cit { country "EP", id app-number "99999" } } },
+      inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+    }
+  }
+}

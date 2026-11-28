@@ -1,0 +1,30 @@
+Bioseq-set ::= {
+  class nuc-prot,
+  seq-set {
+    seq {
+      id { other { accession "NM_000988", version 1 } },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus "GENE988" }, location int { from 0, to 29, id other { accession "NM_000988", version 1 } } },
+        { data cdregion { frame one }, product whole pdb { mol "1ABH", chain 65 }, location int { from 0, to 29, id other { accession "NM_000988", version 1 } } }
+      } } }
+    },
+    seq {
+      id { pdb { mol "1ABH", chain 65, rel str "2000" } },
+      descr { title "pdb protein 0" },
+      inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+      annot { { data ftable {
+        { data prot { name { "probe protein A" } }, location whole pdb { mol "1ABH", chain 65, rel str "2000" } }
+      } } }
+    },
+    seq {
+      id { pdb { mol "1ABH", chain 65, rel str "2001" } },
+      descr { title "pdb protein 1" },
+      inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+      annot { { data ftable {
+        { data prot { name { "probe protein A" } }, location whole pdb { mol "1ABH", chain 65, rel str "2001" } }
+      } } }
+    }
+  }
+}

@@ -1,0 +1,130 @@
+Bioseq-set ::= {
+  seq-set {
+    set {
+      class nuc-prot,
+      descr { source { genome chloroplast, org { taxname "Arabidopsis thaliana", orgname { name binomial { genus "Arabidopsis", species "thaliana" } } } } },
+      seq-set {
+        seq {
+          id { local str "nuc1" },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "ATGAAACCCTTTGGGCCCAAATTTGGGCCC" },
+          annot { { data ftable {
+            { data gene { locus "rbcL", locus-tag "AT_001" }, location int { from 0, to 11, id local str "nuc1" } },
+            { data gene { locus "hypG", locus-tag "AT_002" }, location int { from 12, to 23, id local str "nuc1" } },
+            { data biosrc { org { taxname "Spinacia oleracea" } }, location int { from 24, to 29, id local str "nuc1" } }
+          } } }
+        },
+        seq {
+          id { local str "p_longest" },
+          descr { molinfo { completeness partial } },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable {
+            { data prot { name { "short mature" }, processed mature }, location int { from 0, to 1, id local str "p_longest" } },
+            { data prot { name { "long pre" }, processed preprotein }, location int { from 0, to 3, id local str "p_longest" } },
+            { data prot { name { "long unprocessed [Arabidopsis thaliana]" }, processed not-set }, location int { from 0, to 3, id local str "p_longest" } }
+          } } }
+        },
+        seq {
+          id { local str "p_hyp_iso" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable {
+            { data prot { name { "hypothetical protein, isoform 2" } }, location int { from 0, to 3, id local str "p_hyp_iso" } }
+          } } }
+        },
+        seq {
+          id { local str "p_gene_fallback" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" }
+        },
+        seq {
+          id { local str "p_src_override" },
+          inst { repr raw, mol aa, length 2, seq-data ncbieaa "MK" }
+        },
+        seq {
+          id { local str "p_explicit_adj" },
+          descr { title "kinase, partial (mitochondrion) [Arabidopsis thaliana]", molinfo { completeness no-left } },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" }
+        },
+        seq {
+          id { local str "p_explicit_binom" },
+          descr { title "kinase [Arabidopsis thaliana]", source { genome mitochondrion, org { taxname "Arabidopsis thaliana strain Col-0", orgname { name binomial { genus "Arabidopsis", species "thaliana" } } } } },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" }
+        },
+        seq {
+          id { local str "p_binom_long" },
+          descr { title "a very long protein kinase name here [Arabidopsis thaliana]", source { genome mitochondrion, org { taxname "Arabidopsis thaliana strain Col-0", orgname { name binomial { genus "Arabidopsis", species "thaliana" } } } } },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "p_gene_fallback", location int { from 0, to 11, id local str "nuc1" }, except-text "LOW-QUALITY SEQUENCE REGION" },
+        { data cdregion {}, product whole local str "p_hyp_iso", location int { from 12, to 23, id local str "nuc1" } },
+        { data cdregion {}, product whole local str "p_src_override", location int { from 24, to 29, strand minus, id local str "nuc1" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "synthetic construct" } } },
+      seq-set {
+        seq {
+          id { local str "nuc2" },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "ATGAAACCCTTTGGGCCCAAATTTGGGCCC" },
+          annot { { data ftable {
+            { data gene { syn { "synA" } }, location int { from 0, to 5, id local str "nuc2" } },
+            { data gene { desc "gene description" }, location int { from 6, to 11, id local str "nuc2" } },
+            { data gene { locus-tag "LT99" }, location int { from 12, to 17, id local str "nuc2" } },
+            { data biosrc { org { taxname "Should Not Override" } }, location int { from 0, to 29, id local str "nuc2" } }
+          } } }
+        },
+        seq {
+          id { local str "p_desc" },
+          inst { repr raw, mol aa, length 2, seq-data ncbieaa "MK" },
+          annot { { data ftable { { data prot { desc "from desc" }, location int { from 0, to 1, id local str "p_desc" } } } } }
+        },
+        seq {
+          id { local str "p_act" },
+          inst { repr raw, mol aa, length 2, seq-data ncbieaa "MK" },
+          annot { { data ftable { { data prot { activity { "catalytic act" } }, location int { from 0, to 1, id local str "p_act" } } } } }
+        },
+        seq { id { local str "p_syn" }, inst { repr raw, mol aa, length 2, seq-data ncbieaa "MK" } },
+        seq { id { local str "p_gdesc" }, inst { repr raw, mol aa, length 2, seq-data ncbieaa "MK" } },
+        seq { id { local str "p_unnamed_lt" }, inst { repr raw, mol aa, length 2, seq-data ncbieaa "MK" } },
+        seq {
+          id { local str "p_nad" },
+          inst { repr raw, mol aa, length 2, seq-data ncbieaa "MK" },
+          annot { { data ftable { { data prot { name { "dehydrogenase [NADP]" } }, location int { from 0, to 1, id local str "p_nad" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "p_syn", location int { from 0, to 5, id local str "nuc2" } },
+        { data cdregion {}, product whole local str "p_gdesc", location int { from 6, to 11, id local str "nuc2" } },
+        { data cdregion {}, product whole local str "p_unnamed_lt", location int { from 12, to 17, id local str "nuc2" } }
+      } } }
+    },
+    seq {
+      id { other { accession "WP_000000001", version 1 } },
+      descr { title "kinase [Bacteria]", source { org { taxname "Bacteria", orgname { name partial { { fixed-level other, level "superkingdom", name "Bacteria" } } } } } },
+      inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+    },
+    seq {
+      id { other { accession "WP_000000002", version 1 } },
+      descr { source { org { taxname "Bacteria", orgname { name partial { { fixed-level other, level "superkingdom", name "Bacteria" } } } } } },
+      inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+    },
+    seq {
+      id { other { accession "WP_000000003", version 1 } },
+      descr {
+        source { org { taxname "Bacteria", orgname { name partial { { fixed-level other, level "superkingdom", name "Bacteria" } } } } },
+        source { org { taxname "Archaea", orgname { name partial { { fixed-level other, level "superkingdom", name "Archaea" } } } } }
+      },
+      inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+    },
+    seq {
+      id { other { accession "WP_000000004", version 1 } },
+      descr {
+        title "kinase [Bacteria]",
+        source { org { taxname "Bacteria", orgname { name partial { { fixed-level other, level "superkingdom", name "Bacteria" } } } } },
+        source { org { taxname "Archaea", orgname { name partial { { fixed-level other, level "superkingdom", name "Archaea" } } } } }
+      },
+      inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKTW" }
+    }
+  }
+}

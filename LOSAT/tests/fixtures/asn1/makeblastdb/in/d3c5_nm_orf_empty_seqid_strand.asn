@@ -1,0 +1,94 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { other { accession "NM_000500", version 1 }, gi 900500 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000500", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id other { accession "NM_000500", version 1 } }, empty gi 900500 } }
+      } } }
+    },
+    seq {
+      id { other { accession "NM_000501", version 1 }, gi 900501 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000501", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id other { accession "NM_000501", version 1 } }, empty other { accession "XM_999999", version 1 } } }
+      } } }
+    },
+    seq {
+      id { other { accession "NM_000502", version 1 }, gi 900502 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000502", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { int { from 0, to 9, strand minus, id other { accession "NM_000502", version 1 } }, int { from 20, to 29, strand minus, id gi 900502 }, empty other { accession "XM_999999", version 1 } } }
+      } } }
+    },
+    seq {
+      id { other { accession "NM_000503", version 1 }, gi 900503 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000503", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { mix { int { from 0, to 29, strand minus, id other { accession "NM_000503", version 1 } }, empty gi 900503 } } }
+      } } }
+    },
+    seq {
+      id { other { accession "NM_000504", version 1 }, gi 900504 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000504", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id other { accession "NM_000504", version 1 } }, empty other { accession "NM_000504", version 1 } } }
+      } } }
+    },
+    seq {
+      id { other { accession "NM_000507", version 1 }, gi 900507 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000507", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { mix { int { from 0, to 9, strand minus, id other { accession "NM_000507", version 1 } }, empty other { accession "XM_999999", version 1 } }, int { from 20, to 29, strand minus, id other { accession "NM_000507", version 1 } } } }
+      } } }
+    },
+    seq {
+      id { other { accession "NM_000508", version 1 }, gi 900508 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000508", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id other { accession "NM_000508", version 1 } }, empty other { accession "NM_000500", version 1 } } }
+      } } }
+    },
+    seq {
+      id { other { accession "NM_000509", version 1 }, gi 900509 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000509", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id other { accession "NM_000509", version 1 } }, empty other { version 1 } } }
+      } } }
+    },
+    seq {
+      id { other { accession "NM_000510", version 1 }, gi 900510 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000510", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { mix { int { from 0, to 29, strand minus, id other { accession "NM_000510", version 1 } }, empty other { accession "NM_000510", version 1 } }, empty gi 900510 } }
+      } } }
+    },
+    seq {
+      id { other { accession "NM_000522", version 1 }, gi 900522 },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location mix { int { from 0, to 29, strand minus, id other { accession "NM_000522", version 1 } }, empty other { accession "XM_999999", version 1 } } },
+        { data cdregion { orf TRUE }, location int { from 0, to 29, strand plus, id other { accession "NM_000522", version 1 } } }
+      } } }
+    }
+  }
+}

@@ -1,0 +1,5 @@
+Seq-entry ::= seq {
+      id { prf { name "OTHERPRF", accession "PRF2000" } },
+      descr { title "prf other" },
+      inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" }
+    }

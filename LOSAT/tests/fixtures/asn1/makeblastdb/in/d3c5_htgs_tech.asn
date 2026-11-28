@@ -1,0 +1,87 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { local str "h0" },
+      descr {
+        title "ignored old title",
+        molinfo { tech htgs-0 },
+        source { org { taxname "Homo sapiens" }, subtype { { subtype clone, name "c1" } } }
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "h1" },
+      descr {
+        molinfo { tech htgs-1 },
+        genbank { keywords { "HTGS_DRAFT" } },
+        source { org { taxname "Homo sapiens" } }
+      },
+      inst {
+        repr delta,
+        mol dna,
+        length 9,
+        ext delta {
+          literal { length 2, seq-data ncbi2na '1B'H },
+          literal { length 1 },
+          literal { length 2, seq-data ncbi2na '1B'H },
+          loc null NULL,
+          literal { length 1, seq-data gap { type unknown } },
+          literal { length 2, seq-data ncbi2na '1B'H }
+        }
+      }
+    },
+    seq {
+      id { local str "h2" },
+      descr {
+        molinfo { tech htgs-2 },
+        genbank { keywords { "HTGS_POOLED_MULTICLONE" } },
+        source { org { taxname "Homo sapiens" } }
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" },
+      annot { { data ftable { { data biosrc { org { taxname "Homo sapiens" }, subtype { { subtype clone, name "c9" } } }, location int { from 0, to 3, id local str "h2" } } } } }
+    },
+    seq {
+      id { local str "h2c" },
+      descr {
+        molinfo { tech htgs-2 },
+        genbank { keywords { "HTGS_CANCELLED" } },
+        source { org { taxname "Homo sapiens" } }
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "h3" },
+      descr { title "BAC clone 1", molinfo { tech htgs-3 } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "e1" },
+      descr { title "est read", molinfo { tech est } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "s1" },
+      descr { title "sts marker", molinfo { tech sts } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "g1" },
+      descr { title "gss read", molinfo { tech survey } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "ud1" },
+      descr { title "scaffold 1", genbank { keywords { "UNORDERED" } } },
+      inst {
+        repr delta,
+        mol dna,
+        length 5,
+        ext delta {
+          literal { length 2, seq-data ncbi2na '1B'H },
+          literal { length 1 },
+          literal { length 2, seq-data ncbi2na '1B'H }
+        }
+      }
+    }
+  }
+}

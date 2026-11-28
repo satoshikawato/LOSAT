@@ -1,0 +1,325 @@
+Bioseq-set ::= {
+  seq-set {
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_p5b" },
+          inst { repr raw, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org B" } }, location int { from 200, to 600, id local str "n_p5b" } },
+            { data biosrc { org { taxname "Org A" } }, location int { from 100, to 500, id local str "n_p5b" } }
+          } } }
+        },
+        seq {
+          id { local str "p5b" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "p5b" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "p5b", location int { from 250, to 450, id local str "n_p5b" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_pb2_minus" },
+          inst { repr raw, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org B" } }, location int { from 200, to 600, strand minus, id local str "n_pb2_minus" } },
+            { data biosrc { org { taxname "Org A" } }, location int { from 100, to 500, strand minus, id local str "n_pb2_minus" } }
+          } } }
+        },
+        seq {
+          id { local str "pb2_minus" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pb2_minus" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pb2_minus", location int { from 250, to 450, strand minus, id local str "n_pb2_minus" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_pb1_same" },
+          inst { repr raw, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org X" } }, location int { from 100, to 500, id local str "n_pb1_same" } },
+            { data biosrc { org { taxname "Org Y" } }, location int { from 100, to 500, id local str "n_pb1_same" } }
+          } } }
+        },
+        seq {
+          id { local str "pb1_same" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pb1_same" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pb1_same", location int { from 250, to 450, id local str "n_pb1_same" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_pb1_same_za" },
+          inst { repr raw, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Z" } }, location int { from 100, to 500, id local str "n_pb1_same_za" } },
+            { data biosrc { org { taxname "Org A" } }, location int { from 100, to 500, id local str "n_pb1_same_za" } }
+          } } }
+        },
+        seq {
+          id { local str "pb1_same_za" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pb1_same_za" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pb1_same_za", location int { from 250, to 450, id local str "n_pb1_same_za" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_pb_ms_MS" },
+          inst { repr raw, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Multi" } }, location mix { int { from 100, to 200, id local str "n_pb_ms_MS" }, int { from 240, to 360, id local str "n_pb_ms_MS" }, int { from 500, to 577, id local str "n_pb_ms_MS" } } },
+            { data biosrc { org { taxname "Org Single" } }, location int { from 200, to 499, id local str "n_pb_ms_MS" } }
+          } } }
+        },
+        seq {
+          id { local str "pb_ms_MS" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pb_ms_MS" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pb_ms_MS", location int { from 250, to 350, id local str "n_pb_ms_MS" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_pb_ms_SM" },
+          inst { repr raw, mol dna, length 700, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCGGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Single" } }, location int { from 200, to 499, id local str "n_pb_ms_SM" } },
+            { data biosrc { org { taxname "Org Multi" } }, location mix { int { from 100, to 200, id local str "n_pb_ms_SM" }, int { from 240, to 360, id local str "n_pb_ms_SM" }, int { from 500, to 577, id local str "n_pb_ms_SM" } } }
+          } } }
+        },
+        seq {
+          id { local str "pb_ms_SM" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pb_ms_SM" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pb_ms_SM", location int { from 250, to 350, id local str "n_pb_ms_SM" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "nbs_minus_plus" },
+          inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Override" } }, location int { from 0, to 59, strand minus, id local str "nbs_minus_plus" } }
+          } } }
+        },
+        seq {
+          id { local str "pbs_minus_plus" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pbs_minus_plus" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pbs_minus_plus", location int { from 3, to 26, strand plus, id local str "nbs_minus_plus" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "nbs_bothrev_plus" },
+          inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Override" } }, location int { from 0, to 59, strand both-rev, id local str "nbs_bothrev_plus" } }
+          } } }
+        },
+        seq {
+          id { local str "pbs_bothrev_plus" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pbs_bothrev_plus" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pbs_bothrev_plus", location int { from 3, to 26, strand plus, id local str "nbs_bothrev_plus" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "nbs_bothrev_minus" },
+          inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Override" } }, location int { from 0, to 59, strand both-rev, id local str "nbs_bothrev_minus" } }
+          } } }
+        },
+        seq {
+          id { local str "pbs_bothrev_minus" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pbs_bothrev_minus" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pbs_bothrev_minus", location int { from 3, to 26, strand minus, id local str "nbs_bothrev_minus" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "nbs_bothrev_bothrev" },
+          inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Override" } }, location int { from 0, to 59, strand both-rev, id local str "nbs_bothrev_bothrev" } }
+          } } }
+        },
+        seq {
+          id { local str "pbs_bothrev_bothrev" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pbs_bothrev_bothrev" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pbs_bothrev_bothrev", location int { from 3, to 26, strand both-rev, id local str "nbs_bothrev_bothrev" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "nbs_bothrev_both" },
+          inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Override" } }, location int { from 0, to 59, strand both-rev, id local str "nbs_bothrev_both" } }
+          } } }
+        },
+        seq {
+          id { local str "pbs_bothrev_both" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pbs_bothrev_both" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pbs_bothrev_both", location int { from 3, to 26, strand both, id local str "nbs_bothrev_both" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "nbs_plus_bothrev" },
+          inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Override" } }, location int { from 0, to 59, strand plus, id local str "nbs_plus_bothrev" } }
+          } } }
+        },
+        seq {
+          id { local str "pbs_plus_bothrev" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pbs_plus_bothrev" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pbs_plus_bothrev", location int { from 3, to 26, strand both-rev, id local str "nbs_plus_bothrev" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "nbs_minus_bothrev" },
+          inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Override" } }, location int { from 0, to 59, strand minus, id local str "nbs_minus_bothrev" } }
+          } } }
+        },
+        seq {
+          id { local str "pbs_minus_bothrev" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pbs_minus_bothrev" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pbs_minus_bothrev", location int { from 3, to 26, strand both-rev, id local str "nbs_minus_bothrev" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "nbs_both_minus" },
+          inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Override" } }, location int { from 0, to 59, strand both, id local str "nbs_both_minus" } }
+          } } }
+        },
+        seq {
+          id { local str "pbs_both_minus" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pbs_both_minus" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pbs_both_minus", location int { from 3, to 26, strand minus, id local str "nbs_both_minus" } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "nbs_minus_both" },
+          inst { repr raw, mol dna, length 60, seq-data iupacna "GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG" },
+          annot { { data ftable {
+            { data biosrc { org { taxname "Org Override" } }, location int { from 0, to 59, strand minus, id local str "nbs_minus_both" } }
+          } } }
+        },
+        seq {
+          id { local str "pbs_minus_both" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "kinase" } }, location int { from 0, to 3, id local str "pbs_minus_both" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "pbs_minus_both", location int { from 3, to 26, strand both, id local str "nbs_minus_both" } }
+      } } }
+    }
+  }
+}

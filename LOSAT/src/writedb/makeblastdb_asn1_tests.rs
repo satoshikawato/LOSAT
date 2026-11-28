@@ -389,7 +389,10 @@ fn all_frozen_ncbi_2_17_0_asn1_cases_match_byte_for_byte() {
         assert_eq!(actual_files, expected_files, "case {name}: DB files differ");
         checked += 1;
     }
-    assert!(checked >= 82, "expected >= 82 frozen cases, got {checked}");
+    assert!(
+        checked >= 200,
+        "expected >= 200 frozen cases, got {checked}"
+    );
 }
 
 #[test]
@@ -415,6 +418,12 @@ fn text_and_binary_asn1_produce_identical_databases() {
             fix_a.join("ptitles.asn"),
             fix_a.join("ptitles.asnb"),
             "prot",
+        ),
+        (
+            "titles",
+            fix_a.join("titles.asn"),
+            fix_a.join("titles.asnb"),
+            "nucl",
         ),
         ("fr", fix_a.join("fr.asn"), fix_a.join("fr.asnb"), "nucl"),
         (
@@ -446,6 +455,24 @@ fn text_and_binary_asn1_produce_identical_databases() {
             fix_m.join("e1.asn.zst"),
             fix_m.join("e1.asnb.zst"),
             "nucl",
+        ),
+        (
+            "d3c5_unver",
+            fix_m.join("d3c5_unver.asn"),
+            fix_m.join("d3c5_unver.asnb"),
+            "nucl",
+        ),
+        (
+            "d3c5_htgs_tech",
+            fix_m.join("d3c5_htgs_tech.asn"),
+            fix_m.join("d3c5_htgs_tech.asnb"),
+            "nucl",
+        ),
+        (
+            "d3c5_prot_feats",
+            fix_m.join("d3c5_prot_feats.asn"),
+            fix_m.join("d3c5_prot_feats.asnb"),
+            "prot",
         ),
     ];
     let env = MakedbEnv {
@@ -504,42 +531,19 @@ fn text_and_binary_asn1_produce_identical_databases() {
 }
 
 #[test]
-fn d3c4_unsupported_title_and_ub_cases_are_refused_cleanly() {
-    let (fix_a, fix_m, _, _) = asn1_fixture_paths();
+fn d3c6_autodef_and_ub_cases_are_refused_cleanly() {
+    let (_fix_a, fix_m, _, _) = asn1_fixture_paths();
     let env_default = MakedbEnv {
         skip_unverified: false,
         scan_cfastareader: true,
     };
-    let file_cases = [
-        (
-            "molinfo",
-            fix_a.join("titles.asn"),
-            "nucl",
-            env_default,
-            "MolInfo",
-        ),
-        (
-            "unver",
-            fix_m.join("unver.asn"),
-            "nucl",
-            env_default,
-            "Unverified",
-        ),
-        (
-            "protfeat",
-            fix_m.join("protfeat.asn"),
-            "prot",
-            env_default,
-            "not supported by LOSAT's makeblastdb",
-        ),
-        (
-            "llong",
-            fix_m.join("llong.asn"),
-            "nucl",
-            env_default,
-            "past the data",
-        ),
-    ];
+    let file_cases = [(
+        "llong",
+        fix_m.join("llong.asn"),
+        "nucl",
+        env_default,
+        "past the data",
+    )];
     for (label, path, dbtype, env, expected_substr) in file_cases {
         let dir = TempDir::unique(&format!("asn1-refuse-{label}"));
         let dir_str = dir_string(&dir);
@@ -573,15 +577,14 @@ fn d3c4_unsupported_title_and_ub_cases_are_refused_cleanly() {
         }
     }
 
-    // Regression: Unverified on a genbank set (not skipped by SKIP_UNVER) whose explicit title
-    // begins with "UNVERIFIED: " is still refused because NCBI strips the prefix and re-emits
-    // UNVERIFIED_ORG: from the user object.
-    let genbank_unver = br#"Seq-entry ::= set {
-  class genbank,
-  descr { user { type str "Unverified", data { { label str "Type", data str "Organism" } } } },
-  seq-set {
-    seq { id { local str "g1" }, descr { title "UNVERIFIED: ok" }, inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } }
-  }
+    // D3c-6 boundary: untitled nucleotide sequence with AutodefOptions (not TLS, not RefSeq contig).
+    let autodef_nucl = br#"Seq-entry ::= seq {
+  id { other { accession "NZ_000001", version 1 } },
+  descr {
+    source { org { taxname "Escherichia coli" } },
+    user { type str "AutodefOptions", data {} }
+  },
+  inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
 }
 "#;
     let empty_delta = br#"Seq-entry ::= seq {
@@ -598,13 +601,10 @@ fn d3c4_unsupported_title_and_ub_cases_are_refused_cleanly() {
 "#;
     for (label, bytes, env, substr) in [
         (
-            "genbank_unver_prefix",
-            genbank_unver.as_slice(),
-            MakedbEnv {
-                skip_unverified: true,
-                scan_cfastareader: true,
-            },
-            "Unverified",
+            "autodef_nucl",
+            autodef_nucl.as_slice(),
+            env_default,
+            "AutoDef",
         ),
         (
             "empty_delta",
@@ -635,6 +635,137 @@ fn d3c4_unsupported_title_and_ub_cases_are_refused_cleanly() {
         ];
         let (rc, _, stderr) = run_case(&words, env, bytes);
         assert_refusal(label, rc, &stderr, substr);
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let fname = entry.unwrap().file_name().to_string_lossy().into_owned();
+            assert!(
+                !fname.ends_with(".nin")
+                    && !fname.ends_with(".nhr")
+                    && !fname.ends_with(".nsq")
+                    && !fname.ends_with(".ndb"),
+                "{label}: volume/LMDB file {fname} was left behind after refusal"
+            );
+        }
+    }
+}
+
+/// Feature-made titles that change with the Bioseq NCBI's scope finds for a location Seq-id are
+/// refused before any volume is written, with nothing on stderr before the refusal: an accession
+/// without a version that two Bioseqs in two Seq-id trees have with one version, one of them the
+/// Bioseq of the CDS; and a packed `pir` accession alone whose name match NCBI skips when
+/// another Seq-id of the entry has an accession of its prefix that is not packed, which here
+/// only an alignment annotation (whose Seq-ids LOSAT does not read) may hold; a name match that
+/// an earlier title resolves at one pick of a tie only; and a CDS label from a product whose
+/// parts carry the protein features.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1438-1510,1564-1572
+/// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
+/// NCBI reference (598d8ae6): c++/src/objmgr/seqdesc_ci.cpp:84-96,258-283
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/feature.cpp:179-197
+#[test]
+fn d3c5_scope_order_cases_are_refused_cleanly() {
+    let pir_accession_with_align_annot = br#"Seq-entry ::= seq {
+  id { other { accession "NM_000814", version 1 }, pir { name "PIR814" }, gi 900814 },
+  descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+  inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+  annot {
+    { data ftable {
+      { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000814", version 1 } } },
+      { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id gi 900814 }, empty pir { accession "PIR814" } } }
+    } },
+    { data align { { type global, dim 2, segs denseg { dim 2, numseg 1, ids { pir { accession "PIR8140" }, gi 900814 }, starts { 0, 0 }, lens { 10 } } } } }
+  }
+}
+"#;
+    let tie_across_trees = br#"Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { other { accession "NM_000830", version 1 }, gi 900830, genbank { accession "AB000831", version 1 } },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+      annot { { data ftable {
+        { data gene { locus-tag "LTORF" }, location int { from 0, to 29, id other { accession "NM_000830", version 1 } } },
+        { data cdregion { orf TRUE }, location mix { int { from 0, to 29, strand minus, id gi 900830 }, empty tpg { accession "AB000831" } } }
+      } } }
+    },
+    seq {
+      id { other { accession "AB000831", version 1 } },
+      descr { title "ref one" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    }
+  }
+}
+"#;
+    for (label, bytes) in [
+        (
+            "pir_accession_with_align_annot",
+            pir_accession_with_align_annot.as_slice(),
+        ),
+        ("tie_across_trees", tie_across_trees.as_slice()),
+    ] {
+        refuse_scope_order(
+            label,
+            bytes,
+            "nucl",
+            "changes with the Bioseq NCBI's object manager",
+        );
+    }
+    // A titled `ref` X whose reference two PDB Bioseqs match alike: at one pick (a `ref` to the
+    // name-matched `prf` accession) X's descriptor iterator resolves that accession, at the other
+    // it does not; a `ref` to another `prf` accession then makes the handle that blocks the name
+    // match, so the protein's title depends on the pick (`Fixed::Maybe`). NCBI's own two picks
+    // are frozen as `t_d3c5_ref_chain_then_blocker` and `t_d3c5_ref_raw_then_blocker`.
+    // An NM title whose CDS product is a `seg` protein with a protein feature on its part: NCBI
+    // maps that feature onto the product and names the CDS after it.
+    let fix_m = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/asn1/makeblastdb/in");
+    for (label, file, dbtype, substr) in [
+        (
+            "tie_ref_chain_then_blocker",
+            "d3c5_refuse_tie_ref_chain_then_blocker.asn",
+            "prot",
+            "changes with the Bioseq NCBI's object manager",
+        ),
+        (
+            "nm_product_seg_part_prot",
+            "d3c5_refuse_nm_product_seg_part_prot.asn",
+            "nucl",
+            "CDS product whose sequence map",
+        ),
+    ] {
+        let bytes = std::fs::read(fix_m.join(file)).unwrap();
+        refuse_scope_order(label, &bytes, dbtype, substr);
+    }
+}
+
+/// Runs `makeblastdb` on `bytes` and checks that it refuses with `substr` and leaves no volume.
+fn refuse_scope_order(label: &str, bytes: &[u8], dbtype: &str, substr: &str) {
+    let env_default = MakedbEnv {
+        skip_unverified: false,
+        scan_cfastareader: true,
+    };
+    let dir = TempDir::unique(&format!("asn1-refuse-inline-{label}"));
+    let dir_str = dir_string(&dir);
+    let words = vec![
+        "-in".into(),
+        "-".into(),
+        "-input_type".into(),
+        "asn1_txt".into(),
+        "-dbtype".into(),
+        dbtype.into(),
+        "-title".into(),
+        "T".into(),
+        "-out".into(),
+        format!("{dir_str}/db"),
+    ];
+    let (rc, _, stderr) = run_case(&words, env_default, bytes);
+    assert_refusal(label, rc, &stderr, substr);
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let fname = entry.unwrap().file_name().to_string_lossy().into_owned();
+        assert!(
+            ![".nin", ".nhr", ".nsq", ".ndb", ".pin", ".phr", ".psq", ".pdb"]
+                .iter()
+                .any(|ext| fname.ends_with(ext)),
+            "{label}: volume/LMDB file {fname} was left behind after refusal"
+        );
     }
 }
 

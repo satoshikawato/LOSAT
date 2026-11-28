@@ -9,6 +9,7 @@ use std::io::{Read, Write};
 #[cfg(not(windows))]
 use std::path::Path;
 
+use super::asn_defline::title_pick_refusal;
 use super::asn_source::{
     fix_asn_delta, write_serial_posts, AsnBioseq, AsnFormat, AsnStream, SeqEntrySource,
 };
@@ -17,6 +18,7 @@ use super::convert::{short_nucleotide_data, ShortNucleotideData};
 use super::deflines;
 use super::dir_entry;
 use super::fasta_source::{FastaBioseqSource, SourceErrorKind, Warn};
+use super::header::encode_defline_set;
 use super::mask_data::range_set::address_order_refusal;
 use super::mask_data::{ranges_are_empty, MaskedRangeSet};
 use super::platform::Platform;
@@ -1009,6 +1011,9 @@ impl<'a> BuildDatabase<'a> {
                     return Err(error);
                 }
                 if bioseq.seq_data.is_some() {
+                    if !bioseq.title_alternatives.is_empty() {
+                        return Err(title_pick_refusal());
+                    }
                     let seq_len = bioseq.length as u32;
                     let short = bioseq
                         .seq_data
@@ -1074,6 +1079,8 @@ impl<'a> BuildDatabase<'a> {
         scan_cfastareader: bool,
         warn: Warn<'_>,
     ) -> Result<(DeflineSet, bool), WriteDbError> {
+        // The other titles matter only where the title is used.
+        let alternatives = std::mem::take(&mut bioseq.title_alternatives);
         if let Some(bin_hdr) = bioseq.binary_header.take() {
             let (decoded, posts) = deflines::decode_binary_deflines_with_names(
                 &bin_hdr,
@@ -1128,6 +1135,25 @@ impl<'a> BuildDatabase<'a> {
             &bioseq.descr_taxids,
         )
         .ok_or_else(|| WriteDbError::Creation("Error: No deflines provided.".to_string()))?;
+        // A title whose text NCBI picks by memory order is used from here on: the bad characters
+        // `post_extracted_deflines` posts must be the same for every text, and the text is stored
+        // with the sequence (`add_asn_bioseqs`); with no sequence data it is not.
+        bioseq.title_alternatives = alternatives;
+        if !bioseq.title_alternatives.is_empty() {
+            let bad_chars = |set: &DeflineSet| {
+                let mut bad = Vec::new();
+                encode_defline_set(set, &mut bad);
+                bad
+            };
+            let bad = bad_chars(&set);
+            for title in &bioseq.title_alternatives {
+                let mut other = set.clone();
+                other.deflines[0].title = Some(title.clone());
+                if bad_chars(&other) != bad {
+                    return Err(title_pick_refusal());
+                }
+            }
+        }
         Ok((set, false))
     }
 

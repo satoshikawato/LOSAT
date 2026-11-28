@@ -103,9 +103,58 @@ Seq-entry ::= seq {
     assert_eq!(skipped.len(), 1);
     assert_eq!(skipped[0].first_id_fasta(), "lcl|ok1");
 
-    // Without skip_unver, Unverified title prefix is explicitly refused in D3c-4.
-    let err = read_text_err(input);
-    assert!(matches!(err, WriteDbError::Unsupported(ref msg) if msg.contains("Unverified")));
+    // Without skip_unver, Unverified title prefix is prepended by CDeflineGenerator (D3c-5).
+    let kept = read_text_ok(input);
+    assert_eq!(kept.len(), 2);
+    assert_eq!(kept[0].title, b"UNVERIFIED: u1");
+    assert_eq!(kept[1].title, b"good");
+}
+
+#[test]
+fn autodef_is_refused_only_when_entered_and_bypassed_for_tls_and_refseq_contig() {
+    let autodef_nucl = b"\
+Seq-entry ::= seq {
+  id { other { accession \"NZ_000001\" } },
+  descr {
+    source { org { taxname \"Escherichia coli\" } },
+    user { type str \"AutodefOptions\", data { } }
+  },
+  inst { repr raw, mol dna, length 4, seq-data iupacna \"ACGT\" }
+}
+";
+    let err = read_text_err(autodef_nucl);
+    assert!(matches!(err, WriteDbError::Unsupported(ref msg) if msg.contains("AutoDef")));
+
+    // NT_ (refseq contig -> m_IsNZ) and tech targeted (m_IsTLS) bypass AutoDef in NCBI.
+    let bypassed = b"\
+Seq-entry ::= seq {
+  id { other { accession \"NT_000001\" } },
+  descr {
+    source { org { taxname \"Homo sapiens\" } },
+    user { type str \"AutodefOptions\", data { } }
+  },
+  inst { repr raw, mol dna, length 4, seq-data iupacna \"ACGT\" }
+}
+Seq-entry ::= seq {
+  id { genbank { accession \"KAAA01000001\" } },
+  descr {
+    source { org { taxname \"Escherichia coli\" } },
+    molinfo { tech targeted },
+    user {
+      type str \"AutodefOptions\",
+      data { { label str \"Targeted Locus Name\", data str \"16S ribosomal RNA\" } }
+    }
+  },
+  inst { repr raw, mol dna, length 4, seq-data iupacna \"ACGT\" }
+}
+";
+    let bioseqs = read_text_ok(bypassed);
+    assert_eq!(bioseqs.len(), 2);
+    assert_eq!(bioseqs[0].title, b"Homo sapiens");
+    assert_eq!(
+        bioseqs[1].title,
+        b"TLS: Escherichia coli 16S ribosomal RNA, sequence"
+    );
 }
 
 #[test]

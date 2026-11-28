@@ -1,0 +1,15 @@
+Bioseq-set ::= {
+  class genbank,
+  seq-set {
+    seq {
+      id { genbank { accession "AB009300", version 1 } },
+      descr { title "raw dna", molinfo { biomol genomic } },
+      inst { repr raw, mol dna, length 10, seq-data iupacna "ACGTACGTAC" }
+    },
+    seq {
+      id { genbank { accession "AB009400", version 1 } },
+      descr { title "htgs delta", molinfo { biomol genomic, tech htgs-2 }, genbank { keywords { "HTGS_CANCELLED" } } },
+      inst { repr delta, mol dna, length 30, ext delta { loc whole genbank { accession "AB009099", version 1 }, literal { length 10 }, literal { length 10, seq-data iupacna "ACGTACGTAC" } } }
+    }
+  }
+}

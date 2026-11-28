@@ -1,0 +1,367 @@
+Bioseq-set ::= {
+  seq-set {
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_a" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_PLUS" }, location int { from 0, to 199, strand plus, id local str "n_ts_a" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_a" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_a" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_a", location mix { int { from 10, to 30, strand plus, id local str "n_ts_a" }, int { from 150, to 170, strand minus, id local str "n_ts_a" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_b" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_MINUS" }, location int { from 0, to 199, strand minus, id local str "n_ts_b" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_b" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_b" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_b", location mix { int { from 10, to 30, strand plus, id local str "n_ts_b" }, int { from 150, to 170, strand minus, id local str "n_ts_b" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_c" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_PLUS" }, location int { from 0, to 199, strand plus, id local str "n_ts_c" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_c" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_c" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "ts_c", location mix { int { from 10, to 30, strand plus, id local str "n_ts_c" }, int { from 150, to 170, strand minus, id local str "n_ts_c" } } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_d" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_UNSET" }, location int { from 0, to 199, id local str "n_ts_d" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_d" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_d" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_d", location mix { int { from 10, to 30, strand plus, id local str "n_ts_d" }, int { from 150, to 170, strand minus, id local str "n_ts_d" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_e" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_MIX" }, location mix { int { from 0, to 60, strand plus, id local str "n_ts_e" }, int { from 100, to 199, strand minus, id local str "n_ts_e" } } }
+          } } }
+        },
+        seq {
+          id { local str "ts_e" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_e" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_e", location mix { int { from 10, to 30, strand plus, id local str "n_ts_e" }, int { from 150, to 170, strand minus, id local str "n_ts_e" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_f" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_SMALL" }, location int { from 5, to 175, strand plus, id local str "n_ts_f" } },
+            { data gene { locus-tag "TS_MIX2" }, location mix { int { from 0, to 80, strand plus, id local str "n_ts_f" }, int { from 90, to 199, strand minus, id local str "n_ts_f" } } }
+          } } }
+        },
+        seq {
+          id { local str "ts_f" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_f" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_f", location mix { int { from 10, to 30, strand plus, id local str "n_ts_f" }, int { from 150, to 170, strand minus, id local str "n_ts_f" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_g" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_MINUS" }, location int { from 0, to 199, strand minus, id local str "n_ts_g" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_g" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_g" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_g", location mix { int { from 10, to 30, strand plus, id local str "n_ts_g" }, int { from 150, to 170, id local str "n_ts_g" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_i" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_BREV" }, location int { from 0, to 199, strand both-rev, id local str "n_ts_i" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_i" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_i" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_i", location mix { int { from 10, to 30, strand plus, id local str "n_ts_i" }, int { from 150, to 170, strand minus, id local str "n_ts_i" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_j" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_BOTH" }, location int { from 0, to 199, strand both, id local str "n_ts_j" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_j" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_j" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_j", location mix { int { from 10, to 30, strand plus, id local str "n_ts_j" }, int { from 150, to 170, strand minus, id local str "n_ts_j" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_k" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_PART" }, location int { from 0, to 100, strand plus, id local str "n_ts_k" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_k" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_k" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_k", location mix { int { from 10, to 30, strand plus, id local str "n_ts_k" }, int { from 150, to 170, strand minus, id local str "n_ts_k" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_l" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_MINUS" }, location int { from 0, to 199, strand minus, id local str "n_ts_l" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_l" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_l" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "ts_l", location mix { int { from 10, to 30, strand plus, id local str "n_ts_l" }, int { from 150, to 170, strand minus, id local str "n_ts_l" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_m" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_M200" }, location int { from 0, to 199, strand minus, id local str "n_ts_m" } },
+            { data gene { locus-tag "TS_P200" }, location int { from 0, to 199, strand plus, id local str "n_ts_m" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_m" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_m" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_m", location mix { int { from 10, to 30, strand plus, id local str "n_ts_m" }, int { from 150, to 170, strand minus, id local str "n_ts_m" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_n" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_P200" }, location int { from 0, to 199, strand plus, id local str "n_ts_n" } },
+            { data gene { locus-tag "TS_M200" }, location int { from 0, to 199, strand minus, id local str "n_ts_n" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_n" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_n" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_n", location mix { int { from 10, to 30, strand plus, id local str "n_ts_n" }, int { from 150, to 170, strand minus, id local str "n_ts_n" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_ts_o" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { data gene { locus-tag "TS_PLUS" }, location int { from 0, to 199, strand plus, id local str "n_ts_o" } }
+          } } }
+        },
+        seq {
+          id { local str "ts_o" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "ts_o" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, except TRUE, product whole local str "ts_o", location mix { int { from 150, to 170, strand minus, id local str "n_ts_o" }, int { from 10, to 30, strand plus, id local str "n_ts_o" } }, except-text "trans-splicing" }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_sx_a" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { id local str "gbig", data gene { locus-tag "SX_BIG" }, location int { from 0, to 199, strand plus, id local str "n_sx_a" } },
+            { id local str "gsmall", data gene { locus-tag "SX_SMALL" }, location int { from 5, to 40, strand plus, id local str "n_sx_a" } }
+          } } }
+        },
+        seq {
+          id { local str "sx_a" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "sx_a" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "sx_a", location int { from 10, to 30, strand plus, id local str "n_sx_a" }, xref { { id local str "gbig" } } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_sx_b" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { id local id 7, data gene { locus-tag "SX_BIG" }, location int { from 0, to 199, strand plus, id local str "n_sx_b" } },
+            { id local id 8, data gene { locus-tag "SX_SMALL" }, location int { from 5, to 40, strand plus, id local str "n_sx_b" } }
+          } } }
+        },
+        seq {
+          id { local str "sx_b" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "sx_b" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "sx_b", location int { from 10, to 30, strand plus, id local str "n_sx_b" }, xref { { id local id 7 } } }
+      } } }
+    },
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Escherichia coli" } } },
+      seq-set {
+        seq {
+          id { local str "n_sx_c" },
+          inst { repr raw, mol dna, length 200, seq-data iupacna "GTACACGCGTGTCTTTTCCGGTGTAAGGGAGCCTGAGTAGTGTCGGCGATAACAAAAGTGGTGCAAGGAAGGCTTGCTTAAATCTACGTAACAAAAGTTCAACGTCGTCGCTCTTTAGCATGAACCCAGGGTCAGAACAATTCGGTTTCGTGCGGATTAATATCATATTACGCGGTACCGGAACAAGCTCACACCCCCTT" },
+          annot { { data ftable {
+            { id local str "7", data gene { locus-tag "SX_BIG" }, location int { from 0, to 199, strand plus, id local str "n_sx_c" } },
+            { id local id 8, data gene { locus-tag "SX_SMALL" }, location int { from 5, to 40, strand plus, id local str "n_sx_c" } }
+          } } }
+        },
+        seq {
+          id { local str "sx_c" },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable { { data prot { name { "hypothetical protein" } }, location int { from 0, to 3, id local str "sx_c" } } } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole local str "sx_c", location int { from 10, to 30, strand plus, id local str "n_sx_c" }, xref { { id local id 7 } } }
+      } } }
+    }
+  }
+}

@@ -961,23 +961,49 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(true)
     }
 
-    /// The CDATA section from its `<!`: its bytes up to `]]>`, as they are. The bytes before the
-    /// next `]`, which cannot start the `]]>`, are taken as one run, and each `]` that does not
-    /// start it alone; the bytes read are not asked for again (`release_before`).
+    /// The CDATA section from its `<!`: its bytes up to `]]>`, as they are. `<![CDATA[` and the
+    /// end are found in the kept bytes where they are kept whole: the kept bytes of a section
+    /// are one run whatever `]` they hold, and a `]` is read with the peeks (which ask for more
+    /// of the input, and fail at its end) only where the two bytes after it are not kept yet.
+    /// The bytes read are not asked for again (`release_before`).
     #[inline(never)]
     fn cd_section(&mut self, out: &mut Vec<u8>) -> Result<()> {
-        self.skip(2);
-        for &c in b"[CDATA[" {
-            if self.peek(0)? != c {
-                return fail("CDATA section expected");
+        const OPEN: &[u8; 9] = b"<![CDATA[";
+        if self.src.rest(self.pos).first_chunk::<9>() == Some(OPEN) {
+            self.pos += OPEN.len();
+        } else {
+            self.skip(2);
+            for &c in &OPEN[2..] {
+                if self.peek(0)? != c {
+                    return fail("CDATA section expected");
+                }
+                self.skip(1);
             }
-            self.skip(1);
         }
         loop {
             let rest = self.src.rest(self.pos);
-            let run = rest.iter().position(|&c| c == b']').unwrap_or(rest.len());
-            out.extend_from_slice(&rest[..run]);
-            self.pos += run;
+            // The bytes before the `]]>`, or before the end of the kept bytes or a `]` among
+            // the last two of them (`taken`).
+            let mut from = 0;
+            let taken = loop {
+                let Some(next) = rest[from..].iter().position(|&c| c == b']') else {
+                    break rest.len();
+                };
+                let at = from + next;
+                match rest.get(at + 1..at + 3) {
+                    Some(b"]>") => {
+                        out.extend_from_slice(&rest[..at]);
+                        self.pos += at + 3;
+                        return Ok(());
+                    }
+                    Some(_) => from = at + 1,
+                    None => break at,
+                }
+            };
+            if taken > 0 {
+                out.extend_from_slice(&rest[..taken]);
+                self.pos += taken;
+            }
             self.src.release_before(self.pos);
             // The next byte: more of the input where none is kept (the end of the input fails).
             if self.peek(0)? != b']' {

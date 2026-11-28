@@ -143,6 +143,12 @@ fn character_data() {
     assert_eq!(name("&#65;&#x42;&#xe9;&#0;c"), Ok(b"AB\xc3\xa9c".to_vec()));
     assert_eq!(name("ab&#4294967295;"), Ok(b"ab".to_vec()));
     assert_eq!(name("a<![CDATA[<&x>]]>b"), Ok(b"a<&x>b".to_vec()));
+    // A `]` ends the section only before `]>`; sections next to each other and empty ones.
+    assert_eq!(
+        name("<![CDATA[]]]><![CDATA[]]]]>x<![CDATA[]]><![CDATA[a]>]]]]>"),
+        Ok(b"]]]xa]>]]".to_vec())
+    );
+    assert!(fails(name("a<![CDATA]]>b")));
     // After a `\r`, NCBI's flag stays set until a `\n`: each later `\r` is then a `\n`.
     assert_eq!(name("a\r\nb\r\rc\rd\r"), Ok(b"a\nb\nc\nd\n".to_vec()));
     assert_eq!(name("a\rb\r"), Ok(b"ab\n".to_vec()));

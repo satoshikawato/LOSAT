@@ -13,4 +13,4 @@
   0.55 to 0.89 for text of entities, Latin-1 or cp1252 bytes, line ends or NULs. An XML input of ordinary size
   runs 4 % fewer instructions (13 % with a title of 4,000 bytes of UTF-8), and one of 5,000 hits or 5,000
   queries whose strings are empty 0.1 to 0.3 % fewer. Archive inputs of ordinary size run no more instructions
-  as before, and an archive of 5,000 queries of one residue 4 to 6 % fewer.
+  than before, and an archive of 5,000 queries of one residue 4 to 6 % fewer.

@@ -389,6 +389,13 @@ export class SearchDraft {
   /** The running fetch of each role's accessions. */
   private readonly fetches = new Map<InputRole, AbortController>();
   private readonly race: SourceRace;
+  /**
+   * What the latest answer of the engine's start says of the argv's print (`prints`), and the program and Additional options'
+   * words (`extraKey`) that it was made for: it is for these words and no others (`runCount`). None before the first answer.
+   */
+  private answered: { readonly key: string; readonly prints: PrintedKind | null } | undefined;
+  /** Whether a start of the engine that `askStart` made is on its way (one at a time; the latest words are asked after it). */
+  private askingStart = false;
   /** The argv of the latest validation that the engine accepted (the prepare hint's argv). */
   private validArgv: readonly string[] | undefined;
   /** The validation that runs, or the last one: the next waits for it (validateInTurn). */
@@ -1424,14 +1431,70 @@ export class SearchDraft {
   /**
    * The runs that "Run LOSAT" would make now: the runs that `submit` starts (one `inputGroups` for both). A draft whose argv
    * prints the command line's help or version starts the one run that prints it, whatever the inputs (line WQA's D20, S3-2,
-   * 2026-11-23).
+   * 2026-11-23). It reads the engine's answer for the program and Additional options' words that the draft has now (`answered`;
+   * the words that make an argv print are the user's own, the form builds the others), whatever the validation does with the
+   * files. Until the engine has answered for these words (`askStart` asks at once on an edit: a round trip) whether the run
+   * prints is not known, so it says 1, which the button shows as no number, and never the count of an older argv (line WQA's D33,
+   * S4-8 and R1's M1, M2, 2026-11-28).
    */
   runCount(): number {
-    if (this.printsKind() !== null) return 1;
     const { querySource, subjectSource } = this.state.get();
     const queryCount = querySource !== 'fasta' ? 1 : Math.max(1, this.inputGroups('query').length);
     const subjectCount = subjectSource === 'database' ? 1 : Math.max(1, this.inputGroups('subject').length);
-    return queryCount * subjectCount;
+    const searches = queryCount * subjectCount;
+    if (searches === 1) return 1;
+    const key = this.extraKey();
+    // Words that cannot be read are no argv: no run starts, and the label says what the inputs make.
+    if (key === undefined) return searches;
+    return this.answered?.key === key && this.answered.prints === null ? searches : 1;
+  }
+
+  /**
+   * Asks the engine's start (a cheap answer, no files read: the validation follows after its pause) what the argv of the
+   * words now prints, when it has not answered for them yet, so that the count of runs (`runCount`) waits a round trip for an
+   * edit and not the form's pause. One ask at a time; when it answers, the latest words are asked if they changed meanwhile.
+   */
+  private askStart(): void {
+    if (this.askingStart) return;
+    const key = this.extraKey();
+    if (key === undefined || key === this.answered?.key) return;
+    let argv: readonly string[];
+    try {
+      argv = this.currentArgv();
+    } catch {
+      // Words that the argv cannot be built with (a word that the form sets, `--`) start no run and print nothing: the
+      // answer for them, so that the line, the label and the press read one answer (the check says why; R3 M1).
+      this.noteStart(key, null);
+      return;
+    }
+    this.askingStart = true;
+    this.deps.engine.start(argv).then(
+      (started) => this.noteStart(key, started.ok ? started.start.prints : null),
+      // A part of LOSAT that could not be loaded answers nothing: the label says what the inputs make.
+      () => this.noteStart(key, null),
+    ).finally(() => {
+      this.askingStart = false;
+      this.askStart();
+    });
+  }
+
+  /**
+   * What the line under Run LOSAT says the run of the draft's words prints in place of a search (help or version), or null
+   * for a search: the engine's latest answer of its start (`answered`), the answer that the count of runs (`runCount`) reads,
+   * so that the line and the button's label change in one render (line WQA's D33, R2 L-c; `printsKind` waits for the
+   * validation's pause). Between an edit and its answer the older answer stands, as it does for `printsKind` (D20 round 4);
+   * words that cannot be read, or that the argv cannot be built with (`askStart`), print nothing (no run starts; the check
+   * says why).
+   */
+  shownPrintsKind(): PrintedKind | null {
+    return this.extraKey() === undefined ? null : (this.answered?.prints ?? null);
+  }
+
+  /** Records the engine's answer of the start for the program and words `key`, if the draft still has them. */
+  private noteStart(key: string, prints: PrintedKind | null): void {
+    if (key !== this.extraKey() || (this.answered?.key === key && this.answered.prints === prints)) return;
+    this.answered = { key, prints };
+    this.set({});
   }
 
   // --- submit -----------------------------------------------------------------------------
@@ -1542,7 +1605,7 @@ export class SearchDraft {
     // Assemble local BLAST database metadata and read-only run directory files (WQA D12b + RG-D4 W2).
     const activeFilterFiles = this.activeDatabaseFilterFiles(state);
     const filterFileSnapshots: DatabaseFilterFileSnapshot[] = Object.entries(activeFilterFiles).map(([flag, file]) =>
-      Object.freeze({ flag, name: file.name, size: file.size }),
+      Object.freeze({ flag, name: normalizeRunPath(file.name) ?? file.name, size: file.size }),
     );
     const usesFilteringDb = program === 'blastn' && parameters.some(([flag]) => flag === FILTERING_DB_FLAG);
     let assembled: AssembledSearchDirectory;
@@ -1646,10 +1709,11 @@ export class SearchDraft {
 
   /**
    * What the run of the draft's argv prints in place of a search (`printsText`): help or version, or null for a search, as the
-   * engine's latest answer says (`start.prints`, validation ok). The page reads it for the line under the button and the run
-   * count, and Run LOSAT reads it once the validation is idle. Between an edit and its answer the older answer stands (the
-   * app cannot know before the engine answers that a word makes the argv print or not); it is not set aside at every edit,
-   * which would flip the line on each edit of an ordinary search (line WQA's D20 round 4, 2026-11-23).
+   * engine's latest answer says (`start.prints`, validation ok). Run LOSAT reads it once the validation is idle. Between an
+   * edit and its answer the older answer stands (the app cannot know before the engine answers that a word makes the argv
+   * print or not); it is not set aside at every edit, which would flip the line on each edit of an ordinary search (line
+   * WQA's D20 round 4, 2026-11-23). The run count does not take the older answer for other words (`runCount`); the line
+   * under the button reads the answer that the count reads (`shownPrintsKind`, line WQA's D33 R2 L-c).
    */
   printsKind(): PrintedKind | null {
     const { start, validation } = this.state.get();
@@ -2311,6 +2375,7 @@ export class SearchDraft {
   }
 
   private scheduleValidation(): void {
+    this.askStart();
     // A validation of an older argv that is still running is not shown.
     this.nextGeneration('validate');
     this.debounce('validate', () => this.track(this.validateInTurn()));
@@ -2343,10 +2408,47 @@ export class SearchDraft {
     return turn;
   }
 
-  private async validate(): Promise<void> {
-    const generation = this.generations.get('validate');
+  /** The program and the words of the Additional options as one key; undefined where they cannot be read (an unclosed quote, a word that the form sets). */
+  private extraKey(): string | undefined {
+    try {
+      return JSON.stringify([this.state.get().program, this.extraWords()]);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The argv that the draft would validate and run now (names of the inputs as the argv gives them); throws where it cannot be built. */
+  private currentArgv(): readonly string[] {
     const state = this.state.get();
     const { program, querySource, queryFile, subjectSource } = state;
+    const querySpec =
+      querySource !== 'fasta'
+        ? {
+            queryFile: {
+              flag: querySource === 'pssm' ? ('-in_pssm' as const) : ('-in_msa' as const),
+              name:
+                (queryFile.file === undefined ? undefined : normalizeRunPath(queryFile.file.name)) ??
+                (querySource === 'pssm' ? 'query.pssm' : 'query.msa'),
+            },
+          }
+        : { queryName: this.inputName('query') };
+    return buildArgv({
+      program,
+      ...querySpec,
+      ...(subjectSource === 'database'
+        ? { databaseName: argvDatabaseName(state) }
+        : { subjectName: this.inputName('subject') }),
+      // A repeats database that -filtering_db cannot name is not in the parameters: the option is on without it.
+      parameters: this.parameters(),
+      extra: this.extraWords(),
+    });
+  }
+
+  private async validate(): Promise<void> {
+    const generation = this.generations.get('validate');
+    const extraKey = this.extraKey();
+    const state = this.state.get();
+    const { program } = state;
     // A database that its option's list cannot carry (-db, -filtering_db): the argv asked about leaves its name out
     // (`argvDatabaseName`; no writer writes a list that the command line cannot read back), and the check says why unless
     // the words print help or the version, which read no database, as in the tool tabs and on the command line (NCBI
@@ -2354,27 +2456,10 @@ export class SearchDraft {
     const refusal = databaseNameRefusal(state);
     let argv: readonly string[];
     try {
-      const querySpec =
-        querySource !== 'fasta'
-          ? {
-              queryFile: {
-                flag: querySource === 'pssm' ? ('-in_pssm' as const) : ('-in_msa' as const),
-                name:
-                  (queryFile.file === undefined ? undefined : normalizeRunPath(queryFile.file.name)) ??
-                  (querySource === 'pssm' ? 'query.pssm' : 'query.msa'),
-              },
-            }
-          : { queryName: this.inputName('query') };
-      argv = buildArgv({
-        program,
-        ...querySpec,
-        ...(subjectSource === 'database' ? { databaseName: argvDatabaseName(state) } : { subjectName: this.inputName('subject') }),
-        // A repeats database that -filtering_db cannot name is not in the parameters: the option is on without it.
-        parameters: this.parameters(),
-        extra: this.extraWords(),
-      });
+      argv = this.currentArgv();
     } catch (error) {
-      // No argv, so no start of one: the -conffile row goes with the words that named the file.
+      // No argv, so no start of one: the -conffile row goes with the words that named the file, and the words print nothing.
+      if (extraKey !== undefined) this.noteStart(extraKey, null);
       this.set({ validation: { state: 'invalid', message: messageOf(error) }, start: undefined });
       return;
     }
@@ -2393,6 +2478,7 @@ export class SearchDraft {
       // ABI v2 does not run) has the engine's message, as validate gives it.
       const started = await this.deps.engine.start(argv);
       answered = true;
+      if (extraKey !== undefined) this.noteStart(extraKey, started.ok ? started.start.prints : null);
       // A newer change came meanwhile: its validation follows, and this one reads no file.
       if (this.generations.get('validate') !== generation) return;
       if (refusal !== undefined && !(started.ok && started.start.prints !== null)) {

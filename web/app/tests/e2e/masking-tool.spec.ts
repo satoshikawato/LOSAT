@@ -11,7 +11,8 @@
 // makeblastdb's just before or just after the browser's run, but the seconds of their dates (support/makeblastdb-native.ts). One more run writes maskinfo_xml, which
 // makeblastdb does not read: its bytes are the native's and no hand-over is offered. In Chromium, one run's -out goes
 // through a picked folder (`-out sub/../m.asnb`): the run makes m.asnb, as the command line does, and the app reads it as
-// the -out file (WW4e). Without the engine the same steps run on the FakeEngine's outputs and nothing is compared.
+// the -out file (WW4e). Without the engine the same steps run on the FakeEngine's outputs and nothing is compared; the
+// FakeEngine names the run's files as the engine does (WW4h), so the folder's case checks the label and the hand-over too.
 //
 // LOSAT_E2E_SCREENSHOT_DIR=<dir> saves the Masking tab empty, filled and finished, and the makeblastdb tab with the
 // handed-over mask data and its finished run (handover, handover-finished), at 1280 and 390 px in the light and the dark
@@ -353,8 +354,6 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
   for (const [index, c] of MASKING_CASES.entries()) {
     test(`${c.label ?? c.tool}: the download is the native command line's bytes, and makeblastdb's database made with its mask data too`, async ({ page, browserName }) => {
       test.skip(c.folder !== undefined && browserName !== 'chromium', 'Only Chromium lets the test choose a folder (webkitdirectory).');
-      // The FakeEngine names a file by the -out typed; the engine by the file's path (`sub/../m.asnb` is `m.asnb`).
-      test.skip(c.file !== undefined && !BUILD_HAS_ENGINE, "The FakeEngine does not name a run's files as the engine does.");
       const real = BUILD_HAS_ENGINE && NATIVE !== undefined;
       const external = trackNet(page);
       const fasta = readFileSync(join(LOSAT, 'tests', c.tool, 'in', c.input));

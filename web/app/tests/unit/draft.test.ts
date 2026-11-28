@@ -1537,6 +1537,194 @@ describe('SearchDraft submit', () => {
     expect(draft.runCount()).toBe(3);
   });
 
+  // Line WQA's D33 (S4-8): between an edit of the Additional options and the engine's answer for its words, the count is not that
+  // of the older argv: it names no number (one run), then the answer's.
+  it('does not show the run count of an older argv between a print word and its answer', async () => {
+    const { draft } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    draft.setMode('query', 'separate');
+    await draft.idle();
+    expect(draft.runCount()).toBe(2);
+    // A word that prints: no window with the old count 2.
+    draft.setExtra('-version');
+    expect(draft.runCount()).toBe(1);
+    await draft.idle();
+    expect(draft.runCount()).toBe(1);
+    expect(draft.printsKind()).toBe('version');
+    // The word taken out: the older answer's 1 does not stand either; the count of the search comes with the answer.
+    draft.setExtra('');
+    expect(draft.runCount()).toBe(1);
+    await draft.idle();
+    expect(draft.runCount()).toBe(2);
+    // A word that does not print: the same, then 2.
+    draft.setExtra('-outfmt 17');
+    expect(draft.runCount()).toBe(1);
+    await draft.idle();
+    expect(draft.runCount()).toBe(2);
+    // An edit that leaves the extra words (another input) keeps the count of the answer.
+    draft.addFiles('query', [file('c.fa', '>c\nACGT\n')]);
+    await draft.idle();
+    expect(draft.runCount()).toBe(3);
+  });
+
+  // Line WQA's D33 R1 (M1): the engine's start is asked at once on an edit of the words, not after the form's pause and the
+  // validation, so the blank of the count lasts a round trip; typing a word that does not print never blanks a longer time.
+  it('asks the engine start for the typed words at once, and one at a time', async () => {
+    const asked: string[][] = [];
+    const { draft } = setup({
+      start: (argv) => {
+        asked.push([...argv]);
+        return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false } };
+      },
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setMode('query', 'separate');
+    await draft.idle();
+    const before = asked.length;
+    draft.setExtra('-outfmt 17');
+    expect(draft.runCount()).toBe(1);
+    // A round trip (a microtask turn of the fake engine), not the form's pause.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(asked.length).toBeGreaterThan(before);
+    expect(asked.at(-1)).toContain('-outfmt');
+    expect(draft.runCount()).toBe(2);
+    await draft.idle();
+    expect(draft.runCount()).toBe(2);
+  });
+
+  // Line WQA's D33 R1 (M2): while the validation of unchanged words runs ("checking"), the count of an argv that prints stays 1.
+  it('keeps the count of a print argv while the validation checks, with the words unchanged', async () => {
+    let release: (() => void) | undefined;
+    let hold = false;
+    const { draft } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+      validate: async () => {
+        if (hold) await new Promise<void>((resolve) => void (release = resolve));
+        return { ok: true, dataLoaders: true, parseDeflines: false };
+      },
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setMode('query', 'separate');
+    draft.setExtra('-version');
+    await draft.idle();
+    expect(draft.runCount()).toBe(1);
+    hold = true;
+    draft.addFiles('query', [file('c.fa', '>c\nACGT\n')]);
+    for (let i = 0; i < 50 && draft.state.get().validation.state !== 'checking'; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(draft.state.get().validation.state).toBe('checking');
+    expect(draft.runCount()).toBe(1);
+    release?.();
+    hold = false;
+    await draft.idle();
+    expect(draft.runCount()).toBe(1);
+  });
+
+  // Line WQA's D33 R2 (L-c): the line under Run LOSAT and the button's count read one answer of the engine's start, so they change
+  // in one render: the line says the run prints as soon as the count drops to one run for the word, not after the validation.
+  it("shows the line's print and the button's count from one answer, before the validation has run", async () => {
+    let release: (() => void) | undefined;
+    let hold = false;
+    const { draft } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+      validate: async () => {
+        if (hold) await new Promise<void>((resolve) => void (release = resolve));
+        return { ok: true, dataLoaders: true, parseDeflines: false };
+      },
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setMode('query', 'separate');
+    await draft.idle();
+    expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([2, null]);
+    hold = true;
+    // A round trip of the engine's start (a few microtask turns of the fake engine), not the validation's.
+    const roundTrip = async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+    draft.setExtra('-version');
+    await roundTrip();
+    // The start has answered for the word; the validation has not (printsKind waits for it): the line reads the count's answer.
+    expect(draft.printsKind()).toBeNull();
+    expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([1, 'version']);
+    release?.();
+    hold = false;
+    await draft.idle();
+    expect([draft.runCount(), draft.shownPrintsKind(), draft.printsKind()]).toEqual([1, 'version', 'version']);
+    // Taken out: until the start answers, the button names no count and the line keeps the older answer; then both change.
+    hold = true;
+    draft.setExtra('');
+    expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([1, 'version']);
+    await roundTrip();
+    expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([2, null]);
+    release?.();
+    hold = false;
+    await draft.idle();
+    // Words that cannot be read print nothing, and the count is the inputs'.
+    draft.setExtra("-version '");
+    expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([2, null]);
+  });
+
+  // Line WQA's D33 R3 (M1): words that the argv cannot be built with (a word that the form sets, `--`) start no run and print
+  // nothing: the line under Run LOSAT no longer says the version of the words before them, at once and after the check.
+  it('shows no print for words that the argv cannot be built with, after -version', async () => {
+    const { draft } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setMode('query', 'separate');
+    for (const words of ['-out r.txt', '-mt_mode 1', '-version -out r.txt', '--']) {
+      draft.setExtra('-version');
+      await draft.idle();
+      expect([draft.runCount(), draft.shownPrintsKind(), draft.printsKind()], words).toEqual([1, 'version', 'version']);
+      draft.setExtra(words);
+      expect([draft.runCount(), draft.shownPrintsKind()], words).toEqual([2, null]);
+      await draft.idle();
+      expect([draft.runCount(), draft.shownPrintsKind(), draft.printsKind()], words).toEqual([2, null, null]);
+      expect(draft.state.get().validation.state, words).toBe('invalid');
+    }
+  });
+
+  // Line WQA's D33 R1: a press in the gap between the word and the engine's answer starts the one run that prints (the
+  // validation settles first), whatever the button said.
+  it('starts one run for a print word pressed before the engine has answered', async () => {
+    const { draft, requests } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setMode('query', 'separate');
+    await draft.idle();
+    draft.setExtra('-version');
+    expect(draft.runCount()).toBe(1);
+    const result = await draft.submit();
+    expect(result).toMatchObject({ ok: true });
+    expect(requests.at(-1)).toHaveLength(1);
+  });
+
   // Line WQA's D20 round 4: Run LOSAT reads whether the argv prints after the validation is idle, so a word typed just before
   // the press (a pasted accession is not refused with the accession message) or taken out (the accession check is not
   // skipped) decides as the engine's answer for the argv says.

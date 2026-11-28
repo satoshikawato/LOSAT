@@ -307,6 +307,103 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     expect(await combined!.file.text()).toBe('>a\nACGT\n>b\nTGCA\n');
   });
 
+  // Line WQA's D33 R1 (M3): the WindowMasker button counts one run for a help or version word, as the press starts one print request.
+  it('counts one run for a help or version word in Additional options, with two FASTA files in separate mode', async () => {
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa'), new File(['>b\nTGCA\n'], 'b.fa')]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    draft.setFastaMode('separate');
+    expect(draft.runCount()).toBe(2);
+    for (const word of ['-version', '-h', '-help', '-version-full']) {
+      draft.setExtra(word);
+      expect(draft.runCount(), word).toBe(1);
+    }
+    draft.setExtra('');
+    expect(draft.runCount()).toBe(2);
+    draft.setExtra('-version');
+    expect((await draft.submit()).ok).toBe(true);
+    expect(submitted.at(-1)).toHaveLength(1);
+  });
+
+  // Line WQA's D33 R3 (L1): words that the argv cannot be built with (a NUL) leave the count to the words alone, as the Masking tab
+  // reads them, and never throw (WindowMaskerPanel's computed reads the count); the check says why and the press starts nothing.
+  it('counts without throwing when the argv cannot be built with the words of Additional options (a NUL)', async () => {
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa'), new File(['>b\nTGCA\n'], 'b.fa')]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    draft.setFastaMode('separate');
+    for (const [words, count] of [['-xyz a\0b', 2], ['-version a\0b', 1]] as const) {
+      draft.setExtra(words);
+      expect(draft.runCount(), JSON.stringify(words)).toBe(count);
+      await vi.waitFor(() =>
+        expect(draft.state.get().validation, JSON.stringify(words)).toMatchObject({ state: 'invalid', message: expect.stringContaining('NUL') }),
+      );
+      expect((await draft.submit()).ok, JSON.stringify(words)).toBe(false);
+    }
+    expect(submitted).toHaveLength(0);
+  });
+
+  // Line WQA's D33 R2 (H2): a name that comes from a file reaches the argv as the run directory holds it, a space at its start or
+  // end included, so the run opens it (and the shown command, quoted, runs on the command line with the same bytes): the FASTA
+  // input, a file chosen for -ids, -ustat and Convert's -in. Only text that the user types is trimmed.
+  it('names each file in the argv as the run directory holds it, a space at its start or end included', async () => {
+    const valueOf = (request: ToolRequest, flag: string) => request.argv[request.argv.indexOf(flag) + 1];
+    const namesOf = (request: ToolRequest) => request.directory.map((entry) => entry.name);
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa ')]);
+      draft.setOptionFile('-ids', new File(['a\n'], ' ids.txt'));
+      await sleep(30);
+      expect((await draft.submit()).ok).toBe(true);
+      const request = submitted.at(-1)![0]!;
+      expect(valueOf(request, '-in')).toBe('a.fa ');
+      expect(valueOf(request, '-ids')).toBe(' ids.txt');
+      expect(namesOf(request)).toEqual(['a.fa ', ' ids.txt']);
+      expect(draft.previewArgv()).toEqual(request.argv);
+      // A name typed in the box of -ids is typed text: without the white space around it.
+      draft.setField('-ids', '  typed.txt ');
+      expect(valueOf({ ...request, argv: draft.previewArgv() }, '-ids')).toBe('typed.txt');
+    }
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.addFastaFiles([new File(['>b\nACGT\n'], ' b.fa'), new File(['>c\nACGT\n'], 'c.fa ')]);
+      await sleep(30);
+      draft.setFastaMode('separate');
+      expect((await draft.submit()).ok).toBe(true);
+      expect(submitted.at(-1)!.map((request) => [valueOf(request, '-in'), namesOf(request)])).toEqual([
+        [' b.fa', [' b.fa']],
+        ['c.fa ', ['c.fa ']],
+      ]);
+    }
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.setStage('mask');
+      draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa')]);
+      draft.setUstatFile(new File(['>x\n'], 'c.ascii '));
+      await sleep(30);
+      expect((await draft.submit()).ok).toBe(true);
+      const request = submitted.at(-1)![0]!;
+      expect(valueOf(request, '-ustat')).toBe('c.ascii ');
+      expect(namesOf(request)).toEqual(['a.fa', 'c.ascii ']);
+    }
+    {
+      const { draft, submitted } = setupDraft();
+      await sleep(20);
+      draft.setStage('convert');
+      draft.setConvertFile(new File(['>x\n'], ' c.ascii'));
+      await sleep(30);
+      expect((await draft.submit()).ok).toBe(true);
+      const request = submitted.at(-1)![0]!;
+      expect(valueOf(request, '-in')).toBe(' c.ascii');
+      expect(namesOf(request)).toEqual([' c.ascii']);
+    }
+  });
+
   it('refuses duplicate filenames and detects blastdb names from opened folder files', async () => {
     const { draft } = setupDraft();
     draft.setField('-infmt', 'blastdb');
@@ -580,13 +677,13 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     draft.ensureLoaded();
     await sleep(20);
     draft.setFastaPaste('>q\nACGTACGT\n');
-    draft.setOutName('sub/../../c.counts');
+    draft.setOutName('./../c.counts');
     expect((await draft.submit()).ok).toBe(true);
-    for (let i = 0; i < 200 && coordinator.state.get().runs.find(isToolRun)?.status !== 'completed'; i++) await sleep(5);
-    // The FakeEngine names the file by the -out typed; the engine names it `../c.counts` (its path from the run's directory).
+    expect((await runEnd(coordinator, coordinator.state.get().runs.find(isToolRun)!.snapshot.runId)).status).toBe('completed');
+    // The FakeEngine names the file as the engine does: `../c.counts`, its path from the run's directory (WW4h).
     const counts = coordinator.sessionMadeCounts()[0]!;
-    expect(counts.name).toBe('sub/../../c.counts');
-    draft.useCountsForMask(counts.runId, counts.runNumber, counts.key, '../c.counts', counts.size);
+    expect(counts.name).toBe('../c.counts');
+    draft.useCountsForMask(counts.runId, counts.runNumber, counts.key, counts.name, counts.size);
     draft.setFastaPaste('>q\nACGTACGT\n');
     expect((await draft.submit()).ok).toBe(true);
     const mask = submitted[1]![0]!;

@@ -25,6 +25,7 @@ import {
   isStandardOutputName,
   maskDataName,
   maskOutfmtDefault,
+  runFileName,
   toolFileOptionLabel,
 } from '../../src/domain/tool-argv';
 import {
@@ -361,6 +362,170 @@ describe("the run's files that -out and -logfile name (WW4e)", () => {
   });
 });
 
+/**
+ * The 33 rows of the WW4e probe (ww4e/probe/web-after.jsonl, 2026-11-28: dustmasker through the Masking tab with the
+ * reactors of Web run 46112132724, in a run directory of input.fa and the folder sub/ holding sub/x.txt): `-out` and
+ * `-logfile` (undefined: not given), and the names of the files that the engine's run made for each (null: none), with
+ * its exit status. The 26 rows that the native run also ran made the same files.
+ */
+const ENGINE_RUN_FILES: ReadonlyArray<readonly [out: string | undefined, log: string | undefined, outFile: string | null, logFile: string | null, status: number]> = [
+  ['m.asnb', undefined, 'm.asnb', null, 0],
+  ['./m.asnb', undefined, 'm.asnb', null, 0],
+  ['.//m.asnb', undefined, 'm.asnb', null, 0],
+  ['sub/../m.asnb', undefined, 'm.asnb', null, 0],
+  ['sub//../m.asnb', undefined, 'm.asnb', null, 0],
+  ['./sub/./../m.asnb', undefined, 'm.asnb', null, 0],
+  ['sub/m.asnb', undefined, 'sub/m.asnb', null, 0],
+  ['sub//m.asnb', undefined, 'sub/m.asnb', null, 0],
+  ['./sub/m.asnb', undefined, 'sub/m.asnb', null, 0],
+  ['nosub/../m.asnb', undefined, null, null, 1],
+  ['input.fa/../m.asnb', undefined, null, null, 1],
+  ['/proc/self/cwd/m.asnb', undefined, 'm.asnb', null, 0],
+  ['/proc/self/cwd/sub/../m.asnb', undefined, 'm.asnb', null, 0],
+  ['../m.asnb', undefined, '../m.asnb', null, 0],
+  ['sub/../../m.asnb', undefined, '../m.asnb', null, 0],
+  ['m.asnb/', undefined, null, null, 1],
+  [undefined, 'run.log', null, 'run.log', 0],
+  [undefined, './run.log', null, 'run.log', 0],
+  [undefined, 'sub/../run.log', null, 'run.log', 0],
+  [undefined, 'nosub/../run.log', null, null, 0],
+  [undefined, 'sub//run.log', null, 'sub/run.log', 0],
+  [undefined, '/proc/self/cwd/run.log', null, 'run.log', 0],
+  ['m.asnb', 'sub/../m.asnb', 'm.asnb', 'm.asnb', 0],
+  ['sub/../m.asnb', './m.asnb', 'm.asnb', 'm.asnb', 0],
+  [undefined, 'run.log/', null, 'run.log', 0],
+  [undefined, ' run.log', null, 'run.log', 0],
+  ['/tmp/m.asnb', undefined, '/tmp/m.asnb', null, 0],
+  ['/tmp//m.asnb', undefined, '/tmp/m.asnb', null, 0],
+  ['/var/run/../tmp/m.asnb', undefined, '/tmp/m.asnb', null, 0],
+  ['/var/lock/m.asnb', undefined, '/var/lock/m.asnb', null, 0],
+  ['../nosub/../m.asnb', undefined, '../m.asnb', null, 0],
+  ['/var/run/../tmp/x.out', '/var/run/../tmp/x.out', '/tmp/x.out', '/var/tmp/x.out', 0],
+  [undefined, '/var/run/../tmp/run.log', null, '/var/tmp/run.log', 0],
+];
+
+/** The run's directory of the probes (WW4e, WW4h): the pasted FASTA and the folder sub/ with one file. */
+const PROBE_DIRECTORY = ['input.fa', 'sub/x.txt'] as const;
+const probeDirectory = (names: readonly string[] = PROBE_DIRECTORY) => names.map((name) => ({ name, file: new Blob(['x\n']) }));
+
+describe("the name that the engine gives a run's file, in the FakeEngine's runs too (WW4h)", () => {
+  const rows = ENGINE_RUN_FILES.map(([out, log, outFile, logFile, status]) => ({ out, log, outFile, logFile, status }));
+
+  it.each(rows)("-out '$out' -logfile '$log': the engine's names $outFile and $logFile", ({ out, log, outFile, logFile }) => {
+    if (out !== undefined) expect(runFileName('-out', out, PROBE_DIRECTORY)).toBe(outFile ?? undefined);
+    if (log !== undefined) expect(runFileName('-logfile', log, PROBE_DIRECTORY)).toBe(logFile ?? undefined);
+  });
+
+  it.each(rows)("the FakeEngine's dustmasker -out '$out' -logfile '$log': the engine's files and exit status $status", async ({ out, log, outFile, logFile, status }) => {
+    const argv = ['dustmasker', '-in', 'input.fa', ...(out === undefined ? [] : ['-out', out]), '-outfmt', 'maskinfo_asn1_bin', ...(log === undefined ? [] : ['-logfile', log])];
+    const run = await new FakeEngine().runTool(argv, { directory: probeDirectory() });
+    expect(run.status).toBe(status);
+    expect(run.files.map((file) => file.name).sort()).toEqual([...new Set([outFile, logFile].filter((name) => name !== null))].sort());
+    if (status !== 0) expect(await run.stderr.text()).toContain(`Error:  Argument "out". File is not accessible:  \`${out}'`);
+  });
+
+  it('reads the other names of the WW4h probe as the engine: folders, directories, streams and the special names', () => {
+    // The WW4h probe (ww4h/probe/engine.jsonl, 2026-11-28: each tool on the reactors of Web run 46124737526 in Node, in
+    // a run directory of input.fa, prot.fa, bn.asn and sub/x.txt): null where the run made no file.
+    const names: ReadonlyArray<readonly ['-out' | '-logfile', string, string | null]> = [
+      ['-out', 'sub', null],
+      ['-out', '/proc/self/cwd', null],
+      ['-out', 'nosub/m.out', null],
+      ['-out', '-', null],
+      ['-out', '/dev/stdout', null],
+      ['-logfile', 'sub', null],
+      ['-logfile', 'sub/', null],
+      ['-logfile', ' sub/../run.log', null],
+      ['-logfile', 'sub/../nosub/../run.log', null],
+      ['-logfile', 'nosub/run.log', null],
+      ['-logfile', '../run.log', '../run.log'],
+      ['-logfile', '-', null],
+      ['-logfile', '', null],
+      ['-logfile', '/dev/null', null],
+    ];
+    for (const [option, value, file] of names) expect(runFileName(option, value, PROBE_DIRECTORY), `${option} '${value}'`).toBe(file ?? undefined);
+    // Without the run's directory no folder is looked up.
+    expect(runFileName('-out', 'nosub/../m.asnb')).toBe('m.asnb');
+    expect(runFileName('-logfile', 'nosub/../run.log')).toBe('run.log');
+    expect(runFileName('-out', 'm.asnb/')).toBeUndefined();
+    // A file's folders are the run's folders, at any depth; a file is none.
+    expect(runFileName('-out', 'a/b/../m.out', ['a/b/c.fa'])).toBe('a/m.out');
+    expect(runFileName('-out', 'a/b/c.fa/../m.out', ['a/b/c.fa'])).toBeUndefined();
+  });
+
+  it("fails a run whose -out opens no file with each tool's words, and names the folder's file", async () => {
+    // The engine's runs of `-out nosub/../m.out` (WW4h probe): the exit status and the last line of the standard error.
+    const words: ReadonlyArray<readonly [argv: readonly string[], status: number, last: string | undefined]> = [
+      [['dustmasker', '-in', 'input.fa'], 1, 'Error:  Argument "out". File is not accessible:  `nosub/../m.out\''],
+      [['segmasker', '-in', 'prot.fa'], 1, 'Argument "out". File is not accessible:  `nosub/../m.out\''],
+      [['convert2blastmask', '-in', 'input.fa', '-masking_algorithm', 'dust', '-masking_options', 'window=64'], 1, 'Argument "out". File is not accessible:  `nosub/../m.out\''],
+      [['windowmasker', '-mk_counts', '-in', 'input.fa'], 0, undefined],
+      [['windowmasker', '-convert', '-in', 'c.counts'], 0, undefined],
+      [['windowmasker', '-ustat', 'c.counts', '-in', 'input.fa'], 1, 'Error:  Argument "out". File is not accessible:  `nosub/../m.out\''],
+      [['blast_formatter', '-archive', 'bn.asn'], 1, 'Command line argument error: Argument "out". File is not accessible:  `nosub/../m.out\''],
+    ];
+    const directory = probeDirectory(['input.fa', 'prot.fa', 'bn.asn', 'c.counts', 'sub/x.txt']);
+    for (const [argv, status, last] of words) {
+      const failed = await new FakeEngine().runTool([...argv, '-out', 'nosub/../m.out'], { directory });
+      expect(failed.status, argv.join(' ')).toBe(status);
+      expect(failed.files, argv.join(' ')).toEqual([]);
+      const lines = (await failed.stderr.text()).split('\n').filter((line) => line !== '');
+      if (last !== undefined) expect(lines[lines.length - 1], argv.join(' ')).toBe(last);
+      const made = await new FakeEngine().runTool([...argv, '-out', 'sub/../m.out'], { directory });
+      expect(made.status, argv.join(' ')).toBe(0);
+      expect(made.files.map((file) => file.name), argv.join(' ')).toEqual(['m.out']);
+    }
+    // A run given no directory has an empty one, as the engine's: `sub/m.out` has no folder.
+    expect((await new FakeEngine().runTool(['segmasker', '-in', 'prot.fa', '-out', 'sub/m.out'])).status).toBe(1);
+    // The standard output's names write there, and `-logfile -` there too: no file.
+    const streams = await new FakeEngine().runTool(['dustmasker', '-in', 'input.fa', '-out', '/dev/stdout', '-logfile', '-'], { directory });
+    expect(streams.files).toEqual([]);
+    expect(await streams.stdout.text()).toContain(FAKE_MARKER);
+    expect(await streams.stderr.text()).toContain(FAKE_MARKER);
+  });
+
+  it("names makeblastdb's database and log as the engine, and fails a -logfile that makeblastdb cannot open", async () => {
+    const directory = probeDirectory();
+    const run = (words: readonly string[]) => new FakeEngine().runTool(['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', ...words], { directory });
+    // The engine's database files (WW4h probe): by their path in the run's directory, folders made where missing.
+    for (const [out, base] of [
+      ['db', 'db'],
+      ['./db', 'db'],
+      ['db/', 'db'],
+      ['sub/../db', 'db'],
+      ['sub/db', 'sub/db'],
+      ['nosub/db', 'nosub/db'],
+      ['sub', 'sub'],
+    ] as const) {
+      const made = await run(['-out', out]);
+      expect(made.status, out).toBe(0);
+      expect(made.files.map((file) => file.name), out).toEqual([`${base}.nhr`, `${base}.nin`, `${base}.nsq`]);
+    }
+    const named = await new FakeEngine().runTool(['makeblastdb', '-in', 'sub/../input.fa', '-dbtype', 'nucl'], { directory });
+    expect(named.files.map((file) => file.name)).toEqual(['input.fa.nhr', 'input.fa.nin', 'input.fa.nsq']);
+    // -logfile: makeblastdb opens it as NCBI's log and as an output; where the output does not open, exit status 1.
+    const db = ['db.nhr', 'db.nin', 'db.nsq'];
+    const error = (name: string) => `Command line argument error: Argument "logfile". File is not accessible:  \`${name}'\n`;
+    for (const [log, status, files, stderr] of [
+      ['sub/../run.log', 0, [...db, 'run.log'], ''],
+      ['../run.log', 0, [...db, '../run.log'], ''],
+      ['/dev/null', 0, db, ''],
+      ['nosub/../run.log', 1, [], error('nosub/../run.log')],
+      ['nosub/run.log', 1, [], error('nosub/run.log')],
+      ['sub', 1, [], error('sub')],
+      ['sub/', 1, [], error('sub/')],
+      [' sub/../run.log', 1, [], error(' sub/../run.log')],
+      ['run.log/', 1, ['run.log'], ''],
+      ['', 1, [], ''],
+    ] as const) {
+      const made = await run(['-out', 'db', '-logfile', log]);
+      expect(made.status, `-logfile '${log}'`).toBe(status);
+      expect(made.files.map((file) => file.name), `-logfile '${log}'`).toEqual(files);
+      expect(await made.stderr.text(), `-logfile '${log}'`).toBe(stderr);
+    }
+  });
+});
+
 describe('MaskingDraft', () => {
   function setup(options: { readonly validate?: 'fake' | 'ok' } = {}) {
     const fake = new FakeEngine();
@@ -619,6 +784,50 @@ describe('MaskingDraft', () => {
     expect((await draft.submit()).ok).toBe(true);
     expect(queued[1]).toMatchObject({ tool: 'convert2blastmask', argv: ['convert2blastmask', '-help'], prints: 'help' });
     expect(queued[1]!.outfmtDefault).toBeUndefined();
+  });
+
+  // Line WQA's D33 R2 (H1): the button's count is the number of runs that the press queues, for every tool of the tab: one print
+  // request for a help or version word (the one answer of `printsKindOf`, which the press reads too), else one run per input.
+  it('counts the runs that the press queues: one for a help or version word, one per input in Separate', async () => {
+    const { draft, queued } = setup({ validate: 'ok' });
+    draft.ensureLoaded();
+    await described(draft, 'dustmasker');
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa'), new File(['>b\nACGT\n'], 'b.fa')]);
+    await vi.waitFor(() => expect(draft.state.get().fastaFiles.every((entry) => entry.status === 'ready')).toBe(true));
+    draft.setFastaMode('separate');
+    for (const tool of ['dustmasker', 'segmasker'] as const) {
+      draft.setTool(tool);
+      await described(draft, tool);
+      for (const extra of ['', '-version', '-version-full', '-h', '-help-full', '-xmlhelp', '-outfmt fasta']) {
+        draft.setExtra(extra);
+        await settled(draft);
+        const count = draft.runCount();
+        queued.length = 0;
+        expect((await draft.submit()).ok, `${tool} ${extra}`).toBe(true);
+        expect(count, `${tool} ${extra}`).toBe(queued.length);
+        expect(count, `${tool} ${extra}`).toBe(toolPrintsKind([tool, extra]) === null ? 2 : 1);
+      }
+    }
+    // Words that cannot be read start no run: the count is the inputs'.
+    draft.setExtra("-outfmt 'fasta");
+    expect(draft.runCount()).toBe(2);
+  });
+
+  // Line WQA's D33 R2 (H2): a FASTA file named with a space at its start or end is named so in -in, as the run directory holds it.
+  it('names a FASTA file in -in as the run directory holds it, a space at its start or end included', async () => {
+    const { draft, queued } = setup({ validate: 'ok' });
+    draft.ensureLoaded();
+    await described(draft, 'dustmasker');
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa '), new File(['>b\nACGT\n'], ' b.fa')]);
+    await vi.waitFor(() => expect(draft.state.get().fastaFiles.every((entry) => entry.status === 'ready')).toBe(true));
+    draft.setFastaMode('separate');
+    expect(draft.previewArgv()).toEqual(['dustmasker', '-in', 'a.fa ']);
+    await settled(draft);
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued.map((request) => [request.argv, request.directory.map((entry) => entry.name)])).toEqual([
+      [['dustmasker', '-in', 'a.fa '], ['a.fa ']],
+      [['dustmasker', '-in', ' b.fa'], [' b.fa']],
+    ]);
   });
 
   it("checks the argv in a directory that holds the run's input under the run's name (review of WW4c, F2)", async () => {

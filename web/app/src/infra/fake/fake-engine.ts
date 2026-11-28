@@ -40,17 +40,24 @@ import { toolOptionValue } from '../../domain/tool-argv';
 import { toolHelpFlag, toolPrintsKind } from '../../domain/tools';
 import DESCRIBE from './describe.json';
 import BLAST_FORMATTER_XMLHELP_DOC from './blast_formatter-xmlhelp.json';
+import CONVERT2BLASTMASK_XMLHELP_DOC from './convert2blastmask-xmlhelp.json';
+import DUSTMASKER_XMLHELP_DOC from './dustmasker-xmlhelp.json';
 import MAKEBLASTDB_XMLHELP_DOC from './makeblastdb-xmlhelp.json';
+import SEGMASKER_XMLHELP_DOC from './segmasker-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from './windowmasker-xmlhelp.json';
 import { fakeReaderError, fakeRecordKeys } from './fake-fasta';
 
-const WINDOWMASKER_XMLHELP: string = WINDOWMASKER_XMLHELP_DOC.xml;
-const BLAST_FORMATTER_XMLHELP: string = BLAST_FORMATTER_XMLHELP_DOC.xml;
-const MAKEBLASTDB_XMLHELP: string = MAKEBLASTDB_XMLHELP_DOC.xml;
+/**
+ * Each tool's `-xmlhelp`, as the engine prints it (file snapshots of tests/unit/engine-runtime.test.ts:
+ * compared with the reactor when one is built, and written again with `vitest -u`).
+ */
 const TOOL_XMLHELP: Readonly<Record<string, string>> = {
-  windowmasker: WINDOWMASKER_XMLHELP,
-  blast_formatter: BLAST_FORMATTER_XMLHELP,
-  makeblastdb: MAKEBLASTDB_XMLHELP,
+  windowmasker: WINDOWMASKER_XMLHELP_DOC.xml,
+  blast_formatter: BLAST_FORMATTER_XMLHELP_DOC.xml,
+  makeblastdb: MAKEBLASTDB_XMLHELP_DOC.xml,
+  dustmasker: DUSTMASKER_XMLHELP_DOC.xml,
+  segmasker: SEGMASKER_XMLHELP_DOC.xml,
+  convert2blastmask: CONVERT2BLASTMASK_XMLHELP_DOC.xml,
 };
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
@@ -82,7 +89,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
   }
 
   async describeTool(tool: string): Promise<ToolDescription> {
-    const xml = TOOL_XMLHELP[tool];
+    const xml = Object.hasOwn(TOOL_XMLHELP, tool) ? TOOL_XMLHELP[tool] : undefined;
     if (xml === undefined) throw new Error(`unknown tool: ${tool}`);
     let description = this.toolDescriptions.get(tool);
     if (description === undefined) {
@@ -92,9 +99,14 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     return description;
   }
 
+  /**
+   * Refuses an unknown tool, a word that is not an option of the tool's `-xmlhelp`, a value outside its
+   * list or range, options that exclude each other, and a required option left out (NCBI's message);
+   * the engine's other checks are not imitated.
+   */
   async validateTool(argv: readonly string[]): Promise<ToolValidation> {
     const tool = argv[0];
-    if (tool === undefined || TOOL_XMLHELP[tool] === undefined) return { ok: false, message: `unknown tool: ${tool}` };
+    if (tool === undefined || !Object.hasOwn(TOOL_XMLHELP, tool)) return { ok: false, message: `unknown tool: ${tool}` };
     const description = await this.describeTool(tool);
     const byFlag = new Map(description.parameters.map((param) => [param.flag, param]));
     const seen = new Set<string>();
@@ -137,6 +149,15 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     for (const [first, second] of description.excludes) {
       if (seen.has(first) && seen.has(second)) {
         return { ok: false, message: `Argument error: ${first} and ${second} are mutually exclusive` };
+      }
+    }
+    for (const param of description.parameters) {
+      if (param.mandatory && !seen.has(param.flag)) {
+        const name = param.flag.slice(1);
+        return {
+          ok: false,
+          message: `Error: (CArgException::eNoArg) Argument "${name}". Mandatory value is missing:  \`${param.kind}'`,
+        };
       }
     }
     if (tool === 'windowmasker' && !seen.has('-mk_counts') && !seen.has('-convert') && !seen.has('-ustat')) {
@@ -205,7 +226,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       return finish(0);
     }
     if (prints === 'help') {
-      if (toolHelpFlag(argv) === '-xmlhelp') await writeStdout(TOOL_XMLHELP[toolName] ?? WINDOWMASKER_XMLHELP);
+      if (toolHelpFlag(argv) === '-xmlhelp') await writeStdout(TOOL_XMLHELP[toolName] ?? '');
       else await writeStdout(`USAGE\n  ${toolName} ... (${FAKE_MARKER})\n`);
       return finish(0);
     }

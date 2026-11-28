@@ -5,10 +5,12 @@
 // database is chosen, with the reason.
 //
 // With either engine: the refusal in the Database picker, the Repeats database, WindowMasker's and makeblastdb's Input
-// blocks, the check and Run LOSAT (for as long as the refused database is chosen or its files are in the run), and a
+// blocks and the Masking tab's, the check and Run LOSAT (for as long as the refused database is chosen or its files are
+// in the run), and a
 // database named with a space shown in Run details as a command that works when pasted. With the real engine
 // (LOSAT_WEB_REACTORS) and the native binary (LOSAT_WEB_NATIVE): blastn -db on a folder `my dbs` (and an alias `my
-// nslice`), BLASTN's Repeats database in a folder `rep dbs`, WindowMasker -infmt blastdb on a folder `my db`, and
+// nslice`), BLASTN's Repeats database in a folder `rep dbs`, WindowMasker and dustmasker -infmt blastdb on a folder
+// `my db`, and
 // makeblastdb's -out and -input_type blastdb with a space write what the native command line writes on the same files.
 //
 // LOSAT_E2E_SCREENSHOT_DIR=<dir> saves the changed screens at 1280 and 390 px.
@@ -19,7 +21,7 @@ import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { nativeMakeblastdb } from './support/makeblastdb-native';
+import { nativeRun } from './support/makeblastdb-native';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { openParameters, openSearch, paste, pickRun, program, result, submit, waitStatus } from './support/search';
 import { test } from './support/test';
@@ -187,6 +189,30 @@ test('a database named with a double quote is refused where it is chosen, with t
   await expect(page.getByTestId('mk-message')).toHaveText(mkRefused);
   await page.getByTestId('mk-db-in').fill('mydb');
   await expect(page.getByTestId('mk-db-in-refused')).toHaveCount(0);
+
+  // The Masking tab's dustmasker -in of -infmt blastdb (WW4c), a SeqDB name list as WindowMasker's (WW4d R1 probe).
+  await page.getByTestId('tab-masking').click();
+  await expect(page.getByTestId('ms-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await page.getByTestId('ms-param-infmt').selectOption('blastdb');
+  await page.getByTestId('ms-in-files').setInputFiles([named('q"ms.nin'), named('q"ms.nsq')]);
+  const msRefused = `A database named "q"ms" cannot be in -in: ${REASON}.`;
+  await expect(page.getByTestId('ms-in-refused')).toHaveText(msRefused);
+  await expect(page.getByTestId('ms-in-refused')).toHaveAttribute('role', 'alert');
+  await expect(page.getByTestId('ms-in-name')).toHaveValue('');
+  await expect(page.getByTestId('ms-argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await expect(page.getByTestId('ms-argv-validation')).toHaveText(msRefused);
+  await shots(page, 'ms-refused');
+  await page.getByTestId('ms-run-losat').click();
+  await expect(page.getByTestId('ms-message')).toHaveText(msRefused);
+  const msToggle = page.getByTestId('ms-options-toggle');
+  if ((await msToggle.getAttribute('aria-expanded')) !== 'true') await msToggle.click();
+  const msRunFiles = page.locator('[data-testid="ms-run-files-list"] > li');
+  await expect(msRunFiles).toHaveCount(2);
+  while ((await msRunFiles.count()) > 0) await page.getByTestId('ms-run-file-remove-0').click();
+  await page.getByTestId('ms-in-files').setInputFiles([named('my ms.nin'), named('my ms.nsq')]);
+  await expect(page.getByTestId('ms-in-name')).toHaveValue('"my ms"');
+  await expect(page.getByTestId('ms-command')).toContainText(`-in '"my ms"'`);
+  await expect(page.getByTestId('ms-in-refused')).toHaveCount(0);
 });
 
 test.describe('real engine: database names with a space are the native command line\'s (line WW, WW4d)', () => {
@@ -266,7 +292,7 @@ test.describe('real engine: database names with a space are the native command l
     }
   });
 
-  test('WindowMasker -infmt blastdb -in "my db/wm", and makeblastdb -out "my db" and -input_type blastdb -in "my dbs/ndb"', async ({ page }) => {
+  test('WindowMasker and dustmasker -infmt blastdb -in "my db/wm", and makeblastdb -out "my db" and -input_type blastdb -in "my dbs/ndb"', async ({ page }) => {
     const work = mkdtempSync(join(tmpdir(), 'losat-ww4d-'));
     try {
       // 1. WindowMasker -mk_counts of a database in a folder "my db".
@@ -297,7 +323,7 @@ test.describe('real engine: database names with a space are the native command l
       await page.getByTestId('mk-param-dbtype-nucl').check();
       await page.getByTestId('mk-param-out').fill('my db');
       await expect(page.getByTestId('mk-command')).toHaveText(`losat makeblastdb -in input.fa -dbtype nucl -out 'my db'`);
-      const outNative = nativeMakeblastdb(['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-out', 'my db'], new Map([['input.fa', nucl]]), ZONE);
+      const outNative = nativeRun(['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-out', 'my db'], new Map([['input.fa', nucl]]), ZONE);
       expect(outNative.status).toBe(1);
       await expect(page.getByTestId('mk-argv-validation')).not.toHaveAttribute('data-state', 'checking');
       await page.getByTestId('mk-run-losat').click();
@@ -316,13 +342,28 @@ test.describe('real engine: database names with a space are the native command l
       await expect(page.getByTestId('mk-db-in')).toHaveValue('"my dbs/ndb"');
       await expect(page.getByTestId('mk-command')).toHaveText(`losat makeblastdb -in '"my dbs/ndb"' -input_type blastdb -dbtype nucl -out copy`);
       const inputs = new Map(ndb.map((name) => [`my dbs/${name}`, readFileSync(join(corpus, name))] as const));
-      const dbNative = nativeMakeblastdb(['makeblastdb', '-in', '"my dbs/ndb"', '-input_type', 'blastdb', '-dbtype', 'nucl', '-out', 'copy'], inputs, ZONE);
+      const dbNative = nativeRun(['makeblastdb', '-in', '"my dbs/ndb"', '-input_type', 'blastdb', '-dbtype', 'nucl', '-out', 'copy'], inputs, ZONE);
       await expect(page.getByTestId('mk-argv-validation')).not.toHaveAttribute('data-state', 'checking');
       await page.getByTestId('mk-run-losat').click();
       const db = await toolRun(page, 3, dbNative.status === 0 ? 'completed' : 'failed');
       expect(db.exit).toBe(dbNative.status);
       expect(db.stdout, 'makeblastdb -input_type blastdb -in "my dbs/ndb" stdout').toBe(dbNative.stdout.toString('utf8'));
       expect(db.stderr, 'makeblastdb -input_type blastdb -in "my dbs/ndb" stderr').toBe(dbNative.stderr.toString('utf8'));
+
+      // 4. The Masking tab's dustmasker -infmt blastdb on the database in the folder "my db" (WW4c; WW4d R1).
+      await page.getByTestId('tab-masking').click();
+      await expect(page.getByTestId('ms-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+      await page.getByTestId('ms-param-infmt').selectOption('blastdb');
+      await page.getByTestId('ms-in-folder').setInputFiles(join(work, 'my db'));
+      await expect(page.getByTestId('ms-in-name')).toHaveValue('"my db/wm"');
+      await expect(page.getByTestId('ms-command')).toContainText(`-in '"my db/wm"'`);
+      await expect(page.getByTestId('ms-argv-validation')).toHaveAttribute('data-state', 'ok');
+      await page.getByTestId('ms-run-losat').click();
+      const dust = await toolRun(page, 4, 'completed');
+      const dustNative = native(['dustmasker', '-in', '"my db/wm"', '-infmt', 'blastdb'], work);
+      expect(dustNative.status).toBe(0);
+      expect(dust.stdout, 'dustmasker -in "my db/wm" stdout').toBe(dustNative.stdout);
+      expect(dust.stderr, 'dustmasker -in "my db/wm" stderr').toBe(dustNative.stderr);
     } finally {
       rmSync(work, { recursive: true, force: true });
     }

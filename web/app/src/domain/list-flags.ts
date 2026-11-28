@@ -19,12 +19,13 @@ export function commaListLength(value: string): number {
  * one (`SeqDB_SplitQuoted`): a space separates two names, a double quote starts or ends a name that holds spaces, so no
  * name can hold a double quote. Measured against NCBI BLAST+ 2.17.0 for every such option that the Web writes (line WW,
  * WW4d probe, 2026-11-28): the search programs' `-db`, BLASTN's `-filtering_db`, makeblastdb's `-in` (its FASTA files
- * and its `-input_type blastdb` databases), and WindowMasker's `-in` with `-infmt blastdb`. The same flag means other
- * things in other commands (`isSeqdbList`): WindowMasker's `-in` is one file's name with another `-infmt`.
+ * and its `-input_type blastdb` databases), and the `-in` of WindowMasker, dustmasker and segmasker with `-infmt blastdb`.
+ * The same flag means other things in other commands (`isSeqdbList`): their `-in` is one file's name with another
+ * `-infmt`.
  */
 export const SEQDB_LIST_FLAGS: ReadonlySet<string> = new Set(['-db', '-filtering_db', '-in']);
 
-/** An option of a command: the flag, the command's tool where the flag depends on it, and WindowMasker's `-infmt` value. */
+/** An option of a command: the flag, the command's tool where the flag depends on it, and the tool's `-infmt` value. */
 export interface ListOption {
   /**
    * The tool of the command line (`makeblastdb`, `windowmasker`, …) for a flag whose meaning depends on it (`-in`, the
@@ -32,16 +33,22 @@ export interface ListOption {
    */
   readonly command?: string;
   readonly flag: string;
-  /** WindowMasker's `-infmt` value, which decides what its `-in` is (`fasta` when not given). */
+  /** The `-infmt` value of WindowMasker, dustmasker or segmasker, which decides what its `-in` is (`fasta` when not given). */
   readonly inputFormat?: string;
 }
+
+/**
+ * The tools whose `-in` is a SeqDB name list with `-infmt blastdb` (one file's name with another `-infmt`): WindowMasker,
+ * and the Masking tab's dustmasker and segmasker (measured against NCBI BLAST+ 2.17.0, WW4d R1 probe, 2026-11-28).
+ */
+const SEQDB_INFMT_COMMANDS: ReadonlySet<string> = new Set(['windowmasker', 'dustmasker', 'segmasker']);
 
 /** Whether the option's value is a SeqDB name list (`SEQDB_LIST_FLAGS`), for its command. */
 export function isSeqdbList(option: ListOption): boolean {
   if (!SEQDB_LIST_FLAGS.has(option.flag)) return false;
   if (option.flag !== '-in') return true;
   if (option.command === 'makeblastdb') return true;
-  return option.command === 'windowmasker' && option.inputFormat?.trim() === 'blastdb';
+  return SEQDB_INFMT_COMMANDS.has(option.command ?? '') && option.inputFormat?.trim() === 'blastdb';
 }
 
 /** What a list option's splitter takes out of a name (`listNameRefusal`): the mark, and why. */

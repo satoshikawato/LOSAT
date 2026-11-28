@@ -22,9 +22,9 @@
 // restoration, the Search tab's button, which goes back, scrolled the page down to where the form
 // had been left, and the focused tab out of view.
 
-export type MainTab = 'search' | 'results' | 'windowmasker' | 'makeblastdb' | 'blast_formatter';
+export type MainTab = 'search' | 'results' | 'windowmasker' | 'masking' | 'makeblastdb' | 'blast_formatter';
 
-type FormTab = 'search' | 'windowmasker' | 'makeblastdb' | 'blast_formatter';
+type FormTab = Exclude<MainTab, 'results'>;
 
 /** The part of `window.history` that the tabs use. */
 export interface TabHistory {
@@ -70,7 +70,7 @@ export function tabNavigation(history: TabHistory, options: TabNavigationOptions
   const load = options.load ?? crypto.randomUUID();
   const now = options.now ?? (() => performance.now());
   history.scrollRestoration = 'manual';
-  /** The form tab (Search or WindowMasker) that Back from Results returns to. */
+  /** The form tab (Search, WindowMasker, Masking or Format Archive) that Back from Results returns to. */
   let lastForm: FormTab = 'search';
   /** Whether the current entry is this load's own Results entry. */
   const onResultsEntry = (): boolean => isResultsEntry(history.state) && history.state.load === load;

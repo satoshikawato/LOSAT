@@ -1,20 +1,26 @@
 // Single command-line builders for the tools (windowmasker: WW3b DESIGN §2.5, brief §4.4;
-// blast_formatter: RG-F3p7; makeblastdb: line WW WW4b2): the same argv array is validated by `validateTool`, run by `runTool`,
+// blast_formatter: RG-F3p7; makeblastdb: line WW WW4b2; dustmasker, segmasker, convert2blastmask: WW4c): the same
+// argv array is validated by `validateTool`, run by `runTool`,
 // displayed beside "Run LOSAT" as `losat windowmasker ...` and shown in Run details. Defaults are
 // omitted; Make counts and Convert counts write `-out wmasker.<sformat>` until the user edits it.
 import type { ToolDescription, ToolParameterDescription } from 'losat/domain';
 import { splitOptions } from './argv';
 import { writtenValue, type FieldValue, type FormValues } from './parameters';
 import {
+  allMaskingParameters,
   allStageParameters,
   BLAST_FORMATTER_BLOCK_FLAGS,
   blastFormatterOptionParameters,
   defaultCountsOutName,
+  isMaskingTool,
+  maskingOptionParameters,
   makeblastdbOptionParameters,
   makeblastdbParameters,
   stageOptionParameters,
   toToolParameterField,
+  TOOL_WRITTEN_TEXT_FLAGS,
   WINDOWMASKER_BLOCK_FLAGS,
+  type MaskingTool,
   type ToolId,
   type ToolStage,
   type WindowMaskerStage,
@@ -39,8 +45,17 @@ export interface WindowMaskerArgvInput {
   readonly extra?: readonly string[];
 }
 
+/**
+ * What a tool form writes for an option: a text that the tool writes or stores as given (`TOOL_WRITTEN_TEXT_FLAGS`)
+ * as typed, white space and all, as the command line passes it; any other field as the search forms write it
+ * (`writtenValue`: names, numbers and keywords without the white space around them). An empty box writes nothing;
+ * an empty value is given in Additional options (`-title ''`; review of WW4c, F3).
+ */
 function toolWrittenValue(param: ToolParameterDescription, value: FieldValue | undefined): string | boolean | undefined {
   const field = toToolParameterField(param);
+  if (field.kind === 'text' && TOOL_WRITTEN_TEXT_FLAGS.has(param.flag)) {
+    return typeof value === 'string' && value !== '' && value !== param.defaultValue ? value : undefined;
+  }
   const known = param.defaultValue === undefined ? undefined : { defaultValue: param.defaultValue };
   return writtenValue(field, value, known);
 }
@@ -66,15 +81,22 @@ function pushOptionWords(
   for (const [flag, val] of Object.entries(values)) {
     if (skip.has(flag)) continue;
     if (val === true) argv.push(flag);
-    else if (typeof val === 'string' && val.trim() !== '') argv.push(flag, val.trim());
+    else if (typeof val === 'string') {
+      const text = TOOL_WRITTEN_TEXT_FLAGS.has(flag) ? val : val.trim();
+      if (text !== '') argv.push(flag, text);
+    }
   }
 }
 
-/** Appends the words of Additional options; throws for `''` and a word with NUL, which the search form refuses too (DW-42, `domain/argv.ts`). */
+/**
+ * Appends the words of Additional options; throws for a word with NUL, which the engine cannot read (DW-42,
+ * `domain/argv.ts`). An empty word is an empty value, as on the command line (`-masking_options ''`): the engine
+ * reads every word of a tool's argv as given (each ends with NUL, `encodeArgv`), where the search form refuses it
+ * because a search's run adds words after the argv's (review of WW4c, F3).
+ */
 function pushExtraWords(argv: string[], extra: readonly string[] | undefined): void {
   for (const word of extra ?? []) {
-    const unread = word === '' ? "''" : word.includes('\0') ? 'a NUL character' : undefined;
-    if (unread !== undefined) throw new Error(`Additional options: ${unread} is not accepted`);
+    if (word.includes('\0')) throw new Error('Additional options: a NUL character is not accepted');
     argv.push(word);
   }
 }
@@ -176,6 +198,20 @@ export function changedBlastFormatterOptionsCount(
   return changedOptionsCount(blastFormatterOptionParameters(description), values, extra);
 }
 
+export interface MaskingArgvInput {
+  readonly tool: MaskingTool;
+  /** Value for `-in` (a FASTA file name, `combined_input.fa`, or a BLAST database name), omitted when empty. */
+  readonly inputName?: string;
+  /** Value for `-out`, omitted when empty or `'-'` (standard output, the command line's default). */
+  readonly outName?: string;
+  /** Option values keyed by `-flag` (`-infmt`, `-outfmt`, the required options and the tool's options). */
+  readonly values: FormValues;
+  /** Parsed `-xmlhelp` description (provides defaults and usage order). */
+  readonly description?: ToolDescription;
+  /** Extra words parsed from "Additional options" (`splitOptions`). */
+  readonly extra?: readonly string[];
+}
+
 export interface MakeblastdbArgvInput {
   /**
    * `-in`'s value as the command line takes it, omitted when empty: the files of the run as one list
@@ -190,6 +226,26 @@ export interface MakeblastdbArgvInput {
   readonly extra?: readonly string[];
 }
 
+/** The words that the Masking builder writes from the blocks (the file names). */
+const MASKING_NAMED_FLAGS: ReadonlySet<string> = new Set(['-in', '-out']);
+
+/**
+ * Builds `['dustmasker' | 'segmasker' | 'convert2blastmask', '-in', …, '-out', …, options…]` for
+ * validation, execution and display: the options in NCBI `-help` usage order with their defaults
+ * left out. Throws for a word of `extra` that Additional options refuse (`pushExtraWords`).
+ */
+export function buildMaskingArgv(input: MaskingArgvInput): readonly string[] {
+  const argv: string[] = [input.tool];
+  const inputName = input.inputName?.trim() ?? '';
+  if (inputName !== '') argv.push('-in', inputName);
+  const outName = input.outName?.trim() ?? '';
+  if (outName !== '' && outName !== '-') argv.push('-out', outName);
+  const ordered = allMaskingParameters(input.description, input.tool).filter((param) => !MASKING_NAMED_FLAGS.has(param.flag));
+  pushOptionWords(argv, ordered, input.values, MASKING_NAMED_FLAGS);
+  pushExtraWords(argv, input.extra);
+  return Object.freeze(argv);
+}
+
 /**
  * Builds `['makeblastdb', '-in', ..., ...]` for validation, execution and display: `-in` first, then the
  * options set in the form in NCBI's `-help` usage order, then Additional options.
@@ -202,6 +258,16 @@ export function buildMakeblastdbArgv(input: MakeblastdbArgvInput): readonly stri
   pushOptionWords(argv, ordered, input.values, MAKEBLASTDB_NAMED_FLAGS);
   pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
+}
+
+/** Count of changed options inside the collapsible "<Tool> options" section of the Masking tab (plus Additional options). */
+export function changedMaskingOptionsCount(
+  tool: MaskingTool,
+  values: FormValues,
+  extra: string,
+  description: ToolDescription | undefined,
+): number {
+  return changedOptionsCount(maskingOptionParameters(description, tool), values, extra);
 }
 
 /** makeblastdb's option whose words the builder writes from the Input block (the input's names). */
@@ -263,6 +329,84 @@ function namedOutPath(argv: readonly string[]): string | undefined {
   return out !== undefined && out !== '-' ? normalizeRelName(out) : undefined;
 }
 
+// The engine's model of a Linux path walk (`LOSAT/src/report/run_files.rs`: `Walk`, `LINKS`, `SELF`, `THREAD`,
+// `MAX_LINKS`, `WORKING_TREE`), for the names that it opens as the run's standard output (`OutputName::Stdout`).
+/** LOSAT Web's process in procfs: `/proc/self` links to it; its id is a NUL byte, which no typed name holds. */
+const PROC_SELF = '/proc/\0';
+/** LOSAT Web's thread in procfs (`/proc/thread-self`). */
+const PROC_THREAD = '/proc/\0/task/\0';
+/** The links of LOSAT Web's Linux and their targets, besides `cwd` of `PROC_SELF` and `PROC_THREAD`. */
+const PATH_LINKS: ReadonlyMap<string, string> = new Map([
+  ['/bin', '/usr/bin'],
+  ['/lib', '/usr/lib'],
+  ['/lib32', '/usr/lib32'],
+  ['/lib64', '/usr/lib64'],
+  ['/sbin', '/usr/sbin'],
+  ['/var/lock', '/run/lock'],
+  ['/var/run', '/run'],
+  ['/dev/fd', '/proc/self/fd'],
+  ['/dev/stdin', '/proc/self/fd/0'],
+  ['/dev/stdout', '/proc/self/fd/1'],
+  ['/dev/stderr', '/proc/self/fd/2'],
+  ['/proc/self', PROC_SELF],
+  ['/proc/thread-self', PROC_THREAD],
+  [`${PROC_SELF}/root`, '/'],
+  [`${PROC_THREAD}/root`, '/'],
+]);
+/** The links that one lookup follows; one more is `ELOOP`. */
+const MAX_PATH_LINKS = 40;
+
+/**
+ * The path that the system opens for `name` in the working directory `cwd`, its links followed and its `.` and `..`
+ * taken (the engine's `Walk::resolve`, without the directories that a user cannot search, which fail the run's open);
+ * undefined past `MAX_PATH_LINKS` links.
+ */
+function walkedPath(name: string, cwd: string): string | undefined {
+  let resolved = '';
+  let links = 0;
+  let refused = false;
+  const walk = (path: string): void => {
+    for (const part of path.split('/')) step(part);
+  };
+  const step = (part: string): void => {
+    if (part === '' || part === '.' || refused) return;
+    if (part === '..') {
+      resolved = resolved.slice(0, Math.max(resolved.lastIndexOf('/'), 0));
+      return;
+    }
+    resolved += `/${part}`;
+    const target = resolved === `${PROC_SELF}/cwd` || resolved === `${PROC_THREAD}/cwd` ? cwd : PATH_LINKS.get(resolved);
+    const stream = [PROC_SELF, PROC_THREAD].some((of) => ['/fd/0', '/fd/1', '/fd/2'].some((fd) => resolved === `${of}${fd}`));
+    if ((target !== undefined || stream) && ++links > MAX_PATH_LINKS) {
+      refused = true;
+      return;
+    }
+    if (target !== undefined) {
+      resolved = '';
+      walk(target);
+    }
+  };
+  if (!name.startsWith('/')) walk(cwd);
+  walk(name);
+  return refused ? undefined : resolved === '' ? '/' : resolved;
+}
+
+/**
+ * Whether the engine opens the output file name `name` as the run's standard output, as the command line on Linux
+ * does (`OutputName::Stdout` of `run_files.rs`'s `output_name`): a name whose walk ends at the process's or the
+ * thread's descriptor 1 (`/dev/stdout`, `/dev/fd/1`, `/proc/self/fd/1`, `/proc/thread-self/fd/1`, or a path to one of
+ * them such as `//dev/./stdout` or `/proc/self/root/dev/stdout`). A relative name never is: the working directory is
+ * deeper than its `..` reach (`WORKING_TREE`). A name that the system refuses fails the run instead (review of WW4c,
+ * F5; the list in `web/adapter/tests/standard_output_names.json` is checked against the engine and this function).
+ */
+export function isStandardOutputName(name: string): boolean {
+  const parts = name.split('/');
+  if (['', '.', '..'].includes(parts[parts.length - 1]!)) return false;
+  const cwd = '/\0'.repeat(parts.filter((part) => part === '..').length + 1);
+  const path = walkedPath(name, cwd);
+  return path === `${PROC_SELF}/fd/1` || path === `${PROC_THREAD}/fd/1`;
+}
+
 /** Identifies which option(s) (`-out`, `-logfile`) named an output file produced by a tool run. */
 export function toolFileOptionLabel(argv: readonly string[], fileName: string): string | undefined {
   const target = normalizeRelName(fileName);
@@ -292,26 +436,46 @@ const MASK_DATA_FORMATS: Readonly<Record<string, string>> = Object.freeze({
   maskinfo_asn1_text: 'asnt',
 });
 
-/** The tool runs that mask with a `-outfmt`: WindowMasker's Mask (`-ustat`); the masking tools of line WW WW4c join here. */
+/** The tool runs that mask with a `-outfmt`: WindowMasker's Mask (`-ustat`) and every tool of the Masking tab. */
 function masks(tool: ToolId, stage: ToolStage): boolean {
-  return tool === 'windowmasker' && stage === 'mask';
+  return isMaskingTool(tool) || (tool === 'windowmasker' && stage === 'mask');
+}
+
+/**
+ * The `-outfmt` default that `-xmlhelp` gives a run that masks (`masks`), for the run to record at submit: the argv
+ * names `-outfmt` only to change it, and the run is judged (`maskDataName`) from its own record, not from the form's
+ * descriptions. Undefined for another run, or when the description (or its `-outfmt`) is not known.
+ */
+export function maskOutfmtDefault(tool: ToolId, stage: ToolStage, description: ToolDescription | undefined): string | undefined {
+  return masks(tool, stage) ? description?.parameters.find((param) => param.flag === '-outfmt')?.defaultValue : undefined;
 }
 
 /**
  * The name under which an output of a tool run goes to makeblastdb's `-mask_data` ("Use as -mask_data in makeblastdb"),
- * or undefined for an output that is not mask data: the `-out` file of a masking run whose `-outfmt` writes mask data
- * that makeblastdb reads (`maskinfo_asn1_bin`, `maskinfo_asn1_text`; not `maskinfo_xml`, see `MASK_DATA_FORMATS`), or
- * its standard output when it has no `-out`, named for the run (`windowmasker-run3.asnb`).
+ * or undefined for an output that is not mask data: the `-out` file of a masking run whose effective `-outfmt` writes
+ * mask data that makeblastdb reads (`maskinfo_asn1_bin`, `maskinfo_asn1_text`; not `maskinfo_xml`, see `MASK_DATA_FORMATS`), or
+ * its standard output when it has no `-out` or an `-out` that the engine opens as the standard output
+ * (`isStandardOutputName`: `/dev/stdout`, `/dev/fd/1`, …), named for the run (`windowmasker-run3.asnb`, `convert2blastmask-run4.asnt`). The effective `-outfmt` is the argv's
+ * value, else the run's `outfmtDefault` (`maskOutfmtDefault`). The one rule for every masking tool.
  */
 export function maskDataName(
-  run: { readonly tool: ToolId; readonly stage: ToolStage; readonly argv: readonly string[]; readonly number: number },
+  run: {
+    readonly tool: ToolId;
+    readonly stage: ToolStage;
+    readonly argv: readonly string[];
+    readonly number: number;
+    readonly outfmtDefault?: string;
+  },
   entry: { readonly key: string; readonly name: string },
 ): string | undefined {
   if (!masks(run.tool, run.stage)) return undefined;
-  const extension = MASK_DATA_FORMATS[toolOptionValue(run.argv, '-outfmt') ?? ''];
+  const extension = MASK_DATA_FORMATS[(toolOptionValue(run.argv, '-outfmt') ?? run.outfmtDefault ?? '').trim()];
   if (extension === undefined) return undefined;
-  const out = namedOutPath(run.argv);
-  if (out === undefined) return entry.key === 'stdout' ? `${run.tool}-run${run.number}.${extension}` : undefined;
+  const given = toolOptionValue(run.argv, '-out');
+  if (given === undefined || given === '-' || isStandardOutputName(given)) {
+    return entry.key === 'stdout' ? `${run.tool}-run${run.number}.${extension}` : undefined;
+  }
+  const out = normalizeRelName(given);
   return entry.key !== 'stdout' && entry.key !== 'stderr' && normalizeRelName(entry.name) === out ? entry.name : undefined;
 }
 

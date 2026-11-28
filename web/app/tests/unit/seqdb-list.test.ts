@@ -49,6 +49,13 @@ describe('SeqDB name lists (line WW, WW4d)', () => {
     expect(isSeqdbList({ command: 'windowmasker', flag: '-in', inputFormat: 'blastdb' })).toBe(true);
     expect(isSeqdbList({ command: 'windowmasker', flag: '-in', inputFormat: 'fasta' })).toBe(false);
     expect(isSeqdbList({ command: 'windowmasker', flag: '-in' })).toBe(false);
+    // The Masking tab's dustmasker and segmasker read -in with -infmt blastdb as WindowMasker does (WW4d R1 probe);
+    // convert2blastmask's -in is one file's name.
+    expect(isSeqdbList({ command: 'dustmasker', flag: '-in', inputFormat: 'blastdb' })).toBe(true);
+    expect(isSeqdbList({ command: 'segmasker', flag: '-in', inputFormat: 'blastdb' })).toBe(true);
+    expect(isSeqdbList({ command: 'dustmasker', flag: '-in', inputFormat: 'fasta' })).toBe(false);
+    expect(isSeqdbList({ command: 'segmasker', flag: '-in' })).toBe(false);
+    expect(isSeqdbList({ command: 'convert2blastmask', flag: '-in', inputFormat: 'blastdb' })).toBe(false);
     expect(isSeqdbList({ command: 'blast_formatter', flag: '-in' })).toBe(false);
     expect(isSeqdbList({ command: 'makeblastdb', flag: '-out' })).toBe(false);
     expect(isSeqdbList({ command: 'makeblastdb', flag: '-mask_data' })).toBe(false);

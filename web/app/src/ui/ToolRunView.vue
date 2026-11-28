@@ -4,8 +4,8 @@
 // Outputs preview at most 512 KiB so large counts/FASTA outputs never grow page JS heap;
 // binary outputs show "Binary, <size>". Download streams the full OPFS-backed File.
 // Made counts files (`-out` of `-mk_counts` / `-convert`) offer "Use in BLASTN" and
-// "Mask with these counts"; mask data (Mask with `-outfmt maskinfo_*`) offers "Use as -mask_data in
-// makeblastdb". A tool that writes its files into the run's directory (makeblastdb, line WW WW4b2) has
+// "Mask with these counts"; mask data (a masking run's `-outfmt maskinfo_*` output, `maskDataName`) offers "Use as
+// -mask_data in makeblastdb". A tool that writes its files into the run's directory (makeblastdb, line WW WW4b2) has
 // them listed, each to download and all in one tar archive, and its database offers "Use as Database
 // (-db)" and, for a nucleotide one, "Use as Repeats database (-filtering_db)".
 import { computed, nextTick, ref, shallowRef, useId, watch } from 'vue';

@@ -21,7 +21,7 @@ export interface AvailabilityDeps {
    * which asks the engine again (recheck).
    */
   readonly draft: { readonly state: Store<DraftState> } & Pick<SearchDraft, 'askAgain'>;
-  /** The tool tabs' forms (WindowMasker, Format Archive), whose describeTool and validateTool can also observe an unavailable engine. */
+  /** The tool tabs' forms (WindowMasker, Masking, Format Archive), whose describeTool and validateTool can also observe an unavailable engine. */
   readonly tools?: readonly ToolForm[];
   /** Settles when the Data worker could not start or ended: for good, as no call of it can succeed again. */
   readonly dataWorkerEnded: Promise<Error>;

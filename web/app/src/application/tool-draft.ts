@@ -1,10 +1,9 @@
 // The WindowMasker form draft (WW3b DESIGN §2, §4): independent of queued and completed runs,
 // driven by `ToolEngine.describeTool('windowmasker')` (-xmlhelp) and validated by `validateTool`
-// through the tool drafts' shared core (`ToolDraftCore`: files of the run, check, submit).
-// Large inputs stay as disk/OPFS-backed Files: compressed inputs inflate into session OPFS via
-// `DataGateway.inflateToSessionFile`, and combined FASTA files join Blob references by checking
-// only the final byte of each non-final file so page JS heap never holds the input sequences.
-import { isUnavailable } from 'losat/ports';
+// through the tool drafts' shared core (`ToolDraftCore`: files of the run, check, submit). Its
+// FASTA input (paste, files inflated into session OPFS, Combined or Separate runs, the `-in` name of
+// a BLAST database) is the one that the Masking tab reads too (`FastaToolDraft`).
+import type { DirectoryFile } from 'losat/domain';
 import { splitOptions } from '../domain/argv';
 import { normalizeRunPath } from '../domain/blast-db';
 import { countsName } from '../domain/counts';
@@ -18,32 +17,11 @@ import {
   type WindowMaskerStage,
 } from '../domain/tools';
 import type { DataGateway } from '../ports/data';
-import { failureText } from './availability';
 import type { ToolDirectoryFile, ToolRequest } from './coordinator';
-import type { InputMode } from './draft';
-import { SessionFiles } from './session-files';
-import {
-  foundDatabase,
-  ToolDraftCore,
-  type StatePatch,
-  type ToolDraftCoreDeps,
-  type ToolFormState,
-} from './tool-draft-core';
+import { EMPTY_FASTA_INPUT, FastaToolDraft, type FastaInputState, type FastaToolDraftDeps } from './fasta-tool-draft';
 
 export type { ToolExtraFile } from './tool-draft-core';
-
-/** One FASTA file added to WindowMasker's Input block (inflated into OPFS when compressed). */
-export interface ToolInputFile {
-  readonly key: string;
-  readonly name: string;
-  readonly size: number;
-  readonly file: File;
-  readonly status: 'inflating' | 'ready' | 'failed';
-  readonly inflatedFrom?: string;
-  readonly sessionToken?: string;
-  readonly error?: string;
-  readonly unavailable?: true;
-}
+export type { ToolInputFile } from './fasta-tool-draft';
 
 /** Counts file selected for Mask (`-ustat`) or Convert counts (`-in`). */
 export type ToolCountsChoice =
@@ -59,66 +37,41 @@ export type ToolCountsChoice =
   | { readonly kind: 'saved'; readonly taxid: number; readonly name: string; readonly size: number }
   | { readonly kind: 'file'; readonly file: File; readonly name: string; readonly size: number };
 
-export interface ToolDraftState extends ToolFormState {
+export interface ToolDraftState extends FastaInputState {
   readonly stage: WindowMaskerStage;
   readonly values: Readonly<Record<WindowMaskerStage, FormValues>>;
   readonly extra: Readonly<Record<WindowMaskerStage, string>>;
   readonly outNames: Readonly<Record<WindowMaskerStage, string>>;
   readonly outEdited: Readonly<Record<WindowMaskerStage, boolean>>;
-  readonly fastaPaste: string;
-  readonly fastaFiles: readonly ToolInputFile[];
-  readonly fastaMode: InputMode;
-  /** The Input name typed (`-in` of `-infmt blastdb` or `seqids`, or of `-fa_list`), as the command line takes it. */
-  readonly blastDbIn: string;
-  /** Whether the user typed the Input name; until then the files of the run name it (`inName`). */
-  readonly blastDbInEdited: boolean;
   readonly ustatSource: ToolCountsChoice;
   readonly convertSource: ToolCountsChoice;
 }
 
-export interface ToolDraftDeps extends ToolDraftCoreDeps {
+export interface ToolDraftDeps extends FastaToolDraftDeps {
   readonly data: Pick<DataGateway, 'inflateToSessionFile' | 'dropSessionFile' | 'getToolOutputFile'>;
   /** Reads a counts file saved in this browser for a taxonomy ID (OPFS-backed File). */
   readonly readSavedCounts?: (taxid: number) => Promise<File | undefined>;
-  /** Shared holder tracker for inflated session files; defaults to a draft-local instance in unit tests. */
-  readonly sessionFiles?: SessionFiles;
 }
 
 const STAGES: readonly WindowMaskerStage[] = ['mk_counts', 'mask', 'convert'];
-const PASTE_NAME = 'input.fa';
-const COMBINED_NAME = 'combined_input.fa';
-const LF = 0x0a;
 
-export class ToolDraft extends ToolDraftCore<ToolDraftState> {
-  private readonly sessionFiles: SessionFiles;
-
+export class ToolDraft extends FastaToolDraft<ToolDraftState> {
   constructor(private readonly deps: ToolDraftDeps) {
-    const sessionFiles =
-      deps.sessionFiles ?? new SessionFiles((token) => void deps.data.dropSessionFile(token).catch(() => undefined));
     const emptyValues = Object.fromEntries(STAGES.map((stage) => [stage, Object.freeze({})])) as Record<WindowMaskerStage, FormValues>;
     const emptyExtra = Object.fromEntries(STAGES.map((stage) => [stage, ''])) as Record<WindowMaskerStage, string>;
-    super(
-      'windowmasker',
-      { ...deps, sessionFiles },
-      {
-        stage: 'mk_counts',
-        values: emptyValues,
-        extra: emptyExtra,
-        outNames: { mk_counts: defaultCountsOutName(undefined), mask: '', convert: defaultCountsOutName(undefined) },
-        outEdited: { mk_counts: false, mask: false, convert: false },
-        fastaPaste: '',
-        fastaFiles: [],
-        fastaMode: 'combined',
-        blastDbIn: '',
-        blastDbInEdited: false,
-        ustatSource: { kind: 'none' },
-        convertSource: { kind: 'none' },
-        runFiles: [],
-        validation: { state: 'idle' },
-        submitting: false,
-      },
-    );
-    this.sessionFiles = sessionFiles;
+    super('windowmasker', deps, {
+      stage: 'mk_counts',
+      values: emptyValues,
+      extra: emptyExtra,
+      outNames: { mk_counts: defaultCountsOutName(undefined), mask: '', convert: defaultCountsOutName(undefined) },
+      outEdited: { mk_counts: false, mask: false, convert: false },
+      ...EMPTY_FASTA_INPUT,
+      ustatSource: { kind: 'none' },
+      convertSource: { kind: 'none' },
+      runFiles: [],
+      validation: { state: 'idle' },
+      submitting: false,
+    });
   }
 
   // --- stage and options ------------------------------------------------------------------
@@ -197,59 +150,7 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
     this.scheduleValidation();
   }
 
-  // --- FASTA, blastdb, counts and run directory files -------------------------------------
-
-  setFastaPaste(text: string): void {
-    this.set({ fastaPaste: text, message: undefined });
-    this.scheduleValidation();
-  }
-
-  setFastaMode(mode: InputMode): void {
-    this.set({ fastaMode: mode, message: undefined });
-    this.scheduleValidation();
-  }
-
-  addFastaFiles(files: readonly File[]): void {
-    if (files.length === 0) return;
-    const existing = new Set(this.state.get().fastaFiles.map((entry) => entry.name));
-    const added: ToolInputFile[] = [];
-    for (const file of files) {
-      const entryName = normalizeRunPath(file.name);
-      if (entryName === undefined) {
-        this.reportError(`Invalid file name: "${file.name}".`);
-        continue;
-      }
-      if (existing.has(entryName)) {
-        this.reportError(`A file named "${entryName}" is already added.`);
-        continue;
-      }
-      existing.add(entryName);
-      const key = `fa-${this.nextKey++}`;
-      added.push({ key, name: entryName, size: file.size, file, status: 'inflating' });
-    }
-    if (added.length === 0) return;
-    this.set({
-      fastaFiles: Object.freeze([...this.state.get().fastaFiles, ...added]),
-      message: undefined,
-    });
-    for (const entry of added) void this.inflateFastaEntry(entry.key, entry.file);
-  }
-
-  removeFastaFile(key: string): void {
-    const target = this.state.get().fastaFiles.find((entry) => entry.key === key);
-    if (target === undefined) return;
-    this.sessionFiles.release(`form:${key}`);
-    this.set({
-      fastaFiles: Object.freeze(this.state.get().fastaFiles.filter((entry) => entry.key !== key)),
-      message: undefined,
-    });
-    this.scheduleValidation();
-  }
-
-  setBlastDbIn(name: string): void {
-    this.set({ blastDbIn: name, blastDbInEdited: true, message: undefined });
-    this.scheduleValidation();
-  }
+  // --- counts and run directory files ------------------------------------------------------
 
   setUstatSession(runId: string, runNumber: number, key: string, name: string, size: number): void {
     this.set({
@@ -317,31 +218,6 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
     this.scheduleValidation();
   }
 
-  /**
-   * The Input name (`-in` when the stage does not read the FASTA box): the name typed, or, until one is typed, the BLAST
-   * database that the files of the run hold, with `-infmt blastdb` only (`foundDatabase`: a SeqDB name list,
-   * `"my dbs/wm"`; line WW, WW4d), as makeblastdb's `dbInName` is; none when the list cannot carry its name
-   * (`databaseRefusal`). With `-infmt seqids` or `-fa_list`, `-in` is one file's name, which the user types.
-   */
-  inName(state: ToolDraftState = this.state.get()): string {
-    if (state.blastDbInEdited) return state.blastDbIn;
-    return this.foundIn(state)?.written ?? '';
-  }
-
-  /**
-   * Why the BLAST database that the files of the run hold cannot be `-in` (a name with a double quote), while it would
-   * name `-in`: `-infmt blastdb`, its files in the run, no name typed. The Input block, the check and "Run LOSAT" say it
-   * for as long as that lasts (line WW, WW4d R1).
-   */
-  databaseRefusal(state: ToolDraftState = this.state.get()): string | undefined {
-    return state.blastDbInEdited ? undefined : this.foundIn(state)?.refusal;
-  }
-
-  /** A name typed and then cleared gives the Input name back to the files of the run, when files are added. */
-  protected override runFilesAdded(state: ToolDraftState): StatePatch<ToolDraftState> {
-    return state.blastDbInEdited && state.blastDbIn.trim() === '' ? { blastDbIn: '', blastDbInEdited: false } : {};
-  }
-
   // --- command line & validation ----------------------------------------------------------
 
   /** Whether the active stage currently reads `-in` as FASTA files/paste rather than a named blastdb/seqids/fa_list. */
@@ -374,13 +250,7 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
 
   /** Whether the WindowMasker tab holds user inputs or files that a reload would lose. */
   holdsInputs(state: ToolDraftState = this.state.get()): boolean {
-    return (
-      state.fastaPaste.trim() !== '' ||
-      state.fastaFiles.length > 0 ||
-      state.runFiles.length > 0 ||
-      state.ustatSource.kind !== 'none' ||
-      state.convertSource.kind !== 'none'
-    );
+    return this.holdsFastaInputs(state) || state.ustatSource.kind !== 'none' || state.convertSource.kind !== 'none';
   }
 
   // --- what the core asks -----------------------------------------------------------------
@@ -406,20 +276,29 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
     return argv;
   }
 
+  /** WindowMasker's `-in` with the stage's `-infmt` (`isSeqdbList`); Convert's `-in` is its counts file. */
+  protected override inOption(state: ToolDraftState): ListOption | undefined {
+    if (state.stage === 'convert') return undefined;
+    const infmt = state.values[state.stage]['-infmt'];
+    return { command: 'windowmasker', flag: '-in', inputFormat: typeof infmt === 'string' ? infmt : 'fasta' };
+  }
+
+  /**
+   * The check's directory holds the inputs that the run reads, under their names (review of WW4c, F2): the FASTA
+   * input and, for Mask, the `-ustat` counts; for Convert the counts. A counts file that the form reads only when the
+   * run starts (saved or made in the session) stands in by its name, as the check does not read the counts.
+   */
+  protected override validationInputs(state: ToolDraftState): readonly DirectoryFile[] {
+    if (toolPrintsKind(this.buildArgv(state, this.parseExtra(state))) !== null) return [];
+    const counts = (choice: ToolCountsChoice): readonly DirectoryFile[] =>
+      choice.kind === 'none' ? [] : [{ name: choice.name, file: choice.kind === 'file' ? choice.file : new Blob([]) }];
+    if (state.stage === 'convert') return counts(state.convertSource);
+    return [...this.fastaCheckInputs(state), ...(state.stage === 'mask' ? counts(state.ustatSource) : [])];
+  }
+
   protected async buildRequests(state: ToolDraftState, extra: readonly string[]): Promise<readonly ToolRequest[]> {
     const prints = toolPrintsKind(this.buildArgv(state, extra));
     return prints !== null ? [this.buildPrintRequest(state, extra, prints)] : this.buildStageRequests(state, extra);
-  }
-
-  protected override heldTokens(state: ToolDraftState): readonly string[] {
-    return state.fastaFiles.flatMap((entry) => (entry.sessionToken === undefined ? [] : [entry.sessionToken]));
-  }
-
-  protected override inputsUnavailable(state: ToolDraftState): string | undefined {
-    for (const file of state.fastaFiles) {
-      if (file.status === 'failed' && file.unavailable === true && file.error !== undefined) return file.error;
-    }
-    return undefined;
   }
 
   // --- internals --------------------------------------------------------------------------
@@ -439,15 +318,6 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
       ...(description === undefined ? {} : { description }),
       extra,
     });
-  }
-
-  /** The BLAST database of the files of the run, for the stage's `-in` (`foundDatabase`; Convert's `-in` is its counts). */
-  private foundIn(state: ToolDraftState): ReturnType<typeof foundDatabase> {
-    return state.stage === 'convert' ? undefined : foundDatabase(windowMaskerIn(state), state.runFiles);
-  }
-
-  private releaseSessionToken(token: string | undefined): void {
-    if (token !== undefined) void this.deps.data.dropSessionFile(token).catch(() => undefined);
   }
 
   private buildPrintRequest(state: ToolDraftState, extraWords: readonly string[], prints: 'help' | 'version'): ToolRequest {
@@ -471,76 +341,21 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
 
     const ustatFile =
       stage === 'mask' ? await this.resolveCountsChoice(state.ustatSource, 'Choose a counts file for -ustat.') : undefined;
-
-    if (!this.usesFastaBox(state)) {
-      const refusal = this.databaseRefusal(state);
-      if (refusal !== undefined) throw new Error(refusal);
-      const inputName = this.inName(state).trim();
-      if (inputName === '') throw new Error('Enter an input name or open files.');
-      const dir = this.runDirectoryOf(state, ustatFile === undefined ? [] : [ustatFile]);
-      const argv = this.buildArgv(state, extraWords, { inputName, ustatName: ustatFile?.name });
-      return this.req(stage, argv, dir);
-    }
-
-    if (state.fastaFiles.some((entry) => entry.status === 'inflating')) {
-      throw new Error('Wait until the opened files finish reading.');
-    }
-    const failed = state.fastaFiles.find((entry) => entry.status === 'failed');
-    if (failed !== undefined) {
-      throw new Error(`${failed.name}: ${failed.error ?? 'could not be read'}`);
-    }
-
-    const parts: Array<ToolDirectoryFile & { readonly sessionToken?: string }> = [];
-    if (state.fastaPaste.trim() !== '') {
-      parts.push({
-        name: PASTE_NAME,
-        file: new File([state.fastaPaste], PASTE_NAME, { type: 'text/plain' }),
-        origin: { kind: 'pasted' },
-      });
-    }
-    for (const entry of state.fastaFiles) {
-      parts.push({
-        name: entry.name,
-        file: entry.file,
-        origin: entry.inflatedFrom === undefined ? { kind: 'picked' } : { kind: 'inflated', from: entry.inflatedFrom },
-        ...(entry.sessionToken === undefined ? {} : { sessionToken: entry.sessionToken }),
-      });
-    }
-    if (parts.length === 0) {
-      throw new Error('Enter sequences or open FASTA files.');
-    }
-
-    const makeRequest = (inputEntry: ToolDirectoryFile, sessionTokens: readonly string[]): ToolRequest => {
-      const directory = this.runDirectoryOf(state, [inputEntry, ...(ustatFile === undefined ? [] : [ustatFile])]);
-      const argv = this.buildArgv(state, extraWords, { inputName: inputEntry.name, ustatName: ustatFile?.name });
+    const inputs = await this.runInputs(state);
+    return inputs.map((input): ToolRequest => {
+      const directory = this.runDirectoryOf(state, [
+        ...(input.file === undefined ? [] : [input.file]),
+        ...(ustatFile === undefined ? [] : [ustatFile]),
+      ]);
+      const argv = this.buildArgv(state, extraWords, { inputName: input.name, ustatName: ustatFile?.name });
       return {
         tool: 'windowmasker',
         stage,
         argv,
         directory,
-        ...(sessionTokens.length === 0 ? {} : { sessionTokens: Object.freeze([...sessionTokens]) }),
+        ...(input.sessionTokens.length === 0 ? {} : { sessionTokens: Object.freeze([...input.sessionTokens]) }),
       };
-    };
-
-    if (parts.length === 1) {
-      const only = parts[0]!;
-      return [makeRequest(only, only.sessionToken === undefined ? [] : [only.sessionToken])];
-    }
-    if (state.fastaMode === 'separate') {
-      return parts.map((part) => makeRequest(part, part.sessionToken === undefined ? [] : [part.sessionToken]));
-    }
-    const combined = await combineFastaFiles(parts);
-    const combinedTokens = parts.flatMap((part) => (part.sessionToken === undefined ? [] : [part.sessionToken]));
-    return [
-      makeRequest(
-        {
-          name: COMBINED_NAME,
-          file: combined,
-          origin: { kind: 'combined', parts: Object.freeze(parts.map((part) => part.name)) },
-        },
-        combinedTokens,
-      ),
-    ];
+    });
   }
 
   private async resolveCountsChoice(choice: ToolCountsChoice, emptyMessage: string): Promise<ToolDirectoryFile> {
@@ -563,64 +378,8 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
     if (state.stage === 'convert') {
       return state.convertSource.kind === 'none' ? undefined : state.convertSource.name;
     }
-    if (!this.usesFastaBox(state)) {
-      const name = this.inName(state).trim();
-      return name === '' ? undefined : name;
-    }
-    const count = (state.fastaPaste.trim() !== '' ? 1 : 0) + state.fastaFiles.length;
-    if (count === 0) return undefined;
-    if (count === 1) return state.fastaPaste.trim() !== '' ? PASTE_NAME : state.fastaFiles[0]!.name;
-    if (state.fastaMode === 'combined') return COMBINED_NAME;
-    return state.fastaPaste.trim() !== '' ? PASTE_NAME : state.fastaFiles[0]!.name;
+    return this.fastaInputName(state);
   }
-
-  private async inflateFastaEntry(key: string, file: File): Promise<void> {
-    try {
-      const ref = await this.deps.data.inflateToSessionFile(file);
-      const current = this.state.get().fastaFiles;
-      const stillPresent = current.some((entry) => entry.key === key);
-      if (!stillPresent) {
-        this.releaseSessionToken(ref.token);
-        return;
-      }
-      const conflict = current.some((entry) => entry.key !== key && entry.name === ref.name);
-      if (conflict) {
-        this.releaseSessionToken(ref.token);
-        this.updateFastaEntry(key, { status: 'failed', error: `A file named "${ref.name}" is already added.` });
-        return;
-      }
-      if (ref.token !== undefined) this.sessionFiles.set(`form:${key}`, [ref.token]);
-      this.updateFastaEntry(key, {
-        name: ref.name,
-        size: ref.size,
-        file: ref.file,
-        status: 'ready',
-        ...(ref.inflatedFrom === undefined ? {} : { inflatedFrom: ref.inflatedFrom }),
-        ...(ref.token === undefined ? {} : { sessionToken: ref.token }),
-      });
-      this.scheduleValidation();
-    } catch (error) {
-      this.updateFastaEntry(key, {
-        status: 'failed',
-        error: failureText(error),
-        ...(isUnavailable(error) ? { unavailable: true as const } : {}),
-      });
-    }
-  }
-
-  private updateFastaEntry(key: string, patch: Partial<ToolInputFile>): void {
-    this.set({
-      fastaFiles: Object.freeze(
-        this.state.get().fastaFiles.map((entry) => (entry.key === key ? { ...entry, ...patch } : entry)),
-      ),
-    });
-  }
-}
-
-/** WindowMasker's `-in` with the stage's `-infmt`, which decides whether it is a SeqDB name list (`isSeqdbList`). */
-function windowMaskerIn(state: ToolDraftState): ListOption {
-  const infmt = state.values[state.stage]['-infmt'];
-  return { command: 'windowmasker', flag: '-in', inputFormat: typeof infmt === 'string' ? infmt : 'fasta' };
 }
 
 function sessionCountsChoice(runId: string, runNumber: number, key: string, name: string, size: number): ToolCountsChoice {
@@ -635,21 +394,4 @@ function fileCountsChoice(file: File | undefined): ToolCountsChoice {
   return file === undefined
     ? { kind: 'none' }
     : { kind: 'file', file, name: normalizeRunPath(file.name) ?? file.name, size: file.size };
-}
-
-/**
- * Joins FASTA files into one `combined_input.fa` Blob without copying their bytes into page memory:
- * reads only the final 1 byte of each non-final file to insert `\n` when missing.
- */
-async function combineFastaFiles(parts: readonly ToolDirectoryFile[]): Promise<File> {
-  const blobs: BlobPart[] = [];
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]!;
-    blobs.push(part.file);
-    if (i + 1 < parts.length && part.file.size > 0) {
-      const tail = new Uint8Array(await part.file.slice(part.file.size - 1, part.file.size).arrayBuffer());
-      if (tail[0] !== LF) blobs.push('\n');
-    }
-  }
-  return new File(blobs, COMBINED_NAME, { type: 'text/plain' });
 }

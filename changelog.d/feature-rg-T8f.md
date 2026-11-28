@@ -1,0 +1,1 @@
+- `-outfmt 11` whose output fails (for example `-out /dev/full`) after a query or subject title with a byte that the archive replaces (`Error: (803.7)`): the error archive now keeps that error, as NCBI BLAST+ 2.17.0 does, so the `error at byte N` of its write fault has NCBI's number in every search program, with and without `-import_search_strategy` (line RG, T8f).

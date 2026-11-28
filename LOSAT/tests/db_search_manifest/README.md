@@ -56,6 +56,10 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   both sides; `dev_nw.fna`'s warning on a failed standard error and in one limited file with the report; a strategy
   file that LOSAT refuses on a device that fails at NCBI's prolog, in every program; and closed pipes for formats 0, 5, 6, 11 (and
   blastn's 17).
+  Line RG item T8f (2026-11-28) adds the rows `db.device.*.apost.*` (out-full, outfmt 11, every search program;
+  `tests/db_search/apost`, README.md there): a query or subject title with a byte that the archive's stream replaces,
+  whose 803.7 post the error archive holds where the archive's write throws (with a strategy, over two query batches,
+  and over psiblast's queries and rounds, where an archive that was written drops it).
 - `kind ncbi` with `ncbi-copies: PATH [NAME=VALUE ...]` in covers (a copy row; up to a ` | ` or the end): the
   expectation is made from NCBI's run on the oracle query file PATH (relative to LOSAT/) in place of the row's query
   file. With unified P-values (`blastp -comp_based_stats 1u`, `2u`, `3u`) NCBI BLAST+ 2.17.0 adjusts a query's E-values

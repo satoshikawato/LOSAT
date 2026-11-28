@@ -3050,3 +3050,18 @@ including `psiblast` one-round and multi-round runs and `rpsblast`/`rpstblastn` 
   negative-pair gaps (`q_neg_gap*`, `q_first`), valid letters only in a gap (`q_gapvalid`),
   unsearchable batch (`q_alln310`), and split duplicate-id batches (`q_dup300`, `q_dup_lc_both`,
   `q_dup_lc_first`, `q_dup_alln`).
+
+## `apost/`: outfmt 11 posts of a replaced title byte on a failing device (line RG item T8f)
+
+Rows `db.device.*.apost.*` (`tests/db_search_manifest/<program>.device.tsv`, device `out-full`). The queries
+`nslice_qbad.fna`, `bslice_qbad.fna`, `tslice_qbad.faa`, `xslice_qbad.fna` and `p3bad.faa` are `nslice_q.fna`,
+`bslice_q.fna`, `tslice_q.faa`, `xslice_q.fna` and `p3.faa` with ` x<0x81>y` after the first title's first word;
+`q40bad.faa` and `rnqbad.fna` are `tests/fasta/rps/q40.faa` and `tests/fasta/rps/nq.fna` changed the same way.
+`nq.fna` (900 bases), `nq2.fna` (`nq.fna` twice, the second as `nq2`), `lone_bad.fna` (`Subject_9 bad x<0x81>y
+title`, 1,350 bases whose first 300 are `nq.fna`'s), `pq.faa` (`nq.fna`'s first frame translated, stops left out) and
+`ps_bad.faa` (`lone_bad.fna`'s first frame translated, the same title) are line RG-F's probe inputs of 2026-11-28.
+`blastn_nslice.ss` and `tblastx_xslice.ss` are NCBI BLAST+ 2.17.0's `-export_search_strategy` of `blastn -db nslice
+-query nslice_q.fna` and `tblastx -db xslice -query xslice_q.fna` (`-num_threads 1`). NCBI's archive stream replaces
+the byte (`Error: (803.7) [<program>] Blast4-archive...title`), its handler saves that post, and where the archive's
+write then throws the error archive holds it after the archive's messages (its write fault, `error at byte N`, counts
+it); where the archive was written (its `Close` alone failed) the post is dropped with the archive's messages.

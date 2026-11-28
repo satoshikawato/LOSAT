@@ -894,6 +894,11 @@ fn write_error_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, messages: &[Mes
 /// as NCBI writes them: each after the bytes of the document that NCBI's buffer had written to
 /// the output by then (`Traced::posting`; NCBI's `cerr` is tied to `cout`).
 ///
+/// The messages are NCBI's one list of the application's saved posts (`CBlastAppDiagHandler`):
+/// the archive holds a copy of it, the posts made while the archive is written are saved after
+/// it, and the application's `ResetMessages` after a written archive empties it; where the write
+/// throws, the list keeps the archive's messages and those posts for the error archive.
+///
 /// The archive is one object of NCBI's object stream on the report's stream
 /// (`ostream::Site::Serial`, `CBlastFormat::PrintArchive`: the archive inserted with `MSerial_AsnText`),
 /// then `~CObjectOStream`'s flush. LOSAT inserts it in large parts; where one fails at the device,
@@ -921,8 +926,10 @@ pub fn write_archive<A: AlignSource>(
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:265-276
     // NCBI's exception leaves `WriteArchive` before the application's `ResetMessages` (a failed
     // write of the device, or the throw of its stream at a `NULL` list element,
-    // `encoder::NullElement`): the archive's messages are saved still, in their order, for the
-    // error archive (`PrintErrorArchive` of the application's `CATCH_ALL`).
+    // `encoder::NullElement`): the archive's messages are saved still, in their order, and after
+    // them the posts made while it was written before the throw (`post_replaced`; NCBI's handler
+    // saves every post, blast_aux.cpp:1155-1172), for the error archive (`PrintErrorArchive` of
+    // the application's `CATCH_ALL`).
     let failed = |error: anyhow::Error| {
         handle.restore_messages(messages.clone());
         error
@@ -934,6 +941,10 @@ pub fn write_archive<A: AlignSource>(
     } else {
         written.map_err(failed)?;
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:304-306
+    // `WriteArchive` returned (also where only `Close`'s flush failed): `ResetMessages` drops the
+    // posts made while the archive was written.
+    drop(handle.take_messages());
     sink.site(Site::Report)?;
     Ok(())
 }

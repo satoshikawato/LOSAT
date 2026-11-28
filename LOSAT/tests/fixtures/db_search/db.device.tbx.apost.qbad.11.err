@@ -1,0 +1,6 @@
+Error: (803.7) [tblastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x81] in string at line 23
+q_p_plus xÅy PemoMJNVA 10601-12200
+Error: (802.4) [tblastx] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+BLAST failed to write output
+Error: (802.5) [tblastx] CObjectOStream: error at byte 588: stack is empty: write fault

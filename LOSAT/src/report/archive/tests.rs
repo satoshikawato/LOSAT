@@ -527,6 +527,156 @@ fn the_error_archive_of_a_failed_report_has_ncbis_length() {
     assert!(sink.ends_with(b"}\n"));
 }
 
+/// Line RG item T8f: NCBI's handler saves the 803.7 posts of the bytes that the archive's stream
+/// replaces (blast_aux.cpp:1155-1172) after the archive took its messages; the application's
+/// `ResetMessages` drops them after a written archive (blastn_app.cpp:304-306), and where the
+/// write throws they stay, after the archive's messages, for the error archive.
+#[test]
+fn the_posts_of_an_archive_s_replaced_bytes_are_dropped_after_it_or_kept_where_it_fails() {
+    struct NoAligns;
+    impl AlignSource for NoAligns {
+        fn write<E: crate::report::serial::encoder::Encoder>(
+            &mut self,
+            _enc: &mut E,
+            _flush: &mut dyn FnMut(&mut E),
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+    /// A device that takes nothing (`-out /dev/full`).
+    struct Full;
+    impl std::io::Write for Full {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from_raw_os_error(28))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    impl crate::report::ostream::ReportWrite for Full {}
+    let handle = ArchiveHandle::new(
+        ArchiveEncoding::Text,
+        ArchiveRequest {
+            program: "tblastx",
+            application: "tblastx",
+            service: "plain",
+            algorithm: Vec::new(),
+            database: Some(b"in/db".to_vec()),
+            step_number: None,
+        },
+        OptionsHandle::default(),
+    );
+    let queries = [BioseqInput {
+        id: "Query_1",
+        ids: None,
+        seq_loc: None,
+        defline: std::borrow::Cow::Borrowed(b">q1 bad x\x81y title"),
+        title: b"q1 bad x\x81y title",
+        letters: b"ACGTACGTACGT",
+        protein: false,
+    }];
+    let batch = BatchArchive {
+        request: writer::RequestInputs {
+            queries: writer::RequestQueries::Bioseqs(&queries),
+            subjects: &[],
+            required: None,
+            lcase_masks: &[],
+        },
+        masks: &[],
+        ka_blocks: [KaBlock::missing(false), KaBlock::missing(true)],
+        search_space: 0,
+        length_adjustment: 0,
+        searched_space: None,
+        round: None,
+    };
+    let before = (
+        WARNING,
+        b"Warning: [tblastx] a warning of the batch".to_vec(),
+    );
+    // A written archive: it holds the message saved before it, not the post, and the post is
+    // dropped after it.
+    handle.post(before.0, &before.1);
+    let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());
+    write_archive(&handle, &batch, &mut NoAligns, &mut sink, &mut diagnostics).unwrap();
+    let post = String::from_utf8_lossy(&diagnostics).into_owned();
+    assert!(
+        post.starts_with(
+            "Error: (803.7) [tblastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.\
+             seq-set.E.seq.descr.E.title\nBad char [0x81] in string at line "
+        ),
+        "{post}"
+    );
+    let text = String::from_utf8(sink).unwrap();
+    assert!(
+        text.contains("a warning of the batch") && !text.contains("803.7"),
+        "{text}"
+    );
+    assert!(handle.take_messages().is_empty());
+    // A write that fails: the batch's message, then the post, for the error archive.
+    handle.post(before.0, &before.1);
+    let mut failed_posts = Vec::new();
+    write_archive(&handle, &batch, &mut NoAligns, &mut Full, &mut failed_posts).unwrap_err();
+    assert_eq!(failed_posts, diagnostics);
+    assert_eq!(
+        handle.take_messages(),
+        vec![
+            before,
+            (ERROR, crate::report::diag_log::sanitize(&diagnostics))
+        ]
+    );
+}
+
+/// The write fault of the error archive after a failed archive counts the saved posts of the
+/// archive's replaced bytes (line RG item T8f; NCBI BLAST+ 2.17.0, frozen as
+/// `LOSAT/tests/fixtures/db_search/db.device.tbx.apost.sbad.11.err`, 563, and
+/// `db.device.bn.apost.ssqbad.11.err`, 891, the strategy's warnings first; LOSAT counted 357 and
+/// 676 without the post).
+#[test]
+fn the_error_archive_of_a_failed_archive_counts_its_saved_posts() {
+    let failure = |program: &str| -> Vec<Message> {
+        let error: anyhow::Error = crate::cli::NativeError {
+            exit: 6,
+            message: format!(
+                "Error: (802.4) [{program}] [Cannot close serializing output stream] \
+                 Exception: basic_ios::clear: iostream error\nBLAST failed to write output\n"
+            ),
+        }
+        .into();
+        error_lines(&error, false).expect("the output error's lines")
+    };
+    let post = |text: &[u8]| (ERROR, crate::report::diag_log::sanitize(text));
+    let mut tblastx = vec![post(
+        b"Error: (803.7) [tblastx] Blast4-archive.request.body.queue-search.subject.sequences.E.\
+          descr.E.title\nBad char [0x81] in string at line 55\nSubject_9 bad x\x81y title\n",
+    )];
+    assert_eq!(
+        writer::error_archive_fault(ArchiveEncoding::Text, &failure("tblastx")),
+        357
+    );
+    tblastx.extend(failure("tblastx"));
+    assert_eq!(
+        writer::error_archive_fault(ArchiveEncoding::Text, &tblastx),
+        563
+    );
+    let mut blastn: Vec<Message> = [
+        "Warning: [blastn] Overriding database/subject in saved strategy",
+        "Warning: [blastn] Overriding query in saved strategy",
+        "Warning: [blastn] mt_mode cannot be overridden when using a search strategy",
+    ]
+    .iter()
+    .map(|line| (WARNING, line.as_bytes().to_vec()))
+    .collect();
+    blastn.push(post(
+        b"Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.\
+          seq-set.E.seq.descr.E.title\nBad char [0x81] in string at line 23\nq_a x\x81y 1500 of a\n",
+    ));
+    blastn.extend(failure("blastn"));
+    assert_eq!(
+        writer::error_archive_fault(ArchiveEncoding::Text, &blastn),
+        891
+    );
+}
+
 /// psiblast's archive of a round (`ArchiveRound`, psiblast_app.cpp:259-271): `Web_StepNumber` is
 /// the round's number with `-db` (none with `-subject`), and a PSSM round records the
 /// composition-based statistics of its set-up in place of the handle's.

@@ -1,0 +1,10 @@
+Error: (803.7) [psiblast] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x81] in string at line 23
+p01 xÅy first protein [Test organism]
+Error: (802.4) [psiblast] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+Error: (803.7) [psiblast] Blast4-archive.request.body.queue-search.queries.pssm.pssm.query.seq.descr.E.title
+Bad char [0x81] in string at line 18
+p01 xÅy first protein [Test organism]
+Error: (802.4) [psiblast] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+BLAST failed to write output
+Error: (802.5) [psiblast] CObjectOStream: error at byte 588: stack is empty: write fault

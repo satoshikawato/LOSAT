@@ -2864,19 +2864,11 @@ fn search(
             html: resolved.html.clone(),
             is_html: args.html,
             // NCBI's posts of each read of a reported sequence's definition line by the rows or
-            // the pairwise report.
+            // the pairwise report, made where the database has a title that posts (`shared::title_decodes`);
+            // each reader asks whether its read posts (`TabularWriter::title_posts`,
+            // `QueryWarnings::title_read`).
             title_decodes: match (&reported, database) {
-                (Some(reported), Some(database))
-                    if outputs.formats.iter().any(|format| {
-                        crate::algorithm::common::database::FormatterTitleReads::takes_decodes(
-                            format.report_format(),
-                            super::tabular::tabular_spec(format.outfmt)
-                                .is_some_and(|spec| spec.reads_defline()),
-                        )
-                    }) =>
-                {
-                    database.title_decodes(reported)
-                }
+                (Some(reported), Some(database)) => database.title_decodes(reported),
                 _ => Default::default(),
             },
         };

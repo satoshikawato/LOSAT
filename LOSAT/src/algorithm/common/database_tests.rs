@@ -1215,59 +1215,6 @@ fn outfmt_taxdb_use_matches_ncbi_format_rules() {
     }
 }
 
-// RG-KB 9b-2: the reports that take NCBI's posts of each read of a reported title
-// (`FormatterTitleReads::takes_decodes`): the pairwise reports, BLAST XML, the XML2 and JSON
-// formats, the organism report, and the tables whose fields read the definition line; not SAM or
-// the Seq-aligns' formats, and no value that NCBI's reading refuses.
-#[test]
-fn every_report_that_reads_titles_takes_the_decodes() {
-    use crate::blastinput::app::ReportFormat::{self, *};
-    let takes = |format: Option<ReportFormat>, reads: bool| {
-        FormatterTitleReads::takes_decodes(format, reads)
-    };
-    for format in (0..=20).filter_map(ReportFormat::from_number) {
-        let (always, rows) = match FormatterTitleReads::of(format) {
-            FormatterTitleReads::Pairwise { .. }
-            | FormatterTitleReads::Hits
-            | FormatterTitleReads::Hsps => (true, false),
-            FormatterTitleReads::Rows => (false, true),
-            FormatterTitleReads::None => (false, false),
-        };
-        assert_eq!(takes(Some(format), false), always, "{format:?}");
-        assert_eq!(takes(Some(format), true), always || rows, "{format:?}");
-    }
-    for format in [
-        Pairwise,
-        QueryAnchoredIdentities,
-        QueryAnchoredNoIdentities,
-        FlatQueryAnchoredIdentities,
-        FlatQueryAnchoredNoIdentities,
-        Xml,
-        Xml2,
-        Json,
-        JsonS,
-        Xml2S,
-        TaxFormat,
-    ] {
-        assert!(takes(Some(format), false), "{format:?}");
-    }
-    for format in [
-        Tabular,
-        TabularWithComments,
-        CommaSeparatedValues,
-        CommaSeparatedValuesWithHeader,
-    ] {
-        assert!(
-            takes(Some(format), true) && !takes(Some(format), false),
-            "{format:?}"
-        );
-    }
-    for format in [Sam, AsnText, AsnBinary, ArchiveFormat, JsonSeqalign] {
-        assert!(!takes(Some(format), true), "{format:?}");
-    }
-    assert!(!takes(None, true));
-}
-
 #[test]
 fn linux_online_cpu_parsers_match_sysfs_and_proc_stat() {
     assert_eq!(parse_linux_cpu_list("0\n"), Some(1));

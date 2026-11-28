@@ -4102,13 +4102,8 @@ fn run_batch_loop(
                         batch_warnings.append(posts);
                     }
                     // NCBI's posts of the titles that the batch's Seq-aligns read.
-                    let titled = crate::algorithm::common::database::batch_title_posts(
-                        &database.db,
-                        aligned(),
-                        utf8.is_some(),
-                        title_prefetch,
-                        "TBLASTX",
-                    )?;
+                    let titled =
+                        database.batch_title_posts(aligned(), utf8.is_some(), title_prefetch)?;
                     warnings[start].append(&titled);
                     batch_warnings.append(&titled);
                 }
@@ -4853,11 +4848,11 @@ impl BatchReports<'_> {
             _ => None,
         };
         // NCBI's posts of each read of a reported sequence's definition line by the rows or the
-        // pairwise report.
+        // pairwise report, made where the database has a title that posts (`shared::title_decodes`);
+        // each reader asks whether its read posts (`TabularWriter::title_posts`,
+        // `QueryWarnings::title_read`).
         let title_decodes = match (&self.subjects, &database) {
-            (ShownSubjects::Database { database, .. }, Some(shown))
-                if super::super::database::takes_title_decodes(&outputs.formats) =>
-            {
+            (ShownSubjects::Database { database, .. }, Some(shown)) => {
                 database.title_decodes(shown.reported)
             }
             _ => Default::default(),

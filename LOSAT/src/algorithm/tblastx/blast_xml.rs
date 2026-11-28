@@ -376,7 +376,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         // NCBI's posts of the formatter's read of each `Hit`'s definition line.
         let titles = warnings
             .as_deref()
-            .and_then(crate::report::query_warnings::QueryWarnings::titles);
+            .and_then(crate::report::query_warnings::QueryWarnings::title_decodes);
         let written = document.query(&xml_run, &xml_query, &mut buf, |sink| {
             let mut first = 0usize;
             while first < query_hits.len() {

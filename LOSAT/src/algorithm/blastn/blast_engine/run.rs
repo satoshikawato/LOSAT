@@ -5705,19 +5705,12 @@ fn post_process_hits_and_write(
         // NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
         let later = format.later_warnings(keeps_later, &mut outputs.later_warnings, format_index);
         // NCBI's posts of each read of a subject's definition line by a table's rows or the
-        // pairwise report (`BlastnDatabase::title_decodes`).
+        // pairwise report (`BlastnDatabase::title_decodes`), made where the database has a title that
+        // posts; each reader asks whether its read posts (`TabularWriter::title_posts`,
+        // `QueryWarnings::title_read`).
         let title_decodes = match report.database_reader.zip(report.database_ordinals) {
-            Some((database, ordinals))
-                if crate::algorithm::common::database::FormatterTitleReads::takes_decodes(
-                    format.report_format(),
-                    output_format
-                        .tabular_spec()
-                        .is_some_and(crate::report::tabular::TabularSpec::reads_defline),
-                ) =>
-            {
-                database.title_decodes(ordinals)
-            }
-            _ => Default::default(),
+            Some((database, ordinals)) => database.title_decodes(ordinals),
+            None => Default::default(),
         };
         let mut format_warnings = (warning_lines.is_some()
             || later.is_some()

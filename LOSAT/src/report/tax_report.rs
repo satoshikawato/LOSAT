@@ -923,7 +923,7 @@ pub struct TaxQuery<'a> {
 /// (`ExtractBlastDefline`), their read again at the first line that the report shows
 /// (`GetDisplayIds`, after that line's title), and the lookup of a taxid (`GetTaxInfo`,
 /// `TaxLookups::messages`). Each read of the definition lines posts for a stored title with a
-/// byte outside ' ' ..= '~' (`QueryWarnings::titles`); a sequence that the scope finds as a query
+/// byte outside ' ' ..= '~' (`QueryWarnings::title_decodes`); a sequence that the scope finds as a query
 /// (`TaxSubjects::loads`) is neither loaded nor read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Step {
@@ -1008,7 +1008,7 @@ impl TaxReport {
     /// is flushed), in the order of NCBI's report (`Step`). `reads`: where the batch's prefetch is
     /// off, the texts of the subjects that the report reads one by one and the query's index among
     /// them (`ReadCursor::subject_read`); `titles`: the posts of each read of a subject's
-    /// definition lines (`QueryWarnings::titles`). A query that NCBI did not search
+    /// definition lines (`QueryWarnings::title_decodes`). A query that NCBI did not search
     /// (`TaxQuery::hsps`) is refused after its `Query=` block (`TaxReportRefusal`), where NCBI's
     /// report stops.
     #[allow(clippy::too_many_arguments)]
@@ -1116,7 +1116,7 @@ pub fn write_report(
         match warnings.as_deref_mut() {
             Some(warnings) => {
                 warnings.before_query(q_idx, &mut *writer)?;
-                let titles = warnings.titles();
+                let titles = warnings.title_decodes();
                 let (reads, sink) = warnings.reads_and_sink();
                 report.write_query(
                     q_idx,

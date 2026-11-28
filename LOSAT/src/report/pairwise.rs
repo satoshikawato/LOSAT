@@ -1794,7 +1794,7 @@ fn write_database_subject_heading<W: Write>(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2296-2303
     // The heading of a loaded subject (`x_PrintDefLine`) reads its definition line once, before
     // its bytes and the reads of its links, posting for the bytes of its title that NCBI replaces
-    // (`common::database::FormatterTitleReads::Pairwise`).
+    // (the formatter reads at `common::database::check_reported_title`).
     if !matches!(heading, DatabaseHeading::Skipped(_)) {
         place(super::query_warnings::ReportPlace::Titles(s_idx, 1), writer)?;
     }
@@ -4770,7 +4770,8 @@ fn write_description_row_start<W: Write>(
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
             // The line's subject (`x_FillDeflineAndId`, not on the row of NCBI's `catch`) reads
             // its definition line twice before the line, each read posting for the bytes of its
-            // title that NCBI replaces (`common::database::FormatterTitleReads::Pairwise`).
+            // title that NCBI replaces (the formatter reads at
+            // `common::database::check_reported_title`).
             if !label.caught {
                 place(
                     super::query_warnings::ReportPlace::Titles(rank.0, 2),

@@ -424,9 +424,8 @@ pub(super) fn write_blastx_tabular(
     let counts_by_fields = COUNTS_FIELDS.iter().any(|field| spec.has(*field));
     // Which rows read their subject (`TabularSpec::subject_fetch`).
     let fetch = spec.subject_fetch(crate::blastinput::app::Program::Blastx);
-    // Whether each row reads the subject's definition line (`TabularSpec::reads_defline`), and
-    // what each read posts (`ShownSubjects::title_decodes`).
-    let reads_defline = spec.reads_defline();
+    // What each row's read of the subject's definition line posts (`ShownSubjects::title_decodes`;
+    // `TabularWriter::title_posts`).
     let title_decodes = shown.title_decodes().filter(|titles| !titles.is_empty());
     let no_taxonomy = TabularTaxonomy::default();
     let loc = SubjectLoc::of(shown);
@@ -674,10 +673,10 @@ pub(super) fn write_blastx_tabular(
                         // The row's read of the subject's definition line posts for the bytes of
                         // its title that NCBI replaces (`TitleDecodes::write_read`), before the
                         // texts of the row's lookups.
-                        if let (Some(titles), true) = (title_decodes, reads_defline) {
-                            if table.reads_title(&tabular_subject) {
-                                titles.write_read(list.oid as u32, &mut *writer, &mut *stderr)?;
-                            }
+                        if let Some(titles) = title_decodes.filter(|&titles| {
+                            table.title_posts(&tabular_subject, Some(titles), list.oid as u32)
+                        }) {
+                            titles.write_read(list.oid as u32, &mut *writer, &mut *stderr)?;
                         }
                         // The texts of the row's lookups of the taxonomy database
                         // (`x_SetTaxInfoAll`, `x_SetTaxInfo`) follow the rows before it.

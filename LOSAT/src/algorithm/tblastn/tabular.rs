@@ -205,8 +205,6 @@ pub(super) fn write_tblastn_tabular(
     let spec = tab.spec;
     // Which rows read their subject (`TabularSpec::subject_fetch`).
     let fetch = spec.subject_fetch(crate::blastinput::app::Program::Tblastn);
-    // Whether each row reads the subject's definition line (`TabularSpec::reads_defline`).
-    let reads_defline = spec.reads_defline();
     let needs = spec.needs();
     let nident_alone = nident_alone(spec);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
@@ -480,10 +478,10 @@ pub(super) fn write_tblastn_tabular(
                 // The row's read of the subject's definition line posts for the bytes of its
                 // title that NCBI replaces (`QueryWarnings::title_read`), before the texts of the
                 // row's lookups.
-                if let (Some(warnings), true) = (warnings.as_deref_mut(), reads_defline) {
-                    if table.reads_title(&subject) {
-                        warnings.title_read(oid as u32, &mut *writer)?;
-                    }
+                if let Some(warnings) = warnings.as_deref_mut().filter(|warnings| {
+                    table.title_posts(&subject, warnings.title_decodes(), oid as u32)
+                }) {
+                    warnings.title_read(oid as u32, &mut *writer)?;
                 }
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.

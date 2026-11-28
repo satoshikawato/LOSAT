@@ -218,6 +218,23 @@ impl BlastxDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// NCBI's posts of the titles that a batch's Seq-aligns of the subjects `aligned` read and,
+    /// where its prefetch loads them (`prefetch`), of those loads (`shared::batch_title_posts`).
+    pub(crate) fn batch_title_posts(
+        &self,
+        aligned: impl IntoIterator<Item = u32> + Clone,
+        utf8_posted: bool,
+        prefetch: bool,
+    ) -> Result<crate::report::diag_log::Posts> {
+        shared::batch_title_posts(
+            &self.db,
+            aligned,
+            utf8_posted,
+            prefetch.then_some(&self.taxdb),
+            self.program,
+        )
+    }
+
     /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
     /// (`shared::TaxdbRun::loads_write_texts`).
     pub(crate) fn loads_write_texts(&self) -> bool {
@@ -760,9 +777,7 @@ impl ReportedSubjects {
     /// subject's Seq-align id (`report::tabular::reads_subject`), the only kind that refuses the
     /// ids. `structured`: outfmt 5 or 13 to 16, which read the Bioseq. `taxonomy`: whether the
     /// report writes the sequences' taxids or their names (13 to 16, a table of taxonomy fields;
-    /// `ParsedSubject::fetched`). `title_decodes`: whether a report reads the definition lines
-    /// where LOSAT writes NCBI's posts of each read (`shared::FormatterTitleReads::takes_decodes`;
-    /// `ReportedSubjects::title_decodes`).
+    /// `ParsedSubject::fetched`).
     /// `prefetched`: whether the batch's prefetch reads the subjects
     /// (`shared::prefetches_subjects`, and the batch's Seq-aligns do not outnumber a positive
     /// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`), which where no report reads their Bioseqs
@@ -802,7 +817,6 @@ impl ReportedSubjects {
         joined: bool,
         taxonomy: bool,
         words: crate::report::tabular::PrintedIds,
-        title_decodes: bool,
         prefetched: bool,
         read: crate::report::db_subject::ReportRead,
         cut: usize,
@@ -1114,9 +1128,10 @@ impl ReportedSubjects {
             );
         }
         // NCBI's posts of each read of a reported sequence's definition line by a report's
-        // formatter (`title_decodes`: `shared::FormatterTitleReads::takes_decodes`), by rank
-        // (`shared::title_decodes`, `QueryWarnings::title_read`).
-        if reports && title_decodes {
+        // formatter, by rank (`shared::title_decodes`, made where the database has a title that posts;
+        // each reader asks whether its read posts, `TabularWriter::title_posts`,
+        // `QueryWarnings::title_read`).
+        if reports {
             reported.title_decodes =
                 shared::title_decodes(&database.db, &reported.ordinals, database.program);
         }

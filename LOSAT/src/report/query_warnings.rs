@@ -782,7 +782,7 @@ impl HitPosts {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:360-388
     /// The `Hit` `hit` of subject `subject` loads it at `at` (`HitSink::position`), then reads its
     /// definition line (the posts of that read: `titles`, by the key of the report's writer,
-    /// `QueryWarnings::titles`), then `post` writes the texts that the writer makes there (the
+    /// `QueryWarnings::title_decodes`), then `post` writes the texts that the writer makes there (the
     /// lookups of the line's taxids). A `Hit` whose subject's lookup throws
     /// (`XmlHit::lookup_throws`) loads nothing: no read and no text of it (`post` is not called).
     pub fn hit(
@@ -1283,10 +1283,11 @@ impl<'a> QueryWarnings<'a> {
         self.titles.is_some()
     }
 
-    /// The posts of each read of a subject's definition line (`with_title_decodes`; `None`: no
-    /// read posts), for a writer that places them itself (`HitPosts::hit`,
-    /// `tax_report::TaxReport::write_query`).
-    pub fn titles(&self) -> Option<&'a TitleDecodes> {
+    /// The posts of the formatter's reads of the reported subjects' definition lines
+    /// (`with_title_decodes`; `None` where none posts), for a writer that places them itself
+    /// (`HitPosts::hit`, `tax_report::TaxReport::write_query`) and for a table's row, which asks
+    /// whether its read posts (`report::tabular::TabularWriter::title_posts`).
+    pub fn title_decodes(&self) -> Option<&'a TitleDecodes> {
         self.titles
     }
 

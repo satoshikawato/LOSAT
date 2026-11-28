@@ -1047,13 +1047,19 @@
   model: BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX with one `-outfmt` of 6, 7, 10, 17 or 20, or
   8, 9 or 12 with `PRE_FETCH_SEQS_LIMIT=2147483647`, write NCBI's output and `Error: (803.7)`
   messages, rule 2: those of each query batch's prefetch, which loads each subject once in Seq-id
-  handle order unless NCBI's data source still holds its blob from a batch before, and those of
-  each table row whose fields read the definition line; explicit rejection, rule 3, where NCBI's
-  bytes are not determined: a subject whose blob NCBI's cache of 10 released blobs may hold or not
-  (an earlier release of more than it keeps, in an order that follows the addresses of NCBI's
-  objects; probe `K/kb/i9b2/probe` E1 and E3 under several allocator settings), a batch whose
-  prefetch asks for more than 200 ids, a database with parsed Seq-ids, a prefetch that may be off,
-  and `OBJMGR_*` settings; line RG-KB item 9b-2, Owner-delegated, standing instruction
+  handle order (a batch of more than 200 ids in NCBI's pieces: sorted by `CSortableSeq_id`, 100
+  while more than 150 are left, then the rest, each piece in its map's order) unless NCBI's data
+  source still holds its blob from a batch before, and those of each table row whose fields read
+  the definition line; explicit rejection, rule 3, where NCBI's bytes are not determined: a
+  subject whose blob NCBI's cache of 10 released blobs may hold or not (an earlier release of more
+  than it keeps, in an order that follows the addresses of NCBI's objects; probe `K/kb/i9b2/probe`
+  E1 and E3 under several allocator settings) and a subject whose title posts in the header cache's
+  slot of such a subject; LOSAT's refusal, not rule 3, of what NCBI determines and LOSAT does not
+  model yet (line RG-KB item 9b-3, review 1 of 2026-11-28): a prefetch that may be off, a database
+  with parsed Seq-ids, `OBJMGR_*` settings, a run whose prefetch's loads of a sequence with a taxid
+  write texts of the taxonomy database (inside each load, among its messages), a query batch whose
+  reads also give NCBI's warning of a UTF8String header, and searches restricted by a list or an
+  OID mask; line RG-KB item 9b-2, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.126 at the merge of dev of 2026-11-28 that
   brought line RG item T4b-f's 1.126 (PR #1690); first 1.123, then 1.124 (dev brought 1.123), then
   1.126 (dev brought RG-D2's 1.124 and 1.125, PR #1660));
@@ -5396,11 +5402,12 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   cases narrowed by versions 1.120, 1.127 and 1.128 (line RG-KB items 9(b) and 9b-2, Owner-delegated:
   `psiblast`, `rpsblast` and `rpstblastn`; more than one format unless each writes the Seq-aligns
   as they are without the prefetch; with `-outfmt` 0 to 7, 10, 13 to 18 and 20, or 8, 9 and 12
-  with `PRE_FETCH_SEQS_LIMIT=2147483647`, a prefetch that may be off, a database with parsed Seq-ids,
-  `OBJMGR_*` settings, a subject whose blob NCBI's data source may hold or not from an earlier
-  batch, or a batch whose prefetch asks for more than 200 ids; a search restricted by a seqid, GI
-  or taxid list, an alias
-  file with a list or an OID mask, or a volume with an OID mask type; a query batch whose headers
+  with `PRE_FETCH_SEQS_LIMIT=2147483647`: rule 3, a subject whose blob NCBI's data source may hold
+  or not from an earlier batch, or whose header cache slot such a subject takes; not modelled yet
+  (line RG-KB item 9b-3), a prefetch that may be off, a database with parsed Seq-ids, `OBJMGR_*`
+  settings, a run whose prefetch's loads write texts of the taxonomy database, a search restricted
+  by a seqid, GI or taxid list, an alias
+  file with a list or an OID mask, or a volume with an OID mask type, and a query batch whose headers
   also give NCBI's warning of a UTF8String; except a query batch that ends at a header NCBI cannot
   read, which writes NCBI's `Error: (803.7)` messages for the titles read before it, then NCBI's
   error, in any format of all eight search programs): NCBI prints `#` and an error message each

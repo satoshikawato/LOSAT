@@ -132,15 +132,18 @@ fn equals_frozen_in(
                     let output = run_in(&dir, &args, &vars);
                     let what = format!("{name} threads {threads} {switch:?}");
                     assert_eq!(output.status.code(), Some(rc), "{what}");
-                    assert_eq!(
+                    // The bytes, not a lossy text: a title's raw byte in a post must match.
+                    assert!(
+                        without_cl(&output.stdout) == without_cl(&expected),
+                        "{what}: stdout\n{}\nexpected\n{}",
                         String::from_utf8_lossy(&without_cl(&output.stdout)),
-                        String::from_utf8_lossy(&without_cl(&expected)),
-                        "{what}: stdout"
+                        String::from_utf8_lossy(&without_cl(&expected))
                     );
-                    assert_eq!(
+                    assert!(
+                        output.stderr == expected_err,
+                        "{what}: stderr\n{}\nexpected\n{}",
                         String::from_utf8_lossy(&output.stderr),
-                        String::from_utf8_lossy(&expected_err),
-                        "{what}: stderr"
+                        String::from_utf8_lossy(&expected_err)
                     );
                 }
             }

@@ -602,7 +602,7 @@ impl PreparedXml {
             // NCBI's posts of the formatter's read of each `Hit`'s definition line.
             let titles = warnings
                 .as_deref()
-                .and_then(crate::report::query_warnings::QueryWarnings::titles);
+                .and_then(crate::report::query_warnings::QueryWarnings::title_decodes);
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 let lists = hitlist.lists();
                 ensure!(

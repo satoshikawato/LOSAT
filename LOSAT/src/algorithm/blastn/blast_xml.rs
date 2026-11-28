@@ -180,7 +180,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         // NCBI's posts of the formatter's read of each `Hit`'s definition line.
         let titles = warnings
             .as_deref()
-            .and_then(crate::report::query_warnings::QueryWarnings::titles);
+            .and_then(crate::report::query_warnings::QueryWarnings::title_decodes);
         let written = document.query(&xml.run, &query, &mut buf, |sink| {
             let Some(hit_list) = hit_list else {
                 return Ok(());

@@ -581,9 +581,10 @@ impl TabularSpec {
     }
 
     /// Whether NCBI's formatter reads the subject's definition line for each row
-    /// (`CSeqDB::ExtractBlastDefline`, `algorithm::common::database::FormatterTitleReads::Rows`):
-    /// one of the subject's `sall*` ids, taxonomy or title fields, once for the row whatever
-    /// their number. Not the organism report's, which reads its own.
+    /// (`CSeqDB::ExtractBlastDefline`; the formatter reads at
+    /// `algorithm::common::database::check_reported_title`): one of the subject's `sall*` ids,
+    /// taxonomy or title fields, once for the row whatever their number. Not the organism
+    /// report's, which reads its own.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:809-842
     pub fn reads_defline(&self) -> bool {
@@ -2210,6 +2211,22 @@ impl<'a> TabularWriter<'a> {
             self.spec.failed_stage(subject.lookup),
             Some(FailedStage::Bioseq | FailedStage::SubjectId)
         )
+    }
+
+    /// Whether the row of `subject` posts NCBI's error messages of its read of the subject's
+    /// definition line: a read of the title of the writer's key `key` posts (`titles`), the row's
+    /// fields read the definition line (`TabularSpec::reads_defline`) and the subject block reaches
+    /// `ExtractBlastDefline` (`reads_title`). The one gate of the rows of the five programs, which
+    /// then write the posts (`QueryWarnings::title_read`, `TitleDecodes::write_read`).
+    pub fn title_posts(
+        &self,
+        subject: &TabularSubject<'_>,
+        titles: Option<&crate::report::query_warnings::TitleDecodes>,
+        key: u32,
+    ) -> bool {
+        titles.is_some_and(|titles| !titles.of(key).is_empty())
+            && self.spec.reads_defline()
+            && self.reads_title(subject)
     }
 
     /// The exception that ends the run at `program`'s row of `subject` with the engine's

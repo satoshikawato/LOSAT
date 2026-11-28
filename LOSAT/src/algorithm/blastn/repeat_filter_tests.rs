@@ -19,6 +19,7 @@ fn search_args_are_the_repeat_options() {
     assert_eq!(args.num_threads, 4);
     assert!(args.one_query_batch);
     assert!(args.hits_only);
+    assert!(args.db_reader_one_thread);
     assert!(args.filtering_db.is_none());
 }
 

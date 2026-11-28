@@ -377,6 +377,14 @@ pub struct BlastnArgs {
     // formatter reads (`PRE_FETCH_SEQS_LIMIT`) stops it. Its caller takes the hits
     // (`blast_engine::repeat_search_hits`). No argument of the command line sets this.
     pub hits_only: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:394-396
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:230-231,292-293
+    // The database reader of the search runs one thread, whatever threads the search's workers
+    // get: the search of the repeats of `-filtering_db` (`repeat_filter`) is a `CLocalBlast` that
+    // is never given threads (`m_NumThreads` stays 0), so its scan of the database does not stop
+    // at a negative length and its read errors are those of one thread. No argument of the
+    // command line sets this.
+    pub db_reader_one_thread: bool,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // The position in the whole input of the first of these records, as a reader's counter
     // starts there (`api::run_batches`): a query's `Query_N` in the messages. 0 on the command
@@ -484,6 +492,7 @@ impl BlastnArgs {
             progress_bar: Default::default(),
             one_query_batch: Default::default(),
             hits_only: Default::default(),
+            db_reader_one_thread: Default::default(),
             first_query_ordinal: Default::default(),
             scope_refusal: Default::default(),
         })

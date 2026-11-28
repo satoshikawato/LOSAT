@@ -1858,13 +1858,58 @@ fn poke_amb_offset(nin: &Path, oid: usize, crash: bool) {
     fs::write(nin, bytes).unwrap();
 }
 
-/// PR #1660 review R6 probe 2 (`n6db/`: six sequences, OID 1 with the signed length `-4`, OID 5
-/// with its last byte `2^28` past the file): a block that the scan's own gap stops, before a
-/// last block whose trailing excluded OID would crash. NCBI's results (`n6_<row>.{out,err,rc}`)
-/// are `SIGSEGV` at one thread without a list, and rows without a crash otherwise (OID 0's rows
-/// only with `-num_threads 4`); LOSAT is byte-identical, and refuses the crash. A row at more
-/// threads than the host's CPUs runs the threads that run (`effective_threads`) against their
-/// row, where one was frozen.
+/// NCBI's frozen result `nonasc_xprog/<label>.{rc,out,err}` as NCBI wrote it: (exit status,
+/// standard output, standard error). A label without a frozen row panics, so no row is skipped
+/// for a typo.
+fn frozen_tail_row(label: &str) -> (i32, Vec<u8>, Vec<u8>) {
+    let base = fixtures().join("nonasc_xprog");
+    let read = |ext: &str| {
+        fs::read(base.join(format!("{label}.{ext}")))
+            .unwrap_or_else(|error| panic!("{label}.{ext}: {error}"))
+    };
+    let rc = String::from_utf8(read("rc"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    (rc, read("out"), read("err"))
+}
+
+/// LOSAT's result of a row for the closing checks of a test: (exit status, lines of standard
+/// output).
+fn losat_status(got: &(Vec<u8>, Vec<u8>, i32)) -> (i32, usize) {
+    (got.2, got.0.iter().filter(|&&byte| byte == b'\n').count())
+}
+
+/// The CPUs that this test may run on (`available_parallelism`: its affinity and cgroup quota).
+/// LOSAT, like NCBI, caps `-num_threads` at the host's online CPUs (LOSAT's own count, which
+/// falls back to this one), which are never fewer than these, so a row of NCBI's results at no
+/// more threads than these runs as NCBI ran it (uncapped); a test skips a row at more threads.
+fn usable_cpus() -> i64 {
+    std::thread::available_parallelism().map_or(1, |n| n.get() as i64)
+}
+
+/// The guard of a test of rows at 1, 2 and 4 threads (`threads`: each row's), of which `ran`
+/// ran: a row is skipped only for threads past the host's CPUs (`usable_cpus`), so on two CPUs
+/// or more (every CI runner) every 1- and 2-thread row runs.
+fn assert_rows_ran(test: &str, ran: usize, threads: &[i64]) {
+    let cpus = usable_cpus();
+    let runnable = threads.iter().filter(|&&t| t <= cpus).count();
+    assert_eq!(
+        ran,
+        runnable,
+        "{test}: {ran} of {} rows ran on {cpus} CPUs",
+        threads.len()
+    );
+    assert!(ran > 0, "{test}: no row ran");
+}
+
+/// PR #1660 review R6 (`n6db/`: six sequences, OID 1 with the signed length `-4`, OID 5 with
+/// its last byte `2^28` past the file): a block that the scan's own gap stops, before a last
+/// block whose trailing excluded OID would crash. NCBI's results (`n6_<row>.{out,err,rc}`) are
+/// `SIGSEGV` at one thread without a list, and rows without a crash otherwise (OID 0's rows only
+/// at 2 and 4 threads); LOSAT is byte-identical, and refuses the crash. A row at more threads
+/// than the host's CPUs is skipped (`usable_cpus`).
 #[test]
 fn nonasc_gap_stop_before_crash_parity() {
     let root = scratch("n6-gapstop");
@@ -1893,19 +1938,23 @@ fn nonasc_gap_stop_before_crash_parity() {
         fs::write(root.join(format!("{name}.txt")), gis).unwrap();
     }
     let query = query.to_str().unwrap().to_string();
-    let base = fixtures().join("nonasc_xprog");
-    for (named, list, requested) in [
-        ("t", None, 1),
-        ("t", None, 4),
-        ("neg135_t", Some("neg135"), 1),
-        ("neg135_t", Some("neg135"), 4),
-        ("neg35_t", Some("neg35"), 4),
-        ("neg5_t", Some("neg5"), 4),
-        ("neg5_t", Some("neg5"), 1),
+    let mut rows = Vec::new();
+    for (named, list) in [
+        ("t", None),
+        ("neg135_t", Some("neg135")),
+        ("neg35_t", Some("neg35")),
+        ("neg5_t", Some("neg5")),
     ] {
-        let threads = effective_threads(requested);
-        let label = format!("{named}{threads}");
-        if !base.join(format!("n6_{label}.rc")).exists() {
+        for threads in [1i64, 2, 4] {
+            rows.push((named, list, threads));
+        }
+    }
+    let cpus = usable_cpus();
+    let mut results = BTreeMap::new();
+    for &(named, list, threads) in &rows {
+        let label = format!("n6_{named}{threads}");
+        let ncbi = frozen_tail_row(&label);
+        if threads > cpus {
             continue;
         }
         let threads = threads.to_string();
@@ -1921,76 +1970,79 @@ fn nonasc_gap_stop_before_crash_parity() {
         }
         args.extend(["-num_threads", &threads]);
         let got = run_losat_sub(&root, &db, "blastn", &args);
-        let read = |ext: &str| fs::read(base.join(format!("n6_{label}.{ext}"))).unwrap();
-        let rc: i32 = String::from_utf8(read("rc"))
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        assert_tail_row(
-            &format!("n6_{label}"),
-            &got,
-            (rc, &read("out"), &read("err")),
-        );
+        assert_tail_row(&label, &got, (ncbi.0, &ncbi.1, &ncbi.2));
+        results.insert(label, losat_status(&got));
     }
-    // NCBI's results: one thread without a list crashes; the others complete.
-    let rc = |label: &str| load_nonasc_expected(&format!("n6_{label}")).2;
-    assert_eq!((rc("t1"), rc("t4"), rc("neg5_t4")), (-11, 0, 0));
+    let threads: Vec<i64> = rows.iter().map(|row| row.2).collect();
+    assert_rows_ran(
+        "nonasc_gap_stop_before_crash_parity",
+        results.len(),
+        &threads,
+    );
+    // LOSAT's results: one thread without a list is refused (NCBI's crash), the lists complete
+    // at one thread, and at 2 threads the scan stops at OID 1 (OID 0's rows only).
+    assert_eq!(results["n6_t1"], (1, 0));
+    assert_eq!(results["n6_neg35_t1"], (0, 15));
+    assert_eq!(results["n6_neg5_t1"], (0, 20));
+    if cpus >= 2 {
+        assert_eq!(results["n6_t2"], (0, 5));
+        assert_eq!(results["n6_neg5_t2"], (0, 5));
+    }
     let _ = fs::remove_dir_all(&root);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// NCBI reference (598d8ae6): c++/src/corelib/ncbi_system.cpp:598-638
-/// The threads that NCBI and LOSAT run for `-num_threads threads`: at most the host's online CPUs
-/// (`CMTArgs::x_ExtractAlgorithmOptions`, LOSAT's `ncbi_effective_threads`), so a frozen row of
-/// NCBI's results at more threads than the host has is checked against the row of the threads
-/// that run.
-fn effective_threads(threads: i64) -> i64 {
-    let online = fs::read_to_string("/sys/devices/system/cpu/online")
-        .ok()
-        .and_then(|list| {
-            let mut count = 0i64;
-            for part in list.trim().split(',').filter(|part| !part.is_empty()) {
-                count += match part.split_once('-') {
-                    Some((a, b)) => b.parse::<i64>().ok()? - a.parse::<i64>().ok()? + 1,
-                    None => {
-                        part.parse::<i64>().ok()?;
-                        1
-                    }
-                };
-            }
-            (count > 0).then_some(count)
-        })
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get() as i64));
-    threads.min(online)
+/// The sequence file of `pv1` in a row of `nonasc_protein_scan_stop_parity`.
+#[derive(Clone, Copy, PartialEq)]
+enum Pv1Psq {
+    Kept,
+    Empty,
+    Missing,
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1802
-/// A protein database whose multithreaded scan stops at a negative length before a volume whose
-/// sequence file has no bytes or is missing (RG-D2 tail R2, review finding 8). `p2db/` has the
-/// volumes `pv0` (GIs 7001-7003) and `pv1` (7004-7006) under an alias `p`; `p2_<row>` holds
-/// NCBI's results. `gapstop`: OID 1 of `pv0` has the length -1 and the GI list leaves it out
-/// before the block of `pv1`, so the scan stops before `pv1` and never opens its sequence file
-/// (at 2 threads NCBI completes whether that file is empty or missing; at 1 thread it reads
-/// `pv1`). `v1gap`: the negative OID is in `pv1` itself, after its first OID, so the scan opens
-/// the file first (missing: NCBI's error). `emptyv1_skipfirst`: no stop before the empty file,
-/// which NCBI crashes on. A row at more threads than the host's CPUs runs the threads that run
-/// (`effective_threads`) against their row, where one was frozen.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1838
+/// The multithreaded scan of a protein database whose later volume's sequence file has no bytes
+/// or is missing (RG-D2 tail R2 review finding 8, R4 review findings 1 and 2). `p2db/` has the
+/// volumes `pv0` (GIs 7001-7003) and `pv1` (7004-7006) under an alias `p`; `p2_<row>` (blastp)
+/// and `p2x_<row>` (blastx) hold NCBI's results at 1 and 2 threads. The scan reads every raw OID
+/// of the iteration range, the excluded ones after the last included one too, up to the first
+/// negative length; its first read in `pv1` opens `pv1.psq` (missing: NCBI's memory map error),
+/// and a read of a positive length from the empty file crashes (`SIGSEGV`, refused by LOSAT).
+/// `gapstop`: OID 1 of `pv0` has the length -1 and the list leaves it out before the block of
+/// `pv1`, so the scan stops before `pv1`; `v1gap`: the negative OID is OID 1 of `pv1`;
+/// `emptyv1_skipfirst`: no stop before the empty file. `trail`: the list holds only OID 0, so
+/// only the excluded OIDs after it reach `pv1` (`trail_neg`: OID 1 of `pv0` of length -1 stops
+/// them first). `none`: the list includes no OID; one thread warns that the filtering left no
+/// database, two threads read the whole range first. `v1firstneg`: OID 0 of `pv1` has the
+/// length -1 and `pv1.psq` is empty: a non-positive length reads nothing, so two threads stop
+/// there and one thread crashes at the next OID; with the list of OIDs 0 and 3 nothing is read
+/// from the file (blastx: NCBI's error of the length -1). A row at more threads than the host's
+/// CPUs is skipped (`usable_cpus`).
 #[test]
-fn nonasc_protein_scan_stop_before_empty_or_missing_sequence_file() {
+fn nonasc_protein_scan_stop_parity() {
+    use Pv1Psq::{Empty, Kept, Missing};
     let root = scratch("p2-stop");
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let root = root.canonicalize().unwrap();
     let base = fixtures().join("nonasc_xprog");
-    let query = root.join("q.faa");
+    let protein_query = root.join("q.faa");
     fs::write(
-        &query,
+        &protein_query,
         b">q\nYKNTARICGENSIPVEWIAHQKGPGDFYYRFFAAHHGGLMHVHGHPLANQGFKDMLYWAY\n",
     )
     .unwrap();
-    let query = query.to_str().unwrap().to_string();
+    // The codons of the protein query.
+    let nucleotide_query = root.join("q.fna");
+    fs::write(
+        &nucleotide_query,
+        concat!(
+            ">qn\nTATAAAAATACTGCTCGTATTTGTGGTGAAAATTCTATTCCTGTTGAATGGATTGCTCATCAAAAAGGTCCTGG",
+            "TGATTTTTATTATCGTTTTTTTGCTGCTCATCATGGTGGTCTTATGCATGTTCATGGTCATCCTCTTGCTAATCAAGGT",
+            "TTTAAAGATATGCTTTATTGGGCTTAT\n"
+        ),
+    )
+    .unwrap();
     // Protein `oid` of the volume index `pin` gets the length -1: its end (the next start) is
     // set to its start.
     let negative = |pin: &Path, oid: usize| {
@@ -2001,83 +2053,159 @@ fn nonasc_protein_scan_stop_before_empty_or_missing_sequence_file() {
         bytes[seq + 4 * (oid + 1)..seq + 4 * (oid + 1) + 4].copy_from_slice(&start);
         fs::write(pin, bytes).unwrap();
     };
-    let mut ran = 0;
-    for (named, requested) in [
-        ("gapstop", 1),
-        ("gapstop", 2),
-        ("gapstop_emptyv1", 1),
-        ("gapstop_emptyv1", 2),
-        ("gapstop_missingv1", 1),
-        ("gapstop_missingv1", 2),
-        ("v1gap_emptyv1", 1),
-        ("v1gap_emptyv1", 2),
-        ("v1gap_missingv1", 1),
-        ("v1gap_missingv1", 2),
-        ("emptyv1_skipfirst", 1),
-        ("emptyv1_skipfirst", 2),
-    ] {
-        let threads = effective_threads(requested);
-        let label = format!("p2_{named}_t{threads}");
-        if !base.join(format!("{label}.rc")).exists() {
+    // (row, GI list, the OID of length -1, `pv1.psq`, blastx too)
+    let cases: [(&str, Option<&str>, Option<(&str, usize)>, Pv1Psq, bool); 13] = [
+        (
+            "gapstop",
+            Some("7001\n7004\n7005\n7006\n"),
+            Some(("pv0", 1)),
+            Kept,
+            false,
+        ),
+        (
+            "gapstop_emptyv1",
+            Some("7001\n7004\n7005\n7006\n"),
+            Some(("pv0", 1)),
+            Empty,
+            false,
+        ),
+        (
+            "gapstop_missingv1",
+            Some("7001\n7004\n7005\n7006\n"),
+            Some(("pv0", 1)),
+            Missing,
+            false,
+        ),
+        (
+            "v1gap_emptyv1",
+            Some("7001\n7006\n"),
+            Some(("pv1", 1)),
+            Empty,
+            false,
+        ),
+        (
+            "v1gap_missingv1",
+            Some("7001\n7006\n"),
+            Some(("pv1", 1)),
+            Missing,
+            false,
+        ),
+        (
+            "emptyv1_skipfirst",
+            Some("7001\n7006\n"),
+            None,
+            Empty,
+            false,
+        ),
+        ("trail_missingv1", Some("7001\n"), None, Missing, true),
+        (
+            "trail_neg_missingv1",
+            Some("7001\n"),
+            Some(("pv0", 1)),
+            Missing,
+            true,
+        ),
+        ("trail_emptyv1", Some("7001\n"), None, Empty, true),
+        ("none_missingv1", Some("9999\n"), None, Missing, true),
+        (
+            "none_neg_missingv1",
+            Some("9999\n"),
+            Some(("pv0", 1)),
+            Missing,
+            true,
+        ),
+        ("v1firstneg_emptyv1", None, Some(("pv1", 0)), Empty, true),
+        (
+            "v1firstneg_emptyv1_list",
+            Some("7001\n7004\n"),
+            Some(("pv1", 0)),
+            Empty,
+            true,
+        ),
+    ];
+    let mut rows = Vec::new();
+    for case in cases {
+        for program in ["blastp", "blastx"] {
+            if program == "blastp" || case.4 {
+                for threads in [1i64, 2] {
+                    rows.push((case, program, threads));
+                }
+            }
+        }
+    }
+    let cpus = usable_cpus();
+    let mut results = BTreeMap::new();
+    for &((named, list, negative_oid, psq, _), program, threads) in &rows {
+        let prefix = if program == "blastp" { "p2" } else { "p2x" };
+        let label = format!("{prefix}_{named}_t{threads}");
+        let ncbi = frozen_tail_row(&label);
+        if threads > cpus {
             continue;
         }
-        let dir = root.join(format!("run_{named}_t{requested}"));
+        let dir = root.join(format!("run_{label}"));
         fs::create_dir_all(&dir).unwrap();
         for entry in fs::read_dir(base.join("p2db")).unwrap() {
             let entry = entry.unwrap();
             fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
         }
         fs::write(dir.join("p.pal"), "TITLE p\nDBLIST pv0 pv1\n").unwrap();
-        let list = if named.starts_with("gapstop") {
-            negative(&dir.join("pv0.pin"), 1);
-            "7001\n7004\n7005\n7006\n"
-        } else if named.starts_with("v1gap") {
-            negative(&dir.join("pv1.pin"), 1);
-            "7001\n7006\n"
-        } else {
-            "7001\n7006\n"
-        };
-        fs::write(dir.join("gl.txt"), list).unwrap();
-        if named.ends_with("emptyv1") || named == "emptyv1_skipfirst" {
-            fs::write(dir.join("pv1.psq"), b"").unwrap();
-        } else if named.ends_with("missingv1") {
-            fs::remove_file(dir.join("pv1.psq")).unwrap();
+        if let Some((volume, oid)) = negative_oid {
+            negative(&dir.join(format!("{volume}.pin")), oid);
         }
+        match psq {
+            Kept => {}
+            Empty => fs::write(dir.join("pv1.psq"), b"").unwrap(),
+            Missing => fs::remove_file(dir.join("pv1.psq")).unwrap(),
+        }
+        let query = if program == "blastp" {
+            &protein_query
+        } else {
+            &nucleotide_query
+        };
         let threads = threads.to_string();
-        let args = [
+        let mut args = vec![
             "-query",
-            &query,
+            query.to_str().unwrap(),
             "-db",
             "p",
             "-outfmt",
             "6",
-            "-gilist",
-            "gl.txt",
-            "-num_threads",
-            &threads,
         ];
-        let got = run_losat_sub(&root, &dir, "blastp", &args);
-        let read = |ext: &str| fs::read(base.join(format!("{label}.{ext}"))).unwrap();
-        let rc: i32 = String::from_utf8(read("rc"))
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        assert_tail_row(&label, &got, (rc, &read("out"), &read("err")));
-        ran += 1;
+        if let Some(list) = list {
+            fs::write(dir.join("gl.txt"), list).unwrap();
+            args.extend(["-gilist", "gl.txt"]);
+        }
+        args.extend(["-num_threads", &threads]);
+        let got = run_losat_sub(&root, &dir, program, &args);
+        assert_tail_row(&label, &got, (ncbi.0, &ncbi.1, &ncbi.2));
+        results.insert(label, losat_status(&got));
     }
-    assert!(ran >= 6, "{ran} rows");
-    // NCBI's results: the stop before `pv1` completes at 2 threads with `pv1.psq` empty or
-    // missing; the empty file that the scan reaches crashes it.
-    let rc = |label: &str| load_nonasc_expected(&format!("p2_{label}")).2;
-    assert_eq!(
-        (
-            rc("gapstop_emptyv1_t2"),
-            rc("gapstop_missingv1_t2"),
-            rc("emptyv1_skipfirst_t2")
-        ),
-        (0, 0, -11)
-    );
+    let threads: Vec<i64> = rows.iter().map(|row| row.2).collect();
+    assert_rows_ran("nonasc_protein_scan_stop_parity", results.len(), &threads);
+    // LOSAT's results. One thread reads only the included OIDs: the missing file after them is
+    // never opened, the list of no OID warns, and the empty file is refused where a positive
+    // length is read from it (NCBI's crash).
+    assert_eq!(results["p2_trail_missingv1_t1"], (0, 1));
+    assert_eq!(results["p2x_trail_missingv1_t1"], (0, 1));
+    assert_eq!(results["p2_none_missingv1_t1"], (0, 0));
+    assert_eq!(results["p2_v1firstneg_emptyv1_t1"], (1, 0));
+    assert_eq!(results["p2_v1firstneg_emptyv1_list_t1"], (0, 1));
+    if cpus >= 2 {
+        // Two threads: the stop before `pv1` completes; the excluded OIDs after the last
+        // included one open `pv1.psq` (missing: the error, also where no OID is included)
+        // unless a negative length stops them first; the length -1 of OID 0 of `pv1` stops the
+        // scan before the empty file.
+        assert_eq!(results["p2_gapstop_missingv1_t2"], (0, 1));
+        assert_eq!(results["p2_emptyv1_skipfirst_t2"], (1, 0));
+        assert_eq!(results["p2_trail_missingv1_t2"], (3, 0));
+        assert_eq!(results["p2x_trail_missingv1_t2"], (3, 0));
+        assert_eq!(results["p2_trail_neg_missingv1_t2"], (0, 1));
+        assert_eq!(results["p2_none_missingv1_t2"], (3, 0));
+        assert_eq!(results["p2x_none_missingv1_t2"], (3, 0));
+        assert_eq!(results["p2_none_neg_missingv1_t2"], (0, 0));
+        assert_eq!(results["p2_v1firstneg_emptyv1_t2"], (0, 3));
+        assert_eq!(results["p2x_v1firstneg_emptyv1_t2"], (0, 3));
+    }
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -2086,10 +2214,11 @@ fn nonasc_protein_scan_stop_before_empty_or_missing_sequence_file() {
 /// four kinds of the database (`empty`: `v1.nsq` of 0 bytes; `neg`: and OID 2 of `v0` with the
 /// signed length `-4`; `zero`: and the first sequence offset of `v1` 0; `negzero`: both), the
 /// aliases `n` (the three volumes), `r_head`, `r_tail` and `r_pre` (OID ranges), with or without
-/// a GI list, at 1, 2 and 4 threads. NCBI stops its scan where an empty file's sequence offset
-/// is 0 (a null pointer) and crashes where it reads another offset; LOSAT matches both. A row at
-/// more threads than the host's CPUs runs the threads that run (`effective_threads`) against
-/// their row, where the table has one.
+/// a GI list, at 1, 2 and 4 threads. NCBI's read at an empty file's sequence offset 0 (a null
+/// pointer) gives the length -1, which stops the multithreaded scan and which one thread skips
+/// (`posv1first`: the list of OID 5 only, the first of `v1`), and it crashes where it reads
+/// another offset; LOSAT matches both. A row at more threads than the host's CPUs is skipped
+/// (`usable_cpus`).
 #[test]
 fn nonasc_empty_later_volume_sequence_file_parity() {
     let root = scratch("mv3-empty");
@@ -2122,6 +2251,8 @@ fn nonasc_empty_later_volume_sequence_file_parity() {
             "posv0v2" => Some(("-gilist", gis(&v0_v2))),
             "posv0" => Some(("-gilist", gis(&all_v0))),
             "negoid2" => Some(("-negative_gilist", gis(&[2]))),
+            "posv1first" => Some(("-gilist", gis(&[5]))),
+            "posv1first2" => Some(("-gilist", gis(&[5, 6]))),
             other => panic!("unknown list {other}"),
         }
     };
@@ -2159,23 +2290,24 @@ fn nonasc_empty_later_volume_sequence_file_parity() {
         .skip(1)
         .map(|line| line.split('\t').collect())
         .collect();
-    let (mut refused, mut completed, mut skipped) = (0, 0, 0);
-    for row in &rows {
-        // A row at more threads than the host's CPUs: the row of the threads that run, where
-        // the table has one (`effective_threads`).
-        let (named, frozen) = row[0].rsplit_once("_t").unwrap();
-        let run = effective_threads(frozen.parse().unwrap());
-        let run_label = format!("{named}_t{run}");
-        let Some(cell) = rows.iter().find(|other| other[0] == run_label) else {
-            skipped += 1;
+    let cpus = usable_cpus();
+    let mut results = BTreeMap::new();
+    let mut threads_of_rows = Vec::new();
+    for cell in &rows {
+        let label = cell[0];
+        let (rest, threads) = label
+            .strip_prefix("mv3e_")
+            .unwrap()
+            .rsplit_once("_t")
+            .unwrap();
+        let threads: i64 = threads.parse().unwrap();
+        threads_of_rows.push(threads);
+        if threads > cpus {
             continue;
-        };
-        let label = row[0];
+        }
         let ncbi_rc: i32 = cell[1].parse().unwrap();
-        let rest = label.strip_prefix("mv3e_").unwrap();
         let (kind, rest) = rest.split_once('_').unwrap();
-        let rest = rest.rsplit_once("_t").unwrap().0;
-        let threads = run.to_string();
+        let threads = threads.to_string();
         let (db, list) = ["r_head_", "r_tail_", "r_pre_", "n_"]
             .iter()
             .find_map(|prefix| {
@@ -2208,19 +2340,26 @@ fn nonasc_empty_later_volume_sequence_file_parity() {
             }
         };
         assert_tail_row(label, &got, (ncbi_rc, &file(cell[2]), &file(cell[3])));
-        if ncbi_rc == -11 {
-            refused += 1;
-        } else {
-            completed += 1;
-        }
+        results.insert(label.to_string(), losat_status(&got));
     }
-    if skipped == 0 {
-        assert!(
-            refused >= 20 && completed >= 80,
-            "{refused} refused, {completed} completed"
-        );
-    } else {
-        assert!(refused + completed > 0, "every row skipped");
+    assert_rows_ran(
+        "nonasc_empty_later_volume_sequence_file_parity",
+        results.len(),
+        &threads_of_rows,
+    );
+    // LOSAT's results: every row of the table at 4 threads or fewer, 59 refused (NCBI's crashes)
+    // and 145 completed, among them the skip at one thread and the stop at two of a read at
+    // offset 0 of the empty file.
+    let refused = results.values().filter(|status| status.0 == 1).count();
+    let completed = results.values().filter(|status| status.0 == 0).count();
+    assert_eq!(refused + completed, results.len(), "{results:?}");
+    if cpus >= 4 {
+        assert_eq!((refused, completed), (59, 145));
+    }
+    assert_eq!(results["mv3e_zero_n_posv1first_t1"], (0, 0));
+    assert_eq!(results["mv3e_zero_n_posv1first2_t1"], (1, 0));
+    if cpus >= 2 {
+        assert_eq!(results["mv3e_zero_n_posv1first2_t2"], (0, 0));
     }
     let _ = fs::remove_dir_all(&root);
 }
@@ -2237,8 +2376,7 @@ fn nonasc_empty_later_volume_sequence_file_parity() {
 /// `repa`'s OID 1 has its ambiguity offset 4 bytes past the next sequence's start (`ambnext`):
 /// the repeat search's traceback cannot read its ambiguity data, and each query's set-up posts
 /// the error (exit status 3), as at one thread (a multithreaded traceback aborts). A row at more
-/// threads than the host's CPUs runs the threads that run (`effective_threads`) against their
-/// row.
+/// threads than the host's CPUs is skipped (`usable_cpus`).
 #[test]
 fn nonasc_filtering_db_repeat_search_runs_one_thread() {
     let root = scratch("fdb-one-thread");
@@ -2248,15 +2386,18 @@ fn nonasc_filtering_db_repeat_search_runs_one_thread() {
     let base = fixtures().join("nonasc_xprog");
     let query = base.join("fdb_q.fna");
     let query = query.to_str().unwrap().to_string();
-    let mut ran = 0;
+    let cpus = usable_cpus();
+    let mut results = BTreeMap::new();
+    let mut threads_of_rows = Vec::new();
     for (named, repeats) in [("clean", "rep"), ("neg", "rep"), ("ambnext", "repa")] {
-        for requested in [1, 2] {
-            let threads = effective_threads(requested);
+        for threads in [1i64, 2] {
             let label = format!("fdb_{named}_t{threads}");
-            if !base.join(format!("{label}.rc")).exists() {
+            let ncbi = frozen_tail_row(&label);
+            threads_of_rows.push(threads);
+            if threads > cpus {
                 continue;
             }
-            let dir = root.join(format!("run_{named}_t{requested}"));
+            let dir = root.join(format!("run_{label}"));
             fs::create_dir_all(&dir).unwrap();
             for entry in fs::read_dir(base.join("fdb")).unwrap() {
                 let entry = entry.unwrap();
@@ -2286,24 +2427,26 @@ fn nonasc_filtering_db_repeat_search_runs_one_thread() {
                 &threads,
             ];
             let got = run_losat_sub(&root, &dir, "blastn", &args);
-            let read = |ext: &str| fs::read(base.join(format!("{label}.{ext}"))).unwrap();
-            let rc: i32 = String::from_utf8(read("rc"))
-                .unwrap()
-                .trim()
-                .parse()
-                .unwrap();
-            assert_tail_row(&label, &got, (rc, &read("out"), &read("err")));
-            ran += 1;
+            assert_tail_row(&label, &got, (ncbi.0, &ncbi.1, &ncbi.2));
+            results.insert(label, got);
         }
     }
-    assert!(ran >= 3, "{ran} rows");
-    // NCBI's results: R is masked past the negative length, and the traceback's error is posted,
-    // at 2 threads as at 1.
-    let rc = |label: &str| load_nonasc_expected(&format!("fdb_{label}")).2;
-    assert_eq!((rc("neg_t2"), rc("ambnext_t2")), (0, 3));
-    assert_eq!(
-        load_nonasc_expected("fdb_neg_t2").0,
-        load_nonasc_expected("fdb_clean_t2").0
+    assert_rows_ran(
+        "nonasc_filtering_db_repeat_search_runs_one_thread",
+        results.len(),
+        &threads_of_rows,
     );
+    // LOSAT's results: R is masked past the negative length (the rows of `clean`), and the
+    // traceback's error is posted, at 2 threads as at 1.
+    let mut threads = vec![1];
+    if cpus >= 2 {
+        threads.push(2);
+    }
+    for t in threads {
+        let got = |named: &str| &results[&format!("fdb_{named}_t{t}")];
+        assert_eq!(losat_status(got("clean")), (0, 1));
+        assert_eq!(got("neg"), got("clean"));
+        assert_eq!(losat_status(got("ambnext")), (3, 0));
+    }
     let _ = fs::remove_dir_all(&root);
 }

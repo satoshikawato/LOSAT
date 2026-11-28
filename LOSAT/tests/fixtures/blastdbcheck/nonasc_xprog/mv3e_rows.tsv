@@ -191,3 +191,15 @@ mv3e_negzero_r_pre_negv0_t4	0	mv3e_o20.out	-
 mv3e_negzero_r_pre_posv0_t1	0	mv3e_o14.out	-
 mv3e_negzero_r_pre_posv0_t2	0	mv3e_o15.out	-
 mv3e_negzero_r_pre_posv0_t4	0	mv3e_o15.out	-
+mv3e_zero_n_posv1first_t1	0	-	-
+mv3e_zero_n_posv1first_t2	0	-	-
+mv3e_zero_n_posv1first_t4	0	-	-
+mv3e_zero_n_posv1first2_t1	-11	-	-
+mv3e_zero_n_posv1first2_t2	0	-	-
+mv3e_zero_n_posv1first2_t4	0	-	-
+mv3e_empty_n_posv1first_t1	-11	-	-
+mv3e_empty_n_posv1first_t2	-11	-	-
+mv3e_empty_n_posv1first_t4	-11	-	-
+mv3e_empty_n_posv1first2_t1	-11	-	-
+mv3e_empty_n_posv1first2_t2	-11	-	-
+mv3e_empty_n_posv1first2_t4	-11	-	-

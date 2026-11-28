@@ -6550,14 +6550,17 @@ fn open_search_database(
             );
             // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
-            // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:374-399
-            // The search of the repeats of `-filtering_db` (`hits_only`) is NCBI's `CLocalBlast`
-            // without threads, whatever threads LOSAT gives it: its scan does not stop at a
-            // negative length, and its traceback's read errors are those of one thread.
+            // The database reader of a search whose `CLocalBlast` is never given threads (the
+            // search of the repeats of `-filtering_db`, `BlastnArgs::db_reader_one_thread`) runs
+            // one thread, whatever threads LOSAT's workers get.
             let word_size =
                 crate::algorithm::blastn::coordination::determine_effective_word_size(args);
             let database = database.with_mt_mode(
-                if args.hits_only { 1 } else { args.num_threads },
+                if args.db_reader_one_thread {
+                    1
+                } else {
+                    args.num_threads
+                },
                 args.mt_mode,
                 word_size,
                 Some(args.query.as_path()),

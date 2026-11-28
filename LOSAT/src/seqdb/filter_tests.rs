@@ -1196,43 +1196,60 @@ fn alias_taxid_list_rescues_lines_before_negative_user_taxids() {
     );
 }
 
-/// `approx_nucleotide_length` of an ambiguity offset at or before the sequence's start: NCBI's
-/// negative `GetSeqLengthApprox` while the whole bytes fit a signed 32-bit `int`, and the positive
-/// count that the narrowing to `int` gives where the offsets are further apart; the totals of a
-/// negative length (`ScanTotals::add_nucleotide`): `total` wraps as NCBI's `Uint8` sum does,
-/// `shortest` takes it, `longest` and `searchable_total` stay.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:325-344
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1557-1610
+/// `approx_nucleotide_length` is NCBI's `GetSeqLengthApprox` as its build computes it: the whole
+/// bytes narrowed to a signed 32-bit `int`, then four bases a byte and `oid & 3` in 32-bit `int`
+/// arithmetic, which wraps past `2^29` whole bytes; `ScanTotals::add_length` adds it as
+/// `x_ScanTotals` does (`total` wraps a negative one, `shortest` takes it, `longest` and
+/// `searchable_total` take only a positive one). The offsets past `2^29` are those of the frozen
+/// blastdbcmd `-info` rows `ap_*` of `nonasc_xprog` (OID 2 of `mv3db/v0`: start 55, oid & 3 = 2,
+/// the other four OIDs 432 bases): NCBI BLAST+ 2.17.0 prints the totals of the wrapped lengths.
 #[test]
-fn approx_nucleotide_length_narrows_the_whole_bytes_and_totals_a_negative_one() {
+fn approx_nucleotide_length_is_ncbis_32_bit_int_and_totals_add_it() {
     // amb == seq: -1 whole bytes, `oid & 3` bases more.
     assert_eq!(approx_nucleotide_length(&[100], &[100], 0, 0), -4);
     assert_eq!(approx_nucleotide_length(&[100], &[100], 0, 7), -1);
     // amb before seq: -(seq - amb + 1) whole bytes.
     assert_eq!(approx_nucleotide_length(&[1000], &[10], 0, 1), 4 * -991 + 1);
-    // The most negative whole bytes an `int` holds: seq - amb + 1 == 2^31.
-    let seq = 0x8000_0000u32;
-    assert_eq!(
-        approx_nucleotide_length(&[seq], &[1], 0, 0),
-        4 * i64::from(i32::MIN)
-    );
-    // One byte further: the difference narrows to `INT4_MAX` whole bytes, which the four bases
-    // a byte take past `u32::MAX` (the cap of the lengths LOSAT keeps).
-    assert_eq!(
-        approx_nucleotide_length(&[seq], &[0], 0, 0),
-        i64::from(u32::MAX)
-    );
-    // Far apart: amb - seq - 1 == 16 - 0x9000_0000 - 1 narrows to 0x7000_000f whole bytes.
-    assert_eq!(
-        approx_nucleotide_length(&[0x9000_0000], &[16], 0, 2),
-        i64::from(u32::MAX)
-    );
-    let narrowed = (16i64 - 0x9000_0000 - 1) as i32;
-    assert_eq!(narrowed, 0x7000_000f);
-    // A short positive one is unchanged.
+    // A short positive one.
     assert_eq!(approx_nucleotide_length(&[100], &[126], 0, 6), 4 * 25 + 2);
+    // The rows `ap_*`: NCBI's totals are 432 plus these lengths.
+    let start = 55u32;
+    let at =
+        |delta: u64| approx_nucleotide_length(&[start], &[(u64::from(start) + delta) as u32], 0, 2);
+    // ap_pos29: 2^29 + 5 whole bytes; the product 2^31 + 20 wraps.
+    assert_eq!(at((1 << 29) + 6), i32::MIN + 22);
+    // ap_pos30: 2^30 + 5 whole bytes; the product 2^32 + 20 wraps to 20.
+    assert_eq!(at((1 << 30) + 6), 22);
+    // ap_neg30: the difference 2^31 + 2^30 - 1 narrows to -2^30 - 1 whole bytes.
+    assert_eq!(at((1 << 31) + (1 << 30)), -2);
+    // ap_neg31: the difference 2^31 + 5 narrows to -2^31 + 5 whole bytes.
+    assert_eq!(at((1 << 31) + 6), 22);
+    // ap_eq: amb == seq.
+    assert_eq!(at(0), -2);
+    // NCBI's printed totals (`N total bases` of the rows).
+    for (delta, total) in [
+        ((1u64 << 29) + 6, 18_446_744_071_562_068_422u64),
+        ((1 << 30) + 6, 454),
+        ((1 << 31) + (1 << 30), 430),
+        ((1 << 31) + 6, 454),
+        (0, 430),
+    ] {
+        let mut totals = ScanTotals::default();
+        for length in [100, 109, 131, 92] {
+            totals.add_length(length);
+        }
+        totals.add_length(at(delta));
+        assert_eq!(
+            (totals.count, totals.total, totals.longest),
+            (5, total, 131)
+        );
+    }
 
     let mut totals = ScanTotals::default();
-    totals.add_nucleotide(102);
-    totals.add_nucleotide(approx_nucleotide_length(&[100], &[100], 0, 1));
+    totals.add_length(102);
+    totals.add_length(approx_nucleotide_length(&[100], &[100], 0, 1));
     assert_eq!(totals.count, 2);
     assert_eq!(totals.total, 102u64.wrapping_add(-3i64 as u64));
     assert_eq!(totals.total, 99);
@@ -1240,7 +1257,7 @@ fn approx_nucleotide_length_narrows_the_whole_bytes_and_totals_a_negative_one() 
     assert_eq!(totals.longest, 102);
     assert_eq!(totals.searchable_total, 102);
     let mut negative = ScanTotals::default();
-    negative.add_nucleotide(-4);
+    negative.add_length(-4);
     assert_eq!(
         (negative.total, negative.shortest, negative.longest),
         (u64::MAX - 3, -4, 0)

@@ -3681,12 +3681,12 @@ fn section_hsps(
             hsps.set_query_bioseq(s_idx);
         }
         // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:213-260
-        // The row of the subject whose Bioseq this one's loads give, where it is in the section.
-        let row = loads
-            .and_then(|loads| loads.anchored_row(s_idx as usize).flatten())
-            .and_then(|row| u32::try_from(row).ok())
-            .and_then(|row| anchored_section_row(group, aligned, row))
-            .unwrap_or(s_idx);
+        // The row of the subject whose Bioseq this one's loads give, in the section.
+        debug_assert!(
+            loads.is_none_or(|loads| loads.anchored_row(s_idx as usize) != Some(None)),
+            "a subject whose row LOSAT does not name is refused before the report"
+        );
+        let row = anchored_section_row(group, aligned, s_idx, loads).unwrap_or(s_idx);
         for hit in &group.subject_hits[&s_idx] {
             let strands = segments_of(hit, &mut segments);
             hsps.push_dense_seg(row, segments.starts(), segments.lens(), 0, 0, strands);
@@ -3696,22 +3696,43 @@ fn section_hsps(
 }
 
 /// The subject of a query-anchored section (`aligned`, the hits that it shows) whose row holds the
-/// Bioseq of the subject `row` (`HitLoads::anchored_row`): `row` where it is one of them, else the
-/// one whose hit shows `row` as a copy of its record (`QueryGroup::new`'s `joins`: one Bioseq);
-/// `None` where the section does not show `row`.
+/// HSPs of the shown subject `s_idx` where its loads give the Bioseq of another subject's row,
+/// `row` (`loads`, `HitLoads::anchored_row`): `row` where it is one of them, else the one whose
+/// hit shows `row` as a copy of its record (`QueryGroup::new`'s `joins`: one Bioseq), else the
+/// first whose hit shows a subject of that Bioseq (the section does not show `row`: a
+/// `-num_alignments` cut, or another query's or batch's row). `None` for a subject of its own
+/// row (also one whose row LOSAT does not name, which the programs refuse before any report).
 fn anchored_section_row(
     group: &super::x_pairwise_par::QueryGroup<'_>,
     aligned: &[u32],
-    row: u32,
+    s_idx: u32,
+    loads: Option<&crate::report::db_subject::HitLoads>,
 ) -> Option<u32> {
+    let loads = loads?;
+    let row_of = |subject: u32| {
+        loads
+            .anchored_row(subject as usize)
+            .flatten()
+            .and_then(|row| u32::try_from(row).ok())
+    };
+    let row = row_of(s_idx)?;
     if aligned.contains(&row) {
         return Some(row);
     }
-    aligned.iter().copied().find(|shown| {
+    let shows = |shown: &u32, of: &dyn Fn(u32) -> bool| {
         group.subject_hits[shown]
             .iter()
-            .any(|hit| hit.hit.s_idx == row)
-    })
+            .any(|hit| of(hit.hit.s_idx))
+    };
+    aligned
+        .iter()
+        .find(|shown| shows(shown, &|subject| subject == row))
+        .or_else(|| {
+            aligned
+                .iter()
+                .find(|shown| shows(shown, &|subject| row_of(subject) == Some(row)))
+        })
+        .copied()
 }
 
 /// `section_hsps` of a BLASTP section (`seqalign::protein_row_segments`: no strands).
@@ -4203,7 +4224,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                     stored_source(self.subject_sources, s_idx),
                     parsed_subject(self.parsed_subjects, s_idx),
                     true,
-                    self.thrown(s_idx).is_some(),
+                    self.loads.describes_thrown(s_idx as usize),
                 )
             },
             place,
@@ -5000,15 +5021,15 @@ fn write_blastn_description_table<W: Write>(
             // The description keeps the prefixes (`fLeavePrefixSuffix`, `defline.rs`).
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1579-1592
             // A subject whose load throws where the report reads it (`loads`,
-            // `thrown_description`) takes the `catch` of that line too: its description is the
-            // Seq-align id and `Unknown`.
+            // `HitLoads::describes_thrown`, `thrown_description`) takes the `catch` of that line
+            // too: its description is the Seq-align id and `Unknown`.
             let title = subject_titles.get(&s_idx).map_or(&[][..], Vec::as_slice);
             database_description_label(
                 title,
                 stored_source(sources, s_idx),
                 parsed_subject(parsed, s_idx),
                 protein,
-                loads.thrown(s_idx as usize).is_some(),
+                loads.describes_thrown(s_idx as usize),
             )
         },
         place,

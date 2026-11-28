@@ -4342,3 +4342,61 @@ fn copies_of_one_record_share_the_first_copys_row() {
     assert_eq!(bulk.anchored_row(9), Some(Some(8)));
     assert_eq!(bulk.anchored_row(10), None);
 }
+
+// Review 1 of line DBID hr-2b, L-3: a copy that loads its own record joins the first copy's row
+// in each query; where two queries or batches give it two rows (another first copy in each),
+// both are rows of its one Bioseq (one Seq-align id handle), so they join, never a row that LOSAT
+// does not name (`HitLoads::join_copies`). A held subject's two answers stay refused.
+#[test]
+fn a_copy_s_rows_of_two_queries_join() {
+    let a = DbSequence::of_unrestricted(1);
+    let own = AnchoredRow::Own {
+        sequence: Some(a),
+        line: 0,
+        target: 0,
+    };
+    let mut loads = HitLoads::default();
+    loads.note_rows([(3, Some(40), own), (6, Some(40), own)].into_iter(), false);
+    loads.note_rows([(0, Some(40), own), (6, Some(40), own)].into_iter(), false);
+    loads.note_rows([(2, Some(40), own), (5, Some(40), own)].into_iter(), true);
+    for key in [3, 6] {
+        assert_eq!(loads.anchored_row(key), Some(Some(0)), "{key}");
+    }
+    assert_eq!(loads.anchored_row(0), None);
+    assert_eq!(loads.anchored_row(5), Some(Some(2)));
+    // The later row of a subject that already joins the earlier one.
+    loads.note_rows([(2, Some(40), own), (3, Some(40), own)].into_iter(), false);
+    for key in [2, 3, 5, 6] {
+        assert_eq!(loads.anchored_row(key), Some(Some(0)), "{key}");
+    }
+    let held = AnchoredRow::Shown(Some((a, 0)));
+    loads.note_rows([(7, Some(41), held), (9, Some(41), held)].into_iter(), true);
+    loads.note_rows([(8, Some(41), held), (9, Some(41), held)].into_iter(), true);
+    assert_eq!(loads.anchored_row(9), Some(None));
+}
+
+// Review 1 of line DBID hr-2b, M-1 (review 4 of pfoff-4, `pq.zr1.V.U1.b1.0`): a subject whose
+// load threw at its description line and whose alignment's load later gave another sequence
+// (prefetch off): the description writes the line of NCBI's `catch` (`describes_thrown`), the
+// alignment that sequence's record (`written_holder`), not a refusal of both.
+#[test]
+fn a_thrown_description_keeps_the_held_alignment() {
+    let mut loads = HitLoads::default();
+    let holder = DbSequence::of_unrestricted(4);
+    let shown = ShownInstead {
+        holder: Some(holder),
+        by: ShownBy::Weak,
+        line: 0,
+    };
+    loads.shown.insert(3, shown);
+    loads.note_shown(3, shown);
+    loads.note_described(3, Some(Described::Thrown));
+    loads.writes_shown = true;
+    assert!(loads.describes_thrown(3));
+    assert_eq!(loads.written_holder(3), Some((holder, 0)));
+    assert_eq!(loads.described_line(3), Some(Some(Described::Thrown)));
+    // Another report that describes it by a line: LOSAT does not know one answer.
+    loads.note_described(3, Some(Described::Line(0)));
+    assert_eq!(loads.described_line(3), Some(None));
+    assert!(!loads.describes_thrown(3));
+}

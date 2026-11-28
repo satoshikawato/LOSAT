@@ -208,7 +208,7 @@ impl<'a> RoundSections<'a> {
             super::stored_source(self.subject_sources, s_idx),
             self.parsed(s_idx),
             true,
-            self.thrown(s_idx).is_some(),
+            self.loads.describes_thrown(s_idx as usize),
         )
     }
 

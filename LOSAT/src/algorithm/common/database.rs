@@ -4415,7 +4415,9 @@ impl<'d> ShownHolders<'d> {
     /// a holder whose own Seq-align id is the subject's in other letter case
     /// (`differs_in_case_only`), and a subject whose description line in a pairwise report writes
     /// the title of a Bioseq that LOSAT does not know (`HitLoads::described_line`; where it knows
-    /// it, the record writes that line's title, `ShownBioseq::described_by`).
+    /// it, the record writes that line's title, `ShownBioseq::described_by`; where the load there
+    /// threw, the line writes the subject's Seq-align id and `Unknown`, refused as such a line,
+    /// `description_line_refusal`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn shown<'r>(
         &self,
@@ -4508,11 +4510,21 @@ impl<'d> ShownHolders<'d> {
                 "in outfmt 1 to 4 where that Bioseq is another row's of a query's section, whose rows LOSAT does not merge as NCBI does",
             ));
         }
+        use crate::report::db_subject::Described;
         let bioseq = match loads.described_line(key) {
             None => bioseq,
-            Some(Some(line)) => bioseq
+            Some(Some(Described::Line(line))) => bioseq
                 .described_by(line as usize)
                 .map_err(|reason| parsed_refusal(self.db.oid(ordinal), &reason, self.program))?,
+            // The description line writes the subject's Seq-align id and `Unknown`
+            // (`HitLoads::describes_thrown`), refused as a thrown load's line is.
+            Some(Some(Described::Thrown)) => {
+                let thrown = crate::report::db_subject::HitLoad::Throws;
+                if let Some(reason) = description_line_refusal(subject, thrown, self.protein) {
+                    return Err(parsed_refusal(self.db.oid(ordinal), &reason, self.program));
+                }
+                bioseq
+            }
             Some(None) => {
                 return Err(refuse(
                     "in a pairwise report whose description line looks its title up again by its display id, where LOSAT does not know the Bioseq that NCBI's places give for that id",

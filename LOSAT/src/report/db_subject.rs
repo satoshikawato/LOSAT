@@ -6066,6 +6066,19 @@ pub fn unchanged_by_load_throws_outfmts<O: AsRef<[u8]>>(
     })
 }
 
+/// What the description line of a pairwise report (outfmt 0 to 4) writes for a subject whose
+/// loads give another sequence ([`HitLoads::described_line`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Described {
+    /// The title of the other sequence's line that its second lookup, by the display id, gives
+    /// (`ScopeWalk::display_held`, `ShownBioseq::described_by`).
+    Line(u32),
+    /// The line of NCBI's `catch` (`ParsedSubject::thrown_description`): the load threw there,
+    /// before a later load of the report (its alignment's) gave the other sequence, whose record
+    /// the alignment writes.
+    Thrown,
+}
+
 /// What NCBI's reports do at the `Hit` (outfmt 5, 13 to 16), the rows (outfmt 6, 7, 10 and 20) or
 /// the organism report's HSPs (outfmt 18) of a subject: the one answer to "this subject's lookup
 /// throws there" and "this subject is never loaded", which the refusals
@@ -6166,10 +6179,10 @@ pub struct HitLoads {
     /// runs (`HitLoads::after`'s `own`), so that a call keeps nothing per subject that no load
     /// shows as another sequence.
     written: std::collections::HashMap<usize, Option<(DbSequence, usize)>>,
-    /// The line whose title the description line of a pairwise report writes for a subject whose
-    /// loads give another sequence ([`HitLoads::described_line`], `ScopeWalk::display_held`), by
-    /// key: `None` where LOSAT does not know it, or two descriptions give other lines.
-    described: std::collections::HashMap<usize, Option<u32>>,
+    /// What the description line of a pairwise report writes for a subject whose loads give
+    /// another sequence ([`HitLoads::described_line`], `ScopeWalk::display_held`), by key: `None`
+    /// where LOSAT does not know the line, or two descriptions give other lines.
+    described: std::collections::HashMap<usize, Option<Described>>,
     /// The subject whose row of outfmt 1 to 4 a subject's HSPs join where its loads give a Bioseq
     /// that another row has (another sequence's, or a copy's of its record), by key
     /// ([`HitLoads::anchored_row`]): `None` where LOSAT does not merge it as NCBI does.
@@ -6424,7 +6437,7 @@ impl HitLoads {
                                 Some(&HitLoad::Shown(shown)) if shown_keys.contains(&key) => {
                                     let line = described_line(walk, subject, shown, &holder_record);
                                     if let Some(line) = line {
-                                        loads.note_described(key, line);
+                                        loads.note_described(key, line.map(Described::Line));
                                     }
                                 }
                                 _ => {}
@@ -6827,7 +6840,8 @@ impl HitLoads {
         let first = |hit: usize| reads.hits[hit].first().copied().and_then(parsed);
         let state = std::cell::RefCell::new(vec![None::<Read>; reads.hits.len()]);
         // The hits whose read threw before a later one gave a sequence: the description line
-        // wrote the thrown record, so no one record is the hit's (`HitLoads::written`).
+        // wrote the line of NCBI's `catch`, the alignment the other sequence's record
+        // (`Described::Thrown`).
         let threw = std::cell::RefCell::new(vec![false; reads.hits.len()]);
         let walk = std::cell::RefCell::new(walk);
         // The Bioseq of each hit's load: its sequence and line (`ScopeWalk::load_place`).
@@ -6953,10 +6967,10 @@ impl HitLoads {
                     self.shown.insert(first, shown);
                     self.note_shown(first, shown);
                     if let Some(line) = titles.borrow()[hit] {
-                        self.note_described(first, line);
+                        self.note_described(first, line.map(Described::Line));
                     }
                     if threw.borrow()[hit] {
-                        own.insert(first);
+                        self.note_described(first, Some(Described::Thrown));
                     }
                     loaded.extend(keys);
                 }
@@ -7141,12 +7155,24 @@ impl HitLoads {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
-    /// The line of the other sequence whose title the description line of a pairwise report
-    /// (outfmt 0 to 4) writes for the subject `key` (`ScopeWalk::display_held`: the line of the
-    /// Bioseq that its second lookup, by the display id, gives): `None` where no pairwise report
-    /// describes it as another sequence, `Some(None)` where LOSAT does not know that Bioseq.
-    pub fn described_line(&self, key: usize) -> Option<Option<u32>> {
+    /// What the description line of a pairwise report (outfmt 0 to 4) writes for the subject `key`
+    /// whose loads give another sequence ([`Described`]: the title of that sequence's line that its
+    /// second lookup, by the display id, gives, `ScopeWalk::display_held`; or the line of NCBI's
+    /// `catch` where its load there threw): `None` where no pairwise report describes it as
+    /// another sequence, `Some(None)` where LOSAT does not know that Bioseq (or two reports
+    /// describe it apart).
+    pub fn described_line(&self, key: usize) -> Option<Option<Described>> {
         self.described.get(&key).copied()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1579-1592
+    /// Whether the description line of a pairwise report writes the line of NCBI's `catch` for the
+    /// subject `key` (`ParsedSubject::thrown_description`): its `Hit` throws
+    /// ([`HitLoads::thrown`]), or its load threw at the description line before its alignment's
+    /// load gave another sequence ([`Described::Thrown`]; the alignment writes that sequence's
+    /// record).
+    pub fn describes_thrown(&self, key: usize) -> bool {
+        self.thrown(key).is_some() || self.described.get(&key) == Some(&Some(Described::Thrown))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:213-260
@@ -7154,9 +7180,14 @@ impl HitLoads {
     /// The subject whose row the HSPs of the subject `key` join in the query-anchored sections of
     /// outfmt 1 to 4 (`CAlnMix` tells its sequences apart by Bioseq handle, and NCBI's places give
     /// the Bioseq of a held subject's Seq-align id): `None` for its own row, `Some(Some(other))`
-    /// where its loads give the Bioseq of the subject `other`'s row ([`HitLoads::note_rows`]),
-    /// `Some(None)` where LOSAT does not merge its rows as NCBI does (no one row of that Bioseq,
-    /// or a subject that joins another row in one query or batch than in another).
+    /// where its loads give the Bioseq of the subject `other`'s row ([`HitLoads::note_rows`]; one
+    /// `other` for every subject of that Bioseq, whose first in a section holds the row there,
+    /// `pairwise::anchored_section_row`), `Some(None)` where LOSAT does not merge its rows as NCBI
+    /// does (no one row of that Bioseq, or a subject that joins another row in one query or batch
+    /// than in another): only a subject whose loads give another sequence, which the programs
+    /// refuse before any report (`common::database::ShownHolders::shown`,
+    /// `ParsedSubject::shown_reason`); a copy that loads its own record joins its rows of every
+    /// query ([`HitLoads::note_row`]).
     pub fn anchored_row(&self, key: usize) -> Option<Option<usize>> {
         self.rows.get(&key).copied()
     }
@@ -7232,14 +7263,15 @@ impl HitLoads {
             // The row's own subject keeps its row; one by one, a held subject that no other
             // subject of the section joins is noted only where its holder's own Bioseq is
             // another row of it (`anchored_row` of a subject whose row is not in a section
-            // is its own there, `pairwise::section_hsps`). The copies of the row's own
-            // subject join it where it is known.
+            // is there the row of the first subject of that Bioseq that the section shows,
+            // its own where it is the only one, `pairwise::anchored_section_row`). The copies
+            // of the row's own subject join it where it is known.
             let noted = bulk || joined.is_none() || rows.len() > 1 || owned.contains(&sequence);
             for (key, _, row) in rows {
-                match row {
-                    AnchoredRow::Shown(_) if noted => self.note_row(key, joined),
-                    AnchoredRow::Own { .. } if joined.is_some_and(|joined| joined != key) => {
-                        self.note_row(key, joined)
+                match (row, joined) {
+                    (AnchoredRow::Shown(_), _) if noted => self.note_row(key, joined),
+                    (AnchoredRow::Own { .. }, Some(joined)) if joined != key => {
+                        self.join_copies(key, joined)
                     }
                     _ => {}
                 }
@@ -7283,9 +7315,11 @@ impl HitLoads {
         (one_handle && by_line).then_some(first)
     }
 
-    /// One query's answer `row` for the subject `key` ([`HitLoads::anchored_row`]): where two
+    /// One query's answer `row` for the subject `key` whose load gives another sequence
+    /// ([`HitLoads::anchored_row`], the row's subject as [`HitLoads::row_of`] names it): where two
     /// queries give other rows, `None`.
     fn note_row(&mut self, key: usize, row: Option<usize>) {
+        let row = row.map(|row| self.row_of(row));
         self.rows
             .entry(key)
             .and_modify(|rows| {
@@ -7296,8 +7330,56 @@ impl HitLoads {
             .or_insert(row);
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:213-260
+    /// One query's answer for the copy `key` of a record that loads its own record: it shares the
+    /// row of the subject `row` ([`HitLoads::bioseq_row`]: own loads of one Seq-align id handle,
+    /// one Bioseq in every scope). Where another query or batch gave it another row, both rows
+    /// are of that one Bioseq: they join, every subject of the later of the two taking the
+    /// earlier (the row of its first subject in a section is the section's,
+    /// `pairwise::anchored_section_row`). So a copy's row is always one that LOSAT names.
+    fn join_copies(&mut self, key: usize, row: usize) {
+        if [key, row]
+            .iter()
+            .any(|key| self.rows.get(key) == Some(&None))
+        {
+            // A subject whose loads give another sequence in a query (refused).
+            return;
+        }
+        let (one, other) = (self.row_of(key), self.row_of(row));
+        let (kept, joined) = (one.min(other), one.max(other));
+        if kept == joined {
+            return;
+        }
+        for target in self.rows.values_mut() {
+            if *target == Some(joined) {
+                *target = Some(kept);
+            }
+        }
+        self.rows.insert(joined, Some(kept));
+    }
+
+    /// Loads whose copies `copies` (key, row) join as [`HitLoads::join_copies`] joins them (the
+    /// rows of the query-anchored sections, `pairwise::anchored_section_row`).
+    #[cfg(test)]
+    pub(crate) fn with_joined_copies(copies: &[(usize, usize)]) -> Self {
+        let mut loads = Self::default();
+        for &(key, row) in copies {
+            loads.join_copies(key, row);
+        }
+        loads
+    }
+
+    /// The subject whose row the subject `key` shares ([`HitLoads::join_copies`] keeps every
+    /// answer a subject that keeps its own row), or `key` itself.
+    fn row_of(&self, key: usize) -> usize {
+        match self.rows.get(&key) {
+            Some(&Some(row)) => row,
+            _ => key,
+        }
+    }
+
     /// A description's answer `line` for the subject `key` ([`HitLoads::described_line`]).
-    fn note_described(&mut self, key: usize, line: Option<u32>) {
+    fn note_described(&mut self, key: usize, line: Option<Described>) {
         self.described
             .entry(key)
             .and_modify(|described| {

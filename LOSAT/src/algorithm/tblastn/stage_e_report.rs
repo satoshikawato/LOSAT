@@ -79,6 +79,15 @@ impl ShownSubjects<'_> {
         }
     }
 
+    /// The ranks of the subjects whose identities the reports count again on their holders'
+    /// letters (`database::ReportedSubjects::recounted`; none for `-subject`).
+    fn recounted(&self) -> &[usize] {
+        match self {
+            Self::Fasta { .. } => &[],
+            Self::Database { reported, .. } => &reported.recounted,
+        }
+    }
+
     /// Whether the search read other letters of the database sequences than the reports show
     /// (`-db_hard_mask`: `ShownSubjects::Database::hard_masked`).
     fn hard_masked(&self) -> bool {
@@ -376,7 +385,8 @@ pub(super) fn render(
     let query_bioseq = pssm.and_then(|psi| psi.bioseq_letters.as_deref());
     let hard_masked = shown.hard_masked();
     let has_nullb = pssm.is_some() && super::nullb_report::hitlists_have_nullb(hitlists);
-    if (recounts_shown_counts(pssm, hard_masked) || has_nullb)
+    let held = shown.recounted();
+    if (recounts_shown_counts(pssm, hard_masked) || has_nullb || !held.is_empty())
         && reads_subject_letters(outputs, pssm, hard_masked, has_nullb)
     {
         recount_shown_counts(
@@ -385,8 +395,7 @@ pub(super) fn render(
             subject_letters,
             hitlists,
             genetic_code,
-            hard_masked,
-            has_nullb,
+            (hard_masked, has_nullb, held),
         )?;
     }
     // BLAST XML (outfmt 5, and the XML2 and JSON documents of 15 and 16): its texts are made,
@@ -2072,9 +2081,12 @@ pub(super) fn recounts_shown_counts(
 /// The report counts (`report_num_ident`, `report_mismatches`) of the HSPs
 /// of `hitlists`, counted again from their rows (`aligned_sequences`) for a query whose reports
 /// read other letters than its search (`QueryLetters::shows_other_letters`: a PSSM query's Bioseq
-/// letters `query_bioseq`, or its gap residue), and for every query of a search with
+/// letters `query_bioseq`, or its gap residue), for every query of a search with
 /// `-db_hard_mask` (`hard_masked`: the search read `B` over the masked bases, the rows read the
-/// stored bases; series NP, M4b PR 2). Stage D counts on the searched NCBIstdaa codes;
+/// stored bases; series NP, M4b PR 2), and for the subjects `held` (ranks, ascending) whose
+/// holders' letters, other than the subjects', the rows read (line DBID hr-2b: NCBI's scope gives
+/// the holder's Bioseq for the Seq-align id, `database::ReportedSubjects::recounted`). Stage D
+/// counts on the searched NCBIstdaa codes;
 /// NCBI's reports compare the rows' letters, where a lower-case letter is identical to no subject
 /// letter and the gap residue's `-` is identical to a gap of the subject (an identity and a gap,
 /// so the mismatches can be fewer than none). Every report then reads these counts: the default
@@ -2085,19 +2097,19 @@ fn recount_shown_counts(
     subject_letters: SubjectLetters<'_>,
     hitlists: &mut [KappaResultHitList],
     genetic_code: u8,
-    hard_masked: bool,
-    has_nullb: bool,
+    (hard_masked, has_nullb, held): (bool, bool, &[usize]),
 ) -> Result<()> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut x_window = Vec::new();
     for (query, hitlist) in query_records.iter().zip(hitlists.iter_mut()) {
         let letters = QueryLetters::new(query.seq(), query_bioseq);
-        let recount_all = hard_masked || letters.shows_other_letters();
-        if !recount_all && !has_nullb {
+        let recount_query = hard_masked || letters.shows_other_letters();
+        if !recount_query && !has_nullb && held.is_empty() {
             continue;
         }
         for list in hitlist.lists_mut() {
             let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
+            let recount_all = recount_query || held.binary_search(&oid).is_ok();
             let subject_seq = subject_letters.nt(oid);
             let mut translation = TargetTranslation::of(subject_seq, &code);
             for (linked, payload) in list.hsps.hsps.iter().zip(list.payloads.iter_mut()) {

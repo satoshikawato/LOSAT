@@ -903,6 +903,10 @@ pub(super) struct ReportedSubjects {
     /// Whether the search is gapped: the Seq-aligns that NCBI's prefetch counts are one for each
     /// HSP, else one for each subject (`seq_aligns_of`).
     pub(super) gapped: bool,
+    /// The ranks (ascending) of the subjects whose holders' records the pairwise reports write
+    /// with other letters than the subjects' (`ShownHolders::shown`): their identities are
+    /// counted again on the holder's letters (`stage_e_report::recount_shown_counts`).
+    pub(super) recounted: Vec<usize>,
 }
 
 impl ReportedSubjects {
@@ -1367,6 +1371,7 @@ pub(super) fn reported_subjects(
     let mut taxdb_found: Option<bool> = None;
     // The holders whose records the writers write for subjects (`shared::ShownHolders`).
     let holders = shared::ShownHolders::new(&database.db, false, PROGRAM);
+    let mut recounted = Vec::new();
     for (rank, &ordinal) in ordinals.iter().enumerate() {
         // The sequence whose letters and length the reports read: the subject's, or its holder's.
         let mut read_ordinal = ordinal;
@@ -1411,22 +1416,26 @@ pub(super) fn reported_subjects(
                 };
                 let (subject, checked, load) = match &shown_bioseq {
                     Some(bioseq) => {
-                        // Outfmt 0 to 4 print the search's identities (`recount_shown_counts`
-                        // counts them again only for a PSSM or `-db_hard_mask`).
+                        let same = || -> Result<bool> {
+                            let letters = |ordinal| {
+                                database
+                                    .db
+                                    .nucleotide_iupac(ordinal)
+                                    .map_err(|error| shared::database_error(error, PROGRAM))
+                            };
+                            Ok(letters(ordinal)? == letters(bioseq.ordinal())?)
+                        };
+                        // The tables print the search's identities; outfmt 0 to 4 count them again
+                        // on the holder's letters (`recounted`).
                         holders.other_letters(
                             (ordinal, subject),
                             bioseq,
-                            shown.table_identities || shown.pairwise,
-                            || {
-                                let letters = |ordinal| {
-                                    database
-                                        .db
-                                        .nucleotide_iupac(ordinal)
-                                        .map_err(|error| shared::database_error(error, PROGRAM))
-                                };
-                                Ok(letters(ordinal)? == letters(bioseq.ordinal())?)
-                            },
+                            shown.table_identities,
+                            &same,
                         )?;
+                        if shown.pairwise && !same()? {
+                            recounted.push(rank);
+                        }
                         read_ordinal = bioseq.ordinal();
                         (
                             &bioseq.record,
@@ -1519,6 +1528,7 @@ pub(super) fn reported_subjects(
         loads,
         prefetch,
         gapped,
+        recounted,
     })
 }
 

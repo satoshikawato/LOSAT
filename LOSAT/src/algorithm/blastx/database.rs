@@ -1749,7 +1749,7 @@ impl ReportedSubjects {
 
     /// The description-table labels by rank: the title as NCBI's defline generator makes it
     /// for the description table (as BLASTP's, BLASTN's and TBLASTN's `-db` reports), or the
-    /// Seq-align id and `Unknown` of one whose load throws (`HitLoads::thrown`).
+    /// Seq-align id and `Unknown` of one whose load throws there (`HitLoads::describes_thrown`).
     pub(crate) fn descriptions(&self) -> Vec<crate::report::pairwise::DescriptionLabel> {
         self.titles
             .iter()
@@ -1760,7 +1760,7 @@ impl ReportedSubjects {
                     crate::report::pairwise::stored_source(&self.sources, rank as u32),
                     self.parsed_subject(rank),
                     true,
-                    self.loads.thrown(rank).is_some(),
+                    self.loads.describes_thrown(rank),
                 )
             })
             .collect()

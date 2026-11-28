@@ -1955,3 +1955,46 @@ fn tblastn_nullb_empty_subject_row_html_preprocess_and_id_texts() {
     )
     .unwrap();
 }
+
+// Review 1 of line DBID hr-2b, H-1 (probe `R/ad41/hr2br/bin/rprobe.py`, `blastp.F4n3.pf.1`): five
+// copies of one record (one Bioseq) whose hits X, Z, X, Y, X are cut at three alignments by
+// `-num_alignments 3`; the prefetch joined every copy to the first by key (`HitLoads::note_rows`),
+// whose hit the section does not show. NCBI's `CAlnMix` still takes the two shown X hits for one
+// sequence (rows X, X, Z): the row is the first of that Bioseq that the section shows. A subject
+// of its own row keeps it.
+#[test]
+fn a_cut_copy_s_row_is_the_first_of_its_bioseq_that_the_section_shows() {
+    let hits: Vec<PairwiseHit> = [6, 5, 4, 3, 2, 1, 0]
+        .into_iter()
+        .map(|s_idx| {
+            PairwiseHit::from(Hit {
+                s_idx,
+                ..make_hit()
+            })
+        })
+        .collect();
+    let query_hits: Vec<_> = hits
+        .iter()
+        .enumerate()
+        .map(|(index, hit)| (index, hit))
+        .collect();
+    let titles: Vec<Arc<[u8]>> = (0..7).map(|_| Arc::from(&b"t"[..])).collect();
+    let group =
+        crate::report::x_pairwise_par::QueryGroup::new(&query_hits, &titles, |before, s_idx| {
+            matches!((before, s_idx), (6, 5) | (3, 2))
+        })
+        .unwrap();
+    let loads =
+        crate::report::db_subject::HitLoads::with_joined_copies(&[(6, 0), (5, 0), (3, 0), (2, 0)]);
+    let aligned = group.aligned(3);
+    assert_eq!(aligned, [6, 4, 3]);
+    let row = |s_idx| anchored_section_row(&group, aligned, s_idx, Some(&loads));
+    assert_eq!((row(6), row(3), row(4)), (Some(6), Some(6), None));
+    // The first copy shown: its row.
+    let aligned = group.aligned(5);
+    assert_eq!(
+        [6, 3, 0].map(|s_idx| anchored_section_row(&group, aligned, s_idx, Some(&loads))),
+        [Some(0), Some(0), None]
+    );
+    assert_eq!(anchored_section_row(&group, aligned, 6, None), None);
+}

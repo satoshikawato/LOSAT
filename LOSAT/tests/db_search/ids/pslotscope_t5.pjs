@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pslotscope_t5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pslotscope_t5 (parsed Seq-ids, taxids 99990, 9606 and 150)",
+  "number-of-letters": 1560,
+  "number-of-sequences": 13,
+  "last-updated": "2026-11-28T01:47:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 3,
+  "bytes-total": 52580,
+  "bytes-to-cache": 1822,
+  "files": [
+    "pslotscope_t5.pdb",
+    "pslotscope_t5.phr",
+    "pslotscope_t5.pin",
+    "pslotscope_t5.pog",
+    "pslotscope_t5.pos",
+    "pslotscope_t5.pot",
+    "pslotscope_t5.psq",
+    "pslotscope_t5.ptf",
+    "pslotscope_t5.pto"
+  ]
+}

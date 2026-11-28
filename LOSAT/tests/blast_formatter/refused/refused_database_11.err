@@ -1,0 +1,1 @@
+Error: the database 'in/gone/db' of the BLAST archive cannot be opened here; NCBI BLAST+ then asks NCBI's servers for its sequences, which is not supported by LOSAT's BLAST_FORMATTER

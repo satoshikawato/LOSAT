@@ -1311,6 +1311,19 @@ pub fn x_identify_accession(
     ai
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1094-1108
+/// `IsLocalId`: whether `id` is a local Seq-id, or one whose `IdentifyAccession` (the member
+/// function's default flags) is `eAcc_local` or `eAcc_general`. The archive's and the search
+/// strategy's request then holds the queries' Bioseqs (`CExportStrategy::x_Process_Query`).
+pub fn is_local_id(id: &ParsedSeqId) -> bool {
+    let info = identify_seq_id(
+        id,
+        parse_flags::ANY_RAW | parse_flags::ANY_LOCAL,
+        &mut |_| {},
+    );
+    matches!(id, ParsedSeqId::Local(_)) || info == LOCAL || info == GENERAL
+}
+
 /// `CSeq_id::IdentifyAccession` with `flags`, on a Seq-id (the member function; its default
 /// flags are `fParse_AnyRaw` and `fParse_AnyLocal` together).
 ///

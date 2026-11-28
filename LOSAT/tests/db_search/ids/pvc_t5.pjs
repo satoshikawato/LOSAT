@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pvc_t5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pvc_t5 (parsed Seq-ids, taxid 99990)",
+  "number-of-letters": 240,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-27T16:06:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49815,
+  "bytes-to-cache": 379,
+  "files": [
+    "pvc_t5.pdb",
+    "pvc_t5.phr",
+    "pvc_t5.pin",
+    "pvc_t5.pog",
+    "pvc_t5.pos",
+    "pvc_t5.pot",
+    "pvc_t5.psq",
+    "pvc_t5.ptf",
+    "pvc_t5.pto"
+  ]
+}

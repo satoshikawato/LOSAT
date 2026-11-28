@@ -139,6 +139,11 @@ describe.skipIf(REACTORS === undefined)('psiblast and tblastn -in_pssm through t
     expect(out6_1.length).toBeGreaterThan(0);
     const files1 = readStoredZip(Buffer.concat(streams1.get(8) ?? []));
     expect(files1.map((f) => f.name).sort()).toEqual(['chk.ascii', 'chk.asn']);
+    // The engine labels each file by its option (the comment of its entry).
+    expect(files1.map((f) => [f.name, f.label]).sort()).toEqual([
+      ['chk.ascii', 'out_ascii_pssm'],
+      ['chk.asn', 'out_pssm'],
+    ]);
     if (NATIVE) {
       const tmp = mkdtempSync(join(tmpdir(), 'losat-pkg-psi-'));
       try {

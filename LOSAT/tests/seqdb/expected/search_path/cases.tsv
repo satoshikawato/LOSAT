@@ -124,12 +124,12 @@ i11_version_5	empty	{R}/v5ok	<none>	prot_v5	ok	prot.faa	10	{R}/v5ok/prot_v5	\e	0
 i12_version_5_without_lmdb	empty	{R}/v5no	<none>	prot_v5	error	\e	\e	\e	File {R}/v5no/prot_v5.pdb not found. If you renamed any BLAST database files, please use original file names, and makeblastdb to rename the database. If you deleted any BLAST database files, you need to recreate the database.	2	\e	\e
 i13_group_alias_dblist_dir	empty	{R}/b1	<none>	{R}/g1/plain	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/g1/plain	\e	0	\e	unsupported:group alias file
 j01_index_0_bytes	empty	{R}/bad	<none>	trunc0	other	\e	\e	\e	\e	139	\e	format:index file ends inside a field
-j02_index_3_bytes	empty	{R}/bad	<none>	trunc3	error	\e	\e	\e	Error: Not a valid version 4 or 5 database.	2	\e	format:index file ends inside a field
-j03_index_20_bytes	empty	{R}/bad	<none>	trunc20	other	\e	\e	\e	BLAST engine error: Database memory map file error	3	\e	format:index file ends inside a field
-j04_index_last_byte_missing	empty	{R}/bad	<none>	truncm1	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/bad/truncm1	\e	0	\e	format:index file ends inside a field
+j02_index_3_bytes	empty	{R}/bad	<none>	trunc3	error	\e	\e	\e	Error: Not a valid version 4 or 5 database.	2	\e	\e
+j03_index_20_bytes	empty	{R}/bad	<none>	trunc20	other	\e	\e	\e	BLAST engine error: Database memory map file error	3	\e	zero_oids
+j04_index_last_byte_missing	empty	{R}/bad	<none>	truncm1	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/bad/truncm1	\e	0	\e	\e
 j05_no_sequence_file	empty	{R}/bad	<none>	nopsq	other	\e	\e	\e	BLAST engine error: Database memory map file error	3	\e	search:Database memory map file error
 j06_no_header_file	empty	{R}/bad	<none>	nophr	error	\e	\e	\e	Error: File ({R}/bad/nophr.phr) not found.	2	\e	header
-j07_alias_of_cut_index	empty	{R}/bad	<none>	al_trunc	other	\e	\e	\e	BLAST engine error: Database memory map file error	3	\e	format:index file ends inside a field
+j07_alias_of_cut_index	empty	{R}/bad	<none>	al_trunc	other	\e	\e	\e	BLAST engine error: Database memory map file error	3	\e	zero_oids
 x01_database_named_dash	xd	<unset>	<none>	-	error	\e	\e	\e	Error: File (/-.pin) not found.	2	\e	\e
 x02_database_named_dash_blastdb	empty	{R}/xd	<none>	-	error	\e	\e	\e	Error: File (/-.pin) not found.	2	\e	\e
 x03_alias_without_bytes	empty	{R}/xz	<none>	zero	error	\e	\e	\e	No database names were found in alias file [{R}/xz/zero].	2	\e	\e

@@ -1,4 +1,6 @@
 import type { OutputFormat, ProgramId, ToolDescription } from 'losat/domain';
+// The generator of the table (build/verification.ts) runs this module in Node as it is: its imports name their files.
+import { COMMA_LIST_FLAGS, commaListLength } from './list-flags.ts';
 import type { ToolId } from './tools';
 // The verification badge of a run (plan §6.1, design §10.3, PD-LOSAT-WEB-APP-BOUNDARY
 // "Compatibility contract"). A run matches a certified profile only when its program and
@@ -45,7 +47,7 @@ export interface VerificationTable {
   /** The records the table was generated from, with their SHA-256. */
   readonly sources: readonly { readonly path: string; readonly sha256: string; readonly optionSets: number }[];
   readonly programs: Readonly<Partial<Record<ProgramId, ProgramVerification>>>;
-  /** CLI tools besides BLAST searches (windowmasker). */
+  /** CLI tools besides BLAST searches (windowmasker, blast_formatter, dustmasker, segmasker, convert2blastmask). */
   readonly tools?: Readonly<Partial<Record<ToolId, ToolVerification>>>;
 }
 
@@ -60,12 +62,97 @@ const NOT_OPTIONS = new Set(['-query', '-subject', '-out', '-outfmt', '-num_thre
 /** Flags whose value is a coordinate range of the inputs (S11): a profile has the flag, not the range. */
 const RANGE_OPTIONS = new Set(['-query_loc', '-subject_loc']);
 export const RANGE_VALUE = '<range>';
-/** Placeholder for file-path option values (`-ustat`, `-ids`, `-exclude_ids`) in tool option keys. */
+/** Placeholder for the values of TOOL_FILE_OPTIONS in tool option keys (one name; a list of one entry). */
 export const FILE_VALUE = '<file>';
+/**
+ * Placeholder for the value of a list option of TOOL_FILE_OPTIONS (`COMMA_LIST_FLAGS`: `-mask_data`, `-mask_id`,
+ * `-mask_desc`, `-gi_mask_name`) that lists several entries: makeblastdb writes one mask column per `-mask_data` file
+ * (several make several algorithms in one column index), so a set with one entry is not a set with several.
+ */
+export const FILES_VALUE = '<files>';
 /** Tool flags that name only input/output/log files and do not change the option set. */
 const TOOL_NOT_OPTIONS = new Set(['-in', '-archive', '-out', '-logfile']);
-/** Tool flags whose values name files in the run directory (the flag stays in the key, the file name does not). */
-const TOOL_FILE_OPTIONS = new Set(['-ustat', '-ids', '-exclude_ids']);
+/**
+ * Tool flags whose values are names: files in the run directory (`-ustat`, `-ids`, `-exclude_ids`, makeblastdb's
+ * `-mask_data` and `-taxid_map`), the names of files that makeblastdb writes (`-gi_mask_name`) or lists in its
+ * metadata file (`-metadata_output_prefix`), and texts that makeblastdb stores in the database as given (the database
+ * `-title`, the masking algorithms' `-mask_id` and `-mask_desc`). The flag stays in the key, the name does not.
+ */
+const TOOL_FILE_OPTIONS = new Set([
+  '-ustat',
+  '-ids',
+  '-exclude_ids',
+  '-mask_data',
+  '-taxid_map',
+  '-title',
+  '-gi_mask_name',
+  '-metadata_output_prefix',
+  '-mask_id',
+  '-mask_desc',
+]);
+/**
+ * Placeholder for makeblastdb's `-taxid` values other than 0 in tool option keys: makeblastdb stores such a taxonomy
+ * ID in every sequence as given, while 0 leaves the sequences to `-taxid_map` (writedb `taxid_set.rs`,
+ * `global_taxid != 0`), so the key keeps 0 and not the other values.
+ */
+export const TAXID_VALUE = '<taxid>';
+/** Placeholder for a text that a tool writes as given, every byte in the visible ASCII range (0x20-0x7E). */
+export const TEXT_VALUE = '<text>';
+/**
+ * Placeholder for a text that a tool writes as given with a byte outside the visible ASCII range (a tab, a control
+ * character, a letter of UTF-8): NCBI's serial streams write `#` for such a byte with error 803.7 (LOSAT's
+ * `seqmasks_io::writer::rewrite_and_post`), a path of its own.
+ */
+export const OTHER_BYTES_TEXT_VALUE = '<text with a byte outside visible ASCII>';
+/** The programs that convert2blastmask's `-masking_algorithm` names; any other name is `other`. */
+const MASKING_PROGRAMS: ReadonlySet<string> = new Set(['not_set', 'dust', 'seg', 'windowmasker', 'repeat']);
+
+/** The class of a text that a tool writes as given (`TEXT_VALUE` or `OTHER_BYTES_TEXT_VALUE`). */
+function writtenTextClass(value: string): string {
+  return /^[\x20-\x7e]*$/.test(value) ? TEXT_VALUE : OTHER_BYTES_TEXT_VALUE;
+}
+
+/**
+ * The one rule for the values of tool options that the user types freely (a name, a text or a number that
+ * `-xmlhelp` gives no list of values for): an option key holds the code path that the value selects, not the value.
+ * A value that selects no different path is one option set, written as its class; a value that does select a path
+ * keeps itself (`TOOL_PATH_VALUES`). Each entry maps a value to its class.
+ */
+const TOOL_VALUE_CLASSES: ReadonlyMap<string, (value: string) => string> = new Map<string, (value: string) => string>([
+  // Names of files and texts that a tool reads or stores as given (`TOOL_FILE_OPTIONS`); a value of a list option that
+  // lists several entries is a set of its own (`FILES_VALUE`, WW4b2 R3).
+  ...[...TOOL_FILE_OPTIONS].map((flag): [string, (value: string) => string] => [
+    flag,
+    (value) => (COMMA_LIST_FLAGS.has(flag) && commaListLength(value) > 1 ? FILES_VALUE : FILE_VALUE),
+  ]),
+  // makeblastdb: a nonzero -taxid is stored in every sequence as given; 0 leaves them to -taxid_map (WW4b2 R2).
+  ['-taxid', (value) => (/^\+?0+$/.test(value) ? '0' : TAXID_VALUE)],
+  // convert2blastmask: the program that the name gives in lower case (C locale `tolower`), any other name `other`
+  // (convert2blastmask.cpp:199-217, LOSAT's `convert2blastmask::work::writer`). The name itself is not written.
+  [
+    '-masking_algorithm',
+    (value) => {
+      const lower = value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+      return MASKING_PROGRAMS.has(lower) ? lower : 'other';
+    },
+  ],
+  // convert2blastmask: the text of algo-options, written as given.
+  ['-masking_options', writtenTextClass],
+  // windowmasker: the ##note text of a counts file, written as given; an empty -meta writes none (`-convert` writes the
+  // input's note instead), as without -meta.
+  ['-meta', (value) => (value === '' ? '' : TEXT_VALUE)],
+]);
+/**
+ * The free values that select a code path each and stay in an option key as typed: blast_formatter's `-outfmt` (the
+ * format and its fields), dustmasker's `-infmt` (`fasta` or `blastdb`, compared as bytes; any other value is refused),
+ * makeblastdb's `-max_file_sz` (where the volumes split).
+ */
+export const TOOL_PATH_VALUES: ReadonlySet<string> = new Set(['-outfmt', '-infmt', '-max_file_sz']);
+
+/** The class of `value` of the tool option `flag` in an option key, or undefined when the key keeps the value. */
+export function toolValueClass(flag: string, value: string): string | undefined {
+  return TOOL_VALUE_CLASSES.get(flag)?.(value);
+}
 
 export interface OptionGrammar {
   /** Whether the flag takes a value (the engine's `describe`). */
@@ -131,8 +218,9 @@ export function toolOptionKey(words: readonly string[], grammar: ToolOptionGramm
       i += takesValue ? 2 : 1;
     }
     if (TOOL_NOT_OPTIONS.has(flag)) continue;
-    if (TOOL_FILE_OPTIONS.has(flag)) {
-      pairs.push([flag, FILE_VALUE]);
+    const valueClass = toolValueClass(flag, value);
+    if (valueClass !== undefined) {
+      pairs.push([flag, valueClass]);
       continue;
     }
     const isBool = grammar.isBoolean?.(flag) === true;
@@ -144,7 +232,7 @@ export function toolOptionKey(words: readonly string[], grammar: ToolOptionGramm
     }
     pairs.push([flag, normalized]);
   }
-  if (pairs.length === 0) return undefined;
+  // No option besides the inputs and outputs is the tool's default option set (`dustmasker -in a.fa`), a set of its own.
   pairs.sort(([fa, va], [fb, vb]) => (fa < fb ? -1 : fa > fb ? 1 : va < vb ? -1 : va > vb ? 1 : 0));
   return JSON.stringify(pairs);
 }

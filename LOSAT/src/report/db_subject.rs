@@ -4198,6 +4198,7 @@ impl ParsedSubject {
                 bioseq: false,
                 length: false,
                 lineless,
+                map_length: false,
             }),
         )
     }
@@ -5619,6 +5620,13 @@ impl FormatThrow {
             FormatThrow::Writes(run) => Some(run),
             FormatThrow::Refused(_) | FormatThrow::Unread => None,
         }
+    }
+
+    /// Whether the query's report or the run ends at the first subject whose load throws
+    /// ([`AfterThrow::EndsReport`], [`AfterThrow::EndsRun`]): the subjects after it are not read.
+    pub fn ends_on_throw(self) -> bool {
+        self.run()
+            .is_some_and(|run| matches!(run.after, AfterThrow::EndsReport | AfterThrow::EndsRun))
     }
 
     /// [`FormatThrow::run`] of the answer of the formats `formats` ([`FormatThrow::of_formats`]).

@@ -1,23 +1,23 @@
 //! blast_formatter's pairwise report (`-outfmt 0`, the default) and query-anchored reports
-//! (`-outfmt` 1 to 4), with or without `-html`, of one archive object: NCBI's `CBlastFormat` with `PrintProlog`, the prefetch, `PrintOneResultSet` of
-//! each query and `PrintEpilog`, written by the search programs' report writers
-//! (`report::pairwise`, `report::pairwise::psiblast_round`) from the archive's Seq-aligns as
-//! `CDisplaySeqalign` reads them (decision F3-19 of line RG, O1: the writers' `PairwiseHit`, made
-//! here from each Seq-align's Dense-seg and the letters of its query and subject). The
-//! query-anchored reports read the sequences, their labels and masks (`ArchiveSequences`), as
-//! the search programs' do.
+//! (`-outfmt` 1 to 4), with or without `-html`, of one archive object: NCBI's `CBlastFormat` with
+//! `PrintProlog`, the prefetch, `PrintOneResultSet` of each query and `PrintEpilog`, written by the
+//! search programs' report writers (`report::pairwise`, `report::pairwise::psiblast_round`) from
+//! the archive's Seq-aligns as `CDisplaySeqalign` reads them (decision F3-19 of line RG, O1: the
+//! writers' `PairwiseHit`, made here from each Seq-align's Dense-seg and the letters of its query
+//! and subject). The query-anchored reports read the sequences, their labels and masks
+//! (`ArchiveSequences`), as the search programs' do.
 //!
-//! The object's scope is the tabular driver's (`tabular`: the request's queries, the database
-//! that the archive names or its `-subject` Bioseqs, a query Bioseq found first as NCBI's scope
-//! finds it). The report's statistics are the archive's: the options of the first search object
+//! The object's scope is the tabular driver's (`tabular`: the request's queries, the database that
+//! the archive names or its `-subject` Bioseqs, a query Bioseq found first as NCBI's scope finds
+//! it). The report's statistics are the archive's: the options of the first search object
 //! (`BuiltOptions`: the factory defaults of its program with the archive's calls, which the
-//! epilog prints), the results' first Karlin-Altschul blocks and search space for every query
-//! (`report::pairwise::Ancillary::of_archive`), the subjects as the database holds them now or as
-//! the request's Bioseqs. What LOSAT does not show as NCBI does is refused by name before the
-//! object's first byte (`Refusal::NotCovered`).
+//! epilog prints), the results' first Karlin-Altschul blocks and search space for
+//! every query (`report::pairwise::Ancillary::of_archive`), the subjects as the database holds them
+//! now or as the request's Bioseqs. What LOSAT does not show as NCBI does is refused by name before
+//! the object's first byte (`Refusal::NotCovered`).
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 use std::ops::Range;
 use std::sync::Arc;
@@ -26,9 +26,9 @@ use anyhow::Result;
 
 use super::refusals::{Refusal, PAIRWISE_FORMATS};
 use super::tabular::{
-    covered, formatter_matrix, prefetch_reads, query_sets_taxon, set_titles, BioseqRecords,
-    IdIndex, LetterCache, LetterEnd, ObjectInputs, QueryEntry, ReportSink, ScopeBioseqs,
-    SubjectSource, Subjects,
+    covered, formatter_matrix, prefetch_reads, query_sets_taxon, read_bioseq, read_bioseq_map,
+    scope_index, set_titles, BioseqRecords, LetterCache, LetterEnd, ObjectInputs, QueryEntry,
+    ReportSink, ScopeBioseqs, SubjectSource, Subjects,
 };
 use super::PROGRAM;
 use crate::algorithm::common::database::{
@@ -51,13 +51,15 @@ use crate::report::pairwise::psiblast_round::{
 };
 use crate::report::pairwise::{
     blastn_section_hsps, blastp_section_aborts, blastp_section_frees, scan_mode_definition_bytes,
-    section_aborts, write_blastn_pairwise_report, write_blastp_pairwise_window, Ancillary,
-    BlastnIntro, BlastnPairwiseQuery, BlastnPairwiseReport, BlastpPairwiseQuery,
-    BlastpPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseEdge, PairwiseHit,
-    PairwiseView,
+    section_aborts, write_blastn_pairwise_prolog, write_blastn_pairwise_report,
+    write_blastp_pairwise_prolog, write_blastp_pairwise_window, Ancillary, BlastnIntro,
+    BlastnPairwiseQuery, BlastnPairwiseReport, BlastpPairwiseQuery, BlastpPairwiseReport,
+    PairwiseConfig, PairwiseDatabase, PairwiseEdge, PairwiseHit, PairwiseView,
 };
 use crate::report::query_anchored::aln_vec::{AlnMap, MapBuffers};
-use crate::report::query_anchored::{fill_seqid, Denseg, Mask, ReportSequences, SeqKey};
+use crate::report::query_anchored::{
+    fill_seqid, pair_plus, Denseg, Mask, ReportSequences, SeqKey, Sequences,
+};
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::serial::seqalign::{Segments, Strand};
 use crate::report::serial::seqalign_read::{read_set, PairDenseg, ReadAlign, ReadStop};
@@ -70,6 +72,17 @@ use crate::stats::tables::KarlinParams;
 /// The refusal of a form that the pairwise format does not write yet.
 fn refused(what: &str) -> anyhow::Error {
     super::tabular::refused_in(PAIRWISE_FORMATS, what)
+}
+
+/// The end of a read of a sequence's letters (`LetterEnd`): NCBI's exception is refused, as the
+/// alignment display reads the letters after the report's first bytes.
+fn unread_letters(end: LetterEnd) -> anyhow::Error {
+    match end {
+        LetterEnd::Refusal(error) => error,
+        LetterEnd::Exception(_) => {
+            refused("a sequence whose letters NCBI BLAST+'s alignment display cannot read")
+        }
+    }
 }
 
 /// A stop of a Seq-align's read as the run's error: NCBI's where it stops there, else the
@@ -252,9 +265,9 @@ pub(super) fn print_object(
         return Err(refused("a result set without its query Bioseq"));
     }
     let scope = ScopeBioseqs {
-        query_ids: IdIndex::of_bioseqs(queries.iter().map(|query| query.bioseq)),
+        query_ids: scope_index(queries.iter().map(|query| query.bioseq)),
         queries: &queries,
-        subject_ids: IdIndex::of_bioseqs(subject_bioseqs.iter().copied()),
+        subject_ids: scope_index(subject_bioseqs.iter().copied()),
         subjects: &subject_bioseqs,
     };
     let mut subjects = Subjects::default();
@@ -442,6 +455,22 @@ pub(super) fn print_object(
     let mut letters = LetterCache::default();
     let mut map = MapBuffers::default();
     let mut hits: Vec<PairwiseHit> = Vec::with_capacity(seq_aligns);
+    // The request's Bioseqs that the rows read, each read whole once before its first row
+    // (`read_bioseq_map`: a read that throws is refused), by `(kind, index)`: 0 a query, 1 a
+    // `-subject` Bioseq.
+    let mut read_bioseqs: HashSet<(u8, usize)> = HashSet::new();
+    let mut check_read = |key: (u8, usize)| -> Result<()> {
+        if !read_bioseqs.insert(key) {
+            return Ok(());
+        }
+        let (bioseq, what) = match key {
+            (0, at) => (queries[at].bioseq, "a query Bioseq"),
+            (_, at) => (subject_bioseqs[at], "a -subject Bioseq"),
+        };
+        read_bioseq_map(bioseq, what)
+            .map(drop)
+            .map_err(unread_letters)
+    };
     // The subject letters that each run's rows read, and the query of the run.
     let mut spans: Vec<(usize, Option<(u32, u32)>)> = vec![(0, None); runs.sources.len()];
     for (q, aligns) in planned.iter().enumerate() {
@@ -456,15 +485,16 @@ pub(super) fn print_object(
                 (Some((from, to)), Some((a, b))) => Some((from.min(a), to.max(b))),
                 (span, range) => span.or(range),
             };
-            let row_letters = match letters.letters(range, &scope, inputs, source, q) {
-                Ok(letters) => letters,
-                Err(LetterEnd::Refusal(error)) => return Err(error),
-                Err(LetterEnd::Exception(_)) => {
-                    return Err(refused(
-                        "a sequence whose letters NCBI BLAST+'s alignment display cannot read",
-                    ))
-                }
-            };
+            check_read((0, q))?;
+            match *source {
+                SubjectSource::Bioseq(at) => check_read((1, at))?,
+                SubjectSource::Query(at) => check_read((0, at))?,
+                SubjectSource::Database { .. } => {}
+            }
+            let plus = pair_plus(ds.strands, ds.first_minus);
+            let row_letters = letters
+                .letters(range, Some(plus), &scope, inputs, source, q)
+                .map_err(unread_letters)?;
             let context = HitContext {
                 nucleotide,
                 matrix,
@@ -644,7 +674,6 @@ pub(super) fn print_object(
         beta: 0.0,
     });
     let mut blastn_report = nucleotide.then(|| BlastnPairwiseReport {
-        version: crate::wording::REPORT_VERSION.to_string(),
         intro: BlastnIntro {
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:417-418
             megablast: options.program == EProgram::Megablast,
@@ -669,7 +698,6 @@ pub(super) fn print_object(
         num_alignments: counts.num_alignments,
         unsearched: vec![false; queries.len()],
         epilog: false,
-        prolog: true,
         parsed_subjects: run_parsed.clone(),
         subject_sources: subject_sources.clone(),
         subject_oids: db.map(|db| {
@@ -725,11 +753,41 @@ pub(super) fn print_object(
         Ok(Some(number)) => number,
         _ => 0,
     };
-    // One call of the program's writer: the prolog where `prolog`, the queries `range`, the
-    // epilog where `epilog`.
+    // One call of the program's writer: the prolog alone where `prolog` (the search programs
+    // write it before their first query batch, `write_blastn_pairwise_prolog`,
+    // `write_blastp_pairwise_prolog`), else the queries `range` and the epilog where `epilog`.
     let mut write = |range: Range<usize>, prolog: bool, epilog: bool| -> io::Result<()> {
+        if prolog {
+            debug_assert!(range.is_empty() && !epilog, "the prolog alone");
+            let mut buffered = io::BufWriter::new(&mut out);
+            let html = config
+                .html_links()
+                .map(|links| (links, warnings.html_posts_sink()));
+            match blastn_report.as_ref() {
+                Some(report) => write_blastn_pairwise_prolog(
+                    &mut buffered,
+                    crate::wording::REPORT_VERSION,
+                    report.intro,
+                    &report.database_name,
+                    report.database_num_sequences,
+                    report.database_total_letters,
+                    report.database.as_ref(),
+                    html,
+                )?,
+                None => write_blastp_pairwise_prolog(
+                    &mut buffered,
+                    &blastp_report.version,
+                    &config.program,
+                    &blastp_report.database_name,
+                    blastp_report.database_num_sequences,
+                    blastp_report.database_total_letters,
+                    database.as_ref(),
+                    html,
+                )?,
+            }
+            return buffered.flush();
+        }
         if let Some(report) = blastn_report.as_mut() {
-            report.prolog = prolog;
             report.epilog = epilog;
             return write_blastn_pairwise_report(
                 &hits,
@@ -763,7 +821,6 @@ pub(super) fn print_object(
                 database.as_ref(),
                 None,
                 Some(&mut warnings),
-                prolog,
                 ReportRound {
                     number: round_number,
                     found_before: None,
@@ -795,7 +852,6 @@ pub(super) fn print_object(
             database.as_ref(),
             None,
             Some(&mut warnings),
-            prolog,
             epilog,
             None,
             anchored,
@@ -808,9 +864,8 @@ pub(super) fn print_object(
     // each query's `PrintOneResultSet` (psiblast's round number read at the first: a
     // `Web_StepNumber` that is no integer throws there, `GetPsiNumberOfIterations`); the epilog.
     write(0..0, true, false).map_err(|error| cell.error_of(error))?;
-    if let Err(error) = prefetch_limit {
-        return Err(error);
-    }
+    // A value that is no integer ends the run after the prolog.
+    prefetch_limit?;
     {
         let mut sink = cell.sink.borrow_mut();
         if prefetches && !prefetched {
@@ -888,15 +943,15 @@ struct ArchiveSequences<'a> {
 
 impl<'a> ArchiveSequences<'a> {
     #[allow(clippy::too_many_arguments)]
-    fn of(
+    fn of<'r>(
         queries: &[QueryEntry<'_>],
         subject_bioseqs: &[crate::report::archive::read::request::Bioseq<'_>],
         sources: &[SubjectSource],
         runs: &RunSubjects,
         shown: &[SourceShown],
         spans: &[(usize, Option<(u32, u32)>)],
-        letters: &mut LetterCache,
-        scope: &ScopeBioseqs<'_, '_>,
+        letters: &mut LetterCache<'r>,
+        scope: &ScopeBioseqs<'_, 'r>,
         inputs: &ObjectInputs<'_>,
         query_masks: &'a [Vec<(i32, i32)>],
         show_gis: bool,
@@ -907,26 +962,29 @@ impl<'a> ArchiveSequences<'a> {
             fill_seqid(&ids, show_gis, &mut out);
             out
         };
-        let unread = |end: LetterEnd| match end {
-            LetterEnd::Refusal(error) => error,
-            LetterEnd::Exception(_) => {
-                refused("a sequence whose letters NCBI BLAST+'s alignment display cannot read")
-            }
-        };
         let mut query_letters = Vec::with_capacity(queries.len());
         for query in queries {
             query_letters
-                .push(super::tabular::read_bioseq(query.bioseq, "a query Bioseq").map_err(unread)?);
+                .push(read_bioseq(query.bioseq, "a query Bioseq").map_err(unread_letters)?);
         }
         let mut subjects = Vec::with_capacity(runs.sources.len());
         let mut subject_labels = Vec::with_capacity(runs.sources.len());
         let mut self_hits = Vec::with_capacity(runs.sources.len());
         for (s_idx, &at) in runs.sources.iter().enumerate() {
             let (q, span) = spans[s_idx];
+            // The span's letters on the plus strand (the subject's rows were read whole above).
             let read = letters
-                .letters(span, scope, inputs, &sources[at], q)
-                .map_err(unread)?;
-            subjects.push((read.subject_from, read.subject.to_vec()));
+                .letters(span, Some([true, true]), scope, inputs, &sources[at], q)
+                .map_err(unread_letters)?;
+            let mut span_letters = Vec::new();
+            let from = match span {
+                Some((from, to)) => {
+                    read.letters(SeqKey::Subject(0), from, to, &mut span_letters);
+                    from
+                }
+                None => 0,
+            };
+            subjects.push((from, span_letters));
             let mut out = Vec::new();
             match sources[at] {
                 SubjectSource::Database { .. } => crate::report::query_anchored::database_label(

@@ -1844,11 +1844,6 @@ fn write_pairwise(
     // A subject set's subjects are all loaded.
     let every_loaded = crate::report::db_subject::HitLoads::default();
     write_tblastn_pairwise_report(
-        if pssm.is_some() {
-            super::in_pssm::PROGRAM
-        } else {
-            "TBLASTN"
-        },
         hits,
         writer,
         &config,

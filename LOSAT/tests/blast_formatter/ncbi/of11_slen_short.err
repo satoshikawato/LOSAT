@@ -1,0 +1,4 @@
+BLAST engine error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objmgr/seq_vector_ci.cpp", line 60: Error: (CSeqVectorException::eOutOfRange) ncbi::objects::ThrowOutOfRangeSeq_inst() - reference out of range of Seq-inst data: 1024
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/blast/api/blast_setup_cxx.cpp", line 797: Error: (CSeqVectorException::eOutOfRange) BLAST::ncbi::blast::SetupSubjects_OMF() - reference out of range of Seq-inst data: 1024
+

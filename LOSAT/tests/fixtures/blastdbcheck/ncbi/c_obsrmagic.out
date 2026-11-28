@@ -1,0 +1,18 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing first 1 and last 1 OIDs.
+Testing CDD files' headers for DELTA-BLAST
+
+Testing 1 volume(s).
+ <RUN>/cases/c_obsrmagic/db
+  <RUN>/cases/c_obsrmagic/db / CDD_Headers:   [ERROR] caught exception while reading .obsr freqs header 
+  <RUN>/cases/c_obsrmagic/db / CDD_Headers: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/blast/api/rps_aux.cpp", line 444: Error: (CBlastException::eInvalid) BLAST::ncbi::blast::CRpsObsrFile::CRpsObsrFile() - RPS BLAST profile file (<RUN>/cases/c_obsrmagic/db.obsr) is either corrupt or constructed for an incompatible architecture
+
+ Result=FAILURE. 1 errors reported in 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

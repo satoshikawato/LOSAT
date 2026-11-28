@@ -11,11 +11,9 @@
 //! (`RoundSections`), so that no default report's instance is shared.
 
 use super::super::{
-    blastp_family_program, cpp_default_double, write_blast_database_header,
-    write_blastp_database_header_spacing, write_description_table, write_no_hits_found,
-    write_prolog, write_query_preamble, write_spaces,
-    write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery, BlastpPairwiseReport,
-    PairwiseConfig, PairwiseDatabase, PairwiseHit, RowDecoration,
+    cpp_default_double, write_description_table, write_no_hits_found, write_query_preamble,
+    write_spaces, write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery,
+    BlastpPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseHit, RowDecoration,
 };
 use super::{ReportRound, RoundSections, RoundWriter};
 use crate::api::local_blast::{FormatProbe, HspIndex};
@@ -68,40 +66,6 @@ impl RowDecoration for PatternRow {
     fn feature(&self, rows: &crate::report::query_anchored::HspAlnVec) -> Option<(usize, usize)> {
         rows.query_columns(self.from, self.to)
     }
-}
-
-/// The prolog of PHI-BLAST's outfmt 0 report (`PrintProlog` of `phiblastp`): its version line, the
-/// Gapped BLAST reference and the database's lines.
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506
-pub(crate) fn write_phi_prolog(
-    writer: &mut dyn ReportWrite,
-    config: &PairwiseConfig,
-    report: &BlastpPairwiseReport,
-    database: Option<&PairwiseDatabase>,
-) -> io::Result<()> {
-    let mut buffered = io::BufWriter::new(RoundWriter(writer));
-    let writer = &mut buffered;
-    // PHI-BLAST refuses `-html` (`phi_hooks::phi_limits`): the plain prolog.
-    write_prolog(
-        writer,
-        blastp_family_program(&config.program),
-        &report.version,
-        false,
-        false,
-        false,
-        None,
-    )?;
-    match database {
-        Some(database) => write_blast_database_header(writer, database)?,
-        None => write_blastp_database_header_spacing(
-            writer,
-            &report.database_name,
-            report.database_num_sequences,
-            report.database_total_letters,
-            1,
-        )?,
-    }
-    writer.flush()
 }
 
 /// The outfmt 0 report of query `q_idx` of PHI-BLAST's round: `occurrence_hits[i]` are the rows of

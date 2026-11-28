@@ -206,7 +206,6 @@ fn tblastx_reports_of_consecutive_query_ranges_are_the_whole_report() {
         })
         .collect();
     let report = TblastxPairwiseReport {
-        version: "2.17.0+".to_string(),
         database_name: b"subjects".to_vec(),
         database_num_sequences: 3,
         database_total_letters: 900,
@@ -218,11 +217,23 @@ fn tblastx_reports_of_consecutive_query_ranges_are_the_whole_report() {
         // Query 1 is not searched (a batch without a valid context).
         unsearched: vec![false, true, false, false],
         epilog: true,
-        prolog: true,
         parsed_subjects: Vec::new(),
         subject_sources: Vec::new(),
         sum_stats: true,
     };
+    // The prolog, which the search writes before the first query batch (`run_impl`'s
+    // `write_pairwise_prologs`), then the reports.
+    let mut prolog = Vec::new();
+    write_tblastx_pairwise_prolog(
+        &mut prolog,
+        "2.17.0+",
+        &report.database_name,
+        report.database_num_sequences,
+        report.database_total_letters,
+        None,
+        None,
+    )
+    .unwrap();
     // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
     let hits: Vec<PairwiseHit> = [(0, 1, 4), (0, 1, 4), (0, 2, 1), (2, 1, 1), (3, 1, 1)]
         .into_iter()
@@ -284,7 +295,7 @@ fn tblastx_reports_of_consecutive_query_ranges_are_the_whole_report() {
                 (written, diagnostics)
             };
             let (whole, whole_warnings) = write(0..queries.len());
-            let text = String::from_utf8(whole.clone()).unwrap();
+            let text = String::from_utf8([prolog.as_slice(), &whole].concat()).unwrap();
             assert!(text.starts_with("TBLASTX 2.17.0+"), "{text}");
             assert_eq!(text.matches("Query= ").count(), queries.len(), "{text}");
             assert!(text.contains("No hits found"), "{text}");
@@ -296,7 +307,7 @@ fn tblastx_reports_of_consecutive_query_ranges_are_the_whole_report() {
                 "Warning: [tblastx] Query_1 q0: a warning\nWarning: [tblastx] Query_3 q2: a warning\n"
             );
             for cuts in [vec![1], vec![2], vec![3], vec![1, 2, 3], vec![1, 3]] {
-                let mut joined = Vec::new();
+                let mut joined = prolog.clone();
                 let mut joined_warnings = Vec::new();
                 let mut start = 0;
                 for end in cuts.into_iter().chain([queries.len()]) {
@@ -1250,9 +1261,9 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
 }
 
 /// A BLASTP pairwise report written a window of queries at a time (the rows of a caller that
-/// makes them window by window) is the report written at once: the prolog with the first
-/// window, the epilog with the last, the query indices global. So is a psiblast round's report
-/// (`psiblast_round`, the prolog with the first window, no epilog), also in two parts.
+/// makes them window by window) is the report written at once: the epilog with the last
+/// window, the query indices global (the prolog is the search's, written before). So is a
+/// psiblast round's report (`psiblast_round`, no epilog), also in two parts.
 #[test]
 fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
     let karlin = KarlinParams {
@@ -1355,7 +1366,6 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
             None,
             None,
             true,
-            true,
             None,
             None,
             None,
@@ -1406,7 +1416,6 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
                 None,
                 None,
                 None,
-                true,
                 psiblast_round::ReportRound {
                     number: 2,
                     found_before,
@@ -1531,7 +1540,6 @@ fn an_unreadable_query_writes_one_line_for_each_hsp_with_the_subjects_id() {
             None,
             None,
             None,
-            true,
             psiblast_round::ReportRound {
                 number,
                 found_before: None,
@@ -1689,7 +1697,6 @@ fn psiblast_round_two_part_table_shows_zero_when_all_bit_scores_are_negative() {
         None,
         None,
         None,
-        true,
         psiblast_round::ReportRound {
             number: 2,
             found_before: Some(&[true, false, false]),
@@ -1854,7 +1861,6 @@ fn psiblast_html_two_part_table_restarts_rank_reads_empty_part_and_epilog_ends_h
             None,
             None,
             Some(&mut warnings),
-            false,
             psiblast_round::ReportRound {
                 number: 2,
                 found_before: Some(found_before),

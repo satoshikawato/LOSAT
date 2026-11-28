@@ -99,3 +99,73 @@ fn same_file_target_matches_aliases_and_missing_targets() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The resolution name by name (`resolved_by_names`, for a platform without `canonicalize`: LOSAT
+/// Web's engine) gives what `canonicalize` (`realpath(3)`) gives: a relative and an absolute name,
+/// `.` and `..`, a link to a directory (relative and absolute, a link to a link, `..` after a
+/// link: the link's parent), a file, and nothing for a missing name, a name or a final `/` after
+/// a file and a loop of links (line NP WW4b1, 2026-11-27).
+#[cfg(unix)]
+#[test]
+fn a_path_resolved_by_its_names_is_canonicalize_s() {
+    use std::os::unix::fs::symlink;
+    let out = crate::utils::test_dir::TempDir::unique("same-file-names");
+    let root = std::fs::canonicalize(out.join(".")).unwrap();
+    std::fs::create_dir_all(root.join("a/b/c")).unwrap();
+    std::fs::write(root.join("a/file"), b"x").unwrap();
+    symlink("a/b", root.join("rel")).unwrap();
+    symlink(root.join("a/b/c"), root.join("abs")).unwrap();
+    symlink("rel", root.join("chain")).unwrap();
+    symlink("loop2", root.join("loop1")).unwrap();
+    symlink("loop1", root.join("loop2")).unwrap();
+    symlink("a/file", root.join("tofile")).unwrap();
+    symlink("a/file/", root.join("tofile_dir")).unwrap();
+    for name in [
+        "a",
+        "a/",
+        "a/b/c/",
+        "a/./b/../b/c",
+        "rel",
+        "rel/c",
+        "rel/..",
+        "abs/..",
+        "chain/c/../..",
+        "abs",
+        ".",
+        "a/b/c/../../..",
+        "a/file",
+        "rel/../file",
+        "tofile",
+    ] {
+        let path = root.join(name);
+        assert_eq!(
+            resolved_by_names(&path),
+            Some(std::fs::canonicalize(&path).unwrap()),
+            "{name}"
+        );
+    }
+    for name in [
+        "missing",
+        "a/file/x",
+        "a/file/..",
+        "a/file/",
+        "tofile/",
+        "tofile_dir",
+        "loop1",
+        "rel/missing/..",
+    ] {
+        assert!(std::fs::canonicalize(root.join(name)).is_err(), "{name}");
+        assert_eq!(resolved_by_names(&root.join(name)), None, "{name}");
+    }
+    // A relative name is read from the current directory.
+    let here = std::env::current_dir().unwrap();
+    assert_eq!(
+        resolved_by_names(Path::new(".")),
+        Some(std::fs::canonicalize(&here).unwrap())
+    );
+    // `canonical_path` is `canonicalize` where the platform has it.
+    assert_eq!(
+        canonical_path(&root.join("rel/c")),
+        Some(root.join("a/b/c"))
+    );
+}

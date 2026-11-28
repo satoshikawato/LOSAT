@@ -108,6 +108,28 @@ impl EProgram {
                 | EProgram::PhiBlastn
         )
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:59-61
+    /// `Blast_QueryIsTranslated` of the options' program type: BLASTX, TBLASTX and RPS-TBLASTN.
+    pub(crate) fn query_is_translated(self) -> bool {
+        matches!(
+            self,
+            EProgram::Blastx | EProgram::Tblastx | EProgram::RpsTblastn
+        )
+    }
+
+    /// Whether the options' program type is `eBlastTypeBlastn` or `eBlastTypeMapping`
+    /// (`EProgramToEBlastProgramType`): BLASTN's tasks, the vector screen and the mapper.
+    pub(crate) fn blastn_or_mapping(self) -> bool {
+        matches!(
+            self,
+            EProgram::Blastn
+                | EProgram::Megablast
+                | EProgram::DiscMegablast
+                | EProgram::VecScreen
+                | EProgram::Mapper
+        )
+    }
 }
 
 /// A `Blast4-parameter` as the reader gives it: the name (a VisibleString: the reader keeps bytes

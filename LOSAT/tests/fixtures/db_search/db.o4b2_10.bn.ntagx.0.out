@@ -1,0 +1,23 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: ntagx_t5 (parsed Seq-ids, taxid 99990)
+           2 sequences; 1,260 total letters
+
+
+
+Query= qa part of the sequence with the text tag
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+Unknown                                                               555     3e-162
+
+

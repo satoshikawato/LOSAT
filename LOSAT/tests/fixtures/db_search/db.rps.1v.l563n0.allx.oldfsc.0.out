@@ -1,0 +1,63 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: t
+           0 sequences; 563 total letters
+
+
+
+Query= x1
+
+Length=20
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= x2
+
+Length=12
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+  Database: t
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 563
+  Number of sequences in database:  0
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

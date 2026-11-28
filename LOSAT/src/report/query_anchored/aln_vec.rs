@@ -778,6 +778,28 @@ impl<'d> AlnMap<'d> {
         Ok(out)
     }
 
+    /// The reads of `GetWholeAlnSeqString` of row `row` of a map without an anchor (the tabular
+    /// formats'): `GetSeqString` of each segment that the row is in, in order, from its start to
+    /// its start plus its length less 1 (`seq_from - 1` for a segment of 0 letters, in the
+    /// unsigned `TSeqPos`), given to `read` (`aln_seq_string`'s calls of `seq_string`).
+    pub(crate) fn seq_string_reads<E>(
+        &self,
+        row: usize,
+        mut read: impl FnMut(u32, u32) -> Result<(), E>,
+    ) -> Result<(), E> {
+        debug_assert!(self.anchor.is_none(), "a map without an anchor");
+        let width = self.width(row);
+        for seg in 0..self.num_segs {
+            let start = self.raw_start(row, seg);
+            if start >= 0 {
+                let len = self.ds.lens[seg].wrapping_mul(width);
+                let stop = start.wrapping_add(len as i32).wrapping_sub(1);
+                read(start as u32, stop as u32)?;
+            }
+        }
+        Ok(())
+    }
+
     /// The per-line coordinates of row `row` alone (`aln_seq_string` without the letters): each
     /// screen's `scrn_lefts` and `scrn_rights` entries of `GetWholeAlnSeqString`, given in order to
     /// `emit(left, right)`. Outfmt 0 reads them (`x_PrepareRowData` calls `GetWholeAlnSeqString`

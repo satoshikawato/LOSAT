@@ -161,6 +161,10 @@ export class BlastFormatterDraft extends ToolDraftCore<BlastFormatterDraftState>
     return splitOptions(state.extra);
   }
 
+  protected optionValue(state: BlastFormatterDraftState, flag: string): FieldValue | undefined {
+    return state.values[flag];
+  }
+
   /**
    * The argv of the check; none before an archive is chosen, unless the words name `-archive` or
    * `-rid` themselves or print help or the version (NCBI's error then would be `-rid`'s missing value).

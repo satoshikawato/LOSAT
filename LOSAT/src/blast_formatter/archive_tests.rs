@@ -211,7 +211,7 @@ fn a_failed_standard_output_ends_the_run_as_ncbi_s_runtime_does() {
     // The diagnostics on `cerr`: the close's post flushes `cout` through the tie, which throws
     // inside the destructor (`std::terminate`, exit status 134 in a shell; the library returns
     // -6 and the command line aborts).
-    for outfmt in ["8", "9", "12"] {
+    for outfmt in ["8", "9", "11", "12"] {
         assert_eq!(
             run_archive_full(&["-outfmt", outfmt]),
             (
@@ -289,6 +289,22 @@ fn non_utf8_outfmt_argument_preserves_raw_bytes_in_error() {
     }
 }
 
+/// `psi_round`, the one check of the round of the formats: a `Web_StepNumber` that is no integer
+/// throws at the first result set (NCBI rows of7_psiblast_step_string and of7/of6/of20/of8
+/// _ps_none_step_str, a query without hits), and not where an object has no result set.
+#[test]
+fn a_step_that_is_no_integer_throws_at_the_first_result_set() {
+    assert_eq!(psi_round(Ok(Some(2)), 1).unwrap(), Some(2));
+    assert_eq!(psi_round(Ok(None), 3).unwrap(), None);
+    assert_eq!(psi_round(Err(()), 0).unwrap(), None);
+    let error = psi_round(Err(()), 1).unwrap_err();
+    assert_eq!(
+        format!("{error}"),
+        format!("{}", invalid_archive()),
+        "the archive's error"
+    );
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:796-818
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
 #[test]
@@ -307,7 +323,7 @@ fn binary_and_xml_archives_format_identical_to_text_and_match_truncation_quirks(
         let status = super::super::run_with(&line, &mut &bytes[..], &mut out, &mut err);
         (status, out, String::from_utf8(err).unwrap())
     };
-    for outfmt in ["8", "9", "12"] {
+    for outfmt in ["8", "9", "12", "6", "7", "10", "20", "6 std qseq sseq"] {
         let expected = run_bytes(&text, outfmt);
         assert_eq!(expected.0, 0, "text outfmt {outfmt}");
         assert_eq!(run_bytes(&binary, outfmt), expected, "bin outfmt {outfmt}");

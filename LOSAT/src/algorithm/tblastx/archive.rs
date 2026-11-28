@@ -39,7 +39,7 @@ use crate::report::archive::read::import;
 use crate::report::archive::read::options::{EProgram, Setter};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RunRequests};
 use crate::report::archive::{
-    ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
+    ka_block, write_archive, AlignSource, ArchiveHandle, BatchArchive, KaBlock,
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
@@ -165,17 +165,6 @@ pub(super) fn batch_searched_space(
 
 pub(crate) use crate::report::archive::error_lines;
 
-fn frame_of(frame: i8) -> Frame {
-    match frame {
-        1 => Frame::Plus1,
-        2 => Frame::Plus2,
-        3 => Frame::Plus3,
-        -1 => Frame::Minus1,
-        -2 => Frame::Minus2,
-        _ => Frame::Minus3,
-    }
-}
-
 /// NCBI's order of the frames of a query's masks (the contexts: plus1, plus2, plus3, minus1,
 /// minus2, minus3).
 fn frame_rank(frame: i8) -> u8 {
@@ -210,7 +199,7 @@ fn query_results_masks(
             (!intervals.is_empty()).then(|| MaskEntry {
                 id: query.local_id.clone(),
                 best: query.believed().map(|ids| ids.best.clone()),
-                frame: frame_of(frame),
+                frame: Frame::of_number(i32::from(frame)),
                 intervals,
             })
         })
@@ -249,7 +238,8 @@ struct TblastxAligns<'a> {
 impl<'a> AlignSource for TblastxAligns<'a> {
     fn write<E: crate::report::serial::encoder::Encoder>(
         &mut self,
-        out: &mut ArchiveOut<'_, E>,
+        enc: &mut E,
+        flush: &mut dyn FnMut(&mut E),
     ) -> Result<()> {
         let data = self.data;
         let mut segments = Segments::default();
@@ -279,17 +269,15 @@ impl<'a> AlignSource for TblastxAligns<'a> {
                 searched_length: i32::try_from(query.seq().len())?,
                 offset: i32::try_from(data.query_placements.offset(q_idx))?,
             };
-            out.write_with(|enc, flush| {
-                write_seq_aligns(
-                    enc,
-                    &self.run,
-                    &query,
-                    &subjects,
-                    &hsps,
-                    &mut segments,
-                    |enc| flush(enc),
-                );
-            });
+            write_seq_aligns(
+                enc,
+                &self.run,
+                &query,
+                &subjects,
+                &hsps,
+                &mut segments,
+                |enc| flush(enc),
+            );
         }
         Ok(())
     }

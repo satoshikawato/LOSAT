@@ -973,6 +973,7 @@ impl TabularSpec {
             SubjectLookup::Found => None,
             SubjectLookup::Failed(failed) => self.failure_stage(failed.failure()),
             SubjectLookup::Throws(_) => self.failure_stage(LookupFailure::thrown()),
+            SubjectLookup::MapLength(thrown) => self.failure_stage(thrown.failure()),
         }
     }
 
@@ -996,6 +997,8 @@ impl TabularSpec {
             // The subject block stops at `GetBioseqLength`, before it sets the other members,
             // which stay as the rows before left them (as where the load throws).
             self.reads_subject_bioseq().then_some(FailedStage::Bioseq)
+        } else if failure.map_length {
+            self.reads_subject_bioseq().then_some(FailedStage::Length)
         } else if failure.all_ids
             && self.has_any(&[SubjectAllSeqIds, SubjectAllGis, SubjectAllAccessions])
         {
@@ -1097,7 +1100,7 @@ fn failed_lookup_stops(
     let empty_id = match stage {
         FailedStage::SubjectId => true,
         FailedStage::Bioseq => first,
-        FailedStage::SubjectIds => false,
+        FailedStage::SubjectIds | FailedStage::Length => false,
     };
     (empty_id, first)
 }
@@ -1273,6 +1276,13 @@ pub fn row_stop_end(
         return error.into();
     }
     end_reads();
+    row_stop_refusal(stop, describe, program)
+}
+
+/// LOSAT's refusal at the row `stop` (`row_stop_end`), for a writer that wrote the bytes before
+/// the stop itself (blast_formatter's report sink): it names the row's subject (`describe`) and
+/// the program.
+pub fn row_stop_refusal(stop: RowStop, describe: String, program: &str) -> anyhow::Error {
     FailedLookupRefusal(format!(
         "{describe}; {}, which is not supported by LOSAT's {program}",
         stop.reason
@@ -1675,6 +1685,9 @@ pub enum SubjectLookup<'a> {
     Failed(FailedLookup<'a>),
     /// The load of the subject throws (`ThrownLookup`), before `GetSeqIdList` runs.
     Throws(ThrownLookup<'a>),
+    /// `GetBioseqLength` of the subject throws at its sequence map (`MapLengthLookup`), after
+    /// `SetSubjectId`.
+    MapLength(MapLengthLookup<'a>),
 }
 
 /// A subject whose ids `GetSeqIdList` cannot make (`SubjectLookup::Failed`): the subject's
@@ -1712,6 +1725,7 @@ impl FailedLookup<'_> {
             bioseq: false,
             length: self.empty_handle,
             lineless: false,
+            map_length: false,
         }
     }
 }
@@ -1732,6 +1746,37 @@ pub struct ThrownLookup<'a> {
     pub exception: &'a crate::ncbi_exception::NcbiException,
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:836-871
+// NCBI reference (598d8ae6): c++/src/objmgr/bioseq_info.cpp:676-685
+/// A row of a subject whose `GetBioseqLength` throws in the subject block of `SetFields`: the
+/// subject's sequence map exists (blast_formatter's prefetch with `BL2SEQ_LEGACY` makes it,
+/// `LoadSequencesToScope`) and holds a segment of 4294967295 letters, whose length its
+/// `GetLength` resolves (`Invalid sequence length`). `SetSubjectId` ran before it (the row's
+/// `sseqid`, `sgi`, `sacc`, `saccver` are the subject's own); the catch pushes the row's
+/// Seq-align id onto `m_SubjectIds`. A subject whose `SetSubjectId` throws too (`subject_id`)
+/// stops there where one of those fields is asked (`FailedStage::SubjectId`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MapLengthLookup<'a> {
+    /// The row's Seq-align id as `sallseqid`, `sallgi` and `sallacc` print it (`eFullId`, `eGi`,
+    /// `eAccession` of the id alone).
+    pub full: &'a [u8],
+    pub gi: i64,
+    pub accession: &'a [u8],
+    /// Whether `SetSubjectId` throws first (`FailedLookup::subject_id`).
+    pub subject_id: bool,
+}
+
+impl MapLengthLookup<'_> {
+    /// Which of NCBI's lookups throw.
+    pub fn failure(&self) -> LookupFailure {
+        LookupFailure {
+            subject_id: self.subject_id,
+            map_length: true,
+            ..LookupFailure::default()
+        }
+    }
+}
+
 /// Which of NCBI's lookups of a subject throw (`FailedLookup` without its ids): `SetSubjectId`
 /// (`subject_id`) and `x_SetSubjectIds` (`all_ids`), the checks of a report's field list
 /// (`failed_lookup_stop`) read only these.
@@ -1750,6 +1795,9 @@ pub struct LookupFailure {
     /// (`db_subject::ParsedSubject::has_lineless_line`): no lookup fails, but `sallacc` prints the
     /// label of that line's best id, which is null (`failed_lookup_stop`).
     pub lineless: bool,
+    /// Whether `GetBioseqLength` throws at the subject's sequence map, after `SetSubjectId`
+    /// (`MapLengthLookup`).
+    pub map_length: bool,
 }
 
 impl LookupFailure {
@@ -1785,6 +1833,12 @@ pub enum FailedStage {
     /// `x_SetSubjectIds` (`sallseqid`, `sallgi`, `sallacc` asked, none of the above): after
     /// `m_SubjectIds.clear()`, so the Seq-align id is its only list; the length is set.
     SubjectIds,
+    /// `GetBioseqLength` at the subject's sequence map (`MapLengthLookup`), after `SetSubjectId`:
+    /// `m_SubjectId` is the subject's own where a field of it is asked (only rows of database
+    /// subjects print the kept one, `Bioseq`, and those maps are of `-subject` Bioseqs),
+    /// `m_SubjectLength` 0, the other members as the rows before left them, and the Seq-align
+    /// id is added to `m_SubjectIds`.
+    Length,
 }
 
 /// The fields of a row that a row whose subject lookup failed leaves as the last row of the result
@@ -2311,6 +2365,7 @@ impl<'a> TabularWriter<'a> {
         let stop = match subject.lookup {
             SubjectLookup::Failed(failed) => Some(failed.failure()),
             SubjectLookup::Throws(_) => Some(LookupFailure::thrown()),
+            SubjectLookup::MapLength(thrown) => Some(thrown.failure()),
             SubjectLookup::Found => None,
         }
         .and_then(|failure| row_stop_field(Some(spec), failure, !rows.started));
@@ -2320,6 +2375,7 @@ impl<'a> TabularWriter<'a> {
         let (pushed, pushed_gi, lines): ([&[u8]; 2], i64, _) = match subject.lookup {
             SubjectLookup::Failed(failed) => ([failed.full, failed.accession], 0, failed.all_ids),
             SubjectLookup::Throws(thrown) => ([thrown.full, thrown.accession], thrown.gi, None),
+            SubjectLookup::MapLength(thrown) => ([thrown.full, thrown.accession], thrown.gi, None),
             SubjectLookup::Found => ([&[][..], &[][..]], 0, None),
         };
         if stage == FailedStage::SubjectId {
@@ -2384,6 +2440,8 @@ impl<'a> TabularWriter<'a> {
         ]);
         let names = kept.map(|kept| RowNames::of(spec, kept));
         let subject_set = stage == FailedStage::SubjectIds;
+        // `SetSubjectId` set `m_SubjectId` before the throw (`SubjectIds`, `Length`).
+        let own_id = subject_set || stage == FailedStage::Length;
         for (i, field) in spec.fields.iter().enumerate() {
             if i > 0 {
                 out.extend_from_slice(&spec.delimiter);
@@ -2439,12 +2497,12 @@ impl<'a> TabularWriter<'a> {
                 QueryAccessionVersion => out.extend_from_slice(query.accession_version),
                 QueryGi => push_num(out, query.gi as usize),
                 QueryLength => push_num(out, if query_block { query.length } else { 0 }),
-                SubjectSeqId if subject_set => out.extend_from_slice(subject.id),
-                SubjectAccession if subject_set => out.extend_from_slice(subject.accession),
-                SubjectAccessionVersion if subject_set => {
+                SubjectSeqId if own_id => out.extend_from_slice(subject.id),
+                SubjectAccession if own_id => out.extend_from_slice(subject.accession),
+                SubjectAccessionVersion if own_id => {
                     out.extend_from_slice(subject.accession_version)
                 }
-                SubjectGi if subject_set => push_num(out, subject.gi),
+                SubjectGi if own_id => push_num(out, subject.gi),
                 SubjectSeqId => out.extend_from_slice(b"Unknown"),
                 SubjectGi => push_num(out, 0),
                 SubjectAccession | SubjectAccessionVersion => {}

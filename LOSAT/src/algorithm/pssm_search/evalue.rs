@@ -6,8 +6,8 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
 
+use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::{blast_spouge_etos, blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
-use crate::utils::glibc_fma_libm::GlibcLibm;
 
 /// What the e-values and the hit-saving cutoff of a PSSM search read besides the Karlin block:
 /// the Gumbel block, and without it the context's effective search space.
@@ -44,7 +44,7 @@ impl<'a> EvalueStats<'a> {
     pub(crate) fn e_value(&self, score: i32, kbp: &KarlinParams, m: i32, n: i32) -> f64 {
         match self.gumbel {
             Some(gumbel) => blast_spouge_stoe(score, kbp, gumbel, m, n),
-            None => karlin_stoe_simple(score, kbp, self.search_space),
+            None => evalue_from_raw_score(score, kbp, self.search_space as f64),
         }
     }
 
@@ -54,39 +54,23 @@ impl<'a> EvalueStats<'a> {
     /// cutoff (`avg_subject_length`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:915-945
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4097-4129
-    /// `BlastKarlinEtoS_simple` is `cutoff_score_from_evalue`; its value is raised to the
-    /// `new_cutoff` of 1 (`-evalue` is above 0: NCBI's options validation refuses the others).
-    /// A block with a negative value keeps the cutoff of 1:
-    ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4101-4102
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4054-4057
-    /// (`es` is then `BLAST_SCORE_MIN`, not above the cutoff of 1.)
+    /// Without the Gumbel block, `BLAST_Cutoffs` from the `new_cutoff` of 1
+    /// (`stats::cutoffs::cutoff_score`): a block with a negative value keeps the cutoff of 1
+    /// (`BLAST_Cutoffs` returns at once for a block of -1s, and `BlastKarlinEtoS_simple` gives
+    /// `BLAST_SCORE_MIN` for any negative Lambda, K or H), as does an e-value not above 0
+    /// (`-evalue -nan`, which NCBI's option check lets pass).
     pub(crate) fn hit_cutoff(&self, prelim_evalue: f64, kbp: &KarlinParams, m: i32, n: i32) -> i32 {
         match self.gumbel {
             Some(gumbel) => blast_spouge_etos(prelim_evalue, kbp, gumbel, m, n),
-            None if kbp.lambda < 0.0 || kbp.k < 0.0 || kbp.h < 0.0 => 1,
-            None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
+            None => crate::stats::cutoffs::cutoff_score(
                 prelim_evalue,
-                self.search_space,
                 kbp,
-            )
-            .max(1),
+                self.search_space,
+                None,
+                crate::stats::cutoffs::CutoffConversion::PROTEIN,
+            ),
         }
     }
-}
-
-/// `BLAST_KarlinStoE_simple`: the e-value of `score` in the search space `searchsp`, -1 for a
-/// block without valid values.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4156-4171
-/// `kbp->logK` is the natural log of `kbp->K` in every block a PSSM search reads
-/// (psiblast_aux_priv.cpp:121, blast_kappa.c:2127).
-fn karlin_stoe_simple(score: i32, kbp: &KarlinParams, searchsp: i64) -> f64 {
-    if kbp.lambda < 0.0 || kbp.k < 0.0 || kbp.h < 0.0 {
-        return -1.0;
-    }
-    searchsp as f64 * (-kbp.lambda * score as f64 + kbp.k.glibc_ln()).glibc_exp()
 }
 
 #[cfg(test)]

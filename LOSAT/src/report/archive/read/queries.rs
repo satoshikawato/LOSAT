@@ -28,7 +28,6 @@ use crate::report::serial::asn_types::view::V;
 use crate::seqid::label::{bioseq_fasta, fasta};
 use crate::seqid::mask_handle::{handle_fasta_is_own, mask_handle_key};
 use crate::seqid::model::ParsedSeqId;
-use crate::sequence::stdaa_letters::protein_fasta_letters;
 use crate::sequence::FastaLines;
 
 use super::request::{self, Bioseq};
@@ -566,8 +565,6 @@ struct Sequence<'a> {
 impl Sequence<'_> {
     /// The letters in lines of [`WIDTH`] into `text`, a block at a time.
     fn write(&self, text: &mut Text) -> Result<(), RenderError> {
-        let letters = self.length as usize;
-        text.reserve(letters + letters.div_ceil(WIDTH as usize));
         let mut lines = Lines {
             text,
             lines: FastaLines::new(WIDTH),
@@ -584,50 +581,192 @@ struct Lines<'t> {
     lines: FastaLines,
 }
 
-/// Where the letters of a Bioseq go (`append_letters`): a FASTA text in lines (`Lines`), or the
-/// letters alone (`bioseq_letters`).
+/// Where the letters of a Bioseq go (`append_letters`): a FASTA text in lines (`Lines`), or
+/// nowhere (`Checks`, `check_setup_letters`).
 trait LetterSink {
+    /// Room for `letters` more letters (`append_letters`, once the sequence map is read).
+    fn reserve(&mut self, letters: usize);
     /// The next letters, at most [`LETTER_BLOCK`] of them.
     fn write(&mut self, letters: &[u8]) -> Result<(), RenderError>;
+    /// Whether the sink takes no letters: the read stops at each segment's checks.
+    fn checks_only(&self) -> bool {
+        false
+    }
+}
+
+/// The sink of a read that checks the letters without making them (`check_setup_letters`).
+struct Checks;
+
+impl LetterSink for Checks {
+    fn reserve(&mut self, _: usize) {}
+
+    fn write(&mut self, _: &[u8]) -> Result<(), RenderError> {
+        Ok(())
+    }
+
+    fn checks_only(&self) -> bool {
+        true
+    }
 }
 
 impl LetterSink for Lines<'_> {
+    fn reserve(&mut self, letters: usize) {
+        self.text
+            .reserve(letters + letters.div_ceil(WIDTH as usize));
+    }
+
     fn write(&mut self, letters: &[u8]) -> Result<(), RenderError> {
         self.lines.write(letters, &mut self.text.bytes);
         self.text.spill()
     }
 }
 
-impl LetterSink for Vec<u8> {
-    fn write(&mut self, letters: &[u8]) -> Result<(), RenderError> {
-        self.extend_from_slice(letters);
-        Ok(())
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:732-797
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:867-916
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:502-521
+/// The read of a subject Bioseq by the search setup of NCBI's formatter in its scan mode
+/// (`SetupSubjects_OMF`: `GetBlastSequence` of the whole Bioseq, its vector's size from its
+/// sequence map, `seq_vector::SeqMap`, then each letter from the first, in NCBI4na for a search
+/// of nucleotide subjects, in NCBIstdaa for one of proteins, `protein`): the map's throws, a
+/// Bioseq of 0 letters (`SubjectSetup::Empty`, the setup's warning), the exceptions of the read
+/// of all its letters (`letters_in`: its fills, from the first letter, are the setup's:
+/// `of6_slen_short` of agent E3, 2026-11-27, `reference out of range of Seq-inst data: 1024`; a
+/// coding that does not convert, `of6_c_*`: `Incompatible sequence codings: 8 -> 4`), then for a
+/// protein the residues past NCBIstdaa's 28 codes (`invalid_residues`, `of6_s_*`).
+pub(crate) fn check_setup_letters(
+    bioseq: Bioseq<'_>,
+    protein: bool,
+) -> Result<SubjectSetup, RenderError> {
+    let length = seq_vector::SeqMap::of(bioseq)?.length()?;
+    if length == 0 {
+        return Ok(SubjectSetup::Empty);
     }
+    let inst = bioseq.value().field("inst");
+    letters_in(
+        inst,
+        length,
+        if protein { NCBISTDAA } else { NCBI4NA },
+        &mut Checks,
+    )?;
+    if protein {
+        invalid_residues(inst, length)?;
+    }
+    Ok(SubjectSetup::Read)
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:108-140
-/// The letters of the request's Bioseq `bioseq` as the tabular formats' `CAlnVec` reads them
-/// (`x_GetSeqVector`: the Bioseq's `CSeqVector` in `ncbieaa` for a protein, `inst.mol` `aa`, else
-/// IUPAC; `append_letters`), from its first to its last; a Bioseq without its length is LOSAT's
-/// refusal (NCBI's reader of the archive keeps none).
-pub(crate) fn bioseq_letters(bioseq: Bioseq<'_>) -> Result<Vec<u8>, RenderError> {
-    let length = match bioseq.length() {
-        Some(length) => seq_length(length)?,
-        None => {
-            return Err(RenderError::Unsupported(
-                "a Bioseq without its length".into(),
-            ))
-        }
-    };
-    let mut out = Vec::with_capacity(length as usize);
-    append_letters(
-        bioseq.value().field("inst"),
-        length,
-        bioseq.molecule() == MOL_AA,
-        &mut out,
-    )?;
-    Ok(out)
+/// What the setup of NCBI's formatter does with a subject Bioseq that it reads
+/// (`check_setup_letters`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SubjectSetup {
+    /// Its letters, for the search.
+    Read,
+    /// None: a Bioseq of 0 letters (`size() == 0`, `CBlastException::eInvalidArgument`), which
+    /// the setup skips with its warning `Subject sequence contains no data`.
+    Empty,
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:870-916
+/// The throw of `GetSequenceProtein` (`kMaxResiduesToWarnAbout`).
+const INVALID_RESIDUES: ThrowSite = ThrowSite {
+    file: "src/algo/blast/api/blast_setup_cxx.cpp",
+    line: 916,
+    kind: "CBlastException::eInvalid",
+    function: Some("BLAST::ncbi::blast::GetSequenceProtein"),
+};
+
+/// `GetSequenceProtein`'s check of the letters of a protein's map up to `length` (which read in
+/// NCBIstdaa, `check_setup_letters`): a letter whose code is past NCBIstdaa's 28 (an ncbieaa
+/// letter other than `A`-`Z`, `-` and `*`, an IUPACaa letter other than `A`-`Z`, an NCBIstdaa
+/// code past 27; probes `of6_s_*` of agent E3, 2026-11-27) throws `Invalid residues found at
+/// positions` with the first 20 positions (`,... (only first 20 shown)` past them). Gaps read as
+/// code 0 (`-`), a residue.
+fn invalid_residues(inst: V<'_>, length: u32) -> Result<(), RenderError> {
+    const SHOWN: usize = 20;
+    let mut positions: Vec<u64> = Vec::new();
+    let mut more = false;
+    let mut position = 0u64;
+    for piece in sequence_map(inst, length)? {
+        if position >= u64::from(length) {
+            break;
+        }
+        let needed = (position + u64::from(piece.length())).min(u64::from(length)) - position;
+        if let Piece::Data(data, _) = piece {
+            let (bytes, _) = data_bytes(data);
+            let source = coding(data.choice().0);
+            let valid = |code: u8| match source {
+                NCBIEAA => code.is_ascii_uppercase() || code == b'-' || code == b'*',
+                IUPACAA => code.is_ascii_uppercase(),
+                _ => code < 28,
+            };
+            for (i, &code) in bytes[..needed as usize].iter().enumerate() {
+                if !valid(code) {
+                    if positions.len() < SHOWN {
+                        positions.push(position + i as u64);
+                    } else {
+                        more = true;
+                    }
+                }
+            }
+        }
+        position += u64::from(piece.length());
+    }
+    let Some((first, rest)) = positions.split_first() else {
+        return Ok(());
+    };
+    let mut message = format!("Invalid residues found at positions {first}");
+    for position in rest {
+        message.push_str(&format!(", {position}"));
+    }
+    if more {
+        message.push_str(&format!(",... (only first {SHOWN} shown)"));
+    }
+    Err(RenderError::Exception(NcbiException::new(
+        INVALID_RESIDUES,
+        message,
+    )))
+}
+
+/// The letters that `append_letters` writes of the sequence map `pieces` up to `length` where
+/// they read (each gap's, a Seq-data's up to the letters it holds, `data_bytes`, none from a
+/// segment of `kInvalidSeqPos` on): the room it reserves. Not the Bioseq's length, which an
+/// archive can declare past the letters it holds (4294967294 with 120): LOSAT gives NCBI's error
+/// of the read then (`data_letters`, `INVALID_LENGTH`), not an allocation of 4 GiB (or a
+/// capacity overflow on wasm32).
+fn written_letters(pieces: &[Piece<'_>], length: u32) -> usize {
+    let length = u64::from(length);
+    let mut position = 0u64;
+    let mut letters = 0u64;
+    for piece in pieces {
+        if position >= length || piece.length() == INVALID_SEQ_POS {
+            break;
+        }
+        let needed = (position + u64::from(piece.length())).min(length) - position;
+        letters += match piece {
+            Piece::Gap(_) => needed,
+            Piece::Data(data, _) => {
+                let (bytes, per_byte) = data_bytes(*data);
+                needed.min(bytes.len() as u64 * per_byte)
+            }
+        };
+        position += u64::from(piece.length());
+    }
+    usize::try_from(letters).unwrap_or(usize::MAX)
+}
+
+/// `kInvalidSeqPos`, the `TSeqPos` that NCBI's sequence map reads as a length not yet known.
+const INVALID_SEQ_POS: u32 = u32::MAX;
+
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:343-372
+/// The throw of a segment whose length is `kInvalidSeqPos` (a Bioseq that declares 4294967295
+/// letters, or a delta literal of that length), when the read reaches it
+/// (`x_ResolveSegmentLength`: `Invalid sequence length`; probe `of6_qlen_huge` of agent E3,
+/// 2026-11-27). NCBI's kind is `eSeqDataError`, the text of `eDataError`.
+const INVALID_LENGTH: ThrowSite = ThrowSite {
+    file: "src/objmgr/seq_map.cpp",
+    line: 367,
+    kind: "CSeqMapException::eSeqDataError",
+    function: None,
+};
 
 /// A segment of the sequence map: a Seq-data and its length, or a gap.
 enum Piece<'a> {
@@ -667,12 +806,31 @@ fn append_letters(
     protein: bool,
     out: &mut impl LetterSink,
 ) -> Result<(), RenderError> {
+    letters_in(inst, length, if protein { NCBIEAA } else { IUPACNA }, out)
+}
+
+/// [`append_letters`] in the coding `target`: ncbieaa or NCBIstdaa for a protein (whose letters
+/// are written as ncbieaa), IUPACna or NCBI4na for a nucleotide (written as IUPACna); the coding
+/// sets the number of the throw of a coding that does not convert.
+fn letters_in(
+    inst: V<'_>,
+    length: u32,
+    target: u32,
+    out: &mut impl LetterSink,
+) -> Result<(), RenderError> {
+    let protein = matches!(target, NCBIEAA | NCBISTDAA);
     let pieces = sequence_map(inst, length)?;
-    let target = if protein { NCBIEAA } else { IUPACNA };
+    out.reserve(written_letters(&pieces, length));
     let mut position = 0u32;
     for piece in pieces {
         if position >= length {
             break;
+        }
+        if piece.length() == INVALID_SEQ_POS {
+            return Err(RenderError::Exception(NcbiException::new(
+                INVALID_LENGTH,
+                "Invalid sequence length",
+            )));
         }
         let Some(end) = position.checked_add(piece.length()) else {
             return Err(RenderError::Unsupported(
@@ -681,6 +839,7 @@ fn append_letters(
         };
         let needed = end.min(length) - position;
         match piece {
+            Piece::Gap(_) if out.checks_only() => {}
             Piece::Gap(_) => {
                 let gap =
                     vec![if protein { b'X' } else { b'N' }; LETTER_BLOCK.min(needed as usize)];
@@ -846,27 +1005,14 @@ fn data_letters(
     if length == 0 {
         return Ok(());
     }
-    let (variant, value) = data.choice();
-    let source = coding(variant);
-    let convertible = matches!(
-        (source, target),
-        (IUPACNA | NCBI2NA | NCBI4NA, IUPACNA) | (NCBIEAA | IUPACAA | NCBISTDAA, NCBIEAA)
-    );
-    if !convertible {
+    let source = coding(data.choice().0);
+    if !seq_vector::convertible(source, target) {
         return Err(RenderError::Exception(NcbiException::new(
             INCOMPATIBLE_CODINGS,
             format!("Incompatible sequence codings: {source} -> {target}"),
         )));
     }
-    let bytes = match variant {
-        "iupacna" | "iupacaa" | "ncbieaa" => value.str(),
-        _ => value.octets(),
-    };
-    let per_byte: u64 = match source {
-        NCBI2NA => 4,
-        NCBI4NA => 2,
-        _ => 1,
-    };
+    let (bytes, per_byte) = data_bytes(data);
     let held = bytes.len() as u64 * per_byte;
     if u64::from(length) > held {
         // The fill that holds the first letter past the data: it throws, or reads past the data's
@@ -883,42 +1029,47 @@ fn data_letters(
                 .into(),
         ));
     }
+    if out.checks_only() {
+        return Ok(());
+    }
     let length = length as usize;
     let mut block = Vec::new();
     for start in (0..length).step_by(LETTER_BLOCK) {
         let end = (start + LETTER_BLOCK).min(length);
         let letters = match source {
             IUPACNA | IUPACAA | NCBIEAA => &bytes[start..end],
-            NCBISTDAA => {
-                block = protein_fasta_letters(&bytes[start..end]);
-                &block[..]
-            }
-            NCBI4NA => {
+            _ => {
                 block.clear();
-                block.extend((start..end).map(|i| {
-                    let byte = bytes[i / 2];
-                    NA4_TO_IUPACNA[usize::from(if i % 2 == 0 { byte >> 4 } else { byte & 15 })]
-                }));
+                seq_vector::data_range_letters(data, start, end, &mut block);
                 &block[..]
             }
-            NCBI2NA => {
-                block.clear();
-                block.extend((start..end).map(|i| {
-                    let shift = 6 - 2 * (i % 4);
-                    NA2_TO_IUPACNA[usize::from((bytes[i / 4] >> shift) & 3)]
-                }));
-                &block[..]
-            }
-            _ => unreachable!("a convertible coding"),
         };
         out.write(letters)?;
     }
     Ok(())
 }
 
+/// The bytes of the Seq-data `data` (not `gap` data) and the letters that each byte holds.
+fn data_bytes(data: V<'_>) -> (&[u8], u64) {
+    let (variant, value) = data.choice();
+    let bytes = match variant {
+        "iupacna" | "iupacaa" | "ncbieaa" => value.str(),
+        _ => value.octets(),
+    };
+    let per_byte = match coding(variant) {
+        NCBI2NA => 4,
+        NCBI4NA => 2,
+        _ => 1,
+    };
+    (bytes, per_byte)
+}
+
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:56
 /// `kCacheSize` of `CSeqVector_CI`.
 const KCACHE_SIZE: u64 = 1024;
+
+#[path = "seq_vector.rs"]
+pub(crate) mod seq_vector;
 
 #[cfg(test)]
 #[path = "queries_tests.rs"]

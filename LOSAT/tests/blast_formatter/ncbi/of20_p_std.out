@@ -1,0 +1,2 @@
+qaccver,saccver,pident,length,mismatch,gapopen,qstart,qend,sstart,send,evalue,bitscore,slen
+q1,s1,0.000,0,0,0,0,0,0,0,1.82e-61,217,0

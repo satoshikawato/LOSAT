@@ -118,8 +118,8 @@ pub enum CutoffLimit {
 }
 
 /// Whether `2 * context length` fits an `Int4`, as NCBI's `query_length * 2` in the word cutoff
-/// needs; a longer context (1 Gb or more) is refused ([`CutoffLimit::QueryLength`]), before any
-/// output (`x_rpt_stream::check` asks it of every query of the search).
+/// needs; a longer context (1 Gb or more) is refused ([`CutoffLimit::QueryLength`]) in the batch
+/// that holds it, after the reports of the batches before (`context_statistics::setup_failure`).
 pub fn cutoff_context_length_supported(context_length: usize) -> bool {
     context_length
         .checked_mul(2)

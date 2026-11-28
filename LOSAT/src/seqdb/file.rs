@@ -45,6 +45,11 @@ pub struct DbFile {
     /// Whether a read in OID order takes this file a window at a time ([`in_order_reads`]): a
     /// volume's index, header and sequence files ([`DbFile::read_in_order`]).
     in_order: bool,
+    /// Whether reads past the file's end up to its last 4 KiB mapped page (`mapped_length`) read
+    /// as zeros, matching POSIX `mmap` of a volume's `.pin`/`.nin`, `.psq`/`.nsq`, and
+    /// `.phr`/`.nhr` files (`CSeqDBFileMemMap`, `DbFile::zero_pad_last_page`). Empty files still
+    /// have `mapped_length(0) == 0`.
+    zero_page: bool,
     #[cfg(any(unix, windows))]
     file: File,
     #[cfg(not(any(unix, windows)))]
@@ -188,6 +193,7 @@ impl DbFile {
             len,
             id: NEXT_FILE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             in_order: false,
+            zero_page: false,
             #[cfg(any(unix, windows))]
             file,
             #[cfg(not(any(unix, windows)))]
@@ -219,6 +225,26 @@ impl DbFile {
         self
     }
 
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:123-134
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1839
+    /// Enables POSIX `mmap` last-page zero reads up to [`mapped_length`] for a volume's index,
+    /// sequence, and header files (not for `CSeqDBRawFile::GetFileDataPtr` callers such as
+    /// columns or OID lists, which assert that the read end does not pass the file length).
+    pub(crate) fn zero_pad_last_page(mut self) -> Self {
+        self.zero_page = true;
+        self
+    }
+
+    /// The readable byte limit of this file: `mapped_length(self.len)` when
+    /// [`DbFile::zero_pad_last_page`] is enabled, otherwise `self.len`.
+    pub(crate) fn readable_len(&self) -> u64 {
+        if self.zero_page {
+            mapped_length(self.len)
+        } else {
+            self.len
+        }
+    }
+
     /// Path this file was opened with.
     pub fn path(&self) -> &Path {
         &self.path
@@ -246,6 +272,9 @@ impl DbFile {
     pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), SeqDbError> {
         let end = offset.checked_add(buf.len() as u64);
         if end.is_none_or(|end| end > self.len) {
+            if self.zero_page && end.is_some_and(|end| end <= mapped_length(self.len)) {
+                return self.read_exact_at_zero_page(buf, offset);
+            }
             return Err(SeqDbError::Format {
                 path: self.path.clone(),
                 message: format!(
@@ -268,6 +297,24 @@ impl DbFile {
                 path: self.path.clone(),
                 source,
             })
+    }
+
+    /// Cold path for [`DbFile::read_exact_at`] when a range crosses `self.len` but stays within
+    /// `mapped_length(self.len)`: reads the held prefix from the file and zero-fills the tail of
+    /// the last 4 KiB page.
+    #[cold]
+    #[inline(never)]
+    fn read_exact_at_zero_page(&self, buf: &mut [u8], offset: u64) -> Result<(), SeqDbError> {
+        let held = self.len.saturating_sub(offset).min(buf.len() as u64) as usize;
+        if held > 0 {
+            self.read_exact_at_impl(&mut buf[..held], offset)
+                .map_err(|source| SeqDbError::Read {
+                    path: self.path.clone(),
+                    source,
+                })?;
+        }
+        buf[held..].fill(0);
+        Ok(())
     }
 
     /// Fills `buf` with the bytes at `offset` (inside the file) from a window of this thread's
@@ -414,7 +461,7 @@ impl DbFile {
                 message: format!("byte range {start}..{end} ends before it starts"),
             });
         }
-        if end > self.len {
+        if end > self.readable_len() {
             return Err(SeqDbError::Format {
                 path: self.path.clone(),
                 message: format!(

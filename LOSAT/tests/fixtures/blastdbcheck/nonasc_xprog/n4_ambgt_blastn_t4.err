@@ -1,0 +1,4 @@
+terminate called after throwing an instance of 'ncbi::CSeqDBException'
+  what():  NCBI C++ Exception:
+    T5 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/blast/seqdb_reader/seqdbvol.cpp", line 2361: Error: (CSeqDBException::eInvalid) BLASTDB:: - File error: could not get ambiguity data.
+

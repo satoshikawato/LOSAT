@@ -171,8 +171,11 @@ pub(super) fn x_count_blocks(db: &SeqDb, block_bytes: u64) -> u64 {
 pub(super) fn x_one_thread_error(db: &SeqDb, program: &str, error: anyhow::Error) -> anyhow::Error {
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, BLOCK_BYTES) {
-        if let Err(first) = read_search_block(db, range, program) {
-            return first;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+        match read_search_block(db, range, program) {
+            Ok(block) if block.stopped_at_negative() => break,
+            Ok(_) => {}
+            Err(first) => return first,
         }
         next_ordinal = range.end_ordinal();
     }

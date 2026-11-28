@@ -1547,14 +1547,10 @@ pub(super) fn reported_batch(
             // The pairwise report reads the subjects that it shows as its writer reads them.
             options.pairwise_reading(),
         ),
-        (
-            matches!(options.outfmt, 6 | 7 | 10 | 20)
-                && crate::report::tabular::prints_identities(options.tabular),
-            matches!(options.outfmt, 6 | 7 | 10 | 20)
-                && options
-                    .tabular
-                    .is_some_and(crate::report::tabular::TabularSpec::light_length),
-        ),
+        matches!(options.outfmt, 6 | 7 | 10 | 20)
+            && options
+                .tabular
+                .is_some_and(crate::report::tabular::TabularSpec::light_length),
     );
     super::x_timing::run(XRun::Titles, x_t);
     let mut reported = reported.map_err(reported_error)?;

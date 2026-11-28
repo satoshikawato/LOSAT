@@ -314,16 +314,16 @@ pub fn reads_subject(spec: Option<&TabularSpec>, program: crate::blastinput::app
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1006-1020
 /// Whether a tabular report of `spec` (`None`: the default fields) prints identities (`nident`,
-/// `pident`, `mismatch`) without its rows, which NCBI counts on the letters of the subject's Bioseq
-/// and LOSAT's protein and translated programs on the search's (`common::database::ShownHolders::
-/// other_letters`).
+/// `pident`, `mismatch`) without its rows (none of the fields of `TabularNeeds::rows`), which
+/// NCBI counts on the letters of the subject's Bioseq and TBLASTN's tables then on the search's
+/// (`common::database::ShownHolders::other_letters`); with the rows they count the rows' letters.
 pub fn prints_identities(spec: Option<&TabularSpec>) -> bool {
     spec.is_none_or(|spec| {
         spec.has_any(&[
             TabularField::NumIdentical,
             TabularField::PercentIdentical,
             TabularField::Mismatches,
-        ])
+        ]) && !spec.needs().rows
     })
 }
 

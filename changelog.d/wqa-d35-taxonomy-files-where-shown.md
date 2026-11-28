@@ -6,8 +6,9 @@
   same results.
 - `-logfile` named like a taxonomy file that the run looks for is now refused on the command line as
   in LOSAT Web, before the file is made: `taxdb.bti` (and the `taxdb.btd` beside the one found) for
-  every search of a database and for a `-subject` search with `sscinames`-like fields or `-outfmt 18`,
-  and `taxonomy4blast.sqlite3` with `-taxids` or `-taxidlist`. The run looks for these names in its
+  every search of a database, for a `-subject` search with `sscinames`-like fields or `-outfmt 18`,
+  and for `dustmasker`, `segmasker`, `windowmasker`, `makembindex`, `blastdbcmd` and `blastdbcheck`
+  with a database; `taxonomy4blast.sqlite3` with `-taxids` or `-taxidlist`. The run looks for these names in its
   working directory first, so it used to find its own empty log there instead of your taxonomy
   files and lost the names. LOSAT Web now refuses the same names, also where it let them run before
   (`-subject -outfmt 18`, `-db` with `-outfmt 5`, `8`, `11` or `"6 qseqid pident"`); `-subject` with

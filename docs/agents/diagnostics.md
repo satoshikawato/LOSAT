@@ -2688,8 +2688,8 @@ Rebuilding less:
   not resident), which the build ahead takes whole (`XFlatArgs::x_ahead`). Exact blastp: one more table
   (backbone 0.44 MiB, overflow 6-8.5 MiB at 50,000-letter blocks, PV 3.5 KiB), on vectors the block search's
   thread allocates and recycles (`lookup/x_lut_direct.rs` `XAaSpares`: the same room rule for the overflow,
-  with the block's words of the standard table;
-  each block's table is given back at the end of its search), with that thread's neighbour lists moved to the
+  with the block's words of the standard table and the 24 zero hits a table of 16-bit hits keeps after its
+  overflow; each block's table is given back at the end of its search), with that thread's neighbour lists moved to the
   builds ahead (one set; given back to it before a block that builds its own table and at the last block). At
   one thread nothing changes.
   Measured 2026-10-16 on the workstation (node 0, 16 physical cores, siblings idle; Species4 hsap x Species6 scer

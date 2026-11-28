@@ -118,8 +118,9 @@
 //! after block i's preliminary stage, block i's table's vectors (`x_make_room_flat`,
 //! `XFlatSpare::x_make_room`: `hits` grown in place where short, to twice the largest table's hits;
 //! a PV array where the spare has none); for exact blastp when block i's table is ready
-//! (`XAaSpares::x_make_room`, the same rule for the overflow entries; each block's table is given
-//! back at the end of its search). The task's build takes them all (`XFlatArgs::x_ahead`,
+//! (`XAaSpares::x_make_room`, the same rule for the overflow entries, with the zero hits that a
+//! table of 16-bit hits keeps after them, `XCell::PAD_HITS`; each block's table is given back at the
+//! end of its search). The task's build takes them all (`XFlatArgs::x_ahead`,
 //! `XAaSpares::x_build_ahead`). A build whose `hits` (overflow) would not fit gives no values and the
 //! block builds its table itself, on its own thread (for blastp-fast on the vectors the second
 //! spare got, moved to the block spare: `XFlatSpare::x_give_to`). Untouched capacity is not resident. The exact build's neighbour lists (about
@@ -170,7 +171,9 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_bpclut_on, XFlatCompressedLookup,
 };
-use crate::algorithm::tblastx::lookup::{QueryContext, XAaSpares};
+use crate::algorithm::tblastx::lookup::{
+    BackboneCell, BackboneCell16, QueryContext, XAaSpares, XCell,
+};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
@@ -593,8 +596,9 @@ fn x_room_of(largest_hits: &Cell<usize>, hits: usize, next_words: usize) -> (usi
 // No NCBI counterpart: which thread allocates the next table's vectors (module header); it changes
 // no value NCBI computes.
 /// On the block's thread, when its exact table `lookup` is ready: makes `XAaSpares` hold vectors with
-/// the room for the next block's table (`x_room_of`, of the next block's `next_words`), allocating
-/// here what is short. `false` where
+/// the room for the next block's table (`x_room_of`, of the next block's `next_words` and the zero
+/// hits that the table's width keeps after its overflow, `XCell::PAD_HITS`, which the lengths of
+/// `lookup`'s vectors count too), allocating here what is short. `false` where
 /// the block's table is not an exact one with its spares (no build ahead then; a flat table's room is
 /// made after the block's preliminary stage, `x_make_room_flat`).
 #[cfg_attr(
@@ -625,17 +629,20 @@ fn x_make_room(
             let Some(spares) = x_bp_aa_spares(pool) else {
                 return false;
             };
-            let (room, grown) = x_room_of(largest_hits, table.overflow.len(), next_words);
+            let next_hits = next_words.saturating_add(BackboneCell::PAD_HITS);
+            let (room, grown) = x_room_of(largest_hits, table.overflow.len(), next_hits);
             spares.x_make_room(table.backbone.len(), table.pv.len(), room, grown);
             true
         }
         // EXPERIMENT (LOSAT_X_BPLK16): the same for a table of 16-bit hits; the lengths of its
-        // vectors count their padding, which the next table of that width has as well.
+        // vectors count their padding, which the next table of that width has as well: its overflow
+        // vector holds its words and `PAD_HITS` zero hits.
         BlastpRuntimeLookup::Aa16(table) => {
             let Some(spares) = x_bp_aa_spares(pool) else {
                 return false;
             };
-            let (room, grown) = x_room_of(largest_hits, table.overflow.len(), next_words);
+            let next_hits = next_words.saturating_add(BackboneCell16::PAD_HITS);
+            let (room, grown) = x_room_of(largest_hits, table.overflow.len(), next_hits);
             spares.x_make_room16(table.backbone.len(), table.pv.len(), room, grown);
             true
         }

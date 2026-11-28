@@ -966,6 +966,62 @@ fn values_built_ahead_are_the_values_the_block_builds_itself() {
     }
 }
 
+// The room that the next block's words give its exact table (`x_make_room`: `next_words`, the most
+// overflow entries the table can hold, `x_query_blocks::x_block_appends`) holds the table's
+// overflow and the zero hits that its width keeps after it (`XCell::PAD_HITS`, 24 for 16-bit hits):
+// a next table with as many overflow entries as `next_words`, more than the floor of the room and
+// twice the table before it, takes the values built ahead. Before, the room was the words alone and
+// such a build was dropped after its count pass (X-sb2p-4 gate 3, the titin's split block then 52
+// SicyWSV queries at 4 threads: 1,321,017 overflow entries of 1,321,027 words, 24 hits of padding).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[test]
+fn the_room_of_the_next_words_holds_an_exact_table_and_its_padding() {
+    let batch_size = 3000;
+    let args = test_args_of("blastp", None);
+    let first = protein_records(0x9e37_79b9_7f4a_7c15, 4);
+    let next = protein_records(0xd1b5_4a32_d192_ed03, 80);
+    crate::utils::threading::with_search_pool(3, "blastp", |pool| {
+        let subjects = XBlockSubjects::new(&[], Vec::new());
+        let pool = pool.x_with_ext(&subjects);
+        let first_frames = blastp_query_frames(&args, &first);
+        let (first_lookup, _) = own_build(&args, &first, &first_frames, batch_size, &pool);
+        let next_frames = blastp_query_frames(&args, &next);
+        let (own, _) = own_build(&args, &next, &next_frames, batch_size, &pool);
+        // The overflow entries of each table, without the padding of its width.
+        let entries = |lookup: &BlastpRuntimeLookup| match lookup {
+            BlastpRuntimeLookup::Aa(table) => table.overflow.len() - BackboneCell::PAD_HITS,
+            BlastpRuntimeLookup::Aa16(table) => table.overflow.len() - BackboneCell16::PAD_HITS,
+            _ => panic!("not an exact table"),
+        };
+        let (first_entries, next_entries) = (entries(&first_lookup), entries(&own));
+        assert!(
+            next_entries > X_MIN_HITS_ROOM && next_entries > 2 * (first_entries + 24),
+            "the fixture's next table ({next_entries} overflow entries) does not pass the floor \
+             ({X_MIN_HITS_ROOM}) and twice the first ({first_entries})"
+        );
+        drop(own);
+        assert!(
+            x_make_room(&pool, &first_lookup, &Cell::new(0), next_entries),
+            "no spares in the pool (LOSAT_X_BPCLUT or LOSAT_X_BPLKPFLAT is set to 0)"
+        );
+        let built = x_run_with_build_ahead(
+            || x_build_ahead(&args, &next, batch_size, &pool),
+            |spawn| spawn(),
+        )
+        .1;
+        assert!(
+            matches!(built, Some(XBuilt::Values(_))),
+            "the next table was not built on the room of its words (LOSAT_X_BPLKPAHEAD is 0 or \
+             LOSAT_DIAGNOSTICS is set?)"
+        );
+        Ok(())
+    })
+    .expect("pool");
+}
+
 // A block's search takes values built ahead only for its own records (the same slice); others are
 // dropped and the search builds its own.
 #[test]

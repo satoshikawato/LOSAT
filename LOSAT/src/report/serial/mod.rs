@@ -29,6 +29,7 @@ pub(crate) mod out_buffer;
 pub mod pssm;
 pub mod real;
 pub mod seqalign;
+pub(crate) mod seqalign_read;
 pub mod xml;
 pub(crate) mod xml_reader;
 

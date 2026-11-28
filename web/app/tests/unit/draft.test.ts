@@ -13,6 +13,7 @@ import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { NodeInflater } from './support/node-inflater';
+import { runEnd } from './support/run-end';
 
 function setup(
   options: {
@@ -101,19 +102,6 @@ const datasetOf = (request: SearchRequest, role: InputRole) => {
   if (input === undefined || !('dataset' in input)) throw new Error('expected a dataset input');
   return input.dataset;
 };
-
-/** Resolves when the run has completed. */
-function completed(coordinator: Coordinator, runId: string): Promise<void> {
-  return new Promise((resolve) => {
-    const check = () => {
-      if (coordinator.state.get().runs.find((run) => run.snapshot.runId === runId)?.status !== 'completed') return;
-      unsubscribe();
-      resolve();
-    };
-    const unsubscribe = coordinator.state.subscribe(check);
-    check();
-  });
-}
 
 describe('SearchDraft inputs', () => {
   it('indexes pasted text and checks it with the engine', async () => {
@@ -928,7 +916,7 @@ describe('SearchDraft gives the data layer back the sources it no longer shows (
     if (run.snapshot.kind === 'tool') throw new Error('expected search run');
     expect(new TextDecoder().decode(run.snapshot.subject.bytes)).toBe('>s\nACGTACGT\n');
     expect(run.snapshot.subject.records).toEqual([{ id: 's', length: 8 }]);
-    await completed(coordinator, run.snapshot.runId);
+    await runEnd(coordinator, run.snapshot.runId);
     expect(await coordinator.readOutput(run.snapshot.runId, 6)).toContain('q\ts\t');
   });
 

@@ -1297,6 +1297,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
             bioseq: false,
             length: false,
             lineless: false,
+            map_length: false,
         };
         failed_lookup_stop(spec.as_ref(), failure, first).is_some()
     };
@@ -1316,6 +1317,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         bioseq: false,
         length: false,
         lineless: false,
+        map_length: false,
     };
     assert!(failed_lookup_stop(Some(&spec("qseqid saccver sallseqid")), only_all, false).is_none());
     assert!(failed_lookup_stop(None, only_all, true).is_none());
@@ -1880,4 +1882,71 @@ fn rows_read_the_definition_line_for_their_ids_taxonomy_and_titles() {
             "{fields}"
         );
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:836-877 (the subject block: `SetSubjectId`, then `GetBioseqLength`, whose throw the catch takes)
+// A -subject Bioseq of 4294967295 letters whose map BL2SEQ_LEGACY's prefetch made (probes
+// of6_t_huge1, of6_t_huge1_all of agent E3 and of6_l_huge1x2_ids of agent E3L, 2026-11-27): the
+// row's ids are the subject's own, `sall*` add the Seq-align id row by row, `slen` and the counts
+// are `x_ResetFields`' 0; before a found row `staxid` reads NCBI's uninitialised member.
+#[test]
+fn a_length_that_throws_writes_the_subject_s_own_ids() {
+    let taxonomy = TabularTaxonomy::default();
+    let subject = |id: &'static [u8], thrown: bool, index| TabularSubject {
+        id,
+        accession: id,
+        accession_version: id,
+        gi: 0,
+        all_ids: &[],
+        length: 500,
+        titles: None,
+        taxonomy: &taxonomy,
+        names: None,
+        nucleotide: true,
+        qcovs: 100,
+        qcovus: -1,
+        lookup: if thrown {
+            SubjectLookup::MapLength(MapLengthLookup {
+                full: b"Subject_1",
+                gi: 0,
+                accession: b"Subject_1",
+                subject_id: false,
+            })
+        } else {
+            SubjectLookup::Found
+        },
+        index,
+    };
+    let (sb, sa) = (subject(b"sb", false, 1), subject(b"sa", true, 0));
+    assert_eq!(
+        failed_rows(
+            "qseqid sseqid sallseqid sallacc sallgi slen evalue",
+            &[sb, sa, sa]
+        ),
+        "nq1\tsb\tsb\tsb\t0\t500\t0.0\n\
+         nq1\tsa\tsb;Subject_1\tsb;Subject_1\t0;0\t0\t0.0\n\
+         nq1\tsa\tsb;Subject_1;Subject_1\tsb;Subject_1;Subject_1\t0;0;0\t0\t0.0\n"
+    );
+    assert_eq!(
+        failed_rows("std slen sstrand qcovhsp", &[sa]),
+        "nq1\tsa\t0.000\t0\t0\t0\t0\t0\t0\t0\t0.0\t812\t0\tN/A\t50\n"
+    );
+    // Without a field of the subject block no catch runs: the row is the found one's.
+    assert!(failed_rows("qseqid length", &[sa]).starts_with("nq1\t450"));
+    let spec = |fields: &str| {
+        blastp_spec(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
+            },
+        )
+    };
+    let SubjectLookup::MapLength(thrown) = sa.lookup else {
+        unreachable!()
+    };
+    let first = |fields: &str| failed_lookup_stop(spec(fields).as_ref(), thrown.failure(), true);
+    assert_eq!(first("std sacc"), None, "m_SubjectId is the subject's");
+    assert!(first("qseqid staxid").is_some(), "an uninitialised staxid");
 }

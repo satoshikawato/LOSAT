@@ -1,0 +1,25 @@
+# BLASTP 2.17.0+
+# Query: protein one
+# Database: in/m3db/m3
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, subject id, subject ids, subject title, subject tax id, subject seq
+# 3 hits found
+protein	seq1	100.000	40	0	0	1	40	1	40	5.14e-29	83.2	seq1	protein	N/A	N/A	DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV
+protein	seq3	100.000	35	0	0	6	40	1	35	3.11e-25	73.6	seq3	protein	N/A	N/A	KIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV
+protein	P0E7A2.1	85.000	40	6	0	1	40	1	40	1.93e-17	53.9	sp|P0E7A2.1|E7A2_TEST	sp|P0E7A2.1|E7A2_TEST	N/A	N/A	DYLAKKIELDAHAAHLLASANRWEACSKIKQALDDGIHAV
+# BLASTP 2.17.0+
+# Query: P0E7A2.1 protein two
+# Database: in/m3db/m3
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, subject id, subject ids, subject title, subject tax id, subject seq
+# 3 hits found
+P0E7A2.1	P0E7A2.1	100.000	40	0	0	1	40	1	40	6.66e-28	80.1	sp|P0E7A2.1|E7A2_TEST	sp|P0E7A2.1|E7A2_TEST	N/A	N/A	DYLAKKIELDAHAAHLLASANRWEACSKIKQALDDGIHAV
+P0E7A2.1	seq1	85.000	40	6	0	1	40	1	40	1.72e-24	71.6	seq1	protein	N/A	N/A	DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV
+P0E7A2.1	seq3	85.714	35	5	0	6	40	1	35	2.73e-21	63.5	seq3	protein	N/A	N/A	KIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV
+# BLASTP 2.17.0+
+# Query: protein three
+# Database: in/m3db/m3
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, subject id, subject ids, subject title, subject tax id, subject seq
+# 3 hits found
+protein	seq3	100.000	39	0	0	1	39	1	39	7.71e-28	80.1	seq3	protein	N/A	N/A	KIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMKVL
+protein	seq1	100.000	35	0	0	1	35	6	40	3.03e-25	73.6	seq1	protein	N/A	N/A	KIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV
+protein	P0E7A2.1	85.714	35	5	0	1	35	6	40	2.28e-14	45.8	sp|P0E7A2.1|E7A2_TEST	sp|P0E7A2.1|E7A2_TEST	N/A	N/A	KIELDAHAAHLLASANRWEACSKIKQALDDGIHAV
+# BLAST processed 3 queries

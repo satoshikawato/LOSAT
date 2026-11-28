@@ -1,0 +1,28 @@
+# Output file names and whether LOSAT Web's engine opens each as the run's standard output (`OutputName::Stdout`,
+# LOSAT/src/report/run_files.rs): checked against the engine by web/adapter/src/tool_tests.rs (a dustmasker run with
+# each -out) and against the app's `isStandardOutputName` (web/app/tests/unit/masking-tool.test.ts); review of WW4c,
+# F5, 2026-11-28. Columns: the name, then `stdout` or `other` (a file, the bytes lost, or the run's error).
+/dev/stdout	stdout
+/dev/fd/1	stdout
+/proc/self/fd/1	stdout
+/proc/thread-self/fd/1	stdout
+//dev/stdout	stdout
+/dev/./stdout	stdout
+/dev/../dev/stdout	stdout
+/proc/self/root/dev/stdout	stdout
+/proc/thread-self/root/dev/fd/1	stdout
+/tmp/../dev/stdout	stdout
+/var/run/../dev/stdout	stdout
+/bin/../../dev/stdout	stdout
+/proc/self/fd/../fd/1	stdout
+m.asnb	other
+./m.asnb	other
+/tmp/m.asnb	other
+/proc/self/cwd/m.asnb	other
+/dev/null	other
+/dev/stdin	other
+/dev/fd/0	other
+/dev/stderr	other
+/bin/../dev/stdout	other
+dev/stdout	other
+/dev/stdout/	other

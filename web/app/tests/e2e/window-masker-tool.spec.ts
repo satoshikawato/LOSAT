@@ -15,6 +15,7 @@ import { REPOSITORY } from './support/harness-server';
 import { NATIVE, nativeExpectation, NO_NATIVE_REASON } from './support/native';
 import {
   chooseRun,
+  described,
   fasta,
   openFiles,
   openParameters,
@@ -127,7 +128,7 @@ async function expectWmTabSelected(page: Page): Promise<void> {
 }
 
 async function expectWmReady(page: Page): Promise<void> {
-  await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await described(page, 'wm-panel', 'ready');
 }
 
 async function waitValidationSettled(page: Page): Promise<void> {

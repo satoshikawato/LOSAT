@@ -595,7 +595,10 @@ mod blastdb_words_tests {
     /// The only test of this crate that reads or changes the process's `BLASTDB`.
     #[test]
     fn a_call_finds_the_blastdb_that_its_own_argv_gave() {
-        assert_eq!(words("BLASTDB=nuc5\0blastn\0-db\0nuc5/nuc5\0"), ["blastn", "-db", "nuc5/nuc5"]);
+        assert_eq!(
+            words("BLASTDB=nuc5\0blastn\0-db\0nuc5/nuc5\0"),
+            ["blastn", "-db", "nuc5/nuc5"]
+        );
         assert_eq!(std::env::var("BLASTDB").as_deref(), Ok("nuc5"));
         assert_eq!(words("blastn\0-version\0"), ["blastn", "-version"]);
         assert!(std::env::var_os("BLASTDB").is_none());

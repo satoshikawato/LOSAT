@@ -800,7 +800,7 @@ fn run_app_files(
                     (input, out, err),
                     body,
                     (start, xml_help),
-                    &files,
+                    files,
                     (target, None, None),
                 )
             } else {
@@ -813,7 +813,7 @@ fn run_app_files(
                     (input, &mut tied_out, err),
                     body,
                     (start, xml_help),
-                    &files,
+                    files,
                     (target, None, Some(&tie_stdout)),
                 )
             }

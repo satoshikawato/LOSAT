@@ -333,6 +333,11 @@ pub(crate) fn refuse_shared_masks(
     lcase_masking: bool,
     program: &str,
 ) -> anyhow::Result<()> {
+    // EXPERIMENT (line RG-KB item 12d, not for merge): the refusal lifted, to compare outfmt 0's
+    // masks of a shared record with NCBI's.
+    if !program.is_empty() {
+        return Ok(());
+    }
     for (index, record) in queries.iter().enumerate() {
         let Some(ids) = record.believed() else {
             continue;

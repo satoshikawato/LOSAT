@@ -5685,13 +5685,6 @@ fn write_tblastx_epilog<W: crate::report::ostream::ReportWrite>(
 /// A `double` written to a C++ stream with the default flags: `%g` with precision 6
 /// (`1e+06` for 1000000, `1.23457e+06` for 1234567).
 pub(crate) fn cpp_default_double(value: f64) -> String {
-    fn trim(text: &str) -> &str {
-        if text.contains('.') {
-            text.trim_end_matches('0').trim_end_matches('.')
-        } else {
-            text
-        }
-    }
     // glibc's `%g` keeps the sign of a zero (segmasker's `-locut -0` in `algo-options`).
     if value == 0.0 {
         return if value.is_sign_negative() { "-0" } else { "0" }.to_string();
@@ -5707,6 +5700,141 @@ pub(crate) fn cpp_default_double(value: f64) -> String {
             "nan"
         }
         .to_string();
+    }
+    match g_of_shortest(value) {
+        Some(text) => text,
+        None => g_exact(value),
+    }
+}
+
+/// `%g` with precision 6 of a normal `value`, from the shortest decimal `S` that reads back as
+/// `value` (`{:e}`), where `S` decides it; `None` where it may not (`g_exact` decides). `S` and
+/// `value` lie in an interval of the decimals that read back as `value`, a few units of
+/// `value`'s 16th significant digit wide, in which no decimal has fewer digits than `S`. With at
+/// most 6 significant digits, `S` is the 6-digit decimal nearest `value`: `%g`'s. With 8 or more,
+/// no decimal of 7 digits or fewer lies between `value` and `S` (it would lie in the interval), so
+/// rounding either at its 6th digit gives the same digits, and neither is a midpoint of 6-digit
+/// decimals (a midpoint has 7 digits). With 7, `S` may be such a midpoint, which `value` itself
+/// lies above, on or below.
+fn g_of_shortest(value: f64) -> Option<String> {
+    if !value.is_normal() {
+        return None;
+    }
+    let mut shortest = Bytes32::default();
+    std::fmt::Write::write_fmt(&mut shortest, format_args!("{:e}", value.abs())).ok()?;
+    let text = shortest.bytes();
+    let e = text.iter().position(|&c| c == b'e')?;
+    let mut exponent: i32 = std::str::from_utf8(&text[e + 1..]).ok()?.parse().ok()?;
+    // The first 6 significant digits (0 past the last), the 7th, and how many there are.
+    let mut kept = [0u8; 6];
+    let mut seventh = 0;
+    let mut count = 0;
+    for &c in text[..e].iter().filter(|&&c| c != b'.') {
+        match count {
+            0..=5 => kept[count] = c - b'0',
+            6 => seventh = c - b'0',
+            _ => {}
+        }
+        count += 1;
+    }
+    if count == 7 {
+        return None;
+    }
+    // 8 digits or more: up from a 7th digit of 5 or more (one of 5 has nonzero digits after it).
+    if count > 7 && seventh >= 5 {
+        let mut i = 5;
+        loop {
+            if kept[i] < 9 {
+                kept[i] += 1;
+                break;
+            }
+            kept[i] = 0;
+            if i == 0 {
+                kept[0] = 1;
+                exponent += 1;
+                break;
+            }
+            i -= 1;
+        }
+    }
+    let digits = 6 - kept.iter().rev().take_while(|&&d| d == 0).count();
+    let mut out = Bytes32::default();
+    let digit = |i: usize| b'0' + kept[i];
+    if value < 0.0 {
+        out.push(b'-');
+    }
+    if !(-4..6).contains(&exponent) {
+        out.push(digit(0));
+        if digits > 1 {
+            out.push(b'.');
+            (1..digits).for_each(|i| out.push(digit(i)));
+        }
+        out.push(b'e');
+        out.push(if exponent < 0 { b'-' } else { b'+' });
+        // At least two digits (at most 308).
+        let magnitude = exponent.unsigned_abs();
+        let decimal = |d: u32| b'0' + (d % 10) as u8;
+        if magnitude >= 100 {
+            out.push(decimal(magnitude / 100));
+        }
+        out.push(decimal(magnitude / 10));
+        out.push(decimal(magnitude));
+    } else if exponent >= 0 {
+        let whole = exponent as usize + 1;
+        (0..whole).for_each(|i| out.push(digit(i)));
+        if digits > whole {
+            out.push(b'.');
+            (whole..digits).for_each(|i| out.push(digit(i)));
+        }
+    } else {
+        out.push(b'0');
+        out.push(b'.');
+        (1..-exponent).for_each(|_| out.push(b'0'));
+        (0..digits).for_each(|i| out.push(digit(i)));
+    }
+    std::str::from_utf8(out.bytes()).ok().map(String::from)
+}
+
+/// Up to 32 bytes of text kept on the stack (`g_of_shortest`): a double in `{:e}` or in `%g`.
+#[derive(Default)]
+struct Bytes32 {
+    bytes: [u8; 32],
+    len: usize,
+}
+
+impl Bytes32 {
+    fn bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+
+    /// Appends `byte` (`%g` of a double has at most 13 bytes).
+    fn push(&mut self, byte: u8) {
+        self.bytes[self.len] = byte;
+        self.len += 1;
+    }
+}
+
+impl std::fmt::Write for Bytes32 {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        let end = self.len + text.len();
+        self.bytes
+            .get_mut(self.len..end)
+            .ok_or(std::fmt::Error)?
+            .copy_from_slice(text.as_bytes());
+        self.len = end;
+        Ok(())
+    }
+}
+
+/// `%g` with precision 6 of a finite `value` other than 0, by the exact conversions of `{:.5e}`
+/// and `{:.N}`.
+fn g_exact(value: f64) -> String {
+    fn trim(text: &str) -> &str {
+        if text.contains('.') {
+            text.trim_end_matches('0').trim_end_matches('.')
+        } else {
+            text
+        }
     }
     let scientific = format!("{value:.5e}");
     let (mantissa, exponent) = scientific.split_once('e').expect("exponent");

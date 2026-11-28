@@ -16,6 +16,81 @@ fn thresholds_are_written_as_a_cpp_stream_writes_a_double() {
     }
 }
 
+/// `g_of_shortest` gives the digits of the exact conversion (`g_exact`) wherever it decides:
+/// random doubles of every exponent, decimals of 1 to 17 digits and their neighbours, the
+/// midpoints of 6-digit decimals (7 digits, left to `g_exact`) and theirs, powers of ten and the
+/// rounding carries (999999.5).
+#[test]
+fn the_shortest_decimal_gives_the_exact_g_of_a_double() {
+    fn check(value: f64, decided: &mut usize) {
+        if !value.is_finite() {
+            return;
+        }
+        let exact = g_exact(value);
+        if let Some(text) = g_of_shortest(value) {
+            assert_eq!(text, exact, "{value:e}");
+            *decided += 1;
+        }
+        assert_eq!(cpp_default_double(value), exact, "{value:e}");
+    }
+    let neighbours = |value: f64| {
+        let bits = value.to_bits();
+        [f64::from_bits(bits - 1), value, f64::from_bits(bits + 1)]
+    };
+    let mut decided = 0;
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for _ in 0..50_000 {
+        let value = f64::from_bits(next());
+        if value.is_finite() && value != 0.0 {
+            check(value, &mut decided);
+        }
+    }
+    for _ in 0..50_000 {
+        let digits = 1 + (next() % 17) as usize;
+        let mantissa = next() % 10u64.pow(digits as u32);
+        let exponent = (next() % 60) as i32 - 30;
+        let value: f64 = format!("{mantissa}e{exponent}").parse().unwrap();
+        if value != 0.0 {
+            for value in neighbours(value) {
+                check(value, &mut decided);
+                check(-value, &mut decided);
+            }
+        }
+    }
+    for text in [
+        "1.234565",
+        "9.999995",
+        "0.0001234565",
+        "123456.5",
+        "999999.5",
+        "1e-5",
+        "1e-4",
+        "1e5",
+        "1e6",
+        "9.99999e5",
+        "9.999995e5",
+        "1.5e-300",
+        "2.2250738585072014e-308",
+        "1.7976931348623157e308",
+        "0.5",
+        "35.5",
+        "2.5e-10",
+        "1.000005",
+        "1.0000050000000001",
+    ] {
+        for value in neighbours(text.parse().unwrap()) {
+            check(value, &mut decided);
+        }
+    }
+    assert!(decided > 150_000, "{decided}");
+}
+
 /// The rows of a protein alignment `query` x `subject` (`-` gaps) from (`q_start`, `s_start`),
 /// with the edit script of their columns (`gap_info`: a gap in the subject is an insertion,
 /// one in the query a deletion), from which the report makes the HSP's Dense-seg.

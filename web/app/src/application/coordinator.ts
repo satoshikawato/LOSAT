@@ -22,6 +22,7 @@ import {
   runFileOption,
   type RunFile,
   type RunOutput,
+  type SequenceKind,
 } from 'losat/domain';
 import {
   isUnavailable,
@@ -57,8 +58,10 @@ import {
   type ToolRunRecord,
   type ToolRunSnapshot,
 } from '../domain/run';
-import { isCountsOutputFile, toolFileOptionLabel } from '../domain/tool-argv';
-import { toolOutputFileName, type ToolId, type ToolStage } from '../domain/tools';
+import { primaryBlastDb } from '../domain/blast-db';
+import { tarArchive } from '../domain/tar';
+import { isCountsOutputFile, maskDataName, toolFileOptionLabel } from '../domain/tool-argv';
+import { toolOutputDownloadName, toolOutputFileName, type ToolId, type ToolStage } from '../domain/tools';
 import type { CountsLocks } from '../ports/counts';
 import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
@@ -169,6 +172,32 @@ export interface SessionCountsEntry {
   readonly size: number;
 }
 
+/** The BLAST database that a makeblastdb run made, for "Use as Database (-db)" and "Use as Repeats database (-filtering_db)". */
+export interface MadeDatabase {
+  /** The molecule type of the run's database (its alias file's, or else its volume's). */
+  readonly kind: SequenceKind;
+  /** Every file that the run made, as the folder of the database that a search opens. */
+  readonly files: readonly File[];
+  /**
+   * Each file's path under the folder named for its run (`run2/db.nin`, `run2/sub/dir/db.nin`): the databases of two
+   * runs, as `-db` and as `-filtering_db` of one search, never share a name in its run directory.
+   */
+  readonly names: readonly string[];
+}
+
+/** The folder of a search's run directory that holds the database made by run `number` (`run2`). */
+export function madeDatabaseFolder(number: number): string {
+  return `run${number}`;
+}
+
+/** The mask data of a masking run, for makeblastdb's `-mask_data` ("Use as -mask_data in makeblastdb"). */
+export interface MaskDataHandover {
+  readonly file: File;
+  /** The name of the file in makeblastdb's run directory (`maskDataName`). */
+  readonly name: string;
+  readonly origin: ToolFileOrigin;
+}
+
 /** A completed `-outfmt 11` BLAST archive output from this session, offered to Format Archive (`blast_formatter`). */
 export interface SessionArchiveEntry {
   readonly runId: string;
@@ -253,6 +282,8 @@ export class Coordinator {
   private readonly runDirectories = new Map<string, readonly DirectoryFile[]>();
   /** Working directory files held for queued/running tool runs; cleared when the run finishes or is cancelled. */
   private readonly toolDirectories = new Map<string, readonly DirectoryFile[]>();
+  /** The database of each completed makeblastdb run handed over (`madeDatabase`), by run: its Files, read once. */
+  private readonly madeDatabases = new Map<string, Promise<MadeDatabase>>();
   /** The releases of the saved-counts locks that each queued or running run holds (holdCounts), by run. */
   private readonly countsHolds = new Map<string, () => void>();
   private active: string | undefined;
@@ -703,14 +734,66 @@ export class Coordinator {
   async exportToolOutput(runId: string, key: string): Promise<void> {
     const view = this.findTool(runId);
     if (view === undefined || view.record.exitStatus === undefined) throw new Error('the run has no outputs');
-    const { name } = this.toolOutputEntry(runId, key);
-    const baseName = key === 'stdout' ? 'stdout.txt' : key === 'stderr' ? 'stderr.txt' : name;
-    const downloadName = toolOutputFileName(view.snapshot, baseName);
-    const file = await this.deps.data.getToolOutputFile(runId, key, downloadName);
+    const downloadName = toolOutputDownloadName(view.snapshot, this.toolOutputEntry(runId, key));
+    await this.saveFile(downloadName, await this.deps.data.getToolOutputFile(runId, key, downloadName));
+  }
+
+  /**
+   * "Download all" of the files that a tool run wrote (a makeblastdb run's database): one tar archive of them under their
+   * paths in the run's directory, made of their stored Files (no byte of them is read into the page).
+   */
+  async exportToolFiles(runId: string): Promise<void> {
+    const view = this.findTool(runId);
+    const entries = view?.record.files ?? [];
+    if (view === undefined || entries.length === 0) throw new Error('the run wrote no files');
+    const files = await Promise.all(entries.map((entry) => this.deps.data.getToolOutputFile(runId, entry.key, baseName(entry.name))));
+    const archive = tarArchive(
+      entries.map((entry, index) => ({ name: entry.name, file: files[index]! })),
+      view.record.endedAt ?? view.snapshot.queuedAt,
+    );
+    const stem = primaryBlastDb(entries.map((entry) => entry.name))?.name ?? 'files';
+    await this.saveFile(toolOutputFileName(view.snapshot, `${stem}.tar`), archive);
+  }
+
+  /**
+   * The database that a completed makeblastdb run made: every file of the run, as a search's database folder. Its Files
+   * are read once per run (`madeDatabases`), so that every hand-over of the run gives the same objects: `-db` and
+   * `-filtering_db` of one run are then one file each in the search's directory, whatever stamp a store gives a read.
+   */
+  async madeDatabase(runId: string): Promise<MadeDatabase> {
+    const view = this.findTool(runId);
+    const entries = view?.record.files ?? [];
+    const primary = primaryBlastDb(entries.map((entry) => entry.name));
+    if (view?.status !== 'completed' || primary === undefined) throw new Error('the run made no BLAST database');
+    let made = this.madeDatabases.get(runId);
+    if (made === undefined) {
+      const folder = madeDatabaseFolder(view.snapshot.number);
+      made = Promise.all(entries.map((entry) => this.deps.data.getToolOutputFile(runId, entry.key, baseName(entry.name)))).then((files) => ({
+        kind: primary.kind,
+        files,
+        names: entries.map((entry) => `${folder}/${entry.name}`),
+      }));
+      this.madeDatabases.set(runId, made);
+      made.catch(() => this.madeDatabases.delete(runId));
+    }
+    return made;
+  }
+
+  /** The mask data of an output of a completed masking run (`maskDataName`), as a file for makeblastdb's `-mask_data`. */
+  async maskData(runId: string, key: string): Promise<MaskDataHandover> {
+    const view = this.findTool(runId);
+    const entry = this.toolOutputEntry(runId, key);
+    const name = view?.status === 'completed' ? maskDataName(view.snapshot, entry) : undefined;
+    if (view === undefined || name === undefined) throw new Error('the output is not mask data');
+    const file = await this.deps.data.getToolOutputFile(runId, key, baseName(name));
+    return { file, name, origin: { kind: 'made', runNumber: view.snapshot.number } };
+  }
+
+  private async saveFile(name: string, file: Blob): Promise<void> {
     if (this.deps.downloader.saveBlob !== undefined) {
-      this.deps.downloader.saveBlob(downloadName, file);
+      this.deps.downloader.saveBlob(name, file);
     } else {
-      this.deps.downloader.save(downloadName, new Uint8Array(await file.arrayBuffer()), 'application/octet-stream');
+      this.deps.downloader.save(name, new Uint8Array(await file.arrayBuffer()), 'application/octet-stream');
     }
   }
 
@@ -1298,4 +1381,9 @@ async function readable(file: Blob): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** The last part of a path (`db.nin` of `sub/dir/db.nin`), a File's name. */
+function baseName(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1);
 }

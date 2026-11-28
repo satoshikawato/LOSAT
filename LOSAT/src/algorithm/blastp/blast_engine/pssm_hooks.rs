@@ -225,7 +225,7 @@ fn psi_gapped_x_dropoffs(args: &ResolvedBlastpArgs, karlin: &PsiKarlin) -> (i32,
 /// length `cutoff_subject_length` and the e-value `prelim_evalue`: `cutoff_score_max` with
 /// `kbp_gap_psi`, which the initial words' cutoff reads, and `cutoff_score`, which psiblast's
 /// `-sum_stats true` lowers to the sum statistics' cutoff at that length where that is smaller
-/// (`blast_engine::sum_stats_hit_cutoff` with `kbp_gap_psi`: NCBI's `kbp_array` is
+/// (`blast_engine::sum_stats_hit_cutoffs` with `kbp_gap_psi`: NCBI's `kbp_array` is
 /// `sbp->kbp_gap`); without sum statistics the two are the same. `psi_prelim_cutoffs` calls it
 /// with the setup's subject length and preliminary e-value, or with a subject's length and
 /// `-evalue` unstretched (the statistics of each subject). With the setup's (as `pssm_traceback`
@@ -235,7 +235,7 @@ fn psi_gapped_x_dropoffs(args: &ResolvedBlastpArgs, karlin: &PsiKarlin) -> (i32,
 /// (blast_traceback.c:1596-1628 updates the thread's copy).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976 (cited at
-/// `blast_engine::sum_stats_hit_cutoff`)
+/// `blast_engine::sum_stats_hit_cutoffs`)
 fn psi_hit_cutoffs(
     args: &ResolvedBlastpArgs,
     contexts: &[QueryContext],
@@ -251,11 +251,10 @@ fn psi_hit_cutoffs(
         cutoff_subject_length,
     );
     let cutoff_score = if args.sum_stats {
-        cutoff_score_max.min(super::sum_stats_hit_cutoff(
-            contexts,
-            cutoff_subject_length,
-            &karlin.gapped,
-        ))
+        // The one context's (a PSSM search has one).
+        let sum_cutoff =
+            super::sum_stats_hit_cutoffs(contexts, cutoff_subject_length, &karlin.gapped)[0];
+        cutoff_score_max.min(sum_cutoff)
     } else {
         cutoff_score_max
     };

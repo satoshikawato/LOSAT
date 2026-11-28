@@ -63,14 +63,21 @@ pub(crate) fn program_type(program: EProgram) -> ProgramType {
 /// The label and value of the Seq-annot's "Blast Type" of an archive of `program`; the error
 /// the run ends with where NCBI's formatter has none.
 pub(crate) fn blast_type(program: EProgram) -> anyhow::Result<(&'static str, i32)> {
-    let name = match program {
-        EProgram::DeltaBlast => "deltablast",
-        _ => program_type(program).name,
-    };
-    match program_name_to_enum(name.as_bytes()) {
+    match program_name_to_enum(formatter_program(program).as_bytes()) {
         Ok(EProgram::Mapper) => Err(Refusal::Program(EProgram::Mapper.task_name()).into()),
         Ok(program) => Ok((program.task_name(), program.number())),
         Err(exception) => Err(NativeError::exception(&exception).into()),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:185-187
+/// The formatter's program (`m_Program`) of an archive of `program`: its handle type's name,
+/// `deltablast` for DELTA-BLAST (whose handle type is PSI-BLAST's). The Seq-annot's Blast Type
+/// (`blast_type`) and the tabular formats' version line (`# DELTABLAST 2.17.0+`) are of it.
+pub(crate) fn formatter_program(program: EProgram) -> &'static str {
+    match program {
+        EProgram::DeltaBlast => "deltablast",
+        _ => program_type(program).name,
     }
 }
 

@@ -24,6 +24,7 @@ import type { MakeblastdbCase, MakeblastdbResult } from './harness/engine';
 import { buildHarness } from './support/browser';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
 import { openHarness, REPOSITORY, startHarnessServer, type HarnessServer } from './support/harness-server';
+import { asNative, maskedOf, nativeRun, treeOf, type Written } from './support/makeblastdb-native';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { test } from './support/test';
 
@@ -72,66 +73,9 @@ const CASES: readonly MakeblastdbCase[] = [
   },
 ];
 
-/** What a run wrote: its streams and the files of its folder that it made or changed (by their names in the folder). */
-interface Written {
-  readonly status: number;
-  readonly stdout: Buffer;
-  readonly stderr: Buffer;
-  readonly files: ReadonlyMap<string, Buffer>;
-}
-
-/** The files under `folder`, by their paths in it, in the byte order of the names. */
-function treeOf(folder: string, prefix = ''): Map<string, Buffer> {
-  const files = new Map<string, Buffer>();
-  for (const name of readdirSync(join(folder, prefix)).sort()) {
-    const path = prefix === '' ? name : `${prefix}/${name}`;
-    if (statSync(join(folder, path)).isDirectory()) for (const [inner, bytes] of treeOf(folder, path)) files.set(inner, bytes);
-    else files.set(path, readFileSync(join(folder, path)));
-  }
-  return files;
-}
-
-/** A folder holding `files` (each [name in the folder, path under LOSAT/]). */
-function folderOf(files: ReadonlyArray<readonly [string, string]>): string {
-  const folder = mkdtempSync(join(tmpdir(), 'losat-makeblastdb-'));
-  for (const [name, path] of files) {
-    mkdirSync(dirname(join(folder, name)), { recursive: true });
-    copyFileSync(join(LOSAT, path), join(folder, name));
-  }
-  return folder;
-}
-
-/** The native command line's run of `item` in a folder of its files with `TZ=zone`, its paths written as the engine's `/work`. */
-function nativeRun(item: MakeblastdbCase, zone: string): Written {
-  const folder = folderOf(item.files);
-  try {
-    const given = treeOf(folder);
-    const run = spawnSync(NATIVE!, item.argv, { cwd: folder, env: { ...process.env, TZ: zone }, maxBuffer: 1 << 28 });
-    if (run.error) throw run.error;
-    const place = (bytes: Buffer) => Buffer.from(bytes.toString('latin1').split(folder).join('/work'), 'latin1');
-    const files = new Map<string, Buffer>();
-    for (const [name, bytes] of treeOf(folder)) if (!given.get(name)?.equals(bytes)) files.set(name, place(bytes));
-    return { status: run.status ?? -1, stdout: place(run.stdout), stderr: place(run.stderr), files };
-  } finally {
-    rmSync(folder, { recursive: true, force: true });
-  }
-}
-
-/** The bytes with the seconds of the times that makeblastdb prints (MM/DD/YYYY HH:MM:SS) and its elapsed time masked. */
-function withoutSeconds(bytes: Buffer): string {
-  return bytes
-    .toString('latin1')
-    .replace(/(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}):\d{2}/g, '$1:##')
-    .replace(/( sequences? in )[0-9.e+-]+( seconds)/g, '$1#$2');
-}
-
-function maskedOf(written: Written): string[] {
-  return [
-    `status ${written.status}`,
-    `stdout ${withoutSeconds(written.stdout)}`,
-    `stderr ${withoutSeconds(written.stderr)}`,
-    ...[...written.files].map(([name, bytes]) => `${name} ${createHash('sha256').update(withoutSeconds(bytes), 'latin1').digest('hex')}`),
-  ];
+/** The inputs of `item`, by their names in its run's folder. */
+function inputsOf(item: MakeblastdbCase): Map<string, Buffer> {
+  return new Map(item.files.map(([name, path]) => [name, readFileSync(join(LOSAT, path))]));
 }
 
 const fromBase64 = (text: string | undefined) => Buffer.from(text ?? '', 'base64');
@@ -174,9 +118,9 @@ for (const zone of ZONES) {
       const page = await openHarness(context, server);
       for (const item of CASES) {
         const label = `${browserName} ${zone} ${item.id}`;
-        const before = nativeRun(item, zone);
+        const before = nativeRun(item.argv, inputsOf(item), zone);
         const [result]: MakeblastdbResult[] = await page.evaluate((list) => window.losatHarness!.engine.makeblastdbRuns(list), [item]);
-        const after = nativeRun(item, zone);
+        const after = nativeRun(item.argv, inputsOf(item), zone);
         expect(result!.error, label).toBeUndefined();
         expect(ZONE_NAMES[zone], `${label}: the page's zone`).toContain(result!.zone);
         const browser: Written = {
@@ -188,8 +132,7 @@ for (const zone of ZONES) {
         expect(before.status, `${label}: the CLI's run`).toBe(0);
         expect([...browser.files.keys()], `${label}: the files, by name`).toEqual([...before.files.keys()]);
         const masked = maskedOf(browser);
-        const matching = [before, after].some((native) => JSON.stringify(maskedOf(native)) === JSON.stringify(masked));
-        if (!matching) expect(masked, `${label}: as the CLI's run`).toEqual(maskedOf(before));
+        expect(masked, `${label}: as the CLI's run`).toEqual(asNative(masked, [maskedOf(before), maskedOf(after)]));
         console.log(`${label}: ${browser.files.size} files, ${Math.round(result!.toolMs ?? 0)} ms`);
 
         const search = result!.search!;

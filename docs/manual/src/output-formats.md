@@ -37,7 +37,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 - `deltablast` writes `0`, `6` and `7`, with `6` and `7` taking a custom field list. Its report shows each round, as `psiblast`'s does.
 - `tblastn` with `-in_pssm` writes every format but `11`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck` and `cleanup-blastdb-volumes.py` have their own formats, listed on their pages. `blast_formatter` writes `-outfmt` `8`, `9` and `12` from the `-outfmt 11` archive of a search, and the archive itself again with `-outfmt 11` (see [blast_formatter](programs/blast_formatter.md)).
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck` and `cleanup-blastdb-volumes.py` have their own formats, listed on their pages. `blast_formatter` writes `-outfmt` `6`, `7`, `10`, `20` (archives of `blastn`, `blastp`, `psiblast`, `deltablast`, PHI-BLAST of a protein query (`psiblast -phi_pattern`) and `rpsblast`), `8`, `9` and `12` from the `-outfmt 11` archive of a search, and the archive itself again with `-outfmt 11` (see [blast_formatter](programs/blast_formatter.md)).
 
 ## Pairwise and query-anchored text (0 to 4)
 

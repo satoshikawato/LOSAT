@@ -544,6 +544,7 @@ function onDrop(event: DragEvent): void {
         </div>
         <DatabasePicker
           :pick="state.database"
+          flag="-db"
           :molecule-kind="kind"
           :context-label="program.label"
           test-id-prefix="subject-db"

@@ -496,10 +496,10 @@ fn a_tool_s_argv_is_checked_as_the_command_line_checks_it() {
 /// The names that are not a tool of LOSAT Web: the searches and the tools that it does not run yet
 /// (`not available in the browser`), and an unknown name; nothing is emitted.
 #[test]
-fn a_tool_run_runs_windowmasker_alone() {
+fn a_tool_run_runs_the_tools_of_losat_web_alone() {
     emitted();
     let refused = |name: &str| Err(format!("{name} is not available in the browser (ABI v2)"));
-    assert_eq!(run(&["dustmasker", "-in", "x"]), refused("dustmasker"));
+    assert_eq!(run(&["blastdbcmd", "-entry", "x"]), refused("blastdbcmd"));
     assert_eq!(run(&["blastn"]), refused("blastn"));
     assert_eq!(validate(&["blastn"]), refused("blastn"));
     assert_eq!(
@@ -511,6 +511,430 @@ fn a_tool_run_runs_windowmasker_alone() {
         assert_eq!(run(&[program]), refused(program));
     }
     assert!(emitted().is_empty());
+}
+
+/// The library's run of the masking tool `tool` (`dustmasker`, `segmasker`, `convert2blastmask`)
+/// with `words` (after the name): its standard output and error.
+fn masking_library(tool: &str, words: &[&str]) -> (Vec<u8>, Vec<u8>) {
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let run = match tool {
+        "dustmasker" => losat::api::run_dustmasker,
+        "segmasker" => losat::api::run_segmasker,
+        "convert2blastmask" => losat::api::run_convert2blastmask,
+        other => panic!("not a masking tool: {other}"),
+    };
+    let _ = run(words, &mut io::empty(), &mut stdout, &mut stderr);
+    (stdout, stderr)
+}
+
+/// A run of each masking tool (line NP WW4c, 2026-11-28) in a maskinfo format, the files that
+/// makeblastdb's `-mask_data` reads: with `-out FILE -logfile FILE` its files go to stream 12 (the
+/// file of `-logfile` first), byte for byte as the library writes them on the disk, and nothing to
+/// the standard output; with `-out -` the standard output is the library's; the exit status 0 on
+/// stream 2 last, and nothing on the disk.
+#[test]
+fn the_masking_tools_write_the_command_line_s_files() {
+    emitted();
+    let cases: [(&str, String, &[&str]); 3] = [
+        (
+            "dustmasker",
+            fixture("dustmasker/in/basic.fa"),
+            &["-outfmt", "maskinfo_asn1_bin"],
+        ),
+        (
+            "segmasker",
+            fixture("segmasker/in/lcr.fa"),
+            &["-outfmt", "maskinfo_asn1_text"],
+        ),
+        (
+            "convert2blastmask",
+            fixture("convert2blastmask/in/lc.fa"),
+            &[
+                "-masking_algorithm",
+                "repeat",
+                "-masking_options",
+                "repeatmasker, default",
+                "-outfmt",
+                "maskinfo_xml",
+            ],
+        ),
+    ];
+    for (tool, input, options) in cases {
+        let words = [
+            &[tool, "-in", input.as_str()][..],
+            options,
+            &["-out", "ww4c-mask.out", "-logfile", "ww4c-mask.log"],
+        ]
+        .concat();
+        run(&words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":0}".to_vec()),
+            "{tool}"
+        );
+        assert!(joined(&calls, STREAM_PRINTED).is_empty(), "{tool}");
+        let files = files(&frames(&calls));
+        let names: Vec<&[u8]> = files.iter().map(|(name, _)| name.as_slice()).collect();
+        assert_eq!(
+            names,
+            [b"ww4c-mask.log".as_slice(), b"ww4c-mask.out"],
+            "{tool}"
+        );
+        assert!(
+            !std::path::Path::new("ww4c-mask.out").exists(),
+            "{tool}: no file on the disk"
+        );
+        let folder = folder(&format!("ww4c-{tool}"));
+        let out = folder.join("out");
+        let log = folder.join("log");
+        let on_disk: Vec<&str> = words[1..]
+            .iter()
+            .map(|&word| match word {
+                "ww4c-mask.out" => out.to_str().unwrap(),
+                "ww4c-mask.log" => log.to_str().unwrap(),
+                other => other,
+            })
+            .collect();
+        let (stdout, stderr) = masking_library(tool, &on_disk);
+        assert!(stdout.is_empty(), "{tool}");
+        assert_eq!(joined(&calls, STREAM_DIAGNOSTICS), stderr, "{tool}");
+        let written = std::fs::read(&out).unwrap();
+        assert!(!written.is_empty(), "{tool}: the masks");
+        assert_eq!(files[1].1, written, "{tool}: -out");
+        assert_eq!(files[0].1, std::fs::read(&log).unwrap(), "{tool}: -logfile");
+        std::fs::remove_dir_all(&folder).unwrap();
+        // The standard output: the library's.
+        let words = [&[tool, "-in", input.as_str()][..], options, &["-out", "-"]].concat();
+        run(&words).unwrap();
+        let calls = emitted();
+        let (stdout, stderr) = masking_library(tool, &words[1..]);
+        assert_eq!(joined(&calls, STREAM_PRINTED), stdout, "{tool}: -out -");
+        assert_eq!(written, stdout, "{tool}: the same bytes as -out FILE");
+        assert_eq!(joined(&calls, STREAM_DIAGNOSTICS), stderr, "{tool}");
+        assert!(frames(&calls).is_empty(), "{tool}: no file");
+    }
+}
+
+/// The masking tools print and fail as the command line (line NP WW4c): `-help`, `-xmlhelp`
+/// (NCBI's XML of the tool), `-version`, and the errors of the run (a missing input, an
+/// unknown `-outfmt`) with the library's standard error and exit status; an `-out` that is a file of
+/// the run's directory is LOSAT's refusal, exit status 1, no output and no file.
+#[test]
+fn the_masking_tools_print_and_fail_as_the_command_line() {
+    emitted();
+    for tool in ["dustmasker", "segmasker", "convert2blastmask"] {
+        run(&[tool, "-help"]).unwrap();
+        let calls = emitted();
+        assert!(
+            joined(&calls, STREAM_PRINTED).starts_with(format!("USAGE\n  {tool}").as_bytes()),
+            "{tool}"
+        );
+        run(&[tool, "-xmlhelp"]).unwrap();
+        let calls = emitted();
+        let xml = joined(&calls, STREAM_PRINTED);
+        assert!(xml.starts_with(b"<?xml"), "{tool}");
+        let named = format!("<name>{tool}</name>");
+        assert!(
+            String::from_utf8_lossy(&xml).contains(&named),
+            "{tool}: its XML"
+        );
+        run(&[tool, "-version"]).unwrap();
+        let (stdout, _) = masking_library(tool, &["-version"]);
+        assert!(!stdout.is_empty());
+        assert_eq!(joined(&emitted(), STREAM_PRINTED), stdout, "{tool}");
+        let c2b: &[&str] = if tool == "convert2blastmask" {
+            &["-masking_algorithm", "dust", "-masking_options", "o"]
+        } else {
+            &[]
+        };
+        for failing in [
+            &["-in", "ww4c-missing.fa"][..],
+            &["-in", "Cargo.toml", "-outfmt", "nosuch"],
+        ] {
+            let words = [failing, c2b].concat();
+            run(&[&[tool][..], &words].concat()).unwrap();
+            let calls = emitted();
+            let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+            let library = match tool {
+                "dustmasker" => losat::api::run_dustmasker,
+                "segmasker" => losat::api::run_segmasker,
+                _ => losat::api::run_convert2blastmask,
+            };
+            assert!(
+                library(&words, &mut io::empty(), &mut stdout, &mut stderr).is_err(),
+                "{tool} {failing:?}"
+            );
+            assert_eq!(joined(&calls, STREAM_PRINTED), stdout, "{tool} {failing:?}");
+            assert_eq!(
+                joined(&calls, STREAM_DIAGNOSTICS),
+                stderr,
+                "{tool} {failing:?}"
+            );
+            assert_ne!(
+                calls.last().unwrap(),
+                &(STREAM_RESPONSE, b"{\"status\":0}".to_vec()),
+                "{tool} {failing:?}"
+            );
+        }
+        let input = fixture(match tool {
+            "dustmasker" => "dustmasker/in/basic.fa",
+            "segmasker" => "segmasker/in/basic.fa",
+            _ => "convert2blastmask/in/lc.fa",
+        });
+        run(&[
+            &[tool, "-in", input.as_str(), "-out", "Cargo.toml"][..],
+            c2b,
+        ]
+        .concat())
+        .unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":1}".to_vec()),
+            "{tool}"
+        );
+        let refusal = String::from_utf8_lossy(&joined(&calls, STREAM_DIAGNOSTICS)).into_owned();
+        assert!(
+            refusal.starts_with("Error: an output file 'Cargo.toml'")
+                && refusal.ends_with(&format!(
+                    " is not supported by LOSAT's {}\n",
+                    tool.to_uppercase()
+                )),
+            "{tool}: {refusal}"
+        );
+        assert!(joined(&calls, STREAM_PRINTED).is_empty(), "{tool}");
+        assert!(frames(&calls).is_empty(), "{tool}: no file");
+    }
+}
+
+/// The validation of the masking tools' argv (line NP WW4c): the command line's checks before the
+/// tool opens a file pass a good argv (also one of a missing input, which the run opens) and a help
+/// or version word, refuse NCBI's errors of the arguments with the command line's standard error
+/// (an unknown option; convert2blastmask's mandatory `-masking_algorithm`), and refuse an `-out` that
+/// is a file of the run's directory or the standard error and a `-logfile` that is the tool's input,
+/// as the run does once it reaches `-out` (an input it opens: review of WW4c, F1); nothing emitted.
+#[test]
+fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
+    emitted();
+    let c2b = ["-masking_algorithm", "dust", "-masking_options", "o"];
+    for (tool, extra) in [
+        ("dustmasker", &[][..]),
+        ("segmasker", &[]),
+        ("convert2blastmask", &c2b[..]),
+    ] {
+        let input = fixture(match tool {
+            "dustmasker" => "dustmasker/in/basic.fa",
+            "segmasker" => "segmasker/in/basic.fa",
+            _ => "convert2blastmask/in/lc.fa",
+        });
+        let input = input.as_str();
+        for passed in [
+            &["-in", "ww4c-missing.fa"][..],
+            &[
+                "-in",
+                "x.fa",
+                "-outfmt",
+                "maskinfo_asn1_bin",
+                "-out",
+                "x.asnb",
+            ],
+            &["-in", "x.fa", "-logfile", "run.log"],
+        ] {
+            let words = [&[tool][..], passed, extra].concat();
+            assert_eq!(validate(&words), Ok(()), "{tool} {passed:?}");
+        }
+        for word in ["-h", "-help", "-xmlhelp", "-version"] {
+            assert_eq!(validate(&[tool, word]), Ok(()), "{tool} {word}");
+        }
+        let unknown = [&["-in", "x.fa", "-nosuchoption"][..], extra].concat();
+        let error = validate(&[&[tool][..], &unknown].concat()).unwrap_err();
+        let (_, stderr) = masking_library(tool, &unknown);
+        assert_eq!(format!("{error}\n").as_bytes(), stderr, "{tool}");
+        assert!(error.starts_with("USAGE\n"), "{tool}: {error}");
+        let error = validate(&[&[tool, "-in", input, "-out", "Cargo.toml"][..], extra].concat())
+            .unwrap_err();
+        assert!(
+            error.starts_with("Error: an output file 'Cargo.toml'")
+                && error.ends_with(&format!(
+                    " is not supported by LOSAT's {}",
+                    tool.to_uppercase()
+                )),
+            "{tool}: {error}"
+        );
+        let error = validate(&[&[tool, "-in", "m.fa", "-logfile", "m.fa"][..], extra].concat())
+            .unwrap_err();
+        assert!(error.contains("a -logfile file 'm.fa'"), "{tool}: {error}");
+        // The standard error as -out: the run's refusal, at the check too.
+        let error = validate(&[&[tool, "-in", input, "-out", "/dev/stderr"][..], extra].concat())
+            .unwrap_err();
+        assert!(
+            error.starts_with("Error: an output file '/dev/stderr' that is the standard error"),
+            "{tool}: {error}"
+        );
+        // dustmasker opens -out before -in: an -out that names its missing -in is refused, as
+        // the command line would make -in empty; segmasker and convert2blastmask read -in first.
+        let same = validate(&[&[tool, "-in", "m.fa", "-out", "m.fa"][..], extra].concat());
+        if tool == "dustmasker" {
+            assert!(
+                same.as_ref()
+                    .is_err_and(|error| error.contains("an output file 'm.fa'")),
+                "{tool}: {same:?}"
+            );
+        } else {
+            assert_eq!(same, Ok(()), "{tool}");
+        }
+    }
+    let missing = ["-in", "x.fa", "-masking_options", "o"];
+    let error = validate(&[&["convert2blastmask"][..], &missing].concat()).unwrap_err();
+    let (_, stderr) = masking_library("convert2blastmask", &missing);
+    assert_eq!(format!("{error}\n").as_bytes(), stderr);
+    assert!(error.contains("masking_algorithm"), "{error}");
+    assert!(emitted().is_empty());
+}
+
+/// Review of WW4c, F1: a run that opens its input before `-out` (segmasker, convert2blastmask,
+/// windowmasker's masking, blast_formatter's `-archive`) ends with NCBI's error of an input that it
+/// cannot open, before it reaches `-out`; the check takes the run's steps in its order, so it leaves
+/// such an argv to the run (D-WW3-10) instead of refusing its `-out`. dustmasker opens `-out` first
+/// and refuses it there, in the check too. Where the run reaches `-out` (an input that opens), the
+/// check refuses what the run refuses (above, and `ustat missing -out same` below).
+#[test]
+fn the_check_refuses_out_only_where_the_run_reaches_it() {
+    emitted();
+    let counts = fixture("winmask/counts/dm2L_u9.binary");
+    let fasta = fixture("winmask/fasta/dm2L_3k.fa");
+    let c2b = ["-masking_algorithm", "dust", "-masking_options", "o"];
+    for out in ["/dev/stderr", "Cargo.toml"] {
+        for (label, words, status) in [
+            (
+                "segmasker",
+                vec!["segmasker", "-in", "f1-missing.fa", "-out", out],
+                1,
+            ),
+            (
+                "convert2blastmask",
+                [
+                    &["convert2blastmask", "-in", "f1-missing.fa", "-out", out][..],
+                    &c2b,
+                ]
+                .concat(),
+                1,
+            ),
+            (
+                "windowmasker",
+                vec![
+                    "windowmasker",
+                    "-ustat",
+                    &counts,
+                    "-in",
+                    "f1-missing.fa",
+                    "-out",
+                    out,
+                ],
+                3,
+            ),
+            (
+                "blast_formatter",
+                vec![
+                    "blast_formatter",
+                    "-archive",
+                    "f1-missing.asn",
+                    "-outfmt",
+                    "8",
+                    "-out",
+                    out,
+                ],
+                1,
+            ),
+        ] {
+            assert_eq!(validate(&words), Ok(()), "{label} {out}: validate");
+            run(&words).unwrap();
+            let calls = emitted();
+            assert_eq!(
+                calls.last().unwrap(),
+                &(
+                    STREAM_RESPONSE,
+                    format!("{{\"status\":{status}}}").into_bytes()
+                ),
+                "{label} {out}: status"
+            );
+            let diag = String::from_utf8_lossy(&joined(&calls, STREAM_DIAGNOSTICS)).into_owned();
+            assert!(
+                diag.contains("f1-missing") && !diag.contains("an output file"),
+                "{label} {out}: {diag}"
+            );
+            assert!(frames(&calls).is_empty(), "{label} {out}: no file");
+        }
+        // dustmasker opens `-out` before `-in`: its refusal, in the check and the run.
+        let words = ["dustmasker", "-in", "f1-missing.fa", "-out", out];
+        let error = validate(&words).unwrap_err();
+        run(&words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            joined(&calls, STREAM_DIAGNOSTICS),
+            format!("{error}\n").as_bytes(),
+            "dustmasker {out}"
+        );
+        // The masking with an input that opens reaches `-out`: the check refuses as the run.
+        let words = [
+            "windowmasker",
+            "-ustat",
+            &counts,
+            "-in",
+            &fasta,
+            "-out",
+            out,
+        ];
+        let error = validate(&words).unwrap_err();
+        assert!(
+            error.contains("an output file"),
+            "windowmasker {out}: {error}"
+        );
+        run(&words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            joined(&calls, STREAM_DIAGNOSTICS),
+            format!("{error}\n").as_bytes(),
+            "windowmasker {out}"
+        );
+        assert!(frames(&calls).is_empty(), "windowmasker {out}: no file");
+    }
+}
+
+/// Review of WW4c, F5: the output file names of `tests/standard_output_names.tsv`, which the app's
+/// `isStandardOutputName` reads too, are the run's standard output (the data on stream 11, no file)
+/// exactly where the list says `stdout`; else a file, lost bytes or the run's error.
+#[test]
+fn the_standard_output_names_are_the_engines() {
+    emitted();
+    let input = fixture("dustmasker/in/basic.fa");
+    let list = std::fs::read_to_string(format!(
+        "{}/tests/standard_output_names.tsv",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let mut rows = 0;
+    for line in list.lines().filter(|line| !line.starts_with('#')) {
+        let (name, kind) = line.split_once('\t').unwrap();
+        run(&[
+            "dustmasker",
+            "-in",
+            &input,
+            "-outfmt",
+            "maskinfo_asn1_bin",
+            "-out",
+            name,
+        ])
+        .unwrap();
+        let calls = emitted();
+        let to_stdout = calls.last().unwrap() == &(STREAM_RESPONSE, b"{\"status\":0}".to_vec())
+            && !joined(&calls, STREAM_PRINTED).is_empty()
+            && frames(&calls).is_empty();
+        assert_eq!(to_stdout, kind == "stdout", "{name}");
+        rows += 1;
+    }
+    assert_eq!(rows, 24);
 }
 
 /// Tool runs and tool validation read `-logfile` against the run's real files (line WQA D19):
@@ -1483,6 +1907,10 @@ fn blast_formatter_matches_library_for_subject_and_db_archives() {
             vec!["-archive", &bn, "-outfmt", "12"],
         ),
         (
+            "subject outfmt 6 stdout",
+            vec!["-archive", &bn, "-outfmt", "6"],
+        ),
+        (
             "batch outfmt 8 stdout",
             vec!["-archive", &batch, "-outfmt", "8"],
         ),
@@ -1495,8 +1923,8 @@ fn blast_formatter_matches_library_for_subject_and_db_archives() {
         ("version", vec!["-version"]),
         ("rid refusal", vec!["-rid", "ABCDEFGH01R"]),
         (
-            "unsupported outfmt 6",
-            vec!["-archive", &bn, "-outfmt", "6"],
+            "unsupported outfmt 5",
+            vec!["-archive", &bn, "-outfmt", "5"],
         ),
         (
             "missing archive",

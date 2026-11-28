@@ -102,6 +102,6 @@ fn without_the_gumbel_block_the_hit_cutoff_reads_the_search_space() {
     }
     // The largest search space with an E-value below kSmallFloat: the quotient is past the
     // double, the cutoff the finite ceil((ln K + ln searchsp - ln E) / Lambda)
-    // (`cutoff_score_from_evalue`, line PS DECISIONS 28).
+    // (`stats::cutoffs::karlin_etos_simple`, line PS DECISIONS 28).
     assert_eq!(cutoff(i64::MAX, 1e-300), 2713);
 }

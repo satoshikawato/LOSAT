@@ -541,6 +541,108 @@ pub fn check_blast_formatter(words: &[&str]) -> Result<(), String> {
     )
 }
 
+/// Runs `dustmasker` with `words` (the command line after `losat dustmasker`) as the command line runs
+/// it in its working directory, and its exit status (the tool runs of ABI v2, `losat_web2_tool`;
+/// line NP WW4c, 2026-11-28): as `run_windowmasker`, its input files are opened by name in the
+/// run's working directory, `input` is its standard input, `out` and `err` its standard output and
+/// error, and its files (`-out FILE`, `-logfile FILE`) go to `run_files` (`dustmasker::run_in`).
+pub fn run_dustmasker(
+    words: &[&str],
+    run_files: &RunFiles,
+    input: &mut dyn std::io::Read,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> i32 {
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    crate::dustmasker::run_in(&words, run_files, input, out, err)
+}
+
+/// Checks `words` (the command line after `dustmasker`) as the command line reads them before
+/// `dustmasker` opens a file (`dustmasker::check_in`; line NP WW4c). `Err` with what the command line
+/// writes for the words that it refuses: its standard error, then the file of `-logfile`, without
+/// the last line end.
+pub fn check_dustmasker(words: &[&str]) -> Result<(), String> {
+    check_tool_in(
+        words,
+        crate::dustmasker::read_files,
+        crate::dustmasker::check_in,
+    )
+}
+
+/// The input file names that a `dustmasker` run with `words` opens for reading
+/// (`dustmasker::read_files`): `(for_logfile, for_out)`.
+pub fn dustmasker_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    crate::dustmasker::read_files(words)
+}
+
+/// Runs `segmasker` with `words` (the command line after `losat segmasker`) as the command line runs
+/// it in its working directory, and its exit status (the tool runs of ABI v2, `losat_web2_tool`;
+/// line NP WW4c, 2026-11-28): as `run_windowmasker`, its input files are opened by name in the
+/// run's working directory, `input` is its standard input, `out` and `err` its standard output and
+/// error, and its files (`-out FILE`, `-logfile FILE`) go to `run_files` (`segmasker::run_in`).
+pub fn run_segmasker(
+    words: &[&str],
+    run_files: &RunFiles,
+    input: &mut dyn std::io::Read,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> i32 {
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    crate::segmasker::run_in(&words, run_files, input, out, err)
+}
+
+/// Checks `words` (the command line after `segmasker`) as the command line reads them before
+/// `segmasker` opens a file (`segmasker::check_in`; line NP WW4c). `Err` with what the command line
+/// writes for the words that it refuses: its standard error, then the file of `-logfile`, without
+/// the last line end.
+pub fn check_segmasker(words: &[&str]) -> Result<(), String> {
+    check_tool_in(
+        words,
+        crate::segmasker::read_files,
+        crate::segmasker::check_in,
+    )
+}
+
+/// The input file names that a `segmasker` run with `words` opens for reading
+/// (`segmasker::read_files`): `(for_logfile, for_out)`.
+pub fn segmasker_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    crate::segmasker::read_files(words)
+}
+
+/// Runs `convert2blastmask` with `words` (the command line after `losat convert2blastmask`) as the command line runs
+/// it in its working directory, and its exit status (the tool runs of ABI v2, `losat_web2_tool`;
+/// line NP WW4c, 2026-11-28): as `run_windowmasker`, its input files are opened by name in the
+/// run's working directory, `input` is its standard input, `out` and `err` its standard output and
+/// error, and its files (`-out FILE`, `-logfile FILE`) go to `run_files` (`convert2blastmask::run_in`).
+pub fn run_convert2blastmask(
+    words: &[&str],
+    run_files: &RunFiles,
+    input: &mut dyn std::io::Read,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> i32 {
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
+    crate::convert2blastmask::run_in(&words, run_files, input, out, err)
+}
+
+/// Checks `words` (the command line after `convert2blastmask`) as the command line reads them before
+/// `convert2blastmask` opens a file (`convert2blastmask::check_in`; line NP WW4c). `Err` with what the command line
+/// writes for the words that it refuses: its standard error, then the file of `-logfile`, without
+/// the last line end.
+pub fn check_convert2blastmask(words: &[&str]) -> Result<(), String> {
+    check_tool_in(
+        words,
+        crate::convert2blastmask::read_files,
+        crate::convert2blastmask::check_in,
+    )
+}
+
+/// The input file names that a `convert2blastmask` run with `words` opens for reading
+/// (`convert2blastmask::read_files`): `(for_logfile, for_out)`.
+pub fn convert2blastmask_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    crate::convert2blastmask::read_files(words)
+}
+
 /// Runs `makeblastdb` with `words` (the command line after `losat makeblastdb`) as the command
 /// line runs it in its working directory, and its exit status (the tool runs of ABI v2,
 /// `losat_web2_tool`; line NP WW4b1, D-WW4b-1, 2026-11-27): it reads and writes its files by name

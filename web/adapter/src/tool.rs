@@ -1,12 +1,12 @@
 //! The runs of the command line's tools besides the searches (`losat_web2_tool`, docs/web/abi_v2.md
-//! §4, §5; line NP WW3a, 2026-11-22; line RG-F3p7; line NP WW4b1, 2026-11-27): `windowmasker`,
-//! `blast_formatter` and `makeblastdb`, with the command line's words, in the run's working
-//! directory (`run::enter_run_directory`), whose files they read by name as the command line reads
+//! §4, §5; line NP WW3a, 2026-11-22; line RG-F3p7; line NP WW4b1, 2026-11-27; line NP WW4c,
+//! 2026-11-28): `windowmasker`, `blast_formatter`, `makeblastdb`, `dustmasker`, `segmasker` and
+//! `convert2blastmask`, with the command line's words, in the run's working directory (`run::enter_run_directory`), whose files they read by name as the command line reads
 //! them in its directory. Standard input is the null device (empty), standard output goes to
 //! stream 11 and standard error to stream 3, then the exit status goes to stream 2
 //! (`{"status":N}`).
 //!
-//! `windowmasker` and `blast_formatter` write their files (`-out FILE`, `-logfile FILE`) to stream
+//! `windowmasker`, `blast_formatter` and the masking tools write their files (`-out FILE`, `-logfile FILE`) to stream
 //! 12, each as it is written, so that no output is held whole (D-WW3-6: human counts are 724 MB, a
 //! genome masked as FASTA 3.1 GB): each write at its offset, as the system writes a file that a run
 //! opens twice (`-out x -logfile x`, D-WW3-9). `makeblastdb` writes, reads back, renames and
@@ -19,8 +19,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use losat::web_adapter::{
-    blast_formatter_read_files, windowmasker_read_files, FileReceiver, FileStream, RunFiles,
-    PROGRAMS,
+    blast_formatter_read_files, convert2blastmask_read_files, dustmasker_read_files,
+    segmasker_read_files, windowmasker_read_files, FileReceiver, FileStream, RunFiles, PROGRAMS,
 };
 
 use crate::emit::{
@@ -28,8 +28,16 @@ use crate::emit::{
     STREAM_DIAGNOSTICS, STREAM_PRINTED, STREAM_RESPONSE, STREAM_TOOL_FILES,
 };
 
-/// The tools that a tool run runs: `windowmasker`, `blast_formatter` and `makeblastdb`.
-pub const TOOLS: &[&str] = &["windowmasker", "blast_formatter", "makeblastdb"];
+/// The tools that a tool run runs: `windowmasker`, `blast_formatter`, `makeblastdb`, `dustmasker`,
+/// `segmasker` and `convert2blastmask`.
+pub const TOOLS: &[&str] = &[
+    "windowmasker",
+    "blast_formatter",
+    "makeblastdb",
+    "dustmasker",
+    "segmasker",
+    "convert2blastmask",
+];
 
 /// A tool that a tool run runs (`TOOLS`).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -37,6 +45,9 @@ enum ToolKind {
     WindowMasker,
     BlastFormatter,
     Makeblastdb,
+    DustMasker,
+    SegMasker,
+    Convert2BlastMask,
 }
 
 /// The tool `words[0]` and its words after the name; `Err` for a name that is not a tool that
@@ -48,6 +59,9 @@ fn tool<'a>(words: &'a [&'a str]) -> Result<(ToolKind, &'a [&'a str]), String> {
         "windowmasker" => Ok((ToolKind::WindowMasker, arguments)),
         "blast_formatter" => Ok((ToolKind::BlastFormatter, arguments)),
         "makeblastdb" => Ok((ToolKind::Makeblastdb, arguments)),
+        "dustmasker" => Ok((ToolKind::DustMasker, arguments)),
+        "segmasker" => Ok((ToolKind::SegMasker, arguments)),
+        "convert2blastmask" => Ok((ToolKind::Convert2BlastMask, arguments)),
         other if PROGRAMS.contains(&other) => {
             Err(format!("{other} is not available in the browser (ABI v2)"))
         }
@@ -71,6 +85,27 @@ pub fn run(words: &[&str]) -> Result<(), String> {
             &mut Diagnostics,
         ),
         ToolKind::BlastFormatter => losat::web_adapter::run_blast_formatter(
+            arguments,
+            &files(),
+            &mut io::empty(),
+            &mut out,
+            &mut Diagnostics,
+        ),
+        ToolKind::DustMasker => losat::web_adapter::run_dustmasker(
+            arguments,
+            &files(),
+            &mut io::empty(),
+            &mut out,
+            &mut Diagnostics,
+        ),
+        ToolKind::SegMasker => losat::web_adapter::run_segmasker(
+            arguments,
+            &files(),
+            &mut io::empty(),
+            &mut out,
+            &mut Diagnostics,
+        ),
+        ToolKind::Convert2BlastMask => losat::web_adapter::run_convert2blastmask(
             arguments,
             &files(),
             &mut io::empty(),
@@ -106,6 +141,9 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         ToolKind::WindowMasker => losat::web_adapter::check_windowmasker(arguments),
         ToolKind::BlastFormatter => losat::web_adapter::check_blast_formatter(arguments),
         ToolKind::Makeblastdb => losat::web_adapter::check_makeblastdb(arguments),
+        ToolKind::DustMasker => losat::web_adapter::check_dustmasker(arguments),
+        ToolKind::SegMasker => losat::web_adapter::check_segmasker(arguments),
+        ToolKind::Convert2BlastMask => losat::web_adapter::check_convert2blastmask(arguments),
     }
 }
 
@@ -145,6 +183,9 @@ impl ToolFiles {
         let (read, out_read) = match kind {
             ToolKind::WindowMasker => windowmasker_read_files(arguments),
             ToolKind::BlastFormatter => blast_formatter_read_files(arguments),
+            ToolKind::DustMasker => dustmasker_read_files(arguments),
+            ToolKind::SegMasker => segmasker_read_files(arguments),
+            ToolKind::Convert2BlastMask => convert2blastmask_read_files(arguments),
             // makeblastdb's files of the working directory go through the file system (`run`),
             // where the command line's refusal of a log naming an input applies.
             ToolKind::Makeblastdb => (Vec::new(), Vec::new()),

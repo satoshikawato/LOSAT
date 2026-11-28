@@ -44,6 +44,7 @@ import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import type { DatabaseMemory, DatabaseSlot, RememberedDatabase } from '../../src/ports/db-memory';
 import { NodeInflater } from './support/node-inflater';
+import { runEnd } from './support/run-end';
 
 const TEST_MTIME = 1_764_100_000_000;
 
@@ -540,20 +541,6 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     return { draft, coordinator, results, runCalls, engine };
   }
 
-  async function waitCompleted(coordinator: Coordinator, runId: string): Promise<void> {
-    await new Promise<void>((resolve) => {
-      const check = () => {
-        const run = coordinator.state.get().runs.find((r) => r.snapshot.runId === runId);
-        if (run?.status === 'completed' || run?.status === 'failed') {
-          unsub();
-          resolve();
-        }
-      };
-      const unsub = coordinator.state.subscribe(check);
-      check();
-    });
-  }
-
   const pasteQuery = (draft: SearchDraft) => draft.setPaste('query', '>q1\nACGTACGTACGTACGTACGTACGT\n');
   const pasteSubject = (draft: SearchDraft) => draft.setPaste('subject', '>s1\nACGTACGTACGTACGTACGTACGT\n');
   const expectReady = (draft: SearchDraft) => expect(draft.readiness()).toBeUndefined();
@@ -562,7 +549,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     const submitted = await draft.submit();
     expect(submitted.ok).toBe(true);
     const runId = submitted.runIds![0]!;
-    await waitCompleted(coordinator, runId);
+    await runEnd(coordinator, runId);
     return runId;
   };
   const mountedNames = (req: EngineRunRequest) => req.files?.map((f) => f.name).sort();
@@ -1269,7 +1256,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(asked.every((argv) => !argv.join(' ').includes('q"'))).toBe(true);
     const first = await draft.submit();
     expect(first).toMatchObject({ ok: true });
-    await waitCompleted(coordinator, (first as { runIds: readonly string[] }).runIds[0]!);
+    await runEnd(coordinator, (first as { runIds: readonly string[] }).runIds[0]!);
     expect(runCalls[0]!.argv).toContain('-help');
     expect(runCalls[0]!.argv.join(' ')).not.toContain('q"');
     // Without the words, the search reads the database again: refused.
@@ -1292,7 +1279,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(draft.readiness()).toBeUndefined();
     const second = await draft.submit();
     expect(second).toMatchObject({ ok: true });
-    await waitCompleted(coordinator, (second as { runIds: readonly string[] }).runIds[0]!);
+    await runEnd(coordinator, (second as { runIds: readonly string[] }).runIds[0]!);
     expect(runCalls[1]!.argv).toContain('-help');
     expect(runCalls[1]!.argv.join(' ')).not.toContain('q"');
   });

@@ -481,9 +481,6 @@ pub(super) fn prefetch_reported_subjects(
                     BlastpReport::CustomTabular(spec) => spec.light_length(),
                     _ => false,
                 }),
-                format_plans
-                    .iter()
-                    .any(|outfmt| matches!(outfmt, BlastpReport::Pairwise(_))),
             ),
         )?;
         // The holders' titles are read as the subjects' own (`check_reported_titles`).

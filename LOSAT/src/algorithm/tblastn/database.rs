@@ -1366,7 +1366,7 @@ pub(super) fn reported_subjects(
     // Seq-ids that outfmt 0 shows.
     let mut taxdb_found: Option<bool> = None;
     // The holders whose records the writers write for subjects (`shared::ShownHolders`).
-    let holders = shared::ShownHolders::new(&database.db, false, PROGRAM, shown.pairwise);
+    let holders = shared::ShownHolders::new(&database.db, false, PROGRAM);
     for (rank, &ordinal) in ordinals.iter().enumerate() {
         // The sequence whose letters and length the reports read: the subject's, or its holder's.
         let mut read_ordinal = ordinal;
@@ -1411,10 +1411,12 @@ pub(super) fn reported_subjects(
                 };
                 let (subject, checked, load) = match &shown_bioseq {
                     Some(bioseq) => {
+                        // Outfmt 0 to 4 print the search's identities (`recount_shown_counts`
+                        // counts them again only for a PSSM or `-db_hard_mask`).
                         holders.other_letters(
                             (ordinal, subject),
                             bioseq,
-                            shown.table_identities,
+                            shown.table_identities || shown.pairwise,
                             || {
                                 let letters = |ordinal| {
                                     database

@@ -3138,7 +3138,7 @@ impl ListedTitles<'_> {
         joined: bool,
         taxonomy: bool,
         loads: &HitLoads,
-        (words, light_length, pairwise): (crate::report::tabular::PrintedIds, bool, bool),
+        (words, light_length): (crate::report::tabular::PrintedIds, bool),
     ) -> Result<Vec<(usize, crate::report::shown_bioseq::ShownBioseq)>> {
         let mut shown_records = Vec::new();
         if self.parsed.is_empty() {
@@ -3146,9 +3146,8 @@ impl ListedTitles<'_> {
         }
         if fetched {
             let seen = self.seen();
-            let holders = database.map(|database| {
-                shared::ShownHolders::new(database.seqdb(), true, self.program, pairwise)
-            });
+            let holders = database
+                .map(|database| shared::ShownHolders::new(database.seqdb(), true, self.program));
             for rank in Self::reported(hit_lists) {
                 if let Some(subject) = self.parsed_subject(rank) {
                     let ordinal = self.listed.ordinals[rank];

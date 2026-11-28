@@ -528,7 +528,7 @@ impl QuerySections for RoundSections<'_> {
             super::blastp_section_hsps(
                 self.report.num_alignments,
                 group,
-                self.parsed_subjects,
+                (self.parsed_subjects, Some(self.loads)),
                 |s_idx| sequences.subject_is_query(q_idx, s_idx),
             )
         })

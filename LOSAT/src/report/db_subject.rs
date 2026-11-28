@@ -52,7 +52,11 @@ pub struct ParsedSubject {
     /// The definition line of the subject Bioseq: `DeflineSet::bioseq_defline` of the Seq-id that
     /// NCBI's data loader builds it for (`loader_id`; of `alignment_id` but where another line
     /// holds the Seq-id of its handle, `handle_lookup`).
-    target: usize,
+    target: u32,
+    /// The definition line whose title the description line of a pairwise report writes: the
+    /// line of the Bioseq that its second lookup, by the display id, gives (`described_by`; the
+    /// target but where a holder's record names another, [`HitLoads::described_line`]).
+    described: u32,
     /// Whether NCBI's formatters find no Bioseq by the Seq-align id whatever its lookup gives
     /// (`new`, `fetched`).
     unfetchable: bool,
@@ -893,6 +897,21 @@ impl ShownInstead {
             _ => None,
         }
     }
+}
+
+/// What one alignment of a query-anchored section (outfmt 1 to 4) loads ([`HitLoads::note_rows`]):
+/// another sequence's Bioseq by a line (`ShownInstead::written`; `None` where LOSAT does not name
+/// it), or the subject's own record: the sequence whose Bioseq its load gave (itself or a copy of
+/// its record; `None` where the prefetch's answers do not say) and the line by which it was loaded
+/// ([`NO_LINE`] where LOSAT does not know it), and the line of its record, `target`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AnchoredRow {
+    Shown(Option<(DbSequence, usize)>),
+    Own {
+        sequence: Option<DbSequence>,
+        line: u32,
+        target: u32,
+    },
 }
 
 /// Inverted index built lazily for [`ScopePlaces`] only when `holders()` is actually queried
@@ -2087,7 +2106,9 @@ impl ScopeWalk {
                     // line DBID pfoff-4, `pq.zr1.V.U1.b1.0`: a description's load, then a failing
                     // lookup's alignment that this Bioseq holds weakly); it registers its lines
                     // only where its blob id is new (`load_subject_blob`).
-                    let line = subject.line_of_handle(handle).unwrap_or(subject.target);
+                    let line = subject
+                        .line_of_handle(handle)
+                        .unwrap_or(subject.target as usize);
                     self.load_subject_blob(subject, registrant.sequence, line, Some(handle));
                     return Some(Resolved::Blob(
                         registrant.sequence,
@@ -2164,11 +2185,30 @@ impl ScopeWalk {
     /// (or no blob, where the lookup's answer refuses it), `HitLoad::Throws` where the lookup
     /// throws, `HitLoad::Shown` where it is another sequence.
     pub fn load(&mut self, subject: &ParsedSubject) -> HitLoad {
+        self.load_place(subject).0
+    }
+
+    /// [`ScopeWalk::load`] and the Bioseq that it gives: its sequence (the subject's own, a copy's
+    /// or another sequence's) and the line by which it was loaded ([`NO_LINE`] where LOSAT does
+    /// not know it); `None` where it gives none, or where two walks give two sequences.
+    fn load_place(&mut self, subject: &ParsedSubject) -> (HitLoad, Option<(DbSequence, u32)>) {
         let resolved = self.resolve(subject, true);
+        let place = match resolved {
+            Some(Resolved::Blob(sequence, _, line)) => Some((sequence, line)),
+            _ => None,
+        };
         let answer = Self::answer(subject, resolved);
         match &mut self.other {
-            Some(other) => Self::either(answer, other.load(subject)),
-            None => answer,
+            Some(other) => {
+                let (other, other_place) = other.load_place(subject);
+                let place = match (place, other_place) {
+                    (Some(one), Some(other)) if one == other => Some(one),
+                    (Some((one, _)), Some((other, _))) if one == other => Some((one, NO_LINE)),
+                    _ => None,
+                };
+                (Self::either(answer, other), place)
+            }
+            None => (answer, place),
         }
     }
 
@@ -2194,6 +2234,51 @@ impl ScopeWalk {
             one.or(other).and_then(|shown| shown.holder),
             ShownBy::Display,
         ))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:432-433, 497-498
+    /// The description table's second lookup (outfmt 0 to 4) of a described subject whose load gave
+    /// the Bioseq of another sequence, `holder`, by its line `line` (`ShownInstead::written`):
+    /// `record` is that Bioseq as the writers read it ([`ParsedSubject::shown_by`]), whose display
+    /// id is the first of the holder's lines that holds the subject's Seq-align id (else its last
+    /// line's). Where that id's handle is the Seq-align id's, the lookup finds the same Bioseq
+    /// (`Some(line)`); else the places answer as for [`ScopeWalk::display`], and the title written
+    /// is that of the line by which the holder's Bioseq that they give was loaded (`Some`), or
+    /// LOSAT does not know it (`None`: another sequence, an unknown order or line, or no place,
+    /// where NCBI's lookup would load a blob).
+    pub fn display_held(
+        &mut self,
+        record: &ParsedSubject,
+        holder: DbSequence,
+        line: u32,
+    ) -> Option<u32> {
+        let Some(keys) = record.display_keys() else {
+            return Some(line);
+        };
+        let one = self.display_held_one(&keys, holder);
+        let Some(other) = &mut self.other else {
+            return one;
+        };
+        let other = other.display_held_one(&keys, holder);
+        one.filter(|_| one == other)
+    }
+
+    /// [`ScopeWalk::display_held`] of this walk alone, by the display id's keys `keys`.
+    fn display_held_one(&mut self, keys: &IdKeys, holder: DbSequence) -> Option<u32> {
+        let handle = keys.handle?;
+        let resolved = self
+            .cached(handle)
+            .or_else(|| self.scope_match(keys).map(|(resolved, _)| resolved))
+            .or_else(|| self.registered_place(handle))?;
+        self.scope.cache.insert(handle, resolved);
+        match resolved {
+            Resolved::Blob(sequence, ShownBy::Holder | ShownBy::Weak, line)
+                if sequence == holder && line != NO_LINE =>
+            {
+                Some(line)
+            }
+            _ => None,
+        }
     }
 
     /// [`ScopeWalk::display`] of this walk alone.
@@ -2655,7 +2740,9 @@ impl ScopeWalk {
                     };
                 }
                 let blob_load = if subject.mine(registrant.sequence) {
-                    let line = subject.line_of_handle(handle).unwrap_or(subject.target);
+                    let line = subject
+                        .line_of_handle(handle)
+                        .unwrap_or(subject.target as usize);
                     Some(self.plan_alone_blob(registrant.sequence, line, Some(handle), None))
                 } else {
                     self.blob_of(registrant.sequence).and_then(|ext| {
@@ -3156,7 +3243,8 @@ impl ParsedSubject {
         Ok(Self {
             set,
             alignment_id,
-            target,
+            target: target as u32,
+            described: target as u32,
             unfetchable,
             resolution: ScopeResolution::default(),
             scope_finds_none: lookup == Some(HandleLookup::NoBioseq),
@@ -3196,7 +3284,8 @@ impl ParsedSubject {
         Ok(Self {
             set: holder.set.clone(),
             alignment_id: alignment_id.clone(),
-            target: line,
+            target: line as u32,
+            described: line as u32,
             unfetchable: false,
             resolution: ScopeResolution::default(),
             scope_finds_none: false,
@@ -3213,14 +3302,32 @@ impl ParsedSubject {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:376-394
-    /// Whether the description line of this record shows its target line (the B-line of a
-    /// holder's Bioseq, [`ParsedSubject::shown_by`]): the first line that holds the Seq-align id
-    /// (`GetDisplayIds`), whose title NCBI looks up again by its display id.
-    pub fn displays_its_line(&self) -> bool {
-        self.set
-            .display_defline(&self.alignment_id)
-            .is_some_and(|shown| shown.index == self.target)
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
+    /// This record whose description line (outfmt 0 to 4) writes the title of its line `line`:
+    /// the line of the Bioseq that the description's second lookup, by the display id, gives
+    /// (a holder's record whose display line is not its B-line, [`HitLoads::described_line`]).
+    /// `Err` for a line that it does not have (LOSAT's internal error).
+    pub fn described_by(mut self, line: usize) -> Result<Self, String> {
+        if line >= self.set.deflines.len() {
+            return Err(format!(
+                "is described by definition line {line} of a sequence of {} (internal error)",
+                self.set.deflines.len()
+            ));
+        }
+        self.described = line as u32;
+        Ok(self)
+    }
+
+    /// The record whose title the description line writes ([`ParsedSubject::described_by`]): this
+    /// one, or its view by the described line.
+    fn described_record(&self) -> std::borrow::Cow<'_, ParsedSubject> {
+        if self.described == self.target {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        match Self::shown_by(self, self.described as usize, &self.alignment_id) {
+            Ok(record) => std::borrow::Cow::Owned(record),
+            Err(_) => std::borrow::Cow::Borrowed(self),
+        }
     }
 
     /// The sequence of the database whose Bioseq this record is (`in_database`; the holder of a
@@ -3257,6 +3364,7 @@ impl ParsedSubject {
             },
             alignment_id: ids.best.clone(),
             target: 0,
+            described: 0,
             unfetchable: false,
             resolution: ScopeResolution::default(),
             scope_finds_none: false,
@@ -3365,7 +3473,7 @@ impl ParsedSubject {
             }
             None | Some(F::OtherTaxids(_) | F::CopyApart(..)) => Some(LoadedBlobRef::Own {
                 sequence: self.resolution.gives.or(self.sequence)?,
-                line: self.target,
+                line: self.target as usize,
             }),
         }
     }
@@ -3407,7 +3515,7 @@ impl ParsedSubject {
     fn blob_keys_as(&self, sequence: DbSequence) -> std::sync::Arc<BlobKeys> {
         std::sync::Arc::new(BlobKeys::of_deflines(
             Some(sequence),
-            self.target,
+            self.target as usize,
             &self.set.deflines,
         ))
     }
@@ -4145,7 +4253,7 @@ impl ParsedSubject {
 
     /// The definition line of the subject Bioseq.
     fn target(&self) -> &BlastDefline {
-        &self.set.deflines[self.target]
+        &self.set.deflines[self.target as usize]
     }
 
     /// What `GenerateDefline` reads of the subject Bioseq: its Seq-ids, whether it has a source
@@ -4554,7 +4662,7 @@ impl ParsedSubject {
             let (start, title) = self.thrown_description();
             return (start, title, true);
         } else {
-            match self.bioseq_title(protein, true) {
+            match self.described_record().bioseq_title(protein, true) {
                 Ok(title) if !self.description_meets_lineless_line(&title.text) => title,
                 _ => {
                     let (start, title) = self.thrown_description();
@@ -6058,6 +6166,14 @@ pub struct HitLoads {
     /// runs (`HitLoads::after`'s `own`), so that a call keeps nothing per subject that no load
     /// shows as another sequence.
     written: std::collections::HashMap<usize, Option<(DbSequence, usize)>>,
+    /// The line whose title the description line of a pairwise report writes for a subject whose
+    /// loads give another sequence ([`HitLoads::described_line`], `ScopeWalk::display_held`), by
+    /// key: `None` where LOSAT does not know it, or two descriptions give other lines.
+    described: std::collections::HashMap<usize, Option<u32>>,
+    /// The subject whose row of outfmt 1 to 4 a subject's HSPs join where its loads give another
+    /// sequence's Bioseq that another row has ([`HitLoads::anchored_row`]), by key: `None` where
+    /// LOSAT does not merge it as NCBI does.
+    rows: std::collections::HashMap<usize, Option<usize>>,
     /// Whether the run's formats write the record of the sequence that a load gives for a subject
     /// (`ShownInstead::written`, the record writers of line DBID hr-2a: the tables of outfmt 6,
     /// 7, 10 and 20, BLAST XML, outfmt 13 to 16 and 18); not the pairwise reports and SAM yet, nor a
@@ -6209,8 +6325,7 @@ impl HitLoads {
             }
             FormatThrow::Unread => None,
         };
-        loads.writes_shown =
-            run.is_some_and(|run| !matches!(run.after, AfterThrow::EndsAtAlignment { .. }));
+        loads.writes_shown = run.is_some();
         // The answers of the prefetch of the batch of the reports read last (`ScopeWalk::bulk`).
         let mut batch_answers: std::collections::HashMap<usize, HitLoad> = Default::default();
         let mut loaded = std::collections::HashSet::new();
@@ -6224,6 +6339,23 @@ impl HitLoads {
         let mut failed_prefetches: std::collections::HashMap<Option<usize>, Vec<usize>> =
             Default::default();
         let mut failed_prefetched = std::collections::HashSet::new();
+        // The records of the call's subjects by sequence, made at the first description of a
+        // subject whose load gives another sequence (`ScopeWalk::display_held`); a holder that
+        // these reports do not name (reported in a batch before, where each batch's reports
+        // come apart), by its ordinal id where the keys are ordinal ids.
+        let records = std::cell::OnceCell::new();
+        let holder_record = |holder: DbSequence| {
+            records
+                .get_or_init(|| subject_records(&reports, &parsed))
+                .get(&holder.ordinal())
+                .copied()
+                .or_else(|| {
+                    parsed(holder.ordinal() as usize).filter(|record| {
+                        record.database_sequence().map(DbSequence::ordinal)
+                            == Some(holder.ordinal())
+                    })
+                })
+        };
         for (report, (read, keys)) in reports.iter().enumerate() {
             if read.prefetch_fails {
                 let subjects = failed_prefetches.entry(read.batch).or_default();
@@ -6283,12 +6415,41 @@ impl HitLoads {
                     // of the lines does not change what each finds.
                     if run.is_some_and(|run| run.after.is_pairwise()) {
                         for &(key, subject) in &subjects {
-                            if answers.get(&key) == Some(&HitLoad::Loaded) {
-                                if let Some(shown) = walk.display(subject) {
-                                    loads.shown.insert(key, shown);
+                            match answers.get(&key) {
+                                Some(HitLoad::Loaded) => {
+                                    if let Some(shown) = walk.display(subject) {
+                                        loads.shown.insert(key, shown);
+                                    }
                                 }
+                                Some(&HitLoad::Shown(shown)) if shown_keys.contains(&key) => {
+                                    let line = described_line(walk, subject, shown, &holder_record);
+                                    if let Some(line) = line {
+                                        loads.note_described(key, line);
+                                    }
+                                }
+                                _ => {}
                             }
                         }
+                    }
+                    if run
+                        .is_some_and(|run| matches!(run.after, AfterThrow::EndsAtAlignment { .. }))
+                    {
+                        loads.note_rows(
+                            shown_keys.iter().filter_map(|&key| {
+                                let subject = parsed(key)?;
+                                let row = match answers.get(&key)? {
+                                    HitLoad::Shown(shown) => AnchoredRow::Shown(shown.written()),
+                                    HitLoad::Loaded => AnchoredRow::Own {
+                                        sequence: None,
+                                        line: NO_LINE,
+                                        target: subject.target,
+                                    },
+                                    _ => return None,
+                                };
+                                Some((key, subject.id_handle(), row))
+                            }),
+                            true,
+                        );
                     }
                 }
                 if !ended.get() {
@@ -6307,7 +6468,7 @@ impl HitLoads {
                     loads.pairwise_report(
                         run,
                         reads,
-                        &parsed,
+                        (&parsed, &holder_record),
                         (ended, &mut *walk),
                         (&mut loaded, &mut passed, &mut own),
                     );
@@ -6550,8 +6711,8 @@ impl HitLoads {
             if let Some(sequence) = subject.sequence {
                 places.add_ids(
                     sequence,
-                    subject.target,
-                    &subject.set.deflines[subject.target].ids,
+                    subject.target as usize,
+                    &subject.set.deflines[subject.target as usize].ids,
                 );
                 for handle in subject.line_handles() {
                     registry.entry(handle).or_default().push(sequence);
@@ -6645,7 +6806,10 @@ impl HitLoads {
         &mut self,
         run: RunThrow,
         reads: &PairwiseReads,
-        parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
+        (parsed, holder_record): (
+            &impl Fn(usize) -> Option<&'p ParsedSubject>,
+            &impl Fn(DbSequence) -> Option<&'p ParsedSubject>,
+        ),
         (ended, walk): (&std::cell::Cell<bool>, &mut ScopeWalk),
         (loaded, passed, own): (
             &mut std::collections::HashSet<usize>,
@@ -6666,6 +6830,8 @@ impl HitLoads {
         // wrote the thrown record, so no one record is the hit's (`HitLoads::written`).
         let threw = std::cell::RefCell::new(vec![false; reads.hits.len()]);
         let walk = std::cell::RefCell::new(walk);
+        // The Bioseq of each hit's load: its sequence and line (`ScopeWalk::load_place`).
+        let places = std::cell::RefCell::new(vec![None; reads.hits.len()]);
         // A read of the hit `hit` where the report reaches it, in the report's order: a hit that
         // threw at a read before is looked up again (a holder may have been loaded since).
         let read = |hit: usize| {
@@ -6674,11 +6840,15 @@ impl HitLoads {
                 return done;
             }
             let now = match first(hit) {
-                Some(subject) => match walk.borrow_mut().load(subject) {
-                    HitLoad::Shown(shown) => Read::Shown(shown),
-                    HitLoad::Throws if subject.lookup_throws().is_some() => Read::Throws,
-                    _ => Read::Loads,
-                },
+                Some(subject) => {
+                    let (load, place) = walk.borrow_mut().load_place(subject);
+                    places.borrow_mut()[hit] = place;
+                    match load {
+                        HitLoad::Shown(shown) => Read::Shown(shown),
+                        HitLoad::Throws if subject.lookup_throws().is_some() => Read::Throws,
+                        _ => Read::Loads,
+                    }
+                }
                 None => Read::Loads,
             };
             if matches!(now, Read::Throws) {
@@ -6687,11 +6857,21 @@ impl HitLoads {
             state[hit] = Some(now);
             now
         };
-        // A description line's reads: its load, then where that gave the subject itself, the
-        // second lookup by its display id (`ScopeWalk::display`), once.
+        // A description line's reads: its load, then the second lookup by its display id, once:
+        // where the load gave the subject itself `ScopeWalk::display`, where it gave another
+        // sequence `ScopeWalk::display_held` (`titles`: the line whose title it writes).
         let displayed = std::cell::RefCell::new(vec![false; reads.hits.len()]);
+        let titles = std::cell::RefCell::new(vec![None::<Option<u32>>; reads.hits.len()]);
         let describe = |hit: usize| {
             let now = read(hit);
+            if let (Read::Shown(shown), Some(subject)) = (now, first(hit)) {
+                if titles.borrow()[hit].is_none() {
+                    let line =
+                        described_line(&mut walk.borrow_mut(), subject, shown, holder_record);
+                    titles.borrow_mut()[hit] = line;
+                }
+                return now;
+            }
             if !matches!(now, Read::Loads)
                 || std::mem::replace(&mut displayed.borrow_mut()[hit], true)
             {
@@ -6705,6 +6885,8 @@ impl HitLoads {
                 None => now,
             }
         };
+        // The alignments that the report writes (outfmt 1 to 4: their rows, `note_rows`).
+        let mut aligned = 0..0;
         if !ended.get() {
             // With `-html` the description lines end the run at the first whose load throws
             // (`AfterThrow::description_end`, the writer's answer): nothing after it loads.
@@ -6729,11 +6911,33 @@ impl HitLoads {
                 );
                 // The alignments that the report reaches, each read once more where the end above
                 // did not read it (`SkipsAlignment` reads the first alone there).
+                aligned = 0..end.unwrap_or(reads.aligned);
                 for hit in 0..end.map_or(reads.aligned, |end| end + 1) {
                     read(hit);
                 }
                 ended.set(end.is_some());
             }
+        }
+        if matches!(run.after, AfterThrow::EndsAtAlignment { .. }) {
+            let state = state.borrow();
+            let places = places.borrow();
+            self.note_rows(
+                aligned.filter_map(|hit| {
+                    let key = *reads.hits[hit].first()?;
+                    let subject = first(hit)?;
+                    let row = match state[hit]? {
+                        Read::Shown(shown) => AnchoredRow::Shown(shown.written()),
+                        Read::Loads => AnchoredRow::Own {
+                            sequence: places[hit].map(|(sequence, _)| sequence),
+                            line: places[hit].map_or(NO_LINE, |(_, line)| line),
+                            target: subject.target,
+                        },
+                        Read::Throws => return None,
+                    };
+                    Some((key, subject.id_handle(), row))
+                }),
+                false,
+            );
         }
         for (hit, keys) in reads.hits.iter().enumerate() {
             let now = state.borrow()[hit];
@@ -6748,6 +6952,9 @@ impl HitLoads {
                 (Some(Read::Shown(shown)), Some((&first, _))) => {
                     self.shown.insert(first, shown);
                     self.note_shown(first, shown);
+                    if let Some(line) = titles.borrow()[hit] {
+                        self.note_described(first, line);
+                    }
                     if threw.borrow()[hit] {
                         own.insert(first);
                     }
@@ -6796,6 +7003,16 @@ impl HitLoads {
                 .written
                 .into_iter()
                 .filter_map(|(old, holder)| Some((key(old)?, holder)))
+                .collect(),
+            described: self
+                .described
+                .into_iter()
+                .filter_map(|(old, line)| Some((key(old)?, line)))
+                .collect(),
+            rows: self
+                .rows
+                .into_iter()
+                .filter_map(|(old, row)| Some((key(old)?, row.and_then(&key))))
                 .collect(),
             writes_shown: self.writes_shown,
         }
@@ -6922,6 +7139,183 @@ impl HitLoads {
         }
         self.written.get(&key).copied().flatten()
     }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
+    /// The line of the other sequence whose title the description line of a pairwise report
+    /// (outfmt 0 to 4) writes for the subject `key` (`ScopeWalk::display_held`: the line of the
+    /// Bioseq that its second lookup, by the display id, gives): `None` where no pairwise report
+    /// describes it as another sequence, `Some(None)` where LOSAT does not know that Bioseq.
+    pub fn described_line(&self, key: usize) -> Option<Option<u32>> {
+        self.described.get(&key).copied()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:213-260
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:441-449
+    /// The subject whose row the HSPs of the subject `key` join in the query-anchored sections of
+    /// outfmt 1 to 4 (`CAlnMix` tells its sequences apart by Bioseq handle, and NCBI's places give
+    /// the Bioseq of a held subject's Seq-align id): `None` for its own row, `Some(Some(other))`
+    /// where its loads give the Bioseq of the subject `other`'s row ([`HitLoads::note_rows`]),
+    /// `Some(None)` where LOSAT does not merge its rows as NCBI does (no one row of that Bioseq,
+    /// or a subject that joins another row in one query or batch than in another).
+    pub fn anchored_row(&self, key: usize) -> Option<Option<usize>> {
+        self.rows.get(&key).copied()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:756-788
+    /// The rows of the alignments `aligned` (key, Seq-align id handle, load) of one query's
+    /// section (outfmt 1 to 4), or with `bulk` of the reports of a batch that the prefetch loaded:
+    /// the subjects whose loads give one Bioseq share its row. One by one, a Bioseq is one
+    /// sequence by one line of the scope (step 2 finds it before step 3 could load another blob);
+    /// the prefetch skips step 2, so each Seq-align id handle loads a blob of its own, and one
+    /// handle is one Bioseq. Where a subject's load gives another sequence's Bioseq, it joins the
+    /// row of the one subject that loads that Bioseq as its own record (by its record's line),
+    /// or, where none does, of the first of those whose Seq-align id is its handle; where neither
+    /// is so (two own loads, one by another line, two handles, a sequence whose line LOSAT does
+    /// not know), its row is refused ([`HitLoads::anchored_row`]).
+    fn note_rows(
+        &mut self,
+        aligned: impl Iterator<Item = (usize, Option<HandleKey>, AnchoredRow)>,
+        bulk: bool,
+    ) {
+        type Rows = Vec<(usize, Option<HandleKey>, AnchoredRow)>;
+        let mut bioseqs: std::collections::HashMap<(u32, u32, HandleKey), Rows> =
+            Default::default();
+        // The sequences of own loads whose line LOSAT does not know, and whether one by one an own
+        // load's sequence is not known (its Bioseq may be any held subject's).
+        let mut unsure = std::collections::HashSet::new();
+        let mut unknown_own = false;
+        for (key, handle, row) in aligned {
+            let bioseq = match (bulk, row) {
+                (true, _) => handle.map(|handle| (0, 0, handle)),
+                (false, AnchoredRow::Shown(written)) => {
+                    written.map(|(holder, line)| (holder.ordinal(), line as u32, 0))
+                }
+                (false, AnchoredRow::Own { sequence, line, .. }) => {
+                    if let Some(sequence) = sequence.filter(|_| line == NO_LINE) {
+                        unsure.insert(sequence.ordinal());
+                    }
+                    unknown_own |= sequence.is_none();
+                    sequence.map(|sequence| (sequence.ordinal(), line, 0))
+                }
+            };
+            match bioseq {
+                Some(bioseq) => bioseqs.entry(bioseq).or_default().push((key, handle, row)),
+                None if matches!(row, AnchoredRow::Shown(_)) => {
+                    // No handle in the prefetch: a blob of its own; one by one: LOSAT does not
+                    // know the Bioseq.
+                    self.note_row(key, bulk.then_some(key));
+                }
+                None => {}
+            }
+        }
+        // One by one, the sequences that some own load of the query gives: a subject held by
+        // another of their Bioseqs keeps a row of its own where they are in the section too.
+        let owned: std::collections::HashSet<u32> = bioseqs
+            .iter()
+            .filter(|(_, rows)| {
+                rows.iter()
+                    .any(|(_, _, row)| matches!(row, AnchoredRow::Own { .. }))
+            })
+            .map(|(&(sequence, _, _), _)| sequence)
+            .collect();
+        for ((sequence, _, _), mut rows) in bioseqs {
+            if !rows
+                .iter()
+                .any(|(_, _, row)| matches!(row, AnchoredRow::Shown(_)))
+            {
+                continue;
+            }
+            rows.sort_unstable_by_key(|&(key, ..)| key);
+            let own: Vec<(usize, bool)> = rows
+                .iter()
+                .filter_map(|&(key, _, row)| match row {
+                    AnchoredRow::Own { line, target, .. } => Some((key, bulk || line == target)),
+                    AnchoredRow::Shown(_) => None,
+                })
+                .collect();
+            let joined = match own.as_slice() {
+                _ if !bulk && (unknown_own || unsure.contains(&sequence)) => None,
+                &[(own, true)] => Some(own),
+                [] if rows
+                    .iter()
+                    .all(|&(_, handle, _)| handle.is_some() && handle == rows[0].1) =>
+                {
+                    Some(rows[0].0)
+                }
+                _ => None,
+            };
+            // The row's own subject keeps its row; one by one, a held subject that no other
+            // subject of the section joins is noted only where its holder's own Bioseq is
+            // another row of it (`anchored_row` of a subject whose row is not in a section
+            // is its own there, `pairwise::section_hsps`).
+            let noted = bulk || joined.is_none() || rows.len() > 1 || owned.contains(&sequence);
+            for (key, _, row) in rows {
+                if matches!(row, AnchoredRow::Shown(_)) && noted {
+                    self.note_row(key, joined);
+                }
+            }
+        }
+    }
+
+    /// One query's answer `row` for the subject `key` ([`HitLoads::anchored_row`]): where two
+    /// queries give other rows, `None`.
+    fn note_row(&mut self, key: usize, row: Option<usize>) {
+        self.rows
+            .entry(key)
+            .and_modify(|rows| {
+                if *rows != row {
+                    *rows = None;
+                }
+            })
+            .or_insert(row);
+    }
+
+    /// A description's answer `line` for the subject `key` ([`HitLoads::described_line`]).
+    fn note_described(&mut self, key: usize, line: Option<u32>) {
+        self.described
+            .entry(key)
+            .and_modify(|described| {
+                if *described != line {
+                    *described = None;
+                }
+            })
+            .or_insert(line);
+    }
+}
+
+/// The records of the subjects of `reports` (`parsed` of each key) by the ordinal id of their
+/// sequence: the holders whose Bioseqs the description lines of pairwise reports look up
+/// ([`ScopeWalk::display_held`]), local to a call's walk.
+fn subject_records<'p>(
+    reports: &[(ReportRead, ReportKeys)],
+    parsed: &impl Fn(usize) -> Option<&'p ParsedSubject>,
+) -> std::collections::HashMap<u32, &'p ParsedSubject> {
+    let mut records = std::collections::HashMap::new();
+    for key in reports.iter().flat_map(|(_, keys)| keys.keys()) {
+        if let Some(subject) = parsed(key) {
+            if let Some(sequence) = subject.database_sequence() {
+                records.entry(sequence.ordinal()).or_insert(subject);
+            }
+        }
+    }
+    records
+}
+
+/// The description table's second lookup of `subject`, whose load gave another sequence's Bioseq
+/// (`shown`), in `walk` ([`ScopeWalk::display_held`]): `None` where its record is not written
+/// (`ShownInstead::written`: no title is asked of it), `Some(None)` where LOSAT does not know the
+/// Bioseq that the lookup gives (or the holder is not reported in the call:
+/// `holder_record`), else the line whose title the description writes.
+fn described_line<'p>(
+    walk: &mut ScopeWalk,
+    subject: &ParsedSubject,
+    shown: ShownInstead,
+    holder_record: &impl Fn(DbSequence) -> Option<&'p ParsedSubject>,
+) -> Option<Option<u32>> {
+    let (holder, line) = shown.written()?;
+    let record = holder_record(holder)
+        .and_then(|record| ParsedSubject::shown_by(record, line, &subject.alignment_id).ok());
+    Some(record.and_then(|record| walk.display_held(&record, holder, line as u32)))
 }
 
 /// Whether the reports `one` and `other` (`other` after `one`) of `reports` are of one query

@@ -4192,3 +4192,102 @@ fn the_holders_bioseq_is_its_record_by_its_loaded_line() {
     assert_eq!(bioseq.ordinal(), 10);
     assert_eq!(bioseq.record.bioseq_ids(), &[gb("AAA00009", 1)]);
 }
+
+// Line DBID hr-2b: a held record's description line writes the title of the line that its
+// second lookup gives (`described_by`); the B-line stays its Bioseq's ids.
+#[test]
+fn a_held_record_describes_the_line_that_its_display_lookup_gives() {
+    let holder = DbSequence::of_unrestricted(10);
+    let mut record = lines(vec![vec![gb("AAA00009", 1)], vec![gb("AAA00001", 1)]]);
+    record.set.deflines[1].title = Some(b"second".to_vec());
+    let record = record.in_database(holder);
+    let shown = ParsedSubject::shown_by(&record, 0, &gb("AAA00001", 1)).unwrap();
+    assert_eq!(shown.description_line(true).1.text, b"t");
+    let described = shown.clone().described_by(1).unwrap();
+    assert_eq!(described.description_line(true).1.text, b"second");
+    assert_eq!(described.bioseq_ids(), &[gb("AAA00009", 1)]);
+    assert!(shown.described_by(2).is_err());
+}
+
+// Line DBID hr-2b: outfmt 1 to 4 rows by Bioseq handle (`HitLoads::note_rows`): a held subject
+// joins the row of the subject that loads the same holder by the same line as its own record's;
+// two held subjects of one Bioseq that no subject has as its own, or a holder loaded by another
+// line than its record's, are refused; a key that joins in one query and not in another too.
+#[test]
+fn held_rows_join_the_row_of_their_holders_own_bioseq() {
+    let a = DbSequence::of_unrestricted(1);
+    let own = |line, target| AnchoredRow::Own {
+        sequence: Some(a),
+        line,
+        target,
+    };
+    let held = |line: usize| AnchoredRow::Shown(Some((a, line)));
+    // One by one: one Bioseq per sequence and line.
+    let mut loads = HitLoads::default();
+    let rows = [
+        (1, Some(10), own(0, 0)),
+        (2, Some(11), held(0)),
+        (3, Some(12), held(1)),
+    ];
+    loads.note_rows(rows.into_iter(), false);
+    assert_eq!(loads.anchored_row(2), Some(Some(1)));
+    assert_eq!(loads.anchored_row(3), Some(Some(3)));
+    assert_eq!(loads.anchored_row(1), None);
+    // Two held subjects of one Bioseq that no subject has as its own: one handle shares a row,
+    // two handles are not known to.
+    loads.note_rows(
+        [(4, Some(13), held(1)), (5, Some(13), held(1))].into_iter(),
+        false,
+    );
+    assert_eq!(loads.anchored_row(4), Some(Some(4)));
+    assert_eq!(loads.anchored_row(5), Some(Some(4)));
+    loads.note_rows(
+        [(8, Some(14), held(1)), (9, Some(15), held(1))].into_iter(),
+        false,
+    );
+    assert_eq!(loads.anchored_row(9), Some(None));
+    // An own load by another line than its record's, and an own load whose line is not known.
+    loads.note_rows(
+        [(6, Some(16), own(1, 0)), (7, Some(17), held(1))].into_iter(),
+        false,
+    );
+    assert_eq!(loads.anchored_row(7), Some(None));
+    loads.note_rows(
+        [(20, Some(18), own(NO_LINE, 0)), (21, Some(19), held(0))].into_iter(),
+        false,
+    );
+    assert_eq!(loads.anchored_row(21), Some(None));
+    let unknown = AnchoredRow::Own {
+        sequence: None,
+        line: NO_LINE,
+        target: 0,
+    };
+    loads.note_rows(
+        [(22, Some(20), unknown), (23, Some(21), held(0))].into_iter(),
+        false,
+    );
+    assert_eq!(loads.anchored_row(23), Some(None));
+    // Another answer for one key in another query.
+    loads.note_row(2, Some(2));
+    assert_eq!(loads.anchored_row(2), Some(None));
+    // The prefetch: one Bioseq per Seq-align id handle, whatever the line.
+    let mut bulk = HitLoads::default();
+    let rows = [
+        (1, Some(10), own(NO_LINE, 0)),
+        (2, Some(10), held(3)),
+        (3, Some(11), held(0)),
+        (4, None, held(0)),
+    ];
+    bulk.note_rows(rows.into_iter(), true);
+    assert_eq!(bulk.anchored_row(2), Some(Some(1)));
+    assert_eq!(bulk.anchored_row(3), Some(Some(3)));
+    assert_eq!(bulk.anchored_row(4), Some(Some(4)));
+    // Two own loads of one handle (copies of one record) with a held subject: not known.
+    let rows = [
+        (5, Some(20), own(0, 0)),
+        (6, Some(20), own(0, 0)),
+        (7, Some(20), held(0)),
+    ];
+    bulk.note_rows(rows.into_iter(), true);
+    assert_eq!(bulk.anchored_row(7), Some(None));
+}

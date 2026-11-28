@@ -563,13 +563,13 @@ fn shown_records(
     batches: &[BatchResults],
     parsed: &BTreeMap<usize, Arc<ParsedSubject>>,
     loads: &HitLoads,
-    (table_identities, light_length, pairwise): (bool, bool, bool),
+    (table_identities, light_length): (bool, bool),
 ) -> Result<BTreeMap<usize, crate::report::shown_bioseq::ShownBioseq>> {
     let mut records = BTreeMap::new();
     if !loads.writes_any_shown() {
         return Ok(records);
     }
-    let holders = shared::ShownHolders::new(&database.db, true, database.program, pairwise);
+    let holders = shared::ShownHolders::new(&database.db, true, database.program);
     let mut ends: BTreeMap<usize, usize> = BTreeMap::new();
     for list in batches.iter().flat_map(|batch| &batch.queries).flatten() {
         let end = ends.entry(list.oid).or_default();
@@ -948,14 +948,7 @@ impl ReportedSubjects {
         let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
         // The holders' records that the reports write for subjects (`shared::ShownHolders`).
         let shown_records = if reports {
-            shown_records(
-                database,
-                subjects,
-                batches,
-                &parsed,
-                &loads,
-                (shown.0, shown.1, pairwise),
-            )?
+            shown_records(database, subjects, batches, &parsed, &loads, shown)?
         } else {
             BTreeMap::new()
         };

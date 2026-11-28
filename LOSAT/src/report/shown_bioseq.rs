@@ -48,6 +48,16 @@ impl ShownBioseq {
         })
     }
 
+    /// This Bioseq whose description line (outfmt 0 to 4) writes the title of the holder's line
+    /// `line` ([`ParsedSubject::described_by`]). `Err` as that function's.
+    pub fn described_by(self, line: usize) -> Result<Self, String> {
+        let record = Arc::unwrap_or_clone(self.record).described_by(line)?;
+        Ok(Self {
+            record: Arc::new(record),
+            holder: self.holder,
+        })
+    }
+
     /// The ordinal id of the holder, by which the program reads its letters and length.
     pub(crate) fn ordinal(&self) -> u32 {
         self.holder.ordinal()

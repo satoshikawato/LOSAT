@@ -4375,9 +4375,6 @@ pub(crate) struct ShownHolders<'d> {
     db: &'d SeqDb,
     protein: bool,
     program: &'d str,
-    /// Whether a pairwise report (outfmt 0) writes the records: its description line looks the
-    /// title up again by the display id (`ParsedSubject::displays_its_line`).
-    pairwise: bool,
     /// The texts of the taxonomy database's lookups (`LookupTexts`), read at the first holder.
     texts: std::sync::OnceLock<LookupTexts>,
 }
@@ -4389,13 +4386,12 @@ impl<'d> ShownHolders<'d> {
     }
 
     /// The holders of the reported subjects of `db` (`protein` for a protein database) for the
-    /// refusals of `program`, whose reports include a pairwise one where `pairwise`.
-    pub(crate) fn new(db: &'d SeqDb, protein: bool, program: &'d str, pairwise: bool) -> Self {
+    /// refusals of `program`.
+    pub(crate) fn new(db: &'d SeqDb, protein: bool, program: &'d str) -> Self {
         Self {
             db,
             protein,
             program,
-            pairwise,
             texts: std::sync::OnceLock::new(),
         }
     }
@@ -4417,8 +4413,9 @@ impl<'d> ShownHolders<'d> {
     /// a query's scope finds (`seen_by_scope`), a holder shorter than the subject's ranges
     /// (NCBI's rows then end in gaps) or of another length where `exact`, the light `slen`, and
     /// a holder whose own Seq-align id is the subject's in other letter case
-    /// (`differs_in_case_only`), and in a pairwise report a holder whose description line is not
-    /// its loaded line (`ParsedSubject::displays_its_line`).
+    /// (`differs_in_case_only`), and a subject whose description line in a pairwise report writes
+    /// the title of a Bioseq that LOSAT does not know (`HitLoads::described_line`; where it knows
+    /// it, the record writes that line's title, `ShownBioseq::described_by`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn shown<'r>(
         &self,
@@ -4506,11 +4503,22 @@ impl<'d> ShownHolders<'d> {
                 "where its Seq-align id differs from this one in letter case only (NCBI takes the two for one handle, whose spelling decides the sequence that its places give)",
             ));
         }
-        if self.pairwise && !bioseq.record.displays_its_line() {
+        if loads.anchored_row(key) == Some(None) {
             return Err(refuse(
-                "in a pairwise report where its description line is not the line that NCBI loaded it by (NCBI looks that line's title up again by its display id)",
+                "in outfmt 1 to 4 where that Bioseq is another row's of a query's section, whose rows LOSAT does not merge as NCBI does",
             ));
         }
+        let bioseq = match loads.described_line(key) {
+            None => bioseq,
+            Some(Some(line)) => bioseq
+                .described_by(line as usize)
+                .map_err(|reason| parsed_refusal(self.db.oid(ordinal), &reason, self.program))?,
+            Some(None) => {
+                return Err(refuse(
+                    "in a pairwise report whose description line looks its title up again by its display id, where LOSAT does not know the Bioseq that NCBI's places give for that id",
+                ))
+            }
+        };
         Ok(Some(bioseq))
     }
 

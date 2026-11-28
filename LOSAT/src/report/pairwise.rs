@@ -3652,12 +3652,17 @@ struct BlastpSections<'a> {
 /// a database record, `joins`) are the hit's subject, one Bioseq for NCBI's scope; `is_query`
 /// tells the subject that is the query's own Bioseq. A subject whose Bioseq NCBI's scope does not
 /// get (`parsed`, by subject index: `ParsedSubject::scope_finds_none`) is left out, and counted
-/// among the first `num_alignments`.
+/// among the first `num_alignments`. A subject whose load gives the Bioseq that another subject
+/// loads as its own (`loads`, `HitLoads::anchored_row`) puts its HSPs in that subject's row
+/// (`CAlnMix` tells its sequences apart by Bioseq handle).
 fn section_hsps(
     mut hsps: super::query_anchored::Hsps,
     num_alignments: usize,
     group: &super::x_pairwise_par::QueryGroup<'_>,
-    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    (parsed, loads): (
+        &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        Option<&crate::report::db_subject::HitLoads>,
+    ),
     is_query: impl Fn(u32) -> bool,
     mut segments_of: impl FnMut(
         &PairwiseHit,
@@ -3665,7 +3670,8 @@ fn section_hsps(
     ) -> super::query_anchored::HspStrands,
 ) -> super::query_anchored::Hsps {
     let mut segments = super::serial::seqalign::Segments::default();
-    for &s_idx in group.aligned(num_alignments) {
+    let aligned = group.aligned(num_alignments);
+    for &s_idx in aligned {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1997-2003
         if finds_no_bioseq(parsed, s_idx) {
             continue;
@@ -3673,9 +3679,16 @@ fn section_hsps(
         if is_query(s_idx) {
             hsps.set_query_bioseq(s_idx);
         }
+        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:213-260
+        // The row of the subject whose Bioseq this one's loads give, where it is in the section.
+        let row = loads
+            .and_then(|loads| loads.anchored_row(s_idx as usize).flatten())
+            .and_then(|row| u32::try_from(row).ok())
+            .filter(|row| aligned.contains(row))
+            .unwrap_or(s_idx);
         for hit in &group.subject_hits[&s_idx] {
             let strands = segments_of(hit, &mut segments);
-            hsps.push_dense_seg(s_idx, segments.starts(), segments.lens(), 0, 0, strands);
+            hsps.push_dense_seg(row, segments.starts(), segments.lens(), 0, 0, strands);
         }
     }
     hsps
@@ -3685,7 +3698,10 @@ fn section_hsps(
 fn blastp_section_hsps(
     num_alignments: usize,
     group: &super::x_pairwise_par::QueryGroup<'_>,
-    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    parsed: (
+        &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        Option<&crate::report::db_subject::HitLoads>,
+    ),
     is_query: impl Fn(u32) -> bool,
 ) -> super::query_anchored::Hsps {
     section_hsps(
@@ -3713,7 +3729,10 @@ fn blastp_row_segments(
 pub(crate) fn blastn_section_hsps(
     num_alignments: usize,
     group: &super::x_pairwise_par::QueryGroup<'_>,
-    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    parsed: (
+        &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        Option<&crate::report::db_subject::HitLoads>,
+    ),
     is_query: impl Fn(u32) -> bool,
 ) -> super::query_anchored::Hsps {
     section_hsps(
@@ -3740,7 +3759,10 @@ pub(crate) fn blastn_section_hsps(
 fn blastx_section_hsps(
     num_alignments: usize,
     group: &super::x_pairwise_par::QueryGroup<'_>,
-    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    parsed: (
+        &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        Option<&crate::report::db_subject::HitLoads>,
+    ),
 ) -> super::query_anchored::Hsps {
     section_hsps(
         super::query_anchored::Hsps::of_translated_query(),
@@ -3891,7 +3913,7 @@ fn blastx_anchored_stop(
         && super::query_anchored::section_frees(&blastx_section_hsps(
             options.num_alignments,
             group,
-            &[],
+            (&[], None),
         ))?;
     Ok(frees.then_some(EmptyRowsStop::MergeFreesSegment))
 }
@@ -3915,7 +3937,7 @@ pub(crate) fn blastp_section_aborts(
         rows,
         subject_titles,
         &is_query,
-        |group| blastp_section_hsps(num_alignments, group, &[], &is_query),
+        |group| blastp_section_hsps(num_alignments, group, (&[], None), &is_query),
     )
 }
 
@@ -3941,9 +3963,12 @@ pub(crate) fn blastp_section_frees(
     else {
         return Ok(false);
     };
-    super::query_anchored::section_frees(&blastp_section_hsps(num_alignments, &group, &[], |_| {
-        false
-    }))
+    super::query_anchored::section_frees(&blastp_section_hsps(
+        num_alignments,
+        &group,
+        (&[], None),
+        |_| false,
+    ))
 }
 
 /// Whether NCBI BLAST+ aborts on the query-anchored section (`view`) of query `q_idx` of a
@@ -4228,7 +4253,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             blastp_section_hsps(
                 self.report.num_alignments,
                 group,
-                self.parsed_subjects,
+                (self.parsed_subjects, Some(self.loads)),
                 |s_idx| sequences.subject_is_query(q_idx, s_idx),
             )
         })
@@ -5436,7 +5461,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             blastn_section_hsps(
                 self.report.num_alignments,
                 group,
-                &self.report.parsed_subjects,
+                (&self.report.parsed_subjects, Some(self.loads)),
                 |s_idx| sequences.subject_is_query(q_idx, s_idx),
             )
         })
@@ -6042,7 +6067,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
                 super::query_anchored::Hsps::of_translated_nucleotides(),
                 self.report.num_alignments,
                 group,
-                &self.report.parsed_subjects,
+                (&self.report.parsed_subjects, Some(self.loads)),
                 |s_idx| sequences.subject_is_query(q_idx, s_idx),
                 |hit, segments| tblastx_row_segments(hit, query_length, segments),
             )
@@ -6519,7 +6544,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                 super::query_anchored::Hsps::of_translated_subjects(),
                 self.report.num_alignments,
                 group,
-                self.parsed_subjects,
+                (self.parsed_subjects, Some(self.loads)),
                 |_| false,
                 tblastn_row_segments,
             )
@@ -7040,7 +7065,14 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
     ) -> io::Result<()> {
         write_anchored_section(writer, self.config, self.anchored, q_idx, |_| {
-            blastx_section_hsps(self.options.num_alignments, group, self.database_parsed())
+            blastx_section_hsps(
+                self.options.num_alignments,
+                group,
+                (
+                    self.database_parsed(),
+                    self.database.is_some().then_some(self.loads),
+                ),
+            )
         })
     }
 

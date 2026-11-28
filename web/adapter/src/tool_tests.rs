@@ -793,6 +793,39 @@ fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
     assert!(emitted().is_empty());
 }
 
+/// Line WQA D35: reading a database (`-infmt blastdb`) looks the taxonomy files up along the search
+/// path, the run's directory first, so a `-logfile taxdb.bti` would be read as the taxonomy
+/// database: refused, as on the command line, and as dustmasker's `-out`, which it opens before the
+/// database; segmasker reads the database before `-out`, and `taxonomy4blast.sqlite3`, which only a
+/// taxonomy filter looks up, is no file of these runs.
+#[test]
+fn a_masking_tool_s_database_refuses_the_taxonomy_files_that_it_looks_for() {
+    emitted();
+    let nucl = fixture("db_search/taxfilter/tfn");
+    let prot = fixture("db_search/taxfilter/tfp");
+    for (tool, db) in [("dustmasker", nucl.as_str()), ("segmasker", prot.as_str())] {
+        let base = [tool, "-infmt", "blastdb", "-in", db];
+        let error = validate(&[&base[..], &["-logfile", "taxdb.bti"]].concat()).unwrap_err();
+        assert!(
+            error.contains("a -logfile file 'taxdb.bti'"),
+            "{tool}: {error}"
+        );
+        let out = validate(&[&base[..], &["-out", "taxdb.bti"]].concat());
+        if tool == "dustmasker" {
+            assert!(
+                out.as_ref()
+                    .is_err_and(|error| error.contains("an output file 'taxdb.bti'")),
+                "{tool}: {out:?}"
+            );
+        } else {
+            assert_eq!(out, Ok(()), "{tool}");
+        }
+        let sqlite = ["-logfile", "taxonomy4blast.sqlite3"];
+        assert_eq!(validate(&[&base[..], &sqlite].concat()), Ok(()), "{tool}");
+    }
+    assert!(emitted().is_empty());
+}
+
 /// Review of WW4c, F1: a run that opens its input before `-out` (segmasker, convert2blastmask,
 /// windowmasker's masking, blast_formatter's `-archive`) ends with NCBI's error of an input that it
 /// cannot open, before it reaches `-out`; the check takes the run's steps in its order, so it leaves

@@ -463,7 +463,12 @@ pub(crate) fn write_blastx_archive(
     // whose every HSP has length 0 where it rewrites one, which LOSAT does not write
     // (`empty_rows::refuse_mapped_without_scores`).
     if run.remaps_subjects() && !run.gapped {
-        super::empty_rows::refuse_mapped_without_scores(call.batch.batches, run.gapped, None)?;
+        super::empty_rows::refuse_mapped_without_scores(
+            call.batch.batches,
+            run.gapped,
+            None,
+            call.batch.options.app.name(),
+        )?;
     }
     with_batch(&call.batch, |batch| {
         let mut aligns = BlastxAligns {

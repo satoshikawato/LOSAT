@@ -179,6 +179,7 @@ fn the_sorthits_refusal_is_not_a_write_failure() {
                 sum_stats: false,
                 num_descriptions: 500,
                 num_alignments: 0,
+                app: "BLASTX",
             },
             None,
             &[],

@@ -426,12 +426,19 @@ impl AlignQueryIds {
 }
 
 /// The refusal of `-subject` where a reported HSP of length 0 lies at the first letter of the
-/// searched part of a subject with HSPs of letters (decision X2g-4, `mapper_wraps_empty_row`).
-pub(crate) const UNPORTED_SUBJECT_START: &str = "BLASTX -ungapped -window_size 0 with -subject: a one-hit ungapped alignment of length 0 at the first letter of the searched part of a subject with alignments of letters among the hits to report, which NCBI BLAST+'s Seq-loc mapper cuts into two alignments without scores (tabular rows of the query's Seq-align id with an E-value of 0.0 and a bit score of -1.0, or an exception, depending on the frame and the fields), which LOSAT does not support";
+/// searched part of a subject with HSPs of letters (decision X2g-4, `mapper_wraps_empty_row`), by
+/// the running application `app` (`Program::name`: BLASTX, or TBLASTX where it runs a BLASTX
+/// strategy).
+pub(crate) fn unported_subject_start(app: &str) -> String {
+    format!("{app} -ungapped -window_size 0 with -subject: a one-hit ungapped alignment of length 0 at the first letter of the searched part of a subject with alignments of letters among the hits to report, which NCBI BLAST+'s Seq-loc mapper cuts into two alignments without scores (tabular rows of the query's Seq-align id with an E-value of 0.0 and a bit score of -1.0, or an exception, depending on the frame and the fields), which LOSAT does not support")
+}
 
 /// The refusal of `-subject` where every reported HSP of a subject has length 0 and the mapper
-/// rewrites one (`mapper_wraps_empty_row`).
-pub(crate) const UNPORTED_SUBJECT_ALL_EMPTY: &str = "BLASTX -ungapped -window_size 0 with -subject: a subject among the hits to report whose every one-hit ungapped alignment has length 0, one at the first or second letter of its subject's searched part, of which NCBI BLAST+'s Seq-loc mapper, finding no sequence type in its rows, makes alignments without scores of nucleotides against the rest of the subject's letters (rows with an E-value of 0.0 and a bit score of -1.0, or, for two or more such alignments, more rows, an exception or an out-of-memory stop), which LOSAT does not support where the report reads the alignment";
+/// rewrites one (`mapper_wraps_empty_row`), by the running application `app`
+/// (`unported_subject_start`).
+pub(crate) fn unported_subject_all_empty(app: &str) -> String {
+    format!("{app} -ungapped -window_size 0 with -subject: a subject among the hits to report whose every one-hit ungapped alignment has length 0, one at the first or second letter of its subject's searched part, of which NCBI BLAST+'s Seq-loc mapper, finding no sequence type in its rows, makes alignments without scores of nucleotides against the rest of the subject's letters (rows with an E-value of 0.0 and a bit score of -1.0, or, for two or more such alignments, more rows, an exception or an out-of-memory stop), which LOSAT does not support where the report reads the alignment")
+}
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:422-427,499-503
 /// Whether every Std-seg of the Seq-align of the hit list `list` (one for each HSP with a Seq-align,
@@ -559,11 +566,13 @@ pub(crate) struct MappedTables<'a> {
 /// unless there is one such HSP and the report is a table (`tabular`, `MappedRows::of`), or where,
 /// among the shown HSPs of a subject with letters in its rows, the mapper rewrites the empty row
 /// of one of length 0 (X2g-4: at the first letter of the subject's searched range,
-/// `mapper_wraps_empty_row`). The first refusal in the order of the hit lists.
+/// `mapper_wraps_empty_row`). The first refusal in the order of the hit lists, named by the running
+/// application `app` (`Program::name`).
 pub(crate) fn refuse_mapped_without_scores(
     batches: &[super::runtime::BatchResults],
     gapped: bool,
     tabular: Option<MappedTables<'_>>,
+    app: &str,
 ) -> anyhow::Result<()> {
     for batch in batches {
         for (qidx, list) in batch
@@ -593,14 +602,14 @@ pub(crate) fn refuse_mapped_without_scores(
                         )
                         .is_some()
                     });
-                (!written).then_some(UNPORTED_SUBJECT_ALL_EMPTY)
+                (!written).then(|| unported_subject_all_empty(app))
             } else {
                 shown
                     .any(|hsp| rows_empty(hsp) && mapper_wraps_empty_row(hsp.hsp.s_start, true))
-                    .then_some(UNPORTED_SUBJECT_START)
+                    .then(|| unported_subject_start(app))
             };
             if let Some(refusal) = refusal {
-                return Err(EmptyRowsRefusal(refusal.to_string()).into());
+                return Err(EmptyRowsRefusal(refusal).into());
             }
         }
     }

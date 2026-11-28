@@ -369,7 +369,13 @@ fn a_refusal_of_another_programs_strategy_names_the_running_application() {
 /// does not reproduce (`BL2SEQ_LEGACY` with `-subject`, the engines' `check_search_environment`)
 /// are refused in each engine that another application reaches: TBLASTX's under blastn and blastx,
 /// BLASTN's and BLASTX's under tblastx. NCBI never writes these texts; LOSAT exits 1 with nothing
-/// on standard output.
+/// on standard output. Review 2 S2: the BLASTX engine's refusals of `-ungapped -window_size 0`'s
+/// alignments of length 0, which name the program at their start (`Error: BLASTX -ungapped ...`),
+/// name the running application too: tblastx running the strategies that NCBI's blastx exported
+/// for the rows `db.x2g.bx.f1144.subj.6` (`-subject`, an alignment at the subject's first letter),
+/// `db.x2g.bx.s1d.subj.6i` (every alignment of a subject of length 0; in the archive too) and
+/// `db.x2g.bx.of.p0127.nd0.1` (`-outfmt 1`, the query-anchored merge), with blastx's own runs of
+/// them as the control, which keep `BLASTX`.
 #[test]
 fn other_refusals_of_another_programs_strategy_name_the_running_application() {
     const BL2SEQ: &str = "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's";
@@ -438,6 +444,59 @@ fn other_refusals_of_another_programs_strategy_name_the_running_application() {
                 output.status.code(),
                 output.stdout.len()
             ));
+        }
+    }
+    let x2g: &[(&str, &[&str], &str)] = &[
+        (
+            "x2g.blastx_f1144",
+            &["-outfmt", "6"],
+            "-ungapped -window_size 0 with -subject: a one-hit ungapped alignment of length 0 at the first letter",
+        ),
+        (
+            "x2g.blastx_s1d",
+            &["-outfmt", "6 qseqid sseqid"],
+            "-ungapped -window_size 0 with -subject: a subject among the hits to report whose every one-hit ungapped alignment has length 0",
+        ),
+        (
+            "x2g.blastx_s1d",
+            &["-outfmt", "11"],
+            "-ungapped -window_size 0 with -subject: a subject among the hits to report whose every one-hit ungapped alignment has length 0",
+        ),
+        (
+            "x2g.blastx_p0127.db",
+            &["-outfmt", "1", "-num_descriptions", "0"],
+            "-ungapped -window_size 0 with -outfmt 1 to 4: a one-hit ungapped alignment of length 0",
+        ),
+    ];
+    for (strategy, more, words) in x2g {
+        for (program, other) in [("tblastx", "BLASTX"), ("blastx", "TBLASTX")] {
+            let mut args = vec![
+                "-import_search_strategy".to_string(),
+                format!("{{ss}}/{strategy}.ss"),
+            ];
+            args.extend(more.iter().map(|arg| arg.to_string()));
+            let case = Case {
+                name: format!("{program} running {strategy} {more:?}"),
+                program: program.to_string(),
+                args,
+                rc: 1,
+                out: "-".to_string(),
+                err: "-".to_string(),
+            };
+            let output = run(&case, None);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let app = program.to_ascii_uppercase();
+            let refusal = |name: &str| format!("Error: {name} {words}");
+            if output.status.code() != Some(case.rc)
+                || !stderr.lines().any(|line| line.starts_with(&refusal(&app)))
+                || stderr.contains(&refusal(other))
+            {
+                failed.push(format!(
+                    "{}: exit {:?}, stderr {stderr:?}",
+                    case.name,
+                    output.status.code()
+                ));
+            }
         }
     }
     assert!(failed.is_empty(), "{failed:#?}");

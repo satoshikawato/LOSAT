@@ -660,6 +660,7 @@ pub(super) fn render_queries_with(
             batches,
             options.gapped,
             tabular,
+            options.app.name(),
         ))? {
             return Ok(());
         }
@@ -1100,6 +1101,7 @@ fn write_pairwise(
             sum_stats: options.sum_stats,
             num_descriptions: options.num_descriptions as usize,
             num_alignments: options.num_alignments as usize,
+            app: options.app.name(),
         },
         database,
         records_parsed,
@@ -1504,6 +1506,7 @@ pub(crate) fn write_epilog(
                 sum_stats: options.sum_stats,
                 num_descriptions: options.num_descriptions as usize,
                 num_alignments: options.num_alignments as usize,
+                app: options.app.name(),
             },
             shown.pairwise_database(),
             options.html.is_some(),

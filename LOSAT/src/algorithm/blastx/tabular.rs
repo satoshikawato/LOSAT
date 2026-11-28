@@ -708,7 +708,9 @@ pub(super) fn write_blastx_tabular(
                             // does not map (`empty_rows::refuse_mapped_without_scores`).
                             let Some(MappedRows::Letters(mapped)) = &mapped else {
                                 return Err(EmptyRowsRefusal(
-                                    super::empty_rows::UNPORTED_SUBJECT_ALL_EMPTY.to_string(),
+                                    super::empty_rows::unported_subject_all_empty(
+                                        options.app.name(),
+                                    ),
                                 )
                                 .into());
                             };

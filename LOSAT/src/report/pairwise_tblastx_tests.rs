@@ -853,6 +853,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
         sum_stats: false,
         num_descriptions: 500,
         num_alignments: 0,
+        app: "BLASTX",
     };
     let posts: Vec<crate::report::diag_log::Posts> = [&b""[..], b"W1\n", b"W2\n"]
         .map(|lines| crate::report::diag_log::Posts::of_lines(lines.to_vec()))

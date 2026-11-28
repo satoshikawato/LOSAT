@@ -522,8 +522,9 @@ pub(crate) enum EmptyRowsStop {
     StdSegLengths,
     /// Not an exception: the merge of a query-anchored section (outfmt 1 to 4) frees a segment
     /// that it still reads (`blastx_anchored_stop`), which LOSAT refuses before the call's first
-    /// byte (`UNPORTED_ANCHORED_FREE`).
-    MergeFreesSegment,
+    /// byte (`unported_anchored_free`) in the name of the running application it holds
+    /// (`BlastxPairwiseOptions::app`).
+    MergeFreesSegment(&'static str),
 }
 
 /// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0 or at a
@@ -548,8 +549,8 @@ pub(crate) fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
             &super::serial::seqalign::std_seg_lengths_not_accurate(),
         )
         .into(),
-        Some(EmptyRowsStop::MergeFreesSegment) => {
-            EmptyRowsRefusal(UNPORTED_ANCHORED_FREE.to_string()).into()
+        Some(EmptyRowsStop::MergeFreesSegment(app)) => {
+            EmptyRowsRefusal(unported_anchored_free(app)).into()
         }
         None => crate::cli::NativeError::of_writer(error),
     }
@@ -582,8 +583,11 @@ impl std::error::Error for EmptyRowsRefusal {}
 /// `FillUnalignedRegions` starts to fill the row, which replaces the row's reference to its
 /// segment: the last one unless the segment is the last that the merge made (`x_Merge`'s local
 /// `CRef`), so the segment is freed while `m_Segments` still lists it and `x_CreateDenseg`
-/// reads it (`Mix::fill_unaligned_regions`). PD-LOSAT-NCBI-DEFECTS rule 3.
-pub(crate) const UNPORTED_ANCHORED_FREE: &str = "BLASTX -ungapped -window_size 0 with -outfmt 1 to 4: a one-hit ungapped alignment of length 0 among the alignments shown where NCBI BLAST+'s merge of the query-anchored alignments frees memory that it still reads (it crashed in our runs): one whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1, whose segment the merge splits at a length of 0, or one followed on its query row by unaligned letters, whose segment of length 0 the merge's FillUnalignedRegions replaces, unless it is the last segment the merge made, which LOSAT does not support";
+/// reads it (`Mix::fill_unaligned_regions`). PD-LOSAT-NCBI-DEFECTS rule 3. `app` is the running
+/// application (`Program::name`: BLASTX, or TBLASTX where it runs a BLASTX strategy).
+pub(crate) fn unported_anchored_free(app: &str) -> String {
+    format!("{app} -ungapped -window_size 0 with -outfmt 1 to 4: a one-hit ungapped alignment of length 0 among the alignments shown where NCBI BLAST+'s merge of the query-anchored alignments frees memory that it still reads (it crashed in our runs): one whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1, whose segment the merge splits at a length of 0, or one followed on its query row by unaligned letters, whose segment of length 0 the merge's FillUnalignedRegions replaces, unless it is the last segment the merge made, which LOSAT does not support")
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1522-1530
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3074-3094
@@ -3815,7 +3819,7 @@ fn blastx_mapped_empty_rows(remaps: bool, hits: &[&PairwiseHit]) -> bool {
 /// `FillUnalignedRegions` after a segment of length 0). `None` for a report without such an
 /// HSP among its aligned subjects. What NCBI writes before the crash is what its stream had flushed
 /// (no prefix of it is NCBI's, as for `query_anchored::ncbi_aborts`): the program refuses the
-/// report before the call's first byte (`UNPORTED_ANCHORED_FREE`), unless a query
+/// report before the call's first byte (`unported_anchored_free`), unless a query
 /// before it ends the run with an exception.
 fn blastx_anchored_stop(
     config: &PairwiseConfig,
@@ -3849,7 +3853,7 @@ fn blastx_anchored_stop(
             group,
             &[],
         ))?;
-    Ok(frees.then_some(EmptyRowsStop::MergeFreesSegment))
+    Ok(frees.then_some(EmptyRowsStop::MergeFreesSegment(options.app)))
 }
 
 /// Whether NCBI BLAST+ aborts on the query-anchored section (`view`) of query `q_idx` of a
@@ -6564,6 +6568,9 @@ pub struct BlastxPairwiseOptions {
     pub sum_stats: bool,
     pub num_descriptions: usize,
     pub num_alignments: usize,
+    /// The running application's name in LOSAT's refusals (`Program::name`: BLASTX, or TBLASTX
+    /// where it runs a BLASTX strategy; `EmptyRowsStop::MergeFreesSegment`).
+    pub app: &'static str,
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1490-1519
 /// The subjects of a BLASTX `-db` report (`write_blastx_pairwise_report`): the database, and by
@@ -6645,8 +6652,8 @@ pub fn write_blastx_pairwise_report<W: crate::report::ostream::ReportWrite>(
                 continue;
             };
             match blastx_anchored_stop(config, options, &group, database.is_none())? {
-                Some(EmptyRowsStop::MergeFreesSegment) => {
-                    return Err(io::Error::other(EmptyRowsStop::MergeFreesSegment))
+                Some(stop @ EmptyRowsStop::MergeFreesSegment(_)) => {
+                    return Err(io::Error::other(stop))
                 }
                 Some(_) => break,
                 None => {}

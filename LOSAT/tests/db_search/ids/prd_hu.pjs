@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "prd_hu",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_hu (no parsed Seq-ids)",
+  "number-of-letters": 420,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-28T15:30:00",
+  "number-of-volumes": 1,
+  "bytes-total": 37754,
+  "bytes-to-cache": 560,
+  "files": [
+    "prd_hu.pdb",
+    "prd_hu.phr",
+    "prd_hu.pin",
+    "prd_hu.pot",
+    "prd_hu.psq",
+    "prd_hu.ptf",
+    "prd_hu.pto"
+  ]
+}

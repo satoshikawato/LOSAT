@@ -217,6 +217,16 @@ taxid 9606, read in place of the b databases through `pjoin_abt.pal` and `njoin_
 `pjoin_x.*` and `njoin_x.*` from the FASTA of the same names (the definition lines of r1 and r3 with other letters),
 read after `pjoin_a` and `njoin_a` through `pjoin_ax.pal` and `njoin_ax.nal`; `njoin_ta.*` and `njoin_tb.*` from
 `njoin_t.fna` with taxid 9606, through `njoin_tab.nal`. `--join-only` builds only these.
+
+psiblast's PSSM reads that another sequence answers, across the run's queries (line DBID hr-3, review 1), version 5,
+from the FASTA of the same names: through `prd_hzhy.pal`, `prd_hz` (Z `gi|8199|ref|XP_819999.1|`), `prd_hh` (H with
+the lines `gi|8101|ref|XP_810001.1|`, `ref|NP_100001.1|` and `gi|8199|ref|XP_819999.1|`), `prd_hy` (Y with
+`gi|8201|ref|XP_820001.1|` and `gi|8199|ref|XP_819999.1|`), `prd_hs` (S `ref|NP_100001.1|`, B `ref|NP_100000.1|`) and
+`prd_hu` (without parsed Seq-ids, so that the lookups of the list fail), for `prd_hq4.faa` (queries of H, Y, S, Z: the
+loader's registry gives H for S's id, whose new blob registers `gi|8199` again, so Z's read gets H: H1); through
+`prd_mst.pal`, `prd_mo` (O `ref|NP_200001.1|`), `prd_ms` (S `ref|NP_200001.1|` with `ref|NP_300001.1|` on a second
+line) and `prd_mt` (T `ref|NP_300001.1|`), for `prd_mq12.faa` (queries of T, S: T's read loads S's blob by T's id, so
+S's read gets S by the registry, not the lookup's O: M3). `--heldread-only` builds only these.
 """
 import argparse
 import subprocess
@@ -485,6 +495,20 @@ def build_join(args: argparse.Namespace) -> None:
             f"DBLIST {names}\n")
 
 
+def build_heldread(args: argparse.Namespace) -> None:
+    """Line DBID hr-3 (review 1, H1 and M3): psiblast's PSSM read that another sequence answers, and the run's record."""
+    for name, parsed in (("prd_hz", True), ("prd_hh", True), ("prd_hy", True), ("prd_hs", True), ("prd_hu", False),
+                         ("prd_mo", True), ("prd_ms", True), ("prd_mt", True)):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.faa"), "-dbtype", "prot"]
+            + (["-parse_seqids"] if parsed else []) + ["-blastdb_version", "5",
+             "-title", f"{name} ({'parsed' if parsed else 'no parsed'} Seq-ids)", "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+    for alias, names in (("prd_hzhy", "prd_hz prd_hh prd_hy prd_hs prd_hu"), ("prd_mst", "prd_mo prd_ms prd_mt")):
+        (args.out / f"{alias}.pal").write_text(
+            f"#\n# Alias file of line DBID, hr-3\n#\nTITLE {alias} (parsed Seq-ids)\nDBLIST {names}\n")
+
+
 def build_lru(args: argparse.Namespace) -> None:
     """Line DBID hr-1 f1 (review 1, M1): CBlastDbDataLoader::m_Ids 1,000-handle LRU eviction."""
     for name in ("lru12x100", "lru9x100", "lru12x1"):
@@ -514,6 +538,7 @@ def main() -> int:
     ap.add_argument("--taxrow-only", action="store_true", help="build only the databases of line DBID taxrow")
     ap.add_argument("--pircase-only", action="store_true", help="build only the databases of line DBID pircase")
     ap.add_argument("--lru-only", action="store_true", help="build only the databases of line DBID hr-1 f1 (m_Ids LRU)")
+    ap.add_argument("--heldread-only", action="store_true", help="build only the databases of line DBID hr-3")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -559,6 +584,9 @@ def main() -> int:
         return 0
     if args.lru_only:
         build_lru(args)
+        return 0
+    if args.heldread_only:
+        build_heldread(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants

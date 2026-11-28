@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "prd_hz",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_hz (parsed Seq-ids)",
+  "number-of-letters": 150,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-28T15:30:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49647,
+  "bytes-to-cache": 264,
+  "files": [
+    "prd_hz.pdb",
+    "prd_hz.phr",
+    "prd_hz.pin",
+    "prd_hz.pnd",
+    "prd_hz.pni",
+    "prd_hz.pog",
+    "prd_hz.pos",
+    "prd_hz.pot",
+    "prd_hz.psq",
+    "prd_hz.ptf",
+    "prd_hz.pto"
+  ]
+}

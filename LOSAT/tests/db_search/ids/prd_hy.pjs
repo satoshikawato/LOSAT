@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "prd_hy",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_hy (parsed Seq-ids)",
+  "number-of-letters": 150,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-28T15:30:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49745,
+  "bytes-to-cache": 264,
+  "files": [
+    "prd_hy.pdb",
+    "prd_hy.phr",
+    "prd_hy.pin",
+    "prd_hy.pnd",
+    "prd_hy.pni",
+    "prd_hy.pog",
+    "prd_hy.pos",
+    "prd_hy.pot",
+    "prd_hy.psq",
+    "prd_hy.ptf",
+    "prd_hy.pto"
+  ]
+}

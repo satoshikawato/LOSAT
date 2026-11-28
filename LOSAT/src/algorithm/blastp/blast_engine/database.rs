@@ -2400,13 +2400,16 @@ impl ListedTitles<'_> {
         database: &BlastpDatabase,
         batch: usize,
         ranks: impl FnOnce() -> I,
+        held: &[&crate::report::db_subject::HeldLoad],
     ) {
         if self.parsed.is_empty() {
             return;
         }
-        database.taxdb.note_loaded(batch, || {
-            ranks().into_iter().map(|rank| self.prefetch_subject(rank))
-        });
+        database.taxdb.note_loaded_with(
+            batch,
+            || ranks().into_iter().map(|rank| self.prefetch_subject(rank)),
+            held,
+        );
     }
 
     /// The subjects of ranks `ranks` of psiblast's traceback hit lists as NCBI's prefetch reads
@@ -2766,6 +2769,23 @@ impl ListedTitles<'_> {
                         self.program,
                     )
                 };
+                // A holder whose letters end before every included Seq-align's range, for a
+                // subject whose lookup fails: each read throws and warns, whichever of the two
+                // NCBI reads, as LOSAT's (the static read gives no letters), whatever the
+                // holder's load writes (review 1 of line DBID hr-3, M2: before the refusal of
+                // that load's texts, as before line DBID hr-3).
+                if let Some(holder) = shown.holder.filter(|_| subject.lookup_throws().is_some()) {
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+                    // Clamp non-positive signed 32-bit `GetSeqLengthProt` lengths to 0
+                    // (`pssm_letters`: then every range read throws and warns).
+                    let letters = database
+                        .db
+                        .protein_length_i32(holder.ordinal())
+                        .map_err(|error| shared::database_error(error, self.program))?;
+                    if usize::try_from(letters.max(0)).unwrap_or(usize::MAX) < reach {
+                        continue;
+                    }
+                }
                 // The other sequence's load where the query's scope has not loaded it.
                 if let Some(holder) = shown.holder {
                     let load = (database, prefetch, *query);
@@ -2785,23 +2805,6 @@ impl ListedTitles<'_> {
                         );
                     }
                     _ => {
-                        // A holder whose letters end before every included Seq-align's range,
-                        // for a subject whose lookup fails: each read throws and warns, as
-                        // LOSAT's.
-                        if let Some(holder) =
-                            shown.holder.filter(|_| subject.lookup_throws().is_some())
-                        {
-                            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
-                            // Clamp non-positive signed 32-bit `GetSeqLengthProt` lengths to 0
-                            // (`pssm_letters`: then every range read throws and warns).
-                            let letters = database
-                                .db
-                                .protein_length_i32(holder.ordinal())
-                                .map_err(|error| shared::database_error(error, self.program))?;
-                            if usize::try_from(letters.max(0)).unwrap_or(usize::MAX) < reach {
-                                continue;
-                            }
-                        }
                         refusal.get_or_insert_with(|| refused(&subject.pssm_held_reason(shown)));
                     }
                 }

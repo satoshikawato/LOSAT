@@ -335,16 +335,22 @@ impl<'a> PssmAlignment<'a> {
 /// from the hit lists: psiblast makes a round's PSSMs after the round's reports, where NCBI reads
 /// the subjects' letters for them (`ComputePssmForNextIteration`, cited at
 /// `blast_engine::report_prep::report_values`), from the Seq-aligns before the formatter's cut,
-/// which the reports' hit lists no longer hold by then. One flat list of the operations; the
-/// call drops it once its PSSMs are made.
+/// which the reports' hit lists no longer hold by then. Only what `input_msa` reads is kept: each
+/// included Seq-align, and of the others the last one before an included one, by its subject alone
+/// (whether the included one opens a row of the multiple alignment); one flat list of the
+/// operations, of exact size (review 1 of line DBID hr-3, M1). The call drops it once its PSSMs
+/// are made.
 #[derive(Default)]
 pub(crate) struct PssmSeqAligns {
     kept: Vec<KeptAlignment>,
     ops: Vec<GapEditOp>,
+    /// Whether the query has a Seq-align (a query without one makes no PSSM).
+    any: bool,
 }
 
 /// A [`PssmAlignment`] of [`PssmSeqAligns`]: its operations are `ops[start..end]` of the list
-/// (`None` for an ungapped one).
+/// (`None` for an ungapped one, and for one that is not included, of which only the subject and
+/// the E-value are kept).
 struct KeptAlignment {
     subject: u32,
     e_value: f64,
@@ -355,10 +361,48 @@ struct KeptAlignment {
 }
 
 impl PssmSeqAligns {
-    /// The Seq-aligns `alignments`, in their order.
-    pub(crate) fn of<'a>(alignments: impl IntoIterator<Item = PssmAlignment<'a>>) -> Self {
-        let mut aligns = Self::default();
+    /// The Seq-aligns `alignments`, in their order, of which the PSSM includes those whose
+    /// E-value is below `inclusion_ethresh` (`input_msa`'s rule).
+    pub(crate) fn of<'a, I>(alignments: I, inclusion_ethresh: f64) -> Self
+    where
+        I: IntoIterator<Item = PssmAlignment<'a>>,
+        I::IntoIter: Clone,
+    {
+        let alignments = alignments.into_iter();
+        let included = |alignment: &PssmAlignment<'_>| {
+            seqalign_pssm_evalue(alignment.e_value) < inclusion_ethresh
+        };
+        // The sizes first, so that each list is allocated once, exactly.
+        let (mut kept, mut ops, mut before, mut any) = (0usize, 0usize, false, false);
+        for alignment in alignments.clone() {
+            any = true;
+            if included(&alignment) {
+                kept += 1 + usize::from(before);
+                ops += alignment.ops.map_or(0, <[GapEditOp]>::len);
+                before = false;
+            } else {
+                before = true;
+            }
+        }
+        let mut aligns = Self {
+            kept: Vec::with_capacity(kept),
+            ops: Vec::with_capacity(ops),
+            any,
+        };
+        let mut before = None;
         for alignment in alignments {
+            if !included(&alignment) {
+                before = Some(KeptAlignment {
+                    subject: alignment.subject,
+                    e_value: alignment.e_value,
+                    q_start: 0,
+                    s_start: 0,
+                    q_length: 0,
+                    ops: None,
+                });
+                continue;
+            }
+            aligns.kept.extend(before.take());
             let ops = alignment.ops.map(|ops| {
                 let start = aligns.ops.len() as u32;
                 aligns.ops.extend_from_slice(ops);
@@ -395,7 +439,7 @@ impl PssmSeqAligns {
 
     /// Whether there is no Seq-align (a query without alignments makes no PSSM).
     pub(crate) fn is_empty(&self) -> bool {
-        self.kept.is_empty()
+        !self.any
     }
 }
 

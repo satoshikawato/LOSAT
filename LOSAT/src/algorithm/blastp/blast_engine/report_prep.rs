@@ -916,8 +916,16 @@ pub(super) fn prefetch_reported_subjects(
         // PSSM's reads, loaded (`loaded`), for the stop of a later round's or query's prefetch
         // (`shared::TaxdbRun::note_loaded`, on the database that the rounds share). The call
         // reaches here where its prefetch did not stop.
+        // The loads that NCBI's places answered with another sequence than the lookup's (a PSSM
+        // read that a holder answers loads the holder's blob, whose lines register again: review
+        // 1 of line DBID hr-3, H1) are the walk's (`HitLoads::held_loads`).
         if reports.psi_round.is_some() {
-            titles.note_loaded(database, ranges.x_ordinal_base, || loaded(hit_lists.len()));
+            titles.note_loaded(
+                database,
+                ranges.x_ordinal_base,
+                || loaded(hit_lists.len()),
+                &hit_loads.held_loads(0..hit_lists.len()),
+            );
         }
     }
     // NCBI's posts of the titles that the batches' Seq-aligns read come before their prefetches'

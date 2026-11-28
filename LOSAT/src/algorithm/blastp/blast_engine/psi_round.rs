@@ -1006,8 +1006,12 @@ pub(super) fn round_outcome(
         HandleIndex::new(&set)?;
     }
     let q_shift = ranges.query_input.placements.offset(0);
-    let next = makes_next
-        .then(|| PssmSeqAligns::of(hsps.iter().map(|hsp| PssmAlignment::of_hsp(hsp, q_shift))));
+    let next = makes_next.then(|| {
+        PssmSeqAligns::of(
+            hsps.iter().map(|hsp| PssmAlignment::of_hsp(hsp, q_shift)),
+            args.inclusion_ethresh,
+        )
+    });
     // The blocks of a PSSM round's search, which NCBI writes back into the PSSM it searched
     // (`in_pssm_files::InPssmRounds::written_back`).
     let searched = args.psi_search.as_deref().map(|psi| {

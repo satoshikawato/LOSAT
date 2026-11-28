@@ -4068,3 +4068,148 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
     assert!(nucl_source_throwing.description_may_throw());
     assert_long_id(&nucl_source_throwing, false, "BLASTN");
 }
+
+#[test]
+fn a_held_read_registers_its_holder_again_for_the_later_calls_of_the_run() {
+    // Review 1 of line DBID hr-3, H1 (probe family `xy`): H holds S's Seq-align id and Z's, Y holds
+    // Z's; H, then Y are loaded by calls of their own, so the loader's `m_Ids` gives Y for Z's id.
+    // A later call's read of S (whose lookup fails) gives H by `m_Ids`: H's new blob (by S's
+    // handle) registers H's lines again, so a read of Z in the call after gives H, not Y.
+    let failure = || {
+        Some(FoundInstead::Failed(LookupFailure::ncbi(
+            crate::seqdb::tax_files::NO_ACCESSION_INFO,
+        )))
+    };
+    let h = lines(vec![
+        vec![gb("HHH00001", 1)],
+        vec![gb("SSS00001", 1)],
+        vec![gb("ZZZ00001", 1)],
+    ])
+    .in_database(DbSequence::of_unrestricted(0));
+    let y = lines(vec![vec![gb("YYY00001", 1)], vec![gb("ZZZ00001", 1)]])
+        .in_database(DbSequence::of_unrestricted(1));
+    let s = sequence(vec![gb("SSS00001", 1)], 2).found_instead(failure());
+    let z = sequence(vec![gb("ZZZ00001", 1)], 3);
+    for kept in [true, false] {
+        let mut record = ScopeRecord::default();
+        record.set_keeps_scope(Some(false));
+        let shared: SharedRecord = std::sync::Arc::new(std::sync::RwLock::new(record));
+        let note = |batch: usize, subjects: &[&ParsedSubject], held: &[&HeldLoad]| {
+            shared
+                .write()
+                .unwrap()
+                .note_with(Some(batch), subjects.iter().copied(), held)
+        };
+        note(0, &[&h], &[]);
+        note(1, &[&y], &[]);
+        let mut walk = ScopeWalk::new(LoadsBefore::new(&shared, Some(2), false), Some(false));
+        walk.enter(Some(2));
+        assert_eq!(walk.read(&s), shown(Some(0), ShownBy::Holder));
+        let held = walk.take_held();
+        assert_eq!(held.len(), 1);
+        assert!(held[0].blob.is_some());
+        note(
+            2,
+            &[&s],
+            &if kept {
+                held.iter().collect()
+            } else {
+                Vec::new()
+            },
+        );
+        let mut walk = ScopeWalk::new(LoadsBefore::new(&shared, Some(3), false), Some(false));
+        walk.enter(Some(3));
+        let want = if kept { 0 } else { 1 };
+        assert_eq!(
+            walk.read(&z),
+            shown(Some(want), ShownBy::Holder),
+            "kept {kept}"
+        );
+    }
+}
+
+#[test]
+fn a_read_that_the_places_give_the_subject_itself_takes_its_letters_where_the_lookup_does_not() {
+    // Review 1 of line DBID hr-3, M3: T's Seq-align id is on S's second line, and T's lookup gives
+    // S; S's own lookup gives another record O. T's load registers S's lines, so a later read of
+    // S's id in another call gets S by `m_Ids`, not the lookup's O: its letters are S's.
+    let o_keys = lines(vec![vec![gb("OOO00001", 1)], vec![gb("SSS00001", 1)]])
+        .in_database(DbSequence::of_unrestricted(9));
+    let s_lines = vec![vec![gb("SSS00001", 1)], vec![gb("TTT00001", 1)]];
+    let s = lines(s_lines.clone())
+        .in_database(DbSequence::of_unrestricted(2))
+        .found_instead(Some(FoundInstead::Sequence(DbSequence::of_unrestricted(9))))
+        .lookup_gives(Some(DbSequence::of_unrestricted(9)));
+    assert!(o_keys.lookup_gives_other_than(DbSequence::of_unrestricted(2)));
+    assert!(s.lookup_gives_other_than(DbSequence::of_unrestricted(2)));
+    assert!(!s.lookup_gives_other_than(DbSequence::of_unrestricted(9)));
+    // A subject whose lookup gives itself: its own record is the lookup's.
+    let own = sequence(vec![gb("UUU00001", 1)], 4);
+    assert!(!own.lookup_gives_other_than(DbSequence::of_unrestricted(4)));
+    // S's own blob in the run's record (as T's load by its id would load it): `m_Ids` gives S for
+    // S's id, the subject's own record, which the lookup does not give.
+    let s_as_loaded = lines(s_lines).in_database(DbSequence::of_unrestricted(2));
+    let before = recorded(Some(0), &[&s_as_loaded], Some(1), false);
+    let mut walk = ScopeWalk::new(before, Some(false));
+    walk.enter(Some(1));
+    assert_eq!(walk.read(&s), shown(Some(2), ShownBy::Holder));
+    let held = walk.take_held();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].sequence, DbSequence::of_unrestricted(2));
+    // A report's load of the same (`ScopeWalk::load`) writes the subject itself.
+    let before = recorded(Some(0), &[&s_as_loaded], Some(1), false);
+    let mut walk = ScopeWalk::new(before, Some(false));
+    walk.enter(Some(1));
+    assert_eq!(walk.load(&s), HitLoad::Loaded);
+}
+
+#[test]
+fn a_later_round_whose_ids_the_scope_resolved_leaves_the_loaders_registrants_alone() {
+    // Review 1 of line DBID hr-3, M3 with the prefetch on (probe family `m3`, `q12.it2.6n.ne`): O
+    // holds S's Seq-align id; S's second line holds T's id (T's lookup gives S, S's gives O). The
+    // first round of query 1 prefetches T and O: which of their blobs registers S's id last,
+    // LOSAT's record does not order. Its second round finds T's, S's and O's ids in the scope of
+    // the query, so the loader's `m_Ids` keeps what it held: query 2's read of S is not the
+    // lookup's O (NCBI gives S's letters), but a load whose order LOSAT does not know.
+    let seq = DbSequence::of_unrestricted;
+    let o = lines(vec![vec![gb("OOO00001", 1)]]).in_database(seq(0));
+    let s_lines = lines(vec![vec![gb("OOO00001", 1)], vec![gb("TTT00001", 1)]]);
+    let s_keys = s_lines.shown_keys(&s_lines.set, seq(1));
+    let o_keys = s_lines.shown_keys(&o.set, seq(0));
+    let s = s_lines
+        .clone()
+        .in_database(seq(1))
+        .resolved(ScopeResolution {
+            found: Some(FoundInstead::Sequence(seq(0))),
+            gives: Some(seq(0)),
+            gives_keys: Some(o_keys),
+            ..Default::default()
+        });
+    let t = lines(vec![vec![gb("TTT00001", 1)]])
+        .in_database(seq(2))
+        .resolved(ScopeResolution {
+            found: Some(FoundInstead::Sequence(seq(1))),
+            gives: Some(seq(1)),
+            gives_keys: Some(s_keys),
+            ..Default::default()
+        });
+    let mut record = ScopeRecord::default();
+    record.set_keeps_scope(Some(false));
+    let shared: SharedRecord = std::sync::Arc::new(std::sync::RwLock::new(record));
+    shared.write().unwrap().note_with(Some(0), [&t, &o], &[]);
+    shared
+        .write()
+        .unwrap()
+        .note_with(Some(0), [&t, &s, &o], &[]);
+    let mut walk = ScopeWalk::new(LoadsBefore::new(&shared, Some(1), false), Some(false));
+    walk.enter(Some(1));
+    assert_eq!(walk.read(&s), shown(None, ShownBy::Order));
+    // A query whose own batch noted S alone: the lookup's O, as NCBI gives it.
+    let mut record = ScopeRecord::default();
+    record.set_keeps_scope(Some(false));
+    let shared: SharedRecord = std::sync::Arc::new(std::sync::RwLock::new(record));
+    shared.write().unwrap().note_with(Some(0), [&s], &[]);
+    let mut walk = ScopeWalk::new(LoadsBefore::new(&shared, Some(1), false), Some(false));
+    walk.enter(Some(1));
+    assert_eq!(walk.read(&s), HitLoad::Loaded);
+}

@@ -3099,6 +3099,7 @@ fn psiblast_pssm_aligns(
                     .iter()
                     .flat_map(|hsp_list| &hsp_list.hsps)
                     .map(|hsp| PssmAlignment::of_hsp(hsp, q_shift)),
+                args.inclusion_ethresh,
             ))
         })
         .collect())

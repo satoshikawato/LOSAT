@@ -6854,28 +6854,44 @@ impl TaxdbRun {
     where
         I: IntoIterator<Item = PrefetchSubject<'s>>,
     {
-        self.keep_loaded(Some(batch), subjects());
+        self.keep_loaded(Some(batch), subjects(), &[]);
+    }
+
+    /// [`TaxdbRun::note_loaded`] with the loads of the batch that NCBI's places answered before
+    /// the lookup with another sequence than its (`held`, the walk's
+    /// `report::db_subject::HitLoads::held_loads`), which the record takes instead of those
+    /// subjects' own (`ScopeRecord::note_with`; review 1 of line DBID hr-3, H1).
+    pub(crate) fn note_loaded_with<'s, I>(
+        &self,
+        batch: usize,
+        subjects: impl FnOnce() -> I,
+        held: &[&crate::report::db_subject::HeldLoad],
+    ) where
+        I: IntoIterator<Item = PrefetchSubject<'s>>,
+    {
+        self.keep_loaded(Some(batch), subjects(), held);
     }
 
     /// The record of [`TaxdbRun::note_loaded`], also at a stop ([`batch_prefetch`]): the subjects
     /// that the call's batches before loaded (`batch` `None`: the loader's alone; the run ends at
-    /// the stop).
+    /// the stop), with the loads `held` ([`TaxdbRun::note_loaded_with`]).
     fn keep_loaded<'s>(
         &self,
         batch: Option<usize>,
         subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
+        held: &[&crate::report::db_subject::HeldLoad],
     ) {
         let parsed: Vec<&crate::report::db_subject::ParsedSubject> = subjects
             .into_iter()
             .filter_map(|subject| subject.parsed)
             .collect();
-        if parsed.is_empty() {
+        if parsed.is_empty() && held.is_empty() {
             return;
         }
         self.loaded
             .write()
             .expect("the run's record")
-            .note(batch, parsed);
+            .note_with(batch, parsed, held);
     }
 
     /// Records that calls of the run before this one loaded sequences that no record here holds
@@ -9286,7 +9302,7 @@ pub(crate) fn batch_prefetch<'s, 'b>(
 ) -> Result<crate::report::diag_log::Posts> {
     let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
     if stops(&subjects) {
-        run.keep_loaded(None, before);
+        run.keep_loaded(None, before, &[]);
         return Err(prefetch_stop(db, run, &subjects, program, queries));
     }
     // NCBI's map of the batch counts every Seq-align id of it, those that a query resolves and
@@ -11018,16 +11034,22 @@ fn prefetch_gets_no_bioseq(
     program: &str,
 ) -> Result<std::result::Result<bool, String>> {
     use crate::report::db_subject::{HitLoad, ShownBy};
+    let read = || scope_bioseq(db, ordinal, subject, program);
     if let Some(HitLoad::Shown(shown)) = load {
+        // Every place before the lookup that gives a sequence gives a blob loaded by a line that
+        // holds the id, whose Bioseq holds it: a handle. Where LOSAT does not know which place
+        // answers (whether `m_Ids` still holds a handle, an order), a lookup that gives a Bioseq
+        // too makes it a handle either way (review 1 of line DBID hr-3, L1).
         return Ok(match (shown.holder, shown.by) {
             (Some(_), ShownBy::Holder | ShownBy::Weak) => Ok(false),
+            _ if read()?.letters().is_some() => Ok(false),
             _ => Err(format!(
                 "{}: NCBI BLAST+ 2.17.0's prefetch of a minus-strand alignment then writes Error pre-fetching sequence data or not, as its reads decide",
                 subject.shown_reason(shown)
             )),
         });
     }
-    let read = scope_bioseq(db, ordinal, subject, program)?;
+    let read = read()?;
     if let Some(other) = read.blob.filter(|_| read.throws) {
         return Ok(Err(format!(
             "has the Seq-align id {}, by which NCBI BLAST+'s lookup gives database sequence {}, whose definition lines do not hold that id: NCBI BLAST+ 2.17.0's prefetch stops there (oid headers do not contain target gi/seq_id)",

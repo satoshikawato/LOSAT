@@ -1448,3 +1448,82 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
         None
     );
 }
+
+// Review 1 of line DBID hr-3, M1: the PSSM keeps of a query's Seq-aligns what `input_msa` reads,
+// each included one and of the others the last before an included one, by its subject (whether
+// the included one opens a row); the multiple alignment is the one of all of them.
+#[test]
+fn the_kept_seq_aligns_make_the_msa_of_all_of_them() {
+    let query = [1, 2, 3, 4, 5, 6];
+    let subject = |s_idx: u32| Ok(Some(vec![10 + s_idx as u8; 8]));
+    let gapped = [GapEditOp::Sub(1), GapEditOp::Del(1), GapEditOp::Sub(1)];
+    let sets: [Vec<PssmAlignment<'_>>; 3] = [
+        vec![
+            alignment(0, 1e-10, 0, 0, 3, Some(&gapped)),
+            alignment(1, 1.0, 0, 0, 3, Some(&gapped)),
+            alignment(1, 1e-10, 3, 0, 3, None),
+            alignment(2, 1.0, 0, 0, 3, None),
+            alignment(3, 1.0, 0, 0, 3, Some(&gapped)),
+            alignment(3, 1e-9, 2, 1, 3, Some(&gapped)),
+            alignment(4, 1.0, 0, 0, 3, None),
+            alignment(5, 1.0, 0, 0, 3, Some(&gapped)),
+        ],
+        // The row of the excluded subject's second Seq-align is its included first's.
+        vec![
+            alignment(0, 1e-10, 0, 0, 3, None),
+            alignment(2, 1.0, 0, 0, 3, None),
+            alignment(0, 1e-10, 1, 0, 3, Some(&gapped)),
+        ],
+        // None included: no row but the query's, and still a PSSM.
+        vec![alignment(0, 1.0, 0, 0, 3, None)],
+    ];
+    for alignments in &sets {
+        let kept = PssmSeqAligns::of(
+            alignments.iter().map(|a| {
+                alignment(
+                    a.subject, a.e_value, a.q_start, a.s_start, a.q_length, a.ops,
+                )
+            }),
+            0.002,
+        );
+        assert!(!kept.is_empty());
+        let msa = |alignments: &[PssmAlignment<'_>]| {
+            input_msa(
+                &query,
+                alignments,
+                &subject,
+                &SetKey::Index,
+                0.002,
+                &mut Vec::new(),
+            )
+            .map(|msa| {
+                msa.rows
+                    .iter()
+                    .map(|row| row_letters(row.as_slice()))
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|error| error.to_string())
+        };
+        assert_eq!(msa(&kept.alignments()), msa(alignments));
+    }
+    // Of the first set: 0; 1 (excluded, before 1's included one), 1; 3 (excluded, the last of 2 and
+    // 3 before 3's included one), 3; nothing of 4 and 5 after the last included one.
+    let kept = PssmSeqAligns::of(
+        sets[0].iter().map(|a| {
+            alignment(
+                a.subject, a.e_value, a.q_start, a.s_start, a.q_length, a.ops,
+            )
+        }),
+        0.002,
+    );
+    assert_eq!(
+        kept.alignments()
+            .iter()
+            .map(|a| a.subject)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 1, 3, 3]
+    );
+    assert_eq!(kept.ops.len(), 6);
+    assert_eq!(kept.ops.capacity(), 6);
+    assert!(PssmSeqAligns::of(std::iter::empty(), 0.002).is_empty());
+}

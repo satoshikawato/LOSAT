@@ -1320,9 +1320,11 @@ query's sequences for its later rounds and queries: a read of a sequence loaded 
 or not (after 40 other included subjects it does, after none it does not), which writes nothing where
 the slot holds that taxid either way. Where NCBI's scope and data loader give another sequence for
 the id when the PSSM reads it after the round's report (a sequence loaded before that holds the id,
-also by an earlier query or round of the run, or one that the scope matches weakly), the read takes
-that sequence's letters, or NCBI's warning and the query's letters where they end before the range
-does (line DBID hr-3, 2026-11-27); refused there: such a read where LOSAT does not know which sequence
+also by an earlier query or round of the run, or one that the scope matches weakly; or the subject's
+own sequence, loaded before by another id, where the lookup of its id gives another sequence), the
+read takes that sequence's letters, or NCBI's warning and the query's letters where they end before
+the range does (line DBID hr-3, 2026-11-27), and its load of that sequence registers its ids for the
+rest of the run (review 1 of hr-3, 2026-11-28); refused there: such a read where LOSAT does not know which sequence
 NCBI gives (an order of its loads that their Seq-ids do not decide, a handle at the limit of the
 loader's 1,000), or where that sequence's load can write texts of a damaged taxonomy database or the
 warning of a UTF8String header. Refused: an id that

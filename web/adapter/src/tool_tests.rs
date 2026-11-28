@@ -1877,11 +1877,18 @@ fn a_makeblastdb_argv_is_checked_as_the_command_line_checks_it() {
 /// opening of `-logfile`, which it resolves as the run's opening does without opening it: a log
 /// that does not open (in a folder that the run's directory does not have, also before `..`;
 /// through a file; ending in `/`; a folder; `.`) is NCBI's `File is not accessible`, after the
-/// checks of the database's name (a name with a space comes first), with the run's standard error
-/// and no file made. Before WW4f the check passed them all and the run failed.
+/// checks of the database's name (a name with a space comes first), with what the run writes for
+/// it: its standard error, then the file of the diagnostics, which only a name ending in `/` makes
+/// (NCBI's diagnostics open it without the `/`, in the run's directory: the native rows
+/// `makeblastdb.logfile.c_trailing_slash`), and which the check keeps in memory. Before WW4f the
+/// check passed them all and the run failed.
 #[test]
 fn a_makeblastdb_check_ends_where_the_run_opens_its_log() {
     emitted();
+    // The file of the diagnostics of `-logfile ww4f-mk.log/`: the adapter's makeblastdb writes the
+    // files of its working directory (this test's) through the file system.
+    let made = std::path::Path::new("ww4f-mk.log");
+    let _ = std::fs::remove_file(made);
     let folder = folder("makeblastdb-ww4f");
     let db = folder.join("db");
     let db = db.to_str().unwrap();
@@ -1908,7 +1915,10 @@ fn a_makeblastdb_check_ends_where_the_run_opens_its_log() {
             log,
         ];
         let error = validate(&words).unwrap_err();
-        assert!(taken(&folder).is_empty(), "{log}: no file at the check");
+        assert!(
+            taken(&folder).is_empty() && !made.exists(),
+            "{log}: no file at the check"
+        );
         run(&words).unwrap();
         let calls = emitted();
         assert_eq!(
@@ -1916,11 +1926,20 @@ fn a_makeblastdb_check_ends_where_the_run_opens_its_log() {
             &(STREAM_RESPONSE, b"{\"status\":1}".to_vec()),
             "{log} {out}"
         );
-        assert_eq!(
-            format!("{error}\n").into_bytes(),
-            joined(&calls, STREAM_DIAGNOSTICS),
-            "{log} {out}"
+        assert!(
+            frames(&calls).is_empty(),
+            "{log} {out}: no file of the run's"
         );
+        let mut written = joined(&calls, STREAM_DIAGNOSTICS);
+        let diagnostics = std::fs::read(made).ok();
+        let _ = std::fs::remove_file(made);
+        assert_eq!(
+            diagnostics.is_some(),
+            log.ends_with('/'),
+            "{log} {out}: the file of the diagnostics"
+        );
+        written.extend(diagnostics.unwrap_or_default());
+        assert_eq!(format!("{error}\n").into_bytes(), written, "{log} {out}");
         let first = if out == "my db" {
             "Please provide a database name using -out".to_string()
         } else {

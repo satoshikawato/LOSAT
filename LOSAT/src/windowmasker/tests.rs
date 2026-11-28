@@ -514,6 +514,8 @@ fn a_run_of_losat_web_writes_the_files_of_the_command_line() {
 /// each mode, list and file names that are not UTF-8 included: a name read as text fails here in a
 /// debug build (`Args::value`'s check; review F1 of item K10a of line RG). A given list is read by
 /// the run before `-infmt seqids` is refused, so the check passes it; without one the check refuses.
+/// The masking (`-ustat`) opens `-in` before it reads the lists, in the check too (line NP WW4f,
+/// 2026-11-28), so its input is a fixture.
 #[cfg(unix)]
 #[test]
 fn the_checks_of_each_mode_read_names_by_their_bytes() {
@@ -535,11 +537,12 @@ fn the_checks_of_each_mode_read_names_by_their_bytes() {
         (status, String::from_utf8_lossy(&err).into_owned())
     };
     let name: &[u8] = b"l\xe9";
+    let fasta = "tests/winmask/fasta/dm2L_3k.fa";
     for list in ["-ids", "-exclude_ids"] {
         for line in [
             &["-mk_counts", "-in", "missing.fa"][..],
             &["-mk_counts", "-in", "missing.fa", "-infmt", "seqids"][..],
-            &["-ustat", "missing.counts", "-in", "missing.fa"][..],
+            &["-ustat", "missing.counts", "-in", fasta][..],
         ] {
             assert_eq!(check(line, &[(list, name)]).0, 0, "{line:?} {list}");
         }
@@ -555,7 +558,7 @@ fn the_checks_of_each_mode_read_names_by_their_bytes() {
     assert_eq!(check(&["-mk_counts"], &[("-in", name)]).0, 0);
     assert_eq!(check(&["-convert", "-out", "o"], &[("-in", name)]).0, 0);
     assert_eq!(
-        check(&["-in", "missing.fa"], &[("-ustat", name), ("-meta", name)]).0,
+        check(&["-in", fasta], &[("-ustat", name), ("-meta", name)]).0,
         0
     );
 }

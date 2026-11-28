@@ -2199,6 +2199,10 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  // The -logfile rows read a name under /dev, /proc or /sys as a device's (checkLogfileNames): a scratch folder there
+  // would make the run's files look like devices (line NP WW4f, 2026-11-28: TMPDIR=/dev/shm/...).
+  assert.ok(!/^\/+(dev|proc|sys)\//.test(`${os.tmpdir()}/`),
+            `V-ABI's scratch folder (TMPDIR, ${os.tmpdir()}) is under /dev, /proc or /sys: use another`);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "losat-v-abi-"));
   const results = [];
   const selected = (options.engines || "serial,threads").split(",");

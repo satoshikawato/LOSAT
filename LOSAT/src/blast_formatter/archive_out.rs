@@ -33,7 +33,7 @@ use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::asn_types::view::V;
-use crate::report::serial::asn_types::write::write_value;
+use crate::report::serial::asn_types::write::{write_value, ValueWriter};
 use crate::report::serial::asn_types::Value;
 use crate::report::serial::encoder::{Encoder, ReplacedChar, SerialError, Traced};
 use crate::report::serial::xml::XmlEncoder;
@@ -182,9 +182,11 @@ impl ResultsSource for &ResultsOut<'_> {
         enc: &mut E,
         flush: &mut dyn FnMut(&mut E),
     ) -> anyhow::Result<()> {
+        // One `ValueWriter` for the Seq-aligns, as `ArchiveDocument::write_aligns`.
+        let mut writer = ValueWriter::new();
         for align in &self.alignments {
             enc.element();
-            write_value(enc, align.ty, align.value);
+            writer.write(enc, align.ty, align.value);
             flush(enc);
         }
         Ok(())

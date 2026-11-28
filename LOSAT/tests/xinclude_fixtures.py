@@ -223,10 +223,9 @@ def freeze(result: Result, frozen: Path, row_id: str, outfmt: str) -> None:
         (frozen / side_name(row_id, n, outfmt)).write_bytes(side)
 
 
-def problems(result: Result, row: dict[str, str], frozen: Path, first_difference) -> list[str]:
-    """What differs between a run and the frozen files of `row` (empty: the same). `first_difference` is
-    the caller's `(expected, actual) -> text`. The row's hash columns must also agree with the frozen
-    files."""
+def frozen_files(row: dict[str, str], frozen: Path) -> tuple[bytes, list[bytes], list[str]]:
+    """The frozen master and side files of `row`, and what is wrong with them: the row's hash columns must
+    agree with them, and the side files must be numbered from 1."""
     row_id = row.get("fixture_id") or row["row_id"]
     outfmt = row.get("outfmt", "")
     out: list[str] = []
@@ -240,6 +239,14 @@ def problems(result: Result, row: dict[str, str], frozen: Path, first_difference
         out.append("frozen side files do not match side_sha256")
     if [path.name for path in names] != [side_name(row_id, n, outfmt) for n in range(1, len(names) + 1)]:
         out.append(f"frozen side files are named {[path.name for path in names]}")
+    return expected, expected_sides, out
+
+
+def problems(result: Result, row: dict[str, str], frozen: Path, first_difference) -> list[str]:
+    """What differs between a run and the frozen files of `row` (empty: the same). `first_difference` is
+    the caller's `(expected, actual) -> text`. The row's hash columns must also agree with the frozen
+    files (`frozen_files`)."""
+    expected, expected_sides, out = frozen_files(row, frozen)
     if result.run.stdout:
         out.append(f"stdout is not empty ({len(result.run.stdout)} bytes)")
     if result.master is None:

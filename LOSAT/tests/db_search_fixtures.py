@@ -165,7 +165,14 @@ databases of the inflated directory, not paths. `freeze` and `check` refuse to s
   `covers` cell has a part ` | ncbi-stderr` checks its whole stderr too: LOSAT's minus its last line (the
   refusal) must be NCBI's stderr of the row's own command up to its exception report
   (`Error: NCBI C++ Exception:`), which `freeze` runs and writes as <row_id>.err with `stderr_sha256`
-  (`ncbi_stderr`; a run without that report stops it).
+  (`ncbi_stderr`; a run without that report stops it). A rejection row of outfmt 13 or 14 (`files`
+  `xinclude`) expects the master and the side files of NCBI's run of its own command, compared as an
+  `ncbi` row's (`xinclude.problems`), with its own rc and stderr (LOSAT's): NCBI writes each side file
+  whole before it makes the next report, opens a report's file before it makes the report and writes
+  the master only in the epilog, so where it crashes making the refused report (the title of line RG
+  series D, item xml-stream, remaining-gaps DECISIONS D-SO-8) the files are whole: the side files
+  before it, the refused report's file empty, an empty master. `freeze` takes them from that run, a
+  crash included (`rejection_files`; the crash cuts only standard output, which is empty).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX] [--valgrind CMD]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
@@ -1269,6 +1276,9 @@ def freeze(args: argparse.Namespace) -> int:
             continue
         command = [str(ncbi_bin / row["program"]), *search_argv(row), "-num_threads", "1"]
         own_stdout = bool(row["stdout_bytes"]) and not near_row_id(row)
+        if row["kind"] == "losat-rejection" and xinclude.wants_files(row):
+            rejection_files(row, command, env)
+            continue
         if row["kind"] == "losat-rejection" and (own_stdout or ncbi_stderr(row)):
             # NCBI's stdout of the command that LOSAT refuses after the reports NCBI writes too, or its stderr up
             # to its exception report (`ncbi_stderr`).
@@ -1396,6 +1406,21 @@ def freeze(args: argparse.Namespace) -> int:
               + f"\trc={row['rc']}\tstdout={row['stdout_bytes']}")
     write_manifest(comments, rows)
     return 0
+
+
+def rejection_files(row: dict[str, str], command: list[str], env: dict[str, str]) -> None:
+    """`freeze` of a rejection row of outfmt 13 or 14 (`xinclude.wants_files`): the master and the side files of NCBI's
+    run of its own command, which NCBI writes whole before each next report, also where it then crashes making the
+    report that LOSAT refuses (its file opened and empty, the master empty: no epilog). Its rc and stderr stay LOSAT's
+    (the row's)."""
+    if near_row_id(row) or own_cut(row) is not None or ncbi_stderr(row) or rps_cell(row["db"]) is not None:
+        raise SystemExit(f"{row['row_id']}: a rejection row with files takes NCBI's files of its own -db or -subject run")
+    written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=row_cwd(row), timeout=TIMEOUT,
+                                      env=row_env(row, env), preexec_fn=ncbi_stack(row))
+    xinclude.freeze(written, FROZEN, row["row_id"], row["outfmt"])
+    row.update(xinclude.observed(written))
+    print(f"{row['row_id']}\tncbi_rc={written.run.returncode}\tmaster={len(written.master or b'')}"
+          f"\tsides={[len(side) for side in written.sides]} (rejection row: files only)")
 
 
 def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> None:
@@ -1538,7 +1563,10 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         # PSIBLAST, RPSBLAST and TBLASTN write before their first batch, `ncbi-near:`: the prolog; the
         # refusals at a later query batch, as tblastn's `db.xs.tblastn.bat.*`: the reports of the
         # query batches before; psiblast's PSSM file and rounds rows, which the library skips).
-        if row["stdout_bytes"]:
+        if files:
+            # Outfmt 13 and 14: NCBI's master and side files of the row's command (`rejection_files`).
+            problems += xinclude.problems(written, row, FROZEN, first_difference)
+        elif row["stdout_bytes"]:
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
                 problems.append("frozen .out does not match the manifest")

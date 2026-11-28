@@ -1102,6 +1102,15 @@ impl Core {
         };
     }
 
+    /// Whether a post on the command line's standard error now flushes this stream through `cerr`'s
+    /// tie (`ReportWrite::tied_to_posts`): standard output, while `cerr` is good and the run's
+    /// messages do not follow `-logfile` (`cerr_post`, `tie_standard_output`).
+    fn tied_to_posts(&self) -> bool {
+        self.standard_output
+            && !PROCESS_CERR.failed()
+            && crate::blastinput::ncbi_environment::terminal_stderr().is_none()
+    }
+
     /// `cerr`'s tie: standard output writes what it holds before a text on standard error. A
     /// failed `cout` while the formatter lives throws there, inside the post's destructor
     /// (`std::terminate`); the text is not written.
@@ -1492,6 +1501,10 @@ impl ReportHandle {
         lock(&self.0).badbit()
     }
 
+    fn tied_to_posts(&self) -> bool {
+        lock(&self.0).tied_to_posts()
+    }
+
     /// The insertions from here on are made in NCBI's region `site` (`ReportWrite::site`, for a
     /// hold that keeps the regions in order with its bytes).
     pub(crate) fn declare(&self, site: Site) -> std::io::Result<()> {
@@ -1560,6 +1573,16 @@ pub trait ReportWrite: std::io::Write {
     /// record whole (`0` when every cut must be passed).
     fn ncbi_room(&self) -> usize {
         0
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
+    /// Whether a post of NCBI's on standard error now makes this stream write what NCBI's buffer
+    /// holds (`cerr`'s tie of `cout`: the command line's report on standard output, `cerr_post`).
+    /// A `-out` file is not tied (a post makes NCBI's writes so far, `sync_report`, and its buffer
+    /// keeps the rest), nor is a writer of a library caller or of LOSAT Web, whose posts go to the
+    /// call's diagnostics.
+    fn tied_to_posts(&self) -> bool {
+        false
     }
 
     /// Runs `f` with a direct inserter into this stream when specialized (`ReportStream` holds
@@ -1732,6 +1755,10 @@ impl ReportWrite for ReportStream {
         lock(&self.0).room
     }
 
+    fn tied_to_posts(&self) -> bool {
+        lock(&self.0).tied_to_posts()
+    }
+
     fn try_with_inserter(
         &mut self,
         f: &mut dyn FnMut(&mut StreamInserter<'_>) -> std::io::Result<()>,
@@ -1766,6 +1793,10 @@ impl<W: ReportWrite + ?Sized> ReportWrite for &mut W {
 
     fn ncbi_room(&self) -> usize {
         (**self).ncbi_room()
+    }
+
+    fn tied_to_posts(&self) -> bool {
+        (**self).tied_to_posts()
     }
 
     fn try_with_inserter(
@@ -1805,6 +1836,10 @@ impl<W: ReportWrite> ReportWrite for std::io::BufWriter<W> {
     fn badbit(&mut self) -> std::io::Result<()> {
         std::io::Write::flush(self)?;
         self.get_mut().badbit()
+    }
+
+    fn tied_to_posts(&self) -> bool {
+        self.get_ref().tied_to_posts()
     }
 }
 
@@ -2444,6 +2479,14 @@ impl ReportWrite for NcbiOstream<'_> {
             (_, Some(hold)) => hold.badbit(),
             (Some(report), None) => report.badbit(),
             (None, None) => Err(write_failure()),
+        }
+    }
+
+    fn tied_to_posts(&self) -> bool {
+        match (&self.report, &self.hold) {
+            (_, Some(hold)) => hold.tied_to_posts(),
+            (Some(report), None) => report.tied_to_posts(),
+            (None, None) => false,
         }
     }
 }

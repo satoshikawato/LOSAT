@@ -112,6 +112,8 @@ struct Run {
     /// The side files of outfmt 13 and 14 (`o_<n>.json`, `o_<n>.xml` of `-out o.json`, `o.xml`),
     /// by name.
     side_files: Vec<String>,
+    /// The size of each of `side_files`.
+    side_sizes: Vec<u64>,
 }
 
 /// Runs `command` (a search with `-outfmt outfmt`; 13 and 14 write to `dir/o.<ext>`). The outputs
@@ -144,11 +146,20 @@ fn run(mut command: Command, outfmt: &str, dir: &Path) -> Run {
         .filter(|name| name.starts_with("o_"))
         .collect();
     side_files.sort();
+    let side_sizes = side_files
+        .iter()
+        .map(|name| {
+            std::fs::metadata(dir.join(name))
+                .expect("a side file")
+                .len()
+        })
+        .collect();
     Run {
         status: output.status.code(),
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         side_files,
+        side_sizes,
     }
 }
 
@@ -223,12 +234,13 @@ fn refused(what: &str, run: &Run) {
 }
 
 /// A title in a report that NCBI makes after `written` reports, each written (and flushed) when
-/// it was made: BLASTN, whose `-subject` XML2 and JSON documents LOSAT writes as NCBI does, refuses
-/// it there, after those reports (remaining-gaps DECISIONS D-SO-6, Owner-delegated 2026-11-27); the
-/// other programs refuse it before the first byte (`refused`). Nothing is written where it is the
-/// first report, and never the document's end.
+/// it was made: BLASTN, whose XML2 and JSON documents LOSAT writes as NCBI does, refuses it there,
+/// after those reports (remaining-gaps DECISIONS D-SO-6 and D-SO-8, Owner-delegated 2026-11-27 and
+/// 2026-11-28), with the refused report's side file of 13 and 14 created empty (NCBI opens it
+/// before it makes the report); the other programs refuse it before the first byte (`refused`).
+/// Nothing is written to the output where it is the first report, and never the document's end.
 fn refused_where_made(program: &str, what: &str, run: &Run, outfmt: &str, written: usize) {
-    if program != "blastn" || written == 0 {
+    if program != "blastn" {
         return refused(what, run);
     }
     assert_eq!(run.status, Some(1), "{what}: status, stderr {}", run.stderr);
@@ -237,9 +249,20 @@ fn refused_where_made(program: &str, what: &str, run: &Run, outfmt: &str, writte
         "{what}: stderr {}",
         run.stderr
     );
-    assert_eq!(reports(run, outfmt), written, "{what}: reports");
     let stdout = String::from_utf8_lossy(&run.stdout);
     match outfmt {
+        "13" | "14" => {
+            assert!(stdout.is_empty(), "{what}: {stdout}");
+            assert_eq!(run.side_files.len(), written + 1, "{what}: side files");
+            assert!(
+                run.side_sizes[..written].iter().all(|&size| size > 0)
+                    && run.side_sizes[written] == 0,
+                "{what}: side files {:?} of {:?}",
+                run.side_sizes,
+                run.side_files
+            );
+        }
+        _ if written == 0 => assert!(stdout.is_empty(), "{what}: {stdout}"),
         "16" => assert!(
             stdout.starts_with("<?xml") && !stdout.contains("</BlastXML2>"),
             "{what}: {stdout}"
@@ -249,6 +272,9 @@ fn refused_where_made(program: &str, what: &str, run: &Run, outfmt: &str, writte
             "{what}: {stdout}"
         ),
         _ => assert!(stdout.is_empty(), "{what}: {stdout}"),
+    }
+    if !matches!(outfmt, "13" | "14") {
+        assert_eq!(reports(run, outfmt), written, "{what}: reports");
     }
 }
 
@@ -301,7 +327,7 @@ fn the_title_of_the_report_that_ncbi_holds_back_and_never_writes_is_not_refused(
                     outfmt,
                     &dir.0,
                 );
-                refused(&what("first each"), &result);
+                refused_where_made(program, &what("first each"), &result, outfmt, 0);
                 // Without an error: record 2's report (`batch_title.s` read as the query) is
                 // written when record 3's results arrive, and the last record's in the epilog.
                 let result = run(
@@ -494,7 +520,7 @@ fn a_subject_title_that_only_the_held_report_shows_is_not_refused() {
                 );
                 command.args(["-evalue", "1e-10"]);
                 let result = run(command, outfmt, &dir.0);
-                refused(&what("written"), &result);
+                refused_where_made(program, &what("written"), &result, outfmt, 0);
             }
         }
     }

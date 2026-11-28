@@ -82,18 +82,22 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     // A title NCBI crashes on (`names::Refusal`) is refused where NCBI makes the report that
-    // shows it, after only the bytes that NCBI has flushed by then (remaining-gaps DECISIONS D-SO-6,
-    // Owner-delegated 2026-11-27; OWNER_DECISIONS 44 + D-SO-2/D-SO-6, the form of Q-X2c). A document that writes
-    // each report at once (outfmt 5; XML2 and JSON with `-db`) makes the call's reports in one
-    // step, so their refusals come before the call's first byte, after the reports of the calls
-    // before. A `-subject` XML2 or JSON document (`holds_back`) makes a report only when the
-    // result of another query arrives or in the epilog, and writes it at once: the refusal of a
-    // report comes there, after the reports before it (`StructuredXml::hold_refused`), in one call
-    // or across the calls of BLASTN's report stream alike; the report of the last query of a run
-    // that stops is never made, nor refused (`written_queries`).
+    // shows it, after only the bytes that NCBI has flushed by then (remaining-gaps DECISIONS D-SO-6
+    // and D-SO-8, Owner-delegated 2026-11-27 and 2026-11-28; OWNER_DECISIONS 44 + D-SO-2/D-SO-6, the
+    // form of Q-X2c). BLAST XML (outfmt 5, alone or among a library call's formats) makes the call's
+    // reports in one step, so their refusals come before the call's first byte, after the reports
+    // of the calls before. The XML2 and JSON documents (`per_report`: every structured format of
+    // the call is one) make each report where they write it, so its refusal comes there, after the
+    // reports before it, in one call or across the calls of BLASTN's report stream alike, in one
+    // rule for `-db` and `-subject` (`StructuredXml::hold_refused`): a `-db` report at its query's
+    // place, a `-subject` report (`holds_back`) when the result of another query arrives or in the
+    // epilog; the report of the last query of a `-subject` run that stops is never made, nor
+    // refused (`written_queries`). The side file of a refused report of outfmt 13 or 14 is left
+    // empty, as NCBI opens it before it makes the report.
     let queries = xml.queries.len();
     let shows = |q_idx: usize| crate::blastinput::query_batch::xml_show_of(xml.query_scopes, q_idx);
-    let holds_back = xml.only_xml2 && document.holds_back();
+    let per_report = xml.only_xml2;
+    let holds_back = per_report && document.holds_back();
     let reports = written_queries(
         queries,
         xml.stops,
@@ -127,7 +131,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         .map(|mut text| text.pop().expect("the text of one query"))
     };
     let mut subjects = SubjectNameCache::new(&xml.subjects);
-    let texts: Vec<Result<names::QueryText>> = if holds_back {
+    let texts: Vec<Result<names::QueryText>> = if per_report {
         // Each report's refusal waits for the place where NCBI makes the report (the loop below).
         (0..reports).map(text_of).collect()
     } else {
@@ -149,15 +153,15 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     // The call's output buffer, that of the call before where the writer keeps it.
     let mut buf: Vec<u8> = document.take_out();
     // The document's start (`StructuredXml::start`), before the first query's warnings, after the
-    // refusal of the database counts that the written reports would print. A `-subject` XML2 or
-    // JSON document's start waits for the output's first write or flush (`StartFirst`), as NCBI's
-    // start waits in its stream's buffer, so that a refused first report leaves nothing.
+    // refusal of the database counts that the written reports would print. An XML2 or JSON
+    // document's start waits for the output's first write or flush (`StartFirst`), as NCBI's start
+    // waits in its stream's buffer, so that a refused first report leaves nothing.
     document.start((reports > 0).then_some(&xml.run), &mut buf)?;
     let mut writer = StartFirst {
         inner: writer,
         start: buf.split_off(0),
     };
-    if !holds_back {
+    if !per_report {
         writer.emit()?;
     }
     let writer = &mut writer;
@@ -193,11 +197,12 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         }
         // The query whose id, title and length the result shows (`XmlShow::label`).
         let label = show.label.unwrap_or(q_idx);
-        if holds_back {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2403
+        if per_report {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2416
             // A report that LOSAT refuses (the title it shows, or that of a subject of its hits):
-            // the result is not made, and what the document writes at its arrival (the report
-            // held before it) is written; the refusal comes where the report would be written.
+            // the result is not made. A `-db` document refuses it here, after the reports before
+            // it; a `-subject` document writes what it writes at the result's arrival (the report
+            // held before it), and the refusal comes where the report would be written.
             let refusal = match (&texts[label], &texts[q_idx]) {
                 (Err(_), _) => text_of(label).err(),
                 (_, Err(_)) => text_of(q_idx).err(),
@@ -378,10 +383,10 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-367
 /// The output of a report call whose document's start (`start`) is not written yet: NCBI writes the
 /// start of the XML2 and JSON documents into its stream's buffer before the search
-/// (`PrintProlog`), and the start reaches the output with the stream's first flush (a report's, or
-/// the one before a post on the diagnostics, `query_warnings::write_after`), so a crash before
-/// that (LOSAT's refusal of the first report) leaves nothing. The start is written before the
-/// call's first write, flush or region of the output (`emit`), and the call's other writes pass
+/// (`PrintProlog`), and the start reaches the output with the stream's first flush: a report's, or
+/// on standard output the tie of a post on the diagnostics (`flush`), so a crash before that
+/// (LOSAT's refusal of the first report) leaves nothing. The start is written before the call's
+/// first write, NCBI flush or region of the output (`emit`), and the call's other writes pass
 /// through unchanged.
 struct StartFirst<'w> {
     inner: &'w mut dyn crate::report::ostream::ReportWrite,
@@ -416,8 +421,17 @@ impl std::io::Write for StartFirst<'_> {
         self.inner.write_all(bytes)
     }
 
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
+    /// LOSAT's flush before a post on the diagnostics (`query_warnings::write_after`): the post
+    /// makes NCBI's stream write the start only through `cerr`'s tie of standard output
+    /// (`ReportWrite::tied_to_posts`); a `-out` file, or a library caller's writer, keeps it in the
+    /// buffer, which a crash loses (NCBI BLAST+ 2.17.0: a reader's warning before a refused first
+    /// report, 275 bytes of outfmt 16 on standard output, none in `-out`; remaining-gaps DECISIONS
+    /// D-SO-8).
     fn flush(&mut self) -> std::io::Result<()> {
-        self.emit()?;
+        if self.inner.tied_to_posts() {
+            self.emit()?;
+        }
         self.inner.flush()
     }
 }
@@ -451,6 +465,10 @@ impl crate::report::ostream::ReportWrite for StartFirst<'_> {
     /// The room of the stream with the start in its buffer, where it waits.
     fn ncbi_room(&self) -> usize {
         self.inner.ncbi_room().saturating_sub(self.start.len())
+    }
+
+    fn tied_to_posts(&self) -> bool {
+        self.inner.tied_to_posts()
     }
 
     fn try_with_inserter(

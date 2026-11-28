@@ -15,12 +15,14 @@
 //! that NCBI has written by then (OWNER_DECISIONS 44 + D-SO-2/D-SO-6, Owner-delegated; the
 //! form of Q-X2c): the start of
 //! the document of the same search without the refused title, without its end. BLAST XML refuses
-//! the refused title's batch before its first byte, after the batches before; the held report of a
-//! `-subject` XML2 or JSON search is refused where NCBI makes it (the arrival of the next query's
-//! result, or the epilog), after the reports before it, in any layout of the batches and with the
-//! switch or without it alike, and is dropped with its refusal where an error of NCBI's stops the
-//! run first, as NCBI never makes it. A refused first report writes nothing. That the bytes equal
-//! NCBI's is the business of the blastn fixtures (`tests/db_search_manifest/blastn.dxs.tsv`).
+//! the refused title's batch before its first byte, after the batches before; an XML2 or JSON report
+//! is refused where NCBI makes it, after the reports before it, in any layout of the batches and
+//! with the switch or without it alike (D-SO-6, D-SO-8): a `-db` report at its query, a held
+//! `-subject` report at the arrival of the next query's result or in the epilog, dropped with its
+//! refusal where an error of NCBI's stops the run first, as NCBI never makes it. A refused report
+//! of 14 and 13 leaves its side file empty. A refused first report writes nothing, except the
+//! document's start on standard output where a post came before it (`cerr`'s tie). That the bytes
+//! equal NCBI's is the business of the blastn fixtures (`tests/db_search_manifest/blastn.dxs.tsv`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -595,5 +597,207 @@ fn a_held_report_that_an_error_stops_first_is_dropped_with_its_refusal() {
             reason == "none" && batches >= 5,
             "{what}: {batches} {reason}"
         );
+    }
+}
+
+/// The database of the subject LC738868 in `dir` (`losat makeblastdb`).
+fn subject_db(dir: &TempDir) -> String {
+    let db = dir.path("db").to_str().unwrap().to_string();
+    let made = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .arg("makeblastdb")
+        .arg("-in")
+        .arg(fasta("LC738868.fasta"))
+        .args(["-dbtype", "nucl", "-out", &db])
+        .output()
+        .expect("run losat makeblastdb");
+    assert!(made.status.success(), "makeblastdb");
+    db
+}
+
+/// The number `n` of a side file named `<base>_<n>.<extension>`.
+fn side_number(name: &str) -> usize {
+    let (stem, _) = name.rsplit_once('.').expect("an extension");
+    let (_, number) = stem.rsplit_once('_').expect("a number");
+    number.parse().expect("the side file's number")
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2416
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-778
+/// A `-db` report of 16, 15, 14 and 13 is made when its query's result arrives, so a refused title
+/// comes there, after the reports before it, in any layout of the batches, with the switch and
+/// without it (remaining-gaps DECISIONS D-SO-8, Owner-delegated 2026-11-28): standard output or
+/// `-out` holds the document of the run without the title up to the refused report (nothing for a
+/// refused first report). Outfmt 14 and 13, also of `-subject`: the side files of the reports
+/// before it are written whole and the refused report's side file is created empty (NCBI opens it
+/// before it makes the report), the master stays empty. NCBI BLAST+ 2.17.0 (probe 2026-11-28, the
+/// rows `db.dxs.blastn.d*`): `o_1.xml` whole and `o_2.xml` empty, `o_1.xml` empty for a refused
+/// first report, with `-db` and `-subject` alike.
+#[test]
+fn a_refused_report_is_refused_where_ncbi_makes_it_with_db_and_in_side_files() {
+    let dir = TempDir::new("dbrefused");
+    let db = subject_db(&dir);
+    let subject = fasta("LC738868.fasta");
+    let out = dir.path("out").join("o.out");
+    let whole_query = pieces(&dir, "whole.fa", None, b"");
+    let mut threads = [1, 4].into_iter().cycle();
+    for (target, outfmt) in [
+        (["-db", db.as_str()], "16"),
+        (["-db", db.as_str()], "15"),
+        (["-db", db.as_str()], "14"),
+        (["-db", db.as_str()], "13"),
+        (["-subject", subject.to_str().unwrap()], "14"),
+        (["-subject", subject.to_str().unwrap()], "13"),
+    ] {
+        let files = matches!(outfmt, "14" | "13");
+        let args_of = |query: &Path| -> Vec<String> {
+            [
+                "-task",
+                "megablast",
+                "-query",
+                query.to_str().unwrap(),
+                target[0],
+                target[1],
+                "-outfmt",
+                outfmt,
+            ]
+            .map(String::from)
+            .to_vec()
+        };
+        let whole_args = args_of(&whole_query);
+        let whole_args: Vec<&str> = whole_args.iter().map(String::as_str).collect();
+        let whole = blastn(&whole_args, 1, "400", &[], files.then_some(&*out));
+        let what = format!("{} outfmt {outfmt}", target[0]);
+        assert_eq!(whole.status, Some(0), "{what}: {whole:?}");
+        if files {
+            assert_eq!(whole.files.len(), 6, "{what}: {:?}", whole.files.keys());
+        } else {
+            assert_eq!(reports_in(outfmt, &whole.report), 6, "{what}");
+        }
+        for refused in [0usize, 2, 5] {
+            let query = pieces(&dir, "refused.fa", Some(refused), b"");
+            let args = args_of(&query);
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            for batch in ["400", "800", "100000"] {
+                let threads = threads.next().unwrap();
+                for switches in [&[][..], &[OFF]] {
+                    let what =
+                        format!("{what}, refused query {refused}, batch {batch} {switches:?}");
+                    let run = blastn(&args, threads, batch, switches, files.then_some(&*out));
+                    let stderr = String::from_utf8_lossy(&run.stderr);
+                    assert_eq!(run.status, Some(1), "{what}: {stderr}");
+                    assert!(
+                        stderr.contains(&format!("a query title {REFUSAL}")),
+                        "{what}: {stderr}"
+                    );
+                    if files {
+                        let mut expected: BTreeMap<String, Vec<u8>> = whole
+                            .files
+                            .iter()
+                            .filter(|(name, _)| side_number(name) <= refused + 1)
+                            .map(|(name, bytes)| (name.clone(), bytes.clone()))
+                            .collect();
+                        for (name, bytes) in &mut expected {
+                            if side_number(name) == refused + 1 {
+                                bytes.clear();
+                            }
+                        }
+                        assert!(run.report.is_empty(), "{what}: the master");
+                        assert_eq!(run.files, expected, "{what}");
+                    } else {
+                        assert!(
+                            whole.report.starts_with(&run.report)
+                                && reports_in(outfmt, &run.report) == refused,
+                            "{what}: {} reports\n{}",
+                            reports_in(outfmt, &run.report),
+                            String::from_utf8_lossy(&run.report)
+                        );
+                        if refused == 0 {
+                            assert!(run.report.is_empty(), "{what}: nothing");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
+/// A post on standard error before a refused first report (here the reader's warning of a line of
+/// digits in the second query, read in the first query's batch or in the next) makes NCBI's
+/// standard output write the document's start through `cerr`'s tie; a `-out` file is not tied, its
+/// buffer keeps the start, and the crash loses it (remaining-gaps DECISIONS D-SO-8). NCBI BLAST+
+/// 2.17.0 (probe 2026-11-28, `-subject`, one batch and two): 275 bytes of outfmt 16 and 20 of 15 on
+/// standard output, 0 in `-out`. LOSAT writes the same with `-subject` and `-db`, with the switch and
+/// without it, except where a `-db` run's first report is made before the second batch is read:
+/// then nothing is posted before the refusal, and nothing is written.
+#[test]
+fn a_post_before_a_refused_first_report_writes_the_start_on_standard_output_only() {
+    let dir = TempDir::new("posted");
+    let db = subject_db(&dir);
+    let subject = fasta("LC738868.fasta");
+    let out = dir.path("out").join("o.out");
+    let query = pieces(&dir, "posted.fa", Some(0), b"");
+    // The second query gets a line of digits, which the reader keeps with a warning.
+    let mut text = std::fs::read(&query).expect("read the pieces");
+    let second = text
+        .windows(4)
+        .position(|window| window == b"\n>p1")
+        .expect("the second query")
+        + 1;
+    let line_end = second
+        + text[second..]
+            .iter()
+            .position(|&byte| byte == b'\n')
+            .unwrap()
+        + 1;
+    text.splice(line_end..line_end, b"ACGT12ACGT\n".iter().copied());
+    std::fs::write(&query, text).expect("write the query");
+    for (target, outfmt, start) in [
+        (["-subject", subject.to_str().unwrap()], "16", 275),
+        (["-subject", subject.to_str().unwrap()], "15", 20),
+        (["-db", db.as_str()], "16", 275),
+        (["-db", db.as_str()], "15", 20),
+    ] {
+        let args = [
+            "-task",
+            "megablast",
+            "-query",
+            query.to_str().unwrap(),
+            target[0],
+            target[1],
+            "-outfmt",
+            outfmt,
+        ];
+        for batch in ["400", "100000"] {
+            for switches in [&[][..], &[OFF]] {
+                let what = format!("{} outfmt {outfmt} batch {batch} {switches:?}", target[0]);
+                let stdout = blastn(&args, 1, batch, switches, None);
+                let file = blastn(&args, 1, batch, switches, Some(&out));
+                // A `-db` report is made after its batch, before the next is read.
+                let posted = !(target[0] == "-db" && batch == "400");
+                for run in [&stdout, &file] {
+                    let stderr = String::from_utf8_lossy(&run.stderr);
+                    assert_eq!(run.status, Some(1), "{what}: {stderr}");
+                    assert!(
+                        stderr.contains("Ignoring invalid residues") == posted
+                            && stderr.contains(&format!("a query title {REFUSAL}")),
+                        "{what}: {stderr}"
+                    );
+                }
+                let start = if posted { start } else { 0 };
+                assert_eq!(stdout.report.len(), start, "{what}: standard output");
+                let head: &[u8] = if outfmt == "16" {
+                    b"<?xml version=\"1.0\""
+                } else {
+                    b"{\n\"BlastOutput2\": [\n"
+                };
+                assert!(posted <= stdout.report.starts_with(head), "{what}");
+                assert!(
+                    file.report.is_empty(),
+                    "{what}: -out holds {} bytes",
+                    file.report.len()
+                );
+            }
+        }
     }
 }

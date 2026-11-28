@@ -99,17 +99,18 @@
 //!   document only at the end (`SamDocument::finish`), so a refusal in a later batch finds nothing
 //!   written there either.
 //!   The XML family has refusals of its own (a `-db` name, query title or id, or a title of a
-//!   subject with a hit that cannot be written, `blast_xml.rs`). Outfmt 5 and the `-db` XML2 and
-//!   JSON documents make a batch's reports in its call, so their refusals come before the call's
-//!   first byte: after the reports of the batches before, without the footer, the end or the
-//!   master file (OWNER_DECISIONS 44 + D-SO-2, Owner-delegated; the form
-//!   of Q-X2c). A `-subject` XML2 or JSON
-//!   document makes a report where NCBI makes it (when the result of another query arrives, in
-//!   the same batch or a later one, or in the epilog: blast_format.cpp:2362-2403), and its refusal
-//!   comes there, after the reports before it and only the bytes NCBI has flushed by then: a
-//!   refused first report leaves nothing, not even the document's start, which waits for the
-//!   output's first write or flush as NCBI's waits in its stream's buffer (`blast_xml::StartFirst`;
-//!   remaining-gaps DECISIONS D-SO-6). One rule for any batch layout: the refused report is held
+//!   subject with a hit that cannot be written, `blast_xml.rs`). Outfmt 5 makes a batch's reports
+//!   in its call, so their refusals come before the call's first byte: after the reports of the
+//!   batches before, without the footer or the end (OWNER_DECISIONS 44 + D-SO-2, Owner-delegated;
+//!   the form of Q-X2c). An XML2 or JSON document makes a report where NCBI makes it (`-db`: at
+//!   its query's place; `-subject`: when the result of another query arrives, in the same batch
+//!   or a later one, or in the epilog: blast_format.cpp:2362-2403), and its refusal comes there,
+//!   after the reports before it and only the bytes NCBI has flushed by then, without the end or
+//!   the master file (outfmt 13 and 14 leave the refused report's file empty): a refused first
+//!   report leaves nothing, not even the document's start, which waits for the output's first
+//!   write or flush as NCBI's waits in its stream's buffer (`blast_xml::StartFirst`; a post's
+//!   flush writes it on standard output only, through `cerr`'s tie; remaining-gaps DECISIONS
+//!   D-SO-6 and D-SO-8). One rule for any batch layout: a refused `-subject` report is held
 //!   with its refusal (`Xml2Document::hold_refused`), carried to the next call where a batch ends
 //!   with it, and where an error stops the run first the report and its refusal are dropped, as NCBI
 //!   never makes the report (the off path's `write_before_failed_batch` drops them alike; the start

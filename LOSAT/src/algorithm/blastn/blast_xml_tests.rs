@@ -78,12 +78,14 @@ impl Calls<'_> {
     }
 }
 
-/// One report call of `queries` (numbered from `first` in the run) into `out`.
+/// One report call of `queries` into `out`; `only_xml2`: the call's one structured format is an
+/// XML2 or JSON document (`BlastnXml::only_xml2`), not BLAST XML.
 fn call<W: StructuredXml>(
     document: &mut W,
     queries: &[FastaRecord],
     (epilog, stops): (bool, bool),
     out: &mut Vec<u8>,
+    only_xml2: bool,
 ) -> Result<()> {
     let subjects = records("Subject", &[b"subject"]);
     let query_input = QueryInput::whole(queries);
@@ -113,7 +115,7 @@ fn call<W: StructuredXml>(
         ungapped: false,
         epilog,
         stops,
-        only_xml2: true,
+        only_xml2,
         query_scopes: None,
     };
     let hit_lists: Vec<Option<BlastnHitList>> = queries.iter().map(|_| None).collect();
@@ -123,12 +125,22 @@ fn call<W: StructuredXml>(
 /// The `-subject` XML2 or JSON document (`kind`) of queries titled `titles`, written by `calls`
 /// with the document's state handed from call to call (`Xml2Carry`): the output and the error.
 fn xml2(kind: Xml2Kind, titles: &[&[u8]], calls: Calls<'_>) -> (Vec<u8>, Option<String>) {
+    xml2_of(Xml2Target::Subjects(1), kind, titles, calls)
+}
+
+/// `xml2` of the search of `target` (`-subject` or `-db`).
+fn xml2_of(
+    target: Xml2Target,
+    kind: Xml2Kind,
+    titles: &[&[u8]],
+    calls: Calls<'_>,
+) -> (Vec<u8>, Option<String>) {
     let queries = records("Query", titles);
     let mut carry = Xml2Carry::default();
     let mut out = Vec::new();
     for (range, epilog, stops) in calls.plan(queries.len()) {
         let params = Xml2Run {
-            target: Xml2Target::Subjects(1),
+            target,
             subject_names: None,
             gapped: true,
             cbs: 0,
@@ -138,7 +150,13 @@ fn xml2(kind: Xml2Kind, titles: &[&[u8]], calls: Calls<'_>) -> (Vec<u8>, Option<
         };
         let mut document = Xml2Writer::for_run(kind, params, None, None);
         document.resume(std::mem::take(&mut carry));
-        let result = call(&mut document, &queries[range], (epilog, stops), &mut out);
+        let result = call(
+            &mut document,
+            &queries[range],
+            (epilog, stops),
+            &mut out,
+            true,
+        );
         carry = document.take_carry();
         if let Err(error) = result {
             return (out, Some(error.to_string()));
@@ -256,6 +274,112 @@ fn a_run_that_an_error_stops_never_makes_its_last_report_nor_refuses_it() {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2403-2416
+// A `-db` report is made when its query's result arrives: the refusal of its title comes there,
+// after the reports before it, in every layout of the calls, and a refused first report writes
+// nothing (remaining-gaps DECISIONS D-SO-8; NCBI BLAST+ 2.17.0 writes 3,177 bytes of outfmt 16 for
+// `na` then `, ,` in one batch and in two).
+#[test]
+fn a_db_report_is_refused_where_ncbi_makes_it_after_the_reports_before_it() {
+    let db = |kind, titles: &[&[u8]], calls| xml2_of(Xml2Target::Database, kind, titles, calls);
+    let before_end_db = |kind, titles: &[&[u8]]| {
+        let (mut bytes, error) = db(kind, titles, Calls::One);
+        assert_eq!(error, None, "{titles:?}");
+        assert!(bytes.ends_with(tail(kind)), "{kind:?}");
+        bytes.truncate(bytes.len() - tail(kind).len());
+        bytes
+    };
+    for kind in KINDS {
+        let titles: [&[u8]; 4] = [b"qa", b"qb", PUNCTUATION, b"qd"];
+        let expected = before_end_db(kind, &[b"qa", b"qb"]);
+        for calls in [
+            Calls::One,
+            Calls::Stops,
+            Calls::Batches(&[1, 1, 1, 1]),
+            Calls::Batches(&[2, 2]),
+            Calls::Batches(&[3, 1]),
+            Calls::Batches(&[1, 3]),
+            Calls::Batches(&[4]),
+        ] {
+            let (bytes, error) = db(kind, &titles, calls);
+            assert_eq!(bytes, expected, "{kind:?} {calls:?}");
+            assert!(error.is_some_and(|error| error.contains(REFUSAL)));
+        }
+        for titles in [&[PUNCTUATION, b"qb"][..], &[PUNCTUATION]] {
+            for calls in [
+                Calls::One,
+                Calls::Stops,
+                Calls::Batches(&[1; 2][..titles.len()]),
+            ] {
+                let (bytes, error) = db(kind, titles, calls);
+                assert!(
+                    bytes.is_empty(),
+                    "{kind:?} {calls:?}: {} bytes",
+                    bytes.len()
+                );
+                assert!(error.is_some_and(|error| error.contains(REFUSAL)));
+            }
+        }
+    }
+}
+
+/// An output that a post's tie flushes (`tied`) or not, and its bytes.
+struct Output {
+    bytes: Vec<u8>,
+    tied: bool,
+}
+
+impl std::io::Write for Output {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl crate::report::ostream::ReportWrite for Output {
+    fn tied_to_posts(&self) -> bool {
+        self.tied
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
+// LOSAT's flush before a post on the diagnostics writes the waiting start only where the post's
+// tie flushes NCBI's stream (standard output); NCBI's own flush, a write or a region writes it in
+// any case (NCBI BLAST+ 2.17.0: a reader's warning before a refused first report leaves 275
+// bytes of outfmt 16 on standard output and none in `-out`; remaining-gaps DECISIONS D-SO-8).
+#[test]
+fn a_post_writes_the_waiting_start_only_through_the_tie_of_standard_output() {
+    use crate::report::ostream::ReportWrite;
+    use std::io::Write;
+    for tied in [true, false] {
+        let mut output = Output {
+            bytes: Vec::new(),
+            tied,
+        };
+        let mut writer = StartFirst {
+            inner: &mut output,
+            start: b"start".to_vec(),
+        };
+        assert_eq!(writer.tied_to_posts(), tied);
+        writer.flush().unwrap();
+        let left = writer.start.clone();
+        writer.ncbi_flush().unwrap();
+        writer.write_all(b" report").unwrap();
+        assert_eq!(
+            (left, output.bytes),
+            (
+                if tied { Vec::new() } else { b"start".to_vec() },
+                b"start report".to_vec()
+            ),
+            "tied {tied}"
+        );
+    }
+}
+
 /// A report call that only holds its report writes nothing, not even the start of the document:
 /// the next call writes the start with the report (`StartFirst`, `start_not_written`).
 #[test]
@@ -273,12 +397,12 @@ fn the_start_comes_with_the_first_written_report() {
         };
         let mut out = Vec::new();
         let mut document = Xml2Writer::for_run(kind, params(), None, None);
-        call(&mut document, &queries[..1], (false, false), &mut out).expect("qa's call");
+        call(&mut document, &queries[..1], (false, false), &mut out, true).expect("qa's call");
         assert!(out.is_empty(), "{kind:?}: {} bytes", out.len());
         let carry = document.take_carry();
         let mut document = Xml2Writer::for_run(kind, params(), None, None);
         document.resume(carry);
-        call(&mut document, &queries[1..], (false, false), &mut out).expect("qb's call");
+        call(&mut document, &queries[1..], (false, false), &mut out, true).expect("qb's call");
         assert_eq!(out, before_end(kind, &[b"qa", b"qb"])[..out.len()]);
         assert!(out.starts_with(&prolog_bytes(kind)) && out.len() > prolog_bytes(kind).len());
     }
@@ -291,7 +415,13 @@ fn xml5(titles: &[&[u8]], calls: Calls<'_>) -> (Vec<u8>, Option<String>) {
     let mut out = Vec::new();
     for (range, epilog, stops) in calls.plan(queries.len()) {
         let mut document = BlastXmlWriter::new(range.start);
-        if let Err(error) = call(&mut document, &queries[range], (epilog, stops), &mut out) {
+        if let Err(error) = call(
+            &mut document,
+            &queries[range],
+            (epilog, stops),
+            &mut out,
+            false,
+        ) {
             return (out, Some(error.to_string()));
         }
     }

@@ -733,6 +733,141 @@ fn a_refused_held_report_is_refused_where_it_is_written_and_never_where_it_is_no
     }
 }
 
+#[test]
+fn a_db_report_is_refused_at_its_arrival_after_the_reports_before_it() {
+    // NCBI makes each report of a `-db` run when its result arrives, so a report that LOSAT
+    // refuses is refused there, after the reports before it (remaining-gaps DECISIONS D-SO-8,
+    // Owner-delegated 2026-11-28): the bytes before it are those of the reports before it, and a
+    // refused first report writes nothing.
+    let refusal = |text: &'static str| anyhow::anyhow!(text);
+    for kind in [Xml2Kind::Single15, Xml2Kind::Single16] {
+        let mut plain = Xml2Document::new(kind, false);
+        let mut expected = Vec::new();
+        put(&mut plain, b"{1}\n", &mut expected).unwrap();
+        let mut doc = Xml2Document::new(kind, false);
+        let mut out = Vec::new();
+        put(&mut doc, b"{1}\n", &mut out).unwrap();
+        let error = doc
+            .hold_refused(&mut out, false, refusal("first"))
+            .unwrap_err();
+        assert_eq!(error.to_string(), "first", "{kind:?}");
+        assert_eq!(out, expected, "{kind:?}");
+        let mut doc = Xml2Document::new(kind, false);
+        let mut out = Vec::new();
+        let error = doc
+            .hold_refused(&mut out, true, refusal("first"))
+            .unwrap_err();
+        assert_eq!(error.to_string(), "first", "{kind:?}");
+        assert!(out.is_empty(), "{kind:?}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-778
+#[test]
+fn a_refused_report_of_side_files_leaves_its_file_empty() {
+    // NCBI opens a report's side file before it makes the report, and crashes there on a title
+    // that LOSAT refuses: that file stays empty, the files before it are whole and the master
+    // stays empty (no epilog). NCBI BLAST+ 2.17.0 with `-subject` and `-db` alike (remaining-gaps
+    // DECISIONS D-SO-8): `o_1.xml` 3,083 bytes and `o_2.xml` empty for a refused second report,
+    // `o_1.xml` empty for a refused first one.
+    let refusal = |text: &'static str| anyhow::anyhow!(text);
+    for kind in [Xml2Kind::Files14, Xml2Kind::Files13] {
+        for delayed in [true, false] {
+            for (first_refused, ends) in [
+                (false, "epilog"),
+                (false, "report"),
+                (false, "unwritten"),
+                (true, "epilog"),
+                (true, "report"),
+            ] {
+                let what = format!("{kind:?} delayed {delayed} first {first_refused} {ends}");
+                let files = MemoryFiles::default();
+                let stored = files.files.clone();
+                let mut doc = Xml2Document::with_files(kind, delayed, files);
+                let mut out = Vec::new();
+                if !first_refused {
+                    put(&mut doc, b"{1}\n", &mut out).unwrap();
+                }
+                let refused = doc.hold_refused(&mut out, false, refusal("refused"));
+                // A `-subject` run holds the refusal where NCBI makes the report.
+                let error = if delayed {
+                    refused.unwrap();
+                    match ends {
+                        "epilog" => doc.epilog(&mut out),
+                        "report" => put(&mut doc, b"{3}\n", &mut out),
+                        _ => doc.unwritten(&mut out, false),
+                    }
+                    .unwrap_err()
+                } else {
+                    refused.unwrap_err()
+                };
+                assert_eq!(error.to_string(), "refused", "{what}");
+                assert!(out.is_empty(), "{what}: the master");
+                let expected: Vec<(u32, Vec<u8>)> = if first_refused {
+                    vec![(1, Vec::new())]
+                } else {
+                    vec![(1, b"{1}\n".to_vec()), (2, Vec::new())]
+                };
+                assert_eq!(*stored.borrow(), expected, "{what}");
+            }
+        }
+        // A side file that cannot be opened fails first, as NCBI's open does.
+        let files = MemoryFiles {
+            fail_at: Some(1),
+            ..MemoryFiles::default()
+        };
+        let mut doc = Xml2Document::with_files(kind, false, files);
+        let error = doc
+            .hold_refused(&mut Vec::new(), false, refusal("refused"))
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("Cannot open output file"),
+            "{kind:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn a_refusal_after_a_held_report_that_fails_is_held_where_ncbi_makes_it() {
+    // The held report of a `-subject` run fails where it is written (`CaughtException`, which
+    // NCBI's report function catches: the program posts it and goes on) at the arrival of a
+    // result that LOSAT refuses: the refusal is held all the same, and comes where its report
+    // would be written.
+    use crate::ncbi_exception::{NcbiException, ThrowSite};
+    let refusal = |text: &'static str| anyhow::anyhow!(text);
+    for kind in [Xml2Kind::Single15, Xml2Kind::Single16] {
+        let mut doc = Xml2Document::new(kind, true);
+        let mut out = Vec::new();
+        doc.report(&mut Vec::new(), &mut out, |_, _| {
+            Err(
+                crate::report::blast_xml::CaughtException(NcbiException::new(
+                    ThrowSite {
+                        file: "src/objects/seq/../seqalign/Dense_seg.cpp",
+                        line: 197,
+                        kind: "CSeqalignException::eInvalidAlignment",
+                        function: None,
+                    },
+                    "CDense_seg::GetSeqStart(): Row is empty",
+                ))
+                .into(),
+            )
+        })
+        .unwrap();
+        let failed = doc.hold_refused(&mut out, false, refusal("refused"));
+        assert!(
+            failed
+                .unwrap_err()
+                .is::<crate::report::blast_xml::CaughtException>(),
+            "{kind:?}"
+        );
+        assert!(doc.held_refused(), "{kind:?}");
+        let written = out.clone();
+        let error = doc.epilog(&mut out).unwrap_err();
+        assert_eq!(error.to_string(), "refused", "{kind:?}");
+        assert_eq!(out, written, "{kind:?}");
+    }
+}
+
 /// The state of a run whose second report, refused ("first"), is held after the first.
 fn next_carry(kind: Xml2Kind, refusal: &dyn Fn(&'static str) -> anyhow::Error) -> Xml2Carry {
     let mut doc = Xml2Document::new(kind, true);

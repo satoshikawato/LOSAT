@@ -196,6 +196,11 @@ class DbSearchFixtureTests(unittest.TestCase):
                 if own is not None:
                     self.assertEqual((r["kind"], near, r["stdout_bytes"]), ("losat-rejection", None, str(own)),
                                      r["row_id"])
+                # A rejection row of outfmt 13 or 14 has the frozen master and side files of NCBI's run of its own
+                # command (`rejection_files`).
+                if xinclude.wants_files(r):
+                    self.assertEqual((near, own, db_fixtures.ncbi_stderr(r)), (None, None, False), r["row_id"])
+                    self.assertEqual(xinclude.frozen_files(r, db_fixtures.FROZEN)[2], [], r["row_id"])
                 # A rejection row's frozen stderr is NCBI's up to its exception report (`ncbi-stderr`), or none.
                 err = db_fixtures.FROZEN / f"{r['row_id']}.err"
                 self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])

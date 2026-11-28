@@ -160,6 +160,12 @@ FASTA files:
   NULLB-start alignments whose entire edit script lies in the trailing `Sub(k)` segment leave an empty subject row
   (`Row is empty` in pairwise/XML/XML2/JSON/prefetch and `Row 1 contains gaps only.` in tabular).
 
+- The database `dxs_n` (rows `db.dxs.blastn.d*`, line RG series D, item xml-stream, fix round 2, 2026-11-28; title
+  `dxs subjects`, `-blastdb_version 4`, NCBI BLAST+ 2.17.0 `makeblastdb -in LOSAT/tests/fasta/outfmt0/dxs_s.fna
+  -dbtype nucl`) holds `pa` (93 bases, which the query `na` of the files `dxs_*` hits) and a subject titled `, ,`
+  (which `r` of `dxs_na_r.fna` hits): a `-db` search whose XML2 or JSON report of a query titled `, ,` NCBI crashes
+  on when it makes that report, after the reports before it (remaining-gaps DECISIONS D-SO-8); NCBI writes the
+  database's title `, ,` as it is (row `db.dxs.blastn.dnar.16`).
 - The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
   `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),
   whose frame +1 is W W W, the last three letters of the query `xs_q.faa` (`MHYWWW`). NCBI BLAST+ translates a subject's

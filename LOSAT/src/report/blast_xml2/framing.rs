@@ -21,13 +21,15 @@
 //! report (`XmlQuery::joins_held`): NCBI accumulates it, and writes the results of one Seq-id as
 //! one report whose `bl2seq` list has a `Search` for each (`Xml2Writer`'s join, `HeldSearches`).
 //!
-//! A held report that LOSAT refuses (a title that NCBI's definition line generator reads past the
-//! end of, `blast_xml::names::Refusal`) is not made: its refusal is held in its place
-//! (`Xml2Document::hold_refused`) and returned where the document would write it (the arrival of
-//! another query's result, in the same report call or a later one of the run, or the epilog), since
-//! NCBI makes that report, and crashes on it, only when it writes it, after the reports before it
-//! (each flushed when it is written); a run that an error stops first never makes it (it is dropped
-//! with the report).
+//! A report that LOSAT refuses (a title that NCBI's definition line generator reads past the end of,
+//! `blast_xml::names::Refusal`) is not made, and is refused where NCBI makes it
+//! (`Xml2Document::hold_refused`): a `-db` report at its arrival, after the reports before it; a
+//! held `-subject` report where the document would write it (the arrival of another query's result,
+//! in the same report call or a later one of the run, or the epilog), since NCBI makes that report,
+//! and crashes on it, only when it writes it, after the reports before it (each flushed when it is
+//! written); a run that an error stops first never makes it (it is dropped with the report). The
+//! side file of a refused report of outfmt 13 or 14 is left empty, as NCBI opens it before it makes
+//! the report.
 
 use std::io::{self, Write};
 use std::path::Path;
@@ -528,37 +530,40 @@ impl<F: SideFiles> Xml2Document<F> {
         self.delayed
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2403
-    /// The arrival of a result whose report LOSAT refuses (`refusal`) in a document that holds each
-    /// report back (a `-subject` run): NCBI makes the accumulated report, and crashes on it, only
-    /// where it writes it (when the result of another query arrives, in a later batch too, or in the
-    /// epilog), so the refusal is held in the report's place and returned there (`release_held`); a
-    /// run that stops before never makes it. As at a report's arrival, `out` gets the report held
-    /// before it (`write_held`, with the document's start where it is the first), unless the result
-    /// joins it (`joins_held`): then the held report is refused (its first refusal kept). A refused
-    /// first report thus writes nothing, not even the start.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2416
+    /// The arrival of a result whose report LOSAT refuses (`refusal`). A document that writes each
+    /// report at once (a `-db` run) refuses it now (`refused`): NCBI makes the report here, after
+    /// the reports before it. A document that holds each report back (a `-subject` run): NCBI makes
+    /// the accumulated report, and crashes on it, only where it writes it (when the result of another
+    /// query arrives, in a later batch too, or in the epilog), so the refusal is held in the
+    /// report's place and returned there (`release_held`); a run that stops before never makes it.
+    /// As at a report's arrival, `out` gets the report held before it (`write_held`, with the
+    /// document's start where it is the first), unless the result joins it (`joins_held`): then
+    /// the held report is refused (its first refusal kept). The refusal is held whatever the held
+    /// report's writing returns (its failure that NCBI's report function catches,
+    /// `CaughtException`, is posted and the run goes on). A refused first report thus writes
+    /// nothing, not even the start.
     pub fn hold_refused(
         &mut self,
         out: &mut Vec<u8>,
         joins_held: bool,
         refusal: anyhow::Error,
     ) -> Result<()> {
-        debug_assert!(
-            self.delayed,
-            "only a held report is refused where it is written"
-        );
+        if !self.delayed {
+            return Err(self.refused(refusal));
+        }
         if joins_held && self.has_pending {
             self.held_refusal.get_or_insert(refusal);
             return Ok(());
         }
-        self.write_held(out)?;
+        let written = self.write_held(out);
         self.has_pending = true;
         self.pending.clear();
         self.pending_made = MadeReport::default();
         self.pending_failure = None;
         self.held = HeldSearches::default();
         self.held_refusal = Some(refusal);
-        Ok(())
+        written
     }
 
     /// Whether the held report is refused (`hold_refused`): a result that joins it adds nothing.
@@ -566,12 +571,29 @@ impl<F: SideFiles> Xml2Document<F> {
         self.has_pending && self.held_refusal.is_some()
     }
 
-    /// Where the document writes the held report: its refusal (`hold_refused`), if it has one.
+    /// Where the document writes the held report: its refusal (`hold_refused`, `refused`), if it
+    /// has one.
     fn release_held(&mut self) -> Result<()> {
         match self.held_refusal.take() {
-            Some(refusal) if self.has_pending => Err(refusal),
+            Some(refusal) if self.has_pending => Err(self.refused(refusal)),
             _ => Ok(()),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-778
+    /// LOSAT's refusal of a report where NCBI makes it (`hold_refused`, `release_held`): the forms
+    /// of side files (outfmt 13 and 14) have opened the report's file, which stays empty, as for a
+    /// report that fails (`failed`; NCBI BLAST+ 2.17.0 leaves `o_2.xml` empty after `o_1.xml`, and
+    /// `o_1.xml` empty for a refused first report, with `-subject` and `-db` alike: remaining-gaps
+    /// DECISIONS D-SO-8). A file that cannot be opened fails first (`side_file_open_error`).
+    fn refused(&mut self, refusal: anyhow::Error) -> anyhow::Error {
+        if self.kind.is_files() {
+            self.written += 1;
+            if let Err(error) = self.files.write_file(self.written, &[]) {
+                return error;
+            }
+        }
+        refusal
     }
 
     /// The held report, written where the result of another query arrives (`hold_refused`) or the
@@ -696,7 +718,6 @@ impl<F: SideFiles> Xml2Document<F> {
         // (`CaughtException`, returned after the end); a file form stops here.
         let mut caught = None;
         if self.has_pending {
-            self.release_held()?;
             self.has_pending = false;
             let pending = std::mem::take(&mut self.pending);
             let made = std::mem::take(&mut self.pending_made);

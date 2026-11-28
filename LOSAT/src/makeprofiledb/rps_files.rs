@@ -3,15 +3,19 @@
 //! parameters (`.aux`), in the 28-letter form that rpsblast reads (`crate::seqdb::rps`).
 //!
 //! Each file is NCBI's `CNcbiOfstream`, the file stream of the database's writer
-//! (`crate::writedb::ofstream::OfStream`), written with NCBI's calls: the header of `.rps` and
-//! `.freq` as one write per integer; for each profile its rows at the end of the file (a
-//! `seekp` to the end), then its offset at its place in the header (a `seekp` there), the `.aux`
-//! text one value and one newline at a time; the last offset and the table of words at the close.
-//! Where the bytes reach the files is the stream's rule, so a run that ends at a closed pipe
-//! (`crate::writedb::ofstream::end_at_closed_pipe`) leaves the bytes NCBI's process, ended by
-//! SIGPIPE there, leaves: the rows of the profiles added, the offsets but the last one's, the
-//! `.aux` text only past a full buffer, no table of words (line RG item T8c). The table of words is
-//! the thin backbone of every profile of the volume, finalized and repacked at the close
+//! (`crate::writedb::ofstream::OfStream`). NCBI writes the header of `.rps` and `.freq` one
+//! integer at a time; for each profile it seeks to the end of the file, writes the rows, seeks
+//! to the profile's place in the header and writes its offset; the `.aux` text one value and one
+//! newline at a time; the last offset and the table of words at the close. Where a run can end
+//! (between two profiles: a closed pipe, `crate::writedb::ofstream::end_at_closed_pipe`, or an
+//! error), the stream has written the header, the rows of every profile added and the offset of
+//! each profile but the last, which it still holds (its seek to the end of the file writes it,
+//! one profile later); the `.aux` text only past a full buffer; no table of words (line RG item
+//! T8c). LOSAT writes the same bytes with one write of the rows for each profile
+//! (`OffsetFile::add`): it keeps the offsets and writes them at the close, or where the run ends
+//! the ones NCBI's stream has written (`OffsetFile`'s `Drop`), so a run that ends leaves NCBI's
+//! bytes without NCBI's two seeks and its write of an offset for each profile. The table of words
+//! is the thin backbone of every profile of the volume, finalized and repacked at the close
 //! (`x_RPS_DbClose`).
 
 use crate::algorithm::pssm_search::lookup::ThinBackbone;
@@ -19,7 +23,7 @@ use crate::algorithm::pssm_search::rows::QueryPssm;
 use crate::core::blast_util::BLASTAA_SIZE;
 use crate::seqdb::rps::{RPS_BACKBONE_SIZE, RPS_HITS_PER_CELL, RPS_MAGIC_NUM_28, RPS_WORDSIZE};
 use crate::utils::os_bytes::path_of_bytes;
-use crate::writedb::ofstream::OfStream;
+use crate::writedb::ofstream::{ended_at_closed_pipe, OfStream};
 
 /// `RPS_DATABASE_VERSION` of makeprofiledb 2.17.0, which writes the 28-letter alphabet.
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:117-122
@@ -82,19 +86,13 @@ pub(super) struct RpsVolume {
     /// `num_seqs`: the profiles the volume is made for.
     num_seqs: usize,
     /// `pssm_file`: the scores (`.rps`).
-    pssm: OfStream,
+    pssm: OffsetFile,
     /// `lookup_file`: the table of words (`.loo`), written at the close.
     lookup_file: OfStream,
     /// `aux_file`: the text of the parameters and of each profile's length and kappa (`.aux`).
     aux: OfStream,
     /// `freq_file`: the frequency ratios (`.freq`).
-    freq: OfStream,
-    /// The end of `.rps` and of `.freq`, where NCBI's `seekp` to the end puts the next profile's
-    /// rows: their header, then the rows written.
-    pssm_end: u64,
-    freq_end: u64,
-    /// The profiles added: the `seq_index` of the next one.
-    added: usize,
+    freq: OffsetFile,
     /// `curr_seq_offset`: the rows of the profiles added, one more for each.
     curr_seq_offset: i32,
     /// The table of words (`lookup`), made by the first profile.
@@ -108,6 +106,73 @@ pub(super) struct RpsVolume {
 /// number and the count, four bytes for each profile before it.
 fn offset_place(seq_index: usize) -> u64 {
     8 + 4 * seq_index as u64
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1170-1181
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1042-1060
+/// `.rps` or `.freq`: the stream, and the offsets of the profiles added (`curr_seq_offset` of
+/// each, little-endian, in the order of their places in the header) that LOSAT writes at the
+/// close (`write_offsets`) or where the run ends (`Drop`). NCBI writes a profile's offset into its
+/// stream after the rows, so the stream holds it until the seek to the end before the next
+/// profile's rows writes it: at every point where the run can end, the file has the offsets of the
+/// profiles added but the last one's. LOSAT writes each profile's rows at once (`add`), as the
+/// stream does at its seek after them, and the offsets then: the bytes on disk are NCBI's
+/// wherever the run ends, without a seek and a write of NCBI's for each offset.
+struct OffsetFile {
+    stream: OfStream,
+    /// The offsets not written yet, 4 bytes for each profile from the first one's place.
+    offsets: Vec<u8>,
+}
+
+impl OffsetFile {
+    /// The file whose stream is `stream` (its header not written yet).
+    fn new(stream: OfStream) -> Self {
+        OffsetFile {
+            stream,
+            offsets: Vec::new(),
+        }
+    }
+
+    /// A profile's rows `rows`, at the end of the file (the header, then the rows written), on
+    /// disk at once, and its offset `offset`, which the file gets later (`write_offsets`).
+    fn add(&mut self, rows: &[u8], offset: i32) {
+        self.stream.write(rows);
+        self.stream.flush();
+        self.offsets.extend_from_slice(&offset.to_le_bytes());
+    }
+
+    /// Writes the first `bytes` bytes of the offsets at their places, then forgets the offsets.
+    fn write_offsets(&mut self, bytes: usize) {
+        if bytes > 0 {
+            self.stream.seekp(offset_place(0));
+            self.stream.write(&self.offsets[..bytes]);
+            self.stream.flush();
+        }
+        self.offsets.clear();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1196-1199
+    /// The close's offsets: the profiles', then the total `total` at the place of the profile
+    /// `num_seqs` (after the last place of the volume's profiles).
+    fn close_offsets(&mut self, num_seqs: usize, total: i32) {
+        self.write_offsets(self.offsets.len());
+        self.stream.seekp(offset_place(num_seqs));
+        self.stream.write(&total.to_le_bytes());
+    }
+}
+
+impl Drop for OffsetFile {
+    /// The offsets that NCBI's stream has written where the run ends before the close: after the
+    /// end at a closed pipe every one but the last, which NCBI's stream, lost with its process,
+    /// still holds; otherwise every one, which NCBI's stream writes as its destructor closes it
+    /// (an error that ends the run).
+    fn drop(&mut self) {
+        let mut bytes = self.offsets.len();
+        if ended_at_closed_pipe() {
+            bytes = bytes.saturating_sub(4);
+        }
+        self.write_offsets(bytes);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:725-783
@@ -142,25 +207,21 @@ pub(super) fn open_volume(
                  its 32-bit integers)"
             ))
         })?;
-    let header_end = offset_place(num_seqs + 1);
     let mut volume = RpsVolume {
         name: name.to_vec(),
         num_seqs,
-        pssm,
+        pssm: OffsetFile::new(pssm),
         lookup_file,
         aux,
-        freq,
-        pssm_end: header_end,
-        freq_end: header_end,
-        added: 0,
+        freq: OffsetFile::new(freq),
         curr_seq_offset: 0,
         lookup: None,
         threshold: 0,
         params,
     };
     for value in [RPS_DATABASE_VERSION, count].into_iter().chain(0..=count) {
-        volume.pssm.write(&value.to_le_bytes());
-        volume.freq.write(&value.to_le_bytes());
+        volume.pssm.stream.write(&value.to_le_bytes());
+        volume.freq.stream.write(&value.to_le_bytes());
     }
     volume.check()?;
     Ok(volume)
@@ -256,10 +317,10 @@ impl RpsVolume {
     /// close that its system call refused), which NCBI does not test.
     fn check(&self) -> Result<(), RpsError> {
         let files = [
-            (&self.pssm, "rps"),
+            (&self.pssm.stream, "rps"),
             (&self.lookup_file, "loo"),
             (&self.aux, "aux"),
-            (&self.freq, "freq"),
+            (&self.freq.stream, "freq"),
         ];
         match files.iter().find(|(stream, _)| stream.fail()) {
             Some((_, extension)) => Err(RpsError::Io(std::io::Error::other(format!(
@@ -306,24 +367,18 @@ impl RpsVolume {
     /// `seq_size` positions, by row or by position), `freq_matrix` the frequency ratios as
     /// `GetFreqRatios` holds them for a profile by row (28 rows of `seq_size` values, row by
     /// row), `kappa` the profile's. In `.rps` and `.freq` the rows go to the end of the file and
-    /// the profile's offset (`curr_seq_offset`) to its place in the header.
+    /// the profile's offset (`curr_seq_offset`) to its place in the header (`OffsetFile::add`).
     pub(super) fn add_profile(&mut self, profile: &ProfileData<'_>) -> Result<(), RpsError> {
         let seq_size = profile.seq_size;
         let next_offset = self.next_offset(seq_size)?;
         let rows = pssm_rows(profile.scores, profile.num_rows, profile.by_row, seq_size)?;
-        let place = offset_place(self.added);
-        let offset = self.curr_seq_offset.to_le_bytes();
         let mut bytes = Vec::with_capacity(rows.rows.len() * BLASTAA_SIZE * 4);
         for row in &rows.rows {
             for score in row {
                 bytes.extend_from_slice(&score.to_le_bytes());
             }
         }
-        self.pssm.seekp(self.pssm_end);
-        self.pssm.write(&bytes);
-        self.pssm_end += bytes.len() as u64;
-        self.pssm.seekp(place);
-        self.pssm.write(&offset);
+        self.pssm.add(&bytes, self.curr_seq_offset);
         let lookup = self
             .lookup
             .as_mut()
@@ -336,14 +391,9 @@ impl RpsVolume {
         );
         bytes.clear();
         freq_rows(profile, &mut bytes)?;
-        self.freq.seekp(self.freq_end);
-        self.freq.write(&bytes);
-        self.freq_end += bytes.len() as u64;
-        self.freq.seekp(place);
-        self.freq.write(&offset);
+        self.freq.add(&bytes, self.curr_seq_offset);
         self.aux_line(seq_size.to_string().as_bytes());
         self.aux_line(c_scientific(profile.kappa).as_bytes());
-        self.added += 1;
         self.curr_seq_offset = next_offset;
         self.check()
     }
@@ -351,18 +401,14 @@ impl RpsVolume {
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1190-1301
     // NCBI writes the backbone and the overflow each as one write; written here in pieces, they
     // reach the file whole by its close, and nothing can end the run between.
-    /// `x_RPS_DbClose`: the last offset of both files (the total, at the place after the
-    /// profiles'), then the table of words: "Empty database" without a profile; else finalized
-    /// (`eBackbone`), each hit moved to the end of its word, the overflow of the cells of more
-    /// than three hits packed, and written after the header with the backbone filled to 32,769
-    /// cells; then the files are flushed and closed in NCBI's order.
+    /// `x_RPS_DbClose`: the offsets of both files (the profiles' and the total, at the place after
+    /// the profiles', `OffsetFile::close_offsets`), then the table of words: "Empty database"
+    /// without a profile; else finalized (`eBackbone`), each hit moved to the end of its word, the
+    /// overflow of the cells of more than three hits packed, and written after the header with the
+    /// backbone filled to 32,769 cells; then the files are flushed and closed in NCBI's order.
     pub(super) fn close(mut self) -> Result<(), RpsError> {
-        let place = offset_place(self.num_seqs);
-        let total = self.curr_seq_offset.to_le_bytes();
-        self.pssm.seekp(place);
-        self.pssm.write(&total);
-        self.freq.seekp(place);
-        self.freq.write(&total);
+        self.pssm.close_offsets(self.num_seqs, self.curr_seq_offset);
+        self.freq.close_offsets(self.num_seqs, self.curr_seq_offset);
         let Some(lookup) = self.lookup.take() else {
             return Err(RpsError::Blast("Empty database"));
         };
@@ -421,9 +467,9 @@ impl RpsVolume {
         write_int4s(&mut self.lookup_file, overflow[..cursor].iter().copied());
         for stream in [
             &mut self.lookup_file,
-            &mut self.pssm,
+            &mut self.pssm.stream,
             &mut self.aux,
-            &mut self.freq,
+            &mut self.freq.stream,
         ] {
             stream.flush();
             stream.close();

@@ -1521,6 +1521,9 @@ textarea {
 .blast-row .primary-action {
   padding: 10px 22px;
   font-size: 1.05em;
+  /* The label's width does not change with the count ("Run LOSAT", "Run LOSAT (2 runs)", up to 99 runs), so the line beside the
+     button does not move under a press while the engine answers for the words just typed (line WQA's D33, R1 M1). */
+  min-width: 14.5em;
 }
 
 /* W4b search: the Job Title on a run's card. */

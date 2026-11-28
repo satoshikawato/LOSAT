@@ -54,7 +54,7 @@ use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::read_xml::XmlStyle;
 use crate::report::serial::asn_types::stream::{guess_encoding, Encoding, GuessStop};
 use crate::report::serial::asn_types::view::V;
-use crate::report::serial::asn_types::write::write_value;
+use crate::report::serial::asn_types::write::ValueWriter;
 use crate::report::serial::asn_types::ReadError;
 use crate::report::serial::encoder::{Encoder, SerialError};
 use crate::report::serial::seqalign::{
@@ -778,12 +778,13 @@ impl SeqAnnotDocument for ArchiveDocument<'_> {
         self.desc
     }
 
-    /// Each Seq-align as the archive holds it (`asn_types::write::write_value`): NCBI's
-    /// formatter writes the objects it read.
+    /// Each Seq-align as the archive holds it (`asn_types::write::write_value`, by one
+    /// `ValueWriter` for them all): NCBI's formatter writes the objects it read.
     fn write_aligns<E: Encoder>(&self, enc: &mut E) {
+        let mut writer = ValueWriter::new();
         for align in self.aligns {
             enc.element();
-            write_value(enc, align.ty, align.value);
+            writer.write(enc, align.ty, align.value);
             if let Some(spill) = self.spill {
                 spill.borrow_mut().after_element(enc);
             }

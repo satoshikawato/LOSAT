@@ -1302,11 +1302,17 @@ fn the_stored_messages_are_read_by_their_code() {
         }]
     );
 
+    // (`true`: the archive's NULL elements are looked for, as when the reader kept one.)
     let archive = |body: &str, messages: &str| {
-        Archive::from_value(value(
-            named::BLAST4_ARCHIVE,
-            &format!("Blast4-archive ::= {{ request {{ body {body} }}, results {{ }}{messages} }}"),
-        ))
+        Archive::from_value(
+            value(
+                named::BLAST4_ARCHIVE,
+                &format!(
+                    "Blast4-archive ::= {{ request {{ body {body} }}, results {{ }}{messages} }}"
+                ),
+            ),
+            true,
+        )
     };
     let error = "get-request-info { request-id \"Error\" }";
     let coded = archive(

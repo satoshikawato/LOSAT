@@ -13,7 +13,7 @@ import { duplicateRunFileMessage, normalizeRunPath } from '../domain/blast-db';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
 import { listNameRefusal, seqdbNameList } from '../domain/list-flags';
-import { buildMakeblastdbArgv, fileListNames, namesOption } from '../domain/tool-argv';
+import { buildMakeblastdbArgv, fileListNames, namesOption, runFileNames } from '../domain/tool-argv';
 import { makeblastdbInputType, makeblastdbOptionParameters, toolPrintsKind, type MakeblastdbInputType } from '../domain/tools';
 import type { ToolDirectoryFile, ToolRequest } from './coordinator';
 import {
@@ -113,7 +113,7 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     const earlier = state.runFiles.find((entry) => entry.name === path && entry.flag === '-mask_data' && entry.origin?.kind === 'made');
     if (path !== undefined && earlier !== undefined) {
       const replaced: ToolExtraFile = { ...earlier, key: `rf-${this.nextKey++}`, size: file.size, file, origin };
-      const names = fileListNames(state.values['-mask_data']);
+      const names = fileListNames(state.values['-mask_data'], runFileNames(state.runFiles));
       this.set({
         runFiles: Object.freeze(state.runFiles.map((entry) => (entry === earlier ? replaced : entry))),
         runFilesError: undefined,
@@ -279,6 +279,7 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
       values: state.values,
       ...(state.description === undefined ? {} : { description: state.description }),
       extra,
+      fileNames: runFileNames(state.runFiles),
     });
   }
 

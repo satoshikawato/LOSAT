@@ -7,7 +7,9 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:354
 
 use super::rows::PssmRows;
-use crate::algorithm::blastp::gapalign::adjust_subject_range;
+use crate::algorithm::blastp::gapalign::{
+    adjust_subject_range, gap_dp_reserve_band, gap_dp_reserve_initial, BlastGapDp,
+};
 use crate::common::GapEditOp;
 // The traceback's result, which the Smith-Waterman round loop reads (one owner of the loop).
 use crate::core::composition_adjustment::smith_waterman::SwXdropTraceback;
@@ -27,20 +29,14 @@ const SCRIPT_EXTEND_GAP_B: u8 = 0x40;
 /// alignment never meets it; kept for the statement order of `ALIGN_EX`.
 const FENCE_SENTRY: u8 = 201;
 
-/// The DP cell of NCBI's `BlastGapDP`.
-#[derive(Clone, Copy)]
-struct GapDp {
-    best: i32,
-    best_gap: i32,
-}
-
-/// The memory of the PSSM gapped kernels (`gap_align->dp_mem` and the traceback rows of
-/// `ALIGN_EX`), kept from one alignment to the next as NCBI keeps its `BlastGapAlignStruct`.
-/// NCBI's `dp_mem` grows with `dp_mem_alloc` and its cells are written before they are read;
-/// here the vector holds `N + 2` cells of each extension (the most the DP addresses), so the
-/// values are the same and only the allocation differs.
+/// The memory of the PSSM gapped kernels (`gap_align->dp_mem` with its `dp_mem_alloc`, and the
+/// traceback rows of `ALIGN_EX`), kept from one alignment to the next as NCBI keeps its
+/// `BlastGapAlignStruct`. The DP cells grow with NCBI's window (`gap_dp_reserve_initial`,
+/// `gap_dp_reserve_band`: the band that the X-drop test reaches), not with the subject's letters.
 pub(crate) struct PssmGapScratch {
-    dp: Vec<GapDp>,
+    dp: Vec<BlastGapDp>,
+    /// NCBI's `dp_mem_alloc` (`BLAST_GapAlignStructNew` starts it at 1000).
+    dp_mem_alloc: usize,
     /// The traceback rows of `ALIGN_EX`, one after the other.
     cells: Vec<u8>,
     /// For each row: its first cell in `cells` and its `edit_start_offset`.
@@ -50,25 +46,27 @@ pub(crate) struct PssmGapScratch {
 }
 
 impl PssmGapScratch {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:313-319
     pub(crate) fn new() -> Self {
         Self {
             dp: Vec::new(),
+            dp_mem_alloc: 1000,
             cells: Vec::new(),
             rows: Vec::new(),
             ops: Vec::new(),
         }
     }
+}
 
-    fn reserve_dp(&mut self, n: usize) {
-        if self.dp.len() < n + 2 {
-            self.dp.resize(
-                n + 2,
-                GapDp {
-                    best: MININT,
-                    best_gap: MININT,
-                },
-            );
-        }
+/// NCBI's `num_extra_cells`: the cells that the X-drop test can reach past the band's last cell.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:797-800
+#[inline(always)]
+fn num_extra_cells(x_dropoff: i32, gap_extend: i32, n: usize) -> usize {
+    if gap_extend > 0 {
+        (x_dropoff / gap_extend + 3) as usize
+    } else {
+        n + 3
     }
 }
 
@@ -252,9 +250,12 @@ fn semi_gapped_align_score_only<R: PssmRows, const REVERSE: bool>(
     if n == 0 || m == 0 {
         return (0, 0, 0);
     }
-    scratch.reserve_dp(n);
-    // The cells the DP addresses: 0 to N + 1 (`b_size` is at most N + 1).
-    let dp = &mut scratch.dp[..n + 2];
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:797-807
+    let extra = num_extra_cells(x_dropoff, gap_extend, n);
+    let PssmGapScratch {
+        dp, dp_mem_alloc, ..
+    } = scratch;
+    gap_dp_reserve_initial(dp, dp_mem_alloc, extra, n);
     // The subject letters of the DP's columns, taken once (D5 of PS12s): column `b_index` reads
     // `subject_letter(subject, s_base, n, b_index, REVERSE)`, which is a letter of `subject` for
     // the columns `inside` and 0 (the sentinel's value, NCBI's read past it) for the others.
@@ -293,7 +294,7 @@ fn semi_gapped_align_score_only<R: PssmRows, const REVERSE: bool>(
         let hi = inside.end.clamp(lo, end);
         {
             // One cell of the row (the statements of NCBI's inner loop, in its order).
-            let mut cell = |b_index: usize, dp_cell: &mut GapDp, letter: u8| {
+            let mut cell = |b_index: usize, dp_cell: &mut BlastGapDp, letter: u8| {
                 let mut score_gap_col = dp_cell.best_gap;
                 let next_score = dp_cell.best + matrix_row[letter as usize];
                 if score < score_gap_col {
@@ -352,6 +353,8 @@ fn semi_gapped_align_score_only<R: PssmRows, const REVERSE: bool>(
         if first_b_index == b_size {
             break;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:923-931
+        gap_dp_reserve_band(dp, dp_mem_alloc, last_b_index, extra, n);
         if last_b_index + 1 < b_size {
             b_size = last_b_index + 1;
         } else {
@@ -500,13 +503,16 @@ fn align_ex<R: PssmRows>(
     if n == 0 || m == 0 {
         return (0, 0, 0, Vec::new());
     }
-    scratch.reserve_dp(n);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:457-468
+    let extra = num_extra_cells(x_dropoff, gap_extend, n);
     let PssmGapScratch {
         dp,
+        dp_mem_alloc,
         cells,
         rows: trace_rows,
         ops,
     } = scratch;
+    gap_dp_reserve_initial(dp, dp_mem_alloc, extra, n);
     cells.clear();
     trace_rows.clear();
     // Row 0 (`edit_script[0]`): its cells 1.. are gaps in A; cell 0 is never read.
@@ -600,6 +606,8 @@ fn align_ex<R: PssmRows>(
         if first_b_index == b_size || *fence_hit {
             break;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-649
+        gap_dp_reserve_band(dp, dp_mem_alloc, last_b_index, extra, n);
         if last_b_index + 1 < b_size {
             b_size = last_b_index + 1;
         } else {

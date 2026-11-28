@@ -8,7 +8,9 @@
   second query's hit on another database's `ref|NP_100001.1|` is written with the first sequence's names, as NCBI BLAST+
   writes it. LOSAT still refuses, naming the holder, where it does not write that record as NCBI BLAST+ does: the
   pairwise reports (outfmt 0 to 4) and outfmt 17, a holder that the call does not report, a holder shorter than the
-  subject's aligned range (or, in TBLASTN and TBLASTX, of another length), a holder of other letters in BLASTP (and in a
-  table that prints identities in BLASTX, TBLASTN and TBLASTX), a table whose only field of the subject is `slen`, a
+  subject's aligned range in BLASTX (or, in TBLASTN and TBLASTX, of another length), a holder of other letters in a
+  TBLASTN table that prints identities without the aligned letters, a table whose only field of the subject is `slen`
+  where a query batch's prefetch is off, a
   subject whose loads give it in one place and itself or a failing lookup in another, a positive id list, a header with a
-  UTF8String, taxonomy database texts, and an id that differs from the holder's in letter case only.
+  UTF8String, taxonomy database texts, a holder whose lines do not hold the subject's id or hold it only as an id
+  of another type of the same accession, and an id that differs from the holder's in letter case only.

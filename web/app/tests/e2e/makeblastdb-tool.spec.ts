@@ -9,7 +9,9 @@
 // files of the native command line's run just before or just after the browser's byte for byte but the seconds of their
 // times (run in a folder of the same files, in the browser's time zone; support/makeblastdb-native.ts), and the searches
 // that "Use as Database (-db)" starts (blastn; blastp with -db_soft_mask 21) on the database in its run's folder
-// (run1/db, run3/pdb) write the native command line's outfmt 0 and 6 on the files that the browser made, in that folder.
+// (run1/db, run3/pdb) write the native command line's outfmt 0 and 6 on the files that the browser made, in that folder;
+// and a WindowMasker run's mask data handed over ("Use as -mask_data in makeblastdb") makes the database that the native
+// windowmasker and makeblastdb make on the same files.
 //
 // LOSAT_E2E_SCREENSHOT_DIR=<dir> saves the screens (empty tab, filled form, finished run, Search after "Use as Database
 // (-db)") at 1280 and 390 px, in the light and the dark colour scheme.
@@ -188,6 +190,39 @@ test('makeblastdb tab: the options in the groups of -xmlhelp, the command, a mis
   expect(external, 'requests outside the origin').toEqual([]);
 });
 
+test("makeblastdb input: the Input block says why a name is refused, and when the pasted FASTA's name is taken (WW4b2 R3 F3, F4)", async ({ page }) => {
+  const external = trackNet(page);
+  await openMakeblastdb(page);
+  await page.getByTestId('mk-param-dbtype-nucl').check();
+
+  // A name that -in's list cannot carry (the command line reads a double quote as the end of a quoted name).
+  await page.getByTestId('mk-input-files').setInputFiles({ name: 'my"seqs.fa', mimeType: 'text/plain', buffer: Buffer.from(NUCL_FASTA) });
+  const problem = page.getByTestId('mk-input-block').getByTestId('mk-input-error');
+  await expect(problem).toHaveText('A file named "my"seqs.fa" cannot be in -in: a double quote there starts or ends a name.');
+  await expect(page.getByTestId('mk-input-list')).toHaveCount(0);
+
+  // The pasted FASTA's name taken by an opened file: one rule whichever came first, said in the Input block.
+  const taken = 'A file named "input.fa" is open, the name of the pasted FASTA in the run directory: remove the file or clear the pasted text.';
+  await page.getByTestId('mk-input-files').setInputFiles({ name: 'input.fa', mimeType: 'text/plain', buffer: Buffer.from(NUCL_FASTA) });
+  await expect(problem).toHaveCount(0);
+  await page.getByTestId('mk-fasta-input').fill(NUCL_FASTA);
+  await expect(problem).toHaveText(taken);
+  await expect(page.getByTestId('mk-argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await expect(page.getByTestId('mk-argv-validation')).toHaveText(taken);
+  await shots(page, 'mk-input-problem');
+  await expectLayout(page, 'mk-panel', MOBILE);
+  await page.setViewportSize(DESKTOP);
+  await page.getByTestId('mk-input-remove-0').click();
+  await expect(problem).toHaveCount(0);
+  await page.getByTestId('mk-input-files').setInputFiles({ name: 'input.fa', mimeType: 'text/plain', buffer: Buffer.from(NUCL_FASTA) });
+  await expect(problem).toHaveText(taken);
+  await page.getByTestId('mk-fasta-clear').click();
+  await expect(problem).toHaveCount(0);
+  await expect(page.getByTestId('mk-command')).toHaveText('losat makeblastdb -in input.fa -dbtype nucl');
+
+  expect(external, 'requests outside the origin').toEqual([]);
+});
+
 test('makeblastdb run: the files it made, Download all, Use as Database (-db), Use as Repeats database (-filtering_db)', async ({ page }) => {
   const external = trackNet(page);
   await openMakeblastdb(page);
@@ -235,7 +270,7 @@ test('makeblastdb run: the files it made, Download all, Use as Database (-db), U
 });
 
 test("WindowMasker's mask data goes to makeblastdb's -mask_data (Use as -mask_data in makeblastdb)", async ({ page }) => {
-  test.skip(BUILD_HAS_ENGINE, 'the fake engine masks without counts; the real engine run of -mask_data is the next test');
+  test.skip(BUILD_HAS_ENGINE, "the fake engine masks without counts; the real engine's hand-over is the test \"real engine: WindowMasker's mask data …\"");
   await openSearch(page);
   await page.getByTestId('tab-windowmasker').click();
   await page.getByTestId('wm-stage-mask').check();
@@ -388,6 +423,61 @@ test('real engine: the databases of the tab are the native command line\'s, and 
       nativeSearch(['blastp', '-db', 'run3/pdb', '-query', 'q.faa', '-db_soft_mask', '21'], protFiles, format),
     );
   }
+
+  expect(external, 'requests outside the origin').toEqual([]);
+});
+
+test("real engine: WindowMasker's mask data handed to makeblastdb's -mask_data makes the native command line's database", async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'requires built Wasm reactors');
+  test.skip(NATIVE === undefined, NO_NATIVE_REASON ?? 'requires the native losat binary');
+  const external = trackNet(page);
+  const fasta = readFileSync(join(LOSAT, 'tests/windowmasker/in/multi.fa'));
+  const counts = readFileSync(join(LOSAT, 'tests/winmask/counts/dm2L_u9.binary'));
+
+  // WindowMasker's Mask with -outfmt maskinfo_asn1_bin (to its standard output), then "Use as -mask_data in makeblastdb".
+  await openSearch(page);
+  await page.getByTestId('tab-windowmasker').click();
+  await page.getByTestId('wm-stage-mask').check();
+  await page.getByTestId('wm-ustat-file').setInputFiles({ name: 'dm2L_u9.binary', mimeType: 'application/octet-stream', buffer: counts });
+  await page.getByTestId('wm-fasta-files').setInputFiles({ name: 'multi.fa', mimeType: 'application/octet-stream', buffer: fasta });
+  await expect(page.locator('[data-testid="wm-fasta-list"] > li').first()).toHaveAttribute('data-status', 'ready', { timeout: 60_000 });
+  await page.getByTestId('wm-options-toggle').click();
+  await page.getByTestId('wm-param-outfmt').selectOption('maskinfo_asn1_bin');
+  await expect(page.getByTestId('wm-command')).toHaveText('losat windowmasker -ustat dm2L_u9.binary -in multi.fa -outfmt maskinfo_asn1_bin');
+  await expect(page.getByTestId('wm-argv-validation')).not.toHaveAttribute('data-state', 'checking');
+  await page.getByTestId('wm-run-losat').click();
+  await waitStatus(page, 1, 'completed');
+  await page.getByTestId('tool-use-as-mask-data').click();
+  await expect(page.getByTestId('mk-param-mask_data')).toHaveValue('windowmasker-run1.asnb');
+
+  // makeblastdb on the same FASTA with that mask data.
+  await page.getByTestId('mk-input-files').setInputFiles({ name: 'multi.fa', mimeType: 'text/plain', buffer: fasta });
+  await page.getByTestId('mk-param-dbtype-nucl').check();
+  await page.getByTestId('mk-param-out').fill('wmdb');
+  await expect(page.getByTestId('mk-command')).toHaveText('losat makeblastdb -in multi.fa -dbtype nucl -mask_data windowmasker-run1.asnb -out wmdb');
+
+  // The native command line's windowmasker and makeblastdb on the same files.
+  const maskFolder = folderOf(new Map([['dm2L_u9.binary', counts], ['multi.fa', fasta]]));
+  let mask: Buffer;
+  try {
+    const run = spawnSync(NATIVE!, ['windowmasker', '-ustat', 'dm2L_u9.binary', '-in', 'multi.fa', '-outfmt', 'maskinfo_asn1_bin'], { cwd: maskFolder, maxBuffer: 1 << 28 });
+    if (run.status !== 0) throw new Error(`native windowmasker exited ${run.status}: ${run.stderr.toString()}`);
+    mask = run.stdout;
+  } finally {
+    rmSync(maskFolder, { recursive: true, force: true });
+  }
+  const argv = ['makeblastdb', '-in', 'multi.fa', '-dbtype', 'nucl', '-mask_data', 'windowmasker-run1.asnb', '-out', 'wmdb'];
+  const inputs = new Map([
+    ['multi.fa', fasta],
+    ['windowmasker-run1.asnb', mask],
+  ]);
+  const before = nativeMade(argv, inputs);
+  await runMakeblastdb(page, 2);
+  const made = await downloadAll(page);
+  const after = nativeMade(argv, inputs);
+  // The mask's column (.naa, .nab, .nac) is among the files: the mask data was read.
+  expect([...made.files.keys()]).toEqual(expect.arrayContaining(['wmdb.naa', 'wmdb.nab', 'wmdb.nac']));
+  expect(maskedFiles(made.files)).toEqual(asNative(maskedFiles(made.files), [maskedFiles(before.files), maskedFiles(after.files)]));
 
   expect(external, 'requests outside the origin').toEqual([]);
 });

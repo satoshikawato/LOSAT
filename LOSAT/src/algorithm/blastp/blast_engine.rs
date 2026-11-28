@@ -2778,6 +2778,8 @@ fn write_blastp_tabular_hit_lists(
                     gap_opens: hsp.gapopen,
                 }
                 .within_query_range(hsp.gap_info.as_deref().unwrap_or_default());
+                // The Seq-align's ends (`BlastpHsp::seqalign_ends`).
+                let (q_end, s_end) = hsp.seqalign_ends();
                 crate::report::outfmt6::write_hit_fields_bytes(
                     writer,
                     query_id,
@@ -2789,9 +2791,9 @@ fn write_blastp_tabular_hit_lists(
                     hsp.mismatch,
                     counts.gap_opens,
                     hsp.q_start,
-                    hsp.q_end,
+                    q_end,
                     hsp.s_start,
-                    hsp.s_end,
+                    s_end,
                     hsp.e_value,
                     hsp.bit_score,
                     &config,
@@ -3268,6 +3270,14 @@ impl<'a> ShownLetters<'a> {
         }
     }
 
+    /// The number of letters.
+    fn letter_count(self) -> usize {
+        match self {
+            Self::Ascii(letters) | Self::Bioseq(letters) => letters.len(),
+            Self::Stored(residues) => residues.len(),
+        }
+    }
+
     /// The letter at `index` (0-based).
     fn get(self, index: usize) -> Option<u8> {
         match self {
@@ -3553,7 +3563,10 @@ fn recount_shown_identities(
                         })
                 } else {
                     query.recounted() || subject.recounted()
-                };
+                }
+                // A Seq-align that runs past the end of its query or subject (a PHI-BLAST
+                // HSP's, `BlastpHsp::seqalign_ends`), whose rows show gaps there.
+                || runs_past_letters(hsp, query, subject);
             if !recounted {
                 continue;
             }
@@ -3563,7 +3576,6 @@ fn recount_shown_identities(
             let mut subject_row = String::new();
             let mut q_index = hsp.q_start.saturating_sub(1);
             let mut s_index = hsp.s_start.saturating_sub(1);
-            let mut complete = true;
             let compared = query.case().compared_letters();
             for op in ops {
                 // A deletion is a gap in the query, an insertion a gap in the subject.
@@ -3573,19 +3585,18 @@ fn recount_shown_identities(
                     GapEditOp::Ins(_) => (true, false),
                 };
                 for _ in 0..op.num() as usize {
+                    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:282-300
+                    // Past the end of the letters, the gap character of the row
+                    // (`alignment::sequence_letter`).
                     let q = if in_query {
-                        query.get(q_index)
+                        query.get(q_index).unwrap_or(b'-')
                     } else {
-                        Some(b'-')
+                        b'-'
                     };
                     let s = if in_subject {
-                        subject.get(s_index)
+                        subject.get(s_index).unwrap_or(b'-')
                     } else {
-                        Some(b'-')
-                    };
-                    let (Some(q), Some(s)) = (q, s) else {
-                        complete = false;
-                        break;
+                        b'-'
                     };
                     query_row.push(compared[usize::from(q)] as char);
                     subject_row.push(s.to_ascii_uppercase() as char);
@@ -3593,7 +3604,7 @@ fn recount_shown_identities(
                     s_index += usize::from(in_subject);
                 }
             }
-            if !complete || query_row.len() != hsp.length {
+            if query_row.len() != hsp.length {
                 continue;
             }
             let num_ident = query_row
@@ -3629,6 +3640,13 @@ fn recount_shown_identities(
             };
         }
     }
+}
+
+/// Whether the Seq-align of `hsp` (`BlastpHsp::seqalign_ends`) runs past the last of the `query`
+/// letters or of the `subject` letters.
+fn runs_past_letters(hsp: &BlastpHsp, query: ShownLetters<'_>, subject: ShownLetters<'_>) -> bool {
+    let (q_end, s_end) = hsp.seqalign_ends();
+    q_end > query.letter_count() || s_end > subject.letter_count()
 }
 
 /// The columns (0-based) of the rows of `hit` whose letter on `side` is a gap character, a

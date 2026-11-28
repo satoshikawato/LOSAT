@@ -238,14 +238,16 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                         let (Some(qrow), Some(srow)) = (&row.query_seq, &row.subject_seq) else {
                             bail!("unimplemented BLASTP report alignment for final HSP");
                         };
+                        // The Seq-align's ends (`BlastpHsp::seqalign_ends`).
+                        let (q_end, s_end) = hsp.seqalign_ends();
                         hsps.hsp(&XmlHsp {
                             score: hsp.raw_score,
                             bit_score: hsp.bit_score,
                             evalue: seqalign_evalue_read(hsp.e_value),
                             query_from: hsp.q_start as i32,
-                            query_to: hsp.q_end as i32,
+                            query_to: q_end as i32,
                             hit_from: hsp.s_start as i32,
-                            hit_to: hsp.s_end as i32,
+                            hit_to: s_end as i32,
                             query_frame: 0,
                             hit_frame: 0,
                             qrow: qrow.as_bytes(),

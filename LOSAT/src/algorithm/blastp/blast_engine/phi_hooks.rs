@@ -28,7 +28,8 @@ use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::encoding::EncodedProtein;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{
-    update_best_evalue, BlastpHitList, BlastpHsp, BlastpHspList, PhiOccurrenceIndex,
+    edit_script_ends, update_best_evalue, BlastpHitList, BlastpHsp, BlastpHspList,
+    PhiOccurrenceIndex,
 };
 use crate::algorithm::blastp::x_prelim_compact::{PhiPrelimOrdinal, XPrelimHsp};
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
@@ -45,6 +46,8 @@ use crate::algorithm::tblastx::lookup::{
 };
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::seq_range;
+use crate::common::GapEditOp;
+use crate::config::ScoringMatrix;
 
 thread_local! {
     static PHI_SCRATCH: RefCell<PssmGapScratch> = RefCell::new(PssmGapScratch::new());
@@ -604,12 +607,8 @@ fn long_subject_prelim(
     let hsps = combined
         .iter()
         .map(|merged| {
-            let ordinal = XPrelimHsp {
-                hsp: *merged,
-                e_value: 0.0,
-            }
-            .phi_ordinal()
-            .expect("every PHI part HSP carries its ordinal");
+            let ordinal =
+                PhiPrelimOrdinal::of(merged).expect("every PHI part HSP carries its ordinal");
             let own = &found[ordinal.index()];
             PhiHsp {
                 occurrence: own.occurrence,
@@ -879,7 +878,7 @@ pub(super) fn phi_traceback(
                         preliminary_of(&hsp, q_idx, list.oid as usize, ctx.aa_len).hsp;
                     preliminary.query_end = hsp.query_end;
                     preliminary.subject_end = hsp.subject_end;
-                    let mut final_hsp = crate::algorithm::pssm_search::traceback0::final_hsp(
+                    let mut final_hsp = phi_final_hsp(
                         &preliminary,
                         hsp.edit_script,
                         query_nomask,
@@ -910,6 +909,81 @@ pub(super) fn phi_traceback(
         args.traceback_hitlist_size(),
         sorts_results,
     ))
+}
+
+/// The final HSP of a traced PHI-BLAST HSP (`pssm_search::traceback0::final_hsp`) on the letters
+/// `query` and `subject`. The edit script of an HSP that the merge of a long subject's parts gave
+/// the pattern starts of another occurrence (`long_subject_prelim`) may read past the last letter
+/// of either (`BlastpHsp::seqalign_ends`): its counts then read the gap residue there
+/// (`padded_final_hsp`).
+#[inline]
+fn phi_final_hsp(
+    preliminary: &BlastpPreliminaryHsp,
+    edit_script: Vec<GapEditOp>,
+    query: &[u8],
+    subject: &[u8],
+    matrix: ScoringMatrix,
+) -> BlastpHsp {
+    let (q_end, s_end) = edit_script_ends(
+        preliminary.query_start as usize,
+        preliminary.subject_start as usize,
+        &edit_script,
+    );
+    if q_end <= query.len() && s_end <= subject.len() {
+        return crate::algorithm::pssm_search::traceback0::final_hsp(
+            preliminary,
+            edit_script,
+            query,
+            subject,
+            matrix,
+        );
+    }
+    padded_final_hsp(
+        preliminary,
+        edit_script,
+        query,
+        subject,
+        matrix,
+        q_end,
+        s_end,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:282-300
+/// `phi_final_hsp` of an edit script that reads up to the 0-based ends `q_end` and `s_end`, past
+/// the last letter of `query` or `subject`: the counts on the letters followed by gap residues
+/// (0) up to those ends, the gap character that NCBI's report shows there. NCBI's core counts no
+/// identities for PHI-BLAST (`s_PHITracebackFromHSPList`); its report compares the rows, where a
+/// letter past the end facing a gap is an identity, which the reports' recount gives the HSP
+/// (`recount_shown_identities` of a Seq-align past the letters).
+#[cold]
+#[inline(never)]
+fn padded_final_hsp(
+    preliminary: &BlastpPreliminaryHsp,
+    edit_script: Vec<GapEditOp>,
+    query: &[u8],
+    subject: &[u8],
+    matrix: ScoringMatrix,
+    q_end: usize,
+    s_end: usize,
+) -> BlastpHsp {
+    // Only a sequence whose letters end before the edit script's is copied.
+    let padded = |letters: &[u8], end: usize| -> std::borrow::Cow<'_, [u8]> {
+        if end <= letters.len() {
+            return std::borrow::Cow::Borrowed(letters);
+        }
+        let mut padded = Vec::with_capacity(end);
+        padded.extend_from_slice(letters);
+        padded.resize(end, 0);
+        std::borrow::Cow::Owned(padded)
+    };
+    crate::algorithm::pssm_search::traceback0::final_hsp(
+        preliminary,
+        edit_script,
+        &padded(query, q_end),
+        &padded(subject, s_end),
+        matrix,
+    )
 }
 
 /// Splits a query's final hit list into one hit list per pattern occurrence

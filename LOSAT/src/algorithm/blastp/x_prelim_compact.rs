@@ -64,6 +64,16 @@ impl PhiPrelimOrdinal {
     pub(crate) fn index(self) -> usize {
         self.0
     }
+
+    /// The ordinal that [`XPrelimHsp::with_phi_ordinal`] attached to the preliminary HSP `hsp`, or
+    /// `None` when unset (`query_frame <= 0`).
+    #[inline]
+    pub(crate) fn of(hsp: &BlastpPreliminaryHsp) -> Option<Self> {
+        usize::try_from(hsp.query_frame)
+            .ok()
+            .and_then(|value| value.checked_sub(1))
+            .map(Self)
+    }
 }
 
 impl XPrelimHsp {
@@ -89,10 +99,7 @@ impl XPrelimHsp {
     /// or `None` when unset (`query_frame <= 0`).
     #[inline]
     pub(crate) fn phi_ordinal(&self) -> Option<PhiPrelimOrdinal> {
-        usize::try_from(self.hsp.query_frame)
-            .ok()
-            .and_then(|value| value.checked_sub(1))
-            .map(PhiPrelimOrdinal)
+        PhiPrelimOrdinal::of(&self.hsp)
     }
 }
 

@@ -72,6 +72,30 @@ impl PhiOccurrenceIndex {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:168-246
+/// The 0-based ends (exclusive) that the edit script `ops` reaches from the 0-based starts
+/// `q_offset` and `s_offset`: `Sub` and `Ins` take query letters, `Sub` and `Del` subject letters
+/// (`BlastpHsp::seqalign_ends`).
+#[inline]
+pub(crate) fn edit_script_ends(
+    q_offset: usize,
+    s_offset: usize,
+    ops: &[GapEditOp],
+) -> (usize, usize) {
+    let (mut q, mut s) = (q_offset, s_offset);
+    for op in ops {
+        match *op {
+            GapEditOp::Sub(n) => {
+                q += n as usize;
+                s += n as usize;
+            }
+            GapEditOp::Ins(n) => q += n as usize,
+            GapEditOp::Del(n) => s += n as usize,
+        }
+    }
+    (q, s)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537
 // `BlastpHsp` stores 1-based inclusive starts and ends (`q_start - 1`, `q_end` are NCBI's 0-based
 // half-open `offset` and `end`), and keeps `length` equal to the merged query span.
@@ -161,6 +185,28 @@ impl BlastpHsp {
         usize::try_from(self.length as i64 - self.num_ident as i64 - self.mismatch).unwrap_or(0)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:168-246
+    /// The ends (1-based, inclusive) of the HSP's Seq-align, which every report prints: its
+    /// starts plus the letters of its edit script (`Sub` and `Ins` on the query, `Sub` and `Del`
+    /// on the subject), or its own ends without one (blastx's `Hsp::seqalign_ends`). Every step on
+    /// the HSP reads its own ends (`q_end`, `s_end`: the sorts, culling, `-qcov_hsp_perc`, and
+    /// `qcovhsp`, NCBI's `hsp_percent_coverage` of the BlastHSP). The two differ only for a
+    /// PHI-BLAST HSP that the merge of a long subject's parts gave the pattern starts of another
+    /// query occurrence (`phi_hooks::long_subject_prelim`): its pattern region's operations read
+    /// other letters than its own occurrence's length, so its Seq-align ends before or after its
+    /// own ends, past the end of the query too (shown as gaps, `alignment::sequence_letter`).
+    #[inline]
+    pub(crate) fn seqalign_ends(&self) -> (usize, usize) {
+        match self.gap_info.as_deref() {
+            Some(ops) if !ops.is_empty() => edit_script_ends(
+                self.q_start.saturating_sub(1),
+                self.s_start.saturating_sub(1),
+                ops,
+            ),
+            _ => (self.q_end, self.s_end),
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
     pub(crate) fn from_hit(hit: Hit) -> Self {
         let Hit {
@@ -215,16 +261,18 @@ impl BlastpHsp {
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
+    /// The reports' hit of the HSP: its Seq-align's ends (`seqalign_ends`).
     pub(crate) fn into_hit(self) -> Hit {
+        let (q_end, s_end) = self.seqalign_ends();
         Hit {
             identity: self.identity,
             length: self.length,
             mismatch: self.mismatch,
             gapopen: self.gapopen,
             q_start: self.q_start,
-            q_end: self.q_end,
+            q_end,
             s_start: self.s_start,
-            s_end: self.s_end,
+            s_end,
             e_value: self.e_value,
             bit_score: self.bit_score,
             num_ident: self.num_ident,

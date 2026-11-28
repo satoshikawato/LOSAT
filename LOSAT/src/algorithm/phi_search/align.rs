@@ -464,8 +464,19 @@ fn align_patterns(
     gap_extend: i32,
 ) -> Result<Vec<GapEditOp>, PhiError> {
     let mut ops = Vec::new();
-    let query_region = &query[q_start..q_start + q_len];
-    let subject_region = &subject[s_start..s_start + s_len];
+    // A long subject's merged HSP aligns the pattern region from one occurrence's start with the
+    // length of another (`phi_hooks::long_subject_prelim`), which can pass the last letter of
+    // the query or subject: NCBI then reads past the sequence (its sentinel byte and what follows
+    // in the buffer).
+    let (Some(query_region), Some(subject_region)) = (
+        query.get(q_start..q_start + q_len),
+        subject.get(s_start..s_start + s_len),
+    ) else {
+        return Err(refusal_because(
+            "a pattern region past the end of the query or subject",
+            "reads past the sequence",
+        ));
+    };
     let segments = |query_base: usize, subject_base: usize| Segments {
         rows,
         subject,

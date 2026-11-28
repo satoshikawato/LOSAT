@@ -846,7 +846,7 @@ fn write_tabular_rows<const RPS: bool>(
                         .hsps
                         .iter()
                         .filter(|hsp| hsp.length > 0)
-                        .map(|hsp| (hsp.q_start as u64 - 1, hsp.q_end as u64 - 1)),
+                        .map(|hsp| (hsp.q_start as u64 - 1, hsp.seqalign_ends().0 as u64 - 1)),
                 );
                 coverage_percent(union_length(&mut query_ranges), query_length)
             } else {
@@ -1015,8 +1015,9 @@ fn hsp_rows<'r>(
     }
 }
 
-/// The values of one HSP's row: its Seq-align's coordinates, scores and lengths (`SetFields`),
-/// its `qcovhsp` by its subject's rule `coverage`, `rows` when a field shows them.
+/// The values of one HSP's row: its Seq-align's coordinates (`BlastpHsp::seqalign_ends`), scores
+/// and lengths (`SetFields`), its `qcovhsp` by its subject's rule `coverage`, `rows` when a field
+/// shows them.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1071-1094
 /// The gaps are the alignment's columns that are neither identities nor mismatches
@@ -1027,11 +1028,12 @@ fn tabular_hsp<'r>(
     coverage: QueryCoveragePerHsp,
     rows: Option<(&'r [u8], &'r [u8])>,
 ) -> TabularHsp<'r> {
+    let (q_end, s_end) = hsp.seqalign_ends();
     TabularHsp {
         q_start: hsp.q_start as i64,
-        q_end: hsp.q_end as i64,
+        q_end: q_end as i64,
         s_start: hsp.s_start as i64,
-        s_end: hsp.s_end as i64,
+        s_end: s_end as i64,
         evalue: hsp.e_value,
         bit_score: hsp.bit_score,
         score: hsp.raw_score,
@@ -1043,11 +1045,13 @@ fn tabular_hsp<'r>(
         s_frame: 1,
         rows,
         ops: hsp.gap_info.as_deref().unwrap_or_default(),
-        // The HSP's query letters, in its context and in its Seq-align.
-        qcovhsp: {
-            let span = (hsp.q_end + 1 - hsp.q_start) as i32;
-            coverage.of_hsp(span, span)
-        },
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1222-1226
+        // The HSP's query letters, in its context (its own ends: `Blast_HSPGetQueryCoverage` of
+        // the BlastHSP) and in its Seq-align.
+        qcovhsp: coverage.of_hsp(
+            (hsp.q_end + 1 - hsp.q_start) as i32,
+            (q_end + 1 - hsp.q_start) as i32,
+        ),
     }
 }
 

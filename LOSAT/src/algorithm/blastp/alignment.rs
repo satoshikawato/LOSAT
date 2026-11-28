@@ -114,8 +114,8 @@ fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
         match *op {
             GapEditOp::Sub(n) => {
                 for _ in 0..n as usize {
-                    let q = *query.get(q_index)?;
-                    let s = *subject.get(s_index)?;
+                    let q = sequence_letter(query, q_index);
+                    let s = sequence_letter(subject, s_index);
                     query_aln.push(ncbistdaa_to_ascii(q));
                     subject_aln.push(ncbistdaa_to_ascii(s));
                     if q == s {
@@ -132,7 +132,7 @@ fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
             GapEditOp::Del(n) => {
                 gap_opens += 1;
                 for _ in 0..n as usize {
-                    let s = *subject.get(s_index)?;
+                    let s = sequence_letter(subject, s_index);
                     query_aln.push('-');
                     subject_aln.push(ncbistdaa_to_ascii(s));
                     s_index += 1;
@@ -143,7 +143,7 @@ fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
             GapEditOp::Ins(n) => {
                 gap_opens += 1;
                 for _ in 0..n as usize {
-                    let q = *query.get(q_index)?;
+                    let q = sequence_letter(query, q_index);
                     query_aln.push(ncbistdaa_to_ascii(q));
                     subject_aln.push('-');
                     q_index += 1;
@@ -163,6 +163,16 @@ fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
         gap_opens,
         alignment_len,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:282-300
+/// The letter (NCBIstdaa) at `index` of a row's sequence `letters`: past its end, where a
+/// segment of the alignment runs on (a PHI-BLAST HSP's Seq-align past the end of the query,
+/// `BlastpHsp::seqalign_ends`), the gap character that NCBI's alignment vector fills in for the
+/// letters the sequence lacks (the gap residue 0, shown as `-`).
+#[inline]
+fn sequence_letter(letters: &[u8], index: usize) -> u8 {
+    letters.get(index).copied().unwrap_or(0)
 }
 
 #[cfg(test)]

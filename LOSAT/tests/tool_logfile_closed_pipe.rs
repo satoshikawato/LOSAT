@@ -486,9 +486,6 @@ const CASES: &[Case] = &[
     },
 ];
 
-/// What NCBI's `maskinfo_asn1_bin` writer wrote of `in/defonly2.fa` before the record without
-/// residues (85 bytes).
-
 /// FNV-1a 64 of `bytes`.
 fn fnv1a64(bytes: &[u8]) -> u64 {
     bytes.iter().fold(EMPTY, |hash, &byte| {

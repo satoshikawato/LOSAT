@@ -9,8 +9,8 @@
 //! spread over the binary, was the last code such a run touched, about 1.1 MiB of the binary's
 //! pages, which in a small run raised the most memory the run held (line RG-KB item 9a-4). A
 //! report under a new variable adds the variable to `NAMES`; `LOSAT/tests/exit_reports.rs` reads
-//! the functions `write` calls, and the functions they call, and fails where one reads a variable
-//! that is not in `NAMES`.
+//! the functions `write` calls, and the functions they call, and fails where one names a `LOSAT_*`
+//! variable outside `NAMES`, `xdiag::NAMES` and the switches (a switch read passes).
 //!
 //! No NCBI counterpart: LOSAT's own diagnostics. NCBI BLAST+ has none of them, and this module
 //! changes nothing that NCBI's programs write.

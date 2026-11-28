@@ -28,6 +28,19 @@
 //! not followed, and a test it reads must be in the text of a condition, not in a local
 //! variable (`let on = ..; if on`).
 //!
+//! Limits (what the test does not see):
+//! - A new report called inside a program's arm of the `match` in `cli/main_entry.rs`, or at the
+//!   end of a program's own run function, is not caught: programs print their `LOSAT_TIMING` and
+//!   `LOSAT_X_STATS` lines during their runs, so only the calls after the `match` are checked.
+//! - A condition counts as a guard when it mentions a test, whatever it decides. `||` with a
+//!   counter, an inverted test (`.is_none()`), a positive test whose block returns, a return
+//!   nested in another block, and a closure's `return` all pass.
+//! - Writes other than the print macros, `write!` and `fs::write` are not seen: a method, an
+//!   associated function called by path (`Show::show(n)`), a macro of the file's own, and
+//!   `stderr().write_all(..)`.
+//! - A closure written outside a guard but called under one fails (the safe side): its lines are
+//!   judged where it is written.
+//!
 //! The second test runs one search with no such variable and with each variable alone: without one
 //! no report line is written, and each variable still gives its report.
 //!
@@ -542,11 +555,33 @@ fn entry_ends_with_write(src: &[Source], reports: &[Vec<String>]) -> Vec<String>
         .match_indices("crate::utils::xexit::write()")
         .map(|(at, _)| at)
         .collect();
-    let mut failures: Vec<String> = reports
+    // The calls of main_entry that reach a report of write, by the functions they resolve to.
+    let (e, x) = (
+        src.iter()
+            .position(|f| f.rel == "cli/main_entry.rs")
+            .expect("main_entry"),
+        src.iter()
+            .position(|f| f.rel == "utils/xexit.rs")
+            .expect("xexit"),
+    );
+    let report_fns: Vec<(usize, usize)> = reports
         .iter()
-        .map(|report| report.join("::"))
-        .filter(|report| text.contains(report.as_str()))
-        .map(|report| format!("cli/main_entry.rs calls {report} outside xexit::write"))
+        .flat_map(|report| resolve(src, x, report, 0))
+        .map(|(j, s, _)| (j, s))
+        .collect();
+    let mut failures: Vec<String> = calls_at(&entry.masked, 0, entry.masked.len())
+        .into_iter()
+        .filter(|(_, path)| {
+            resolve(src, e, path, 0)
+                .iter()
+                .any(|&(j, s, _)| report_fns.contains(&(j, s)))
+        })
+        .map(|(_, path)| {
+            format!(
+                "cli/main_entry.rs calls {} outside xexit::write",
+                path.join("::")
+            )
+        })
         .collect();
     let [at] = calls[..] else {
         failures.push(format!("{rule} ({} calls of it)", calls.len()));
@@ -604,6 +639,14 @@ fn every_report_of_the_runs_end_tests_a_listed_variable() {
         .filter(|path| path[0] == "crate")
         .collect();
     assert!(reports.len() > 30, "the calls of xexit::write: {reports:?}");
+    // write's own gate comes first: no report's code runs where the run asks for none.
+    let body: String = String::from_utf8_lossy(&src[k].masked[write.1..=write.2])
+        .split_whitespace()
+        .collect();
+    assert!(
+        body.starts_with("fnwrite(){if!asked(){return;}"),
+        "xexit::write must begin with `if !asked() {{ return; }}`: {body:.80}"
+    );
     let mut tests = Tests {
         src: &src,
         names: &names,

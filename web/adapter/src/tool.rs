@@ -32,7 +32,7 @@ use crate::emit::{
 pub const TOOLS: &[&str] = &["windowmasker", "blast_formatter", "makeblastdb"];
 
 /// A tool that a tool run runs (`TOOLS`).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum ToolKind {
     WindowMasker,
     BlastFormatter,
@@ -77,9 +77,11 @@ pub fn run(words: &[&str]) -> Result<(), String> {
             &mut out,
             &mut Diagnostics,
         ),
-        // Through the file system of the run's working directory (D-WW4b-1): no receiver.
+        // Through the file system of the run's working directory (D-WW4b-1); a `-logfile` file
+        // elsewhere on stream 12 (`ToolFiles::writes`).
         ToolKind::Makeblastdb => losat::web_adapter::run_makeblastdb(
             arguments,
+            &files(),
             &mut io::empty(),
             &mut out,
             &mut Diagnostics,
@@ -132,6 +134,10 @@ struct ToolFiles {
     next: AtomicU32,
     read: Vec<Vec<u8>>,
     out_read: Vec<Vec<u8>>,
+    /// Whether the run writes the files of its working directory through the file system
+    /// (makeblastdb, D-WW4b-1; `FileReceiver::writes_working_directory`): only its files elsewhere
+    /// (`-logfile /tmp/mk.log`) come here.
+    writes: bool,
 }
 
 impl ToolFiles {
@@ -139,13 +145,15 @@ impl ToolFiles {
         let (read, out_read) = match kind {
             ToolKind::WindowMasker => windowmasker_read_files(arguments),
             ToolKind::BlastFormatter => blast_formatter_read_files(arguments),
-            // makeblastdb's files go through the file system (`run`): it has no receiver.
+            // makeblastdb's files of the working directory go through the file system (`run`),
+            // where the command line's refusal of a log naming an input applies.
             ToolKind::Makeblastdb => (Vec::new(), Vec::new()),
         };
         Self {
             next: AtomicU32::new(0),
             read,
             out_read,
+            writes: kind == ToolKind::Makeblastdb,
         }
     }
 }
@@ -166,6 +174,10 @@ impl FileReceiver for ToolFiles {
 
     fn output_read_files(&self) -> &[Vec<u8>] {
         &self.out_read
+    }
+
+    fn writes_working_directory(&self) -> bool {
+        self.writes
     }
 }
 

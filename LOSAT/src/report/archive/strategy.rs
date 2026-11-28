@@ -59,14 +59,18 @@ use super::writer::{encode_strategy_request, EncodedStrategyRequest, RequestInpu
 use super::{ArchiveHandle, ArchiveRequest, HandleCarry, OptionsHandle, SearchedContext0};
 use crate::report::diag_log::{Posts, ERROR};
 use crate::report::ostream::{emit_strategy_posts, StrategyStream};
-use crate::report::run_files::{FileReceiver, RunFileName, RunFiles, StrategyTarget as Target};
+use crate::report::run_files::{
+    Opening, RunFileName, RunFiles, SharedOpening, StrategyTarget as Target,
+};
 use crate::report::serial::encoder::BufferPiece;
 
 // No NCBI counterpart: Rust abstraction over `ostream::StrategyStream` (CLI disk/device sinks),
-// `ReceivedFile` (LOSAT Web in-memory sink), and `NoSink` (refused/null sinks).
+// `ReceivedFile` (the same stream over LOSAT Web's file of the run), and `NoSink` (refused/null
+// sinks).
 /// The stream of a strategy file: writes each encoded `Blast4-request` (with NCBI's object-stream
 /// `BufferPiece` writes and `803.7` posts) as NCBI's `CNcbiOfstream` writes it
-/// (`ostream::StrategyStream`), or into memory for LOSAT Web (`ReceivedFile`).
+/// (`ostream::StrategyStream`), to the file system or to LOSAT Web's file of the run
+/// (`ReceivedFile`).
 pub trait StrategySink: Send {
     /// Writes one complete `Blast4-request`, interleaving `posts` (`(written_before_post, line)`)
     /// with NCBI's buffer flushes and posting any write failure to `diagnostics` (and `archive`
@@ -89,11 +93,10 @@ pub trait StrategySink: Send {
         archive: Option<&ArchiveHandle>,
     ) -> std::io::Result<()>;
 
-    /// The run has ended (`end_run`): the file is complete. LOSAT Web's file goes to the run's
-    /// receiver here (`ReceivedFile`); a file of the disk is the file system's already.
-    fn hand_over(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
+    /// The run has ended (`end_run`): the file is complete. LOSAT Web's file closes here
+    /// (`ReceivedFile`), and goes to the run's receiver with the run's other files
+    /// (`RunFiles::end`); a file of the disk is the file system's already.
+    fn hand_over(&mut self) {}
 }
 
 // No NCBI counterpart: sink for refused targets (`-`) and LOSAT Web's `/dev/null` that discards
@@ -150,25 +153,21 @@ impl StrategySink for StrategyStream {
     }
 }
 
-/// The strategy file of a caller without files (LOSAT Web, `RunFiles::Receiver`): the file in
-/// memory under the name that the command line writes it to, which the receiver gets whole where
-/// the run ends (`end_run`, `hand_over`: its error is the run's internal error), or, for a run
-/// that stops before its export is made, when the made file is dropped: the receiver gets the
-/// file that the command line leaves then, empty (`create_strategy_file`). (No NCBI counterpart:
+/// The strategy file of a caller without files (LOSAT Web, `RunFiles::Receiver`): the command
+/// line's stream of the file (`ostream::StrategyStream`, with NCBI's buffer and its flushes) over
+/// the run's file in the run's table (`RunFiles::open_file`, opened where `create_strategy_file_in`
+/// makes it), so that the file has the command line's bytes also where another option of the run
+/// writes the same file (line RG item F1w-r3). `hand_over` closes it where the run ends
+/// (`end_run`), as the command line's run writes nothing more to it; the receiver gets it when the
+/// run's files end (`RunFiles::end`), also for a run that stops before its export is made: then
+/// the file that the command line leaves, empty (`create_strategy_file`). (No NCBI counterpart:
 /// NCBI writes a file.)
-pub struct ReceivedFile {
-    name: Vec<u8>,
-    bytes: Vec<u8>,
-    receiver: Arc<dyn FileReceiver>,
-    /// The receiver has got the file (`hand_over`).
-    handed: bool,
-}
+pub struct ReceivedFile(Option<StrategyStream>);
 
 impl std::fmt::Debug for ReceivedFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReceivedFile")
-            .field("name", &String::from_utf8_lossy(&self.name))
-            .field("len", &self.bytes.len())
+            .field("open", &self.0.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -177,18 +176,19 @@ impl StrategySink for ReceivedFile {
     fn write_request(
         &mut self,
         bytes: &[u8],
-        _pieces: &[BufferPiece],
+        pieces: &[BufferPiece],
         posts: &[(u64, Vec<u8>)],
         diagnostics: &mut dyn Write,
         archive: Option<&ArchiveHandle>,
     ) -> std::io::Result<()> {
         debug_assert!(
-            !self.handed,
+            self.0.is_some(),
             "a write of the strategy file after its run ended"
         );
-        let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
-        self.bytes.extend_from_slice(bytes);
-        Ok(())
+        match self.0.as_mut() {
+            Some(stream) => stream.write_object(bytes, pieces, posts, diagnostics, archive),
+            None => Ok(()),
+        }
     }
 
     fn write_partial(
@@ -199,37 +199,17 @@ impl StrategySink for ReceivedFile {
         archive: Option<&ArchiveHandle>,
     ) -> std::io::Result<()> {
         debug_assert!(
-            !self.handed,
+            self.0.is_some(),
             "a write of the strategy file after its run ended"
         );
-        let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
-        self.bytes.extend_from_slice(bytes);
-        Ok(())
-    }
-
-    fn hand_over(&mut self) -> std::io::Result<()> {
-        if std::mem::replace(&mut self.handed, true) {
-            return Ok(());
+        match self.0.as_mut() {
+            Some(stream) => stream.write_partial(bytes, posts, diagnostics, archive),
+            None => Ok(()),
         }
-        self.receiver.receive_run_file(
-            crate::report::run_files::RunFileOption::ExportSearchStrategy,
-            &self.name,
-            &self.bytes,
-        )
     }
-}
 
-impl Drop for ReceivedFile {
-    fn drop(&mut self) {
-        // The file of a run that stopped before its export was made (`create_strategy_file_in`):
-        // the receiver keeps it (LOSAT Web's run files, emitted after the run). A failure has no
-        // run to fail any more; in a debug build it is a loss that a test sees.
-        let received = self.hand_over();
-        debug_assert!(
-            received.is_ok() || std::thread::panicking(),
-            "the strategy file {} did not reach the run's files: {received:?}",
-            String::from_utf8_lossy(&self.name)
-        );
+    fn hand_over(&mut self) {
+        self.0 = None;
     }
 }
 
@@ -366,8 +346,9 @@ enum StrategyTarget {
     None,
     /// The file on the file system (the command line).
     Disk(std::fs::File),
-    /// The file in memory that the caller's receiver gets (LOSAT Web).
-    Received(ReceivedFile),
+    /// The run's file in its table, which the caller's receiver gets (LOSAT Web,
+    /// `ReceivedFile`).
+    Received(SharedOpening),
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-798
@@ -444,9 +425,9 @@ pub fn create_strategy_file_in(
     label: &str,
     others: &[RunFileName<'_>],
 ) -> Result<StrategyFile> {
-    let RunFiles::Receiver(receiver) = files else {
+    if !matches!(files, RunFiles::Receiver(_)) {
         return create_strategy_file(path, label);
-    };
+    }
     if path.as_os_str() == "-" {
         return Ok(standard_output_refusal(label));
     }
@@ -455,13 +436,18 @@ pub fn create_strategy_file_in(
         refusal: Some(not_in_the_browser(path, what)),
     };
     Ok(match files.strategy_target(path.as_os_str(), others) {
-        Target::File(name) => StrategyFile {
-            target: StrategyTarget::Received(ReceivedFile {
-                name,
-                bytes: Vec::new(),
-                receiver: receiver.clone(),
-                handed: false,
-            }),
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-798 (cited at
+        // `create_strategy_file`: the output argument's stream, made or emptied)
+        Target::File(file) => StrategyFile {
+            target: StrategyTarget::Received(
+                files
+                    .open_file(
+                        &file,
+                        Opening::Create,
+                        crate::report::run_files::RunFileOption::ExportSearchStrategy,
+                    )
+                    .map_err(|error| anyhow::anyhow!("{error}"))?,
+            ),
             refusal: None,
         },
         Target::Nowhere => StrategyFile {
@@ -689,7 +675,10 @@ impl StrategyExport {
                 Box::new(file),
                 inputs.kind.application(),
             )),
-            StrategyTarget::Received(file) => Box::new(file),
+            StrategyTarget::Received(file) => Box::new(ReceivedFile(Some(StrategyStream::new(
+                Box::new(file),
+                inputs.kind.application(),
+            )))),
             StrategyTarget::None => Box::new(NoSink),
         };
         Self::with_refusal(sink, &inputs, database, options.clone(), file.refusal)
@@ -1031,9 +1020,8 @@ fn write_held_of(open: &[std::sync::Weak<Shared>]) {
 /// own text. Each program calls this once, where its run's result is known (`blastn`, `blastp`
 /// for psiblast and rpsblast too, `blastx` for rpstblastn too, `tblastn`, `tblastx`; LOSAT Web's
 /// records searches, `ReportOutputs::run_records`). The posts still waiting go then: each holds
-/// the export (its request's mark), so that the export would outlive the run, and a sink that
-/// ends with the export (LOSAT Web's file of the run, `ReceivedFile`) would never reach its
-/// receiver.
+/// the export (its request's mark), so that the export would outlive the run, and LOSAT Web's
+/// file of the run (`ReceivedFile`) would close only with the export.
 pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<()> {
     let Some(strategy) = strategy else {
         return result;
@@ -1041,19 +1029,10 @@ pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<
     let ended = end_export(strategy, result);
     let waiting = strategy.with_state(|state| std::mem::take(&mut state.pending));
     drop(waiting);
-    // The file is complete: LOSAT Web's goes to the run's files now (`ReceivedFile`), and a file
-    // that does not get there is LOSAT's internal error instead of a run without it. A refusal of
-    // LOSAT's keeps its own text.
-    let handed = hook_lock(&strategy.0.held).sink.hand_over();
-    let refused = matches!(&ended, Err(error) if crate::cli::NativeError::caught(error).is_none());
-    match handed {
-        Err(error) if !refused => {
-            Err(anyhow::anyhow!(
-                "LOSAT internal error: the -export_search_strategy file did not reach the run's files ({error})"
-            ))
-        }
-        _ => ended,
-    }
+    // The file is complete: LOSAT Web's closes now (`ReceivedFile`), and goes to the run's
+    // receiver with the run's other files (`RunFiles::end`).
+    hook_lock(&strategy.0.held).sink.hand_over();
+    ended
 }
 
 /// `end_run` of a run with the export `strategy`, before its waiting posts go.

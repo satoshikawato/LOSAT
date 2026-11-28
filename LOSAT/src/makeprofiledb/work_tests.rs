@@ -165,7 +165,9 @@ fn post_diag_flushes_cout_only_for_cerr_and_respects_empty_and_suppressed_posts(
     let mut pipe2 = FailingWriter(std::io::ErrorKind::BrokenPipe);
     let mut stdout2 = cout(&mut pipe2, block_stream);
     stdout2.insert(b"still buffered\n");
-    let mem_target = crate::blastinput::ncbi_environment::DiagTarget::Memory(Default::default());
+    let mem_target = crate::blastinput::ncbi_environment::DiagTarget::Stream(
+        std::sync::Mutex::new(Box::new(Vec::new())),
+    );
     let mut stderr2 = Vec::new();
     let mut diag2 = Diag::new(&mem_target, &mut stderr2, &super::super::TOOL);
     post_diag(&mut stdout2, &mut diag2, |d| d.post("logged")).unwrap();

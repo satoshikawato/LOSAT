@@ -204,7 +204,7 @@ fn run_main_entry() -> Result<()> {
                 start,
                 crate::blastinput::ncbi_environment::log_file(&argv[2..]),
             ) {
-                Ok((target, _)) => target,
+                Ok(target) => target,
                 Err(reason) => {
                     let message = crate::seqmasks_io::run::unsupported(&reason, refusal_name);
                     if argv_is_rpsbproc {

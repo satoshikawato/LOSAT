@@ -1055,6 +1055,26 @@ impl PssmFile {
         }
         std::fs::File::create(&self.path)
     }
+
+    /// `open` in LOSAT Web's run (`RunFiles::open_file`), whose file of this name is `file`
+    /// (`RunFiles::pssm_target`), for `option`: with version 0 the file of the path is removed and
+    /// made again (`Opening::Replace`: a `-logfile` of the name keeps writing to the removed
+    /// file), a numbered file is made or emptied (`Opening::Create`), as `open` on the file
+    /// system (line RG item F1w-r3).
+    pub(crate) fn open_in(
+        &self,
+        run_files: &crate::report::run_files::RunFiles,
+        file: &crate::report::run_files::RunFile,
+        option: RunFileOption,
+    ) -> std::io::Result<crate::report::run_files::SharedOpening> {
+        use crate::report::run_files::Opening;
+        let opening = if self.replaced {
+            Opening::Replace
+        } else {
+            Opening::Create
+        };
+        run_files.open_file(file, opening, option)
+    }
 }
 
 /// What a PSSM file's name is before the run, for NCBI's `GetStream` on it (`PssmFile::open`).
@@ -1310,8 +1330,8 @@ enum Staged {
     InPlace(Vec<u8>),
     /// The bytes for a character device.
     Device(Vec<u8>),
-    /// The host file name and bytes for `RunFiles::Receiver` (LOSAT Web).
-    Receiver(Vec<u8>, Vec<u8>),
+    /// The file of the run and the bytes for `RunFiles::Receiver` (LOSAT Web).
+    Receiver(crate::report::run_files::RunFile, Vec<u8>),
     /// Nothing: the target is `/dev/null`.
     Null,
     /// Written, or replaced by a later query's file of the same name.
@@ -1443,7 +1463,7 @@ impl PssmFiles {
                 .run_files
                 .pssm_target(RunFileOption::OutPssm.flag(), path.as_os_str())
             {
-                PssmTarget::File(host_name) => Ok(Staged::Receiver(host_name, asn.to_vec())),
+                PssmTarget::File(target) => Ok(Staged::Receiver(target, asn.to_vec())),
                 PssmTarget::Discard => Ok(Staged::Null),
                 PssmTarget::Full => Err(cannot_write(std::io::Error::from(
                     std::io::ErrorKind::StorageFull,
@@ -1551,14 +1571,10 @@ impl PssmFiles {
                     )
                 };
                 match std::mem::replace(staged, Staged::Done) {
-                    Staged::Receiver(host_name, bytes) => {
-                        if let crate::report::run_files::RunFiles::Receiver(receiver) =
-                            &self.run_files
-                        {
-                            receiver
-                                .receive_run_file(RunFileOption::OutPssm, &host_name, &bytes)
-                                .map_err(commit_err)?;
-                        }
+                    Staged::Receiver(target, bytes) => {
+                        file.open_in(&self.run_files, &target, RunFileOption::OutPssm)
+                            .and_then(|mut out| out.write_all(&bytes))
+                            .map_err(commit_err)?;
                     }
                     other => {
                         let bytes = match other {
@@ -1583,16 +1599,16 @@ impl PssmFiles {
             {
                 let file = stream.next_file();
                 match &self.run_files {
-                    crate::report::run_files::RunFiles::Receiver(receiver) => {
-                        if let crate::report::run_files::PssmTarget::File(host_name) = self
+                    crate::report::run_files::RunFiles::Receiver(_) => {
+                        if let crate::report::run_files::PssmTarget::File(target) = self
                             .run_files
                             .pssm_target(RunFileOption::OutAsciiPssm.flag(), file.path.as_os_str())
                         {
-                            let _ = receiver.receive_run_file(
-                                RunFileOption::OutAsciiPssm,
-                                &host_name,
-                                &ascii,
-                            );
+                            if let Ok(mut out) =
+                                file.open_in(&self.run_files, &target, RunFileOption::OutAsciiPssm)
+                            {
+                                let _ = out.write_all(&ascii);
+                            }
                         }
                     }
                     crate::report::run_files::RunFiles::Disk => {

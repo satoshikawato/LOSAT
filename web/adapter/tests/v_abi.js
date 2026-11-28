@@ -1851,6 +1851,22 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
       db: "tests/db_search/paja",
       extra: ["-msa_master_idx", "2", "-out_pssm", "msa.asn", "-save_pssm_after_last_round"],
     },
+    // Line RG item F1w-r3: two options of one file, the run's one file as the CLI's (the log opened first; the PSSM
+    // file of version 0 removes it and makes another, a numbered one empties it).
+    {
+      id: "psiblast.subject.it2.logfile_pssm",
+      program: "psiblast",
+      query: "tests/fasta/psiblast/q1b_gi.faa",
+      subject: subjIds,
+      extra: ["-num_iterations", "2", "-logfile", "L", "-out_pssm", "L", "-save_pssm_after_last_round"],
+    },
+    {
+      id: "psiblast.subject.it2.logfile_each",
+      program: "psiblast",
+      query: "tests/fasta/psiblast/q1b_gi.faa",
+      subject: subjIds,
+      extra: ["-num_iterations", "2", "-logfile", "E.1", "-out_pssm", "E", "-save_each_pssm", "-save_pssm_after_last_round"],
+    },
     {
       id: "psiblast.subject.in_pssm.it2",
       program: "psiblast",
@@ -1894,7 +1910,7 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
       for (const format of formats) {
         const out = path.join(cliDir, `out.${format}`);
         const cliArgv = baseArgv.map((w, i, arr) => {
-          if (i > 0 && (arr[i - 1] === "-out_pssm" || arr[i - 1] === "-out_ascii_pssm")) return path.join(cliDir, w);
+          if (i > 0 && ["-out_pssm", "-out_ascii_pssm", "-logfile"].includes(arr[i - 1])) return path.join(cliDir, w);
           return w;
         });
         const res = require("node:child_process").spawnSync(native, [...cliArgv, "-outfmt", String(format), "-num_threads", "1", "-out", out], {

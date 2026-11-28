@@ -52,7 +52,7 @@ fn tool<'a>(words: &'a [&'a str]) -> Result<(ToolKind, &'a [&'a str]), String> {
 pub fn run(words: &[&str]) -> Result<(), String> {
     let (kind, arguments) = tool(words)?;
     let mut out = StreamWriter::new(STREAM_PRINTED);
-    let files = RunFiles::Receiver(Arc::new(ToolFiles::for_tool(kind, arguments)));
+    let files = RunFiles::receiver(Arc::new(ToolFiles::for_tool(kind, arguments)));
     let status = match kind {
         ToolKind::WindowMasker => losat::web_adapter::run_windowmasker(
             arguments,

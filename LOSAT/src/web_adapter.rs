@@ -501,7 +501,7 @@ fn check_tool_in(
     });
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let status = check_in(&words, &RunFiles::Receiver(log.clone()), &mut out, &mut err);
+    let status = check_in(&words, &RunFiles::receiver(log.clone()), &mut out, &mut err);
     if status == 0 {
         return Ok(());
     }

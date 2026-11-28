@@ -555,7 +555,7 @@ fn an_exception_of_ncbis_from_a_writer_ends_the_run_as_ncbis_error() {
 #[derive(Default)]
 struct Received(Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
 
-impl FileReceiver for Received {
+impl crate::report::run_files::FileReceiver for Received {
     fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
         self.0.lock().unwrap().push((name.to_vec(), bytes.to_vec()));
         Ok(())
@@ -568,17 +568,22 @@ impl Received {
     }
 }
 
-/// LOSAT Web's strategy file (`RunFiles::Receiver`, line RG's F1w): the receiver gets it under
-/// the name as typed where the run ends (`end_run`, whatever still holds the export), with the bytes
-/// that the command line writes to the file;
-/// a made file dropped before its export (an error after it is made) is the empty file that the
-/// command line leaves; NCBI's error cuts it back as it cuts the command line's file
-/// (`end_run`).
+/// LOSAT Web's strategy file (`RunFiles::Receiver`, line RG's F1w): the command line's stream of
+/// the file over the run's file in its table (line RG item F1w-r3), which the run closes where it
+/// ends (`end_run`, whatever still holds the export) and the receiver gets when the run's files
+/// end (`RunFiles::end`), under the command line's name, with the bytes that the command line
+/// writes to the file; a made file dropped before its export (an error after it is made) is the
+/// empty file that the command line leaves; NCBI's error cuts it back as it cuts the command line's
+/// file (`end_run`); a file that the receiver refuses is the error of the run's files.
 #[test]
-fn a_receiver_gets_the_file_when_the_export_ends() {
-    let received = Arc::new(Received::default());
-    let files = RunFiles::Receiver(received.clone());
-    let open = |name: &str| create_strategy_file_in(&files, Path::new(name), "BLASTP", &[]);
+fn a_receiver_gets_the_file_when_the_run_s_files_end() {
+    let run = || {
+        let received = Arc::new(Received::default());
+        (received.clone(), RunFiles::receiver(received))
+    };
+    let open = |files: &RunFiles, name: &str| {
+        create_strategy_file_in(files, Path::new(name), "BLASTP", &[])
+    };
     let export = |file| {
         StrategyExport::for_run(
             file,
@@ -593,67 +598,67 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
     // A name in a folder of the run's directory (`src`, of this test's working directory, the
     // crate's) is a file under the command line's name of it (line RG item F1w-r2: `./src/s.asn`
     // and `src/../src/s.asn` make `src/s.asn`).
-    let made = export(open("./src/../src/s.asn").unwrap());
+    let (received, files) = run();
+    let made = export(open(&files, "./src/../src/s.asn").unwrap());
     assert!(!made.refused());
     assert!(made.write_request(0..1, &request(&queries, &[])).unwrap());
-    // The run's end hands the file over, while a clone of the export is still held; the drop
-    // gives it no second time.
+    // The run's end closes the file, while a clone of the export is still held; the receiver gets
+    // it once, when the run's files end.
     let kept = made.clone();
     end_run(Some(&made), Ok(())).unwrap();
+    assert!(
+        received.files().is_empty(),
+        "nothing before the run's files end"
+    );
+    files.end().unwrap();
     assert_eq!(
         received.files(),
         [(b"src/s.asn".to_vec(), FIRST.as_bytes().to_vec())]
     );
     drop((made, kept));
+    files.end().unwrap();
     assert_eq!(received.files().len(), 1);
     // An error after the file is made: the file, empty.
-    received.0.lock().unwrap().clear();
-    drop(open("s.asn").unwrap());
+    let (received, files) = run();
+    drop(open(&files, "s.asn").unwrap());
+    files.end().unwrap();
     assert_eq!(received.files(), [(b"s.asn".to_vec(), Vec::new())]);
     // NCBI's error before the batch's start was reached: the request is cut away.
-    received.0.lock().unwrap().clear();
-    let cut = export(open("s.asn").unwrap());
+    let (received, files) = run();
+    let cut = export(open(&files, "s.asn").unwrap());
     assert!(cut.write_request(0..1, &request(&queries, &[])).unwrap());
     let native = crate::cli::inaccessible("query", Path::new("q"));
     assert!(end_run(Some(&cut), Err(native)).is_err());
     drop(cut);
+    files.end().unwrap();
     assert_eq!(received.files(), [(b"s.asn".to_vec(), Vec::new())]);
     // A run that ends with the posts of a request not taken (an error between the request and its
-    // batch's start) still gives the file at its end.
-    received.0.lock().unwrap().clear();
-    let early = export(open("s.asn").unwrap());
+    // batch's start) still gives the file.
+    let (received, files) = run();
+    let early = export(open(&files, "s.asn").unwrap());
     assert!(early.write_request(0..1, &request(&queries, &[])).unwrap());
     let refusal = anyhow::anyhow!("a refusal of LOSAT's");
     assert!(end_run(Some(&early), Err(refusal)).is_err());
     drop(early);
+    files.end().unwrap();
     assert_eq!(
         received.files(),
         [(b"s.asn".to_vec(), FIRST.as_bytes().to_vec())]
     );
-    // A file that does not reach the run's files is the run's internal error, not a run without
-    // it; a refusal of LOSAT's keeps its own text.
+    // A file that does not reach the receiver is the error of the run's files, not a run without
+    // it; the run's own result is its own.
     struct Closed;
-    impl FileReceiver for Closed {
+    impl crate::report::run_files::FileReceiver for Closed {
         fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
             Err(std::io::Error::other("the archive was closed"))
         }
     }
-    let closed = RunFiles::Receiver(Arc::new(Closed));
-    let lost = |result: Result<()>| {
-        let file = create_strategy_file_in(&closed, Path::new("s.asn"), "BLASTP", &[]);
-        end_run(Some(&export(file.unwrap())), result)
-            .unwrap_err()
-            .to_string()
-    };
-    let error = lost(Ok(()));
-    assert!(
-        error.starts_with("LOSAT internal error: the -export_search_strategy file did not reach")
-            && error.contains("the archive was closed"),
-        "{error}"
-    );
+    let closed = RunFiles::receiver(Arc::new(Closed));
+    let file = create_strategy_file_in(&closed, Path::new("s.asn"), "BLASTP", &[]);
+    end_run(Some(&export(file.unwrap())), Ok(())).unwrap();
     assert_eq!(
-        lost(Err(anyhow::anyhow!("a refusal of LOSAT's"))),
-        "a refusal of LOSAT's"
+        closed.end().unwrap_err().to_string(),
+        "the archive was closed"
     );
 }
 
@@ -665,7 +670,7 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
 #[test]
 fn a_receiver_refuses_what_the_command_line_refuses_or_has_no_file_for() {
     let received = Arc::new(Received::default());
-    let files = RunFiles::Receiver(received.clone());
+    let files = RunFiles::receiver(received.clone());
     let query = [RunFileName {
         option: "query",
         name: std::ffi::OsStr::new("q.fa"),
@@ -786,7 +791,7 @@ fn strategy_target_reads_logfile_against_runs_files() {
         option: "logfile",
         name: std::ffi::OsStr::new("out/x.asn"),
     }];
-    let without_out = RunFiles::Receiver(Arc::new(WithRegistered(Vec::new())));
+    let without_out = RunFiles::receiver(Arc::new(WithRegistered(Vec::new())));
     let error = create_strategy_file_in(&without_out, Path::new("out/x.asn"), "TBLASTX", &others)
         .unwrap_err();
     let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
@@ -796,7 +801,7 @@ fn strategy_target_reads_logfile_against_runs_files() {
         b"Command line argument error: Argument \"export_search_strategy\". File is not accessible:  `out/x.asn'\n"
     );
 
-    let with_out = RunFiles::Receiver(Arc::new(WithRegistered(vec![b"out/keep".to_vec()])));
+    let with_out = RunFiles::receiver(Arc::new(WithRegistered(vec![b"out/keep".to_vec()])));
     let refused =
         create_strategy_file_in(&with_out, Path::new("out/x.asn"), "TBLASTX", &others).unwrap();
     assert_eq!(

@@ -3,6 +3,23 @@ use std::sync::Mutex;
 
 use crate::blastinput::ncbi_environment::TextPlace as Place;
 
+/// A strategy file of the run by its command line's name (`RunFile::name`), its path left out:
+/// what the tests compare (`named`).
+fn strategy_file(name: &[u8]) -> StrategyTarget {
+    StrategyTarget::File(RunFile {
+        name: name.to_vec(),
+        key: Vec::new(),
+    })
+}
+
+/// `target` with a file's path left out (`strategy_file`).
+fn named(target: StrategyTarget) -> StrategyTarget {
+    match target {
+        StrategyTarget::File(file) => strategy_file(&file.name),
+        other => other,
+    }
+}
+
 #[derive(Default)]
 struct Kept {
     files: Mutex<Vec<(Vec<u8>, Vec<u8>)>>,
@@ -65,7 +82,7 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
     // Registered folders standing for the folders that exist in the command line's directory for
     // the D11 compatibility matrix (plus `in/q.fa` and `s.fa` for D19's existing-file and folder
     // cases).
-    let kept = Arc::new(Kept::with_registered(&[
+    let registered = [
         "logs/keep",
         "a/b/keep",
         "dev/keep",
@@ -73,8 +90,9 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         "x/keep",
         "in/q.fa",
         "s.fa",
-    ]));
-    let files = RunFiles::Receiver(kept.clone());
+    ];
+    let kept = Arc::new(Kept::with_registered(&registered));
+    let files = RunFiles::receiver(kept.clone());
     let target = |name: Option<&str>| files.log_target(name.map(OsStr::new));
     // Linux's limits: a component of 255 bytes, a path of 4095 bytes given to the system.
     let component_255 = "a".repeat(255);
@@ -92,13 +110,10 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
     let directory_4099 = format!("{}run.log", "x/../".repeat(820));
     let directory_4095 = format!("x{}/run.log", "/.".repeat(2047));
     let directory_4096 = format!("xx{}/run.log", "/.".repeat(2047));
-    assert!(matches!(target(None), Ok((DiagTarget::Stderr, None))));
-    assert!(matches!(target(Some("-")), Ok((DiagTarget::Stderr, None))));
-    assert!(matches!(target(Some("")), Ok((DiagTarget::Discard, None))));
-    assert!(matches!(
-        target(Some("/dev/null")),
-        Ok((DiagTarget::Discard, None))
-    ));
+    assert!(matches!(target(None), Ok(DiagTarget::Stderr)));
+    assert!(matches!(target(Some("-")), Ok(DiagTarget::Stderr)));
+    assert!(matches!(target(Some("")), Ok(DiagTarget::Discard)));
+    assert!(matches!(target(Some("/dev/null")), Ok(DiagTarget::Discard)));
     for name in [
         ".",
         "..",
@@ -217,7 +232,7 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         "/proc/self/autogroup",
     ] {
         assert!(
-            matches!(target(Some(name)), Ok((DiagTarget::Stderr, None))),
+            matches!(target(Some(name)), Ok(DiagTarget::Stderr)),
             "{name}"
         );
     }
@@ -251,7 +266,7 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         "/proc/self/root/dev/stderr",
     ] {
         assert!(
-            matches!(target(Some(name)), Ok((DiagTarget::StderrFile, None))),
+            matches!(target(Some(name)), Ok(DiagTarget::StderrFile)),
             "{name}"
         );
     }
@@ -285,7 +300,7 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         stdin_links_39.as_str(),
     ] {
         assert!(
-            matches!(target(Some(name)), Ok((DiagTarget::Discard, None))),
+            matches!(target(Some(name)), Ok(DiagTarget::Discard)),
             "{name}"
         );
     }
@@ -368,32 +383,29 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         ("/run/shm/run.log", "/run/shm/run.log"),
         ("/mnt/wsl/run.log", "/mnt/wsl/run.log"),
     ];
+    // Each in a run of its own (names of one path share one file of a run's table).
     for (name, expected_host_name) in names {
-        let (log, host_name) = target(Some(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
-        assert!(matches!(log, DiagTarget::Memory(_)), "{name}");
+        let one = Arc::new(Kept::with_registered(&registered));
+        let run = RunFiles::receiver(one.clone());
+        let log = run
+            .log_target(Some(OsStr::new(name)))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(matches!(log, DiagTarget::Stream(_)), "{name}");
+        log.write_text(name.as_bytes(), &mut io::sink());
+        drop(log);
+        run.end().unwrap();
         assert_eq!(
-            host_name.as_deref(),
-            Some(expected_host_name.as_bytes()),
+            *one.files.lock().unwrap(),
+            [(
+                expected_host_name.as_bytes().to_vec(),
+                name.as_bytes().to_vec()
+            )],
             "{name}"
         );
-        log.write_text(name.as_bytes(), &mut io::sink());
-        files.deliver_log(host_name.as_deref(), log).unwrap();
     }
     // A target without a file hands nothing over.
-    files.deliver_log(Some(b"-"), DiagTarget::Stderr).unwrap();
-    files
-        .deliver_log(Some(b"/dev/stderr"), DiagTarget::StderrFile)
-        .unwrap();
-    files
-        .deliver_log(Some(b"/dev/fd/2"), DiagTarget::Discard)
-        .unwrap();
-    assert_eq!(
-        *kept.files.lock().unwrap(),
-        names
-            .iter()
-            .map(|(name, host_name)| (host_name.as_bytes().to_vec(), name.as_bytes().to_vec()))
-            .collect::<Vec<_>>()
-    );
+    files.end().unwrap();
+    assert!(kept.files.lock().unwrap().is_empty());
 }
 
 /// A name of 4 KB is read in time linear in its length (review 3 M1, line WQA's D11 round 5,
@@ -472,13 +484,6 @@ fn the_standard_error_file_writes_to_the_standard_error() {
     let mut stderr = Vec::new();
     DiagTarget::Stderr.write_collected(b"collected\n", &mut stderr);
     assert!(stderr.is_empty());
-    let memory = DiagTarget::Memory(Default::default());
-    memory.write_collected(b"collected\n", &mut stderr);
-    assert!(stderr.is_empty());
-    let DiagTarget::Memory(bytes) = memory else {
-        unreachable!()
-    };
-    assert_eq!(bytes.into_inner().unwrap(), b"collected\n");
 }
 
 /// The names of `-export_search_strategy` of a receiver (LOSAT Web, line RG's F1w), read as the
@@ -497,11 +502,11 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
     use StrategyTarget as T;
     // Registered names stand for the folders and files of the command line's directory (as in
     // `a_receiver_reads_a_log_name_as_the_command_line_on_linux`).
-    let files = RunFiles::Receiver(Arc::new(Kept::with_registered(&[
+    let files = RunFiles::receiver(Arc::new(Kept::with_registered(&[
         "out/keep", "a/b/keep", "in/q.fa",
     ])));
-    let target = |name: &str| files.strategy_target(OsStr::new(name), &[]);
-    let file = |name: &str| T::File(name.as_bytes().to_vec());
+    let target = |name: &str| named(files.strategy_target(OsStr::new(name), &[]));
+    let file = |name: &str| strategy_file(name.as_bytes());
     let long_component = "a".repeat(256);
     let component_255 = "a".repeat(255);
     for (name, read) in [
@@ -594,8 +599,8 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
         // The *start*'s name of the file (`losat_web2_start`, before the run's files) is the run's.
         if let T::File(made) = &read {
             assert_eq!(
-                RunFiles::output_host_name(OsStr::new(name)).as_ref(),
-                Some(made),
+                RunFiles::output_host_name(OsStr::new(name)).as_deref(),
+                Some(made.name()),
                 "{name:?}"
             );
         }
@@ -603,7 +608,7 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
     // Without those folders, as in a new directory that holds only the run's other files, the
     // command line cannot open a name in them (NCBI's `File is not accessible`); the *start* still
     // names the file that a run with the folders makes.
-    let bare = RunFiles::Receiver(Arc::new(Kept::default()));
+    let bare = RunFiles::receiver(Arc::new(Kept::default()));
     for (name, made) in [
         ("out/s.asn", "out/s.asn"),
         ("a/b/../s.asn", "a/s.asn"),
@@ -654,7 +659,7 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
 #[test]
 fn a_strategy_name_sees_registered_and_read_files_outside_the_view() {
     use StrategyTarget as T;
-    let files = RunFiles::Receiver(Arc::new(Kept {
+    let files = RunFiles::receiver(Arc::new(Kept {
         registered: vec![b"/data/q.fa".to_vec(), b"../up.fa".to_vec()],
         read: vec![b"tfp.pal".to_vec(), b"missing_sub/x.fa".to_vec()],
         ..Kept::default()
@@ -672,17 +677,17 @@ fn a_strategy_name_sees_registered_and_read_files_outside_the_view() {
         ("/data/s.asn", &[], T::Inaccessible),
         ("/data/q.fa/s.asn", &[], T::Inaccessible),
         // `/data` is there, the folder of a registered file: a name may pass it on its way out.
-        ("/data/../tmp/s.asn", &[], T::File(b"/tmp/s.asn".to_vec())),
+        ("/data/../tmp/s.asn", &[], strategy_file(b"/tmp/s.asn")),
         ("../up.fa", &[], T::Existing),
-        ("../s.asn", &[], T::File(b"../s.asn".to_vec())),
+        ("../s.asn", &[], strategy_file(b"../s.asn")),
         ("tfp.pal", &[], T::Existing),
         ("./tfp.pal", &[], T::Existing),
-        ("tfp.pin", &[], T::File(b"tfp.pin".to_vec())),
+        ("tfp.pin", &[], strategy_file(b"tfp.pin")),
         ("missing_sub/x.fa", &[], T::Inaccessible),
         ("missing_sub/s.asn", &[], T::Inaccessible),
     ] {
         assert_eq!(
-            files.strategy_target(OsStr::new(name), others),
+            named(files.strategy_target(OsStr::new(name), others)),
             read,
             "{name:?}"
         );
@@ -690,8 +695,8 @@ fn a_strategy_name_sees_registered_and_read_files_outside_the_view() {
         // though `/data` is no directory of the model's).
         if let T::File(made) = &read {
             assert_eq!(
-                RunFiles::output_host_name(OsStr::new(name)).as_ref(),
-                Some(made),
+                RunFiles::output_host_name(OsStr::new(name)).as_deref(),
+                Some(made.name()),
                 "{name:?}"
             );
         }
@@ -705,32 +710,35 @@ fn a_strategy_name_sees_registered_and_read_files_outside_the_view() {
 /// in the *start*. Without the link, one name is one file (the strategy file is the log's).
 #[test]
 fn a_log_and_a_strategy_of_one_name_after_a_link_are_two_files() {
-    let files = RunFiles::Receiver(Arc::new(Kept::default()));
     for (name, log_name, strategy) in [
-        (
-            "/var/run/../tmp/X",
-            "/var/tmp/X",
-            StrategyTarget::File(b"/tmp/X".to_vec()),
-        ),
+        ("/var/run/../tmp/X", "/var/tmp/X", strategy_file(b"/tmp/X")),
         ("/tmp/X", "/tmp/X", StrategyTarget::OtherFile("logfile")),
     ] {
+        let kept = Arc::new(Kept::default());
+        let files = RunFiles::receiver(kept.clone());
         let log = [RunFileName {
             option: "logfile",
             name: OsStr::new(name),
         }];
         assert_eq!(
-            files.strategy_target(OsStr::new(name), &log),
+            named(files.strategy_target(OsStr::new(name), &log)),
             strategy,
             "{name:?}"
         );
-        let Ok((DiagTarget::Memory(_), Some(logged))) = files.log_target(Some(OsStr::new(name)))
-        else {
+        let Ok(log @ DiagTarget::Stream(_)) = files.log_target(Some(OsStr::new(name))) else {
             panic!("{name:?}: a -logfile file");
         };
-        assert_eq!(logged, log_name.as_bytes(), "{name:?}");
+        log.write_text(b"log", &mut io::sink());
+        drop(log);
+        files.end().unwrap();
         assert_eq!(
-            RunFiles::log_host_name(OsStr::new(name)),
-            Some(logged),
+            *kept.files.lock().unwrap(),
+            [(log_name.as_bytes().to_vec(), b"log".to_vec())],
+            "{name:?}"
+        );
+        assert_eq!(
+            RunFiles::log_host_name(OsStr::new(name)).as_deref(),
+            Some(log_name.as_bytes()),
             "{name:?}"
         );
     }
@@ -763,7 +771,7 @@ fn a_strategy_name_a_log_name_and_an_output_name_are_one_reading() {
         out_read: vec![b"tfp.pal".to_vec()],
         ..Kept::default()
     });
-    let run_files = RunFiles::Receiver(kept);
+    let run_files = RunFiles::receiver(kept);
     let open_files = OpenFiles::new(&run_files);
     for name in [
         "s.asn",
@@ -809,15 +817,18 @@ fn a_strategy_name_a_log_name_and_an_output_name_are_one_reading() {
         };
         let log_target = run_files.log_target(Some(OsStr::new(name)));
         let log = match &log_target {
-            Ok((DiagTarget::Memory(_), Some(_))) => Read::File,
-            Ok((DiagTarget::Stderr, None)) => Read::Unopened,
+            Ok(DiagTarget::Stream(_)) => Read::File,
+            Ok(DiagTarget::Stderr) => Read::Unopened,
             Err(_) => Read::Refused,
             Ok(_) => panic!("{name:?}: log target"),
         };
         // A file of both is the command line's one file, under one host name.
-        if let (StrategyTarget::File(made), Ok((_, Some(logged)))) = (&strategy_target, &log_target)
-        {
-            assert_eq!(made, logged, "{name:?}");
+        if let (StrategyTarget::File(made), Read::File) = (&strategy_target, log) {
+            assert_eq!(
+                Some(made.name()),
+                RunFiles::log_host_name(OsStr::new(name)).as_deref(),
+                "{name:?}"
+            );
         }
         let output = match open_files.create(name) {
             Ok(Created::File(_)) => Read::File,
@@ -836,7 +847,7 @@ fn a_strategy_name_a_log_name_and_an_output_name_are_one_reading() {
 #[test]
 fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
     use StrategyTarget as T;
-    let files = RunFiles::Receiver(Arc::new(Kept::default()));
+    let files = RunFiles::receiver(Arc::new(Kept::default()));
     let target = |name: &str, others: &[(&'static str, &str)]| {
         let others: Vec<RunFileName<'_>> = others
             .iter()
@@ -845,9 +856,9 @@ fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
                 name: OsStr::new(name),
             })
             .collect();
-        files.strategy_target(OsStr::new(name), &others)
+        named(files.strategy_target(OsStr::new(name), &others))
     };
-    let file = |name: &str| T::File(name.as_bytes().to_vec());
+    let file = |name: &str| strategy_file(name.as_bytes());
     for (name, others, read) in [
         ("q.fa", vec![("query", "q.fa")], T::OtherFile("query")),
         ("./q.fa", vec![("query", "q.fa")], T::OtherFile("query")),
@@ -1203,7 +1214,7 @@ fn log_and_output_names_share_the_runs_files_view() {
         LogName::File { ref name, .. } if name == b"../other.log"
     ));
     // Registered names also reach `OpenFiles::create` through the same view.
-    let files = OpenFiles::new(&RunFiles::Receiver(Arc::new(receiver)));
+    let files = OpenFiles::new(&RunFiles::receiver(Arc::new(receiver)));
     assert!(matches!(files.create("q.fa"), Ok(Created::Refused(_))));
     assert!(matches!(files.create("in/a.fa"), Ok(Created::Refused(_))));
     assert_eq!(files.create("in").err(), Some(Unopened));
@@ -1227,7 +1238,7 @@ fn log_and_output_names_share_the_runs_files_view() {
 #[test]
 fn a_receiver_s_output_file_goes_to_the_receiver_when_the_run_ends() {
     let kept = Arc::new(Kept::default());
-    let files = OpenFiles::new(&RunFiles::Receiver(kept.clone()));
+    let files = OpenFiles::new(&RunFiles::receiver(kept.clone()));
     let name = "ww3a-receiver-test.counts";
     assert!(!std::path::Path::new(name).exists());
     let Ok(Created::File(mut file)) = files.create(name) else {
@@ -1350,7 +1361,7 @@ impl FileReceiver for Streamed {
 fn a_receiver_that_opens_its_files_takes_them_as_they_are_written() {
     let streamed = Streamed::default();
     let events = streamed.0.clone();
-    let files = OpenFiles::new(&RunFiles::Receiver(Arc::new(streamed)));
+    let files = OpenFiles::new(&RunFiles::receiver(Arc::new(streamed)));
     let Ok(Created::File(mut file)) = files.create("ww3a-streamed.counts") else {
         panic!("a streamed file");
     };
@@ -1384,12 +1395,23 @@ fn a_receiver_that_opens_its_files_takes_them_as_they_are_written() {
         ]
     );
     assert!(!std::path::Path::new("ww3a-streamed.counts").exists());
-    // The default: whole files, from memory; a search's log in memory.
-    let kept = RunFiles::Receiver(Arc::new(Kept::default()));
-    assert!(matches!(
-        kept.log_target(Some(OsStr::new("ww3a-kept.log"))),
-        Ok((DiagTarget::Memory(_), Some(ref name))) if name == b"ww3a-kept.log"
-    ));
+    // The default: whole files, from memory, when the run's files end; a search's log too.
+    let kept = Arc::new(Kept::default());
+    let run = RunFiles::receiver(kept.clone());
+    let Ok(log) = run.log_target(Some(OsStr::new("ww3a-kept.log"))) else {
+        panic!("a kept log file");
+    };
+    log.write_text(b"message", &mut io::sink());
+    drop(log);
+    assert!(
+        kept.files.lock().unwrap().is_empty(),
+        "no file before the end"
+    );
+    run.end().unwrap();
+    assert_eq!(
+        *kept.files.lock().unwrap(),
+        [(b"ww3a-kept.log".to_vec(), b"message".to_vec())]
+    );
 }
 
 /// A run that opens one file twice (`-logfile x` and then `-out x`, or `./x`) has one file, which
@@ -1403,7 +1425,7 @@ fn a_receiver_that_opens_its_files_takes_them_as_they_are_written() {
 fn a_file_opened_twice_is_one_file_with_the_system_s_offsets() {
     let streamed = Streamed::default();
     let events = streamed.0.clone();
-    let files = OpenFiles::new(&RunFiles::Receiver(Arc::new(streamed)));
+    let files = OpenFiles::new(&RunFiles::receiver(Arc::new(streamed)));
     let Ok(ToolLog::Target(log)) = files.log_target(Some(OsStr::new("ww3a-twice.out"))) else {
         panic!("a streamed log file");
     };
@@ -1431,7 +1453,7 @@ fn a_file_opened_twice_is_one_file_with_the_system_s_offsets() {
     );
     // Whole: the same bytes, once.
     let kept = Arc::new(Kept::default());
-    let files = OpenFiles::new(&RunFiles::Receiver(kept.clone()));
+    let files = OpenFiles::new(&RunFiles::receiver(kept.clone()));
     let Ok(ToolLog::Target(log)) = files.log_target(Some(OsStr::new("ww3a-twice.out"))) else {
         panic!("a log file");
     };
@@ -1492,7 +1514,7 @@ fn outside_cwd_registered_files_are_seen_by_log_and_output_names() {
         "/tmp",
         "/",
     ]));
-    let run_files = RunFiles::Receiver(receiver.clone());
+    let run_files = RunFiles::receiver(receiver.clone());
     let open_files = OpenFiles::new(&run_files);
     // Case 2 outside cwd: refused by both `log_target` and `OpenFiles::create`.
     for existing in [
@@ -1533,7 +1555,7 @@ fn outside_cwd_registered_files_are_seen_by_log_and_output_names() {
         assert!(
             matches!(
                 run_files.log_target(Some(OsStr::new(unopened))),
-                Ok((DiagTarget::Stderr, None))
+                Ok(DiagTarget::Stderr)
             ),
             "log_target should keep {unopened:?} on stderr"
         );
@@ -1555,7 +1577,7 @@ fn outside_cwd_registered_files_are_seen_by_log_and_output_names() {
         assert!(
             matches!(
                 run_files.log_target(Some(OsStr::new(raw))),
-                Ok((DiagTarget::Memory(_), Some(ref name))) if name == want.as_bytes()
+                Ok(DiagTarget::Stream(_))
             ),
             "log_target control {raw:?}"
         );
@@ -1571,7 +1593,7 @@ fn outside_cwd_registered_files_are_seen_by_log_and_output_names() {
     }
     assert!(matches!(
         run_files.log_target(Some(OsStr::new("/data/run.log"))),
-        Ok((DiagTarget::Stderr, None))
+        Ok(DiagTarget::Stderr)
     ));
     assert_eq!(open_files.create("/data/run.log").err(), Some(Unopened));
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6514-6515
@@ -1581,7 +1603,7 @@ fn outside_cwd_registered_files_are_seen_by_log_and_output_names() {
     // keeps messages on stderr and never opens `../q.fa`.
     assert!(matches!(
         run_files.log_target(Some(OsStr::new("/proc/self/cwd/../q.fa"))),
-        Ok((DiagTarget::Stderr, None))
+        Ok(DiagTarget::Stderr)
     ));
 }
 
@@ -1594,7 +1616,7 @@ fn read_files_refuse_matching_writes_without_creating_folders() {
         &["missing.fa", "missing_sub/x.fa", "ids.txt"],
         &["missing.fa"],
     ));
-    let run_files = RunFiles::Receiver(receiver);
+    let run_files = RunFiles::receiver(receiver);
     let open_files = OpenFiles::new(&run_files);
 
     // `-logfile` naming a missing read input (also via `./`) is refused.
@@ -1609,11 +1631,11 @@ fn read_files_refuse_matching_writes_without_creating_folders() {
     // Missing parent folder of a missing input does NOT become present.
     assert!(matches!(
         run_files.log_target(Some(OsStr::new("missing_sub/run.log"))),
-        Ok((DiagTarget::Stderr, None))
+        Ok(DiagTarget::Stderr)
     ));
     assert!(matches!(
         run_files.log_target(Some(OsStr::new("missing_sub/x.fa"))),
-        Ok((DiagTarget::Stderr, None))
+        Ok(DiagTarget::Stderr)
     ));
 
     // `-out` refuses only `output_read_files` (`missing.fa`), not `ids.txt`.
@@ -1630,4 +1652,200 @@ fn read_files_refuse_matching_writes_without_creating_folders() {
         .is_some());
     assert!(matches!(open_files.create("ids.txt"), Ok(Created::File(_))));
     assert!(open_files.refused_output(OsStr::new("ids.txt")).is_none());
+}
+
+/// A receiver that keeps each run file with the option it is labeled by (LOSAT Web's stream 8).
+#[derive(Default)]
+struct Labeled(Mutex<Vec<(&'static str, Vec<u8>, Vec<u8>)>>);
+
+impl FileReceiver for Labeled {
+    fn receive(&self, name: &[u8], _bytes: &[u8]) -> io::Result<()> {
+        panic!(
+            "a file without its option: {}",
+            String::from_utf8_lossy(name)
+        );
+    }
+
+    fn receive_run_file(&self, option: RunFileOption, name: &[u8], bytes: &[u8]) -> io::Result<()> {
+        self.0
+            .lock()
+            .unwrap()
+            .push((option.name(), name.to_vec(), bytes.to_vec()));
+        Ok(())
+    }
+}
+
+impl Labeled {
+    /// The files received, as text.
+    fn files(&self) -> Vec<(&'static str, String, String)> {
+        self.0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(option, name, bytes)| {
+                (
+                    *option,
+                    String::from_utf8_lossy(name).into_owned(),
+                    String::from_utf8_lossy(bytes).into_owned(),
+                )
+            })
+            .collect()
+    }
+}
+
+/// The run's file of a PSSM name (`RunFiles::pssm_target`).
+fn pssm_file(files: &RunFiles, name: &str) -> RunFile {
+    match files.pssm_target("out_pssm", OsStr::new(name)) {
+        PssmTarget::File(file) => file,
+        _ => panic!("{name}: a PSSM file"),
+    }
+}
+
+/// One path is one file of a run's table (line RG item F1w-r3; NCBI BLAST+ 2.17.0 and LOSAT's
+/// command line, line RG item F1w-r3's probes): the log appends (`Opening::Append`, made first, never
+/// emptied); a strategy file or a numbered PSSM file empties the file and writes from 0
+/// (`Opening::Create`: a message appended before its bytes is written over, one after them follows
+/// them); a PSSM file of version 0 removes the file of the name and makes another
+/// (`Opening::Replace`: the log then writes to the removed file). The file is labeled by the
+/// option whose opening made it or last emptied it, and given once, when the run's files end.
+#[test]
+fn one_path_is_one_file_of_the_run_s_table() {
+    // `-logfile L -out_pssm L`: the PSSM file, the log's start message and later posts gone.
+    let labeled = Arc::new(Labeled::default());
+    let files = RunFiles::receiver(labeled.clone());
+    let log = files.log_target(Some(OsStr::new("L"))).unwrap();
+    log.write_text(b"start\n", &mut io::sink());
+    let mut pssm = files
+        .open_file(
+            &pssm_file(&files, "L"),
+            Opening::Replace,
+            RunFileOption::OutPssm,
+        )
+        .unwrap();
+    pssm.write_all(b"PSSM").unwrap();
+    drop(pssm);
+    log.write_text(b"late\n", &mut io::sink());
+    drop(log);
+    assert!(labeled.files().is_empty(), "no file before the run's end");
+    files.end().unwrap();
+    assert_eq!(labeled.files(), [("out_pssm", "L".into(), "PSSM".into())]);
+    // Once: a second end gives nothing; a file opened after the end writes nowhere and fails.
+    files.end().unwrap();
+    let mut after = files
+        .open_file(
+            &pssm_file(&files, "M"),
+            Opening::Create,
+            RunFileOption::OutPssm,
+        )
+        .unwrap();
+    let error = after.write_all(b"x").unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "LOSAT's internal error: M was written after the run's files ended"
+    );
+    assert_eq!(labeled.files().len(), 1);
+
+    // `-logfile L -export_search_strategy L` (TBLASTX): a warning appended before the strategy's
+    // first write is written over, NCBI's error after it follows it.
+    let labeled = Arc::new(Labeled::default());
+    let files = RunFiles::receiver(labeled.clone());
+    let log = files.log_target(Some(OsStr::new("L"))).unwrap();
+    log.write_text(b"bad registry\n", &mut io::sink());
+    let StrategyTarget::File(file) = files.strategy_target(OsStr::new("L"), &[]) else {
+        panic!("a strategy file");
+    };
+    let mut strategy = files
+        .open_file(&file, Opening::Create, RunFileOption::ExportSearchStrategy)
+        .unwrap();
+    log.write_text(b"warning\n", &mut io::sink());
+    strategy.write_all(b"the strategy").unwrap();
+    drop(strategy);
+    log.write_text(b"error\n", &mut io::sink());
+    drop(log);
+    files.end().unwrap();
+    assert_eq!(
+        labeled.files(),
+        [(
+            "export_search_strategy",
+            "L".into(),
+            "the strategyerror\n".into()
+        )]
+    );
+
+    // `-logfile E.1 -out_pssm E -save_each_pssm`: `E.1` emptied on its inode, the log's later
+    // posts after the PSSM's bytes; `E.2` a file of its own; each in the order first closed.
+    let labeled = Arc::new(Labeled::default());
+    let files = RunFiles::receiver(labeled.clone());
+    let log = files.log_target(Some(OsStr::new("E.1"))).unwrap();
+    log.write_text(b"start\n", &mut io::sink());
+    for (name, bytes) in [("E.1", "round 1"), ("E.2", "round 2")] {
+        let mut pssm = files
+            .open_file(
+                &pssm_file(&files, name),
+                Opening::Create,
+                RunFileOption::OutPssm,
+            )
+            .unwrap();
+        pssm.write_all(bytes.as_bytes()).unwrap();
+    }
+    log.write_text(b"late\n", &mut io::sink());
+    drop(log);
+    files.end().unwrap();
+    assert_eq!(
+        labeled.files(),
+        [
+            ("out_pssm", "E.1".into(), "round 1late\n".into()),
+            ("out_pssm", "E.2".into(), "round 2".into()),
+        ]
+    );
+
+    // `-out_pssm F -out_ascii_pssm F` of two queries: the last query's ASCII file, labeled by its
+    // option, in the place of the path's first close.
+    let labeled = Arc::new(Labeled::default());
+    let files = RunFiles::receiver(labeled.clone());
+    let log = files.log_target(Some(OsStr::new("run.log"))).unwrap();
+    log.write_text(b"start\n", &mut io::sink());
+    for (option, bytes) in [
+        (RunFileOption::OutPssm, "pssm 1"),
+        (RunFileOption::OutAsciiPssm, "ascii 1"),
+        (RunFileOption::OutPssm, "pssm 2"),
+        (RunFileOption::OutAsciiPssm, "ascii 2"),
+    ] {
+        let mut pssm = files
+            .open_file(&pssm_file(&files, "./F"), Opening::Replace, option)
+            .unwrap();
+        pssm.write_all(bytes.as_bytes()).unwrap();
+    }
+    drop(log);
+    files.end().unwrap();
+    assert_eq!(
+        labeled.files(),
+        [
+            ("out_ascii_pssm", "F".into(), "ascii 2".into()),
+            ("logfile", "run.log".into(), "start\n".into()),
+        ]
+    );
+}
+
+/// A run's table lives while an opening of its files does: the files of a run whose `RunFiles`
+/// went first (the other search of a run of two searches, whose strategy file no one keeps) take
+/// their writes and end, given to the receiver, when the last opening closes.
+#[test]
+fn an_opening_keeps_its_run_s_table() {
+    let labeled = Arc::new(Labeled::default());
+    let files = RunFiles::receiver(labeled.clone());
+    let StrategyTarget::File(file) = files.strategy_target(OsStr::new("s.asn"), &[]) else {
+        panic!("a strategy file");
+    };
+    let mut strategy = files
+        .open_file(&file, Opening::Create, RunFileOption::ExportSearchStrategy)
+        .unwrap();
+    drop(files);
+    strategy.write_all(b"requests").unwrap();
+    assert!(labeled.files().is_empty());
+    drop(strategy);
+    assert_eq!(
+        labeled.files(),
+        [("export_search_strategy", "s.asn".into(), "requests".into())]
+    );
 }

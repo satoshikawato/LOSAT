@@ -1661,15 +1661,13 @@ pub enum DiagTarget {
     /// Nowhere: `-logfile ""` and `-logfile /dev/null` (a stream handler without a stream).
     Discard,
     /// The file of `-logfile` of a run whose files LOSAT Web gives its host
-    /// (`report::run_files::RunFiles::Receiver`): its bytes, kept until the run ends. Behind a
-    /// lock, so that every target is written through a shared reference, as a file is
-    /// (`Write for &File`), and a target stays `Sync` and `RefUnwindSafe` (`api::Batches` holds
-    /// one; a `RefCell` would take both away from that public type).
-    Memory(std::sync::Mutex<Vec<u8>>),
-    /// The file of `-logfile` of a tool's run whose files LOSAT Web gives its host
-    /// (`report::run_files::OpenFiles`, line NP WW3a, 2026-11-22): an opening of the run's file of
-    /// that path that appends to it, as NCBI's does, and that the run's other openings of the
-    /// file share (`-out x -logfile x`, D-WW3-9). Behind a lock, as `Memory`.
+    /// (`report::run_files::RunFiles::Receiver`; a tool's run since line NP WW3a, 2026-11-22, a
+    /// search's since line RG item F1w-r3): an opening of the run's file of that path in the run's
+    /// table that appends to it, as NCBI's does, and that the run's other openings of the file
+    /// share (`-out x -logfile x`, D-WW3-9; `-logfile L -out_pssm L`). Behind a lock, so that
+    /// every target is written through a shared reference, as a file is (`Write for &File`), and
+    /// a target stays `Sync` and `RefUnwindSafe` (`api::Batches` holds one; a `RefCell` would take
+    /// both away from that public type).
     Stream(std::sync::Mutex<Box<dyn Write + Send>>),
     /// The file of `-logfile` of a run whose files LOSAT Web gives its host, where the name is the
     /// process's standard error (`report::run_files::RunFiles::log_target`: `/dev/stderr`): a file,
@@ -1687,7 +1685,7 @@ pub enum DiagTarget {
 pub enum TextPlace {
     /// The standard error (`cerr`): the caller's diagnostics.
     StandardError,
-    /// The file of `-logfile`, on disk or in memory.
+    /// The file of `-logfile`, on disk or in the run's table.
     LogFile,
     /// Nowhere (`-logfile ""` and `-logfile /dev/null`).
     Nowhere,
@@ -1698,9 +1696,7 @@ impl DiagTarget {
     pub fn place(&self) -> TextPlace {
         match self {
             DiagTarget::Stderr | DiagTarget::StderrFile => TextPlace::StandardError,
-            DiagTarget::File(_) | DiagTarget::Memory(_) | DiagTarget::Stream(_) => {
-                TextPlace::LogFile
-            }
+            DiagTarget::File(_) | DiagTarget::Stream(_) => TextPlace::LogFile,
             DiagTarget::Discard => TextPlace::Nowhere,
         }
     }
@@ -1719,8 +1715,8 @@ impl DiagTarget {
         }
     }
 
-    /// Writes `text` to the file of `-logfile` (on disk or in memory); nothing for `cerr` and for
-    /// no output, nor for a file that is the standard error (`StderrFile`), whose text the caller's
+    /// Writes `text` to the file of `-logfile` (on disk or in the run's table); nothing for `cerr`
+    /// and for no output, nor for a file that is the standard error (`StderrFile`), whose text the caller's
     /// diagnostics have where the caller writes it: the error that ends a run there is the run's
     /// error, as for `cerr` (`api::start::RunLog::post`).
     pub fn write_to_file(&self, text: &[u8]) {
@@ -1730,10 +1726,6 @@ impl DiagTarget {
                 let mut file: &std::fs::File = file;
                 let _ = file.write_all(text);
             }
-            DiagTarget::Memory(bytes) => bytes
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .extend_from_slice(text),
             DiagTarget::Stream(writer) => {
                 let _ = writer
                     .lock()
@@ -1799,9 +1791,6 @@ impl DiagTarget {
                     .write(true)
                     .open(null)
                     .map_err(|error| refusal(format!("{null}: {error}")))?
-            }
-            DiagTarget::Memory(_) => {
-                return Err(refusal("the file is kept in memory".to_string()));
             }
             DiagTarget::Stream(_) => {
                 return Err(refusal("the file goes to LOSAT Web's host".to_string()));

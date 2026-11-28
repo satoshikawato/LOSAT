@@ -325,6 +325,208 @@ fn a_run_that_fails_after_the_file_is_made_keeps_the_command_lines_file() {
     }
 }
 
+/// SHA-256 of `bytes`, in hex.
+fn sha256(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The files of the run (stream 8): each name, the option of its entry's comment, its bytes' size
+/// and SHA-256.
+fn labeled_files(streams: &BTreeMap<u32, Vec<u8>>) -> Vec<(String, String, usize, String)> {
+    streams
+        .get(&STREAM_RUN_FILES)
+        .map(|archive| {
+            crate::zip::read_with_comments(archive)
+                .into_iter()
+                .map(|(name, bytes, comment)| {
+                    (
+                        String::from_utf8(name).unwrap(),
+                        String::from_utf8(comment).unwrap(),
+                        bytes.len(),
+                        sha256(&bytes),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// psiblast's PSSM files of `tests/fasta/psiblast/q1b_gi.faa` against `q1_subj_ids.faa` (the last
+/// of 2 rounds, `-save_pssm_after_last_round`; line RG item F1w-r3's probes): NCBI
+/// BLAST+ 2.17.0's and LOSAT's command line's, size and SHA-256. The ASN.1 PSSM; the ASCII PSSM
+/// of round 2, and of round 1 (also the second query's of `PSSM_TWO_QUERIES` runs of 1 round).
+const PSSM: (usize, &str) = (
+    39_579,
+    "6f6879f8f1c6bbf7b67dbb38f940fd0c88bafb5932dd83e5f61b8b2bc1d788f3",
+);
+const ASCII_ROUND_2: (usize, &str) = (
+    6_005,
+    "641993a472c6fafe5c1a5f561e032262157bf0ae94b9e8050f0f5cc8b4dc8f24",
+);
+const ASCII_ROUND_1: (usize, &str) = (
+    6_005,
+    "0f0bf9804c7d1c1aa7d17aa374c7dcf70b83dfb212f792e37fd9b052433a3330",
+);
+/// The ASN.1 PSSM of the second query of `two_queries` (1 round).
+const PSSM_TWO_QUERIES: (usize, &str) = (
+    39_523,
+    "e6f063a1f650e7e5e6131e24ed7840c9a8d7eb18e1ea27f742efd2c13bcb824d",
+);
+
+/// The argv of psiblast's PSSM probes (line RG item F1w-r3) with `words` after it.
+fn psiblast_argv<'a>(two_queries: bool, words: &[&'a str]) -> Vec<&'a str> {
+    let mut argv = vec![
+        "psiblast",
+        "-query",
+        "psiblast/q1b_gi.faa",
+        "-subject",
+        "psiblast/q1_subj_ids.faa",
+    ];
+    if two_queries {
+        argv.extend(["-num_iterations", "1"]);
+    } else {
+        argv.extend(["-num_iterations", "2"]);
+    }
+    argv.extend([
+        "-save_pssm_after_last_round",
+        "-num_descriptions",
+        "3",
+        "-num_alignments",
+        "2",
+    ]);
+    argv.extend_from_slice(words);
+    argv.extend(["-num_threads", "1"]);
+    argv
+}
+
+/// The query of `psiblast_argv`: `q1b_gi.faa`, and for two queries that protein again under the
+/// id `second`.
+fn psiblast_query(two_queries: bool) -> Vec<u8> {
+    let one = fasta("psiblast/q1b_gi.faa");
+    if !two_queries {
+        return one;
+    }
+    let body = &one[one.iter().position(|&byte| byte == b'\n').unwrap()..];
+    let mut two = one.clone();
+    two.extend_from_slice(b">second query");
+    two.extend_from_slice(body);
+    two
+}
+
+/// Two options that name one file (line RG item F1w-r3; review of F1w-r2): the run's file is the
+/// command line's, which is NCBI BLAST+ 2.17.0's (the item's probes), labeled by the option
+/// whose opening made it or last emptied it. The log is opened first and appends; a PSSM file
+/// (version 0) removes the file of its name and makes another, so the log's file is no file of the
+/// run; a numbered PSSM file (`-save_each_pssm`) empties the file of its name. Before F1w-r3 the
+/// Web's file was the log's (`L` 0 bytes labeled `logfile`).
+#[test]
+fn a_file_that_two_options_name_is_the_command_lines_file() {
+    let row = |name: &str, option: &str, (size, sha): (usize, &str)| {
+        (name.to_string(), option.to_string(), size, sha.to_string())
+    };
+    for (two_queries, words, expected) in [
+        (
+            false,
+            &["-logfile", "L", "-out_pssm", "L"][..],
+            vec![row("L", "out_pssm", PSSM)],
+        ),
+        (
+            false,
+            &["-logfile", "L", "-out_ascii_pssm", "L"],
+            vec![row("L", "out_ascii_pssm", ASCII_ROUND_2)],
+        ),
+        (
+            false,
+            &["-logfile", "E.1", "-out_pssm", "E", "-save_each_pssm"],
+            vec![row("E.1", "out_pssm", PSSM), row("E.2", "out_pssm", PSSM)],
+        ),
+        (
+            false,
+            &["-logfile", "E.2", "-out_ascii_pssm", "E", "-save_each_pssm"],
+            vec![
+                row("E.1", "out_ascii_pssm", ASCII_ROUND_1),
+                row("E.2", "out_ascii_pssm", ASCII_ROUND_2),
+            ],
+        ),
+        (
+            false,
+            &["-out_pssm", "F", "-out_ascii_pssm", "F"],
+            vec![row("F", "out_ascii_pssm", ASCII_ROUND_2)],
+        ),
+        (
+            false,
+            &["-out_pssm", "F", "-out_ascii_pssm", "F", "-save_each_pssm"],
+            vec![
+                row("F.1", "out_ascii_pssm", ASCII_ROUND_1),
+                row("F.2", "out_ascii_pssm", ASCII_ROUND_2),
+            ],
+        ),
+        (
+            true,
+            &["-logfile", "L", "-out_pssm", "L"],
+            vec![row("L", "out_pssm", PSSM_TWO_QUERIES)],
+        ),
+        (
+            true,
+            &["-out_pssm", "F", "-out_ascii_pssm", "F"],
+            vec![row("F", "out_ascii_pssm", ASCII_ROUND_1)],
+        ),
+        // Distinct names: each file its own (the run's order: the PSSM file when written, the log
+        // at the run's end).
+        (
+            false,
+            &["-logfile", "L", "-out_pssm", "P"],
+            vec![
+                row("P", "out_pssm", PSSM),
+                row(
+                    "L",
+                    "logfile",
+                    (
+                        0,
+                        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                    ),
+                ),
+            ],
+        ),
+    ] {
+        let argv = psiblast_argv(two_queries, words);
+        let (result, streams) = run_inputs_of(
+            &argv,
+            &psiblast_query(two_queries),
+            &fasta("psiblast/q1_subj_ids.faa"),
+        );
+        result.unwrap_or_else(|error| panic!("{words:?}: {error}"));
+        assert_eq!(labeled_files(&streams), expected, "{words:?}");
+    }
+    // An argument error after the log opened: the file is the log's, with the command line's posts
+    // (NCBI's 210 bytes, in LOSAT's words: LOSAT's command line's 185 bytes).
+    let argv = psiblast_argv(
+        false,
+        &["-logfile", "L", "-out_pssm", "L", "-evalue", "abc"],
+    );
+    let (result, streams) = run_inputs_of(
+        &argv,
+        &psiblast_query(false),
+        &fasta("psiblast/q1_subj_ids.faa"),
+    );
+    assert!(result.is_err());
+    assert_eq!(
+        labeled_files(&streams),
+        [row(
+            "L",
+            "logfile",
+            (
+                185,
+                "03e7c3b31a6f937e490da81fe8a2a79af98283d2a060d52dc67183249ecef410"
+            )
+        )]
+    );
+}
+
 /// The names that the command line cannot open are NCBI's error, at once (no file): also, read
 /// against the run's files as `-logfile` is (line RG item F1w-r2), a name in a folder that they do
 /// not have (`out/s.asn`, `a/b/../s.asn`) or in a file of them, and a folder of them (the query's

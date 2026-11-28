@@ -455,7 +455,7 @@ fn a_run_of_losat_web_writes_the_files_of_the_command_line() {
         let (mut web_out, mut web_err) = (Vec::new(), Vec::new());
         let web_status = run_in(
             &web_words,
-            &RunFiles::Receiver(kept.clone()),
+            &RunFiles::receiver(kept.clone()),
             &mut std::io::empty(),
             &mut web_out,
             &mut web_err,
@@ -584,7 +584,7 @@ fn a_receiver_windowmasker_reads_logfile_against_the_runs_files() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_in(
             &args,
-            &RunFiles::Receiver(kept.clone()),
+            &RunFiles::receiver(kept.clone()),
             &mut std::io::empty(),
             &mut out,
             &mut err,

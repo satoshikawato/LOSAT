@@ -797,14 +797,14 @@ struct NoFiles(SearchRunFiles);
 /// that the search reads each name of a file (`-export_search_strategy`, psiblast's `-out_pssm`)
 /// against the same run's files as the argv's own search (line RG item F1w-r2).
 fn kept_by_no_one(run_files: &RunFiles) -> RunFiles {
-    let names = match run_files {
-        RunFiles::Receiver(receiver) => SearchRunFiles {
+    let names = match run_files.received() {
+        Some(receiver) => SearchRunFiles {
             registered: receiver.registered_files().to_vec(),
             read: receiver.read_files().to_vec(),
         },
-        RunFiles::Disk => SearchRunFiles::default(),
+        None => SearchRunFiles::default(),
     };
-    RunFiles::Receiver(Arc::new(NoFiles(names)))
+    RunFiles::receiver(Arc::new(NoFiles(names)))
 }
 
 impl losat::web_adapter::FileReceiver for NoFiles {
@@ -913,7 +913,7 @@ pub fn data_loaders(words: &[&str]) -> Result<bool, String> {
     let started = start(
         words,
         &registry,
-        &RunFiles::Receiver(Arc::new(NoFiles(run_names))),
+        &RunFiles::receiver(Arc::new(NoFiles(run_names))),
         &mut std::io::sink(),
     )
     .map_err(|(message, _)| message)?;
@@ -962,7 +962,7 @@ pub fn validate_with(
     use losat::web_adapter::{parse_optional_range, RangeRole};
     let registry = crate::files::registry_files();
     let run_names = search_run_files(words, &registry);
-    let no_files = RunFiles::Receiver(Arc::new(NoFiles(run_names)));
+    let no_files = RunFiles::receiver(Arc::new(NoFiles(run_names)));
     let started =
         start(words, &registry, &no_files, &mut std::io::sink()).map_err(|(message, _)| message)?;
     let parse_deflines = if started.version().is_some() {
@@ -2108,7 +2108,7 @@ pub fn run(
 ) -> Result<(), String> {
     let registry = crate::files::registry_files();
     let files = Arc::new(RunFileArchive::new(search_run_files(words, &registry)));
-    let run_files = RunFiles::Receiver(files.clone());
+    let run_files = RunFiles::receiver(files.clone());
     let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
     let (result, started) = match start(words, &registry, &run_files, &mut diagnostics) {
         Ok(mut started) => (
@@ -2133,9 +2133,14 @@ pub fn run(
     // stream 8 (docs/web/abi_v2.md §5; line WQA's sweep, D3, 2026-11-19). The error itself is the
     // run's error. A run that succeeded sent it already.
     diagnostics.finish();
-    // The run's files (the file of `-logfile`), after the run, whether it failed or not.
-    let handed = started.map_or(Ok(()), CallerStart::finish);
-    // The archive closes here, also where the start's files failed: a file handed over later is
+    // The run's files, after the run, whether it failed or not: the file of `-logfile` closes
+    // (`CallerStart::finish`), and the run's table gives every file of the run to the archive
+    // (`RunFiles::end`: line RG item F1w-r3).
+    if let Some(started) = started {
+        started.finish();
+    }
+    let handed = run_files.end();
+    // The archive closes here, also where the run's files failed: a file handed over later is
     // refused (`RunFileArchive::receive_run_file`).
     let kept = files.close();
     let emitted = handed.and_then(|()| RunFileArchive::emit(kept));
@@ -2149,14 +2154,15 @@ pub fn run(
 type ArchivedEntries = Vec<(Vec<u8>, Vec<u8>, losat::web_adapter::RunFileOption)>;
 
 /// The files of a run besides its outputs (the file of `-logfile`, the strategy file, the PSSM
-/// files), which the engine hands over when the run ends (`RunFiles::Receiver`), each with the
-/// option that names it (`FileReceiver::receive_run_file`), emitted as a ZIP archive on
+/// files), which the run's table of files hands over when the run ends (`RunFiles::end`), each
+/// once, as the command line's run leaves it, with the option whose bytes it starts with
+/// (`FileReceiver::receive_run_file`), emitted as a ZIP archive on
 /// `STREAM_RUN_FILES` after the run, whether it succeeded or failed (docs/web/abi_v2.md §5), and
 /// only when there are any: each entry's comment is its option (`RunFileOption::name`), by which
 /// the host labels the file (line RG item F1w-r2, review 3 S1).
-/// The archive closes once, after the run (`close`): a file handed over after it (`None`) is
-/// refused, so that a file that the engine hands over late is its error (LOSAT's internal error of
-/// `-export_search_strategy`, `strategy::end_run`) instead of a file lost without one.
+/// The archive closes once, after the run's files end (`close`): a file handed over after it
+/// (`None`), or a name handed over twice, is LOSAT's internal error instead of a file lost without
+/// one (the run's table gives each path's file once).
 struct RunFileArchive {
     files: std::sync::Mutex<Option<ArchivedEntries>>,
     run_names: SearchRunFiles,
@@ -2223,15 +2229,16 @@ impl losat::web_adapter::FileReceiver for RunFileArchive {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
         {
             Some(files) => {
-                // Match filesystem semantics: writing the same file name again replaces its bytes
-                // in place so stream 8 holds the final bytes written for each name, under the
-                // option that wrote them (`-out_ascii_pssm` after `-out_pssm` of one name).
-                if let Some(existing) = files.iter_mut().find(|(n, _, _)| n.as_slice() == name) {
-                    existing.1 = bytes.to_vec();
-                    existing.2 = option;
-                } else {
-                    files.push((name.to_vec(), bytes.to_vec(), option));
+                // The run's table gives each file of the run once (`RunFiles::end`): the file of
+                // its path as the command line's run leaves it, so a name that came before is
+                // LOSAT's internal error, not a file to replace.
+                if files.iter().any(|(kept, _, _)| kept.as_slice() == name) {
+                    return Err(std::io::Error::other(format!(
+                        "LOSAT's internal error: the run's file {} came twice",
+                        String::from_utf8_lossy(name)
+                    )));
                 }
+                files.push((name.to_vec(), bytes.to_vec(), option));
                 Ok(())
             }
             None => Err(std::io::Error::other(format!(

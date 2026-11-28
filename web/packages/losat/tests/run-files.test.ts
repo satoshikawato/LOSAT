@@ -1,6 +1,6 @@
 // The options that name a run's files (stream 8): the engine's label of each, checked against the command line's file
 // names of the engine's *start*, and those names in order where the archive labels no file (`namedRunFiles`; line RG
-// item F1w-r2, 2026-11-28).
+// item F1w-r2, 2026-11-28; a file that two options name, F1w-r3).
 import { describe, expect, it } from 'vitest';
 import { namedRunFiles, runFileOption, type RunFileOption, type StoredRunFile } from '../src/domain/index.ts';
 
@@ -84,6 +84,30 @@ describe('namedRunFiles', () => {
     expect(labels(['logs'], { logFile: 'logs/', logFileName: 'logs', strategyFile: 'logs', outPssm: 'logs' })).toEqual([['logs', 'logfile']]);
     expect(labels(['s.asn'], { logFile: null, logFileName: null, strategyFile: 's.asn', outPssm: 's.asn' })).toEqual([
       ['s.asn', 'export_search_strategy'],
+    ]);
+  });
+
+  it('labels a file that the log and a PSSM option name by the option whose bytes it holds', () => {
+    // NCBI 2.17.0 psiblast (line RG item F1w-r3): the log opens first and appends; a PSSM file removes the file of its
+    // name and makes another (`-save_each_pssm`: empties it), so the file is the PSSM's.
+    const start = { logFile: 'L', logFileName: 'L', strategyFile: null, outPssm: 'L' };
+    expect(labels([['L', 'out_pssm']], start)).toEqual([['L', 'out_pssm']]);
+    expect(labels([['L', 'out_ascii_pssm']], { ...start, outPssm: null, outAsciiPssm: 'L' })).toEqual([['L', 'out_ascii_pssm']]);
+    expect(
+      labels(
+        [
+          ['E.1', 'out_pssm'],
+          ['E.2', 'out_pssm'],
+        ],
+        { logFile: 'E.1', logFileName: 'E.1', strategyFile: null, outPssm: 'E', saveEachPssm: true },
+      ),
+    ).toEqual([
+      ['E.1', 'out_pssm'],
+      ['E.2', 'out_pssm'],
+    ]);
+    // `-out_pssm F -out_ascii_pssm F`: the ASCII PSSM, written last.
+    expect(labels([['F', 'out_ascii_pssm']], { logFile: null, logFileName: null, strategyFile: null, outPssm: 'F', outAsciiPssm: 'F' })).toEqual([
+      ['F', 'out_ascii_pssm'],
     ]);
   });
 

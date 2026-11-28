@@ -1343,9 +1343,12 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
         received: Mutex::new(Vec::new()),
         registered: vec![b"existing.pssm".to_vec()],
     });
-    let run_files = RunFiles::Receiver(collector.clone());
+    // Each case is a run of its own: the run's table gives each file once, whole, when the run's
+    // files end (`RunFiles::end`; line RG item F1w-r3), in the order the run first closed each.
+    let run_files = RunFiles::receiver(collector.clone());
 
-    let drain = || -> Vec<(String, Vec<u8>)> {
+    let drain = |run_files: &RunFiles| -> Vec<(String, Vec<u8>)> {
+        run_files.end().unwrap();
         collector
             .received
             .lock()
@@ -1355,7 +1358,8 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
             .collect()
     };
 
-    // Single-round / PssmFiles with -save_each_pssm = false replaces earlier query's ASN.1.
+    // Single-round / PssmFiles with -save_each_pssm = false replaces earlier query's ASN.1 (and
+    // the ASCII file, one file of the path, holds the last query's).
     let req = PssmRequest {
         asn_path: Some(std::path::PathBuf::from("./out.pssm")),
         ascii_path: Some(std::path::PathBuf::from("out.ascii")),
@@ -1374,15 +1378,15 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
         .unwrap();
     files.commit().unwrap();
     assert_eq!(
-        drain(),
+        drain(&run_files),
         vec![
-            ("out.ascii".to_string(), b"ascii-1".to_vec()),
-            ("out.pssm".to_string(), b"asn-2".to_vec()),
             ("out.ascii".to_string(), b"ascii-2".to_vec()),
+            ("out.pssm".to_string(), b"asn-2".to_vec()),
         ]
     );
 
     // RoundFiles with -save_each_pssm = true delivers numbered files.
+    let run_files = RunFiles::receiver(collector.clone());
     let each_req = PssmRequest {
         asn_path: Some(std::path::PathBuf::from("iter.pssm")),
         ascii_path: Some(std::path::PathBuf::from("iter.ascii")),
@@ -1395,7 +1399,7 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
     round_files.write(Some(b"r1-asn"), Some(b"r1-asc")).unwrap();
     round_files.write(Some(b"r2-asn"), Some(b"r2-asc")).unwrap();
     assert_eq!(
-        drain(),
+        drain(&run_files),
         vec![
             ("iter.pssm.1".to_string(), b"r1-asn".to_vec()),
             ("iter.ascii.1".to_string(), b"r1-asc".to_vec()),
@@ -1406,6 +1410,7 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
 
     // A `..` after a link steps back from the link's target: the receiver and the *start* name the
     // file that the command line makes (`/tmp/...`; `/var/run` is `/run`), line RG item F1w-r2.
+    let run_files = RunFiles::receiver(collector.clone());
     let linked = PssmRequest {
         asn_path: Some(std::path::PathBuf::from("/var/run/../tmp/linked.pssm")),
         ascii_path: None,
@@ -1419,7 +1424,7 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
     files.add(Some(b"asn-linked"), None).unwrap();
     files.commit().unwrap();
     assert_eq!(
-        drain(),
+        drain(&run_files),
         vec![("/tmp/linked.pssm".to_string(), b"asn-linked".to_vec())]
     );
     assert_eq!(
@@ -1428,6 +1433,7 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
     );
 
     // Collision with an existing registered file is refused by check_pssm_files.
+    let run_files = RunFiles::receiver(collector.clone());
     let collision = PssmRequest {
         asn_path: Some(std::path::PathBuf::from("existing.pssm")),
         ascii_path: None,

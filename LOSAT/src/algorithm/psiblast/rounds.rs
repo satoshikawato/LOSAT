@@ -328,12 +328,13 @@ impl RoundFiles {
     /// NCBI's unchecked `ofstream`.
     pub(crate) fn write(&mut self, asn: Option<&[u8]>, ascii: Option<&[u8]>) -> Result<()> {
         use crate::report::run_files::{PssmTarget, RunFileOption, RunFiles};
-        if let RunFiles::Receiver(receiver) = &self.run_files {
+        if let RunFiles::Receiver(_) = &self.run_files {
             let deliver = |option: RunFileOption,
-                           path: &std::path::Path,
+                           file: &super::pssm::PssmFile,
                            bytes: &[u8],
                            checked: bool|
              -> Result<()> {
+                let path = &file.path;
                 let flag = option.flag();
                 let cannot_write = |error: std::io::Error| {
                     anyhow::anyhow!(
@@ -342,13 +343,12 @@ impl RoundFiles {
                         )
                 };
                 match self.run_files.pssm_target(flag, path.as_os_str()) {
-                    PssmTarget::File(host_name) => {
+                    PssmTarget::File(target) => {
+                        let written = file
+                            .open_in(&self.run_files, &target, option)
+                            .and_then(|mut out| out.write_all(bytes));
                         if checked {
-                            receiver
-                                .receive_run_file(option, &host_name, bytes)
-                                .map_err(cannot_write)?;
-                        } else {
-                            let _ = receiver.receive_run_file(option, &host_name, bytes);
+                            written.map_err(cannot_write)?;
                         }
                     }
                     PssmTarget::Discard => {}
@@ -370,11 +370,11 @@ impl RoundFiles {
             };
             if let (Some(stream), Some(bytes)) = (self.asn.as_mut(), asn) {
                 let file = stream.next_file();
-                deliver(RunFileOption::OutPssm, &file.path, bytes, true)?;
+                deliver(RunFileOption::OutPssm, &file, bytes, true)?;
             }
             if let (Some(stream), Some(bytes)) = (self.ascii.as_mut(), ascii) {
                 let file = stream.next_file();
-                deliver(RunFileOption::OutAsciiPssm, &file.path, bytes, false)?;
+                deliver(RunFileOption::OutAsciiPssm, &file, bytes, false)?;
             }
             return Ok(());
         }

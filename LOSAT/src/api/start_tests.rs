@@ -725,40 +725,44 @@ fn a_callers_start_reads_its_files_and_hands_over_the_log() {
     let report = section_report();
     let files = Files(vec![("./good.ini", b"[BLAST]\n"), ("./bad.ini", b"[x\n")]);
     let start = |program: &str, words: &[&str], kept: &std::sync::Arc<Kept>| {
+        let run_files = RunFiles::receiver(kept.clone());
         let mut stderr = Vec::new();
         let started = begin_with(
             ApplicationStart::with_files(program, words, &[], &files),
             words,
-            &RunFiles::Receiver(kept.clone()),
+            &run_files,
             &mut stderr,
         )
         .unwrap();
-        (started, stderr)
+        (started, stderr, run_files)
     };
     let kept = std::sync::Arc::new(Kept::default());
-    let (started, stderr) = start(
+    let (started, stderr, run_files) = start(
         "blastn",
         &["-conffile", "good.ini", "-logfile", "a.log", "-dryrun"],
         &kept,
     );
     assert_eq!((started.ended(), stderr.as_slice()), (None, &b""[..]));
     assert!(started.settings().is_ok() && started.dry_run());
-    started.finish().unwrap();
-    let (started, stderr) = start(
+    started.finish();
+    run_files.end().unwrap();
+    let (started, stderr, run_files) = start(
         "tblastx",
         &["-conffile", "bad.ini", "-logfile", "b.log"],
         &kept,
     );
     assert_eq!(started.ended(), Some(report.repeat(2).trim_end()));
     assert!(stderr.is_empty() && !started.dry_run());
-    started.finish().unwrap();
+    started.finish();
+    run_files.end().unwrap();
     // TBLASTX's run messages and its NCBI error go to the file, the others' to `cerr`.
     for (program, name) in [("tblastx", "c.log"), ("blastn", "d.log")] {
-        let (mut started, _) = start(program, &["-logfile", name], &kept);
+        let (mut started, _, run_files) = start(program, &["-logfile", name], &kept);
         let mut cerr = Vec::new();
         started.sink(&mut cerr).write_all(b"Warning: w\n").unwrap();
         started.post(b"BLAST engine error: e\n");
-        started.finish().unwrap();
+        started.finish();
+        run_files.end().unwrap();
         let expected: &[u8] = if program == "tblastx" {
             b""
         } else {
@@ -766,7 +770,7 @@ fn a_callers_start_reads_its_files_and_hands_over_the_log() {
         };
         assert_eq!(cerr, expected, "{program}");
     }
-    let (started, _) = start("blastn", &["-conffile", "missing.ini"], &kept);
+    let (started, _, _) = start("blastn", &["-conffile", "missing.ini"], &kept);
     assert_eq!(
         started.ended(),
         Some("Critical: (106.23) Registry file \"missing.ini\" not found, aborting.")
@@ -807,10 +811,11 @@ fn what_a_callers_run_adds_goes_where_the_run_s_messages_can_go() {
     ] {
         let words: Vec<&str> = logfile.map_or(Vec::new(), |name| vec!["-logfile", name]);
         let mut stderr = Vec::new();
+        let run_files = RunFiles::receiver(kept.clone());
         let mut started = begin_with(
             ApplicationStart::with_files(program, &words, &[], &files),
             &words,
-            &RunFiles::Receiver(kept.clone()),
+            &run_files,
             &mut stderr,
         )
         .unwrap();
@@ -824,7 +829,8 @@ fn what_a_callers_run_adds_goes_where_the_run_s_messages_can_go() {
             TextPlace::Nowhere
         };
         assert_eq!(place, expected, "{program} {logfile:?}");
-        started.finish().unwrap();
+        started.finish();
+        run_files.end().unwrap();
     }
     // The files of `-logfile` hold nothing of it.
     assert!(kept
@@ -856,17 +862,19 @@ fn a_callers_start_says_where_its_run_s_messages_go() {
             let words: Vec<&str> = logfile.map_or(Vec::new(), |name| vec!["-logfile", name]);
             let kept = std::sync::Arc::new(Kept::default());
             let mut stderr = Vec::new();
+            let run_files = RunFiles::receiver(kept.clone());
             let mut started = begin_with(
                 ApplicationStart::with_files(program, &words, &[], &files),
                 &words,
-                &RunFiles::Receiver(kept.clone()),
+                &run_files,
                 &mut stderr,
             )
             .unwrap();
             let place = started.messages_place();
             let mut cerr = Vec::new();
             started.sink(&mut cerr).write_all(b"Warning: w\n").unwrap();
-            started.finish().unwrap();
+            started.finish();
+            run_files.end().unwrap();
             let in_file = kept
                 .0
                 .lock()
@@ -923,17 +931,19 @@ fn a_callers_sink_writes_an_output_s_error_where_the_command_line_does() {
                 let words: Vec<&str> = logfile.map_or(Vec::new(), |name| vec!["-logfile", name]);
                 let kept = std::sync::Arc::new(Kept::default());
                 let mut stderr = Vec::new();
+                let run_files = RunFiles::receiver(kept.clone());
                 let mut started = begin_with(
                     ApplicationStart::with_files(program, &words, &[], &files),
                     &words,
-                    &RunFiles::Receiver(kept.clone()),
+                    &run_files,
                     &mut stderr,
                 )
                 .unwrap();
                 let messages = started.messages_place();
                 let mut cerr = Vec::new();
                 let place = started.sink(&mut cerr).error(text, source);
-                started.finish().unwrap();
+                started.finish();
+                run_files.end().unwrap();
                 let in_file = kept
                     .0
                     .lock()
@@ -1019,10 +1029,11 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
             let words = ["-logfile", logfile];
             let kept = std::sync::Arc::new(Kept::default());
             let mut stderr = Vec::new();
+            let run_files = RunFiles::receiver(kept.clone());
             let mut started = begin_with(
                 ApplicationStart::with_files(program, &words, &[], &files),
                 &words,
-                &RunFiles::Receiver(kept.clone()),
+                &run_files,
                 &mut stderr,
             )
             .unwrap();
@@ -1031,7 +1042,8 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
                 .sink(&mut stderr)
                 .write_all(warning.as_bytes())
                 .unwrap();
-            started.finish().unwrap();
+            started.finish();
+            run_files.end().unwrap();
             let label = format!("{program} -logfile {logfile}");
             let warned = !follows || matches!(kind, Kind::Stderr | Kind::StderrFile);
             let expected_stderr = format!(
@@ -1080,7 +1092,7 @@ fn a_callers_log_name_may_have_a_directory_or_be_the_standard_error() {
             let err = begin_with(
                 ApplicationStart::with_files(program, &words, &[], &files),
                 &words,
-                &RunFiles::Receiver(receiver.clone()),
+                &RunFiles::receiver(receiver.clone()),
                 &mut stderr,
             )
             .err()

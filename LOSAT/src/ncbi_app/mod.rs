@@ -746,18 +746,43 @@ fn run_app(
     (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
     body: Body,
     (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
-    files: &RunFiles,
+    run_files: &RunFiles,
     command_line: bool,
 ) -> i32 {
     // NCBI's application start (`ncbi_environment::ApplicationStart`): the file of `-logfile`
     // gets the usage report's messages when NCBI opens it, before `-version`.
-    // The files that the run opens by name, which end when the run ends (`OpenFiles`).
-    let files = OpenFiles::new(files);
+    // The files that the run opens by name (`OpenFiles`), which end when the run ends.
+    let files = OpenFiles::new(run_files);
     let files = if command_line {
         files.of_command_line()
     } else {
         files
     };
+    let status = run_app_files(
+        tool,
+        words,
+        (input, out, err),
+        body,
+        (start, xml_help),
+        &files,
+    );
+    drop(files);
+    // A receiver gets the run's files (or their ends) when the run ends (`RunFiles::end`), which
+    // keeps every file it gets (`ncbi_app`'s receivers: LOSAT Web's streams of a tool's files).
+    let _ = run_files.end();
+    status
+}
+
+/// `run_app` with the run's files `files`.
+fn run_app_files(
+    tool: &'static Tool,
+    words: &[OsString],
+    (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
+    body: Body,
+    (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
+    files: &OpenFiles,
+) -> i32 {
+    let command_line = files.command_line();
     match files.log_target_for(words, start, log_file(words)) {
         Err(reason) => {
             let mut diag = Diag::new(&DiagTarget::Stderr, err, tool);
@@ -794,7 +819,7 @@ fn run_app(
             }
         }
         Ok(ToolLog::Stdout) => {
-            let files = files.with_tool_log_stdout();
+            let files = files.clone().with_tool_log_stdout();
             let shared = RefCell::new(SharedStdout {
                 out,
                 held: Vec::new(),

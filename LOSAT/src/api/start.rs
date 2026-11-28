@@ -24,8 +24,6 @@ use crate::report::run_files::RunFiles;
 pub(super) struct Opened {
     pub(super) start: ApplicationStart,
     pub(super) target: DiagTarget,
-    /// The host file name for `RunFiles::deliver_log` (`None` on `Disk` or when no file is made).
-    pub(super) log_name: Option<Vec<u8>>,
 }
 
 /// The application start of `program` with the arguments `words` (after the program's name), of
@@ -60,7 +58,7 @@ fn open_with<S: AsRef<OsStr> + Clone>(
         }
         Err(reason) => return Err(Error::Search(reason.into())),
     }
-    let (mut target, log_name) = match files.log_target_for(words, &start, log_file(words)) {
+    let mut target = match files.log_target_for(words, &start, log_file(words)) {
         Ok(opened) => opened,
         Err(reason) => {
             let program = crate::cli::reader::tool(start.program()).map_or_else(
@@ -73,11 +71,7 @@ fn open_with<S: AsRef<OsStr> + Clone>(
         }
     };
     start.write_log_setup(&mut target, diagnostics);
-    Ok(Opened {
-        start,
-        target,
-        log_name,
-    })
+    Ok(Opened { start, target })
 }
 
 impl Opened {
@@ -431,9 +425,6 @@ pub struct CallerStart {
     log: RunLog,
     /// The `-logfile` target otherwise.
     target: Option<DiagTarget>,
-    /// The file of `-logfile` (`RunFiles::log_target`) and where it goes, for `finish`.
-    log_name: Option<Vec<u8>>,
-    files: RunFiles,
 }
 
 /// The start `start`, made from the arguments `words` (after the program's name) by the caller,
@@ -487,8 +478,6 @@ pub fn begin_with<S: AsRef<OsStr> + Clone>(
         version,
         log,
         target,
-        log_name: opened.log_name,
-        files: files.clone(),
     })
 }
 
@@ -548,13 +537,11 @@ impl CallerStart {
         }
     }
 
-    /// Hands the file of `-logfile` to the run's files (`RunFiles::deliver_log`) at the end of the
-    /// run.
-    pub fn finish(self) -> std::io::Result<()> {
-        match self.log.0.or(self.target) {
-            Some(target) => self.files.deliver_log(self.log_name.as_deref(), target),
-            None => Ok(()),
-        }
+    /// Closes the file of `-logfile` at the end of the run, after its last message: an opening of
+    /// the run's file in a `Receiver`'s table (`RunFiles::log_target`), which the run's files give
+    /// their receiver when they end (`RunFiles::end`).
+    pub fn finish(self) {
+        drop((self.log, self.target));
     }
 }
 

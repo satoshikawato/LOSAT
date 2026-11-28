@@ -819,12 +819,12 @@ pub(super) fn sort_preliminary_lists(
     // several volumes the merged lists keep `s_MergeAlignSet`'s order, which NCBI sorts nowhere.)
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:144-205,678-686
     // Without composition-based statistics (no score sort callback), `BlastHSPStreamClose` sorts
-    // by descending subject OID and `BlastHSPStreamRead` pops in ascending OID order. For PSSM
-    // `-use_sw_tback` (one query per batch), sorting here puts lists and excluded fetch marks in
-    // that order; round-1 / blastp CBS 0 SW builds its own batch OID stream in `sw_c0`.
+    // by descending subject OID and `BlastHSPStreamRead` pops in ascending OID order
+    // (`ResolvedBlastpArgs::sw_redo_in_oid_order`). For a PSSM search (one query per batch),
+    // sorting here puts lists and excluded fetch marks in that order; BLASTP and PSIBLAST's
+    // first round build their batch's OID stream across its queries in `sw_c0`.
     if args.rps_search.is_none() {
-        let by_oid =
-            args.psi_search.is_some() && args.use_sw_tback && !args.comp_based_stats.is_enabled();
+        let by_oid = args.psi_search.is_some() && args.sw_redo_in_oid_order();
         for hit_list_opt in preliminary_hit_lists.iter_mut() {
             if let Some(hit_list) = hit_list_opt.as_mut() {
                 if by_oid {

@@ -130,7 +130,7 @@ impl MatchStep for PssmSwStep<'_> {
         let on_endless = self.options.on_endless;
         let matched = self
             .status
-            .redone(redone, || on_endless(&*heaps, position))?;
+            .redone(redone, || on_endless(&*heaps, position, oid))?;
         self.status_position = Some(position);
         Ok(matched.flatten())
     }

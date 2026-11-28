@@ -10479,13 +10479,9 @@ fn run_call(
     // `-comp_based_stats 0` without `-use_sw_tback`: the ordinary traceback below reads the
     // compact lists as they are. With `-use_sw_tback` (item X4-c0; psiblast round 1: line PS-SW),
     // NCBI runs the Smith-Waterman redo without composition adjustment in batch OID order
-    // (`sw_c0`). psiblast `-in_pssm` / rounds 2+ and rpsblast take their own paths and leave the
-    // redo unused.
-    let sw_c0_redo = !args.ungapped
-        && args.use_sw_tback
-        && args.psi_search.is_none()
-        && args.rps_search.is_none()
-        && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats;
+    // (`sw_c0`, `ResolvedBlastpArgs::sw_redo_in_oid_order`). psiblast `-in_pssm` / rounds 2+
+    // redo their lists in that order in `pssm_hooks::pssm_traceback`.
+    let sw_c0_redo = args.sw_redo_in_oid_order() && args.psi_search.is_none();
     let ordinary_traceback = (args.comp_based_stats.mode
         == BlastpCompositionMode::NoCompositionBasedStats
         && !sw_c0_redo)
@@ -10508,7 +10504,7 @@ fn run_call(
     let fetch_notes = database::FetchNotes::new(
         listed_subjects.as_ref(),
         database,
-        sw_c0_redo,
+        args.sw_redo_in_oid_order(),
         redo_run::SwErrorText::of(&args),
     );
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
@@ -10549,7 +10545,6 @@ fn run_call(
             blastp_parallel_pool,
             fetch_excluded,
             &fetch_notes,
-            &|heaps: &[_]| fetch_notes.pssm_redo(heaps),
             sorts_results,
         )?)
     } else if args.ungapped {

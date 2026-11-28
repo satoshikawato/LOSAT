@@ -1092,7 +1092,8 @@ impl XFetchedUtf8 {
 pub(in crate::algorithm::blastp) struct FetchNotes<'a> {
     listed: Option<&'a ListedSubjects>,
     database: Option<&'a BlastpDatabase>,
-    /// Whether the redo runs in batch OID order (`-comp_based_stats 0 -use_sw_tback`, item X4-c0).
+    /// Whether the redo runs in batch OID order (`-comp_based_stats 0 -use_sw_tback`, item X4-c0;
+    /// `ResolvedBlastpArgs::sw_redo_in_oid_order`, PSIBLAST's PSSM rounds included).
     sw_oid_order: bool,
     /// Whether the PSSM's position-based redo ran and noted its own.
     pssm_redone: std::cell::Cell<bool>,
@@ -1133,16 +1134,51 @@ impl<'a> FetchNotes<'a> {
         FetchNotes::new(None, None, false, super::redo_run::SwErrorText::BLASTP)
     }
 
-    /// The PSSM's position-based redo of modes 1 to 3 ran, whose heaps `heaps` tell which
-    /// subjects its fetches read; LOSAT's refusal where one of them has a header that cannot be
-    /// read (`ListedSubjects::note_fetched`).
+    /// The PSSM's position-based redo (modes 1 to 3, and `-use_sw_tback`) ran, whose heaps `heaps`
+    /// tell which subjects its fetches read, in the redo's order (OID order at
+    /// `-comp_based_stats 0 -use_sw_tback`); LOSAT's refusal where one of them has a header that
+    /// cannot be read (`ListedSubjects::note_fetched`).
     pub(super) fn pssm_redo(&self, heaps: &[BlastCompoHeap]) -> Result<()> {
         self.pssm_redone.set(true);
         if let (Some(listed), Some(database)) = (self.listed, self.database) {
             let all = |_: usize| 0..heaps.len();
-            listed.note_fetched(database, Some(heaps), &all, false)?;
+            listed.note_fetched(database, Some(heaps), &all, self.sw_oid_order)?;
         }
         Ok(())
+    }
+
+    /// The error of a PSSM round (PSIBLAST, one query: `pssm_hooks::pssm_redo`) whose last redone
+    /// match failed its Smith-Waterman redo, with `heaps` as the redo left them, the fetches
+    /// before it taken in the redo's order (`sw_oid_order`).
+    pub(super) fn pssm_batch_failed(&self, heaps: &[BlastCompoHeap]) -> anyhow::Error {
+        let batch = 0..heaps.len();
+        if self.sw_oid_order {
+            super::redo_run::sw_batch_failed_after_oid(self, batch, heaps)
+        } else {
+            let last = heaps.len().saturating_sub(1);
+            super::redo_run::sw_batch_failed_after(self, batch, heaps, last)
+        }
+    }
+
+    /// The refusal of a PSSM round's match whose Smith-Waterman redo NCBI never ends: the match
+    /// after `position` lists of the query's list, of the subject `oid` (its rank where a seqid
+    /// list ranks the subjects), with `heaps` as the redo left them before it, the fetches before
+    /// it taken in the redo's order (`sw_oid_order`).
+    pub(super) fn pssm_endless(
+        &self,
+        heaps: &[BlastCompoHeap],
+        position: usize,
+        oid: u32,
+    ) -> anyhow::Error {
+        let batch = 0..heaps.len();
+        if self.sw_oid_order {
+            let ordinal = self
+                .listed
+                .map_or(oid, |listed| listed.ordinals[oid as usize]);
+            super::redo_run::sw_endless_after_oid(self, batch, heaps, ordinal, 0)
+        } else {
+            super::redo_run::sw_endless_after(self, batch, heaps, 0, position)
+        }
     }
 
     /// LOSAT's refusal where the composition-based redo of the batch `batch`, before its

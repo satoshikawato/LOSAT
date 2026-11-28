@@ -126,8 +126,9 @@ pub(crate) struct PssmSwOptions<'a> {
     /// The error of a batch whose last redone match failed (`Traceback failed`, or the refusal
     /// where NCBI's clean-up crashes).
     pub(crate) on_batch_failed: &'a dyn Fn(&[BlastCompoHeap]) -> anyhow::Error,
-    /// The refusal of a match whose redo NCBI never ends, at its position in the query's list.
-    pub(crate) on_endless: &'a dyn Fn(&[BlastCompoHeap], usize) -> anyhow::Error,
+    /// The refusal of a match whose redo NCBI never ends, at its position in the query's list,
+    /// of the subject `oid` (the list's).
+    pub(crate) on_endless: &'a dyn Fn(&[BlastCompoHeap], usize, u32) -> anyhow::Error,
 }
 
 /// The scale of a redo and whether it adjusts the matrix to each subject's composition: NCBI's

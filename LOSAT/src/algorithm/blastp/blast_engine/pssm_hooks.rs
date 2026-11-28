@@ -570,7 +570,6 @@ pub(super) fn pssm_traceback(
     pool: &crate::utils::threading::SearchPool<'_>,
     fetch_excluded: &[database::FetchExcludedMatch],
     fetch_notes: &database::FetchNotes<'_>,
-    redone: &dyn Fn(&[crate::algorithm::blastp::hsp::BlastCompoHeap]) -> anyhow::Result<()>,
     sorts_results: bool,
 ) -> Result<Vec<Option<BlastpHitList>>> {
     let psi = args
@@ -621,7 +620,6 @@ pub(super) fn pssm_traceback(
             compact_hit_lists,
             fetch_excluded,
             fetch_notes,
-            redone,
         )
         .map(seqalign_scores_of_lists);
     }
@@ -694,7 +692,6 @@ fn pssm_redo(
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     fetch_excluded: &[database::FetchExcludedMatch],
     fetch_notes: &database::FetchNotes<'_>,
-    redone: &dyn Fn(&[crate::algorithm::blastp::hsp::BlastCompoHeap]) -> anyhow::Result<()>,
 ) -> Result<Vec<Option<BlastpHitList>>> {
     let has_lists = preliminary_hit_lists
         .iter()
@@ -743,17 +740,17 @@ fn pssm_redo(
             sw_status,
         );
     };
+    // The fetch notes take the fetches in the redo's order (`FetchNotes::pssm_redo`,
+    // `pssm_batch_failed`, `pssm_endless`: OID order at `-comp_based_stats 0`).
+    let redone =
+        |heaps: &[crate::algorithm::blastp::hsp::BlastCompoHeap]| fetch_notes.pssm_redo(heaps);
     let on_batch_failed = |heaps: &[crate::algorithm::blastp::hsp::BlastCompoHeap]| {
-        super::redo_run::sw_batch_failed_after(
-            fetch_notes,
-            0..heaps.len(),
-            heaps,
-            heaps.len().saturating_sub(1),
-        )
+        fetch_notes.pssm_batch_failed(heaps)
     };
-    let on_endless = |heaps: &[crate::algorithm::blastp::hsp::BlastCompoHeap], position: usize| {
-        super::redo_run::sw_endless_after(fetch_notes, 0..heaps.len(), heaps, 0, position)
-    };
+    let on_endless =
+        |heaps: &[crate::algorithm::blastp::hsp::BlastCompoHeap], position: usize, oid: u32| {
+            fetch_notes.pssm_endless(heaps, position, oid)
+        };
     redo1::PssmRedo1 {
         pssm: &psi.pssm,
         info: &info,
@@ -770,7 +767,7 @@ fn pssm_redo(
         hitlist_size: args.traceback_hitlist_size(),
         inclusion_ethresh: args.inclusion_ethresh,
         link,
-        redone,
+        redone: &redone,
         scale,
         sw: args.use_sw_tback.then_some(redo1::PssmSwOptions {
             on_query_done: &on_query_done,

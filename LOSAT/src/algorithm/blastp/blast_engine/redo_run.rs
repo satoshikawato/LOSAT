@@ -1160,7 +1160,10 @@ pub(super) fn sw_endless_after_oid(
 /// without composition-based statistics (item X4-c0): NCBI's `s_GetAlignParams` calls
 /// `_PSIMatrixFrequencyRatiosNew` unconditionally before reading any match, so `-matrix IDENTITY`
 /// fails the first searched batch with `Traceback failed` (exit 3, even with 0 hits), while a run
-/// whose batches are all skipped (every query invalid) completes with exit 0.
+/// whose batches are all skipped (every query invalid) completes with exit 0. `program` names the
+/// application in the error; BLASTP alone reaches it: PSIBLAST's argument check refuses
+/// `-matrix IDENTITY` before the search (row `db.sw.ident.it1.6`), and its other matrices have
+/// frequency ratios.
 pub(super) fn sw_matrix_check(
     program: &str,
     matrix: ScoringMatrix,

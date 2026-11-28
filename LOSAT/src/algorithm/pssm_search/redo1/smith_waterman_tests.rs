@@ -883,8 +883,8 @@ fn prelim_list(oid: u32, ranges: &[((i32, i32), (i32, i32))]) -> BlastpHspList {
 // A against A first). A failed match before a redone one leaves the redone one's list; a failed
 // last match fails the batch (`on_batch_failed`), unless the query's end clears the status (a
 // later list that the fetch excludes, `on_query_done`, which hears the position of the last match
-// whose redo set the status); a match whose redo never ends is refused at its position
-// (`on_endless`).
+// whose redo set the status); a match whose redo never ends is refused at its position, with its
+// subject (`on_endless`).
 #[test]
 fn psiblast_loop_keeps_the_last_matchs_status() {
     let consensus = encode("AWCH");
@@ -928,8 +928,9 @@ fn psiblast_loop_keeps_the_last_matchs_status() {
                 }
             };
         let on_batch_failed = |_: &[BlastCompoHeap]| anyhow::anyhow!("failed");
-        let on_endless =
-            |_: &[BlastCompoHeap], position: usize| anyhow::anyhow!("endless at {position}");
+        let on_endless = |_: &[BlastCompoHeap], position: usize, oid: u32| {
+            anyhow::anyhow!("endless at {position} of {oid}")
+        };
         let count = lists.len();
         let mut preliminary = vec![Some(BlastpHitList {
             hsplist_count: count,
@@ -989,6 +990,6 @@ fn psiblast_loop_keeps_the_last_matchs_status() {
     );
     assert_eq!(
         run(vec![prelim_list(0, &two), prelim_list(2, &two)], false),
-        (Err("endless at 1".to_string()), Vec::new())
+        (Err("endless at 1 of 2".to_string()), Vec::new())
     );
 }

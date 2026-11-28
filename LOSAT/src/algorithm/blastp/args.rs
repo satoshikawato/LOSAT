@@ -736,6 +736,24 @@ impl ResolvedBlastpArgs {
         !self.ungapped && !self.old_fsc
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:144-205
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
+    /// Whether the redo of the matches takes them in ascending subject OID order: the
+    /// Smith-Waterman redo of `-use_sw_tback` without composition-based statistics, whose stream
+    /// has no score sort, so that NCBI's `BlastHSPStreamClose` sorts it by OID (BLASTP's batches
+    /// and PSIBLAST's first round, `sw_c0`; PSIBLAST's PSSM rounds, `pssm_search::redo1`). With
+    /// composition-based statistics, or in a gapped search without the redo, the matches go in the
+    /// order of their preliminary e-values. RPS-BLAST's redo reads its own lists (its engine's).
+    /// The one owner of that order: the sort of the preliminary lists, the choice of the batch
+    /// stream and the fetch notes read it.
+    pub(crate) fn sw_redo_in_oid_order(&self) -> bool {
+        self.use_sw_tback
+            && !self.ungapped
+            && self.rps_search.is_none()
+            && !self.comp_based_stats.is_enabled()
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:213-224
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:92-93
     /// The hit list size of the traceback (`hitParams->options->hitlist_size`: the heaps and the

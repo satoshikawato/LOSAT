@@ -24,6 +24,7 @@ import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { NodeInflater } from './support/node-inflater';
+import { runEnd } from './support/run-end';
 import {
   EngineCallError,
   EngineStoppedError,
@@ -169,7 +170,7 @@ describe('the draft and the counts file', () => {
     const { draft, coordinator } = await ready();
     draft.setFile(WINDOW_MASKER_FLAG, counts());
     await draft.submit();
-    for (let i = 0; i < 200 && coordinator.state.get().runs[0]?.status !== 'completed'; i++) await new Promise((r) => setTimeout(r, 5));
+    await runEnd(coordinator, coordinator.state.get().runs[0]!.snapshot.runId);
     const run = coordinator.state.get().runs[0]!;
     if (isToolRun(run)) throw new Error('expected search run');
     expect(run.status).toBe('completed');

@@ -1,0 +1,169 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q1 query one"
+                  }
+                }
+              },
+              title "q1 query one"
+            },
+            inst {
+              repr delta,
+              mol na,
+              length 120,
+              ext delta {
+                literal {
+                  length 110,
+                  seq-data iupacna "ATGAACTGGAGTCTACGATGAGTGTACGAACGTCAGCTGGAA
+CAGGCTTCCCACCAGGGTTGCTACTTATCATTTATTGTACGTTCAAAGGCGTGGTTTGTTTCTTGTGG"
+                },
+                literal {
+                  length 4294967295,
+                  seq-data iupacna "CTGGTTCGAT"
+                }
+              }
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1 subject one"
+                }
+              }
+            },
+            title "s1 subject one"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 400,
+            seq-data ncbi2na 'F97359E9882EBA19F38BFEE32146AD0E2102D884214FBAC0
+2F64BEACFB5890D6735F0B211ADDB9514CC7BCE213E8FE5243BC26594FDC88FCAFA2BAEB6187BA
+F2DBA67A4543E9BEF4757019A012375D1156C500D3856F46D86DB56C59A9E127542439B0B9'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 43401
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 117
+          },
+          {
+            id str "blast_score",
+            value int 117
+          },
+          {
+            id str "e_value",
+            value real { 182102520953404, 10, -75 }
+          },
+          {
+            id str "bit_score",
+            value real { 217178303557249, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 119
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            0,
+            100
+          },
+          lens {
+            120
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 43401",
+      "Effective search space used: 43401",
+      "Length adjustment: 9"
+    }
+  }
+}

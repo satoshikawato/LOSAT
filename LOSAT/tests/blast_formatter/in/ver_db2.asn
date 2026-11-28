@@ -1,0 +1,254 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              ddbj {
+                accession "AB000033",
+                version 1
+              }
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">AB000033.1 query three"
+                  }
+                }
+              },
+              title "query three"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '296D8714D4EC35E6DD88634026BA08F9D822044B8CA7E2
+4C667FFB4D9704DA1BBC454543DA910CEFD8FF17A00FD40073F5EC15146771DF6837FD2307CCC9
+82F5D2694F9621A85528D01A7B'H
+            }
+          },
+          seq {
+            id {
+              local str "lq4"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">lq4 query four"
+                  }
+                }
+              },
+              title "query four"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '10980D52286EB37160BAAA964F3AAF642444127F8F0F35
+43159962A739E9491C7D8B041A536A0189A80F8B83BA7EF6407D6BD4998355881FBDE08B77437B
+DB44D7CFD08A0150585B3DCFF1'H
+            }
+          }
+        }
+      },
+      subject database "in/vdb2/v2",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 282642
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 38,
+                  to 44,
+                  id local str "lq4"
+                },
+                {
+                  from 38,
+                  to 44,
+                  id local str "lq4"
+                }
+              }
+            },
+            frame plus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 276
+          },
+          {
+            id str "blast_score",
+            value int 276
+          },
+          {
+            id str "e_value",
+            value real { 485780371249728, 10, -163 }
+          },
+          {
+            id str "bit_score",
+            value real { 510795598278971, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 292
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            ddbj {
+              accession "AB000033",
+              version 1
+            },
+            ddbj {
+              accession "AB000033"
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            300
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 300
+          },
+          {
+            id str "blast_score",
+            value int 300
+          },
+          {
+            id str "e_value",
+            value real { 22126538532706, 10, -175 }
+          },
+          {
+            id str "bit_score",
+            value real { 55511518993508, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 300
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "lq4",
+            ddbj {
+              accession "AB000044",
+              version 1
+            }
+          },
+          starts {
+            0,
+            50
+          },
+          lens {
+            300
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 38,
+              to 44,
+              id local str "lq4"
+            }
+          }
+        },
+        frame plus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 282642",
+      "Effective search space used: 282642",
+      "Length adjustment: 11"
+    }
+  }
+}

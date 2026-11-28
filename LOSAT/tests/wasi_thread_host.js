@@ -447,14 +447,15 @@ function recycleWorkers(kind) {
   return kind === "threaded-reactor" && raw === "1";
 }
 
-async function instantiateMain(module, args, spawnThread, limits, provided, files, directory) {
+async function instantiateMain(module, args, spawnThread, limits, provided, files, directory, environment) {
   const initial = parsePositiveIntEnv("LOSAT_WASM_MEMORY_INITIAL_PAGES", limits.initial);
   // A maximum given in the environment is used as it is, without stepping down.
   const requested = parsePositiveIntEnv("LOSAT_WASM_MEMORY_MAXIMUM_PAGES", limits.maximum);
   const { memory, maximum } = createSharedMemory(initial, requested,
     process.env.LOSAT_WASM_MEMORY_MAXIMUM_PAGES === undefined);
   debug(`shared memory: initial ${initial} pages, maximum ${maximum} pages (module declares ${limits.maximum})`);
-  return { ...await instantiateWithMemory(module, memory, args, spawnThread, provided, undefined, files, directory), memory };
+  return { ...await instantiateWithMemory(module, memory, args, spawnThread, provided, undefined, files, directory, environment),
+    memory };
 }
 
 async function terminateWorkers(workers) {
@@ -568,7 +569,9 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   // The table of the files that every thread reads and writes (sharedFileImports), at every thread
   // count: a command's, and a reactor's, whose search of -db opens its database by name in the
   // run directory `options.directory`, preopened as "/work" on every thread (createWasi; line WQA D12a,
-  // 2026-11-20), and reads it on the search's threads.
+  // 2026-11-20), and reads it on the search's threads. `options.environment`: the main instance's environment as a
+  // function, read at each `environ_sizes_get` (environImports; a host whose `TZ` changes between runs, line NP WW4b1
+  // R2, 2026-11-28), in place of this process's at its start.
   const files = sharedFileTable(), directory = options.directory;
   const workers = new Set(), exits = new Map(), events = [], standby = [];
   // LOSAT_WASI_RECYCLE: the workers that run one guest thread after another, the guest threads
@@ -750,7 +753,8 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
       standby.push(slot); event("standby_spawned", { standby: index });
     }
   };
-  const instantiated = await instantiateMain(module, args, spawnThread, identity.memory, options.imports, files, directory);
+  const instantiated = await instantiateMain(module, args, spawnThread, identity.memory, options.imports, files, directory,
+    options.environment);
   mainMemory = instantiated.memory;
   const { instance, wasi } = instantiated;
   if (kind === "threaded-reactor") wasi.initialize(instance);

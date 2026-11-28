@@ -103,6 +103,32 @@ fn a_string_exception_reports_its_position() {
     );
 }
 
+// blast_formatter 2.17.0 (the official Linux x64 release) with a `-subject` delta that declares
+// 4294967295 letters (probe C of agent E3c, 2026-11-28, `of7_c_dlen`): a place that names the
+// module but no function ends with `::` (`BLAST:: - `), which LOSAT's words leave out.
+#[test]
+fn a_place_without_a_function_ends_with_its_module() {
+    let e = NcbiException::new(
+        ThrowSite {
+            file: "src/algo/blast/api/blast_objmgr_tools.cpp",
+            line: 337,
+            kind: "CBlastException::eInvalid",
+            function: Some("BLAST::"),
+        },
+        "Could not find length of query # 0 with Seq-id [lcl|Subject_1]",
+    );
+    assert_eq!(
+        String::from_utf8(e.ncbi_what()).unwrap(),
+        format!(
+            "NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/blast/api/blast_objmgr_tools.cpp\", line 337: Error: (CBlastException::eInvalid) BLAST:: - Could not find length of query # 0 with Seq-id [lcl|Subject_1]\n"
+        )
+    );
+    assert_eq!(
+        String::from_utf8(e.what()).unwrap(),
+        "Could not find length of query # 0 with Seq-id [lcl|Subject_1]\n"
+    );
+}
+
 // blastn 2.17.0 (the official Linux x64 release) `-window_masker_db` with a counts file whose
 // header is cut short (line NP, M/STATE.md "M2 の実機確認"): the reader's exception, without a
 // function, and the factory's rethrow, oldest first.

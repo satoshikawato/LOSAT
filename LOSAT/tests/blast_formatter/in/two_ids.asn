@@ -1,0 +1,275 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "qa"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qa query a"
+                  }
+                }
+              },
+              title "query a"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 40,
+              seq-data ncbieaa "DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV"
+            }
+          },
+          seq {
+            id {
+              local str "qb"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qb query b"
+                  }
+                }
+              },
+              title "query b"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 40,
+              seq-data ncbieaa "DYLAKKIELDAHAAHLLASANRWEACSKIKQALDDGIHAV"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            gi 1234,
+            swissprot {
+              name "E7A1_TEST",
+              accession "P0E7A1",
+              release "reviewed",
+              version 1
+            }
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">gi|1234|sp|P0E7A1.1|E7A1_TEST two ids"
+                }
+              }
+            },
+            title "two ids"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 40,
+            seq-data ncbieaa "DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 1600
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 204
+          },
+          {
+            id str "blast_score",
+            value int 204
+          },
+          {
+            id str "e_value",
+            value real { 172905041923973, 10, -43 }
+          },
+          {
+            id str "bit_score",
+            value real { 831889457671841, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 40
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 40
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "qa",
+            gi 1234
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            40
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 174
+          },
+          {
+            id str "blast_score",
+            value int 174
+          },
+          {
+            id str "e_value",
+            value real { 579073143035623, 10, -39 }
+          },
+          {
+            id str "bit_score",
+            value real { 716329584896635, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 34
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 37
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "qb",
+            swissprot {
+              name "E7A1_TEST",
+              accession "P0E7A1",
+              version 1
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            40
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 323023089996218, 10, -15 },
+        k { 138409661875776, 10, -15 },
+        h { 427524054562414, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 1600",
+      "Effective search space used: 1600",
+      "Length adjustment: 0"
+    }
+  }
+}

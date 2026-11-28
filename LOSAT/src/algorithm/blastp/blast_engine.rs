@@ -767,12 +767,13 @@ fn blastp_cutoff_score_max(
             subject_length_for_hit_cutoff,
         ),
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:942-944
-        None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
+        None => crate::stats::cutoffs::cutoff_score(
             expect_value,
-            search_space,
             gapped_params,
-        )
-        .max(1),
+            search_space,
+            None,
+            crate::stats::cutoffs::CutoffConversion::PROTEIN,
+        ),
     }
 }
 
@@ -1172,36 +1173,48 @@ fn blastp_ungapped_word_cutoff_score_for_context(
         0.0,
         &ctx.karlin_params,
         1.0,
+        crate::stats::cutoffs::CutoffConversion::PROTEIN,
     )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:949-976
-/// The sum statistics' cutoff score of a context (`BLAST_Cutoffs` with the gap decay, from an
-/// e-value of 1 in the search space of the average query and subject lengths); `BLAST_Cutoffs`
-/// keeps the `new_cutoff` of 1 when its score is lower (blast_stat.c:4108-4129).
-pub(super) fn sum_stats_hit_cutoff(
+/// The sum statistics' cutoff score of each context (`stats::cutoffs::SumStatsCutoffs`:
+/// `BLAST_Cutoffs` with the gap decay, from a cutoff of 1, in the search space of the average
+/// query and subject lengths, the e-value carried from one valid context to the next), `i32::MAX`
+/// for an invalid context (NCBI skips it).
+pub(super) fn sum_stats_hit_cutoffs(
     contexts: &[QueryContext],
     avg_subject_length: i32,
     gapped_params: &KarlinParams,
-) -> i32 {
+) -> Vec<i32> {
     let concat_qlen = contexts
         .last()
         .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
         .unwrap_or(0);
     let avg_qlen = concat_qlen / contexts.len().max(1) as i32;
-    crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_sum_stats(
+    let mut sum_stats = crate::stats::cutoffs::SumStatsCutoffs::new(
         avg_qlen,
         avg_subject_length,
         crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED,
-        gapped_params,
-    )
+        crate::stats::cutoffs::CutoffConversion::PROTEIN,
+    );
+    contexts
+        .iter()
+        .map(|ctx| {
+            if ctx.is_valid {
+                sum_stats.next_valid_context(gapped_params)
+            } else {
+                i32::MAX
+            }
+        })
+        .collect()
 }
 
 /// psiblast's `-sum_stats true` in a search with the matrix (round 1): the lowered cutoff of the
 /// HSPs the search keeps and the linking parameters of the preliminary stage.
 pub(super) struct BlastpSumStats {
-    /// The sum statistics' cutoff (`sum_stats_hit_cutoff`).
-    hit_cutoff: i32,
+    /// The sum statistics' cutoff of each context (`sum_stats_hit_cutoffs`).
+    hit_cutoffs: Vec<i32>,
     /// The preliminary stage's linking parameters (`cutoff_small_gap` = the words' smallest
     /// cutoff, `word_params->cutoff_score_min`).
     pub(super) preliminary: crate::core::link_hsps::EvenGapLinkParams,
@@ -1223,7 +1236,7 @@ impl BlastpSumStats {
             .min()
             .unwrap_or(i32::MAX);
         Self {
-            hit_cutoff: sum_stats_hit_cutoff(contexts, avg_subject_length, gapped_params),
+            hit_cutoffs: sum_stats_hit_cutoffs(contexts, avg_subject_length, gapped_params),
             preliminary: crate::core::link_hsps::EvenGapLinkParams::preliminary(
                 word_cutoff_score_min,
             ),
@@ -1236,9 +1249,10 @@ impl BlastpSumStats {
         contexts: &[QueryContext],
         mut cutoffs: Vec<i32>,
     ) -> Vec<i32> {
-        for (cutoff, ctx) in cutoffs.iter_mut().zip(contexts) {
+        for ((cutoff, ctx), &sum_cutoff) in cutoffs.iter_mut().zip(contexts).zip(&self.hit_cutoffs)
+        {
             if ctx.is_valid {
-                *cutoff = (*cutoff).min(self.hit_cutoff);
+                *cutoff = (*cutoff).min(sum_cutoff);
             }
         }
         cutoffs
@@ -6205,16 +6219,17 @@ fn psiblast_check_subject_letters(subjects: &[FastaRecord]) -> Result<()> {
 }
 
 /// psiblast `-in_pssm`: what stops the run at its one query batch before the PSSM's search, after
-/// the outfmt 0 prolog, with NCBI's error (`PsiSearch::stop_before_search`, the rule tblastn's
-/// `-in_pssm` shares): with `-export_search_strategy` and `-subject` (no database, `database`) the
-/// search strategy's "Remote PSI-BL2SEQ is not supported" (the options error, exit status 1; without
-/// the strategy NCBI runs the search), else a PSSM that NCBI's `CPsiBlastValidate::Pssm` refuses
-/// (the engine error; the PSSM is checked before the query's Karlin-Altschul parameters,
-/// `psiblast_stop_at_invalid_query`), else the PSSM engine's error for the scores of a PSSM of
-/// frequency ratios only. The first two write no request (`QueryBatches::stop_batch` cleared); the
-/// last stops after the request (`stop_batch`: the PSSM query's batch), as NCBI's
-/// `SaveSearchStrategy` comes before `CPsiBlast` (psiblast_app.cpp:340; the local rounds make
-/// `CPsiBlast` later, psiblast_app.cpp:239).
+/// the outfmt 0 prolog, with NCBI's error or LOSAT's refusal (`PsiSearch::stop_before_search`, the
+/// rule tblastn's `-in_pssm` shares): with `-export_search_strategy` and `-subject` (no database,
+/// `database`) the search strategy's "Remote PSI-BL2SEQ is not supported" (the options error, exit
+/// status 1; without the strategy NCBI runs the search), else a PSSM that NCBI's
+/// `CPsiBlastValidate::Pssm` refuses (the engine error; the PSSM is checked before the query's
+/// Karlin-Altschul parameters, `psiblast_stop_at_invalid_query`), else LOSAT's refusal of a request
+/// whose write NCBI stops in with its exception (`PssmQueryStop::RequestRefused`, exit status 1),
+/// else the PSSM engine's error for the scores of a PSSM of frequency ratios only. The first three
+/// write no request (`QueryBatches::stop_batch` cleared); the last stops after the request
+/// (`stop_batch`: the PSSM query's batch), as NCBI's `SaveSearchStrategy` comes before `CPsiBlast`
+/// (psiblast_app.cpp:340; the local rounds make `CPsiBlast` later, psiblast_app.cpp:239).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:58-67 (cited at
 /// `PsiSearch::stop_before_search`)
@@ -7311,7 +7326,9 @@ fn x_bp_encode_block_subjects(
 // `x_block_xml_run_allowed`; each check where any output is of its kind),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
 // (`blastp_database_search_space`, with `-db` or `-dbsize`), no database whose setup count the
-// reference path refuses (`call_setup::setup_count_refused`), no query that is also a subject under
+// reference path refuses (`call_setup::setup_count_refused`; the search of all queries refuses
+// both after the reports of the batches before the failing one, `split_steps::batch_failure`, the
+// one place of those refusals), no query that is also a subject under
 // `-parse_deflines` where outfmt 0 can fail alone (its refusal of such a record's masks is outfmt
 // 0's alone, `believed::refuse_shared_masks_in`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
@@ -7489,9 +7506,9 @@ fn x_query_block_plan(
         // A database without sequences fails in the first batch (`run_call`). A setup count that
         // LOSAT refuses (`call_setup::setup_count_refused`, with the setup count of a search
         // without RPS, `db_extent`'s: the statistics' count) is refused by the call that holds a
-        // valid query: the call of all queries refuses before any output, a block only after the
-        // reports of the blocks before, whose queries were invalid (review D of line RG D1a-4,
-        // SF1).
+        // valid query, after the reports of the batches before its first searched one
+        // (`split_steps::first_batch_setup`): the plan leaves it to the call of all queries, the
+        // one place of the refusal (review D of line RG D1a-4, SF1; line RG item bp-SF1).
         BlastpSubjectSource::Database(database) => {
             if database.num_sequences() == 0
                 || call_setup::setup_count_refused(args, {
@@ -9786,7 +9803,7 @@ enum UngappedSetupFailure {
     /// NCBI's error of the first batch (`preliminary_search_error` writes it after the outfmt 0
     /// prolog), or LOSAT's refusal of the matrix file that NCBI reads, in its place.
     Engine(String),
-    /// LOSAT's refusal before any output.
+    /// LOSAT's refusal of the first searched batch (after the reports of the batches before).
     Refusal(anyhow::Error),
 }
 
@@ -10108,7 +10125,14 @@ fn run_call(
     if let Some(failure) = failure {
         return Err(match failure {
             UngappedSetupFailure::Engine(text) => setup_error(outputs, true, b"", &text),
-            UngappedSetupFailure::Refusal(error) => error,
+            // The refusal of the first searched batch, after the reports of the batches before,
+            // of invalid queries only, which NCBI writes before it searches that batch
+            // (`split_steps::batch_failure`, line RG item bp-SF1).
+            UngappedSetupFailure::Refusal(error) => split_steps::batch_failure(
+                &args,
+                split_steps::first_searched_query(&query_batches, &query_batch_skipped),
+                error,
+            ),
         });
     }
 
@@ -10165,7 +10189,7 @@ fn run_call(
         option_space_of,
         preliminary_option_spaces,
         preliminary_spaces,
-    } = call_setup::call_search_spaces(&call_statistics)?;
+    } = call_setup::call_search_spaces(&call_statistics, &query_batches)?;
     let (preliminary_search_spaces, preliminary_exact_spaces) = match &preliminary_spaces {
         Some((spaces, exact)) => (spaces, exact),
         None => (&search_spaces, &exact_search_spaces),

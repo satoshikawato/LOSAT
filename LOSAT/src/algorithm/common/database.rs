@@ -594,11 +594,12 @@ pub(crate) fn setup_count_refused(setup_total: i64, setup_count: i32, gumbel: bo
 
 /// LOSAT's refusal of `setup_count_refused` for `program`, which each program makes where NCBI's
 /// setup meets the division: in the setup of the first query batch (or query chunk, RPS unit or
-/// PSI-BLAST round) with a valid context. BLASTN, TBLASTX, TBLASTN and RPSTBLASTN write the
-/// reports of the batches before it (NCBI's output before its crash in the tabular formats; in the
-/// others the crash cuts NCBI's buffered output short), BLASTP, PSI-BLAST and RPSBLAST refuse
-/// before any output. A run whose queries are all invalid is reported as NCBI reports it (exit 0;
-/// D1a-5 of line RG, DECISIONS D1a4-12).
+/// PSI-BLAST round) with a valid context. BLASTN, TBLASTX, TBLASTN, RPSTBLASTN, BLASTP and
+/// RPSBLAST write the reports of the batches before it (NCBI's output before its crash in the
+/// tabular formats; in the others the crash cuts NCBI's buffered output short; BLASTP and RPSBLAST
+/// since line RG item bp-SF1, `blastp::blast_engine::split_steps::batch_failure`), PSI-BLAST, which
+/// searches one query per batch, at the round of its query. A run whose queries are all invalid is
+/// reported as NCBI reports it (exit 0; D1a-5 of line RG, DECISIONS D1a4-12).
 pub(crate) fn check_setup_count(
     setup_total: i64,
     setup_count: i32,
@@ -9987,15 +9988,22 @@ fn unknown_utf8_load(
 /// NCBI's warning where the prefetch of a query batch fails ([`batch_prefetch`], and BLASTX's and
 /// RPSTBLASTN's Seq-align of a subject row whose range it cannot take,
 /// `blastx::empty_rows::prefetch_reads_unranged_row`): the one producer of its text.
-pub(crate) fn prefetch_warning(app: &str) -> Vec<u8> {
-    // A post of NCBI's main thread (`ncbi_exception::post_line`: the header alone after the run's diagnostic
-    // stream failed).
+/// NCBI's `Warning: [<app>] Error pre-fetching sequence data` (no prefix when `app` is `None`,
+/// as in blast_formatter, which sets no diagnostic prefix).
+pub(crate) fn prefetch_warning_of(app: Option<&str>) -> Vec<u8> {
+    let prefix = app.map(str::to_ascii_lowercase);
     crate::ncbi_exception::post_line(
         crate::ncbi_exception::Severity::Warning,
         None,
-        Some(&app.to_ascii_lowercase()),
+        prefix.as_deref(),
         b"Error pre-fetching sequence data",
     )
+}
+
+pub(crate) fn prefetch_warning(app: &str) -> Vec<u8> {
+    // A post of NCBI's main thread (`ncbi_exception::post_line`: the header alone after the run's diagnostic
+    // stream failed).
+    prefetch_warning_of(Some(app))
 }
 
 /// Whether one of `subjects` has a lookup that fails on a file with NCBI's exception

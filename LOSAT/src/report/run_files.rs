@@ -721,7 +721,7 @@ impl OpenFiles {
             return Ok(LogOutput::Refused(reason));
         }
         match named {
-            OutputName::Unopened => Err(Unopened),
+            OutputName::Unopened(_) => Err(Unopened),
             OutputName::File {
                 name: host_name,
                 key,
@@ -2218,7 +2218,7 @@ impl RunFiles {
         };
         let name = name.as_encoded_bytes();
         let (made, key) = match view.output_name(name) {
-            OutputName::Unopened => return StrategyTarget::Inaccessible,
+            OutputName::Unopened(_) => return StrategyTarget::Inaccessible,
             OutputName::Stdout => return StrategyTarget::StandardOutput,
             OutputName::Discard => return StrategyTarget::Nowhere,
             OutputName::Full | OutputName::StandardError | OutputName::Special => {

@@ -5074,6 +5074,11 @@ impl TitleReads {
 /// bytes are determined in all of these; LOSAT does not model them yet (line RG-KB item 9b-3: the
 /// prefetch's order of parsed Seq-ids, known for packed ids, with the address order of the
 /// handles of one key; the object manager's sizes; the traceback's header reads).
+///
+/// Asked for each reported subject: a title without such a byte, the default path, costs the
+/// test alone (review 3 of line RG-KB item 9b-2, R3-L2's recovery); the rest is
+/// `refuse_reported_title`.
+#[inline]
 pub(crate) fn check_reported_title(
     db: &SeqDb,
     ordinal: u32,
@@ -5081,12 +5086,21 @@ pub(crate) fn check_reported_title(
     reads: TitleReads,
     program: &str,
 ) -> Result<()> {
-    if replaced_bytes
-        && (reads == TitleReads::Reports
-            || db
-                .location_of(ordinal)
-                .is_none_or(|at| db.filters_header_sets(at))
-            || (reads == TitleReads::Prefetched && !prefetch_title_posts_known(db)))
+    if replaced_bytes {
+        refuse_reported_title(db, ordinal, reads, program)
+    } else {
+        Ok(())
+    }
+}
+
+/// [`check_reported_title`] of a stored title that held such a byte.
+#[cold]
+fn refuse_reported_title(db: &SeqDb, ordinal: u32, reads: TitleReads, program: &str) -> Result<()> {
+    if reads == TitleReads::Reports
+        || db
+            .location_of(ordinal)
+            .is_none_or(|at| db.filters_header_sets(at))
+        || (reads == TitleReads::Prefetched && !prefetch_title_posts_known(db))
     {
         bail!(
             "database sequence {} has a stored title with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line); this is not supported by LOSAT's {program}",

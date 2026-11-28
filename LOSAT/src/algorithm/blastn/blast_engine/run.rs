@@ -6301,8 +6301,14 @@ pub fn run(
     // end of file).
     let out_file = open_out_file(&args)?;
     let outfmt = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
-    let mut report =
-        crate::cli::ReportStream::of_cli(out_file, "blastn", &outfmt, args.strategy.as_ref());
+    // NCBI's posts of the stream carry the running application's prefix (`SetDiagPostPrefix`),
+    // also where it runs another program's strategy.
+    let mut report = crate::cli::ReportStream::of_cli(
+        out_file,
+        args.app().ncbi_name(),
+        &outfmt,
+        args.strategy.as_ref(),
+    );
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
@@ -6387,7 +6393,7 @@ fn write_run_error_archive(
     if let Ok(out_file) = open_out_file(args) {
         let mut report = crate::cli::ReportStream::of_cli(
             out_file,
-            "blastn",
+            args.app().ncbi_name(),
             crate::utils::os_bytes::os_str_bytes(&args.outfmt),
             None,
         );

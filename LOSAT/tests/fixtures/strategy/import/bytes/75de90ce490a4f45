@@ -1,0 +1,9 @@
+Warning: [blastn] Overriding database/subject in saved strategy
+Warning: [blastn] Overriding query in saved strategy
+Warning: [blastn] mt_mode cannot be overridden when using a search strategy
+Error: (803.7) [blastn] Blast4-archive.request.body.queue-search.subject.sequences.E.descr.E.title
+Bad char [0x81] in string at line 55
+Subject_9 bad xÅy title
+Error: (802.4) [blastn] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+BLAST failed to write output
+Error: (802.5) [blastn] CObjectOStream: error at byte 884: stack is empty: write fault

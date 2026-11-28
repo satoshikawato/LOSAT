@@ -979,9 +979,11 @@ pub fn run(
         Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
         _ => outfmt_bytes.clone(),
     };
+    // NCBI's posts of the stream carry the running application's prefix (`SetDiagPostPrefix`),
+    // also where it runs another program's strategy.
     let mut stream = crate::cli::ReportStream::of_cli(
         out_file,
-        "tblastx",
+        args.app().ncbi_name(),
         &outfmt_bytes,
         args.strategy.as_ref(),
     );
@@ -1059,7 +1061,7 @@ fn write_run_error_archive(
     if let Ok(out_file) = open_out_file(args) {
         let mut report = crate::cli::ReportStream::of_cli(
             out_file,
-            "tblastx",
+            args.app().ncbi_name(),
             crate::utils::os_bytes::os_str_bytes(&args.outfmt),
             None,
         );

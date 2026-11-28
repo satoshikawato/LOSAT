@@ -443,6 +443,75 @@ fn other_refusals_of_another_programs_strategy_name_the_running_application() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// Line RG-F item F2f (review 2 S1): NCBI's posts of the report stream where it fails, here an
+/// archive (`-outfmt 11`) to `/dev/full` (the archive's close and the error archive after it,
+/// `report::ostream`'s `[app]` prefix), carry the running application's prefix where it runs
+/// another program's strategy, as `SetDiagPostPrefix` gives every post of the application:
+/// blastn running a TBLASTX strategy and tblastx running a BLASTN one, against NCBI BLAST+
+/// 2.17.0's standard error (`bytes/`, probe of 2026-11-28; exit status 6, nothing on standard
+/// output). The number of `error at byte N` is masked: it is the size of the error archive, which
+/// in LOSAT lacks the `803.7` post of the replaced title byte that NCBI saves into it when the
+/// archive's write throws (`report::archive::writer`, outside this item, plain runs too).
+#[cfg(target_os = "linux")]
+#[test]
+fn ncbis_posts_of_a_failed_report_name_the_running_application() {
+    fn masked(stderr: &[u8]) -> String {
+        String::from_utf8_lossy(stderr)
+            .lines()
+            .map(|line| match line.split_once("error at byte ") {
+                Some((head, tail)) => {
+                    let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+                    format!("{head}error at byte N{}\n", &tail[digits..])
+                }
+                None => format!("{line}\n"),
+            })
+            .collect()
+    }
+    let mut failed = Vec::new();
+    for (program, strategy, err) in [
+        ("blastn", "tblastx.sub.ss", "75de90ce490a4f45"),
+        ("tblastx", "blastn.sub.ss", "13763efe5c88a89a"),
+    ] {
+        let case = Case {
+            name: format!("{program} running {strategy}"),
+            program: program.to_string(),
+            args: [
+                "-import_search_strategy",
+                &format!("{{ss}}/{strategy}"),
+                "-query",
+                "tests/db_search/t7/nq.fna",
+                "-subject",
+                "tests/db_search/t7/lone.fna",
+                "-outfmt",
+                "11",
+                "-out",
+                "/dev/full",
+            ]
+            .map(str::to_string)
+            .to_vec(),
+            rc: 6,
+            out: "-".to_string(),
+            err: err.to_string(),
+        };
+        let output = run(&case, None);
+        let want = frozen(&case.err);
+        assert!(masked(&want).contains(&format!("[{program}] CObjectOStream: error at byte N")));
+        if output.status.code() != Some(case.rc)
+            || !output.stdout.is_empty()
+            || masked(&output.stderr) != masked(&want)
+        {
+            failed.push(format!(
+                "{}: exit {:?}, stdout {} bytes, stderr {:?}",
+                case.name,
+                output.status.code(),
+                output.stdout.len(),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 struct TempDir(PathBuf);
 
 impl TempDir {

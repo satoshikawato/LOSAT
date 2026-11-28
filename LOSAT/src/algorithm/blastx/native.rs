@@ -306,9 +306,11 @@ fn run_inner(
     // of standard output. Every other format's: LOSAT's buffer before the file or standard output,
     // behind the held document.
     let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt);
+    // NCBI's posts of the stream carry the running application's prefix (`SetDiagPostPrefix`),
+    // also where tblastx runs a BLASTX strategy.
     let device = crate::cli::ReportStream::of_cli(
         out_file.map(create).transpose()?,
-        program.lower,
+        program.app,
         &outfmt_bytes,
         strategy.as_ref(),
     );
@@ -2590,7 +2592,7 @@ fn write_run_error_archive(
     };
     let mut report = crate::cli::ReportStream::of_cli(
         out_file,
-        args.program().lower,
+        args.program().app,
         crate::utils::os_bytes::os_str_bytes(&args.outfmt),
         None,
     );

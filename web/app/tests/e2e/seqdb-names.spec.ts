@@ -4,7 +4,8 @@
 // writes a name with a space between double quotes (`"my dbs/ndb"`), and refuses a name with a double quote where the
 // database is chosen, with the reason.
 //
-// With either engine: the refusal in the Database picker, the Repeats database and WindowMasker's Input block, and a
+// With either engine: the refusal in the Database picker, the Repeats database, WindowMasker's and makeblastdb's Input
+// blocks, the check and Run LOSAT (for as long as the refused database is chosen or its files are in the run), and a
 // database named with a space shown in Run details as a command that works when pasted. With the real engine
 // (LOSAT_WEB_REACTORS) and the native binary (LOSAT_WEB_NATIVE): blastn -db on a folder `my dbs` (and an alias `my
 // nslice`), BLASTN's Repeats database in a folder `rep dbs`, WindowMasker -infmt blastdb on a folder `my db`, and
@@ -111,6 +112,10 @@ test('a database named with a double quote is refused where it is chosen, with t
   await page.getByTestId('param-filtering_db-files-input').setInputFiles([named('q"rep.nin'), named('q"rep.nhr'), named('q"rep.nsq')]);
   const repRefused = `A database named "q"rep" cannot be in -filtering_db: ${REASON}.`;
   await expect(page.getByTestId('param-filtering_db-refused')).toHaveText(repRefused);
+  await expect(page.getByTestId('param-filtering_db-refused')).toHaveAttribute('role', 'alert');
+  // The check says it too, as it says -db's (WW4d R1).
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await expect(page.getByTestId('argv-validation')).toHaveText(repRefused);
   await page.getByTestId('param-filtering_db-refused').scrollIntoViewIfNeeded();
   await shots(page, 'repeats-refused');
   await page.getByTestId('run-losat').click();
@@ -140,9 +145,21 @@ test('a database named with a double quote is refused where it is chosen, with t
   await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
   await page.getByTestId('wm-param-infmt').selectOption('blastdb');
   await page.getByTestId('wm-in-files').setInputFiles([named('q"wm.nin'), named('q"wm.nsq')]);
-  await expect(page.getByTestId('wm-in-error')).toHaveText(`A database named "q"wm" cannot be in -in: ${REASON}.`);
+  const wmRefused = `A database named "q"wm" cannot be in -in: ${REASON}.`;
+  await expect(page.getByTestId('wm-in-refused')).toHaveText(wmRefused);
+  await expect(page.getByTestId('wm-in-refused')).toHaveAttribute('role', 'alert');
   await expect(page.getByTestId('wm-in-name')).toHaveValue('');
+  await expect(page.getByTestId('wm-argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await expect(page.getByTestId('wm-argv-validation')).toHaveText(wmRefused);
   await shots(page, 'wm-refused');
+  // The refusal lasts as long as its cause (WW4d R1): other edits keep it, and Run LOSAT says it.
+  await page.getByTestId('wm-stage-mask').check();
+  await expect(page.getByTestId('wm-in-refused')).toHaveCount(0);
+  await page.getByTestId('wm-stage-mk_counts').check();
+  await expect(page.getByTestId('wm-in-refused')).toHaveText(wmRefused);
+  await expect(page.getByTestId('wm-argv-validation')).toHaveText(wmRefused);
+  await page.getByTestId('wm-run-losat').click();
+  await expect(page.getByTestId('wm-message')).toHaveText(wmRefused);
   // The refused database's files stay in the run's files until they are removed, as makeblastdb's do.
   const toggle = page.getByTestId('wm-options-toggle');
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
@@ -152,6 +169,24 @@ test('a database named with a double quote is refused where it is chosen, with t
   await page.getByTestId('wm-in-files').setInputFiles([named('my wm.nin'), named('my wm.nsq')]);
   await expect(page.getByTestId('wm-in-name')).toHaveValue('"my wm"');
   await expect(page.getByTestId('wm-command')).toContainText(`-in '"my wm"'`);
+  await expect(page.getByTestId('wm-in-refused')).toHaveCount(0);
+
+  // makeblastdb's -in of -input_type blastdb: the Input block, the check and Run LOSAT (WW4d R1).
+  await page.getByTestId('tab-makeblastdb').click();
+  await expect(page.getByTestId('mk-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await page.getByTestId('mk-param-input_type').selectOption('blastdb');
+  await page.getByTestId('mk-db-files').setInputFiles([named('q"mk.nin'), named('q"mk.nsq')]);
+  const mkRefused = `A database named "q"mk" cannot be in -in: ${REASON}.`;
+  await expect(page.getByTestId('mk-db-in-refused')).toHaveText(mkRefused);
+  await expect(page.getByTestId('mk-db-in-refused')).toHaveAttribute('role', 'alert');
+  await expect(page.getByTestId('mk-db-in')).toHaveValue('');
+  await expect(page.getByTestId('mk-argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await expect(page.getByTestId('mk-argv-validation')).toHaveText(mkRefused);
+  await shots(page, 'mk-refused');
+  await page.getByTestId('mk-run-losat').click();
+  await expect(page.getByTestId('mk-message')).toHaveText(mkRefused);
+  await page.getByTestId('mk-db-in').fill('mydb');
+  await expect(page.getByTestId('mk-db-in-refused')).toHaveCount(0);
 });
 
 test.describe('real engine: database names with a space are the native command line\'s (line WW, WW4d)', () => {

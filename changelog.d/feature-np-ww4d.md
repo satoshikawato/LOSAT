@@ -4,3 +4,8 @@
   it; before, the search looked for a database named `my` and failed. Run details shows the command
   with the name quoted, so it works when pasted. A database whose name holds a double quote, which
   the command line cannot read in these options, is refused where it is chosen, with the reason.
+  The refusal stays in the input block, the check and Run LOSAT for as long as that database is
+  chosen or its files are in the run. With WindowMasker's `-infmt seqids` or `-fa_list`, whose input
+  is one file's name, the files of the run no longer fill in the input name. The Database picker reads
+  the database list of an alias file as BLAST+ does, so a multi-volume database whose volume names
+  hold a wide space (U+3000) is one choice, not several.

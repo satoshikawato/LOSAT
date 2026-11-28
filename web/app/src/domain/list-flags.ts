@@ -73,13 +73,13 @@ export function listNameRefusal(option: ListOption, name: string, what: 'file' |
 
 /**
  * The one writer of a SeqDB name list (`isSeqdbList`), as the command line reads it back (`seqdbNames`): the names
- * separated by spaces, a name that holds a space between double quotes (`SeqDB_CombineAndQuote`); empty names are left
- * out. A name with a double quote cannot be written: it throws the refusal (`listNameRefusal`), which the place that
- * takes the name shows before it comes here.
+ * separated by spaces, a name that holds a space between double quotes (`SeqDB_CombineAndQuote`); an empty name is left
+ * out (the reader drops it), a name of spaces is quoted as any name with a space. A name with a double quote cannot be
+ * written: it throws the refusal (`listNameRefusal`), which the place that takes the name shows before it comes here.
  */
 export function seqdbNameList(flag: string, names: readonly string[], what: 'file' | 'database' = 'database'): string {
   return names
-    .filter((name) => name.trim() !== '')
+    .filter((name) => name !== '')
     .map((name) => {
       if (name.includes(SEQDB_LIST_SPLIT.mark)) throw new Error(`A ${what} named "${name}" cannot be in ${flag}: ${SEQDB_LIST_SPLIT.reason}.`);
       return name.includes(' ') ? `"${name}"` : name;

@@ -9,14 +9,14 @@
 // are one `-in` list, as the command line takes them (`SeqDB_SplitQuoted`), not one file made of them.
 import type { DirectoryFile } from 'losat/domain';
 import { splitOptions } from '../domain/argv';
-import { duplicateRunFileMessage, normalizeRunPath, primaryBlastDbName } from '../domain/blast-db';
+import { duplicateRunFileMessage, normalizeRunPath } from '../domain/blast-db';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
 import { listNameRefusal, seqdbNameList } from '../domain/list-flags';
 import { buildMakeblastdbArgv, fileListNames } from '../domain/tool-argv';
 import { makeblastdbInputType, makeblastdbOptionParameters, toolPrintsKind, type MakeblastdbInputType } from '../domain/tools';
 import type { ToolDirectoryFile, ToolRequest } from './coordinator';
-import { ToolDraftCore, type StatePatch, type ToolDraftCoreDeps, type ToolExtraFile, type ToolFormState } from './tool-draft-core';
+import { foundDatabase, ToolDraftCore, type StatePatch, type ToolDraftCoreDeps, type ToolExtraFile, type ToolFormState } from './tool-draft-core';
 
 /** makeblastdb's `-in`: a SeqDB name list, of FASTA or ASN.1 files or of BLAST databases (`isSeqdbList`). */
 const MAKEBLASTDB_IN = { command: 'makeblastdb', flag: '-in' } as const;
@@ -33,12 +33,11 @@ export interface MakeblastdbDraftState extends ToolFormState {
   /** Why files opened for `-in` were refused, shown in the Input block (`inputProblem`). */
   readonly inputError?: string;
   /**
-   * `-in` for `-input_type blastdb`, as the command line takes it (its files are files of the run): as typed (a list of
-   * databases, a name with a space between double quotes), or the name that the files of the run give, quoted when it
-   * holds a space.
+   * `-in` for `-input_type blastdb` as typed, as the command line takes it (a list of databases, a name with a space
+   * between double quotes); its files are files of the run.
    */
   readonly dbIn: string;
-  /** Whether the user typed `dbIn`; until then the files of the run name it. */
+  /** Whether the user typed `dbIn`; until then the files of the run name it (`dbInName`). */
   readonly dbInEdited: boolean;
 }
 
@@ -180,6 +179,25 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     this.scheduleValidation();
   }
 
+  /**
+   * `-in` for `-input_type blastdb`: the name typed, or, until one is typed, the BLAST database that the files of the run
+   * hold (`foundDatabase`: quoted when it holds a space); none when `-in`'s list cannot carry its name (`databaseRefusal`).
+   */
+  dbInName(state: MakeblastdbDraftState = this.state.get()): string {
+    if (state.dbInEdited) return state.dbIn;
+    return foundDatabase(MAKEBLASTDB_IN, state.runFiles)?.written ?? '';
+  }
+
+  /**
+   * Why the BLAST database that the files of the run hold cannot be `-in` (a name with a double quote), while it would
+   * name `-in`: `-input_type blastdb`, its files in the run, no name typed. The Input block, the check and "Run LOSAT" say
+   * it for as long as that lasts (line WW, WW4d R1).
+   */
+  databaseRefusal(state: MakeblastdbDraftState = this.state.get()): string | undefined {
+    if (this.inputType(state) !== 'blastdb' || state.dbInEdited) return undefined;
+    return foundDatabase(MAKEBLASTDB_IN, state.runFiles)?.refusal;
+  }
+
   /** The input type that `-input_type` chooses. */
   inputType(state: MakeblastdbDraftState = this.state.get()): MakeblastdbInputType {
     return makeblastdbInputType(state.values['-input_type']);
@@ -216,26 +234,20 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     return state.values[flag];
   }
 
-  /**
-   * The `-in` name that files added to the run directory name, until the user edits it (a BLAST database); a name that
-   * `-in`'s list cannot carry (`listNameRefusal`) is not written, and the Input block says why.
-   */
-  protected override runFilesAdded(state: MakeblastdbDraftState, runFiles: readonly ToolExtraFile[]): StatePatch<MakeblastdbDraftState> {
-    if (state.dbInEdited && state.dbIn.trim() !== '') return {};
-    const detected = primaryBlastDbName(runFiles.map((entry) => entry.name));
-    if (detected === undefined) return {};
-    const refusal = listNameRefusal(MAKEBLASTDB_IN, detected, 'database');
-    return refusal === undefined ? { dbIn: seqdbNameList('-in', [detected]), dbInEdited: false } : { runFilesError: refusal };
+  /** A name typed and then cleared gives `-in` back to the files of the run, when files are added. */
+  protected override runFilesAdded(state: MakeblastdbDraftState): StatePatch<MakeblastdbDraftState> {
+    return state.dbInEdited && state.dbIn.trim() === '' ? { dbIn: '', dbInEdited: false } : {};
   }
 
   /**
    * The argv of the check; none before an input is given, unless the words name `-in` themselves or print help or the
-   * version (makeblastdb would then read its standard input, which a run on the Web has empty).
+   * version (makeblastdb would then read its standard input, which a run on the Web has empty). A database of the files
+   * of the run that `-in` cannot name (`inputRefusal`) is the check's refusal.
    */
   protected validationArgv(state: MakeblastdbDraftState, extra: readonly string[]): readonly string[] | undefined {
     const argv = this.argvOf(state, extra);
-    const taken = pasteNameTaken(state, this.inputType(state));
-    if (taken !== undefined && toolPrintsKind(argv) === null) throw new Error(taken);
+    const refusal = this.inputRefusal(state, argv);
+    if (refusal !== undefined) throw new Error(refusal);
     if (this.inputValue(state) !== '' || toolPrintsKind(argv) !== null) return argv;
     return namesInput(argv) ? argv : undefined;
   }
@@ -250,9 +262,9 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     if (prints !== null) {
       return [{ tool: 'makeblastdb', stage: 'build', argv, directory: this.runDirectoryOf(state, []), prints }];
     }
+    const refusal = this.inputRefusal(state, argv);
+    if (refusal !== undefined) throw new Error(refusal);
     if (this.inputValue(state) === '' && !namesInput(argv)) throw new Error(MISSING_INPUT[this.inputType(state)]);
-    const taken = pasteNameTaken(state, this.inputType(state));
-    if (taken !== undefined) throw new Error(taken);
     return [{ tool: 'makeblastdb', stage: 'build', argv, directory: this.runDirectoryOf(state, this.inputEntries(state)) }];
   }
 
@@ -267,9 +279,21 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     });
   }
 
-  /** `-in`'s value for the input type chosen: `dbIn` for a BLAST database, the files of FASTA and ASN.1 input as one list. */
+  /**
+   * Why the input cannot run, for an argv that does not print help or the version: the pasted FASTA's name taken
+   * (`pasteNameTaken`), or a database of the files of the run that `-in` cannot name while the words do not name `-in`
+   * themselves (`databaseRefusal`).
+   */
+  private inputRefusal(state: MakeblastdbDraftState, argv: readonly string[]): string | undefined {
+    if (toolPrintsKind(argv) !== null) return undefined;
+    const taken = pasteNameTaken(state, this.inputType(state));
+    if (taken !== undefined) return taken;
+    return namesInput(argv) ? undefined : this.databaseRefusal(state);
+  }
+
+  /** `-in`'s value for the input type chosen: `dbInName` for a BLAST database, the files of FASTA and ASN.1 input as one list. */
   private inputValue(state: MakeblastdbDraftState): string {
-    if (this.inputType(state) === 'blastdb') return state.dbIn.trim();
+    if (this.inputType(state) === 'blastdb') return this.dbInName(state).trim();
     return seqdbNameList('-in', this.inputEntries(state).map((entry) => entry.name), 'file');
   }
 

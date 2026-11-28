@@ -6,9 +6,9 @@
 // only the final byte of each non-final file so page JS heap never holds the input sequences.
 import { isUnavailable } from 'losat/ports';
 import { splitOptions } from '../domain/argv';
-import { normalizeRunPath, primaryBlastDbName } from '../domain/blast-db';
+import { normalizeRunPath } from '../domain/blast-db';
 import { countsName } from '../domain/counts';
-import { listNameRefusal, seqdbNameList } from '../domain/list-flags';
+import type { ListOption } from '../domain/list-flags';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import { buildWindowMaskerArgv } from '../domain/tool-argv';
 import {
@@ -23,10 +23,10 @@ import type { ToolDirectoryFile, ToolRequest } from './coordinator';
 import type { InputMode } from './draft';
 import { SessionFiles } from './session-files';
 import {
+  foundDatabase,
   ToolDraftCore,
   type StatePatch,
   type ToolDraftCoreDeps,
-  type ToolExtraFile,
   type ToolFormState,
 } from './tool-draft-core';
 
@@ -59,9 +59,6 @@ export type ToolCountsChoice =
   | { readonly kind: 'saved'; readonly taxid: number; readonly name: string; readonly size: number }
   | { readonly kind: 'file'; readonly file: File; readonly name: string; readonly size: number };
 
-/** WindowMasker's `-in` with `-infmt blastdb`: a SeqDB name list (`isSeqdbList`). */
-const WINDOWMASKER_BLASTDB_IN = { command: 'windowmasker', flag: '-in', inputFormat: 'blastdb' } as const;
-
 export interface ToolDraftState extends ToolFormState {
   readonly stage: WindowMaskerStage;
   readonly values: Readonly<Record<WindowMaskerStage, FormValues>>;
@@ -71,7 +68,9 @@ export interface ToolDraftState extends ToolFormState {
   readonly fastaPaste: string;
   readonly fastaFiles: readonly ToolInputFile[];
   readonly fastaMode: InputMode;
+  /** The Input name typed (`-in` of `-infmt blastdb` or `seqids`, or of `-fa_list`), as the command line takes it. */
   readonly blastDbIn: string;
+  /** Whether the user typed the Input name; until then the files of the run name it (`inName`). */
   readonly blastDbInEdited: boolean;
   readonly ustatSource: ToolCountsChoice;
   readonly convertSource: ToolCountsChoice;
@@ -319,16 +318,28 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
   }
 
   /**
-   * The `-in` value of the BLAST database that files added to the run directory hold, until the user edits it: `-in` of
-   * `-infmt blastdb`, a SeqDB name list (`seqdbNameList`: `"my dbs/wm"`; line WW, WW4d), as makeblastdb's `dbIn` is. A
-   * name that the list cannot carry (`listNameRefusal`) is not written, and the Input block says why.
+   * The Input name (`-in` when the stage does not read the FASTA box): the name typed, or, until one is typed, the BLAST
+   * database that the files of the run hold, with `-infmt blastdb` only (`foundDatabase`: a SeqDB name list,
+   * `"my dbs/wm"`; line WW, WW4d), as makeblastdb's `dbInName` is; none when the list cannot carry its name
+   * (`databaseRefusal`). With `-infmt seqids` or `-fa_list`, `-in` is one file's name, which the user types.
    */
-  protected override runFilesAdded(state: ToolDraftState, runFiles: readonly ToolExtraFile[]): StatePatch<ToolDraftState> {
-    if (state.blastDbInEdited && state.blastDbIn.trim() !== '') return {};
-    const detected = primaryBlastDbName(runFiles.map((entry) => entry.name));
-    if (detected === undefined) return {};
-    const refusal = listNameRefusal(WINDOWMASKER_BLASTDB_IN, detected, 'database');
-    return refusal === undefined ? { blastDbIn: seqdbNameList('-in', [detected]) } : { runFilesError: refusal };
+  inName(state: ToolDraftState = this.state.get()): string {
+    if (state.blastDbInEdited) return state.blastDbIn;
+    return this.foundIn(state)?.written ?? '';
+  }
+
+  /**
+   * Why the BLAST database that the files of the run hold cannot be `-in` (a name with a double quote), while it would
+   * name `-in`: `-infmt blastdb`, its files in the run, no name typed. The Input block, the check and "Run LOSAT" say it
+   * for as long as that lasts (line WW, WW4d R1).
+   */
+  databaseRefusal(state: ToolDraftState = this.state.get()): string | undefined {
+    return state.blastDbInEdited ? undefined : this.foundIn(state)?.refusal;
+  }
+
+  /** A name typed and then cleared gives the Input name back to the files of the run, when files are added. */
+  protected override runFilesAdded(state: ToolDraftState): StatePatch<ToolDraftState> {
+    return state.blastDbInEdited && state.blastDbIn.trim() === '' ? { blastDbIn: '', blastDbInEdited: false } : {};
   }
 
   // --- command line & validation ----------------------------------------------------------
@@ -382,11 +393,17 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
     return state.values[state.stage][flag];
   }
 
-  /** The argv of the check: the inputs not chosen yet are named `input.fa` and `counts.ascii`. */
+  /**
+   * The argv of the check: the inputs not chosen yet are named `input.fa` and `counts.ascii`. A database of the files of
+   * the run that `-in` cannot name (`databaseRefusal`) is the check's refusal, unless the words print help or the version.
+   */
   protected validationArgv(state: ToolDraftState, extra: readonly string[]): readonly string[] {
     const inputName = this.previewInputName(state) ?? (state.stage === 'convert' ? 'counts.ascii' : 'input.fa');
     const ustatName = state.stage === 'mask' ? (state.ustatSource.kind === 'none' ? 'counts.ascii' : state.ustatSource.name) : undefined;
-    return this.buildArgv(state, extra, { inputName, ustatName });
+    const argv = this.buildArgv(state, extra, { inputName, ustatName });
+    const refusal = this.databaseRefusal(state);
+    if (refusal !== undefined && toolPrintsKind(argv) === null) throw new Error(refusal);
+    return argv;
   }
 
   protected async buildRequests(state: ToolDraftState, extra: readonly string[]): Promise<readonly ToolRequest[]> {
@@ -424,6 +441,11 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
     });
   }
 
+  /** The BLAST database of the files of the run, for the stage's `-in` (`foundDatabase`; Convert's `-in` is its counts). */
+  private foundIn(state: ToolDraftState): ReturnType<typeof foundDatabase> {
+    return state.stage === 'convert' ? undefined : foundDatabase(windowMaskerIn(state), state.runFiles);
+  }
+
   private releaseSessionToken(token: string | undefined): void {
     if (token !== undefined) void this.deps.data.dropSessionFile(token).catch(() => undefined);
   }
@@ -451,7 +473,9 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
       stage === 'mask' ? await this.resolveCountsChoice(state.ustatSource, 'Choose a counts file for -ustat.') : undefined;
 
     if (!this.usesFastaBox(state)) {
-      const inputName = state.blastDbIn.trim();
+      const refusal = this.databaseRefusal(state);
+      if (refusal !== undefined) throw new Error(refusal);
+      const inputName = this.inName(state).trim();
       if (inputName === '') throw new Error('Enter an input name or open files.');
       const dir = this.runDirectoryOf(state, ustatFile === undefined ? [] : [ustatFile]);
       const argv = this.buildArgv(state, extraWords, { inputName, ustatName: ustatFile?.name });
@@ -540,7 +564,7 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
       return state.convertSource.kind === 'none' ? undefined : state.convertSource.name;
     }
     if (!this.usesFastaBox(state)) {
-      const name = state.blastDbIn.trim();
+      const name = this.inName(state).trim();
       return name === '' ? undefined : name;
     }
     const count = (state.fastaPaste.trim() !== '' ? 1 : 0) + state.fastaFiles.length;
@@ -591,6 +615,12 @@ export class ToolDraft extends ToolDraftCore<ToolDraftState> {
       ),
     });
   }
+}
+
+/** WindowMasker's `-in` with the stage's `-infmt`, which decides whether it is a SeqDB name list (`isSeqdbList`). */
+function windowMaskerIn(state: ToolDraftState): ListOption {
+  const infmt = state.values[state.stage]['-infmt'];
+  return { command: 'windowmasker', flag: '-in', inputFormat: typeof infmt === 'string' ? infmt : 'fasta' };
 }
 
 function sessionCountsChoice(runId: string, runNumber: number, key: string, name: string, size: number): ToolCountsChoice {

@@ -285,8 +285,8 @@ describe('MakeblastdbDraft', () => {
 
     draft.setField('-input_type', 'blastdb');
     draft.addRunFiles(['nin', 'nhr', 'nsq'].map((ext) => new File(['x'], `old"db.${ext}`)));
-    expect(draft.state.get().dbIn).toBe('');
-    expect(draft.state.get().runFilesError).toBe('A database named "old"db" cannot be in -in: a double quote there starts or ends a name.');
+    expect(draft.dbInName()).toBe('');
+    expect(draft.databaseRefusal()).toBe('A database named "old"db" cannot be in -in: a double quote there starts or ends a name.');
     // The one rule for every list option: a comma in -mask_data's list.
     expect(listNameRefusal({ command: 'makeblastdb', flag: '-mask_data' }, 'a,b.asnb')).toBe('A file named "a,b.asnb" cannot be in -mask_data: a comma separates its files.');
     expect(listNameRefusal({ command: 'makeblastdb', flag: '-mask_data' }, 'a"b.asnb')).toBeUndefined();
@@ -317,10 +317,10 @@ describe('MakeblastdbDraft', () => {
     const files = ['nin', 'nhr', 'nsq'].map((ext) => new File(['x'], `old.${ext}`));
     for (const file of files) Object.defineProperty(file, 'webkitRelativePath', { value: `in/${file.name}` });
     draft.addRunFiles(files);
-    expect(draft.state.get().dbIn).toBe('in/old');
+    expect(draft.dbInName()).toBe('in/old');
     draft.setDbIn('in/other');
     draft.addRunFiles([new File(['x'], 'more.nal')]);
-    expect(draft.state.get().dbIn).toBe('in/other');
+    expect(draft.dbInName()).toBe('in/other');
     draft.setDbIn('in/old');
     draft.setField('-out', 'new');
     const res = await draft.submit();
@@ -347,8 +347,43 @@ describe('MakeblastdbDraft', () => {
     await loaded(found);
     found.setField('-input_type', 'blastdb');
     found.addRunFiles(['nin', 'nhr', 'nsq'].map((ext) => new File(['x'], `my db.${ext}`)));
-    expect(found.state.get().dbIn).toBe('"my db"');
+    expect(found.dbInName()).toBe('"my db"');
     expect(found.previewCommandWords().slice(1, 4)).toEqual(['makeblastdb', '-in', '"my db"']);
+  });
+
+  // Line WW, WW4d R1 (review finding 1): the refusal is worked out from the draft (the files of the run, -input_type, a
+  // name typed), so it lasts as long as its cause, and a name found earlier does not run in its place.
+  it('keeps refusing a found database named with a double quote while its files are in the run: the Input block, the check and Run LOSAT, and no name found earlier runs (line WW, WW4d R1)', async () => {
+    const refused = 'A database named "q"/d" cannot be in -in: a double quote there starts or ends a name.';
+    const { draft, queued } = setup();
+    await loaded(draft);
+    draft.setField('-input_type', 'blastdb');
+    draft.setField('-dbtype', 'nucl');
+    draft.addRunFiles(['nin', 'nhr', 'nsq'].map((ext) => new File(['x'], `old.${ext}`)), ['in/old.nin', 'in/old.nhr', 'in/old.nsq']);
+    expect(draft.previewArgv().slice(0, 3)).toEqual(['makeblastdb', '-in', 'in/old']);
+    // A second database, which the files of the run now name (the shortest name), and whose name -in cannot carry.
+    draft.addRunFiles(['nin', 'nsq'].map((ext) => new File(['x'], `d.${ext}`)), ['q"/d.nin', 'q"/d.nsq']);
+    expect(draft.previewArgv()).not.toContain('in/old');
+    expect(draft.databaseRefusal()).toBe(refused);
+    expect(draft.dbInName()).toBe('');
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused }));
+    // Edits that cleared the old one-shot error keep it now: its cause is still there.
+    draft.resetOptions();
+    draft.setField('-out', 'new');
+    expect(draft.databaseRefusal()).toBe(refused);
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused }));
+    expect(await draft.submit()).toEqual({ ok: false, message: refused });
+    expect(queued).toHaveLength(0);
+    // FASTA input: the files of the run name no -in, so nothing is refused.
+    draft.setField('-input_type', 'fasta');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    // A name typed is the user's, whatever the files hold.
+    draft.setField('-input_type', 'blastdb');
+    draft.setDbIn('in/old');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued[0]!.argv.slice(0, 3)).toEqual(['makeblastdb', '-in', 'in/old']);
   });
 
   it('adds mask data to -mask_data as a list, once per file, and takes it away with the file', async () => {

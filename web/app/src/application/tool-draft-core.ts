@@ -8,10 +8,10 @@
 // inputs and its argv through the abstract members.
 import type { DirectoryFile, ToolDescription } from 'losat/domain';
 import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports';
-import { duplicateRunFileMessage, normalizeRunPath, pickedFilePath, RunDirectoryBuilder } from '../domain/blast-db';
+import { duplicateRunFileMessage, normalizeRunPath, pickedFilePath, primaryBlastDbName, RunDirectoryBuilder } from '../domain/blast-db';
 import type { FieldValue } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
-import { listNameRefusal } from '../domain/list-flags';
+import { isSeqdbList, listNameRefusal, seqdbNameList, type ListOption } from '../domain/list-flags';
 import { fileListNames, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
 import { TOOL_FILE_LIST_FLAGS, type ToolId } from '../domain/tools';
 import { failureText } from './availability';
@@ -121,10 +121,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
   /** The message of an input that could not be read because a part of LOSAT is unavailable. */
   protected inputsUnavailable?(state: S): string | undefined;
 
-  /**
-   * What else changes when files are added to the run directory (WindowMasker's `-in` name, makeblastdb's database
-   * name); its `runFilesError` says why the files could not name what they hold, unless a name was refused already.
-   */
+  /** What else changes when files are added to the run directory (a name of WindowMasker's or makeblastdb's `-in`). */
   protected runFilesAdded?(state: S, runFiles: readonly ToolExtraFile[]): StatePatch<S>;
 
   /** The value of an option of the form (of the stage shown, for WindowMasker). */
@@ -193,7 +190,7 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
     }
     const runFiles = Object.freeze([...state.runFiles, ...added]);
     const found = this.runFilesAdded?.(state, runFiles);
-    this.set({ ...found, ...common<S>({ runFiles, runFilesError: duplicateError ?? found?.runFilesError, message: undefined }) });
+    this.set({ ...found, ...common<S>({ runFiles, runFilesError: duplicateError, message: undefined }) });
     this.scheduleValidation();
   }
 
@@ -484,6 +481,25 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
     this.asking.add(promise);
     void promise.finally(() => this.asking.delete(promise));
   }
+}
+
+/** The BLAST database that files of the run hold, as an option's list writes its name, or why the list cannot carry it. */
+export type FoundDatabase = { readonly written: string; readonly refusal?: undefined } | { readonly written?: undefined; readonly refusal: string };
+
+/**
+ * The BLAST database that the files of the run hold (`primaryBlastDbName`), for an option whose value is a SeqDB name
+ * list (`isSeqdbList`: WindowMasker's `-in` with `-infmt blastdb`, makeblastdb's `-in`): its name as the list writes it
+ * (`seqdbNameList`: `"my dbs/wm"`), or why the list cannot carry it (`listNameRefusal`); undefined when the files hold
+ * none or the option takes one file's name. The drafts work out from it, every time, the name that `-in` shows until
+ * one is typed and the refusal that the Input block, the check and "Run LOSAT" say while its files are in the run (line
+ * WW, WW4d R1).
+ */
+export function foundDatabase(option: ListOption, runFiles: readonly ToolExtraFile[]): FoundDatabase | undefined {
+  if (!isSeqdbList(option)) return undefined;
+  const name = primaryBlastDbName(runFiles.map((entry) => entry.name));
+  if (name === undefined) return undefined;
+  const refusal = listNameRefusal(option, name, 'database');
+  return refusal === undefined ? { written: seqdbNameList(option.flag, [name]) } : { refusal };
 }
 
 /** A change of the common state as a change of a tool draft's state (whose type extends it). */

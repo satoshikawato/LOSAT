@@ -12,7 +12,12 @@ describe('SeqDB name lists (line WW, WW4d)', () => {
     expect(seqdbNameList('-in', ['input.fa', 'my genome.fa.gz'], 'file')).toBe('input.fa "my genome.fa.gz"');
     // A tab is no separator of the reader, so the writer leaves it as it is.
     expect(seqdbNameList('-db', ['a\tb'])).toBe('a\tb');
-    expect(seqdbNameList('-db', ['', ' '])).toBe('');
+    // Only an empty name is left out (it reads back as nothing); a name of spaces is a name, quoted as
+    // SeqDB_CombineAndQuote quotes any name with a space (line WW, WW4d R1, review finding 4).
+    expect(seqdbNameList('-db', [''])).toBe('');
+    expect(seqdbNameList('-db', ['a', '', 'b'])).toBe('a b');
+    expect(seqdbNameList('-db', [' '])).toBe('" "');
+    expect(seqdbNameList('-db', ['', ' ', 'b'])).toBe('" " b');
   });
 
   it('throws for a name that the list cannot carry, with the reason', () => {

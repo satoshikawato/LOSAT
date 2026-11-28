@@ -1722,7 +1722,7 @@ export class SearchDraft {
         if (field.kind === 'database') {
           if (values[program][field.flag] === true) {
             if (filteringDb.scanning !== undefined) return readingDatabaseMessage('repeats database', filteringDb.scanning);
-            const refusal = filteringDb.selected === undefined ? undefined : filteringDbRefusal(filteringDb.selected);
+            const refusal = repeatsRefusal(state);
             if (refusal !== undefined) return refusal;
             if (filteringDb.discovery !== undefined && filteringDb.selected === undefined) {
               return noMatchingDatabaseMessage(filteringDb.discovery, field.database?.kind ?? 'nucleotide', field.label);
@@ -2373,6 +2373,13 @@ export class SearchDraft {
       this.set({ validation: { state: 'invalid', message: messageOf(error) }, start: undefined });
       return;
     }
+    // A repeats database that -filtering_db cannot name: the argv has the option without it, and the check says why, as it
+    // says -db's (line WW, WW4d R1).
+    const repeats = repeatsRefusal(this.state.get());
+    if (repeats !== undefined) {
+      this.set({ validation: { state: 'invalid', message: repeats }, start: undefined });
+      return;
+    }
     this.set({ validation: { state: 'checking' } });
     let validation: Validation;
     let start: StartInfo | undefined;
@@ -2774,4 +2781,14 @@ function messageOf(error: unknown): string {
 /** Why a repeats database cannot be BLASTN's `-filtering_db`: a name that the option's list cannot carry (`listNameRefusal`). */
 function filteringDbRefusal(name: string): string | undefined {
   return listNameRefusal({ flag: FILTERING_DB_FLAG }, name, 'database');
+}
+
+/**
+ * Why the repeats database chosen cannot be the program's `-filtering_db` while the option is on (`filteringDbRefusal`;
+ * the option is then written without a database): what the check, the line above "Run LOSAT" and "Run LOSAT" say.
+ */
+function repeatsRefusal(state: Pick<DraftState, 'program' | 'values' | 'filteringDb'>): string | undefined {
+  const { program, values, filteringDb } = state;
+  if (values[program][FILTERING_DB_FLAG] !== true || filteringDb.selected === undefined) return undefined;
+  return filteringDbRefusal(filteringDb.selected);
 }

@@ -17,6 +17,7 @@ import {
   toShellCommand,
 } from '../../src/domain/argv';
 import { ALL_DB_FILTER_FLAGS, FILTERING_DB_FLAG } from '../../src/domain/blast-db';
+import { writtenValue } from '../../src/domain/parameters';
 import { PROGRAMS } from '../../src/domain/programs';
 
 describe('buildArgv', () => {
@@ -126,7 +127,13 @@ describe('buildArgv', () => {
   });
 
   it('writes -db as the command line reads it: a database whose path holds a space between double quotes, shown so that it pastes (line WW, WW4d)', () => {
-    const argv = buildArgv({ program: 'blastn', queryName: 'q.fa', databaseName: 'my dbs/ndb', parameters: [['-filtering_db', '"rep dbs/rep"']] });
+    // The repeats database as the form writes it (`writtenValue` of the Repeats database field), from its real name.
+    const repeatsField = PROGRAMS.find((program) => program.id === 'blastn')!
+      .sections.flatMap((section) => section.fields)
+      .find((field) => field.flag === FILTERING_DB_FLAG)!;
+    const repeats = writtenValue(repeatsField, 'rep dbs/rep', undefined);
+    expect(repeats).toBe('"rep dbs/rep"');
+    const argv = buildArgv({ program: 'blastn', queryName: 'q.fa', databaseName: 'my dbs/ndb', parameters: [[FILTERING_DB_FLAG, repeats!]] });
     expect(argv).toEqual(['blastn', '-query', 'q.fa', '-db', '"my dbs/ndb"', '-filtering_db', '"rep dbs/rep"']);
     // The shell gives the engine the word "my dbs/ndb" with its quotes, as native `losat blastn -db '"my dbs/ndb"'` reads it.
     expect(toShellCommand(argv, 0)).toBe(`losat blastn -query q.fa -db '"my dbs/ndb"' -filtering_db '"rep dbs/rep"' -outfmt 0`);

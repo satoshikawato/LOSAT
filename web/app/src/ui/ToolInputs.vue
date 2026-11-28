@@ -35,6 +35,8 @@ const infmtField = computed(() => {
   return param === undefined ? undefined : toToolParameterField(param);
 });
 const usesFasta = computed(() => props.draft.usesFastaBox(props.state));
+/** Why the database of the files of the run cannot be -in, for as long as its files are in the run (line WW, WW4d R1). */
+const databaseRefusal = computed(() => props.draft.databaseRefusal(props.state));
 const fastaCount = computed(() => (props.state.fastaPaste.trim() !== '' ? 1 : 0) + props.state.fastaFiles.length);
 
 function readPickedFiles(event: Event): File[] {
@@ -191,7 +193,7 @@ function onInFiles(event: Event): void {
               autocomplete="off"
               spellcheck="false"
               placeholder="db/wm"
-              :value="state.blastDbIn"
+              :value="draft.inName(state)"
               data-testid="wm-in-name"
               @input="draft.setBlastDbIn(($event.target as HTMLInputElement).value)"
             />
@@ -225,7 +227,8 @@ function onInFiles(event: Event): void {
         <p v-if="state.runFiles.length > 0" class="muted small wm-in-count" data-testid="wm-in-files-count">
           {{ state.runFiles.length }} {{ state.runFiles.length === 1 ? 'file' : 'files' }} in the run directory.
         </p>
-        <p v-if="state.runFilesError" class="error small" data-testid="wm-in-error">{{ state.runFilesError }}</p>
+        <p v-if="state.runFilesError" class="error small" role="alert" data-testid="wm-in-error">{{ state.runFilesError }}</p>
+        <p v-if="databaseRefusal" class="error small" role="alert" data-testid="wm-in-refused">{{ databaseRefusal }}</p>
       </template>
     </template>
   </fieldset>

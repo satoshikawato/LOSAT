@@ -3,6 +3,7 @@
 // (WQA D12b + RG-D4 W2). Single owner reused by Subject "Database" (-db),
 // BLASTN "Repeats database" (-filtering_db), and WindowMasker (-infmt blastdb).
 import { WINDOW_MASKER_TAXID_FLAG, type DirectoryFile, type ProgramId, type SequenceKind } from 'losat/domain';
+import { seqdbNames } from './list-flags';
 
 export const DB_FLAG = '-db';
 export const FILTERING_DB_FLAG = '-filtering_db';
@@ -338,38 +339,35 @@ export class RunDirectoryBuilder {
   }
 }
 
-/** Parses `TITLE` and `DBLIST` tokens from a BLAST `.nal` or `.pal` alias file. */
+/**
+ * The `TITLE` and the `DBLIST` names of a BLAST `.nal` or `.pal` alias file, as NCBI's SeqDB reads them: its lines by
+ * `aliasValues`, and `DBLIST`'s value as a SeqDB name list (`seqdbNames`: only a space separates two names, a double
+ * quote starts or ends one), each name with its backslashes read as slashes (SeqDB's `SeqDB_ConvertOSPath`).
+ */
 export function parseAliasMetadata(text: string): { readonly title?: string; readonly dblist: readonly string[] } {
-  let title: string | undefined;
-  const dblist: string[] = [];
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
+  const values = aliasValues(text);
+  const title = values.get('TITLE');
+  const dblist = seqdbNames(values.get('DBLIST') ?? '').map((name) => name.replaceAll('\\', '/'));
+  return title === undefined || title === '' ? { dblist } : { title, dblist };
+}
+
+/**
+ * The keys and values of an alias file's lines, as NCBI's SeqDB reads them (LOSAT `seqdb/alias.rs` `read_values`; line
+ * WW, WW4d R1): a line ends at a newline or a carriage return; the spaces before it are skipped, and a line that then
+ * starts with `#` is a comment; the key is the line up to its first space or tab, exactly (`DBLISTX` is another key);
+ * the value is the rest without the spaces and tabs at its ends, each tab read as a space; a key given again replaces
+ * the earlier value.
+ */
+function aliasValues(text: string): ReadonlyMap<string, string> {
+  const values = new Map<string, string>();
+  for (const raw of text.split(/[\r\n]/)) {
+    const line = raw.replace(/^ +/, '');
     if (line === '' || line.startsWith('#')) continue;
-    if (line.startsWith('TITLE')) {
-      const value = line.slice('TITLE'.length).trim();
-      if (value !== '') title = value;
-      continue;
-    }
-    if (!line.startsWith('DBLIST')) continue;
-    const rest = line.slice('DBLIST'.length).trim();
-    let i = 0;
-    while (i < rest.length) {
-      while (i < rest.length && /\s/.test(rest[i]!)) i++;
-      if (i >= rest.length) break;
-      let token: string;
-      if (rest[i] === '"') {
-        const end = rest.indexOf('"', i + 1);
-        token = end < 0 ? rest.slice(i + 1) : rest.slice(i + 1, end);
-        i = end < 0 ? rest.length : end + 1;
-      } else {
-        const start = i;
-        while (i < rest.length && !/\s/.test(rest[i]!)) i++;
-        token = rest.slice(start, i);
-      }
-      if (token !== '') dblist.push(token.replaceAll('\\', '/'));
-    }
+    const key = /^[^ \t]*/.exec(line)![0];
+    if (key === '') continue;
+    values.set(key, line.slice(key.length).replace(/^[ \t]+|[ \t]+$/g, '').replaceAll('\t', ' '));
   }
-  return title === undefined ? { dblist } : { title, dblist };
+  return values;
 }
 
 function parentDir(path: string): string {

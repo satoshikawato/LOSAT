@@ -99,6 +99,32 @@ describe('blast-db domain discovery & directory assembly', () => {
     expect(meta).toEqual({ title: 'Test Multi Volume DB', dblist: ['vol 00', 'vol_01'] });
   });
 
+  // Line WW, WW4d R1 (review finding 2): the lines of an alias file as NCBI's SeqDB reads them (LOSAT seqdb/alias.rs
+  // read_values: a key is the line's first word exactly, a tab is a space, a key given again replaces its value), and
+  // DBLIST's value as the one reader of a SeqDB name list (seqdbNames: only a space separates, a double quote quotes).
+  it('reads an alias file as SeqDB does: DBLIST split at spaces only, quotes inside a word, the last line of a key, the key exactly (line WW, WW4d R1)', () => {
+    expect(parseAliasMetadata('DBLIST vol\u3000a.00 vol\u3000a.01\n').dblist).toEqual(['vol\u3000a.00', 'vol\u3000a.01']);
+    expect(parseAliasMetadata('DBLIST a"b c"\n').dblist).toEqual(['a', 'b c']);
+    expect(parseAliasMetadata('DBLIST a\nDBLIST b\n').dblist).toEqual(['b']);
+    expect(parseAliasMetadata('DBLISTX a\n').dblist).toEqual([]);
+    expect(parseAliasMetadata('DBLIST\ta\tb \r\n').dblist).toEqual(['a', 'b']);
+    expect(parseAliasMetadata('  # DBLIST a\n  DBLIST "my vol.00" "my vol.01"\n').dblist).toEqual(['my vol.00', 'my vol.01']);
+    expect(parseAliasMetadata('DBLIST sub\\x\n').dblist).toEqual(['sub/x']);
+    expect(parseAliasMetadata('TITLE one\nTITLEX two\nDBLIST a\n')).toEqual({ title: 'one', dblist: ['a'] });
+    expect(parseAliasMetadata('TITLE one\nTITLE  two  words \n')).toEqual({ title: 'two  words', dblist: [] });
+  });
+
+  it('offers a multi-volume database whose volume names hold a non-ASCII space as one alias of its volumes (line WW, WW4d R1)', async () => {
+    const files = [
+      fileWithRelPath('db/vol\u3000a.nal', 'TITLE wide\nDBLIST vol\u3000a.00 vol\u3000a.01\n'),
+      ...['00', '01'].flatMap((n) => ['nin', 'nhr', 'nsq'].map((ext) => fileWithRelPath(`db/vol\u3000a.${n}.${ext}`, ext))),
+    ];
+    const discovery = await discoverBlastDatabases(files);
+    expect(discovery.databases).toEqual([
+      { name: 'db/vol\u3000a', kind: 'nucleotide', entry: 'alias', title: 'wide', volumes: ['vol\u3000a.00', 'vol\u3000a.01'] },
+    ]);
+  });
+
   it('discovers single-volume, multi-volume aliases, molecule types, and folder-scoped taxonomy aux files without reading binary volumes', async () => {
     let nsqReads = 0;
     const nsq = fileWithRelPath('dbdir/multi.00.nsq', 'BINARY');
@@ -1163,6 +1189,8 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(draft.parameters()).toEqual([]);
     const refusedRepeats = `A database named "q"r/rep" cannot be in -filtering_db: ${reason}.`;
     expect(draft.readiness()).toBe(refusedRepeats);
+    // The check says it too, as it says -db's (line WW, WW4d R1, review finding 1).
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refusedRepeats });
     expect(await draft.submit()).toEqual({ ok: false, message: refusedRepeats });
     draft.selectFilteringDb('q"r/rep');
     expect(draft.state.get().values.blastn[FILTERING_DB_FLAG]).toBe(true);

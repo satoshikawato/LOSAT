@@ -62,6 +62,13 @@
   min-width: 0;
 }
 
+/* The label's word keeps its width and the list takes what is left: with the page's rule for long words (body's
+   overflow-wrap) a narrow band shrank "Subject" too and broke it over two lines at 270 to 296 px (D32's review
+   r3, M1, 2026-11-28). */
+.plot-subject > span {
+  flex: none;
+}
+
 .plot-subject select {
   flex: 1 1 auto;
   width: 10em;

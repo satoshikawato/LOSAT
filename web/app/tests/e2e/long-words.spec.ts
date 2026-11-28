@@ -3,8 +3,8 @@
 // make the page wider than the window (line WQA's sweep 4, S4-4 and S4-7, 2026-11-28). The same word in the other
 // boxes that show a name or an ID (the review's M1): the Alignments summary, the HSP list's heading, the Dot plot's
 // caption, Format Archive's chosen file, WindowMasker's output tab and download button, and the words of a failed run.
-// The rule must not break the page's own words (review r2, M1: "TBLASTN" in two lines at 280 to 360 px), and a help
-// stays inside the page when the window narrows while it is open (review r2, L2).
+// The rule must not break the page's own words (reviews r2 and r3: "TBLASTN" and the Dot Plot's "Subject" over two
+// lines at 270 to 370 px), and a help stays inside the page when the window narrows while it is open (review r2, L2).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
@@ -170,34 +170,85 @@ test.describe('long words stay inside the page', () => {
 
 // The page's own words: a tab's name has a line as wide as its tab, so the rule for long words never breaks it.
 test.describe("the page's own words and its helps", () => {
-  const NARROW_TO_WIDE = [280, 300, 320, 340, 359, 360, 390, 480, 800, 801, 1280] as const;
+  const NARROW_TO_WIDE = [280, 290, 300, 320, 340, 360, 370, 390, 800, 1280] as const;
 
-  /** The names of the shown `.program-tab` tabs that take more than one line, at the window's width now. */
-  async function brokenTabNames(page: Page): Promise<string[]> {
-    return page.evaluate(() =>
-      [...document.querySelectorAll('.program-tab')].flatMap((tab) => {
-        const text = [...tab.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim());
-        if (text === undefined) return [];
-        const range = document.createRange();
-        range.selectNodeContents(text);
-        const tops = new Set([...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top)));
-        return tops.size > 1 ? [text.textContent!.trim()] : [];
-      }),
-    );
+  /**
+   * The page's words that take more than one line inside a word: a run of letters or digits whose letters are on two
+   * lines (a break at a hyphen, a slash or a space is not inside a word). Lists, text boxes and hidden text are left out.
+   */
+  async function wordsBrokenInside(page: Page): Promise<string[]> {
+    return page.evaluate(() => {
+      const broken: string[] = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const parent = node.parentElement;
+        if (parent === null || parent.closest('select, textarea, script, style, .visually-hidden') !== null) continue;
+        for (const word of (node.textContent ?? '').matchAll(/[\p{L}\p{N}]+/gu)) {
+          range.setStart(node, word.index);
+          range.setEnd(node, word.index + word[0].length);
+          const lines = new Set([...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top)));
+          if (lines.size > 1) broken.push(`${word[0]} (${parent.className || parent.tagName.toLowerCase()})`);
+        }
+      }
+      return broken;
+    });
   }
 
-  test('the mode tabs and the WindowMasker stage tabs keep each name on one line at every width', async ({ page }) => {
-    await openSearch(page);
-    for (const panel of ['search', 'windowmasker'] as const) {
-      if (panel === 'windowmasker') await page.getByTestId('tab-windowmasker').click();
-      const tabs = page.getByTestId(panel === 'search' ? 'program-tabs' : 'wm-stage-tabs');
-      await expect(tabs).toBeVisible();
-      for (const width of NARROW_TO_WIDE) {
-        await page.setViewportSize({ width, height: 900 });
-        expect(await brokenTabNames(page), `${panel} tabs at ${width} px: a name in two lines`).toEqual([]);
-      }
+  /** Shows that no word of the page now breaks inside at any of the widths. */
+  async function expectWholeWords(page: Page, screen: string): Promise<void> {
+    for (const width of NARROW_TO_WIDE) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await wordsBrokenInside(page), `${screen} at ${width} px: words broken over two lines`).toEqual([]);
     }
-  });
+  }
+
+  // The page's own words in every screen that the cases above open, with ordinary names and IDs (D32's reviews r2 and
+  // r3: the mode tabs' "TBLASTN" and the Dot Plot's "Subject" broke inside at 270 to 370 px), with Inter and with the
+  // font that the browser uses when Inter does not come (blocked web fonts; a first load before the font came).
+  for (const font of ['Inter', 'the fallback font'] as const) {
+    test(`the page's own words never break inside a word, from 280 to 1280 px, in ${font}`, async ({ page }) => {
+      test.setTimeout(180_000);
+      if (font === 'the fallback font') await page.route('**/fonts/inter/**', (route) => route.abort());
+      await openSearch(page);
+      const inter = await page.evaluate(async () => {
+        await document.fonts.ready;
+        return [...document.fonts].some((face) => face.family.replace(/["']/g, '') === 'Inter' && face.status === 'loaded');
+      });
+      expect(inter, 'Inter is loaded').toBe(font === 'Inter');
+      const fasta = (id: string) => `>${id}\nACGTTGCAAGCTTGCAGGCATCGATCGGATCGATTTAGCGCGATATCGCGATTAGCGGCTAATCGGATCGATCGTAGGCTAGCTAG\n`;
+      await paste(page, 'query', fasta('q1'));
+      await paste(page, 'subject', fasta('s1'));
+      await openParameters(page);
+      await expectWholeWords(page, 'BLASTN form with its parameters');
+      for (const mode of ['tblastx', 'psiblast'] as const) {
+        await program(page, mode);
+        await openParameters(page);
+        await expectWholeWords(page, `${mode} form with its parameters`);
+      }
+      await program(page, 'blastn');
+      await page.getByTestId('subject-source-database').check();
+      await expectWholeWords(page, 'BLASTN form with a database as subjects');
+      await page.getByTestId('subject-source-fasta').check();
+      await submit(page);
+      await waitStatus(page, 1, 'completed');
+      await pickRun(page, 1);
+      await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
+      await expectWholeWords(page, 'Results');
+      await page.getByTestId('pane-dotplot').click();
+      await expect(page.getByTestId('dotplot-subject')).toBeVisible();
+      await expectWholeWords(page, 'Results, Dot Plot');
+      await page.getByTestId('tab-windowmasker').click();
+      for (const stage of ['mk_counts', 'mask', 'convert'] as const) {
+        await page.getByTestId(`wm-stage-${stage}`).check({ force: true });
+        await expectWholeWords(page, `WindowMasker, ${stage}`);
+      }
+      await page.getByTestId('tab-blast-formatter').click();
+      await expectWholeWords(page, 'Format Archive, file');
+      await page.getByTestId('bf-source-paste').check();
+      await expectWholeWords(page, 'Format Archive, paste');
+    });
+  }
 
   test('every help opened in a wide window stays inside the page when the window narrows', async ({ page }) => {
     // 24 helps opened at 1280 px and seen at three widths, then opened at two: WebKit took 33 s.

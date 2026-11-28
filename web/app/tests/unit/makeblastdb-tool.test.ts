@@ -7,13 +7,12 @@ import type { ToolEngine } from 'losat/ports';
 import { Coordinator, madeDatabaseFolder, type EnqueueAllResult, type ToolRequest } from '../../src/application/coordinator';
 import { MakeblastdbDraft } from '../../src/application/makeblastdb-draft';
 import { assembleSearchDirectory, discoverBlastDatabases, primaryBlastDb } from '../../src/domain/blast-db';
+import { listNameRefusal, seqdbNameList } from '../../src/domain/list-flags';
 import { tarArchive } from '../../src/domain/tar';
 import {
   buildMakeblastdbArgv,
   changedMakeblastdbOptionsCount,
   fileListNames,
-  listNameRefusal,
-  makeblastdbInputList,
   maskDataName,
   refusedToolFields,
 } from '../../src/domain/tool-argv';
@@ -48,7 +47,7 @@ describe('makeblastdb domain helpers', () => {
   it('writes -in as the command line takes a list (spaces separate, quotes keep a name with spaces)', () => {
     expect(
       buildMakeblastdbArgv({
-        input: makeblastdbInputList(['input.fa', 'my genome.fa.gz']),
+        input: seqdbNameList('-in', ['input.fa', 'my genome.fa.gz'], 'file'),
         values: { '-dbtype': 'nucl', '-parse_seqids': true, '-out': 'db', '-mask_data': 'a.asnb, b.asnb' },
         description: MK_DESC,
         extra: ['-logfile', 'run.log'],
@@ -92,7 +91,8 @@ describe('makeblastdb domain helpers', () => {
     expect(toolOutputDownloadName(run, { key: 'f1', name: 'db/mydb.nin' })).toBe('mydb.nin');
     expect(toolOutputDownloadName(run, { key: 'stdout', name: 'stdout' })).toMatch(/run.*3.*stdout\.txt$/);
     expect(toolPrintsKind(['makeblastdb', '-help-full'])).toBe('help');
-    expect(toolPrintsKind(['windowmasker', '-help-full'])).toBeNull();
+    // Every tool's reader takes -help-full (review of WW4c, F4: NCBI BLAST+ 2.17.0 and LOSAT print the help, exit 0).
+    expect(toolPrintsKind(['windowmasker', '-help-full'])).toBe('help');
   });
 
   it('prints what the command line prints: a version flag anywhere wins, else the first help flag, in FakeEngine too (line WW, WW4b2 R3 F8)', async () => {
@@ -111,7 +111,14 @@ describe('makeblastdb domain helpers', () => {
     expect(await printed(['makeblastdb', '-help', '-xmlhelp'])).toEqual({ status: 0, text: expect.stringMatching(/^USAGE\n/) });
     expect(await printed(['makeblastdb', '-xmlhelp', '-help'])).toEqual({ status: 0, text: expect.stringMatching(/^<\?xml/) });
     expect((await engine.validateTool(['makeblastdb', '-help-full', '-no_such_option'])).ok).toBe(true);
-    expect((await engine.validateTool(['windowmasker', '-help-full'])).ok).toBe(false);
+    expect((await engine.validateTool(['windowmasker', '-help-full'])).ok).toBe(true);
+  });
+
+  it("names FakeEngine's database without -out after the first name of -in's list as the command line reads it (line WW, WW4d)", async () => {
+    const engine = new FakeEngine();
+    const made = async (input: string) => (await engine.runTool(['makeblastdb', '-in', input, '-dbtype', 'nucl'])).files.map((file) => file.name).sort();
+    expect(await made('"my seqs.fa" b.fa')).toEqual(['my seqs.fa.nhr', 'my seqs.fa.nin', 'my seqs.fa.nsq']);
+    expect(await made('a.fa "my seqs.fa"')).toEqual(['a.fa.nhr', 'a.fa.nin', 'a.fa.nsq']);
   });
 
   it("offers a masking run's maskinfo output as -mask_data: the -out file, or the standard output under a name", () => {
@@ -279,13 +286,13 @@ describe('MakeblastdbDraft', () => {
 
     draft.setField('-input_type', 'blastdb');
     draft.addRunFiles(['nin', 'nhr', 'nsq'].map((ext) => new File(['x'], `old"db.${ext}`)));
-    expect(draft.state.get().dbIn).toBe('');
-    expect(draft.state.get().runFilesError).toBe('A database named "old"db" cannot be in -in: a double quote there starts or ends a name.');
+    expect(draft.dbInName()).toBe('');
+    expect(draft.databaseRefusal()).toBe('A database named "old"db" cannot be in -in: a double quote there starts or ends a name.');
     // The one rule for every list option: a comma in -mask_data's list.
-    expect(listNameRefusal('-mask_data', 'a,b.asnb')).toBe('A file named "a,b.asnb" cannot be in -mask_data: a comma separates its files.');
-    expect(listNameRefusal('-mask_data', 'a"b.asnb')).toBeUndefined();
-    expect(listNameRefusal('-in', 'a,b.fa')).toBeUndefined();
-    expect(listNameRefusal('-taxid_map', 'a,"b.txt')).toBeUndefined();
+    expect(listNameRefusal({ command: 'makeblastdb', flag: '-mask_data' }, 'a,b.asnb')).toBe('A file named "a,b.asnb" cannot be in -mask_data: a comma separates its files.');
+    expect(listNameRefusal({ command: 'makeblastdb', flag: '-mask_data' }, 'a"b.asnb')).toBeUndefined();
+    expect(listNameRefusal({ command: 'makeblastdb', flag: '-in' }, 'a,b.fa')).toBeUndefined();
+    expect(listNameRefusal({ command: 'makeblastdb', flag: '-taxid_map' }, 'a,"b.txt')).toBeUndefined();
   });
 
   it('checks nothing before an input is given, then reports a missing -dbtype in its field', async () => {
@@ -311,10 +318,10 @@ describe('MakeblastdbDraft', () => {
     const files = ['nin', 'nhr', 'nsq'].map((ext) => new File(['x'], `old.${ext}`));
     for (const file of files) Object.defineProperty(file, 'webkitRelativePath', { value: `in/${file.name}` });
     draft.addRunFiles(files);
-    expect(draft.state.get().dbIn).toBe('in/old');
+    expect(draft.dbInName()).toBe('in/old');
     draft.setDbIn('in/other');
     draft.addRunFiles([new File(['x'], 'more.nal')]);
-    expect(draft.state.get().dbIn).toBe('in/other');
+    expect(draft.dbInName()).toBe('in/other');
     draft.setDbIn('in/old');
     draft.setField('-out', 'new');
     const res = await draft.submit();
@@ -341,8 +348,83 @@ describe('MakeblastdbDraft', () => {
     await loaded(found);
     found.setField('-input_type', 'blastdb');
     found.addRunFiles(['nin', 'nhr', 'nsq'].map((ext) => new File(['x'], `my db.${ext}`)));
-    expect(found.state.get().dbIn).toBe('"my db"');
+    expect(found.dbInName()).toBe('"my db"');
     expect(found.previewCommandWords().slice(1, 4)).toEqual(['makeblastdb', '-in', '"my db"']);
+  });
+
+  // Line WW, WW4d R1 (review finding 1): the refusal is worked out from the draft (the files of the run, -input_type, a
+  // name typed), so it lasts as long as its cause, and a name found earlier does not run in its place.
+  it('keeps refusing a found database named with a double quote while its files are in the run: the Input block, the check and Run LOSAT, and no name found earlier runs (line WW, WW4d R1)', async () => {
+    const refused = 'A database named "q"/d" cannot be in -in: a double quote there starts or ends a name.';
+    const { draft, queued } = setup();
+    await loaded(draft);
+    draft.setField('-input_type', 'blastdb');
+    draft.setField('-dbtype', 'nucl');
+    draft.addRunFiles(['nin', 'nhr', 'nsq'].map((ext) => new File(['x'], `old.${ext}`)), ['in/old.nin', 'in/old.nhr', 'in/old.nsq']);
+    expect(draft.previewArgv().slice(0, 3)).toEqual(['makeblastdb', '-in', 'in/old']);
+    // A second database, which the files of the run now name (the shortest name), and whose name -in cannot carry.
+    draft.addRunFiles(['nin', 'nsq'].map((ext) => new File(['x'], `d.${ext}`)), ['q"/d.nin', 'q"/d.nsq']);
+    expect(draft.previewArgv()).not.toContain('in/old');
+    expect(draft.databaseRefusal()).toBe(refused);
+    expect(draft.dbInName()).toBe('');
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused }));
+    // Edits that cleared the old one-shot error keep it now: its cause is still there.
+    draft.resetOptions();
+    draft.setField('-out', 'new');
+    expect(draft.databaseRefusal()).toBe(refused);
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused }));
+    expect(await draft.submit()).toEqual({ ok: false, message: refused });
+    expect(queued).toHaveLength(0);
+    // FASTA input: the files of the run name no -in, so nothing is refused.
+    draft.setField('-input_type', 'fasta');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    // A name typed is the user's, whatever the files hold.
+    draft.setField('-input_type', 'blastdb');
+    draft.setDbIn('in/old');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued[0]!.argv.slice(0, 3)).toEqual(['makeblastdb', '-in', 'in/old']);
+  });
+
+  // Line WW, WW4d R2 (review N1, N2): a cleared -in name is none, and words of Additional options that name -in give -in
+  // themselves: the found database is neither written nor refused (one rule with WindowMasker and Masking).
+  it('takes a cleared -in name as none, and writes no found database when Additional options name -in (line WW, WW4d R2)', async () => {
+    const refused = 'A database named "q"/d" cannot be in -in: a double quote there starts or ends a name.';
+    const { draft } = setup();
+    await loaded(draft);
+    draft.setField('-input_type', 'blastdb');
+    draft.setField('-dbtype', 'nucl');
+    draft.addRunFiles(['nin', 'nsq'].map((ext) => new File(['x'], `old.${ext}`)), ['in/old.nin', 'in/old.nsq']);
+    draft.setDbIn('typed');
+    draft.setDbIn(' ');
+    expect(draft.dbInName()).toBe('in/old');
+    draft.setDbIn('typed');
+    draft.addRunFiles(['nin', 'nsq'].map((ext) => new File(['x'], `d.${ext}`)), ['q"/d.nin', 'q"/d.nsq']);
+    draft.setDbIn('');
+    expect(draft.databaseRefusal()).toBe(refused);
+    // -in in Additional options: the found database (refused or not) is not written.
+    for (const entry of draft.state.get().runFiles.filter((file) => file.name.startsWith('q"/'))) draft.removeRunFile(entry.key);
+    draft.setExtra('-in other');
+    expect(draft.dbInName()).toBe('');
+    expect(draft.previewArgv().filter((word) => word === '-in')).toHaveLength(1);
+    expect(draft.previewArgv().slice(-2)).toEqual(['-in', 'other']);
+  });
+
+  // Line WW (dev defect found by the WW4d R2 review): -input_type blastdb reads a database of -dbtype's kind; before
+  // -dbtype is chosen the kind is not known, and the files of the run name the database as before (an alias first, then
+  // the shortest name, of either kind).
+  it("names the run files' database of -dbtype's kind, and of either kind before -dbtype is chosen (line WW, WW4d R2)", async () => {
+    const { draft } = setup();
+    await loaded(draft);
+    draft.setField('-input_type', 'blastdb');
+    const names = ['db/p.pin', 'db/p.psq', 'db/nuc.nin', 'db/nuc.nsq'];
+    draft.addRunFiles(names.map((name) => new File(['x'], name.slice(3))), names);
+    expect(draft.dbInName()).toBe('db/p');
+    draft.setField('-dbtype', 'nucl');
+    expect(draft.dbInName()).toBe('db/nuc');
+    draft.setField('-dbtype', 'prot');
+    expect(draft.dbInName()).toBe('db/p');
   });
 
   it('adds mask data to -mask_data as a list, once per file, and takes it away with the file', async () => {
@@ -377,6 +459,40 @@ describe('MakeblastdbDraft', () => {
     expect(state.values['-mask_data']).toBeUndefined();
     expect(state.runFiles).toHaveLength(0);
   });
+  // Line WQA's D33 R2 (H2): a file chosen for an option, or a file of the run whose name the option names, is named in the argv
+  // as the run directory holds it, a space at its start or end included: -taxid_map, and each file of -mask_data's list, also
+  // when the list is built again (a file added or taken away). Text typed in an option's box is trimmed.
+  it("names the files of options as the run directory holds them, and keeps those names in -mask_data's list", async () => {
+    const { draft, queued } = setup();
+    await loaded(draft);
+    draft.setFastaPaste('>s1\nACGT\n');
+    draft.setField('-dbtype', 'nucl');
+    draft.setField('-parse_seqids', true);
+    draft.setOptionFile('-taxid_map', new File(['1\t9606\n'], 'taxmap.txt '));
+    draft.setOptionFile('-mask_data', new File(['a'], ' a.asnb'));
+    draft.setOptionFile('-mask_data', new File(['b'], 'b.asnb '));
+    draft.setOptionFile('-mask_data', new File(['c'], 'c.asnb'));
+    const valueOf = (argv: readonly string[], flag: string) => argv[argv.indexOf(flag) + 1];
+    let argv = draft.previewArgv();
+    expect(valueOf(argv, '-taxid_map')).toBe('taxmap.txt ');
+    expect(valueOf(argv, '-mask_data')).toBe(' a.asnb,b.asnb ,c.asnb');
+    draft.removeRunFile(draft.state.get().runFiles.find((entry) => entry.name === 'c.asnb')!.key);
+    argv = draft.previewArgv();
+    expect(valueOf(argv, '-mask_data')).toBe(' a.asnb,b.asnb ');
+    draft.removeRunFile(draft.state.get().runFiles.find((entry) => entry.name === ' a.asnb')!.key);
+    expect(valueOf(draft.previewArgv(), '-mask_data')).toBe('b.asnb ');
+    draft.setOptionFile('-mask_data', new File(['a'], ' a.asnb'));
+    argv = draft.previewArgv();
+    expect(valueOf(argv, '-mask_data')).toBe('b.asnb , a.asnb');
+    await vi.waitFor(() => expect(draft.state.get().validation.state).not.toBe('checking'));
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued.at(-1)!.argv).toEqual(argv);
+    expect(queued.at(-1)!.directory.map((entry) => entry.name)).toEqual(['input.fa', 'taxmap.txt ', 'b.asnb ', ' a.asnb']);
+    // Typed in the box: without the white space around it, as before.
+    draft.setField('-taxid_map', ' typed.map ');
+    expect(valueOf(draft.previewArgv(), '-taxid_map')).toBe('typed.map');
+  });
+
   it("replaces the mask data of an earlier run handed over under the same name, in its place (WW4b2 R1 finding 4)", async () => {
     const { draft, queued } = setup();
     await loaded(draft);

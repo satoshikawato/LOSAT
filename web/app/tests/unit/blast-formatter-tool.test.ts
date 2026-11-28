@@ -193,6 +193,21 @@ describe('BlastFormatterDraft', () => {
     expect(last[1]?.directory?.map((entry) => entry.name)).toEqual(['bn.asn']);
   });
 
+  // Line WQA's D33 R2 (H2): an archive file named with a space at its start or end is named so in -archive, as the run directory
+  // holds it, in the argv checked, shown and run.
+  it('names the archive in -archive as the run directory holds it, a space at its start or end included', async () => {
+    const { draft, queued, validateTool } = setup();
+    draft.ensureLoaded();
+    await waitDescribed(draft);
+    draft.setArchiveFile(new File(['Blast4-archive ::= {}'], 'r.asn '));
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    expect(validateTool.mock.calls.at(-1)![0]).toEqual(['blast_formatter', '-archive', 'r.asn ', '-outfmt', '8']);
+    expect(draft.previewArgv()).toEqual(['blast_formatter', '-archive', 'r.asn ', '-outfmt', '8']);
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued.at(-1)!.argv).toEqual(['blast_formatter', '-archive', 'r.asn ', '-outfmt', '8']);
+    expect(queued.at(-1)!.directory.map((entry) => entry.name)).toEqual(['r.asn ']);
+  });
+
   it('runs words that name -archive themselves from the run directory, as the CLI does', async () => {
     const { draft, queued, validateTool } = setup();
     draft.ensureLoaded();

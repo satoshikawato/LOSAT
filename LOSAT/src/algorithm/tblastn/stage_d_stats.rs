@@ -1,8 +1,7 @@
 //! TBLASTN local-subject statistical inputs before preliminary search.
 
-use crate::algorithm::tblastx::ncbi_cutoffs::{
-    cutoff_score_from_evalue, cutoff_score_sum_stats, gap_trigger_raw_score, x_drop_raw_score,
-};
+use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
+use crate::stats::cutoffs::{cutoff_score, CutoffConversion, SumStatsCutoffs};
 use crate::stats::setup::SearchSpaceOverflow;
 use crate::stats::spouge::{blast_spouge_etos, BlastGumbelBlk};
 use crate::stats::tables::KarlinParams;
@@ -322,8 +321,13 @@ pub(super) fn local_parameters_for_blocks(
                 hit_subject_length,
             )
         } else {
-            cutoff_score_from_evalue(options.expect_value, lengths[context].eff_searchsp, params)
-                .max(1)
+            cutoff_score(
+                options.expect_value,
+                params,
+                lengths[context].eff_searchsp,
+                None,
+                CutoffConversion::PROTEIN,
+            )
         };
         hit.push((max_cutoff, max_cutoff));
     }
@@ -340,15 +344,17 @@ pub(super) fn local_parameters_for_blocks(
             .sum::<usize>()
             - 1;
         let avg_qlen = (concat_qlen / query_contexts.len()) as i32;
+        // The e-value carries from one valid context to the next (`SumStatsCutoffs`).
+        let mut sum_stats = SumStatsCutoffs::new(
+            avg_qlen,
+            hit_subject_length,
+            link_params.gap_decay_rate,
+            CutoffConversion::PROTEIN,
+        );
         for (context, (&(_, valid), params)) in query_contexts.iter().zip(gapped_params).enumerate()
         {
             if valid {
-                let cutoff = cutoff_score_sum_stats(
-                    avg_qlen,
-                    hit_subject_length,
-                    link_params.gap_decay_rate,
-                    params,
-                );
+                let cutoff = sum_stats.next_valid_context(params);
                 hit[context].0 = hit[context].0.min(cutoff);
             }
         }
@@ -436,7 +442,7 @@ pub(super) fn local_parameters_for_blocks(
 /// which cites the call): the score of e-value `CUTOFF_E_TBLASTN` (1.0) with the gap decay
 /// `gap_decay_rate` in the search space (the shorter of subject and query times the subject) of
 /// NCBI's `Uint8` (the subject length is NCBI's `Uint4` argument, in nucleotides), at least the
-/// cutoff of 1 that NCBI passes in. `cutoff_score_from_evalue` is NCBI's `BlastKarlinEtoS_simple`.
+/// cutoff of 1 that NCBI passes in (`stats::cutoffs::cutoff_score`).
 fn ungapped_word_cutoff(
     query_length: usize,
     subj_length: i32,
@@ -447,12 +453,13 @@ fn ungapped_word_cutoff(
     let subj_length = u64::from(subj_length as u32);
     // C's conversion of the `Uint8` product to the `Int8` argument (two's complement).
     let searchsp = (subj_length.min(query_length as u64)).wrapping_mul(subj_length) as i64;
-    let e = if gap_decay_rate > 0.0 && gap_decay_rate < 1.0 {
-        CUTOFF_E_TBLASTN * crate::stats::sum_statistics::gap_decay_divisor(gap_decay_rate, 1)
-    } else {
-        CUTOFF_E_TBLASTN
-    };
-    cutoff_score_from_evalue(e, searchsp, kbp).max(1)
+    cutoff_score(
+        CUTOFF_E_TBLASTN,
+        kbp,
+        searchsp,
+        Some(gap_decay_rate),
+        CutoffConversion::PROTEIN,
+    )
 }
 
 #[cfg(test)]

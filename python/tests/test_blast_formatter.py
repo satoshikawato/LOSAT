@@ -99,7 +99,7 @@ def test_roundtrip_from_pylosat_search_outfmt_11(losat_bin):
         ("-rid", ""),
         ("-rid", "ABCDEFGH01R"),
         ("-rid", "ABCDEFGH01R", "-archive", "in/bn.asn"),
-        ("-archive", "in/bn.asn", "-outfmt", "6"),
+        ("-archive", "in/bn.asn", "-outfmt", "5"),
         ("-archive", "in/empty.asn", "-outfmt", "8"),
         ("-archive", "in/cut2.asn", "-outfmt", "8"),
         ("-archive", "in/no_such_file.asn", "-outfmt", "8"),

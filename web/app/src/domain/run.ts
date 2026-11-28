@@ -101,7 +101,10 @@ export interface DatabaseFilterFileSnapshot {
 
 /** Metadata of a local BLAST database (`-db` or BLASTN `-filtering_db`) fixed when a run is queued. */
 export interface DatabaseSnapshot {
-  /** Exact relative path passed to `-db` or `-filtering_db` (e.g. `mydb/nt_small`). */
+  /**
+   * The database's relative path as it is called (e.g. `mydb/nt_small`, `my dbs/nt`): the argv names it as the command line
+   * reads it (`seqdbNameList`: `"my dbs/nt"`), and a reader takes the name from here, not from the argv.
+   */
   readonly name: string;
   readonly folder?: string;
   readonly kind: SequenceKind;
@@ -281,6 +284,8 @@ export interface ToolRunSnapshot {
   readonly argv: readonly string[];
   readonly directory: readonly ToolDirectoryEntry[];
   readonly prints?: PrintedKind;
+  /** A masking run's `-outfmt` default from `-xmlhelp`, kept for the run's mask data (`domain/tool-argv.ts` `maskDataName`). */
+  readonly outfmtDefault?: string;
   readonly queuedAt: number;
   readonly group?: RunGroup;
 }

@@ -85,8 +85,8 @@ def _literal(text: bytes, i: int, expected: bytes) -> int | None:
 
 
 def _tag(text: bytes, i: int) -> tuple[int, bytes] | None:
-    """The end of `(<class>::<code>) ` at `i` and of the function after it (`<function>() - `),
-    with `<code>` (`wording::tag`)."""
+    """The end of `(<class>::<code>) ` at `i` and of the function after it (`<function>() - `, or
+    `<module>:: - ` without a function), with `<code>` (`wording::tag`)."""
     j = _literal(text, i, b"(")
     if j is None:
         return None

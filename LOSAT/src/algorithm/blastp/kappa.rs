@@ -1749,7 +1749,11 @@ where
         redo_align_params.score_divisor,
         redo_align_params.do_link_hsps,
     );
-    if best_evalue > expect_value || hsp_list.hsps.is_empty() {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687
+    // The best alignment is kept when its e-value is at most `-evalue`: an `-evalue` that is NaN
+    // (NCBI's option check lets it pass) keeps none here, though the reaping above keeps them all.
+    let significant = best_evalue <= expect_value;
+    if !significant || hsp_list.hsps.is_empty() {
         return Ok(BlastpPostprocessResult {
             hsp_list: None,
             best_score,

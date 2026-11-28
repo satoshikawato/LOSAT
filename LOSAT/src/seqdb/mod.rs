@@ -3333,6 +3333,15 @@ impl SeqDb {
         self.volumes[at.volume].nucleotide_sequence_len_i32(at.vol_oid, self.location_oid(&at))
     }
 
+    /// NCBI's `x_GetSequence` of the nucleotide at `at`: `None` for its null pointer, else the
+    /// signed 32-bit length (`Volume::nucleotide_sequence_or_null_i32`).
+    pub fn nucleotide_sequence_or_null_i32_at(
+        &self,
+        at: SeqLocation,
+    ) -> Result<Option<i32>, SeqDbError> {
+        self.volumes[at.volume].nucleotide_sequence_or_null_i32(at.vol_oid, self.location_oid(&at))
+    }
+
     /// [`SeqDb::nucleotide_iupac_range_at`] of nucleotide `ordinal`.
     #[cfg(test)]
     pub fn nucleotide_iupac_range(

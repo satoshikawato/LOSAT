@@ -617,11 +617,14 @@ impl<'a> Volume<'a, '_> {
         // Sequence: `GetSequence`, which maps the sequence's bytes. For a protein with
         // non-ascending offsets, NCBI's `x_GetSequence` returns a negative length (which passes
         // the zero-length and null-pointer check here and then fails `GetBioseq` with no bioseq).
+        // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:500-505
+        // A length of 0 or the null pointer (a nucleotide at offset 0 of a sequence file of no
+        // bytes) is empty.
         let length = match self.sequence_len(at) {
             Ok(length) => length,
             Err(error) => return Failure::of("sequence", &error).map(Some),
         };
-        if length == 0 {
+        if length.is_none_or(|length| length == 0) {
             return Ok(Some(Failure::own("sequence", "sequence data is empty")));
         }
         // Bioseq: `GetBioseq`, none for no definition line or no letters (`length < 1`).
@@ -664,12 +667,20 @@ impl<'a> Volume<'a, '_> {
         Ok(true)
     }
 
-    /// The length returned by `GetSequence` for the sequence at `at`: signed 32-bit for protein
-    /// (`x_GetSequence`) and nucleotide (`x_GetSequence` / `GetSeqLengthExact`).
-    fn sequence_len(&self, at: SeqLocation) -> Result<i64, SeqDbError> {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1841
+    /// `GetSequence` of the sequence at `at` (`x_GetSequence`): its signed 32-bit length, `None`
+    /// for NCBI's null pointer (`SeqDb::nucleotide_sequence_or_null_i32_at`; a protein's pointer
+    /// is never null in the 2.17.0 binary, `Volume::protein_sequence_len_i32`).
+    fn sequence_len(&self, at: SeqLocation) -> Result<Option<i64>, SeqDbError> {
         match self.db.seqtype() {
-            SeqType::Protein => self.db.protein_sequence_len_at(at).map(i64::from),
-            SeqType::Nucleotide => self.db.nucleotide_length_i32_at(at).map(i64::from),
+            SeqType::Protein => self
+                .db
+                .protein_sequence_len_at(at)
+                .map(|length| Some(i64::from(length))),
+            SeqType::Nucleotide => self
+                .db
+                .nucleotide_sequence_or_null_i32_at(at)
+                .map(|length| length.map(i64::from)),
         }
     }
 
@@ -683,9 +694,11 @@ impl<'a> Volume<'a, '_> {
         oid: u32,
         set: &DeflineSet,
     ) -> Result<Option<Failure>, Stop> {
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+        // `x_GetSequence`'s length, as `GetSequence` read it (the null pointer's -1).
         let len = match self.db.seqtype() {
-            SeqType::Protein => self.db.protein_length_i32_at(at).map(i64::from),
-            SeqType::Nucleotide => self.db.nucleotide_length_i32_at(at).map(i64::from),
+            SeqType::Protein => self.db.protein_sequence_len_at(at).map(i64::from),
+            SeqType::Nucleotide => self.db.nucleotide_sequence_len_i32_at(at).map(i64::from),
         };
         match len {
             Ok(n) if n < 1 => return Ok(Some(Failure::own("bioseq", "no bioseq"))),

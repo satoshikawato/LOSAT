@@ -29,7 +29,8 @@ pub(super) struct DbBioseq<'s> {
     kept: Option<DeflineSet>,
     /// The target's Seq-id.
     pub target: Option<ParsedSeqId>,
-    /// `GetSeqLength` of `oid`, at least 1 (NCBI makes no Bioseq of no letters).
+    /// The length that `GetBioseq` takes from `x_GetSequence` for `oid`
+    /// (`Source::sequence_length`), at least 1 (NCBI makes no Bioseq of no letters).
     pub length: u32,
 }
 

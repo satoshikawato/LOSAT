@@ -2469,7 +2469,10 @@ fn nonasc_filtering_db_repeat_search_runs_one_thread() {
 /// `-outfmt` line without `%l`, `%s` or `%h` reads neither the length nor the letters
 /// (seq_formatter.cpp:199-201, 282-313), so it is printed also for a sequence whose length or
 /// letters crash NCBI (`mv3z_dbcmd_e607_a*`, `far_dbcmd_e603_a`: an ambiguity offset of 2^28).
-/// LOSAT is byte-identical and refuses the crashes.
+/// `-range 0-` is NCBI's empty `TSeqRange` (its start stored as -1), so `x_GetSeq` reads no length
+/// (RG-D2 tail R7, review R6 finding 3): `mv3z_dbcmd_e606_s_r0` gives the error of `%s` without
+/// the length's crash, `_e606_a_r0` and `_e606_r0` (the FASTA) are those of no range, and
+/// `_e605_s_r0` writes OID 4's whole sequence. LOSAT is byte-identical and refuses the crashes.
 #[test]
 fn nonasc_blastdbcmd_empty_sequence_file_parity() {
     let root = scratch("dbcmd-empty-seq-file");
@@ -2533,6 +2536,19 @@ fn nonasc_blastdbcmd_empty_sequence_file_parity() {
         ("far_dbcmd_e603_h", &far, entry_fmt("603", "%h")),
         ("far_dbcmd_e603_f", &far, vec!["-db", "n", "-entry", "603"]),
     ];
+    for (label, entry, fmt) in [
+        ("mv3z_dbcmd_e606_s_r0", "606", Some("%s")),
+        ("mv3z_dbcmd_e606_a_r0", "606", Some("%a")),
+        ("mv3z_dbcmd_e605_s_r0", "605", Some("%s")),
+        ("mv3z_dbcmd_e606_r0", "606", None),
+    ] {
+        let mut args = vec!["-db", "n", "-entry", entry];
+        if let Some(fmt) = fmt {
+            args.extend(["-outfmt", fmt]);
+        }
+        args.extend(["-range", "0-"]);
+        rows.push((label, &mv3z, args));
+    }
     let first: [(&str, &Path, &[&str]); 9] = [
         ("mv3z_dbcmd_e606", &mv3z, &["-db", "n", "-entry", "606"]),
         (
@@ -2594,6 +2610,215 @@ fn nonasc_blastdbcmd_empty_sequence_file_parity() {
     assert_eq!(results["mv3z_dbcmd_e606_h"], (1, 0));
     assert_eq!(results["far_dbcmd_e603_l"], (1, 0));
     assert_eq!(results["p2_dbcmd_e7005"], (1, 0));
+    // `-range 0-` reads no length: NCBI's error of `%s` (not a refusal), the line of `%a`.
+    assert_eq!(results["mv3z_dbcmd_e606_s_r0"], (1, 0));
+    assert_eq!(results["mv3z_dbcmd_e606_a_r0"], (0, 1));
+    assert_eq!(results["mv3z_dbcmd_e605_s_r0"], (0, 1));
+    assert_eq!(results["mv3z_dbcmd_e606_r0"], (0, 0));
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// LOSAT's refusal where NCBI crashes after writing whole lines (each flushed by `endl`): those
+/// lines on standard output, no part of the line NCBI was writing, then the refusal.
+fn assert_tail_refusal_after_lines(label: &str, got: &(Vec<u8>, Vec<u8>, i32), ncbi_out: &[u8]) {
+    assert!(
+        ncbi_out.ends_with(b"\n"),
+        "{label}: NCBI's output ends with a line"
+    );
+    assert_eq!(text(&got.0), text(ncbi_out), "{label}: stdout");
+    assert_tail_refusal(label, &(Vec::new(), got.1.clone(), got.2));
+}
+
+/// The offsets of the arrays of a version 5 nucleotide `.nin` (a volume number before the title,
+/// the LMDB file's name after it): (number of OIDs, header offsets, sequence offsets, ambiguity
+/// offsets), each as a byte position in the file.
+fn nin_v5_layout(nin: &[u8]) -> (usize, usize, usize, usize) {
+    let be = |at: usize| u32::from_be_bytes(nin[at..at + 4].try_into().unwrap()) as usize;
+    let mut at = 12;
+    for _ in 0..3 {
+        at += 4 + be(at);
+    }
+    let count = be(at);
+    at += 4 + 8 + 4;
+    let seq = at + 4 * (count + 1);
+    (count, at, seq, seq + 4 * (count + 1))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:165-201
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:315-358
+/// blastdbcmd's `%l` reads the length (`GetSeqLength`) where NCBI's `x_Print` reaches the
+/// specifier, so only for a printed line, after `GetHdr` and the fields before it (RG-D2 tail R7,
+/// review R6 finding 1). `omn*_dbcmd_<row>`: a copy of `tests/db_search/oidmask` whose OID 2
+/// (`XM_000003.1`, `AY000003.1`) has its ambiguity offset at 2^28 in `omn.00.nin`, so its exact
+/// length crashes NCBI. The alias `omnx` (`OID_MASK_TYPE 1`) erases every line of OID 2, which
+/// `-entry all` still visits: with `%a` it prints the other OIDs (`all_oal`, `all_al`), its
+/// accessions give no line (`a3_oal`, `x3_oal`), and without a field of the lines (`all_ol`) its
+/// line is printed and crashes after the lines before it, as in `omn` (`omn_dbcmd_all_ol`). In
+/// `omn`, an unknown specifier before `%l` throws with the line written up to it (`x3_ozl`); one
+/// after it, or `%a` before it, comes after the crash (`x3_olz`, `x3_oal`).
+/// `nullhdr_dbcmd_<row>`: `mv3db/v0` under the alias `n` whose OID 2 (GI 603) has its ambiguity
+/// offset at 2^28 and a header of no bytes (NCBI's null set): `%o %a %l` skips it, `%o %l` crashes
+/// there. LOSAT is byte-identical and refuses the crashes.
+#[test]
+fn nonasc_blastdbcmd_length_read_by_printed_line_parity() {
+    let root = scratch("dbcmd-length-printed-line");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let copy_files = |from: &Path, name: &str| -> PathBuf {
+        let dir = root.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_file() {
+                fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
+            }
+        }
+        dir
+    };
+    let oidmask = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/oidmask");
+    let omn = copy_files(&oidmask, "run_omn");
+    let mut nin = fs::read(omn.join("omn.00.nin")).unwrap();
+    let (count, _, _, amb) = nin_v5_layout(&nin);
+    assert_eq!(count, 4);
+    nin[amb + 8..amb + 12].copy_from_slice(&0x1000_0000u32.to_be_bytes());
+    fs::write(omn.join("omn.00.nin"), nin).unwrap();
+    let nullhdr = copy_files(&fixtures().join("nonasc_xprog/mv3db"), "run_nullhdr");
+    fs::write(nullhdr.join("n.nal"), "TITLE n\nDBLIST v0\n").unwrap();
+    poke_amb_offset(&nullhdr.join("v0.nin"), 2, true);
+    let mut nin = fs::read(nullhdr.join("v0.nin")).unwrap();
+    let (_, hdr, _, _) = nin_v4_layout(&nin);
+    let next: [u8; 4] = nin[hdr + 12..hdr + 16].try_into().unwrap();
+    nin[hdr + 8..hdr + 12].copy_from_slice(&next);
+    fs::write(nullhdr.join("v0.nin"), nin).unwrap();
+    let all = |db: &'static str, fmt: &'static str| -> Vec<&'static str> {
+        vec![
+            "-db", db, "-dbtype", "nucl", "-entry", "all", "-outfmt", fmt,
+        ]
+    };
+    let entry = |db: &'static str, id: &'static str, fmt: &'static str| -> Vec<&'static str> {
+        vec!["-db", db, "-dbtype", "nucl", "-entry", id, "-outfmt", fmt]
+    };
+    let rows: Vec<(&str, &Path, Vec<&str>)> = vec![
+        ("omnx_dbcmd_all_oal", &omn, all("omnx", "%o %a %l")),
+        ("omnx_dbcmd_all_al", &omn, all("omnx", "%a %l")),
+        (
+            "omnx_dbcmd_a3_oal",
+            &omn,
+            entry("omnx", "AY000003.1", "%o %a %l"),
+        ),
+        (
+            "omnx_dbcmd_x3_oal",
+            &omn,
+            entry("omnx", "XM_000003.1", "%o %a %l"),
+        ),
+        ("omnx_dbcmd_all_ol", &omn, all("omnx", "%o %l")),
+        ("omn_dbcmd_all_ol", &omn, all("omn", "%o %l")),
+        (
+            "omn_dbcmd_x3_ozl",
+            &omn,
+            entry("omn", "XM_000003.1", "%o %z %l"),
+        ),
+        (
+            "omn_dbcmd_x3_olz",
+            &omn,
+            entry("omn", "XM_000003.1", "%o %l %z"),
+        ),
+        (
+            "omn_dbcmd_x3_oal",
+            &omn,
+            entry("omn", "XM_000003.1", "%o %a %l"),
+        ),
+        (
+            "nullhdr_dbcmd_all_oal",
+            &nullhdr,
+            vec!["-db", "n", "-entry", "all", "-outfmt", "%o %a %l"],
+        ),
+        (
+            "nullhdr_dbcmd_all_ol",
+            &nullhdr,
+            vec!["-db", "n", "-entry", "all", "-outfmt", "%o %l"],
+        ),
+    ];
+    let mut results = BTreeMap::new();
+    for (label, dir, args) in rows {
+        let ncbi = frozen_tail_row(label);
+        let got = run_losat_sub(&root, dir, "blastdbcmd", &args);
+        if ncbi.0 == -11 && !ncbi.1.is_empty() {
+            assert_tail_refusal_after_lines(label, &got, &ncbi.1);
+        } else {
+            assert_tail_row(label, &got, (ncbi.0, &ncbi.1, &ncbi.2));
+        }
+        results.insert(label, losat_status(&got));
+    }
+    // The OID whose length crashes NCBI prints no line where no line reaches `%l`.
+    assert_eq!(results["omnx_dbcmd_all_oal"], (0, 5));
+    assert_eq!(results["omnx_dbcmd_all_al"], (0, 5));
+    assert_eq!(results["omnx_dbcmd_a3_oal"], (0, 0));
+    assert_eq!(results["omnx_dbcmd_x3_oal"], (0, 0));
+    assert_eq!(results["nullhdr_dbcmd_all_oal"], (0, 4));
+    // The unknown specifier before `%l`: NCBI's error after `2 `, with no length read.
+    assert_eq!(results["omn_dbcmd_x3_ozl"], (1, 0));
+    // The crashes are refused after the lines before them.
+    assert_eq!(results["omnx_dbcmd_all_ol"], (1, 1));
+    assert_eq!(results["omn_dbcmd_all_ol"], (1, 2));
+    assert_eq!(results["nullhdr_dbcmd_all_ol"], (1, 2));
+    assert_eq!(results["omn_dbcmd_x3_olz"], (1, 0));
+    assert_eq!(results["omn_dbcmd_x3_oal"], (1, 0));
+    let _ = fs::remove_dir_all(&root);
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:500-505
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841
+/// blastdbcheck's `GetSequence` on a sequence file of no bytes (RG-D2 tail R7, review R6 finding
+/// 2): `x_GetSequence` gives the null pointer at offset 0, which NCBI's test reports as `sequence
+/// data is empty` (exit status 1), where `GetSeqLengthExact` would crash. `v1z_check*`: `v1` of
+/// `mv3db` alone, `v1.nsq` of no bytes and every sequence offset 0; `v1z1_check*`: only the first
+/// offset 0 (the volume's test stops at OID 0, before OID 1 at offset 28 would crash). `_full`:
+/// `-full -verbosity 3`, else the default sample. No taxonomy database is found, so the
+/// metadata test fails too (`Taxid 9606 not found`). LOSAT is byte-identical.
+#[test]
+fn nonasc_blastdbcheck_empty_sequence_file_parity() {
+    let root = scratch("check-empty-seq-file");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let base = fixtures().join("nonasc_xprog/mv3db");
+    for (name, every) in [("v1z", true), ("v1z1", false)] {
+        let dir = root.join(format!("run_{name}"));
+        fs::create_dir_all(&dir).unwrap();
+        for entry in fs::read_dir(&base).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name().to_string_lossy().starts_with("v1.") {
+                fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
+            }
+        }
+        fs::write(dir.join("v1.nsq"), b"").unwrap();
+        let mut nin = fs::read(dir.join("v1.nin")).unwrap();
+        let (count, _, seq, _) = nin_v4_layout(&nin);
+        let poked = if every { count } else { 1 };
+        for oid in 0..poked {
+            nin[seq + 4 * oid..seq + 4 * oid + 4].copy_from_slice(&0u32.to_be_bytes());
+        }
+        fs::write(dir.join("v1.nin"), nin).unwrap();
+        for (suffix, args) in [
+            (
+                "_full",
+                &["-db", "v1", "-dbtype", "nucl", "-full", "-verbosity", "3"][..],
+            ),
+            ("", &["-db", "v1", "-dbtype", "nucl"][..]),
+        ] {
+            let label = format!("{name}_check{suffix}");
+            let ncbi = frozen_tail_row(&label);
+            let got = run_losat_sub(&root, &dir, "blastdbcheck", args);
+            assert_tail_row(&label, &got, (ncbi.0, &ncbi.1, &ncbi.2));
+            assert_eq!(got.2, 1, "{label}");
+            if suffix == "_full" {
+                let empty = "Stride:     sequence failed; oid=0: sequence data is empty";
+                assert!(text(&got.0).contains(empty), "{label}: {:?}", text(&got.0));
+            }
+        }
+    }
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -2664,8 +2889,9 @@ fn nonasc_approx_length_info_parity() {
 
 /// NCBI BLAST+ 2.17.0 dustmasker and windowmasker of `-infmt blastdb` over an OID whose
 /// `GetBioseq` gives no Bioseq (frozen rows `mv3z_wm_counts`, `mv3z_dust_iv`, `wmnull_*` of
-/// `nonasc_xprog`): OID 606 at offset 0 of a sequence file of no bytes (its `x_GetSequence` length
-/// is -1), or a sequence whose ambiguity offset is its start in a sequence file with bytes.
+/// `nonasc_xprog`): OID 5 (GI 606) at offset 0 of a sequence file of no bytes (its
+/// `x_GetSequence` length is -1), or a sequence whose ambiguity offset is its start in a sequence
+/// file with bytes.
 /// `CMaskBDBReader` gives an empty Seq-entry for it: windowmasker's counts (`-mk_counts`, also
 /// after `-checkdup true`) end there with `Seq_entry.seq`, dustmasker with `Seq_entry.set`, after
 /// the output of the earlier sequences.

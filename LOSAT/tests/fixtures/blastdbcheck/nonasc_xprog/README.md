@@ -140,7 +140,10 @@ standard error and exit status (a signal as `-N`) are the row's `.out`, `.err` a
   `_e606_h` gives the same error, `_e607_h` and `_e607_s` crash; `far_dbcmd_e603_<row>`: `mv3db/v0`
   under the alias `n` (`DBLIST v0`) whose OID 2 (GI 603) has its ambiguity offset at 2^28, so
   its last byte lies far past `v0.nsq`: `a` (`%a`) prints the accession, `l`, `s`, `h` and `f`
-  (the FASTA) crash. LOSAT matches every row (the crashes refused).
+  (the FASTA) crash. LOSAT matches every row (the crashes refused). `-range 0-` (RG-D2 tail R7,
+  review R6 finding 3) is NCBI's empty range, so no length is read: `mv3z_dbcmd_e606_s_r0` (`%s`)
+  gives the same error, `_e606_a_r0` (`%a`) the accession, `_e606_r0` (the FASTA) no output, and
+  `_e605_s_r0` OID 4's whole sequence.
 - `ap_<row>_info{,_t}` (RG-D2 tail R5 finding 6, frozen 2026-11-28 for review R5 finding 2; test
   `nonasc_approx_length_info_parity`): NCBI `blastdbcmd -db g -info` (`_t`: and `-exact_length`)
   of the alias `g` (`DBLIST v0`, `GILIST g.gil`, `ap_g.gil` made by NCBI `blastdb_aliastool
@@ -152,8 +155,26 @@ standard error and exit status (a signal as `-N`) are the row's `.out`, `.err` a
 - `mv3z_wm_counts`, `mv3z_dust_iv`, `wmnull_*` (RG-D2 tail R6, test
   `nonasc_masker_entry_without_bioseq_parity`): NCBI BLAST+ 2.17.0 windowmasker `-mk_counts`
   (also with `-checkdup true`) and dustmasker `-outfmt interval` of `-infmt blastdb` over an OID
-  whose `GetBioseq` gives no Bioseq: OID 606 of `run_mv3z` (above), or OID 0 or 2 of `mv3db/v0`
+  whose `GetBioseq` gives no Bioseq: OID 5 (GI 606) of `run_mv3z` (above), or OID 0 or 2 of `mv3db/v0`
   (alias `n`, `DBLIST v0`) whose ambiguity offset is its sequence's start (`wmnull_k0`,
   `wmnull_k2`). `CMaskBDBReader` gives an empty Seq-entry for it, and the readers' request for
   its Bioseq (windowmasker's `CInputBioseq_CI`: `Seq_entry.seq`) or Bioseq set (dustmasker:
   `Seq_entry.set`) ends the run with exit status 3, after the output of the earlier sequences.
+- `omn*_dbcmd_*`, `nullhdr_dbcmd_*` (RG-D2 tail R7, review R6 finding 1, frozen 2026-11-28; test
+  `nonasc_blastdbcmd_length_read_by_printed_line_parity`): NCBI `blastdbcmd -dbtype nucl` over a copy
+  of `tests/db_search/oidmask` whose OID 2 (`XM_000003.1`, `AY000003.1`) has its ambiguity offset at
+  2^28 in `omn.00.nin` (its exact length crashes NCBI), and `blastdbcmd -db n` over `mv3db/v0` (alias
+  `n`, `DBLIST v0`) whose OID 2 (GI 603) has that offset and a header of no bytes (`hdr[2] = hdr[3]`).
+  `%l` is read only where `x_Print` reaches it for a printed line: `omnx` (every line of OID 2
+  erased) `-entry all` with `"%o %a %l"` or `"%a %l"` prints 5 lines (exit status 0), the entries
+  `AY000003.1` and `XM_000003.1` print nothing, `"%o %l"` crashes after the lines before OID 2
+  (`omnx_dbcmd_all_ol`, `omn_dbcmd_all_ol`, `nullhdr_dbcmd_all_ol`); `omn -entry XM_000003.1` with
+  `"%o %z %l"` writes `2 ` and NCBI's error of the unknown specifier, with `"%o %l %z"` or
+  `"%o %a %l"` it crashes; `nullhdr_dbcmd_all_oal` prints 4 lines (the null set skipped).
+- `v1z_check*`, `v1z1_check*` (RG-D2 tail R7, review R6 finding 2, frozen 2026-11-28; test
+  `nonasc_blastdbcheck_empty_sequence_file_parity`): NCBI `blastdbcheck -db v1 -dbtype nucl` (`_full`:
+  and `-full -verbosity 3`) over `mv3db`'s `v1` alone with `v1.nsq` of no bytes and every sequence
+  offset 0 (`v1z`) or the first only (`v1z1`): `GetSequence` (`x_GetSequence`) gives the null pointer
+  at OID 0, reported as `sequence failed; oid=0: sequence data is empty` (the volume's test stops
+  there), with the metadata test's `Taxid 9606 not found` (no taxonomy database); exit status 1. The
+  run directory is `<RUN>`.

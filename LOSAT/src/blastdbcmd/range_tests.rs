@@ -16,10 +16,15 @@ fn the_grammar_is_ncbi_s() {
             to: u32::MAX
         })
     );
-    // `0-`: the start is stored as the largest TSeqPos; the clipped range is empty.
+    // `0-`: the start is stored as the largest TSeqPos; the range is empty (NCBI's `Empty`), so
+    // `x_GetSeq` reads no length, and the clipped range is empty.
     let zero_open = range("0-").unwrap();
     assert_eq!(zero_open.from, u32::MAX);
+    assert!(zero_open.is_empty());
     assert_eq!(zero_open.clipped(137), None);
+    assert!(!range("1-").unwrap().is_empty());
+    assert!(!range("10-30").unwrap().is_empty());
+    assert!(NO_RANGE.is_empty());
     assert_eq!(
         range("0-10").unwrap_err(),
         "Failed to parse sequence range (range elements cannot be less than or equal to 0)"

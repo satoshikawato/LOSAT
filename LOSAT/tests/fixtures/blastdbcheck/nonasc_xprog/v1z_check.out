@@ -1,0 +1,13 @@
+Writing messages to <stdout> at verbosity (Summary)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+By default, testing 200 randomly sampled OIDs.
+
+Testing 1 volume(s).
+  <RUN>/run_v1z/v1 / MetaData:   [ERROR] caught exception.
+ Result=FAILURE. 1 errors reported in 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 2

@@ -1935,17 +1935,34 @@ impl Volume {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841
     /// Signed 32-bit length of nucleotide `oid` (volume-relative; `named` its OID in the
     /// database) as NCBI's `x_GetSequence` gives it to the readers of the letters (`GetBioseq`,
-    /// `x_GetAmbigSeq`): a file of no bytes is NCBI's null pointer, a length of -1 at offset 0
-    /// and the crash at any other (`x_empty_file_nucleotide`); otherwise
-    /// [`Self::x_nucleotide_length_from_last_byte`].
+    /// `x_GetAmbigSeq`): [`Self::nucleotide_sequence_or_null_i32`], with NCBI's null pointer
+    /// as its length of -1.
     pub fn nucleotide_sequence_len_i32(&self, oid: u32, named: u32) -> Result<i32, SeqDbError> {
+        Ok(self
+            .nucleotide_sequence_or_null_i32(oid, named)?
+            .unwrap_or(-1))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841
+    /// NCBI's `x_GetSequence` of nucleotide `oid` (volume-relative; `named` its OID in the
+    /// database): `None` where it returns the null pointer (with a length of -1), which a file of
+    /// no bytes maps at offset 0, the crash at any other offset of that file
+    /// (`x_empty_file_nucleotide`); otherwise the signed 32-bit length
+    /// ([`Self::x_nucleotide_length_from_last_byte`]). The one owner of the reader, for the callers
+    /// that test the pointer itself (`GetSequence` in blastdbcheck).
+    pub fn nucleotide_sequence_or_null_i32(
+        &self,
+        oid: u32,
+        named: u32,
+    ) -> Result<Option<i32>, SeqDbError> {
         let (start, amb_start) = self.x_nucleotide_start_and_ambiguity(oid)?;
         let file = self.seq_file()?;
         if file.is_empty() {
             self.x_empty_file_nucleotide(start)?;
-            return Ok(-1);
+            return Ok(None);
         }
         self.x_nucleotide_length_from_last_byte(file, start, amb_start, named)
+            .map(Some)
     }
 
     /// The sequence offset and the ambiguity offset of nucleotide `oid` (volume-relative).
@@ -1983,8 +2000,8 @@ impl Volume {
                 ),
             });
         }
-        // NCBI's `GetSeqLengthExact` / `x_GetSequence` (`seqdbvol.cpp:312-323,1817-1838`) does
-        // pointer arithmetic on `start` and dereferences only `file[start + whole_bytes]`.
+        // NCBI's `GetSeqLengthExact` and `x_GetSequence` do pointer arithmetic on `start` and
+        // dereference only `file[start + whole_bytes]`.
         let last = file.with_range(last_pos as u64, last_pos as u64 + 1, |b| b[0])?;
         if whole_bytes >= 0 {
             let length = (whole_bytes as u64) * 4 + u64::from(last & 3);

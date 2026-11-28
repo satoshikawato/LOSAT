@@ -3,8 +3,8 @@
 //! `CBlastDB_SeqFormatter::x_GetSeq`).
 
 /// `TSeqRange` as blastdbcmd holds it: 0-based, both ends inclusive, `to` unset (`u32::MAX`)
-/// for an open end; `from` above `to` is the empty range (`TSeqRange::GetEmpty()`, the range
-/// of no `-range`).
+/// for an open end; `from` above `to` (`TSeqRange::GetEmpty()`, the range of no `-range`) and
+/// the open range from `u32::MAX` (`0-`) are empty ([`SeqRange::is_empty`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct SeqRange {
     pub from: u32,
@@ -12,13 +12,14 @@ pub(super) struct SeqRange {
 }
 
 impl SeqRange {
-    /// `TSeqRange::Empty()`: `from` above `to`. The empty range has `from == to`
-    /// (`GetEmpty` is `[max, max)` with the open end as `max - 1`: `TSeqRange::GetToOpen`
-    /// unset); NCBI's `NotEmpty` is what `-range` tests, and the range of no `-range` holds
-    /// `to` below `from` there (`CRange<TSeqPos>::GetEmpty()` has `from` at the maximum, `to` one
-    /// below).
+    // NCBI reference (598d8ae6): c++/include/util/range.hpp:148-155
+    /// `TSeqRange::Empty()`: the open end at or below the start. A closed range is empty where
+    /// `from` is above `to` (the range of no `-range`, `CRange<TSeqPos>::GetEmpty()`, has `from`
+    /// at the maximum and `to` one below). An open one (`to` unset, NCBI's open end at the
+    /// maximum) is empty only from the maximum: `0-`, whose start `ParseSequenceRangeOpenEnd`
+    /// stores as -1, so `x_GetSeq` reads no length for it.
     pub fn is_empty(self) -> bool {
-        self.from > self.to
+        self.from > self.to || self.from == u32::MAX
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:285-291

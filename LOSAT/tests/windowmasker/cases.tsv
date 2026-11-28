@@ -423,3 +423,6 @@ t_wm_tx_ids_taxdb_sl	BLASTDB=../seqdb/taxdb/t5 -ustat ../winmask/counts/dm2L_u9.
 db_oidmask_ntall	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in ../db_search/oidmask/ntall
 db_oidmask_ntall_fasta	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in ../db_search/oidmask/ntall -outfmt fasta
 db_oidmask_omnx	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in ../db_search/oidmask/omnx
+# -mk_counts over the same alias files (RG-D2 tail R7, review R6 finding 4): NCBI's counts reader (CInputBioseq_CI) asks every Seq-entry for its Bioseq, and the empty one of the first sequence left without a line ends the run (exit status 3, Seq_entry.seq) after the genome-length line. NCBI BLAST+ 2.17.0 (local oracle), 2026-11-28, ad-RG-D2-7.
+db_oidmask_omnx_mk_counts	-mk_counts -infmt blastdb -in ../db_search/oidmask/omnx
+db_oidmask_ntall_mk_counts	-mk_counts -infmt blastdb -in ../db_search/oidmask/ntall

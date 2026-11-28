@@ -185,7 +185,8 @@ pub(super) fn post_after_output(diag: &mut Diag, line: &[u8]) -> Result<(), Fail
 
 impl GenomeInput<'_, '_, '_> {
     /// One read of every file: `f` gets each sequence that has letters and that the id lists
-    /// keep, with the output and the diagnostics. The posts of the read are kept.
+    /// keep, with the output and the diagnostics; a database record without a Bioseq ends the
+    /// read with NCBI's `Seq_entry.seq` exception. The posts of the read are kept.
     pub(super) fn each_record(&mut self, f: &mut RecordFn<'_>) -> Result<(), Failure> {
         self.diag.start_record();
         let result = self.read_files(f);

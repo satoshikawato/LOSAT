@@ -105,8 +105,10 @@ impl FormatSpec {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:315-358
     /// Writes the lines of sequence `oid` to `out`: one per definition line (the one of
     /// `target` alone with `-target_only`), or one line when no specifier reads them. The
-    /// line NCBI has written up to an unknown specifier is written before its error. The texts
-    /// of a line's taxonomy lookups (`GetTaxInfo` of `%L %B %K %S %C %N`) are posted before it.
+    /// line NCBI has written up to an unknown specifier, or up to a `%l` whose length read throws,
+    /// is written before its error; a refusal of the length read writes no part of its line. The
+    /// texts of a line's taxonomy lookups (`GetTaxInfo` of `%L %B %K %S %C %N`) are posted
+    /// before it.
     pub fn write(
         &self,
         source: &Source,
@@ -128,22 +130,32 @@ impl FormatSpec {
             .iter()
             .map(|&algo| Ok(masks_string(&source.masks(oid, algo)?)))
             .collect::<Result<Vec<String>, Stop>>()?;
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:199-201
-        // Only `%l` reads the length (`GetSeqLength`); a line without it never does.
-        let length = if self.types.contains(&b'l') {
-            source.length(oid)?
-        } else {
-            0
-        };
+        // The length of `%l`, read by the first printed line that reaches the specifier
+        // (`x_print`).
+        let mut length = None;
         let mut line = self.line.borrow_mut();
         let mut print =
             |defline: Option<&BlastDefline>, line: &mut CutBuffer| -> Result<(), Stop> {
                 let mut texts = Vec::new();
                 let printed = self.x_print(
-                    source, oid, length, defline, &seq, &hash, &masks, line, &mut texts,
+                    source,
+                    oid,
+                    &mut length,
+                    defline,
+                    &seq,
+                    &hash,
+                    &masks,
+                    line,
+                    &mut texts,
                 );
                 for text in &texts {
                     out.post(text)?;
+                }
+                // A refusal stands for NCBI's crash (a `%l` length read), which loses the line
+                // it was writing.
+                if let Err(Stop::Refused(_)) = printed {
+                    *line = CutBuffer::default();
+                    return printed;
                 }
                 // `out` writes to a `files::OutputFile` (`retrieve::process`): a failed write does
                 // nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
@@ -213,13 +225,14 @@ impl FormatSpec {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:165-262
     /// One line into `line`, the texts of its taxonomy lookups into `texts`; `Err` after the
-    /// part NCBI writes before an unknown specifier. Each separator and each field is one of
-    /// NCBI's insertions; the line ends with the last separator and `endl`.
+    /// part NCBI writes before an unknown specifier or a length read that fails. Each separator
+    /// and each field is one of NCBI's insertions; the line ends with the last separator and
+    /// `endl`. `length` keeps the length of `oid` once a line has read it.
     fn x_print(
         &self,
         source: &Source,
         oid: u32,
-        length: i64,
+        length: &mut Option<i64>,
         defline: Option<&BlastDefline>,
         seq: &[u8],
         hash: &str,
@@ -239,7 +252,17 @@ impl FormatSpec {
                 b's' => line.extend_from_slice(seq),
                 b'o' => push_decimal(line, i64::from(oid)),
                 b'h' => line.extend_from_slice(hash.as_bytes()),
-                b'l' => push_decimal(line, length),
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:199-201
+                // `GetSeqLength` at the specifier, so only a printed line reads it, after `GetHdr`
+                // and the fields before it (each of NCBI's lines reads it again, with the same
+                // result).
+                b'l' => {
+                    let length = match *length {
+                        Some(length) => length,
+                        None => *length.insert(source.length(oid)?),
+                    };
+                    push_decimal(line, length);
+                }
                 b'a' | b'i' | b'g' | b't' | b'T' | b'P' | b'e' | b'n' => {
                     if let Some(defline) = defline {
                         fields.write_defline_field(kind, defline, line);

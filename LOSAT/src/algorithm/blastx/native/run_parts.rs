@@ -284,7 +284,8 @@ impl ArchiveBatch<'_> {
                             },
                             usize::MAX,
                             (crate::report::db_subject::FormatThrow::Unread, None),
-                            false,
+                            // The archive writes no table.
+                            crate::algorithm::common::database::HolderTables::default(),
                         )
                         .map_err(reported_error)?,
                     };

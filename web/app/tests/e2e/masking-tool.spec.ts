@@ -9,13 +9,15 @@
 // its download is the native command line's bytes (the argv shown beside Run LOSAT, in a folder of the same files);
 // "Use as -mask_data in makeblastdb" then hands that file to the makeblastdb tab, whose database files are the native
 // makeblastdb's just before or just after the browser's run, but the seconds of their dates (support/makeblastdb-native.ts). One more run writes maskinfo_xml, which
-// makeblastdb does not read: its bytes are the native's and no hand-over is offered. Without the engine the same steps
-// run on the FakeEngine's outputs and nothing is compared.
+// makeblastdb does not read: its bytes are the native's and no hand-over is offered. In Chromium, one run's -out goes
+// through a picked folder (`-out sub/../m.asnb`): the run makes m.asnb, as the command line does, and the app reads it as
+// the -out file (WW4e). Without the engine the same steps run on the FakeEngine's outputs and nothing is compared.
 //
 // LOSAT_E2E_SCREENSHOT_DIR=<dir> saves the Masking tab empty, filled and finished, and the makeblastdb tab with the
 // handed-over mask data and its finished run (handover, handover-finished), at 1280 and 390 px in the light and the dark
 // colour scheme (<browser>-ms-<state>-<width>-<scheme>.png), and in Chromium each tool's finished run and hand-over.
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { expect, type Page } from '@playwright/test';
@@ -24,7 +26,7 @@ import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE } from './support/native';
 import { asNative, downloadAll, maskedFiles, nativeRun } from './support/makeblastdb-native';
-import { openSearch, waitStatus } from './support/search';
+import { described, openSearch, waitStatus } from './support/search';
 
 const SCREENSHOT_DIR = process.env['LOSAT_E2E_SCREENSHOT_DIR'];
 const FAKE_MARKER = 'FAKE ENGINE OUTPUT';
@@ -48,13 +50,13 @@ function trackNet(page: Page): string[] {
 async function openMasking(page: Page): Promise<void> {
   await page.getByTestId('tab-masking').click();
   await expect(page.getByTestId('tab-masking')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('ms-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await described(page, 'ms-panel', 'ready');
 }
 
 async function chooseTool(page: Page, tool: 'dustmasker' | 'segmasker' | 'convert2blastmask'): Promise<void> {
   await page.getByTestId(`ms-tool-${tool}`).check();
   await expect(page.getByTestId('ms-panel')).toHaveAttribute('data-tool', tool);
-  await expect(page.getByTestId('ms-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await described(page, 'ms-panel', 'ready');
 }
 
 async function validIs(page: Page, state: 'ok' | 'invalid'): Promise<void> {
@@ -319,6 +321,10 @@ interface MaskingCase {
   readonly extension: string;
   /** A `-out` file name; undefined writes to the standard output. */
   readonly out: string | undefined;
+  /** The name of the `-out` file that the run makes, where it is not `out` as typed (`sub/../m.asnb` makes `m.asnb`). */
+  readonly file?: string;
+  /** A folder of the run's directory, picked with "Open folder…" (Chromium only), with one file in it. */
+  readonly folder?: string;
   readonly dbtype: 'nucl' | 'prot';
   /** makeblastdb reads mask data in ASN.1 only (it refuses maskinfo_xml): the run is compared, and no hand-over is offered. */
   readonly noMaskData?: true;
@@ -337,6 +343,11 @@ const MASKING_CASES: readonly MaskingCase[] = [
     command: 'losat convert2blastmask -in input.fa -parse_seqids -masking_algorithm dust -masking_options window=64' },
   { tool: 'dustmasker', input: 'basic.fa', open: false, outfmt: 'maskinfo_xml', extension: 'xml', out: undefined, dbtype: 'nucl', noMaskData: true,
     label: 'dustmasker-xml', command: 'losat dustmasker -in input.fa -outfmt maskinfo_xml -parse_seqids' },
+  // An -out through a folder of the run's directory: the run makes m.asnb (as the command line does), which the app reads
+  // as the -out file (its label and its hand-over; WW4e).
+  { tool: 'dustmasker', input: 'basic.fa', open: false, outfmt: 'maskinfo_asn1_bin', extension: 'asnb', out: 'sub/../m.asnb', file: 'm.asnb',
+    folder: 'sub', dbtype: 'nucl', label: 'dustmasker-folder',
+    command: 'losat dustmasker -in input.fa -out sub/../m.asnb -outfmt maskinfo_asn1_bin -parse_seqids' },
 ];
 
 test.describe('Masking tab: each tool run, its output, and its mask data in makeblastdb', () => {
@@ -344,10 +355,14 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
   test.use({ timezoneId: ZONE });
 
   for (const [index, c] of MASKING_CASES.entries()) {
-    test(`${c.label ?? c.tool}: the download is the native command line's bytes, and makeblastdb's database made with its mask data too`, async ({ page }) => {
+    test(`${c.label ?? c.tool}: the download is the native command line's bytes, and makeblastdb's database made with its mask data too`, async ({ page, browserName }) => {
+      test.skip(c.folder !== undefined && browserName !== 'chromium', 'Only Chromium lets the test choose a folder (webkitdirectory).');
+      // The FakeEngine names a file by the -out typed; the engine by the file's path (`sub/../m.asnb` is `m.asnb`).
+      test.skip(c.file !== undefined && !BUILD_HAS_ENGINE, "The FakeEngine does not name a run's files as the engine does.");
       const real = BUILD_HAS_ENGINE && NATIVE !== undefined;
       const external = trackNet(page);
       const fasta = readFileSync(join(LOSAT, 'tests', c.tool, 'in', c.input));
+      const folderFile = c.folder === undefined ? undefined : ([`${c.folder}/x.txt`, Buffer.from('x\n')] as const);
       const first = index === 0;
       await openSearch(page);
       await openMasking(page);
@@ -373,8 +388,20 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
         await page.getByTestId('ms-param-outfmt').selectOption(c.outfmt);
       }
       if (c.out !== undefined) await page.getByTestId('ms-out').fill(c.out);
+      if (folderFile !== undefined) {
+        const work = mkdtempSync(join(tmpdir(), 'losat-ww4e-e2e-'));
+        try {
+          mkdirSync(join(work, c.folder!));
+          writeFileSync(join(work, folderFile[0]), folderFile[1]);
+          await page.getByTestId('ms-run-folder-input').setInputFiles(join(work, c.folder!));
+        } finally {
+          rmSync(work, { recursive: true, force: true });
+        }
+        await expect(page.getByTestId('ms-run-files-list')).toContainText(folderFile[0]);
+      }
       await validIs(page, 'ok');
       const inName = c.open ? c.input : 'input.fa';
+      const outFile = c.file ?? c.out;
       await expect(page.getByTestId('ms-command')).toHaveText(c.command);
       await assertLayout(page, MOBILE_VIEWPORT);
       await assertLayout(page, DESKTOP_VIEWPORT);
@@ -387,7 +414,9 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
       );
       // Each case's options are in a set that NCBI froze (the typed -masking_options text by its class, WW4c).
       if (real) await expect(page.getByTestId('verification-badge')).toHaveText('Supported');
-      await page.getByTestId(c.out === undefined ? 'tool-tab-stdout' : 'tool-tab-file-0').click();
+      // The -out file's tab: the option and the name of the file that the run made.
+      if (outFile !== undefined) await expect(page.getByTestId('tool-tab-file-0')).toHaveText(`-out ${outFile}`);
+      await page.getByTestId(outFile === undefined ? 'tool-tab-stdout' : 'tool-tab-file-0').click();
       const argv = ((await page.getByTestId('result-command').textContent()) ?? '').trim().split(/\s+/);
       expect(argv.slice(0, 2), 'the command beside the run').toEqual(['losat', c.tool]);
       const made = await downloadActive(page);
@@ -398,10 +427,10 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 'run view overflow at 390px').toBeLessThanOrEqual(1);
       await page.setViewportSize(DESKTOP_VIEWPORT);
       if (real) {
-        const native = nativeRun(argv.slice(1), new Map([[inName, fasta]]), ZONE);
+        const native = nativeRun(argv.slice(1), new Map([[inName, fasta], ...(folderFile === undefined ? [] : [folderFile])]), ZONE);
         expect(native.status, `native ${argv.slice(1).join(' ')}: ${native.stderr.toString()}`).toBe(0);
-        expect(made.equals(c.out === undefined ? native.stdout : native.files.get(c.out)!), `${c.tool} ${argv.slice(1).join(' ')}: the downloaded bytes`).toBe(true);
-        if (c.out !== undefined) expect([...native.files.keys()], 'the files the native run made').toEqual([c.out]);
+        expect(made.equals(outFile === undefined ? native.stdout : native.files.get(outFile)!), `${c.tool} ${argv.slice(1).join(' ')}: the downloaded bytes`).toBe(true);
+        if (outFile !== undefined) expect([...native.files.keys()], 'the files the native run made').toEqual([outFile]);
       }
 
       if (c.noMaskData) {
@@ -413,7 +442,7 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
       }
 
       // Use as -mask_data in makeblastdb: the file goes to -mask_data, the same FASTA is -in, and the database is built.
-      const maskName = c.out ?? `${c.tool}-run1.${c.extension}`;
+      const maskName = outFile ?? `${c.tool}-run1.${c.extension}`;
       await page.getByTestId('tool-use-as-mask-data').click();
       await expect(page.getByTestId('mk-panel')).toBeVisible();
       await expect(page.getByTestId('mk-param-mask_data')).toHaveValue(maskName);

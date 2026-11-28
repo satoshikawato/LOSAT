@@ -1,0 +1,104 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: pP; zpApP
+           3 sequences; 420 total letters
+
+
+
+Query= qp2 protein query two
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+XP_000050.1 p4 first line                                             139     7e-48
+NP_100001.1 p4 second line                                            139     7e-48
+NP_100000.1 ptitle 0 of the protein set                               14.6    1.7  
+
+
+>XP_000050.1 p4 first line
+ NP_100001.1 p4 second line
+Length=140
+
+ Score = 139 bits (351),  Expect = 7e-48, Method: Compositional matrix adjust.
+ Identities = 66/70 (94%), Positives = 66/70 (94%), Gaps = 0/70 (0%)
+
+Query  81   NGLSTTRPWGRQQEGHWGRPAYCWYRIRDYMHNAIESEHVLPKKKGPDESRMAQKMDDNP  140
+            NGLSTTRPWGRQQEGHWGRPAYCW RIRDYMHNAIESEHVL KKKGPDESR AQKMD NP
+Sbjct  61   NGLSTTRPWGRQQEGHWGRPAYCWDRIRDYMHNAIESEHVLEKKKGPDESREAQKMDRNP  120
+
+Query  141  LYSVRFGKAI  150
+            LYSVRFGKAI
+Sbjct  121  LYSVRFGKAI  130
+
+
+>XP_000050.1 p4 first line
+ NP_100001.1 p4 second line
+Length=140
+
+ Score = 139 bits (351),  Expect = 7e-48, Method: Compositional matrix adjust.
+ Identities = 66/70 (94%), Positives = 66/70 (94%), Gaps = 0/70 (0%)
+
+Query  81   NGLSTTRPWGRQQEGHWGRPAYCWYRIRDYMHNAIESEHVLPKKKGPDESRMAQKMDDNP  140
+            NGLSTTRPWGRQQEGHWGRPAYCW RIRDYMHNAIESEHVL KKKGPDESR AQKMD NP
+Sbjct  61   NGLSTTRPWGRQQEGHWGRPAYCWDRIRDYMHNAIESEHVLEKKKGPDESREAQKMDRNP  120
+
+Query  141  LYSVRFGKAI  150
+            LYSVRFGKAI
+Sbjct  121  LYSVRFGKAI  130
+
+
+>NP_100000.1 ptitle 0 of the protein set
+Length=140
+
+ Score = 14.6 bits (26),  Expect = 1.7, Method: Compositional matrix adjust.
+ Identities = 5/15 (33%), Positives = 7/15 (47%), Gaps = 0/15 (0%)
+
+Query  1   LSCSNIGNSPQFGYN  15
+           + C     +P F YN
+Sbjct  59  IGCFQSTQNPYFMYN  73
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.135    0.435    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 44577
+
+
+  Database: pP
+    Posted date:  Nov 14, 2026  10:37 PM
+  Number of letters in database: 280
+  Number of sequences in database:  2
+
+  Database: zpApP
+    Posted date:  Nov 24, 2026  4:47 PM
+  Number of letters in database: 140
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

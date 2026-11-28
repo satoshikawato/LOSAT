@@ -1,0 +1,74 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: pP; zzgpP
+           4 sequences; 560 total letters
+
+
+
+Query= qp2 protein query two
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_100001.1 ptitle 1 of the protein set                               139     9e-48
+NP_100001.1 ptitle 1 of the protein set                               139     9e-48
+NP_100000.1 ptitle 0 of the protein set                               14.6    2.3  
+
+
+
+Query_1      1    LSCSNIGNSPQFGYNKCLVRRYRLLSVAVRILTQRTLYGWIVTRAERKGYRQGEEVVMQQ  60
+NP_100000.1  59   IG.FQSTQN.Y.M..                                               73
+NP_100000.1  59   IG.FQSTQN.Y.M..                                               73
+
+Query_1      61   VDQKRCQKDNTMTNPCMEPRNGLSTTRPWGRQQEGHWGRPAYCWYRIRDYMHNAIESEHV  120
+NP_100001.1  61                       ........................D...............  100
+NP_100001.1  61                       ........................D...............  100
+
+Query_1      121  LPKKKGPDESRMAQKMDDNPLYSVRFGKAI  150
+NP_100001.1  101  .E.........E.....R............  130
+NP_100001.1  101  .E.........E.....R............  130
+
+
+Lambda      K        H        a         alpha
+   0.321    0.135    0.435    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 57500
+
+
+  Database: pP
+    Posted date:  Nov 14, 2026  10:37 PM
+  Number of letters in database: 280
+  Number of sequences in database:  2
+
+  Database: zzgpP
+    Posted date:  Nov 23, 2026  8:09 AM
+  Number of letters in database: 280
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

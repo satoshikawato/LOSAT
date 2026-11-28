@@ -16,7 +16,8 @@ use crate::seqdb::{id_list, seqidlist, SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::utils::os_bytes::{os_str_bytes, path_bytes, path_from_bytes, path_of_bytes};
 use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR, USER_MANUAL_FOOTER};
 use crate::writedb::alias_file::{self, AliasError, FilterType, CLOCK_ERROR};
-use crate::writedb::binary_list::gi_list_bytes;
+use crate::writedb::binary_list::write_gi_list;
+use crate::writedb::ofstream::OfStream;
 use crate::writedb::seqidlist_writer::{seqidlist_bytes, SeqidlistError};
 use crate::writedb::time::LocalTime;
 
@@ -146,21 +147,23 @@ fn gi_ids(bytes: &[u8]) -> Vec<i64> {
         .collect()
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:343-382
 // The output (`CNcbiOfstream` in binary mode, whose failure is not reported) is made, or emptied,
 // after the input is opened and before it is read: an output that is the input leaves nothing to
-// read.
-/// `ConvertGiFile` of the opened input `input` into the binary GI list file `output`; the number
-/// of GIs.
-fn convert_gi_list(mut input: impl Read, output: &Path) -> usize {
-    let mut file = std::fs::File::create(output).ok();
+// read. `ConvertGiFile` writes the list into the stream and then posts its count, and the stream
+// closes at the end of the caller's scope, after the post: the post that meets a closed pipe ends
+// NCBI's process with the bytes its file buffer still holds unwritten (an empty file for a list
+// of fewer than 8,192 bytes; NCBI BLAST+ 2.17.0, line RG item T8c round 3).
+/// `ConvertGiFile` of the opened input `input` into the binary GI list file `output`: the stream,
+/// still open (its caller posts the count, then drops it), and the number of GIs.
+fn convert_gi_list(mut input: impl Read, output: &Path) -> (OfStream, usize) {
+    let mut file = OfStream::create(output);
     let mut bytes = Vec::new();
     // NCBI's loop ends at the stream's failure: the bytes read before it are the input.
     let _ = input.read_to_end(&mut bytes);
     let ids = gi_ids(&bytes);
-    if let Some(file) = &mut file {
-        let _ = file.write_all(&gi_list_bytes(&ids));
-    }
-    ids.len()
+    write_gi_list(&ids, &mut |word| file.write(word));
+    (file, ids.len())
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:634-651
@@ -174,8 +177,13 @@ fn convert_gi_file(args: &Args, stdin: &mut Cin<'_>, diag: &mut Diag) -> Result<
         Some(name) => PathBuf::from(name),
         None => path_from_bytes([&*os_str_bytes(gi_file_in), b".bgl"].concat()),
     };
-    let count = convert_gi_list(input, &gi_file_out);
+    let (file, count) = convert_gi_list(input, &gi_file_out);
     diag.post(&format!("Converted {count} GIs into binary GI file"));
+    drop(file);
+    // A post that met a closed pipe ended NCBI's process there (`Diag::closed`).
+    if diag.closed() {
+        return Ok(());
+    }
     if !gi_file_out.is_file() {
         return Err(Failure::SeqDb(
             [&*path_bytes(&gi_file_out), b" not written"].concat(),
@@ -303,7 +311,7 @@ fn create_alias_file(
             // An input that does not open reads as empty (`ifstream`).
             let input = files::open_text_file(path_of_bytes(&ifname).as_os_str())
                 .unwrap_or_else(|_| Box::new(std::io::empty()));
-            let count = convert_gi_list(input, &path_of_bytes(&gilist));
+            let (file, count) = convert_gi_list(input, &path_of_bytes(&gilist));
             let converted = format!("Converted {count} GIs from ");
             let line = [
                 converted.as_bytes(),
@@ -312,6 +320,10 @@ fn create_alias_file(
                 gilist.as_slice(),
             ];
             diag.post_bytes(&line.concat());
+            drop(file);
+            if diag.closed() {
+                return Ok(());
+            }
         }
     }
     if let Some(dblist) = args.bytes("dblist") {
@@ -344,6 +356,9 @@ fn create_alias_file(
     };
     if let Some(line) = created {
         diag.post_bytes(&line);
+        if diag.closed() {
+            return Ok(());
+        }
     }
     if has(args, "vdblist") || has(args, "vdblist_file") {
         let (extension, append) = match (seqtype, has(args, "dblist") || has(args, "dblist_file")) {

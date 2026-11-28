@@ -96,7 +96,13 @@
   1.38 2026-11-27 (exception 10: makeprofiledb's database files at a closed pipe as NCBI's, and
   LMDB's lock files left where NCBI's ended process leaves them, makeblastdb's too, line RG item
   T8c; 2026-11-28, the tools' posts to a `-logfile` that is a closed pipe end them there, line RG
-  item T8d; Owner-delegated, the same standing instruction)
+  item T8d; Owner-delegated, the same standing instruction; blastdb_aliastool and blastdbcheck named in
+  exception 10 with their posts to a closed `-logfile` ending them there, the Owner's answer of
+  2026-11-28 13:36 JST, verbatim 「Q-T8d-W=A」; the tools' messages to a standard error that is a
+  closed pipe end them there too, line RG item T8c round 3, applying the Owner's rule of
+  Q-T8d-W=A, Owner-delegated, the same standing instruction; blastdbcmd writes each `%d` or `%b`
+  object at its end as NCBI's, its cost above dev accepted by the Owner, 2026-11-28 13:36 JST,
+  verbatim 「Q-T8d-F=A」)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -318,7 +324,8 @@ BLAST+.
    on ws, 2026-11-27, the same bytes and exit status in each). A closed pipe is exception 10.
 10. **Closed pipe in blastdbcmd's, dustmasker's, segmasker's, windowmasker's and convert2blastmask's output,
    in makeblastdb's log, in makembindex's `-show_filters`, `-stat` and index outputs that are named pipes, in makeprofiledb's log and
-   standard output, in rpsbproc's report and standard error, and in every program's version and help**
+   standard output, in rpsbproc's report and standard error, in the messages of those tools and of blastdb_aliastool
+   and blastdbcheck to a `-logfile` or a standard error that is the closed pipe, and in every program's version and help**
    (version 1.13, 2026-11-13, Owner-delegated; line RG, item K1, RG DECISIONS K1-8; version 1.14
    the same day, item K1b, K1b-3 and K1b-5; version 1.16 the same day, segmasker, item K2, K2-5;
    version 1.18 the same day, convert2blastmask, item K3; version 1.24, 2026-11-21, windowmasker,
@@ -326,7 +333,9 @@ BLAST+.
    RG item KD; version 1.32, 2026-11-25, makembindex, Owner-delegated, line RG item KD; version 1.35, 2026-11-26,
    makeprofiledb, Owner-delegated, line RG item KD; version 1.37, 2026-11-27, rpsbproc, Owner-delegated, line RG
    item T8b; version 1.38, 2026-11-27, the files makeprofiledb leaves, Owner-delegated, line RG item T8c, and
-   2026-11-28, the tools' posts to a closed `-logfile`, Owner-delegated, line RG item T8d). A write of NCBI's blastdbcmd 2.17.0,
+   2026-11-28, the tools' posts to a closed `-logfile`, Owner-delegated, line RG item T8d; blastdb_aliastool and
+   blastdbcheck, the Owner's answer Q-T8d-W=A of 2026-11-28; the tools' messages to a closed standard error,
+   Owner-delegated, line RG item T8c round 3). A write of NCBI's blastdbcmd 2.17.0,
    dustmasker 1.0.0, segmasker 1.0.0, windowmasker 1.0.0 or convert2blastmask 2.17.0 to a pipe whose
    reader has closed ends the program by SIGPIPE outside Windows (exit status 141 from the
    shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT
@@ -501,7 +510,11 @@ BLAST+.
    records before an id that is not found, for one). Those flushes also put blastdbcmd's output
    and the posts of a `-logfile` on the same pipe in NCBI's order. Before, LOSAT dropped the post
    and ran on to its end and exit status (1, 2, 3 or 255 by the case, the output written in
-   full), and wrote a `%d` or `%b` object only when its buffer filled. An argument error keeps its usage and exit
+   full), and wrote a `%d` or `%b` object only when its buffer filled; a write for each object costs
+   time above dev's on small objects (`-entry all -outfmt %d` of 25,000 sequences to a pipe: 25,000
+   writes as NCBI's, 0.11 s where dev took 0.06 s and NCBI 0.13 s), which the Owner accepted on
+   2026-11-28 13:36 JST, verbatim 「Q-T8d-F=A」 (line RG's question Q-T8d-F, option A: keep a write
+   for each object, NCBI's flush points). An argument error keeps its usage and exit
    status 1 (version 1.19), whether the reader or `Run` throws it (makeprofiledb's `-in` that
    cannot be opened, blastdbcmd's `Command line argument error` of an `-out` it cannot open;
    `ncbi_app::Diag::argument_error`). windowmasker with `-infmt seqids` registers NCBI's GenBank loader
@@ -509,10 +522,44 @@ BLAST+.
    there on (`connect/ncbi_socket.c:866-873`): its error post and its output fail as on a full
    disk, and the run ends with exit status 1 as NCBI's does (a `maskinfo_*` object on the closed
    standard output is a failed write of the serial stream, which LOSAT refuses, as above); before,
-   LOSAT ended that run with exit status 0 where the object met the closed pipe. blastdb_aliastool
-   and blastdbcheck, which this exception does not name, drop such a post and run on (NCBI's are
-   ended by SIGPIPE too; Owner question Q-T8d-W), and blast_formatter's `-logfile` is Owner
-   question Q-T8b-N2.
+   LOSAT ended that run with exit status 0 where the object met the closed pipe.
+   The same holds for blastdb_aliastool and blastdbcheck (the Owner, 2026-11-28 13:36 JST,
+   verbatim 「Q-T8d-W=A」, line RG's question Q-T8d-W, option A: name them in this exception, stop
+   at the post to a `-logfile` that is a closed pipe with exit status 0 and write no file after
+   it; line RG item T8c round 3). NCBI's are ended by SIGPIPE at their first post in each of the
+   268 runs of blastdb_aliastool and the 4 of blastdbcheck above. blastdb_aliastool's conversion of
+   a GI list (`-gi_file_in`, and the `-gilist` of an alias that is text) writes the binary list
+   through NCBI's file stream, one write for each of NCBI's words (`writedb::binary_list::write_gi_list`,
+   `writedb::ofstream::OfStream`), and posts before the stream closes, so the post that ends the
+   run leaves the list file as NCBI's ended process leaves it (empty for a list under 8,192
+   bytes) and no alias file after it (`blastdb_aliastool::work::convert_gi_list`); an alias file
+   written before its post stays. blastdbcheck ends at the post (`blastdbcheck::volume::Stop::Closed`).
+   Before, LOSAT dropped the post and ran on to its end, exit status and files (1, 2 or 255 by
+   the case). blast_formatter's `-logfile` and standard error are exception 5 (Q-T8b-N2=A).
+   Since version 1.38 the same holds for the messages of those tools (blastdbcmd, dustmasker,
+   segmasker, windowmasker, convert2blastmask, makembindex, makeprofiledb, blastdb_aliastool and
+   blastdbcheck) to a standard error whose reader has closed it, without `-logfile` (line RG item
+   T8c round 3; Owner-delegated, the same standing instruction: the Owner's rule of Q-T8d-W=A
+   applied to the same posts where they go to the standard error, one rule for the class; the
+   option rejected is to run on and lose the messages, as before). NCBI's diagnostics handler
+   writes each post to `cerr` at once (`corelib/ncbidiag.cpp:6695-6696`), and so do the
+   exception reports of segmasker and convert2blastmask (`cerr << e.what()`,
+   `app/segmasker/segmasker.cpp:245-246`, `app/convert2blastmask/convert2blastmask.cpp:229-230`)
+   and makembindex's progress (`creating ...`, `algo/blast/dbindex/makeindex/mkindex_app.cpp:360-367`),
+   so the first such write that meets the closed pipe ends NCBI by SIGPIPE: 1,244 of 1,249 runs
+   (NCBI BLAST+ 2.17.0, the local official release, 2026-11-28: the 1,236 cases above and 13 of
+   blastdbcheck's fixtures whose NCBI run writes to the standard error, each with a standard
+   error whose reader closed it before the start and no `-logfile`; the others are windowmasker
+   with `-infmt seqids`, whose GenBank loader ignores SIGPIPE as above, blastdbcheck that writes
+   nothing there, and blastdbcmd's `-outfmt "%m11 %m99"`, which reports nothing). That write can
+   be the usage report's message of a malformed `.ncbirc`, which NCBI writes before it reads the
+   arguments (`algo/blast/api/blast_usage_report.cpp:208-210`), or the first progress line of
+   makembindex, before its index file is made. LOSAT ends at that write with exit status 0 and no
+   message (`ncbi_app::Diag::write_stderr`, `ApplicationStart::write_usage_report`): the output
+   written before it stays and nothing after it is written or made (makembindex no index, where
+   before it wrote the whole index). An argument error keeps its usage and exit status 1
+   (version 1.19, `ncbi_app::Diag::refuse`). Before, LOSAT lost the messages and ran on to its
+   end and exit status. The search programs and blast_formatter are not changed (exception 5).
    Functions: `ncbi_app::files::OutputFile` (one stream of `-out` for each program, the searches'
    `report::ostream::ReportStream` without an exception mask; `ends_like_sigpipe`), `ncbi_app::Diag`
    (the tie before a text), `report::run_files::OpenFiles::finish_streams` (the end of the
@@ -534,7 +581,10 @@ BLAST+.
    `rpsbproc::Report`, `rpsbproc::write_stderr_bytes` and `rpsbproc::closed_end` for rpsbproc;
    `ncbi_app::Diag::write_log_file`, `Diag::write_log_setup`, `ApplicationStart::config_load` and
    `windowmasker::work::start_genbank_loader` (`OutputFile::ignore_sigpipe`) for the posts to
-   `-logfile`.
+   `-logfile`; `ncbi_app::Diag::write_stderr`, `ApplicationStart::write_usage_report` (`report_met_closed_pipe`),
+   `blastdb_aliastool::work::convert_gi_list`, `writedb::binary_list::write_gi_list`,
+   `blastdbcheck::volume::Stop::Closed`, `dbindex::factory::make_index` and `makembindex::work` for the posts and
+   messages of blastdb_aliastool, blastdbcheck and the standard error.
    Tests: `tests/tool_logfile_closed_pipe.rs`;
    `tests/makeblastdb_closed_pipe.rs` (`a_closed_pipe_at_the_first_line_makes_no_file`,
    `an_old_database_of_the_name_is_left_as_it_was`, `logfile_builds_with_the_pipe_closed`,

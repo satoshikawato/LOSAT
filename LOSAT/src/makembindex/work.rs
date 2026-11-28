@@ -145,6 +145,11 @@ fn make_volumes(
         let name = volume_name(base, vol_num);
         vol_num += 1;
         diag.cerr(&[b"creating ".as_slice(), &name, b"..."].concat());
+        // A text that met a closed pipe of the standard error or of `-logfile` ended NCBI's
+        // process there (`Diag::closed`): before the volume's file is made.
+        if diag.closed() {
+            return Err(Failure::ClosedPipe);
+        }
         let diag_cell = RefCell::new(&mut *diag);
         let made = make_index(
             input,
@@ -152,8 +157,16 @@ fn make_volumes(
             start,
             &mut stop,
             options,
-            &mut |line| diag_cell.borrow_mut().post_bytes(line),
-            &mut |text| diag_cell.borrow_mut().cerr(text),
+            &mut |line| {
+                let mut diag = diag_cell.borrow_mut();
+                diag.post_bytes(line);
+                !diag.closed()
+            },
+            &mut |text| {
+                let mut diag = diag_cell.borrow_mut();
+                diag.cerr(text);
+                !diag.closed()
+            },
         );
         match made {
             Ok(()) => {}
@@ -171,12 +184,19 @@ fn make_volumes(
             Err(Stop::ClosedPipe) => return Err(Failure::ClosedPipe),
         }
         num_seq = num_seq.wrapping_add(stop.wrapping_sub(start));
-        if start == stop {
+        let empty = start == stop;
+        if empty {
             diag.cerr(b"removed (empty)\n");
+        } else {
+            num_vol += 1;
+            diag.cerr(b"done\n");
+        }
+        if diag.closed() {
+            return Err(Failure::ClosedPipe);
+        }
+        if empty {
             return Ok((num_seq, num_vol));
         }
-        num_vol += 1;
-        diag.cerr(b"done\n");
     }
 }
 
@@ -230,6 +250,10 @@ fn run_index<'a>(
         .boolean("old_style_index")
         .expect("-old_style_index has a default");
     let options = index_options(args, diag);
+    // A warning that met a closed pipe ended NCBI's process there (`Diag::closed`).
+    if diag.closed() {
+        return Err(Failure::ClosedPipe);
+    }
     let iformat = args
         .value("iformat")
         .unwrap_or(if old_style { "fasta" } else { "blastdb" });
@@ -300,6 +324,9 @@ fn new_style(
 ) -> Result<i32, Failure> {
     if args.os_value("output").is_some() {
         warning(diag, "option 'output' is ignored for new style indices");
+        if diag.closed() {
+            return Err(Failure::ClosedPipe);
+        }
     }
     let db_vols = BlastDbStream::open(input, Filter::None, database, false)?.volume_paths(input)?;
     let mask = args.bytes("db_mask");

@@ -52,12 +52,13 @@ pub(crate) struct Tool {
     /// program's `Init` that LOSAT does in its `Run` (makeprofiledb's parameters and files), or
     /// nothing (`None`: exit status 0).
     pub(crate) dry_run: Option<Body>,
-    /// Whether a post to the file of `-logfile` that meets a pipe whose reader has closed it ends
-    /// the run there with exit status 0, where SIGPIPE ends NCBI's process
-    /// (`Diag::write_log_file`): the programs that PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception
-    /// 10 names. Otherwise the failed write is dropped and the run goes on (blastdb_aliastool,
-    /// blastdbcheck and blast_formatter, which it does not name).
-    pub(crate) closed_log_ends_run: bool,
+    /// Whether a text that meets a pipe whose reader has closed it, a post to the file of
+    /// `-logfile` (`Diag::write_log_file`) or a write to the standard error itself (`Diag::cerr`,
+    /// a post to `cerr`), ends the run there with exit status 0, where SIGPIPE ends NCBI's process
+    /// (`Diag::end_at_closed_pipe`): the programs that PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception
+    /// 10 names. Otherwise the failed write is dropped and the run goes on (blast_formatter and the
+    /// search programs' reader, whose closed standard error exception 5 names).
+    pub(crate) closed_pipe_ends_run: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
@@ -113,12 +114,13 @@ pub(crate) struct Diag<'a> {
     /// which takes no later text and whose tie no longer writes standard output first).
     failed: bool,
     /// A write of the run's output met a closed pipe where NCBI's process ended before a text, or
-    /// a text to the file of `-logfile` met one (`write_log_file`): no later text is written.
+    /// a text to the file of `-logfile` or to the standard error met one (`end_at_closed_pipe`):
+    /// no later text is written.
     closed: bool,
-    /// A text to the file of `-logfile` that meets a closed pipe ends the run (`write_log_file`):
-    /// in the programs of exception 10 (`Tool::closed_log_ends_run`) until NCBI's process ignores
-    /// SIGPIPE (`ignore_sigpipe`).
-    log_sigpipe: bool,
+    /// A text that meets a closed pipe, at the file of `-logfile` (`write_log_file`) or at the
+    /// standard error (`write_stderr`), ends the run: in the programs of exception 10
+    /// (`Tool::closed_pipe_ends_run`) until NCBI's process ignores SIGPIPE (`ignore_sigpipe`).
+    sigpipe: bool,
     /// The run reported an argument error (`report_arg_exception`, `post_arg_error`), whose exit
     /// status 1 stays where its text met a closed pipe (`argument_error`).
     argument_error: bool,
@@ -142,29 +144,39 @@ impl<'a> Diag<'a> {
             record: None,
             failed: false,
             closed: false,
-            log_sigpipe: tool.closed_log_ends_run,
+            sigpipe: tool.closed_pipe_ends_run,
             argument_error: false,
         }
     }
 }
 
-/// A standard error stream that notes a failed write (`Diag::failed`).
+/// A standard error stream that notes a failed write (`Diag::failed`) and one that met a pipe
+/// whose reader has closed it (`broken`, `files::ends_like_sigpipe`).
 struct Noted<'w> {
     stream: &'w mut dyn Write,
     failed: &'w mut bool,
+    broken: bool,
+}
+
+impl Noted<'_> {
+    fn note<T>(&mut self, result: std::io::Result<T>) -> std::io::Result<T> {
+        if let Err(error) = &result {
+            *self.failed = true;
+            self.broken |= files::ends_like_sigpipe(error);
+        }
+        result
+    }
 }
 
 impl Write for Noted<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let written = self.stream.write(buf);
-        *self.failed |= written.is_err();
-        written
+        self.note(written)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         let flushed = self.stream.flush();
-        *self.failed |= flushed.is_err();
-        flushed
+        self.note(flushed)
     }
 }
 
@@ -205,7 +217,7 @@ impl Diag<'_> {
             _ => Ok(()),
         };
         match made {
-            Err(error) if files::ends_like_sigpipe(&error) => self.closed = true,
+            Err(error) if files::ends_like_sigpipe(&error) => self.end_at_closed_pipe(),
             Err(error) if crate::report::ostream::is_report_write_failure(&error) => return false,
             _ => {}
         }
@@ -219,18 +231,22 @@ impl Diag<'_> {
     }
 
     /// Whether a write of the run's output met a closed pipe before a text (`before_text`), or a
-    /// text to the file of `-logfile` did (`write_log_file`): the run ends at once, exit status 0,
-    /// no text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+    /// text to the file of `-logfile` (`write_log_file`) or to the standard error (`write_stderr`)
+    /// did: the run ends at once, exit status 0, no text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+    /// exception 10).
     pub(crate) fn closed(&self) -> bool {
         self.closed
     }
 
-    /// The standard error stream, which notes a failed write.
-    fn noted(&mut self) -> Noted<'_> {
-        Noted {
-            stream: &mut *self.stderr,
-            failed: &mut self.failed,
-        }
+    // NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873 (cited at
+    // `report::ostream::ends_like_sigpipe`: NCBI keeps SIGPIPE's default action)
+    /// NCBI's process ends here by SIGPIPE: no later text (`closed`), and the file streams that
+    /// the command line's run drops from here on lose what their buffers hold, as NCBI's ended
+    /// process runs no destructor that would write it (`writedb::ofstream::end_at_closed_pipe`:
+    /// blastdb_aliastool's GI lists, makeprofiledb's database files).
+    fn end_at_closed_pipe(&mut self) {
+        self.closed = true;
+        crate::writedb::ofstream::end_at_closed_pipe();
     }
 
     /// Posts one diagnostic line (`LOG_POST`, `ERR_POST`).
@@ -266,15 +282,11 @@ impl Diag<'_> {
             write(text);
             return;
         }
-        if place == TextPlace::LogFile {
-            self.write_log_file(text);
-            return;
+        match place {
+            TextPlace::LogFile => self.write_log_file(text),
+            TextPlace::StandardError => self.write_stderr(text, true),
+            TextPlace::Nowhere => {}
         }
-        let mut stderr = Noted {
-            stream: &mut *self.stderr,
-            failed: &mut self.failed,
-        };
-        self.target.write_text(text, &mut stderr);
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6683-6697 (the file's handler
@@ -283,25 +295,28 @@ impl Diag<'_> {
     // `report::ostream::ends_like_sigpipe`: NCBI keeps SIGPIPE's default action)
     /// Writes `text` to the file of `-logfile`: a failed write is dropped, as NCBI's file handler
     /// drops it, except one that meets a pipe whose reader has closed it, which ends NCBI's process
-    /// by SIGPIPE at that post. In the programs of exception 10 (`Tool::closed_log_ends_run`;
-    /// `log_sigpipe` until `ignore_sigpipe`) the run ends there (`closed`: exit status 0, no later
-    /// text; the program stops where it looks at `closed` after a post), and the command line's
-    /// output streams lose what their buffers hold
+    /// by SIGPIPE at that post. In the programs of exception 10 (`Tool::closed_pipe_ends_run`;
+    /// `sigpipe` until `ignore_sigpipe`) the run ends there (`end_at_closed_pipe`: exit status 0,
+    /// no later text; the program stops where it looks at `closed` after a post), and the command
+    /// line's output streams lose what their buffers hold
     /// (`report::run_files::OpenFiles::end_streams_at_closed_pipe`): NCBI BLAST+ 2.17.0 with
     /// `-logfile /dev/stdout` or `/dev/stderr` on a pipe closed before the start, line RG item T8d
     /// (rpsbproc's own diagnostics, `rpsbproc::Diagnostics`, end so since item T8b).
     fn write_log_file(&mut self, text: &[u8]) {
         if let Err(error) = self.target.try_write_to_file(text) {
-            self.closed |= self.log_sigpipe && files::ends_like_sigpipe(&error);
+            if self.sigpipe && files::ends_like_sigpipe(&error) {
+                self.end_at_closed_pipe();
+            }
         }
     }
 
     // NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873
     /// NCBI's process ignores SIGPIPE from here on (the connection library started: windowmasker's
     /// GenBank loader, `windowmasker::work::start_genbank_loader`): a later text to the file of
-    /// `-logfile` that meets a closed pipe is dropped as any failed write, and the run goes on.
+    /// `-logfile` or to the standard error that meets a closed pipe is dropped as any failed
+    /// write, and the run goes on.
     pub(crate) fn ignore_sigpipe(&mut self) {
-        self.log_sigpipe = false;
+        self.sigpipe = false;
     }
 
     /// Whether the run reported an argument error: a closed pipe that its text met keeps the run's
@@ -334,8 +349,15 @@ impl Diag<'_> {
         if self.target.place() == TextPlace::LogFile {
             self.write_log_file(text.as_bytes());
         } else {
-            self.target
-                .write_collected(text.as_bytes(), &mut *self.stderr);
+            let mut stderr = Noted {
+                stream: &mut *self.stderr,
+                failed: &mut self.failed,
+                broken: false,
+            };
+            self.target.write_collected(text.as_bytes(), &mut stderr);
+            if stderr.broken && self.sigpipe {
+                self.end_at_closed_pipe();
+            }
         }
     }
 
@@ -350,22 +372,47 @@ impl Diag<'_> {
         self.record.take().unwrap_or_default()
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:245-246
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:229-230
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/mkindex_app.cpp:360-367
     /// Writes `text` to the standard error stream itself (an insertion into `cerr`), not to the
-    /// target of `-logfile`: segmasker's report of an exception its `Run` catches.
+    /// target of `-logfile`: segmasker's and convert2blastmask's report of an exception their `Run`
+    /// catches, makembindex's progress. A closed pipe there ends the run (`write_stderr`).
     pub(crate) fn cerr(&mut self, text: &[u8]) {
-        if !self.before_text(TextPlace::StandardError) {
-            return;
+        if self.before_text(TextPlace::StandardError) {
+            self.write_stderr(text, true);
         }
-        let mut stderr = self.noted();
-        let _ = stderr.write_all(text);
-        let _ = stderr.flush();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696 (cited at
+    // `report::ostream::Cerr`: `cerr` takes each insertion at once)
+    /// Writes `text` to the standard error stream itself (`cerr`, which writes each insertion at
+    /// once; the target `Stderr`'s `write_text`), noting a failed write (`failed`). A write that
+    /// meets a pipe whose reader has closed it ends NCBI's process by SIGPIPE: in the programs of
+    /// exception 10 (`sigpipe`) the run ends there (`end_at_closed_pipe`) where the text is
+    /// NCBI's (`ncbi`), not LOSAT's refusal, whose exit status 1 stays (NCBI BLAST+ 2.17.0 with
+    /// the standard error a pipe closed before the start and no `-logfile`, line RG item T8c
+    /// round 3).
+    fn write_stderr(&mut self, text: &[u8], ncbi: bool) {
+        let mut stderr = Noted {
+            stream: &mut *self.stderr,
+            failed: &mut self.failed,
+            broken: false,
+        };
+        DiagTarget::Stderr.write_text(text, &mut stderr);
+        if stderr.broken && ncbi && self.sigpipe {
+            self.end_at_closed_pipe();
+        }
     }
 
     /// LOSAT's refusal: a line on the standard error stream itself, not on the target of
     /// `-logfile` (NCBI has no text for it, and `-logfile /dev/null` must not hide it: as the
-    /// searches' refusals, line RG DECISIONS 32), exit status 1.
+    /// searches' refusals, line RG DECISIONS 32), exit status 1, also where the standard error is
+    /// a closed pipe (`write_stderr`).
     pub(crate) fn refuse(&mut self, reason: &str) -> i32 {
-        self.cerr(format!("Error: {reason}\n").as_bytes());
+        if self.before_text(TextPlace::StandardError) {
+            self.write_stderr(format!("Error: {reason}\n").as_bytes(), false);
+        }
         1
     }
 
@@ -460,9 +507,7 @@ impl Diag<'_> {
             text.push_str(&"=".repeat(72));
             text.push_str("\n\n");
             if self.before_text(TextPlace::StandardError) {
-                let mut stderr = self.noted();
-                let _ = stderr.write_all(text.as_bytes());
-                let _ = stderr.flush();
+                self.write_stderr(text.as_bytes(), true);
             }
         }
         let messages = error.messages.iter().map(Vec::as_slice);
@@ -638,15 +683,10 @@ pub(crate) fn run_with(
     err: &mut dyn Write,
     body: Body,
 ) -> i32 {
-    let start = ApplicationStart::of_process(tool.program, words);
-    match start.usage_report() {
-        Ok(text) => {
-            let _ = err.write_all(text.as_bytes());
-        }
-        Err(reason) => {
-            let _ = writeln!(err, "Error: {reason}");
-            return 1;
-        }
+    let mut start = ApplicationStart::of_process(tool.program, words);
+    if let Err(reason) = start.write_usage_report(err) {
+        let _ = writeln!(err, "Error: {reason}");
+        return 1;
     }
     run_app(
         tool,
@@ -671,15 +711,10 @@ pub(crate) fn run_in(
     (input, out, err): (&mut dyn Read, &mut dyn Write, &mut dyn Write),
     body: Body,
 ) -> i32 {
-    let start = ApplicationStart::of_process(tool.program, words);
-    match start.usage_report() {
-        Ok(text) => {
-            let _ = err.write_all(text.as_bytes());
-        }
-        Err(reason) => {
-            let _ = writeln!(err, "Error: {reason}");
-            return 1;
-        }
+    let mut start = ApplicationStart::of_process(tool.program, words);
+    if let Err(reason) = start.write_usage_report(err) {
+        let _ = writeln!(err, "Error: {reason}");
+        return 1;
     }
     run_app(
         tool,
@@ -826,6 +861,12 @@ fn run_app(
     files: &RunFiles,
     command_line: bool,
 ) -> i32 {
+    // The usage report's messages met a closed standard error, where SIGPIPE ended NCBI's process
+    // before it read its arguments (`ApplicationStart::write_usage_report`): exit status 0, no
+    // output (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+    if tool.closed_pipe_ends_run && start.report_met_closed_pipe() {
+        return 0;
+    }
     // The files that the run opens by name, which end when the run ends (`OpenFiles`).
     let files = OpenFiles::new(files);
     let files = if command_line {

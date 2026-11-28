@@ -2338,6 +2338,9 @@ pub struct ApplicationStart {
     /// Registry files read by this start (or looked up by its configuration load before
     /// `-logfile` is opened): `.ncbirc` / `ncbi.ini`, `<program>.ini`, or `-conffile`.
     registry_inputs: Vec<PathBuf>,
+    /// The usage report's messages met a pipe whose reader has closed it at the standard error
+    /// (`write_usage_report`), which ended NCBI's process there by SIGPIPE.
+    report_met_closed_pipe: bool,
 }
 
 /// The configuration load of an application start.
@@ -2433,6 +2436,36 @@ impl ApplicationStart {
     /// messages to write (LOSAT does not write them under it).
     pub fn usage_report(&self) -> Result<&str, &str> {
         self.usage_report.as_deref().map_err(String::as_str)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:208-210 (cited at
+    // `ApplicationStart`: the usage report's messages go to `cerr` at once)
+    /// Writes the usage report's messages (`usage_report`) to `stderr`, the process's standard
+    /// error, and notes whether the write met a pipe whose reader has closed it, where SIGPIPE
+    /// ended NCBI's process before it read its arguments (`report_met_closed_pipe`: NCBI BLAST+
+    /// 2.17.0 with a malformed `.ncbirc` and the standard error a pipe closed before the start,
+    /// exit status 141 and no output, line RG item T8c round 3). `Err` with LOSAT's refusal of
+    /// the run there, unwritten.
+    pub fn write_usage_report(&mut self, stderr: &mut dyn Write) -> Result<(), String> {
+        let text = self
+            .usage_report
+            .as_deref()
+            .map_err(|reason| reason.to_string())?;
+        if let Err(error) = stderr
+            .write_all(text.as_bytes())
+            .and_then(|()| stderr.flush())
+        {
+            self.report_met_closed_pipe = crate::report::ostream::ends_like_sigpipe(&error);
+        }
+        Ok(())
+    }
+
+    /// Whether the usage report's messages met a closed pipe (`write_usage_report`): a program of
+    /// PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10 ends there with exit status 0
+    /// (`ncbi_app::run_app`); the search programs and blast_formatter lose the messages only
+    /// (exception 5).
+    pub fn report_met_closed_pipe(&self) -> bool {
+        self.report_met_closed_pipe
     }
 
     /// NCBI's first `SetupDiag` with a `-logfile` file: the file gets the messages collected
@@ -2686,6 +2719,7 @@ fn application_start(
         config: Ok(ConfigLoad::Loaded(String::new())),
         settings: Err(String::new()),
         registry_inputs: Vec::new(),
+        report_met_closed_pipe: false,
     };
     // A start whose messages LOSAT would write under a variable that it refuses is refused
     // there.

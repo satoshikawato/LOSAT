@@ -909,7 +909,9 @@ impl From<StreamError> for Stop {
 /// the index volume `oname` of the sequences from `start` of `input`; `stop` becomes the number
 /// after its last sequence (`start` when the input had none left, and then nothing is written). A
 /// sequence that the volume cannot take whole goes back to the input. `post` gets the messages
-/// of the input's sequences; `cerr` gets the lines NCBI writes to `std::cerr`.
+/// of the input's sequences; `cerr` gets the lines NCBI writes to `std::cerr`. Each says whether
+/// the run goes on: not where the text met a closed pipe that ended NCBI's process by SIGPIPE
+/// (`Stop::ClosedPipe`, before the volume's file is made).
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1657-1760
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1797-1803
 pub(crate) fn make_index(
@@ -918,8 +920,8 @@ pub(crate) fn make_index(
     start: SeqNum,
     stop: &mut SeqNum,
     options: &Options,
-    post: &mut dyn FnMut(&[u8]),
-    cerr: &mut dyn FnMut(&[u8]),
+    post: &mut dyn FnMut(&[u8]) -> bool,
+    cerr: &mut dyn FnMut(&[u8]) -> bool,
 ) -> Result<(), Stop> {
     let mut subject_map = SubjectMap::new(options);
     let mut offset_data = OffsetData::new(options);
@@ -934,12 +936,16 @@ pub(crate) fn make_index(
     while i < *stop {
         let sd = input.next();
         for line in input.take_warnings() {
-            post(&line);
+            if !post(&line) {
+                return Err(Stop::ClosedPipe);
+            }
         }
         let sd = sd?;
         if let Some(sd) = &sd {
             for text in &sd.texts {
-                post(text.as_bytes());
+                if !post(text.as_bytes()) {
+                    return Err(Stop::ClosedPipe);
+                }
             }
         }
         let real = sd.is_some();
@@ -968,8 +974,8 @@ pub(crate) fn make_index(
             }
             if !overflow {
                 offset_data.update(&mut subject_map);
-            } else {
-                cerr(b"WARNING: logical sequence id overflow. Starting new volume.\n");
+            } else if !cerr(b"WARNING: logical sequence id overflow. Starting new volume.\n") {
+                return Err(Stop::ClosedPipe);
             }
             let total = u64::from(subject_map.total()) + 4 * u64::from(offset_data.total);
             if total > MEGABYTE * options.max_index_size || overflow {

@@ -33,7 +33,7 @@ fn tool(program: &'static str) -> Tool {
         help_full: None,
         short_description: None,
         dry_run: None,
-        closed_log_ends_run: false,
+        closed_pipe_ends_run: false,
     }
 }
 

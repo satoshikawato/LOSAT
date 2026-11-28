@@ -213,11 +213,21 @@ impl<'a> Volume<'a, '_> {
         [b"  ", self.name, b" / ", test.name(), b": "].concat()
     }
 
-    /// Posts the `ERR_POST` texts of NCBI's reader.
-    fn post(&mut self, texts: Vec<String>) {
+    /// Posts the `ERR_POST` texts of NCBI's reader; a post that met a closed pipe ended NCBI's
+    /// process there (`Diag::closed`: `Stop::Closed`).
+    fn post(&mut self, texts: Vec<String>) -> Result<(), Stop> {
         for text in texts {
             self.diag.err_post(&text);
         }
+        self.closed()
+    }
+
+    /// `Stop::Closed` where a post met a closed pipe (`Diag::closed`).
+    fn closed(&self) -> Result<(), Stop> {
+        if self.diag.closed() {
+            return Err(Stop::Closed);
+        }
+        Ok(())
     }
 
     fn test(&mut self, log: &mut Log<'_>, test: &mut Test, seen: &mut Seen) -> Result<u32, Escape> {
@@ -366,7 +376,7 @@ impl<'a> Volume<'a, '_> {
     fn metadata(&mut self, log: &mut Log<'_>, prefix: &[u8]) -> Result<u32, Stop> {
         let mut texts = Vec::new();
         let lookup = self.taxdb.lookup(9606, &mut texts);
-        self.post(texts);
+        self.post(texts)?;
         let names = match lookup.and_then(|lookup| lookup.into_names()) {
             Ok(Some(names)) => names,
             Ok(None) => {
@@ -609,6 +619,7 @@ impl<'a> Volume<'a, '_> {
         if need_posts {
             let posts = self.db.header_replaced_char_posts_at(at);
             self.diag.post_replaced(&posts);
+            self.closed()?;
         }
         let has_set = match header {
             Ok(has_set) => has_set,
@@ -703,7 +714,7 @@ impl<'a> Volume<'a, '_> {
         }
         match self.run.bioseq_texts(self.db, oid, set, None) {
             Ok(texts) => {
-                self.post(texts);
+                self.post(texts)?;
                 Ok(None)
             }
             Err(error) => Failure::of("bioseq", &error).map(Some),

@@ -90,25 +90,20 @@ fn run_main_entry() -> Result<()> {
     // `-version` and before blastdbcmd's `-logfile` is read. The start of the others (dustmasker,
     // segmasker, windowmasker, rpsbproc) writes nothing here.
     // The program's application start, made once here and given to what reads after it.
-    let start = argv
+    let mut start = argv
         .get(1)
         .and_then(|word| word.to_str())
         .filter(|word| crate::cli::ENTRY_NAMES.contains(word))
         .map(|program| {
             crate::blastinput::ncbi_environment::ApplicationStart::of_process(program, &argv[2..])
         });
+    if let Some(start) = &mut start {
+        start
+            .write_usage_report(&mut std::io::stderr())
+            .map_err(anyhow::Error::msg)?;
+    }
     // The start of the program `name`, which the entry made above when `argv` names it.
     let started = |name: &str| start.as_ref().filter(|start| start.program() == name);
-    if let Some(start) = &start {
-        match start.usage_report() {
-            Ok(text) => {
-                let mut stderr = std::io::stderr();
-                let _ = stderr.write_all(text.as_bytes());
-                let _ = stderr.flush();
-            }
-            Err(reason) => return Err(anyhow::Error::msg(reason.to_string())),
-        }
-    }
     if let Some(start) = started("blastdbcmd") {
         std::process::exit(crate::blastdbcmd::run(&argv[2..], start));
     }
@@ -150,6 +145,10 @@ fn run_main_entry() -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:704-707
     // `losat blastdb_aliastool` too.
     if let Some(start) = started("blastdb_aliastool") {
+        // The command line's process (`cli::is_command_line_run`): a post that meets a closed
+        // pipe ends it where SIGPIPE ends NCBI's, the GI list that its file stream holds unwritten
+        // (`writedb::ofstream::end_at_closed_pipe`, line RG item T8c round 3).
+        crate::cli::post_errors_in_run();
         std::process::exit(crate::blastdb_aliastool::run(&argv[2..], start));
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:1555-1559

@@ -56,7 +56,7 @@ static TOOL: Tool = Tool {
     help_full: None,
     short_description: None,
     dry_run: None,
-    closed_log_ends_run: false,
+    closed_pipe_ends_run: false,
 };
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:588-592

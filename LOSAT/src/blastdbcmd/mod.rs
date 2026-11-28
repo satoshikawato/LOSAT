@@ -55,7 +55,7 @@ static TOOL: Tool = Tool {
     help_full: None,
     short_description: None,
     dry_run: None,
-    closed_log_ends_run: true,
+    closed_pipe_ends_run: true,
 };
 
 /// Runs `blastdbcmd` with `words` (the command line after `losat blastdbcmd`), after its

@@ -1685,6 +1685,7 @@ fn start_of(program: &str, u: &str, config: ConfigLoad) -> ApplicationStart {
         config: Ok(config),
         settings: Ok(ApplicationSettings::default()),
         registry_inputs: Vec::new(),
+        report_met_closed_pipe: false,
     }
 }
 

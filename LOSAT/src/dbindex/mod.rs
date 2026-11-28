@@ -139,8 +139,8 @@ pub(crate) fn test_volume(
         0,
         &mut stop,
         options,
-        &mut |_| {},
-        &mut |_| {},
+        &mut |_| true,
+        &mut |_| true,
     );
     assert!(made.is_ok(), "the test index was not made");
     (dir, crate::utils::os_bytes::path_from_bytes(path))

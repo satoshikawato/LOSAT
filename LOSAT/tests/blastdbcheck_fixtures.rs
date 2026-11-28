@@ -171,6 +171,21 @@ fn set_mode_644(path: &Path) {
     fs::set_permissions(path, fs::Permissions::from_mode(0o644)).unwrap();
 }
 
+/// Builds `run/in`, `run/home` and `run/cases/<dir>` by the operations of `setup.tsv` for the
+/// case directory `dir`: the directory `run/cases/<dir>` (the tests of a closed pipe,
+/// `tool_logfile_closed_pipe`).
+pub(crate) fn build_case_dir(run: &Path, dir: &str) -> PathBuf {
+    let row = Row {
+        id: String::new(),
+        dir: dir.to_string(),
+        env: Vec::new(),
+        seed: String::new(),
+        args: String::new(),
+    };
+    build(run, &row);
+    run.join("cases").join(dir)
+}
+
 /// Builds `run/in`, `run/home` and `run/cases/<dir>` of `row` by the operations of `setup.tsv`.
 fn build(run: &Path, row: &Row) {
     let run_text = run.to_str().unwrap();

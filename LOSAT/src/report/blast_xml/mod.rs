@@ -14,8 +14,8 @@ pub mod subjects;
 pub mod writer;
 
 pub use records::{HitTaxonomy, QueryMask, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats};
-pub use subjects::{hit_ranges, SubjectNameCache, XmlSubjects, XmlTitles};
-pub use writer::{written_queries, BlastXmlWriter, DocumentPosts, StructuredXml};
+pub use subjects::{hit_ranges, MadeNames, SubjectNameCache, XmlSubjects, XmlTitles};
+pub use writer::{written_queries, BlastXmlWriter, BufferSizes, DocumentPosts, StructuredXml};
 
 /// An exception of NCBI's formatters raised while one query's structured report is made, which
 /// NCBI's report function catches itself (BLAST XML's `s_BlastXMLAddIteration`, the stream forms

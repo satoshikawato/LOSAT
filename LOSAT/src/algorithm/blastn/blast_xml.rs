@@ -73,10 +73,12 @@ pub(crate) struct BlastnXml<'a> {
 /// Writes the document of every query of `hit_lists` (indexed by query) through `document`
 /// (BLAST XML, or the XML2 / JSON documents) to `writer`, each query's warnings before it,
 /// with the document's header before the first query and its end after the last when
-/// `xml.epilog`.
+/// `xml.epilog`. `subjects` makes the names of `xml.subjects` (`SubjectNameCache`, with those
+/// that the run's calls before made: `SubjectNameCache::resume`).
 pub(crate) fn write_blastn_xml<W: StructuredXml>(
     xml: &BlastnXml<'_>,
     document: &mut W,
+    subjects: &mut SubjectNameCache<'_, '_>,
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut dyn crate::report::ostream::ReportWrite,
     mut warnings: Option<&mut QueryWarnings<'_>>,
@@ -130,7 +132,6 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         )
         .map(|mut text| text.pop().expect("the text of one query"))
     };
-    let mut subjects = SubjectNameCache::new(&xml.subjects);
     let texts: Vec<Result<names::QueryText>> = if per_report {
         // Each report's refusal waits for the place where NCBI makes the report (the loop below).
         (0..reports).map(text_of).collect()
@@ -145,7 +146,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
             has_hits,
             unshown,
         )?;
-        name_subjects(&mut subjects, &hit_lists[..reports.min(hit_lists.len())])?;
+        name_subjects(subjects, &hit_lists[..reports.min(hit_lists.len())])?;
         texts.into_iter().map(Ok).collect()
     };
     let mut taxdb_printer = xml.taxdb_notes.printer();
@@ -206,9 +207,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
             let refusal = match (&texts[label], &texts[q_idx]) {
                 (Err(_), _) => text_of(label).err(),
                 (_, Err(_)) => text_of(q_idx).err(),
-                _ => {
-                    name_subjects(&mut subjects, hit_lists.get(q_idx..=q_idx).unwrap_or(&[])).err()
-                }
+                _ => name_subjects(subjects, hit_lists.get(q_idx..=q_idx).unwrap_or(&[])).err(),
             };
             if let Some(refusal) = refusal {
                 let written = document.hold_refused(&mut buf, show.joins_held, refusal);

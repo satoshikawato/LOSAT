@@ -4918,10 +4918,10 @@ struct BlastnReportInputs<'a> {
     /// EXPERIMENT (LOSAT_X_RPTSTREAM): the report values of a subject set's subjects, made once
     /// for the reports of all batches (`x_rpt_stream::SubjectCache`); `None`: made here.
     subject_cache: Option<&'a x_rpt_stream::SubjectCache>,
-    /// EXPERIMENT (LOSAT_X_RPTSTREAM): the framing state of the XML2 and JSON documents (outfmt 13
-    /// to 16) that the stream's calls hand on (`x_rpt_stream::Written::xml2`); `None`: the call
-    /// writes the whole document.
-    xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
+    /// EXPERIMENT (LOSAT_X_RPTSTREAM): what the stream's calls of a BLAST XML, XML2 or JSON
+    /// document (outfmt 5, 13 to 16) hand on (`x_rpt_stream::XmlCarry`, `Written::xml`);
+    /// `None`: the call writes the whole document.
+    xml_carry: Option<&'a std::sync::Mutex<x_rpt_stream::XmlCarry>>,
     /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool that formats the outfmt 0 rows and text
     /// (`report::x_pairwise_par`); `None`: the serial writer.
     x_pairwise_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
@@ -10299,7 +10299,7 @@ fn write_reports_untimed(
         is_html: args.html,
         queries_before: written.queries,
         subject_cache: written.subjects,
-        xml2_carry: written.xml2,
+        xml_carry: written.xml,
         x_pairwise_pool: x_pool.and_then(crate::report::x_pairwise_par::pool),
         x_tab_pool: x_pool.and_then(crate::algorithm::blastn::x_tab_par::pool),
         out: args.out.as_deref(),

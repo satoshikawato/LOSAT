@@ -91,6 +91,51 @@ fn the_hit_of_a_subject_whose_lookup_throws_has_the_catch_names_and_the_exceptio
         HitNames::of(&every, 0, parsed[0].as_deref(), || subjects.names(0, "BLASTP")),
         Ok(HitNames::Names(names)) if names.lookup_throws.is_none()
     ));
+    // A database's names follow its batch's loads: none goes to a later call's cache, and none is
+    // taken from an earlier one (line RG series D, item xml-stream, recovery round rgd42b).
+    assert!(cache.into_made().0.is_empty());
+    let records = [FastaRecord::new("Subject_1".to_string(), b"one", b"ACGT")];
+    let set = XmlSubjects::Records {
+        records: &records,
+        length: &|_| 4,
+        protein: false,
+    };
+    let mut made = SubjectNameCache::new(&set);
+    made.get(0, "BLASTN").unwrap();
+    let resumed = SubjectNameCache::resume(&subjects, made.into_made());
+    assert!(resumed.names.iter().all(Option::is_none));
+}
+
+// Line RG series D, item xml-stream, recovery round rgd42b: the calls of BLASTN's report stream
+// make each name of a subject set's record once, as the one call of a run does: a later call's
+// cache starts with the names the calls before made (`resume`, `into_made`).
+#[test]
+fn a_subject_sets_names_go_to_the_cache_of_the_next_call_and_are_not_made_again() {
+    let records = [
+        FastaRecord::new("Subject_1".to_string(), b"one", b"ACGT"),
+        FastaRecord::new("Subject_2".to_string(), b"two", b"ACGT"),
+    ];
+    let subjects = XmlSubjects::Records {
+        records: &records,
+        length: &|_| 4,
+        protein: false,
+    };
+    let mut first = SubjectNameCache::new(&subjects);
+    let made: *const SubjectNames = first.get(1, "BLASTN").unwrap().names().unwrap();
+    let mut second = SubjectNameCache::resume(&subjects, first.into_made());
+    assert!(second.names[0].is_none());
+    let kept: *const SubjectNames = second.get(1, "BLASTN").unwrap().names().unwrap();
+    assert_eq!(made, kept, "the names made by the call before");
+    assert_eq!(
+        second.get(1, "BLASTN").unwrap().names().unwrap().title,
+        b"two"
+    );
+    let mut third = SubjectNameCache::resume(&subjects, second.into_made());
+    assert!(third.names[0].is_none() && third.names[1].is_some());
+    assert_eq!(
+        third.get(0, "BLASTN").unwrap().names().unwrap().title,
+        b"one"
+    );
 }
 
 // Line DBID N3: following lists of joined subjects, or of one subject, make one `Hit`; a list

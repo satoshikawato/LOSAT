@@ -308,14 +308,10 @@ impl Xml2Document<RunSideFiles> {
 /// several calls (the BLASTP block search, `x_query_blocks.rs`; BLASTN's report stream,
 /// `blastn::blast_engine::x_rpt_stream`): the count of reports written, whether the start of the
 /// document has been written, and the held report of a `-subject` run (with its refusal,
-/// `Xml2Document::hold_refused`); with `Xml2Writer::take_carry`, the sizes of the writer's buffers
-/// too.
+/// `Xml2Document::hold_refused`). (BLASTN's report stream hands the sizes of the writer's buffers
+/// on beside it: `report::blast_xml::BufferSizes`.)
 #[derive(Default)]
 pub struct Xml2Carry {
-    /// The capacities that a call's writer grew its buffers to (`Xml2Writer::take_carry`): the
-    /// next call's writer allocates them at once, so that the calls of a run grow them once, as
-    /// one call does, and hold nothing between the calls (the search of the next batch).
-    capacities: [usize; 2],
     written: u32,
     started: bool,
     pending: Vec<u8>,
@@ -327,18 +323,6 @@ pub struct Xml2Carry {
 }
 
 impl Xml2Carry {
-    /// Keeps the capacities of the writer's `buffers` for the next call's writer
-    /// (`Xml2Writer::take_carry`).
-    pub(super) fn keep_capacities(&mut self, buffers: [&Vec<u8>; 2]) {
-        self.capacities = buffers.map(Vec::capacity);
-    }
-
-    /// Empty buffers of the capacities that the call before kept (`keep_capacities`); new ones
-    /// where none was.
-    pub(super) fn take_buffers(&mut self) -> [Vec<u8>; 2] {
-        std::mem::take(&mut self.capacities).map(Vec::with_capacity)
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-367
     /// The start of a document of kind `kind` where the run stops with an error of NCBI's before any
     /// call wrote it (NCBI's exit flushes the start that `PrintProlog` wrote): appended to `out`
@@ -355,7 +339,6 @@ impl<F: SideFiles> Xml2Document<F> {
     /// takes it up with [`Xml2Document::resume`].
     pub fn take_carry(&mut self) -> Xml2Carry {
         Xml2Carry {
-            capacities: Default::default(),
             written: std::mem::take(&mut self.written),
             started: std::mem::take(&mut self.started),
             pending: std::mem::take(&mut self.pending),
@@ -512,17 +495,26 @@ impl<F: SideFiles> Xml2Document<F> {
     /// after what the making posted (the loads of its subjects): the exception is handed back
     /// after the posts (`DocumentPosts::ends_run`, by `query_warnings::write_hit_posts`).
     fn failed(&mut self, exception: crate::ncbi_exception::NcbiException) -> Result<()> {
-        self.written += 1;
         match self.kind {
             Xml2Kind::Single16 | Xml2Kind::Single15 => {
+                self.written += 1;
                 Err(crate::report::blast_xml::CaughtException(exception).into())
             }
             Xml2Kind::Files14 | Xml2Kind::Files13 => {
-                self.files.write_file(self.written, &[])?;
+                self.file_left_empty()?;
                 self.posts.ends_run = Some(Box::new(exception));
                 Ok(())
             }
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-778
+    /// A report of outfmt 13 or 14 that is not made where NCBI opens its file: it fails (`failed`)
+    /// or LOSAT refuses it (`refused`). The report is counted as written and its file is written
+    /// empty.
+    fn file_left_empty(&mut self) -> Result<()> {
+        self.written += 1;
+        self.files.write_file(self.written, &[])
     }
 
     /// Whether a report is held back until the next one arrives (a `-subject` run).
@@ -588,8 +580,7 @@ impl<F: SideFiles> Xml2Document<F> {
     /// DECISIONS D-SO-8). A file that cannot be opened fails first (`side_file_open_error`).
     fn refused(&mut self, refusal: anyhow::Error) -> anyhow::Error {
         if self.kind.is_files() {
-            self.written += 1;
-            if let Err(error) = self.files.write_file(self.written, &[]) {
+            if let Err(error) = self.file_left_empty() {
                 return error;
             }
         }

@@ -11,8 +11,8 @@ use anyhow::Result;
 use crate::report::blast_xml::hsp::{round6, MaskLetter};
 use crate::report::blast_xml::records::{HitTaxonomy, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats};
 use crate::report::blast_xml::writer::{
-    count_hsp, int_member, real_member, replaced_posts, string_member, DocumentPost, HitSink,
-    HitWrite, HspSink, HspWrite, Scratch, StructuredXml,
+    count_hsp, int_member, real_member, replaced_posts, string_member, BufferSizes, DocumentPost,
+    HitSink, HitWrite, HspSink, HspWrite, Scratch, StructuredXml,
 };
 use crate::report::record::ProgramType;
 use crate::report::serial::encoder::{Encoder, SerialError};
@@ -20,7 +20,7 @@ use crate::report::serial::json::JsonEncoder;
 use crate::report::serial::xml::XmlEncoder;
 
 use super::framing::{
-    HeldReport, MadeReport, NoSideFiles, RunSideFiles, SideFiles, Xml2Carry, Xml2Document, Xml2Kind,
+    HeldReport, MadeReport, NoSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind,
 };
 use super::records::{Xml2Run, Xml2Target};
 
@@ -808,26 +808,6 @@ impl<F: SideFiles> Xml2Writer<F> {
     pub fn document_mut(&mut self) -> &mut Xml2Document<F> {
         &mut self.document
     }
-
-    // No NCBI counterpart: LOSAT's buffers.
-    /// Takes the state of the run so far (`Xml2Document::take_carry`) with the capacities of the
-    /// writer's buffers (its report's and the caller's output buffer, `StructuredXml::keep_out`),
-    /// for the writer of a later call of the run (`resume`), which allocates them at once: the
-    /// calls of a run grow them once, as one call does, and hold nothing between the calls
-    /// (BLASTN's report stream, review M3 of line RG series D, item xml-stream).
-    pub fn take_carry(&mut self) -> Xml2Carry {
-        let mut carry = self.document.take_carry();
-        carry.keep_capacities([&self.report, &self.out]);
-        carry
-    }
-
-    /// Continues the run whose state `carry` holds (`take_carry`): the document's
-    /// (`Xml2Document::resume`), and buffers of the capacities of the writer before.
-    pub fn resume(&mut self, mut carry: Xml2Carry) {
-        let [report, out] = carry.take_buffers();
-        (self.report, self.out) = (report, out);
-        self.document.resume(carry);
-    }
 }
 
 impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
@@ -956,6 +936,16 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
     fn keep_out(&mut self, mut out: Vec<u8>) {
         out.clear();
         self.out = out;
+    }
+
+    fn buffer_sizes(&self) -> BufferSizes {
+        BufferSizes::of(&self.out, &self.scratch, self.report.capacity())
+    }
+
+    fn allocate(&mut self, sizes: BufferSizes) {
+        self.out = Vec::with_capacity(sizes.out);
+        self.report = Vec::with_capacity(sizes.report);
+        self.scratch = sizes.scratch();
     }
 
     fn start(&mut self, reported: Option<&XmlRun<'_>>, out: &mut Vec<u8>) -> Result<()> {

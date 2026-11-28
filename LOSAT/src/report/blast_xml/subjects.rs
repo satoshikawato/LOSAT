@@ -502,11 +502,39 @@ pub struct SubjectNameCache<'s, 'a> {
     names: Vec<Option<HitNames>>,
 }
 
+/// The names that a `SubjectNameCache` made (`SubjectNameCache::into_made`), for the cache of a
+/// later report call of the run over the same subjects (`SubjectNameCache::resume`).
+#[derive(Default)]
+pub struct MadeNames(Vec<Option<HitNames>>);
+
 impl<'s, 'a> SubjectNameCache<'s, 'a> {
     pub fn new(subjects: &'s XmlSubjects<'a>) -> Self {
-        let mut names = Vec::new();
+        Self::resume(subjects, MadeNames::default())
+    }
+
+    // No NCBI counterpart: LOSAT makes each name once (NCBI makes a `Hit`'s names in each report).
+    /// A cache over `subjects` that starts with the names `made` by the cache of the run's report
+    /// call before (`into_made`), where several calls write a run's reports (BLASTN's report
+    /// stream): the names of a subject set's records are made of the record alone, so the calls
+    /// make each once, as the one call of a run does, and hold no more names than it. A database's
+    /// are not taken: they follow what its batch's reports load (`HitNames::of`, `HitLoads`), and
+    /// its subjects are numbered within the batch.
+    pub fn resume(subjects: &'s XmlSubjects<'a>, made: MadeNames) -> Self {
+        let mut names = match subjects {
+            XmlSubjects::Records { .. } => made.0,
+            XmlSubjects::Database { .. } => Vec::new(),
+        };
+        debug_assert!(names.is_empty() || names.len() == subjects.count());
         names.resize_with(subjects.count(), || None);
         Self { subjects, names }
+    }
+
+    /// The names made so far, for the cache of the run's next report call (`resume`).
+    pub fn into_made(self) -> MadeNames {
+        match self.subjects {
+            XmlSubjects::Records { .. } => MadeNames(self.names),
+            XmlSubjects::Database { .. } => MadeNames::default(),
+        }
     }
 
     /// `XmlSubjects::hit_names` of subject `s_idx`, made on first use (a refusal is the error;

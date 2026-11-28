@@ -287,6 +287,66 @@ pub(crate) struct Scratch {
     tail: Vec<u8>,
 }
 
+impl Scratch {
+    /// The capacities of the buffers (`BufferSizes::scratch`).
+    fn capacities(&self) -> [usize; 7] {
+        [
+            self.masked.capacity(),
+            self.hseq.capacity(),
+            self.midline.capacity(),
+            self.columns.capacity(),
+            self.segments.capacity(),
+            self.hit.capacity(),
+            self.tail.capacity(),
+        ]
+    }
+
+    /// Empty buffers of the `capacities` of a scratch before (`capacities`).
+    fn with_capacities(capacities: [usize; 7]) -> Self {
+        let [masked, hseq, midline, columns, segments, hit, tail] = capacities;
+        Self {
+            masked: Vec::with_capacity(masked),
+            hseq: Vec::with_capacity(hseq),
+            midline: Vec::with_capacity(midline),
+            columns: Vec::with_capacity(columns),
+            segments: Vec::with_capacity(segments),
+            hit: Vec::with_capacity(hit),
+            tail: Vec::with_capacity(tail),
+        }
+    }
+}
+
+// No NCBI counterpart: LOSAT's buffers.
+/// The capacities that a report call's writer grew its buffers to: the call's output buffer
+/// (`StructuredXml::take_out`), the scratch of its queries and HSPs (`Scratch`) and the report
+/// buffer of an XML2 or JSON writer. Where several calls write a run's document (BLASTN's report
+/// stream), each call hands them to the writer of the next (`StructuredXml::buffer_sizes`,
+/// `StructuredXml::allocate`), which allocates its buffers at once: the calls grow them once, as
+/// the one call of a run does, and hold nothing between the calls (the search of the next batch).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BufferSizes {
+    pub(crate) out: usize,
+    pub(crate) report: usize,
+    scratch: [usize; 7],
+}
+
+impl BufferSizes {
+    /// The sizes of a writer's call output buffer `out`, `scratch` and report buffer `report` (0
+    /// for a writer without one).
+    pub(crate) fn of(out: &Vec<u8>, scratch: &Scratch, report: usize) -> Self {
+        Self {
+            out: out.capacity(),
+            report,
+            scratch: scratch.capacities(),
+        }
+    }
+
+    /// An empty scratch of these sizes.
+    pub(crate) fn scratch(&self) -> Scratch {
+        Scratch::with_capacities(self.scratch)
+    }
+}
+
 /// The writer of a structured BLAST report (outfmt 5, and the XML2 / JSON formats 13-16): a
 /// program's adapter hands it each query and its hits one at a time through the sinks, and
 /// finishes the document. Each program's adapter is written once over it.
@@ -376,18 +436,21 @@ pub trait StructuredXml {
         DocumentPosts::default()
     }
 
-    /// An empty buffer for a call's output (the `out` of the other methods): the one that the
-    /// call before kept (`keep_out`), whose capacity a run's later calls reuse; a new one where
-    /// the writer keeps none.
-    fn take_out(&mut self) -> Vec<u8> {
-        Vec::new()
-    }
+    /// An empty buffer for a call's output (the `out` of the other methods): the one that
+    /// `allocate` made, or that the call before kept (`keep_out`).
+    fn take_out(&mut self) -> Vec<u8>;
 
-    /// Keeps the call's output buffer `out` for a later call (`take_out`); dropped where the
-    /// writer keeps none.
-    fn keep_out(&mut self, out: Vec<u8>) {
-        let _ = out;
-    }
+    /// Keeps the call's output buffer `out` (emptied) for a later call (`take_out`) and for its
+    /// size (`buffer_sizes`).
+    fn keep_out(&mut self, out: Vec<u8>);
+
+    /// The capacities that the writer's buffers grew to (`BufferSizes`), the output buffer kept
+    /// by `keep_out` among them, for the writer of a run's later call (`allocate`).
+    fn buffer_sizes(&self) -> BufferSizes;
+
+    /// Allocates the writer's buffers, empty, to `sizes` (`buffer_sizes` of the writer of the run's
+    /// call before), before the writer's first query.
+    fn allocate(&mut self, sizes: BufferSizes);
 }
 
 /// How many of the `queries` of a report call have reports that the documents write, and so have
@@ -444,6 +507,8 @@ pub struct BlastXmlWriter {
     iterations: u32,
     scratch: Scratch,
     posts: DocumentPosts,
+    /// The caller's output buffer between its calls (`StructuredXml::take_out`).
+    out: Vec<u8>,
 }
 
 impl BlastXmlWriter {
@@ -454,6 +519,7 @@ impl BlastXmlWriter {
             iterations: queries_before as u32,
             scratch: Scratch::default(),
             posts: DocumentPosts::default(),
+            out: Vec::new(),
         }
     }
 }
@@ -588,6 +654,24 @@ impl StructuredXml for BlastXmlWriter {
 
     fn take_posts(&mut self) -> DocumentPosts {
         std::mem::take(&mut self.posts)
+    }
+
+    fn take_out(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.out)
+    }
+
+    fn keep_out(&mut self, mut out: Vec<u8>) {
+        out.clear();
+        self.out = out;
+    }
+
+    fn buffer_sizes(&self) -> BufferSizes {
+        BufferSizes::of(&self.out, &self.scratch, 0)
+    }
+
+    fn allocate(&mut self, sizes: BufferSizes) {
+        self.out = Vec::with_capacity(sizes.out);
+        self.scratch = sizes.scratch();
     }
 
     /// The report-sum refusal of outfmt 5 (`XmlRun::check_sums`); BLAST XML writes nothing before

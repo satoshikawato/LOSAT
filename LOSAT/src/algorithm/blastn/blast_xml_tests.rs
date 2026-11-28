@@ -119,7 +119,8 @@ fn call<W: StructuredXml>(
         query_scopes: None,
     };
     let hit_lists: Vec<Option<BlastnHitList>> = queries.iter().map(|_| None).collect();
-    write_blastn_xml(&xml, document, &hit_lists, out, None)
+    let mut names = SubjectNameCache::new(&xml.subjects);
+    write_blastn_xml(&xml, document, &mut names, &hit_lists, out, None)
 }
 
 /// The `-subject` XML2 or JSON document (`kind`) of queries titled `titles`, written by `calls`
@@ -149,7 +150,7 @@ fn xml2_of(
             program_type: None,
         };
         let mut document = Xml2Writer::for_run(kind, params, None, None);
-        document.resume(std::mem::take(&mut carry));
+        document.document_mut().resume(std::mem::take(&mut carry));
         let result = call(
             &mut document,
             &queries[range],
@@ -157,7 +158,7 @@ fn xml2_of(
             &mut out,
             true,
         );
-        carry = document.take_carry();
+        carry = document.document_mut().take_carry();
         if let Err(error) = result {
             return (out, Some(error.to_string()));
         }
@@ -277,8 +278,8 @@ fn a_run_that_an_error_stops_never_makes_its_last_report_nor_refuses_it() {
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2403-2416
 // A `-db` report is made when its query's result arrives: the refusal of its title comes there,
 // after the reports before it, in every layout of the calls, and a refused first report writes
-// nothing (remaining-gaps DECISIONS D-SO-8; NCBI BLAST+ 2.17.0 writes 3,177 bytes of outfmt 16 for
-// `na` then `, ,` in one batch and in two).
+// nothing (remaining-gaps DECISIONS D-SO-8; NCBI BLAST+ 2.17.0 writes 3,192 bytes of outfmt 16 for
+// `na` then `, ,` in one batch and in two: rows db.dxs.blastn.dtl1.16 and dtl.16).
 #[test]
 fn a_db_report_is_refused_where_ncbi_makes_it_after_the_reports_before_it() {
     let db = |kind, titles: &[&[u8]], calls| xml2_of(Xml2Target::Database, kind, titles, calls);
@@ -399,9 +400,9 @@ fn the_start_comes_with_the_first_written_report() {
         let mut document = Xml2Writer::for_run(kind, params(), None, None);
         call(&mut document, &queries[..1], (false, false), &mut out, true).expect("qa's call");
         assert!(out.is_empty(), "{kind:?}: {} bytes", out.len());
-        let carry = document.take_carry();
+        let carry = document.document_mut().take_carry();
         let mut document = Xml2Writer::for_run(kind, params(), None, None);
-        document.resume(carry);
+        document.document_mut().resume(carry);
         call(&mut document, &queries[1..], (false, false), &mut out, true).expect("qb's call");
         assert_eq!(out, before_end(kind, &[b"qa", b"qb"])[..out.len()]);
         assert!(out.starts_with(&prolog_bytes(kind)) && out.len() > prolog_bytes(kind).len());

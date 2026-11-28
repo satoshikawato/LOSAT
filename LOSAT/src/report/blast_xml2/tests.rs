@@ -613,9 +613,9 @@ fn a_run_written_by_several_documents_in_turn_has_the_bytes_of_one() {
 
 #[test]
 fn a_writer_hands_the_sizes_of_its_buffers_on_and_writes_the_bytes_of_one() {
-    // BLASTN's report stream writes a run with a writer per batch: the capacities of the writer's
-    // report buffer and of the call's output buffer go on with the carry, and the next writer
-    // allocates them at once, so that the calls grow them once.
+    // BLASTN's report stream writes a run with a writer per batch: the sizes of the writer's
+    // buffers (its report buffer, its scratch and the call's output buffer) go to the next writer
+    // (`BufferSizes`), which allocates them at once, so that the calls grow them once.
     let message = invalid_message();
     let run = run(None, "");
     for kind in [Xml2Kind::Single16, Xml2Kind::Single15] {
@@ -628,13 +628,14 @@ fn a_writer_hands_the_sizes_of_its_buffers_on_and_writes_the_bytes_of_one() {
         let written = out.clone();
         let capacity = out.capacity();
         first.keep_out(out);
-        let mut carry = first.take_carry();
-        let [report, kept] = carry.take_buffers();
-        assert!(report.is_empty() && report.capacity() > 0, "{kind:?}");
-        assert!(kept.is_empty() && kept.capacity() >= capacity, "{kind:?}");
-        carry.keep_capacities([&report, &kept]);
+        let sizes = first.buffer_sizes();
+        assert!(sizes.report > 0 && sizes.out >= capacity, "{kind:?}");
+        let carry = first.document_mut().take_carry();
         let mut second = Xml2Writer::new(kind, params(target));
-        second.resume(carry);
+        second.allocate(sizes);
+        second.document_mut().resume(carry);
+        let allocated = second.buffer_sizes();
+        assert!(allocated.report >= sizes.report, "{kind:?}");
         let mut out = second.take_out();
         assert!(out.is_empty() && out.capacity() >= capacity, "{kind:?}");
         second.finish(&mut out).unwrap();

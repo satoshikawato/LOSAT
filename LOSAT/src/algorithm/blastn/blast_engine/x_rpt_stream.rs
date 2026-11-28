@@ -44,8 +44,10 @@
 //!   start, the number of its reports, which JSON's separator and the side files' names read, and
 //!   the held report of a `-subject` run, which NCBI makes when the next query's result arrives, in
 //!   the next batch or in the epilog: blast_format.cpp:2362-2403) is handed from call to call
-//!   (`Xml2Carry`, `Stream::xml2`), as the BLASTP block search hands it; the footer, the end and
-//!   the master file come with the epilog call. Under `-parse_deflines` each call shows its
+//!   (`Xml2Carry` in `XmlCarry`, `Stream::xml`), as the BLASTP block search hands it; so are, for
+//!   both, the sizes of the writer's buffers and a subject set's names made so far (LOSAT's own:
+//!   the calls grow the buffers and make each name once, as the one call does); the footer, the
+//!   end and the master file come with the epilog call. Under `-parse_deflines` each call shows its
 //!   queries by the run's scopes (`QueryScopes::numbered_from`: which results join the held
 //!   report is the run's, the labels the call's). The tabular reports with a field list or a
 //!   delimiter and outfmt 10 and 20 (`algorithm::blastn::tabular`) write per query like 6 and 7
@@ -181,6 +183,7 @@ use anyhow::Result;
 
 use crate::api::local_blast::ReportOutputs;
 use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
+use crate::report::blast_xml::{BufferSizes, MadeNames};
 use crate::report::blast_xml2::Xml2Carry;
 use crate::report::sam::SamDocument;
 use crate::utils::dust::MaskedInterval;
@@ -233,17 +236,31 @@ pub(super) struct SubjectCache {
     pub(super) masks: Option<Vec<Vec<MaskedInterval>>>,
 }
 
+/// What the report calls of a run's BLAST XML, XML2 or JSON document (outfmt 5, 13 to 16) hand
+/// from call to call (`Written::xml`): the framing state of an XML2 or JSON document (`Xml2Carry`;
+/// outfmt 5's calls number their `Iteration`s from `Written::queries` alone), the sizes that the
+/// writer's buffers grew to (`BufferSizes`) and the names of a subject set's subjects made so far
+/// (`MadeNames`, `SubjectNameCache::resume`). The sizes and the names are LOSAT's own: the calls
+/// grow the buffers once and make each name once, as the one call of the off path does, and hold
+/// no more than it (the buffers' sizes, not the buffers, between the calls).
+#[derive(Default)]
+pub(super) struct XmlCarry {
+    pub(super) document: Xml2Carry,
+    pub(super) sizes: BufferSizes,
+    pub(super) names: MadeNames,
+}
+
 /// What the report calls of a search wrote before a call (`write_reports`): the number of
 /// queries whose reports were written, the subject values made once, the SAM document that
-/// the calls add to (outfmt 17 writes its document at the end: `SamDocument`), the framing state
-/// of the XML2 and JSON documents that the calls hand on (outfmt 13 to 16: `Xml2Carry`), and
-/// whether a later call follows this one. The default is the off path's single call.
+/// the calls add to (outfmt 17 writes its document at the end: `SamDocument`), what the calls of
+/// a structured document hand on (outfmt 5, 13 to 16: `XmlCarry`), and whether a later call
+/// follows this one. The default is the off path's single call.
 #[derive(Default)]
 pub(super) struct Written<'a> {
     pub(super) queries: usize,
     pub(super) subjects: Option<&'a SubjectCache>,
     pub(super) sam: Option<&'a mut SamDocument>,
-    pub(super) xml2: Option<&'a Mutex<Xml2Carry>>,
+    pub(super) xml: Option<&'a Mutex<XmlCarry>>,
     /// A later call of the stream writes more of the run's reports (a batch's call): a call
     /// without the epilog does not end the run (`BlastnReportInputs::stops`).
     pub(super) continues: bool,
@@ -264,10 +281,11 @@ pub(super) struct Stream {
     /// The SAM document of the run (outfmt 17 joins the streaming: its records are held as
     /// rendered bytes until the last call, or an NCBI error, writes it).
     sam: Option<SamDocument>,
-    /// The framing state of the run's XML2 or JSON document (outfmt 13 to 16), which each call
-    /// takes up from the call before and hands on (`Xml2Carry`: the reports written, the start,
-    /// the held report of a `-subject` run and its refusal).
-    xml2: Option<Mutex<Xml2Carry>>,
+    /// What the calls of the run's BLAST XML, XML2 or JSON document (outfmt 5, 13 to 16) take up
+    /// from the call before and hand on (`XmlCarry`: of an XML2 or JSON document the reports
+    /// written, the start, the held report of a `-subject` run and its refusal; the sizes of the
+    /// writer's buffers; a subject set's names).
+    xml: Option<Mutex<XmlCarry>>,
     batches: u64,
     queries: usize,
     one_batch: bool,
@@ -315,17 +333,18 @@ impl Stream {
             .map(|spec| sam_document(args, spec));
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2332-2417
         // NCBI's formatter keeps the document's state for the run (`m_XMLFileCount`, the
-        // accumulated results of a `-subject` run): the stream holds it between the calls.
-        let xml2 = output_formats
+        // accumulated results of a `-subject` run): the stream holds it between the calls (with
+        // LOSAT's sizes of the buffers and names, `XmlCarry`).
+        let xml = output_formats
             .iter()
-            .any(|format| format.xml2_kind().is_some())
+            .any(|format| format.is_structured_xml())
             .then(Mutex::default)
             .filter(|_| off.is_none());
         Stream {
             off,
             cache,
             sam,
-            xml2,
+            xml,
             batches: 0,
             queries: 0,
             one_batch,
@@ -355,7 +374,7 @@ impl Stream {
             queries: self.queries,
             subjects: self.cache.as_ref(),
             sam: self.sam.as_mut(),
-            xml2: self.xml2.as_ref(),
+            xml: self.xml.as_ref(),
             continues: !epilog,
         };
         let result = write(outputs, written);
@@ -399,7 +418,7 @@ impl Stream {
         output_formats: &[BlastnOutputFormat],
     ) -> Result<()> {
         let (Some(carry), Some(kind)) = (
-            self.xml2.as_ref(),
+            self.xml.as_ref(),
             output_formats.first().and_then(|format| format.xml2_kind()),
         ) else {
             return Ok(());
@@ -408,6 +427,7 @@ impl Stream {
         carry
             .lock()
             .expect("the carry")
+            .document
             .start_at_stop(kind, &mut start);
         if start.is_empty() {
             return Ok(());

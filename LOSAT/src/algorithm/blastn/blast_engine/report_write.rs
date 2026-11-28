@@ -17,6 +17,7 @@ use crate::algorithm::blastn::pairwise::shown_query_masks;
 use crate::algorithm::blastn::sam;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::query_batch::NO_DATA_MESSAGE;
+use crate::report::blast_xml::StructuredXml;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::record::{QueryNames, SubjectNames};
 use anyhow::Result;
@@ -519,14 +520,32 @@ pub(super) fn write_structured_xml(
         only_xml2: xml_only_xml2,
         query_scopes: report.query_scopes,
     };
+    // EXPERIMENT (LOSAT_X_RPTSTREAM): a batch's call takes up what the calls before it handed on
+    // (`x_rpt_stream::XmlCarry`: an XML2 or JSON document's state, the sizes of the writer's
+    // buffers, a subject set's names made so far) and hands it on when it returns (an error ends
+    // the run). The off path's one call starts from nothing.
+    let mut carried = report
+        .xml_carry
+        .map(|carry| std::mem::take(&mut *carry.lock().expect("the carry")))
+        .unwrap_or_default();
+    let mut names = crate::report::blast_xml::SubjectNameCache::resume(
+        &xml.subjects,
+        std::mem::take(&mut carried.names),
+    );
     match xml2_kind {
-        None => crate::algorithm::blastn::blast_xml::write_blastn_xml(
-            &xml,
-            &mut crate::report::blast_xml::BlastXmlWriter::new(report.queries_before),
-            hit_lists,
-            writer,
-            format_warnings,
-        )?,
+        None => {
+            let mut document = crate::report::blast_xml::BlastXmlWriter::new(report.queries_before);
+            document.allocate(carried.sizes);
+            crate::algorithm::blastn::blast_xml::write_blastn_xml(
+                &xml,
+                &mut document,
+                &mut names,
+                hit_lists,
+                writer,
+                format_warnings,
+            )?;
+            carried.sizes = document.buffer_sizes();
+        }
         Some(kind) => {
             // The gap costs are written for a gapped search (NCBI reads them from
             // the options when `GetGappedMode()`); `cbs` and the genetic codes
@@ -552,23 +571,25 @@ pub(super) fn write_structured_xml(
             };
             let mut document =
                 crate::report::blast_xml2::Xml2Writer::for_run(kind, params, report.out, side_sink);
-            // EXPERIMENT (LOSAT_X_RPTSTREAM): a batch's call continues the document of the calls
-            // before it and hands its state on (`x_rpt_stream::Written::xml2`), with the
-            // writer's buffers (`Xml2Writer::take_carry`).
-            if let Some(carry) = report.xml2_carry {
-                document.resume(std::mem::take(&mut *carry.lock().expect("the carry")));
-            }
+            document.allocate(carried.sizes);
+            document
+                .document_mut()
+                .resume(std::mem::take(&mut carried.document));
             crate::algorithm::blastn::blast_xml::write_blastn_xml(
                 &xml,
                 &mut document,
+                &mut names,
                 hit_lists,
                 writer,
                 format_warnings,
             )?;
-            if let Some(carry) = report.xml2_carry {
-                *carry.lock().expect("the carry") = document.take_carry();
-            }
+            carried.sizes = document.buffer_sizes();
+            carried.document = document.document_mut().take_carry();
         }
+    }
+    if let Some(carry) = report.xml_carry {
+        carried.names = names.into_made();
+        *carry.lock().expect("the carry") = carried;
     }
     Ok(())
 }

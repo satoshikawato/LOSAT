@@ -1212,6 +1212,8 @@ fn owner(_metadata: &std::fs::Metadata) -> u32 {
 ///   query of some thousand residues) and written by `commit`. A device that takes zero bytes but
 ///   not the PSSM's would fail only after the reports;
 /// - a directory or a socket: NCBI's open fails, and so does LOSAT's;
+/// - a name that ends in a directory by its form (`sub/`, `sub/.`, `nodir/..`: `ends_in_directory`):
+///   opened as NCBI opens it, which fails without making a file (`EISDIR`, or a folder's error);
 /// - a named pipe, a block device, a symbolic link to no file: refused (also before the search,
 ///   `check_pssm_files`).
 ///
@@ -1452,6 +1454,18 @@ impl PssmFiles {
                 PssmTarget::Refused(reason) => Err(anyhow::anyhow!("{reason}")),
             };
         }
+        if ends_in_directory(path) {
+            // No file is made of such a name: the open fails as NCBI's fails (`EISDIR`, or the
+            // error of a folder on the way), and that error is the refusal's. Where a system
+            // opens it all the same, it is a target as any other.
+            if let Err(error) = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(path)
+            {
+                return Err(cannot_write(error));
+            }
+        }
         let existing = match target_kind(path) {
             TargetKind::Absent => false,
             TargetKind::Regular => true,
@@ -1462,12 +1476,6 @@ impl PssmFiles {
             TargetKind::Unsupported(kind) => return Err(unsupported_target(path, kind)),
             TargetKind::Unreachable(error) => return Err(cannot_write(error)),
         };
-        if path.file_name().is_none() {
-            return Err(cannot_write(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "not a file name",
-            )));
-        }
         let directory = match path.parent() {
             Some(parent) if !parent.as_os_str().is_empty() => parent,
             _ => std::path::Path::new("."),
@@ -1630,6 +1638,20 @@ fn test_device(path: &std::path::Path, null: bool, asn: &[u8]) -> std::io::Resul
     } else {
         Staged::Device(asn.to_vec())
     })
+}
+
+/// Whether the name `path` ends in a directory by its form: a final separator (`sub/`), or a last
+/// component `.` or `..` (`sub/.`, `nodir/..`). The system makes no file of such a name, while
+/// `std::path::Path` reads `sub/` and `sub/.` as `sub`, a file that `PssmFiles::stage` would
+/// foresee in the working directory and the open of `commit` would then fail to make, after the
+/// reports (line WQA D34 review r1, M1).
+fn ends_in_directory(path: &std::path::Path) -> bool {
+    let name = path.as_os_str().as_encoded_bytes();
+    let last = name
+        .rsplit(|byte| std::path::is_separator(char::from(*byte)))
+        .next()
+        .unwrap_or(name);
+    !name.is_empty() && matches!(last, b"" | b"." | b"..")
 }
 
 fn unsupported_target(path: &std::path::Path, kind: &str) -> anyhow::Error {

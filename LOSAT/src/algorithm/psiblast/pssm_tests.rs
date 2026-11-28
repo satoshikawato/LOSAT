@@ -1087,6 +1087,42 @@ fn a_long_target_name_is_staged_and_a_too_long_one_refused() {
     assert_eq!(names(&dir), ["L".repeat(245)]);
 }
 
+// Line WQA D34 review r1 (M1): a name that ends in a directory by its form is refused at its query
+// with the error of the open that NCBI makes of it (as the rounds' files and LOSAT Web give it):
+// not staged in the folder that `std::path::Path` reads (`nosuch/` as `nosuch` in `.`) and refused
+// after the reports, nor refused with words of LOSAT's own (`nodir/..`); nothing is made.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_name_that_ends_in_a_directory_is_refused_with_its_open_error() {
+    let dir = scratch("dirname");
+    std::fs::write(dir.join("in.fa"), b">q\nM\n").unwrap();
+    for (name, reason) in [
+        ("nosuch/", "Is a directory (os error 21)"),
+        ("nosuch//", "Is a directory (os error 21)"),
+        ("in.fa/", "Is a directory (os error 21)"),
+        ("nodir/.", "No such file or directory (os error 2)"),
+        ("nodir/..", "No such file or directory (os error 2)"),
+        ("nodir/x/", "No such file or directory (os error 2)"),
+        ("in.fa/..", "Not a directory (os error 20)"),
+        (".", "Is a directory (os error 21)"),
+        ("..", "Is a directory (os error 21)"),
+    ] {
+        let path = dir.join(name);
+        let mut files = PssmFiles::new(&asn_request(&path, false));
+        let error = files.add(Some(b"pssm\n"), None).unwrap_err().to_string();
+        assert_eq!(
+            error,
+            format!(
+                "a -out_pssm file that cannot be written ({}: {reason}), where NCBI BLAST+'s psiblast stops after the query's report with a serial-stream write error, is not supported by LOSAT's PSIBLAST",
+                path.display()
+            ),
+            "{name}"
+        );
+        drop(files);
+        assert_eq!(names(&dir), ["in.fa"], "{name}");
+    }
+}
+
 // The re-review of PS3 (RS2): an existing file that opens for writing in a directory that takes no
 // new file is written in place after the reports, as NCBI's version 0 (which cannot remove its
 // name) and numbered files are (NCBI 2.17.0 `rodir`); nothing changes before the commit.

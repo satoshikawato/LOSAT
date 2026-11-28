@@ -853,7 +853,10 @@ fn the_check_refuses_out_only_where_the_run_reaches_it() {
             let calls = emitted();
             assert_eq!(
                 calls.last().unwrap(),
-                &(STREAM_RESPONSE, format!("{{\"status\":{status}}}").into_bytes()),
+                &(
+                    STREAM_RESPONSE,
+                    format!("{{\"status\":{status}}}").into_bytes()
+                ),
                 "{label} {out}: status"
             );
             let diag = String::from_utf8_lossy(&joined(&calls, STREAM_DIAGNOSTICS)).into_owned();
@@ -884,7 +887,10 @@ fn the_check_refuses_out_only_where_the_run_reaches_it() {
             out,
         ];
         let error = validate(&words).unwrap_err();
-        assert!(error.contains("an output file"), "windowmasker {out}: {error}");
+        assert!(
+            error.contains("an output file"),
+            "windowmasker {out}: {error}"
+        );
         run(&words).unwrap();
         let calls = emitted();
         assert_eq!(

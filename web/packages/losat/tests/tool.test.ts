@@ -1335,10 +1335,14 @@ describe.skipIf(REACTORS === undefined)('blast_formatter through the host', () =
     expect(emptyRidRun.status).toBe(3);
     expect(await emptyRidRun.stderr.text()).toBe('LOSAT engine error: Empty RID string specified\n');
 
-    // Overwriting an existing run-directory file with -out or -logfile is refused.
-    const overwrite = abi.validateTool(['blast_formatter', '-archive', 'in/bn.asn', '-outfmt', '8', '-out', 'in/bn.asn']);
-    expect(overwrite.ok).toBe(false);
-    expect(!overwrite.ok && overwrite.message).toContain("in/bn.asn");
+    // Overwriting an existing run-directory file with -out is refused by the run, when it reaches -out (after it has
+    // read the archive's first search, which may fail first with NCBI's error); the check leaves it to the run, so
+    // that both give the command line's first error (review of WW4c, F1).
+    const overwriteArgv = ['blast_formatter', '-archive', 'in/bn.asn', '-outfmt', '8', '-out', 'in/bn.asn'];
+    expect(abi.validateTool(overwriteArgv)).toEqual({ ok: true });
+    const overwrite = await run(overwriteArgv);
+    expect(overwrite.status).toBe(1);
+    expect(await overwrite.stderr.text()).toContain("an output file 'in/bn.asn' that is a file of the run's directory");
   }, 120_000);
 });
 

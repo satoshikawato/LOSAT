@@ -430,11 +430,14 @@ const fn ncbi4na_code_of_ncbi2na_letter(residue: u8) -> u8 {
         | (((upper & 0xfe) == b'T') as u8) << 3
 }
 
-/// The byte of two NCBI4na codes (each 0 to 15), the first in the high half: the low byte of the
+/// The byte of two 4-bit values (each 0 to 15), the first in the high half: the low byte of the
 /// pair as a little-endian 16-bit number shifted left by 4, ORed with its high byte (one shift
-/// and one OR, which a loop over pairs computes for many at once).
+/// and one OR, which a loop over pairs computes for many at once). Two NCBI4na codes in the
+/// NCBI4na bytes of a delta (`C8naTo4na`); two halves, each the two 2-bit codes of an input
+/// byte, in an output byte of `WriteDB_Ncbi4naToBinary`.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:856-874
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:444-518
 #[inline(always)]
 pub(crate) fn pair_byte(two: [u8; 2]) -> u8 {
     let pair = u16::from_le_bytes(two);

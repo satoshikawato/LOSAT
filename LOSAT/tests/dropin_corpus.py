@@ -19,8 +19,9 @@ The cell `check` says what is compared besides the exit status:
 - `contains:A|B`: stdout holds each text (a tool greps `-help` for it); NCBI's bytes are not frozen.
 
 A `makeblastdb` row compares its report and its `-logfile` without the lines that hold the time or the absolute path
-(`NO_REPORT_LINES`), and the sha256 of each database file in the `files` cell, without the date of a `.nin`/`.pin` or
-the time of a `.njs`/`.pjs`, whose two sizes are compared with the files they count (`database_bytes`). A date of
+(`NO_REPORT_LINES`), and the sha256 of each database file in the `files` cell, without the date of a `.nin`/`.pin`, the
+creation time of a column's index file (`.naa`, `.paa`, ...: the masks of `-mask_data`) or the time of a `.njs`/`.pjs`,
+whose two sizes are compared with the files they count (`database_bytes`). A date of
 another form leaves the file whole, so it differs from the frozen sha256. No bytes of a database are frozen.
 
 `freeze --ncbi-bin DIR [--only PREFIX]` runs NCBI, writes the frozen files and rewrites the rc, hash and size columns.
@@ -56,6 +57,9 @@ NOT_INPUTS = ("README.md", ".gitattributes")
 NO_REPORT_LINES = (b"Building a new DB", b"New DB name:", b"Adding sequences from")
 # NCBI's CTime "b D, Y  H:m P", then the padding that aligns what follows the date.
 INDEX_DATE = re.compile(rb"[A-Z][a-z]{2} \d{1,2}, \d{4}  \d{1,2}:\d{2} [AP]M\0*")
+# The creation time of a column's index file, `%m/%d/%Y %H:%M:%S` (NCBI's CWriteDB_ColumnIndex).
+COLUMN_TIME = re.compile(rb"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}")
+COLUMN_INDEX = re.compile(r"\.[np][a-z0-9]a$")
 MANIFEST_TIME = re.compile(rb'("last-updated": ")\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(")')
 TIMEOUT = 300
 
@@ -97,6 +101,18 @@ def index_without_date(data: bytes) -> bytes:
     return data[:at] + data[date_end:]
 
 
+def column_index_without_time(data: bytes) -> bytes:
+    """A column's index file (`n` or `p`, the column's letter, `a`) without the creation time it stores: the second
+    string after its 32-byte head, each string after a one-byte length (as `mask_column_date` of
+    LOSAT/src/writedb/tests.rs reads it). A time of another form keeps the file whole."""
+    if len(data) < 34 or data[32] >= 0x80:
+        return data
+    at = 33 + data[32]
+    if at >= len(data) or data[at] >= 0x80 or COLUMN_TIME.fullmatch(data[at + 1:at + 1 + data[at]]) is None:
+        return data
+    return data[:at] + data[at + 1 + data[at]:]
+
+
 def manifest_without_time(data: bytes, files: dict[str, bytes]) -> bytes:
     """A `.njs`/`.pjs` without its time, and with each of its two sizes replaced by its distance from the files it
     counts: `bytes-total` all the files it lists, `bytes-to-cache` the index and sequence files. These sizes follow the
@@ -124,6 +140,8 @@ def database_bytes(name: str, files: dict[str, bytes]) -> bytes:
         return index_without_date(data)
     if name.endswith((".njs", ".pjs")):
         return manifest_without_time(data, files)
+    if COLUMN_INDEX.search(name):
+        return column_index_without_time(data)
     if name.endswith(".log"):
         return report_without_time(data)
     return data

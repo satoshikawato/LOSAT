@@ -23,7 +23,7 @@ import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { asNative, downloadAll, folderOf, maskedFiles, nativeRun, type Written } from './support/makeblastdb-native';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { openSearch, paste, pickRun, result, waitStatus } from './support/search';
+import { described, openSearch, paste, pickRun, result, waitStatus } from './support/search';
 import { test } from './support/test';
 
 test.setTimeout(300_000);
@@ -50,7 +50,7 @@ async function openMakeblastdb(page: Page): Promise<void> {
   await openSearch(page);
   await page.getByTestId('tab-makeblastdb').click();
   await expect(page.getByTestId('mk-panel')).toBeVisible();
-  await expect(page.getByTestId('mk-panel')).toHaveAttribute('data-describe', 'ready');
+  await described(page, 'mk-panel', 'ready');
 }
 
 async function openOptions(page: Page): Promise<void> {

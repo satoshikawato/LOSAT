@@ -981,9 +981,9 @@ impl SetUpReading {
 
     /// The reads of `records`, records that are first in the scope with their ids or have none of
     /// their own (`read` with `Meets::New`).
-    fn of_new_records<'r>(
+    fn of_new_records<R>(
         self,
-        records: impl Iterator<Item = (Option<&'r BelievedIds>, usize, bool)>,
+        records: impl Iterator<Item = (R, usize, bool)>,
     ) -> impl Iterator<Item = SetUpRead> {
         records.map(move |(_, length, is_searched)| {
             self.read(Meets::New, length, is_searched)

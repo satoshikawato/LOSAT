@@ -14,3 +14,6 @@
   error now exit with NCBI's status (0, or 6 for outfmt 15 and 16) instead of aborting.
 - `losat makeblastdb` with its log on a pipe that closes before the sequences are added leaves the volume's files as NCBI's
   ended process leaves them (empty for a small input): the bytes its file buffers still held are dropped.
+- `losat rpsbproc` and `losat blast_formatter` read ASN.1 text archives faster: rpsbproc uses about 9 % less CPU time
+  (4 to 6 % less with `-m full -f -q`, whose report is now written line by line as NCBI's rpsbproc writes it), and
+  blast_formatter 3 to 10 % less. Output is unchanged.

@@ -152,8 +152,8 @@ impl Report {
         if self.failed.is_some() {
             return;
         }
-        self.pending.extend_from_slice(bytes);
-        self.buffer.sputn(bytes.len(), &self.pending);
+        // (`sputn` reads no more than the insertion's own bytes of the stream.)
+        self.buffer.sputn(bytes.len(), bytes);
         // An insertion that ends a line is `endl`, which flushes the stream. LOSAT writes the
         // report in the pieces of NCBI's insertions where a piece can reach a buffer's limit: the
         // strings of the archive and the data. NCBI rpsbproc 0.5.1, both builds, on a `SESSION`
@@ -162,7 +162,39 @@ impl Report {
         if bytes.last() == Some(&b'\n') {
             self.buffer.flush();
         }
-        self.write_blocks();
+        let held = self.buffer.held();
+        if self.pending.len() + bytes.len() - held < REPORT_BLOCK {
+            self.pending.extend_from_slice(bytes);
+        } else {
+            self.write_through(bytes, held);
+        }
+    }
+
+    /// The write of a full block or more that NCBI's stream has written, ending in the insertion
+    /// `bytes`: the bytes before the last `held` ones (which NCBI's buffer holds) go to the file
+    /// from `pending` and from `bytes` where they are, in one write as the block's `write_all` was
+    /// (`report::ostream::write_device2`), and only the held ones are kept, so a long string of the
+    /// input (a title of many megabytes) is not copied into the report as well. (A write of a
+    /// block, once in 64 KiB of the report, stays out of the insertion's own code.)
+    #[cold]
+    #[inline(never)]
+    fn write_through(&mut self, bytes: &[u8], held: usize) {
+        let held_of_bytes = held.min(bytes.len());
+        let (written, kept) = bytes.split_at(bytes.len() - held_of_bytes);
+        let n = self.pending.len() - (held - held_of_bytes);
+        let mut landed = 0;
+        if let Err(error) = crate::report::ostream::write_device2(
+            &mut *self.out,
+            &mut landed,
+            &self.pending[..n],
+            written,
+        )
+        .and_then(|()| self.out.flush())
+        {
+            self.failed = Some(error);
+        }
+        self.pending.drain(..n);
+        self.pending.extend_from_slice(kept);
     }
 
     /// An insertion of a `char` (a stream insertion of `DELIMIT`: `put`), where a line can be cut
@@ -967,7 +999,7 @@ fn run_sessions<R: Read>(
         }
         let archive = stream.next_archive();
         let report: &mut Report = stream.posts();
-        let archive = match archive {
+        let mut archive = match archive {
             Ok(Some(archive)) => archive,
             Ok(None) => break,
             Err(refusal) => return Outcome::refused(refusal.message),
@@ -989,7 +1021,7 @@ fn run_sessions<R: Read>(
             }
         }
         report.progress(&format!("RPSBlast session {session} start..."));
-        let RequestBody::QueueSearch(search) = &archive.body else {
+        let RequestBody::QueueSearch(search) = &mut archive.body else {
             report
                 .post("Wrong type of request data: CBlast4_request_body::e_Queue_search expected");
             return Outcome::Exit(E_INPUT_DATA_ERROR);
@@ -1068,7 +1100,7 @@ fn run_sessions<R: Read>(
             }
         }
         report.write(b"\n");
-        let Queries::BioseqSet(entries) = &search.queries else {
+        let Queries::BioseqSet(entries) = &mut search.queries else {
             if report.stopped() {
                 return Outcome::Exit(E_OK);
             }

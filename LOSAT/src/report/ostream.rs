@@ -386,8 +386,10 @@ fn write_device(
 
 /// Writes `first` and then `second` to `device` (as one `writev` where the device takes it),
 /// counting the bytes it takes in `landed` (a write that stops at a file's size limit takes part
-/// of the bytes, the next fails).
-fn write_device2(
+/// of the bytes, the next fails). As `write_all`: an interrupted write is made again, and a write
+/// that takes no byte fails with `write_all`'s error. The one writer of two pieces as one write:
+/// the report streams here and rpsbproc's report (`rpsbproc::Report::write_through`).
+pub(crate) fn write_device2(
     device: &mut dyn std::io::Write,
     landed: &mut u64,
     mut first: &[u8],
@@ -402,7 +404,12 @@ fn write_device2(
             device.write_vectored(&[std::io::IoSlice::new(first), std::io::IoSlice::new(second)])
         };
         match written {
-            Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "failed to write whole buffer",
+                ))
+            }
             Ok(n) => {
                 *landed += n as u64;
                 let from_first = n.min(first.len());

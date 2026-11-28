@@ -192,13 +192,13 @@ pub(crate) fn is_na_mol(mol: i32) -> bool {
 // NCBI reference (598d8ae6): c++/include/corelib/ncbiobj.hpp:1047-1054,1109-1112
 // (Dereferencing a `NULL` `Seq-annot` or `Seq-feat` reached before a matching feature throws
 // `CCoreException::eNullPtr` with a stack trace of memory addresses: refused.)
-fn query_title(query: &Query) -> Result<Vec<u8>, ProcessError> {
-    if let Some(title) = &query.title {
-        return Ok(title.clone());
+fn query_title(query: &mut Query) -> Result<Vec<u8>, ProcessError> {
+    if let Some(title) = &mut query.title {
+        return Ok(std::mem::take(title));
     }
-    match &query.annot_title {
+    match &mut query.annot_title {
         AnnotTitle::None => Ok(Vec::new()),
-        AnnotTitle::Title(title) => Ok(title.clone()),
+        AnnotTitle::Title(title) => Ok(std::mem::take(title)),
         AnnotTitle::NullElement(what) => Err(ProcessError::Unsupported(format!(
             "a query Bioseq without a title descriptor whose annot reaches {what} (NCBI stops with a NULL pointer stack trace) is not supported by LOSAT's rpsbproc"
         ))),
@@ -219,7 +219,10 @@ fn query_title(query: &Query) -> Result<Vec<u8>, ProcessError> {
 // a string is refused (`Query::unread_descriptor`).
 // `GetTaxId` (biodata_core.cpp:977) reads the `org` and `source` descriptors but never throws,
 // and the taxid is not printed, so those descriptors are only read past.
-fn fill_sequence(query: &Query) -> Result<(Vec<u8>, Vec<u8>, u32, Vec<u8>), ProcessError> {
+// The title and the residues, where there are any, are taken out of `query`, which nothing reads
+// again (NCBI copies them from its Bioseq, which it keeps): a long title or sequence is not held
+// twice.
+fn fill_sequence(query: &mut Query) -> Result<(Vec<u8>, Vec<u8>, u32, Vec<u8>), ProcessError> {
     // `SeqDataTo1LtrSeq` (biodata_core.cpp:149-197) converts the encodings with
     // `CSeqportUtil::Convert`, which LOSAT ports for every encoding but NCBI8aa and NCBIstdaa
     // codes from 28 (refused, before the length, as the conversion comes first; NCBIpaa and
@@ -275,13 +278,13 @@ type LetterType = u8;
 // ncbistdaa codes 0 to 27 are the characters `-ABCDEFGHIKLMNPQRSTVWXYZU*OJ` and the other
 // codes, 0xff, are refused as in PS16a, and so is NCBI8aa (PS16a). NCBIpaa and NCBIpna have no
 // conversion in `CSeqportUtil`: NCBI's `runtime_error` (`UNCONVERTIBLE`).
-fn one_letter(data: &(&'static str, Vec<u8>)) -> Result<(LetterType, Vec<u8>), &'static str> {
+fn one_letter(data: (&'static str, Vec<u8>)) -> Result<(LetterType, Vec<u8>), &'static str> {
     const STDAA_TO_EAA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
     const NA2: &[u8; 4] = b"ACGT";
     const NA4: &[u8; 16] = b"NACMGRSVTWYHKDBN";
     let (name, bytes) = data;
-    Ok(match *name {
-        "ncbieaa" | "iupacaa" => (0, bytes.clone()),
+    Ok(match name {
+        "ncbieaa" | "iupacaa" => (0, bytes),
         "ncbistdaa" => {
             if bytes.iter().any(|&code| code >= 28) {
                 return Err(name);
@@ -294,7 +297,7 @@ fn one_letter(data: &(&'static str, Vec<u8>)) -> Result<(LetterType, Vec<u8>), &
                     .collect(),
             )
         }
-        "iupacna" => (1, bytes.clone()),
+        "iupacna" => (1, bytes),
         "ncbi2na" => (
             1,
             bytes
@@ -333,15 +336,17 @@ const UNCONVERTIBLE: &str = "Requested conversion not implemented";
 /// (the place and the encoding).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:199-246
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:248-253
-fn one_letter_residues(query: &Query) -> Result<Vec<u8>, (&'static str, &'static str)> {
-    if let Some(data) = &query.seq_data {
-        return Ok(one_letter(data).map_err(|name| ("Seq-data", name))?.1);
+fn one_letter_residues(query: &mut Query) -> Result<Vec<u8>, (&'static str, &'static str)> {
+    if let Some((name, bytes)) = &mut query.seq_data {
+        return Ok(one_letter((*name, std::mem::take(bytes)))
+            .map_err(|name| ("Seq-data", name))?
+            .1);
     }
     let mut residues = Vec::new();
     let mut literal_type = None;
-    for data in &query.delta_literals {
-        let (kind, letters) =
-            one_letter(data).map_err(|name| ("Seq-data of a delta literal", name))?;
+    for (name, bytes) in &mut query.delta_literals {
+        let (kind, letters) = one_letter((*name, std::mem::take(bytes)))
+            .map_err(|name| ("Seq-data of a delta literal", name))?;
         if *literal_type.get_or_insert(kind) == kind {
             residues.extend_from_slice(&letters);
         }
@@ -509,7 +514,7 @@ fn query_row_id(align: &Align) -> Result<&ParsedSeqId, ProcessError> {
 // `Std-seg`s of a translated search and of a `Packed-seg` (NCBI's exception); the other
 // segments are refused there.)
 pub(crate) fn process_blast_results(
-    entries: &[SeqEntry],
+    entries: &mut [SeqEntry],
     aligns: &[Align],
     data: &CddData,
 ) -> Result<Vec<DomQuery>, ProcessError> {

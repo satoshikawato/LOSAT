@@ -146,7 +146,8 @@ impl NcbiBuffer {
     }
 
     /// An insertion of the last `n` bytes of `stream` (a string or a number; `stream` is
-    /// everything inserted so far). Afterwards `held` is what NCBI's buffer holds.
+    /// everything inserted so far, or the insertion alone: no byte before the last `n` is read).
+    /// Afterwards `held` is what NCBI's buffer holds.
     #[inline]
     pub fn sputn(&mut self, n: usize, stream: &[u8]) {
         if n == 0 {

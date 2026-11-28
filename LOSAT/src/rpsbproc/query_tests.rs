@@ -42,13 +42,16 @@ fn refusals_of_translated_hits() {
             tag: ObjectId::Id(tag),
         }))
     };
-    let entries = [SeqEntry::Seq(Query {
-        ids: vec![local.clone()],
-        mol: 1,
-        length: Some(6),
-        seq_data: Some(("iupacna", b"ACGTAC".to_vec())),
-        ..Query::default()
-    })];
+    // (`process_blast_results` takes the residues out of its queries: a new query each run.)
+    let entries = || {
+        [SeqEntry::Seq(Query {
+            ids: vec![local.clone()],
+            mol: 1,
+            length: Some(6),
+            seq_data: Some(("iupacna", b"ACGTAC".to_vec())),
+            ..Query::default()
+        })]
+    };
     let run =
         |query_id: QueryRowId, hit_id: Option<ParsedSeqId>, from: u32, to: u32, strand: i32| {
             let align = Align {
@@ -74,7 +77,7 @@ fn refusals_of_translated_hits() {
                 num_ident: None,
                 score_of_other_type: None,
             };
-            match process_blast_results(&entries, &[align], &data) {
+            match process_blast_results(&mut entries(), &[align], &data) {
                 Ok(queries) => Ok(queries[0]
                     .aligns
                     .iter()
@@ -124,7 +127,7 @@ fn residues_of_delta_literals() {
             delta_literals: delta,
             ..Query::default()
         };
-    let residues = |query: Query| fill_sequence(&query).map(|(_, _, _, residues)| residues);
+    let residues = |mut query: Query| fill_sequence(&mut query).map(|(_, _, _, residues)| residues);
     let delta = vec![
         ("ncbieaa", b"MK".to_vec()),
         ("ncbistdaa", vec![1, 25, 27, 0]),
@@ -166,7 +169,7 @@ fn residues_of_nucleotide_encodings() {
         delta_literals: delta,
         ..Query::default()
     };
-    let residues = |query: Query| fill_sequence(&query).map(|(_, _, _, residues)| residues);
+    let residues = |mut query: Query| fill_sequence(&mut query).map(|(_, _, _, residues)| residues);
     // 0x1B = 00 01 10 11, 0xE4 = 11 10 01 00.
     assert_eq!(
         residues(query(7, Some(("ncbi2na", vec![0x1b, 0xe4])), vec![])).ok(),
@@ -302,7 +305,7 @@ fn query_title_and_is_na_mol() {
         seq_data: Some(("ncbieaa", b"M".to_vec())),
         ..Query::default()
     };
-    let title_of = |q: Query| fill_sequence(&q).map(|(_, t, _, _)| t);
+    let title_of = |mut q: Query| fill_sequence(&mut q).map(|(_, t, _, _)| t);
 
     assert_eq!(
         title_of(base(

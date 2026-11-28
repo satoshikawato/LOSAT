@@ -661,6 +661,90 @@ fn the_batch_of_a_repeated_id_stops_at_one_point_in_every_program() {
     assert_eq!((rows, error.as_deref()), (0, Some(cli_error.as_str())));
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652 (cited at
+// `query_batch::setup_queries_failure`)
+// A batch whose every searched record is read past the end of the earlier record of its id stops
+// with NCBI's set-up error (line RG-KB item 7b; the forms are NCBI BLAST+ 2.17.0's, strategy rows
+// `*.pd.pastfirst.*`), in the library's run and in `run_batches` as on the command line: the
+// `-query_loc` cut of the interval, the read from the interval's upper end on `-strand minus` and
+// BLASTN's masks reach the scope of the library's run as the command line's (review F3 of item
+// 7b). DUST fails at the first such record for every record of the batch; `-dust no` gives each
+// record's own position.
+#[test]
+fn a_batch_read_past_its_earlier_records_stops_as_on_the_command_line() {
+    let protein = |length, seed| letters(b"ACDEFGHIKLMNPQRSTVWY", length, seed);
+    let nucleotide = |length, seed| letters(b"ACGT", length, seed);
+    let named = |name: &str, sequence: &[u8]| fasta_named(&[name.to_string()], sequence);
+    let segments = |positions: &[usize]| {
+        let messages: Vec<String> = positions
+            .iter()
+            .map(|pos| format!("Warning: CSeqVector_CI: cannot locate segment at {pos}"))
+            .collect();
+        format!("{} {}", crate::wording::ENGINE_ERROR, messages.join(" "))
+    };
+    // BLASTP with `-query_loc 101-10600`: `q1` of 10500 letters fills the first batch (10000
+    // letters), and a `q1` of 11000, counted by the first's letters, the second; its interval (100
+    // to 10599) passes the first's end 10400 letters after its start.
+    let mut text = named("q1", &protein(10500, 7));
+    text.extend_from_slice(&named("q1", &protein(11000, 8)));
+    ends_as_the_command_line(
+        "blastp -query_loc",
+        Program::Blastp,
+        &text,
+        &named("s1", &protein(2000, 7)),
+        &["-parse_deflines", "-query_loc", "101-10600"],
+        &segments(&[10400]),
+    );
+    // BLASTX with `-strand minus`: `q1` of 10500 letters (the first batch, 10002 letters), whose
+    // minus strand codes the subject, then a `q1` of 11000 letters: the read stops at 0.
+    let reverse_complement = |letters: Vec<u8>| -> Vec<u8> {
+        letters
+            .iter()
+            .rev()
+            .map(|letter| match letter {
+                b'A' => b'T',
+                b'C' => b'G',
+                b'G' => b'C',
+                _ => b'A',
+            })
+            .collect()
+    };
+    let mut text = named("q1", &reverse_complement(coding(&protein(3500, 7))));
+    text.extend_from_slice(&named("q1", &nucleotide(11000, 9)));
+    ends_as_the_command_line(
+        "blastx -strand minus",
+        Program::Blastx,
+        &text,
+        &named("s1", &protein(700, 7)),
+        &["-parse_deflines", "-strand", "minus"],
+        &segments(&[0]),
+    );
+    // BLASTN: `q1` of 2600 and `q2` of 2700 letters fill the first batch (5000 letters, the
+    // mixer's first), then `q1` and `q2` of 3000 letters each pass their first's end.
+    let mut text = named("q1", &nucleotide(2600, 3));
+    text.extend_from_slice(&named("q2", &nucleotide(2700, 4)));
+    text.extend_from_slice(&named("q1", &nucleotide(3000, 5)));
+    text.extend_from_slice(&named("q2", &nucleotide(3000, 6)));
+    let subject = named("s1", &nucleotide(5000, 3));
+    for (name, options, positions) in [
+        ("blastn DUST", &["-parse_deflines"][..], [2600, 2600]),
+        (
+            "blastn -dust no",
+            &["-parse_deflines", "-dust", "no"][..],
+            [2600, 2700],
+        ),
+    ] {
+        ends_as_the_command_line(
+            name,
+            Program::Blastn,
+            &text,
+            &subject,
+            options,
+            &segments(&positions),
+        );
+    }
+}
+
 // The batches of `run_batches` end alike: the batches before, then the error in the batch that
 // reads the record; a reader error in the first batch is the first batch's error.
 #[test]

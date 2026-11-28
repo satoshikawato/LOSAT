@@ -28,7 +28,7 @@ import { exampleById } from '../../src/domain/examples';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { navigate } from './support/navigate';
 import { E2E_ORIGIN } from './support/origin';
-import { fasta, openFiles, openParameters, openSearch, paste, pickRun, program, runMessage, submit, waitStatus } from './support/search';
+import { described, fasta, openFiles, openParameters, openSearch, paste, pickRun, program, runMessage, submit, waitStatus } from './support/search';
 
 const ENGINE_ONLY = 'the FakeEngine build has no engine modules nor Engine worker: the engine build runs this test';
 const RELOAD = 'Reload the page.';
@@ -310,7 +310,7 @@ async function pastedWhileUnavailable(page: Page, file: Awaited<ReturnType<typeo
   await pasteBoth(page);
   await notRead(page);
   await expect(page.getByTestId('losat-unavailable')).toBeVisible();
-  await expect(page.getByTestId('search-panel')).toHaveAttribute('data-describe', 'failed');
+  await described(page, 'search-panel', 'failed');
   await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'unavailable');
   let last = -1;
   await expect

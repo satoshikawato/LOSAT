@@ -1,0 +1,4 @@
+BLAST engine error: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objmgr/seq_map.cpp", line 367: Error: (CSeqMapException::eSeqDataError) Invalid sequence length
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/algo/blast/api/blast_setup_cxx.cpp", line 797: Error: (CSeqMapException::eSeqDataError) BLAST::ncbi::blast::SetupSubjects_OMF() - Invalid sequence length
+

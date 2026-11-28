@@ -161,6 +161,14 @@ impl<'a> V<'a> {
         (0..self.len()).map(move |index| self.int_in(index))
     }
 
+    /// The REAL number.
+    pub(crate) fn real(self) -> f64 {
+        match self.value {
+            Value::Real(x) => *x,
+            other => not_in_table("a REAL", other),
+        }
+    }
+
     /// The string's bytes.
     pub(crate) fn str(self) -> &'a [u8] {
         match self.value {

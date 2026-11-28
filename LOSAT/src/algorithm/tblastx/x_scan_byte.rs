@@ -424,9 +424,13 @@ pub(crate) fn x_count_unit(calls: u64) {
 }
 
 /// The `[X_STATS] TBNSCANBYTE` line (printed by `main` at exit) with `LOSAT_X_STATS`, when the unit
-/// path scanned any unit this way.
+/// path scanned any unit this way (the counters count only with `LOSAT_X_STATS`; the test here is
+/// the one `utils/xexit.rs` asks of every report).
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
+    if !crate::algorithm::tblastx::x_aascan_bf::x_stats() {
+        return;
+    }
     let [units, calls, runs, steps] = COUNTS.each_ref().map(|c| c.load(Ordering::Relaxed));
     let mode = x_scan_byte_if_read();
     if units > 0 {

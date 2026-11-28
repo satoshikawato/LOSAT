@@ -530,6 +530,7 @@ function onList(next: string): void {
         <DatabasePicker
           v-if="field.kind === 'database' && dbOn && model.filteringDb !== undefined"
           :pick="model.filteringDb"
+          :flag="field.flag"
           :molecule-kind="field.database?.kind ?? 'nucleotide'"
           :context-label="field.label"
           :test-id-prefix="id"

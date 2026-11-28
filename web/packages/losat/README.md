@@ -10,7 +10,7 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 16, `docs/web/abi_v2.md` in the repository). A search
+The two builds speak the same ABI (ABI v2 at version 17, `docs/web/abi_v2.md` in the repository). A search
 gets an argv, as on the command line, and FASTA bytes (or `-in_pssm`/`-in_msa` files in the run directory). It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
@@ -27,7 +27,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 16 |
+| 0.2.0 | 0.2.0 | 17 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
@@ -172,9 +172,12 @@ directory, as the command line run from that directory names it (`-db db/nt` rea
 database; files named `db/taxdb.*` give the command line's `N/A` names. The directory is the engine's
 current directory, `/work`: a relative name is a file of it, an absolute one (`/db/nt`) names none, and
 a path is looked up as the OS looks it up (`nofolder/../db/nt` fails), as on the command line run from
-that directory. Such a run has no `subject`, and `engine.start(argv)` says so (`database`). The engine opens the files by those names and reads each in place, only the bytes that
-it needs, with `FileReaderSync` in the workers: a database is never copied into memory or into the
-browser's storage. Every thread of a threaded search reads the same files.
+that directory. Such a run has no `subject`, and `engine.start(argv)` says so (`database`). The engine opens the files by those names and reads each in place with `FileReaderSync` in the
+workers: the bytes that it needs and, for a file read in order, up to 1 MiB ahead (a read of a file costs
+about a millisecond whatever its size, so a file read in small pieces is read in fewer, larger ones). Each
+worker keeps the last 8 MiB that it read, as an OS cache keeps them: bytes read again come from there, and
+each place of a file that is read in order (a database's index is read in two places in turn) is read ahead
+from where its last read ended. A database is never copied whole into memory or into the browser's storage. Every thread of a threaded search reads the same files.
 
 BLASTN's `-filtering_db` (a database of repeats that masks the query) runs the same way, with `-db` or
 with a `-subject`: give the run the repeat database's files (every file of that database, as for `-db`)
@@ -218,10 +221,11 @@ abi.release(subject.handle);
 The package's tests run this example on one of the repository's fixtures (`tests/package.test.ts`):
 its outfmt 6 is byte for byte what NCBI BLAST+ 2.17.0 writes for the same search.
 
-## Running CLI tools (`windowmasker` and `blast_formatter`)
+## Running CLI tools (`windowmasker`, `blast_formatter`, `dustmasker`, `segmasker`, `convert2blastmask`)
 
-`engine.runTool(argv, options)` runs the command line's browser-supported tools (`windowmasker` and `blast_formatter`)
-on the user's files, as the command line runs them in a folder that holds them:
+`engine.runTool(argv, options)` runs the command line's browser-supported tools (`windowmasker`, `blast_formatter`,
+`dustmasker`, `segmasker` and `convert2blastmask` here; `makeblastdb`, which writes its database into the run's directory, in "Running makeblastdb" below) on the user's
+files, as the command line runs them in a folder that holds them:
 
 - `windowmasker` (`losat windowmasker`: `-mk_counts` in each `-sformat`, `-convert`, and the masking of `-ustat` in each
   `-outfmt`, with their options, help and version), reading `-in`, `-ustat`, `-fa_list` and the files it lists, `-ids`,
@@ -230,15 +234,22 @@ on the user's files, as the command line runs them in a folder that holds them:
   format that LOSAT's `blast_formatter` writes, with `-out`, `-max_target_seqs`, `-num_alignments`, `-parse_deflines`,
   help and version; `-rid` is refused), reading `-archive`, any local BLAST database referenced by a `-db` archive, and
   `-conffile` from `options.directory`.
+- `dustmasker` and `segmasker` (`losat dustmasker`, `losat segmasker`: the masking of low-complexity regions of nucleotide
+  and protein sequences in each `-outfmt`, with their options, help and version), reading `-in` (FASTA, or a BLAST database
+  of `-infmt blastdb`) and `-conffile` from `options.directory`.
+- `convert2blastmask` (`losat convert2blastmask`: the lower-case masks of FASTA as masking information in each `-outfmt`,
+  with its options, help and version), reading `-in` and `-conffile` from `options.directory`.
 
-`argv[0]` is the tool name (`windowmasker` or `blast_formatter`), then the command line's words. `options.directory` holds
+The outputs of `-outfmt maskinfo_asn1_bin` and `maskinfo_asn1_text` are the files that `makeblastdb -mask_data` reads.
+
+`argv[0]` is the tool name (`windowmasker`, `blast_formatter`, `dustmasker`, `segmasker` or `convert2blastmask`), then the command line's words. `options.directory` holds
 the files that the words name, each a `DirectoryFile` that the engine reads in place, as for a search of `-db` (above). A
 folder of the directory opens as it does on Linux, and a read of it fails: `-in <folder>` ends as the command line does,
 with "Is a directory". The promise resolves with the command line's
 exit status (`status`, whatever it is) and what the tool wrote: `stdout`, `stderr` and `files` (`-out FILE`, `-logfile FILE`,
 in the order the run opened them, under the command line's file name: `x.counts` for `./x.counts`, `logs` for `-logfile logs/`,
 `sub/x` when `sub` is a folder of the directory; `-logfile /dev/stdout` writes diagnostic messages into `stdout` in the command
-line's order, and a `-logfile` naming an existing file or an input the run opens or checks for reading (including `windowmasker`'s `-fa_list true` entries and `-infmt blastdb` database lookup files, or `blast_formatter`'s `-archive`), or a `-out` naming an existing file or a missing input that the command line reads after opening `-out` (`-in` of `-mk_counts`, including `-fa_list true` entries and `-infmt blastdb` lookup files, and `-ustat` of masking), is refused with status 1). The status is the command line's: an argument error and a refusal by LOSAT are status 1, NCBI's exceptions
+line's order, and a `-logfile` naming an existing file or an input the run opens or checks for reading (including `windowmasker`'s `-fa_list true` entries and `-infmt blastdb` database lookup files, or `blast_formatter`'s `-archive`, or the `-in` of a masking tool), or a `-out` naming an existing file or a missing input that the command line reads after opening `-out` (`-in` of `-mk_counts`, including `-fa_list true` entries and `-infmt blastdb` lookup files, `-ustat` of masking, and `dustmasker`'s `-in`), is refused with status 1). The status is the command line's: an argument error and a refusal by LOSAT are status 1, NCBI's exceptions
 (a missing file, a bad counts file) are status 3, a `-conffile` that is not there is status 255, and a registry file that is
 malformed (a `-conffile`, or a `windowmasker.ini` / `blast_formatter.ini` in the directory, with a bad section or entry line) is status 2; their text
 is on `stderr`, but with `-logfile FILE` NCBI's report is in that file, as it is on the command line. `stderr` arrives as
@@ -348,6 +359,50 @@ again.", and the next run starts a new worker.
 `[tool, '-xmlhelp']` (on the control reactor when `reactorControl` provides it, else through `runTool`) and parsing the
 XML with `parseToolDescription`. `parseToolDescription(xml)` is also exported from `losat` and `losat/domain` and needs
 no `DOMParser`, so it works in workers and in Node.
+
+## Running makeblastdb
+
+`engine.runTool(['makeblastdb', ...words], options)` runs the command line's `makeblastdb` (`losat makeblastdb`, with every
+option: nucleotide and protein, BLAST database versions 4 and 5, `-parse_seqids`, `-hash_index`, volumes of `-max_file_sz`,
+`-mask_data`, `-gi_mask`, `-taxid`, `-taxid_map`, `-input_type` fasta, blastdb, asn1_txt and asn1_bin, gzip input, `-logfile`,
+help and version) on the files of `options.directory`, and writes the same bytes as the command line. The run's directory
+is the command line's working directory, and it is writable for a tool's run: the database's files go into it as the
+command line writes them, the run reads them back, renames and removes files (a run that replaces a database of
+`directory` removes the old volumes), and makes the folders of `-out sub/dir/db`. What it writes is kept in the Engine
+worker's memory, and the user's files (the Blobs of `directory`) are never changed. When the run has ended, the files that
+it made or changed and that are still there come to `sinks.onFile`, or to `files` as Blobs, in the byte order of their
+names: a file that the run removed never arrives, nor does a file of `directory` that it left as it was. The standard
+input is empty (`-in -` reads no sequence, as the command line with `< /dev/null`).
+
+The dates that the database holds (the index files' "Nov 27, 2026  12:23 AM", an alias file's "Alias file created", the
+mask column's and the report's dates) are the user's local time, as on the user's machine: the host gives the engine the
+browser's time zone (`Intl`) as a POSIX `TZ` rule of the current year, with its summer time, made at the start of each
+run, so a zone that the user changed since an earlier run is the new run's.
+
+`-logfile` writes where the command line writes it: a file of `directory` (made or appended to, then a file of the run),
+`/dev/stdout` and `/dev/stderr` among the run's standard output and error, `/dev/null` nowhere, and a file outside
+`directory` (`/tmp/mk.log`) as a file of the run under that path; a name that does not open (a missing folder, a folder)
+leaves the messages on the standard error, as on the command line.
+
+```ts
+import { WasmEngine } from 'losat';
+
+declare const engine: WasmEngine; // as in "Use"
+declare const proteins: File; // a FASTA file, from a file picker
+
+const argv = ['makeblastdb', '-in', 'proteins.faa', '-dbtype', 'prot', '-parse_seqids', '-out', 'proteins'];
+const directory = [{ name: 'proteins.faa', file: proteins }];
+const { status, stdout, stderr, files } = await engine.runTool(argv, { directory });
+if (status !== 0) throw new Error(await stderr.text());
+console.log(await stdout.text()); // "Building a new DB, current time: ..." and the counts, as the command line prints them
+// files: proteins.pdb, proteins.phr, proteins.pin, ... (a Blob each, by name). Each is a `DirectoryFile`, so a search
+// of `-db proteins` takes them as they are (`EngineRunRequest.files`, in "Databases"), as does another tool's `directory`.
+```
+
+`engine.validateTool(argv, { directory })` makes the command line's checks of the words that come before its run starts:
+an option that is not known, a missing `-dbtype`, a `-dbtype` that is not `nucl` or `prot`, and the registry files of the
+directory. The errors that the command line reports once it has started (a missing `-in`, a mask file that cannot be read)
+are the run's: `runTool` returns them as the command line does.
 
 ## License
 

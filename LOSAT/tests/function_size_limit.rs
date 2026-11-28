@@ -14,6 +14,8 @@
 //! (`rust_fns.py`, outside the repository): a function made by a macro (`fn $name`), with a
 //! non-ASCII name or with a brace in its signature (`-> [u8; { N }]`) is not measured, and a test
 //! attribute on a macro call with a path (`crate::m! { .. }`) covers the code up to the next `;`.
+//! `exit_reports.rs` reads the source with the same helpers (`read_rust_files`, `mask`, `closers`,
+//! `fn_item`, `ident`, `literal_end`, `word_before`).
 //!
 //! No NCBI counterpart: the test reads LOSAT's own source; NCBI BLAST+ has no such check.
 
@@ -99,7 +101,7 @@ fn scan_tree(src: &Path) -> Vec<Function> {
 }
 
 /// The `.rs` files below `dir`: (path below `src`, text).
-fn read_rust_files(dir: &Path, rel: &str, out: &mut Vec<(String, Vec<u8>)>) {
+pub(super) fn read_rust_files(dir: &Path, rel: &str, out: &mut Vec<(String, Vec<u8>)>) {
     for entry in or_panic(fs::read_dir(dir), dir) {
         let entry = or_panic(entry, dir);
         let (path, rel) = (
@@ -325,7 +327,7 @@ fn normalize(path: &str) -> String {
 }
 
 /// `src` with every comment and literal turned into spaces, newlines kept.
-fn mask(src: &[u8]) -> Vec<u8> {
+pub(super) fn mask(src: &[u8]) -> Vec<u8> {
     let (mut m, mut i) = (src.to_vec(), 0);
     while i < src.len() {
         let Some(end) = literal_end(src, i) else {
@@ -344,7 +346,7 @@ fn mask(src: &[u8]) -> Vec<u8> {
 /// The end of the comment or literal that starts at `i`, tried in this order: line comment, block
 /// comment (nested), raw string (`r`, `br`, `cr`, any number of `#`), string (plain, `b`, `c`),
 /// character or byte literal. A literal's prefix must not end an identifier.
-fn literal_end(s: &[u8], i: usize) -> Option<usize> {
+pub(super) fn literal_end(s: &[u8], i: usize) -> Option<usize> {
     let (rest, n) = (&s[i..], s.len());
     let prefix_ok = i == 0 || !(s[i - 1].is_ascii_alphanumeric() || s[i - 1] == b'_');
     if rest.starts_with(b"//") {
@@ -403,7 +405,7 @@ fn find(s: &[u8], from: usize, pattern: &[u8]) -> Option<usize> {
 }
 
 /// For each `{`, `(` and `[` of `m`, the offset of the one that closes it (`u32::MAX`: none).
-fn closers(m: &[u8]) -> Vec<u32> {
+pub(super) fn closers(m: &[u8]) -> Vec<u32> {
     let (mut close, mut open) = (vec![u32::MAX; m.len()], [vec![], vec![], vec![]]);
     for (i, b) in m.iter().enumerate() {
         if let Some(kind) = b"{([".iter().position(|o| o == b) {
@@ -437,12 +439,12 @@ fn skip_ws(m: &[u8], mut i: usize) -> usize {
     i
 }
 
-fn word_before(m: &[u8], i: usize) -> bool {
+pub(super) fn word_before(m: &[u8], i: usize) -> bool {
     i > 0 && (m[i - 1].is_ascii_alphanumeric() || m[i - 1] == b'_' || m[i - 1] >= 0x80)
 }
 
 /// The identifier at `i` (empty when none starts there).
-fn ident(m: &[u8], i: usize) -> &[u8] {
+pub(super) fn ident(m: &[u8], i: usize) -> &[u8] {
     let rest = m.get(i..).unwrap_or(&[]);
     if rest.first().is_some_and(u8::is_ascii_digit) {
         return &[];
@@ -456,7 +458,7 @@ fn string(bytes: &[u8]) -> String {
 }
 
 /// The `fn` item whose keyword is at `i`: its name and the offset of its body's closing brace.
-fn fn_item<'m>(m: &'m [u8], close: &[u32], i: usize) -> Option<(&'m [u8], usize)> {
+pub(super) fn fn_item<'m>(m: &'m [u8], close: &[u32], i: usize) -> Option<(&'m [u8], usize)> {
     let j = skip_ws(m, i + 2);
     let raw = 2 * usize::from(m[j..].starts_with(b"r#"));
     let name = ident(m, j + raw);

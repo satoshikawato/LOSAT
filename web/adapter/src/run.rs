@@ -452,6 +452,78 @@ pub fn keeps_whole_records(words: &[&str]) -> bool {
     })
 }
 
+/// Makes the process's environment the one that the host gives at this call (WASI's
+/// `environ_get`), at the start of each run (`losat_web2_run` and `losat_web2_tool`): the host may
+/// change `TZ` between runs, and a run reads it at its start, as a command line started then
+/// reads its environment (docs/web/abi_v2.md §3; line NP WW4b1 R2, finding 5, 2026-11-28). The C
+/// library reads WASI's environment once per instance, at its first use; this reads it again, and
+/// what the instance's threads read is this environment (one per instance). Variables that the
+/// host no longer gives are removed. Nothing on other targets, whose environment is the process's.
+pub fn read_host_environment() {
+    #[cfg(target_os = "wasi")]
+    {
+        let Some(given) = host_environment() else {
+            return;
+        };
+        let given: Vec<(std::ffi::OsString, std::ffi::OsString)> = given
+            .iter()
+            .filter_map(|entry| {
+                let at = entry.iter().position(|&byte| byte == b'=')?;
+                let text = |bytes: &[u8]| {
+                    std::str::from_utf8(bytes)
+                        .ok()
+                        .map(std::ffi::OsString::from)
+                };
+                Some((text(&entry[..at])?, text(&entry[at + 1..])?))
+            })
+            .filter(|(key, _)| !key.is_empty())
+            .collect();
+        for (key, _) in std::env::vars_os() {
+            if !given.iter().any(|(named, _)| *named == key) {
+                std::env::remove_var(key);
+            }
+        }
+        for (key, value) in given {
+            if std::env::var_os(&key).as_ref() != Some(&value) {
+                std::env::set_var(key, value);
+            }
+        }
+    }
+}
+
+/// The entries `NAME=value` of the environment that the host gives at this call (WASI's
+/// `environ_sizes_get` and `environ_get`, which the C library calls once per instance); `None`
+/// where the host refuses it.
+#[cfg(target_os = "wasi")]
+fn host_environment() -> Option<Vec<Vec<u8>>> {
+    #[link(wasm_import_module = "wasi_snapshot_preview1")]
+    extern "C" {
+        #[link_name = "environ_sizes_get"]
+        fn wasi_environ_sizes_get(count: *mut usize, size: *mut usize) -> i32;
+        #[link_name = "environ_get"]
+        fn wasi_environ_get(environ: *mut *mut u8, buffer: *mut u8) -> i32;
+    }
+    let (mut count, mut size) = (0usize, 0usize);
+    // SAFETY: the two pointers are to this frame's integers, which the host writes.
+    if unsafe { wasi_environ_sizes_get(&mut count, &mut size) } != 0 {
+        return None;
+    }
+    let mut pointers = vec![std::ptr::null_mut::<u8>(); count];
+    let mut buffer = vec![0u8; size];
+    // SAFETY: `pointers` has room for `count` pointers and `buffer` for `size` bytes, the sizes
+    // that the host gave for the environment it writes (one host call apart, the same).
+    if unsafe { wasi_environ_get(pointers.as_mut_ptr(), buffer.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    Some(
+        buffer
+            .split(|&byte| byte == 0)
+            .take(count)
+            .map(<[u8]>::to_vec)
+            .collect(),
+    )
+}
+
 /// The run's working directory: the name under which the host preopens it (docs/web/abi_v2.md §3),
 /// and the module's current directory. A relative name of the argv (`-db db/nt`) is a file of it, as
 /// on the command line run from that directory; an absolute one (`/db/nt`) names a file outside it,

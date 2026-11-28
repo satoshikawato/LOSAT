@@ -13,7 +13,7 @@ import { test } from './support/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { navigate } from './support/navigate';
-import { chooseRun, fasta, openFiles, openParameters, pickRun, program, showRecords, submit, task, waitStatus } from './support/search';
+import { chooseRun, described, fasta, openFiles, openParameters, pickRun, program, showRecords, submit, task, waitStatus } from './support/search';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
 test.skip(SCREENS === undefined, 'screen records are taken only with LOSAT_WEB_SCREENS');
@@ -452,7 +452,7 @@ for (const size of SIZES) {
     await navigate(page, '/');
     await expect(page.getByTestId('storage-status')).toBeAttached();
     await showWmTab(page);
-    await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+    await described(page, 'wm-panel', 'ready');
 
     const dm60k = readFileSync(join(REPOSITORY, 'LOSAT/tests/winmask/fasta/dm2L_60k.fa'));
     const multi = readFileSync(join(REPOSITORY, 'LOSAT/tests/windowmasker/in/multi.fa'));

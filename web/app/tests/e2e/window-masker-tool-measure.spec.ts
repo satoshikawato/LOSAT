@@ -17,7 +17,7 @@ import { test } from './support/test';
 import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { openSearch, pickRun, waitStatus } from './support/search';
+import { described, openSearch, pickRun, waitStatus } from './support/search';
 
 const MEASURE = process.env['LOSAT_WEB_MEASURE'] === '1';
 const MIB = 1024 * 1024;
@@ -169,7 +169,7 @@ test.describe('WindowMasker -mk_counts -sformat obinary local measurements', () 
 
       await openSearch(page);
       await page.getByTestId('tab-windowmasker').click();
-      await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+      await described(page, 'wm-panel', 'ready');
       await page.getByTestId('wm-stage-mk_counts').check();
       await page.getByTestId('wm-param-sformat').selectOption('obinary');
       await expect(page.getByTestId('wm-out')).toHaveValue('wmasker.obinary');

@@ -513,46 +513,10 @@ fn run_main_entry() -> Result<()> {
             }
         }
     }
-    // Diagnostic (LOSAT_X_REACH): the sides the conditional switches took (utils/xreach.rs). No
-    // NCBI counterpart; it writes only with LOSAT_X_REACH.
-    crate::utils::xreach::write_report();
-    crate::utils::xstats::print();
-    crate::core::composition_adjustment::adjust_scores::x_adjmemo_print_stats();
-    crate::core::composition_adjustment::adjust_scores::x_newtonexact_print_stats();
-    crate::algorithm::tblastx::x_seed_bucket::print_summary();
-    crate::algorithm::tblastx::blast_engine::x_pair_par_print_summary();
-    crate::algorithm::tblastx::blast_engine::x_seed_release_print_summary();
-    crate::algorithm::tblastx::sum_stats_linking::x_hsp_inplace_print_summary();
-    crate::algorithm::tblastx::sum_stats_linking::x_link_sort_print_summary();
-    crate::algorithm::tblastx::sum_stats_linking::x_link_slices_print_summary();
-    crate::algorithm::tblastn::x_subject_translate_print_summary();
-    crate::algorithm::tblastn::x_subject_store_print_summary();
-    crate::algorithm::tblastn::x_scan_bf_print_summary();
-    crate::algorithm::tblastn::x_scan_byte_print_summary();
-    crate::algorithm::tblastn::x_lut_lean_print_summary();
-    crate::algorithm::tblastn::x_link_window_print_summary();
-    crate::algorithm::tblastn::x_link_ctx_print_summary();
-    crate::algorithm::blastn::x_subject_store_print_summary();
-    crate::algorithm::blastn::x_query_dust_par_print_summary();
-    crate::algorithm::blastn::x_greedy_row_print_summary();
-    crate::algorithm::blastn::blast_engine::x_query_prep_par_print_summary();
-    crate::algorithm::blastn::blast_engine::x_qgroup_par_print_summary();
-    crate::algorithm::blastn::blast_engine::x_tb_range_print_summary();
-    crate::algorithm::blastn::blast_engine::x_lut_drop_print_summary();
-    crate::algorithm::blastn::blast_engine::x_query_drop_print_summary();
-    crate::algorithm::blastp::x_bp_hit_bf_print_summary();
-    crate::algorithm::blastp::x_bp_flat_print_summary();
-    crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();
-    crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_clutpairs_print_summary();
-    crate::algorithm::blastp::x_bp_lkp_ahead_print_summary();
-    crate::algorithm::blastp::x_restricted_gap_print_summary();
-    crate::algorithm::blastn::lookup::x_disc_lookup_par::print_summary();
-    crate::algorithm::blastn::lookup::x_dc_csr::print_summary();
-    crate::algorithm::blastn::lookup::x_mb_lookup_print_summary();
-    crate::algorithm::blastx::seed::x_seed_scan::print_shadow_stats();
-    crate::utils::x_logclone::print_shadow_stats();
-    // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).
-    crate::utils::xtiming::print();
+    // Diagnostics (LOSAT_X_STATS, LOSAT_TIMING, LOSAT_X_REACH and the others of `utils/xexit.rs`):
+    // the reports of the run's end, written only where a variable asks for one. No NCBI
+    // counterpart.
+    crate::utils::xexit::write();
     Ok(())
 }
 

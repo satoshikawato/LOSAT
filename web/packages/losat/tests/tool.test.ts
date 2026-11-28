@@ -384,12 +384,12 @@ function fakeEngine(options: { tool?: (emit: Emit, argv: string[]) => number; va
 }
 
 describe('ReactorAbi.tool and validateTool', () => {
-  it('speaks ABI version 17 and the module check wants losat_web2_tool', () => {
-    expect(ABI_VERSION).toBe(17);
+  it('speaks ABI version 18 and the module check wants losat_web2_tool', () => {
+    expect(ABI_VERSION).toBe(18);
     expect(ABI_EXPORTS).toContain('losat_web2_tool');
   });
 
-  it('leads the argv of every call with BLASTDB=<folder> while the run has a BLASTDB (ABI v2 §7, version 17), and with nothing after it', () => {
+  it('leads the argv of every call with BLASTDB=<folder> while the run has a BLASTDB (ABI v2 §7, version 18), and with nothing after it', () => {
     const { abi, log } = fakeEngine({ validate: (emit) => (emit(2, encode('{"data_loaders":true}')), 0) });
     abi.validate(['blastn', '-db', 'nuc5/nuc5']);
     abi.blastdb = 'nuc5';
@@ -1352,9 +1352,112 @@ describe.skipIf(REACTORS === undefined)('blast_formatter through the host', () =
     expect(emptyRidRun.status).toBe(3);
     expect(await emptyRidRun.stderr.text()).toBe('LOSAT engine error: Empty RID string specified\n');
 
-    // Overwriting an existing run-directory file with -out or -logfile is refused.
-    const overwrite = abi.validateTool(['blast_formatter', '-archive', 'in/bn.asn', '-outfmt', '8', '-out', 'in/bn.asn']);
-    expect(overwrite.ok).toBe(false);
-    expect(!overwrite.ok && overwrite.message).toContain("in/bn.asn");
+    // Overwriting an existing run-directory file with -out is refused by the run, when it reaches -out (after it has
+    // read the archive's first search, which may fail first with NCBI's error); the check leaves it to the run, so
+    // that both give the command line's first error (review of WW4c, F1).
+    const overwriteArgv = ['blast_formatter', '-archive', 'in/bn.asn', '-outfmt', '8', '-out', 'in/bn.asn'];
+    expect(abi.validateTool(overwriteArgv)).toEqual({ ok: true });
+    const overwrite = await run(overwriteArgv);
+    expect(overwrite.status).toBe(1);
+    expect(await overwrite.stderr.text()).toContain("an output file 'in/bn.asn' that is a file of the run's directory");
+  }, 120_000);
+});
+
+// dustmasker, segmasker and convert2blastmask (line NP WW4c, 2026-11-28): the package runs them as any tool, by name; the
+// bytes are NCBI BLAST+ 2.17.0's of the same words (LOSAT/tests/<tool>/ncbi/<row>.{out,err,rc}, the rows of cases.tsv).
+describe.skipIf(REACTORS === undefined)('the masking tools through the host', () => {
+  const rows = [
+    { tool: 'dustmasker', row: 'basic_maskinfo_asn1_bin', words: ['-in', 'in/basic.fa', '-outfmt', 'maskinfo_asn1_bin'] },
+    { tool: 'segmasker', row: 'basic_maskinfo_asn1_text', words: ['-in', 'in/basic.fa', '-outfmt', 'maskinfo_asn1_text'] },
+    { tool: 'convert2blastmask', row: 'lc_txt', words: ['-in', 'in/lc.fa', '-masking_algorithm', 'dust', '-masking_options', 'o'] },
+  ] as const;
+  for (const { tool, row, words } of rows) {
+    it(`${tool}: describes its options, writes NCBI's bytes to the standard output and to -out, and refuses as the command line`, async () => {
+      const { module } = await compileReactor(readFileSync(join(REACTORS!, 'losat-web-serial.wasm')));
+      const dir = join(LOSAT, 'tests', tool);
+      const input = words[1];
+      const path = join(dir, input);
+      const blob = await openAsBlob(path);
+      const directory = new RunDirectory(undefined, (file, start, end) => {
+        expect(file).toBe(blob);
+        const bytes = new Uint8Array(end - start);
+        const descriptor = openSync(path, 'r');
+        try {
+          return bytes.subarray(0, readSync(descriptor, bytes, 0, bytes.length, start));
+        } finally {
+          closeSync(descriptor);
+        }
+      });
+      const { abi } = await instantiateSerial(module, directory);
+      const run = async (argv: string[]) => {
+        const router = new ToolOutputRouter(undefined, (error) => {
+          throw error;
+        });
+        const status = abi.tool(argv, {
+          stdout: (bytes) => router.stdout(bytes.slice()),
+          stderr: (bytes) => router.stderr(bytes.slice()),
+          file: (parsed) => router.frame(ownedFrame(parsed)),
+        });
+        return { status, ...(await router.finish()) };
+      };
+      directory.open([{ name: input, file: blob }]);
+      const ncbi = (suffix: string) => readFileSync(join(dir, 'ncbi', `${row}.${suffix}`));
+
+      const described = await run([tool, '-xmlhelp']);
+      expect(described.status).toBe(0);
+      const description = parseToolDescription(await described.stdout.text());
+      expect(description.tool).toBe(tool);
+      expect(description.parameters.map((param) => param.flag)).toEqual(expect.arrayContaining(['-in', '-out', '-outfmt', '-parse_seqids']));
+
+      const argv = [tool, ...words];
+      expect(abi.validateTool(argv)).toEqual({ ok: true });
+      const printed = await run(argv);
+      expect(printed.status).toBe(Number(ncbi('rc').toString().trim()));
+      expect(Buffer.from(await printed.stdout.arrayBuffer()).equals(ncbi('out')), `${tool} ${row} stdout`).toBe(true);
+      expect(Buffer.from(await printed.stderr.arrayBuffer()).equals(ncbi('err')), `${tool} ${row} stderr`).toBe(true);
+
+      const written = await run([...argv, '-out', 'mask.out', '-logfile', 'run.log']);
+      expect(written.status).toBe(0);
+      expect(written.stdout.size).toBe(0);
+      expect(written.files.map((file) => file.name)).toEqual(['run.log', 'mask.out']);
+      const file = written.files.find((entry) => entry.name === 'mask.out')!.file;
+      expect(Buffer.from(await file.arrayBuffer()).equals(ncbi('out')), `${tool} ${row} -out`).toBe(true);
+
+      // An -out that names a file of the run's directory is LOSAT Web's refusal, at the check and at the run.
+      const existing = [...argv, '-out', input];
+      const verdict = abi.validateTool(existing);
+      expect(verdict.ok).toBe(false);
+      expect(!verdict.ok && verdict.message).toContain(`an output file '${input}'`);
+      const refused = await run(existing);
+      expect(refused.status).toBe(1);
+      expect(refused.files).toEqual([]);
+      expect(await refused.stderr.text()).toContain(`an output file '${input}'`);
+    }, 120_000);
+  }
+
+  it("convert2blastmask without -masking_algorithm: the command line's exit status and text, at the check and at the run", async () => {
+    const { module } = await compileReactor(readFileSync(join(REACTORS!, 'losat-web-serial.wasm')));
+    const { abi } = await instantiateSerial(module, new RunDirectory(undefined, () => new Uint8Array(0)));
+    const argv = ['convert2blastmask', '-in', 'in/lc.fa', '-masking_options', 'o'];
+    // NCBI's record (LOSAT/tests/convert2blastmask/ncbi/noalgo.err) in LOSAT's words (losat::wording, which the command
+    // line's own test applies): the usage of NCBI's text, then the error without NCBI's exception class.
+    const ncbi = readFileSync(join(LOSAT, 'tests/convert2blastmask/ncbi/noalgo.err')).toString();
+    const verdict = abi.validateTool(argv);
+    expect(verdict.ok).toBe(false);
+    const message = verdict.ok ? '' : verdict.message;
+    expect(message.startsWith(ncbi.slice(0, ncbi.indexOf('Error:')))).toBe(true);
+    expect(message).toContain('Error:  Argument "masking_algorithm". Mandatory value is missing:  `String\'');
+    const router = new ToolOutputRouter(undefined, (error) => {
+      throw error;
+    });
+    const status = abi.tool(argv, {
+      stdout: (bytes) => router.stdout(bytes.slice()),
+      stderr: (bytes) => router.stderr(bytes.slice()),
+      file: (parsed) => router.frame(ownedFrame(parsed)),
+    });
+    const result = await router.finish();
+    expect(status).toBe(Number(readFileSync(join(LOSAT, 'tests/convert2blastmask/ncbi/noalgo.rc')).toString().trim()));
+    // The check's text is the run's standard error without its last line end (abi_v2.md §4).
+    expect(await result.stderr.text()).toBe(`${message}\n`);
   }, 120_000);
 });

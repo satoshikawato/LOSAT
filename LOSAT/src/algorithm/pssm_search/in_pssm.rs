@@ -337,37 +337,79 @@ pub(crate) fn read_in_pssm(
     psi_search_and_object(pssm, reader)
 }
 
-/// `CPsiBlastValidate::Pssm`'s error for `pssm`, which NCBI raises (`CBlastException`, "BLAST
-/// engine error") when the search is made, after the outfmt 0 prolog.
+/// What `CPsiBlastValidate::Pssm` reads of a `PssmWithParameters` (`require_scores` false), from
+/// the typed PSSM of `-in_pssm` (`PssmChecks::of`) or from the PSSM of an archive's results that
+/// `blast_formatter -outfmt 11` writes back (`blast_formatter::archive_out`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PssmChecks {
+    /// `CanGetPssm`.
+    pub(crate) has_pssm: bool,
+    /// No `finalData`, no `scores`, or no score.
+    pub(crate) missing_scores: bool,
+    /// No `intermediateData`, no `freqRatios`, or no ratio.
+    pub(crate) missing_freq_ratios: bool,
+    /// `finalData.scalingFactor` (`None`: its default 1).
+    pub(crate) scaling_factor: Option<i64>,
+    /// `HasQuery`, and whether the query is the `seq` variant (`IsSeq`).
+    pub(crate) query_is_seq: Option<bool>,
+    /// `isProtein` (default TRUE).
+    pub(crate) is_protein: bool,
+}
+
+impl PssmChecks {
+    /// The checks of the typed PSSM `pssm`.
+    pub(crate) fn of(pssm: &PssmWithParameters) -> Self {
+        let final_data = pssm.pssm.final_data.as_ref();
+        Self {
+            has_pssm: true,
+            missing_scores: final_data.is_none_or(|data| data.scores.is_empty()),
+            missing_freq_ratios: pssm
+                .pssm
+                .intermediate_data
+                .as_ref()
+                .is_none_or(|data| data.freq_ratios.is_empty()),
+            scaling_factor: final_data
+                .and_then(|data| data.scaling_factor)
+                .map(i64::from),
+            query_is_seq: pssm
+                .pssm
+                .query
+                .as_ref()
+                .map(|query| matches!(query, SeqEntry::Seq(_))),
+            is_protein: pssm.pssm.is_protein != Some(false),
+        }
+    }
+}
+
+/// `CPsiBlastValidate::Pssm`'s error for the PSSM of `checks` (`require_scores` false), which NCBI
+/// raises as a `CBlastException` ("BLAST engine error"): psiblast's and tblastn's `-in_pssm` when the
+/// search is made, after the outfmt 0 prolog (their query checks are never reached there: the
+/// application reads the query of the PSSM before, `psi_search_and_object`), and blast_formatter's
+/// `BlastBuildArchive` of a PSSM search's archive.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:569-625
-/// (The query checks between them are never reached from psiblast's application, which reads
-/// the query of the PSSM before; LOSAT refuses those PSSMs, `psi_search_of`.)
-fn validation_error(pssm: &PssmWithParameters) -> Option<String> {
-    let scores = pssm.pssm.final_data.as_ref().map(|data| &data.scores);
-    let missing_scores = scores.is_none_or(|scores| scores.is_empty());
-    let missing_freq_ratios = pssm
-        .pssm
-        .intermediate_data
-        .as_ref()
-        .is_none_or(|data| data.freq_ratios.is_empty());
-    if missing_freq_ratios && missing_scores {
+pub(crate) fn validation_error(checks: &PssmChecks) -> Option<String> {
+    if !checks.has_pssm {
+        return Some("Missing PSSM data".to_string());
+    }
+    if checks.missing_freq_ratios && checks.missing_scores {
         return Some("PSSM data must contain either scores or frequency ratios".to_string());
     }
-    if !missing_scores {
-        if let Some(factor) = pssm
-            .pssm
-            .final_data
-            .as_ref()
-            .and_then(|data| data.scaling_factor)
-            .filter(|&factor| factor != 1)
-        {
+    if !checks.missing_scores {
+        if let Some(factor) = checks.scaling_factor.filter(|&factor| factor != 1) {
             return Some(format!(
                 "PSSM has a scaling factor of {factor}. PSI-BLAST does not accept scaled PSSMs"
             ));
         }
     }
-    if pssm.pssm.is_protein == Some(false) {
+    match checks.query_is_seq {
+        None => return Some("Missing query sequence in PSSM".to_string()),
+        Some(false) => {
+            return Some("Query sequence in ASN.1 PSSM is not a single Bioseq".to_string())
+        }
+        Some(true) => {}
+    }
+    if !checks.is_protein {
         return Some("PSSM does not represent protein scoring matrix".to_string());
     }
     None
@@ -517,6 +559,7 @@ fn stopped_as_query_joins_scope(
         setup_messages: Vec::new(),
         warning_title: Some(Vec::new()),
         request: None,
+        request_refusal: None,
         archive_pssm: None,
         archive_matrix_name_unwritable: false,
         annot,
@@ -678,7 +721,7 @@ pub(crate) fn psi_search_and_object_of(
             "a PSSM query whose Seq-data is {name} (LOSAT's PSSM search reads iupacaa, ncbieaa and ncbistdaa)"
         )));
     }
-    let validation_error = validation_error(&pssm);
+    let validation_error = validation_error(&PssmChecks::of(&pssm));
     // A PSSM of frequency ratios only: NCBI computes its scores with the PSSM engine
     // (`x_CreatePssmScoresFromFrequencyRatios`, below).
     let scores: &[i32] = match pssm.pssm.final_data.as_ref() {
@@ -1050,7 +1093,7 @@ pub(crate) fn psi_search_and_object_of(
     // for a request that NCBI writes (a PSSM that NCBI's check refuses writes none; one whose
     // scores the engine cannot compute is written first), with every member it read (the PSSM
     // writer writes them all, `report::serial::pssm`).
-    let request = (super::pssm_request_written(reader.strategy, reader.database)
+    let mut request = (super::pssm_request_written(reader.strategy, reader.database)
         && validation_error.is_none())
     .then(|| PssmQueryRequest {
         pssm: std::sync::Arc::new(pssm.clone()),
@@ -1058,20 +1101,25 @@ pub(crate) fn psi_search_and_object_of(
     // NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
     // That ASN.1 text write reads each delay buffer of another format (`CDelayBuffer::Update`):
     // one whose read fails stops NCBI with its exception after part of the strategy file (rc
-    // 255; line RG-F3, PR 2: probe AR5 SO), refused before any output as `-out_pssm` refuses it
-    // (`algorithm::psiblast::in_pssm_files`).
-    if let Some(request) = &request {
-        let text = crate::report::archive::ArchiveEncoding::Text;
-        // (A list element stated as NULL is written: the strategy's writer throws where NCBI's
-        // stream does, `report::serial::encoder::NullElement`.)
-        if crate::report::archive::pssm_unwritten(text, &request.pssm)
-            == Some(crate::report::archive::PssmGap::ReadAgain)
-        {
-            return Err(reader.refuse(
+    // 255; line RG-F3, PR 2: probe AR5 SO). NCBI starts that write after the outfmt 0 prolog
+    // (NCBI BLAST+ 2.17.0: psiblast's 1,021 bytes and tblastn's 379 of rows
+    // `db.xml.ps.dl_ovf.strat` and `db.xml.tbn.dl_ovf.strat`), where LOSAT refuses the request
+    // (`PssmQueryStop::RequestRefused`) and writes none. (A list element stated as NULL is
+    // written: the strategy's writer throws where NCBI's stream does,
+    // `report::serial::encoder::NullElement`.)
+    let request_refusal = request
+        .take_if(|request| {
+            crate::report::archive::pssm_unwritten(
+                crate::report::archive::ArchiveEncoding::Text,
+                &request.pssm,
+            ) == Some(crate::report::archive::PssmGap::ReadAgain)
+        })
+        .map(|_| {
+            reader.refuse(
                 "-export_search_strategy with a PSSM whose author names (a member read into a delay buffer of another format) NCBI reads again with an error (NCBI BLAST+ writes part of the file and stops with a C++ exception)",
-            ));
-        }
-    }
+            )
+            .to_string()
+        });
     let search = PsiSearch {
         pssm: QueryPssm { rows },
         freq_ratios,
@@ -1085,6 +1133,7 @@ pub(crate) fn psi_search_and_object_of(
         setup_messages: Vec::new(),
         warning_title: Some(warning_title),
         request,
+        request_refusal,
         archive_pssm: None,
         archive_matrix_name_unwritable: false,
         annot,

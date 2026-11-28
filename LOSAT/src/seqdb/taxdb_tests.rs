@@ -1032,10 +1032,10 @@ fn read_paths_are_the_places_that_the_run_looks_at_up_to_the_one_found() {
     let search = SearchPath::new(&cwd, Some(dir.as_os_str()), None);
     let bytes = |path: PathBuf| path.into_os_string().into_encoded_bytes();
     let at = |root: &Path, name: &str| bytes(root.join(name));
-    let search_use = DbUse::search("blastp");
-    let mut every_taxid = DbUse::search("blastp");
+    let search_use = DbUse::of_program("blastp");
+    let mut every_taxid = DbUse::of_program("blastp");
     every_taxid.note_every_taxid();
-    let mut filtered = DbUse::search("blastp");
+    let mut filtered = DbUse::of_program("blastp");
     filtered.note_option("taxids");
     let mut kept = filtered;
     kept.note_flag("no_taxid_expansion");

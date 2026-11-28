@@ -62,6 +62,11 @@ export interface StartInfo {
    * working tree, `/dev/stdout` for `/dev/stdout`; null where `-logfile` never makes a file).
    */
   readonly logFileName?: string | null;
+  /**
+   * The command line's file name under which a run gives the `-export_search_strategy` file on stream 8, if it makes
+   * one (`s.asn` for `s.asn`, `./s.asn`, `in/../s.asn` and `/proc/self/cwd/s.asn`, `/tmp/s.asn` outside the working
+   * tree; line RG item F1w-r2, as `outPssm`); null where no run of the argv makes a file (`/dev/null`, `/etc/s.asn`).
+   */
   readonly strategyFile: string | null;
   readonly dryRun: boolean;
   /**
@@ -231,7 +236,7 @@ export interface EngineRunRequest {
   /**
    * The folder that the run's `BLASTDB` names, as the command that the application shows writes it (`BLASTDB=<folder>
    * losat ...`): a folder of `files` whose `taxdb.*` and `taxonomy4blast.sqlite3` the engine finds there, as the command
-   * line finds them, and nowhere else in the run's directory (ABI v2 §7, version 17).
+   * line finds them, and nowhere else in the run's directory (ABI v2 §7, version 18).
    */
   readonly blastdb?: string;
   readonly requestedThreads: number | 'auto';
@@ -431,6 +436,13 @@ export interface ToolSinks {
    * The run opens a file named `name`: returns the sink of its bytes, or undefined to have the file collected as a Blob
    * in `files`. Called once for each file that the run opens, also when it opens one file twice (`-out X -logfile X` is
    * one file). The name is the argv's spelling and may hold `/` (`sub/x`, for a folder of the run's directory).
+   *
+   * `makeblastdb` writes into the run's directory, as the command line writes into its working directory (ABI v2
+   * version 17, line NP WW4b1): its files (the database's, a `-logfile`) are offered here when the run has ended, each once,
+   * in the byte order of their names (UTF-8), each with its bytes from offset 0 in order and then `close`. They are the
+   * files that the run made or changed and that are there when it ends: a file that it removed or renamed away is not
+   * offered, and a file of `directory` that it did not change is not offered either. The name is the file's path in the
+   * directory (`db.pin`; `sub/dir/db.pin` for `-out sub/dir/db`, whose folders the run makes as the command line does).
    */
   readonly onFile?: (name: string) => ToolFileSink | undefined | Promise<ToolFileSink | undefined>;
 }
@@ -444,8 +456,12 @@ export interface ToolFile {
 export interface ToolRunOptions {
   /**
    * The files of the run's working directory that the words of the tool name (`-in`, `-ustat`, `-fa_list` and the files it
-   * lists, `-ids`, `-exclude_ids`, `-conffile`, a BLAST database of `-infmt blastdb`), as `EngineRunRequest.files` gives them to a search:
-   * the engine reads each in place, never copied whole. A `ToolFile` of an earlier run may be given here.
+   * lists, `-ids`, `-exclude_ids`, `-conffile`, a BLAST database of `-infmt blastdb`; for `makeblastdb`, `-in`, `-mask_data`,
+   * `-gi_mask` files, `-taxid_map`, a BLAST database of `-input_type blastdb`, `.ncbirc`), as `EngineRunRequest.files` gives
+   * them to a search: the engine reads each in place, never copied whole. A `ToolFile` of an earlier run may be given here.
+   * A tool's run may make, change, rename and remove files in this directory as on Linux (a `makeblastdb` that replaces a
+   * database given here): what it writes is kept in the Engine worker's memory until the run ends, and the given Blobs are
+   * never changed.
    */
   readonly directory?: readonly DirectoryFile[];
   readonly sinks?: ToolSinks;
@@ -461,7 +477,11 @@ export interface ToolRunResult {
   readonly stdout: Blob;
   /** What the tool wrote to its standard error; empty when `ToolSinks.onStderr` took it. */
   readonly stderr: Blob;
-  /** The files that the run wrote (`-out`, `-logfile`), in the order it opened them; those that `ToolSinks.onFile` took are not here. */
+  /**
+   * The files that the run wrote: those it sent as it wrote them (`-out`, `-logfile` of `windowmasker`, `blast_formatter`, `dustmasker`, `segmasker`, `convert2blastmask`) in the order it
+   * opened them, then those it made or changed in its directory (`makeblastdb`'s) in the byte order of their names; those
+   * that `ToolSinks.onFile` took are not here.
+   */
   readonly files: readonly ToolFile[];
 }
 
@@ -473,7 +493,7 @@ export interface ToolValidateOptions {
   readonly directory?: readonly DirectoryFile[];
 }
 
-/** What an engine offers for the command line's tools besides the searches (`windowmasker`). */
+/** What an engine offers for the command line's tools besides the searches (`windowmasker`, `blast_formatter`, `makeblastdb`, `dustmasker`, `segmasker`, `convert2blastmask`). */
 export interface ToolEngine {
   /**
    * Reads a tool's options, defaults, value lists, ranges and exclusions by running `<tool> -xmlhelp`
@@ -481,8 +501,8 @@ export interface ToolEngine {
    */
   describeTool(tool: string): Promise<ToolDescription>;
   /**
-   * Runs a tool as the command line runs it in the run's directory (`argv[0]` is the tool's name, `windowmasker`, then the
-   * command line's words), with its standard input empty. Streams the tool's standard output, standard error and files to
+   * Runs a tool as the command line runs it in the run's directory (`argv[0]` is the tool's name, `windowmasker`,
+   * `blast_formatter`, `makeblastdb`, `dustmasker`, `segmasker` or `convert2blastmask`, then the command line's words), with its standard input empty. Streams the tool's standard output, standard error and files to
    * `options.sinks` as they are written (a file's bytes in frames of up to 1 MiB: a small file may arrive only when the run
    * ends), then resolves with the exit status (the command line's, for every status, a refusal
    * of an argument included: its text is on stderr). Rejects for a name that is not a tool that the engine runs, for a

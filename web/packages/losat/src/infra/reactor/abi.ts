@@ -14,7 +14,7 @@ import type { Compression } from '../../ports/inflate.js';
 import { DIAGNOSTICS_STREAM } from '../../ports/run-output.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 17;
+export const ABI_VERSION = 18;
 /** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -268,7 +268,7 @@ const encoder = new TextEncoder();
  * The argv of a `losat_web2_*` call (abi_v2.md §7): each word ends with NUL. The adapter drops the
  * empty word after the last NUL, so a last empty word (`blast_formatter -rid ''`) reaches the engine
  * as the CLI gets it. Every call that takes an argv encodes it here. `blastdb`, the folder that the
- * run's `BLASTDB` names, leads it as `BLASTDB=<folder>` (§7, version 17), as the shown command
+ * run's `BLASTDB` names, leads it as `BLASTDB=<folder>` (§7, version 18), as the shown command
  * writes it.
  */
 function encodeArgv(argv: readonly string[], blastdb?: string): Uint8Array {
@@ -300,7 +300,7 @@ export class ReactorAbi {
 
   /**
    * The folder that the run's `BLASTDB` names (the run's directory's `BLASTDB=<folder>` of the shown command), which
-   * every call's argv carries while it is set (§7, version 17). The Engine worker sets it with the run's files and
+   * every call's argv carries while it is set (§7, version 18). The Engine worker sets it with the run's files and
    * clears it when the run's directory is closed.
    */
   blastdb: string | undefined;

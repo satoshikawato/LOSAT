@@ -8,5 +8,8 @@
   that the run does not read. A database's files that a run cannot open are no longer refused on the
   command line either: the GI-mask files, the GI index and the mask columns of a search without
   `-db_soft_mask` / `-db_hard_mask`, the id-lookup files of a search without an id list or taxonomy
-  option, the RPS files of every search but `rpsblast` and `rpstblastn`. LOSAT Web now refuses the
-  same files as the command line, from the same function, and a volume's component files.
+  option, the RPS files of every search but `rpsblast` and `rpstblastn`; for `dustmasker`,
+  `segmasker`, `windowmasker`, `makembindex` and a `makeblastdb -input_type blastdb` copy, which
+  read the sequences in order, a volume's string index, id-lookup and metadata files, and the mask
+  files except for `makeblastdb` and `makembindex -db_mask`, which read them. LOSAT Web now refuses
+  the same files as the command line, from the same function, and a volume's component files.

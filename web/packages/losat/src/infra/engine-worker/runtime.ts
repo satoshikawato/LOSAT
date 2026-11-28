@@ -203,10 +203,14 @@ export class EngineRuntime {
   /**
    * Runs a tool (ABI v2 `losat_web2_tool`, version 13) on the serial instance, in the run's working directory that
    * `request.files` makes (as a search of -db has it), and gives its standard output, standard error and the frames of its
-   * files to `posts` as the engine emits them: nothing of them is held here (D-WW3-6). The instance's retained subject and
-   * counts file are released first, so that the memory and the names of the instance are the tool's, and the files go
-   * back to nothing after the run. Resolves with the exit status, which the engine returns for every status; an error is
-   * the engine's (a name that is not a tool) or a stop of the instance, which the next run starts again.
+   * files to `posts` as the engine emits them: nothing of them is held here (D-WW3-6). The directory is writable for the
+   * run (version 17; line NP WW4b1, D-WW4b-1, 2026-11-27): the files that the tool writes with the command line's file
+   * calls (makeblastdb's database) are held in it, and those that the run left there go to `posts` after the engine's
+   * call, by name in byte order, as frames of files numbered after those of stream 12, each chunk given up as it goes.
+   * The instance's retained subject and counts file are released first, so that the memory and the names of the instance
+   * are the tool's, and the files go back to nothing after the run. Resolves with the exit status, which the engine
+   * returns for every status; an error is the engine's (a name that is not a tool) or a stop of the instance, which the
+   * next run starts again.
    */
   async tool(request: WorkerTool, posts: ToolPosts): Promise<WorkerToolResult> {
     const loaded = await this.load('serial');
@@ -214,15 +218,31 @@ export class EngineRuntime {
     try {
       this.releaseRetained(loaded);
       this.releaseCounts(loaded, undefined);
-      loaded.directory.open(request.files ?? []);
+      loaded.directory.open(request.files ?? [], { writable: true });
       // The engine's standard error of this run only, for a stop message.
       loaded.instance.wasi.clear();
       const linearBytesBefore = abi.memoryBytes();
+      let nextFile = 0;
       const status = abi.tool(request.argv, {
         stdout: (bytes) => posts.chunk('stdout', bytes.slice()),
         stderr: (bytes) => posts.chunk('stderr', bytes.slice()),
-        file: (frame) => posts.file(ownedFrame(frame)),
+        file: (frame) => {
+          nextFile = Math.max(nextFile, frame.number + 1);
+          posts.file(ownedFrame(frame));
+        },
       });
+      for (const file of loaded.directory.takeWritten()) {
+        const number = nextFile++;
+        posts.file({ number, kind: 'begin', name: file.name });
+        let offset = 0;
+        for (const bytes of file.pieces()) {
+          // The post transfers the chunk's buffer, which leaves `bytes` empty: its length is read first.
+          const length = bytes.length;
+          posts.file({ number, kind: 'bytes', offset, bytes });
+          offset += length;
+        }
+        posts.file({ number, kind: 'end' });
+      }
       loaded.runs++;
       return {
         status,
@@ -304,7 +324,7 @@ export class EngineRuntime {
     try {
       // The files that the argv names, opened by the engine from here on (validate checks some of them, as the CLI does).
       loaded.directory.open(request.files ?? []);
-      // ... and the folder that its `BLASTDB` names, which the argv of every call below carries (ABI v2 §7, version 17).
+      // ... and the folder that its `BLASTDB` names, which the argv of every call below carries (ABI v2 §7, version 18).
       abi.blastdb = request.blastdb;
       const validation = abi.validate(argv);
       if (!validation.ok) throw new EngineCallError(validation.message);
@@ -681,8 +701,9 @@ function joined(chunks: readonly Uint8Array[]): Uint8Array {
 }
 
 /**
- * The files of a run's archive (stream 8, in chunks), each with the option that named it in the
- * argv's *start* `start` (`namedRunFiles`); none when the run sent none.
+ * The files of a run's archive (stream 8, in chunks), each with the option that the engine labels it
+ * with (its entry's comment), checked against the argv's *start* `start`, or named by the start for
+ * an archive without labels (`namedRunFiles`); none when the run sent none.
  */
 function readRunFiles(chunks: readonly Uint8Array[], start: StartInfo): RunFile[] {
   if (chunks.length === 0) return [];

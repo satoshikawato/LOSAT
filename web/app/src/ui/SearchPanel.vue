@@ -189,7 +189,21 @@ async function focusRepeats(): Promise<void> {
   target?.scrollIntoView({ block: 'center' });
   target?.focus({ preventScroll: true });
 }
-defineExpose({ focusRepeats });
+/** Moves focus to the subject's database ("Use as Database (-db)" on a makeblastdb run): its source, with the database in view. */
+function focusDatabase(): void {
+  document.querySelector('[data-testid="subject-db-block"]')?.scrollIntoView({ block: 'center' });
+  document.querySelector<HTMLElement>('[data-testid="subject-source-database"]')?.focus({ preventScroll: true });
+}
+
+/** Opens Algorithm parameters and moves focus to BLASTN's repeats database ("Use as Repeats database (-filtering_db)"). */
+async function focusFilteringDb(): Promise<void> {
+  open.value = true;
+  await nextTick();
+  const target = document.getElementById('param-filtering_db');
+  target?.scrollIntoView({ block: 'center' });
+  target?.focus({ preventScroll: true });
+}
+defineExpose({ focusRepeats, focusDatabase, focusFilteringDb });
 </script>
 
 <template>

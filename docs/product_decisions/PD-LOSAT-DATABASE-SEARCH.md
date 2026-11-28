@@ -1236,13 +1236,16 @@ item hr-2b (2026-11-28), in the pairwise reports, outfmt 0 to 4 (rows `db.hr2.*.
 there NCBI's description line writes the title of the Bioseq that its second lookup, by the line's
 display id, gives (showdefline.cpp: the walk follows that lookup in the same places), and outfmt 1
 to 4 put the subjects of one Bioseq in one row (CAlnMix groups rows by Bioseq handle: one by one,
-one sequence by one loaded line of the scope; in a prefetched batch, one Seq-align id). It still
+one sequence by one loaded line of the scope; in a prefetched batch, one Seq-align id; the copies of
+one record in two databases, whose one Seq-align id the scope answers once, are one Bioseq too, also
+where a hit of another sequence sorts between them, item hr2b3). It still
 refuses, naming the holder, outfmt 17; a holder that the call does not report; a holder shorter
 than the subject's aligned range (in TBLASTN and TBLASTX, of another length); a holder of other
 letters in BLASTP, in TBLASTN's outfmt 0 to 4 (which print the search's identities) and in a table
 that prints identities of BLASTX, TBLASTN and TBLASTX; a description line whose second lookup gives
-a Bioseq that LOSAT does not know, and rows of outfmt 1 to 4 whose merge LOSAT does not know (two
-own loads of one Bioseq beside a held one, an own load by another line than its record's); a table
+a Bioseq that LOSAT does not know, and rows of outfmt 1 to 4 whose merge LOSAT does not know (own
+loads of one Bioseq by two Seq-align ids beside a held one, an own load by another line than its
+record's); a table
 whose only field of the subject is `slen`; a subject that one of its loads gives as itself or as a
 failing lookup; a load whose line is not known (`ShownBy::Order`, hr-1's ties); a positive id list; a
 UTF8String header; taxonomy database texts; and a holder whose own Seq-align id is the subject's in

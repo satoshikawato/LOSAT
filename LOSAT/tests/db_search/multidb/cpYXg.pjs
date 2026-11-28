@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "cpYXg",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "cpYXg",
+  "number-of-letters": 200,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-28T15:54:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49789,
+  "bytes-to-cache": 307,
+  "files": [
+    "cpYXg.pdb",
+    "cpYXg.phr",
+    "cpYXg.pin",
+    "cpYXg.pog",
+    "cpYXg.pos",
+    "cpYXg.pot",
+    "cpYXg.psq",
+    "cpYXg.ptf",
+    "cpYXg.pto"
+  ]
+}

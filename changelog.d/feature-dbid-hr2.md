@@ -13,3 +13,6 @@
   description line or rows of outfmt 1 to 4 whose Bioseq LOSAT does not know, a table whose only field of the subject
   is `slen`, a subject whose loads give it in one place and itself or a failing lookup in another, a positive id list,
   a header with a UTF8String, taxonomy database texts, and an id that differs from the holder's in letter case only.
+- In `-outfmt` 1 to 4 of a `-db` search, the copies of one record that two databases hold (the same definition lines
+  and letters) are now written as NCBI BLAST+ writes them: one sequence whose rows follow each other, also where a hit
+  of another sequence with the same score sorts between the copies (LOSAT wrote that hit's row between them).

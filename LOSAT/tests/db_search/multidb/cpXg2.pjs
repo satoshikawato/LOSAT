@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "cpXg2",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "cpXg2",
+  "number-of-letters": 100,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-28T16:11:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49561,
+  "bytes-to-cache": 198,
+  "files": [
+    "cpXg2.pdb",
+    "cpXg2.phr",
+    "cpXg2.pin",
+    "cpXg2.pog",
+    "cpXg2.pos",
+    "cpXg2.pot",
+    "cpXg2.psq",
+    "cpXg2.ptf",
+    "cpXg2.pto"
+  ]
+}

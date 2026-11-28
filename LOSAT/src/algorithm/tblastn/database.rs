@@ -1056,9 +1056,11 @@ pub(super) fn seq_aligns_of(hitlists: &[KappaResultHitList], gapped: bool) -> us
 /// structured documents (5, 13 to 16), the formats that join the alignments of following hits
 /// whose Seq-align ids match (0, 5, 13 to 16), those that write the sequences' taxids (13 to 16,
 /// the tabular reports of taxonomy fields), and whether the first format's batches prefetch the
-/// subjects.
+/// subjects, at the run's `PRE_FETCH_SEQS_LIMIT` `limit` (`shared::prefetch_seqs_limit`, read once
+/// by the run: review 3 of line RG-KB item 9b-2, R3-L2).
 pub(super) fn parsed_shown(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
+    limit: Option<i32>,
 ) -> crate::algorithm::common::database::ParsedShown {
     let pairwise = formats
         .iter()
@@ -1126,13 +1128,14 @@ pub(super) fn parsed_shown(
             ),
         // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (cited in
         // `tblastn_app::search`).
-        prefetched: shared::prefetches_subjects(Some(prefetch_format(formats)))
-            && !shared::prefetch_always_off(prefetch_format(formats)),
+        prefetched: shared::prefetches_subjects_at(Some(prefetch_format(formats)), limit)
+            && !shared::prefetch_always_off_at(prefetch_format(formats), limit),
         titles: shared::TitleReads::of_outfmts(
             crate::report::archive::options::RequestKind::Tblastn,
             formats
                 .iter()
                 .map(|format| super::stage_e_report::format_number(format.outfmt)),
+            limit,
         ),
     }
 }
@@ -1239,7 +1242,8 @@ fn pairwise_read_order<'l>(
 /// answer of what the reports load, `hit_loads`, with how the pairwise reports read each query's
 /// subjects, `pairwise`, after the loads of the calls before, whose loads nothing here records,
 /// `TaxdbRun::calls_before`). The packed subjects are read from the database
-/// (`SubjectLetters::Stream`, one read each) instead of cloned from the copy.
+/// (`SubjectLetters::Stream`, one read each) instead of cloned from the copy. `prefetch_limit` is
+/// the run's `PRE_FETCH_SEQS_LIMIT`, read once by the run (`shared::prefetch_seqs_limit`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
     database: &TblastnDatabase,
@@ -1248,6 +1252,7 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
+    prefetch_limit: Option<i32>,
     call: (&[&str], bool),
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
@@ -1256,7 +1261,7 @@ pub(super) fn reported_subjects(
     seen: crate::report::query_bioseq::SeenFrom<'_>,
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
-    let shown = parsed_shown(formats);
+    let shown = parsed_shown(formats, prefetch_limit);
     for hitlist in hitlists.iter_mut() {
         hitlist.drop_zero_score_hsps();
     }
@@ -1272,22 +1277,27 @@ pub(super) fn reported_subjects(
         Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
         _ => None,
     };
-    let prefetch = shared::BatchPrefetch::of(
+    let prefetch = shared::BatchPrefetch::at(
+        prefetch_limit,
         format,
         hitlists.len(),
         0,
         batches,
-        |span| seq_aligns_of(&hitlists[span], gapped),
-        |span| {
-            (has_nullb
-                && super::nullb_report::hitlists_have_empty_subject_row_db(&hitlists[span.clone()]))
-                || shared::BatchPrefetch::prefetch_fails_among(
-                    hitlists[span]
-                        .iter()
-                        .flat_map(KappaResultHitList::lists)
-                        .map(|list| titled(usize::try_from(list.oid).ok()?)),
-                )
-        },
+        (
+            |span: std::ops::Range<usize>| seq_aligns_of(&hitlists[span], gapped),
+            |span: std::ops::Range<usize>| {
+                (has_nullb
+                    && super::nullb_report::hitlists_have_empty_subject_row_db(
+                        &hitlists[span.clone()],
+                    ))
+                    || shared::BatchPrefetch::prefetch_fails_among(
+                        hitlists[span]
+                            .iter()
+                            .flat_map(KappaResultHitList::lists)
+                            .map(|list| titled(usize::try_from(list.oid).ok()?)),
+                    )
+            },
+        ),
     );
     let reads = prefetch.reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {
         hitlist

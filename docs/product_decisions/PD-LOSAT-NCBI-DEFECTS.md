@@ -1058,11 +1058,13 @@
   model yet (line RG-KB item 9b-3, review 1 of 2026-11-28): a prefetch that may be off, a database
   with parsed Seq-ids, `OBJMGR_*` settings, a query batch whose prefetch's loads write a text of the
   taxonomy database (in the load that looks a taxid up, after its header read and before its decode:
-  the texts of opening once per run, at its first such load, the offset error at a lookup that the
-  volume's cache does not hold, a null mapping, a file that throws; a later batch whose loads write
-  none, as in rows `db.tchar.*.h1.later.6t`, is written; review 2), a query batch whose
-  reads also give NCBI's warning of a UTF8String header, and searches restricted by a list or an
-  OID mask; line RG-KB item 9b-2, Owner-delegated, standing instruction
+  the texts of opening once per run, at its first such load, the offset error at a lookup of the
+  last entry's taxid that the volume's cache does not hold, or any lookup of it in a volume where
+  another taxid can take its cache slot, a lookup of another taxid where `taxdb.btd` is mapped as a
+  null pointer, where NCBI faults, a file that throws; a later batch whose loads write none, as in
+  rows `db.tchar.*.h1.later.6t`, `h1.off.6t` and `h1.null.6t`, is written; reviews 2 and 3), a query
+  batch whose reads also give NCBI's warning of a UTF8String header, and searches restricted by a
+  list or an OID mask; line RG-KB item 9b-2, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.126 at the merge of dev of 2026-11-28 that
   brought line RG item T4b-f's 1.126 (PR #1690); first 1.123, then 1.124 (dev brought 1.123), then
   1.126 (dev brought RG-D2's 1.124 and 1.125, PR #1660));

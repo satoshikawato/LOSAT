@@ -292,16 +292,21 @@ fn database_check(
     if database.parsed_beyond(max_parsed) {
         return Err(Off::LargeParsed);
     }
-    let shown =
-        crate::algorithm::tblastx::database::parsed_shown(&[format], format.prefetch_format());
+    // The run's `PRE_FETCH_SEQS_LIMIT`, read once for the answers below.
+    let limit = crate::algorithm::common::database::prefetch_seqs_limit();
+    let shown = crate::algorithm::tblastx::database::parsed_shown(
+        &[format],
+        format.prefetch_format(),
+        limit,
+    );
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
-    let prefetch = format.prefetches_subjects() && database.taxdb_found();
+    let prefetch = format.prefetches_subjects(limit) && database.taxdb_found();
     if prefetch && database.cache_may_refuse() {
         return Err(Off::TaxonomyCache);
     }
     // A batch may read its subjects one by one, by the scope's index.
     let one_by_one =
-        crate::algorithm::common::database::prefetch_may_be_off(format.prefetch_format());
+        crate::algorithm::common::database::prefetch_may_be_off(format.prefetch_format(), limit);
     match database.reports_may_refuse(shown, (prefetch, one_by_one), queries, pool) {
         Some(refusal) => Err(Off::Database(refusal)),
         None => Ok(()),

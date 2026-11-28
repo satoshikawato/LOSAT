@@ -30,6 +30,12 @@ NCBI BLAST+ 2.17.0's makeblastdb), the version 4 databases of `tests/db_search/t
 - `tc_h1_p` / `tc_h1_n`: H1 (a clean title and one with such a byte, `-taxid 99990`; the queries `tc_qh1`,
   the clean one's letters then the other's, and `tc_qh1r`, the reverse: with BATCH_SIZE, which batch's
   loads look the taxid up first);
+- `tc_h2_p` / `tc_h2_n`: H2 (a clean title, `-taxid 99990`), the second volume of the aliases
+  `tc_h12_p.pal` / `tc_h12_n.nal` (`DBLIST tc_h1 tc_h2`; the query `tc_qh2`, H2's letters then H1's
+  title with such a byte: the second batch looks the taxid up in the other volume);
+- `tc_h3_p` / `tc_h3_n`: H3 (two clean titles of the taxids 99990 and 100246, one slot of NCBI's taxonomy
+  cache of a volume; no query hits them), the first volume of the aliases `tc_h31_p.pal` /
+  `tc_h31_n.nal` (`DBLIST tc_h3 tc_h1`);
 - the queries `tc_q200` and `tc_q201` (BIG's OIDs 0 to 197 or 198 and OID 256: 200 or 201 Seq-align ids
   with OIDs 1 and 257), `tc_q260` (BIG's OIDs 0 to 259 in one query), `tc_qslotu` (BIG's OID 258 with OIDs
   4 to 13, then OIDs 2 and 258) and `tc_qslotu1` (its first query);
@@ -146,8 +152,16 @@ DU = [(b"v0 utf8 clean long", [], EU), (b"v1 fam#one", [b"\xe9"], PROT), (b"v2 d
 # offset error's taxid in offset_last_past_end); one query each, so that BATCH_SIZE gives each its batch.
 H1_CLEAN, H1_BAD = lcg(60, 401), lcg(80, 402)
 H1 = [(b"k0 clean", [], H1_CLEAN), (b"k1 cee#", [b"\xff"], H1_BAD)]
+# H2: a clean title of taxid 99990 in a volume of its own; H3: two clean titles, made with taxid 99990, the second
+# rewritten to 100246 (the same slot, 100246 & 255 == 99990 & 255, and the same length of its INTEGER).
+H2_CLEAN = lcg(70, 403)
+H2 = [(b"k2 clean other volume", [], H2_CLEAN)]
+H3 = [(b"x0 slot taxid", [], lcg(64, 404)), (b"x1 slot taxid other", [], lcg(66, 405))]
 DATABASES = {"tc": SUBJECTS, "tc_b": DBB, "tc_big": BIG, "tc_big2": BIG2, "tc_x": DBX, "tc_dmg": DMG,
-             "tc_ps": PS, "tc_u8": U8, "tc_tax": SUBJECTS, "tc_fam": FAM, "tc_du": DU, "tc_h1": H1}
+             "tc_ps": PS, "tc_u8": U8, "tc_tax": SUBJECTS, "tc_fam": FAM, "tc_du": DU, "tc_h1": H1, "tc_h2": H2,
+             "tc_h3": H3}
+TAXID_99990 = b"\x02\x03\x01\x86\x96"
+TAXID_100246 = b"\x02\x03\x01\x87\x96"
 # More queries: one of the letters of BIG's OIDs 0 to 259 (a batch of 260 Seq-align ids, NCBI's prefetch in
 # pieces of 100, 100 and 60); BIG's OID 258 with OIDs 4 to 13 (11 loads, more than NCBI's cache of 10 keeps),
 # then OID 2 and OID 258 (OID 2 posts in the header cache slot of OID 258), and its first query alone (the
@@ -161,6 +175,7 @@ MORE_QUERIES = {
     "tc_q201": [(b"q201", "".join(BIG[i][2] for i in range(199)) + BIG[256][2])],
     "tc_qh1": [(b"qa clean", H1_CLEAN), (b"qb bad", H1_BAD)],
     "tc_qh1r": [(b"qb bad", H1_BAD), (b"qa clean", H1_CLEAN)],
+    "tc_qh2": [(b"qc other volume", H2_CLEAN), (b"qb bad", H1_BAD)],
     "tc_qslotu": [(b"qsu1 dee and ten", D + "".join(BIG[i][2] for i in range(4, 14))), (b"qsu2 cee dee", C + D)],
     "tc_qslotu1": [(b"qsu1 dee and ten", D + "".join(BIG[i][2] for i in range(4, 14)))],
     "tc_qabc": [FAM_QUERIES[c] for c in "ABC"],
@@ -215,6 +230,14 @@ def retag(path, titles, old, new):
     open(path, "wb").write(data)
 
 
+def retaxid(path, old, new):
+    """Rewrite the last of the two INTEGERs `old` (a taxid) of the headers in `path` to `new`."""
+    data = open(path, "rb").read()
+    assert data.count(old) == 2 and len(old) == len(new), path
+    at = data.rindex(old)
+    open(path, "wb").write(data[:at] + new + data[at + len(old):])
+
+
 def write_queries():
     os.makedirs(HERE, exist_ok=True)
     for suffix, encode in ((".faa", lambda p: p), (".fna", nuc)):
@@ -243,7 +266,7 @@ def main():
                             "-blastdb_version", "4", "-title", name, "-out", os.path.join(HERE, name)]
                            + (["-parse_seqids"] if stem == "tc_ps" else [])
                            + (["-taxid", "9606"] if stem == "tc_tax" else [])
-                           + (["-taxid", "99990"] if stem == "tc_h1" else []),
+                           + (["-taxid", "99990"] if stem in ("tc_h1", "tc_h2", "tc_h3") else []),
                            check=True, stdout=subprocess.DEVNULL)
             os.remove(source)
             for ext in ("pjs", "njs"):
@@ -258,11 +281,17 @@ def main():
             if stem == "tc_du":
                 retag(header, [b"v0 utf8 clean long"], b"\x1a", b"\x0c")
                 retag(header, [b"v2 damaged title"], b"\x1a", b"\x1b")
+            if stem == "tc_h3":
+                retaxid(header, TAXID_99990, TAXID_100246)
     for mol in "pn":
         open(os.path.join(HERE, f"tc_alias_{mol}.{mol}al"), "w").write(
             f"TITLE tc alias\nDBLIST tc_{mol} tc_b_{mol}\n")
         open(os.path.join(HERE, f"tc_bigal_{mol}.{mol}al"), "w").write(
             f"TITLE tc big alias\nDBLIST tc_big_{mol} tc_big2_{mol}\n")
+        open(os.path.join(HERE, f"tc_h12_{mol}.{mol}al"), "w").write(
+            f"TITLE tc h1 h2 alias\nDBLIST tc_h1_{mol} tc_h2_{mol}\n")
+        open(os.path.join(HERE, f"tc_h31_{mol}.{mol}al"), "w").write(
+            f"TITLE tc h3 h1 alias\nDBLIST tc_h3_{mol} tc_h1_{mol}\n")
 
 
 if __name__ == "__main__":

@@ -1851,9 +1851,13 @@ pub(super) fn read_titles(
 
 /// What the reports `output_formats` show of a reported sequence with parsed Seq-ids
 /// (`reported_subjects`); outfmt 13 to 16 and the tabular reports of taxonomy fields write its
-/// taxids; the first format's batches prefetch the subjects.
+/// taxids; the first format's batches prefetch the subjects. It reads `PRE_FETCH_SEQS_LIMIT` once
+/// (`shared::prefetch_seqs_limit`); the run makes it once and hands it to its batches
+/// (`ReportSubjects::parsed`; review 3 of line RG-KB item 9b-2, R3-L2).
 pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown {
     let pairwise = output_formats.iter().any(|format| format.is_pairwise());
+    let limit = shared::prefetch_seqs_limit();
+    let prefetch = prefetch_format(output_formats);
     ParsedShown {
         tabular: output_formats
             .iter()
@@ -1895,15 +1899,16 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .fold(PrintedIds::default(), |words, format| {
                 words.or(PrintedIds::of(format.tabular_spec()))
             }),
-        prefetched: output_formats
-            .first()
-            .is_some_and(|format| format.prefetches_subjects())
-            && !shared::prefetch_always_off(prefetch_format(output_formats)),
+        // `prefetch` is the first format's (`BlastnOutputFormat::prefetches_subjects`).
+        prefetched: !output_formats.is_empty()
+            && shared::prefetches_subjects_at(Some(prefetch), limit)
+            && !shared::prefetch_always_off_at(prefetch, limit),
         titles: shared::TitleReads::of_outfmts(
             crate::report::archive::options::RequestKind::Blastn,
             output_formats
                 .iter()
                 .map(|format| format.report_format() as i32),
+            limit,
         ),
     }
 }

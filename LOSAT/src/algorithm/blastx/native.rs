@@ -850,6 +850,9 @@ fn run_inner(
     .with_held(held.as_ref());
     // NCBI's scope of the query records at each batch's prefetch (`BatchScopes`).
     let batch_scopes = BatchScopes::new(options.outfmt == 5, database.as_ref());
+    // What the reports of every batch ask, at the run's `PRE_FETCH_SEQS_LIMIT`: asked once for the
+    // run (review 3 of line RG-KB item 9b-2, R3-L2).
+    let asks = ReportedAsks::of(&options);
     let render_batch = |writer: &mut crate::cli::NcbiOstream<'static>,
                         diagnostics: &mut dyn Write,
                         queries: &[FastaRecord],
@@ -884,7 +887,6 @@ fn run_inner(
                 held.discard();
             }
         };
-        let asks = ReportedAsks::of(&options);
         // The posts before the batch's reports (the reads of its titles, its prefetch and its
         // reads' texts) come after the report written so far, `-html`'s prolog too (review 1 of
         // line DBID pf7, H2).
@@ -1085,8 +1087,18 @@ pub(super) struct ReportedAsks {
 }
 
 impl ReportedAsks {
-    /// What the reports of `options.outfmt` ask.
+    /// What the reports of `options.outfmt` ask, at the run's `PRE_FETCH_SEQS_LIMIT`
+    /// ([`ReportedAsks::at`]), read here once: a run asks it once, before its batches (review 3 of
+    /// line RG-KB item 9b-2, R3-L2).
     pub(super) fn of(options: &super::args::ResolvedOptions) -> Self {
+        Self::at(
+            options,
+            crate::algorithm::common::database::prefetch_seqs_limit(),
+        )
+    }
+
+    /// [`ReportedAsks::of`] at the limit `limit` (`common::database::prefetch_seqs_limit`).
+    fn at(options: &super::args::ResolvedOptions, limit: Option<i32>) -> Self {
         // The organism report (18) makes no tabular subject ids (`report::tabular::writes_rows`).
         let tabular = matches!(options.outfmt, 6 | 7 | 10 | 18 | 20)
             && crate::report::tabular::writes_rows(options.tabular);
@@ -1112,12 +1124,16 @@ impl ReportedAsks {
                 crate::report::tabular::PrintedIds::default()
             },
             // Outfmt 10 and 20 prefetch as 6 does (`ResolvedOptions::prefetch_format`).
-            prefetched: prefetches_subjects(Some(options.prefetch_format()))
-                && !crate::algorithm::common::database::prefetch_always_off(
-                    options.prefetch_format(),
-                ),
+            prefetched: crate::algorithm::common::database::prefetches_subjects_at(
+                Some(options.prefetch_format()),
+                limit,
+            ) && !crate::algorithm::common::database::prefetch_always_off_at(
+                options.prefetch_format(),
+                limit,
+            ),
             one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
                 options.prefetch_format(),
+                limit,
             ),
             throw: crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
                 .map_or(
@@ -1148,6 +1164,7 @@ impl ReportedAsks {
             titles: crate::algorithm::common::database::TitleReads::of_outfmts(
                 options.request_kind(),
                 [i32::from(options.outfmt)],
+                limit,
             ),
         }
     }
@@ -1157,9 +1174,12 @@ impl ReportedAsks {
     /// (`common::database::TitleReads::SeqAligns` for BLASTX; `Reports` for RPSTBLASTN).
     pub(super) fn of_archive(options: &super::args::ResolvedOptions) -> Self {
         Self {
+            // BLASTX and RPSTBLASTN write the archive without calling the prefetch, whatever the
+            // limit (`PrefetchFormat::reads_at`): no read of `PRE_FETCH_SEQS_LIMIT` here.
             titles: crate::algorithm::common::database::TitleReads::of_outfmts(
                 options.request_kind(),
                 [11],
+                None,
             ),
             ..Self::default()
         }
@@ -1173,9 +1193,11 @@ impl ReportedAsks {
     pub(super) fn of_all(options: &[super::args::ResolvedOptions], others: &[&str]) -> Self {
         // The first search's asks start the call's: `FormatThrow::and` of a format that reads
         // nothing (`Self::default()`'s) with one that stops is a refusal (`FormatThrow::of_formats`).
+        // The call's `PRE_FETCH_SEQS_LIMIT`, read once for every search's asks.
+        let limit = crate::algorithm::common::database::prefetch_seqs_limit();
         let mut asks = options
             .iter()
-            .map(Self::of)
+            .map(|options| Self::at(options, limit))
             .reduce(Self::or)
             .unwrap_or_default();
         let app = options.first().map_or(
@@ -1188,15 +1210,13 @@ impl ReportedAsks {
             app,
             options.iter().any(|options| options.html.is_some()),
         );
-        asks.prefetched = options
-            .first()
-            .is_some_and(|options| Self::of(options).prefetched);
-        asks.one_by_one = options
-            .first()
-            .is_some_and(|options| Self::of(options).one_by_one);
+        let first = options.first().map(|options| Self::at(options, limit));
+        asks.prefetched = first.is_some_and(|first| first.prefetched);
+        asks.one_by_one = first.is_some_and(|first| first.one_by_one);
         asks.titles = crate::algorithm::common::database::TitleReads::of_outfmts(
             app,
             options.iter().map(|options| i32::from(options.outfmt)),
+            limit,
         );
         asks
     }

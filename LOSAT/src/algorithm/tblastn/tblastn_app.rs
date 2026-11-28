@@ -2043,11 +2043,14 @@ fn search(
         // the search's batches (`database::fetch_excluded`), and their reads of headers.
         // The first format, whose prefetch each batch asks (`database::prefetch_format`).
         let prefetch_format = super::database::prefetch_format(&outputs.formats);
-        let reads = super::database::CallReads::of(
-            database,
-            super::database::parsed_shown(&outputs.formats).titles,
-            || query_input.batches(batch_size),
-        );
+        // The run's `PRE_FETCH_SEQS_LIMIT`, read once, and what the reports show of the reported
+        // sequences at it (`database::parsed_shown`), for every batch (review 3 of line RG-KB
+        // item 9b-2, R3-L2).
+        let prefetch_limit = crate::algorithm::common::database::prefetch_seqs_limit();
+        let parsed_shown = super::database::parsed_shown(&outputs.formats, prefetch_limit);
+        let reads = super::database::CallReads::of(database, parsed_shown.titles, || {
+            query_input.batches(batch_size)
+        });
         // Graduated 2026-10-22 (was LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when there
         // is none. A batch whose range does not match is searched by the loop.
@@ -2296,7 +2299,7 @@ fn search(
                         }),
                     database.oid_map(),
                     scopes,
-                    super::database::parsed_shown(&outputs.formats),
+                    parsed_shown,
                     &mut query_bioseqs,
                     &run,
                     "TBLASTN",
@@ -2521,6 +2524,7 @@ fn search(
                         has_nullb,
                     ),
                     &outputs.formats,
+                    prefetch_limit,
                     (outputs.other_outfmts, resolved.html.is_some()),
                     pairwise_reading(&resolved, &outputs.formats),
                     &batch_spans,

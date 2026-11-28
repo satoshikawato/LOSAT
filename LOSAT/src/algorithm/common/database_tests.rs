@@ -907,17 +907,23 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
 #[test]
 fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
     use crate::report::archive::options::RequestKind;
-    for app in [
+    // The run's limit, which the caller reads once (review 3 of line RG-KB item 9b-2, R3-L2):
+    // unset, 0, a positive count and `INT_MAX`.
+    let limits = [None, Some(0), Some(3), Some(i32::MAX)];
+    for (app, limit) in [
         RequestKind::Blastn,
         RequestKind::Blastp,
         RequestKind::Blastx,
         RequestKind::Tblastn,
         RequestKind::Tblastx,
-    ] {
-        let of = |outfmts: &[i32]| TitleReads::of_outfmts(app, outfmts.iter().copied());
+    ]
+    .into_iter()
+    .flat_map(|app| limits.map(|limit| (app, limit)))
+    {
+        let of = |outfmts: &[i32]| TitleReads::of_outfmts(app, outfmts.iter().copied(), limit);
         let prefetched = |as_outfmt: i32| {
             let format = PrefetchFormat::of(as_outfmt, app);
-            prefetches_subjects(Some(format)) && !prefetch_may_be_off(format)
+            prefetches_subjects_at(Some(format), limit) && !prefetch_may_be_off(format, limit)
         };
         assert_eq!(of(&[11]), TitleReads::SeqAligns, "{app:?}");
         assert_eq!(of(&[11, 11]), TitleReads::SeqAligns, "{app:?}");
@@ -951,8 +957,16 @@ fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
             };
             assert_eq!(of(&[outfmt]), expected, "{app:?} {outfmt}");
         }
+        // Only `INT_MAX` prefetches them, and every batch then.
+        assert_eq!(of(&[8]) == TitleReads::Prefetched, limit == Some(i32::MAX));
+        // A positive count or 0 may turn a batch's prefetch off.
+        assert_eq!(
+            of(&[6]) == TitleReads::Prefetched,
+            matches!(limit, None | Some(i32::MAX)),
+            "{app:?} {limit:?}"
+        );
         for outfmt in [8, 9, 12] {
-            let prefetch = prefetches_subjects(Some(PrefetchFormat::of(outfmt, app)));
+            let prefetch = prefetches_subjects_at(Some(PrefetchFormat::of(outfmt, app)), limit);
             let (alone, with_archive) = match (prefetch, prefetched(outfmt)) {
                 (false, _) => (TitleReads::SeqAligns, TitleReads::SeqAligns),
                 (true, true) => (TitleReads::Prefetched, TitleReads::Reports),
@@ -970,7 +984,7 @@ fn only_the_seq_align_formats_read_titles_at_the_seq_aligns_alone() {
     ] {
         for outfmts in [&[][..], &[8], &[9], &[11], &[12], &[8, 11], &[0], &[6]] {
             assert_eq!(
-                TitleReads::of_outfmts(app, outfmts.iter().copied()),
+                TitleReads::of_outfmts(app, outfmts.iter().copied(), None),
                 TitleReads::Reports,
                 "{app:?} {outfmts:?}"
             );

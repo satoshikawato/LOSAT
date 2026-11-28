@@ -2109,6 +2109,19 @@ Rows `db.ak.*.l62*` (D1a-6 review A F2): `aliaskeys/n_nseq0_l62` (`NSEQ 0`, `LEN
 `allx_q649.faa` (TBLASTN, with and without `OLD_FSC=1`) or `alln_q.fna` (BLASTN split `CHUNK_SIZE=200`, TBLASTX):
 LOSAT writes the reports of the two unsearchable batches before batch 3 refuses the 64-bit effective search space overflow
 (`ncbi-near` against the matching `allx.faa` / `alln.fna` runs).
+Rows `db.ak.bp.*x6*`, `db.ak.bp.rej.nseq0.oldfsc.blocks*`, `db.ak.bp.*.b1*`, `db.ak.bp.*l55*`, `db.rps.*.b1*` and
+`db.rps.*ds55*` (line RG series D, item bp-SF1): BLASTP's and RPSBLAST's refusals of a call's setup come after the reports
+of the query batches before the batch that meets them. `aliaskeys/p_l55` (`LENGTH 36028797018963968`, 2^55, over
+`../taxfilter/tfp`) with `aliaskeys/q_hba_long.faa` (`hba`, the 142 letters of `taxfilter/q.faa`, then `long`, `hba` 35
+times, 4,970 letters) and `BATCH_SIZE=1`: the first batch has hits, the second's effective search space overflows `Int8`
+(NCBI wraps it and goes on); `aliaskeys/q_hba.faa` alone is the near run. `../fasta/rps/x6only.faa` (the six X-only
+queries of `x6q.faa`) is the near run of the count-0 refusal after six unsearched batches, and over `p_l55` an input
+whose invalid contexts NCBI computes no space for (exit 0).
+Review rows of bp-SF1: `db.ak.bp.rej.l55.b1.{0,5}` and `db.ak.bp.rej.nseq0.oldfsc.one.0` (a refusal of the first batch:
+outfmt 0's prolog, which NCBI writes before the batch's setup, then the refusal; nothing in outfmt 5),
+`db.ak.bp.l55.x1hba.7` (`aliaskeys/q_x1_hba.faa`: an X-only query of 10,000 letters, then `q_hba.faa`'s hba, in one
+batch: exit 0), `db.ak.bp.l55.hba.5` and `db.ak.bp.rej.l55.b2.5` (outfmt 5 up to the end of the first batch's iteration),
+`db.ak.ps.l55.hba.7` and `db.ak.ps.rej.l55.b2.7` (psiblast: the first query's report, then the plain refusal).
 Rows `db.cnt.avg2p32.g3.*`, `db.cnt.g3.*`, `db.ak.bn.rej.nseq0.g3.*` and `db.gr.bn.rej.mo00.g3.split.b1` (D1a-6 review A F1):
 `../fasta/rps/g3_acn.fna` (`>g3`, `aC` followed by 398 `N`) and `../fasta/rps/alln_g3.fna` (`alln.fna`, then `g3_acn.fna`)
 with `-task megablast -lcase_masking -soft_masking false -dust no -strand plus CHUNK_SIZE=200`: the whole batch keeps base `C`
@@ -3007,14 +3020,15 @@ and formats `6`, `7` and `11` where `-html` is ignored, with the `rc/` directori
 
 `tchar/` (rows `db.tchar.*`): `tchar/make_tchar.py` (run from `LOSAT/` with the directory of NCBI's makeblastdb,
 and the stems to write, or none for all) writes the version 4 databases `tc_p`, `tc_b_p`, `tc_big_p`, `tc_big2_p`,
-`tc_x_p`, `tc_dmg_p`, `tc_ps_p`, `tc_u8_p`, `tc_tax_p`, `tc_fam_p`, `tc_du_p`, `tc_h1_p` (proteins) and `tc_n`,
-`tc_b_n`, `tc_big_n`, `tc_big2_n`, `tc_x_n`, `tc_dmg_n`, `tc_ps_n`, `tc_u8_n`, `tc_tax_n`, `tc_fam_n`, `tc_du_n`,
-`tc_h1_n` (their
+`tc_x_p`, `tc_dmg_p`, `tc_ps_p`, `tc_u8_p`, `tc_tax_p`, `tc_fam_p`, `tc_du_p`, `tc_h1_p`, `tc_h2_p`, `tc_h3_p`
+(proteins) and `tc_n`, `tc_b_n`, `tc_big_n`, `tc_big2_n`, `tc_x_n`, `tc_dmg_n`, `tc_ps_n`, `tc_u8_n`, `tc_tax_n`,
+`tc_fam_n`, `tc_du_n`, `tc_h1_n`, `tc_h2_n`, `tc_h3_n` (their
 back-translations), the aliases `tc_alias_p.pal` and `tc_alias_n.nal`
-(`tc_*` then `tc_b_*`), `tc_bigal_p.pal` and `tc_bigal_n.nal` (`tc_big_*` then `tc_big2_*`) and the queries
+(`tc_*` then `tc_b_*`), `tc_bigal_p.pal` and `tc_bigal_n.nal` (`tc_big_*` then `tc_big2_*`), `tc_h12_p.pal` and
+`tc_h12_n.nal` (`tc_h1_*` and `tc_h2_*`), `tc_h31_p.pal` and `tc_h31_n.nal` (`tc_h3_*` and `tc_h1_*`) and the queries
 `tc_q1`, `tc_q2`, `tc_qslot`, `tc_qu8`, `tc_qkeep`, `tc_q260`, `tc_q200`, `tc_q201`, `tc_qslotu`, `tc_qslotu1`,
-`tc_qabc`, `tc_qbac`, `tc_qacb`, `tc_qaba`, `tc_qdu`, `tc_qh1` and `tc_qh1r` (`.faa`, `.fna`; `make_tchar.write_queries()`
-writes them alone). makeblastdb stores each byte outside ' '..'~' of a FASTA
+`tc_qabc`, `tc_qbac`, `tc_qacb`, `tc_qaba`, `tc_qdu`, `tc_qh1`, `tc_qh1r` and `tc_qh2` (`.faa`, `.fna`;
+`make_tchar.write_queries()` writes them alone). makeblastdb stores each byte outside ' '..'~' of a FASTA
 title as `#`; the script rewrites those stored titles to raw bytes (0x00, 0x01, 0x1B, 0x7F, 0x80, 0xC3 0xA9, 0xE9,
 0xFF; titles of 133, 300 and 1,100 bytes). `tc_big_*` holds 300 sequences, of which the OIDs 0, 1, 2, 3, 256 and 257
 have such bytes and hit the queries with OID 258 (clean): 0 and 256, 1 and 257, 2 and 258 share a slot of NCBI's
@@ -3035,7 +3049,12 @@ those of OIDs 0 to 197 or 198 and 256 (with OIDs 1 and 257, 200 or 201 Seq-align
 `tests/seqdb/taxdb`'s databases), which `tc_qh1` reads in that order and `tc_qh1r` in the other, a batch each with
 `BATCH_SIZE=50` (rows `h1.*`: the batch whose load looks the taxid up first writes the damaged taxonomy database's
 text; `h1.later.*` and `h1.off.*` of outfmt 0, 5, 16 and 18 write the second batch's formatter posts, and in outfmt
-5, 16 and 18 the offset errors of the report's own taxonomy lookups after them); `tc_qslotu` reads OID 258
+5, 16 and 18 the offset errors of the report's own taxonomy lookups after them; `h1.null.6t` with an empty
+`taxdb.btd`, where that lookup gives the offset error); `tc_h2_*` holds a clean title of taxid 99990, which `tc_qh2`
+reads in `tc_h12_*` before `tc_h1_*`'s title with 0xFF (row `h1.vol.r6t`: NCBI's taxonomy cache is the volume's, so the
+second batch writes the offset error again); `tc_h3_*` holds two clean titles of the taxids 99990 and 100246 (one slot
+of that cache; the script rewrites the second taxid), which no query hits (row `h1.coll.6t`: `tc_h31_*` with
+`tc_qh1`, the other volume's slot does not change `tc_h1_*`'s); `tc_qslotu` reads OID 258
 with OIDs 4 to 13 (11 loads), then OIDs 2 and 258 (rows `slot.r6t`; `tc_qslotu1`, its first query, is the near
 input of BLASTN's, which writes that batch's rows before it refuses).
 NCBI BLAST+ 2.17.0 reads a reported subject's definition line where it makes the Seq-aligns of its query batch, and

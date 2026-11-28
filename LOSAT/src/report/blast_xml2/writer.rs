@@ -810,21 +810,19 @@ impl<F: SideFiles> Xml2Writer<F> {
     }
 
     // No NCBI counterpart: LOSAT's buffers.
-    /// Takes the state of the run so far (`Xml2Document::take_carry`) with the writer's buffers
-    /// (its report's and the caller's output buffer, `StructuredXml::keep_out`), emptied, for the
-    /// writer of a later call of the run (`resume`): the calls of a run grow them once, as one
-    /// call does (BLASTN's report stream, review M3 of line RG series D, item xml-stream).
+    /// Takes the state of the run so far (`Xml2Document::take_carry`) with the capacities of the
+    /// writer's buffers (its report's and the caller's output buffer, `StructuredXml::keep_out`),
+    /// for the writer of a later call of the run (`resume`), which allocates them at once: the
+    /// calls of a run grow them once, as one call does, and hold nothing between the calls
+    /// (BLASTN's report stream, review M3 of line RG series D, item xml-stream).
     pub fn take_carry(&mut self) -> Xml2Carry {
         let mut carry = self.document.take_carry();
-        carry.keep_buffers([
-            std::mem::take(&mut self.report),
-            std::mem::take(&mut self.out),
-        ]);
+        carry.keep_capacities([&self.report, &self.out]);
         carry
     }
 
     /// Continues the run whose state `carry` holds (`take_carry`): the document's
-    /// (`Xml2Document::resume`) and the buffers of the writer before.
+    /// (`Xml2Document::resume`), and buffers of the capacities of the writer before.
     pub fn resume(&mut self, mut carry: Xml2Carry) {
         let [report, out] = carry.take_buffers();
         (self.report, self.out) = (report, out);

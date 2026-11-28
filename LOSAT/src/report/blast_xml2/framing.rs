@@ -306,12 +306,14 @@ impl Xml2Document<RunSideFiles> {
 /// several calls (the BLASTP block search, `x_query_blocks.rs`; BLASTN's report stream,
 /// `blastn::blast_engine::x_rpt_stream`): the count of reports written, whether the start of the
 /// document has been written, and the held report of a `-subject` run (with its refusal,
-/// `Xml2Document::hold_refused`); with `Xml2Writer::take_carry`, the writer's buffers too.
+/// `Xml2Document::hold_refused`); with `Xml2Writer::take_carry`, the sizes of the writer's buffers
+/// too.
 #[derive(Default)]
 pub struct Xml2Carry {
-    /// The buffers that a call's writer grows (`Xml2Writer::take_carry`), empty: kept for their
-    /// capacity, so that the calls of a run grow them once, as one call does.
-    buffers: [Vec<u8>; 2],
+    /// The capacities that a call's writer grew its buffers to (`Xml2Writer::take_carry`): the
+    /// next call's writer allocates them at once, so that the calls of a run grow them once, as
+    /// one call does, and hold nothing between the calls (the search of the next batch).
+    capacities: [usize; 2],
     written: u32,
     started: bool,
     pending: Vec<u8>,
@@ -323,17 +325,16 @@ pub struct Xml2Carry {
 }
 
 impl Xml2Carry {
-    /// Keeps `buffers` (emptied) for the next call's writer (`Xml2Writer::take_carry`).
-    pub(super) fn keep_buffers(&mut self, mut buffers: [Vec<u8>; 2]) {
-        for buffer in &mut buffers {
-            buffer.clear();
-        }
-        self.buffers = buffers;
+    /// Keeps the capacities of the writer's `buffers` for the next call's writer
+    /// (`Xml2Writer::take_carry`).
+    pub(super) fn keep_capacities(&mut self, buffers: [&Vec<u8>; 2]) {
+        self.capacities = buffers.map(Vec::capacity);
     }
 
-    /// The buffers that the call before kept (`keep_buffers`), empty; new ones where none was.
+    /// Empty buffers of the capacities that the call before kept (`keep_capacities`); new ones
+    /// where none was.
     pub(super) fn take_buffers(&mut self) -> [Vec<u8>; 2] {
-        std::mem::take(&mut self.buffers)
+        std::mem::take(&mut self.capacities).map(Vec::with_capacity)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-367
@@ -352,7 +353,7 @@ impl<F: SideFiles> Xml2Document<F> {
     /// takes it up with [`Xml2Document::resume`].
     pub fn take_carry(&mut self) -> Xml2Carry {
         Xml2Carry {
-            buffers: Default::default(),
+            capacities: Default::default(),
             written: std::mem::take(&mut self.written),
             started: std::mem::take(&mut self.started),
             pending: std::mem::take(&mut self.pending),

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.126
+- Version: 1.127
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -1041,7 +1041,12 @@
   that brought 1.121, line RG-KB item 12, then 1.123 at the merge of dev of 2026-11-27 that brought
   1.122, line NP item M4b-3d, then
   1.124 at the merge of dev of 2026-11-27 that brought 1.123, line RG-KB item 18b, then 1.126 at the merge
-  of dev of 2026-11-27 that brought 1.124 and 1.125, line RG-D2 items D2b-2..5 and exception 36)
+  of dev of 2026-11-27 that brought 1.124 and 1.125, line RG-D2 items D2b-2..5 and exception 36);
+  1.127 2026-11-28 (psiblast and TBLASTN `-in_pssm`, line RG item O-2: author names of a binary or
+  XML PSSM whose second read fails, in `-out_pssm`, `-export_search_strategy` and `-outfmt 11`,
+  are no longer refused; LOSAT writes NCBI's bytes, the file up to where NCBI stops, then NCBI's
+  exception, exit status 255; no new exception; line RG decision F3-25, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3762,12 +3767,19 @@ file would differ, and NCBI's programs still could not open the database).
   (valgrind: an invalid write) though it exits 0. With 29, one less than the letters, NCBI answers
   (exit 0, clean under valgrind) in ASN.1 text and binary alike: it searches the 29 letters with
   the PSSM, and its E-values are those of a query of 29 letters. LOSAT gives that answer since
-  line PS item PS7c (the query is searched as its first 29 letters), and refuses the other lengths. Not a rule-3 item but
-  a refusal: with `-out_pssm`, author names (`Auth-list` `names`) of a binary PSSM, which NCBI keeps
-  in a delay buffer and reads again only while it writes them, where that read posts a message or
-  fails (NCBI reports it in the middle of the file it writes; not ported). The warning of a
+  line PS item PS7c (the query is searched as its first 29 letters), and refuses the other lengths. Author
+  names (`Auth-list` `names`) of a binary or XML PSSM, which NCBI keeps in a delay buffer and reads
+  again only while it writes them in another format (with `-out_pssm`, `-export_search_strategy`
+  with `-db`, also of `tblastn -in_pssm`, and `-outfmt 11`), were refused there where that read
+  fails; since line RG item O-2 (version 1.127) LOSAT writes NCBI's bytes instead: where the read
+  fails (a number too large for its type, such as a Dbtag tag id 99999999999), the file up to
+  where NCBI stops, then NCBI's exception, exit status 255 (rows `db.xml.ps.*dl_ovf*`,
+  `db.xml.tbn.*dl_ovf.strat` and `db.ps15b.dlread.*`). Where the read posts a byte outside the
+  visible ASCII range (803.7), LOSAT posts NCBI's message and writes `#`, as NCBI does. A read
+  that would post another message is still refused (`report::archive::pssm_unwritten`; none of
+  LOSAT's inputs is known to reach it). The warning of a
   UTF8String tag (803.10) is not one of them: NCBI posts it once per process, when it first reads
-  the file, so the second read posts nothing and the names are written. Also not a rule-3 item
+  the file, so the second read posts nothing and the names are written. Not a rule-3 item
   but a refusal, of the text form too: a gapped `lambda` of `PLUS-INFINITY`, a gapped `lambda`,
   `kappa` or `h` of `NOT-A-NUMBER`, a negative gapped value, and psiblast's `lambdaUngapped` of
   `PLUS-INFINITY` were refused here while LOSAT did not compute NCBI's output of them. Since line PS

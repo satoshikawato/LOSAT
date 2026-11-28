@@ -233,3 +233,23 @@ pub(crate) const SKIP_POINTER_FRAME_END: (&str, u32, &str) = (
     1267,
     "ncbi::CObjectIStream::SkipPointer",
 );
+
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:490-501
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:805-842
+/// The `END_OBJECT_FRAME_OF` of the member frame (line 499) and the class frame (line 500) that
+/// `CMemberInfo::UpdateDelayedBuffer` puts around its read of a delayed member
+/// (`CDelayBuffer::Update`, `asn_types::read::read_delayed`): the place of the line that
+/// `NCBI_RETHROW_SAME` adds to a `CException` other than a `CSerialException` passing through
+/// it. The report names no function there: the name of a `const` member function ends in
+/// `const`, not `)`, which `CDiagCompileInfo::ParseCurrFunctName` takes for a name without
+/// arguments and leaves unparsed (NCBI BLAST+ 2.17.0, rows `db.xml.ps.dl_ovf.outpssm` and
+/// `db.ps15b.dlread.ovf` of line RG-F3: `member.cpp", line 499: Error:
+/// (CUtilException::eWrongData)  Frame type= eFrameClassMember, Member name= names`).
+pub(crate) fn update_delayed_buffer_frame_end(kind: FrameKind) -> (&'static str, u32) {
+    const MEMBER: &str = "src/serial/member.cpp";
+    match kind {
+        FrameKind::ClassMember => (MEMBER, 499),
+        FrameKind::Class => (MEMBER, 500),
+        _ => unreachable!("UpdateDelayedBuffer pushes a class and a member frame"),
+    }
+}

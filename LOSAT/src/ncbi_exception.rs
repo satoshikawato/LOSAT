@@ -144,12 +144,13 @@ impl NcbiException {
     /// error code and extra text; `site.kind` is not used) with the place of `site` and `message`,
     /// its predecessor its copy before the call, which keeps the main text of the chain. The one
     /// owner of the macro: the object frames of NCBI's object streams (`seqid::ber`'s reads,
-    /// `report::serial::xml`'s `END_OBJECT_FRAME`).
+    /// `report::serial::xml`'s `END_OBJECT_FRAME`). `function` is `None` where NCBI's report names
+    /// none (`ThrowSite::function`).
     pub fn rethrow_same(
         self,
         file: &'static str,
         line: u32,
-        function: &'static str,
+        function: impl Into<Option<&'static str>>,
         message: impl Into<Vec<u8>>,
     ) -> Self {
         NcbiException {
@@ -157,7 +158,7 @@ impl NcbiException {
                 file,
                 line,
                 kind: self.site.kind,
-                function: Some(function),
+                function: function.into(),
             },
             message: message.into(),
             extra: self.extra.clone(),

@@ -12,7 +12,9 @@ use super::{read_document, type_info, Encoding, Kind, Value};
 use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::asn_text_reader::SliceSource;
-use crate::report::serial::encoder::{Encoder, ReplacedChar, SerialError, StreamPosition, Traced};
+use crate::report::serial::encoder::{
+    Encoder, ReplacedChar, SerialError, StreamPosition, Thrown, Traced,
+};
 use crate::report::serial::xml::XmlEncoder;
 
 /// What the XML stream reads of `bytes` as the root type `root`, in the ASN.1 style.
@@ -568,7 +570,7 @@ const AUTH: &str =
 /// (NCBI 2.17.0's blast_formatter, probes x4, x5 of review D of line RG-F3: rc 0, nothing on
 /// standard error). A stream of the XML format copies the bytes; another one reads them first
 /// under the member's frames (`read_delayed`, `CDelayBuffer::Update`): their replaced bytes are
-/// posted, and an error keeps LOSAT from writing the member.
+/// posted, and a read that fails ends the write with NCBI's exception there.
 #[test]
 fn the_delayed_member_is_kept_unparsed_and_read_on_a_write_of_another_format() {
     let document = xml(named::AUTH_LIST, "NCBI-Biblio", AUTH);
@@ -649,8 +651,12 @@ fn the_delayed_member_is_kept_unparsed_and_read_on_a_write_of_another_format() {
     let (read_again, posts) = read_delayed(Encoding::Xml, bytes, class, member);
     assert!(read_again.is_ok(), "{read_again:?}");
     assert_eq!(posts, vec![Post::BadChar(posted[0].clone())]);
-    // A number past its storage inside it: read without an error, not written in text (NCBI's
-    // exception from its writer, probe dl_ovf: rc 255 after 283 bytes of the PSSM file).
+    // A number past its storage inside it: read without an error. A text write reads it first,
+    // which fails: NCBI's exception (the `CUtilException` of the number, rethrown at each frame of
+    // the read, the last two `UpdateDelayedBuffer`'s, which name no function) leaves the writer
+    // after the bytes before the member (line RG-F3 item O-2; NCBI 2.17.0's psiblast -in_pssm of
+    // such an XML PSSM with -out_pssm, row db.xml.ps.dl_ovf.outpssm: rc 255 after 283 bytes of
+    // the PSSM file).
     let ovf = document.replace(
         "<Person-id_name>",
         "<Person-id_dbtag><Dbtag><Dbtag_db>x</Dbtag_db><Dbtag_tag><Object-id>\
@@ -661,14 +667,39 @@ fn the_delayed_member_is_kept_unparsed_and_read_on_a_write_of_another_format() {
     let (value, posts) = read(ovf.as_bytes(), named::AUTH_LIST);
     assert!(posts.is_empty(), "{posts:?}");
     let value = value.expect("read");
+    let Value::Sequence(members) = &value else {
+        panic!("{value:?}")
+    };
+    let Value::Delayed { bytes, .. } = &members[0].1 else {
+        panic!("{members:?}")
+    };
+    let (read_again, posts) = read_delayed(Encoding::Xml, bytes, class, member);
+    assert!(posts.is_empty(), "{posts:?}");
+    let Err(ReadError::Exception(exception)) = read_again else {
+        panic!("{read_again:?}")
+    };
+    let what = String::from_utf8(exception.ncbi_what()).expect("ASCII");
+    let frames: Vec<&str> = what.lines().rev().take(2).collect();
+    assert!(
+        frames[1].ends_with(
+            "src/serial/member.cpp\", line 499: Error: (CUtilException::eWrongData)  Frame type= eFrameClassMember, Member name= names"
+        ),
+        "{what}"
+    );
+    assert!(
+        frames[0].ends_with(
+            "src/serial/member.cpp\", line 500: Error: (CUtilException::eWrongData)  Frame type= eFrameClass, Object type= Auth-list"
+        ),
+        "{what}"
+    );
     let mut out = Vec::new();
     let mut enc = Traced::new(AsnTextEncoder::new(&mut out), 0);
     write_document(&mut enc, named::AUTH_LIST, &value);
-    assert!(
-        matches!(enc.error(), Some(SerialError::Unwritten(_))),
-        "{:?}",
-        enc.error()
-    );
+    assert_eq!(enc.error(), Some(SerialError::DelayedRead));
+    let thrown = enc.take_thrown().expect("the writer throws");
+    drop(enc);
+    assert!(matches!(*thrown, Thrown::DelayedRead(_)), "{thrown:?}");
+    assert_eq!(String::from_utf8(out).expect("ASCII"), "Auth-list ::= {");
 }
 
 /// `text` without the first `from` and everything up to and including the next `to`.

@@ -60,9 +60,9 @@ use crate::report::serial::asn_input::{
 use crate::report::serial::asn_text_reader::{AsnSource, PointerType, ReplacedSink, SliceSource};
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
 use crate::report::serial::object_frame::{
-    frame_info, frame_name, FrameKind, CLASS_NOT_FOUND, EXPECTED_MEMBER, GET_REGISTERED_OBJECT,
-    HANDLE_EOF, READ_INT2, READ_POINTER_FRAME_END, READ_POINTER_INCOMPATIBLE, SKIP_FILE_HEADER,
-    SKIP_POINTER_FRAME_END,
+    frame_info, frame_name, update_delayed_buffer_frame_end, FrameKind, CLASS_NOT_FOUND,
+    EXPECTED_MEMBER, GET_REGISTERED_OBJECT, HANDLE_EOF, READ_INT2, READ_POINTER_FRAME_END,
+    READ_POINTER_INCOMPATIBLE, SKIP_FILE_HEADER, SKIP_POINTER_FRAME_END,
 };
 
 /// The text of the byte block's post ([`Post::UnendedByteBlock`]).
@@ -252,9 +252,8 @@ pub(crate) struct Frame {
     kind: FrameKind,
     /// Whether the frame belongs to a skip function (`SkipClassSequential`, ...).
     skip: bool,
-    /// The named frame of `ReadPointer` (or `SkipPointer`) around a value of the type that
-    /// `:Type` names, whose `END_OBJECT_FRAME` is that function's.
-    pointer: bool,
+    /// The function whose `END_OBJECT_FRAME` leaves the frame.
+    end: FrameEnd,
     /// The type (the table's index) of a named, class or choice frame: the name of its
     /// `Object type= `, and the object whose `HasTypeInfo` NCBI's `GetParentObjectPtr` asks
     /// (`hooks::pre_read_variant`). [`NO_TYPE`] for the other frames.
@@ -309,18 +308,37 @@ impl Frame {
         frame_info(self.kind, self.type_name(), self.member_name())
     }
 
-    /// The source file, line and function of the `END_OBJECT_FRAME` that leaves this frame in
-    /// the stream `I` (`Input::frame_site`: `object_frame::text_frame_site` for the text and
-    /// binary streams; `READ_POINTER_FRAME_END`, `SKIP_POINTER_FRAME_END`). The binary stream's
-    /// primitives throw no `CException` but a `CSerialException` (and the end of the input), so
-    /// only the text and XML streams' frames are ever named by their lines.
-    fn site<I: Input>(&self) -> (&'static str, u32, &'static str) {
-        match (self.pointer, self.skip) {
-            (true, false) => READ_POINTER_FRAME_END,
-            (true, true) => SKIP_POINTER_FRAME_END,
-            (false, skip) => I::frame_site(self.kind, skip),
-        }
+    /// The source file, line and function (`None` where NCBI's report names none) of the
+    /// `END_OBJECT_FRAME` that leaves this frame in the stream `I` (`Input::frame_site`:
+    /// `object_frame::text_frame_site` for the text and binary streams; `READ_POINTER_FRAME_END`,
+    /// `SKIP_POINTER_FRAME_END`, `object_frame::update_delayed_buffer_frame_end`). The binary
+    /// stream's primitives throw no `CException` but a `CSerialException` (and the end of the
+    /// input), so only the text and XML streams' frames are ever named by their lines.
+    fn site<I: Input>(&self) -> (&'static str, u32, Option<&'static str>) {
+        let (file, line, function) = match (self.end, self.skip) {
+            (FrameEnd::Pointer, false) => READ_POINTER_FRAME_END,
+            (FrameEnd::Pointer, true) => SKIP_POINTER_FRAME_END,
+            (FrameEnd::UpdateDelayedBuffer, _) => {
+                let (file, line) = update_delayed_buffer_frame_end(self.kind);
+                return (file, line, None);
+            }
+            (FrameEnd::Stream, skip) => I::frame_site(self.kind, skip),
+        };
+        (file, line, Some(function))
     }
+}
+
+/// The function whose `END_OBJECT_FRAME` leaves a frame (`Frame::site`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FrameEnd {
+    /// The stream's function that pushed it (`Input::frame_site`).
+    Stream,
+    /// The named frame of `ReadPointer` (or `SkipPointer`) around a value of the type that
+    /// `:Type` names.
+    Pointer,
+    /// The class and member frames of `CMemberInfo::UpdateDelayedBuffer` around the read of a
+    /// delayed member (`read_delayed`).
+    UpdateDelayedBuffer,
 }
 
 /// Reads the ASN.1 text document at the start of `text` as the root type `root` (an object of
@@ -736,7 +754,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         self.frames.push(Frame {
             kind,
             skip,
-            pointer: false,
+            end: FrameEnd::Stream,
             ty,
             member: None,
             num_rows: None,
@@ -748,6 +766,14 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     #[inline(always)]
     pub(super) fn depth(&self) -> usize {
         self.frames.len()
+    }
+
+    /// `BEGIN_OBJECT_FRAME_OF2` of `UpdateDelayedBuffer` (`delayed_member`).
+    fn push_delayed(&mut self, kind: FrameKind, ty: u16) {
+        self.push(kind, ty, false);
+        if let Some(top) = self.frames.last_mut() {
+            top.end = FrameEnd::UpdateDelayedBuffer;
+        }
     }
 
     /// `END_OBJECT_FRAME` of the top frame after what it holds was read.
@@ -846,15 +872,16 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:882-901
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:959-969
-    /// The delayed member `member` of the SEQUENCE `class` in its frames (`read_delayed`).
+    /// The delayed member `member` of the SEQUENCE `class` in its frames (`read_delayed`), which
+    /// `UpdateDelayedBuffer` pushes and leaves (`FrameEnd::UpdateDelayedBuffer`).
     fn delayed_member(&mut self, class: u16, member: &'static Member) -> R<Value> {
-        self.push(FrameKind::Class, class, false);
+        self.push_delayed(FrameKind::Class, class);
         let value = self.delayed_member_frame(member);
         self.pop(value)
     }
 
     fn delayed_member_frame(&mut self, member: &'static Member) -> R<Value> {
-        self.push(FrameKind::ClassMember, NO_TYPE, false);
+        self.push_delayed(FrameKind::ClassMember, NO_TYPE);
         self.set_member(member);
         let value = self.read_value(member.ty, false);
         self.pop(value)
@@ -992,7 +1019,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
                 }
                 self.push(FrameKind::Named, declared, skip);
                 if let Some(top) = self.frames.last_mut() {
-                    top.pointer = true;
+                    top.end = FrameEnd::Pointer;
                 }
                 Ok(Pointee::Other)
             }
@@ -1057,7 +1084,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     fn read_other(&mut self, class: u16) -> R<()> {
         self.push(FrameKind::Named, class, false);
         if let Some(top) = self.frames.last_mut() {
-            top.pointer = true;
+            top.end = FrameEnd::Pointer;
         }
         let value = self.read_value(class, false);
         self.end_pointer(value).map(drop)

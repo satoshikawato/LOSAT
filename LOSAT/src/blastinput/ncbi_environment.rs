@@ -1865,26 +1865,6 @@ fn replace_standard_error(_file: std::fs::File) -> Result<(), String> {
     Err("this platform cannot replace the standard error of a process".to_string())
 }
 
-/// No NCBI counterpart: a `DiagTarget` as a stream, each write going where the diagnostics go
-/// (`DiagTarget::write_text`; `stderr` stands for `cerr`). It holds the target by a shared
-/// reference, so that a log can write through the target's file at the same time
-/// (`writedb::makeblastdb::run_with`).
-pub struct DiagStream<'a> {
-    pub target: &'a DiagTarget,
-    pub stderr: &'a mut dyn Write,
-}
-
-impl Write for DiagStream<'_> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.target.write_text(buf, self.stderr);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7570-7608
 /// The target of the `-logfile` value `name` (a file NCBI fails to open leaves `cerr`). The file
 /// is opened (made when it does not exist) at once, as NCBI's first `SetupDiag` does, before

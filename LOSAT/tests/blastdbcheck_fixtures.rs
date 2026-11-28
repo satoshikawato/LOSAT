@@ -22,11 +22,13 @@ use std::time::{Duration, Instant};
 
 /// Rows where LOSAT must refuse (exit status 1, standard error starting `Error: ` and containing
 /// `not supported by LOSAT`) because NCBI's result is a crash or an endless loop that LOSAT does
-/// not reproduce: a sequence file of no bytes, a cut string ISAM, a garbage index found by `-dir`
-/// (status 139), `-stride` of 0 or less (killed after 5 s); NCBI's frozen result stays beside it.
-const LOSAT_REFUSES: [&str; 7] = [
+/// not reproduce: a sequence file of no bytes, an empty `.rps` profile file, a cut string ISAM, a
+/// garbage index found by `-dir` (status 139), `-stride` of 0 or less (killed after 5 s); NCBI's
+/// frozen result stays beside it.
+const LOSAT_REFUSES: [&str; 8] = [
     "d_p4_psq_zero",
     "d_p5_psq_zero",
+    "c_rps0",
     "d_p4_psd_cut",
     "r_garbage",
     "r_garbage2",
@@ -34,41 +36,12 @@ const LOSAT_REFUSES: [&str; 7] = [
     "strideneg",
 ];
 
-/// Rows where NCBI reads zeros past the end of a short file inside its last mapped page (a
-/// truncated index, sequence or header file) and succeeds; LOSAT must refuse them (as above)
-/// until its volume readers model that page (row RG-D2b's next PR).
-const AWAITING_ZERO_PAGE: [&str; 6] = [
-    "d_p4_pin_10",
-    "d_p4_pin_cut",
-    "d_p4_psq_half",
-    "d_p4_phr_half",
-    "d_p5_pin_cut",
-    "d_n4_nsq_half",
-];
-
-/// Rows of an alias file whose count checks overflow a signed integer in NCBI's binary, where
-/// the overflow's result (undefined in C) decides the check; LOSAT must refuse them (as above)
-/// until the Owner decides the exception (Q-D2B-OV). An overflow that decides nothing gives NCBI's
-/// result (a_ov3). `-dir .` of the alias rows (`a_dir`, `a_dir_v1`) now gets past `membx.pal`
-/// and `taxmiss.pal` and meets `ov1.pal`.
-const AWAITING_Q_D2B_OV: [&str; 4] = ["a_ov1", "a_ov2", "a_dir", "a_dir_v1"];
-
-/// Rows of `-cdd_delta`, which LOSAT refuses until row RG-D2b ports its test of a CDD database's
-/// headers (the next PR of the row).
-const AWAITING_CDD_DELTA: [&str; 12] = [
-    "cdd",
-    "c_ok",
-    "c_ok_v1",
-    "c_nowc",
-    "c_noaux",
-    "c_nofreq",
-    "c_freqmagic",
-    "c_wcn",
-    "c_wcoff",
-    "c_obsr28",
-    "c_two",
-    "c_two_v4",
-];
+/// Rows covered by approved exception 35 (`Q-D2b-OV=A`, `PD-LOSAT-NCBI-DEFECTS` version 1.124,
+/// Owner decision 2026-11-25 17:54 JST): NCBI's 32/64-bit signed integer arithmetic overflows and
+/// wraps to produce false alias errors (`a_ov1`, `a_ov2`, and `-dir .` runs `a_dir`, `a_dir_v1`
+/// that visit them) or a wrapped OID (`ends_intmin`), whereas LOSAT widens the calculation and
+/// reports the exact result (NCBI's frozen output stays beside every row for provenance).
+const APPROVED_WIDENED_OVERFLOW: [&str; 5] = ["a_ov1", "a_ov2", "a_dir", "a_dir_v1", "ends_intmin"];
 
 /// `tests/fixtures/blastdbcheck`.
 fn fixtures() -> PathBuf {
@@ -473,15 +446,89 @@ fn text(bytes: &[u8]) -> String {
 }
 
 /// Every list of rows that LOSAT must refuse.
-const REFUSAL_LISTS: [&[&str]; 4] = [
-    &LOSAT_REFUSES,
-    &AWAITING_ZERO_PAGE,
-    &AWAITING_Q_D2B_OV,
-    &AWAITING_CDD_DELTA,
-];
+const REFUSAL_LISTS: [&[&str]; 1] = [&LOSAT_REFUSES];
 
 fn must_refuse(name: &str) -> bool {
     REFUSAL_LISTS.iter().any(|list| list.contains(&name))
+}
+
+/// Expected LOSAT output for an approved widened-overflow row (`Q-D2b-OV=A`,
+/// `PD-LOSAT-NCBI-DEFECTS` exception 35): exact arithmetic avoids NCBI's signed overflow false
+/// errors (`a_ov1`, `a_ov2`, and `-dir .` runs `a_dir`/`a_dir_v1` that visit them) and negative
+/// wraparound (`ends_intmin`), keeping every other line and warning identical to NCBI.
+fn expected_widened(name: &str) -> Run {
+    if matches!(name, "a_dir" | "a_dir_v1") {
+        let (out, err, rc, files) = expected(name);
+        let text = String::from_utf8(out).unwrap();
+        let adjusted = text
+            .replace(
+                "  <RUN>/cases/a/ov1.pal / AliasFileTest:   [ERROR] FIRST_OID not paired with LAST_OID\n",
+                "",
+            )
+            .replace(
+                "  <RUN>/cases/a/ov2.pal / AliasFileTest:   [ERROR] OIDLIST cannot be provided without MAXOID , LENGTH, or NSEQ\n",
+                "",
+            )
+            .replace(
+                " Result=FAILURE. 21 errors reported in 26 alias(es).\n",
+                " Result=FAILURE. 19 errors reported in 26 alias(es).\n",
+            )
+            .replace("Total errors: 39\n", "Total errors: 37\n");
+        return (adjusted.into_bytes(), err, rc, files);
+    }
+    let alias_ok = |alias: &str, warn: &str| -> Vec<u8> {
+        let mut s = String::from(concat!(
+            "Writing messages to <stdout> at verbosity (Detailed)\n",
+            "ISAM testing is ENABLED.\n",
+            "Legacy testing is DISABLED.\n",
+            "TaxID testing is DISABLED.\n",
+            "Testing every 100-th OID.\n",
+            "\n",
+            "Testing 1 volume(s).\n",
+            " <RUN>/cases/a/p5\n",
+            " Result=SUCCESS. No errors reported for 1 volume(s).\n",
+            "Testing 1 alias(es).\n",
+        ));
+        s.push_str(&format!(" <RUN>/cases/a/{alias}\n{warn}"));
+        s.push_str(" Result=SUCCESS. No errors reported for 1 alias(es).\n");
+        s.into_bytes()
+    };
+    let (out, rc): (Vec<u8>, i32) = match name {
+        "a_ov1" => (alias_ok("ov1.pal", ""), 0),
+        "a_ov2" => (
+            alias_ok(
+                "ov2.pal",
+                "  <RUN>/cases/a/ov2.pal / AliasFileTest:   [WARNING] oidlist file gi.gil does not have .msk extension\n",
+            ),
+            0,
+        ),
+        "ends_intmin" => (
+            concat!(
+                "Writing messages to <stdout> at verbosity (Minutiae)\n",
+                "ISAM testing is ENABLED.\n",
+                "Legacy testing is DISABLED.\n",
+                "TaxID testing is DISABLED.\n",
+                "Testing first -2147483648 and last -2147483648 OIDs.\n",
+                "\n",
+                "Testing 1 volume(s).\n",
+                " <RUN>/in/p5\n",
+                "  <RUN>/in/p5 / EndPoints: <testing -2147483648 OIDs at each end>\n",
+                "  <RUN>/in/p5 / EndPoints:     Failed during headers, oid 2147483657: OID not found\n",
+                "\n",
+                "  <RUN>/in/p5 / EndPoints:       Status for OID 2147483657: FAIL\n",
+                " Result=FAILURE. 1 errors reported in 1 volume(s).\n",
+                "Testing 0 alias(es).\n",
+                " Result=SUCCESS. No errors reported for 0 alias(es).\n",
+                "\n",
+                "Total errors: 1\n",
+            )
+            .as_bytes()
+            .to_vec(),
+            1,
+        ),
+        _ => panic!("unexpected approved widened row {name}"),
+    };
+    (out, Vec::new(), rc, String::new())
 }
 
 #[test]
@@ -511,11 +558,15 @@ fn blastdbcheck_gives_ncbis_bytes() {
             }
             continue;
         }
-        let want = expected(&name);
+        let want = if APPROVED_WIDENED_OVERFLOW.contains(&name.as_str()) {
+            expected_widened(&name)
+        } else {
+            expected(&name)
+        };
         if got != want {
             eprintln!(
-                "--- {name}: LOSAT status {}, NCBI {}\nLOSAT stdout: {:?}\nNCBI stdout:  {:?}\n\
-                 LOSAT stderr: {:?}\nNCBI stderr:  {:?}\nLOSAT files:\n{}NCBI files:\n{}",
+                "--- {name}: LOSAT status {}, expected {}\nLOSAT stdout: {:?}\nexpected stdout:  {:?}\n\
+                 LOSAT stderr: {:?}\nexpected stderr:  {:?}\nLOSAT files:\n{}expected files:\n{}",
                 got.2,
                 want.2,
                 text(&got.0),
@@ -530,17 +581,1228 @@ fn blastdbcheck_gives_ncbis_bytes() {
             let _ = fs::remove_dir_all(&dir);
         }
     }
-    assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
+    assert!(
+        differ.is_empty(),
+        "rows that differ from expected: {differ:?}"
+    );
 }
 
-/// Every id in the refusal lists names a row of the table, and no row is in two lists.
+/// Every id in the refusal and approved-exception lists names a row of the table, and no row is in
+/// two lists.
 #[test]
 fn refusal_lists_name_rows() {
     let ids: Vec<String> = rows().into_iter().map(|row| row.id).collect();
     let mut seen = Vec::new();
-    for name in REFUSAL_LISTS.iter().flat_map(|list| list.iter()) {
+    for name in REFUSAL_LISTS
+        .iter()
+        .flat_map(|list| list.iter())
+        .chain(APPROVED_WIDENED_OVERFLOW.iter())
+    {
         assert!(ids.iter().any(|id| id == name), "no row {name}");
         assert!(!seen.contains(name), "{name} is in two lists");
         seen.push(name);
     }
+}
+
+const PROT_ALL_FASTA: [&str; 6] = ["-db", "p4", "-dbtype", "prot", "-entry", "all"];
+const PROT_ALL_FMT: [&str; 8] = [
+    "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
+];
+
+fn copy_base_db(dst: &Path, stem: &str) {
+    fs::create_dir_all(dst).unwrap();
+    let prefix = format!("{stem}.");
+    for entry in fs::read_dir(base_in()).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().into_string().unwrap();
+        if name.starts_with(&prefix) {
+            fs::copy(entry.path(), dst.join(name)).unwrap();
+        }
+    }
+}
+
+/// D2b-3 cross-program parity: `blastdbcmd`, `blastp`, and `blastn` share the same 4 KiB
+/// last-page zero-read behavior in `seqdb` and match NCBI BLAST+ 2.17.0 on the same truncated
+/// inputs (`p4_pin_10`, `p4_pin_cut`, `p4_psq_half`, `p4_phr_half`, `n4_nsq_half`).
+#[test]
+fn zero_page_cross_program_parity() {
+    let run_prog = |dir: &Path, sub: &str, args: &[&str]| -> (Vec<u8>, Vec<u8>, i32) {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_losat"));
+        cmd.arg(sub)
+            .args(args)
+            .current_dir(dir)
+            .stdin(Stdio::null())
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("TZ", "UTC")
+            .env("LC_ALL", "C");
+        let out = cmd.output().unwrap();
+        (out.stdout, out.stderr, out.status.code().unwrap_or(-1))
+    };
+    let cp_db = copy_base_db;
+
+    let root = scratch("zp-xprog");
+    fs::create_dir_all(&root).unwrap();
+    let q_prot = root.join("q.faa");
+    fs::write(&q_prot, b">q\nCSNFRHATLYNGCRFTMHYLCSNFRHATLYNGCRFTMHYL\n").unwrap();
+    let q_nucl = root.join("q.fna");
+    fs::write(
+        &q_nucl,
+        b">qn\nATGAAACCCTTTGGGCCCAAATTTGGGCCCAAATTTGGGCCCAAATTTGGGCCCAAATTT\n",
+    )
+    .unwrap();
+    let q_prot_s = q_prot.to_str().unwrap();
+    let q_nucl_s = q_nucl.to_str().unwrap();
+    let blastp_args = ["-query", q_prot_s, "-db", "p4", "-outfmt", "6"];
+    let prot_all_args = PROT_ALL_FMT;
+    let run_ok = |dir: &Path, sub: &str, args: &[&str]| -> Vec<u8> {
+        let (out, err, rc) = run_prog(dir, sub, args);
+        assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
+        out
+    };
+    let run_bp = |dir: &Path| run_prog(dir, "blastp", &blastp_args);
+    let run_bp_ok = |dir: &Path| run_ok(dir, "blastp", &blastp_args);
+
+    // 1. p4_pin_10: blastdbcmd -info sees 0 sequences; blastp exits 3 with memory map error.
+    let d = root.join("p4_pin10");
+    cp_db(&d, "p4");
+    fs::OpenOptions::new()
+        .write(true)
+        .open(d.join("p4.pin"))
+        .unwrap()
+        .set_len(10)
+        .unwrap();
+    let out = run_ok(&d, "blastdbcmd", &["-db", "p4", "-dbtype", "prot", "-info"]);
+    assert!(
+        text(&out).contains("\t0 sequences; 0 total residues\n"),
+        "{}",
+        text(&out)
+    );
+    let (out, err, rc) = run_bp(&d);
+    assert_eq!((rc, out.as_slice()), (3, b"".as_slice()));
+    assert_eq!(err, b"LOSAT engine error: Database memory map file error\n");
+
+    // 2. p4_pin_cut (-8 bytes): blastdbcmd prints signed negative lengths -364 and -1; blastp hits XP_000104.1.
+    let d = root.join("p4_pincut");
+    cp_db(&d, "p4");
+    let pin_len = fs::metadata(d.join("p4.pin")).unwrap().len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(d.join("p4.pin"))
+        .unwrap()
+        .set_len(pin_len - 8)
+        .unwrap();
+    let out = run_ok(&d, "blastdbcmd", &prot_all_args);
+    assert_eq!(
+        text(&out),
+        concat!(
+            "0 60 alpha protein\n",
+            "1 45 beta predicted protein\n",
+            "2 70 gamma protein\n",
+            "3 50 delta predicted protein\n",
+            "4 40 epsilon protein\n",
+            "5 55 zeta protein\n",
+            "6 35 pir protein\n",
+            "7 -364 prf protein\n",
+            "8 -1 local protein\n",
+        )
+    );
+    let out = run_bp_ok(&d);
+    assert_eq!(
+        text(&out),
+        "q\tXP_000104.1\t100.000\t40\t0\t0\t1\t40\t1\t40\t2.85e-28\t82.8\n\
+         q\tXP_000104.1\t100.000\t30\t0\t0\t1\t30\t21\t50\t2.81e-20\t62.4\n"
+    );
+
+    // 3. p4_psq_half: zero-filled trailing protein bytes cut the alignment at residue 31 in blastp.
+    let d = root.join("p4_psqhalf");
+    cp_db(&d, "p4");
+    let psq_len = fs::metadata(d.join("p4.psq")).unwrap().len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(d.join("p4.psq"))
+        .unwrap()
+        .set_len(psq_len / 2)
+        .unwrap();
+    let out = run_bp_ok(&d);
+    assert_eq!(
+        text(&out),
+        "q\tXP_000104.1\t100.000\t31\t0\t0\t1\t31\t1\t31\t2.62e-21\t65.1\n\
+         q\tXP_000104.1\t100.000\t20\t0\t0\t21\t40\t1\t20\t5.39e-13\t44.3\n"
+    );
+
+    // 4. p4_phr_half: blastdbcmd outputs OIDs 0..3, posts 8 Error (803.7) lines for NUL bytes,
+    // then stops with `byte 25: member seqid expected`; blastp exits 255 on zero-filled header.
+    let d = root.join("p4_phrhalf");
+    cp_db(&d, "p4");
+    let phr_len = fs::metadata(d.join("p4.phr")).unwrap().len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(d.join("p4.phr"))
+        .unwrap()
+        .set_len(phr_len / 2)
+        .unwrap();
+    let (out, err, rc) = run_prog(&d, "blastdbcmd", &prot_all_args);
+    assert_eq!(rc, 1);
+    assert_eq!(
+        text(&out),
+        "0 60 alpha protein\n1 45 beta predicted protein\n2 70 gamma protein\n3 50 delta predicted protein\n"
+    );
+    let err_s = String::from_utf8_lossy(&err);
+    assert_eq!(
+        err_s
+            .matches("Error: (803.7) [blastdbcmd] Blast-def-line-set.E.title\n")
+            .count(),
+        8,
+        "{err_s}"
+    );
+    assert!(
+        err_s.ends_with("Error: [blastdbcmd] byte 25: member seqid expected\n"),
+        "{err_s}"
+    );
+    let (out, err, rc) = run_bp(&d);
+    assert_eq!((rc, out.as_slice()), (255, b"".as_slice()));
+    assert_eq!(
+        text(&err),
+        "Error: byte 0: unexpected tag: None (0), should be constructed/None (32) ( at Blast-def-line-set.[])\n\n"
+    );
+
+    // 5. n4_nsq_half: zero-filled trailing 2-bit bytes yield lengths 120, 90, 148, 80 and blastn rc 0.
+    let d = root.join("n4_nsqhalf");
+    cp_db(&d, "n4");
+    let nsq_len = fs::metadata(d.join("n4.nsq")).unwrap().len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(d.join("n4.nsq"))
+        .unwrap()
+        .set_len(nsq_len / 2)
+        .unwrap();
+    let out = run_ok(&d, "blastdbcmd", N4_DBCMD_FMT);
+    assert_eq!(
+        text(&out),
+        "0 120 n one\n1 90 n two predicted\n2 148 n three\n3 80 n four\n"
+    );
+    let out = run_ok(
+        &d,
+        "blastn",
+        &["-query", q_nucl_s, "-db", "n4", "-outfmt", "6"],
+    );
+    assert!(out.is_empty(), "{}", text(&out));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+const N4_DBCMD: &[&str] = &["-db", "n4", "-dbtype", "nucl", "-entry", "all"];
+const N4_DBCMD_FMT: &[&str] = &[
+    "-db", "n4", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o %l %t",
+];
+const N4_CHECK: &[&str] = &["-db", "n4", "-dbtype", "nucl", "-full"];
+const N4_CHECK_V3: &[&str] = &["-db", "n4", "-dbtype", "nucl", "-full", "-verbosity", "3"];
+
+/// Loads a frozen NCBI BLAST+ 2.17.0 cross-program fixture (`nonasc_xprog/<name>.{out,err,rc}`)
+/// translated into LOSAT wording.
+fn load_nonasc_expected(name: &str) -> (Vec<u8>, Vec<u8>, i32) {
+    let base = fixtures().join("nonasc_xprog");
+    let out =
+        losat::wording::losat_output_bytes(&fs::read(base.join(format!("{name}.out"))).unwrap())
+            .into_owned();
+    let err = losat::wording::losat_bytes(&fs::read(base.join(format!("{name}.err"))).unwrap())
+        .into_owned();
+    let rc: i32 = fs::read_to_string(base.join(format!("{name}.rc")))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    (out, err, rc)
+}
+
+/// Runs a `losat <subcommand>` with clean environment and `<RUN>` substitution against `root`,
+/// optionally wrapped by an executable prefix (such as `["taskset", "-c", "0"]`).
+fn run_losat_sub_prefixed(
+    root: &Path,
+    dir: &Path,
+    prefix: &[&str],
+    sub: &str,
+    args: &[&str],
+) -> (Vec<u8>, Vec<u8>, i32) {
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let mut sub_cmd = if let Some((prog, rest)) = prefix.split_first() {
+        let mut cmd = Command::new(prog);
+        cmd.args(rest).arg(env!("CARGO_BIN_EXE_losat"));
+        cmd
+    } else {
+        Command::new(env!("CARGO_BIN_EXE_losat"))
+    };
+    sub_cmd
+        .arg(sub)
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("TZ", "UTC")
+        .env("LC_ALL", "C")
+        .env("HOME", &home)
+        .env("NCBI_CONFIG_PATH", &home)
+        .env("BLAST_USAGE_REPORT", "false");
+    if let Some(log) = std::env::var_os("LOSAT_BLASTX_WORKER_LOG") {
+        sub_cmd.env("LOSAT_BLASTX_WORKER_LOG", log);
+    }
+    let out = sub_cmd.output().unwrap();
+    (
+        with_run(&out.stdout, root),
+        with_run(&out.stderr, root),
+        out.status.code().unwrap_or(-1),
+    )
+}
+
+/// Runs a `losat <subcommand>` with clean environment and `<RUN>` substitution against `root`.
+fn run_losat_sub(root: &Path, dir: &Path, sub: &str, args: &[&str]) -> (Vec<u8>, Vec<u8>, i32) {
+    run_losat_sub_prefixed(root, dir, &[], sub, args)
+}
+
+/// Cross-program parity for non-ascending index offsets (`d_p4_nonasc_seq`, `d_p4_nonasc_hdr`,
+/// `n4_amb_eq_start`, `n4_amb_gt_next`, `n4_amb0_eq_0`) across `blastdbcmd`, `blastp`, `blastx`,
+/// `psiblast`, `blastn`, and `blastdbcheck` (under `[profile.test]` with overflow checks enabled)
+/// against frozen NCBI BLAST+ 2.17.0 outputs in `nonasc_xprog/`.
+#[test]
+fn nonasc_cross_program_parity() {
+    let root = scratch("nonasc-xprog");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+
+    let cp_db = |dst: &Path, stem: &str, with_tax: bool| {
+        copy_base_db(dst, stem);
+        if with_tax {
+            let tax = fixtures().join("files/tax/good");
+            for f in ["taxdb.bti", "taxdb.btd"] {
+                fs::copy(tax.join(f), dst.join(f)).unwrap();
+            }
+        }
+    };
+    let poke = |path: PathBuf, at: usize, hex: &str| {
+        let mut b = fs::read(&path).unwrap();
+        let v = hex_bytes(hex);
+        b[at..at + v.len()].copy_from_slice(&v);
+        fs::write(path, b).unwrap();
+    };
+    let assert_refused = |label: &str, got: (Vec<u8>, Vec<u8>, i32)| {
+        assert_eq!(got.2, 1, "{label}: expected rc=1, err={:?}", text(&got.1));
+        assert!(
+            got.1.starts_with(b"Error: ") && text(&got.1).contains("not supported by LOSAT"),
+            "{label}: expected LOSAT refusal, got stderr={:?}",
+            text(&got.1)
+        );
+    };
+
+    let q3 = root.join("q3.faa");
+    fs::write(&q3, b">q3\nCSNFRHATLYNGCRFTMHYLCSNFRHATLYNGCRFTMHYL\n").unwrap();
+    let q3_dna = root.join("q3_dna.fna");
+    fs::write(
+        &q3_dna,
+        b">q3_dna\n\
+          TGCTCCAACTTCCGCCACGCAACGCTGTACAATGGCTGCCGCTTCACGATGCACTACCTG\
+          TGCTCCAACTTCCGCCACGCAACGCTGTACAATGGCTGCCGCTTCACGATGCACTACCTG\n",
+    )
+    .unwrap();
+    let q2 = root.join("q2.faa");
+    fs::write(&q2, b">q2\nRKFVIYQLDPFWRIVLEYPDRKFVIYQLDPFWRIVLEYPD\n").unwrap();
+    let q4 = root.join("q4.faa");
+    fs::write(&q4, b">q4\nKDWNCQIETHWPKCNEVQHTKDWNCQIETHWPKCNEVQHT\n").unwrap();
+    let qn = root.join("qn.fna");
+    fs::write(
+        &qn,
+        b">qn\nAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTG\n",
+    )
+    .unwrap();
+    let (q3s, q3ds, q2s, q4s, qns) = (
+        q3.to_str().unwrap(),
+        q3_dna.to_str().unwrap(),
+        q2.to_str().unwrap(),
+        q4.to_str().unwrap(),
+        qn.to_str().unwrap(),
+    );
+
+    let neg_gi = root.join("neg_gi.txt");
+    fs::write(&neg_gi, b"103\n").unwrap();
+    let pos_gi = root.join("pos_gi.txt");
+    fs::write(&pos_gi, b"101\n102\n104\n105\n106\n").unwrap();
+    let neg_si = root.join("neg_si.txt");
+    fs::write(&neg_si, b"AAB00103.2\n").unwrap();
+    let n4_neg_gi = root.join("n4_neg_gi.txt");
+    fs::write(&n4_neg_gi, b"302\n").unwrap();
+    let neg_gi2 = root.join("neg_gi2.txt");
+    fs::write(&neg_gi2, b"103\n105\n").unwrap();
+    let n4_neg_gi304 = root.join("n4_neg_gi304.txt");
+    fs::write(&n4_neg_gi304, b"304\n").unwrap();
+    let n4_neg_gi_all = root.join("n4_neg_gi_all.txt");
+    fs::write(&n4_neg_gi_all, b"301\n302\n303\n304\n").unwrap();
+    let (neg_gis, pos_gis, neg_sis, n4_neg_gis) = (
+        neg_gi.to_str().unwrap(),
+        pos_gi.to_str().unwrap(),
+        neg_si.to_str().unwrap(),
+        n4_neg_gi.to_str().unwrap(),
+    );
+    let (neg_gi2s, n4_neg_gi304s, n4_neg_gi_alls) = (
+        neg_gi2.to_str().unwrap(),
+        n4_neg_gi304.to_str().unwrap(),
+        n4_neg_gi_all.to_str().unwrap(),
+    );
+
+    // 1. d_p4_nonasc_seq (p4.pin@106 = 01f4 -> seq=[1, 62, 500, 179, ...]).
+    // At 2+ threads in DB-split mode, NCBI's CSeqDBImpl::x_FillSeqBuffer stops at OID 2 (len=-322)
+    // before applying any GI or seqid list; at 1 thread or `-mt_mode 1` (split by queries), NCBI
+    // scans all included OIDs.
+    let d_seq = root.join("d_p4_nonasc_seq");
+    cp_db(&d_seq, "p4", true);
+    poke(d_seq.join("p4.pin"), 106, "01f4");
+    for (name, sub, args) in [
+        (
+            "nonasc_seq_dbcmd_fasta",
+            "blastdbcmd",
+            PROT_ALL_FASTA.to_vec(),
+        ),
+        ("nonasc_seq_dbcmd_fmt", "blastdbcmd", PROT_ALL_FMT.to_vec()),
+        (
+            "nonasc_seq_blastp_t1",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_t2",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "2",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_mt1_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-mt_mode",
+                "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_neggi_t1",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gis,
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_neggi_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_gi_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-gilist",
+                pos_gis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_negsi_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_seqidlist",
+                neg_sis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_neggi2_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gi2s,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_neggi2_t1",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gi2s,
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_t1",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_mt1_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-mt_mode",
+                "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_neggi_t1",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gis,
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_neggi_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_gi_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-gilist",
+                pos_gis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_negsi_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_seqidlist",
+                neg_sis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_neggi2_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gi2s,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_psiblast_t1",
+            "psiblast",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_seq_psiblast_t4",
+            "psiblast",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_psiblast_neggi2_t4",
+            "psiblast",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gi2s,
+                "-num_threads",
+                "4",
+            ],
+        ),
+    ] {
+        let got = run_losat_sub(&root, &d_seq, sub, &args);
+        let want = load_nonasc_expected(name);
+        assert_eq!(got, want, "{name}");
+    }
+    // Under Linux CPU affinity (`taskset -c 0`), NCBI's `CSystemInfo::GetCpuCount` still counts
+    // online CPUs (`_SC_NPROCESSORS_ONLN`) and keeps the 4-thread DB-split stop on both unfiltered
+    // and list-filtered searches.
+    #[cfg(target_os = "linux")]
+    if Command::new("taskset")
+        .args(["-c", "0", "true"])
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        let base = [
+            "-query",
+            q3s,
+            "-db",
+            "p4",
+            "-outfmt",
+            "6",
+            "-num_threads",
+            "4",
+        ];
+        for (name, extra) in [
+            ("nonasc_seq_blastp_t4", &[][..]),
+            ("nonasc_seq_blastp_neggi_t4", &["-negative_gilist", neg_gis]),
+        ] {
+            let mut args = base.to_vec();
+            args.extend_from_slice(extra);
+            let got =
+                run_losat_sub_prefixed(&root, &d_seq, &["taskset", "-c", "0"], "blastp", &args);
+            let want = load_nonasc_expected(name);
+            assert_eq!(got, want, "{name} under taskset -c 0");
+        }
+    }
+
+    // 2. d_p4_nonasc_hdr (p4.pin@68 = 00000000 -> hdr=[0, 79, 167, 0, 334, ...]).
+    let d_hdr = root.join("d_p4_nonasc_hdr");
+    cp_db(&d_hdr, "p4", true);
+    poke(d_hdr.join("p4.pin"), 68, "00000000");
+    for (name, sub, args) in [
+        (
+            "nonasc_hdr_dbcmd_fasta",
+            "blastdbcmd",
+            PROT_ALL_FASTA.to_vec(),
+        ),
+        ("nonasc_hdr_dbcmd_fmt", "blastdbcmd", PROT_ALL_FMT.to_vec()),
+        (
+            "nonasc_hdr_blastp_q2_t1",
+            "blastp",
+            vec![
+                "-query",
+                q2s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_hdr_blastp_q2_t1",
+            "blastp",
+            vec![
+                "-query",
+                q2s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_hdr_blastp_q4_t1",
+            "blastp",
+            vec![
+                "-query",
+                q4s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_hdr_blastp_q4_t1",
+            "blastp",
+            vec![
+                "-query",
+                q4s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+    ] {
+        let got = run_losat_sub(&root, &d_hdr, sub, &args);
+        let want = load_nonasc_expected(name);
+        assert_eq!(got, want, "{name}");
+    }
+    // OID 3's header range [0, 334) decodes OID 0's gi|101 -> existing lookup-mismatch refusal.
+    for t in ["1", "4"] {
+        let got = run_losat_sub(
+            &root,
+            &d_hdr,
+            "blastp",
+            &[
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                t,
+            ],
+        );
+        assert_refused(&format!("nonasc_hdr_blastp_q3_t{t}"), got);
+    }
+
+    // 3. n4_amb_eq_start (n4.nin@100 = 00000020 -> amb[1] = seq[1] = 32; length = -4 inside mapping).
+    // Deterministic in blastn, blastdbcmd, and blastdbcheck; blastn -t 4 stops at OID 1 via
+    // x_FillSeqBuffer (even when a GI list excludes OID 1). tblastn and tblastx refuse out-of-order
+    // ambiguity offsets (documented in refusals.md).
+    let d_ambeq = root.join("n4_amb_eq_start");
+    cp_db(&d_ambeq, "n4", true);
+    poke(d_ambeq.join("n4.nin"), 100, "00000020");
+    for (name, sub, args) in [
+        ("n4_ambeq_dbcmd", "blastdbcmd", N4_DBCMD.to_vec()),
+        ("n4_ambeq_dbcmd_fmt", "blastdbcmd", N4_DBCMD_FMT.to_vec()),
+        (
+            "n4_ambeq_blastn_t1",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambeq_blastn_t4",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambeq_blastn_mt1_t4",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-mt_mode",
+                "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambeq_blastn_neggi_t1",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gis,
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambeq_blastn_neggi_t4",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        ("n4_ambeq_check", "blastdbcheck", N4_CHECK.to_vec()),
+        ("n4_ambeq_check_v3", "blastdbcheck", N4_CHECK_V3.to_vec()),
+    ] {
+        let got = run_losat_sub(&root, &d_ambeq, sub, &args);
+        let want = load_nonasc_expected(name);
+        assert_eq!(got, want, "{name}");
+    }
+
+    // 4. n4_amb_gt_next (n4.nin@100 = 0000003b -> amb[1] = 59 > next = 55; length = 107).
+    // Deterministic in blastdbcmd, blastn -t 1, and blastdbcheck; blastn at 2+ threads aborts in
+    // NCBI (SIGABRT) and is refused.
+    let d_ambgt = root.join("n4_amb_gt_next");
+    cp_db(&d_ambgt, "n4", true);
+    poke(d_ambgt.join("n4.nin"), 100, "0000003b");
+    for (name, sub, args) in [
+        ("n4_ambgt_dbcmd", "blastdbcmd", N4_DBCMD.to_vec()),
+        ("n4_ambgt_dbcmd_fmt", "blastdbcmd", N4_DBCMD_FMT.to_vec()),
+        (
+            "n4_ambgt_blastn_t1",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        ("n4_ambgt_check", "blastdbcheck", N4_CHECK.to_vec()),
+        ("n4_ambgt_check_v3", "blastdbcheck", N4_CHECK_V3.to_vec()),
+    ] {
+        let got = run_losat_sub(&root, &d_ambgt, sub, &args);
+        let want = load_nonasc_expected(name);
+        assert_eq!(got, want, "{name}");
+    }
+    for (label, args) in [
+        (
+            "n4_ambgt_blastn_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambgt_blastn_mt1_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-mt_mode",
+                "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+    ] {
+        let got = run_losat_sub(&root, &d_ambgt, "blastn", &args);
+        assert_refused(label, got);
+    }
+
+    // 5. n4_amb0_eq_0 (n4.nin@96 = 00000000 -> amb[0] = 0; NCBI reads file[-1] before its mapping
+    // and crashes with SIGSEGV). Refused across all programs.
+    let d_amb0 = root.join("n4_amb0_eq_0");
+    cp_db(&d_amb0, "n4", true);
+    poke(d_amb0.join("n4.nin"), 96, "00000000");
+    for (sub, args) in [
+        ("blastdbcmd", N4_DBCMD.to_vec()),
+        (
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        ("blastdbcheck", N4_CHECK.to_vec()),
+    ] {
+        let got = run_losat_sub(&root, &d_amb0, sub, &args);
+        assert_refused(&format!("n4_amb0_eq_0_{sub}"), got);
+    }
+
+    // 6. n4_amb_past_end (n4.nin@108 = 10000000 -> amb[3] = 2^28: OID 3's last byte lies 256 MiB
+    // past the 114-byte .nsq; NCBI reads it and crashes with SIGSEGV). With `-negative_gilist
+    // {304}` (OID 3 excluded) NCBI at 1 thread and `-mt_mode 1` never reads OID 3; at 2+ threads in
+    // DB-split mode `x_FillSeqBuffer` reads the excluded OIDs after the last included one up to
+    // the iteration range's end and crashes. A list that excludes every OID is scanned the same
+    // way, and an alias file's OID range is read through the OID at its end. LOSAT refuses where
+    // NCBI crashes.
+    let d_past = root.join("n4_amb_past_end");
+    cp_db(&d_past, "n4", true);
+    poke(d_past.join("n4.nin"), 108, "10000000");
+    // Alias files whose only filter is an OID range (OIDs 0..2 and 0..1): NCBI's iteration range
+    // ends at OID 3 (2), and its loop reads that OID too before it compares it with the end.
+    fs::write(
+        d_past.join("n4r.nal"),
+        b"TITLE r\nDBLIST n4\nFIRST_OID 1\nLAST_OID 3\n",
+    )
+    .unwrap();
+    fs::write(
+        d_past.join("n4r2.nal"),
+        b"TITLE r2\nDBLIST n4\nFIRST_OID 1\nLAST_OID 2\n",
+    )
+    .unwrap();
+    let mut past_refusal: Option<Vec<u8>> = None;
+    for (name, args) in [
+        (
+            "n4_ambpast_blastn_neggi_t1",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gi304s,
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_neggi_mt1_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gi304s,
+                "-mt_mode",
+                "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_negall_t1",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gi_alls,
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_range3_t1",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4r",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_range2_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4r2",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+    ] {
+        let got = run_losat_sub(&root, &d_past, "blastn", &args);
+        let want = load_nonasc_expected(name);
+        assert_eq!(got, want, "{name}");
+    }
+    for (name, args) in [
+        (
+            "n4_ambpast_blastn_t1",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_neggi_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gi304s,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_negall_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gi_alls,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambpast_blastn_range3_t4",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4r",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "4",
+            ],
+        ),
+    ] {
+        // NCBI's frozen result (SIGSEGV, rc=-11, no output) stays beside the row for provenance.
+        assert_eq!(load_nonasc_expected(name).2, -11, "{name}");
+        let got = run_losat_sub(&root, &d_past, "blastn", &args);
+        assert!(got.0.is_empty(), "{name}: stdout {:?}", text(&got.0));
+        let err = got.1.clone();
+        assert_refused(name, got);
+        // Every row refuses as the first (1 thread, no list) does: the same read of OID 3's last
+        // byte.
+        match &past_refusal {
+            None => {
+                let past = "byte range 268435455..268435456 passes the end of the file";
+                assert!(text(&err).contains(past), "{name}: {:?}", text(&err));
+                past_refusal = Some(err);
+            }
+            Some(first) => assert_eq!(text(&err), text(first), "{name}"),
+        }
+    }
+
+    let _ = fs::remove_dir_all(&root);
 }

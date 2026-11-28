@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use super::file::{mapped_length, DbFile};
-use super::SeqDbError;
+use super::{SeqDbAssert, SeqDbError};
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5748-5756
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:699-722
@@ -90,6 +90,12 @@ impl OidListError {
                     "the OID list file of an alias file's OIDLIST holds {len} bytes, no bit \
                      after its 4-byte header"
                 ),
+                // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:128
+                assert: Some(SeqDbAssert {
+                    cond: "start < end",
+                    file: "include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp",
+                    line: 128,
+                }),
             },
             OidListError::RangeOutsideBits(path) => SeqDbError::NcbiCrashes {
                 path: path.clone(),

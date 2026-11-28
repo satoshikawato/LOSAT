@@ -201,9 +201,15 @@ pub(super) fn cases(orig: &[u8], rng: &mut Rng) -> Vec<Case> {
 struct Tally {
     opened: usize,
     errors: usize,
+    digest: u64,
 }
 
 impl Tally {
+    fn mix(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.digest = (self.digest ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
     /// The value of `result`, or `None` after counting its error. The text and NCBI's form of
     /// the error are made for every error, damaged file or not.
     fn check<T>(&mut self, result: Result<T, SeqDbError>) -> Option<T> {
@@ -353,16 +359,12 @@ fn read_letters(block: &SequenceBlock, seqtype: SeqType, tally: &mut Tally) {
     for i in 0..block.len() {
         match seqtype {
             SeqType::Protein => {
-                let _ = (
-                    block.protein(i).len(),
-                    block.protein_with_sentinels(i).len(),
-                );
+                tally.mix(block.protein(i));
+                let _ = block.protein_with_sentinels(i).len();
             }
             SeqType::Nucleotide => {
-                let _ = (
-                    block.nucleotide_packed(i).len(),
-                    block.ambiguity_bytes(i).len(),
-                );
+                tally.mix(block.nucleotide_packed(i));
+                tally.mix(block.ambiguity_bytes(i));
                 tally.check(block.nucleotide_len(i));
                 tally.check(block.ambiguity_runs(i));
                 tally.check(block.nucleotide_blastna(i));
@@ -394,12 +396,16 @@ fn sweep(tag: &str, stems: &[&str], open: &str, seqtype: SeqType, masks: bool, t
         for case in cases(&orig, &mut rng) {
             std::fs::write(&path, &case.bytes).unwrap();
             let (opened, errors) = (tally.opened, tally.errors);
+            tally.digest = 0;
             let outcome = catch_unwind(AssertUnwindSafe(|| {
                 exercise(&dir, &name, seqtype, masks, &mut tally)
             }));
             if case.round.is_some() {
                 seeded_opened += usize::from(tally.opened > opened);
-                if tally.opened == opened || tally.errors - errors != intact.errors {
+                if tally.opened == opened
+                    || tally.errors - errors != intact.errors
+                    || tally.digest != intact.digest
+                {
                     seeded_changed += 1;
                 }
             }

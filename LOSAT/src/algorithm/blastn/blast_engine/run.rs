@@ -55,8 +55,7 @@ use super::super::extension::{
 };
 use super::super::filtering::{
     blast_hsp_test_identity_and_length, purge_hsps_with_common_endpoints,
-    purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped_ex,
-    subject_best_hit, ReevalParams,
+    purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped, subject_best_hit,
 };
 use super::super::hsp::{
     adjust_blastn_offsets, evalue_comp, get_prelim_hitlist_size, sort_hsplist_by_evalue,
@@ -429,11 +428,12 @@ fn calculate_blastn_context_statistics(
     } else {
         raw_score
     };
-    let e_value = if params.lambda < 0.0 || params.k < 0.0 || params.h < 0.0 {
-        -1.0
-    } else {
-        (eff_searchsp as f64) * (-(params.lambda) * (evalue_score as f64) + log_k).glibc_exp()
-    };
+    let e_value = crate::stats::karlin::evalue_from_raw_score_with_log_k(
+        evalue_score,
+        params,
+        log_k,
+        eff_searchsp as f64,
+    );
     (bit_score, e_value)
 }
 
@@ -4907,9 +4907,6 @@ struct BlastnReportInputs<'a> {
     /// `-html` (`BlastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 to 4 and
     /// 18 reports (the organism report takes no links).
     is_html: bool,
-    /// Whether the outfmt 0 report starts with the prolog, which is otherwise written
-    /// before the search (`write_pairwise_prologs`).
-    prolog: bool,
     /// The queries whose reports earlier calls wrote, which outfmt 7's epilog counts too
     /// (NCBI's `m_QueriesFormatted`): with LOSAT_X_RPTSTREAM the last call writes only the
     /// epilogs, after the reports of every batch (`x_rpt_stream`); 0 otherwise.
@@ -5017,7 +5014,6 @@ fn blastn_pairwise_report(
     // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221).
     let (num_descriptions, num_alignments) = (report.num_descriptions, report.num_alignments);
     let pairwise_report = BlastnPairwiseReport {
-        version: crate::wording::REPORT_VERSION.to_string(),
         intro: BlastnIntro {
             megablast: report.megablast,
             indexed_megablast: report.indexed_megablast,
@@ -5038,7 +5034,6 @@ fn blastn_pairwise_report(
         num_alignments,
         unsearched,
         epilog: report.epilog,
-        prolog: report.prolog,
         parsed_subjects: report.database_parsed.to_vec(),
         subject_sources: report.database_sources.to_vec(),
         subject_oids: report.database_ordinals.zip(report.database_reader).map(
@@ -6553,6 +6548,16 @@ fn open_search_database(
                     outputs.formats.iter().map(|format| format.outfmt),
                 ),
             );
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+            let word_size =
+                crate::algorithm::blastn::coordination::determine_effective_word_size(args);
+            let database = database.with_mt_mode(
+                args.num_threads,
+                args.mt_mode,
+                word_size,
+                Some(args.query.as_path()),
+            );
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -7523,7 +7528,8 @@ fn search(
 /// prologs that come with the reports). Its errors: of a batch after the first that do not depend on
 /// the batch's queries (the Karlin-Altschul error of the scoring options, the average subject length,
 /// in `context_statistics`), which the first batch with a valid query meets after the reports of the
-/// batches before, whose queries were all invalid; and the stops of NCBI's search of the batch that
+/// batches before, whose queries were all invalid; those that do (a search space overflow, the
+/// ungapped word cutoff of a long query), after the reports of batches with hits; and the stops of NCBI's search of the batch that
 /// LOSAT refuses where NCBI meets them (the query chunks of a split batch, `search_query_chunks`; a
 /// header that the fetch under a negative seqid list cannot read, `database::fetch_refusal`), after
 /// the reports that NCBI's batch loop has printed (line RG item X-short-bat-2). The one place that
@@ -8443,7 +8449,6 @@ fn run_in_pool(
         source,
         subject_ranges,
         query_input,
-        &lengths,
         batching,
     );
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
@@ -8807,7 +8812,6 @@ fn run_in_pool(
             .into());
         }
         warnings[start].append(&batch_title_warnings);
-        check_batch_window(&args, batch_records.batch_queries().records())?;
         // NCBI restricts the lower-case runs of each whole record to the chunks of a split
         // batch, and of the letters outside a `-query_loc` interval the one before it reaches
         // them (`query_split::restrict_masks_with_letter_before`); WindowMasker replaces the
@@ -8837,6 +8841,13 @@ fn run_in_pool(
                 warnings[start].write(&mut *outputs.diagnostics, archive)?;
                 return Err($error);
             }};
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57
+        // LOSAT's refusal of a diagonal table that NCBI never sizes (`check_batch_window`): in
+        // the batch whose concatenated query is too long, after the reports of the batches
+        // before (in both paths of LOSAT_X_RPTSTREAM) and the batch's reader messages.
+        if let Err(error) = check_batch_window(&args, batch_records.batch_queries().records()) {
+            fail_batch!(error);
         }
         // The batch of LOSAT's refusal (`scope_refusal` above, without a request): NCBI's error of
         // the set-up of its records that are first in the scope (`BatchStage::Search::setup_only`,
@@ -9677,28 +9688,22 @@ fn x_debug_output(args: &BlastnArgs) -> bool {
         || crate::utils::threading::diagnostics_enabled()
 }
 
-/// Whether the outfmt 0 prolog of `sink` is written before the search, as NCBI writes it
-/// (`write_pairwise_prologs`). A file sink is created when its report is written
-/// (`OutputSink::open`), so its prolog stays at the start of the report.
-fn prolog_before_search(sink: &OutputSink<'_>) -> bool {
-    !matches!(sink, OutputSink::File(_))
-}
-
 /// Whether the prolog of `format` comes with its reports (or, for a run that stops before any
-/// report, from `write_pairwise_prologs`) and not before the search: the outfmt 0 prolog of a
-/// file sink (`prolog_before_search`), and the start of the XML2 and JSON documents of outfmt
-/// 16 and 15 for every sink. NCBI writes that start before the search too (`PrintProlog`), but
-/// LOSAT's refusals of the reports (a title that NCBI crashes on, `names::Refusal`, DECISIONS
-/// 20 as K4h left it) come after the search and before the first byte, so the start is written
-/// with the first report, or by the path of an NCBI error that stops the run before one.
+/// report, from `write_pairwise_prologs`) and not before the search: the start of the XML2 and
+/// JSON documents of outfmt 16 and 15. NCBI writes that start before the search too
+/// (`PrintProlog`), but LOSAT's refusals of the reports (a title that NCBI crashes on,
+/// `names::Refusal`, DECISIONS 20 as K4h left it) come after the search and before the first
+/// byte, so the start is written with the first report, or by the path of an NCBI error that
+/// stops the run before one. The outfmt 0 to 4 prolog comes before the search for every sink
+/// (`write_pairwise_prologs`; a library `File` sink is kept for the run,
+/// `api::local_blast::KeptFile`).
 ///
 /// Outfmt 20's line of the field names comes with the first report too (or from
 /// `write_pairwise_prologs` for a run that stops before one), after LOSAT's refusals of the
 /// custom tabular report; the taxonomy database's warning of its formatter, which a run that
 /// can refuse never writes, comes before the search (`tabular::write_tabular_prolog_warning`).
-fn prolog_with_report(format: &FormatOutput<'_>, output_format: BlastnOutputFormat) -> bool {
+fn prolog_with_report(output_format: BlastnOutputFormat) -> bool {
     match output_format {
-        BlastnOutputFormat::Pairwise(_) => !prolog_before_search(&format.sink),
         BlastnOutputFormat::Xml2(_) => true,
         BlastnOutputFormat::CustomTabular(spec) => {
             spec.kind == crate::report::tabular::TabularKind::CsvWithHeader
@@ -9719,9 +9724,10 @@ fn blastn_intro(args: &BlastnArgs) -> BlastnIntro {
     }
 }
 
-/// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink whose prolog comes before the
-/// search (`before_search`) or, for a run that stops before any report, the prolog of the
-/// others (`prolog_with_report`: the file sinks of outfmt 0 and every sink of outfmt 15 and 16).
+/// Writes and flushes the outfmt 0 to 4 prolog of every sink before the search
+/// (`before_search`) or, for a run that stops before any report, the prologs that come with the
+/// first report (`prolog_with_report`: outfmt 15 and 16, and outfmt 20's line of the field
+/// names).
 fn write_pairwise_prologs(
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
@@ -9742,12 +9748,8 @@ fn write_pairwise_prologs(
             )?;
         }
         let writes_prolog = match output_format {
-            BlastnOutputFormat::Pairwise(_) => prolog_before_search(&format.sink) == before_search,
-            BlastnOutputFormat::Xml2(_) => !before_search,
-            BlastnOutputFormat::CustomTabular(_) => {
-                !before_search && prolog_with_report(format, output_format)
-            }
-            _ => false,
+            BlastnOutputFormat::Pairwise(_) => before_search,
+            _ => !before_search && prolog_with_report(output_format),
         };
         if writes_prolog {
             let posts = crate::report::query_warnings::html_posts_sink(
@@ -10235,13 +10237,6 @@ fn write_reports_untimed(
         show_gis: args.show_gis,
         html: args.html_links.clone(),
         is_html: args.html,
-        prolog: outputs
-            .formats
-            .iter()
-            .zip(output_formats)
-            .any(|(format, &output_format)| {
-                output_format.is_pairwise() && !prolog_before_search(&format.sink)
-            }),
         queries_before: written.queries,
         subject_cache: written.subjects,
         x_pairwise_pool: x_pool.and_then(crate::report::x_pairwise_par::pool),
@@ -10309,8 +10304,9 @@ fn write_reports_untimed(
     )
 }
 
-/// The outputs that a query batch's search writes to: the outfmt 0 prolog of a file sink
-/// before an error of the first batch (`write_pairwise_prologs`), and nothing otherwise.
+/// The outputs that a query batch's search writes to: the prologs that come with the first
+/// report (outfmt 15, 16 and 20's, `prolog_with_report`) before an error of the first batch, and
+/// nothing otherwise.
 /// `run_in_pool` gives them to the batches it searches (a split batch to its query chunks).
 type BatchOutputs<'o, 'r> = Option<(&'o mut ReportOutputs<'r>, &'o [BlastnOutputFormat])>;
 
@@ -11460,7 +11456,17 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
     let batch_setup::BatchCutoffSet {
         batch: x_batch_cutoffs,
         prelim: x_prelim_cutoffs_owned,
-    } = batch_setup::batch_cutoff_set::<UNGAPPED>(&cutoff_inputs, prelim_eff_searchsp.as_deref())?;
+    } = batch_setup::batch_cutoff_set::<UNGAPPED>(&cutoff_inputs, prelim_eff_searchsp.as_deref())
+        .map_err(|error| {
+        context_statistics::setup_failure(
+            error,
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
+    })?;
     let prelim_eff_searchsp_ref: &Vec<i64> =
         prelim_eff_searchsp.as_ref().unwrap_or(&query_eff_searchsp);
     let x_prelim_cutoffs = x_prelim_cutoffs_owned.as_ref().unwrap_or(&x_batch_cutoffs);

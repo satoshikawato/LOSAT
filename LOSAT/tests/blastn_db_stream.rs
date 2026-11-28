@@ -346,15 +346,15 @@ fn the_window_does_not_act_at_one_thread() {
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
-// A damaged database (its `.nsq` cut short by 500 bytes) through the command line: the search
-// fails with the error of the one-thread order, so standard error and the exit code are the same at
-// one thread and, with the switch off and on, at 4 threads.
+// A damaged database (its `.nsq` cut short by 5000 bytes, past the last 4 KiB page) through the
+// command line: the search fails with the error of the one-thread order, so standard error and the
+// exit code are the same at one thread and, with the switch off and on, at 4 threads.
 #[test]
 fn a_damaged_database_fails_with_the_same_error_with_the_window() {
     let db = database("damaged", 0, 10_000, &[]);
     let nsq = db.with_extension("nsq");
     let bytes = std::fs::read(&nsq).unwrap();
-    std::fs::write(&nsq, &bytes[..bytes.len() - 500]).unwrap();
+    std::fs::write(&nsq, &bytes[..bytes.len() - 5000]).unwrap();
     let one_thread = blastn_any_exit("megablast", &db, 1, &[], "6");
     assert!(
         one_thread.code.is_some_and(|code| code != 0),

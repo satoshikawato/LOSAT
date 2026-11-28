@@ -4564,9 +4564,15 @@ impl ParsedSubject {
 
     /// Whether the display id (`display_id`) is a local id, as a generated query id `Query_N` is:
     /// a sequence with another display id never shows such a query
-    /// (`common::database::refuse_display_ids_of_queries`).
+    /// (`common::database::refuse_display_ids_of_queries`). The display id is one of the
+    /// definition lines' ids, so a sequence without a local id is answered without choosing it.
     pub fn display_id_is_local(&self) -> bool {
-        matches!(self.display_id(), Some(ParsedSeqId::Local(_)))
+        self.set.deflines.iter().any(|defline| {
+            defline
+                .ids
+                .iter()
+                .any(|id| matches!(id, ParsedSeqId::Local(_)))
+        }) && matches!(self.display_id(), Some(ParsedSeqId::Local(_)))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2380-2384,2451-2471

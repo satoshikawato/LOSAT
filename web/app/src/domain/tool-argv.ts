@@ -5,7 +5,6 @@
 // omitted; Make counts and Convert counts write `-out wmasker.<sformat>` until the user edits it.
 import type { ToolDescription, ToolParameterDescription } from 'losat/domain';
 import { splitOptions } from './argv';
-import { COMMA_LIST_FLAGS } from './list-flags';
 import { writtenValue, type FieldValue, type FormValues } from './parameters';
 import {
   allMaskingParameters,
@@ -216,7 +215,7 @@ export interface MaskingArgvInput {
 export interface MakeblastdbArgvInput {
   /**
    * `-in`'s value as the command line takes it, omitted when empty: the files of the run as one list
-   * (`makeblastdbInputList`), or a database's name or list as the user typed it.
+   * (`seqdbNameList`), or a database's name or list as the user typed it.
    */
   readonly input: string;
   /** Option values keyed by `-flag` (`-input_type`, `-dbtype`, `-out`, and the options of the groups). */
@@ -245,41 +244,6 @@ export function buildMaskingArgv(input: MaskingArgvInput): readonly string[] {
   pushOptionWords(argv, ordered, input.values, MASKING_NAMED_FLAGS);
   pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
-}
-
-/**
- * Why a name cannot be written in the list of names that `flag` takes, as the command line splits the list, or undefined
- * when it can (and for an option that takes one name). The one rule for every list option: makeblastdb's `-in`
- * (`SeqDB_SplitQuoted`: spaces separate the names and a double quote starts or ends a name with spaces, so no name can
- * hold a double quote) and the options of `COMMA_LIST_FLAGS` (`-mask_data` and the other lists that `NStr::Split` cuts
- * at commas, so no entry can hold a comma). `what` says what the name is of: a file opened, or a database that the
- * files of the run hold.
- */
-export function listNameRefusal(flag: string, name: string, what: 'file' | 'database' = 'file'): string | undefined {
-  const split = flag === '-in' ? IN_LIST_SPLIT : COMMA_LIST_FLAGS.has(flag) ? COMMA_LIST_SPLIT : undefined;
-  if (split === undefined || !name.includes(split.mark)) return undefined;
-  return `A ${what} named "${name}" cannot be in ${flag}: ${split.reason}.`;
-}
-
-/** What a list option's splitter takes out of a name (`listNameRefusal`): the mark, and why. */
-interface ListSplit {
-  readonly mark: string;
-  readonly reason: string;
-}
-
-const IN_LIST_SPLIT: ListSplit = { mark: '"', reason: 'a double quote there starts or ends a name' };
-const COMMA_LIST_SPLIT: ListSplit = { mark: ',', reason: 'a comma separates its files' };
-
-/**
- * `-in`'s value for several names, as makeblastdb reads it (`SeqDB_SplitQuoted`) and writes it
- * (`SeqDB_CombineAndQuote`): the names separated by spaces, a name with a space between double quotes. A name with a
- * double quote cannot be written (`listNameRefusal`).
- */
-export function makeblastdbInputList(names: readonly string[]): string {
-  return names
-    .filter((name) => name.trim() !== '')
-    .map((name) => (name.includes(' ') ? `"${name}"` : name))
-    .join(' ');
 }
 
 /**
@@ -337,6 +301,15 @@ export function changedToolOptionsCount(
 ): number {
   const params = stageOptionParameters(description, stage).filter((param) => !WINDOWMASKER_BLOCK_FLAGS.has(param.flag));
   return changedOptionsCount(params, values, extra);
+}
+
+/**
+ * Whether words of Additional options name the option `flag` themselves (`-in`, `-in=…`): the one rule of the tool tabs
+ * for an option that their form writes too (makeblastdb's, WindowMasker's and the Masking tools' `-in`): the words give
+ * it, so the form writes no value that it found itself (the database of the run's files), refuses none, and asks for none.
+ */
+export function namesOption(words: readonly string[], flag: string): boolean {
+  return words.some((word) => word === flag || word.startsWith(`${flag}=`));
 }
 
 /** Reads the last value of `flag` in `argv` (supporting both `-flag val` and `-flag=val`). */

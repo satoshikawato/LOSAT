@@ -33,6 +33,7 @@ import {
   type ValidationResult,
 } from 'losat/ports';
 import { optionValue } from '../../domain/argv';
+import { seqdbNames } from '../../domain/list-flags';
 import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
 import { PROGRAMS } from '../../domain/programs';
 import { isStandardOutputName, runFileName, toolOptionValue } from '../../domain/tool-argv';
@@ -271,10 +272,11 @@ export class FakeEngine implements EngineGateway, ToolEngine {
         else if (!logLost) await writeStderr(error);
         return finish(1);
       }
-      // The volume's three files under `-out` (or the first name of `-in`), each the marker: no database is made. They
-      // are named by their path in the run's directory (`runFileName`); makeblastdb makes the folders that the name gives
-      // (`nosub/db`), so none is looked up, and reads the name without its `/`s at the end (`db/` is `db`).
-      const db = outName ?? (toolOptionValue(argv, '-in') ?? 'db').split(' ')[0]!.replace(/^"|"$/g, '');
+      // The volume's three files under `-out` (or the first name of `-in`'s list, `seqdbNames`), each the marker: no
+      // database is made. They are named by their path in the run's directory (`runFileName`); makeblastdb makes the
+      // folders that the name gives (`nosub/db`), so none is looked up, and reads the name without its `/`s at the end
+      // (`db/` is `db`).
+      const db = outName ?? seqdbNames(toolOptionValue(argv, '-in') ?? '')[0] ?? 'db';
       const base = db === '/' ? db : db.replace(/\/+$/, '');
       const letter = toolOptionValue(argv, '-dbtype') === 'prot' ? 'p' : 'n';
       for (const ext of ['hr', 'in', 'sq']) {

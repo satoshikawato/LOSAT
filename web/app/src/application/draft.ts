@@ -51,6 +51,7 @@ import {
   ALL_DB_FILTER_FIELDS,
   ALL_DB_FILTER_FLAGS,
   DB_FILE_FILTER_FIELDS,
+  DB_FLAG,
   DB_HARD_MASK_FLAG,
   DB_SOFT_MASK_FLAG,
   FILTERING_DB_FLAG,
@@ -77,6 +78,7 @@ import {
 } from '../domain/blast-db';
 import type { DatabaseFilterFileSnapshot, DatabaseSnapshot, InputPart, QueryFileSnapshot } from '../domain/run';
 import { buildArgv, PASTED_NAMES, splitOptions } from '../domain/argv';
+import { listNameRefusal } from '../domain/list-flags';
 import {
   endsInput,
   excludedIndicesFor,
@@ -829,8 +831,13 @@ export class SearchDraft {
     await scan;
   }
 
+  /**
+   * The option's value for the repeats database chosen: its name, or `true` (on, no database) when none is chosen or its
+   * name cannot be written in `-filtering_db` (`filteringDbRefusal`, which "Run LOSAT" and the picker then show).
+   */
   private setFilteringDbField(selected: string | undefined): void {
-    this.setFieldForProgram('blastn', FILTERING_DB_FLAG, selected ?? true);
+    const written = selected !== undefined && filteringDbRefusal(selected) === undefined;
+    this.setFieldForProgram('blastn', FILTERING_DB_FLAG, written ? selected : true);
   }
 
   /** Selects one discovered nucleotide database name for BLASTN `-filtering_db`. */
@@ -841,7 +848,7 @@ export class SearchDraft {
     const next = Object.freeze({ ...filteringDb, selected: name });
     this.rememberDb('filtering', next);
     this.set({ filteringDb: next });
-    this.setFieldForProgram('blastn', FILTERING_DB_FLAG, name);
+    this.setFilteringDbField(name);
   }
 
   /** Clears the chosen BLASTN `-filtering_db` folder/files while keeping the option ready to pick again. */
@@ -1715,6 +1722,8 @@ export class SearchDraft {
         if (field.kind === 'database') {
           if (values[program][field.flag] === true) {
             if (filteringDb.scanning !== undefined) return readingDatabaseMessage('repeats database', filteringDb.scanning);
+            const refusal = repeatsRefusal(state);
+            if (refusal !== undefined) return refusal;
             if (filteringDb.discovery !== undefined && filteringDb.selected === undefined) {
               return noMatchingDatabaseMessage(filteringDb.discovery, field.database?.kind ?? 'nucleotide', field.label);
             }
@@ -1824,6 +1833,8 @@ export class SearchDraft {
         const message = noMatchingDatabaseMessage(database.discovery, desc.subject, desc.label);
         return { message, short: message };
       }
+      const refusal = dbRefusal(this.state.get());
+      if (refusal !== undefined) return { message: refusal, short: refusal };
       return undefined;
     }
     const draft = this.role(role);
@@ -2334,7 +2345,13 @@ export class SearchDraft {
 
   private async validate(): Promise<void> {
     const generation = this.generations.get('validate');
-    const { program, querySource, queryFile, subjectSource, database } = this.state.get();
+    const state = this.state.get();
+    const { program, querySource, queryFile, subjectSource } = state;
+    // A database that its option's list cannot carry (-db, -filtering_db): the argv asked about leaves its name out
+    // (`argvDatabaseName`; no writer writes a list that the command line cannot read back), and the check says why unless
+    // the words print help or the version, which read no database, as in the tool tabs and on the command line (NCBI
+    // BLAST+ 2.17.0 prints its help for `blastn -db 'q"d/ndb' -help`; line WW, WW4d R2).
+    const refusal = databaseNameRefusal(state);
     let argv: readonly string[];
     try {
       const querySpec =
@@ -2351,9 +2368,8 @@ export class SearchDraft {
       argv = buildArgv({
         program,
         ...querySpec,
-        ...(subjectSource === 'database'
-          ? { databaseName: database.selected ?? 'database' }
-          : { subjectName: this.inputName('subject') }),
+        ...(subjectSource === 'database' ? { databaseName: argvDatabaseName(state) } : { subjectName: this.inputName('subject') }),
+        // A repeats database that -filtering_db cannot name is not in the parameters: the option is on without it.
         parameters: this.parameters(),
         extra: this.extraWords(),
       });
@@ -2379,7 +2395,9 @@ export class SearchDraft {
       answered = true;
       // A newer change came meanwhile: its validation follows, and this one reads no file.
       if (this.generations.get('validate') !== generation) return;
-      if (!started.ok) {
+      if (refusal !== undefined && !(started.ok && started.start.prints !== null)) {
+        validation = { state: 'invalid', message: refusal };
+      } else if (!started.ok) {
         validation = { state: 'invalid', message: started.message };
       } else {
         start = started.start;
@@ -2758,4 +2776,44 @@ function headText(bytes: Uint8Array): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Why a repeats database cannot be BLASTN's `-filtering_db`: a name that the option's list cannot carry (`listNameRefusal`). */
+function filteringDbRefusal(name: string): string | undefined {
+  return listNameRefusal({ flag: FILTERING_DB_FLAG }, name, 'database');
+}
+
+/** Why the database chosen cannot be `-db`: a name that the option's list cannot carry (`listNameRefusal`). */
+function dbRefusal(state: Pick<DraftState, 'subjectSource' | 'database'>): string | undefined {
+  const { subjectSource, database } = state;
+  if (subjectSource !== 'database' || database.selected === undefined) return undefined;
+  return listNameRefusal({ flag: DB_FLAG }, database.selected, 'database');
+}
+
+/**
+ * Why a database chosen cannot be written in its option's list (`-db`, then BLASTN's `-filtering_db`): what the check
+ * says unless the words print help or the version (line WW, WW4d R2), and what "Run LOSAT" says.
+ */
+function databaseNameRefusal(state: Pick<DraftState, 'program' | 'values' | 'filteringDb' | 'subjectSource' | 'database'>): string | undefined {
+  return dbRefusal(state) ?? repeatsRefusal(state);
+}
+
+/**
+ * The `-db` name of the argv that the check asks about: the database chosen, or `database` while none is chosen or the
+ * one chosen cannot be written (`dbRefusal`; the check then refuses, unless the words print help or the version, whose
+ * run reads no database and has no `-db`).
+ */
+function argvDatabaseName(state: Pick<DraftState, 'subjectSource' | 'database'>): string {
+  const selected = state.database.selected;
+  return selected === undefined || dbRefusal(state) !== undefined ? 'database' : selected;
+}
+
+/**
+ * Why the repeats database chosen cannot be the program's `-filtering_db` while the option is on (`filteringDbRefusal`;
+ * the option is then written without a database): what the check, the line above "Run LOSAT" and "Run LOSAT" say.
+ */
+function repeatsRefusal(state: Pick<DraftState, 'program' | 'values' | 'filteringDb'>): string | undefined {
+  const { program, values, filteringDb } = state;
+  if (values[program][FILTERING_DB_FLAG] !== true || filteringDb.selected === undefined) return undefined;
+  return filteringDbRefusal(filteringDb.selected);
 }

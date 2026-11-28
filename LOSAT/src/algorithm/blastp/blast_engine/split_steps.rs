@@ -419,7 +419,7 @@ pub(super) fn first_batch_setup<'a>(
     // first query batch and fails in that batch's preliminary search, where its reader cannot
     // map the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
     // A first batch of invalid queries only is not searched: the batches up to the first one that
-    // is are reported before the error (`unsearched_batches_then_engine_error`); a call of invalid
+    // is are reported before the error (`preliminary_search_error`); a call of invalid
     // queries only searches no batch, and NCBI reports them (NCBI 2.17.0 blastp, an all-X query
     // and the empty database: exit 0).
     if let Some(database) = database.filter(|database| {
@@ -445,7 +445,7 @@ pub(super) fn first_batch_setup<'a>(
     // batch's reader messages (`preliminary_search_error`; NCBI 2.17.0 blastp and psiblast
     // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
     // batch of invalid queries only, which NCBI does not search, the error follows the reports of
-    // the batches before the first searched one (`unsearched_batches_then_engine_error`).
+    // the batches before the first searched one, in every format (`reports_then_engine_error`).
     if fails {
         return Err(setup_error(
             b"",

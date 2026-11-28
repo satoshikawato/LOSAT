@@ -2623,14 +2623,7 @@ fn search(
                     &outputs.formats,
                     (outputs.other_outfmts, resolved.html.is_some()),
                 )
-                .run()
-                .is_some_and(|run| {
-                    matches!(
-                        run.after,
-                        crate::report::db_subject::AfterThrow::EndsReport
-                            | crate::report::db_subject::AfterThrow::EndsRun
-                    )
-                });
+                .ends_on_throw();
                 let rows_open = |hitlists: &[super::stage_d_results::KappaResultHitList],
                                  stop_on_throw| {
                     database.open_for_rows(reported, hitlists, row_lookups, stop_on_throw)

@@ -1,1 +1,1 @@
-Error: output format 6 is not supported by LOSAT's BLAST_FORMATTER (it writes 8, 9 and 12)
+Error: output format 6 is not supported by LOSAT's BLAST_FORMATTER (it writes 8, 9, 11 and 12)

@@ -31,7 +31,7 @@ use crate::report::archive::read::import;
 use crate::report::archive::read::options::{EProgram, Setter};
 use crate::report::archive::requests::{LcaseFrames, RequestPolicy, RequestRecord, RunRequests};
 use crate::report::archive::{
-    ka_block, write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
+    ka_block, write_archive, AlignSource, ArchiveHandle, BatchArchive, KaBlock,
 };
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
@@ -297,18 +297,6 @@ impl RequestRecord for FastaRecord {
     }
 }
 
-/// The frame of a context (`+1` .. `-3`).
-fn frame_of(frame: i8) -> Frame {
-    match frame {
-        1 => Frame::Plus1,
-        2 => Frame::Plus2,
-        3 => Frame::Plus3,
-        -1 => Frame::Minus1,
-        -2 => Frame::Minus2,
-        _ => Frame::Minus3,
-    }
-}
-
 /// The `masks` of the results: per query of a searched batch, one mask per frame with intervals,
 /// in the order plus1, plus2, plus3, minus1, minus2, minus3; the intervals are the context's
 /// nucleotide intervals moved into the record (`seq_range::record_mask`: other than an empty one
@@ -338,7 +326,7 @@ fn results_masks(call: &CallBatch<'_>) -> Vec<MaskEntry> {
                     masks.push(MaskEntry {
                         id: query.internal_id.clone(),
                         best: query.believed().map(|ids| ids.best.clone()),
-                        frame: frame_of(context.frame),
+                        frame: Frame::of_number(i32::from(context.frame)),
                         intervals,
                     });
                 }
@@ -360,7 +348,8 @@ struct BlastxAligns<'a> {
 impl<'a> AlignSource for BlastxAligns<'a> {
     fn write<E: crate::report::serial::encoder::Encoder>(
         &mut self,
-        out: &mut ArchiveOut<'_, E>,
+        enc: &mut E,
+        flush: &mut dyn FnMut(&mut E),
     ) -> Result<()> {
         let mut segments = Segments::default();
         let mut subject_records: Vec<SubjectRecord<'a>> = Vec::new();
@@ -384,17 +373,15 @@ impl<'a> AlignSource for BlastxAligns<'a> {
                     searched_length: i32::try_from(query.sequence.len())?,
                     offset: i32::try_from(query.placement().offset)?,
                 };
-                out.write_with(|enc, flush| {
-                    write_seq_aligns(
-                        enc,
-                        &self.run,
-                        &query_record,
-                        &subject_records,
-                        &hsp_records,
-                        &mut segments,
-                        |enc| flush(enc),
-                    );
-                });
+                write_seq_aligns(
+                    enc,
+                    &self.run,
+                    &query_record,
+                    &subject_records,
+                    &hsp_records,
+                    &mut segments,
+                    |enc| flush(enc),
+                );
             }
         }
         Ok(())

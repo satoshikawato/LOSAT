@@ -1092,13 +1092,9 @@ pub(crate) fn parsed_shown(
 ) -> ParsedShown {
     let pairwise = formats.iter().any(|format| format.is_pairwise());
     ParsedShown {
-        table_identities: formats.iter().any(|format| {
-            format.is_tabular()
-                && format.tabular_spec().is_none_or(|spec| {
-                    spec.kind != crate::report::tabular::TabularKind::TaxReport
-                        && crate::report::tabular::prints_identities(Some(spec))
-                })
-        }),
+        // TBLASTX's tables count their identities on the rows (`report::set_displayed_identities`,
+        // `tabular::ROW_FIELDS`) of the letters that the reports read, the holder's.
+        table_identities: false,
         light_length: formats.iter().any(|format| {
             format.is_tabular()
                 && format
@@ -1266,20 +1262,6 @@ pub(crate) fn reported_subjects(
                 };
                 let (subject, checked, load) = match &shown_bioseq {
                     Some(bioseq) => {
-                        holders.other_letters(
-                            (ordinal, subject),
-                            bioseq,
-                            shown.table_identities,
-                            || {
-                                let letters = |ordinal| {
-                                    database
-                                        .db
-                                        .nucleotide_iupac(ordinal)
-                                        .map_err(|error| shared::database_error(error, PROGRAM))
-                                };
-                                Ok(letters(ordinal)? == letters(bioseq.ordinal())?)
-                            },
-                        )?;
                         read_ordinal = bioseq.ordinal();
                         (
                             &bioseq.record,

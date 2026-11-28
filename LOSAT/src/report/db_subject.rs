@@ -1245,9 +1245,10 @@ impl ScopeRecord {
     }
 
     /// Records the loads `loads` of the query batch `batch` (`None`: the loader's alone, as the
-    /// loads before a stop), each by the subject's own Seq-align id: its lookup in `m_Ids`, then
-    /// the blob that it gives ([`ParsedSubject::loaded_blob_ref`]), whose lines register every
-    /// handle where its blob id is new (where it is not, and the run has more than
+    /// loads before a stop), each by the subject's own Seq-align id: its lookup in `m_Ids` (the
+    /// sequence that the notes before registered for it, [`ScopeRecord::held_instead`]), else
+    /// the blob that its lookup gives ([`ParsedSubject::loaded_blob_ref`]), whose lines register
+    /// every handle where its blob id is new (where it is not, and the run has more than
     /// [`BLOBS_KEPT`] blob ids, they may register again), and its id resolves to it; an id whose
     /// lookup gives no blob (none, or a record whose lines do not hold it) resolves to no Bioseq
     /// where no blob of the run may have registered its handle (where one may have, the order of
@@ -1259,9 +1260,18 @@ impl ScopeRecord {
     ) {
         let mut loads: Vec<(&ParsedSubject, LoadedBlobRef)> = Vec::new();
         let mut unresolved: Vec<HandleKey> = Vec::new();
+        // The handles of loads that `m_Ids` may hold for another sequence than the lookup's,
+        // with that sequence: LOSAT does not know which the load gives.
+        let mut unsure: Vec<(HandleKey, DbSequence)> = Vec::new();
         for subject in subjects {
             match subject.loaded_blob_ref() {
-                Some(blob) => loads.push((subject, blob)),
+                Some(blob) => match self.held_instead(subject, &blob) {
+                    Ok(held) => loads.push((subject, held.unwrap_or(blob))),
+                    Err(other) => {
+                        unsure.push(other);
+                        loads.push((subject, blob));
+                    }
+                },
                 None if !matches!(
                     subject.resolution.found,
                     Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
@@ -1328,6 +1338,15 @@ impl ScopeRecord {
         ids.use_unordered_map(merged, extra_ambiguous, total_uses);
         for (handle, registrant) in maybe {
             ids.maybe_use(handle, registrant);
+        }
+        for (handle, sequence) in unsure {
+            ids.maybe_use(
+                handle,
+                Registrant {
+                    sequence,
+                    sure: false,
+                },
+            );
         }
         ids.gc(true);
         let keeps_all = self.keeps_scope != Some(false);
@@ -1401,6 +1420,48 @@ impl ScopeRecord {
                     all.by_id.entry(id).or_default().push((at, blob.sequence()));
                 }
             }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-423
+    /// Where `m_Ids` before this note holds the Seq-align id of `subject` for another sequence
+    /// than its lookup's blob `blob` (step 3 of [`ScopeWalk::load`], which the lookup follows):
+    /// `Ok(Some)` that sequence's blob by its first line that holds the id, where `m_Ids` surely
+    /// holds it and LOSAT holds that sequence's keys (a holder that a batch before loaded, which
+    /// the reports of the later batches write too: line DBID hr2c2, rows `db.hr2.mb.slH.*`);
+    /// `Err` the handle with that sequence where LOSAT does not know whether the load gives it;
+    /// `Ok(None)` where the lookup answers.
+    fn held_instead(
+        &self,
+        subject: &ParsedSubject,
+        blob: &LoadedBlobRef,
+    ) -> Result<Option<LoadedBlobRef>, (HandleKey, DbSequence)> {
+        let Some(handle) = subject.id_handle() else {
+            return Ok(None);
+        };
+        let held = self.ids.held(handle);
+        let (Held::Present(registrant) | Held::Maybe(registrant)) = held else {
+            return Ok(None);
+        };
+        let sequence = registrant.sequence;
+        if sequence == blob.sequence() {
+            return Ok(None);
+        }
+        if !registrant.sure || held != Held::Present(registrant) {
+            return Err((handle, sequence));
+        }
+        if subject.mine(sequence) {
+            let line = subject.line_of_handle(handle).unwrap_or(subject.target);
+            return Ok(Some(LoadedBlobRef::Own { sequence, line }));
+        }
+        let keys = self.loader_blobs.get(&sequence.ordinal());
+        match keys.and_then(|keys| Some((keys, keys.line_of(handle)?))) {
+            Some((keys, line)) => Ok(Some(LoadedBlobRef::External {
+                blob: keys.clone(),
+                sequence,
+                line,
+            })),
+            None => Err((handle, sequence)),
         }
     }
 
@@ -1723,6 +1784,10 @@ pub struct ScopeWalk {
     keeps_scope: bool,
     /// The walk that keeps one scope where this one does not, where LOSAT does not know which.
     other: Option<Box<ScopeWalk>>,
+    /// The ordinal ids of the subjects for which the loader loaded another sequence's blob by the
+    /// subject's Seq-align id (step 3 or 4 of [`ScopeWalk::loader`], not the scope's places):
+    /// NCBI reads that Bioseq with the id as its target ([`ScopeWalk::loaded_by_loader`]).
+    loader_holds: rustc_hash::FxHashSet<u32>,
 }
 
 impl ScopeWalk {
@@ -1745,6 +1810,7 @@ impl ScopeWalk {
             in_record: true,
             keeps_scope: keeps_scope.unwrap_or(false),
             other,
+            loader_holds: Default::default(),
         }
     }
 
@@ -1765,6 +1831,16 @@ impl ScopeWalk {
             self.prune_blobs(false);
         }
         self.batch = Some(batch);
+    }
+
+    /// Whether a load of the subject `ordinal` gave another sequence's blob that the loader loaded
+    /// by the subject's Seq-align id, in this walk or the one that keeps one scope.
+    fn loaded_by_loader(&self, ordinal: u32) -> bool {
+        self.loader_holds.contains(&ordinal)
+            || self
+                .other
+                .as_ref()
+                .is_some_and(|other| other.loaded_by_loader(ordinal))
     }
 
     /// Drops cached `BlobKeys` for sequences no longer held by `self.ids`. When `save_handles` is
@@ -2095,6 +2171,8 @@ impl ScopeWalk {
                         line_number(line),
                     ));
                 }
+                self.loader_holds
+                    .extend(subject.sequence.map(DbSequence::ordinal));
                 let line = self.held_blob(registrant.sequence, handle);
                 return Some(Resolved::Blob(registrant.sequence, ShownBy::Holder, line));
             }
@@ -2121,6 +2199,8 @@ impl ScopeWalk {
                 self.load_subject_blob(subject, sequence, line, handle);
             }
             LoadedBlobRef::External { blob, line, .. } => {
+                self.loader_holds
+                    .extend(subject.sequence.map(DbSequence::ordinal));
                 self.load_blob(&blob, line, handle);
             }
         }
@@ -2857,6 +2937,16 @@ impl ScopeWalk {
             .use_unordered_map(merged_uses, extra_ambiguous, total_uses);
         for (index, &(_, handle, _, subject)) in group.iter().enumerate() {
             let alone = &results[index];
+            // Another sequence's blob that the loader loaded by the id (steps 3 and 4, which use
+            // the handle; `ScopeWalk::loaded_by_loader`).
+            if let (Some(_), Some(Resolved::Blob(sequence, ..))) =
+                (alone.requested_use, alone.resolved)
+            {
+                if !subject.mine(sequence) {
+                    self.loader_holds
+                        .extend(subject.sequence.map(DbSequence::ordinal));
+                }
+            }
             // A tie that resolved to nothing alone, where another may have registered its
             // handle before it, is not known to be unresolved: a later read asks the loader.
             let kept = match alone.resolved {
@@ -6037,6 +6127,11 @@ pub struct HitLoads {
     /// What each batch's prefetch gave for each subject of its prefetch set, by key
     /// ([`HitLoads::prefetched`]).
     prefetched: std::collections::HashMap<usize, HitLoad>,
+    /// The subjects that a report of a batch without the prefetch reads ([`HitLoads::read_alone`]).
+    read_alone: std::collections::HashSet<usize>,
+    /// The subjects with a written holder whose blob NCBI's loader loaded by the subject's
+    /// Seq-align id ([`HitLoads::loaded_for_id`]).
+    loader_holds: std::collections::HashSet<usize>,
     /// The reads after the reports ([`CallReads::after`]) for which a load gives another
     /// sequence, by report and key ([`HitLoads::read_after`], made by `HitLoads::load_after`).
     after_shown: std::collections::HashMap<(usize, usize), ShownInstead>,
@@ -6286,6 +6381,8 @@ impl HitLoads {
                 }
                 continue;
             }
+            // A report of a batch without the prefetch reads its subjects by its own lookups.
+            loads.read_alone.extend(keys.keys());
             let Some(run) = run else {
                 // No format reads the subjects: a report that reads one by one loads nothing.
                 continue;
@@ -6402,6 +6499,17 @@ impl HitLoads {
                 *holder = None;
             }
         }
+        loads.loader_holds = loads
+            .written
+            .iter()
+            .filter(|(_, holder)| holder.is_some())
+            .map(|(&key, _)| key)
+            .filter(|&key| {
+                parsed(key)
+                    .and_then(|subject| subject.sequence)
+                    .is_some_and(|sequence| walk.loaded_by_loader(sequence.ordinal()))
+            })
+            .collect();
         loads
     }
 
@@ -6760,6 +6868,8 @@ impl HitLoads {
                 .into_iter()
                 .filter_map(|(old, load)| Some((key(old)?, load)))
                 .collect(),
+            read_alone: self.read_alone.into_iter().filter_map(&key).collect(),
+            loader_holds: self.loader_holds.into_iter().filter_map(&key).collect(),
             after_shown: self
                 .after_shown
                 .into_iter()
@@ -6796,6 +6906,18 @@ impl HitLoads {
     /// (`common::database::check_prefetched_parsed`, `common::database::batch_prefetch`).
     pub fn prefetched(&self, key: usize) -> Option<HitLoad> {
         self.prefetched.get(&key).copied()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2935-2969
+    // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:1390-1437
+    /// Whether a report of a batch without the prefetch (`ReportRead::one_by_one`: off, or
+    /// failed) reads the subject `key`. A light lookup of its Seq-align id (`slen` without
+    /// another field of the subject, `report::tabular::TabularSpec::light_length`) finds what the
+    /// batch's prefetch put in the scope's cache ([`HitLoads::prefetched`], as the loads), but
+    /// in such a batch the sequences that the data source loaded in the run, whose GC and order
+    /// LOSAT does not follow, and then the subject's own record.
+    pub fn read_alone(&self, key: usize) -> bool {
+        self.read_alone.contains(&key)
     }
 
     /// The other sequence that a read of the subject `key` after report `report` gives
@@ -6885,6 +7007,14 @@ impl HitLoads {
                 .written
                 .iter()
                 .any(|(key, holder)| holder.is_some() && self.writes_shown_records(*key))
+    }
+
+    /// Whether NCBI's loader loaded the blob of the written holder of the subject `key` by the
+    /// subject's Seq-align id (`ScopeWalk::loaded_by_loader`), so that it reads that Bioseq with
+    /// the id as its target (`common::database::ShownHolders::holder_lines`), not one that the
+    /// scope's places held before.
+    pub fn loaded_for_id(&self, key: usize) -> bool {
+        self.loader_holds.contains(&key)
     }
 
     /// The other sequence, and its definition line that NCBI's Bioseq of it names, whose record

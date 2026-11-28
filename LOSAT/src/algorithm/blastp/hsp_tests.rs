@@ -173,7 +173,7 @@ fn collected_hits_carry_the_seqalign_identities() {
         })
         .collect();
     let mut engine_counts = super::super::seqalign::EngineCounts::default();
-    engine_counts.save((1, 0, 1), (28, 35));
+    engine_counts.keep((1, 0, 1), (28, 35));
     let counts = |first: usize, end: usize| -> Vec<(usize, usize)> {
         collect_hits_and_methods_from_hit_lists(&hit_lists[first..end], first, &engine_counts)
             .iter()

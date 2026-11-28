@@ -580,16 +580,28 @@ fn context_rows_into(
     // An HSP whose Seq-align has a query start below 0 in the record never reaches the rows
     // (`run::left_of_query_refusal`, `BlastnHsp::record_query_start`).
     ensure!(
-        qs <= qe
-            && query.offset as i64 + hsp.seqalign_query_start() >= 0
-            && ss <= se
-            && se <= subject_length,
+        qs <= qe && query.offset as i64 + hsp.seqalign_query_start() >= 0 && ss <= se,
         "BLASTN HSP outside its sequences"
     );
     let context = context_letters(hsp, query);
-    let subject = subject_letters(ss, se);
     let ungapped = [GapEditOp::Sub((qe - qs) as u32)];
     let ops = hsp.gap_info.as_deref().unwrap_or(&ungapped);
+    // A range past the subject's end is that of a subject whose record the writers take from a
+    // shorter holder (`common::database::ShownHolders::shown`, line DBID hr-2), whose letters
+    // the rows show to its end (`row_letters::shown_subject_row`: then gaps, and on the minus
+    // strand a segment that reaches its end shows none).
+    let subject = if se <= subject_length {
+        subject_letters(ss, se)
+    } else {
+        let inside = ss.min(subject_length);
+        crate::report::row_letters::shown_subject_row(
+            &subject_letters(inside, subject_length),
+            ss - inside,
+            ops,
+            hsp.query_frame < 0,
+            b'-',
+        )
+    };
     // The rows live in a `PairwiseHit` while the reports are written: their exact size, not
     // what growing leaves (a third more on the alignments of the BLASTN hit records). A
     // reused buffer keeps its capacity.

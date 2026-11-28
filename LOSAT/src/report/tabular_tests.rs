@@ -1679,4 +1679,7 @@ fn a_table_reads_the_length_apart_and_prints_identities_by_its_fields() {
     assert!(!prints_identities(Some(&spec(
         "qseqid sseqid slen positive"
     ))));
+    // With the rows, the identities are the rows' (line DBID hr-2c).
+    assert!(!prints_identities(Some(&spec("qseqid pident sseq"))));
+    assert!(!prints_identities(Some(&spec("qseqid nident btop"))));
 }

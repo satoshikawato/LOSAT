@@ -554,16 +554,15 @@ impl BatchTitles {
 
 /// The records of the holders that the reports of the batch `batches` write for its subjects
 /// (`shared::ShownHolders::shown`; `parsed`: the batch's subjects with parsed Seq-ids by ordinal
-/// id, `loads` by ordinal id), by ordinal id: LOSAT refuses a holder of other letters where a
-/// table prints identities (`shown.0`, `ShownHolders::other_letters`: BLASTX counts them on the
-/// search's letters), and a table's `slen` without the Bioseq (`shown.1`).
+/// id, `loads` by ordinal id), by ordinal id: LOSAT refuses a table's `slen` without the Bioseq
+/// (`light_length`). The reports read the holder's letters (`read_oid`), on which every table
+/// counts its identities (from its rows, `tabular::write_tabular`), as NCBI.
 fn shown_records(
     database: &BlastxDatabase,
-    subjects: Subjects<'_>,
     batches: &[BatchResults],
     parsed: &BTreeMap<usize, Arc<ParsedSubject>>,
     loads: &HitLoads,
-    (table_identities, light_length): (bool, bool),
+    light_length: bool,
 ) -> Result<BTreeMap<usize, crate::report::shown_bioseq::ShownBioseq>> {
     let mut records = BTreeMap::new();
     if !loads.writes_any_shown() {
@@ -592,9 +591,6 @@ fn shown_records(
         else {
             continue;
         };
-        holders.other_letters((ordinal, subject), &bioseq, table_identities, || {
-            Ok(subjects.read_encoded(oid)? == subjects.read_encoded(bioseq.ordinal() as usize)?)
-        })?;
         records.insert(oid, bioseq);
     }
     Ok(records)
@@ -790,9 +786,9 @@ impl ReportedSubjects {
     /// tables' rows, the taxonomy reads and the run's record of the loads, `note_loaded`, take that
     /// one answer), with how a pairwise report reads the subjects (`pairwise_read_order`): the
     /// batch's reports come after the loads of the record (the batches before and the calls
-    /// before, `TaxdbRun::loads_before`), in the batch's scope (`HitLoads::of`). `shown`: whether
-    /// a table prints identities and whether it writes `slen` without the subject's Bioseq, which
-    /// decide whether the reports write the record of a holder (`shown_records`).
+    /// before, `TaxdbRun::loads_before`), in the batch's scope (`HitLoads::of`). `light_length`:
+    /// whether a table writes `slen` without the subject's Bioseq, which decides whether the
+    /// reports write the record of a holder (`shown_records`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -815,7 +811,7 @@ impl ReportedSubjects {
             crate::report::db_subject::FormatThrow,
             Option<crate::report::pairwise::PairwiseReading>,
         ),
-        shown: (bool, bool),
+        light_length: bool,
     ) -> Result<Self> {
         let BatchTitles {
             listed,
@@ -950,7 +946,7 @@ impl ReportedSubjects {
         let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
         // The holders' records that the reports write for subjects (`shared::ShownHolders`).
         let shown_records = if reports {
-            shown_records(database, subjects, batches, &parsed, &loads, shown)?
+            shown_records(database, batches, &parsed, &loads, light_length)?
         } else {
             BTreeMap::new()
         };

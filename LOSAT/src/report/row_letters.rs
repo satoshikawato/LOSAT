@@ -1,7 +1,8 @@
 //! The letters of an alignment's rows as NCBI's reports read and compare them: the query's
 //! letters (`QueryLetters`: a FASTA record's, or the Bioseq's of a PSSM query), how a query row's
-//! lower case reads (`QueryCase`), the positives of two rows (`display_positives`), and the
-//! columns whose `-` is a residue (`stored_gap_columns`).
+//! lower case reads (`QueryCase`), the positives of two rows (`display_positives`), the
+//! columns whose `-` is a residue (`stored_gap_columns`), and the letters that a row shows of a
+//! subject's holder (`shown_subject_row`).
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:116-121
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2520-2521
@@ -193,6 +194,57 @@ pub(crate) fn display_positives(
             q == s || crate::utils::matrix::protein_display_score(matrix, q, s) > 0
         })
         .count()
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:280-313
+// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:631-644
+/// The row rebuilder of line DBID hr-2: the letters that NCBI's rows show of a subject whose
+/// Seq-align id gives another database sequence's Bioseq (the holder,
+/// `shown_bioseq::ShownBioseq`), by plus-strand position from `start` (0-based) on, over the
+/// positions that an alignment of the operations `ops` reads of the subject (`RowSide::Subject`),
+/// from the holder's letters `holder` (plus strand); `ops` read the subject's plus strand upward.
+/// A segment of NCBI's Dense-seg is a run of one operation. On the plus strand a position past
+/// the holder's end shows `gap`: the sequence vector stops at the holder's end, and the row fills
+/// the rest of the segment with the gap character. On the minus strand (`minus`) a segment whose
+/// last position is at or past the holder's end shows `gap` in every column: NCBI reads it from
+/// the holder's length less its positions in unsigned arithmetic, whose start then wraps, so the
+/// segment reads nothing. The counts that the reports make from the rows follow
+/// (`display_positives`, the recounts of the programs).
+pub(crate) fn shown_subject_row(
+    holder: &[u8],
+    start: usize,
+    ops: &[GapEditOp],
+    minus: bool,
+    gap: u8,
+) -> Vec<u8> {
+    let span: usize = ops
+        .iter()
+        .filter(|op| RowSide::Subject.reads(op))
+        .map(|op| op.num() as usize)
+        .sum();
+    let mut row: Vec<u8> = (start..start + span)
+        .map(|position| holder.get(position).copied().unwrap_or(gap))
+        .collect();
+    if minus && start + span > holder.len() {
+        // The subject's segments upward: `first` the row offset of the current one's first
+        // column, `at` past its last; a run of one operation is one segment.
+        let (mut first, mut at) = (0, 0);
+        let mut previous = None;
+        for op in ops {
+            let kind = std::mem::discriminant(op);
+            if RowSide::Subject.reads(op) {
+                if previous != Some(kind) {
+                    first = at;
+                }
+                at += op.num() as usize;
+                if start + at > holder.len() {
+                    row[first..at].fill(gap);
+                }
+            }
+            previous = Some(kind);
+        }
+    }
+    row
 }
 
 #[cfg(test)]

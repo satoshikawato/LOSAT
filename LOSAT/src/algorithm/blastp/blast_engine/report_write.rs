@@ -113,6 +113,9 @@ pub(super) struct ReportView<'a> {
     /// (`ListedTitles::hit_loads`, from `report_prep::prefetch_reported_subjects`).
     pub(super) hit_loads: &'a crate::report::db_subject::HitLoads,
     pub(super) engine_counts: &'a EngineCounts,
+    /// The letters and lengths of the holders whose records the reports write for subjects
+    /// (`report_prep::HeldLetters`, line DBID hr-2).
+    pub(super) held: &'a super::report_prep::HeldLetters,
     pub(super) pairwise_hits: &'a Option<Arc<Vec<PairwiseHit>>>,
     pub(super) psiblast_hits_found: &'a Option<Vec<usize>>,
     pub(super) psi_found_before: &'a Option<psi_round::FoundBefore>,
@@ -533,7 +536,7 @@ pub(super) fn write_xml(
                     .collect()
             })
             .collect();
-    let database_length = |rank: usize| subjects[rank].aa_len;
+    let database_length = |rank: usize| view.held.length(rank, subjects[rank].aa_len);
     // The length of each record itself (`-subject_loc` searches part of it).
     let record_length = |s_idx: usize| {
         ranges
@@ -1317,7 +1320,10 @@ pub(super) fn write_custom_tabular(
     let subject_length = |s_idx: usize| {
         ranges.subject_placements.length(
             s_idx,
-            subjects.get(s_idx).map_or(0, |subject| subject.aa_len),
+            view.held.length(
+                s_idx,
+                subjects.get(s_idx).map_or(0, |subject| subject.aa_len),
+            ),
         )
     };
     // The taxids of the reported database sequences where a field shows them, and

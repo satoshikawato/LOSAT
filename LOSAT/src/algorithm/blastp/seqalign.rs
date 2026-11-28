@@ -39,19 +39,22 @@ type HspKey = (u32, u32, u32);
 
 /// The engine's `(num_ident, num_positives)` of the HSPs whose counts the display recount
 /// replaced (`recount_shown_identities`), which the Seq-aligns show (outfmt 8, 11, 12) and the
-/// outfmt 0 report reads from them (`PairwiseHit::seqalign_num_ident`). The keys are added in
-/// the order of the hit lists, so they are sorted. Empty unless a query or subject has
-/// pyrrolysine or a subject a stored gap character.
+/// outfmt 0 report reads from them (`PairwiseHit::seqalign_num_ident`). The keys are kept sorted.
+/// Empty unless a query or subject has pyrrolysine, a subject a stored gap character, or the
+/// reports show a holder's letters for a subject (line DBID hr-2).
 #[derive(Default)]
 pub(crate) struct EngineCounts {
     saved: Vec<(HspKey, (usize, usize))>,
 }
 
 impl EngineCounts {
-    /// Keeps the engine's counts of the HSP at `key` before they are replaced.
-    pub(crate) fn save(&mut self, key: HspKey, counts: (usize, usize)) {
-        debug_assert!(self.saved.last().is_none_or(|&(last, _)| last < key));
-        self.saved.push((key, counts));
+    /// Keeps `counts`, the engine's counts of the HSP at `key`, before they are replaced, unless
+    /// they are kept already (a second recount, of a holder's letters, after the first: line DBID
+    /// hr-2), in key order.
+    pub(crate) fn keep(&mut self, key: HspKey, counts: (usize, usize)) {
+        if let Err(index) = self.saved.binary_search_by(|(saved, _)| saved.cmp(&key)) {
+            self.saved.insert(index, (key, counts));
+        }
     }
 
     /// The engine's counts of the HSP at `key`, if the recount replaced them.

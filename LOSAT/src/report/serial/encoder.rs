@@ -58,6 +58,11 @@ pub enum SerialError {
     /// `Traced` (`NullElement`, the ASN.1 text stream of psiblast's PSSM file and of the search
     /// strategy); for the others it is the writer's error.
     NullElement,
+    /// A member that NCBI's reader kept in a delay buffer of another format, whose read before
+    /// the member is written fails (`Encoder::delayed_read_failed`), where NCBI's exception
+    /// leaves its writer: a writer that reports NCBI's error writes the document again through
+    /// `Traced` (`Thrown::DelayedRead`); for the others it is the writer's error.
+    DelayedRead,
 }
 
 impl std::fmt::Display for SerialError {
@@ -80,6 +85,9 @@ impl std::fmt::Display for SerialError {
             }
             SerialError::NullElement => f.write_str(
                 "an element of a list stated as NULL (where NCBI BLAST+'s writer stops with a C++ exception) in this serialized format is not supported by LOSAT",
+            ),
+            SerialError::DelayedRead => f.write_str(
+                "a member read into a delay buffer of another format whose value NCBI reads again with an error (where NCBI BLAST+'s writer stops with a C++ exception) in this serialized format is not supported by LOSAT",
             ),
         }
     }
@@ -237,7 +245,7 @@ impl NullElement {
         }
     }
 
-    /// The post (`post`) at the start of `message`, the text of `cli::NativeError::null_element`,
+    /// The post (`post`) at the start of `message`, the text of `cli::NativeError::thrown`,
     /// and the rest (`CATCH_ALL`'s report); no post in another message.
     pub fn split_post(message: &[u8]) -> (Option<&[u8]>, &[u8]) {
         let (code, subcode) = Self::ERR_CODE;
@@ -261,6 +269,112 @@ impl NullElement {
         exception.add_frame_infos(&names);
         exception
     }
+}
+
+/// The exception of NCBI's read of a delay buffer of another format that failed
+/// (`CDelayBuffer::Update`, `asn_types::write`), with the frames of the read, which leaves NCBI's
+/// writer through each frame the writer has open (`Traced::delayed_read_failed`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DelayedReadError {
+    /// A `CSerialException`: each frame adds its name to the exception's frame stack
+    /// (`CSerialException::AddFrameInfo`).
+    Serial(crate::ncbi_exception::NcbiException),
+    /// Another `CException` (the `CUtilException` of a number past its storage): each frame
+    /// rethrows it with the frame's text (`NCBI_RETHROW_SAME`).
+    Other(crate::ncbi_exception::NcbiException),
+}
+
+/// What NCBI's object stream threw while it wrote a document (`Traced::take_thrown`): the bytes
+/// held are those NCBI flushed, and its exception ends the run (`cli::NativeError::thrown`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Thrown {
+    /// An element that holds no object (`NullElement`).
+    NullElement(NullElement),
+    /// A delay buffer whose read failed (`DelayedReadError`): the exception with the writer's
+    /// frames.
+    DelayedRead(crate::ncbi_exception::NcbiException),
+}
+
+impl Thrown {
+    /// The post of the stream's failure before the exception's report: `NullElement::post`; none
+    /// for a failed read, whose exception passes through the writer without setting its fail
+    /// flags.
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:201-214
+    pub fn post(&self, prefix: Option<&str>) -> Vec<u8> {
+        match self {
+            Thrown::NullElement(null) => null.post(prefix),
+            Thrown::DelayedRead(_) => Vec::new(),
+        }
+    }
+
+    /// The exception that NCBI's `CATCH_ALL` reports.
+    pub fn exception(&self) -> crate::ncbi_exception::NcbiException {
+        match self {
+            Thrown::NullElement(null) => null.exception(),
+            Thrown::DelayedRead(exception) => exception.clone(),
+        }
+    }
+}
+
+/// The place of the `END_OBJECT_FRAME` of a frame of NCBI's ASN.1 text or binary output stream,
+/// where `NCBI_RETHROW_SAME` adds the frame's line to an exception other than a
+/// `CSerialException` that leaves it (`Traced::delayed_read_failed`): the stream's `WriteClass`,
+/// `WriteClassMember` and `WriteContainer`, `WriteChoiceDefault`'s two frames, `Write`'s root
+/// frame (NCBI BLAST+ 2.17.0, line RG-F3 item O-2 probe 1: psiblast's and tblastn's strategy,
+/// psiblast's `-out_pssm` and archives).
+// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:579-614
+// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:687-713
+// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1206-1264
+// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1381-1455
+// NCBI reference (598d8ae6): c++/src/serial/choice.cpp:428-463
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:610-621
+fn write_frame_site(
+    stream: Stream,
+    kind: super::object_frame::FrameKind,
+) -> Option<(&'static str, u32, &'static str)> {
+    use super::object_frame::FrameKind;
+    const CHOICE: &str = "src/serial/choice.cpp";
+    const WRITE_CHOICE: &str = "ncbi::CChoiceTypeInfoFunctions::WriteChoiceDefault";
+    // The file, then the line and function of `WriteClass`, `WriteClassMember`, and
+    // `WriteContainer`'s element and container frames.
+    let (file, [class, member, element, array], [write_class, write_member, write_container]) =
+        match stream {
+            Stream::AsnText => (
+                "src/serial/objostrasn.cpp",
+                [698, 713, 610, 614],
+                [
+                    "ncbi::CObjectOStreamAsn::WriteClass",
+                    "ncbi::CObjectOStreamAsn::WriteClassMember",
+                    "ncbi::CObjectOStreamAsn::WriteContainer",
+                ],
+            ),
+            Stream::AsnBinary => (
+                "src/serial/objostrasnb.cpp",
+                [1417, 1455, 1255, 1264],
+                [
+                    "ncbi::CObjectOStreamAsnBinary::WriteClass",
+                    "ncbi::CObjectOStreamAsnBinary::WriteClassMember",
+                    "ncbi::CObjectOStreamAsnBinary::WriteContainer",
+                ],
+            ),
+            // The XML stream's frames differ (a class or a container frame only for a named
+            // type, its own choice functions); a buffer of another format whose read fails with
+            // an exception other than a `CSerialException` does not reach it (an XML buffer is
+            // copied, the binary reader throws `CSerialException`s, the text reader's skip reads
+            // the numbers).
+            Stream::Xml | Stream::Json => return None,
+        };
+    Some(match kind {
+        FrameKind::Named | FrameKind::NamedType => {
+            ("src/serial/objostr.cpp", 621, "ncbi::CObjectOStream::Write")
+        }
+        FrameKind::Class => (file, class, write_class),
+        FrameKind::ClassMember => (file, member, write_member),
+        FrameKind::Choice => (CHOICE, 463, WRITE_CHOICE),
+        FrameKind::ChoiceVariant => (CHOICE, 459, WRITE_CHOICE),
+        FrameKind::ArrayElement => (file, element, write_container),
+        FrameKind::Array => (file, array, write_container),
+    })
 }
 
 /// A replaced byte (`ReplacedChar`) and the bytes of its document that NCBI's stream had
@@ -432,10 +546,22 @@ pub trait Encoder {
     /// read first and written by its values (`CDelayBuffer::Update`, `asn_types::write`).
     fn delayed(&mut self, bytes: &[u8]);
     /// A member that NCBI's reader kept in a delay buffer of another format and that NCBI's
-    /// `CDelayBuffer::Update` reads again with an error, or with a message that the encoder does
-    /// not post (`delayed_posts`), before it writes it (`asn_types::write`): LOSAT does not write
-    /// it (`SerialError::Unwritten`).
+    /// `CDelayBuffer::Update` reads again with a message that the encoder does not post
+    /// (`delayed_posts`), or with an error that LOSAT's reader does not report as NCBI's
+    /// (`asn_types::read::ReadError`), before it writes it (`asn_types::write`): LOSAT does not
+    /// write it (`SerialError::Unwritten`).
     fn unread_delayed(&mut self);
+    /// A member that NCBI's reader kept in a delay buffer of another format, whose read by
+    /// `CDelayBuffer::Update` fails with `error` before the member starts (`WriteLongMember`
+    /// reads the buffer before `WriteClassMember`; `asn_types::write`): NCBI's exception leaves
+    /// the writer there, after the bytes written before the member. `Traced` makes NCBI's
+    /// exception (`Thrown::DelayedRead`) and writes nothing after it; the encoders' error is
+    /// `SerialError::DelayedRead`. The default writes no such member (`unread_delayed`).
+    // NCBI reference (598d8ae6): c++/src/serial/member.cpp:1084-1103
+    fn delayed_read_failed(&mut self, error: &DelayedReadError) {
+        let _ = error;
+        self.unread_delayed();
+    }
     /// The posts of the bytes that `CDelayBuffer::Update`'s read of a delayed member of another
     /// format replaced (803.7, `ReplacedChar`: the trace of that read's own stack, the position in
     /// the buffer), which NCBI makes before it writes the member (`WriteLongMember` calls `Update`
@@ -518,8 +644,13 @@ pub trait Encoder {
 /// A frame of NCBI's object stack that `GetStackTraceASN` reads.
 #[derive(Clone, Debug)]
 enum Frame {
-    /// A member or a choice variant: `.name`.
+    /// A member: `.name`.
     Named(String),
+    /// A SEQUENCE value of the type (`begin_sequence`, `eFrameClass`): nothing in the trace.
+    Class(String),
+    /// A CHOICE value of the type `choice` and its variant `name` (`variant`, `eFrameChoice` and
+    /// `eFrameChoiceVariant`): `.name`.
+    Variant { choice: String, name: String },
     /// A container: nothing.
     List,
     /// A container element: `.E`, unless `shown` is false (an element of a named type in
@@ -576,11 +707,9 @@ pub struct Traced<E, P = fn(&ReplacedChar) -> std::io::Result<()>> {
     foreign: usize,
     posted: Vec<Posted>,
     post: Option<P>,
-    /// NCBI's throw at an element that holds no object (`null_element`), after which nothing is
-    /// written.
-    thrown: Option<Box<NullElement>>,
-    /// What NCBI's buffer had written when the last member started (`delayed_posts`).
-    member_written: u64,
+    /// NCBI's throw (`Thrown`: at an element that holds no object, `null_element`, or at a delay
+    /// buffer whose read failed, `delayed_read_failed`), after which nothing is written.
+    thrown: Option<Box<Thrown>>,
 }
 
 /// The empty string of the XML stream's messages.
@@ -625,7 +754,6 @@ impl<E: Encoder> Traced<E> {
             posted: Vec::new(),
             post: None,
             thrown: None,
-            member_written: 0,
         }
     }
 
@@ -657,7 +785,6 @@ impl<E: Encoder> Traced<E> {
             posted: self.posted,
             post: Some(post),
             thrown: self.thrown,
-            member_written: self.member_written,
         }
     }
 }
@@ -700,9 +827,12 @@ impl<E: Encoder, P> Traced<E, P> {
         object_stack_trace(
             &self.root,
             self.frames.iter().filter_map(|frame| match frame {
-                Frame::Named(name) => Some(StackStep::Member(name)),
+                Frame::Named(name) | Frame::Variant { name, .. } => Some(StackStep::Member(name)),
                 Frame::Element { shown: true } => Some(StackStep::Element),
-                Frame::Element { shown: false } | Frame::List | Frame::Type(_) => None,
+                Frame::Element { shown: false }
+                | Frame::List
+                | Frame::Type(_)
+                | Frame::Class(_) => None,
             }),
         )
     }
@@ -732,9 +862,47 @@ impl<E: Encoder, P> Traced<E, P> {
         self.inner.held().len()
     }
 
-    /// NCBI's throw at an element that holds no object (`null_element`), if the document met one.
-    pub fn take_thrown(&mut self) -> Option<Box<NullElement>> {
+    /// NCBI's throw (`Thrown`), if the document met one.
+    pub fn take_thrown(&mut self) -> Option<Box<Thrown>> {
         self.thrown.take()
+    }
+
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:201-214
+    // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:366-381
+    /// `error`, an exception other than a `CSerialException`, as it leaves NCBI's writer of the
+    /// stream `stream`: `END_OBJECT_FRAME`'s `NCBI_RETHROW_SAME` with `GetFrameInfo()` at each
+    /// frame open, innermost first, then the root's (`write_frame_site`); `None` for a stream
+    /// whose frames LOSAT does not place. A container's frames name no type: the container of a
+    /// member is anonymous, and its elements on the way to a delayed member are objects held by
+    /// `CRef<>`s, whose pointer type has no name (NCBI BLAST+ 2.17.0, line RG-F3 item O-2 probe 1).
+    fn rethrown(
+        &self,
+        stream: Stream,
+        mut error: crate::ncbi_exception::NcbiException,
+    ) -> Option<crate::ncbi_exception::NcbiException> {
+        use super::object_frame::{frame_info, FrameKind};
+        let through = |error: crate::ncbi_exception::NcbiException,
+                       kind: FrameKind,
+                       type_name: Option<&str>,
+                       member: Option<&str>| {
+            write_frame_site(stream, kind).map(|(file, line, function)| {
+                error.rethrow_same(file, line, function, frame_info(kind, type_name, member))
+            })
+        };
+        for frame in self.frames.iter().rev() {
+            error = match frame {
+                Frame::Named(name) => through(error, FrameKind::ClassMember, None, Some(name))?,
+                Frame::Class(name) => through(error, FrameKind::Class, Some(name), None)?,
+                Frame::Variant { choice, name } => {
+                    let error = through(error, FrameKind::ChoiceVariant, None, Some(name))?;
+                    through(error, FrameKind::Choice, Some(choice), None)?
+                }
+                Frame::List => through(error, FrameKind::Array, Some(""), None)?,
+                Frame::Element { .. } => through(error, FrameKind::ArrayElement, Some(""), None)?,
+                Frame::Type(_) => error,
+            };
+        }
+        through(error, FrameKind::Named, Some(&self.root), None)
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1211-1227
@@ -749,7 +917,10 @@ impl<E: Encoder, P> Traced<E, P> {
         let xml = self.xml;
         std::iter::once(frame_name(FrameKind::Named, Some(&self.root), None))
             .chain(self.frames.iter().filter_map(|frame| match frame {
-                Frame::Named(name) => Some(frame_name(FrameKind::ClassMember, None, Some(name))),
+                Frame::Named(name) | Frame::Variant { name, .. } => {
+                    Some(frame_name(FrameKind::ClassMember, None, Some(name)))
+                }
+                Frame::Class(_) => None,
                 Frame::List => (!xml).then(|| frame_name(FrameKind::Array, None, None)),
                 Frame::Element { shown } => {
                     (!xml || *shown).then(|| frame_name(FrameKind::ArrayElement, None, None))
@@ -942,10 +1113,12 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     }
     fn begin_sequence(&mut self, type_name: &str) {
         self.name_element(type_name);
+        self.frames.push(Frame::Class(type_name.to_string()));
         self.call(Piece::Markup, |inner| inner.begin_sequence(type_name));
     }
     fn end_sequence(&mut self) {
         self.call(Piece::Markup, |inner| inner.end_sequence());
+        self.frames.pop();
     }
     fn begin_named(&mut self, type_name: &'static str) {
         self.name_element(type_name);
@@ -957,7 +1130,6 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
         self.frames.pop();
     }
     fn member(&mut self, name: &str, tag: u8) {
-        self.member_written = self.buffer.as_ref().map_or(0, OutBuffer::written);
         self.frames.push(Frame::Named(name.to_string()));
         self.call(Piece::Markup, |inner| inner.member(name, tag));
     }
@@ -981,7 +1153,10 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     }
     fn variant(&mut self, type_name: &str, name: &str, tag: u8) {
         self.name_element(type_name);
-        self.frames.push(Frame::Named(name.to_string()));
+        self.frames.push(Frame::Variant {
+            choice: type_name.to_string(),
+            name: name.to_string(),
+        });
         self.call(Piece::Markup, |inner| inner.variant(type_name, name, tag));
     }
     fn end_variant(&mut self) {
@@ -1027,6 +1202,38 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     fn unread_delayed(&mut self) {
         self.call(Piece::Raw, |inner| inner.unread_delayed());
     }
+    /// NCBI's exception of the read (`DelayedReadError`) as it leaves the writer's frames open
+    /// (the member's own frame is not, `Encoder::delayed_read_failed`): a `CSerialException`
+    /// with the name of each (`frame_names`, as `NullElement::exception`), another exception
+    /// rethrown at each (`rethrown`); the bytes held are those NCBI's stream wrote before, and the
+    /// calls after it write nothing (`call`, `string`). Where LOSAT does not place the frames (the
+    /// XML stream and an exception other than a `CSerialException`), the member is not written
+    /// (`unread_delayed`).
+    fn delayed_read_failed(&mut self, error: &DelayedReadError) {
+        if self.thrown.is_some() {
+            return;
+        }
+        let stream = E::STREAM.filter(|stream| *stream != Stream::Json);
+        let exception = match (stream, error) {
+            (Some(_), DelayedReadError::Serial(exception)) => {
+                let mut exception = exception.clone();
+                let names = self.frame_names();
+                let names: Vec<&str> = names.iter().rev().map(String::as_str).collect();
+                exception.add_frame_infos(&names);
+                Some(exception)
+            }
+            (Some(stream), DelayedReadError::Other(exception)) => {
+                self.rethrown(stream, exception.clone())
+            }
+            (None, _) => None,
+        };
+        let Some(exception) = exception else {
+            self.unread_delayed();
+            return;
+        };
+        self.inner.delayed_read_failed(error);
+        self.thrown = Some(Box::new(Thrown::DelayedRead(exception)));
+    }
     /// NCBI's `WriteContainer` at an element that holds no object: the element's frame (pushed
     /// before NCBI's loop over the elements; none in NCBI's XML stream for an element of a named
     /// type, `name_element`), then NCBI's throw (`NullElement`) where the stream stands; the
@@ -1054,19 +1261,21 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
                 StreamPosition::Byte(self.flushed_bytes + offset - self.base)
             }
         };
-        self.thrown = Some(Box::new(NullElement {
+        self.thrown = Some(Box::new(Thrown::NullElement(NullElement {
             stream,
             element_frame,
             trace: self.stack_trace(),
             position,
             frames: self.frame_names(),
-        }));
+        })));
     }
+    /// The posts of the read, made before the member starts (`Encoder::delayed_posts`), after
+    /// what NCBI's buffer had written then.
     fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
         if self.thrown.is_some() {
             return;
         }
-        let written = self.member_written;
+        let written = self.buffer.as_ref().map_or(0, OutBuffer::written);
         self.posted.extend(posts.iter().map(|replaced| Posted {
             written,
             replaced: replaced.clone(),

@@ -23,7 +23,8 @@ use crate::report::serial::encoder::{Encoder, Traced};
 /// What is left to write: a value of a type, or one call of the encoder.
 enum Step<'a> {
     Value(u16, &'a Value),
-    Member(&'static Member, u8),
+    /// A member (`open_member`) and its value.
+    Member(&'static Member, u8, &'a Value),
     EndMember,
     EndSequence,
     Element,
@@ -57,7 +58,7 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
         }
         match step {
             Step::Value(ty, value) => open(enc, ty, value, &mut todo),
-            Step::Member(member, tag) => enc.member(member.name(), tag),
+            Step::Member(member, tag, value) => open_member(enc, member, tag, value, &mut todo),
             Step::EndMember => enc.end_member(),
             Step::EndSequence => enc.end_sequence(),
             Step::Element => enc.element(),
@@ -70,28 +71,57 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
     true
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/member.cpp:1094-1103
-// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:919-933
-// NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
-/// A delayed member of the type `ty` that the reader kept as the `bytes` of `encoding`
-/// (`Value::Delayed`): a stream of that format copies them (`WriteClassMember` of the buffer,
-/// `Encoder::data_format`, `Encoder::delayed`); a stream of another format reads them first
-/// (`CDelayBuffer::Update`: `read::read_delayed`, a stream of their format under the frames of
-/// the member) and writes the value read. That read posts where NCBI's skip did not: a
-/// VisibleString byte replaced by `#` (803.7), which NCBI posts before it writes the member
-/// (`Encoder::delayed_posts`), then writes the `#`. A read that fails (a number past its
-/// storage: NCBI's exception from inside its writer, after the bytes it had written) or posts
-/// another message is not written (`Encoder::unread_delayed`).
-fn write_delayed<E: Encoder>(enc: &mut E, ty: u16, encoding: Encoding, bytes: &[u8]) {
-    if enc.data_format() == Some(encoding) {
-        enc.delayed(bytes);
-        return;
+/// The member `member` (at `tag`) of a SEQUENCE and its `value`: the member, then its value
+/// (`todo`); a delay buffer of another format than the stream's is read first (`update_member`).
+fn open_member<'a, E: Encoder>(
+    enc: &mut E,
+    member: &'static Member,
+    tag: u8,
+    value: &'a Value,
+    todo: &mut Vec<Step<'a>>,
+) {
+    if let Value::Delayed { encoding, bytes } = value {
+        if enc.data_format() != Some(*encoding) {
+            update_member(enc, member, tag, *encoding, bytes);
+            return;
+        }
     }
-    let (class, member) = super::delayed_member(ty);
-    let (value, posts) = super::read::read_delayed(encoding, bytes, class, member);
-    let Ok(value) = value else {
-        enc.unread_delayed();
-        return;
+    enc.member(member.name(), tag);
+    todo.push(Step::EndMember);
+    todo.push(Step::Value(member.ty, value));
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:1084-1103
+// NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
+/// A delayed member `member` (at `tag`) that the reader kept as the `bytes` of `encoding`
+/// (`Value::Delayed`), of another format than the stream's (a stream of that format copies them:
+/// `open`, `Encoder::delayed`): NCBI's `WriteLongMember` reads them first (`CDelayBuffer::Update`:
+/// `read::read_delayed`, a stream of their format under the frames of the member), before
+/// `WriteClassMember` starts the member, then writes the value read. That read posts where NCBI's
+/// skip did not: a VisibleString byte replaced by `#` (803.7), which NCBI posts before the member
+/// (`Encoder::delayed_posts`), then writes the `#`. A read that fails (a number past its storage)
+/// is NCBI's exception, which leaves the writer there (`Encoder::delayed_read_failed`); one that
+/// fails otherwise, or posts another message, is not written (`Encoder::unread_delayed`).
+fn update_member<E: Encoder>(
+    enc: &mut E,
+    member: &'static Member,
+    tag: u8,
+    encoding: Encoding,
+    bytes: &[u8],
+) {
+    use super::read::ReadError;
+    use crate::report::serial::encoder::DelayedReadError;
+    let (class, delayed) = super::delayed_member(member.ty);
+    let (value, posts) = super::read::read_delayed(encoding, bytes, class, delayed);
+    let value = match value {
+        Ok(value) => value,
+        Err(ReadError::Serial(exception)) => {
+            return enc.delayed_read_failed(&DelayedReadError::Serial(exception));
+        }
+        Err(ReadError::Exception(exception)) => {
+            return enc.delayed_read_failed(&DelayedReadError::Other(exception));
+        }
+        Err(_) => return unread_member(enc, member, tag),
     };
     if !posts.is_empty() {
         let replaced: Option<Vec<_>> = posts
@@ -102,19 +132,27 @@ fn write_delayed<E: Encoder>(enc: &mut E, ty: u16, encoding: Encoding, bytes: &[
             })
             .collect();
         let Some(replaced) = replaced else {
-            enc.unread_delayed();
-            return;
+            return unread_member(enc, member, tag);
         };
         enc.delayed_posts(&replaced);
     }
-    write_value(enc, ty, &value);
+    enc.member(member.name(), tag);
+    write_value(enc, member.ty, &value);
+    enc.end_member();
+}
+
+/// The member `member` (at `tag`) that LOSAT does not write (`Encoder::unread_delayed`).
+fn unread_member<E: Encoder>(enc: &mut E, member: &'static Member, tag: u8) {
+    enc.member(member.name(), tag);
+    enc.unread_delayed();
+    enc.end_member();
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/member.cpp:1094-1103
 // NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
 /// What a write of `value`, a value of the type `ty`, by a stream of the format `written` leaves
 /// of it: NCBI's writer reads each delay buffer of another format into the object
-/// (`CDelayBuffer::Update` parses it in place, `write_delayed`), so every later write of the
+/// (`CDelayBuffer::Update` parses it in place, `update_member`), so every later write of the
 /// object, in any format, writes the values read; a buffer of `written`'s format stays, which a
 /// later stream of that format copies. A buffer whose read fails stays too (NCBI's writer stops
 /// with its exception there, before any later write). What the read posts is the first write's
@@ -208,9 +246,11 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
     let info = type_info(ty);
     // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:716-733 (cited at
     // `AsnTextEncoder::delayed`): the delay buffer is written in place of the member's value,
-    // without its type.
+    // without its type. Only a SEQUENCE's member holds one, and a buffer of another format is read
+    // before the member starts (`open_member`), so a buffer here is of the stream's format.
     if let Value::Delayed { encoding, bytes } = value {
-        write_delayed(enc, ty, *encoding, bytes);
+        debug_assert_eq!(enc.data_format(), Some(*encoding), "{}", info.name());
+        enc.delayed(bytes);
         return;
     }
     // A named type that is not a SEQUENCE or a CHOICE (an alias, a SEQUENCE OF or SET OF, an
@@ -233,9 +273,7 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
             todo.push(Step::EndSequence);
             for (position, value) in set.iter().rev() {
                 let member = &members[usize::from(*position)];
-                todo.push(Step::EndMember);
-                todo.push(Step::Value(member.ty, value));
-                todo.push(Step::Member(member, automatic_tag(*position)));
+                todo.push(Step::Member(member, automatic_tag(*position), value));
             }
         }
         (Kind::Choice(span), Value::Choice(index, value)) => {

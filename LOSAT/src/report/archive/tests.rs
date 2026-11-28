@@ -601,8 +601,8 @@ fn a_psiblast_round_writes_its_step_and_composition_mode() {
 // archives do not write yet of a PSSM file's members, which NCBI BLAST+ 2.17.0's psiblast writes
 // with `-outfmt 11` (`pssm_unwritten`: the run is refused before any output). Since PR 2 every
 // stream writes the anonymous types, NULLs, UTF8Strings and REAL specials of these files and a
-// delayed member that it copies or reads again without a message; a delayed member of another
-// format that NCBI reads again with an error or a post stays refused.
+// delayed member that it copies or reads again without a message or with a replaced byte's post;
+// since item O-2 one whose read fails too.
 /// The PSSM file `path` under tests/fixtures (gzipped when it ends with `.gz`) as psiblast's
 /// `-in_pssm` reads it: ASN.1 binary for `.asnb`, XML for `.xml`, else ASN.1 text.
 fn fixture_pssm(path: &str) -> crate::report::serial::pssm::PssmWithParameters {
@@ -633,7 +633,6 @@ fn fixture_pssm(path: &str) -> crate::report::serial::pssm::PssmWithParameters {
 
 #[test]
 fn the_archive_streams_gaps_of_a_pssm_files_members() {
-    const READ_AGAIN: Option<PssmGap> = Some(PssmGap::ReadAgain);
     // (file, the gap of the XML, ASN.1 binary and ASN.1 text archives)
     for (path, xml, binary, text) in [
         // A title only.
@@ -652,8 +651,11 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
         // `Traced`.
         ("pssm/ps9_xml_bin_dl_ctrl.asnb", None, None, None),
         ("pssm/ps9_xml_dl_ctrl.xml", None, None, None),
-        // One whose number is past its storage: read again with an error.
-        ("pssm/ps9_xml_dl_ovf.xml", None, READ_AGAIN, READ_AGAIN),
+        // One whose number is past its storage: read again with an error, NCBI's exception
+        // after the part of the archive written before the member, through `Traced` (line RG-F3
+        // item O-2: the XML read's `CUtilException`, the binary read's `CSerialException`).
+        ("pssm/ps9_xml_dl_ovf.xml", None, None, None),
+        ("pssm/ps9_ber_dl_ovf.asnb", None, None, None),
     ] {
         let pssm = fixture_pssm(path);
         assert_eq!(pssm_unwritten(ArchiveEncoding::Xml, &pssm), xml, "{path}");
@@ -779,4 +781,53 @@ fn a_text_write_reads_a_pssm_files_delay_buffers_of_other_formats_into_it() {
     updated.update_delayed(Encoding::Text);
     assert!(updated == pssm);
     assert!(asn_text_posting(&updated).is_err());
+}
+
+// Line RG-F3 item O-2: a delayed member of another format whose read fails ends NCBI's writer with
+// the read's exception, which leaves each frame the writer has open, after the bytes written before
+// the member (NCBI BLAST+ 2.17.0, rows db.xml.ps.dl_ovf.outpssm and db.xml.ps.bin.dl_ovf.outpssm:
+// psiblast's `-out_pssm` file and standard error, frozen with the official Linux x64 build). The
+// XML read's `CUtilException` is rethrown at each frame (`encoder::Traced::rethrown`), the binary
+// read's `CSerialException` gets each frame's name (`add_frame_infos`); no post precedes either.
+#[test]
+fn a_failed_read_of_a_delay_buffer_ends_the_pssm_file_with_ncbis_exception() {
+    use crate::report::serial::encoder::Thrown;
+    let frozen = |name: &str| {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/db_search")
+                .join(name),
+        )
+        .unwrap()
+    };
+    for (path, row) in [
+        ("pssm/ps9_xml_dl_ovf.xml", "db.xml.ps.dl_ovf.outpssm"),
+        ("pssm/ps9_ber_dl_ovf.asnb", "db.xml.ps.bin.dl_ovf.outpssm"),
+    ] {
+        let pssm = fixture_pssm(path);
+        // The plain encoder stops there (`SerialError::DelayedRead`), so the file is written
+        // through `Traced`.
+        assert!(matches!(
+            crate::report::serial::pssm::asn_text_with_karlin(&pssm, None),
+            Err(crate::report::serial::encoder::SerialError::DelayedRead)
+        ));
+        let written = crate::report::serial::pssm::asn_text_written(&pssm, None).unwrap();
+        assert_eq!(written.bytes, frozen(&format!("{row}.asn")), "{row}");
+        assert!(written.bytes.ends_with(b"authors {"), "{row}");
+        assert!(written.replaced.is_empty(), "{row}");
+        let thrown = written.thrown.expect("the writer throws");
+        assert!(matches!(*thrown, Thrown::DelayedRead(_)), "{row}");
+        assert!(thrown.post(Some("psiblast")).is_empty(), "{row}");
+        let stderr = [
+            b"Error: ".as_slice(),
+            &thrown.exception().ncbi_what(),
+            b"\n",
+        ]
+        .concat();
+        assert_eq!(
+            String::from_utf8(stderr).unwrap(),
+            String::from_utf8(frozen(&format!("{row}.err"))).unwrap(),
+            "{row}"
+        );
+    }
 }

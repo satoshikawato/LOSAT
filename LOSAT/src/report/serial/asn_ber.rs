@@ -312,9 +312,17 @@ impl Encoder for AsnBinaryEncoder<'_> {
     fn unread_delayed(&mut self) {
         if self.error.is_none() {
             self.error = Some(SerialError::Unwritten(
-                "a member read into a delay buffer of another format whose value NCBI reads with an \
-                 error or with a message other than a replaced character",
+                "a member read into a delay buffer of another format whose read LOSAT does not report \
+                 as NCBI's or that posts a message other than a replaced character",
             ));
+        }
+    }
+
+    /// The document's bytes stop where NCBI's exception leaves the stream, before the member
+    /// (`encoder::Traced`): the encoder's error.
+    fn delayed_read_failed(&mut self, _error: &crate::report::serial::encoder::DelayedReadError) {
+        if self.error.is_none() {
+            self.error = Some(SerialError::DelayedRead);
         }
     }
 

@@ -770,12 +770,13 @@ impl NativeError {
 
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384 (cited at
     // `report::serial::encoder::NullElement`)
-    /// The end of a run whose ASN.1 text stream threw at an element that holds no object
-    /// (`encoder::NullElement`, the application `application`): the stream's post of its first
-    /// failure, then `CATCH_ALL`'s report of the exception (`exception`, exit status 255).
-    pub(crate) fn null_element(
+    /// The end of a run whose object stream threw (`encoder::Thrown`, the application
+    /// `application`): at an element that holds no object the stream's post of its first failure
+    /// (none at a delay buffer whose read failed), then `CATCH_ALL`'s report of the exception
+    /// (`exception`, exit status 255).
+    pub(crate) fn thrown(
         application: &str,
-        thrown: &crate::report::serial::encoder::NullElement,
+        thrown: &crate::report::serial::encoder::Thrown,
     ) -> NativeError {
         let mut error = Self::exception(&thrown.exception());
         let mut message = thrown.post(Some(application));

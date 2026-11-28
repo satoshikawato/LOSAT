@@ -285,7 +285,7 @@ impl InPssmRounds {
                     .map_err(|error| anyhow::anyhow!("{error}"))?;
                 let thrown = written
                     .thrown
-                    .map(|thrown| crate::cli::NativeError::null_element("psiblast", &thrown));
+                    .map(|thrown| crate::cli::NativeError::thrown("psiblast", &thrown));
                 (Some(written.bytes), written.replaced, thrown)
             }
             None => (None, Vec::new(), None),

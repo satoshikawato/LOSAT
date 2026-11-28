@@ -224,12 +224,12 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> ArchiveOut<'_, 
     /// `application`): the sink gets the bytes that NCBI's stream flushed (with a post function,
     /// each replaced byte posted after the bytes NCBI had written before it), `collect` the bytes
     /// replaced before the throw that no post function posted, then NCBI's error ends the request
-    /// (`cli::NativeError::null_element`).
+    /// (`cli::NativeError::thrown`).
     fn finish_thrown(
         mut self,
         collect: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
         application: &str,
-        thrown: &crate::report::serial::encoder::NullElement,
+        thrown: &crate::report::serial::encoder::Thrown,
     ) -> Result<()> {
         if self.io_error.is_none() {
             if let Err(error) = self.enc.flush_to(self.sink, true) {
@@ -242,7 +242,7 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> ArchiveOut<'_, 
         }
         match self.io_error {
             Some(error) => Err(error.into()),
-            None => Err(crate::cli::NativeError::null_element(application, thrown).into()),
+            None => Err(crate::cli::NativeError::thrown(application, thrown).into()),
         }
     }
 
@@ -251,7 +251,7 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> ArchiveOut<'_, 
     /// error of `finish` is.
     fn finish_archive(mut self, application: &str) -> Result<()> {
         match self.enc.take_thrown() {
-            Some(null_element) => self.finish_thrown(|_| Ok(()), application, &null_element),
+            Some(thrown) => self.finish_thrown(|_| Ok(()), application, &thrown),
             None => self.finish(),
         }
     }
@@ -839,7 +839,7 @@ pub(super) fn encode_strategy_request(
             (
                 Vec::new(),
                 posts,
-                Some(crate::cli::NativeError::null_element(
+                Some(crate::cli::NativeError::thrown(
                     request.application,
                     &thrown,
                 )),

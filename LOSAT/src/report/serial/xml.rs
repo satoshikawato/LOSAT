@@ -1052,9 +1052,14 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
 
     fn unread_delayed(&mut self) {
         self.fail(SerialError::Unwritten(
-            "a member read into a delay buffer of another format whose value NCBI reads with an \
-                 error or with a message other than a replaced character",
+            "a member read into a delay buffer of another format whose read LOSAT does not report \
+                 as NCBI's or that posts a message other than a replaced character",
         ));
+    }
+
+    /// NCBI's exception leaves the stream at the member (`encoder::Traced`).
+    fn delayed_read_failed(&mut self, _error: &crate::report::serial::encoder::DelayedReadError) {
+        self.fail(SerialError::DelayedRead);
     }
 
     fn delayed_posts(&mut self, posts: &[ReplacedChar]) {

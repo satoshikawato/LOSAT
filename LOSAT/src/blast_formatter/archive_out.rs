@@ -609,6 +609,10 @@ fn unwritable_archive(error: SerialError) -> anyhow::Error {
         SerialError::NullElement => {
             Refusal::Undecided("an element stated as NULL in a list").into()
         }
+        SerialError::DelayedRead => Refusal::Undecided(
+            "a member read into a delay buffer of another format whose read fails",
+        )
+        .into(),
         other => other.into(),
     }
 }

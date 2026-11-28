@@ -772,6 +772,10 @@ impl crate::report::serial::encoder::Encoder for StringsAsIs {
     }
     fn delayed(&mut self, _: &[u8]) {}
     fn unread_delayed(&mut self) {}
+    /// Written through `Traced`, which throws where NCBI's stream does.
+    fn delayed_read_failed(&mut self, _: &crate::report::serial::encoder::DelayedReadError) {
+        self.as_is = false;
+    }
     /// A delayed member whose read posts replaced bytes: written through `Traced`, which posts
     /// them.
     fn delayed_posts(&mut self, _: &[crate::report::serial::encoder::ReplacedChar]) {
@@ -808,9 +812,13 @@ pub(crate) fn seq_id_written_as_is(
 /// in `encoding` does not write as NCBI's does yet: a member that the reader kept in a delay
 /// buffer of another format (`Auth-list.names` of a binary or XML file in ASN.1 text, of a text
 /// or XML file in ASN.1 binary, of a text or binary file in XML), which NCBI's
-/// `CDelayBuffer::Update` reads again before it writes it, when that read fails
-/// (`Encoder::unread_delayed`: NCBI ends the run with its exception after the part of the archive
-/// that its buffer had written). A read that posts a replaced byte is written: through `Traced`
+/// `CDelayBuffer::Update` reads again before it writes it, when LOSAT's reader does not report
+/// that read as NCBI's or it posts another message than a replaced byte
+/// (`Encoder::unread_delayed`), or when it fails in the XML stream with an exception other than a
+/// `CSerialException` (`Encoder::delayed_read_failed`; none of LOSAT's inputs reaches these). A
+/// read that fails is written through `Traced`, which ends with NCBI's exception after the part
+/// of the archive that NCBI's buffer had written (`encoder::Thrown::DelayedRead`, line RG-F3 item
+/// O-2). A read that posts a replaced byte is written: through `Traced`
 /// (`pssm_written_as_is`), which posts it where NCBI does, while it writes the archive, so the
 /// archive's messages do not hold it (line RG-F3, PR 2: probe AR dlpost). A buffer of the
 /// stream's own format is copied (`Encoder::delayed`); the other values are written as NCBI
@@ -830,7 +838,7 @@ struct PssmGaps {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PssmGap {
     /// A member read into a delay buffer of another format that NCBI's `CDelayBuffer::Update`
-    /// reads again with an error (`Encoder::unread_delayed`), which no writer of LOSAT writes.
+    /// reads again in a way that no writer of LOSAT writes (`PssmGaps`).
     ReadAgain,
 }
 
@@ -839,7 +847,7 @@ impl PssmGap {
     pub(crate) fn what(self) -> &'static str {
         match self {
             PssmGap::ReadAgain => {
-                "a member read into a delay buffer of another format that NCBI reads again with an error"
+                "a member read into a delay buffer of another format whose read by NCBI LOSAT does not report as NCBI does"
             }
         }
     }
@@ -879,6 +887,19 @@ impl crate::report::serial::encoder::Encoder for PssmGaps {
     fn unread_delayed(&mut self) {
         if self.gap.is_none() && self.encoding != ArchiveEncoding::Nothing {
             self.gap = Some(PssmGap::ReadAgain);
+        }
+    }
+    /// Written through `Traced`, which throws where NCBI's stream does
+    /// (`Traced::delayed_read_failed`), but in the XML stream an exception other than a
+    /// `CSerialException`, whose frames LOSAT does not place there.
+    fn delayed_read_failed(&mut self, error: &crate::report::serial::encoder::DelayedReadError) {
+        if self.encoding == ArchiveEncoding::Xml
+            && matches!(
+                error,
+                crate::report::serial::encoder::DelayedReadError::Other(_)
+            )
+        {
+            self.unread_delayed();
         }
     }
     /// Written through `Traced` (`pssm_written_as_is`).
@@ -1001,7 +1022,7 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // several lines (an exception's chain), and the macro of an invalid input posts the user
     // manual footer (`USER_MANUAL_FOOTER`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12) as a
     // second one.
-    // The post of a stream's failure that `cli::NativeError::null_element` writes before
+    // The post of a stream's failure that `cli::NativeError::thrown` writes before
     // `CATCH_ALL`'s report (`encoder::NullElement::post`) is a post of its own too.
     let refer_line = crate::wording::USER_MANUAL_FOOTER.as_bytes();
     let (stream_post, report) =

@@ -1,0 +1,174 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "Error: NCBI C++ Exception: T0 ""/home/coremake/release_build/bu
+ild/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRele
+ase_Linux64-Alma_1751374548/c++/compilers/unix/../../src/util/strbuffer.cpp"",
+ line 583: Error: (CUtilException::eWrongData)
+ ncbi::CIStreamBuffer::NumberOverflow() - number overflow in line 6 T0 ""/home
+/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.1
+4.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..
+/src/serial/objistr.cpp"", line 1498: Error: (CUtilException::eWrongData)
+ ncbi::CObjectIStream::ReadChoiceSimple() - Frame type= eFrameChoiceVariant,
+ Member name= id T0 ""/home/coremake/release_build/build/PrepareRelease_Linux6
+4-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_17513745
+48/c++/compilers/unix/../../src/serial/objistr.cpp"", line 1500: Error:
+ (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() - Frame
+ type= eFrameChoice, Object type= Object-id T0 ""/home/coremake/release_build/
+build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRe
+lease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp
+"", line 1424: Error: (CUtilException::eWrongData)
+ ncbi::CObjectIStream::ReadClassSequential() - Frame type= eFrameClassMember,
+ Member name= tag T0 ""/home/coremake/release_build/build/PrepareRelease_Linux
+64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374
+548/c++/compilers/unix/../../src/serial/objistr.cpp"", line 1427: Error:
+ (CUtilException::eWrongData) ncbi::CObjectIStream::ReadClassSequential() -
+ Frame type= eFrameClass, Object type= Dbtag T0 ""/home/coremake/release_build
+/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareR
+elease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp
+"", line 1498: Error: (CUtilException::eWrongData)
+ ncbi::CObjectIStream::ReadChoiceSimple() - Frame type= eFrameChoiceVariant,
+ Member name= dbtag T0 ""/home/coremake/release_build/build/PrepareRelease_Lin
+ux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_17513
+74548/c++/compilers/unix/../../src/serial/objistr.cpp"", line 1500: Error:
+ (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() - Frame
+ type= eFrameChoice, Object type= Person-id T0 ""/home/coremake/release_build/
+build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRe
+lease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp
+"", line 1424: Error: (CUtilException::eWrongData)
+ ncbi::CObjectIStream::ReadClassSequential() - Frame type= eFrameClassMember,
+ Member name= name T0 ""/home/coremake/release_build/build/PrepareRelease_Linu
+x64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_175137
+4548/c++/compilers/unix/../../src/serial/objistr.cpp"", line 1427: Error:
+ (CUtilException::eWrongData) ncbi::CObjectIStream::ReadClassSequential() -
+ Frame type= eFrameClass, Object type= Author T0 ""/home/coremake/release_buil
+d/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__Prepare
+Release_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cp
+p"", line 1498: Error: (CUtilException::eWrongData)
+ ncbi::CObjectIStream::ReadChoiceSimple() - Frame type= eFrameChoiceVariant,
+ Member name= std T0 ""/home/coremake/release_build/build/PrepareRelease_Linux
+64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374
+548/c++/compilers/unix/../../src/serial/objistr.cpp"", line 1500: Error:
+ (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() - Frame
+ type= eFrameChoice, Object type= T0 ""/home/coremake/release_build/build/Prep
+areRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linu
+x64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp"", line
+ 499: Error: (CUtilException::eWrongData) Frame type= eFrameClassMember,
+ Member name= names T0 ""/home/coremake/release_build/build/PrepareRelease_Lin
+ux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_17513
+74548/c++/compilers/unix/../../src/serial/member.cpp"", line 500: Error:
+ (CUtilException::eWrongData) Frame type= eFrameClass, Object type= Auth-list
+ T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_1
+70042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers
+/unix/../../src/serial/objostrasn.cpp"", line 698: Error:
+ (CUtilException::eWrongData) ncbi::CObjectOStreamAsn::WriteClass() - Frame
+ type= eFrameClass, Object type= Auth-list T0 ""/home/coremake/release_build/b
+uild/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRel
+ease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrasn.cp
+p"", line 713: Error: (CUtilException::eWrongData)
+ ncbi::CObjectOStreamAsn::WriteClassMember() - Frame type= eFrameClassMember,
+ Member name= authors T0 ""/home/coremake/release_build/build/PrepareRelease_L
+inux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_175
+1374548/c++/compilers/unix/../../src/serial/objostrasn.cpp"", line 698: Error:
+ (CUtilException::eWrongData) ncbi::CObjectOStreamAsn::WriteClass() - Frame
+ type= eFrameClass, Object type= Cit-gen T0 ""/home/coremake/release_build/bui
+ld/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelea
+se_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/choice.cpp"",
+ line 459: Error: (CUtilException::eWrongData)
+ ncbi::CChoiceTypeInfoFunctions::WriteChoiceDefault() - Frame type=
+ eFrameChoiceVariant, Member name= gen T0 ""/home/coremake/release_build/build
+/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease
+_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/choice.cpp"",
+ line 463: Error: (CUtilException::eWrongData)
+ ncbi::CChoiceTypeInfoFunctions::WriteChoiceDefault() - Frame type=
+ eFrameChoice, Object type= Pub T0 ""/home/coremake/release_build/build/Prepar
+eRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux6
+4-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrasn.cpp"", line
+ 610: Error: (CUtilException::eWrongData)
+ ncbi::CObjectOStreamAsn::WriteContainer() - Frame type= eFrameArrayElement,
+ Object type= T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64-A
+lma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/
+c++/compilers/unix/../../src/serial/objostrasn.cpp"", line 614: Error:
+ (CUtilException::eWrongData) ncbi::CObjectOStreamAsn::WriteContainer() -
+ Frame type= eFrameArray, Object type= T0 ""/home/coremake/release_build/build
+/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease
+_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrasn.cpp"",
+ line 713: Error: (CUtilException::eWrongData)
+ ncbi::CObjectOStreamAsn::WriteClassMember() - Frame type= eFrameClassMember,
+ Member name= pub T0 ""/home/coremake/release_build/build/PrepareRelease_Linux
+64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374
+548/c++/compilers/unix/../../src/serial/objostrasn.cpp"", line 698: Error:
+ (CUtilException::eWrongData) ncbi::CObjectOStreamAsn::WriteClass() - Frame
+ type= eFrameClass, Object type= Pubdesc T0 ""/home/coremake/release_build/bui
+ld/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelea
+se_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/choice.cpp"",
+ line 459: Error: (CUtilException::eWrongData)
+ ncbi::CChoiceTypeInfoFunctions::WriteChoiceDefault() - Frame type=
+ eFrameChoiceVariant, Member name= pub T0 ""/home/coremake/release_build/build
+/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease
+_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/choice.cpp"",
+ line 463: Error: (CUtilException::eWrongData)
+ ncbi::CChoiceTypeInfoFunctions::WriteChoiceDefault() - Frame type=
+ eFrameChoice, Object type= Seqdesc T0 ""/home/coremake/release_build/build/Pr
+epareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Li
+nux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrasn.cpp"",
+ line 610: Error: (CUtilException::eWrongData)
+ ncbi::CObjectOStreamAsn::WriteContainer() - Frame type= eFrameArrayElement,
+ Object type= T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64-A
+lma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/
+c++/compilers/unix/../../src/serial/objostrasn.cpp"", line 614: Error:
+ (CUtilException::eWrongData) ncbi::CObjectOStreamAsn::WriteContainer() -
+ Frame type= eFrameArray, Object type= T0 ""/home/coremake/release_build/build
+/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease
+_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrasn.cpp"",
+ line 713: Error: (CUtilException::eWrongData)
+ ncbi::CObjectOStreamAsn::WriteClassMember() - Frame type= eFrameClassMember,
+ Member name= descr T0 ""/home/coremake/release_build/build/PrepareRelease_Lin
+ux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_17513
+74548/c++/compilers/unix/../../src/serial/objostrasn.cpp"", line 698: Error:
+ (CUtilException::eWrongData) ncbi::CObjectOStreamAsn::WriteClass() - Frame
+ type= eFrameClass, Object type= Bioseq T0 ""/home/coremake/release_build/buil
+d/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareReleas
+e_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/choice.cpp"",
+ line 459: Error: (CUtilException::eWrongData)
+ ncbi::CChoiceTypeInfoFunctions::WriteChoiceDefault() - Frame type=
+ eFrameChoiceVariant, Member name= seq T0 ""/home/coremake/release_build/build
+/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease
+_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/choice.cpp"",
+ line 463: Error: (CUtilException::eWrongData)
+ ncbi::CChoiceTypeInfoFunctions::WriteChoiceDefault() - Frame type=
+ eFrameChoice, Object type= Seq-entry T0 ""/home/coremake/release_build/build/
+PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_
+Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrasn.cpp"",
+ line 713: Error: (CUtilException::eWrongData)
+ ncbi::CObjectOStreamAsn::WriteClassMember() - Frame type= eFrameClassMember,
+ Member name= query T0 ""/home/coremake/release_build/build/PrepareRelease_Lin
+ux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_17513
+74548/c++/compilers/unix/../../src/serial/objostrasn.cpp"", line 698: Error:
+ (CUtilException::eWrongData) ncbi::CObjectOStreamAsn::WriteClass() - Frame
+ type= eFrameClass, Object type= Pssm T0 ""/home/coremake/release_build/build/
+PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_
+Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrasn.cpp"",
+ line 713: Error: (CUtilException::eWrongData)
+ ncbi::CObjectOStreamAsn::WriteClassMember() - Frame type= eFrameClassMember,
+ Member name= pssm T0 ""/home/coremake/release_build/build/PrepareRelease_Linu
+x64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_175137
+4548/c++/compilers/unix/../../src/serial/objostrasn.cpp"", line 698: Error:
+ (CUtilException::eWrongData) ncbi::CObjectOStreamAsn::WriteClass() - Frame
+ type= eFrameClass, Object type= PssmWithParameters T0 ""/home/coremake/releas
+e_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__P
+repareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objo
+str.cpp"", line 621: Error: (CUtilException::eWrongData)
+ ncbi::CObjectOStream::Write() - Frame type= eFrameNamed, Object type=
+ PssmWithParameters"
+    }
+  }
+}

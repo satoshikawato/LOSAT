@@ -817,16 +817,22 @@ pub fn asn_text_posting(
 }
 
 /// `asn_text_posting` of `value` with `karlin`, when given, in place of the six values of its
-/// `finalData` (`asn_text_with_karlin`), for a PSSM that LOSAT made (an element stated as `NULL`,
-/// which only an `-in_pssm` file holds, is the error `SerialError::NullElement` here:
+/// `finalData` (`asn_text_with_karlin`), for a PSSM that LOSAT made (where NCBI's stream throws,
+/// at an element stated as `NULL` or a delay buffer whose read fails, which only an `-in_pssm`
+/// file holds, is the error `SerialError::NullElement` or `SerialError::DelayedRead` here:
 /// `asn_text_written`).
 pub fn asn_text_posting_with_karlin(
     value: &PssmWithParameters,
     karlin: Option<FinalKarlin>,
 ) -> Result<(Vec<u8>, Vec<super::encoder::ReplacedChar>), super::encoder::SerialError> {
     let written = asn_text_written(value, karlin)?;
-    match written.thrown {
-        Some(_) => Err(super::encoder::SerialError::NullElement),
+    match written.thrown.as_deref() {
+        Some(super::encoder::Thrown::NullElement(_)) => {
+            Err(super::encoder::SerialError::NullElement)
+        }
+        Some(super::encoder::Thrown::DelayedRead(_)) => {
+            Err(super::encoder::SerialError::DelayedRead)
+        }
         None => Ok((written.bytes, written.replaced)),
     }
 }
@@ -838,16 +844,16 @@ pub struct WrittenPssm {
     pub bytes: Vec<u8>,
     /// NCBI's post of each byte that its stream replaced (`encoder::ReplacedChar`).
     pub replaced: Vec<super::encoder::ReplacedChar>,
-    /// NCBI's throw at an element stated as `NULL` (an empty descriptor, `Seqdesc::Empty`, or the
-    /// reader's `Value::Null` in another list: `encoder::NullElement`), after the bytes and the
-    /// posts.
-    pub thrown: Option<Box<super::encoder::NullElement>>,
+    /// NCBI's throw (`encoder::Thrown`) at an element stated as `NULL` (an empty descriptor,
+    /// `Seqdesc::Empty`, or the reader's `Value::Null` in another list: `encoder::NullElement`) or
+    /// at a delay buffer of another format whose read fails, after the bytes and the posts.
+    pub thrown: Option<Box<super::encoder::Thrown>>,
 }
 
 /// `asn_text_posting_with_karlin` of a PSSM that may hold an element stated as `NULL`, as psiblast
 /// writes the PSSM of `-in_pssm` (`SavePssmToFile`): a document that `asn_text_with_karlin` does
-/// not write as it is (a byte that the stream replaces, an element stated as `NULL`) is written
-/// again through
+/// not write as it is (a byte that the stream replaces, an element stated as `NULL`, a delay
+/// buffer of another format whose read fails) is written again through
 /// `Traced`, which gives NCBI's posts and NCBI's throw.
 pub fn asn_text_written(
     value: &PssmWithParameters,
@@ -856,7 +862,8 @@ pub fn asn_text_written(
     match asn_text_with_karlin(value, karlin) {
         Err(
             super::encoder::SerialError::NonVisibleChar(_)
-            | super::encoder::SerialError::NullElement,
+            | super::encoder::SerialError::NullElement
+            | super::encoder::SerialError::DelayedRead,
         ) => asn_text_traced(value, karlin),
         written => written.map(|bytes| WrittenPssm {
             bytes,
@@ -878,7 +885,9 @@ fn asn_text_traced(
     write_document(&mut enc, value, karlin);
     let thrown = enc.take_thrown();
     match enc.error() {
-        Some(super::encoder::SerialError::NullElement) if thrown.is_some() => {}
+        Some(
+            super::encoder::SerialError::NullElement | super::encoder::SerialError::DelayedRead,
+        ) if thrown.is_some() => {}
         Some(error) => return Err(error),
         None => {}
     }

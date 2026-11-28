@@ -59,7 +59,7 @@ fn null_element(stream: Stream, position: StreamPosition, extra: &[&str]) -> Nul
     }
 }
 
-/// NCBI's text of what `cli::NativeError::null_element` reports (`post`, then `CATCH_ALL`'s
+/// NCBI's text of what `cli::NativeError::thrown` reports (`post`, then `CATCH_ALL`'s
 /// `Error: ` and `what()` and an end of line): the frozen bytes of NCBI, before LOSAT's words.
 fn ncbi_report(thrown: &NullElement) -> Vec<u8> {
     let mut report = thrown.post(Some("psiblast"));
@@ -128,7 +128,10 @@ fn thrown<E: Encoder>(
     }
     enc.begin_list(false);
     enc.null_element(element_type);
-    *enc.take_thrown().expect("the stream throws at the element")
+    match *enc.take_thrown().expect("the stream throws at the element") {
+        super::Thrown::NullElement(null) => null,
+        thrown => panic!("not a NULL element: {thrown:?}"),
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1186-1209

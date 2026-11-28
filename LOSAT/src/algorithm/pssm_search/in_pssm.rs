@@ -1101,12 +1101,12 @@ pub(crate) fn psi_search_and_object_of(
     // NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
     // That ASN.1 text write reads each delay buffer of another format (`CDelayBuffer::Update`):
     // one whose read fails stops NCBI with its exception after part of the strategy file (rc
-    // 255; line RG-F3, PR 2: probe AR5 SO). NCBI starts that write after the outfmt 0 prolog
-    // (NCBI BLAST+ 2.17.0: psiblast's 1,021 bytes and tblastn's 379 of rows
-    // `db.xml.ps.dl_ovf.strat` and `db.xml.tbn.dl_ovf.strat`), where LOSAT refuses the request
-    // (`PssmQueryStop::RequestRefused`) and writes none. (A list element stated as NULL is
-    // written: the strategy's writer throws where NCBI's stream does,
-    // `report::serial::encoder::NullElement`.)
+    // 255; line RG-F3 PR 2: probe AR5 SO), as the strategy's writer does through `Traced`
+    // (`report::serial::encoder::Thrown::DelayedRead`, line RG-F3 item O-2), after the outfmt 0
+    // prolog, as it does at a list element stated as NULL (`encoder::NullElement`). A read that
+    // LOSAT's reader does not report as NCBI's, or that posts another message than a replaced
+    // byte (`report::archive::pssm_unwritten`; none of LOSAT's inputs reaches these), is refused
+    // where NCBI starts that write (`PssmQueryStop::RequestRefused`).
     let request_refusal = request
         .take_if(|request| {
             crate::report::archive::pssm_unwritten(
@@ -1116,7 +1116,7 @@ pub(crate) fn psi_search_and_object_of(
         })
         .map(|_| {
             reader.refuse(
-                "-export_search_strategy with a PSSM whose author names (a member read into a delay buffer of another format) NCBI reads again with an error (NCBI BLAST+ writes part of the file and stops with a C++ exception)",
+                "-export_search_strategy with a PSSM whose author names (a member read into a delay buffer of another format) LOSAT's reader does not read again as NCBI BLAST+ does",
             )
             .to_string()
         });

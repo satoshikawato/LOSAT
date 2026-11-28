@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+use super::formatter_options::FormatterOptions;
 use super::refusals::Refusal;
 use super::PROGRAM;
 use crate::algorithm::common::database::{
@@ -32,7 +33,7 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::config::ScoringMatrix;
 use crate::record::FastaRecord;
 use crate::report::archive::bioseq::SeqLocStrand;
-use crate::report::archive::read::options::{BuiltOptions, EProgram, Setter};
+use crate::report::archive::read::options::{BuiltOptions, EProgram};
 use crate::report::archive::read::queries::seq_vector::{RowVector, SeqMap};
 use crate::report::archive::read::queries::RenderError;
 use crate::report::archive::read::request::{Bioseq, Queries, Request};
@@ -82,8 +83,11 @@ pub(super) struct ObjectInputs<'a> {
     /// blast_formatter's `-parse_deflines` (`m_BelieveQuery`).
     pub(super) believe: bool,
     pub(super) choice: &'a FormatChoice,
-    /// The options' matrix name when the object's formatter is made (`opts.GetMatrixName()`),
-    /// `None` for NULL.
+    /// The values of the options that the reports print (`FormatterOptions`, the run's: an
+    /// `rpsblast` object's `GetResultSet` has set its matrix name).
+    pub(super) formatter: &'a FormatterOptions,
+    /// The options' matrix name when the object's formatter is made (`opts.GetMatrixName()`,
+    /// before `GetResultSet`), `None` for NULL.
     pub(super) matrix_name: Option<&'a [u8]>,
     /// The hit list size (`m_HitlistSize`) as `PruneSeqalign` takes it.
     pub(super) hitlist: u32,
@@ -152,38 +156,6 @@ pub(super) fn formatter_matrix(name: Option<&[u8]>) -> Option<ScoringMatrix> {
             .then_some(ScoringMatrix::Identity),
         _ => None,
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:121
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:200
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.cpp:58
-/// `GetMatrixName()` of the options of the first search object: the last `MatrixName` setter,
-/// else the factory's: BLOSUM62 for the protein handles; none for the nucleotide handles
-/// (`SetMatrixName` with a null name leaves the scoring options' NULL) and for RPS-BLAST's (whose
-/// defaults set no matrix).
-pub(super) fn options_matrix_name(options: &BuiltOptions) -> Option<Vec<u8>> {
-    let set = options
-        .setters
-        .iter()
-        .rev()
-        .find_map(|setter| match setter {
-            Setter::MatrixName(name) => Some(name.as_bytes().to_vec()),
-            _ => None,
-        });
-    set.or_else(|| {
-        matches!(
-            options.program,
-            EProgram::Blastp
-                | EProgram::Blastx
-                | EProgram::Tblastn
-                | EProgram::Tblastx
-                | EProgram::PsiBlast
-                | EProgram::PsiTblastn
-                | EProgram::PhiBlastp
-                | EProgram::DeltaBlast
-        )
-        .then(|| b"BLOSUM62".to_vec())
-    })
 }
 
 /// The programs whose Seq-aligns the tabular formats write: those of one Dense-seg or Dense-diag
@@ -839,15 +811,7 @@ pub(super) fn print_object(
     let program = super::search_program::program_type(options.program);
     let blastn = program.blastn;
     // `m_IsUngappedSearch`: the last `GappedMode` call of the options (gapped by default).
-    let ungapped = options
-        .setters
-        .iter()
-        .rev()
-        .find_map(|setter| match setter {
-            Setter::GappedMode(gapped) => Some(!gapped),
-            _ => None,
-        })
-        .unwrap_or(false);
+    let ungapped = !inputs.formatter.gapped;
     let matrix = formatter_matrix(inputs.matrix_name);
     let version = format!(
         "{} {}",

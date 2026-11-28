@@ -23,6 +23,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use super::archive_out;
+use super::formatter_options::FormatterOptions;
 use super::formatting::{extract_formatting, sam_check};
 use super::refusals::{self, Refusal};
 use super::search_program::{blast_type, program_type};
@@ -100,7 +101,7 @@ pub(crate) fn format_archive(
         hitlist: 0,
         database: None,
         opened: None,
-        matrix_name: None,
+        formatter_options: None,
         psi_step: Ok(0),
         taxdb: TaxdbRun::default(),
         buf: Vec::new(),
@@ -131,12 +132,13 @@ struct Run<'r, 'o> {
     database: Option<(Vec<u8>, bool)>,
     /// The database opened for an earlier object (`opened_database`).
     opened: Option<OpenedDatabase>,
-    /// The matrix name of the first object's options as the next object's formatter takes it
-    /// (`opts.GetMatrixName()`, `tabular::options_matrix_name`; `None` before the first search
-    /// object): an `rpsblast` or `rpstblastn` object's `GetResultSet` sets the matrix of its
-    /// search statistics on those options after its formatter is made, for the objects after
-    /// it (`Run::print`, with the remote options' `MatrixName`).
-    matrix_name: Option<Option<Vec<u8>>>,
+    /// The values of the first object's options that the reports print (`FormatterOptions`,
+    /// built once with `search_options`; `None` before the first search object), with the
+    /// matrix name as the next object's formatter takes it (`opts.GetMatrixName()`): an
+    /// `rpsblast` or `rpstblastn` object's `GetResultSet` sets the matrix of its search
+    /// statistics on those options after its formatter is made, for the objects after it
+    /// (`Run::print`, with the remote options' `MatrixName`).
+    formatter_options: Option<FormatterOptions>,
     /// `GetPsiNumberOfIterations`: the `Web_StepNumber` of the format options that the last
     /// object of the `psi` service read (`m_FormatOpts`; 0 without one), `Err` for a value that
     /// is no integer.
@@ -494,7 +496,7 @@ impl<'r, 'o> Run<'r, 'o> {
         if self.search_options.is_none() {
             let options = archive_request(&search.request).map_err(|e| exception_error(&e))?;
             self.hitlist = options.hitlist_size();
-            self.matrix_name = Some(super::tabular::options_matrix_name(&options));
+            self.formatter_options = Some(FormatterOptions::of(&options));
             self.algorithm_options = Some(RemoteOptions::built(&options));
             self.search_options = Some(options);
         }
@@ -608,7 +610,10 @@ impl<'r, 'o> Run<'r, 'o> {
             return Err(refusal.into());
         }
         // The options' matrix name when this object's formatter was made, before `GetResultSet`.
-        let matrix_name = self.matrix_name.clone().flatten();
+        let matrix_name = self
+            .formatter_options
+            .as_ref()
+            .and_then(|options| options.matrix_name.clone());
         let algo = self
             .algorithm_options
             .as_mut()
@@ -623,7 +628,10 @@ impl<'r, 'o> Run<'r, 'o> {
         // 11 writes of this object, and the name that the formatters of the objects after it take.
         if let Some(matrix) = search.results.search_stats(&request.service).matrix {
             algo.set(fields::MATRIX_NAME, ParamValue::Str(matrix.clone()));
-            self.matrix_name = Some(Some(matrix));
+            self.formatter_options
+                .as_mut()
+                .expect("the options of the first search object")
+                .matrix_name = Some(matrix);
         }
         if formatting.choice.number == output_format::ARCHIVE_FORMAT {
             let database = self.database.as_ref().map(|(name, _)| name.as_slice());
@@ -677,6 +685,10 @@ impl<'r, 'o> Run<'r, 'o> {
                 options: search_options,
                 believe: self.options.parse_deflines,
                 choice: &formatting.choice,
+                formatter: self
+                    .formatter_options
+                    .as_ref()
+                    .expect("the options of the first search object"),
                 matrix_name: matrix_name.as_deref(),
                 hitlist: self.hitlist as u32,
                 database: database.map(|database| (database.name.as_slice(), &database.db)),
@@ -688,10 +700,8 @@ impl<'r, 'o> Run<'r, 'o> {
                 diag,
             };
             if pairwise {
-                let epilog_matrix = self.matrix_name.clone().flatten();
                 let pairwise_inputs = super::pairwise::PairwiseInputs {
                     formatting: &formatting,
-                    epilog_matrix: epilog_matrix.as_deref(),
                     masks: &masks,
                 };
                 return super::pairwise::print_object(

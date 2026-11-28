@@ -10,8 +10,8 @@
 //! The object's scope is the tabular driver's (`tabular`: the request's queries, the database that
 //! the archive names or its `-subject` Bioseqs, a query Bioseq found first as NCBI's scope finds
 //! it). The report's statistics are the archive's: the options of the first search object
-//! (`BuiltOptions`: the factory defaults of its program with the archive's calls, which the
-//! epilog prints), the results' first Karlin-Altschul blocks and search space for
+//! (`formatter_options::FormatterOptions`: the factory defaults of its program with the archive's
+//! calls, which the epilog prints), the results' first Karlin-Altschul blocks and search space for
 //! every query (`report::pairwise::Ancillary::of_archive`), the subjects as the database holds them
 //! now or as the request's Bioseqs. What LOSAT does not show as NCBI does is refused by name before
 //! the object's first byte (`Refusal::NotCovered`).
@@ -39,7 +39,7 @@ use crate::algorithm::common::database::{
 use crate::blastinput::app::ReportFormat;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
-use crate::report::archive::read::options::{BuiltOptions, EProgram, Setter};
+use crate::report::archive::read::options::EProgram;
 use crate::report::archive::read::request::{Queries, Request};
 use crate::report::archive::read::results::{MaskRange, Results};
 use crate::report::archive::read::{seq_align_id, Stop};
@@ -99,73 +99,8 @@ pub(super) struct PairwiseInputs<'a> {
     /// The formatting options of the object (`-num_descriptions`, `-num_alignments`,
     /// `-line_length`, `-sorthits`, `-sorthsps`, `-show_gis`, `-html`).
     pub(super) formatting: &'a super::formatting::Formatting,
-    /// The options' matrix name when the epilog is printed (`options.GetMatrixName()`: an
-    /// `rpsblast` object's `GetResultSet` sets its search statistics' matrix before it), `None`
-    /// for NULL.
-    pub(super) epilog_matrix: Option<&'a [u8]>,
     /// The masks of each query as `GetResultSet` assigns them (`Results::masks`).
     pub(super) masks: &'a [Vec<MaskRange<'a>>],
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:60-178
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:136-219
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/disc_nucl_options.cpp:59-89
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:61-99
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:788-813
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:58-157
-/// The values of the options that the epilog and the report's tables print
-/// (`CBlastFormat::PrintEpilog`, blast_format.cpp:2249-2292): those of the factory options of
-/// the program (`CBlastOptionsFactory::Create`: `SetTraditionalBlastnDefaults` for blastn,
-/// megablast's, dc-megablast's, rpsblast's handle, which sets no word threshold, and the protein
-/// handles of blastp, psiblast, deltablast and PHI-BLAST), then the archive's calls on them in
-/// order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct EpilogValues {
-    reward: i32,
-    penalty: i32,
-    gap_open: i32,
-    gap_extend: i32,
-    word_threshold: i32,
-    window_size: i32,
-    gapped: bool,
-    sum_statistics: bool,
-}
-
-impl EpilogValues {
-    fn of(options: &BuiltOptions) -> Self {
-        let (reward, penalty, gap_open, gap_extend, word_threshold, window_size) =
-            match options.program {
-                EProgram::Blastn => (2, -3, 5, 2, 0, 0),
-                EProgram::Megablast => (1, -2, 0, 0, 0, 0),
-                EProgram::DiscMegablast => (2, -3, 5, 2, 0, 40),
-                EProgram::RpsBlast => (1, -3, 11, 1, 0, 40),
-                _ => (1, -3, 11, 1, 11, 40),
-            };
-        let mut values = EpilogValues {
-            reward,
-            penalty,
-            gap_open,
-            gap_extend,
-            word_threshold,
-            window_size,
-            gapped: true,
-            sum_statistics: false,
-        };
-        for setter in &options.setters {
-            match *setter {
-                Setter::MatchReward(value) => values.reward = value,
-                Setter::MismatchPenalty(value) => values.penalty = value,
-                Setter::GapOpeningCost(value) => values.gap_open = value,
-                Setter::GapExtensionCost(value) => values.gap_extend = value,
-                Setter::WordThreshold(value) => values.word_threshold = value,
-                Setter::WindowSize(value) => values.window_size = value,
-                Setter::GappedMode(gapped) => values.gapped = gapped,
-                Setter::SumStatisticsMode(on) => values.sum_statistics = on,
-                _ => {}
-            }
-        }
-        values
-    }
 }
 
 /// The subject of each run of a query's Seq-aligns whose subject ids match
@@ -226,7 +161,8 @@ pub(super) fn print_object(
     let program = super::search_program::formatter_program(options.program);
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:452-460
     let psi_task = options.program == EProgram::PsiBlast;
-    let values = EpilogValues::of(options);
+    // The epilog's matrix name is the options' when it is printed (`ObjectInputs::formatter`).
+    let values = inputs.formatter;
     if nucleotide && values.word_threshold != 0 {
         return Err(refused(
             "a blastn search with a word threshold, whose epilog line LOSAT's blastn report \
@@ -722,8 +658,9 @@ pub(super) fn print_object(
         database_name: scan_mode_definition_bytes(b""),
         database_num_sequences: num_sequences,
         database_total_letters: total_letters,
-        matrix_name: pairwise
-            .epilog_matrix
+        matrix_name: values
+            .matrix_name
+            .as_deref()
             .map(|name| String::from_utf8_lossy(name).into_owned()),
         gap_open: values.gap_open,
         gap_extend: values.gap_extend,

@@ -7,6 +7,7 @@
 
 mod archive;
 mod archive_out;
+mod formatter_options;
 mod formatting;
 mod pairwise;
 pub(crate) mod refusals;

@@ -1,7 +1,18 @@
 use super::*;
-use crate::blastinput::ncbi_environment::DiagTarget;
+use crate::blastinput::ncbi_environment::{diag_target, DiagTarget};
+use crate::report::run_files::OpenedFile;
 use crate::utils::test_dir::TempDir;
 use crate::writedb::tests::base_in;
+
+/// The log of `-logfile name` on the file system (`OpenFiles::log_output` on `Disk`): the file
+/// that the system opens under the name as written, appended to; `None` where it does not open.
+fn log_of(name: &std::ffi::OsStr) -> Option<OpenedFile> {
+    match OpenFiles::disk().log_output(name) {
+        Ok(LogOutput::File(file)) => Some(file),
+        Ok(_) => panic!("the file system has only files"),
+        Err(Unopened) => None,
+    }
+}
 
 /// The refusals of an index file that NCBI cannot read as a database are LOSAT's own, printed
 /// with makeblastdb's prefix and ended with exit status 1, and their text is the one of
@@ -223,7 +234,7 @@ fn the_variable_that_changes_stored_titles_is_refused() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201 (cited at
-// `log_of`): the log appends to the `-logfile` file, where the diagnostics append too.
+// `OpenFiles::log_output`): the log appends to the `-logfile` file, where the diagnostics append too.
 /// The log of `-logfile F` is F opened by the system, beside the diagnostics' file: where the
 /// two are one file, the two streams land in F in the order they are written, after what F
 /// held, and nothing goes to the standard error. The empty name and a file in a missing
@@ -237,16 +248,10 @@ fn the_log_and_the_diagnostics_append_to_one_file_in_order() {
     assert!(matches!(target, DiagTarget::File(_)));
     let mut log = log_of(std::ffi::OsStr::new(&name)).expect("the log of a file that opens");
     let mut stderr = Vec::new();
-    {
-        let mut diag = DiagStream {
-            target: &target,
-            stderr: &mut stderr,
-        };
-        log.write_all(b"log 1\n").unwrap();
-        diag.write_all(b"diagnostic\n").unwrap();
-        log.write_all(b"log 2\n").unwrap();
-        diag.write_all(b"diagnostic 2\n").unwrap();
-    }
+    log.write_all(b"log 1\n").unwrap();
+    target.write_text(b"diagnostic\n", &mut stderr);
+    log.write_all(b"log 2\n").unwrap();
+    target.write_text(b"diagnostic 2\n", &mut stderr);
     assert!(stderr.is_empty());
     assert_eq!(
         std::fs::read(&name).unwrap(),

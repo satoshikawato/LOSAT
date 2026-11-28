@@ -2629,6 +2629,15 @@ pre.range-text {
   color: var(--fg);
 }
 
+/* The Masking tab's tool tabs (WW4c) in one row: "convert2blastmask" is wider than a third of the
+   row at 390 px and passed its tab's border, so each tab starts from its name's width and the
+   tabs share the room left. */
+@media (max-width: 800px) {
+  .ms-panel .program-tab {
+    flex-basis: auto;
+  }
+}
+
 .wm-counts-pick .file-name {
   display: inline-flex;
   flex-wrap: wrap;
@@ -2690,6 +2699,20 @@ pre.range-text {
 
 .wm-file-item .link {
   margin-left: auto;
+}
+
+/* The files that a makeblastdb run made (line WW, WW4b2): a list above the run's report. A file's name is the user's
+   database name, as long as they made it. */
+.tool-made-files {
+  margin: 10px 0 16px;
+}
+
+.tool-made-files h3 {
+  margin: 0 0 6px;
+}
+
+.tool-made-files .source-name {
+  overflow-wrap: anywhere;
 }
 
 .tool-save-taxid {

@@ -19,6 +19,7 @@ use crate::core::psi::{
     self, KarlinBlk, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiMsaCell, PsiPssm,
 };
 use crate::report::diag_log::Posts;
+use crate::report::run_files::RunFileOption;
 use crate::report::serial::encoder::ReplacedChar;
 use crate::report::serial::pssm::{
     FormatRpsDbParameters, ObjectId, Pssm, PssmFinalData, PssmIntermediateData, PssmParameters,
@@ -1438,7 +1439,10 @@ impl PssmFiles {
             crate::report::run_files::RunFiles::Receiver(_)
         ) {
             use crate::report::run_files::PssmTarget;
-            return match self.run_files.pssm_target("-out_pssm", path.as_os_str()) {
+            return match self
+                .run_files
+                .pssm_target(RunFileOption::OutPssm.flag(), path.as_os_str())
+            {
                 PssmTarget::File(host_name) => Ok(Staged::Receiver(host_name, asn.to_vec())),
                 PssmTarget::Discard => Ok(Staged::Null),
                 PssmTarget::Full => Err(cannot_write(crate::utils::os_error_text::oracle_error(
@@ -1548,7 +1552,9 @@ impl PssmFiles {
                         if let crate::report::run_files::RunFiles::Receiver(receiver) =
                             &self.run_files
                         {
-                            receiver.receive(&host_name, &bytes).map_err(commit_err)?;
+                            receiver
+                                .receive_run_file(RunFileOption::OutPssm, &host_name, &bytes)
+                                .map_err(commit_err)?;
                         }
                     }
                     other => {
@@ -1577,9 +1583,13 @@ impl PssmFiles {
                     crate::report::run_files::RunFiles::Receiver(receiver) => {
                         if let crate::report::run_files::PssmTarget::File(host_name) = self
                             .run_files
-                            .pssm_target("-out_ascii_pssm", file.path.as_os_str())
+                            .pssm_target(RunFileOption::OutAsciiPssm.flag(), file.path.as_os_str())
                         {
-                            let _ = receiver.receive(&host_name, &ascii);
+                            let _ = receiver.receive_run_file(
+                                RunFileOption::OutAsciiPssm,
+                                &host_name,
+                                &ascii,
+                            );
                         }
                     }
                     crate::report::run_files::RunFiles::Disk => {
@@ -1653,8 +1663,11 @@ pub(crate) fn check_pssm_files(
     );
     let check = (!is_receiver).then(|| PssmFileCheck::new(out));
     for ((option, path), first) in [
-        ("-out_pssm", request.asn_path.as_deref()),
-        ("-out_ascii_pssm", request.ascii_path.as_deref()),
+        (RunFileOption::OutPssm.flag(), request.asn_path.as_deref()),
+        (
+            RunFileOption::OutAsciiPssm.flag(),
+            request.ascii_path.as_deref(),
+        ),
     ]
     .into_iter()
     .zip(request.versions.next())
@@ -1705,7 +1718,7 @@ impl PssmFileCheck {
                 name.display()
             );
         }
-        if option == "-out_pssm" {
+        if option == RunFileOption::OutPssm.flag() {
             if let TargetKind::Unsupported(kind) = target_kind(name) {
                 return Err(unsupported_target(name, kind));
             }

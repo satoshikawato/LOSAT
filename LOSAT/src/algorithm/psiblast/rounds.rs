@@ -327,13 +327,14 @@ impl RoundFiles {
     /// before, or with `-in_pssm` before round 1, after the prolog; no partial file is left); an ASCII file that cannot be opened gets nothing, as
     /// NCBI's unchecked `ofstream`.
     pub(crate) fn write(&mut self, asn: Option<&[u8]>, ascii: Option<&[u8]>) -> Result<()> {
-        use crate::report::run_files::{PssmTarget, RunFiles};
+        use crate::report::run_files::{PssmTarget, RunFileOption, RunFiles};
         if let RunFiles::Receiver(receiver) = &self.run_files {
-            let deliver = |flag: &str,
+            let deliver = |option: RunFileOption,
                            path: &std::path::Path,
                            bytes: &[u8],
                            checked: bool|
              -> Result<()> {
+                let flag = option.flag();
                 let cannot_write = |error: std::io::Error| {
                     anyhow::anyhow!(
                             "a {flag} file that cannot be written ({}: {error}), where NCBI BLAST+'s psiblast stops with a serial-stream write error (after the report of the round before; with -in_pssm or -in_msa before round 1), is not supported by LOSAT's PSIBLAST",
@@ -343,9 +344,11 @@ impl RoundFiles {
                 match self.run_files.pssm_target(flag, path.as_os_str()) {
                     PssmTarget::File(host_name) => {
                         if checked {
-                            receiver.receive(&host_name, bytes).map_err(cannot_write)?;
+                            receiver
+                                .receive_run_file(option, &host_name, bytes)
+                                .map_err(cannot_write)?;
                         } else {
-                            let _ = receiver.receive(&host_name, bytes);
+                            let _ = receiver.receive_run_file(option, &host_name, bytes);
                         }
                     }
                     PssmTarget::Discard => {}
@@ -364,11 +367,11 @@ impl RoundFiles {
             };
             if let (Some(stream), Some(bytes)) = (self.asn.as_mut(), asn) {
                 let file = stream.next_file();
-                deliver("-out_pssm", &file.path, bytes, true)?;
+                deliver(RunFileOption::OutPssm, &file.path, bytes, true)?;
             }
             if let (Some(stream), Some(bytes)) = (self.ascii.as_mut(), ascii) {
                 let file = stream.next_file();
-                deliver("-out_ascii_pssm", &file.path, bytes, false)?;
+                deliver(RunFileOption::OutAsciiPssm, &file.path, bytes, false)?;
             }
             return Ok(());
         }

@@ -2,17 +2,21 @@
 // `EngineRuntime.tool` that the worker calls (the run's directory opened and let go, the retained input released, a second run
 // on the same instance), the worker's check of a tool's words with the run's directory (`EngineRuntime.validateTool`, which
 // reads `-conffile`), and the command line's answer for `-in <folder>` (the open of a folder succeeds, its read fails with
-// EISDIR). Runs with LOSAT_WEB_REACTORS (the folder of web/adapter/tools/build_reactors.py's output); these rows read no
-// frame of stream 12, so the reactors of an earlier frame layout serve as well. The directory reads a file's bytes through
+// EISDIR). Runs with LOSAT_WEB_REACTORS (the folder of web/adapter/tools/build_reactors.py's output); the windowmasker rows read
+// no frame of stream 12, so the reactors of an earlier frame layout serve as well. The makeblastdb rows (ABI version 17, line
+// NP WW4b1, 2026-11-27) need reactors of version 17: makeblastdb writes its database into the run's writable directory, and the
+// files that the run left there come after the run as frames, by name; a database given in the directory is replaced as the
+// command line replaces it, and the directory goes back to nothing after the run. The directory reads a file's bytes through
 // the `FileReaderSync` that a worker has, which Node lacks: the test gives it Blobs that carry their bytes.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { DirectoryFile } from '../src/domain/run-files.ts';
 import type { ToolFrame } from '../src/domain/tool-frames.ts';
 import { ROLE_SUBJECT, type ReactorAbi } from '../src/infra/reactor/abi.ts';
 import { compileReactor } from '../src/infra/reactor/instance.ts';
+import { RunDirectory } from '../src/infra/reactor/run-directory.ts';
 import type { MainLinks } from '../src/infra/engine-worker/link.ts';
 import type { WorkerTool, WorkerToolValidate } from '../src/infra/engine-worker/protocol.ts';
 import { InstanceUse } from '../src/infra/engine-worker/instance-use.ts';
@@ -38,6 +42,7 @@ const memoryFile = (name: string, contents: Uint8Array | string): DirectoryFile 
 });
 
 const fixture = (path: string) => new Uint8Array(readFileSync(join(LOSAT, 'tests/winmask', path)));
+const corpus = (path: string) => new Uint8Array(readFileSync(join(LOSAT, 'tests/dropin_corpus', path)));
 const NO_LINKS: MainLinks = {
   link: () => {
     throw new Error('unused');
@@ -45,12 +50,42 @@ const NO_LINKS: MainLinks = {
   fault: () => undefined,
 };
 
-/** What a run posted. */
+/**
+ * What a run posted. The bytes are taken as the Engine worker's posts take them (tool-posts.ts): their buffer is transferred
+ * (here to a copy that the test keeps), which leaves the runtime's array empty, as the main thread's receipt of a post does.
+ */
 function posts(): ToolPosts & { stdout: Uint8Array[]; stderr: Uint8Array[]; frames: ToolFrame[] } {
   const posted = { stdout: [] as Uint8Array[], stderr: [] as Uint8Array[], frames: [] as ToolFrame[] };
-  return { ...posted, chunk: (stream, bytes) => posted[stream].push(bytes), file: (frame) => posted.frames.push(frame) };
+  const taken = (bytes: Uint8Array) => structuredClone(bytes, { transfer: [bytes.buffer as ArrayBuffer] });
+  return {
+    ...posted,
+    chunk: (stream, bytes) => posted[stream].push(taken(bytes)),
+    file: (frame) => posted.frames.push(frame.kind === 'bytes' ? { ...frame, bytes: taken(frame.bytes) } : frame),
+  };
 }
 const joined = (chunks: Uint8Array[]) => Buffer.concat(chunks);
+
+/**
+ * The files of a run's frames, in the order of their begin frames: each file's bytes as its frames wrote them, and whether
+ * its frames came in the form that the overlay's files come in (begin, bytes from offset 0 one after another, end).
+ */
+function filesOf(frames: readonly ToolFrame[]): Array<{ name: string; bytes: Buffer; inOrder: boolean }> {
+  const files = new Map<number, { name: string; chunks: Uint8Array[]; length: number; inOrder: boolean; ended: boolean }>();
+  for (const frame of frames) {
+    if (frame.kind === 'begin') {
+      files.set(frame.number, { name: frame.name, chunks: [], length: 0, inOrder: true, ended: false });
+      continue;
+    }
+    const file = files.get(frame.number)!;
+    if (frame.kind === 'bytes') {
+      if (frame.offset !== file.length || file.ended) file.inOrder = false;
+      file.chunks.push(frame.bytes);
+      file.length += frame.bytes.length;
+    } else if (frame.kind === 'end') file.ended = true;
+    else file.inOrder = false;
+  }
+  return [...files.values()].map((file) => ({ name: file.name, bytes: joined(file.chunks), inOrder: file.inOrder && file.ended }));
+}
 
 describe.skipIf(REACTORS === undefined)('the Engine worker runtime and tools, on the built serial reactor', () => {
   let module: WebAssembly.Module;
@@ -143,6 +178,164 @@ describe.skipIf(REACTORS === undefined)('the Engine worker runtime and tools, on
     const done = await worker.tool(toolOf(['windowmasker', '-ustat', 'counts/dm_u2.obinary', '-in', 'fa'], files), run);
     expect(done.status).toBe(3);
     expect(joined(run.stderr).toString()).toContain("Application's execution failed: basic_filebuf::xsgetn error reading the file: Is a directory");
+  });
+
+  it('runs makeblastdb in the writable directory: its database comes after the run, by name, and the input does not', async () => {
+    const worker = runtime();
+    const run = posts();
+    const done = await worker.tool(toolOf(['makeblastdb', '-in', 'ns.fna', '-dbtype', 'nucl', '-parse_seqids', '-out', 'dbs/db'], [memoryFile('ns.fna', corpus('ns.fna'))]), run);
+    expect(done.status).toBe(0);
+    expect(joined(run.stdout).toString()).toMatch(/^\n\nBuilding a new DB, current time: \d\d\/\d\d\/\d{4} \d\d:\d\d:\d\d\n/);
+    expect(joined(run.stderr).length).toBe(0);
+    const files = filesOf(run.frames);
+    // `-parse_seqids` of version 5: the ten files of the command line, in the folder that the run made.
+    expect(files.map((file) => file.name)).toEqual(['ndb', 'nhr', 'nin', 'njs', 'nog', 'nos', 'not', 'nsq', 'ntf', 'nto'].map((extension) => `dbs/db.${extension}`));
+    expect(files.every((file) => file.inOrder && file.bytes.length > 0)).toBe(true);
+    expect(files.find((file) => file.name === 'dbs/db.nin')!.bytes.subarray(0, 4)).toEqual(Buffer.from([0, 0, 0, 5]));
+    // A second run without the files: the run's directory went back to nothing, so the database of the first one is not there.
+    const after = posts();
+    const again = await worker.tool(toolOf(['makeblastdb', '-in', 'dbs/db', '-input_type', 'blastdb', '-dbtype', 'nucl', '-out', 'copy']), after);
+    expect(again.status).not.toBe(0);
+    expect(after.frames).toEqual([]);
+  });
+
+  it('posts a database file larger than a chunk in frames one after another, each at its offset (their buffers transferred)', async () => {
+    const worker = runtime();
+    // 1,500 proteins of 1,000 residues: a .psq of about 1.5 MB, more than one chunk (CHUNK_BYTES, 1 MiB) of the directory.
+    const residues = 'ACDEFGHIKLMNPQRSTVWY';
+    let fasta = '';
+    for (let i = 0; i < 1500; i++) {
+      let sequence = '';
+      for (let j = 0; j < 1000; j++) sequence += residues[(i * 7 + j * 13 + ((i * j) % 17)) % residues.length];
+      fasta += `>p${i} protein ${i}\n${sequence.replace(/(.{60})/g, '$1\n')}\n`;
+    }
+    const run = posts();
+    const done = await worker.tool(toolOf(['makeblastdb', '-in', 'big.faa', '-dbtype', 'prot', '-out', 'big'], [memoryFile('big.faa', fasta)]), run);
+    expect(done.status).toBe(0);
+    const psq = filesOf(run.frames).find((file) => file.name === 'big.psq')!;
+    expect(psq.inOrder).toBe(true);
+    // One byte per residue, a 0 between the sequences and one at the start.
+    expect(psq.bytes.length).toBe(1500 * 1001 + 1);
+    const number = run.frames.find((frame) => frame.kind === 'begin' && frame.name === 'big.psq')!.number;
+    const offsets = run.frames.flatMap((frame) => (frame.kind === 'bytes' && frame.number === number ? [frame.offset] : []));
+    expect(offsets).toEqual([0, 1024 * 1024]);
+  });
+
+  it('replaces a database of the directory as the command line does: the old files it removed never come, and a log is appended to', async () => {
+    const worker = runtime();
+    // An older database of the same name made with `-parse_seqids` (its .nog and .nos), and a log of an earlier run.
+    const older = ['ndb', 'nhr', 'nin', 'njs', 'nog', 'nos', 'not', 'nsq', 'ntf', 'nto'].map((extension) => memoryFile(`db.${extension}`, corpus(`ndbp.${extension}`)));
+    const log = memoryFile('mk.log', 'an earlier run\n');
+    const run = posts();
+    const done = await worker.tool(toolOf(['makeblastdb', '-in', 'ns.fna', '-dbtype', 'nucl', '-out', 'db', '-logfile', 'mk.log'], [memoryFile('ns.fna', corpus('ns.fna')), ...older, log]), run);
+    expect(done.status).toBe(0);
+    const files = filesOf(run.frames);
+    // The new database has no .nog and .nos: the run removed the old ones, which do not come.
+    expect(files.map((file) => file.name)).toEqual(['db.ndb', 'db.nhr', 'db.nin', 'db.njs', 'db.not', 'db.nsq', 'db.ntf', 'db.nto', 'mk.log']);
+    const logged = files.find((file) => file.name === 'mk.log')!.bytes.toString();
+    expect(logged.startsWith('an earlier run\n\n\nBuilding a new DB, current time: ')).toBe(true);
+    // The given files are the user's: their Blobs are as they were.
+    expect(Buffer.from((log.file as MemoryBlob).data).toString()).toBe('an earlier run\n');
+    expect(Buffer.from((older[4]!.file as MemoryBlob).data).equals(Buffer.from(corpus('ndbp.nog')))).toBe(true);
+  });
+
+  it("writes makeblastdb's -logfile where the command line writes it: a file outside the directory comes first, by its path, and /dev/stdout is the standard output", async () => {
+    // Line NP WW4b1 R2, finding 1, 2026-11-28 (abi_v2.md §4): the file outside is a file of stream 12, numbered before
+    // the files that the run left in its directory.
+    const worker = runtime();
+    const outside = posts();
+    expect((await worker.tool(toolOf(['makeblastdb', '-in', 'ns.fna', '-dbtype', 'nucl', '-out', 'db', '-logfile', '/tmp/mk.log'], [memoryFile('ns.fna', corpus('ns.fna'))]), outside)).status).toBe(0);
+    const files = filesOf(outside.frames);
+    expect(files[0]!.name).toBe('/tmp/mk.log');
+    expect(files[0]!.inOrder).toBe(true);
+    expect(files[0]!.bytes.toString()).toContain('Adding sequences from FASTA; added 6 sequences');
+    expect(files.slice(1).map((file) => file.name)).toEqual(['db.ndb', 'db.nhr', 'db.nin', 'db.njs', 'db.not', 'db.nsq', 'db.ntf', 'db.nto']);
+    expect(joined(outside.stdout).length).toBe(0);
+    const stdout = posts();
+    expect((await worker.tool(toolOf(['makeblastdb', '-in', 'ns.fna', '-dbtype', 'nucl', '-out', 'db', '-logfile', '/dev/stdout'], [memoryFile('ns.fna', corpus('ns.fna'))]), stdout)).status).toBe(0);
+    expect(joined(stdout.stdout).toString()).toContain('Adding sequences from FASTA; added 6 sequences');
+    expect(filesOf(stdout.frames).map((file) => file.name)).toEqual(['db.ndb', 'db.nhr', 'db.nin', 'db.njs', 'db.not', 'db.nsq', 'db.ntf', 'db.nto']);
+  });
+
+  it("checks makeblastdb's words before its run without writing: the argument reader's errors, and a valid argv whose input is missing", async () => {
+    // Every call of the instance's directory that makes, changes or removes a name (line NP WW4b1 R2, finding 3,
+    // 2026-11-28): an open that makes, empties or writes a file, and the calls that make, rename or remove names.
+    const writes: string[] = [];
+    let watching = false;
+    const imports = RunDirectory.prototype.imports;
+    const spy = vi.spyOn(RunDirectory.prototype, 'imports').mockImplementation(function (this: RunDirectory, base, memory) {
+      const own = imports.call(this, base, memory) as Record<string, (...args: Array<number | bigint>) => unknown>;
+      const path = (pointer: number | bigint, length: number | bigint) =>
+        new TextDecoder().decode(new Uint8Array(memory().buffer, Number(pointer) >>> 0, Number(length) >>> 0).slice());
+      const open = own['path_open']!;
+      own['path_open'] = (...args) => {
+        const [, , pointer, length, oflags, rights, , fdflags] = args;
+        // O_CREAT (1), O_TRUNC (8); the right to write (fd_write, bit 6); O_APPEND (1).
+        const writing = (Number(oflags) & 9) !== 0 || (BigInt(rights!) & (1n << 6n)) !== 0n || (Number(fdflags) & 1) !== 0;
+        if (watching && writing) writes.push(`path_open ${path(pointer!, length!)}`);
+        return open(...args);
+      };
+      for (const name of ['path_create_directory', 'path_unlink_file', 'path_remove_directory', 'path_rename', 'path_link', 'path_symlink']) {
+        const call = own[name];
+        if (call === undefined) continue;
+        own[name] = (...args) => {
+          if (watching) writes.push(name);
+          return call(...args);
+        };
+      }
+      return own as WebAssembly.ModuleImports;
+    });
+    try {
+      const worker = runtime();
+      watching = true;
+      expect(await worker.validateTool(validateOf(['makeblastdb', '-in', 'x.fna', '-dbtype', 'nucl', '-logfile', 'v.log']))).toEqual({ ok: true });
+      const refused = await worker.validateTool(validateOf(['makeblastdb', '-in', 'x.fna', '-logfile', 'v.log']));
+      expect(refused.ok).toBe(false);
+      expect(!refused.ok && refused.message).toContain('dbtype');
+      watching = false;
+      expect(writes).toEqual([]);
+      // The spy sees what a run writes: the same words run make v.log, the one file left in the empty directory.
+      const run = posts();
+      watching = true;
+      expect((await worker.tool(toolOf(['makeblastdb', '-in', 'x.fna', '-dbtype', 'nucl', '-logfile', 'v.log']), run)).status).not.toBe(0);
+      watching = false;
+      expect(writes).toContain('path_open v.log');
+      expect(filesOf(run.frames).map((file) => file.name)).toEqual(['v.log']);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("reads the host's time zone at each run's start: a zone changed between two runs of one instance is the second run's", async () => {
+    // The engine reads its environment, `TZ`, at the start of each run, and the host makes `TZ` then (wasi.ts; line NP
+    // WW4b1 R2, finding 5, 2026-11-28): the user's zone changed between two runs (here Node's, through `process.env.TZ`)
+    // gives the second run's dates in the new zone, on the same instance.
+    const worker = runtime();
+    const saved = process.env['TZ'];
+    /** The offset from UTC, in seconds, of the time that makeblastdb's report gives for its start. */
+    const offsetOf = async (zone: string, runs: number) => {
+      process.env['TZ'] = zone;
+      const run = posts();
+      const started = Date.now();
+      const done = await worker.tool(toolOf(['makeblastdb', '-in', 'ns.fna', '-dbtype', 'nucl', '-out', 'db'], [memoryFile('ns.fna', corpus('ns.fna'))]), run);
+      expect(done.status).toBe(0);
+      expect(done.memory.instanceRuns).toBe(runs);
+      const report = joined(run.stdout).toString();
+      const time = /Building a new DB, current time: (\d\d)\/(\d\d)\/(\d{4}) (\d\d):(\d\d):(\d\d)/.exec(report);
+      expect(time, report).not.toBeNull();
+      const [month, day, year, hour, minute, second] = time!.slice(1).map(Number) as [number, number, number, number, number, number];
+      const local = Date.UTC(year, month - 1, day, hour, minute, second);
+      // To the quarter hour: the run takes seconds.
+      return Math.round((local - started) / 900_000) * 900;
+    };
+    try {
+      expect(await offsetOf('Asia/Tokyo', 1)).toBe(9 * 3600);
+      expect(await offsetOf('America/Phoenix', 2)).toBe(-7 * 3600);
+      expect(await offsetOf('Asia/Kolkata', 3)).toBe(5.5 * 3600);
+    } finally {
+      if (saved === undefined) delete process.env['TZ'];
+      else process.env['TZ'] = saved;
+    }
   });
 });
 

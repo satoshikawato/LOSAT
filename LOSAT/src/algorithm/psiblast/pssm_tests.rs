@@ -1466,6 +1466,29 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
         ]
     );
 
+    // A `..` after a link steps back from the link's target: the receiver and the *start* name the
+    // file that the command line makes (`/tmp/...`; `/var/run` is `/run`), line RG item F1w-r2.
+    let linked = PssmRequest {
+        asn_path: Some(std::path::PathBuf::from("/var/run/../tmp/linked.pssm")),
+        ascii_path: None,
+        save_each: false,
+        pseudocount: 0,
+        versions: Default::default(),
+        run_files: run_files.clone(),
+    };
+    check_pssm_files(&linked, 1, None).unwrap();
+    let mut files = PssmFiles::new(&linked);
+    files.add(Some(b"asn-linked"), None).unwrap();
+    files.commit().unwrap();
+    assert_eq!(
+        drain(),
+        vec![("/tmp/linked.pssm".to_string(), b"asn-linked".to_vec())]
+    );
+    assert_eq!(
+        RunFiles::output_host_name(std::ffi::OsStr::new("/var/run/../tmp/linked.pssm")),
+        Some(b"/tmp/linked.pssm".to_vec())
+    );
+
     // Collision with an existing registered file is refused by check_pssm_files.
     let collision = PssmRequest {
         asn_path: Some(std::path::PathBuf::from("existing.pssm")),
@@ -1479,11 +1502,11 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
 
     // Host name normalization helper matches RunFiles::log_host_name semantics.
     assert_eq!(
-        RunFiles::pssm_host_name(std::ffi::OsStr::new("./sub/a.pssm")),
+        RunFiles::output_host_name(std::ffi::OsStr::new("./sub/a.pssm")),
         Some(b"sub/a.pssm".to_vec())
     );
     assert_eq!(
-        RunFiles::pssm_host_name(std::ffi::OsStr::new("/dev/null")),
+        RunFiles::output_host_name(std::ffi::OsStr::new("/dev/null")),
         None
     );
 }

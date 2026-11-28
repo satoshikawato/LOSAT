@@ -14,3 +14,10 @@
 - Web engine: `validateTool` refuses an `-out` that is the standard error, a device or a file of
   procfs (`/dev/stderr`, `/proc/self/comm`) for every tool, as `runTool` refuses it, where it
   accepted the words and the run then refused them.
+- LOSAT Web's Supported mark of a tool run grades a value typed into a text box by the code path it
+  selects, one rule for every tool: convert2blastmask's `-masking_options` by whether its text holds
+  a byte outside visible ASCII (which NCBI writes as `#` with an error message) and
+  `-masking_algorithm` by the program it names (`other` for any other name), windowmasker's `-meta`
+  as a note written as given, where they were graded by their literal text, so most typed values
+  read "Not yet supported". New NCBI BLAST+ 2.17.0 fixtures (91 runs) cover every combination of the
+  Masking tab's choices that NCBI completes.

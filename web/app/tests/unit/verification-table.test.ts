@@ -7,10 +7,14 @@ import {
   FILE_VALUE,
   NOT_SUPPORTED_LABEL,
   optionKey,
+  OTHER_BYTES_TEXT_VALUE,
   RANGE_VALUE,
   SUPPORTED_LABEL,
+  TEXT_VALUE,
+  TOOL_PATH_VALUES,
   toolOptionGrammar,
   toolOptionKey,
+  toolValueClass,
   toolVerificationBadge,
   type OptionGrammar,
 } from '../../src/domain/verification';
@@ -262,6 +266,95 @@ describe('verification table', () => {
     }
     expect(grade('segmasker', SEGMASKER_XMLHELP_DOC.xml, ['segmasker', '-in', 'input.fa', '-window', '9999']).level).toBe('outside');
     expect(grade('convert2blastmask', CONVERT2BLASTMASK_XMLHELP_DOC.xml, ['convert2blastmask', '-in', 'input.fa']).level).toBe('outside');
+  });
+
+  it('grades a typed value of a Masking tool by the path it selects, and every option of the tab has a frozen row (WW4c)', () => {
+    const xml = { dustmasker: DUSTMASKER_XMLHELP_DOC.xml, segmasker: SEGMASKER_XMLHELP_DOC.xml, convert2blastmask: CONVERT2BLASTMASK_XMLHELP_DOC.xml };
+    const grade = (argv: readonly [keyof typeof xml, ...string[]]) =>
+      toolVerificationBadge({ tool: argv[0], argv, runtimePath: 'serial', grammar: toolOptionGrammar(parseToolDescription(xml[argv[0]])) }, table);
+    const c2bm = (algorithm: string, options: string, ...more: string[]) =>
+      ['convert2blastmask', '-in', 'input.fa', '-masking_algorithm', algorithm, '-masking_options', options, ...more] as const;
+    for (const argv of [
+      // A -masking_options text the user typed (the ledgers hold o, x and a few others): the text is written as given.
+      c2bm('dust', 'window=64'),
+      c2bm('dust', '-window 64 -level 20 -linker 1', '-parse_seqids'),
+      c2bm('seg', 'defaults', '-outfmt', 'maskinfo_asn1_bin'),
+      c2bm('windowmasker', 'my masker', '-outfmt', 'maskinfo_xml', '-parse_seqids'),
+      c2bm('repeat', 'RepeatMasker 4.1', '-outfmt', 'interval'),
+      c2bm('NOT_SET', ''),
+      // A byte outside visible ASCII: NCBI writes # and posts error 803.7, a path of its own that the ledger runs.
+      c2bm('seg', 'segmasker -window 12 (é)', '-outfmt', 'maskinfo_asn1_bin', '-parse_seqids'),
+      c2bm('dust', 'a\tb'),
+      // A name of no program is the program other; letters in upper case name the program.
+      c2bm('my masker', 'x', '-outfmt', 'maskinfo_asn1_bin'),
+      c2bm('WindowMasker', 'x', '-outfmt', 'maskinfo_asn1_bin'),
+      // The combinations of the tab's choices that the ww4c_* rows froze.
+      ['dustmasker', '-in', 'db', '-infmt', 'blastdb', '-outfmt', 'maskinfo_asn1_bin', '-parse_seqids'],
+      ['dustmasker', '-in', 'input.fa', '-outfmt', 'fasta', '-hard_masking', '-parse_seqids'],
+      ['segmasker', '-in', 'db', '-infmt', 'blastdb', '-outfmt', 'maskinfo_xml', '-parse_seqids'],
+    ] as const) {
+      const badge = grade(argv);
+      expect(badge.label, argv.join(' ')).toBe(SUPPORTED_LABEL);
+    }
+    for (const argv of [
+      // NCBI refuses -hard_masking without -outfmt fasta (exit 3), so no row counts.
+      ['dustmasker', '-in', 'input.fa', '-hard_masking', '-outfmt', 'maskinfo_asn1_bin'],
+      // dustmasker's -infmt keeps its value: a value other than fasta and blastdb is refused.
+      ['dustmasker', '-in', 'input.fa', '-infmt', 'FASTA'],
+    ] as const) {
+      expect(grade(argv).label, argv.join(' ')).toBe(NOT_SUPPORTED_LABEL);
+    }
+    // The classes: the program in lower case (C locale: KELVIN SIGN is no k), the text by its bytes.
+    expect(toolValueClass('-masking_algorithm', 'WindowMasker')).toBe('windowmasker');
+    expect(toolValueClass('-masking_algorithm', 'windowmasKer')).toBe('other');
+    expect(toolValueClass('-masking_algorithm', 'not set')).toBe('other');
+    expect(toolValueClass('-masking_options', ' !"~')).toBe(TEXT_VALUE);
+    expect(toolValueClass('-masking_options', 'a\u007fb')).toBe(OTHER_BYTES_TEXT_VALUE);
+    expect(toolValueClass('-masking_options', 'é')).toBe(OTHER_BYTES_TEXT_VALUE);
+
+    // Every option that the Masking tab offers (each -xmlhelp key and flag but -in, -out and the prints), each value
+    // of a list and each class of a typed text, is in an option set that NCBI froze with exit status 0.
+    const PRINTS = new Set(['-h', '-help', '-xmlhelp', '-version', '-version-full', '-version-full-xml', '-version-full-json']);
+    for (const tool of ['dustmasker', 'segmasker', 'convert2blastmask'] as const) {
+      const keys = (table.tools?.[tool]?.optionSets ?? []).map((key) => JSON.parse(key) as [string, string][]);
+      const has = (flag: string, value?: string) => keys.some((pairs) => pairs.some(([f, v]) => f === flag && (value === undefined || v === value)));
+      for (const param of parseToolDescription(xml[tool]).parameters) {
+        if (PRINTS.has(param.flag) || param.flag === '-in' || param.flag === '-out') continue;
+        const values = (param.choices ?? (param.flag === '-infmt' ? ['fasta', 'blastdb'] : [undefined])).filter((v) => v !== param.defaultValue);
+        for (const value of values) expect(has(param.flag, value), `${tool} ${param.flag} ${value ?? ''}`).toBe(true);
+      }
+    }
+    const classes = (tool: 'convert2blastmask', flag: string) =>
+      new Set((table.tools?.[tool]?.optionSets ?? []).flatMap((key) => (JSON.parse(key) as [string, string][]).filter(([f]) => f === flag).map(([, v]) => v)));
+    expect([...classes('convert2blastmask', '-masking_algorithm')].sort()).toEqual(['dust', 'not_set', 'other', 'repeat', 'seg', 'windowmasker']);
+    expect([...classes('convert2blastmask', '-masking_options')].sort()).toEqual([OTHER_BYTES_TEXT_VALUE, TEXT_VALUE].sort());
+  });
+
+  it('has one rule for every typed value of every tool: a class, or the value where it selects a path', () => {
+    const docs = {
+      windowmasker: WINDOWMASKER_XMLHELP_DOC.xml,
+      blast_formatter: BLAST_FORMATTER_XMLHELP_DOC.xml,
+      makeblastdb: MAKEBLASTDB_XMLHELP_DOC.xml,
+      dustmasker: DUSTMASKER_XMLHELP_DOC.xml,
+      segmasker: SEGMASKER_XMLHELP_DOC.xml,
+      convert2blastmask: CONVERT2BLASTMASK_XMLHELP_DOC.xml,
+    };
+    for (const [tool, doc] of Object.entries(docs)) {
+      const description = parseToolDescription(doc);
+      const grammar = toolOptionGrammar(description);
+      // A typed text: a String value with no list of values in -xmlhelp (numbers keep their value: each is a parameter
+      // of the tool's computation).
+      for (const param of description.parameters.filter((p) => p.kind === 'String' && p.choices === undefined)) {
+        const key = toolOptionKey([tool, param.flag, 'typed text'], grammar);
+        if (key === JSON.stringify([])) continue; // a name of an input or output, in no key
+        expect(toolValueClass(param.flag, 'typed text') !== undefined || TOOL_PATH_VALUES.has(param.flag), `${tool} ${param.flag}`).toBe(true);
+      }
+    }
+    // windowmasker's -meta: the note is written as given; empty writes none.
+    const wmGrammar = toolOptionGrammar(parseToolDescription(WINDOWMASKER_XMLHELP_DOC.xml));
+    const wm = (argv: readonly string[]) => toolVerificationBadge({ tool: 'windowmasker', argv, runtimePath: 'serial', grammar: wmGrammar }, table);
+    expect(wm(['windowmasker', '-mk_counts', '-in', 'g.fa', '-meta', 'my genome, 2026', '-sformat', 'binary']).label).toBe(SUPPORTED_LABEL);
+    expect(wm(['windowmasker', '-convert', '-in', 'c.obinary', '-meta', 'replaced', '-sformat', 'ascii']).label).toBe(SUPPORTED_LABEL);
   });
 
   it("generates makeblastdb option sets from every NCBI-frozen ledger of makeblastdb runs and grades runs (line WW, WW4b2 R1)", () => {

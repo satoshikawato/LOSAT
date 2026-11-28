@@ -12,8 +12,9 @@
 // makeblastdb does not read: its bytes are the native's and no hand-over is offered. Without the engine the same steps
 // run on the FakeEngine's outputs and nothing is compared.
 //
-// LOSAT_E2E_SCREENSHOT_DIR=<dir> saves the Masking tab empty, filled and finished at 1280 and 390 px in the light and
-// the dark colour scheme (<browser>-ms-<state>-<width>-<scheme>.png), and in Chromium each tool's finished run.
+// LOSAT_E2E_SCREENSHOT_DIR=<dir> saves the Masking tab empty, filled and finished, and the makeblastdb tab with the
+// handed-over mask data and its finished run (handover, handover-finished), at 1280 and 390 px in the light and the dark
+// colour scheme (<browser>-ms-<state>-<width>-<scheme>.png), and in Chromium each tool's finished run and hand-over.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -384,6 +385,8 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
       await expect(page.getByTestId('results-program')).toHaveText(
         { dustmasker: 'DustMasker', segmasker: 'SegMasker', convert2blastmask: 'convert2blastmask' }[c.tool],
       );
+      // Each case's options are in a set that NCBI froze (the typed -masking_options text by its class, WW4c).
+      if (real) await expect(page.getByTestId('verification-badge')).toHaveText('Supported');
       await page.getByTestId(c.out === undefined ? 'tool-tab-stdout' : 'tool-tab-file-0').click();
       const argv = ((await page.getByTestId('result-command').textContent()) ?? '').trim().split(/\s+/);
       expect(argv.slice(0, 2), 'the command beside the run').toEqual(['losat', c.tool]);
@@ -423,6 +426,9 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
         `losat makeblastdb -in input.fa -dbtype ${c.dbtype} -parse_seqids -mask_data ${maskName} -out db`,
       );
       await expect(page.getByTestId('mk-argv-validation')).toHaveAttribute('data-state', 'ok', { timeout: 30_000 });
+      // The makeblastdb tab with the handed-over mask data, then its finished run (screenshots only).
+      if (test.info().project.name === 'chromium') await maybeShot(page, `ms-handover-${c.tool}-1280-light.png`);
+      if (first) await shots(page, 'handover');
       const makeblastdbArgv = ['makeblastdb', '-in', 'input.fa', '-dbtype', c.dbtype, '-parse_seqids', '-mask_data', maskName, '-out', 'db'];
       const makeblastdbInputs = new Map([
         ['input.fa', fasta],
@@ -443,6 +449,7 @@ test.describe('Masking tab: each tool run, its output, and its mask data in make
       const database = await downloadAll(page);
       const names = [...database.files.keys()];
       expect(names.some((name) => /^db\.[np]in$/.test(name)), `database files: ${names.join(' ')}`).toBe(true);
+      if (first) await shots(page, 'handover-finished');
       if (real) {
         const browser = maskedFiles(database.files);
         expect(browser, `${c.tool}: makeblastdb -mask_data ${maskName}`).toEqual(asNative(browser, [before!, nativeMade()]));

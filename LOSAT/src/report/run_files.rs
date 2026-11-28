@@ -1086,10 +1086,22 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
         return OutputName::Unopened(OpenFailure::NameTooLong);
     }
     let cwd = working_directory(name);
-    let (folders, last) = match name.iter().rposition(|byte| *byte == b'/') {
+    let (mut folders, last) = match name.iter().rposition(|byte| *byte == b'/') {
         Some(at) => (&name[..at], &name[at + 1..]),
         None => (&name[..0], name),
     };
+    if last.is_empty() {
+        // A final `/` makes the name's last component a directory whether it is there or not (the
+        // system's create of `sub/` is `EISDIR`): only the folders before it are walked.
+        let trimmed = folders.len()
+            - folders
+                .iter()
+                .rev()
+                .take_while(|byte| **byte == b'/')
+                .count();
+        folders = &folders[..trimmed];
+        folders = &folders[..folders.iter().rposition(|byte| *byte == b'/').unwrap_or(0)];
+    }
     let mut directories: Vec<Vec<u8>> = vec![cwd.clone()];
     let mut walk = Walk::at(name, &cwd);
     for part in folders.split(|byte| *byte == b'/') {
@@ -1149,12 +1161,15 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     if found == Some(Entry::Directory) {
         return OutputName::Unopened(OpenFailure::IsADirectory);
     }
-    if found.is_none() && directory_at(&path) == Directory::Known {
-        return OutputName::Unopened(OpenFailure::IsADirectory);
-    }
     let existing = found == Some(Entry::File) && !is_virtual_or_device(&path);
     if !existing && !opens(&path) {
-        return OutputName::Unopened(OpenFailure::PermissionDenied);
+        // A name that no user makes is a directory that the model knows (`/tmp`, `/etc`: a
+        // directory is not opened for writing) or a name in root's (`/etc/passwd`).
+        return OutputName::Unopened(if directory_at(&path) == Directory::Known {
+            OpenFailure::IsADirectory
+        } else {
+            OpenFailure::PermissionDenied
+        });
     }
     if path.starts_with(b"/dev/mqueue/") {
         return OutputName::Special;

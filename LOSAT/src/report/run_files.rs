@@ -2123,7 +2123,9 @@ impl RunFiles {
             OutputName::Unopened => return StrategyTarget::Inaccessible,
             OutputName::Stdout => return StrategyTarget::StandardOutput,
             OutputName::Discard => return StrategyTarget::Nowhere,
-            OutputName::Full | OutputName::Special => return StrategyTarget::System,
+            OutputName::Full | OutputName::StandardError | OutputName::Special => {
+                return StrategyTarget::System;
+            }
             // Each name is read in a working directory of its own depth; their paths compare as
             // the run's files' (`file_key`). An existing file of the run is at the path of the
             // same walk (`output_key`).

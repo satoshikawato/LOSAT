@@ -216,3 +216,37 @@ fn the_default_files_are_glibcs() {
         assert_eq!(offsets(zone), tokyo, "TZDIR={tzdir:?}");
     }
 }
+
+/// The rules that LOSAT Web's host puts into `TZ` for the browser's zone in 2026
+/// (web/packages/losat/src/infra/reactor/time-zone.ts and its test; line NP WW4b1, D-WW4b-2,
+/// 2026-11-27): read as `TZ` (no zone file has the rule's name, so jiff reads the POSIX rule), each
+/// gives its zone's offset at every hour of 2026 (where the host has the zone files).
+#[test]
+fn the_rules_of_the_web_host_are_their_zones() {
+    const RULES: &[(&str, &str)] = &[
+        ("Asia/Tokyo", "<+09>-9"),
+        ("Asia/Kolkata", "<+0530>-5:30"),
+        ("UTC", "<+00>0"),
+        ("America/Phoenix", "<-07>7"),
+        ("America/New_York", "<-05>5<-04>4,M3.2.0/2,M11.1.0/2"),
+        ("Europe/London", "<+00>0<+01>-1,M3.5.0/1,M10.5.0/2"),
+        ("Europe/Berlin", "<+01>-1<+02>-2,M3.5.0/2,M10.5.0/3"),
+        ("Australia/Sydney", "<+10>-10<+11>-11,M10.1.0/2,M4.1.0/3"),
+        (
+            "Australia/Lord_Howe",
+            "<+1030>-10:30<+11>-11,M10.1.0/2,M4.1.0/2",
+        ),
+    ];
+    const START_2026: i64 = 1_767_225_600;
+    for &(name, rule) in RULES {
+        let Some(file) = zone_file(format!("/usr/share/zoneinfo/{name}").as_ref()) else {
+            eprintln!("no zone file for {name}: its rule is not compared");
+            continue;
+        };
+        let zone = zone_of(Some(OsStr::new(rule)), None).expect(rule);
+        for hour in 0..366 * 24 {
+            let at = START_2026 + hour * 3600;
+            assert_eq!(zone.offset_at(at), file.offset_at(at), "{rule} at {at}");
+        }
+    }
+}

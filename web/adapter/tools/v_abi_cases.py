@@ -48,7 +48,8 @@ inputs of line WQA's D13 and D16 (`scan_d13`: gap lines, joined lines, Seq-id fi
 `-conffile` with `[BLAST] DATA_LOADERS=none`, whose registry file the host registers as kind 2), and BLASTN
 `-filtering_db` (line RG item D4): with `-db` (`REPEAT_ROWS`, `REPEAT_FAILURE_ROWS`) and with `-subject`
 (`repeat_subject`, `"run_directory": true`: the subject is registered as for every search, and the run goes to
-the instance whose `/work` holds the repeat database).
+the instance whose `/work` holds the repeat database), and PSIBLAST runs whose `-out_pssm` the run cannot open
+(`out_pssm_names`: the CLI's error words and report, line WQA D34).
 `--group fasta_input` writes that group of the full suite alone.
 
 Both suites add the tool runs of `losat_web2_tool` and `losat_web2_validate` for `windowmasker` (`tool`; line NP
@@ -785,6 +786,35 @@ def failed_outputs() -> list[dict]:
                               "-parse_deflines", "-dust", "yes"],
                      "cwd": str(REPO / "LOSAT"), "cases": ["failed_outputs.blastn.pd_self.outfmt0"], "frozen": {},
                      "expect": "failure"})
+    return searches
+
+
+# The `-out_pssm` names that a run cannot open (line WQA D34 review r1, M2, 2026-11-28), each the same on every Linux
+# host where the user is not root: missing folders, a file as a folder, a final `/`, `.` and `..`, a component or a
+# path too long, too many links, root's places, devices and procfs names that procfs does not have.
+OUT_PSSM_NAMES = [
+    "sub/x.asn", "nodir/deeper/x.asn", "<b>bold</b>.asn", "my dir/x.asn", "q1b_gi.faa/x.asn", "q1b_gi.faa/",
+    "nosuch/", "nosuch//", ".", "..", "./", "nodir/..", "q1b_gi.faa/..", "nodir/.", "a" * 256 + ".asn",
+    "x/" * 2100 + "p.asn", "/proc/self/root" * 21 + "/tmp/d34-loop.asn", "/etc/x.asn", "/etc/passwd", "/etc",
+    "/etc/passwd/", "/tmp", "/root/x.asn", "/root/x/", "/home/x.asn", "/dev/full", "/dev/null/x", "/dev/x.asn",
+    "/sys/x.asn", "/proc/self/status", "/proc/self/nonexistent", "/proc/x.asn",
+]
+
+
+def out_pssm_names() -> list[dict]:
+    """PSIBLAST runs whose `-out_pssm` names a file that the run cannot open (line WQA D34 review r1, M2,
+    2026-11-28), with the PSSM of each round (`-num_iterations 2`, `rounds::RoundFiles`) and of the last round only
+    (`-num_iterations 1 -save_pssm_after_last_round`, `pssm::PssmFiles`): the CLI refuses after the query's report
+    (NCBI 2.17.0 stops there with its write error, status 0), with the system's words for the name (`No such file
+    or directory (os error 2)`); LOSAT Web's run gives the same error and the same report (`OUT_PSSM_NAMES`)."""
+    searches = []
+    for mode, options in (("rounds", ["-num_iterations", "2"]),
+                          ("last", ["-num_iterations", "1", "-save_pssm_after_last_round"])):
+        for index, name in enumerate(OUT_PSSM_NAMES):
+            searches.append({"program": "psiblast", "cwd": str(REPO / "LOSAT/tests/fasta/psiblast"),
+                             "argv": ["psiblast", "-query", "q1b_gi.faa", "-subject", "q1_subj_ids.faa", *options,
+                                      "-out_pssm", name],
+                             "cases": [f"out_pssm.{mode}.{index}"], "frozen": {}, "expect": "failure"})
     return searches
 
 
@@ -1530,6 +1560,7 @@ def main() -> int:
         searches += database()
         searches += scan_d13()
         searches += failed_outputs()
+        searches += out_pssm_names()
         searches += tool()
         searches += masking()
         searches += makeblastdb()

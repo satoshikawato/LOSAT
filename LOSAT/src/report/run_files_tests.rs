@@ -1010,9 +1010,118 @@ fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
             "/proc/self/status",
             OutputName::Unopened(OpenFailure::PermissionDenied),
         ),
+        // Procfs makes no file: a name that it does not have is not found, one that it has and
+        // the user does not write is refused, a directory of it is one (line WQA D34 review r1,
+        // L3: the model's host's `open(O_WRONLY | O_CREAT)`).
+        ("/dev/fd/3", OutputName::Unopened(OpenFailure::NotFound)),
         (
-            "/dev/fd/3",
+            "/proc/self/fd/9",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        ("/dev/fd/9/x", OutputName::Unopened(OpenFailure::NotFound)),
+        ("/proc/x.asn", OutputName::Unopened(OpenFailure::NotFound)),
+        ("/proc/x/y", OutputName::Unopened(OpenFailure::NotFound)),
+        (
+            "/proc/self/nonexistent",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        (
+            "/proc/self/attr/x",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        (
+            "/proc/thread-self/x",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        ("/proc/1/x.asn", OutputName::Unopened(OpenFailure::NotFound)),
+        (
+            "/proc/1/task/1/x",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        (
+            "/proc/sys/x.asn",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        (
+            "/proc/sys/kernel/x",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        (
+            "/proc/self/net/x",
+            OutputName::Unopened(OpenFailure::NotFound),
+        ),
+        (
+            "/proc/cpuinfo",
             OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/proc/self/environ",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/proc/self/fdinfo/0",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/proc/1/fd/x",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/proc/self/fd",
+            OutputName::Unopened(OpenFailure::IsADirectory),
+        ),
+        ("/proc/sys", OutputName::Unopened(OpenFailure::IsADirectory)),
+        ("/proc/1", OutputName::Unopened(OpenFailure::IsADirectory)),
+        ("/proc", OutputName::Unopened(OpenFailure::IsADirectory)),
+        (
+            "/proc/self/status/x",
+            OutputName::Unopened(OpenFailure::NotADirectory),
+        ),
+        (
+            "/proc/cpuinfo/x",
+            OutputName::Unopened(OpenFailure::NotADirectory),
+        ),
+        (
+            "/proc/self/fd/0/x",
+            OutputName::Unopened(OpenFailure::NotADirectory),
+        ),
+        (
+            "/sys/x.asn",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/dev/x.asn",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        // A name in `/home` that no user makes is refused there; `/home` is a directory (L1).
+        (
+            "/home/x.asn",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        ("/home", OutputName::Unopened(OpenFailure::IsADirectory)),
+        ("/home/", OutputName::Unopened(OpenFailure::IsADirectory)),
+        // The last component is looked up in a folder that the user cannot search, also before
+        // a final `/`, `.` or `..` (L2).
+        (
+            "/root/x/",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/root/x//",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/root/.",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        (
+            "/root/..",
+            OutputName::Unopened(OpenFailure::PermissionDenied),
+        ),
+        ("/root/", OutputName::Unopened(OpenFailure::IsADirectory)),
+        (
+            "/etc/passwd/",
+            OutputName::Unopened(OpenFailure::IsADirectory),
         ),
         (
             "/dev/kmsg",

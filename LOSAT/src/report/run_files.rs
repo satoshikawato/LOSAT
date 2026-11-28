@@ -1309,7 +1309,8 @@ fn folder_present(
 /// directory, `/dev/null`), a folder that is not there (`ENOENT`), and a folder of root's that the
 /// model does not list as one where the user makes files (`EACCES`: the model cannot tell a
 /// folder of root's there that is not there from one that is, and takes the one that a name in it
-/// would be refused in). `None` where the folder is present.
+/// would be refused in; in procfs, which makes no file, a folder whose entries the model does not
+/// list gives `ENOENT`, `procfs_entry`). `None` where the folder is present.
 fn folder_failure(
     path: &[u8],
     cwd: &[u8],
@@ -1320,6 +1321,15 @@ fn folder_failure(
         Some(Entry::Directory) => None,
         Some(Entry::File) => Some(OpenFailure::NotADirectory),
         Some(Entry::Missing) => Some(OpenFailure::NotFound),
+        None if within(path, b"/proc") => match procfs_entry(path) {
+            ProcEntry::Directory => None,
+            ProcEntry::File => Some(OpenFailure::NotADirectory),
+            ProcEntry::Missing => Some(OpenFailure::NotFound),
+            // A folder of procfs whose entries the model does not list: a name in it is one that
+            // procfs does not have, as `ProcEntry::Missing` (`procfs_entry`).
+            ProcEntry::Unlisted if final_dir => Some(OpenFailure::NotFound),
+            ProcEntry::Unlisted => None,
+        },
         None => match directory_at(path) {
             Directory::Known => None,
             Directory::Unknown if final_dir => Some(OpenFailure::PermissionDenied),
@@ -1388,7 +1398,9 @@ const DISCARDING_DEVICES: [&[u8]; 4] =
 /// directory of root's that the model does not list, passed on the way back out, as `log_name`
 /// takes it); a name of `.`, `..` or with a final `/`, and a directory that the walk passed, the
 /// working directory or one of their ancestors, are directories, which do not open for writing;
-/// a name in a directory of root's does not open (`opens`). The opened file is then the standard
+/// a name in a directory of root's does not open (`opens`), and in procfs a name that procfs does
+/// not have is not found (`procfs_entry`); each such name gives the reason of the system's open
+/// (`OpenFailure`). The opened file is then the standard
 /// output (`/dev/stdout`, `/dev/fd/1`, `/proc/self/fd/1`), the standard input (the null device of
 /// the run: writes lost), the standard error (`StandardError`: `/dev/stderr`, `/dev/fd/2`,
 /// `/proc/self/fd/2`), a file of procfs or a device of `LOST_DEVICES`
@@ -1440,6 +1452,11 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     if let Some(failure) = folder_failure(walk.path(), &cwd, Some(entry), true) {
         return OutputName::Unopened(failure);
     }
+    // The system looks the last component up in that folder whatever it is (`x`, `.`, `..`, or a
+    // name before a final `/`): a folder that the user cannot search refuses it first (`/root/x/`).
+    if !searchable(walk.path()) {
+        return OutputName::Unopened(OpenFailure::PermissionDenied);
+    }
     if matches!(last, b"" | b"." | b"..") {
         return OutputName::Unopened(OpenFailure::IsADirectory);
     }
@@ -1465,11 +1482,17 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     if stream(b"/fd/2".as_slice()) {
         return OutputName::StandardError;
     }
-    if within(&path, SELF) {
+    if within(&path, b"/proc") {
+        // Procfs makes no file: a name that it does not have fails at its lookup (`ENOENT`), before
+        // the system checks the create; a file that the user does not write is `EACCES`.
         return if is_procfs_file(&path) {
             OutputName::Special
         } else {
-            OutputName::Unopened(OpenFailure::PermissionDenied)
+            OutputName::Unopened(match procfs_entry(&path) {
+                ProcEntry::Directory => OpenFailure::IsADirectory,
+                ProcEntry::File => OpenFailure::PermissionDenied,
+                ProcEntry::Missing | ProcEntry::Unlisted => OpenFailure::NotFound,
+            })
         };
     }
     if path == b"/dev/full" {
@@ -1488,8 +1511,9 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     let existing = found == Some(Entry::File) && !is_virtual_or_device(&path);
     if !existing && !opens(&path) {
         // A name that no user makes is a directory that the model knows (`/tmp`, `/etc`: a
-        // directory is not opened for writing) or a name in root's (`/etc/passwd`).
-        return OutputName::Unopened(if directory_at(&path) == Directory::Known {
+        // directory is not opened for writing) or a name in root's (`/etc/passwd`, `/home/x.asn`:
+        // a home that the model takes as present for the names in it is not known to be there).
+        return OutputName::Unopened(if is_known_directory(&path, &cwd) {
             OpenFailure::IsADirectory
         } else {
             OpenFailure::PermissionDenied
@@ -1794,6 +1818,236 @@ const THREAD_FILES: [&[u8]; 15] = [
     b"sched",
     b"uid_map",
 ];
+
+/// The entries of procfs on the model's host (`procfs_entry`), measured as the model's user
+/// (`os.scandir` of `/proc`, `/proc/self`, `/proc/self/task/<tid>` and `/proc/self/attr`, line WQA
+/// D34 review r1, L3, 2026-11-28), each list its directories then its other entries: of `/proc`
+/// besides the processes (`/proc/<pid>`) and the links `self` and `thread-self` (`LINKS`; `mounts`
+/// and `net`, links to the process's own, are listed as what they lead to), of a process (`SELF`
+/// and `/proc/<pid>`), of a thread (`THREAD` and `/proc/<pid>/task/<tid>`) and of their `attr`.
+/// The links `cwd`, `exe` and `root` are listed as files: the model's user does not follow those
+/// of another process (`CLOSED_PROCESS_ENTRIES`), and those of `SELF` are `LINKS` but `exe`.
+const PROC_DIRECTORIES: [&[u8]; 9] = [
+    b"acpi", b"bus", b"driver", b"fs", b"irq", b"net", b"sys", b"sysvipc", b"tty",
+];
+const PROC_ENTRIES: [&[u8]; 43] = [
+    b"buddyinfo",
+    b"cgroups",
+    b"cmdline",
+    b"config.gz",
+    b"consoles",
+    b"cpuinfo",
+    b"crypto",
+    b"devices",
+    b"diskstats",
+    b"dma",
+    b"execdomains",
+    b"filesystems",
+    b"interrupts",
+    b"iomem",
+    b"ioports",
+    b"kallsyms",
+    b"kcore",
+    b"key-users",
+    b"keys",
+    b"kmsg",
+    b"kpagecgroup",
+    b"kpagecount",
+    b"kpageflags",
+    b"loadavg",
+    b"locks",
+    b"mdstat",
+    b"meminfo",
+    b"misc",
+    b"modules",
+    b"mounts",
+    b"mtrr",
+    b"pagetypeinfo",
+    b"partitions",
+    b"schedstat",
+    b"softirqs",
+    b"stat",
+    b"swaps",
+    b"timer_list",
+    b"uptime",
+    b"version",
+    b"vmallocinfo",
+    b"vmstat",
+    b"zoneinfo",
+];
+const PROCESS_DIRECTORIES: [&[u8]; 7] = [
+    b"attr",
+    b"fd",
+    b"fdinfo",
+    b"map_files",
+    b"net",
+    b"ns",
+    b"task",
+];
+const PROCESS_ENTRIES: [&[u8]; 43] = [
+    b"arch_status",
+    b"auxv",
+    b"cgroup",
+    b"clear_refs",
+    b"cmdline",
+    b"comm",
+    b"coredump_filter",
+    b"cpuset",
+    b"cwd",
+    b"environ",
+    b"exe",
+    b"gid_map",
+    b"io",
+    b"limits",
+    b"loginuid",
+    b"maps",
+    b"mem",
+    b"mountinfo",
+    b"mounts",
+    b"mountstats",
+    b"oom_adj",
+    b"oom_score",
+    b"oom_score_adj",
+    b"pagemap",
+    b"personality",
+    b"projid_map",
+    b"root",
+    b"sched",
+    b"schedstat",
+    b"sessionid",
+    b"setgroups",
+    b"smaps",
+    b"smaps_rollup",
+    b"stack",
+    b"stat",
+    b"statm",
+    b"status",
+    b"syscall",
+    b"timens_offsets",
+    b"timers",
+    b"timerslack_ns",
+    b"uid_map",
+    b"wchan",
+];
+const TASK_DIRECTORIES: [&[u8]; 5] = [b"attr", b"fd", b"fdinfo", b"net", b"ns"];
+const TASK_ENTRIES: [&[u8]; 39] = [
+    b"arch_status",
+    b"auxv",
+    b"cgroup",
+    b"children",
+    b"clear_refs",
+    b"cmdline",
+    b"comm",
+    b"cpuset",
+    b"cwd",
+    b"environ",
+    b"exe",
+    b"gid_map",
+    b"io",
+    b"limits",
+    b"loginuid",
+    b"maps",
+    b"mem",
+    b"mountinfo",
+    b"mounts",
+    b"oom_adj",
+    b"oom_score",
+    b"oom_score_adj",
+    b"pagemap",
+    b"personality",
+    b"projid_map",
+    b"root",
+    b"sched",
+    b"schedstat",
+    b"sessionid",
+    b"setgroups",
+    b"smaps",
+    b"smaps_rollup",
+    b"stack",
+    b"stat",
+    b"statm",
+    b"status",
+    b"syscall",
+    b"uid_map",
+    b"wchan",
+];
+const ATTR_ENTRIES: [&[u8]; 6] = [
+    b"current",
+    b"exec",
+    b"fscreate",
+    b"keycreate",
+    b"prev",
+    b"sockcreate",
+];
+
+/// What procfs has at `path`, a path without links in `/proc` (`folder_failure`, `output_name`).
+#[derive(Debug, PartialEq, Eq)]
+enum ProcEntry {
+    /// A directory: `/proc`, a process (`/proc/<pid>`, `SELF`) or a thread of it, or a directory
+    /// of their lists (`PROC_DIRECTORIES`, `PROCESS_DIRECTORIES`, `TASK_DIRECTORIES`).
+    Directory,
+    /// Another entry of those lists (`PROC_ENTRIES`, `PROCESS_ENTRIES`, `TASK_ENTRIES`,
+    /// `ATTR_ENTRIES`), and the descriptors of the standard streams (`fd/0` to `fd/2`, also in
+    /// `fdinfo`): no directory.
+    File,
+    /// A name of a listed directory that procfs does not have there (`/proc/x.asn`,
+    /// `/proc/self/nonexistent`, `/proc/self/fd/3`: the run's only descriptors are the standard
+    /// streams'), whose lookup fails (`ENOENT`).
+    Missing,
+    /// A name in a directory of procfs whose entries the model does not list (`/proc/sys/kernel`,
+    /// `/proc/self/net`).
+    Unlisted,
+}
+
+/// What procfs has at `path` (`ProcEntry`), a path without links in `/proc`.
+fn procfs_entry(path: &[u8]) -> ProcEntry {
+    let parts: Vec<&[u8]> = path
+        .strip_prefix(b"/proc".as_slice())
+        .unwrap_or_default()
+        .split(|byte| *byte == b'/')
+        .skip(1)
+        .collect();
+    // A process or a thread: a number, or the NUL byte of `SELF` and `THREAD`.
+    let id =
+        |part: &[u8]| part == b"\0" || (!part.is_empty() && part.iter().all(u8::is_ascii_digit));
+    let of = |directories: &[&[u8]], entries: &[&[u8]], name: &[u8]| {
+        if directories.contains(&name) {
+            ProcEntry::Directory
+        } else if entries.contains(&name) {
+            ProcEntry::File
+        } else {
+            ProcEntry::Missing
+        }
+    };
+    let stream = |number: &[u8]| {
+        if matches!(number, b"0" | b"1" | b"2") {
+            ProcEntry::File
+        } else {
+            ProcEntry::Missing
+        }
+    };
+    match parts.as_slice() {
+        [] => ProcEntry::Directory,
+        [name] if id(name) => ProcEntry::Directory,
+        [name] => of(&PROC_DIRECTORIES, &PROC_ENTRIES, name),
+        [pid, name] if id(pid) => of(&PROCESS_DIRECTORIES, &PROCESS_ENTRIES, name),
+        [pid, b"task", tid] if id(pid) => {
+            if id(tid) {
+                ProcEntry::Directory
+            } else {
+                ProcEntry::Missing
+            }
+        }
+        [pid, b"task", tid, name] if id(pid) && id(tid) => {
+            of(&TASK_DIRECTORIES, &TASK_ENTRIES, name)
+        }
+        [pid, b"fd" | b"fdinfo", number] if id(pid) => stream(number),
+        [pid, b"task", tid, b"fd" | b"fdinfo", number] if id(pid) && id(tid) => stream(number),
+        [pid, b"attr", name] if id(pid) => of(&[], &ATTR_ENTRIES, name),
+        [pid, b"task", tid, b"attr", name] if id(pid) && id(tid) => of(&[], &ATTR_ENTRIES, name),
+        _ => ProcEntry::Unlisted,
+    }
+}
 
 /// Linux's limits of the paths given to the system (Linux 6.8: include/uapi/linux/limits.h:12-13,
 /// `NAME_MAX` and `PATH_MAX`): a component of at most 255 bytes, a path of fewer than 4096 (with

@@ -1397,6 +1397,11 @@ fn a_receiver_names_the_system_error_of_an_unopenable_pssm_file() {
         ("..", "Is a directory (os error 21)"),
         ("/root/../x.asn", "Permission denied (os error 13)"),
         ("/dev/full", "No space left on device (os error 28)"),
+        // Line WQA D34 review r1: L1, L2, L3.
+        ("/home/x.asn", "Permission denied (os error 13)"),
+        ("/root/x/", "Permission denied (os error 13)"),
+        ("/dev/fd/3", "No such file or directory (os error 2)"),
+        ("/proc/x.asn", "No such file or directory (os error 2)"),
     ] {
         let mut files = PssmFiles::new(&request(name));
         let error = files.add(Some(b"asn"), None).unwrap_err();

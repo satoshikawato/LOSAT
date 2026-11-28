@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "cpZX",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "cpZX",
+  "number-of-letters": 200,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-28T19:32:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49793,
+  "bytes-to-cache": 307,
+  "files": [
+    "cpZX.pdb",
+    "cpZX.phr",
+    "cpZX.pin",
+    "cpZX.pog",
+    "cpZX.pos",
+    "cpZX.pot",
+    "cpZX.psq",
+    "cpZX.ptf",
+    "cpZX.pto"
+  ]
+}

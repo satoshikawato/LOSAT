@@ -1409,14 +1409,15 @@ pub(super) fn read_shown_residues(
 /// (`app::check_prefetch_environment`): where NCBI cannot convert its value, what NCBI writes
 /// before it stops is written (the first batch's search strategy request to the strategy file,
 /// `CallRequests::end_at`; the outfmt 0 prolog, the batch's reader messages and the posts of that
-/// request to `outputs`), and NCBI's error is returned.
+/// request to `outputs`), and NCBI's error is returned. Otherwise the call's limit (`None` where it
+/// is not set, or where the archive alone is written), the one read of the call (`report_values`).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:732-734
 pub(super) fn refuse_prefetch_environment(
     setup: &ReportSetup<'_>,
     outputs: &mut ReportOutputs<'_>,
     utf8_read: Option<&crate::algorithm::common::database::Utf8Read>,
-) -> Result<()> {
+) -> Result<Option<i32>> {
     let ReportSetup {
         args,
         reports,
@@ -1433,36 +1434,40 @@ pub(super) fn refuse_prefetch_environment(
     // its reports (`app::check_prefetch_environment`; the first call of a run that writes reports
     // meets it: not a chunk's search, which returned earlier in `run_call`). psiblast's iterations fetch ahead
     // before they choose the archive, rpsblast's and blastp's write the archive without it.
+    // The value is read once for the call: its limit decides the batches' prefetch and the reads
+    // of the titles (`report_values`; review 3 of line RG-KB item 9b-2, R3-L2).
     let archive_alone = outputs.only_archive() && args.app != BlastpApp::Psiblast;
-    if let Err(error) = crate::blastinput::app::check_prefetch_environment(archive_alone) {
-        // The prologs of the first report, then the first batch's search strategy request, which
-        // NCBI wrote before its search (`CallRequests`).
-        if reports.x_prolog {
-            write_pairwise_prologs(args, subject_source, subject_label, outputs, false)?;
-        }
-        if let Some(call) = reports.call_requests {
-            call.end_at(call.first_batch_end())?;
-        }
-        if let Some(first_batch_messages) = reports.reader_warnings.first() {
-            outputs.diagnostics.write_all(first_batch_messages)?;
-        }
-        // The posts of the bytes replaced in that request follow the batch's reader messages
-        // (`SaveSearchStrategy` after `GetNextSeqBatch`, blastp_app.cpp:259-262).
-        write_request_posts(args, &mut *outputs.diagnostics)?;
-        // NCBI's warning of a UTF8String header that the batch's Seq-aligns read, before.
-        if let (Some(database), Some(batch)) = (database, query_batches.first()) {
-            if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_in(
-                utf8_read,
-                batch.searched.clone(),
-                database.seqdb(),
-                args.app.ncbi_name(),
-            ) {
-                posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            }
-        }
-        return Err(error);
+    let error = match crate::blastinput::app::prefetch_seqs_limit() {
+        Err(error) if !archive_alone => error,
+        // The archive alone is written without the prefetch, which reads nothing then.
+        limit => return Ok(limit.ok().flatten()),
+    };
+    // The prologs of the first report, then the first batch's search strategy request, which
+    // NCBI wrote before its search (`CallRequests`).
+    if reports.x_prolog {
+        write_pairwise_prologs(args, subject_source, subject_label, outputs, false)?;
     }
-    Ok(())
+    if let Some(call) = reports.call_requests {
+        call.end_at(call.first_batch_end())?;
+    }
+    if let Some(first_batch_messages) = reports.reader_warnings.first() {
+        outputs.diagnostics.write_all(first_batch_messages)?;
+    }
+    // The posts of the bytes replaced in that request follow the batch's reader messages
+    // (`SaveSearchStrategy` after `GetNextSeqBatch`, blastp_app.cpp:259-262).
+    write_request_posts(args, &mut *outputs.diagnostics)?;
+    // NCBI's warning of a UTF8String header that the batch's Seq-aligns read, before.
+    if let (Some(database), Some(batch)) = (database, query_batches.first()) {
+        if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_in(
+            utf8_read,
+            batch.searched.clone(),
+            database.seqdb(),
+            args.app.ncbi_name(),
+        ) {
+            posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+        }
+    }
+    Err(error)
 }
 
 /// The records, the titles and the letters of the subjects that the reports show
@@ -1566,6 +1571,7 @@ pub(super) fn report_values(
     listed_titles: &Option<database::ListedTitles<'_>>,
     shown_subjects: ShownSubjects<'_>,
     hit_lists: &mut [Option<BlastpHitList>],
+    prefetch_limit: Option<i32>,
 ) -> Result<ReportValues> {
     let ReportSetup {
         args,
@@ -1609,10 +1615,10 @@ pub(super) fn report_values(
         _ => None,
     };
     let prefetch_format = prefetch_format(args.app, requested_formats);
-    // The call's `PRE_FETCH_SEQS_LIMIT`, read once: the batches' prefetch below
-    // (`shared::BatchPrefetch::limit`) and the reads of the titles
-    // (`prefetch_reported_subjects`) answer by it (review 3 of line RG-KB item 9b-2, R3-L2).
-    let prefetch_limit = crate::algorithm::common::database::prefetch_seqs_limit();
+    // The call's `PRE_FETCH_SEQS_LIMIT` (`prefetch_limit`, read once by
+    // `refuse_prefetch_environment`): the batches' prefetch below (`shared::BatchPrefetch::limit`)
+    // and the reads of the titles (`prefetch_reported_subjects`) answer by it (review 3 of line
+    // RG-KB item 9b-2, R3-L2).
     // Whether the batches prefetch the subjects of a database, and whether that looks their
     // taxids up (`prefetch_reported_subjects`'s `prefetch_messages`).
     let batches_prefetch = listed_titles.is_some()

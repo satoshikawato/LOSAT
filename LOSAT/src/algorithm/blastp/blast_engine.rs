@@ -10746,7 +10746,7 @@ fn run_call(
     };
     let reads = database::CallTitles::new(database, &query_batches);
     let mut listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
-    report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
+    let prefetch_limit = report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
     resolve_seen_queries(
         listed_titles.as_mut(),
         &hit_lists,
@@ -10780,6 +10780,7 @@ fn run_call(
         &listed_titles,
         shown_subjects,
         &mut hit_lists,
+        prefetch_limit,
     )?;
 
     let report_prep::ReportLabels {

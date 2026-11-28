@@ -1,0 +1,123 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">ps251_290 residues 251-290 of YP_009220601.1
+ TK-TMK"
+                  }
+                }
+              },
+              title "ps251_290 residues 251-290 of YP_009220601.1 TK-TMK"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 40,
+              seq-data ncbieaa "DYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVV"
+            }
+          }
+        }
+      },
+      subject database "../db_search/paja",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -50 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 1636200
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 323023089996218, 10, -15 },
+        k { 138409661875776, 10, -15 },
+        h { 427524054562414, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 1636200",
+      "Effective search space used: 1636200",
+      "Length adjustment: 15"
+    }
+  }
+}

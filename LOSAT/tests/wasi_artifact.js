@@ -95,6 +95,34 @@ function unsignedWasiImports(wasiImport) {
   }
   return imports;
 }
+// WASI's `environ_sizes_get` and `environ_get` over the entries `NAME=value` that `environment()` gives, made at each
+// `environ_sizes_get` (a host whose environment changes while the module runs: LOSAT Web's browser host makes `TZ` when
+// the module reads it, at each run's start, docs/web/abi_v2.md §3, web/packages/losat/src/infra/reactor/wasi.ts);
+// `memory()` is the module's memory. The entries counted by the sizes are the ones that `environ_get` writes.
+function environImports(environment, memory) {
+  let entries = [];
+  return {
+    environ_sizes_get(countPtr, sizePtr) {
+      entries = environment().map((entry) => Buffer.from(`${entry}\0`));
+      const view = new DataView(memory().buffer);
+      view.setUint32(countPtr >>> 0, entries.length, true);
+      view.setUint32(sizePtr >>> 0, entries.reduce((size, entry) => size + entry.length, 0), true);
+      return 0;
+    },
+    environ_get(environPtr, bufferPtr) {
+      const view = new DataView(memory().buffer);
+      const bytes = new Uint8Array(memory().buffer);
+      let at = bufferPtr >>> 0;
+      entries.forEach((entry, index) => {
+        view.setUint32((environPtr >>> 0) + 4 * index, at, true);
+        bytes.set(entry, at);
+        at += entry.length;
+      });
+      return 0;
+    },
+  };
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
 // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
 // The native command's write to standard output or error blocks while the reader drains a
@@ -177,8 +205,8 @@ function endOnAbortTrap(err) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ABORT_WAIT_MS);
 }
 
-module.exports = { inspectArtifact, prepareArtifact, refuseWebAbiInCommand, unsignedWasiImports, blockingStdioWrite, waitForStream, createSharedMemory,
-  endOnAbortTrap };
+module.exports = { inspectArtifact, prepareArtifact, refuseWebAbiInCommand, unsignedWasiImports, environImports, blockingStdioWrite, waitForStream,
+  createSharedMemory, endOnAbortTrap };
 if (require.main === module) {
   try { console.log(JSON.stringify(refuseWebAbiInCommand(inspectArtifact(require("node:fs").readFileSync(process.argv[2]), process.argv[3])), null, 2)); }
   catch (error) { console.error(error); process.exitCode = 1; }

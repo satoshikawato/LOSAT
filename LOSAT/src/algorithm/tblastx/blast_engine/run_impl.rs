@@ -3259,6 +3259,7 @@ fn run_in_pool(
         reads: std::cell::RefCell::default(),
         seen: std::cell::RefCell::default(),
         query_scopes: std::cell::RefCell::default(),
+        prefetch_limit: crate::algorithm::common::database::prefetch_seqs_limit(),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-178
     // A reader at the end of its input reads no batch (its `End()` is true): the report of no
@@ -3665,9 +3666,8 @@ fn run_batch_loop(
     // with the query warnings: the first format is outfmt 0, 5, 6 or 7, or with
     // `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or 12 (`TblastxOutputFormat::prefetches_subjects`;
     // see the batch's prefetch below).
-    // The run's `PRE_FETCH_SEQS_LIMIT`, read once for the batches (review 3 of line RG-KB item
-    // 9b-2, R3-L2).
-    let prefetch_limit = crate::algorithm::common::database::prefetch_seqs_limit();
+    // The run's `PRE_FETCH_SEQS_LIMIT`, read once (`BatchReports::prefetch_limit`).
+    let prefetch_limit = reports.prefetch_limit;
     let prefetches = outputs.formats.first().is_some_and(|format| {
         report::output_format(format.outfmt).prefetches_subjects(prefetch_limit)
     });
@@ -4659,6 +4659,9 @@ struct BatchReports<'a> {
     /// Under `-parse_deflines`, the scopes of the batches' queries, which the loop adds to as it
     /// reads the batches (`run_batch_loop`) and the reports read (`TblastxReportRun::query_scopes`).
     query_scopes: std::cell::RefCell<Option<crate::blastinput::query_batch::QueryScopes>>,
+    /// The run's `PRE_FETCH_SEQS_LIMIT` (`common::database::prefetch_seqs_limit`), read once for
+    /// the batches and their reports (review 3 of line RG-KB item 9b-2, R3-L2; review 4, R4-N1).
+    prefetch_limit: Option<i32>,
 }
 
 impl BatchReports<'_> {
@@ -4731,7 +4734,7 @@ impl BatchReports<'_> {
                 let shown = super::super::database::parsed_shown(
                     &formats,
                     prefetch_format,
-                    crate::algorithm::common::database::prefetch_seqs_limit(),
+                    self.prefetch_limit,
                 );
                 // The queries of each batch (`done.spans`, in the numbering of `hits`), whose
                 // prefetch decides the subjects that only the prefetch reads; the hits' engine

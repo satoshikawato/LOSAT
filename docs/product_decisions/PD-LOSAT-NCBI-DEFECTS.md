@@ -1054,15 +1054,17 @@
   subject whose blob NCBI's cache of 10 released blobs may hold or not (an earlier release of more
   than it keeps, in an order that follows the addresses of NCBI's objects; probe `K/kb/i9b2/probe`
   E1 and E3 under several allocator settings) and a subject whose title posts in the header cache's
-  slot of such a subject; LOSAT's refusal, not rule 3, of what NCBI determines and LOSAT does not
+  slot of such a subject, and where NCBI faults: a query batch whose prefetch's loads look a taxid
+  other than the last entry's up where `taxdb.btd` is mapped as a null pointer (NCBI ends on a
+  segmentation fault, exit status 139, after the batch's `Error: (803.7)` posts; review 4); LOSAT's
+  refusal, not rule 3, of what NCBI determines and LOSAT does not
   model yet (line RG-KB item 9b-3, review 1 of 2026-11-28): a prefetch that may be off, a database
   with parsed Seq-ids, `OBJMGR_*` settings, a query batch whose prefetch's loads write a text of the
   taxonomy database (in the load that looks a taxid up, after its header read and before its decode:
   the texts of opening once per run, at its first such load, the offset error at a lookup of the
   last entry's taxid that the volume's cache does not hold, or any lookup of it in a volume where
-  another taxid can take its cache slot, a lookup of another taxid where `taxdb.btd` is mapped as a
-  null pointer, where NCBI faults, a file that throws; a later batch whose loads write none, as in
-  rows `db.tchar.*.h1.later.6t`, `h1.off.6t` and `h1.null.6t`, is written; reviews 2 and 3), a query
+  another taxid can take its cache slot, a file that throws; a later batch whose loads write none,
+  as in rows `db.tchar.*.h1.later.6t`, `h1.off.6t` and `h1.null.6t`, is written; reviews 2 and 3), a query
   batch whose reads also give NCBI's warning of a UTF8String header, and searches restricted by a
   list or an OID mask; line RG-KB item 9b-2, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.126 at the merge of dev of 2026-11-28 that
@@ -1496,7 +1498,7 @@ Accepted by the maintainer on 2026-11-12 (line PS `DECISIONS.md` 36).
    extreme `-searchsp` and `-evalue` on a small input NCBI does write rows: 320 for a
    6,077-codon sequence against itself with `-searchsp 9223372036854775807 -evalue 1e-300`.
    A valid result exists and can be checked: LOSAT keeps the finite cutoff of the mathematically
-   equal `ln K + ln searchsp - ln E` (`algorithm::tblastx::ncbi_cutoffs`), and on a nearby pair
+   equal `ln K + ln searchsp - ln E` (`stats::cutoffs`), and on a nearby pair
    whose quotient stays finite (the same 1.2 Mb query against a 2 Mb subject made of 30 kb of
    the Sakai genome inside N) NCBI and LOSAT write the same 457 rows byte for byte. On the
    genome pair above LOSAT writes 88,562 rows in 2 minutes, and on the small input 262 rows. The
@@ -2886,9 +2888,27 @@ file would differ, and NCBI's programs still could not open the database).
   `hard_ranges[n]` after the last chunk (version 1.83; version 1.82 and before named `[1]`; for a
   masked subject `n` is the number of hard ranges, a read 4 bytes past the array of
   `CSeqDB`; the overlap it chooses only merges HSPs that intersect across a chunk boundary, and
-  hard chunks are disjoint), the out-of-range `double` to `Int4`
-  conversion (INT_MIN), and the catch in `BlastSetupPreliminarySearchEx` that never
+  hard chunks are disjoint), and the catch in `BlastSetupPreliminarySearchEx` that never
   matches.
+- The out-of-range `double` to `Int4` conversion (`INT_MIN`) of BLASTN's `BLAST_Cutoffs`
+  (`BlastKarlinEtoS_simple`, `blast_stat.c:4041-4064`), listed until 2026-11-28 among the defects
+  without an effect, does change the output. The quotient `K * searchsp / E` is past the range of
+  a double once `K * searchsp` passes about 1.8e11 with an `-evalue` of 1e-297 or less (E is
+  raised to `kSmallFloat`), or a larger search space with a larger `-evalue`. An ordinary genome
+  pair with only `-evalue 1e-300` reaches it (MG1655 x Sakai, `LOSAT/tests/fasta/`). NCBI's
+  x86-64 build converts it to `INT_MIN`, the hit-saving cutoff stays 1 and so does the word
+  cutoff, and every seed is extended. On that pair (one thread) NCBI BLAST+ 2.17.0 and LOSAT
+  write the same 476 rows with `-task blastn` (NCBI 196 s and 1.19 GiB, LOSAT 147 s and
+  1.39 GiB) and 455 rows with megablast. The finite value of exception 8 gives as many rows, 1
+  and 6 of them another alignment of the same score, in 10 s and 61 MiB with `-task blastn`;
+  NCBI's own output with `-evalue 1e-290`, a finite quotient, holds those rows byte for byte. On
+  a constructed input (rows `db.etos.bn.int4min.ss.e300`: `-searchsp 9223372036854775807
+  -evalue 1e-300`) NCBI writes an alignment that the finite value would not find (one row
+  against none; with `-evalue 1e-200` the quotient is finite and NCBI writes none,
+  `db.etos.bn.finite.ss.e200`). LOSAT reproduces it (`stats::cutoffs::CutoffConversion::BLASTN`),
+  as decision D4 reproduces the conversions of `-threshold` and the X-drops. Whether it stays so
+  is the maintainer's open question Q-ETOS8 (line RG item X-etos-owner), with the other programs'
+  conversion of the same quotient.
 - `losat windowmasker -mk_counts`, `-convert` and `-checkdup` (version 1.72, 2026-11-22, line NP
   item M5b, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): NCBI's defined
   but surprising results are written byte for byte (fixture rows of `LOSAT/tests/windowmasker`):
@@ -5408,7 +5428,9 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   `psiblast`, `rpsblast` and `rpstblastn`; more than one format unless each writes the Seq-aligns
   as they are without the prefetch; with `-outfmt` 0 to 7, 10, 13 to 18 and 20, or 8, 9 and 12
   with `PRE_FETCH_SEQS_LIMIT=2147483647`: rule 3, a subject whose blob NCBI's data source may hold
-  or not from an earlier batch, or whose header cache slot such a subject takes; not modelled yet
+  or not from an earlier batch, or whose header cache slot such a subject takes, and a query batch
+  whose prefetch's loads look a taxid up where NCBI faults (`taxdb.btd` mapped as a null pointer,
+  a taxid other than the last entry's); not modelled yet
   (line RG-KB item 9b-3), a prefetch that may be off, a database with parsed Seq-ids, `OBJMGR_*`
   settings, a query batch whose prefetch's loads write a text of the taxonomy database, a search restricted
   by a seqid, GI or taxid list, an alias

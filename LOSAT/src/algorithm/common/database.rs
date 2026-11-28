@@ -5678,8 +5678,8 @@ pub(crate) struct TaxdbRun {
     texts: std::sync::OnceLock<PrefetchTexts>,
     /// The volumes where NCBI's cache can make the fetches write the offset error more than once,
     /// with the refusal of the reads of such a run as a reader's refusal
-    /// ([`TaxdbRun::cache_collision`]).
-    collision: std::sync::OnceLock<Option<CacheCollision>>,
+    /// ([`TaxdbRun::cache_collision`]); boxed, as only a damaged taxonomy database has them.
+    collision: std::sync::OnceLock<Option<Box<CacheCollision>>>,
     /// The texts of opening the database when the rows of a tabular report opened it, kept for
     /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
     rows_open: std::sync::OnceLock<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
@@ -5696,8 +5696,9 @@ pub(crate) struct TaxdbRun {
     /// ([`TaxdbRun::load_texts`], `report::query_warnings::LoadTexts`).
     load_texts: std::sync::Arc<crate::report::query_warnings::LoadTexts>,
     /// What the prefetch loads of the run's batches before looked up, as the posts of their titles
-    /// meet them ([`TaxdbRun::title_loads_write_texts`]).
-    title_lookups: std::sync::Mutex<TitleLookups>,
+    /// meet them ([`TaxdbRun::title_loads_write_texts`]); made at the first note of a run whose
+    /// loads can write a text (`None`: nothing looked up yet).
+    title_lookups: std::sync::Mutex<Option<Box<TitleLookups>>>,
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:126
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:128
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:100
@@ -7068,7 +7069,7 @@ impl TaxdbRun {
         if let Some(rows_open) = self.rows_open.get() {
             rows_open.lock().expect("the rows' texts").clear();
         }
-        *self.title_lookups.lock().expect("the title lookups") = TitleLookups::default();
+        *self.title_lookups.lock().expect("the title lookups") = None;
         self.load_texts.clear();
     }
 
@@ -7306,7 +7307,9 @@ impl TaxdbRun {
         }
         let texts = self.prefetch_texts(db);
         let throws = self.load_throws(db);
-        let before = self.title_lookups.lock().expect("the title lookups");
+        let lookups = self.title_lookups.lock().expect("the title lookups");
+        let before = lookups.as_deref();
+        let opened = before.is_some_and(|before| before.opened);
         loads.into_iter().any(|ordinal| {
             let taxids = db.defline_taxids(ordinal).ok();
             if !taxids
@@ -7323,12 +7326,13 @@ impl TaxdbRun {
                 });
             throws
                 || faults
-                || (texts.opening && !before.opened)
+                || (texts.opening && !opened)
                 || texts.offset_error_taxid.is_some_and(|last| {
                     taxids.as_ref().is_none_or(|taxids| taxids.contains(&last))
                         && db.volume_index(ordinal).map_or(true, |volume| {
                             self.collision_volume(db, volume)
-                                || !before.offset_volumes.contains(&volume)
+                                || !before
+                                    .is_some_and(|before| before.offset_volumes.contains(&volume))
                         })
                 })
         })
@@ -7343,7 +7347,8 @@ impl TaxdbRun {
             return;
         }
         let last = self.prefetch_texts(db).offset_error_taxid;
-        let mut seen = self.title_lookups.lock().expect("the title lookups");
+        let mut lookups = self.title_lookups.lock().expect("the title lookups");
+        let seen = lookups.get_or_insert_with(Box::default);
         for ordinal in ordinals {
             let Ok(taxids) = db.defline_taxids(ordinal) else {
                 continue;
@@ -7433,12 +7438,12 @@ impl TaxdbRun {
                         crate::seqdb::taxdb::MSG_OFFSET_ERROR
                     ),
                 );
-                Some(CacheCollision {
+                Some(Box::new(CacheCollision {
                     refusal,
                     volumes: volumes.into_iter().map(|(volume, _)| volume).collect(),
-                })
+                }))
             })
-            .as_ref()
+            .as_deref()
     }
 
     /// Whether a fetch of the run may be refused because of NCBI's taxonomy cache: a volume holds
@@ -10453,15 +10458,22 @@ fn unknown_utf8_load(
 /// NCBI's warning where the prefetch of a query batch fails ([`batch_prefetch`], and BLASTX's and
 /// RPSTBLASTN's Seq-align of a subject row whose range it cannot take,
 /// `blastx::empty_rows::prefetch_reads_unranged_row`): the one producer of its text.
-pub(crate) fn prefetch_warning(app: &str) -> Vec<u8> {
-    // A post of NCBI's main thread (`ncbi_exception::post_line`: the header alone after the run's diagnostic
-    // stream failed).
+/// NCBI's `Warning: [<app>] Error pre-fetching sequence data` (no prefix when `app` is `None`,
+/// as in blast_formatter, which sets no diagnostic prefix).
+pub(crate) fn prefetch_warning_of(app: Option<&str>) -> Vec<u8> {
+    let prefix = app.map(str::to_ascii_lowercase);
     crate::ncbi_exception::post_line(
         crate::ncbi_exception::Severity::Warning,
         None,
-        Some(&app.to_ascii_lowercase()),
+        prefix.as_deref(),
         b"Error pre-fetching sequence data",
     )
+}
+
+pub(crate) fn prefetch_warning(app: &str) -> Vec<u8> {
+    // A post of NCBI's main thread (`ncbi_exception::post_line`: the header alone after the run's diagnostic
+    // stream failed).
+    prefetch_warning_of(Some(app))
 }
 
 /// Whether one of `subjects` has a lookup that fails on a file with NCBI's exception

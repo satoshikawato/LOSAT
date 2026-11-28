@@ -4760,3 +4760,53 @@ fn one_by_one_query_reads_stops_at_throw_and_collapses_joined_copies() {
         vec![0, 1, 2, 3]
     );
 }
+
+// Review 4 of line RG-KB item 9b-2, R4-N2: NCBI's taxonomy cache is a volume's (`m_TaxCache`, cited
+// at `SlotHolds::walk`), so the model of the prefetch loads' lookups
+// (`TaxdbRun::title_loads_write_texts`) trusts the slot of the offset error's taxid that a load
+// before filled only in a volume where no other taxid of the volume takes that slot, and it finds
+// every such volume (`taxonomy_cache_collisions`), not only the first.
+#[test]
+fn a_volume_where_another_taxid_takes_the_offset_taxids_slot_never_keeps_it() {
+    // The volumes tc_h3 (99990 and 100246, one slot), tc_h1 (99990: a clean title, then one that
+    // posts) and a copy of tc_h3, with the taxonomy database whose last entry, 99990, begins past
+    // the end of taxdb.btd (its lookup writes the offset error).
+    let dir = TempDir::unique("collision-volumes");
+    let tchar = root().join("db_search/tchar");
+    for (from, to) in [
+        ("tc_h3_p", "tc_h3_p"),
+        ("tc_h1_p", "tc_h1_p"),
+        ("tc_h3_p", "tc_h3b_p"),
+    ] {
+        for extension in ["phr", "pin", "psq"] {
+            std::fs::copy(
+                tchar.join(format!("{from}.{extension}")),
+                dir.join(format!("{to}.{extension}")),
+            )
+            .unwrap();
+        }
+    }
+    std::fs::write(
+        dir.join("tc_h313_p.pal"),
+        "TITLE tc h3 h1 h3b alias\nDBLIST tc_h3_p tc_h1_p tc_h3b_p\n",
+    )
+    .unwrap();
+    let cwd = empty_cwd("collision-volumes");
+    let taxdb = variant("offset_last_past_end");
+    let search = SearchPath::new(&cwd, Some(taxdb.as_os_str()), None);
+    let path = dir.join("tc_h313_p");
+    let db = SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search).unwrap();
+    assert_eq!(db.num_seqs(), 6);
+    let run = TaxdbRun::default();
+    assert!(run.collision_volume(&db, 0));
+    assert!(!run.collision_volume(&db, 1));
+    assert!(run.collision_volume(&db, 2));
+    // No load looked 99990 up in tc_h1 yet: the load of its title that posts writes the error.
+    assert!(run.title_loads_write_texts(&db, [3]));
+    // A batch's prefetch loads every subject, each volume's 99990 among them.
+    run.note_title_loads(&db, 0..6);
+    // tc_h1's slot holds 99990 from then on; in either copy of tc_h3, 100246 takes it.
+    assert!(!run.title_loads_write_texts(&db, [2, 3]));
+    assert!(run.title_loads_write_texts(&db, [0]));
+    assert!(run.title_loads_write_texts(&db, [4]));
+}

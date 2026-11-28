@@ -1041,7 +1041,7 @@ fn tabular_hsp<'r>(
         q_end: hsp.q_end as i64,
         s_start: hsp.s_start as i64,
         s_end: hsp.s_end as i64,
-        evalue: hsp.e_value,
+        evalue: crate::report::serial::seqalign::seqalign_evalue_read(hsp.e_value),
         bit_score: hsp.bit_score,
         score: hsp.raw_score,
         length: hsp.length,

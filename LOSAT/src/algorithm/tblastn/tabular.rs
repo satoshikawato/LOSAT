@@ -622,7 +622,7 @@ pub(super) fn write_tblastn_tabular(
                     s_start: i64::from(s_start),
                     s_end: i64::from(s_end),
                     // The e-value of the default row: a linked set's sum e-value (`sum_e`).
-                    evalue: linked.evalue,
+                    evalue: crate::report::serial::seqalign::seqalign_evalue_read(linked.evalue),
                     bit_score: payload.bit_score,
                     score: hsp.score,
                     length: payload.align_length,

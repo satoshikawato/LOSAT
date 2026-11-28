@@ -279,6 +279,21 @@ impl Diag<'_> {
         let _ = stderr.flush();
     }
 
+    /// The C++ runtime's text before `std::terminate` aborts NCBI's program
+    /// (`report::ostream::TERMINATE_TEXT`): written to the standard error stream itself (C's
+    /// `stderr`), not to the target of `-logfile`, without `cerr`'s tie, also after a failed write
+    /// of `cerr` (NCBI BLAST+ 2.17.0's blast_formatter with `-logfile` and a failed tabular report:
+    /// the text on the standard error, the posts in the file; probes of line RG item T8b merge 3).
+    /// Nothing after a closed pipe ended the run (`closed`).
+    pub(crate) fn runtime_text(&mut self, text: &[u8]) {
+        if self.closed {
+            return;
+        }
+        let mut stderr = self.noted();
+        let _ = stderr.write_all(text);
+        let _ = stderr.flush();
+    }
+
     /// LOSAT's refusal: a line on the standard error stream itself, not on the target of
     /// `-logfile` (NCBI has no text for it, and `-logfile /dev/null` must not hide it: as the
     /// searches' refusals, line RG DECISIONS 32), exit status 1.

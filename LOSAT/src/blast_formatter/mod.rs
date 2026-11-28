@@ -273,8 +273,14 @@ fn rid(args: &Args, diag: &mut Diag) -> i32 {
 /// `CATCH_ALL` of `Run` for `error`: the text of a `NativeError` (made by the shared producers:
 /// `cli::command_line_argument_error`, `blastinput::app::options_error`, `engine_error`) posted
 /// where the diagnostics go (`-logfile`), and its exit status; any other error is LOSAT's refusal.
+/// A negative status is `std::terminate` (`report::ostream::ReportStream::finish`), whose text the
+/// C++ runtime writes to the standard error itself (`Diag::runtime_text`).
 fn catch_all(diag: &mut Diag, error: anyhow::Error) -> i32 {
     match error.downcast_ref::<NativeError>() {
+        Some(native) if native.exit < 0 => {
+            diag.runtime_text(&native.message);
+            native.exit
+        }
         Some(native) => {
             diag.write_text(&native.message);
             native.exit

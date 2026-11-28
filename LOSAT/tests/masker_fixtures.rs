@@ -1050,7 +1050,8 @@ fn blast_formatter_standard_output_failure_aborts() {
 /// so the failure ends the run as on a file, where a good one's tie aborts it
 /// (`blast_formatter_standard_output_failure_aborts`). In the tabular formats every failed write
 /// aborts (`std::terminate`: a `CBlastTabularInfo`'s destructor flushes the failed stream again),
-/// `-out` and a failed standard error too. Needs `/dev/full`, `sh` and `prlimit`.
+/// `-out` and a failed standard error too; with `-logfile` the runtime's text goes to the standard
+/// error, the posts to the file. Needs `/dev/full`, `sh` and `prlimit`.
 #[cfg(target_os = "linux")]
 #[test]
 fn blast_formatter_failed_streams_give_ncbis_results() {
@@ -1159,7 +1160,7 @@ fn blast_formatter_failed_streams_give_ncbis_results() {
         fs::remove_dir_all(&out).unwrap();
         checked += 1;
     }
-    assert_eq!(checked, 11);
+    assert_eq!(checked, 12);
 }
 
 // `run_dustmasker`, `run_segmasker`, `run_windowmasker`, `run_convert2blastmask` and

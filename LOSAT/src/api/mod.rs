@@ -190,7 +190,7 @@ mod run;
 mod search;
 pub(crate) mod start;
 pub(crate) mod strategy;
-mod tools;
+pub(crate) mod tools;
 mod view;
 
 pub use crate::record::FastaRecord;

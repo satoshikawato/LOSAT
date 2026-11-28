@@ -125,6 +125,10 @@ As of dev b2217b2b9 with line PS's PS12c (2026-11-23): 241 IDs cited in the tree
 | `NP SM-2` | Stage SM-2: tblastx -soft_masking true/false, matching NCBI BLAST+ 2.17.0 including sum statistics. | done | #499 | [LOSAT/tests/outfmt0_manifest.tsv](../../LOSAT/tests/outfmt0_manifest.tsv) |
 | `NP SM-3` | Stage SM-3: blastn -soft_masking, with false writing DUST, lower-case and WindowMasker masks as N into the searched query. | done | #656 | changelog entry `feat-blastn-soft-masking` |
 | `NP WW0` | Stage WW0: bring threaded Wasm shared memory of 65,535 pages (earlier PRs #136, #137) from the Web branches into dev. | done | #488 | [docs/evidence/wasm_memory_max_20261012/README.md](../../docs/evidence/wasm_memory_max_20261012/README.md) |
+| `NP WW1` | Stage WW1: BLASTN `-window_masker_db` in LOSAT Web: the counts file registered once by its argv name through ABI v2's named input files (`file_begin`, `file_chunk`, `file_end`, `file_release`). | done | #1029 | [docs/losat_web_gui_plan.md](../losat_web_gui_plan.md), DW-53 |
+| `NP WW2` | Stage WW2: BLASTN `-window_masker_taxid` in LOSAT Web: a taxonomy ID's counts downloaded from NCBI when the user asks, kept in the browser and given to the WW1 path. | done | #1040 | [docs/losat_web_gui_plan.md](../losat_web_gui_plan.md), DW-54 |
+| `NP WW3a` | Stage WW3a: `windowmasker` as a tool of LOSAT Web's engine and npm package (`losat_web2_tool` and `losat_web2_validate`, ABI v2 version 13): the command line's counts and masks, byte for byte, streamed to the page. | done | #1537 | [docs/web/abi_v2.md](../../docs/web/abi_v2.md), §4 and “Version 13” |
+| `NP WW4b` | Stage WW4b: `makeblastdb` in LOSAT Web with every option. WW4b1: the engine and the npm package (ABI v2 version 17: a tool run's writable directory, the user's time zone in `TZ`, files read in order read ahead); WW4b2: the form. | in progress | none | [docs/web/abi_v2.md](../../docs/web/abi_v2.md), §3, §4 and “Version 17” |
 
 ### OF: output formats (`-outfmt`)
 

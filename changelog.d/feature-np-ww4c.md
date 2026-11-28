@@ -24,3 +24,11 @@
   as a note written as given, where they were graded by their literal text, so most typed values
   read "Not yet supported". New NCBI BLAST+ 2.17.0 fixtures (91 runs) cover every combination of the
   Masking tab's choices that NCBI completes.
+- LOSAT Web's tool tabs write a text that the tool writes or stores as given as it is typed, spaces
+  at its ends included, where they were cut: makeblastdb's `-title`, `-mask_id` and `-mask_desc`,
+  convert2blastmask's `-masking_algorithm` and `-masking_options`, and windowmasker's `-meta`. An
+  empty value is given in Additional options (`-title ''`), as on the command line; an empty box
+  writes no option. The other text boxes (names, numbers, keywords) and the search forms are as before.
+- LOSAT Web: `-help-full` in Additional options prints the tool's help in every tool tab
+  (windowmasker, Format Archive, makeblastdb and the Masking tools), as `-help` does and as the
+  command line does, where only makeblastdb's tab read it as a help run.

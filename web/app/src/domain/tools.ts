@@ -136,15 +136,15 @@ export const TOOL_FILE_STRING_FLAGS: ReadonlySet<string> = new Set(['-ustat', '-
 /** Options whose value is a comma-separated list of files of the run directory (makeblastdb's `-mask_data`). */
 export const TOOL_FILE_LIST_FLAGS: ReadonlySet<string> = new Set(['-mask_data']);
 
-/** Help and version flags, entered via Additional options. */
-export const WINDOWMASKER_HELP_FLAGS: ReadonlySet<string> = new Set(['-h', '-help', '-xmlhelp']);
-
 /**
- * The tools whose argument reader takes `-help-full` (makeblastdb's, for its hidden `-randomize`, which `-help` does not
- * list). The one list of them: `toolPrintsKind` reads it, and every reader of a tool run's help (the drafts, FakeEngine)
- * asks `toolPrintsKind`; a tool whose reader takes `-help-full` is added here.
+ * The help flags of every tool of LOSAT Web (`-xmlhelp` prints the XML, the others the usage). `-help-full` is one of
+ * them for every tool, as NCBI BLAST+ 2.17.0 and LOSAT print each tool's help for it with exit status 0, makeblastdb's
+ * listing its hidden `-randomize`, which `-help` does not list (review of WW4c, F4, probed 2026-11-28). Additional
+ * options take them and the version flags. The one list of them: `toolPrintsKind` reads it, and every reader of a tool
+ * run's help (the drafts, FakeEngine) asks `toolPrintsKind`.
  */
-const HELP_FULL_TOOLS: ReadonlySet<string> = new Set(['makeblastdb']);
+export const WINDOWMASKER_HELP_FLAGS: ReadonlySet<string> = new Set(['-h', '-help', '-help-full', '-xmlhelp']);
+
 export const WINDOWMASKER_VERSION_FLAGS: ReadonlySet<string> = new Set(['-version', '-version-full', '-version-full-xml', '-version-full-json']);
 
 /** Options placed in the Archive and Output blocks of Format Archive rather than "Formatting options". */
@@ -514,11 +514,10 @@ export function toolPrintsKind(argv: readonly string[]): PrintedKind | null {
 
 /** The first help flag of a tool's argv (`-xmlhelp` prints the XML, the others the usage); undefined when there is none. */
 export function toolHelpFlag(argv: readonly string[]): string | undefined {
-  const helpFull = HELP_FULL_TOOLS.has(argv[0] ?? '');
   return argv
     .slice(1)
     .map((word) => word.split('=', 1)[0]!)
-    .find((flag) => WINDOWMASKER_HELP_FLAGS.has(flag) || (helpFull && flag === '-help-full'));
+    .find((flag) => WINDOWMASKER_HELP_FLAGS.has(flag));
 }
 
 /** Download file name for a tool run output or file (`runFileName` pattern). */

@@ -33,6 +33,7 @@ import {
   maskingRequiredParameters,
   maskingToolSummary,
   toolLabel,
+  toolPrintsKind,
   toolRunTitle,
   toolStageLabel,
   toToolParameterField,
@@ -500,6 +501,28 @@ describe('MaskingDraft', () => {
     draft.setStage('convert');
     draft.setConvertFile(new File(['counts'], 'u.ascii'));
     await vi.waitFor(() => expect(names()).toEqual(['u.ascii']));
+  });
+
+  it('runs -help-full as a help run of every tool: no input, no -outfmt default, no mask data (review of WW4c, F4)', async () => {
+    for (const tool of ['windowmasker', 'blast_formatter', 'makeblastdb', 'dustmasker', 'segmasker', 'convert2blastmask']) {
+      expect(toolPrintsKind([tool, '-help-full']), tool).toBe('help');
+      const printed = await new FakeEngine().runTool([tool, '-help-full']);
+      expect(printed.status, tool).toBe(0);
+      expect(await printed.stdout.text(), tool).toMatch(/^USAGE\n/);
+    }
+    const { draft, queued } = setup();
+    draft.ensureLoaded();
+    await described(draft, 'dustmasker');
+    draft.setTool('convert2blastmask');
+    await described(draft, 'convert2blastmask');
+    draft.setFastaPaste('>q\nACGTacgt\n');
+    draft.setExtra('-help-full');
+    expect(draft.previewArgv()).toEqual(['convert2blastmask', '-help-full']);
+    await settled(draft);
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued[0]).toMatchObject({ tool: 'convert2blastmask', argv: ['convert2blastmask', '-help-full'], prints: 'help' });
+    expect(queued[0]!.outfmtDefault).toBeUndefined();
+    expect(maskDataName({ ...queued[0]!, number: 1 }, { key: 'stdout', name: 'stdout' })).toBeUndefined();
   });
 
   it('holds its inflated session files apart from another draft that shares the holder tracker', async () => {

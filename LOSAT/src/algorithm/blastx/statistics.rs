@@ -92,15 +92,27 @@ pub fn evaluate_gapped(
     };
     Ok(LinkedHspList { hsps, best_evalue })
 }
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:868,931-941
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1015-1017
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
+/// NCBI's `params->prelim_evalue`, the e-value of the preliminary reap (`reap_preliminary`):
+/// `-evalue`, stretched 5 times with the Gumbel block (`ResolvedOptions::has_gumbel_block`) and a
+/// composition-based statistics above 1, except where NCBI computes the statistics of each subject
+/// (`per_subject`: `-subject`, a database length of 0), whose update of the hit-saving parameters
+/// passes a composition of 0 before the subject's search (line RG item X-evalue-nan; LOSAT
+/// stretched it there too).
+pub fn prelim_evalue(options: &ResolvedOptions, per_subject: bool) -> f64 {
+    if options.composition > 1 && options.has_gumbel_block() && !per_subject {
+        5.0 * options.evalue
+    } else {
+        options.evalue
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-669
-pub fn reap_preliminary(list: &mut LinkedHspList, options: &ResolvedOptions) -> Vec<LinkedHsp> {
-    // `params->prelim_evalue` is `evalue` without a Gumbel block (blast_parameters.c:931-935).
-    let cutoff = options.evalue
-        * if options.composition > 1 && !options.old_fsc {
-            5.0
-        } else {
-            1.0
-        };
+/// NCBI's preliminary reap of the HSPs whose e-value is greater than `cutoff`
+/// (`prelim_evalue`); an HSP of NaN, or of any e-value with a cutoff of NaN, stays.
+pub fn reap_preliminary(list: &mut LinkedHspList, cutoff: f64) -> Vec<LinkedHsp> {
     let mut deleted = Vec::new();
     list.hsps.retain(|h| {
         if h.evalue > cutoff {

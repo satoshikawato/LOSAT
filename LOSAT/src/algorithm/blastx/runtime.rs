@@ -14,7 +14,8 @@ use super::{
     search::{search_core, PreliminarySink},
     split::QueryChunk,
     statistics::{
-        evaluate_gapped, identity_and_positive, normalize_scores, reap_final, reap_preliminary,
+        evaluate_gapped, identity_and_positive, normalize_scores, prelim_evalue, reap_final,
+        reap_preliminary,
     },
     subjects::Subjects,
 };
@@ -593,14 +594,9 @@ impl Runtime<'_> {
                 self.ungapped_link_state,
             )?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-676
-            let reap_cutoff = self.options.evalue
-                * if self.options.composition > 1 && !self.options.old_fsc {
-                    5.0
-                } else {
-                    1.0
-                };
+            let reap_cutoff = prelim_evalue(self.options, batch.subject_option_spaces.is_some());
             self.observer.reap("PRE_REAP_IN", oid, &linked, reap_cutoff);
-            reap_preliminary(&mut linked, self.options);
+            reap_preliminary(&mut linked, reap_cutoff);
             self.observer
                 .reap("PRE_REAP_OUT", oid, &linked, reap_cutoff);
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2708-2736
@@ -673,14 +669,9 @@ impl Runtime<'_> {
                 self.ungapped_link_state,
             )?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-676
-            let reap_cutoff = self.options.evalue
-                * if self.options.composition > 1 {
-                    5.0
-                } else {
-                    1.0
-                };
+            let reap_cutoff = prelim_evalue(self.options, batch.subject_option_spaces.is_some());
             self.observer.reap("PRE_REAP_IN", oid, &linked, reap_cutoff);
-            reap_preliminary(&mut linked, self.options);
+            reap_preliminary(&mut linked, reap_cutoff);
             self.observer
                 .reap("PRE_REAP_OUT", oid, &linked, reap_cutoff);
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1521-1538
@@ -732,14 +723,9 @@ impl Runtime<'_> {
             1.0,
         )?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:643-676
-        let reap_cutoff = self.options.evalue
-            * if self.options.composition > 1 {
-                5.0
-            } else {
-                1.0
-            };
+        let reap_cutoff = prelim_evalue(self.options, batch.subject_option_spaces.is_some());
         self.observer.reap("PRE_REAP_IN", oid, &linked, reap_cutoff);
-        reap_preliminary(&mut linked, self.options);
+        reap_preliminary(&mut linked, reap_cutoff);
         self.observer
             .reap("PRE_REAP_OUT", oid, &linked, reap_cutoff);
         let hsps = linked

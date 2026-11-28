@@ -2191,9 +2191,10 @@ fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
 }
 
 // Line RG item X-evalue-nan: BLASTX and RPSTBLASTN search an `-evalue` of NaN, which NCBI's option
-// check lets pass (they refused it), and an infinite one without the composition-based redo; with
-// BLASTX's redo (its default mode 2) an infinite one is refused as in blastp (decision D12,
-// `protein_options_check::check_infinite_evalue`); RPSTBLASTN's redo takes it. `-inf` stops at NCBI's check.
+// check lets pass (they refused it), and an infinite one or DBL_MAX without the composition-based
+// redo; with BLASTX's redo (its default mode 2) both are refused as in blastp (decision D12,
+// `protein_options_check::check_evalue_limit`; NCBI's blastx crashes on some inputs, DBL_MAX ran
+// before); RPSTBLASTN's redo takes them. `-inf` stops at NCBI's check.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518-1523
 #[test]
 fn blastx_and_rpstblastn_search_a_nan_evalue_and_an_infinite_one_without_the_redo() {
@@ -2219,6 +2220,13 @@ fn blastx_and_rpstblastn_search_a_nan_evalue_and_an_infinite_one_without_the_red
         &["-evalue", "+nan(1)", "-use_sw_tback"],
         &["-evalue", "+inf", "-comp_based_stats", "0"],
         &["-evalue", "1e999", "-ungapped", "-comp_based_stats", "0"],
+        &[
+            "-evalue",
+            "1.7976931348623157e308",
+            "-comp_based_stats",
+            "0",
+        ],
+        &["-evalue", "1.7976931348623156e308"],
     ] {
         blastx(words).unwrap_or_else(|e| panic!("{words:?}: {e:#}"));
     }
@@ -2233,14 +2241,22 @@ fn blastx_and_rpstblastn_search_a_nan_evalue_and_an_infinite_one_without_the_red
     ] {
         rpstblastn(words).unwrap_or_else(|e| panic!("{words:?}: {e:#}"));
     }
-    for (words, program) in [
-        (&["-evalue", "+inf"][..], "BLASTX"),
-        (&["-evalue", "1e999", "-comp_based_stats", "3"], "BLASTX"),
+    for (words, value) in [
+        (&["-evalue", "+inf"][..], "an infinite -evalue (inf)"),
+        (
+            &["-evalue", "1e999", "-comp_based_stats", "3"],
+            "an infinite -evalue (inf)",
+        ),
+        (
+            &["-evalue", "1.7976931348623157e308", "-sum_stats", "false"],
+            "an -evalue of DBL_MAX (",
+        ),
     ] {
         let error = format!("{:#}", blastx(words).unwrap_err());
         assert!(
-            error.contains("an infinite -evalue (inf) with composition-based statistics")
-                && error.contains(&format!("not supported by LOSAT's {program}")),
+            error.contains(value)
+                && error.contains("with composition-based statistics")
+                && error.contains("not supported by LOSAT's BLASTX"),
             "{words:?}: {error}"
         );
     }

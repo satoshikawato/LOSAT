@@ -85,6 +85,76 @@ fn blastp_web_pair_keeps_v1_error_order_and_fields() {
     assert!(v1_blastp::run_web_pair(args("6 qseqid sseqid std", &[]), fasta, fasta).is_ok());
 }
 
+// Line RG item X-evalue-nan: ABI v1's BLASTP and TBLASTX read `-evalue` with NCBI's CArg_Double
+// (`web_v1_argv::ncbi_double`), as the CLI and v1's BLASTN, BLASTX and TBLASTN: a signed infinity,
+// NaN with its sign and `n-char-sequence` and `1e999`, not a bare `inf` or `nan`, which NCBI's
+// reader refuses (v1 read them with Rust's `str::parse`). BLASTP then refuses an infinite value with
+// its composition-based redo (decision D12) and searches it without; TBLASTX searches any.
+#[test]
+fn blastp_and_tblastx_web_pairs_read_evalue_as_ncbi() {
+    let blastp = |extra: &[&str]| {
+        let mut words = vec!["-outfmt", "6"];
+        words.extend_from_slice(extra);
+        parse_blastp_args(&words, PathBuf::new(), PathBuf::new(), PathBuf::new())
+    };
+    let tblastx = |extra: &[&str]| {
+        let mut words = vec!["-outfmt", "6"];
+        words.extend_from_slice(extra);
+        parse_tblastx_args(&words, PathBuf::new(), PathBuf::new(), PathBuf::new())
+    };
+    for value in ["inf", "nan", "NaN", "infinity", " 1"] {
+        let joined = format!("-evalue={value}");
+        for words in [&["-evalue", value][..], &[joined.as_str()]] {
+            let error = blastp(words).unwrap_err();
+            assert!(error.contains("parse error: expected a number"), "{error}");
+            let error = tblastx(words).unwrap_err();
+            assert!(error.contains("parse error: expected a number"), "{error}");
+        }
+    }
+    for (value, bits) in [
+        ("+inf", f64::INFINITY.to_bits()),
+        ("1e999", f64::INFINITY.to_bits()),
+        ("1e-5", 1e-5f64.to_bits()),
+    ] {
+        assert_eq!(
+            blastp(&["-evalue", value])
+                .unwrap()
+                .evalue
+                .map(f64::to_bits),
+            Some(bits)
+        );
+        assert_eq!(tblastx(&["-evalue", value]).unwrap().evalue.to_bits(), bits);
+    }
+    for value in ["-nan", "+nan(1)"] {
+        assert!(blastp(&["-evalue", value])
+            .unwrap()
+            .evalue
+            .unwrap()
+            .is_nan());
+        assert!(tblastx(&[&format!("-evalue={value}")])
+            .unwrap()
+            .evalue
+            .is_nan());
+    }
+    let protein = ">q\nMKVLAAGIVGLLLAQPAMAAEIPVDPALAV\n";
+    let error = engine_error(
+        v1_blastp::run_web_pair(blastp(&["-evalue", "+inf"]).unwrap(), protein, protein)
+            .unwrap_err(),
+    );
+    assert!(error.contains("an infinite -evalue (inf)"), "{error}");
+    for extra in [
+        &["-evalue", "+inf", "-comp_based_stats", "0"][..],
+        &["-evalue", "-nan"],
+    ] {
+        assert!(v1_blastp::run_web_pair(blastp(extra).unwrap(), protein, protein).is_ok());
+    }
+    let nucleotide = ">q\nATGAAAGTTCTGGCAGCAGGTATTGTTGGTCTGCTGCTGGCACAGCCGGCAATGGCA\n";
+    for value in ["+inf", "-nan"] {
+        let args = tblastx(&["-evalue", value]).unwrap();
+        assert!(v1_tblastx::run_web_pair(args, nucleotide, nucleotide).is_ok());
+    }
+}
+
 // Plan TD-1: ABI v1 is frozen, so its BLASTN keeps outfmt 6 and 7 and rejects
 // outfmt 0, which the engine implements since LOSAT Web session S07, with the error
 // that it gave before.

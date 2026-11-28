@@ -490,12 +490,12 @@ fn parse_tblastx_args(
         } else if let Some(value) = flag.strip_prefix("-outfmt=") {
             args.outfmt = crate::blastinput::value_parsers::tblastx_v1_outfmt(value)?.into();
         } else if flag == "-evalue" {
-            args.evalue = next_arg(extra_args, &mut index, flag)?
-                .parse()
+            // The forms that NCBI's CArg_Double reads, as the CLI and v1's other programs
+            // (`web_v1_argv::ncbi_double`; line RG item X-evalue-nan).
+            args.evalue = crate::web_v1_argv::ncbi_double(next_arg(extra_args, &mut index, flag)?)
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
         } else if let Some(value) = flag.strip_prefix("-evalue=") {
-            args.evalue = value
-                .parse()
+            args.evalue = crate::web_v1_argv::ncbi_double(value)
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
         } else {
             return Err(format!("unsupported tblastx argument for web API: {flag}"));
@@ -611,15 +611,15 @@ fn parse_blastp_args(
         } else if let Some(value) = flag.strip_prefix("-outfmt=") {
             args.outfmt = value.into();
         } else if flag == "-evalue" {
+            // The forms that NCBI's CArg_Double reads, as the CLI and v1's other programs
+            // (`web_v1_argv::ncbi_double`; line RG item X-evalue-nan).
             args.evalue = Some(
-                next_arg(extra_args, &mut index, flag)?
-                    .parse()
+                crate::web_v1_argv::ncbi_double(next_arg(extra_args, &mut index, flag)?)
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else if let Some(value) = flag.strip_prefix("-evalue=") {
             args.evalue = Some(
-                value
-                    .parse()
+                crate::web_v1_argv::ncbi_double(value)
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else if flag == "-threshold" {

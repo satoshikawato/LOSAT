@@ -870,14 +870,15 @@ impl BlastxArgs {
             return Err(SemanticOptionsError::from(message).into());
         }
         // LOSAT's limit, for values that NCBI's checks above accept: an infinite e-value (`+inf`,
-        // `1e999`) with BLASTX's composition-based redo (decision D12,
-        // `protein_options_check::check_infinite_evalue`). NaN (`-nan`, `+nan`; NCBI's argument
-        // reads `inf` and `nan` without a sign as no number), an infinite e-value without the
-        // redo and RPSTBLASTN's, whose traceback drops an empty list itself
+        // `1e999`) or DBL_MAX with BLASTX's composition-based redo (decision D12,
+        // `protein_options_check::check_evalue_limit`). NaN (`-nan`, `+nan`; NCBI's argument
+        // reads `inf` and `nan` without a sign as no number), both values without the redo and
+        // with RPSTBLASTN's, whose traceback drops an empty list itself
         // (`protein_options_check::composition_redo_reads_empty_lists`), run as NCBI runs them
-        // (line RG item X-evalue-nan; until then all were refused).
+        // (line RG item X-evalue-nan; until then the infinities and NaN were refused, and DBL_MAX
+        // ran with the redo).
         // Every word size of NCBI's, 2 to 7, runs (item SC9 of line NP).
-        crate::blastinput::protein_options_check::check_infinite_evalue(
+        crate::blastinput::protein_options_check::check_evalue_limit(
             self.evalue,
             crate::blastinput::protein_options_check::composition_redo_reads_empty_lists(
                 composition != 0,

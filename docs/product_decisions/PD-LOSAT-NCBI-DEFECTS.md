@@ -1046,9 +1046,9 @@
   4 now holds in every program, BLASTX and RPSTBLASTN search NaN, Spouge's cutoff search, the
   reaps and the redo's test of the best e-value take NCBI's comparisons, and the explicit
   rejection of an infinite `-evalue` (decision D12) is limited to the composition-based redo of a
-  database search, as DBL_MAX's is (RPSBLAST and RPSTBLASTN run both, and their redo hands lists
-  back raw as NCBI's does); no new exception, rules 3 and 4; Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07)
+  search with a sequence source, as DBL_MAX's is (RPSBLAST and RPSTBLASTN run both, and their redo
+  hands lists back raw as NCBI's does), while BLASTX refuses DBL_MAX with the redo too; no new
+  exception, rules 3 and 4; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1233,7 +1233,7 @@ the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as re
 Explicit rejections (rule 3):
 
 - `-evalue` infinite or of DBL_MAX or more with the composition-based redo (`-comp_based_stats`
-  1 to 3; BLASTP, PSIBLAST and TBLASTN, and an infinite value in BLASTX; decision D12): a hit list whose HSPs all drop keeps the best e-value DBL_MAX, which passes
+  1 to 3; BLASTP, PSIBLAST, TBLASTN and BLASTX; decision D12): a hit list whose HSPs all drop keeps the best e-value DBL_MAX, which passes
   `best_evalue <= expect_value` (`blast_kappa.c:409,3687`), and the empty list is read
   (`blast_hits.c:3266`): NCBI crashes on some inputs, and LOSAT cannot tell in advance
   which. `1.7976931348623156e308` and below run and match NCBI. Without the redo NCBI never
@@ -1244,7 +1244,11 @@ Explicit rejections (rule 3):
   and BLASTN run these values and match NCBI, and so do RPSBLAST and RPSTBLASTN with the redo since
   version 1.127: RPS-BLAST's traceback gives the redo no sequence source, gets every list back and
   drops a list without HSPs before the hit list (`blast_traceback.c:1238-1275`), so NCBI does not
-  crash there (they were refused before).
+  crash there (they were refused before). BLASTX ran DBL_MAX with the redo until version 1.127;
+  NCBI BLAST+ 2.17.0's blastx crashes there too (rc 139 with DBL_MAX and `+inf`, `-sum_stats false`,
+  whose redo keeps an alignment of any positive score: the second protein of
+  `tests/fasta/outfmt0/e2e_protein_query.faa` back-translated, against the 300 subjects of
+  `e2e_many_subject.faa`, as `-subject` or a database; `1.7976931348623156e308` runs).
 - Query-split settings that NCBI fails on (BLASTP, TBLASTN; decision D13): a
   `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair with which a chunk would be split again, and a
   negative `CHUNK_SIZE` that splits a batch. Unlike BLASTN's exception 1, the maintainer

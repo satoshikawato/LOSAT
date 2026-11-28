@@ -10,4 +10,11 @@
   (`-comp_based_stats 0`, `-matrix IDENTITY`, `-ungapped`) in BLASTP, PSIBLAST, RPSBLAST, TBLASTN,
   BLASTX and RPSTBLASTN and gives NCBI's output there; with the redo it stays refused, as DBL_MAX
   is, since NCBI crashes on some inputs, except in RPSBLAST and RPSTBLASTN, which now run both
-  values with the redo as NCBI does (line RG, X-evalue-nan).
+  values with the redo as NCBI does. BLASTX now refuses DBL_MAX with the redo too (it ran it;
+  NCBI's blastx crashes on some inputs there) (line RG, X-evalue-nan).
+- Fixed: BLASTX with `-subject` or `-searchsp` and composition-based statistics 2 or 3 (the
+  default) drops the preliminary HSPs above `-evalue`, as NCBI does, not those above 5 times it
+  (line RG, X-evalue-nan).
+- Fixed: LOSAT Web's ABI v1 reads the `-evalue` of BLASTP and TBLASTX as the command line and
+  NCBI BLAST+ do: `+inf`, `-nan`, `+nan(1)` and `1e999` are read, a bare `inf` or `nan` is an
+  argument error (line RG, X-evalue-nan).

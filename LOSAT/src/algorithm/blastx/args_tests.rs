@@ -333,3 +333,31 @@ fn a_negative_window_searches_on_one_thread() {
         assert_eq!(args.resolve().unwrap().num_threads, threads, "{window}");
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:868,931-941
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1015-1017
+// Line RG item X-evalue-nan: the preliminary reap's e-value is `-evalue`, 5 times it only with the
+// Gumbel block and a composition-based statistics above 1 in a search whose statistics are the
+// database's: `-subject` (the statistics of each subject, a composition of 0), `-searchsp` (no
+// Gumbel block) and modes 0 and 1 keep `-evalue` (LOSAT stretched the first two too).
+#[test]
+fn the_preliminary_reap_stretches_evalue_as_ncbi() {
+    use crate::algorithm::blastx::statistics::prelim_evalue;
+    let resolved = |options: &[&str]| parse(options).resolve().unwrap();
+    let default = resolved(&["-evalue", "0.5"]);
+    assert_eq!(prelim_evalue(&default, false), 2.5);
+    assert_eq!(prelim_evalue(&default, true), 0.5);
+    for options in [
+        &["-evalue", "0.5", "-searchsp", "1000000"][..],
+        &["-evalue", "0.5", "-comp_based_stats", "1"],
+        &["-evalue", "0.5", "-comp_based_stats", "0"],
+        &["-evalue", "0.5", "-ungapped", "-comp_based_stats", "0"],
+    ] {
+        assert_eq!(prelim_evalue(&resolved(options), false), 0.5, "{options:?}");
+    }
+    assert_eq!(
+        prelim_evalue(&resolved(&["-comp_based_stats", "3"]), false),
+        50.0
+    );
+    assert!(prelim_evalue(&resolved(&["-evalue", "-nan"]), false).is_nan());
+}

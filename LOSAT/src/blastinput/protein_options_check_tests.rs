@@ -52,18 +52,28 @@ fn psiblast_takes_word_sizes_below_5_and_the_standard_matrices() {
 /// redo takes an infinite `-evalue` and DBL_MAX, and no redo takes them all.
 #[test]
 fn only_a_database_search_s_redo_limits_an_infinite_evalue() {
-    use super::{check_evalue_limit, check_infinite_evalue, composition_redo_reads_empty_lists};
+    use super::{check_evalue_limit, composition_redo_reads_empty_lists};
     assert!(composition_redo_reads_empty_lists(true, false));
     assert!(!composition_redo_reads_empty_lists(true, true));
     assert!(!composition_redo_reads_empty_lists(false, false));
     assert!(!composition_redo_reads_empty_lists(false, true));
     for evalue in [f64::INFINITY, f64::MAX] {
-        assert!(check_evalue_limit(evalue, true, "BLASTP").is_err());
+        for program in ["BLASTP", "BLASTX"] {
+            assert!(check_evalue_limit(evalue, true, program).is_err());
+            assert!(check_evalue_limit(evalue, false, program).is_ok());
+        }
         assert!(check_evalue_limit(evalue, false, "RPSBLAST").is_ok());
     }
-    assert!(check_infinite_evalue(f64::INFINITY, true, "BLASTX").is_err());
-    assert!(check_infinite_evalue(f64::MAX, true, "BLASTX").is_ok());
-    for evalue in [f64::NAN, -f64::NAN, 1e308] {
+    let message = |evalue| {
+        format!(
+            "{:#}",
+            check_evalue_limit(evalue, true, "BLASTX").unwrap_err()
+        )
+    };
+    assert!(message(f64::INFINITY).starts_with("an infinite -evalue (inf) with"));
+    assert!(message(f64::MAX).starts_with("an -evalue of DBL_MAX ("));
+    // The double below DBL_MAX and NaN run (NaN fails the redo's test of the best e-value).
+    for evalue in [f64::NAN, -f64::NAN, 1e308, f64::MAX.next_down()] {
         assert!(check_evalue_limit(evalue, true, "BLASTP").is_ok());
     }
 }

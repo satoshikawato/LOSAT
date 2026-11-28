@@ -432,7 +432,7 @@ impl IdKeys {
 
 /// A sequence that registered a handle in the data loader's `m_Ids` last, and whether LOSAT knows
 /// that it was the last (`sure`: not where several sequences of one record of loads registered
-/// it, whose order the record does not keep, `ScopeRecord::note`).
+/// it, whose order the record does not keep, `ScopeRecord::note_with`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Registrant {
     sequence: DbSequence,
@@ -1210,14 +1210,8 @@ impl ScopeRecord {
         self.keeps_scope = keeps;
     }
 
-    /// Records the loads `loads` of the query batch `batch` (`None`: the loader's alone, as the
-    /// loads before a stop), each by the subject's own Seq-align id: its lookup in `m_Ids`, then
-    /// the blob that it gives ([`ParsedSubject::loaded_blob_ref`]), whose lines register every
-    /// handle where its blob id is new (where it is not, and the run has more than
-    /// [`BLOBS_KEPT`] blob ids, they may register again), and its id resolves to it; an id whose
-    /// lookup gives no blob (none, or a record whose lines do not hold it) resolves to no Bioseq
-    /// where no blob of the run may have registered its handle (where one may have, the order of
-    /// the note's loads decides, which LOSAT does not know: a later read asks the loader).
+    /// [`ScopeRecord::note_with`] without held loads, for unit tests.
+    #[cfg(test)]
     pub fn note<'p>(
         &mut self,
         batch: Option<usize>,
@@ -1226,10 +1220,19 @@ impl ScopeRecord {
         self.note_with(batch, subjects, &[]);
     }
 
-    /// [`ScopeRecord::note`] of the loads `subjects` and `held`, the loads of the same batch that
-    /// NCBI's places answered before the lookup with another sequence than its ([`HeldLoad`],
-    /// [`HitLoads::held_loads`]): a subject whose Seq-align id's handle such a load requested
-    /// loaded that load's sequence, not its own (review 1 of line DBID hr-3, H1). A held load
+    /// Records the loads `subjects` of the query batch `batch` (`None`: the loader's alone, as
+    /// the loads before a stop), each by the subject's own Seq-align id: its lookup in `m_Ids`,
+    /// then the blob that it gives ([`ParsedSubject::loaded_blob_ref`]), whose lines register
+    /// every handle where its blob id is new (where it is not, and the run has more than
+    /// [`BLOBS_KEPT`] blob ids, they may register again), and its id resolves to it; an id whose
+    /// lookup gives no blob (none, or a record whose lines do not hold it) resolves to no Bioseq
+    /// where no blob of the run may have registered its handle (where one may have, the order of
+    /// the note's loads decides, which LOSAT does not know: a later read asks the loader).
+    ///
+    /// With them the loads `held`, the loads of the same batch that NCBI's places answered before
+    /// the lookup with another sequence than its ([`HeldLoad`], [`HitLoads::held_loads`]): a
+    /// subject whose Seq-align id's handle such a load requested loaded that load's sequence, not
+    /// its own (review 1 of line DBID hr-3, H1). A held load
     /// from the loader's `m_Ids` is a load of its blob by the requested handle (its lines register
     /// where its blob id is new, its Bioseq enters the scope by its line); one from the scope
     /// (steps 1 and 2) loads nothing, and the scope's cache keeps its answer. So does a subject

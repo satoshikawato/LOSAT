@@ -6845,7 +6845,7 @@ impl TaxdbRun {
     /// before it searches the next (BLASTX), records each batch that does not stop; the callers
     /// that hold a call's batches give the loads of the batches before to the stop itself
     /// ([`batch_prefetch`]'s `before`). Only the sequences with parsed Seq-ids are kept (one
-    /// without them holds no id that a load can find), each as `ScopeRecord::note` keeps it; the
+    /// without them holds no id that a load can find), each as `ScopeRecord::note_with` keeps it; the
     /// callers ask it only of a database with parsed Seq-ids. `batch`: the query batch of these
     /// loads, as the program numbers its batches for its walks of the reports' loads
     /// (`BatchPrefetch::report_read`; psiblast's rounds of a query, its batch, share the number),

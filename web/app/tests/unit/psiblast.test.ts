@@ -12,6 +12,7 @@ import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
+import { runEnd } from './support/run-end';
 import { NodeInflater } from './support/node-inflater';
 
 function makeHarness() {
@@ -60,13 +61,15 @@ function makeHarness() {
   return { draft, coordinator, results, seenRequests };
 }
 
-async function submitFileQuery(draft: SearchDraft, seenRequests: EngineRunRequest[]): Promise<string> {
+/** Submits and waits for the run to end: the submit resolves when the run is accepted, not when it is done. */
+async function submitFileQuery(draft: SearchDraft, coordinator: Coordinator, seenRequests: EngineRunRequest[]): Promise<string> {
   await draft.idle();
   const submitted = await draft.submit();
   expect(submitted.ok, submitted.ok ? '' : submitted.message).toBe(true);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  const runId = submitted.runIds![0]!;
+  await runEnd(coordinator, runId);
   expect(seenRequests[0]!.query).toBeUndefined();
-  return submitted.runIds![0]!;
+  return runId;
 }
 
 describe('psiblast & tblastn -in_pssm domain, draft, coordinator, and results', () => {
@@ -143,7 +146,7 @@ describe('psiblast & tblastn -in_pssm domain, draft, coordinator, and results', 
     draft.setField('-out_ascii_pssm', 'out.ascii');
     draft.setField('-save_pssm_after_last_round', true);
     expect(holdsInputs(draft.state.get())).toBe(true);
-    const runId = await submitFileQuery(draft, seenRequests);
+    const runId = await submitFileQuery(draft, coordinator, seenRequests);
 
     const run = coordinator.state.get().runs.find((r) => r.snapshot.runId === runId);
     expect(run?.status).toBe('completed');
@@ -188,7 +191,7 @@ describe('psiblast & tblastn -in_pssm domain, draft, coordinator, and results', 
     draft.setQuerySource('pssm');
     draft.setQueryFile(new File(['PssmWithParameters ::= {}'], 'query.asn'));
     draft.setPaste('subject', '>nt1\nATGAAAACCGCTTATATTGCTAAACAACGTCAAATTAGCTTTGTTAAAAGCCATTTTTCTCGTCAACTG\n');
-    await submitFileQuery(draft, seenRequests);
+    await submitFileQuery(draft, coordinator, seenRequests);
     expect(seenRequests[0]!.argv.slice(0, 3)).toEqual(['tblastn', '-in_pssm', 'query.asn']);
     expect(coordinator.state.get().runs[0]!.status).toBe('completed');
   });

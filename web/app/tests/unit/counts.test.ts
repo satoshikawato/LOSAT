@@ -27,6 +27,7 @@ import { COUNTS_BUSY, COUNTS_CHANGED, COUNTS_EXISTS, COUNTS_IN_USE, type CountsC
 import type { DownloadProgress } from '../../src/ports/example';
 import { MemoryOpfs } from './support/memory-opfs';
 import { NodeInflater } from './support/node-inflater';
+import { runEnd } from './support/run-end';
 
 const HUMAN = 9606;
 const LAST_MODIFIED = 'Thu, 01 Oct 2026 08:00:00 GMT';
@@ -242,7 +243,7 @@ describe('the draft and the counts of a taxonomy ID', () => {
     const snapshot = run0.snapshot;
     expect(snapshot.argv.slice(-2)).toEqual(['-window_masker_taxid', '9606']);
     expect(snapshot.windowMasker).toEqual({ name: 'windowmasker/9606/wmasker.obinary', file: counts, size: 5000, lastModified: 1_760_000_000_000, origin });
-    for (let i = 0; i < 200 && coordinator.state.get().runs[0]?.status !== 'completed'; i++) await new Promise((r) => setTimeout(r, 5));
+    await runEnd(coordinator, coordinator.state.get().runs[0]!.snapshot.runId);
     const finished = coordinator.state.get().runs[0]!;
     if (isToolRun(finished)) throw new Error('expected search run');
     const record = finished.record;

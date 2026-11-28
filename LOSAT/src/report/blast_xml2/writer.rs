@@ -44,7 +44,8 @@ impl Xml2Encoder for JsonEncoder<'_> {
 
 /// `Parameters` (`s_SetBlastXMLParameters`, blastxml2_format.cpp:514-555), members in the order
 /// of blastxml2.asn: the matrix, `expect`, the nucleotide scores, the gap costs of a gapped
-/// search, the filter, the composition-based statistics and the genetic codes.
+/// search, the filter, PHI-BLAST's pattern, the composition-based statistics and the genetic
+/// codes.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:531-535
 fn write_parameters<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, params: &Xml2Run) {
@@ -68,6 +69,11 @@ fn write_parameters<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, params: &Xml2Run)
     }
     if !run.filter.is_empty() {
         string_member(enc, "filter", 7, run.filter);
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:535-536
+    // (`pattern` follows `filter` in blastxml2.asn's order.)
+    if let Some(pattern) = run.pattern {
+        string_member(enc, "pattern", 8, pattern);
     }
     if params.cbs != 0 {
         int_member(enc, "cbs", 10, params.cbs);
@@ -185,7 +191,8 @@ where
 }
 
 /// The `BlastOutput2` of one query, its `Search` (`write_search` with `masks`) at `search` of the
-/// output: from the call of its list element (a `-subject` search's `bl2seq`) to its end.
+/// output: from the call of its list element (a `-subject` search's `bl2seq`, an iterative
+/// database search's `Iteration`, numbered `number`) to its end.
 fn write_report<E, F>(
     enc: &mut E,
     run: &XmlRun<'_>,
@@ -194,7 +201,7 @@ fn write_report<E, F>(
     masks: &[crate::report::blast_xml::QueryMask],
     scratch: &mut Scratch,
     start: usize,
-    search: &mut std::ops::Range<usize>,
+    (search, number): (&mut std::ops::Range<usize>, i32),
     hits: F,
 ) -> Result<()>
 where
@@ -239,20 +246,21 @@ where
     enc.member("results", 5);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:661-698
     // A `-subject` search's results are `bl2seq`, an iterative database search's its rounds
-    // (`iterations`, numbered from 1), any other database search's one `search`.
+    // (`iterations`, numbered from 1: the results that join the held report follow as the
+    // `Iteration`s after it, `join_search`), any other database search's one `search`.
     match params.target {
         Xml2Target::Database if params.iterative() => {
             enc.variant("Results", "iterations", 0);
             enc.begin_list(false);
+            search.start = enc.written();
             enc.element();
             enc.begin_sequence("Iteration");
-            int_member(enc, "iter-num", 0, 1);
+            int_member(enc, "iter-num", 0, number);
             enc.member("search", 1);
-            search.start = enc.written();
             write_search(enc, run, params, query, masks, scratch, start, hits)?;
-            search.end = enc.written();
             enc.end_member();
             enc.end_sequence();
+            search.end = enc.written();
             enc.end_list();
             enc.end_variant();
         }
@@ -383,7 +391,9 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
                 masks: self.masks,
                 scratch: &mut *self.scratch,
                 hsps: 0,
-                unloaded: hit.unloaded,
+                // A query that the scope dropped (`Xml2Run::query_dropped`) makes every `Hsp`
+                // the catch's, as a subject that the scope does not get.
+                unloaded: hit.unloaded || self.params.query_dropped,
             };
             hsps(&mut HspSink::new(&mut writer))?;
         }
@@ -403,8 +413,9 @@ struct Xml2Hsps<'a, E> {
     masks: &'a [crate::report::blast_xml::QueryMask],
     scratch: &'a mut Scratch,
     hsps: i32,
-    /// The scope gets no Bioseq for the hit's subject (`XmlHit::unloaded`): each `Hsp` is the
-    /// `catch`'s (`blast_xml::writer::write_caught_hsp`).
+    /// The scope gets no Bioseq for the hit's subject (`XmlHit::unloaded`) or for the query
+    /// (`Xml2Run::query_dropped`): each `Hsp` is the `catch`'s
+    /// (`blast_xml::writer::write_caught_hsp`).
     unloaded: bool,
 }
 
@@ -504,6 +515,7 @@ pub(crate) fn is_string_element(tag: &[u8]) -> bool {
             | b"subjects"
             | b"matrix"
             | b"filter"
+            | b"pattern"
             | b"query-id"
             | b"query-title"
             | b"id"
@@ -647,6 +659,8 @@ where
     report.clear();
     let mut search = 0..0;
     let masks = &searches.masks;
+    // The `Iteration` of an iterative database search follows the held report's (`count`).
+    let number = searches.count + 1;
     let (result, posts, thrown) = match kind {
         Xml2Kind::Single16 | Xml2Kind::Files14 => {
             let mut enc = if kind == Xml2Kind::Single16 {
@@ -662,7 +676,7 @@ where
                 masks,
                 scratch,
                 start,
-                &mut search,
+                (&mut search, number),
                 hits,
             );
             (result, enc.take_posts(), enc.take_thrown())
@@ -681,7 +695,7 @@ where
                 masks,
                 scratch,
                 start,
-                &mut search,
+                (&mut search, number),
                 hits,
             );
             (result, Vec::new(), None)
@@ -717,6 +731,7 @@ where
         let spliced = held.report.len();
         held.report.extend_from_slice(&report[search.start..end]);
         searches.end = held.report.len();
+        searches.count = number;
         let posts: Vec<crate::report::serial::xml::XmlPost> = posts
             .into_iter()
             .filter(|post| (search.start..end).contains(&post.at))
@@ -862,7 +877,7 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
                         masks,
                         scratch,
                         start,
-                        &mut search,
+                        (&mut search, 1),
                         hits,
                     );
                     let posts = enc.take_posts();
@@ -880,7 +895,7 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
                         masks,
                         scratch,
                         start,
-                        &mut search,
+                        (&mut search, 1),
                         hits,
                     )
                     .map(|()| MadeReport::default())
@@ -895,7 +910,7 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
                         masks,
                         scratch,
                         start,
-                        &mut search,
+                        (&mut search, 1),
                         hits,
                     )
                     .map(|()| MadeReport::default())
@@ -905,6 +920,7 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
         if self.document.holds_back() {
             let held = self.document.held_searches_mut();
             held.end = search.end;
+            held.count = 1;
             held.cut = threw;
             held.id.clear();
             held.id.extend_from_slice(query.id);
@@ -940,6 +956,10 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
 
     fn holds_back(&self) -> bool {
         self.document.holds_back()
+    }
+
+    fn drops_queries(&self) -> bool {
+        self.params.query_dropped
     }
 
     fn unwritten(&mut self, out: &mut Vec<u8>, joins_held: bool) -> Result<()> {

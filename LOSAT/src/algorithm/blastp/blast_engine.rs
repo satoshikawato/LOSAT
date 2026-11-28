@@ -6297,8 +6297,8 @@ fn blastp_xml_matrix_failure(
         outputs.formats.iter().map(|format| format.outfmt),
         &args.matrix_name,
         !database,
-        args.app
-            .program_type()
+        // PHI-BLAST's search is not iterative (`ResolvedBlastpArgs::xml2_program_type`).
+        args.xml2_program_type()
             .is_some_and(crate::report::record::ProgramType::is_iterative),
     )
 }
@@ -6315,6 +6315,79 @@ fn blastp_xml_failing_query(
     blastp_xml_matrix_failure(args, outputs, database).map(|failure| {
         crate::blastinput::query_batch::QueryScopes::xml_failing_query(scopes, failure)
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2380-2399
+/// psiblast's XML2 and JSON documents (outfmt 13 to 16) against a database, whose reports NCBI
+/// holds (`blast_xml2::reports_held`) and makes at the next query's first result, after that
+/// query's search and prefetch, or at the epilog: LOSAT's refusals before the search.
+///
+/// - A database whose loads write texts or throw (a damaged taxonomy database on the search path,
+///   `BlastpDatabase::loads_write_texts`): NCBI writes the texts of the held report's loads there,
+///   after the next query's (or none, where that query's prefetch stops the run first), while
+///   LOSAT's loads write them where it makes the report (probe corpus `ht` of line PS item
+///   PS15b-4: the lists `multidb/ldl multidb/ldp` with `btd_empty`).
+/// - Of FASTA queries, made after NCBI drops each query from its scope
+///   (`blast_xml2::queries_dropped`): a searched query `queries` whose Seq-id the database holds
+///   (`report::query_bioseq::refuse_found_dropped_query`).
+#[cold]
+#[inline(never)]
+fn refuse_held_xml2_reports(
+    args: &ResolvedBlastpArgs,
+    outputs: &ReportOutputs<'_>,
+    database: Option<&database::BlastpDatabase>,
+    queries: &[FastaRecord],
+) -> Result<()> {
+    let Some(database) = database else {
+        return Ok(());
+    };
+    let iterative = args
+        .xml2_program_type()
+        .is_some_and(crate::report::record::ProgramType::is_iterative);
+    let xml2 = outputs.formats.iter().any(|format| {
+        format
+            .report_format()
+            .and_then(crate::report::blast_xml2::Xml2Kind::of)
+            .is_some()
+    });
+    if !xml2 || !crate::report::blast_xml2::reports_held(false, iterative) {
+        return Ok(());
+    }
+    if database.loads_write_texts() {
+        anyhow::bail!(
+            "-outfmt 13 to 16 against a database with a damaged taxonomy database on the search \
+             path (its lookups write messages or fail): NCBI BLAST+ makes the XML2 and JSON \
+             report of a query when the next query's first result arrives or at the end of the \
+             run, and writes those messages as it loads the report's sequences there; this is \
+             not supported by LOSAT's {}",
+            args.app.name()
+        );
+    }
+    if !crate::report::blast_xml2::queries_dropped(false, iterative, args.psi_search.is_none()) {
+        return Ok(());
+    }
+    let program = args.app.name();
+    let lookup = database.seqdb().seqid_lookup().ok();
+    let indexed = database
+        .seqdb()
+        .seqid_lookup()
+        .ok()
+        .map(crate::seqdb::lookup::SeqidLookup::in_indexed_files);
+    for record in queries {
+        let id = match record.believed() {
+            Some(ids) => ids.best.clone(),
+            None => crate::seqid::ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(
+                record.local_id.as_bytes().to_vec(),
+            )),
+        };
+        crate::report::query_bioseq::refuse_found_dropped_query(
+            &id,
+            lookup.as_ref(),
+            indexed.as_ref(),
+            program,
+        )?;
+    }
+    Ok(())
 }
 
 /// The search of `run_local` and of the CLI, after NCBI's processing of the options and
@@ -6561,6 +6634,16 @@ fn search(
     if !batches.starts.is_empty() {
         validate_requested_blastp_support(&args)?;
         check_identity_compressed_lookup_of(&args)?;
+        // psiblast's XML2 and JSON reports against a database are held, and those of FASTA
+        // queries made after NCBI drops each query from its scope (`refuse_held_xml2_reports`).
+        if args.app == BlastpApp::Psiblast {
+            refuse_held_xml2_reports(
+                &args,
+                outputs,
+                database,
+                &searched_queries[..batches.searched_done],
+            )?;
+        }
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513-523
     // psiblast's rounds of FASTA queries (`-num_iterations` other than 1): the round driver,
@@ -6640,7 +6723,7 @@ fn search(
             epilog,
             x_prolog: true,
             x_queries_before: 0,
-            x_xml2_carry: None,
+            xml2_carries: None,
             last_call: true,
             psi_round: None,
             stopped_pssms: Some(&stopped),
@@ -6819,7 +6902,7 @@ fn search(
         let mut x_records: Option<Vec<PairwiseHit>> = x_want_records.then(Vec::new);
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the framing state that the blocks of an outfmt 13 to 16
         // run hand on (such a run has one output, `x_query_block_plan`).
-        let x_xml2_carry = std::sync::Mutex::new(crate::report::blast_xml2::Xml2Carry::default());
+        let x_xml2_carries = crate::report::blast_xml2::Xml2Carries::default();
         let searched_in_blocks =
             crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
                 // The last checks of the block search, on the pool; when one fails, nothing has
@@ -7053,9 +7136,9 @@ fn search(
                                 epilog: epilog && index + 1 == blocks.len(),
                                 x_prolog: index == 0,
                                 x_queries_before: block.start,
-                                x_xml2_carry: x_kinds
+                                xml2_carries: x_kinds
                                     .contains(&XBlockReport::Xml2)
-                                    .then_some(&x_xml2_carry),
+                                    .then_some(&x_xml2_carries),
                                 last_call: index + 1 == blocks.len(),
                                 psi_round: None,
                                 stopped_pssms: None,
@@ -8852,7 +8935,7 @@ fn reports_then_engine_error(
         epilog: false,
         x_prolog: reports.x_prolog,
         x_queries_before: reports.x_queries_before,
-        x_xml2_carry: reports.x_xml2_carry,
+        xml2_carries: reports.xml2_carries,
         // The engine error follows this report and ends the run: it is the run's last report
         // call (the XML formats, the only readers of `last_call`, keep the refusal before here).
         last_call: true,
@@ -8910,10 +8993,12 @@ struct BlastpReports<'a> {
     /// EXPERIMENT (LOSAT_X_BPQBLOCK): the queries of the blocks before this one, which outfmt
     /// 7's last line counts with this call's (0 outside the block search).
     x_queries_before: usize,
-    /// EXPERIMENT (LOSAT_X_BPQBLOCK): the framing state of an outfmt 13 to 16 run that the
-    /// blocks hand on (the count of reports, the start of the document, a `-subject` run's held
-    /// report; `None` outside the block search).
-    x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
+    /// The framing states of the run's outfmt 13 to 16 formats that its report calls hand on (the
+    /// count of reports, the start of the document, the held report of a `-subject` or psiblast
+    /// run; `blast_xml2::Xml2Carries`, by the format's place in the outputs): psiblast's rounds
+    /// (`psi_round`) and, EXPERIMENT (LOSAT_X_BPQBLOCK), the blocks of the block search; `None`
+    /// for a call that writes the run's whole document.
+    xml2_carries: Option<&'a crate::report::blast_xml2::Xml2Carries>,
     /// Whether this call is the run's last report call, so that without the epilog the run stops
     /// after it (`blast_xml::BlastpXml::stops`). Not a block of the block search before the last
     /// (LOSAT_X_BPQBLOCK), a chunk's search (which reports nothing) or a psiblast round (whose
@@ -8963,7 +9048,7 @@ impl<'a> BlastpReports<'a> {
             epilog: false,
             x_prolog,
             x_queries_before: 0,
-            x_xml2_carry: None,
+            xml2_carries: None,
             last_call: false,
             psi_round: None,
             stopped_pssms: None,
@@ -10917,13 +11002,16 @@ fn run_call(
     };
     let (mut query_warning_lines, kept) = report_prep::query_warning_lines(&prep);
     // PHI-BLAST's reports (`report_write::write_phi_report`) with each query's messages.
-    let phi_result_warnings = phi_call
+    let phi_messages = phi_call
         .as_ref()
-        .map(|call| report_prep::phi_result_warnings(&prep, call.no_statistics.as_deref()));
+        .map(|call| report_prep::phi_query_messages(&prep, call.no_statistics.as_deref()));
+    let phi_result_warnings = phi_messages
+        .as_deref()
+        .map(|messages| report_prep::phi_result_warnings(&prep, messages));
     let phi_reports = report_write::PhiPairwise::of(
         phi_call.as_ref(),
         &rows_of_lists,
-        phi_result_warnings.as_deref(),
+        (phi_messages.as_deref(), phi_result_warnings.as_deref()),
     );
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
@@ -11306,6 +11394,7 @@ fn run_call(
             format,
             (&mut warnings, &mut probe, &pairwise_shown, &side_sink),
             (&first_context, &batch_spans, &query_stats, &rows_of),
+            format_index,
         );
         // An error of the format's report fails the call, or this format alone (`FormatRefusal`):
         // the formats after it are written then.
@@ -11427,6 +11516,7 @@ fn write_format_report(
         &impl Fn() -> Vec<crate::report::blast_xml::XmlStats>,
         &impl Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
     ),
+    format_index: usize,
 ) -> Result<()> {
     match outfmt {
         _ if report_view.prolog_only => empty_alignments::write_exception_prolog(
@@ -11441,12 +11531,11 @@ fn write_format_report(
         // psiblast `-phi_pattern` (item PS8a): PHI-BLAST's reports.
         _ if phi_reports.is_some() => report_write::write_phi_report(
             report_view,
-            outfmt,
+            (outfmt, format_index),
             phi_reports.expect("a PHI-BLAST call"),
             format,
-            warnings,
-            probe,
-            pairwise_shown,
+            (warnings, probe, pairwise_shown, side_sink),
+            query_stats,
             rows_of,
         ),
         BlastpReport::Seqalign(serial) => {
@@ -11457,12 +11546,13 @@ fn write_format_report(
         }
         BlastpReport::Xml | BlastpReport::Xml2(_) => report_write::write_xml(
             report_view,
-            outfmt,
+            (outfmt, format_index),
             format,
             warnings,
             side_sink,
             query_stats,
             rows_of,
+            None,
         ),
         BlastpReport::Pairwise(view) => report_write::write_pairwise(
             report_view,

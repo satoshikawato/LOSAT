@@ -303,3 +303,62 @@ fn tblastx_qseq_throws_matches_seqvector_clipping() {
     assert!(tblastx_qseq_throws(true, 250, 400, 300)); // 50 % 3 == 2
     assert!(tblastx_qseq_throws(true, 251, 401, 300)); // 49 % 3 == 1
 }
+
+/// psiblast's XML2 and JSON reports of FASTA queries against a database (`refuse_found_dropped_query`)
+/// on a list of version 5 databases with and without the accession table (`tests/db_search/multidb`:
+/// `pP` has it, `pU` does not), where NCBI's lookup of a text id throws: the query is refused only
+/// where a database with the table holds its id; alone, `pP` refuses the id that its lookup finds.
+#[test]
+fn a_dropped_query_whose_lookup_throws_is_refused_only_where_a_database_holds_its_id() {
+    use crate::seqdb::lookup::SeqidLookup;
+    use crate::seqdb::{SeqDb, SeqType};
+    let open = |names: &[&str]| {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/multidb");
+        let list: Vec<String> = names
+            .iter()
+            .map(|name| dir.join(name).to_str().unwrap().to_owned())
+            .collect();
+        SeqDb::open(&list.join(" "), SeqType::Protein).unwrap()
+    };
+    let id = |text: &str| {
+        crate::seqid::parse::parse_ids(text.as_bytes(), 0, &mut |_| {})
+            .unwrap()
+            .into_iter()
+            .flatten()
+            .next()
+            .unwrap()
+    };
+    let refusal = |db: &SeqDb, text: &str| {
+        let lookup = db.seqid_lookup().ok();
+        let indexed = db.seqid_lookup().ok().map(SeqidLookup::in_indexed_files);
+        refuse_found_dropped_query(&id(text), lookup.as_ref(), indexed.as_ref(), "PSIBLAST")
+            .err()
+            .map(|error| error.to_string())
+    };
+    let mixed = open(&["pP", "pU"]);
+    assert!(mixed
+        .seqid_lookup()
+        .unwrap()
+        .seqid_to_oid(&id("lcl|Query_1"))
+        .is_err());
+    assert_eq!(refusal(&mixed, "lcl|Query_1"), None);
+    assert_eq!(refusal(&mixed, "ref|NP_999999.1|"), None);
+    let held = refusal(&mixed, "ref|NP_100001.1|").unwrap();
+    assert!(
+        held.starts_with(
+            "the query ref|NP_100001.1| has the Seq-id of the database sequence 1 (NCBI BLAST+'s \
+             lookup of the id fails on a database without the accession table"
+        ),
+        "{held}"
+    );
+    let indexed = open(&["pP"]);
+    assert_eq!(refusal(&indexed, "lcl|Query_1"), None);
+    let found = refusal(&indexed, "ref|NP_100001.1|").unwrap();
+    assert!(
+        found.starts_with(
+            "the query ref|NP_100001.1| has the Seq-id of the database sequence 1: NCBI BLAST+ \
+             makes psiblast's XML2 and JSON reports"
+        ),
+        "{found}"
+    );
+}

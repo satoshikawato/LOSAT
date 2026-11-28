@@ -15,8 +15,10 @@ pub mod writer;
 #[cfg(test)]
 pub use files::base_name;
 pub use files::{run_side_files, FsSideFiles, SideFileSink};
-pub use framing::{NoSideFiles, RunSideFiles, SideFiles, Xml2Carry, Xml2Document, Xml2Kind};
-pub use records::{reports_held, subject_names, Xml2Run, Xml2Target};
+pub use framing::{
+    NoSideFiles, RunSideFiles, SideFiles, Xml2Carries, Xml2Carry, Xml2Document, Xml2Kind,
+};
+pub use records::{queries_dropped, reports_held, subject_names, Xml2Run, Xml2Target};
 pub(crate) use writer::is_string_element;
 pub use writer::Xml2Writer;
 

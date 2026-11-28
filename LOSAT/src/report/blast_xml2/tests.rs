@@ -139,6 +139,7 @@ fn run<'a>(matrix: Option<&'a FormattingMatrix>, db_name: &'static str) -> XmlRu
         gap_extend: 1,
         reward_penalty: None,
         filter: b"F",
+        pattern: None,
         db_num: 4,
         db_len: 5000,
         db_len_overflow: false,
@@ -156,6 +157,7 @@ fn params(target: Xml2Target) -> Xml2Run {
         query_gencode: None,
         db_gencode: None,
         program_type: None,
+        query_dropped: false,
     }
 }
 
@@ -272,6 +274,85 @@ fn an_iterative_database_report_is_held_and_lists_its_round() {
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains(round), "{kind:?}: {text}");
     }
+}
+
+// Line PS, PS15b-4: psiblast's rounds (each a report call of its own) join the held report of
+// their query, each the `Iteration` after the ones before, as the writers of the calls hand the
+// document on (`Xml2Carries`); the report is written at the epilog, once.
+#[test]
+fn the_rounds_of_an_iterative_report_are_its_iterations() {
+    let message = invalid_message();
+    let run = run(None, "");
+    let iterative = Xml2Run {
+        program_type: Some(crate::report::record::ProgramType::PsiBlast),
+        ..params(Xml2Target::Database)
+    };
+    for (kind, numbers, report) in [
+        (
+            Xml2Kind::Single16,
+            [
+                "<iter-num>1</iter-num>",
+                "<iter-num>2</iter-num>",
+                "<iter-num>3</iter-num>",
+            ],
+            "<BlastOutput2>",
+        ),
+        (
+            Xml2Kind::Single15,
+            ["\"iter_num\": 1,", "\"iter_num\": 2,", "\"iter_num\": 3,"],
+            "\"report\"",
+        ),
+    ] {
+        let carries = Xml2Carries::default();
+        let mut out = Vec::new();
+        for round in 1..=3 {
+            let mut writer = Xml2Writer::new(kind, iterative.clone());
+            writer.document_mut().resume(carries.take(1));
+            let query = XmlQuery {
+                joins_held: round > 1,
+                ..invalid_query(&message)
+            };
+            writer
+                .query(&run, &query, &mut out, |_| {
+                    panic!("a query of an unsearched batch has no hits")
+                })
+                .unwrap();
+            carries.put(1, writer.document_mut().take_carry());
+        }
+        // Held: the prolog alone so far, written once.
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+        // The format at another place of the run's outputs has a document of its own: none
+        // of these reports.
+        let mut other = Xml2Writer::new(kind, iterative.clone());
+        other.document_mut().resume(carries.take(0));
+        let (mut empty, mut expected) = (Vec::new(), Vec::new());
+        other.finish(&mut empty).unwrap();
+        Xml2Document::new(kind, true).epilog(&mut expected).unwrap();
+        assert_eq!(empty, expected, "{kind:?}");
+        let mut writer = Xml2Writer::new(kind, iterative.clone());
+        writer.document_mut().resume(carries.take(1));
+        writer.finish(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.matches(report).count(), 1, "{kind:?}: {text}");
+        let places: Vec<usize> = numbers
+            .iter()
+            .map(|number| text.find(number).expect(number))
+            .collect();
+        assert!(
+            places.windows(2).all(|pair| pair[0] < pair[1]),
+            "{kind:?}: {text}"
+        );
+    }
+}
+
+// Line PS, PS15b-4: the reports whose queries NCBI's formatter dropped from its scope are
+// psiblast's FASTA queries against a database alone.
+#[test]
+fn queries_are_dropped_for_the_fasta_queries_of_an_iterative_database_search() {
+    assert!(queries_dropped(false, true, true));
+    assert!(!queries_dropped(true, true, true), "-subject");
+    assert!(!queries_dropped(false, true, false), "-in_pssm, -in_msa");
+    assert!(!queries_dropped(false, false, true), "blastp");
 }
 
 #[test]
@@ -1087,6 +1168,75 @@ fn the_files_of_a_subject_run_are_written_one_report_late_and_a_lost_report_has_
     }
 }
 
+// Line PS, PS15b-4: psiblast's held report of a query whose first `Hit` throws, followed by
+// another query (NCBI BLAST+ 2.17.0, `PS/ps15b4/cases_mix` m.b.u12.off.it1.13 and .14, row
+// db.ps15b4.m.b.u12.b1.it1.13: the held report's file stays empty, exit status 2).
+#[test]
+fn a_held_report_that_failed_ends_a_run_of_side_files_before_the_next_report_is_made() {
+    use crate::ncbi_exception::{NcbiException, ThrowSite};
+    // Any exception that the report function catches (`CaughtException`; here the one of
+    // `a_failed_report_keeps_its_separator_and_fails_where_it_is_written`).
+    let exception = || {
+        NcbiException::new(
+            ThrowSite {
+                file: "src/objects/seq/../seqalign/Seq_align.cpp",
+                line: 227,
+                kind: "CSeqalignException::eInvalidAlignment",
+                function: None,
+            },
+            "CSeq_align::GetSeqRange(): Row is empty",
+        )
+    };
+    for kind in [Xml2Kind::Files13, Xml2Kind::Files14] {
+        let files = MemoryFiles::default();
+        let stored = files.files.clone();
+        let mut document = Xml2Document::with_files(kind, true, files);
+        let mut master = Vec::new();
+        put(&mut document, b"q1\n", &mut master).unwrap();
+        document
+            .report(&mut Vec::new(), &mut master, |_, _| {
+                Err(crate::report::blast_xml::CaughtException(exception()).into())
+            })
+            .unwrap();
+        // The next query's report arrives: the held one is written (an empty file) and ends the
+        // run; the arriving report, whose subjects the run never loads, is not made.
+        let mut made = false;
+        document
+            .report(&mut Vec::new(), &mut master, |_, _| {
+                made = true;
+                anyhow::bail!("a report whose subjects the run does not load")
+            })
+            .unwrap();
+        assert!(!made, "{kind:?}");
+        assert!(document.take_posts().ends_run.is_some(), "{kind:?}");
+        assert_eq!(
+            *stored.borrow(),
+            vec![(1, b"q1\n".to_vec()), (2, Vec::new())],
+            "{kind:?}"
+        );
+        assert!(master.is_empty(), "{kind:?}");
+    }
+    // The stream forms catch the held report's exception and go on: the arriving report is made
+    // and held.
+    let mut document = Xml2Document::new(Xml2Kind::Single16, true);
+    let mut out = Vec::new();
+    document
+        .report(&mut Vec::new(), &mut out, |_, _| {
+            Err(crate::report::blast_xml::CaughtException(exception()).into())
+        })
+        .unwrap();
+    let mut made = false;
+    let failed = document.report(&mut Vec::new(), &mut out, |_, report| {
+        made = true;
+        report.extend_from_slice(b"q2\n");
+        Ok(crate::report::blast_xml2::framing::MadeReport::default())
+    });
+    assert!(made);
+    assert!(failed
+        .unwrap_err()
+        .is::<crate::report::blast_xml::CaughtException>());
+}
+
 #[test]
 fn a_side_file_that_cannot_be_opened_is_ncbis_argument_error_and_earlier_files_stay() {
     // probes `naming/unwritable13`, `unwritable14`: `Command line argument error: Cannot open
@@ -1632,5 +1782,47 @@ fn a_joined_result_is_the_next_search_of_the_held_report() {
             .unwrap();
         writer.unwritten(&mut out, true).unwrap();
         assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+    }
+}
+
+// Line PS, PS15b-4: PHI-BLAST's pattern as read is the `pattern` of `Parameters`, after `filter` in
+// blastxml2.asn's order (NCBI BLAST+ 2.17.0 `psiblast -phi_pattern ploop.pat -outfmt 16 / 15`).
+#[test]
+fn a_phi_pattern_follows_the_filter_in_the_parameters() {
+    let message = invalid_message();
+    for (kind, filter, pattern) in [
+        (
+            Xml2Kind::Single16,
+            "          <filter>F</filter>\n",
+            "          <pattern>[AG]-x(4)-G-K-[ST]&lt;</pattern>\n",
+        ),
+        (
+            Xml2Kind::Single15,
+            "        \"filter\": \"F\",\n",
+            "        \"pattern\": \"[AG]-x(4)-G-K-[ST]<\",\n",
+        ),
+    ] {
+        let run = XmlRun {
+            pattern: Some(b"[AG]-x(4)-G-K-[ST]<"),
+            ..run(None, "")
+        };
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Subjects(2)));
+        let mut out = Vec::new();
+        writer
+            .query(&run, &invalid_query(&message), &mut out, |_| {
+                panic!("a query of an unsearched batch has no hits")
+            })
+            .unwrap();
+        writer.finish(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let plain = match kind {
+            Xml2Kind::Single16 => INVALID_ONLY_16,
+            _ => INVALID_ONLY_15,
+        };
+        assert_eq!(
+            text,
+            plain.replacen(filter, &format!("{filter}{pattern}"), 1),
+            "{kind:?}"
+        );
     }
 }

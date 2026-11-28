@@ -23,17 +23,17 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 | `10` | Comma-separated values | all eight |
 | `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all eight |
 | `12` | Seqalign, JSON | all eight |
-| `13` | Multiple-file BLAST JSON (needs `-out`) | all but `psiblast` |
-| `14` | Multiple-file BLAST XML2 (needs `-out`) | all but `psiblast` |
-| `15` | Single-file BLAST JSON | all but `psiblast` |
-| `16` | Single-file BLAST XML2 | all but `psiblast` |
+| `13` | Multiple-file BLAST JSON (needs `-out`) | all eight |
+| `14` | Multiple-file BLAST XML2 (needs `-out`) | all eight |
+| `15` | Single-file BLAST JSON | all eight |
+| `16` | Single-file BLAST XML2 | all eight |
 | `17` | SAM | `blastn` only |
 | `18` | Organism report | all eight |
 | `20` | Comma-separated values with header lines | all eight |
 
 "All eight" is the five programs, `psiblast`, `rpsblast` and `rpstblastn`. Some programs write fewer formats than the table shows:
 
-- `psiblast` writes `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round; it writes one query-anchored report, Seq-annot, JSON Seq-align set, archive or organism report per round. Formats `13` to `16` are not yet supported.
+- `psiblast` writes `0` to `16`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round, and so does each query's report in formats `13` to `16` (one `Search` per round with `-subject`); it writes one query-anchored report, Seq-annot, JSON Seq-align set, archive or organism report per round.
 - `tblastn` with `-in_pssm` writes every format but `11`.
 
 `rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck` and `cleanup-blastdb-volumes.py` have their own formats, listed on their pages. `blast_formatter` writes `-outfmt` `8`, `9` and `12` from the `-outfmt 11` archive of a search, and the archive itself again with `-outfmt 11` (see [blast_formatter](programs/blast_formatter.md)).

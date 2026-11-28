@@ -495,6 +495,7 @@ pub(super) fn write_structured_xml(
             gap_extend: report.gap_extend,
             reward_penalty: Some((report.reward, report.penalty)),
             filter: &filter,
+            pattern: None,
             db_num: report.database.map_or(0, |database| database.num_sequences),
             db_len: report.database.map_or(0, |database| database.total_letters),
             db_len_overflow: report
@@ -548,6 +549,7 @@ pub(super) fn write_structured_xml(
                 query_gencode: None,
                 db_gencode: None,
                 program_type: None,
+                query_dropped: false,
             };
             let mut document =
                 crate::report::blast_xml2::Xml2Writer::for_run(kind, params, report.out, side_sink);

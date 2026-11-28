@@ -41,6 +41,10 @@ impl std::error::Error for CaughtException {}
 /// again when written.
 pub const REFERENCE_GAPPED_BLAST: &str = super::reference::Publication::GappedBlast.string();
 
+/// `BlastOutput_reference` of PHI-BLAST, psiblast's `-phi_pattern` (`CReference::GetString` of
+/// `ePhiBlast`).
+pub const REFERENCE_PHI_BLAST: &str = super::reference::Publication::PhiBlast.string();
+
 /// `BlastOutput_reference` of megablast (`CReference::GetString` of `eMegaBlast`).
 pub const REFERENCE_MEGABLAST: &str = super::reference::Publication::MegaBlast.string();
 

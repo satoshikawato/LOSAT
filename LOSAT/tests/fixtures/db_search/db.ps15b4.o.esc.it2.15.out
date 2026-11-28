@@ -1,0 +1,427 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "psiblast",
+      "version": "PSIBLAST 2.17.0+",
+      "reference": "Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001), \"Improving the accuracy of PSI-BLAST protein database searches with composition-based statistics and other refinements\", Nucleic Acids Res. 29:2994-3005.",
+      "search_target": {
+        "db": "tests/db_search/paja"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "iterations": [
+          {
+            "iter_num": 1,
+            "search": {
+              "query_id": "lcl|Query_1",
+              "query_len": 398,
+              "hits": [
+                {
+                  "num": 1,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|52",
+                      "accession": "52",
+                      "title": "BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 197,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 132.88,
+                      "score": 333,
+                      "evalue": 3.48991e-39,
+                      "identity": 79,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 2,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|2",
+                      "accession": "2",
+                      "title": "BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 813,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 23.0978,
+                      "score": 48,
+                      "evalue": 2.1959,
+                      "identity": 21,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 3,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|68",
+                      "accession": "68",
+                      "title": "BDT63566.1 hypothetical protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 1045,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 22.3274,
+                      "score": 46,
+                      "evalue": 3.61413,
+                      "identity": 9,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 4,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|74",
+                      "accession": "74",
+                      "title": "BDT63572.1 wsv270-like protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 141,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 21.557,
+                      "score": 44,
+                      "evalue": 4.001,
+                      "identity": 10,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 5,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|58",
+                      "accession": "58",
+                      "title": "BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 1890,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 22.3274,
+                      "score": 46,
+                      "evalue": 4.25344,
+                      "identity": 16,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 6,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|25",
+                      "accession": "25",
+                      "title": "BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 1243,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 21.9422,
+                      "score": 45,
+                      "evalue": 5.05169,
+                      "identity": 13,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 7,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|30",
+                      "accession": "30",
+                      "title": "BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 1039,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 21.9422,
+                      "score": 45,
+                      "evalue": 5.31429,
+                      "identity": 8,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 8,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|56",
+                      "accession": "56",
+                      "title": "BDT63554.1 wsv440-like protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 595,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 21.557,
+                      "score": 44,
+                      "evalue": 6.20497,
+                      "identity": 12,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 9,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|31",
+                      "accession": "31",
+                      "title": "BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 771,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 21.1718,
+                      "score": 43,
+                      "evalue": 8.72442,
+                      "identity": 11,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                }
+              ],
+              "stat": {
+                "db_num": 86,
+                "db_len": 66738,
+                "hsp_len": 66,
+                "eff_space": 20272584,
+                "kappa": 0.041,
+                "lambda": 0.267,
+                "entropy": 0.14
+              }
+            }
+          },
+          {
+            "iter_num": 2,
+            "search": {
+              "query_id": "lcl|Query_1",
+              "query_len": 398,
+              "hits": [
+                {
+                  "num": 1,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|52",
+                      "accession": "52",
+                      "title": "BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 197,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 290.003,
+                      "score": 741,
+                      "evalue": 3.11209e-100,
+                      "identity": 79,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 2,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|58",
+                      "accession": "58",
+                      "title": "BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 1890,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 25.3713,
+                      "score": 54,
+                      "evalue": 0.532418,
+                      "identity": 17,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 3,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|3",
+                      "accession": "3",
+                      "title": "BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 1023,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 22.2897,
+                      "score": 46,
+                      "evalue": 3.9682,
+                      "identity": 8,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 4,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|30",
+                      "accession": "30",
+                      "title": "BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 1039,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 21.5193,
+                      "score": 44,
+                      "evalue": 6.53111,
+                      "identity": 8,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                },
+                {
+                  "num": 5,
+                  "description": [
+                    {
+                      "id": "gnl|BL_ORD_ID|25",
+                      "accession": "25",
+                      "title": "BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]"
+                    }
+                  ],
+                  "len": 1243,
+                  "hsps": [
+                    {
+                      "num": 1,
+                      "bit_score": 21.5193,
+                      "score": 44,
+                      "evalue": 7.95709,
+                      "identity": 13,
+                      "query_from": 0,
+                      "query_to": 0,
+                      "hit_from": 0,
+                      "hit_to": 0,
+                      "qseq": "",
+                      "hseq": ""
+                    }
+                  ]
+                }
+              ],
+              "stat": {
+                "db_num": 86,
+                "db_len": 66738,
+                "hsp_len": 66,
+                "eff_space": 20272584,
+                "kappa": 0.0425747100481762,
+                "lambda": 0.267,
+                "entropy": 0.14
+              },
+              "message": "Query_1 esc1 a \"quoted\" \\.. :  Query_1 esc1 a \"quoted\" \\.. : Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics "
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

@@ -28,10 +28,10 @@ A value or setting refused after the options are read (exit status 1):
 Error: -use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's PSIBLAST
 ```
 
-An output format the program does not write (exit status 1):
+An output format the program does not write (exit status 1; here `psiblast -phi_pattern -outfmt 18`):
 
 ```text
-Error: output format 15 is not supported by LOSAT's PSIBLAST yet
+Error: output format 18 is not supported by LOSAT's PSIBLAST yet
 ```
 
 For example, NCBI BLAST+ runs `psiblast` with the Smith-Waterman traceback, and LOSAT stops with the second message above:
@@ -54,7 +54,7 @@ There is one section for each program, and one for the five search programs toge
 | `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes |
-| `-phi_pattern` with more than one round, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`; with `-phi_pattern`: `0`, `6`, `7`, `10` and `20`) |
+| `-phi_pattern` with more than one round, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0` to `16`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`; with `-phi_pattern`: `0`, `6`, `7`, `10`, `13` to `16` and `20`) |
 | `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
 | `deltablast` | Standalone executable | Not yet provided |
 
@@ -228,7 +228,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | Option or value | What happens |
 | :--- | :--- |
 | `-phi_pattern` with `-num_iterations` other than 1 | Refused: not yet supported. With a matrix and gap costs that have no pattern statistics, NCBI searches nothing and LOSAT gives its answer of one round. |
-| `-phi_pattern` with `-outfmt` 1 to 5, 11, 13 to 16 or 18 | Refused: not yet supported. `-outfmt` 8, 9 and 12 get NCBI's own error (exit status 3) where an alignment is found, and no output otherwise. |
+| `-phi_pattern` with `-outfmt` 1 to 5, 11 or 18 | Refused: not yet supported. `-outfmt` 8, 9 and 12 get NCBI's own error (exit status 3) where an alignment is found, and no output otherwise. |
 | `-phi_pattern` with `-html` | Refused: not yet supported. |
 | `-phi_pattern` with `-sum_stats true` | Refused: not yet supported. |
 | `-phi_pattern` with a subject longer than 5,000,000 residues | Refused: not yet supported. NCBI searches such a sequence in overlapping parts. |
@@ -249,7 +249,8 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-in_msa` with a master sequence from which no ungapped Karlin-Altschul parameters can be computed (X, O, `*` or lower-case x alone, or X with gaps: no residue that the parameters can be computed from), or with `-matrix IDENTITY` | Refused. NCBI crashes. |
 | `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
 | `-use_sw_tback` | Refused. |
-| `-outfmt` 13 to 16 | Refused: not yet supported, with a FASTA query, `-in_pssm` or `-in_msa`. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` 13 to 16 with FASTA queries and `-db`, where the database holds the id of a query (`lcl\|Query_1`, or the id that `-parse_deflines` reads) | Refused before the search. NCBI writes these reports once the query has left its scope, and shows that database sequence for the query. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` 13 to 16 with `-db` and a damaged taxonomy database on the search path whose lookups write messages (such as `Offset error at end of taxdb file.`) or fail | Refused before the search. NCBI writes those messages when it makes a query's report, at the next query's first result or at the end of the run, or not at all where the run stops first. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
 | An infinite `-evalue`, or an `-evalue` of 1.7976931348623157e308 with composition-based statistics | Refused, as in `blastp`. |
@@ -535,9 +536,8 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 
 - The program `deltablast`.
 - `makeprofiledb -dbtype cobalt`.
-- `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10` and `20`, and in
+- `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10`, `13` to `16` and `20`, and in
   the library and pylosat.
-- The `psiblast` output formats `13` to `16`.
 - `blast_formatter`: the output formats other than `8`, `9`, `11` and `12`, and the values of an archive that it does not yet write (in the request or results of `11`, the results of `12`).
 - `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 

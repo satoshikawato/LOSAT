@@ -213,6 +213,24 @@ fn own_message(
     xml_message(&message_id, warnings, has_hits)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:584-595
+/// The `QueryText` of a query that NCBI's formatter has dropped from its scope when it makes the
+/// query's XML2 or JSON report (`blast_xml2::Xml2Run::query_dropped`): the handle of its Seq-loc's
+/// id is not found, so the catch names it by that id (`fasta_id`, the record's `local_id` or the
+/// best of the ids that `-parse_deflines` read) with no title; its message is its result's
+/// (`own_message`). NCBI generates no title of the record, so none is refused (`Refusal`).
+pub fn dropped_query_text(
+    record: &crate::blastinput::fasta_reader::FastaRecord,
+    warnings: &[String],
+    has_hits: bool,
+) -> QueryText {
+    QueryText {
+        title: Vec::new(),
+        message: own_message(record.warning_id(), &record.title, warnings, has_hits),
+        id: Some(fasta_id(record.local_id.as_bytes(), record.believed())),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-719
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2413
 /// The `QueryText` of a query whose result NCBI's XML family formats show with the id, title and

@@ -147,10 +147,12 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             "the rounds of a masked query run ({masks:?})"
         );
     }
-    // Items PS15b-1 and PS15b-2: BLAST XML, the Seq-annots, the archive, the query-anchored
-    // reports, the JSON Seq-aligns and the organism report run; the XML2 and JSON documents (the
-    // second part of PS15b-2) are refused.
-    for format in ["1", "2", "3", "4", "5", "8", "9", "11", "12", "18"] {
+    // Items PS15b-1, PS15b-2 and PS15b-4: BLAST XML, the Seq-annots, the archive, the
+    // query-anchored reports, the JSON Seq-aligns, the organism report and the XML2 and JSON
+    // documents run.
+    for format in [
+        "1", "2", "3", "4", "5", "8", "9", "11", "12", "15", "16", "18",
+    ] {
         assert!(
             parse(&["-outfmt", format])
                 .unwrap()
@@ -159,34 +161,19 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             "outfmt {format}"
         );
     }
-    for format in ["15", "16"] {
-        let error = parse(&["-outfmt", format])
-            .unwrap()
-            .into_blastp_args()
-            .unwrap_err()
-            .to_string();
-        assert_eq!(
-            error,
-            format!("output format {format} is not supported by LOSAT's PSIBLAST yet")
-        );
-    }
-    // Outfmt 13 and 14 to a file are refused here; to standard output they go on to NCBI's
-    // own error (`Please provide a file name for outfmt 13.`, blast_app_util.cpp:888-899),
-    // which comes later (rows db.dlm.ps.o13, .o14).
+    // Outfmt 13 and 14 to a file run; to standard output they go on to NCBI's own error
+    // (`Please provide a file name for outfmt 13.`, blast_app_util.cpp:888-899), which comes
+    // later (rows db.dlm.ps.o13, .o14).
     for format in ["13", "14"] {
-        let error = parse(&["-outfmt", format, "-out", "r.out"])
-            .unwrap()
-            .into_blastp_args()
-            .unwrap_err()
-            .to_string();
-        assert_eq!(
-            error,
-            format!("output format {format} is not supported by LOSAT's PSIBLAST yet")
-        );
-        assert!(parse(&["-outfmt", format])
-            .unwrap()
-            .into_blastp_args()
-            .is_ok());
+        for out in [&["-out", "r.out"][..], &[]] {
+            assert!(
+                parse(&[&["-outfmt", format][..], out].concat())
+                    .unwrap()
+                    .into_blastp_args()
+                    .is_ok(),
+                "outfmt {format} {out:?}"
+            );
+        }
     }
     for format in [
         "0",
@@ -203,9 +190,10 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             .into_blastp_args()
             .is_ok());
     }
-    // With `-phi_pattern` (item PS8a): PHI-BLAST's reports run, formats 8, 9 and 12 go on to
-    // NCBI's engine error, and BLAST XML and the archive go on to the search's setup, whose NCBI
-    // errors come before their refusal (`phi_hooks::phi_limits`).
+    // With `-phi_pattern` (item PS8a): PHI-BLAST's reports run (the XML2 and JSON documents of
+    // 13 to 16 too, item PS15b-4), formats 8, 9 and 12 go on to NCBI's engine error, and BLAST XML
+    // and the archive go on to the search's setup, whose NCBI errors come before their refusal
+    // (`phi_hooks::phi_limits`).
     let with_pattern = |format: &str| {
         parse(&["-phi_pattern", "p.pat", "-outfmt", format])
             .unwrap()
@@ -224,10 +212,14 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
         "12",
         "5",
         "11",
+        "13",
+        "14",
+        "15",
+        "16",
     ] {
         assert_eq!(with_pattern(format), Ok(()), "outfmt {format}");
     }
-    for format in ["1", "2", "3", "4", "15", "16", "18"] {
+    for format in ["1", "2", "3", "4", "18"] {
         assert_eq!(
             with_pattern(format),
             Err(format!(

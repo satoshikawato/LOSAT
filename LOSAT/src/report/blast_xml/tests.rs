@@ -20,6 +20,7 @@ fn run<'a>(matrix: &'a FormattingMatrix) -> XmlRun<'a> {
         gap_extend: 1,
         reward_penalty: None,
         filter: b"F",
+        pattern: None,
         db_num: 0,
         db_len: 0,
         db_len_overflow: false,
@@ -344,6 +345,7 @@ fn run_blastn() -> XmlRun<'static> {
         gap_extend: 0,
         reward_penalty: Some((1, -2)),
         filter: b"L;m;",
+        pattern: None,
         db_num: 0,
         db_len: 0,
         db_len_overflow: false,
@@ -789,6 +791,7 @@ fn a_hit_whose_lookup_throws_is_ncbis_catch() {
                 query_gencode: None,
                 db_gencode: None,
                 program_type: None,
+                query_dropped: false,
             },
         );
         let error = document
@@ -799,4 +802,39 @@ fn a_hit_whose_lookup_throws_is_ncbis_catch() {
         let caught = error.downcast::<CaughtException>().unwrap();
         assert_eq!(caught.0, exception);
     }
+}
+
+// Line PS, PS15b-4: PHI-BLAST's pattern as read is `Parameters_pattern`, after `Parameters_filter`
+// (blastxml.asn's order; blastxml_format.cpp:617-618).
+#[test]
+fn a_phi_pattern_follows_the_filter_in_the_parameters() {
+    let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
+    let run = XmlRun {
+        pattern: Some(b"[AG]-x(4)-G-K-[ST]"),
+        ..run(&matrix)
+    };
+    let query = XmlQuery {
+        id: b"Query_1",
+        title: b"noh first query",
+        len: 32,
+        stats: STATS,
+        message: Some(b"No hits found"),
+        searched: true,
+        masks: &[],
+        joins_held: false,
+    };
+    let mut out = Vec::new();
+    let mut writer = BlastXmlWriter::new(0);
+    writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
+    let filter = "      <Parameters_filter>F</Parameters_filter>\n";
+    let header = HEADER.replacen(
+        filter,
+        &format!("{filter}      <Parameters_pattern>[AG]-x(4)-G-K-[ST]</Parameters_pattern>\n"),
+        1,
+    );
+    assert_ne!(header, HEADER);
+    assert!(
+        String::from_utf8(out).unwrap().starts_with(&header),
+        "the header with the pattern"
+    );
 }

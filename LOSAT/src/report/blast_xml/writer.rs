@@ -60,6 +60,10 @@ fn write_parameters<E: Encoder>(enc: &mut E, run: &XmlRun<'_>) {
     if !run.filter.is_empty() {
         string_member(enc, "filter", 7, run.filter);
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:617-618
+    if let Some(pattern) = run.pattern {
+        string_member(enc, "pattern", 8, pattern);
+    }
     enc.end_sequence();
     enc.end_member();
 }
@@ -333,6 +337,15 @@ pub trait StructuredXml {
     /// the XML2 and JSON documents of a `-subject` search (`Xml2Document`). BLAST XML writes each
     /// query's report at once.
     fn holds_back(&self) -> bool {
+        false
+    }
+
+    /// Whether NCBI's formatter has dropped the queries from its scope when the document's reports
+    /// are made (`blast_xml2::Xml2Run::query_dropped`), so that a query's report names it by its
+    /// Seq-loc's id without a title (`names::dropped_query_text`) and reads none of its
+    /// alignments' rows (`HspSink::reads_alignment`). BLAST XML writes each report at once, with
+    /// the query in the scope.
+    fn drops_queries(&self) -> bool {
         false
     }
 

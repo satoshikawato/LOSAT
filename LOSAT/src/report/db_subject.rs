@@ -5848,6 +5848,9 @@ pub struct HitLoads {
     /// The number of the reports given that NCBI's run reaches, where a report's load ended it
     /// (`None`: the run reaches every one).
     reached: Option<usize>,
+    /// Whether the run ended at the arrival of report `reached`, after its batch's prefetch: the
+    /// held report before it threw (`CallReads::held`; [`HitLoads::prefetches`]).
+    ended_at_arrival: bool,
     /// What each batch's prefetch gave for each subject of its prefetch set, by key
     /// ([`HitLoads::prefetched`]).
     prefetched: std::collections::HashMap<usize, HitLoad>,
@@ -5864,12 +5867,15 @@ pub struct HitLoads {
 /// report, in the order of the reads (psiblast's PSSM of the query, read after its report and
 /// before the next one, `ListedTitles::check_pssm_holds`); and `stop`, the prefetch of the batch
 /// after the reports whose lookup stops the run (`common::database::batch_prefetch`): its query
-/// batch and subjects. Empty for a call that loads nothing else.
+/// batch and subjects. Empty for a call that loads nothing else. `held`: the call's reports are
+/// held until the next report arrives (psiblast's XML2 and JSON documents,
+/// `blast_xml2::reports_held`), so a report whose `Hit` throws ends the run there.
 #[derive(Clone, Debug, Default)]
 pub struct CallReads {
     pub prefetched: Vec<Vec<usize>>,
     pub after: Vec<Vec<usize>>,
     pub stop: Option<(Option<usize>, Vec<usize>)>,
+    pub held: bool,
 }
 
 impl CallReads {
@@ -6021,6 +6027,12 @@ impl HitLoads {
         let mut given = 0;
         // The batch whose prefetch ran last (`ScopeWalk::bulk`), by the index of its first report.
         let mut prefetched = None;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2363-2399
+        // The end of the run that a held report's `Hit` makes (`CallReads::held`, an `EndsRun`
+        // format): NCBI makes that report at the next query's first result, after the prefetch of
+        // its batch, or at the epilog, so the run ends there (`ended_at_arrival`); the prefetch of
+        // a stopping batch after the reports comes first, and the held report is never made.
+        let mut held_end = false;
         for (report, (read, keys)) in reports.iter().enumerate() {
             // The reads after the report before (psiblast's PSSM), in its batch's scope.
             if let Some(before) = report.checked_sub(1) {
@@ -6078,8 +6090,10 @@ impl HitLoads {
                 if !ended.get() {
                     loaded.extend(keys.keys());
                 }
+                loads.end_at_arrival(&mut held_end, ended, report);
                 continue;
             }
+            loads.end_at_arrival(&mut held_end, ended, report);
             let Some(run) = run else {
                 // No format reads the subjects: a report that reads one by one loads nothing.
                 continue;
@@ -6162,7 +6176,9 @@ impl HitLoads {
                 let ends_run =
                     run.after == AfterThrow::EndsRun || (run.first_row_ends && range.start == 0);
                 thrown = ends_run || run.after == AfterThrow::EndsReport;
-                if ends_run {
+                if ends_run && call.held {
+                    held_end = true;
+                } else if ends_run {
                     ended.set(true);
                 }
                 passed.extend(keys.filter(|&key| key != first));
@@ -6178,6 +6194,10 @@ impl HitLoads {
             walk.enter(*batch);
             let answers = walk.bulk(keys.iter().filter_map(|&key| Some((key, parsed(key)?))));
             loads.prefetched.extend(answers);
+        } else {
+            // The epilog (or a later call: psiblast's next round or query) makes the held report,
+            // which ends the run after the reads after the last report (its PSSM).
+            loads.end_at_arrival(&mut held_end, ended, given);
         }
         let (prefetched_only, unread) = passed
             .into_iter()
@@ -6217,6 +6237,23 @@ impl HitLoads {
             }
         }
         keys
+    }
+
+    /// The arrival of report `report` (after its batch's prefetch, before its `Hit`s; for the
+    /// number of the reports, the epilog after the reads after the last) where the held report
+    /// before it threw (`held_end`, taken): the run ends here, and no report from `report` on is
+    /// reached, though its batch was prefetched ([`HitLoads::prefetches`]).
+    fn end_at_arrival(
+        &mut self,
+        held_end: &mut bool,
+        ended: &std::cell::Cell<bool>,
+        report: usize,
+    ) {
+        if std::mem::take(held_end) {
+            ended.set(true);
+            self.reached.get_or_insert(report);
+            self.ended_at_arrival = true;
+        }
     }
 
     /// The reads after report `report` (`CallReads::after`, psiblast's PSSM), in the walk `walk`
@@ -6509,6 +6546,7 @@ impl HitLoads {
             prefetched_only: self.prefetched_only.into_iter().filter_map(&key).collect(),
             refused: self.refused,
             reached: self.reached,
+            ended_at_arrival: self.ended_at_arrival,
             prefetched: self
                 .prefetched
                 .into_iter()
@@ -6570,6 +6608,14 @@ impl HitLoads {
     /// reach is not prefetched either (NCBI's application ends before it, `CATCH_ALL`).
     pub fn reaches(&self, report: usize) -> bool {
         self.reached.is_none_or(|reached| report < reached)
+    }
+
+    /// Whether NCBI's run reaches the prefetch of the batch of report `report` (or of the
+    /// stopping batch after the reports, numbered after them), and the reads after the report
+    /// before it: as [`HitLoads::reaches`], and also where the run ended at that report's arrival
+    /// (a held report's `Hit` that threw, `CallReads::held`), after its batch's prefetch.
+    pub fn prefetches(&self, report: usize) -> bool {
+        self.reaches(report) || (self.ended_at_arrival && self.reached == Some(report))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp (`SeqidToOid`,

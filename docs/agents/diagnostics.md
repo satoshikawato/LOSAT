@@ -5385,20 +5385,19 @@ Scheduling (each value computed by one thread with the original function; order 
   loop writes them (without the switch after none). Any other input that LOSAT does not refuse gives the
   same bytes either way; outfmt 17 writes its document only at the end, so a refused run writes none in
   both. ABI v1 callers, which are streamed, get the reports of the batches before a refusal, then the
-  error. With two or more batches the switch still keeps the
-  reports after the loop where a refusal of the options or the query lengths could come after the first
-  batch, and a subject set's tabular ids (where LOSAT refuses none), outfmt 0 titles and `-lcase_masking`
-  masks are made once; with one batch (the first batch takes every query record) nothing is checked or made
+  error. With two or more batches a subject set's tabular ids (where LOSAT refuses none), outfmt 0 titles
+  and `-lcase_masking` masks are made once; with one batch (the first batch takes every query record) nothing is checked or made
   ahead. Otherwise the reports stay after the loop, and `off=` names why: `outputs` (hit records, a format
   observer, a file sink, or two or more formats, which the library API allows on one stream and the batch
   writes would interleave: the Web adapter; the command line and ABI v1 are streamed), `debug` (`-verbose`,
   `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace,
-  `LOSAT_WASI_THREADS_DEBUG`: `run.rs` `x_debug_output`), `xml` (outfmt 5, 15 and 16), `scoring`
-  (no Karlin-Altschul values, or greedy gap costs LOSAT refuses) and
-  `ungapped_cutoff` (`-ungapped` with a query of 2^30 letters or more);
-  the reasons `subject_ids`, `titles`, `joined`, `large_parsed`, `ambiguity`, `taxonomy`, `search_space`
-  and `chunk_size` (a negative `CHUNK_SIZE`, whose refusals come after the reports of the batches before
-  in both paths since line RG item X-short-bat-2) are gone. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
+  `LOSAT_WASI_THREADS_DEBUG`: `run.rs` `x_debug_output`), `xml` (outfmt 5, 15 and 16);
+  the reasons `subject_ids`, `titles`, `joined`, `large_parsed`, `ambiguity`, `taxonomy`, `search_space`,
+  `chunk_size` (a negative `CHUNK_SIZE`, whose refusals come after the reports of the batches before
+  in both paths since line RG item X-short-bat-2), `scoring` and `ungapped_cutoff` (no Karlin-Altschul
+  values, matrix-only scoring with the greedy extension, and `-ungapped` or matrix-only scoring with a
+  query of 2^30 letters or more, whose refusals come after the reports of the batches before in both
+  paths since line RG series D's follow-up of D1c-1c-b PR 2b) are gone. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
   streamed too (since 2026-11-03, NCMEM1; before, `off=custom_tabular`). Outfmt 20's line of the field names
   comes with the first batch's
   report (or, where an error of NCBI's stops the first batch, from the call of the off path). With `LOSAT_TIMING` the `[TIMING]` blocks are printed
@@ -7341,7 +7340,14 @@ Scheduling (each value computed by one thread with the original function; order 
 - BXPAR, BXPOOL, BXBATCH, BXCHUNK (graduated 2026-10-22; no variables; class conditional, the names stay in
   `GRADUATED` for the reach table; they were in the strict set) BLASTX scheduling. Their rules stay:
   - BXPAR: query-chunk, redo and per-context SEG parallelism on the search pool of 2+ threads (each stage with its
-    own condition: several chunks, several matches, a large batch); 1 thread runs the serial reference stages;
+    own condition: several chunks, several matches, for SEG a batch searched with the pool inside); 1 thread runs
+    the serial reference stages. The contexts' SEG, the contexts' statistical blocks of a batch searched whole and
+    the chunks' setup of a split query are item sets (`utils/xitems.rs` `x_map`, shared with the TBLASTX work
+    board): the batch's thread takes the items in order, the pool's idle threads the next ones, and the batch's
+    thread runs no other job of the pool while it waits for them, so these steps never wait for another batch's
+    search (since 2026-11-27, line M4b item 5; SEG ran in
+    parallel only from 60,000 letters, as a `par_iter` whose waiting thread ran other batches' searches and
+    redo helpers: 19.6-52.8 s of SEG for 5 batches of q200k `-use_sw_tback` at `BATCH_SIZE` 40000, 16 threads);
   - BXPOOL: one pool for all query batches of the run at 2+ threads (1 thread: the per-batch path);
   - BXBATCH: with that pool, several small query batches searched together, output in input order (2+ threads and
     several query batches);

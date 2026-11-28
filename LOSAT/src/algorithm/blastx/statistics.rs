@@ -10,7 +10,7 @@ use crate::core::link_hsps::{EvenGapLinkParams, LinkCutoffs};
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::{
     config::{ProteinScoringSpec, ScoringMatrix},
-    stats::{lookup_protein_params, spouge::blast_spouge_stoe},
+    stats::{karlin::evalue_from_raw_score, lookup_protein_params, spouge::blast_spouge_stoe},
 };
 use anyhow::{ensure, Result};
 
@@ -74,9 +74,9 @@ pub fn evaluate_gapped(
                     query_lengths[h.context],
                     subject_length,
                 ),
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1886-1891
                 None => {
-                    parameters[h.context].search_space as f64
-                        * (-ka.lambda * h.score as f64 + ka.k.glibc_ln()).glibc_exp()
+                    evalue_from_raw_score(h.score, &ka, parameters[h.context].search_space as f64)
                 }
             },
             source_index,
@@ -238,8 +238,7 @@ pub(crate) fn evaluate_ungapped(
             LinkedHsp {
                 hsp: h.clone(),
                 num: 0,
-                evalue: p.search_space as f64
-                    * (-p.ungapped.lambda * h.score as f64 + p.ungapped.k.glibc_ln()).glibc_exp(),
+                evalue: evalue_from_raw_score(h.score, &p.ungapped, p.search_space as f64),
                 source_index,
             }
         })

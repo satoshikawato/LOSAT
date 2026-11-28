@@ -13,8 +13,8 @@
 //! `SubjectSource`, `BatchStage`, `ShownSubjects`, `BatchOutputs`). The functions are statements
 //! of `search_query_batch` moved here in their order; what they read is a struct of references or
 //! `Copy` values, and what they make is what `search_query_batch` then reads under the same names.
-//! An error of the set-up writes the outfmt 0 prolog of a file sink of the first batch through the
-//! batch's outputs before it is returned, as it did in `search_query_batch`.
+//! An error of the set-up writes the prologs that come with the first report (`prolog_with_report`)
+//! through the first batch's outputs before it is returned, as it did in `search_query_batch`.
 
 use super::{
     after_batch_reports, context_lengths, database, database_search_error, prolog_with_report,
@@ -70,8 +70,8 @@ pub(super) struct ContextStatistics {
 }
 
 /// The Karlin-Altschul blocks, the validity and the effective search space of every context of the
-/// batch, after the checks of the set-up; an error writes what NCBI writes before it (the outfmt 0
-/// prolog of a file sink of the first batch) through `outputs`.
+/// batch, after the checks of the set-up; an error writes what NCBI writes before it (the prologs
+/// that come with the first report, `prolog_with_report`, in the first batch) through `outputs`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:455-532
 /// (`BlastSetup_ScoreBlkInit`, which `BLAST_MainSetUp` calls at :652 for
@@ -155,16 +155,27 @@ fn karlin_blocks<const UNGAPPED: bool>(
             // queries (the error does not depend on the queries, so the first batch with a valid
             // query meets it; NCBI writes the results and warnings of the batches before it).
             // The contexts of a query without letters are invalid from their set-up and put
-            // no message here (`context_ungapped_blocks`).
+            // no message here (`context_ungapped_blocks`). LOSAT's refusal comes where NCBI's
+            // search of the batch would crash: after the reports of the batches before (whose
+            // queries were all invalid) in both paths of LOSAT_X_RPTSTREAM, or in the first
+            // batch after the prologs (`setup_failure`).
             if query_contexts
                 .iter()
                 .zip(context_ungapped)
                 .any(|(context, block)| context.len != 0 && block.is_none())
             {
-                anyhow::bail!(
+                let refusal = anyhow::anyhow!(
                     "these scoring options have no Karlin-Altschul values, and the query batch (up to {} residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not supported by LOSAT's BLASTN",
                     batching.batch_size
                 );
+                return Err(setup_failure(
+                    refusal,
+                    first_batch,
+                    false,
+                    outputs,
+                    intro,
+                    shown,
+                ));
             }
             // A query without letters (also a `-query_loc` interval that holds none) keeps its
             // warning in the error (`karlin_error`).
@@ -175,10 +186,11 @@ fn karlin_blocks<const UNGAPPED: bool>(
             if !first_batch {
                 return Err(after_batch_reports(karlin_error(&message, empty_queries)));
             }
-            // The prolog of a file sink (the others were written before the search).
+            // The prologs that come with the first report (outfmt 0 to 4's were written before
+            // the search).
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
             for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
-                if prolog_with_report(format, output_format) {
+                if prolog_with_report(output_format) {
                     let posts = crate::report::query_warnings::html_posts_sink(
                         outputs.html_posts.as_deref_mut(),
                         &mut *outputs.diagnostics,
@@ -275,7 +287,10 @@ pub(super) fn gap_align_setup_error(
 /// query. A 64-bit effective search space overflow (`effective_search_spaces`,
 /// `batch_setup::batch_spaces`, or mid-search at `subject_space_overflow.check()` in `run.rs`;
 /// D1a-6 review A F2) depends on the query length (and subject length for per-subject spaces), so
-/// valid earlier batches with hits may precede it; the handler writes their reports alike.
+/// valid earlier batches with hits may precede it; the handler writes their reports alike. So does
+/// the refusal of the ungapped word cutoff (`batch_setup::batch_cutoff_set`: a context of 2^30
+/// letters or more, or an average subject length whose search space overflows), which a batch with a
+/// long query meets after batches with shorter ones.
 pub(super) fn setup_failure(
     error: anyhow::Error,
     first_batch: bool,

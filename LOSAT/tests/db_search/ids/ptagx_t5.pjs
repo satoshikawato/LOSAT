@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "ptagx_t5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "ptagx_t5 (parsed Seq-ids, taxid 99990)",
+  "number-of-letters": 200,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-27T12:58:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49914,
+  "bytes-to-cache": 339,
+  "files": [
+    "ptagx_t5.pdb",
+    "ptagx_t5.phr",
+    "ptagx_t5.pin",
+    "ptagx_t5.pog",
+    "ptagx_t5.pos",
+    "ptagx_t5.pot",
+    "ptagx_t5.psq",
+    "ptagx_t5.ptf",
+    "ptagx_t5.pto"
+  ]
+}

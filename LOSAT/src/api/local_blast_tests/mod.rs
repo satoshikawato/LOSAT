@@ -7,6 +7,7 @@ mod blastn;
 mod blastp;
 mod blastx;
 mod database_refusal;
+mod file_sink;
 mod later_warnings;
 mod outfmt13_14;
 mod support;

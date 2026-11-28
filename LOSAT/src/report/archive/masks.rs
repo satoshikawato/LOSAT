@@ -22,6 +22,22 @@ pub enum Frame {
 }
 
 impl Frame {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1965-1988
+    /// `FrameNumber2NetworkFrame` for a program that translates the query: the frame of the
+    /// query's translation, 1, 2, 3, -1, -2 or -3 (NCBI aborts on any other; no context of LOSAT's
+    /// searches and no mask that LOSAT's archive reader takes has one).
+    pub fn of_number(frame: i32) -> Self {
+        match frame {
+            1 => Frame::Plus1,
+            2 => Frame::Plus2,
+            3 => Frame::Plus3,
+            -1 => Frame::Minus1,
+            -2 => Frame::Minus2,
+            -3 => Frame::Minus3,
+            other => unreachable!("FrameNumber2NetworkFrame aborts on the frame {other}"),
+        }
+    }
+
     fn name_and_value(self) -> (&'static str, i32) {
         match self {
             Frame::NotSet => ("notset", 0),
@@ -47,26 +63,48 @@ pub struct MaskEntry {
 
 /// Writes the mask as a `Blast4-mask` value (the caller wrote `element()` or the variant).
 pub fn write_mask<E: Encoder>(enc: &mut E, mask: &MaskEntry) {
-    enc.begin_sequence("Blast4-mask");
-    enc.member("locations", 0);
-    enc.begin_list(false);
-    enc.element();
     let id = match &mask.best {
         Some(id) => SeqId::Db(id),
         None => SeqId::Local(&mask.id),
     };
     // The intervals are positions of the query, never negative (`TSeqPos` in NCBI).
-    write_packed_int(
+    write_blast4_mask(
         enc,
-        &id,
+        mask.frame,
         mask.intervals
             .iter()
-            .map(|&(from, to)| (from as u32, to as u32)),
+            .map(|&(from, to)| (id, from as u32, to as u32)),
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1063-1138
+/// A `Blast4-mask` value of `frame` (the caller wrote `element()` or the variant): its one
+/// location, a `Seq-loc` `packed-int` of `intervals` (0-based, inclusive), each on its own Seq-id
+/// (`ConvertToRemoteMasks` adds each `CSeqLocInfo` with its Seq-id; `s_CreateBlastMask` copies
+/// them without a strand).
+pub fn write_blast4_mask<'a, E: Encoder>(
+    enc: &mut E,
+    frame: Frame,
+    intervals: impl IntoIterator<Item = (SeqId<'a>, u32, u32)>,
+) {
+    enc.begin_sequence("Blast4-mask");
+    enc.member("locations", 0);
+    enc.begin_list(false);
+    enc.element();
+    enc.variant("Seq-loc", "packed-int", 4);
+    enc.begin_named("Packed-seqint");
+    enc.begin_list(false);
+    for (id, from, to) in intervals {
+        enc.element();
+        write_interval(enc, &id, from, to);
+    }
+    enc.end_list();
+    enc.end_named();
+    enc.end_variant();
     enc.end_list();
     enc.end_member();
     enc.member("frame", 1);
-    let (name, value) = mask.frame.name_and_value();
+    let (name, value) = frame.name_and_value();
     enc.begin_named("Blast4-frame-type");
     enc.enumerated(name, value);
     enc.end_named();

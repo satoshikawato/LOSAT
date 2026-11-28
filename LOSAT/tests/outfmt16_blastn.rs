@@ -514,9 +514,9 @@ fn a_karlin_error_in_the_first_batch_leaves_the_prolog_alone() {
 /// (3)) at 1, 4, 8 and 16 threads. BLASTN has written the outfmt 0 prolog by then, so outfmt 0
 /// keeps those first lines (the start of the bytes without the taxonomy database, no `Query=`);
 /// outfmt 5, 6, 7 and 17 write nothing.
-/// Outfmt 15 and 16 keep their prologs (the start of the bytes without the taxonomy database, no
-/// report), which NCBI's `PrintProlog` writes before its first batch: the refusal comes at the
-/// batch whose loads make the lookup, after the prologs (line DBID item rf-1,
+/// Outfmt 15 and 16 keep their prologs (the first 20 or 275 bytes without the taxonomy database, up
+/// to the first report), which NCBI's `PrintProlog` writes before its first batch: the refusal
+/// comes at the batch whose loads make the lookup, after the prologs (line DBID item rf-1,
 /// PD-LOSAT-NCBI-DEFECTS 1.128). NCBI BLAST+ 2.17.0 on these arguments dies at that load (SIGSEGV)
 /// with the prolog still in its buffer; with `BLASTDB=tests/seqdb/taxdb/good` its output begins
 /// with the same 20 (outfmt 15) or 275 (outfmt 16) bytes.
@@ -583,10 +583,10 @@ fn the_taxdb_is_read_by_the_prefetching_formats_only() {
             String::from_utf8_lossy(&output.stderr).contains(refusal),
             "outfmt {format}"
         );
-        assert!(
-            !output.stdout.is_empty()
-                && without.stdout.starts_with(&output.stdout)
-                && !String::from_utf8_lossy(&output.stdout).contains("report"),
+        let prolog = if format == "15" { 20 } else { 275 };
+        assert_eq!(
+            output.stdout,
+            without.stdout[..prolog],
             "outfmt {format}: the prolog"
         );
     }

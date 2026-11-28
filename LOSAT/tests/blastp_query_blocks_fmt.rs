@@ -1377,12 +1377,13 @@ fn taxonomy_names_for_outfmt_15_and_16_keep_the_bytes_and_the_refusals() {
                     // The prolog of the run whose taxonomy database reads, then the refusal at the
                     // first batch, whose loads make the lookup (line DBID item rf-1): NCBI BLAST+
                     // 2.17.0 on these arguments dies there (SIGSEGV) with its prolog unflushed;
-                    // with `taxdb/good` its output begins with the same bytes.
+                    // with `taxdb/good` its output begins with the same 20 (outfmt 15) or 275
+                    // (outfmt 16) bytes, up to the first report.
                     let complete = complete.as_ref().expect("the search without a taxdb");
-                    assert!(
-                        !reference.stdout.is_empty()
-                            && complete.starts_with(&reference.stdout)
-                            && !String::from_utf8_lossy(&reference.stdout).contains("report"),
+                    let prolog = if spec == "15" { 20 } else { 275 };
+                    assert_eq!(
+                        reference.stdout,
+                        complete[..prolog],
                         "{what}: the prolog before the refusal"
                     );
                 } else if variant.is_none() {

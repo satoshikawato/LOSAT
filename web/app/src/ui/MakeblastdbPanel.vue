@@ -50,6 +50,11 @@ const dbtypeField = computed(() => blockField('-dbtype'));
 const outField = computed(() => blockField('-out'));
 
 const inputType = computed(() => props.draft.inputType(state.value));
+/** What is wrong with the input, shown in the Input block (files refused at open, the pasted FASTA's name taken). */
+const inputProblem = computed(() => props.draft.inputProblem(state.value));
+watch(inputProblem, (problem) => {
+  if (problem !== undefined) announce(problem, 'alert');
+});
 
 const dragging = ref(false);
 const inputFilesInput = ref<HTMLInputElement | null>(null);
@@ -240,6 +245,7 @@ watch(
             </div>
           </li>
         </ul>
+        <p v-if="inputProblem" class="error small" data-testid="mk-input-error">{{ inputProblem }}</p>
       </template>
 
       <ParameterField v-if="dbtypeField" :model="formModel" :field="dbtypeField" />

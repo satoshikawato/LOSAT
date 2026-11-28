@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { generateVerificationTable } from '../../build/verification';
 import {
   FILE_VALUE,
+  FILES_VALUE,
   NOT_SUPPORTED_LABEL,
   optionKey,
   OTHER_BYTES_TEXT_VALUE,
@@ -385,7 +386,10 @@ describe('verification table', () => {
       ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-title', 'my genome', '-out', 'db'],
       ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-blastdb_version', '5'],
       ['makeblastdb', '-in', 'input.fa', '-dbtype', 'prot', '-mask_data', 'seg.asnb'],
+      // Two -mask_data files of two algorithms without -gi_mask (MKW13, MKW14: WW4b2 R3 F2); three are the same loop.
       ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-parse_seqids', '-mask_data', 'a.asnb,b.asnb', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-mask_data', 'windowmasker-run1.asnb,windowmasker-run2.asnb', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-mask_data', 'a.asnb,b.asnb,c.asnb', '-out', 'db'],
       ['makeblastdb', '-in', 'input.fa', '-dbtype', 'prot', '-mask_data', 'm.asnb', '-mask_id', 'mine', '-mask_desc', 'my seg', '-out', 'db'],
       ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-blastdb_version', '4', '-mask_data', 'dust.asnb'],
       // The ASN.1 manifest.
@@ -409,8 +413,18 @@ describe('verification table', () => {
       expect(badge.level, argv.join(' ')).toBe('certified');
       expect(badge.label, argv.join(' ')).toBe(SUPPORTED_LABEL);
     }
+    // A list option's key says one entry or several (WW4b2 R3 F2): one mask column is not two.
+    const mkKey = (argv: readonly string[]) => toolOptionKey(argv, mkGrammar);
+    expect(mkKey(['makeblastdb', '-dbtype', 'nucl', '-mask_data', 'a.asnb'])).toBe(JSON.stringify([['-dbtype', 'nucl'], ['-mask_data', FILE_VALUE]]));
+    expect(mkKey(['makeblastdb', '-dbtype', 'nucl', '-mask_data', 'a.asnb,b.asnb'])).toBe(JSON.stringify([['-dbtype', 'nucl'], ['-mask_data', FILES_VALUE]]));
+    expect(mkKey(['makeblastdb', '-dbtype', 'nucl', '-mask_data', ' a b.asnb ', '-mask_id', 'm1,m2', '-mask_desc', 'd', '-gi_mask_name', 'g1,g2'])).toBe(
+      JSON.stringify([['-dbtype', 'nucl'], ['-gi_mask_name', FILES_VALUE], ['-mask_data', FILE_VALUE], ['-mask_desc', FILE_VALUE], ['-mask_id', FILES_VALUE]]),
+    );
+    expect(mkKey(['makeblastdb', '-dbtype', 'nucl', '-title', 'a,b'])).toBe(JSON.stringify([['-dbtype', 'nucl'], ['-title', FILE_VALUE]]));
     for (const argv of [
       ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-max_file_sz', '1MB'],
+      // Two -mask_data files with an option that no row of two runs with.
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-parse_seqids', '-hash_index', '-mask_data', 'a.asnb,b.asnb', '-out', 'db'],
       // A single-volume database with -gi_mask: NCBI ends it with exit status 2 (approved exception 25), so no row counts.
       ['makeblastdb', '-in', 'n.fa', '-dbtype', 'nucl', '-parse_seqids', '-title', 't', '-mask_data', 'd.asnb', '-gi_mask'],
       ['makeblastdb', '-in', 'n.fa', '-dbtype', 'nucl', '-parse_seqids', '-title', 't', '-mask_data', 'd.asnb', '-gi_mask', '-gi_mask_name', 'g1'],

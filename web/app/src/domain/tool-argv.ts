@@ -5,6 +5,7 @@
 // omitted; Make counts and Convert counts write `-out wmasker.<sformat>` until the user edits it.
 import type { ToolDescription, ToolParameterDescription } from 'losat/domain';
 import { splitOptions } from './argv';
+import { COMMA_LIST_FLAGS } from './list-flags';
 import { writtenValue, type FieldValue, type FormValues } from './parameters';
 import {
   allMaskingParameters,
@@ -247,8 +248,32 @@ export function buildMaskingArgv(input: MaskingArgvInput): readonly string[] {
 }
 
 /**
+ * Why a name cannot be written in the list of names that `flag` takes, as the command line splits the list, or undefined
+ * when it can (and for an option that takes one name). The one rule for every list option: makeblastdb's `-in`
+ * (`SeqDB_SplitQuoted`: spaces separate the names and a double quote starts or ends a name with spaces, so no name can
+ * hold a double quote) and the options of `COMMA_LIST_FLAGS` (`-mask_data` and the other lists that `NStr::Split` cuts
+ * at commas, so no entry can hold a comma). `what` says what the name is of: a file opened, or a database that the
+ * files of the run hold.
+ */
+export function listNameRefusal(flag: string, name: string, what: 'file' | 'database' = 'file'): string | undefined {
+  const split = flag === '-in' ? IN_LIST_SPLIT : COMMA_LIST_FLAGS.has(flag) ? COMMA_LIST_SPLIT : undefined;
+  if (split === undefined || !name.includes(split.mark)) return undefined;
+  return `A ${what} named "${name}" cannot be in ${flag}: ${split.reason}.`;
+}
+
+/** What a list option's splitter takes out of a name (`listNameRefusal`): the mark, and why. */
+interface ListSplit {
+  readonly mark: string;
+  readonly reason: string;
+}
+
+const IN_LIST_SPLIT: ListSplit = { mark: '"', reason: 'a double quote there starts or ends a name' };
+const COMMA_LIST_SPLIT: ListSplit = { mark: ',', reason: 'a comma separates its files' };
+
+/**
  * `-in`'s value for several names, as makeblastdb reads it (`SeqDB_SplitQuoted`) and writes it
- * (`SeqDB_CombineAndQuote`): the names separated by spaces, a name with a space between double quotes.
+ * (`SeqDB_CombineAndQuote`): the names separated by spaces, a name with a space between double quotes. A name with a
+ * double quote cannot be written (`listNameRefusal`).
  */
 export function makeblastdbInputList(names: readonly string[]): string {
   return names

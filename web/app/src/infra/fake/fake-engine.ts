@@ -36,7 +36,7 @@ import { optionValue } from '../../domain/argv';
 import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
 import { PROGRAMS } from '../../domain/programs';
 import { toolOptionValue } from '../../domain/tool-argv';
-import { WINDOWMASKER_HELP_FLAGS, WINDOWMASKER_VERSION_FLAGS } from '../../domain/tools';
+import { toolHelpFlag, toolPrintsKind } from '../../domain/tools';
 import DESCRIBE from './describe.json';
 import BLAST_FORMATTER_XMLHELP_DOC from './blast_formatter-xmlhelp.json';
 import CONVERT2BLASTMASK_XMLHELP_DOC from './convert2blastmask-xmlhelp.json';
@@ -113,9 +113,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     for (let i = 1; i < argv.length; i++) {
       const word = argv[i]!;
       const [flag, inline] = word.split(/=(.*)/s, 2);
-      if (WINDOWMASKER_HELP_FLAGS.has(flag!) || WINDOWMASKER_VERSION_FLAGS.has(flag!) || (tool === 'makeblastdb' && flag === '-help-full')) {
-        return { ok: true };
-      }
+      if (toolPrintsKind([tool, flag!]) !== null) return { ok: true };
       const param = byFlag.get(flag!);
       const extraValued = flag === '-logfile' || flag === '-conffile' || (tool === 'blast_formatter' && flag === '-rid');
       if (param === undefined && !extraValued) {
@@ -221,17 +219,14 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     }
 
     const toolName = argv[0] ?? 'windowmasker';
-    const words = argv.slice(1).map((word) => word.split('=', 1)[0]!);
-    if (words.includes('-xmlhelp')) {
-      await writeStdout(TOOL_XMLHELP[toolName] ?? '');
-      return finish(0);
-    }
-    if (words.some((w) => WINDOWMASKER_HELP_FLAGS.has(w) || (toolName === 'makeblastdb' && w === '-help-full'))) {
-      await writeStdout(`USAGE\n  ${toolName} ... (${FAKE_MARKER})\n`);
-      return finish(0);
-    }
-    if (words.some((w) => WINDOWMASKER_VERSION_FLAGS.has(w))) {
+    const prints = toolPrintsKind(argv);
+    if (prints === 'version') {
       await writeStdout(`${toolName}: 0.2.0 (${FAKE_MARKER})\n`);
+      return finish(0);
+    }
+    if (prints === 'help') {
+      if (toolHelpFlag(argv) === '-xmlhelp') await writeStdout(TOOL_XMLHELP[toolName] ?? '');
+      else await writeStdout(`USAGE\n  ${toolName} ... (${FAKE_MARKER})\n`);
       return finish(0);
     }
 

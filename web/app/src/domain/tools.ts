@@ -139,7 +139,11 @@ export const TOOL_FILE_LIST_FLAGS: ReadonlySet<string> = new Set(['-mask_data'])
 /** Help and version flags, entered via Additional options. */
 export const WINDOWMASKER_HELP_FLAGS: ReadonlySet<string> = new Set(['-h', '-help', '-xmlhelp']);
 
-/** The help flag of the tools with hidden options (makeblastdb's `-randomize`), which NCBI's `-help` does not list. */
+/**
+ * The tools whose argument reader takes `-help-full` (makeblastdb's, for its hidden `-randomize`, which `-help` does not
+ * list). The one list of them: `toolPrintsKind` reads it, and every reader of a tool run's help (the drafts, FakeEngine)
+ * asks `toolPrintsKind`; a tool whose reader takes `-help-full` is added here.
+ */
 const HELP_FULL_TOOLS: ReadonlySet<string> = new Set(['makeblastdb']);
 export const WINDOWMASKER_VERSION_FLAGS: ReadonlySet<string> = new Set(['-version', '-version-full', '-version-full-xml', '-version-full-json']);
 
@@ -497,15 +501,24 @@ export function toolTakesValue(description: ToolDescription | undefined): (flag:
   return (flag: string) => valued.has(flag);
 }
 
-/** Whether the argv asks the tool to print help or version instead of running a stage. */
+/**
+ * Whether the argv asks the tool to print its version or its help instead of running a stage, as the command line
+ * does: a version flag anywhere wins (NCBI BLAST+ 2.17.0 and LOSAT print the version for `-help -version`), else a
+ * help flag (`toolHelpFlag`).
+ */
 export function toolPrintsKind(argv: readonly string[]): PrintedKind | null {
+  const flags = argv.slice(1).map((word) => word.split('=', 1)[0]!);
+  if (flags.some((flag) => WINDOWMASKER_VERSION_FLAGS.has(flag))) return 'version';
+  return toolHelpFlag(argv) === undefined ? null : 'help';
+}
+
+/** The first help flag of a tool's argv (`-xmlhelp` prints the XML, the others the usage); undefined when there is none. */
+export function toolHelpFlag(argv: readonly string[]): string | undefined {
   const helpFull = HELP_FULL_TOOLS.has(argv[0] ?? '');
-  for (const word of argv.slice(1)) {
-    const flag = word.split('=', 1)[0]!;
-    if (WINDOWMASKER_HELP_FLAGS.has(flag) || (helpFull && flag === '-help-full')) return 'help';
-    if (WINDOWMASKER_VERSION_FLAGS.has(flag)) return 'version';
-  }
-  return null;
+  return argv
+    .slice(1)
+    .map((word) => word.split('=', 1)[0]!)
+    .find((flag) => WINDOWMASKER_HELP_FLAGS.has(flag) || (helpFull && flag === '-help-full'));
 }
 
 /** Download file name for a tool run output or file (`runFileName` pattern). */

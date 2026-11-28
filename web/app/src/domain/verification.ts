@@ -1,4 +1,6 @@
 import type { OutputFormat, ProgramId, ToolDescription } from 'losat/domain';
+// The generator of the table (build/verification.ts) runs this module in Node as it is: its imports name their files.
+import { COMMA_LIST_FLAGS, commaListLength } from './list-flags.ts';
 import type { ToolId } from './tools';
 // The verification badge of a run (plan §6.1, design §10.3, PD-LOSAT-WEB-APP-BOUNDARY
 // "Compatibility contract"). A run matches a certified profile only when its program and
@@ -60,8 +62,14 @@ const NOT_OPTIONS = new Set(['-query', '-subject', '-out', '-outfmt', '-num_thre
 /** Flags whose value is a coordinate range of the inputs (S11): a profile has the flag, not the range. */
 const RANGE_OPTIONS = new Set(['-query_loc', '-subject_loc']);
 export const RANGE_VALUE = '<range>';
-/** Placeholder for the values of TOOL_FILE_OPTIONS in tool option keys. */
+/** Placeholder for the values of TOOL_FILE_OPTIONS in tool option keys (one name; a list of one entry). */
 export const FILE_VALUE = '<file>';
+/**
+ * Placeholder for the value of a list option of TOOL_FILE_OPTIONS (`COMMA_LIST_FLAGS`: `-mask_data`, `-mask_id`,
+ * `-mask_desc`, `-gi_mask_name`) that lists several entries: makeblastdb writes one mask column per `-mask_data` file
+ * (several make several algorithms in one column index), so a set with one entry is not a set with several.
+ */
+export const FILES_VALUE = '<files>';
 /** Tool flags that name only input/output/log files and do not change the option set. */
 const TOOL_NOT_OPTIONS = new Set(['-in', '-archive', '-out', '-logfile']);
 /**
@@ -111,8 +119,12 @@ function writtenTextClass(value: string): string {
  * keeps itself (`TOOL_PATH_VALUES`). Each entry maps a value to its class.
  */
 const TOOL_VALUE_CLASSES: ReadonlyMap<string, (value: string) => string> = new Map<string, (value: string) => string>([
-  // Names of files and texts that a tool reads or stores as given (`TOOL_FILE_OPTIONS`).
-  ...[...TOOL_FILE_OPTIONS].map((flag): [string, (value: string) => string] => [flag, () => FILE_VALUE]),
+  // Names of files and texts that a tool reads or stores as given (`TOOL_FILE_OPTIONS`); a value of a list option that
+  // lists several entries is a set of its own (`FILES_VALUE`, WW4b2 R3).
+  ...[...TOOL_FILE_OPTIONS].map((flag): [string, (value: string) => string] => [
+    flag,
+    (value) => (COMMA_LIST_FLAGS.has(flag) && commaListLength(value) > 1 ? FILES_VALUE : FILE_VALUE),
+  ]),
   // makeblastdb: a nonzero -taxid is stored in every sequence as given; 0 leaves them to -taxid_map (WW4b2 R2).
   ['-taxid', (value) => (/^\+?0+$/.test(value) ? '0' : TAXID_VALUE)],
   // convert2blastmask: the program that the name gives in lower case (C locale `tolower`), any other name `other`

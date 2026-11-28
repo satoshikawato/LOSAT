@@ -134,8 +134,13 @@ standard error and exit status (a signal as `-N`) are the row's `.out`, `.err` a
   offset 28): `SIGSEGV`; `e605_606` (`-entry 605,606`): OID 4's FASTA only. `p2_dbcmd_<row>`:
   `p2db` with OID 0 of `pv1` of length -1 and `pv1.psq` of no bytes under the alias `p`, NCBI
   `blastdbcmd -db p`: `e7004`: no output; `e7004_als` (`-outfmt "%a %l %s"`): the same error;
-  `e7001_7004`: OID 0's FASTA only; `e7005` (a positive length): `SIGSEGV`. LOSAT matches every
-  row (the crashes refused).
+  `e7001_7004`: OID 0's FASTA only; `e7005` (a positive length): `SIGSEGV`. A `-outfmt` line
+  without `%l`, `%s` or `%h` reads neither the length nor the letters: `mv3z_dbcmd_e607_a`,
+  `_e607_aot` (`"%a %o %g %t"`), `_e606_a` and `_e607_a_range` (`-range 1-5`) print the line,
+  `_e606_h` gives the same error, `_e607_h` and `_e607_s` crash; `far_dbcmd_e603_<row>`: `mv3db/v0`
+  under the alias `n` (`DBLIST v0`) whose OID 2 (GI 603) has its ambiguity offset at 2^28, so
+  its last byte lies far past `v0.nsq`: `a` (`%a`) prints the accession, `l`, `s`, `h` and `f`
+  (the FASTA) crash. LOSAT matches every row (the crashes refused).
 - `ap_<row>_info{,_t}` (RG-D2 tail R5 finding 6, frozen 2026-11-28 for review R5 finding 2; test
   `nonasc_approx_length_info_parity`): NCBI `blastdbcmd -db g -info` (`_t`: and `-exact_length`)
   of the alias `g` (`DBLIST v0`, `GILIST g.gil`, `ap_g.gil` made by NCBI `blastdb_aliastool
@@ -144,3 +149,11 @@ standard error and exit status (a signal as `-N`) are the row's `.out`, `.err` a
   0 (`eq`): the totals are those of NCBI's 32-bit `int` approximate lengths (454, 430, or near
   2^64 for `pos29`, printed with NCBI's lost digit); `-exact_length` crashes (`SIGSEGV`) except
   for `eq`. The run directory is `<RUN>`.
+- `mv3z_wm_counts`, `mv3z_dust_iv`, `wmnull_*` (RG-D2 tail R6, test
+  `nonasc_masker_entry_without_bioseq_parity`): NCBI BLAST+ 2.17.0 windowmasker `-mk_counts`
+  (also with `-checkdup true`) and dustmasker `-outfmt interval` of `-infmt blastdb` over an OID
+  whose `GetBioseq` gives no Bioseq: OID 606 of `run_mv3z` (above), or OID 0 or 2 of `mv3db/v0`
+  (alias `n`, `DBLIST v0`) whose ambiguity offset is its sequence's start (`wmnull_k0`,
+  `wmnull_k2`). `CMaskBDBReader` gives an empty Seq-entry for it, and the readers' request for
+  its Bioseq (windowmasker's `CInputBioseq_CI`: `Seq_entry.seq`) or Bioseq set (dustmasker:
+  `Seq_entry.set`) ends the run with exit status 3, after the output of the earlier sequences.

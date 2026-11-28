@@ -10,6 +10,14 @@
   where the scan stops at such a protein or the list leaves out the others, `blastn -num_threads 1` skips such a
   nucleotide, and `blastdbcmd -entry` writes nothing for such a sequence (`-outfmt %s`: NCBI BLAST+'s error `could not get
   sequence or range.`), as NCBI BLAST+ does. `-outfmt %l` of such a nucleotide stays refused (NCBI BLAST+ crashes).
+- `blastdbcmd -outfmt` without `%l`, `%s` or `%h` (such as `%a`): LOSAT now writes the line of a damaged sequence whose
+  length or letters cannot be read (an empty `.nsq`, an ambiguity offset past the end of the file), as NCBI BLAST+ does,
+  which reads neither for such a line; LOSAT refused it.
+- `windowmasker -mk_counts -infmt blastdb`: a sequence for which NCBI BLAST+ makes no Bioseq (one of no letters, such as
+  a sequence at offset 0 of an empty `.nsq` or one whose length in the index is 0 or less, or one whose every definition
+  line the alias files remove) now ends the run with NCBI BLAST+'s error `Seq_entry.seq` and exit status 3, where LOSAT
+  skipped it and wrote counts; also with `-checkdup true`. The masking (`-ustat`) still skips such a sequence, as NCBI
+  BLAST+ does.
 - A database with a list or an OID range whose nucleotide index gives a sequence a negative approximate length, or a
   sequence of 2^31 bases or more: its total, longest and shortest length (`blastdbcmd -info` and the search's statistics)
   now follow NCBI BLAST+'s 32-bit arithmetic.

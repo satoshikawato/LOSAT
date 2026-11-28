@@ -2465,8 +2465,11 @@ fn nonasc_filtering_db_repeat_search_runs_one_thread() {
 /// with `%l`; `-entry 607` (OID 6, at offset 28) crashes; `-entry 605,606` writes OID 4 only.
 /// `p2_dbcmd_<row>`: `p2db` with OID 0 of `pv1` of length -1 and `pv1.psq` of no bytes under
 /// the alias `p`: `-entry 7004` gives no output, NCBI's error with `-outfmt "%a %l %s"`,
-/// `-entry 7001,7004` writes OID 0 only, and `-entry 7005` (a positive length) crashes. LOSAT
-/// is byte-identical and refuses the crashes.
+/// `-entry 7001,7004` writes OID 0 only, and `-entry 7005` (a positive length) crashes. An
+/// `-outfmt` line without `%l`, `%s` or `%h` reads neither the length nor the letters
+/// (seq_formatter.cpp:199-201, 282-313), so it is printed also for a sequence whose length or
+/// letters crash NCBI (`mv3z_dbcmd_e607_a*`, `far_dbcmd_e603_a`: an ambiguity offset of 2^28).
+/// LOSAT is byte-identical and refuses the crashes.
 #[test]
 fn nonasc_blastdbcmd_empty_sequence_file_parity() {
     let root = scratch("dbcmd-empty-seq-file");
@@ -2498,7 +2501,39 @@ fn nonasc_blastdbcmd_empty_sequence_file_parity() {
     let start: [u8; 4] = pin[seq..seq + 4].try_into().unwrap();
     pin[seq + 4..seq + 8].copy_from_slice(&start);
     fs::write(p2z.join("pv1.pin"), pin).unwrap();
-    let rows: [(&str, &Path, &[&str]); 9] = [
+    // OID 2 of `mv3db/v0` (GI 603) whose ambiguity offset is 2^28: its last byte lies far past
+    // the sequence file, which NCBI reads (and crashes) for its length or its letters only.
+    let far = copy_db("run_far", "mv3db");
+    fs::write(far.join("n.nal"), "TITLE n\nDBLIST v0\n").unwrap();
+    poke_amb_offset(&far.join("v0.nin"), 2, true);
+    let entry_fmt = |entry: &'static str, fmt: &'static str| -> Vec<&'static str> {
+        vec!["-db", "n", "-entry", entry, "-outfmt", fmt]
+    };
+    let mut rows: Vec<(&str, &Path, Vec<&str>)> = vec![
+        ("mv3z_dbcmd_e607_a", &mv3z, entry_fmt("607", "%a")),
+        (
+            "mv3z_dbcmd_e607_aot",
+            &mv3z,
+            entry_fmt("607", "%a %o %g %t"),
+        ),
+        ("mv3z_dbcmd_e607_h", &mv3z, entry_fmt("607", "%h")),
+        ("mv3z_dbcmd_e606_h", &mv3z, entry_fmt("606", "%h")),
+        ("mv3z_dbcmd_e606_a", &mv3z, entry_fmt("606", "%a")),
+        ("mv3z_dbcmd_e607_s", &mv3z, entry_fmt("607", "%s")),
+        (
+            "mv3z_dbcmd_e607_a_range",
+            &mv3z,
+            vec![
+                "-db", "n", "-entry", "607", "-outfmt", "%a", "-range", "1-5",
+            ],
+        ),
+        ("far_dbcmd_e603_a", &far, entry_fmt("603", "%a")),
+        ("far_dbcmd_e603_l", &far, entry_fmt("603", "%l")),
+        ("far_dbcmd_e603_s", &far, entry_fmt("603", "%s")),
+        ("far_dbcmd_e603_h", &far, entry_fmt("603", "%h")),
+        ("far_dbcmd_e603_f", &far, vec!["-db", "n", "-entry", "603"]),
+    ];
+    let first: [(&str, &Path, &[&str]); 9] = [
         ("mv3z_dbcmd_e606", &mv3z, &["-db", "n", "-entry", "606"]),
         (
             "mv3z_dbcmd_e606_s",
@@ -2529,10 +2564,11 @@ fn nonasc_blastdbcmd_empty_sequence_file_parity() {
         ),
         ("p2_dbcmd_e7005", &p2z, &["-db", "p", "-entry", "7005"]),
     ];
+    rows.extend(first.map(|(label, dir, args)| (label, dir, args.to_vec())));
     let mut results = BTreeMap::new();
     for (label, dir, args) in rows {
         let ncbi = frozen_tail_row(label);
-        let got = run_losat_sub(&root, dir, "blastdbcmd", args);
+        let got = run_losat_sub(&root, dir, "blastdbcmd", &args);
         assert_tail_row(label, &got, (ncbi.0, &ncbi.1, &ncbi.2));
         results.insert(label, losat_status(&got));
     }
@@ -2544,6 +2580,19 @@ fn nonasc_blastdbcmd_empty_sequence_file_parity() {
     assert_eq!(results["mv3z_dbcmd_e605_606"], (0, 3));
     assert_eq!(results["p2_dbcmd_e7004"], (0, 0));
     assert_eq!(results["p2_dbcmd_e7001_7004"], (0, 3));
+    // A line without `%l`, `%s` or `%h` reads neither the length nor the letters: NCBI and LOSAT
+    // print it also for a sequence whose length crashes NCBI (also with `-range`).
+    for label in [
+        "mv3z_dbcmd_e607_a",
+        "mv3z_dbcmd_e607_aot",
+        "mv3z_dbcmd_e606_a",
+        "mv3z_dbcmd_e607_a_range",
+        "far_dbcmd_e603_a",
+    ] {
+        assert_eq!(results[label], (0, 1), "{label}");
+    }
+    assert_eq!(results["mv3z_dbcmd_e606_h"], (1, 0));
+    assert_eq!(results["far_dbcmd_e603_l"], (1, 0));
     assert_eq!(results["p2_dbcmd_e7005"], (1, 0));
     let _ = fs::remove_dir_all(&root);
 }
@@ -2611,4 +2660,68 @@ fn nonasc_approx_length_info_parity() {
     assert_eq!(total("ap_eq_info_t"), "\t5 sequences; 433 total bases");
     assert_eq!(results["ap_neg31_info_t"].2, 1);
     let _ = fs::remove_dir_all(&root);
+}
+
+/// NCBI BLAST+ 2.17.0 dustmasker and windowmasker of `-infmt blastdb` over an OID whose
+/// `GetBioseq` gives no Bioseq (frozen rows `mv3z_wm_counts`, `mv3z_dust_iv`, `wmnull_*` of
+/// `nonasc_xprog`): OID 606 at offset 0 of a sequence file of no bytes (its `x_GetSequence` length
+/// is -1), or a sequence whose ambiguity offset is its start in a sequence file with bytes.
+/// `CMaskBDBReader` gives an empty Seq-entry for it: windowmasker's counts (`-mk_counts`, also
+/// after `-checkdup true`) end there with `Seq_entry.seq`, dustmasker with `Seq_entry.set`, after
+/// the output of the earlier sequences.
+#[test]
+fn nonasc_masker_entry_without_bioseq_parity() {
+    let root = scratch("masker-no-bioseq");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let base = fixtures().join("nonasc_xprog/mv3db");
+    let copy_db = |name: &str| -> PathBuf {
+        let dir = root.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        for entry in fs::read_dir(&base).unwrap() {
+            let entry = entry.unwrap();
+            fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
+        }
+        dir
+    };
+    let mv3z = copy_db("run_mv3z");
+    fs::write(mv3z.join("n.nal"), "TITLE n\nDBLIST v0 v1 v2\n").unwrap();
+    fs::write(mv3z.join("v1.nsq"), b"").unwrap();
+    let mut nin = fs::read(mv3z.join("v1.nin")).unwrap();
+    let (_, _, seq, _) = nin_v4_layout(&nin);
+    nin[seq..seq + 4].copy_from_slice(&0u32.to_be_bytes());
+    fs::write(mv3z.join("v1.nin"), nin).unwrap();
+    let k0 = copy_db("run_wmnull_k0");
+    let k2 = copy_db("run_wmnull_k2");
+    for (dir, oid) in [(&k0, 0), (&k2, 2)] {
+        fs::write(dir.join("n.nal"), "TITLE n\nDBLIST v0\n").unwrap();
+        poke_amb_offset(&dir.join("v0.nin"), oid, false);
+    }
+    let counts: &[&str] = &["-in", "n", "-infmt", "blastdb", "-mk_counts"];
+    let checkdup: &[&str] = &[
+        "-in",
+        "n",
+        "-infmt",
+        "blastdb",
+        "-mk_counts",
+        "-checkdup",
+        "true",
+    ];
+    let dust: &[&str] = &["-in", "n", "-infmt", "blastdb", "-outfmt", "interval"];
+    let rows: [(&str, &Path, &str, &[&str]); 6] = [
+        ("mv3z_wm_counts", &mv3z, "windowmasker", counts),
+        ("mv3z_dust_iv", &mv3z, "dustmasker", dust),
+        ("wmnull_k0_counts", &k0, "windowmasker", counts),
+        ("wmnull_k2_counts", &k2, "windowmasker", counts),
+        ("wmnull_k2_checkdup", &k2, "windowmasker", checkdup),
+        ("wmnull_k2_dust_iv", &k2, "dustmasker", dust),
+    ];
+    for (label, dir, sub, args) in rows {
+        let ncbi = frozen_tail_row(label);
+        let got = run_losat_sub(&root, dir, sub, args);
+        assert_tail_row(label, &got, (ncbi.0, &ncbi.1, &ncbi.2));
+        // Every row ends with NCBI's exit status 3 of the exception, after the earlier output.
+        assert_eq!(got.2, 3, "{label}");
+    }
 }

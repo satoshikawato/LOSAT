@@ -18,6 +18,7 @@ use crate::ncbi_app::files::{
 };
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::seqmasks_io::bdb_reader::{unset_seq_entry, SeqEntryAsked};
 use crate::seqmasks_io::run::post_read_texts;
 use crate::utils::os_bytes::path_from_bytes;
 use crate::utils::winmask::{
@@ -207,9 +208,17 @@ impl GenomeInput<'_, '_, '_> {
             if self.lists.match_titles() {
                 source.make_titles();
             }
+            let database = self.database;
             let result = (|| -> Result<(), Failure> {
                 while let Some(record) = source.next_record(self.diag)? {
                     post_read_texts::<Failure>(&record.texts, self.diag)?;
+                    // NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:191-205
+                    // `CInputBioseq_CI` asks each Seq-entry of a database for its Bioseq: the
+                    // empty one of an OID without a Bioseq ends the run there (`-mk_counts` and
+                    // `-checkdup`; the masking skips it, `work::mask_input`).
+                    if database && record.iupac.is_empty() {
+                        return Err(Failure::Ncbi(unset_seq_entry(SeqEntryAsked::Seq)));
+                    }
                     if record.iupac.is_empty() || !self.lists.consider(&record) {
                         continue;
                     }

@@ -195,7 +195,7 @@ pub(crate) enum Kind {
         /// empty when it is read, so each element takes NCBI's pointer forms.
         refs: bool,
     },
-    /// A named type that is another named type under its name (`Ref-ext ::= Seq-loc`).
+    /// A named type that is another named type under its name (Ref-ext, defined as a Seq-loc).
     Alias(u16),
     /// INTEGER read as the C++ storage of its member.
     Integer(Storage),
@@ -265,7 +265,7 @@ impl M {
     }
 
     /// Whether a value of the type `ty` has the member: `ty` is the type that has it, or a named
-    /// alias of that type (`Ref-ext ::= Seq-loc`).
+    /// alias of that type (Ref-ext, defined as a Seq-loc).
     #[inline]
     pub(crate) fn is_of(self, mut ty: u16) -> bool {
         loop {

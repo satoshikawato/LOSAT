@@ -13,4 +13,5 @@
 - A `makeblastdb` build that LOSAT refuses now leaves no file of the build, whatever the input
   (FASTA, ASN.1, or a database with `-input_type blastdb`) and wherever the refusal comes, the lock
   files of the version 5 lookup tables included; before, a `-gi_mask` refusal kept its GI-mask files
-  and alias file.
+  and alias file, and a refusal when a version 5 build closes (a sequence with GI ids only between
+  sequences with other ids, `MAX_LMDB_TXN_ENTRY=0`) kept some of the build's files.

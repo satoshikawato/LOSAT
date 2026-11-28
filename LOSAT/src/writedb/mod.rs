@@ -96,7 +96,8 @@ pub enum WriteDbError {
     /// LOSAT's refusal of a version 5 database with parsed Seq-ids in which the sequence of OID
     /// `oid` (first id `name`, its FASTA label) has GIs only and lies between sequences with
     /// other ids: NCBI's writer aborts at its close (`writer::gi_only_between_keys_error`).
-    /// makeblastdb reports it as a creation error.
+    /// makeblastdb reports it as a creation error; as every refusal of LOSAT's, it leaves no
+    /// file of the build.
     GiOnlyBetweenKeys { oid: u32, name: Vec<u8> },
     /// A `std::exception` of NCBI's with its `what()`, which makeblastdb's general handler
     /// reports as "Error: " and the text, exit status 255, the volumes written so far kept (an
@@ -137,11 +138,24 @@ pub enum WriteDbError {
     /// it is a creation error, as `EndBuild` makes every exception of `Close`.
     Database(String),
     /// LOSAT's own refusals (an input on which makeblastdb crashes, does not end or cannot be
-    /// followed), printed after "Error: " with exit status 255, and the errors of the LMDB
-    /// layer after its environment is open (`lmdb::error`, NCBI's `CSeqDBException` texts of
-    /// `CWriteDB_LMDB`), which occur only in the close and so become creation errors. NCBI's
-    /// `std::exception`s are `Std`.
+    /// followed), printed after "Error: " with exit status 255. NCBI's `std::exception`s are
+    /// `Std`, the errors of its LMDB layer `Lmdb`.
     Other(String),
+    /// An error of NCBI's LMDB layer after its environment is open (`lmdb::lmdb_error`): an
+    /// error of lmdb++ (a `std::runtime_error`) or a `CSeqDBException` text of `CWriteDB_LMDB`.
+    /// It occurs only in the close: `EndBuild` makes one of `InsertVolumesInfo` a creation error
+    /// and the build leaves NCBI's files; one of the LMDB writers' destructors is a
+    /// `CloseRefusal`. Where nothing makes it either (the destructors after a failed close,
+    /// makeprofiledb), "Error: " and the text, exit status 255.
+    Lmdb(String),
+    /// The error that leaves a destructor of the LMDB writers inside `Close`
+    /// (`writer::destructor_refusal`): makeblastdb 2.17.0 does not survive it (`std::terminate`)
+    /// or, with `MAX_LMDB_TXN_ENTRY=0` or a split chunk of 0 or 1, never ends, and LOSAT refuses
+    /// the database there. Reported as the creation error that `EndBuild` makes of an exception
+    /// of `Close` (exit status 1), and, as every refusal of LOSAT's, it leaves no file of the
+    /// build (`BuildDatabase::end_build`). It holds the error as the destructor raised it, which
+    /// makeprofiledb reports as before.
+    CloseRefusal(Box<WriteDbError>),
     /// LOSAT's refusal of an input that makeblastdb reads, raised inside the build (mask data
     /// whose ranges NCBI orders by memory addresses, `mask_data::range_set`, at the close of a
     /// build that would otherwise succeed; a mask column created after the first volume): "losat
@@ -189,8 +203,36 @@ impl WriteDbError {
             WriteDbError::Unsupported(_)
                 | WriteDbError::OrdinalIdWithoutIds
                 | WriteDbError::Other(_)
+                | WriteDbError::CloseRefusal(_)
+                | WriteDbError::GiOnlyBetweenKeys { .. }
                 | WriteDbError::Io { .. }
         )
+    }
+
+    /// The error as the destructor of an LMDB writer raised it, for a `CloseRefusal`
+    /// (makeprofiledb and the close of makeblastdb's writer by its destructor report it as it
+    /// is); the error itself otherwise.
+    pub(crate) fn destructor_error(self) -> WriteDbError {
+        match self {
+            WriteDbError::CloseRefusal(error) => *error,
+            error => error,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1423-1475
+    /// The message of the creation error that `EndBuild` makes of this error when `Close` throws
+    /// it (the message of the exception, without its report).
+    pub(crate) fn close_message(&self) -> Vec<u8> {
+        match self {
+            WriteDbError::Creation(message)
+            | WriteDbError::Options(message)
+            | WriteDbError::Database(message)
+            | WriteDbError::Lmdb(message)
+            | WriteDbError::Other(message) => message.as_bytes().to_vec(),
+            WriteDbError::Exception(e) => e.get_msg().to_vec(),
+            WriteDbError::CloseRefusal(error) => error.close_message(),
+            other => other.message(),
+        }
     }
 
     /// A creation error with the message `message`, whose bytes are kept when they are not UTF-8.
@@ -232,7 +274,12 @@ impl WriteDbError {
                 .strip_suffix(b"\n")
                 .unwrap_or(&native.message)
                 .to_vec(),
-            WriteDbError::Other(message) => text("Error: ", message.as_bytes()),
+            WriteDbError::Other(message) | WriteDbError::Lmdb(message) => {
+                text("Error: ", message.as_bytes())
+            }
+            WriteDbError::CloseRefusal(error) => {
+                losat(DATABASE_CREATION_ERROR, &error.close_message())
+            }
             WriteDbError::Unsupported(message) => text("losat makeblastdb: ", message.as_bytes()),
             WriteDbError::OutOfMemory => crate::wording::OUT_OF_MEMORY.as_bytes().to_vec(),
             WriteDbError::Io { path, source } => [

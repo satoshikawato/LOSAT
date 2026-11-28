@@ -1325,7 +1325,8 @@ impl<'a> BuildDatabase<'a> {
     // destroyed, after the error's message and `~CBuildDatabase`'s, and writes what was added,
     // the sequence added last included. A `CWriteDBException` of that close is posted; NCBI's
     // destructor lets any other exception end the process, where LOSAT posts the error's
-    // message.
+    // message. A refusal of LOSAT's there (`WriteDbError::is_losat_own`) removes every file of
+    // the build, as `erase_after_refusal` does.
     /// The close of the writer by its destructor after an error: the messages it posts (the
     /// diagnostics of the sequence written last, the error of the close), each without its final
     /// newline.
@@ -1344,13 +1345,18 @@ impl<'a> BuildDatabase<'a> {
         }
         if let Some(error) = error {
             let _ = self.output_db.destroy_after_failed_close();
+            if error.is_losat_own() {
+                for file in &self.output_db.every_file() {
+                    let _ = dir_entry::remove(&path_of_bytes(file));
+                }
+            }
             messages.push(match error {
                 WriteDbError::Creation(_)
                 | WriteDbError::CreationBytes(_)
                 | WriteDbError::GiOnlyBetweenKeys { .. } => {
                     crate::ncbi_exception::post_text(b"Error: [makeblastdb] ", &error.message())
                 }
-                other => other.message(),
+                other => other.destructor_error().message(),
             });
         }
         messages
@@ -1450,58 +1456,62 @@ impl<'a> BuildDatabase<'a> {
     // the removed files), and the writer's destructors run after the removal
     // (`WriteDb::destroy_after_failed_close`).
     //
-    // LOSAT's refusal of masks whose order NCBI takes from memory addresses (`address_order`)
-    // comes here, when the build would otherwise succeed: after a close that did not fail, in an
-    // `EndBuild` without `erase`. It ends the build as an error of NCBI's build ends it
-    // (`EndBuild` with `erase` true in `AddFasta`, build_db.cpp:1415-1417): the files that
-    // `ListFiles` names are removed, which leaves what NCBI leaves after its error at the last
-    // sequence (nothing in version 4; the `.nos`, `.not`, `.ntf` and `.nto` files in version 5).
-    // The other refusal raised inside the build, `mask_data`'s column that is created too late,
-    // comes from `SetMaskData` inside `AddFasta` and so ends the build in the same way. A build
-    // that ends with an error (`erase`, a failed close) reports that error and drops the refusal:
-    // NCBI's order never reaches a file there.
+    // LOSAT's refusals end the build here in two ways. One that the close raises (a LOSAT error,
+    // `WriteDbError::is_losat_own`: the LMDB writers' destructors that makeblastdb does not
+    // survive or that never end, `WriteDbError::CloseRefusal`; a version 5 database with a
+    // GI-only sequence between sequences with other ids; a refusal of the last sequence, which
+    // the close publishes). And the refusal of masks whose order NCBI takes from memory
+    // addresses (`address_order`), when the build would otherwise succeed: after a close that
+    // did not fail, in an `EndBuild` without `erase`. Either ends the build as an error of
+    // NCBI's build ends it (`EndBuild` with `erase` true in `AddFasta`, build_db.cpp:1415-1417:
+    // the log lines, the files removed), and removes every file of the build, those that
+    // `ListFiles` leaves out too (`WriteDb::every_file`, as `erase_after_refusal`): a build that
+    // LOSAT refuses leaves no file. The writers that a refused close left alive are destroyed
+    // first, so that the files their destructors write are removed too. The other refusal
+    // raised inside the build, `mask_data`'s column that is created too late, comes from
+    // `SetMaskData` inside `AddFasta`. A build that ends with an error (`erase`, a failed close)
+    // reports that error and drops the address-order refusal: NCBI's order never reaches a file
+    // there.
     /// `EndBuild`: closes the database; with `erase`, or when closing fails,
     /// removes its files. `Ok(false)` when no volume was created. `warn`
-    /// takes the diagnostics of the close. A pending refusal of LOSAT (`address_order`) is
-    /// raised after a close without `erase` that did not fail, with the files removed.
+    /// takes the diagnostics of the close. A refusal of LOSAT's that the close raises, or a
+    /// pending one (`address_order`) after a close without `erase` that did not fail, is raised
+    /// with every file of the build removed.
     pub fn end_build(&mut self, erase: bool, warn: Warn<'_>) -> Result<bool, WriteDbError> {
-        let close_error = self.output_db.close().err();
+        let closed = self.output_db.close();
         self.post_diagnostics(warn);
-        let refusal = self
-            .address_order
-            .take()
-            .filter(|_| !erase && close_error.is_none());
-        let erase = erase || close_error.is_some() || refusal.is_some();
-        let vols = self.output_db.list_volumes();
-        // A build that LOSAT refuses leaves no file of its own (`erase_after_refusal`); NCBI's
-        // `EndBuild` removes those of `ListFiles`.
-        let files = match refusal {
-            Some(_) => self.output_db.every_file(),
-            None => self.output_db.list_files(),
+        let address_order = self.address_order.take();
+        let (close_error, refusal) = match closed {
+            Err(error) if error.is_losat_own() => {
+                let _ = self.output_db.destroy_after_failed_close();
+                (None, Some(error))
+            }
+            Err(error) => (Some(error), None),
+            Ok(()) => (None, address_order.filter(|_| !erase)),
         };
+        let erase = erase || close_error.is_some();
+        let vols = self.output_db.list_volumes();
         // `Remove` of a `CFile` is `CDirEntry::Remove` with `eRecursive`.
-        let remove_files = || {
+        let remove_files = |files: Vec<Vec<u8>>| {
             for file in &files {
                 let _ = dir_entry::remove(&path_of_bytes(file));
             }
         };
-        // A closed pipe at this line ends the build before the removals (`endl`), where SIGPIPE
-        // ends NCBI's process. A build that LOSAT refuses (`address_order`) loses its files all
-        // the same: a closed database whose masks are in LOSAT's order, where NCBI's is that of
-        // memory addresses, is never left.
-        if let Err(stop) = endl(self.log) {
-            if refusal.is_some() {
-                remove_files();
-            }
-            return Err(stop);
+        // A build that LOSAT refuses leaves no file of its own (`erase_after_refusal`), whatever
+        // the log lines meet: they are removed before them, since a closed pipe ends the run at
+        // a line of the log (`endl`, where SIGPIPE ends NCBI's process before its removals).
+        if refusal.is_some() {
+            remove_files(self.output_db.every_file());
         }
+        endl(self.log)?;
         let mut success = true;
         if vols.is_empty() {
             let _ = write!(self.log, "No volumes were created.");
             endl(self.log)?;
             success = false;
         } else if erase {
-            remove_files();
+            // NCBI's `EndBuild` removes the files of `ListFiles`.
+            remove_files(self.output_db.list_files());
         }
         endl(self.log)?;
         if let Some(refusal) = refusal {
@@ -1512,17 +1522,16 @@ impl<'a> BuildDatabase<'a> {
         }
         // `NCBI_RETHROW` of the close exception as a `CWriteDBException` of `eArgErr` with the
         // message of the close exception: an exception of the close becomes a creation error with
-        // its message only (no report).
+        // its message only (no report, `WriteDbError::close_message`).
         match close_error {
             Some(
-                WriteDbError::Creation(message)
-                | WriteDbError::Options(message)
-                | WriteDbError::Database(message)
-                | WriteDbError::Other(message),
-            ) => Err(WriteDbError::Creation(message)),
-            Some(WriteDbError::Exception(e)) => Err(WriteDbError::creation(e.get_msg().to_vec())),
-            // A creation error whose text is not UTF-8, an error of a write of LMDB's
-            // data file (`Io`) and a failed allocation keep their kind.
+                error @ (WriteDbError::Creation(_)
+                | WriteDbError::Options(_)
+                | WriteDbError::Database(_)
+                | WriteDbError::Lmdb(_)
+                | WriteDbError::Exception(_)),
+            ) => Err(WriteDbError::creation(error.close_message())),
+            // A creation error whose text is not UTF-8 and a failed allocation keep their kind.
             Some(error) => Err(error),
             None => Ok(success),
         }

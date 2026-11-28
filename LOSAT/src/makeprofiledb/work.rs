@@ -169,9 +169,12 @@ impl From<WriteDbError> for RunError {
                  makeprofiledb writes its gnl|BL_ORD_ID id past the end of an empty list)"
                     .to_string(),
             ),
-            WriteDbError::Other(message) | WriteDbError::Unsupported(message) => {
+            WriteDbError::Other(message)
+            | WriteDbError::Lmdb(message)
+            | WriteDbError::Unsupported(message) => {
                 RunError::Refused(format!("the database error '{message}'"))
             }
+            WriteDbError::CloseRefusal(error) => (*error).into(),
             WriteDbError::Io { path, source } => {
                 RunError::Failed(format!("{}: {source}", path.display()))
             }
@@ -968,11 +971,13 @@ fn make_vol(
     }
     // `output_db->Close()` after the loop, or the writer's destructor in the unwinding of an
     // error (`~CWriteDB_Impl` closes it), then the destructors of the writer's members.
+    // The error of an LMDB writer's destructor as it is (`WriteDbError::destructor_error`).
     let closed = if matches!(result, Err(RunError::Refused(_))) {
         output_db.close()
     } else {
         output_db.close_with_cout(&mut params.stdout)
-    };
+    }
+    .map_err(WriteDbError::destructor_error);
     if let Err(RunError::Refused(_)) = result {
         // LOSAT's refusal: NCBI's run has no defined result there, and nothing after it is
         // reported.

@@ -903,8 +903,8 @@ impl WriteDb {
     // the last volume open and both writers alive: their destructors run when the writer is
     // destroyed, after `x_EndBuild` has removed the files of the build
     // (`destroy_after_failed_close`). An exception that leaves one of these destructors ends
-    // makeblastdb (`std::terminate`): LOSAT ends with an error there, and no destructor runs
-    // after it (`lmdb` and `taxdb` are dropped without their work).
+    // makeblastdb (`std::terminate`): LOSAT refuses the database there (`destructor_refusal`),
+    // and no destructor runs after it (`lmdb` and `taxdb` are dropped without their work).
     //
     // The GI masks close between the last volume and the renames, and the alias file follows
     // them, before the LMDB step: a version 5 build whose LMDB step fails (duplicate Seq-ids)
@@ -969,11 +969,11 @@ impl WriteDb {
                 if let Some(lmdb) = self.lmdb.take() {
                     if let Err(error) = lmdb.close() {
                         self.taxdb = None;
-                        return Err(error);
+                        return Err(destructor_refusal(error));
                     }
                 }
                 if let Some(taxdb) = self.taxdb.take() {
-                    taxdb.close()?;
+                    taxdb.close().map_err(destructor_refusal)?;
                 }
             }
         }
@@ -1354,6 +1354,23 @@ fn cook_sequence(bioseq: &Bioseq, cout: &mut Vec<u8>) -> Result<BinarySequence, 
             bioseq.first_id_string()
         ))
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:378-394
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:65-72,437-444
+// `Close` resets the two LMDB writers, whose destructors do their work: an exception that leaves
+// one of them ends makeblastdb 2.17.0 (`std::terminate`, SIGABRT) with the files written so far,
+// and with `MAX_LMDB_TXN_ENTRY=0` or a split chunk of 0 or 1 the destructor never ends. LOSAT
+// refuses the database there, whatever the error: as every refusal of LOSAT's, it leaves no file
+// of the build (`BuildDatabase::end_build`). A failed write of LMDB's data file is LOSAT's own
+// end already (`WriteDbError::Io`) and keeps its report.
+/// The error of a destructor of the LMDB writers inside `Close`, as LOSAT's refusal
+/// (`WriteDbError::CloseRefusal`).
+fn destructor_refusal(error: WriteDbError) -> WriteDbError {
+    match error {
+        WriteDbError::Io { .. } => error,
+        error => WriteDbError::CloseRefusal(Box::new(error)),
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:383-392

@@ -181,6 +181,15 @@ fn makeblastdb(
     variable: &str,
     value: &std::ffi::OsStr,
 ) -> std::process::Output {
+    makeblastdb_with(dir, parse_seqids, &[(variable, value)])
+}
+
+/// `makeblastdb` with each of `variables` set.
+fn makeblastdb_with(
+    dir: &std::path::Path,
+    parse_seqids: bool,
+    variables: &[(&str, &std::ffi::OsStr)],
+) -> std::process::Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     command.current_dir(dir).args([
         "makeblastdb",
@@ -202,10 +211,10 @@ fn makeblastdb(
     for name in VARIABLES {
         command.env_remove(name);
     }
-    command
-        .env(variable, value)
-        .output()
-        .expect("run losat makeblastdb")
+    for (variable, value) in variables {
+        command.env(variable, value);
+    }
+    command.output().expect("run losat makeblastdb")
 }
 
 #[test]
@@ -264,6 +273,50 @@ fn a_variable_s_bytes_are_quoted_as_makeblastdb_quotes_them() {
             losat::wording::losat_text(&stderr.replace("{ROOT}", ROOT)),
             "{variable}"
         );
+    }
+}
+
+// makeblastdb 2.17.0 does not survive these settings in the destructor of its LMDB writer (an
+// unconvertible split variable: SIGABRT) or never leaves it (`MAX_LMDB_TXN_ENTRY=0`, a split
+// chunk of 1; review 3 S1 `txn0_fa`, which NCBI did not end in 120 s): LOSAT refuses the database
+// there with the creation error, and, as every build that LOSAT refuses, leaves no file of it
+// (the LMDB lock files included).
+#[test]
+fn lmdb_settings_makeblastdb_does_not_survive_leave_no_file() {
+    let os = std::ffi::OsStr::new;
+    for (name, variables, stderr) in [
+        (
+            "txn0",
+            &[(TXN, os("0"))][..],
+            "LOSAT database creation error: MAX_LMDB_TXN_ENTRY=0: makeblastdb never finishes its \
+             LMDB transactions\n",
+        ),
+        (
+            "split1",
+            &[
+                ("LMDB_SPLIT_CHUNK_SIZE", os("1")),
+                ("LMDB_MIN_SPLIT_SIZE", os("1")),
+            ][..],
+            "LOSAT database creation error: LMDB_SPLIT_CHUNK_SIZE=1: makeblastdb's split sort \
+             does not end\n",
+        ),
+        (
+            "split_abc",
+            &[("LMDB_SPLIT_CHUNK_SIZE", os("abc"))][..],
+            "LOSAT database creation error: Cannot convert string 'abc' to Uint8\n",
+        ),
+    ] {
+        let dir = TempDir::new(name);
+        std::fs::write(dir.0.join("in.fa"), TWO).unwrap();
+        let output = makeblastdb_with(&dir.0, true, variables);
+        assert_eq!(output.status.code(), Some(1), "{name}");
+        assert_eq!(String::from_utf8_lossy(&output.stderr), stderr, "{name}");
+        let mut left: Vec<String> = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["in.fa"], "{name}");
     }
 }
 

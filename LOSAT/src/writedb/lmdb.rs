@@ -106,10 +106,12 @@ fn env_open_error(e: LmdbError) -> WriteDbError {
     }
 }
 
+/// An error of lmdb++ after the environment is open, NCBI's (`WriteDbError::Lmdb`); a failed
+/// write of the data file is `Io`.
 fn lmdb_error(e: LmdbError) -> WriteDbError {
     match e {
         LmdbError::Io { path, source } => WriteDbError::Io { path, source },
-        other => WriteDbError::Other(other.to_string()),
+        other => WriteDbError::Lmdb(other.to_string()),
     }
 }
 
@@ -486,14 +488,14 @@ impl WriteDbLmdb {
                 .put(volname, &key, c_str(name), 0)
                 .map_err(lmdb_error)?
             {
-                return Err(WriteDbError::Other("VolNames error ".to_string()));
+                return Err(WriteDbError::Lmdb("VolNames error ".to_string()));
             }
             if !self
                 .env
                 .put(volinfo, &key, &vol_num_oids[i].to_le_bytes(), 0)
                 .map_err(lmdb_error)?
             {
-                return Err(WriteDbError::Other("VolInfo error ".to_string()));
+                return Err(WriteDbError::Lmdb("VolInfo error ".to_string()));
             }
         }
         self.env.txn_commit().map_err(lmdb_error)
@@ -542,8 +544,9 @@ impl WriteDbLmdb {
     // end (a range of one element is split into itself): LOSAT refuses those settings where
     // NCBI takes that path. A value `StringToUInt` cannot convert throws in `~CWriteDB_LMDB`,
     // which makeblastdb 2.17.0 does not survive (`std::terminate`, SIGABRT, after the volumes
-    // are written); LOSAT's close makes the exception a creation error, as `EndBuild` does for
-    // an exception of `Close` (`build_db::BuildDatabase::end_build`).
+    // are written). Every error of this destructor is LOSAT's refusal of the database
+    // (`writer::destructor_refusal`): reported as the creation error `EndBuild` makes of an
+    // exception of `Close`, with no file of the build left.
     fn commit_transaction(&mut self) -> Result<(), WriteDbError> {
         if self.list.is_empty() {
             return Ok(());
@@ -618,7 +621,7 @@ impl WriteDbLmdb {
                 Err(e) => return Err(lmdb_error(e)),
             };
             if !ok {
-                return Err(WriteDbError::Other(format!(
+                return Err(WriteDbError::Lmdb(format!(
                     "acc2oid error for id {}",
                     String::from_utf8_lossy(key)
                 )));
@@ -656,7 +659,7 @@ impl WriteDbLmdb {
             };
             if i > 0 && kv.oid() != prev_oid {
                 if kv.oid().wrapping_sub(prev_oid) != 1 {
-                    return Err(WriteDbError::Other(
+                    return Err(WriteDbError::Lmdb(
                         "Input id list not in ascending oid order".to_string(),
                     ));
                 }
@@ -764,7 +767,7 @@ impl WriteDbTaxId {
     // The stream is not tested (`super::ofstream`), as for the `.pos` file.
     fn create_oid_to_taxids_lookup_file(&mut self) -> Result<(), WriteDbError> {
         if self.taxid2oid.is_empty() {
-            return Err(WriteDbError::Other("No tax info for any oid".to_string()));
+            return Err(WriteDbError::Lmdb("No tax info for any oid".to_string()));
         }
         let total_num_oids = self.taxid2oid.last().unwrap().1 as u64 + 1;
         let filename = lmdb_file_name(&self.db, "ot");
@@ -781,7 +784,7 @@ impl WriteDbTaxId {
             let (_, oid) = self.taxid2oid[i];
             if i > 0 && oid != self.taxid2oid[i - 1].1 {
                 if oid.wrapping_sub(self.taxid2oid[i - 1].1) != 1 {
-                    return Err(WriteDbError::Other(
+                    return Err(WriteDbError::Lmdb(
                         "Input id list not in ascending oid order".to_string(),
                     ));
                 }
@@ -888,7 +891,7 @@ impl WriteDbTaxId {
                 )
                 .map_err(lmdb_error)?;
             if !ok {
-                return Err(WriteDbError::Other(format!(
+                return Err(WriteDbError::Lmdb(format!(
                     "taxid2offset error for tax id {tax_id}"
                 )));
             }

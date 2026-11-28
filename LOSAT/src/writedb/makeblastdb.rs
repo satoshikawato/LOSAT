@@ -174,6 +174,7 @@ impl MakedbError {
             MakedbError::Build(
                 WriteDbError::Exception(_)
                 | WriteDbError::Other(_)
+                | WriteDbError::Lmdb(_)
                 | WriteDbError::Std(_)
                 | WriteDbError::Io { .. },
             ) => 255,
@@ -187,6 +188,7 @@ impl MakedbError {
                 WriteDbError::Creation(_)
                 | WriteDbError::CreationBytes(_)
                 | WriteDbError::GiOnlyBetweenKeys { .. }
+                | WriteDbError::CloseRefusal(_)
                 | WriteDbError::Options(_)
                 | WriteDbError::OptionsBytes(_)
                 | WriteDbError::Unsupported(_)

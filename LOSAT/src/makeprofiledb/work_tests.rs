@@ -200,7 +200,7 @@ fn aborts_strips_trailing_newline_from_exception_message() {
          element while writing container ; NCBI's makeprofiledb aborts there)",
     );
 
-    let plain = WriteDbError::Other("No tax info for any oid".to_string());
+    let plain = WriteDbError::Lmdb("No tax info for any oid".to_string());
     assert!(!plain.message().ends_with(b"\n"));
     assert_refused(
         RunError::Exception(b"boom".to_vec()),

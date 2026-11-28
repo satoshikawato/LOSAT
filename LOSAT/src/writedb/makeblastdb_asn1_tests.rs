@@ -636,6 +636,93 @@ fn the_address_order_refusal_leaves_no_file_from_fasta_or_asn1() {
     }
 }
 
+/// LOSAT's refusals that the close raises leave no file of the build either, from FASTA and from
+/// ASN.1 input alike: a version 5 database with a GI-only sequence between sequences with other
+/// ids (makeblastdb 2.17.0 aborts in its LMDB writer's destructor after writing its volumes, the
+/// GI-mask files and the alias file; review 3 S1 `gionly_fa`, `ok_asn`), here with `-gi_mask`
+/// files on the ASN.1 input.
+#[test]
+fn a_refusal_at_the_close_leaves_no_file_from_fasta_or_asn1() {
+    let seq = |n: usize| "ACGTTGCA".repeat(n);
+    let fasta = format!(
+        ">gb|AB000001.1| one\n{}\n>gi|1006 two\n{}\n>gb|AB000003.1| three\n{}\n",
+        seq(4),
+        seq(3),
+        seq(5)
+    );
+    let bioseq = |ids: &str, title: &str, n: usize| {
+        format!(
+            "    seq {{\n      id {{ {ids} }},\n      descr {{ title \"{title}\" }},\n      inst \
+             {{ repr raw, mol dna, length {}, seq-data iupacna \"{}\" }}\n    }}",
+            8 * n,
+            seq(n)
+        )
+    };
+    let asn = format!(
+        "Bioseq-set ::= {{\n  seq-set {{\n{},\n{},\n{}\n  }}\n}}\n",
+        bioseq(
+            "gi 1001, genbank { accession \"AB000001\", version 1 }",
+            "one",
+            4
+        ),
+        bioseq("gi 1006", "two", 3),
+        bioseq(
+            "gi 1003, genbank { accession \"AB000003\", version 1 }",
+            "three",
+            5
+        )
+    );
+    let masks = "Blast-db-mask-info ::= {\n  algo-id 0,\n  algo-program dust,\n  algo-options \
+                 \"window=64; level=20; linker=1\",\n  masks {\n    masks {\n      int { from 2, \
+                 to 9, id gi 1001 }\n    },\n    more FALSE\n  }\n}\n";
+    let inputs = TempDir::unique("close-refusal-in");
+    std::fs::write(inputs.join("gionly.fa"), fasta).unwrap();
+    std::fs::write(inputs.join("gionly.asn"), asn).unwrap();
+    std::fs::write(inputs.join("masks.asn"), masks).unwrap();
+    for (input, input_type) in [("gionly.fa", "fasta"), ("gionly.asn", "asn1_txt")] {
+        let out = TempDir::unique(&format!("close-refusal-{input_type}"));
+        let path = |dir: &Path, name: &str| dir.join(name).to_string_lossy().into_owned();
+        let mut words: Vec<String> = vec![
+            "-in".into(),
+            path(&inputs, input),
+            "-input_type".into(),
+            input_type.into(),
+            "-dbtype".into(),
+            "nucl".into(),
+            "-parse_seqids".into(),
+            "-title".into(),
+            "t".into(),
+            "-out".into(),
+            path(&out, "db"),
+        ];
+        if input_type == "asn1_txt" {
+            words.extend([
+                "-mask_data".into(),
+                path(&inputs, "masks.asn"),
+                "-gi_mask".into(),
+                "-gi_mask_name".into(),
+                path(&out, "gm"),
+            ]);
+        }
+        let env = MakedbEnv {
+            skip_unverified: false,
+            scan_cfastareader: true,
+        };
+        let (rc, _, stderr) = run_case(&words, env, &[]);
+        let stderr = String::from_utf8_lossy(&stderr);
+        assert_eq!(rc, 1, "{input_type}: {stderr}");
+        assert!(
+            stderr.starts_with(
+                "LOSAT database creation error: Input id list not in ascending oid order: the \
+                 sequence gi|1006 (OID 1) has only GI ids"
+            ),
+            "{input_type}: {stderr}"
+        );
+        let left = files_in(&out);
+        assert!(left.is_empty(), "{input_type}: {left:?}");
+    }
+}
+
 #[test]
 fn text_and_binary_asn1_produce_identical_databases() {
     let (fix_a, fix_m, fix_a_str, fix_m_str) = asn1_fixture_paths();

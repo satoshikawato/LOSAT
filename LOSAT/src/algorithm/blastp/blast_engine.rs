@@ -6498,6 +6498,7 @@ fn search(
     .map(|scopes| {
         scopes
             .with_refusal(args.scope_refusal.clone())
+            .with_query_range(args.query_range)
             .with_xml_matrix_failure(blastp_xml_matrix_failure(
                 &args,
                 outputs,

@@ -342,13 +342,50 @@ pub fn subject_parameters(
     numbers: SubjectNumbers,
     fixed_spaces: Option<&[i64]>,
 ) -> Result<i32> {
+    let n = subject_checks(options, numbers)?;
     let SubjectNumbers {
         total: db_length,
         count: db_count,
         gumbel_total,
-        shortest,
         average,
-        request_count: _,
+        ..
+    } = numbers;
+    effective_lengths(
+        batch,
+        parameters,
+        options,
+        db_length,
+        db_count,
+        fixed_spaces,
+    )?;
+    let gumbel = gumbel_block(options, gumbel_total);
+    context_cutoffs(
+        batch,
+        parameters,
+        options,
+        gumbel.as_ref(),
+        n,
+        average,
+        options.composition > 1,
+    )?;
+    Ok(if options.gapped {
+        gapped_x_drops(options, &gapped_karlin(options)).0
+    } else {
+        0
+    })
+}
+
+/// The checks of `subject_parameters` that read the subjects alone (`numbers`), in NCBI's order:
+/// LOSAT's refusal of a count of 0, the average or shortest subject length, the hit-saving
+/// parameters. The length that the hit-saving parameters read (`min_subject_length`) where they
+/// pass. A batch with a valid context meets them whatever its letters
+/// (`reader_batch::set_up_error`).
+pub(crate) fn subject_checks(options: &ResolvedOptions, numbers: SubjectNumbers) -> Result<i32> {
+    let SubjectNumbers {
+        total: db_length,
+        count: db_count,
+        shortest,
+        ..
     } = numbers;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
@@ -380,29 +417,7 @@ pub fn subject_parameters(
     if crate::stats::setup::hit_saving_parameters_fail(options.sum_stats, options.gapped, n) {
         bail!(crate::stats::setup::HIT_SAVING_PARAMETERS_ERROR);
     }
-    effective_lengths(
-        batch,
-        parameters,
-        options,
-        db_length,
-        db_count,
-        fixed_spaces,
-    )?;
-    let gumbel = gumbel_block(options, gumbel_total);
-    context_cutoffs(
-        batch,
-        parameters,
-        options,
-        gumbel.as_ref(),
-        n,
-        average,
-        options.composition > 1,
-    )?;
-    Ok(if options.gapped {
-        gapped_x_drops(options, &gapped_karlin(options)).0
-    } else {
-        0
-    })
+    Ok(n)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 and

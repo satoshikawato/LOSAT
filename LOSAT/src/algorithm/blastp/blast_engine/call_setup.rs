@@ -851,14 +851,15 @@ fn check_setup_count(args: &ResolvedBlastpArgs, setup_numbers: (i64, i32)) -> Re
 /// `stats::setup::SUBJECT_LENGTH_TOO_SHORT` (`setup_subject_length` of the extent's setup
 /// numbers; rpsblast: every unit's, `RpsUnit::setup_subject_length`, one owner with rpstblastn's,
 /// the first unit's numbers being the set-up's), after LOSAT's refusal of its division by a count
-/// of 0 (`check_setup_count`): both only where a query of the call is valid (`contexts`), as NCBI
-/// meets them in a batch (`CLocalBlast::Run`, cited at `setup_count_refused`).
+/// of 0 (`check_setup_count`): both only where a query of the call is valid (`any_valid`), as NCBI
+/// meets them in a batch (`CLocalBlast::Run`, cited at `setup_count_refused`). The checks read
+/// the subjects alone.
 pub(super) fn setup_fails(
     args: &ResolvedBlastpArgs,
     extent: &BlastpDbExtent<'_>,
-    contexts: &[QueryContext],
+    any_valid: bool,
 ) -> Result<bool> {
-    if !contexts.iter().any(|ctx| ctx.is_valid) {
+    if !any_valid {
         return Ok(false);
     }
     let (setup_total, setup_count) = extent.setup_numbers;

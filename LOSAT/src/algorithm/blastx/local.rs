@@ -305,6 +305,15 @@ struct RunReports<'a> {
     xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
 }
 
+/// The strand of the queries that the call's set-up reads (`-strand` of its first options; the
+/// options of a call's formats share the search's), for its scopes (`QueryScopes::with_strand`).
+fn query_strand(resolved: &[ResolvedOptions]) -> crate::algorithm::blastn::args::QueryStrand {
+    resolved.first().map_or(
+        crate::algorithm::blastn::args::QueryStrand::Both,
+        |options| crate::algorithm::blastn::args::QueryStrand::from_option(&options.strand),
+    )
+}
+
 /// BLAST XML and the XML2 and JSON documents refuse a query title that NCBI crashes on
 /// (`names::Refusal`) before the first byte, in the reports that they write; a `-subject` XML2 or
 /// JSON document never writes
@@ -337,6 +346,7 @@ fn scan_xml_titles(
         .map(|options| options.outfmt)
         .filter(|outfmt| matches!(outfmt, 5 | 13..=16))
         .collect();
+    let strand = query_strand(resolved);
     let query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
         parse_deflines,
         subject_set,
@@ -346,6 +356,8 @@ fn scan_xml_titles(
     .map(|scopes| {
         scopes
             .with_refusal(scope_refusal.cloned())
+            .with_query_range(query_range)
+            .with_strand(strand)
             .with_xml_matrix_failure(xml_matrix)
     });
     let count = crate::blastinput::query_batch::BatchCount::of(query_scopes.as_ref());
@@ -677,6 +689,7 @@ fn write_run(
     // two queries with one id stops the run at the batch of the second, after the reports of the
     // batches before (line WQA D10 round 4, 2026-11-20), in the form of every program (round 5).
     let xml = choices.iter().any(|choice| choice.number == 5);
+    let strand = query_strand(resolved);
     let query_scopes = std::cell::RefCell::new(read_ahead_scopes.or_else(|| {
         crate::blastinput::query_batch::QueryScopes::of_search(
             parse_deflines,
@@ -684,7 +697,12 @@ fn write_run(
             xml,
             "BLASTX",
         )
-        .map(|scopes| scopes.with_refusal(scope_refusal.cloned()))
+        .map(|scopes| {
+            scopes
+                .with_refusal(scope_refusal.cloned())
+                .with_query_range(query_range)
+                .with_strand(strand)
+        })
     }));
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     for (index, (writer, options)) in writers.iter_mut().zip(resolved).enumerate() {

@@ -282,11 +282,11 @@ fn a_refused_batch_knows_the_records_that_ncbis_set_up_reads_as_their_own() {
     assert_eq!(setup_records("TBLASTX", &batches), own(&[1, 0]));
     let batch: &[u8] = b">q1\nACGT\n>q2\nACGT\n>q1\nACGTACGT\n";
     assert_eq!(setup_records("TBLASTX", &[batch]), own(&[1, 1, 0]));
-    // BLASTN's set-up reads the repeat's own interval in the first record's letters (NCBI
-    // 2.17.0: past their end, `CSeqVector_CI: cannot locate segment`): refused where those
-    // are fewer.
-    assert_eq!(setup_records("BLASTN", &[batch]), None);
-    assert_eq!(setup_records("BLASTN", &batches), None);
+    // BLASTN's set-up reads the repeat's own interval in the first record's letters as the
+    // other programs' does (NCBI 2.17.0: past their end, `CSeqVector_CI: cannot locate segment`;
+    // line RG-KB item 7b), so its records with their own letters are known too.
+    assert_eq!(setup_records("BLASTN", &[batch]), own(&[1, 1, 0]));
+    assert_eq!(setup_records("BLASTN", &batches), own(&[1, 0]));
     // Nothing with its own letters: no set-up (`db.pd.q1c.bp.avgdup2.subj.6`).
     assert_eq!(
         setup_records("BLASTP", &[b">q1\nMKV\n", b">q1\nMKV\n"]),
@@ -669,10 +669,34 @@ fn a_batch_of_repeats_is_set_up_with_their_contexts_in_their_earlier_records() {
         let error = refused_batch_error(refusal_of(None, &batches), false, no_set_up).unwrap_err();
         assert!(is_refusal(&error));
     }
-    // `long_new`: longer than the earlier record and alone in its batch.
+    // `long_new`: longer than the earlier record and alone in its batch: NCBI's `SetupQueries_OMF`
+    // fails with `CSeqVector_CI: cannot locate segment at 2` (exit 3) regardless of XML matrix
+    // failure, except under `-export_search_strategy` (which stays refused).
     let long: [&[u8]; 2] = [b">q1\nMK\n", b">q1\nMKV\n"];
-    let error = refused_batch_error(refusal_of(held, &long), false, |_| panic!("no set-up"));
-    assert!(is_refusal(&error.unwrap_err()));
+    let error =
+        refused_batch_error(refusal_of(held, &long), false, |_| panic!("no set-up")).unwrap_err();
+    let native_err = error.downcast_ref::<crate::cli::NativeError>().unwrap();
+    assert_eq!(native_err.exit, 3);
+    assert_eq!(
+        native_err.message.as_slice(),
+        format!(
+            "{} Warning: CSeqVector_CI: cannot locate segment at 2 \n",
+            crate::wording::ENGINE_ERROR
+        )
+        .as_bytes()
+    );
+    let error =
+        refused_batch_error(refusal_of(None, &long), false, |_| panic!("no set-up")).unwrap_err();
+    assert_eq!(
+        error
+            .downcast_ref::<crate::cli::NativeError>()
+            .unwrap()
+            .exit,
+        3
+    );
+    let error =
+        refused_batch_error(refusal_of(held, &long), true, |_| panic!("no set-up")).unwrap_err();
+    assert!(is_refusal(&error));
     // `mixed`: a record of its own beside it, whose set-up decides as in the first batch.
     let mixed: [&[u8]; 2] = [b">q1\nMK\n", b">q1\nMKV\n>q3\nMK\n"];
     let own = |records: &[bool]| {
@@ -1167,4 +1191,360 @@ fn queries_of_different_seq_ids_keep_no_xml_lists() {
         assert_eq!(scopes.held.second, Some(1));
         assert_eq!(xml_shows(span, fasta, batch).1, 4);
     }
+}
+
+/// `SetupQueries_OMF` failures on refused batches (`PastFirst` / `Empty` / `< 3` nt in translated
+/// queries) emit NCBI's exit-3 `CSeqVector_CI` / `Sequence contains no data` message across
+/// programs, `-query_loc` and `-strand minus`, while `PSIBLAST` and mixed `BLASTN` batches stay
+/// refused (line RG-KB item 7b).
+#[test]
+fn setup_queries_omf_failures_match_ncbi_across_ranges_strands_and_programs() {
+    use super::{
+        refused_batch_error, BatchSetUp, QueryMasks, QueryScopeSpan, QueryScopes, ScopeRefusal,
+    };
+    use crate::blastinput::seq_range::{record_interval, RecordInterval, SequenceRange};
+    use crate::wording::ENGINE_ERROR;
+
+    let run_masked = |program: &'static str,
+                      range: Option<SequenceRange>,
+                      minus: bool,
+                      masks: QueryMasks,
+                      batches: &[&[u8]]|
+     -> anyhow::Error {
+        use crate::algorithm::blastn::args::QueryStrand;
+        let mut scopes = QueryScopes::new(QueryScopeSpan::Run, program)
+            .with_query_range(range)
+            .with_strand(if minus {
+                QueryStrand::Minus
+            } else {
+                QueryStrand::Both
+            })
+            .with_query_masks(masks);
+        let mut first = 0;
+        for fasta in batches {
+            let records = parsed_records(fasta);
+            let skipped: Vec<bool> = records
+                .iter()
+                .map(|r| {
+                    range.is_some_and(|qr| {
+                        record_interval(&qr, r.seq().len()) == RecordInterval::PastEnd
+                    })
+                })
+                .collect();
+            if let Err(error) = scopes.add_batch(&records, &skipped, first) {
+                return error;
+            }
+            first += skipped.iter().filter(|&&s| !s).count();
+        }
+        panic!("no refusal")
+    };
+    let run =
+        |program: &'static str, range: Option<SequenceRange>, minus: bool, batches: &[&[u8]]| {
+            run_masked(program, range, minus, QueryMasks::None, batches)
+        };
+
+    let expect_native = |err: anyhow::Error, expected: &str| {
+        let native = err
+            .downcast_ref::<crate::cli::NativeError>()
+            .unwrap_or_else(|| panic!("expected NativeError, got: {err}"));
+        assert_eq!(native.exit, 3);
+        assert_eq!(native.message.as_slice(), expected.as_bytes());
+    };
+
+    // `-query_loc`: mid-range (earlier record length minus range start), past-end (0), exact-end
+    // (`Sequence contains no data`), and in-bounds (`InFirst`, stays refused without XML failure).
+    let range_11_50 = Some(SequenceRange { from: 10, to: 49 });
+    let err = refused_batch_error(
+        run(
+            "BLASTP",
+            range_11_50,
+            false,
+            &[
+                b">q1\nAAAAAAAAAAAAAAAAAAAA\n",
+                b">q1\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n",
+            ],
+        ),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    expect_native(
+        err,
+        &format!("{ENGINE_ERROR} Warning: CSeqVector_CI: cannot locate segment at 10 \n"),
+    );
+
+    let err = refused_batch_error(
+        run(
+            "BLASTX",
+            Some(SequenceRange { from: 14, to: 49 }),
+            false,
+            &[
+                b">q1\nACGTACGTAC\n",
+                b">q1\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC\n",
+            ],
+        ),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    expect_native(
+        err,
+        &format!("{ENGINE_ERROR} Warning: CSeqVector_CI: cannot locate segment at 0 \n"),
+    );
+
+    // `-strand minus` locates the reverse end first, failing at position 0.
+    let err = refused_batch_error(
+        run(
+            "BLASTX",
+            None,
+            true,
+            &[b">q1\nACGTACGTAC\n", b">q1\nACGTACGTACGTACGTACGT\n"],
+        ),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    expect_native(
+        err,
+        &format!("{ENGINE_ERROR} Warning: CSeqVector_CI: cannot locate segment at 0 \n"),
+    );
+
+    // Multiple failing records (Empty + PastFirst + translated `< 3` nt).
+    let err = refused_batch_error(
+        run(
+            "TBLASTX",
+            None,
+            false,
+            &[
+                b">q1\nACGTAC\n>q2\nACG\n",
+                b">q3\n\n>q1\nACGTACGTAC\n>q4\nAT\n>q2\nACGTAC\n",
+            ],
+        ),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    expect_native(
+        err,
+        &format!(
+            "{ENGINE_ERROR} Warning: Sequence contains no data \
+             Warning: CSeqVector_CI: cannot locate segment at 6 \
+             Warning: CSeqVector_CI: cannot locate segment at 3 \n"
+        ),
+    );
+
+    // `BLASTN` without filtering of the letters (`-dust no`): each record's own message, and a
+    // record of its own beside a repeat past its earlier record keeps a valid context (NCBI then
+    // searches the batch with a warning: the refusal after the set-up of the record of its own).
+    let err = refused_batch_error(
+        run(
+            "BLASTN",
+            None,
+            false,
+            &[
+                b">q1\nACGTAC\n>q2\nACGTACGT\n",
+                b">q1\nACGTACGTAC\n>q2\nACGTACGTACGT\n",
+            ],
+        ),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    expect_native(
+        err,
+        &format!(
+            "{ENGINE_ERROR} Warning: CSeqVector_CI: cannot locate segment at 6 \
+             Warning: CSeqVector_CI: cannot locate segment at 8 \n"
+        ),
+    );
+    let mixed: [&[u8]; 2] = [b">q1\nACGTAC\n", b">q1\nACGTACGTAC\n>q2\nACGTACGTAC\n"];
+    let err = refused_batch_error(run("BLASTN", None, false, &mixed), false, |own| {
+        assert_eq!(own, [false, true]);
+        BatchSetUp::Unknown
+    })
+    .unwrap_err();
+    assert!(ScopeRefusal::of(&err).is_some(), "{err}");
+    // With DUST (NCBI BLAST+ 2.17.0, probe 1 of line RG-KB item 7b): the masks of the batch fail
+    // at its first record past its earlier record's end, for every searched record of the batch,
+    // also beside a record of its own and one without letters.
+    let err = refused_batch_error(
+        run_masked(
+            "BLASTN",
+            None,
+            false,
+            QueryMasks::Reads {
+                then_repeats: false,
+            },
+            &[
+                b">q1\nACGTAC\n>q2\nACGTACGT\n",
+                b">q1\nACGTACGTAC\n>q2\nACGTACGTACGT\n",
+            ],
+        ),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    let twice = format!(
+        "{ENGINE_ERROR} Warning: CSeqVector_CI: cannot locate segment at 6 \
+         Warning: CSeqVector_CI: cannot locate segment at 6 \n"
+    );
+    expect_native(err, &twice);
+    let err = refused_batch_error(
+        run_masked(
+            "BLASTN",
+            None,
+            false,
+            QueryMasks::Reads {
+                then_repeats: false,
+            },
+            &mixed,
+        ),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    expect_native(err, &twice);
+    let err = refused_batch_error(
+        run_masked(
+            "BLASTN",
+            None,
+            false,
+            QueryMasks::Reads {
+                then_repeats: false,
+            },
+            &[b">q1\nACGTAC\n", b">q3\n\n>q1\nACGTACGTAC\n"],
+        ),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    expect_native(err, &twice);
+    // Repeat filtering without DUST (NCBI BLAST+ 2.17.0, probe 2 of line RG-KB item 7b): its
+    // search's set-up of the batch fails with each record's own message, and that failure is the
+    // message of every searched record; where it passes, the batch is set up as without filtering.
+    let both: [&[u8]; 2] = [
+        b">q1\nACGTAC\n>q2\nACGTACGT\n",
+        b">q1\nACGTACGTAC\n>q2\nACGTACGTACGT\n",
+    ];
+    let pair = "Warning: CSeqVector_CI: cannot locate segment at 6 \
+                Warning: CSeqVector_CI: cannot locate segment at 8 ";
+    let err = refused_batch_error(
+        run_masked("BLASTN", None, false, QueryMasks::Repeats, &both),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    // `pair` ends with its last message's space, and each record's message adds one after it
+    // (two spaces in all, as in NCBI's bytes of strategy row `blastn.sub.pd.pastfirst.dnfd.b2.f6`).
+    expect_native(
+        err,
+        &format!("{ENGINE_ERROR} Warning: {pair} Warning: {pair} \n"),
+    );
+    let err = refused_batch_error(
+        run_masked("BLASTN", None, false, QueryMasks::Repeats, &mixed),
+        false,
+        |own| {
+            assert_eq!(own, [false, true]);
+            BatchSetUp::Unknown
+        },
+    )
+    .unwrap_err();
+    assert!(ScopeRefusal::of(&err).is_some(), "{err}");
+    // DUST, then repeat filtering (NCBI BLAST+ 2.17.0, probe 3 of line RG-KB item 7b,
+    // `blastn.sub.pfE.fd.f6`): a batch that DUST passes (no record past its earlier record's end)
+    // fails the repeat search where every searched record is empty, each record's message the
+    // search's; without repeat filtering, each record's own message.
+    let empty: [&[u8]; 2] = [b">q1\nACGTAC\n", b">q1\n\n>q3\n\n"];
+    let no_data = "Warning: Sequence contains no data Warning: Sequence contains no data ";
+    for (then_repeats, expected) in [
+        (
+            true,
+            format!("{ENGINE_ERROR} Warning: {no_data} Warning: {no_data} \n"),
+        ),
+        (false, format!("{ENGINE_ERROR} {no_data}\n")),
+    ] {
+        let err = refused_batch_error(
+            run_masked(
+                "BLASTN",
+                None,
+                false,
+                QueryMasks::Reads { then_repeats },
+                &empty,
+            ),
+            false,
+            |_| panic!("no set-up"),
+        )
+        .unwrap_err();
+        expect_native(err, &expected);
+    }
+    assert_eq!(
+        QueryMasks::of_blastn(true, true, false),
+        QueryMasks::Reads { then_repeats: true }
+    );
+    assert_eq!(
+        QueryMasks::of_blastn(true, false, true),
+        QueryMasks::Reads {
+            then_repeats: false
+        }
+    );
+    assert_eq!(
+        QueryMasks::of_blastn(false, false, true),
+        QueryMasks::Reads {
+            then_repeats: false
+        }
+    );
+    assert_eq!(
+        QueryMasks::of_blastn(false, true, false),
+        QueryMasks::Repeats
+    );
+    assert_eq!(QueryMasks::of_blastn(false, false, false), QueryMasks::None);
+
+    // `PSIBLAST` crashes in NCBI 2.17.0 on `PastFirst`: stays refused.
+    let err = refused_batch_error(
+        run("PSIBLAST", None, false, &[b">q1\nMK\n", b">q1\nMKV\n"]),
+        false,
+        |_| panic!("no set-up"),
+    )
+    .unwrap_err();
+    assert!(ScopeRefusal::of(&err).is_some(), "{err}");
+
+    // `BatchSetUp::NoValidContext` (review 2 B1/B2): proceeds under XML matrix failure only when
+    // `subjects_pass` is true.
+    use crate::report::blast_xml::matrix::XmlMatrixFailure;
+    let xml_refusal = |batches: &[&[u8]]| -> anyhow::Error {
+        let mut scopes = QueryScopes::new(QueryScopeSpan::Run, "BLASTP")
+            .with_xml_matrix_failure(Some(XmlMatrixFailure::SecondQueryOrEnd));
+        let mut first = 0;
+        for fasta in batches {
+            let records = parsed_records(fasta);
+            if let Err(error) = scopes.add_batch(&records, &vec![false; records.len()], first) {
+                return error;
+            }
+            first += records.len();
+        }
+        panic!("no refusal")
+    };
+    // B2 (`Own` has no valid KA context):
+    let b2: [&[u8]; 1] = [b">q1\nXXXXXX\n>q1\nMKVLAA\n"];
+    refused_batch_error(xml_refusal(&b2), false, |_| BatchSetUp::NoValidContext {
+        subjects_pass: true,
+    })
+    .unwrap();
+    let err = refused_batch_error(xml_refusal(&b2), false, |_| BatchSetUp::NoValidContext {
+        subjects_pass: false,
+    })
+    .unwrap_err();
+    assert!(ScopeRefusal::of(&err).is_some(), "{err}");
+
+    // B1 (`InFirst` repeat alone in later batch has no valid KA context):
+    let b1: [&[u8]; 2] = [b">q1\nMKVLAA\n", b">q1\nXXXXXX\n"];
+    refused_batch_error(xml_refusal(&b1), false, |_| BatchSetUp::NoValidContext {
+        subjects_pass: true,
+    })
+    .unwrap();
+    let err = refused_batch_error(xml_refusal(&b1), false, |_| BatchSetUp::NoValidContext {
+        subjects_pass: false,
+    })
+    .unwrap_err();
+    assert!(ScopeRefusal::of(&err).is_some(), "{err}");
 }

@@ -678,8 +678,9 @@ function joined(chunks: readonly Uint8Array[]): Uint8Array {
 }
 
 /**
- * The files of a run's archive (stream 8, in chunks), each with the option that named it in the
- * argv's *start* `start` (`namedRunFiles`); none when the run sent none.
+ * The files of a run's archive (stream 8, in chunks), each with the option that the engine labels it
+ * with (its entry's comment), checked against the argv's *start* `start`, or named by the start for
+ * an archive without labels (`namedRunFiles`); none when the run sent none.
  */
 function readRunFiles(chunks: readonly Uint8Array[], start: StartInfo): RunFile[] {
   if (chunks.length === 0) return [];

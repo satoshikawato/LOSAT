@@ -1705,13 +1705,7 @@ pub(super) fn reported_batch(
             // reads them.
             let pairwise = options.pairwise_reading();
             let joins_copies = first_report.is_some_and(ReportFormat::joins_adjacent_copies);
-            let ends_on_throw = asks.throw.run().is_some_and(|run| {
-                matches!(
-                    run.after,
-                    crate::report::db_subject::AfterThrow::EndsReport
-                        | crate::report::db_subject::AfterThrow::EndsRun
-                )
-            });
+            let ends_on_throw = asks.throw.ends_on_throw();
             reported.fetch_by_query(
                 database,
                 results,

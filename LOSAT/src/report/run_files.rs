@@ -20,6 +20,18 @@ pub trait FileReceiver: Send + Sync {
     /// contents.
     fn receive(&self, name: &[u8], bytes: &[u8]) -> io::Result<()>;
 
+    /// One file of a search's run besides its outputs, whole (`receive`), with the option that
+    /// names it (`RunFileOption`), which the run knows where it hands the file over: the file of
+    /// `-logfile` (`RunFiles::deliver_log`), the strategy file (`strategy::end_run`) and the PSSM
+    /// files (`psiblast::pssm`, `psiblast::rounds`). LOSAT Web's host labels the file by it
+    /// (docs/web/abi_v2.md §5, stream 8), as two options' names may name one file where the run
+    /// opens only one of them (line RG item F1w-r2, review 3 S1). Default: `receive`, for a
+    /// receiver that keeps no option.
+    fn receive_run_file(&self, option: RunFileOption, name: &[u8], bytes: &[u8]) -> io::Result<()> {
+        let _ = option;
+        self.receive(name, bytes)
+    }
+
     /// Opens the file `name` of a tool's run (`OpenFiles`: `-out FILE`, `-logfile FILE`) to take
     /// the run's writes as the run makes them (`FileStream`); the file is complete when the stream
     /// is dropped, when the run ends. `None`, the default: the receiver takes each file whole, which
@@ -54,6 +66,39 @@ pub trait FileReceiver: Send + Sync {
     /// when `output_name` would otherwise make a new file (`OutputName::File { key }`).
     fn output_read_files(&self) -> &[Vec<u8>] {
         &[]
+    }
+}
+
+/// The option of a search's argv that names a file of its run besides its outputs
+/// (`FileReceiver::receive_run_file`). No NCBI counterpart: NCBI writes files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunFileOption {
+    Logfile,
+    ExportSearchStrategy,
+    OutPssm,
+    OutAsciiPssm,
+}
+
+impl RunFileOption {
+    /// The option's name without its hyphen, as LOSAT Web's host names it (`logfile`,
+    /// `export_search_strategy`, `out_pssm`, `out_ascii_pssm`).
+    pub fn name(self) -> &'static str {
+        match self {
+            RunFileOption::Logfile => "logfile",
+            RunFileOption::ExportSearchStrategy => "export_search_strategy",
+            RunFileOption::OutPssm => "out_pssm",
+            RunFileOption::OutAsciiPssm => "out_ascii_pssm",
+        }
+    }
+
+    /// The option as the argv writes it (`-out_pssm`).
+    pub fn flag(self) -> &'static str {
+        match self {
+            RunFileOption::Logfile => "-logfile",
+            RunFileOption::ExportSearchStrategy => "-export_search_strategy",
+            RunFileOption::OutPssm => "-out_pssm",
+            RunFileOption::OutAsciiPssm => "-out_ascii_pssm",
+        }
     }
 }
 
@@ -153,14 +198,20 @@ impl RunFiles {
     /// The host file name of the `-logfile` value `name` (what a `Receiver` names the stream 8
     /// entry if the file is made: `run.log` for `./run.log` and ` run.log`, `logs` for `logs/`,
     /// `/tmp/run.log` outside the working directory, `/dev/stdout` for a search's `/dev/stdout`),
-    /// without checking the run's real directory (`losat_web2_start`, which has no run directory
-    /// yet). `None` for NCBI's special names (`-`, `""`, `/dev/null`) and names that never make a
-    /// stream 8 file (`.`, `..`, `/dev/stderr`, `/dev/fd/2`, `/etc/run.log`).
+    /// without the run's files (`losat_web2_start`, which has no run directory yet): read in the
+    /// run's files that make it a file if any do (`made_file`, as `output_host_name`), so that
+    /// every file that a run of the name makes has this name (`/tmp/run.log` for
+    /// `/data/../tmp/run.log`, which a run makes beside a registered `/data/q.fa`). `None` for
+    /// NCBI's special names (`-`, `""`, `/dev/null`) and names that never make a stream 8 file
+    /// (`.`, `..`, `/dev/stderr`, `/dev/fd/2`, `/etc/run.log`).
     pub fn log_host_name(name: &OsStr) -> Option<Vec<u8>> {
         if special_log_target(Some(name)).is_some() {
             return None;
         }
-        match log_name(name.as_encoded_bytes(), None) {
+        let name = name.as_encoded_bytes();
+        let (cwd, file) = log_file(name);
+        let made = made_file(Walk::resolve(&file.path, &cwd));
+        match log_name(name, Some(&made)) {
             LogName::File { name, .. } => Some(name),
             LogName::Stdout => Some(b"/dev/stdout".to_vec()),
             LogName::Unopened | LogName::StandardError | LogName::Nowhere | LogName::Existing => {
@@ -174,7 +225,8 @@ impl RunFiles {
     pub fn deliver_log(&self, name: Option<&[u8]>, target: DiagTarget) -> io::Result<()> {
         match (self, name, target) {
             (RunFiles::Receiver(receiver), Some(name), DiagTarget::Memory(bytes)) => receiver
-                .receive(
+                .receive_run_file(
+                    RunFileOption::Logfile,
                     name,
                     &bytes.into_inner().unwrap_or_else(PoisonError::into_inner),
                 ),
@@ -213,14 +265,23 @@ impl RunFiles {
         }
     }
 
-    /// The host file name of a `-out_pssm` or `-out_ascii_pssm` value `name` (what a `Receiver`
-    /// names the stream 8 entry if the file is made: `pssm.asn` for `./pssm.asn`, `/tmp/pssm.asn`
-    /// outside the working directory), without checking the run's real directory
-    /// (`losat_web2_start`, which has no run directory yet). `None` for names that never make a
-    /// stream 8 file (`/dev/null`, `/dev/stdout`, `/etc/pssm.asn`, `.`, `..`).
-    pub fn pssm_host_name(name: &OsStr) -> Option<Vec<u8>> {
-        let none = |_: &[u8], _: &[u8]| None;
-        match output_name(name.as_encoded_bytes(), &none) {
+    /// The host file name of an output file name `name` that a search writes besides its outputs
+    /// (`-out_pssm`, `-out_ascii_pssm`, `-export_search_strategy`): what a `Receiver` names the
+    /// stream 8 entry if the run makes the file (`output_name`'s `File`: `s.asn` for `./s.asn`,
+    /// `in/../s.asn` and `/proc/self/cwd/s.asn`, `/tmp/s.asn` outside the working directory),
+    /// without the run's files (`losat_web2_start`, which has no run directory yet). The name is
+    /// read in the run's files that make it a file if any do (`made_file`), so that every file
+    /// that a run of the name makes has this name (`/tmp/s.asn` for `/data/../tmp/s.asn`, which a
+    /// run makes beside a registered `/data/q.fa`). `None` for a name that makes no file in any
+    /// run's files (`/dev/null`, `/dev/stdout`, `/etc/s.asn`, `.`, `..`, `s.asn/`).
+    pub fn output_host_name(name: &OsStr) -> Option<Vec<u8>> {
+        let name = name.as_encoded_bytes();
+        if name.is_empty() || !fits(name) {
+            return None;
+        }
+        let cwd = working_directory(name);
+        let made = made_file(Some(Walk::resolve(name, &cwd)?));
+        match output_name(name, &made) {
             OutputName::File { name, .. } => Some(name),
             OutputName::Unopened
             | OutputName::Stdout
@@ -272,8 +333,8 @@ fn existing_output_refusal(name: &OsStr) -> String {
 
 /// The target of the `-logfile` value `name` for a `Receiver` (`RunFiles::log_target`,
 /// `OpenFiles::log_target`): NCBI's special names, then `log_name`'s reading against the run's
-/// real files (`run_entries`, `run_entry`), plus the case-2 refusal when a new file's `file_key`
-/// matches a name in `FileReceiver::read_files`; `direct` wraps a `DiagTarget` without a new file,
+/// real files (`RunView`), plus the case-2 refusal when a new file's `file_key` matches a name in
+/// `FileReceiver::read_files`; `direct` wraps a `DiagTarget` without a new file,
 /// `file` opens a new file given its host name and key (`LogName::File`), and `stdout` handles
 /// `/dev/stdout` (`LogName::Stdout`). `Err` with LOSAT's refusal reason for `LogName::Existing`.
 fn received_log_target<T>(
@@ -287,9 +348,8 @@ fn received_log_target<T>(
         (Some(target), _) => Ok(direct(target)),
         (None, None) => Ok(direct(DiagTarget::Stderr)),
         (None, Some(name)) => {
-            let registered = run_entries(receiver);
-            let entry = |path: &[u8], cwd: &[u8]| run_entry(&registered, path, cwd);
-            match log_name(name.as_encoded_bytes(), Some(&entry)) {
+            let view = RunView::new(receiver, receiver.read_files());
+            match view.log_name(name.as_encoded_bytes()) {
                 LogName::Unopened => Ok(direct(DiagTarget::Stderr)),
                 LogName::StandardError => Ok(direct(DiagTarget::StderrFile)),
                 LogName::Nowhere => Ok(direct(DiagTarget::Discard)),
@@ -299,10 +359,7 @@ fn received_log_target<T>(
                     name: host_name,
                     key,
                 } => {
-                    if path_keys(receiver.read_files())
-                        .iter()
-                        .any(|read| read.as_slice() == key.as_slice())
-                    {
+                    if view.reads(&key) {
                         Err(existing_log_refusal(name))
                     } else {
                         Ok(file(host_name, key))
@@ -546,19 +603,13 @@ impl OpenFiles {
     }
 }
 
-/// Resolves `bytes` as an output file name of `receiver` (`output_name`), turning a new file
-/// whose `file_key` matches `FileReceiver::output_read_files` into `OutputName::Existing`.
+/// Resolves `bytes` as an output file name of `receiver` (`output_name` in the run's view,
+/// `RunView`), turning a new file whose `file_key` matches `FileReceiver::output_read_files` into
+/// `OutputName::Existing`.
 fn receiver_output_name(receiver: &dyn FileReceiver, bytes: &[u8]) -> OutputName {
-    let registered = run_entries(receiver);
-    let entry = |path: &[u8], cwd: &[u8]| run_entry(&registered, path, cwd);
-    match output_name(bytes, &entry) {
-        OutputName::File { key, .. }
-            if path_keys(receiver.output_read_files())
-                .iter()
-                .any(|read| read.as_slice() == key.as_slice()) =>
-        {
-            OutputName::Existing
-        }
+    let view = RunView::new(receiver, receiver.output_read_files());
+    match view.output_name(bytes) {
+        OutputName::File { key, .. } if view.reads(&key) => OutputName::Existing,
         other => other,
     }
 }
@@ -797,8 +848,11 @@ fn file_key(path: &[u8], cwd: &[u8]) -> Vec<u8> {
 
 /// The file's name that the host gets (`log_name`, `output_name`): for a file in the working
 /// directory's tree (`in_working_tree`), its path relative to the run's directory (`run.log`,
-/// `logs/run.log`, `logs`, `../x.log`); for a file outside it, `opened` (the path that NCBI or
-/// the tool opens, normalized lexically: `/tmp/run.log`, `/var/lock/run.log`).
+/// `logs/run.log`, `logs`, `../x.log`); for a file outside it, `opened`: for `-logfile` the path
+/// that NCBI opens, which NCBI normalizes lexically (`/tmp/run.log`, `/var/lock/run.log`,
+/// `/var/run/../tmp/run.log` as `/var/tmp/run.log`), and for a file that the system opens as
+/// typed, the name read lexically where it walks to the file, else the file's path
+/// (`output_name`: `/var/lock/s.asn`, `/var/run/../tmp/s.asn` as `/tmp/s.asn`).
 fn host_file_name(path: &[u8], opened: &[u8], cwd: &[u8]) -> Vec<u8> {
     match in_working_tree(path, cwd) {
         Some((up, rest)) => {
@@ -808,6 +862,15 @@ fn host_file_name(path: &[u8], opened: &[u8], cwd: &[u8]) -> Vec<u8> {
         }
         None => opened.to_vec(),
     }
+}
+
+/// The run's files in which a name whose opened path is `file` makes it a new file, if any run's
+/// files do (`RunFiles::output_host_name`, `RunFiles::log_host_name`): every other path that the
+/// name looks up is a folder of them, and `file` is none (a registered file makes its folders
+/// present outside the working directory too, `run_entry`, as `/data` of `/data/q.fa`). Such a
+/// lookup only makes folders present, and a folder that the walk passes is never the opened path.
+fn made_file(file: Option<Vec<u8>>) -> impl Fn(&[u8], &[u8]) -> Option<Entry> {
+    move |path, _| (Some(path) != file.as_deref()).then_some(Entry::Directory)
 }
 
 /// The relative path of `path` strictly inside the working directory `cwd`.
@@ -904,6 +967,51 @@ fn run_entries(receiver: &dyn FileReceiver) -> Vec<Vec<u8>> {
     path_keys(receiver.registered_files())
 }
 
+/// The one view of a `Receiver`'s run files through which the run reads a name that it writes
+/// (line WQA D19; line RG item F1w-r2): `-logfile` (`received_log_target`), a tool's output
+/// (`receiver_output_name`) and the search strategy file (`RunFiles::strategy_target`). It holds
+/// the keys of the run's registered files (`run_entries`), looked up with the run's directory
+/// (`run_entry`), and the names of the files that the run reads, which a new file of the name may
+/// not be (`read`: `FileReceiver::read_files`, or `FileReceiver::output_read_files` for a tool's
+/// output; keyed by `path_keys` where a name makes a new file).
+#[derive(Default)]
+struct RunView<'a> {
+    registered: Vec<Vec<u8>>,
+    read: &'a [Vec<u8>],
+}
+
+impl<'a> RunView<'a> {
+    /// The view of `receiver`'s files, `read` being the names of the files that its run reads.
+    fn new(receiver: &dyn FileReceiver, read: &'a [Vec<u8>]) -> Self {
+        RunView {
+            registered: run_entries(receiver),
+            read,
+        }
+    }
+
+    /// What the run's files hold at `path` in the working directory `cwd` (`run_entry`).
+    fn entry(&self, path: &[u8], cwd: &[u8]) -> Option<Entry> {
+        run_entry(&self.registered, path, cwd)
+    }
+
+    /// The output file name `name` in the run's files (`output_name`).
+    fn output_name(&self, name: &[u8]) -> OutputName {
+        output_name(name, &|path: &[u8], cwd: &[u8]| self.entry(path, cwd))
+    }
+
+    /// The `-logfile` name `name` in the run's files (`log_name`).
+    fn log_name(&self, name: &[u8]) -> LogName {
+        log_name(name, Some(&|path: &[u8], cwd: &[u8]| self.entry(path, cwd)))
+    }
+
+    /// Whether the run reads the file of the path `key` (`file_key`), present or missing.
+    fn reads(&self, key: &[u8]) -> bool {
+        path_keys(self.read)
+            .iter()
+            .any(|read| read.as_slice() == key)
+    }
+}
+
 /// What the run's files hold at `path` (resolved without links) in working directory `cwd`:
 /// `Some(Entry::File)` when a registered file's `file_key` equals `key`,
 /// `Some(Entry::Directory)` when a registered file sits below `key`, else
@@ -994,9 +1102,9 @@ enum OutputName {
 }
 
 /// The devices of `LOST_DEVICES` whose writes a user's system takes and loses (`output_name`,
-/// `strategy_name`): the null device, `/dev/zero` and the random devices. `/dev/full` fails them;
-/// `/dev/ptmx`, `/dev/fuse` and `/dev/net/tun` give writes to no reader or fail them each in its
-/// own way.
+/// `RunFiles::strategy_target`): the null device, `/dev/zero` and the random devices. `/dev/full`
+/// fails them; `/dev/ptmx`, `/dev/fuse` and `/dev/net/tun` give writes to no reader or fail them
+/// each in its own way.
 const DISCARDING_DEVICES: [&[u8]; 4] =
     [b"/dev/null", b"/dev/zero", b"/dev/random", b"/dev/urandom"];
 
@@ -1018,7 +1126,10 @@ const DISCARDING_DEVICES: [&[u8]; 4] =
 /// (`Special`, but the null device, `/dev/zero` and the random devices, whose writes are lost, and
 /// `/dev/full`, whose writes fail), a queue of `/dev/mqueue` (`Special`), a file of the run's
 /// directory (`Existing`; a folder of it does not open), or a file of that name in the working
-/// directory, in a home or in a directory where every user makes files (`File`).
+/// directory, in a home or in a directory where every user makes files (`File`), named as the
+/// command line's file (`host_file_name`: outside the working directory, the name read lexically
+/// where it walks to the file, else the file's path, as a `..` after a link steps back from the
+/// link's target: `/var/run/../tmp/s.asn` is `/tmp/s.asn`).
 fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     if name.is_empty() || !fits(name) {
         return OutputName::Unopened;
@@ -1091,9 +1202,16 @@ fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     if existing {
         return OutputName::Existing;
     }
-    let opened = crate::blastinput::ncbi_environment::PathRules::Unix
+    // The name as typed, read lexically, names the file where it walks to it (`/var/lock/s.asn`);
+    // where a `..` follows a link, the system steps back from the link's target, so the file is
+    // its path (`/var/run/../tmp/s.asn` makes `/tmp/s.asn`, not `/var/tmp/s.asn`).
+    let typed = crate::blastinput::ncbi_environment::PathRules::Unix
         .normalize(name, None)
         .expect("a path normalized without links has no link limit");
+    let opened = match Walk::resolve(&typed, &cwd) {
+        Some(file) if file == path => typed,
+        _ => path.clone(),
+    };
     OutputName::File {
         name: host_file_name(&path, &opened, &cwd),
         key: file_key(&path, &cwd),
@@ -1701,14 +1819,14 @@ fn log_name(name: &[u8], entry: Option<EntryLookup<'_>>) -> LogName {
     }
 }
 
-/// Whether `directory`, a directory of a name in the working directory `cwd` (`log_name`,
-/// `strategy_name`), is one that the system walks to and the model knows: each directory that its
-/// walk passes may be one of root's that the model does not know, but none that is not there nor
-/// one that the user cannot search, and the directory where it ends is known (`directory_at`).
-/// When `entry` is given, every folder looked up inside `cwd` (or named by a registered file)
-/// must be `Entry::Directory`, and an ancestor of a registered file outside `cwd` is present even
-/// where `directory_at` returns `Directory::None`. Each directory passed is added to `directories`
-/// (the opened path is none of them nor an ancestor of one).
+/// Whether `directory`, a directory of a name in the working directory `cwd` (`log_name`), is one
+/// that the system walks to and the model knows: each directory that its walk passes may be one
+/// of root's that the model does not know, but none that is not there nor one that the user
+/// cannot search, and the directory where it ends is known (`directory_at`). When `entry` is
+/// given, every folder looked up inside `cwd` (or named by a registered file) must be
+/// `Entry::Directory`, and an ancestor of a registered file outside `cwd` is present even where
+/// `directory_at` returns `Directory::None`. Each directory passed is added to `directories` (the
+/// opened path is none of them nor an ancestor of one).
 fn walks_to_directory(
     directory: &[u8],
     cwd: &[u8],
@@ -1734,8 +1852,10 @@ fn walks_to_directory(
 /// What an `-export_search_strategy` name gives for a `Receiver` (`RunFiles::strategy_target`).
 #[derive(Debug, PartialEq, Eq)]
 pub enum StrategyTarget {
-    /// A file of the run under the name as given, which the receiver gets when the run ends.
-    File,
+    /// A file of the run under this host name, the command line's file (`output_name`'s `File`:
+    /// `s.asn` for `./s.asn`, `in/../s.asn` and `/proc/self/cwd/s.asn`; the *start*'s name of it,
+    /// `RunFiles::output_host_name`), which the receiver gets when the run ends.
+    File(Vec<u8>),
     /// No file: the writes are lost (the null device; the standard input, which is the null
     /// device of a command line run without one).
     Nowhere,
@@ -1750,9 +1870,15 @@ pub enum StrategyTarget {
     /// file of procfs or of a message queue (LOSAT Web's refusal).
     System,
     /// The file of another option of the run, whose bytes the command line's strategy file
-    /// replaces or mixes with its own (LOSAT Web's refusal): `-query`, `-subject`, `-logfile` or
-    /// `-window_masker_db`.
+    /// replaces or mixes with its own (LOSAT Web's refusal): `-query`, `-subject`, a PSSM file
+    /// (`-in_pssm`, `-in_msa`, `-out_pssm`, `-out_ascii_pssm`), `-logfile` or `-window_masker_db`.
     OtherFile(&'static str),
+    /// Any other file of the run's files (`RunView`: `run_entries`, `run_directory_entry`), or a
+    /// file that the search reads (`FileReceiver::read_files`), which the command line's strategy
+    /// file empties or makes before the search reads it (LOSAT Web's refusal, as `-logfile`'s
+    /// `LogName::Existing` and a tool's `OutputName::Existing`: LOSAT Web reads the run's files and
+    /// writes none of them).
+    Existing,
 }
 
 /// A file that the run reads or writes besides its strategy file (`RunFiles::strategy_target`):
@@ -1766,33 +1892,43 @@ impl RunFiles {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535 (cited
     // at `strategy::create_strategy_file`): an output file (`CArgDescriptions::eOutputFile`), which
     // NCBI's arguments open as a stream of that name, truncated.
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:623-630
     /// What the `-export_search_strategy` name `name` gives for a `Receiver`, as the command line
-    /// on Linux opens it for writing (`strategy_name`), in a run whose other files are `others`
-    /// (`StrategyTarget`). LOSAT's own names (`-`) are the strategy module's. The `-logfile`
-    /// check reads the log name through the same entry view as `received_log_target` (`run_entries`
-    /// and `run_directory_entry`), so a `-logfile` that stays unopened does not match the strategy
-    /// file.
+    /// on Linux opens it for writing in the run's directory, in a run whose other files are
+    /// `others` (`StrategyTarget`). LOSAT's own names (`-`) are the strategy module's. NCBI opens
+    /// the name as it is written (no reading of NCBI's, unlike `-logfile`), for writing, creating
+    /// it and none of its folders (the option has no `fCreatePath`), as a tool opens its output
+    /// (`output_name`), against the run's files through the one view of the run's directory that
+    /// `-logfile` and a tool's output read (`RunView`; line WQA D19): a folder
+    /// inside the working directory must be one of the run's files (`out/s.asn` without a folder
+    /// `out`, `q.fa/s.asn` and `a/b/../s.asn` without `a/b` are NCBI's error), a folder of the
+    /// run's files is a directory, and a file of them is LOSAT Web's refusal (`Existing`). Then the
+    /// standard output (`/dev/stdout`, `/dev/fd/1`) is the report's stream; the standard input and
+    /// the devices of `DISCARDING_DEVICES` take the bytes and keep none; the standard error, the
+    /// other devices that a user opens, the files of procfs (`/proc/self/comm`) and message queues
+    /// (`/dev/mqueue/q`) are no file of the run; the file of another option of the run is that
+    /// option's (`OtherFile`: compared by path, `file_key`; the `-logfile` name read as
+    /// `received_log_target` reads it, so a `-logfile` that stays unopened does not match), then a
+    /// file that the search reads (`FileReceiver::read_files`) is `Existing`; every other name is a
+    /// file where the user makes files (`/tmp/s.asn`, `out/s.asn` with a folder `out`,
+    /// `/proc/self/cwd/s.asn`), named as the command line's file (`File`).
     pub fn strategy_target(&self, name: &OsStr, others: &[RunFileName<'_>]) -> StrategyTarget {
+        let view = match self {
+            RunFiles::Disk => RunView::default(),
+            RunFiles::Receiver(receiver) => RunView::new(receiver.as_ref(), receiver.read_files()),
+        };
         let name = name.as_encoded_bytes();
-        let cwd = working_directory(name);
-        let (target, path) = strategy_name(name, &cwd);
-        if target != StrategyTarget::File {
-            return target;
-        }
-        let Some(path) = path else {
-            return target;
+        let (made, key) = match view.output_name(name) {
+            OutputName::Unopened => return StrategyTarget::Inaccessible,
+            OutputName::Stdout => return StrategyTarget::StandardOutput,
+            OutputName::Discard => return StrategyTarget::Nowhere,
+            OutputName::Full | OutputName::Special => return StrategyTarget::System,
+            // Each name is read in a working directory of its own depth; their paths compare as
+            // the run's files' (`file_key`). An existing file of the run is at the path of the
+            // same walk (`output_key`).
+            OutputName::Existing => (None, output_key(name).unwrap_or_default()),
+            OutputName::File { name, key } => (Some(name), key),
         };
-        // Each name is read in a working directory of its own depth; their paths compare as the
-        // run's files' (`file_key`).
-        let key = file_key(&path, &cwd);
-        let registered = match self {
-            RunFiles::Disk => None,
-            RunFiles::Receiver(receiver) => Some(run_entries(receiver.as_ref())),
-        };
-        let entry_fn = registered
-            .as_deref()
-            .map(|registered| move |path: &[u8], cwd: &[u8]| run_entry(registered, path, cwd));
-        let entry: Option<EntryLookup<'_>> = entry_fn.as_ref().map(|entry| entry as _);
         for other in others {
             let bytes = other.name.as_encoded_bytes();
             let same = match other.option != "logfile" {
@@ -1802,7 +1938,7 @@ impl RunFiles {
                 false => {
                     special_log_target(Some(other.name)).is_none()
                         && matches!(
-                            log_name(bytes, entry),
+                            view.log_name(bytes),
                             LogName::File { key: other, .. } if other == key
                         )
                 }
@@ -1811,62 +1947,10 @@ impl RunFiles {
                 return StrategyTarget::OtherFile(other.option);
             }
         }
-        StrategyTarget::File
-    }
-}
-
-/// What the `-export_search_strategy` name `name` gives on the command line on Linux, in the
-/// working directory `cwd` of the model's host and user (`log_name`; No NCBI counterpart: LOSAT
-/// Web has no file system), and the path that it opens where it is a file. NCBI opens the name as
-/// it is written (no reading of NCBI's, unlike `-logfile`), for writing, creating it: the system
-/// walks its directory (`walks_to_directory`), which must be there, and opens the path where its
-/// user may write it (`opens`); a directory (`.`, `logs/`, `/tmp`), a name that ends in `/`, an
-/// empty name and a name that the system refuses (`fits`, `Walk`) are not opened. Then the standard
-/// output (`/dev/stdout`, `/dev/fd/1`) is the report's stream; the standard input and the devices
-/// of `DISCARDING_DEVICES` take the bytes and keep none; the standard error, the other devices
-/// that a user opens, the files of procfs (`/proc/self/comm`) and message queues (`/dev/mqueue/q`)
-/// are no file of the run; every other name is a file where the user makes files (`/tmp/s.asn`,
-/// `out/s.asn`, `/proc/self/cwd/s.asn`). A folder of the working directory is one that the user
-/// made where a name gives it, as `log_name` reads `-logfile` (`directory_at`), not only one that
-/// holds a file of the run as for a tool's output (`output_name`).
-fn strategy_name(name: &[u8], cwd: &[u8]) -> (StrategyTarget, Option<Vec<u8>>) {
-    if name.is_empty() || !fits(name) || name.ends_with(b"/") {
-        return (StrategyTarget::Inaccessible, None);
-    }
-    let mut directories: Vec<Vec<u8>> = Vec::new();
-    if let Some(slash) = name.iter().rposition(|byte| *byte == b'/') {
-        let directory = if slash == 0 {
-            b"/".as_slice()
-        } else {
-            &name[..slash]
-        };
-        if !walks_to_directory(directory, cwd, None, &mut directories) {
-            return (StrategyTarget::Inaccessible, None);
+        match made {
+            Some(host_name) if !view.reads(&key) => StrategyTarget::File(host_name),
+            _ => StrategyTarget::Existing,
         }
-    }
-    directories.push(cwd.to_vec());
-    let Some(path) = Walk::resolve(name, cwd) else {
-        return (StrategyTarget::Inaccessible, None);
-    };
-    if directories.iter().any(|directory| within(directory, &path)) || !opens(&path) {
-        return (StrategyTarget::Inaccessible, None);
-    }
-    let stream = |descriptor: &[u8]| {
-        [SELF, THREAD]
-            .iter()
-            .any(|process| path.strip_prefix(*process) == Some(descriptor))
-    };
-    if stream(b"/fd/1".as_slice()) {
-        (StrategyTarget::StandardOutput, None)
-    } else if stream(b"/fd/0".as_slice()) || DISCARDING_DEVICES.contains(&path.as_slice()) {
-        (StrategyTarget::Nowhere, None)
-    } else if LOST_DEVICES.contains(&path.as_slice())
-        || within(&path, SELF)
-        || NO_FREE_SPACE.iter().any(|system| within(&path, system))
-    {
-        (StrategyTarget::System, None)
-    } else {
-        (StrategyTarget::File, Some(path))
     }
 }
 

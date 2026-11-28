@@ -115,7 +115,33 @@ sequence data` where it fails): `ntag_t5.*` from `nordtag.fna`, `nlook_t4.*` (ve
 tests/seqdb/taxdb/offset_last_past_end; `pfw_weak_v5.*` from `pfw_weak.faa` (`sp||NAMEY`, `sp|P00042.1|NAMEY`, which
 the query `pfw_q6.faa` matches exactly, `gb|FFF00099.1|` and `gnl|BL_ORD_ID|0` with a text tag, whose hit psiblast ranks
 last); and `pfw_bad/ntag_t5.*`, a copy of `ntag_t5` whose accession table's leaf page (page 6 of the `.ndb`) has its
-flags zeroed, so that the lookup of an accession fails on the file. `--pfwarn-only` builds only these. Line DBID
+flags zeroed, so that the lookup of an accession fails on the file. `--pfwarn-only` builds only these. Line NP
+item O4b2-10 (a lookup that throws on its id ends NCBI's prefetch loads in the order of the batch's Seq-id handles):
+`ntagx_t5.*` from `nordtagx.fna` (`gnl|BL_ORD_ID|x002`, a packed text tag whose lookup fails, with `gb|FFF00093.1|`,
+and `gb|FFF00094.1|`, whose handle comes after it), `ntagc_t5.*` from `nordtagc.fna` (`gb|FFF00010.1|` before
+`gnl|BL_ORD_ID|x050`, `gb|FFF00090.1|` after it) with the taxids of `nordtagc.taxid_map` (99990, and 150 for
+`gb|FFF00090.1|`: the slot of 99990 in a volume's taxonomy cache), and their protein copies `ptagx_t5.*` from
+`pordtagx.faa` and `ptagc_t5.*` from `pordtagc.faa` (`pordtagc.taxid_map`); every other sequence with taxid 99990.
+For the loads that a failed lookup leaves to NCBI's data source's cache of 10 (query `pordslot_q.faa`):
+`pslot11_t5.*` from `pordslot11.faa` (`gb|FFF00090.1|` taxid 150, the best hit, then `gb|FFF00011.1|` to
+`gb|FFF00001.1|` taxid 99990, then the failing `gnl|BL_ORD_ID|x050`, the worst hit), `pslot12_t5.*` and `pslot10_t5.*`
+the same with 12 and 10 loads before the failure (`pordslot12.faa`, `pordslot10.faa`), `pslotc_t5.*` the control with
+`gb|FFF00050.1|` in place of the failing id (`pordslotc.faa`), and `pslotr_t5.*` and `pslotm_t5.*` (`pordslotr.faa`,
+`pordslotm.faa`, the taxids of `pordslot11.taxid_map`) with `gb|FFF00011.1|` and `gb|FFF00001.1|` the best hit, for
+the order in which the cache takes them; `ptie_t5.*` and `ptie150_t5.*` from `pordtie.faa` (`gb|FFF00010.1|`,
+`gb|FFF00050.1|` of the failing tag's packed number, the failing `gnl|BL_ORD_ID|x050`, `gb|FFF00090.1|` taxid 150),
+`gb|FFF00050.1|` with taxid 99990 (`pordtie.taxid_map`) or 150 (`pordtie150.taxid_map`); and the aliases
+`pvab_t5.pal` (`pva_t5` from `pordva.faa`: a load before the failing tag and the tag, `pvb_t5` from `pordvb.faa`: a
+load after it) and `pvcd_t5.pal` (`pvc_t5`, `pvd_t5` from `pordvc.faa`, `pordvd.faa`: the tag and a load after it, a
+load before it), taxid 99990. For the loads of other slots that the cache counts (re-review of item O4b2-10, R2-1):
+`pslotmix_t5.*` from `pordslotmix.faa` (as `pslot11_t5`, with `gb|FFF00001.1|` of taxid 9606) and `pslotmix12_t5.*`
+from `pordslotmix12.faa` (`gb|FFF00011.1|` of taxid 9606, then `gb|FFF00010.1|` to `gb|FFF00001.1|` of 99990); for a
+load of the failure's key after which the cache drops it (R2-2): `pslottie_t5.*` from `pordslottie.faa`
+(`gb|FFF00010.1|` to `gb|FFF00001.1|` and `gb|FFF00050.1|` of 99990, the failing `gnl|BL_ORD_ID|x050`); for a scope that
+resolves such a load (R2-1): `pslotscope_t5.*` from `pordslotscope.faa` (as `pslotmix_t5`, but `gb|FFF00001.1|` is half
+the first query of `pordslotscope_q.faa`, whose only hit it is, so that a batch of that query alone reads it before the
+second query's batch); each with the taxids of its `.taxid_map`. `nordtag_rc.fna` is the reverse complement of `nordtag_q.fna` (every BLASTN alignment
+on the query's minus strand). `--pfworder-only` builds only these. Line DBID
 weakbatch (psiblast's rounds read the sequences before the cut for the next PSSM): `wkb_e3_v5.*` from `wkb_e3.faa`
 (`gb|FFF00043.1|`, `gb|ZZZ00001.1|`, then `gb|FFF00043|`, which the lookup finds as the first) and `wkb_p1_v5.*` from
 `wkb_p1.faa` (the same with `gb|FFF00043|` a weak hit above -inclusion_ethresh and `gb|WWW00001.1|` before it), for the
@@ -306,6 +332,44 @@ def build_pfwarn(args: argparse.Namespace) -> None:
         (bad / path.name).write_bytes(bytes(data))
 
 
+def build_pfworder(args: argparse.Namespace) -> None:
+    for name, fasta, dbtype, taxids in (("ntagx_t5", "nordtagx.fna", "nucl", None),
+                                        ("ntagc_t5", "nordtagc.fna", "nucl", "nordtagc.taxid_map"),
+                                        ("ptagx_t5", "pordtagx.faa", "prot", None),
+                                        ("ptagc_t5", "pordtagc.faa", "prot", "pordtagc.taxid_map"),
+                                        ("pslot11_t5", "pordslot11.faa", "prot", "pordslot11.taxid_map"),
+                                        ("pslot12_t5", "pordslot12.faa", "prot", "pordslot12.taxid_map"),
+                                        ("pslot10_t5", "pordslot10.faa", "prot", "pordslot10.taxid_map"),
+                                        ("pslotc_t5", "pordslotc.faa", "prot", "pordslotc.taxid_map"),
+                                        ("pslotr_t5", "pordslotr.faa", "prot", "pordslot11.taxid_map"),
+                                        ("pslotm_t5", "pordslotm.faa", "prot", "pordslot11.taxid_map"),
+                                        ("ptie_t5", "pordtie.faa", "prot", "pordtie.taxid_map"),
+                                        ("ptie150_t5", "pordtie.faa", "prot", "pordtie150.taxid_map"),
+                                        ("pslotmix_t5", "pordslotmix.faa", "prot", "pordslotmix.taxid_map"),
+                                        ("pslotmix12_t5", "pordslotmix12.faa", "prot", "pordslotmix12.taxid_map"),
+                                        ("pslottie_t5", "pordslottie.faa", "prot", "pordslottie.taxid_map"),
+                                        ("pslotscope_t5", "pordslotscope.faa", "prot", "pordslotscope.taxid_map"),
+                                        ("pva_t5", "pordva.faa", "prot", None), ("pvb_t5", "pordvb.faa", "prot", None),
+                                        ("pvc_t5", "pordvc.faa", "prot", None), ("pvd_t5", "pordvd.faa", "prot", None)):
+        if taxids is None:
+            taxid_args, title = ["-taxid", "99990"], "taxid 99990"
+        else:
+            # The map's taxids, the largest first ("taxids 99990 and 150", "taxids 99990, 9606 and 150").
+            named = sorted({int(line.split()[1]) for line in (HERE / taxids).read_text().splitlines() if line.strip()},
+                           reverse=True)
+            listed = ", ".join(str(taxid) for taxid in named[:-1]) + f" and {named[-1]}"
+            taxid_args, title = ["-taxid_map", str(HERE / taxids)], f"taxids {listed}"
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", dbtype, "-parse_seqids",
+             "-blastdb_version", "5", *taxid_args, "-title", f"{name} (parsed Seq-ids, {title})",
+             "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+    for alias, names in (("pvab_t5", "pva_t5 pvb_t5"), ("pvcd_t5", "pvc_t5 pvd_t5")):
+        (args.out / f"{alias}.pal").write_text(
+            f"#\n# Alias file of line NP, item O4b2-10\n#\nTITLE {alias} (two databases, parsed Seq-ids, taxid 99990)\n"
+            f"DBLIST {names}\n")
+
+
 def build_weakbatch(args: argparse.Namespace) -> None:
     for name, fasta in (("wkb_e3_v5", "wkb_e3.faa"), ("wkb_p1_v5", "wkb_p1.faa")):
         subprocess.run(
@@ -443,6 +507,7 @@ def main() -> int:
     ap.add_argument("--tabfields-only", action="store_true", help="build only the database of line DBID tabfields")
     ap.add_argument("--pfbatch-only", action="store_true", help="build only the database of line DBID pfbatch")
     ap.add_argument("--pfwarn-only", action="store_true", help="build only the databases of line DBID pfwarn")
+    ap.add_argument("--pfworder-only", action="store_true", help="build only the databases of line NP item O4b2-10")
     ap.add_argument("--weakbatch-only", action="store_true", help="build only the databases of line DBID weakbatch")
     ap.add_argument("--pssmrows-only", action="store_true", help="build only the databases of line DBID pssmrows")
     ap.add_argument("--pssmread-only", action="store_true", help="build only the databases of line DBID pssmread")
@@ -473,6 +538,9 @@ def main() -> int:
         return 0
     if args.pfwarn_only:
         build_pfwarn(args)
+        return 0
+    if args.pfworder_only:
+        build_pfworder(args)
         return 0
     if args.weakbatch_only:
         build_weakbatch(args)
@@ -620,6 +688,7 @@ def main() -> int:
     build_tabfields(args)
     build_pfbatch(args)
     build_pfwarn(args)
+    build_pfworder(args)
     build_weakbatch(args)
     build_pssmrows(args)
     build_pssmread(args)

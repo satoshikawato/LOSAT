@@ -1534,7 +1534,8 @@ pub(crate) struct LocRow<'a, R> {
     pub(crate) width: u32,
 }
 
-/// The `other` row of `HspMasks::set_row` of a pair whose rows' Seq-ids do not match: none.
+/// The `other` row of `HspMasks::set_row` of a pair whose rows' Seq-ids do not match, in the tests: none.
+#[cfg(test)]
 pub(crate) const NO_ROW: Option<LocRow<'static, fn(usize) -> bool>> = None;
 
 impl<R: Fn(usize) -> bool> LocRow<'_, R> {

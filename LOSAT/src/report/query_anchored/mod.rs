@@ -24,7 +24,7 @@
 //! minus frame with `fNegativeStrand`, which `Add` reads as `fForceTranslation` (`AddFlags`).
 
 mod aln_mix;
-mod aln_vec;
+pub(crate) mod aln_vec;
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -407,23 +407,15 @@ impl HspAlnVec {
                 "an HSP's segments are not a Dense-seg of two rows",
             ));
         }
-        let ds = &mut self.ds;
-        ds.lens.clear();
-        ds.lens.extend(lens.iter().map(|&len| len as u32));
-        ds.starts.clear();
-        ds.starts.extend_from_slice(starts);
-        ds.widths.clear();
-        if widths != [1, 1] {
-            ds.widths.extend(widths);
-        }
-        let (mut query, mut subject) = (strands[0], strands[1]);
-        if query == Strand::Minus && widths[0] != 3 {
-            ds.reverse();
-            (query, subject) = (query.reversed(), subject.reversed());
-        }
-        ds.plus.clear();
-        ds.plus
-            .extend([query != Strand::Minus, subject != Strand::Minus]);
+        let first = [strands[0], strands[1]];
+        let reverse = first[0] == Strand::Minus && widths[0] != 3;
+        self.ds.set_pair(
+            starts,
+            lens.iter().map(|&len| len as u32),
+            first,
+            widths,
+            reverse,
+        );
         let map = AlnMap::new_in(&self.ds, &mut self.map).map_err(pairwise_internal)?;
         for (row, data) in self.rows.iter_mut().enumerate() {
             let screens = &mut data.screens;
@@ -507,8 +499,61 @@ impl HspAlnVec {
 }
 
 impl Denseg {
+    /// Sets this Dense-seg of two rows (its ids kept, its vectors reused) to the segments'
+    /// `starts` (two per segment, row 0's then row 1's, -1 for a gap) and `lens`, the rows'
+    /// widths `widths` (none where `[1, 1]`) and each row's strand (`strands`, the segment's that
+    /// `CAlnMap` reads: `IsPositiveStrand` is any strand but minus), reversed by
+    /// `CDense_seg::Reverse` where `reverse` (the caller's rule: the pairwise report reverses an
+    /// HSP whose query strand is minus and is not translated, `HspAlnVec::set`; the tabular
+    /// formats a Dense-seg that is not translated and whose first strand is minus,
+    /// tabular.cpp:943-952, `pair`). The one builder of both paths' Dense-segs.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:643-680
+    pub(crate) fn set_pair(
+        &mut self,
+        starts: &[i32],
+        lens: impl IntoIterator<Item = u32>,
+        strands: [crate::report::serial::seqalign::Strand; 2],
+        widths: [u32; 2],
+        reverse: bool,
+    ) {
+        self.lens.clear();
+        self.lens.extend(lens);
+        self.starts.clear();
+        self.starts.extend_from_slice(starts);
+        self.widths.clear();
+        if widths != [1, 1] {
+            self.widths.extend(widths);
+        }
+        if reverse {
+            self.reverse();
+        }
+        self.plus.clear();
+        self.plus.extend(pair_plus(strands, reverse));
+    }
+
+    /// The Dense-seg of two rows, the sequences `keys`, without widths (`set_pair`): the
+    /// archive path's (`report::tabular_seqalign`).
+    pub(crate) fn pair(
+        keys: [SeqKey; 2],
+        starts: &[i32],
+        lens: &[u32],
+        strands: [crate::report::serial::seqalign::Strand; 2],
+        reverse: bool,
+    ) -> Self {
+        let mut ds = Denseg {
+            ids: keys.to_vec(),
+            lens: Vec::new(),
+            starts: Vec::new(),
+            plus: Vec::new(),
+            widths: Vec::new(),
+        };
+        ds.set_pair(starts, lens.iter().copied(), strands, [1, 1], reverse);
+        ds
+    }
+
     /// `CDense_seg::Reverse`: the segments in the other order, each row on the other strand
-    /// (here the rows' strands are the caller's, `HspAlnVec::set`).
+    /// (here the rows' strands are the caller's, `set_pair`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:661-680
     fn reverse(&mut self) {
@@ -522,6 +567,20 @@ impl Denseg {
             }
         }
     }
+}
+
+/// Whether each row of a Dense-seg of two rows whose first segment's strands are `strands` is on
+/// the plus strand (not minus), the Dense-seg reversed where `reverse` (`CDense_seg::Reverse`
+/// flips each strand: `Denseg::set_pair`).
+pub(crate) fn pair_plus(
+    strands: [crate::report::serial::seqalign::Strand; 2],
+    reverse: bool,
+) -> [bool; 2] {
+    use crate::report::serial::seqalign::Strand;
+    strands.map(|strand| {
+        let strand = if reverse { strand.reversed() } else { strand };
+        strand != Strand::Minus
+    })
 }
 
 /// What a program gives the section about its sequences.

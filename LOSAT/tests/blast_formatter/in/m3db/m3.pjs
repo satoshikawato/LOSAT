@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "m3",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "in/m3.faa",
+  "number-of-letters": 119,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-27T13:35:00",
+  "number-of-volumes": 1,
+  "bytes-total": 604,
+  "bytes-to-cache": 219,
+  "files": [
+    "m3.phr",
+    "m3.pin",
+    "m3.pog",
+    "m3.psd",
+    "m3.psi",
+    "m3.psq"
+  ]
+}

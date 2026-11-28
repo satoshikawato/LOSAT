@@ -268,3 +268,83 @@ pub(crate) const MATCH_FORMS_ACCESSION: u8 = 0b11;
 
 /// The forms of `match_form` of a PDB Seq-id.
 pub(crate) const MATCH_FORMS_PDB: u8 = 0b11_1100;
+
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1253-1290
+/// The Bioseqs of one data source of NCBI's scope (an archive's queries, its `-subject` Bioseqs)
+/// by the keys of their ids, for the lookups of `CDataSource_ScopeInfo::x_GetSeqMatch`
+/// ([`ScopeIndex::finds`]): `defline_set::scope_keys` of each id (the Bioseqs that hold the id
+/// itself: a text Seq-id's accession with its version, so `gb|X.1|` is not `gb|X|`) and
+/// `kind_keys` of each id (the Bioseqs that an id matches weakly, `weak_keys`).
+#[derive(Debug, Default)]
+pub(crate) struct ScopeIndex {
+    own: HashMap<u64, Vec<usize>>,
+    weak: HashMap<u64, Vec<usize>>,
+}
+
+impl ScopeIndex {
+    /// Adds the Bioseq `item` (not below a Bioseq added before) with the id `id`.
+    pub(crate) fn add(&mut self, item: usize, id: &ParsedSeqId) {
+        let mut keys = Vec::new();
+        scope_keys(id, &mut keys);
+        Self::insert(&mut self.own, &keys, item);
+        keys.clear();
+        kind_keys(id, &mut keys);
+        Self::insert(&mut self.weak, &keys, item);
+    }
+
+    fn insert(map: &mut HashMap<u64, Vec<usize>>, keys: &[u64], item: usize) {
+        for &key in keys {
+            let items = map.entry(key).or_default();
+            if items.last() != Some(&item) {
+                items.push(item);
+            }
+        }
+    }
+
+    /// The Bioseqs that NCBI's scope finds for `id` in this data source, in order: those with an
+    /// id that the scope takes for `id` itself (`x_FindBestTSE`), else those with an id that `id`
+    /// matches weakly (`GetMatchingHandles` with `eAllowWeakMatch`: an accession without a version
+    /// finds every version of it, one with a version only that version, `x_FindMatchByAcc`).
+    /// Of several, NCBI takes the better weak match (`IsBetter`) or throws its conflict of TSEs;
+    /// the callers refuse them.
+    pub(crate) fn finds(&self, id: &ParsedSeqId) -> Vec<usize> {
+        let mut keys = Vec::new();
+        scope_keys(id, &mut keys);
+        let found = Self::found(&self.own, &keys);
+        if !found.is_empty() {
+            return found;
+        }
+        keys.clear();
+        weak_keys(id, &mut keys);
+        Self::found(&self.weak, &keys)
+    }
+
+    fn found(map: &HashMap<u64, Vec<usize>>, keys: &[u64]) -> Vec<usize> {
+        let mut found: Vec<usize> = keys
+            .iter()
+            .filter_map(|key| map.get(key))
+            .flatten()
+            .copied()
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        found
+    }
+}
+
+/// Whether NCBI's scope finds a Bioseq that has the id `held` for the id `id` (the lookup of
+/// [`ScopeIndex::finds`] in a data source of that one Bioseq).
+pub(crate) fn scope_finds(held: &ParsedSeqId, id: &ParsedSeqId) -> bool {
+    let (mut held_keys, mut id_keys) = (Vec::new(), Vec::new());
+    scope_keys(held, &mut held_keys);
+    scope_keys(id, &mut id_keys);
+    if held_keys.iter().any(|key| id_keys.contains(key)) {
+        return true;
+    }
+    held_keys.clear();
+    id_keys.clear();
+    kind_keys(held, &mut held_keys);
+    weak_keys(id, &mut id_keys);
+    held_keys.iter().any(|key| id_keys.contains(key))
+}

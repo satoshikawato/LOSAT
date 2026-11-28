@@ -226,6 +226,7 @@ describe('verification table', () => {
       toolVerificationBadge({ tool: 'blast_formatter', argv, runtimePath: 'serial', grammar: bfGrammar }, table);
     for (const argv of [
       ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '8'],
+      ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '6'],
       ['blast_formatter', '-archive', 'db.asn', '-outfmt', '9', '-out', 'out.asnb'],
       ['blast_formatter', '-archive', 'db.asn', '-outfmt', '12', '-logfile', 'run.log'],
       ['blast_formatter', '-archive', 'db.asn', '-outfmt', '8', '-max_target_seqs', '2'],
@@ -237,7 +238,7 @@ describe('verification table', () => {
     }
 
     for (const argv of [
-      ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '6'],
+      ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '5'],
       ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '8', '-line_length', '40'],
     ]) {
       const badge = bfBadge(argv);

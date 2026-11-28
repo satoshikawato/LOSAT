@@ -1,0 +1,93 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= q102
+
+Length=540
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 Unknown                                                       354     2e-131
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  14.6    3.2   
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  14.6    3.3   
+
+
+Sequence with id CDD:102 no longer exists in database...alignment skipped
+Sequence with id CDD:102 no longer exists in database...alignment skipped
+Sequence with id CDD:102 no longer exists in database...alignment skipped
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 14.6 bits (26),  Expect = 3.2
+ Identities = 7/25 (28%), Positives = 10/25 (40%), Gaps = 0/25 (0%)
+ Frame = -1
+
+Query  75  RNINSSSTTTFITTLRHFFHRHIKN  1
+           +N NS+  T           R I+N
+Sbjct  52  KNSNSNRQTPITRIEESLGLRFIEN  76
+
+
+ Score = 14.2 bits (25),  Expect = 3.7
+ Identities = 7/14 (50%), Positives = 9/14 (64%), Gaps = 1/14 (7%)
+ Frame = +1
+
+Query  148  DLFPAIWVSDLFME  189
+            D FP I V D+ M+
+Sbjct  103  DYFPEI-VCDINMQ  115
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 14.6 bits (26),  Expect = 3.3
+ Identities = 4/9 (44%), Positives = 5/9 (56%), Gaps = 0/9 (0%)
+ Frame = -1
+
+Query  264  FTMHIRQTR  238
+            F  H  +TR
+Sbjct  46   FVKHSLETR  54
+
+
+ Score = 14.2 bits (25),  Expect = 4.1
+ Identities = 2/7 (29%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = +2
+
+Query  242  VCLMCMV  262
+             C++C +
+Sbjct  150  KCMICKI  156
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 74228
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

@@ -201,35 +201,40 @@ fn a_strategys_subjects_are_searched_once_at_any_thread_count() {
 /// statistics 4, a greedy extension with dynamic programming's traceback) or runs a search that
 /// LOSAT does not have (a word size of 1, unified P-values in TBLASTN, composition mode -1, the
 /// refusals of the command line's values): LOSAT's refusal in its words, exit status 1, never a
-/// panic (`docs/manual/src/refusals.md`). The strategies are those of the audit, `ss/s3a.*`.
+/// panic (`docs/manual/src/refusals.md`). Refusals checked where the search starts (BLASTP
+/// `-word_size 1`, BLASTP/TBLASTN infinite `-evalue`) follow NCBI's outfmt 0 prolog written before
+/// the first query batch (T4b-f, `I.blastp.db.alone` / `I.tblastn.db.alone`). The strategies are
+/// those of the audit, `ss/s3a.*`.
 #[test]
 fn a_strategy_value_that_losat_does_not_run_is_refused_in_losat_words() {
-    let refusals: &[(&str, &str, &str)] = &[
-        ("blastx", "blastx_QueryGeneticCode_0", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX"),
-        ("blastx", "blastx_QueryGeneticCode_7", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX"),
-        ("blastx", "blastx_QueryGeneticCode_256", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX"),
-        ("tblastn", "tblastn_DbGeneticCode_0", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTN"),
-        ("tblastn", "tblastn_DbGeneticCode_7", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTN"),
-        ("tblastn", "tblastn_DbGeneticCode_-1", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTN"),
-        ("tblastx", "tblastx_QueryGeneticCode_7", "a search strategy with this query genetic code is not supported by LOSAT's TBLASTX"),
-        ("tblastx", "tblastx_QueryGeneticCode_-1", "a search strategy with this query genetic code is not supported by LOSAT's TBLASTX"),
-        ("tblastx", "tblastx_DbGeneticCode_7", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTX"),
-        ("blastp", "blastp_CompositionBasedStats_4", "a search strategy with composition-based statistics 4 (unified P 0) is not supported by LOSAT's BLASTP"),
-        ("blastp", "blastp_CompositionBasedStats_neg1", "a search strategy with composition-based statistics -1 (unified P 0) is not supported by LOSAT's BLASTP"),
-        ("tblastn", "tblastn_CompositionBasedStats_4", "a search strategy with composition-based statistics 4 (unified P 0) is not supported by LOSAT's TBLASTN"),
-        ("tblastn", "tblastn_UnifiedP_2", "a search strategy with composition-based statistics 2 (unified P 2) is not supported by LOSAT's TBLASTN"),
-        ("blastp", "blastp_WordSize_1", "-word_size 1 (the lookup table) is not supported by LOSAT's BLASTP"),
-        ("blastx", "blastx_WordSize_1", "-word_size 1 (the lookup table) is not supported by LOSAT's BLASTX"),
-        ("tblastn", "tblastn_WordSize_1", "the matrix BLOSUM62 with word size 1 is not supported by LOSAT's TBLASTN"),
-        ("blastn", "blastn_GapExtnAlgorithm_0_1", "a search strategy with this pair of gapped extension algorithms is not supported by LOSAT's BLASTN"),
-        ("blastn", "blastn_MatchReward_0", "is not supported by LOSAT's BLASTN"),
-        ("blastp", "blastp_EvalueThreshold_inf", "is not supported by LOSAT's BLASTP"),
-        ("tblastn", "tblastn_EvalueThreshold_inf", "is not supported by LOSAT's TBLASTN"),
-        ("blastx", "blastx_EvalueThreshold_inf", "is not supported by LOSAT's BLASTX"),
-        ("blastx", "blastx_EvalueThreshold_nan", "is not supported by LOSAT's BLASTX"),
+    let bp_prolog = Some("39de21324836dfef");
+    let tn_prolog = Some("19f948e973ed7555");
+    let refusals: &[(&str, &str, &str, Option<&str>)] = &[
+        ("blastx", "blastx_QueryGeneticCode_0", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX", None),
+        ("blastx", "blastx_QueryGeneticCode_7", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX", None),
+        ("blastx", "blastx_QueryGeneticCode_256", "a search strategy with this query genetic code is not supported by LOSAT's BLASTX", None),
+        ("tblastn", "tblastn_DbGeneticCode_0", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTN", None),
+        ("tblastn", "tblastn_DbGeneticCode_7", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTN", None),
+        ("tblastn", "tblastn_DbGeneticCode_-1", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTN", None),
+        ("tblastx", "tblastx_QueryGeneticCode_7", "a search strategy with this query genetic code is not supported by LOSAT's TBLASTX", None),
+        ("tblastx", "tblastx_QueryGeneticCode_-1", "a search strategy with this query genetic code is not supported by LOSAT's TBLASTX", None),
+        ("tblastx", "tblastx_DbGeneticCode_7", "a search strategy with this database genetic code is not supported by LOSAT's TBLASTX", None),
+        ("blastp", "blastp_CompositionBasedStats_4", "a search strategy with composition-based statistics 4 (unified P 0) is not supported by LOSAT's BLASTP", None),
+        ("blastp", "blastp_CompositionBasedStats_neg1", "a search strategy with composition-based statistics -1 (unified P 0) is not supported by LOSAT's BLASTP", None),
+        ("tblastn", "tblastn_CompositionBasedStats_4", "a search strategy with composition-based statistics 4 (unified P 0) is not supported by LOSAT's TBLASTN", None),
+        ("tblastn", "tblastn_UnifiedP_2", "a search strategy with composition-based statistics 2 (unified P 2) is not supported by LOSAT's TBLASTN", None),
+        ("blastp", "blastp_WordSize_1", "-word_size 1 (the lookup table) is not supported by LOSAT's BLASTP", bp_prolog),
+        ("blastx", "blastx_WordSize_1", "-word_size 1 (the lookup table) is not supported by LOSAT's BLASTX", None),
+        ("tblastn", "tblastn_WordSize_1", "the matrix BLOSUM62 with word size 1 is not supported by LOSAT's TBLASTN", None),
+        ("blastn", "blastn_GapExtnAlgorithm_0_1", "a search strategy with this pair of gapped extension algorithms is not supported by LOSAT's BLASTN", None),
+        ("blastn", "blastn_MatchReward_0", "is not supported by LOSAT's BLASTN", None),
+        ("blastp", "blastp_EvalueThreshold_inf", "is not supported by LOSAT's BLASTP", bp_prolog),
+        ("tblastn", "tblastn_EvalueThreshold_inf", "is not supported by LOSAT's TBLASTN", tn_prolog),
+        ("blastx", "blastx_EvalueThreshold_inf", "is not supported by LOSAT's BLASTX", None),
+        ("blastx", "blastx_EvalueThreshold_nan", "is not supported by LOSAT's BLASTX", None),
     ];
     let mut failed = Vec::new();
-    for (program, strategy, words) in refusals {
+    for (program, strategy, words, expected_prolog) in refusals {
         let case = Case {
             name: format!("refusal {program} {strategy}"),
             program: program.to_string(),
@@ -243,11 +248,28 @@ fn a_strategy_value_that_losat_does_not_run_is_refused_in_losat_words() {
         };
         let output = run(&case, None);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if output.status.code() != Some(1) || !stderr.contains(words) || !output.stdout.is_empty() {
+        let expected_stdout = match expected_prolog {
+            Some(name) => {
+                // The prolog: the bytes of NCBI's run before its first query's report.
+                let bytes = frozen(name);
+                let end = bytes
+                    .windows(8)
+                    .position(|window| window == b"\n\nQuery=")
+                    .expect("the first query's report");
+                bytes[..end].to_vec()
+            }
+            None => Vec::new(),
+        };
+        if output.status.code() != Some(1)
+            || !stderr.contains(words)
+            || output.stdout != expected_stdout
+        {
             failed.push(format!(
-                "{}: exit {:?}, stderr {stderr:?}",
+                "{}: exit {:?}, stdout_len {} (expected {}), stderr {stderr:?}",
                 case.name,
-                output.status.code()
+                output.status.code(),
+                output.stdout.len(),
+                expected_stdout.len(),
             ));
         }
     }

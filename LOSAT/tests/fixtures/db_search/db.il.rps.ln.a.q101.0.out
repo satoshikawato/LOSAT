@@ -1,0 +1,87 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= q101
+
+Length=190
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 Unknown                                                       312     2e-114
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  14.7    3.4   
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  14.3    4.4   
+
+
+Sequence with id CDD:101 no longer exists in database...alignment skipped
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 14.7 bits (27),  Expect = 3.4, Method: Composition-based stats.
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+
+Query  180  GAEMYAAACR  189
+            GA + A  CR
+Sbjct  149  GAHITAGKCR  158
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 14.3 bits (26),  Expect = 4.4, Method: Composition-based stats.
+ Identities = 3/7 (43%), Positives = 4/7 (57%), Gaps = 0/7 (0%)
+
+Query  87  PEVVDVI  93
+            +V D I
+Sbjct  29  LDVKDFI  35
+
+
+ Score = 13.5 bits (24),  Expect = 6.6, Method: Composition-based stats.
+ Identities = 5/25 (20%), Positives = 10/25 (40%), Gaps = 4/25 (16%)
+
+Query  30   LKNIYQQENGGNKHCLFVKHSLETR  54
+             K +Y++     K     K  ++ R
+Sbjct  90   FKALYEKYEAEGK----GKEVVKAR  110
+
+
+ Score = 13.5 bits (24),  Expect = 7.2, Method: Composition-based stats.
+ Identities = 2/9 (22%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+
+Query  169  NDNDNNVIC  177
+            +D++   +C
+Sbjct  159  SDSEETAVC  167
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.137    0.405    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0512    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

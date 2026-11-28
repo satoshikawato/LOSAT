@@ -178,7 +178,7 @@ pub use crate::api::start::{CallerSink, CallerStart, ErrorSource};
 pub use crate::blastinput::ncbi_environment::{
     log_file, preparse, ApplicationSettings, Preparsed, RegistryFiles, TextPlace,
 };
-pub use crate::report::run_files::{FileReceiver, FileStream, RunFiles};
+pub use crate::report::run_files::{FileReceiver, FileStream, RunFileOption, RunFiles};
 /// The names of the command line's programs (`losat <program>`, and the names that run one without
 /// its word): LOSAT Web's tool run tells a program that it does not run from a name that is none.
 pub use crate::utils::entry_names::ENTRY_NAMES as PROGRAMS;
@@ -283,9 +283,14 @@ fn search_files(command: &Commands) -> Option<SearchFiles<'_>> {
 /// where the command line makes it (`strategy::open_strategy_file_in`, as the command line's
 /// `open_strategy_file`): after the settings and a dry run's end, before `-outfmt` is read. `None`
 /// without the option. The error is the command line's (NCBI's `File is not accessible` for a name
-/// that the command line cannot open); the run's other files that the name may be are its `-query`,
-/// `-subject`, `-logfile`, BLASTN's `-window_masker_db`, and the files of the run's working directory
-/// that the search reads (`-db`, the lists of its filters, BLASTN's `-filtering_db`).
+/// that the command line cannot open, also a name in a folder that the run's files do not have);
+/// the file is named as the command line's file (`s.asn` for `./s.asn`). The run's other files that
+/// the name may be, which LOSAT Web refuses under their option, are its `-query`, `-subject`,
+/// the PSSM files (`-in_pssm`, `-in_msa`, `-out_pssm`, `-out_ascii_pssm`), `-logfile`, BLASTN's
+/// `-window_masker_db`, and the files of the run's working directory that the search reads (`-db`,
+/// the lists of its filters, BLASTN's `-filtering_db`); any other file of the run's files and a
+/// file that the search reads or checks, present or missing, is LOSAT Web's refusal of a file of
+/// the run's directory (`RunFiles::strategy_target`, `StrategyTarget::Existing`).
 pub fn open_strategy_file(
     command: &Commands,
     words: &[&str],
@@ -534,6 +539,83 @@ pub fn check_blast_formatter(words: &[&str]) -> Result<(), String> {
         crate::blast_formatter::read_files,
         crate::blast_formatter::check_in,
     )
+}
+
+/// Runs `makeblastdb` with `words` (the command line after `losat makeblastdb`) as the command
+/// line runs it in its working directory, and its exit status (the tool runs of ABI v2,
+/// `losat_web2_tool`; line NP WW4b1, D-WW4b-1, 2026-11-27): it reads and writes its files by name
+/// in the run's working directory as the command line does (the file system, which LOSAT Web's
+/// host gives the engine for a tool run: docs/web/abi_v2.md §3), reads `input` where the command
+/// line reads its standard input, writes its standard output to `out` and its standard error to
+/// `err`, and its dates are those of the zone of `TZ` (`writedb::time::LocalTime::now`). The
+/// application start is the command line's (its environment and its registry files: the run's
+/// `.ncbirc`, `makeblastdb.ini`, the file of `-conffile`), and `-xmlhelp` prints NCBI's XML, as
+/// there. The file of `-logfile` is the command line's where it is a file of the working
+/// directory, and goes to `files` where it is a file elsewhere (`/tmp/mk.log`), on the run's
+/// standard output for `/dev/stdout` and on its standard error for `/dev/stderr`, a line at a time
+/// as there; `files` is a `Receiver` whose run writes its working directory
+/// (`FileReceiver::writes_working_directory`; docs/web/abi_v2.md §4, line NP WW4b1 R2,
+/// 2026-11-28).
+pub fn run_makeblastdb(
+    words: &[&str],
+    files: &RunFiles,
+    input: &mut dyn std::io::Read,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> i32 {
+    crate::api::tools::makeblastdb_call(
+        words,
+        input,
+        out,
+        err,
+        crate::api::tools::MakeblastdbCall::WebRun,
+        files,
+    )
+    .status
+}
+
+/// Checks the words of a `makeblastdb` run as `run_makeblastdb` runs them, up to where the build
+/// begins (`api::run_makeblastdb` before `Run`): the application start (which reads the registry
+/// files of the run's working directory), NCBI's reader, LOSAT's refusals and settings, and
+/// makeblastdb's checks of the environment and the registry (LOSAT Web's validation of a tool's
+/// words, `losat_web2_validate`; line NP WW4b1, D-WW4b-3, 2026-11-27, as D-WW3-7). It opens no
+/// file for writing: the file of `-logfile` is kept in memory where the run opens one, and where
+/// the run's messages stay on its standard error (a name in a folder that the working directory
+/// does not have, a folder) they stay there, as the run reads the name (`RunFiles::log_target`;
+/// line NP WW4b1 R2, 2026-11-28). `Err` with what the command line writes for the words that it
+/// refuses: its standard error, then its standard output and the file of `-logfile`, without the
+/// last line end.
+pub fn check_makeblastdb(words: &[&str]) -> Result<(), String> {
+    /// The files of a checked makeblastdb run (`run_makeblastdb`'s), which writes none.
+    struct WorkingDirectory;
+    impl FileReceiver for WorkingDirectory {
+        fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn writes_working_directory(&self) -> bool {
+            true
+        }
+    }
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let end = crate::api::tools::makeblastdb_call(
+        words,
+        &mut std::io::empty(),
+        &mut out,
+        &mut err,
+        crate::api::tools::MakeblastdbCall::WebCheck,
+        &RunFiles::Receiver(std::sync::Arc::new(WorkingDirectory)),
+    );
+    if end.status == 0 {
+        return Ok(());
+    }
+    err.extend_from_slice(&out);
+    err.extend_from_slice(&end.log);
+    if err.last() == Some(&b'\n') {
+        err.pop();
+    }
+    Err(String::from_utf8_lossy(&err).into_owned())
 }
 
 // The checks of the options alone, without the inputs (the `validate` of ABI v2), and BLASTN's

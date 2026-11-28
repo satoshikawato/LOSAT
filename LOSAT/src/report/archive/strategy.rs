@@ -211,7 +211,11 @@ impl StrategySink for ReceivedFile {
         if std::mem::replace(&mut self.handed, true) {
             return Ok(());
         }
-        self.receiver.receive(&self.name, &self.bytes)
+        self.receiver.receive_run_file(
+            crate::report::run_files::RunFileOption::ExportSearchStrategy,
+            &self.name,
+            &self.bytes,
+        )
     }
 }
 
@@ -420,17 +424,20 @@ fn not_in_the_browser(path: &Path, what: &str) -> String {
 
 /// The strategy file `path` of a run whose files go to `files` (`RunFiles`): on `Disk` the
 /// command line's (`create_strategy_file`); for a `Receiver` (LOSAT Web, which has no file system
-/// and no `-out`), the file that the command line on Linux makes of the name
-/// (`RunFiles::strategy_target`, the model of `-logfile`'s names), in the run's file in memory
-/// (`ReceivedFile`) under the name as typed, with the command line's error and refusals: NCBI's
-/// error at once for a name that the command line cannot open; `-` and the standard output
-/// (`/dev/stdout`) refused at NCBI's first request; no file for
-/// the null device (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a name whose
-/// command line run writes where the run has no file: the standard error, a device whose writes
-/// fail or wait for a reader, a file of the system (procfs, a message queue), or the file of
-/// another option of the run (`others`: `-query`, `-subject`, `-logfile`, `-window_masker_db`,
-/// the files that the search reads from the run's folder, `web_adapter::open_strategy_file`),
-/// whose bytes the command line's strategy file replaces or mixes with its own.
+/// and no `-out`), the file that the command line on Linux makes of the name in the run's
+/// directory (`RunFiles::strategy_target`, read against the run's files as `-logfile` and a tool's
+/// output are), in the run's file in memory (`ReceivedFile`) under the command line's file name
+/// (`s.asn` for `./s.asn` and `in/../s.asn`; line RG item F1w-r2), with the command line's error
+/// and refusals: NCBI's error at once for a name that the command line cannot open (a folder that
+/// the run's files do not have, a folder of them, a name in a directory of root's); `-` and the
+/// standard output (`/dev/stdout`) refused at NCBI's first request; no file for the null device
+/// (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a name whose command line
+/// run writes where the run has no file: the standard error, a device whose writes fail or wait
+/// for a reader, a file of the system (procfs, a message queue), the file of another option of the
+/// run (`others`: `-query`, `-subject`, the PSSM files, `-logfile`, `-window_masker_db`, the files
+/// that the search reads from the run's folder, `web_adapter::open_strategy_file`), whose bytes
+/// the command line's strategy file replaces or mixes with its own, and any other file of the
+/// run's files or file that the search reads, which LOSAT Web does not write.
 pub fn create_strategy_file_in(
     files: &RunFiles,
     path: &Path,
@@ -448,9 +455,9 @@ pub fn create_strategy_file_in(
         refusal: Some(not_in_the_browser(path, what)),
     };
     Ok(match files.strategy_target(path.as_os_str(), others) {
-        Target::File => StrategyFile {
+        Target::File(name) => StrategyFile {
             target: StrategyTarget::Received(ReceivedFile {
-                name: path.as_os_str().as_encoded_bytes().to_vec(),
+                name,
                 bytes: Vec::new(),
                 receiver: receiver.clone(),
                 handed: false,
@@ -474,6 +481,12 @@ pub fn create_strategy_file_in(
         Target::OtherFile(option) => browser(&format!(
             "the file of -{option} too, whose bytes the command line's strategy file replaces or mixes with its own"
         )),
+        // No NCBI counterpart: LOSAT Web's refusal (line RG item F1w-r2), as its `-logfile` and a
+        // tool's `-out` of a file of the run's directory (`run_files::LogName::Existing`,
+        // `run_files::OutputName::Existing`): the command line empties or makes the file.
+        Target::Existing => browser(
+            "a file of the run's directory: LOSAT Web reads the run's files and writes none of them",
+        ),
     })
 }
 

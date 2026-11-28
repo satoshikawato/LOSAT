@@ -245,8 +245,9 @@ fn or_half(seq: &mut [u8], i: usize, half: u8) {
 /// with a flag writes each output byte once, from its two input bytes in order: a flagged byte's
 /// half from [`ncbi4na_ambiguous_half`], the other's from the pass. (Writing a block's output
 /// bytes by vector and then ORing the flagged halves into them made all-N input run above dev:
-/// four times its memory-ordering machine clears.) NCBI's loop calls `check` for exactly the
-/// flagged bytes and in that order, so the ambiguity data and the random bases are NCBI's.
+/// each OR read a byte just stored by vector, and the processor's memory-ordering machine
+/// clears rose to several times dev's.) NCBI's loop calls `check` for exactly the flagged bytes
+/// and in that order, so the ambiguity data and the random bases are NCBI's.
 /// The bytes after the last block run the loop's body ([`ncbi4na_byte_to_binary`]).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:444-518
@@ -297,7 +298,7 @@ fn ncbi4na_blocks_to_binary(
                 } else {
                     low
                 };
-                *byte = (high << 4) | low;
+                *byte = pair_byte([high, low]);
             }
         }
     }

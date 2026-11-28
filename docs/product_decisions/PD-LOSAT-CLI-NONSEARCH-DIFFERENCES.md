@@ -216,7 +216,8 @@ BLAST+.
    LOSAT writes the whole report and ends as NCBI's run ends with a full standard error: exit
    code 0, or 6 where a failed write ends the run (a one-object archive whose report fails only
    at the stream's close posts 802.4, which is dropped, and exits 0, also on a full standard
-   output). NCBI 2.17.0 observed, line RG item T8b, review 2 N1 and N2, fix 3.
+   output); in the tabular formats (6, 7, 10, 20) a failed write aborts, exit status 134, as
+   NCBI's does with a full standard error (line RG item T8b merge 3). NCBI 2.17.0 observed, line RG item T8b, review 2 N1 and N2, fix 3.
 6. **Standard output closed at the start** (version 1.3, accepted by the maintainer on
    2026-10-03 in Session S08b, plan DW-17). When a program starts with its standard output
    closed (`>&-`), NCBI's first write to `cout` fails: outfmt 0 reports `BLAST failed to

@@ -1,0 +1,4 @@
+Warning: [blastn] Examining 5 or more matches is recommended
+Warning: Examining 5 or more matches is recommended
+terminate called after throwing an instance of 'std::__ios_failure'
+  what():  basic_ios::clear: iostream error

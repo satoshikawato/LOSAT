@@ -977,7 +977,8 @@ fn blast_formatter_gives_ncbis_bytes() {
 /// aborts (`std::terminate` inside the serial stream's destructor, its post's flush of `cout`
 /// through `cerr`'s tie: exit status 134 by SIGABRT, the runtime's report on the standard error,
 /// no post; probes of line RG item F3, agent C6, 2026-11-23, NCBI BLAST+ 2.17.0, the official
-/// Linux x64 release: every archive of the table with outfmt 8, 9 and 12).
+/// Linux x64 release: every archive of the table with outfmt 8, 9 and 12; the tabular formats 6,
+/// 7, 10 and 20 of `bn`, `batch`, `warn`, `bad1` and `ps`, line RG item T8b merge 3, 2026-11-28).
 #[cfg(target_os = "linux")]
 #[test]
 fn blast_formatter_standard_output_failure_aborts() {
@@ -985,7 +986,17 @@ fn blast_formatter_standard_output_failure_aborts() {
     let want: &[u8] = b"terminate called after throwing an instance of 'std::__ios_failure'\n  \
         what():  basic_ios::clear: iostream error\n";
     let dir = fixtures("blast_formatter");
-    for (archive, outfmt) in [("db", "8"), ("db", "11"), ("bn", "12")] {
+    // The tabular formats too: their every write is made while a `CBlastTabularInfo` lives, whose
+    // destructor flushes the failed stream again (probes of line RG item T8b, merge 3).
+    for (archive, outfmt) in [
+        ("db", "8"),
+        ("db", "11"),
+        ("bn", "12"),
+        ("bn", "6"),
+        ("batch", "7"),
+        ("bn", "10"),
+        ("batch", "20"),
+    ] {
         let words = format!("{archive}.asn -outfmt {outfmt}");
         let case = Case {
             name: "standard_output_failure".to_string(),
@@ -1037,10 +1048,13 @@ fn blast_formatter_standard_output_failure_aborts() {
 /// whose failed `Close` ends the run or, where only its flush fails, posts and goes on); a
 /// standard error that failed before standard output flushes no tie,
 /// so the failure ends the run as on a file, where a good one's tie aborts it
-/// (`blast_formatter_standard_output_failure_aborts`). Needs `/dev/full`, `sh` and `prlimit`.
+/// (`blast_formatter_standard_output_failure_aborts`). In the tabular formats every failed write
+/// aborts (`std::terminate`: a `CBlastTabularInfo`'s destructor flushes the failed stream again),
+/// `-out` and a failed standard error too. Needs `/dev/full`, `sh` and `prlimit`.
 #[cfg(target_os = "linux")]
 #[test]
 fn blast_formatter_failed_streams_give_ncbis_results() {
+    use std::os::unix::process::ExitStatusExt;
     let dir = fixtures("blast_formatter");
     let table = fs::read_to_string(dir.join("streams.tsv")).unwrap();
     let full = || {
@@ -1071,27 +1085,25 @@ fn blast_formatter_failed_streams_give_ncbis_results() {
             "blast_formatter",
             &case,
         );
-        let mut run = if limit == "-" {
-            plain
-        } else {
-            let mut wrapped = Command::new("sh");
-            wrapped
-                .arg("-c")
-                .arg(r#"trap '' XFSZ; l=$1; shift; exec prlimit --fsize="$l" -- "$@""#)
-                .arg("sh")
-                .arg(limit)
-                .arg(plain.get_program())
-                .args(plain.get_args())
-                .current_dir(plain.get_current_dir().unwrap())
-                .stdin(Stdio::null());
-            for (variable, value) in plain.get_envs() {
-                match value {
-                    Some(value) => wrapped.env(variable, value),
-                    None => wrapped.env_remove(variable),
-                };
-            }
-            wrapped
-        };
+        // Each row in the fixtures directory, where an abort must leave no core file (`ulimit -c 0`),
+        // under its size limit (`-`: none).
+        let mut run = Command::new("sh");
+        run.arg("-c")
+            .arg(
+                r#"trap '' XFSZ; ulimit -c 0; l=$1; shift; [ "$l" = - ] && exec "$@"; exec prlimit --fsize="$l" -- "$@""#,
+            )
+            .arg("sh")
+            .arg(limit)
+            .arg(plain.get_program())
+            .args(plain.get_args())
+            .current_dir(plain.get_current_dir().unwrap())
+            .stdin(Stdio::null());
+        for (variable, value) in plain.get_envs() {
+            match value {
+                Some(value) => run.env(variable, value),
+                None => run.env_remove(variable),
+            };
+        }
         match stdout {
             "piped" => run.stdout(Stdio::piped()),
             "full" => run.stdout(full()),
@@ -1115,7 +1127,12 @@ fn blast_formatter_failed_streams_give_ncbis_results() {
             .trim()
             .parse()
             .unwrap();
-        assert_eq!(output.status.code(), Some(status), "{name}: exit status");
+        // A negative status is the signal that ended NCBI's run (SIGABRT of `std::terminate`).
+        let ended = output
+            .status
+            .code()
+            .or_else(|| output.status.signal().map(|signal| -signal));
+        assert_eq!(ended, Some(status), "{name}: exit status");
         if stdout == "piped" {
             let want = losat::wording::losat_output_bytes(&ncbi("out").unwrap()).into_owned();
             assert_eq!(output.stdout, want, "{name}: standard output");
@@ -1142,7 +1159,7 @@ fn blast_formatter_failed_streams_give_ncbis_results() {
         fs::remove_dir_all(&out).unwrap();
         checked += 1;
     }
-    assert_eq!(checked, 5);
+    assert_eq!(checked, 11);
 }
 
 // `run_dustmasker`, `run_segmasker`, `run_windowmasker`, `run_convert2blastmask` and

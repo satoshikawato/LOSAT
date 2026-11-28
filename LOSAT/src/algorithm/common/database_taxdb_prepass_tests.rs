@@ -4150,6 +4150,77 @@ fn a_subject_that_a_query_hides_counts_in_the_map_of_its_batch() {
     }
 }
 
+/// Review of the merge of line DBID pfoff-9, M1 and L1 (`pdbchain/pdbtagdual`: `gnl|BL_ORD_ID|x051`, a packed
+/// text tag whose lookup throws on its id, and the dual record, whose Bioseq's build throws, Seq-align id
+/// `pdb|1AB1|A`, unpacked): NCBI's prefetch looks the packed handles up first, so the failure ends its loads before
+/// the dual record's lookup. The batch's prefetch fails and does not stop (`batch_stops`, the one answer of the
+/// batch), whatever the order of its subjects; where LOSAT does not know NCBI's map (more than 200 Seq-align ids),
+/// it stops, and is refused. A prefetch that reads only some of its subjects (psiblast's traceback hit lists,
+/// `batch_prefetch_reading`) counts them all in its map.
+#[test]
+fn a_failed_lookup_that_surely_comes_first_ends_the_prefetch_before_the_stop() {
+    let cwd = empty_cwd("pfwtagdual");
+    let search = SearchPath::new(&cwd, None, None);
+    let path = root().join("db_search/pdbchain/pdbtagdual");
+    let db = SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search).unwrap();
+    let headers = HeaderReader::new(&db, false);
+    let parsed: Vec<std::sync::Arc<crate::report::db_subject::ParsedSubject>> = (0..db.num_seqs())
+        .map(
+            |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
+                ReportedHeader::Parsed(subject) => subject,
+                _ => panic!("{ordinal}: a sequence with parsed Seq-ids"),
+            },
+        )
+        .collect();
+    let find = |test: fn(&crate::report::db_subject::ParsedSubject) -> bool| {
+        let ordinal = parsed.iter().position(|subject| test(subject)).unwrap();
+        PrefetchSubject::unflipped(ordinal as u32, Some(&*parsed[ordinal]))
+    };
+    let tag = find(|subject| subject.prefetch_fails());
+    let dual = find(|subject| subject.bioseq_load_throws());
+    assert!(dual.stops());
+    let queries = stop_queries(0);
+    assert!(batch_stops(&db, [dual], &queries));
+    assert!(!batch_stops(&db, [tag], &queries));
+    assert!(!batch_stops(&db, [tag, dual], &queries));
+    assert!(!batch_stops(&db, [dual, tag], &queries));
+    // `gnl|BL_ORD_ID|5` and on (sequences without parsed Seq-ids, which the map counts).
+    let unparsed: Vec<PrefetchSubject<'_>> = (5..205)
+        .map(|ordinal| PrefetchSubject::unflipped(ordinal, None))
+        .collect();
+    let batch = |others: usize| {
+        let mut all = vec![dual, tag];
+        all.extend_from_slice(&unparsed[..others]);
+        all
+    };
+    assert!(!batch_stops(&db, batch(198), &queries));
+    assert!(batch_stops(&db, batch(199), &queries));
+    // The prefetch that reads the text tag and the dual record alone: the warning of the failure,
+    // where NCBI's map of the 200 ids is known; with one more id that it does not read, the map is
+    // not known, and the batch stops and is refused.
+    let run = TaxdbRun::default();
+    let reads = |ordinal: u32| ordinal == tag.ordinal || ordinal == dual.ordinal;
+    let prefetch = |others: usize| {
+        batch_prefetch_reading(
+            &db,
+            &run,
+            std::iter::empty(),
+            (batch(others), &reads),
+            "BLASTP",
+            &queries,
+        )
+    };
+    assert_eq!(
+        prefetch(198).unwrap().text(),
+        b"Warning: [blastp] Error pre-fetching sequence data\n"
+    );
+    let refused = format!("{:#}", prefetch(199).unwrap_err());
+    assert!(
+        refused.contains("another of its subjects has an id whose lookup throws, which the prefetch catches and which ends its loads, and which may come before it"),
+        "{refused}"
+    );
+}
+
 /// Line NP item O4b2-10, review F4 and F6: NCBI posts its warning of a UTF8String header (803.10) once
 /// per process (`ERR_POST_X_ONCE`), at the first load that reads one. A load that the prefetch may
 /// make before a failed lookup or not at all is refused where it would be that load, not where a

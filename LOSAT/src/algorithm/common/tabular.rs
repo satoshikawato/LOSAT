@@ -213,7 +213,9 @@ impl<'a> SubjectValues<'a> {
     /// The values of the database sequence `subject` (subject index `index`) whose load throws
     /// with `exception` (`FailedValues::thrown`): its rows print none of its own values (NCBI's
     /// `catch` leaves the subject block's members as the rows before set them), and NCBI reads
-    /// none of its ids, titles or taxonomy, which LOSAT does not check.
+    /// none of its ids, titles or taxonomy, which LOSAT does not check; of `length`, its own
+    /// length, the rows print the length that NCBI reads after the `catch`
+    /// (`ParsedSubject::thrown_length`).
     pub(crate) fn thrown(
         subject: &ParsedSubject,
         exception: &'a crate::ncbi_exception::NcbiException,
@@ -227,11 +229,7 @@ impl<'a> SubjectValues<'a> {
             gi: 0,
             all_ids: Vec::new(),
             titles: None,
-            length: if subject.bioseq_load_throws() {
-                length
-            } else {
-                0
-            },
+            length: subject.thrown_length(length),
             taxonomy: Cow::Owned(TabularTaxonomy::default()),
             failed: Some(FailedValues::thrown(subject, exception)),
             index,
@@ -590,7 +588,8 @@ impl<'a> TabularSubjects<'a> {
                                     .map(|defline| defline.title.as_deref().unwrap_or_default())
                                     .collect(),
                             ),
-                            length,
+                            // `GetSequenceLength`'s, by the Seq-align id.
+                            length: subject.read_length(length),
                             taxonomy,
                             failed,
                             index: s_idx,

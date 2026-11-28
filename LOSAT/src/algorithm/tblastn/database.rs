@@ -955,9 +955,10 @@ fn reported_ranks(hitlists: &[KappaResultHitList]) -> impl Iterator<Item = usize
 /// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`) and loads a subject whose lookup fails on a file with NCBI's exception
 /// (`ParsedSubject::prefetch_stops`), with the subjects that batch reports (ordinal id, and the
 /// definition lines of one with parsed Seq-ids, `titles`): NCBI's prefetch stops the run there
-/// (`shared::batch_prefetch`), before that batch's reports. The caller asks it where the first
-/// format prefetches.
+/// (`shared::batch_prefetch`; the batch's one answer, `shared::batch_stops`, of the sequences of
+/// `db`), before that batch's reports. The caller asks it where the first format prefetches.
 pub(super) fn prefetch_stop(
+    db: &SeqDb,
     titles: &DatabaseTitles,
     hitlists: &[KappaResultHitList],
     batches: &[std::ops::Range<usize>],
@@ -1005,15 +1006,15 @@ pub(super) fn prefetch_stop(
                 (ordinal, parsed)
             })
             .collect();
-        let scope = std::cell::OnceCell::new();
-        subjects
-            .iter()
-            .any(|(_, parsed)| {
-                parsed.as_ref().is_some_and(|subject| {
-                    subject.prefetch_stops_in(|| scope.get_or_init(|| batch_scope(span)))
-                })
-            })
-            .then(|| (span.clone(), subjects))
+        let scope = || batch_scope(span);
+        shared::batch_stops(
+            db,
+            subjects.iter().map(|(ordinal, parsed)| {
+                shared::PrefetchSubject::unflipped(*ordinal, parsed.as_deref())
+            }),
+            &shared::PrefetchQueries::new(span.start, &scope),
+        )
+        .then(|| (span.clone(), subjects))
     })
 }
 

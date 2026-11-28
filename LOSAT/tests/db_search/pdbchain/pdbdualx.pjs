@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "pdbdualx",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "pdbdualx",
+  "number-of-letters": 640,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-28T17:59:00",
+  "number-of-volumes": 1,
+  "bytes-total": 1200,
+  "bytes-to-cache": 740,
+  "files": [
+    "pdbdualx.phr",
+    "pdbdualx.pin",
+    "pdbdualx.pog",
+    "pdbdualx.psd",
+    "pdbdualx.psi",
+    "pdbdualx.psq"
+  ]
+}

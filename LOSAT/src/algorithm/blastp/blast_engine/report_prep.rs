@@ -369,7 +369,13 @@ pub(super) fn prefetch_reported_subjects(
         .as_ref()
         .filter(|_| batches_prefetch)
         .and_then(|titles| {
-            titles.prefetch_stop(batch_ranges, batch_prefetch, prefetched_ranks, &batch_scope)
+            titles.prefetch_stop(
+                database?,
+                batch_ranges,
+                batch_prefetch,
+                prefetched_ranks,
+                &batch_scope,
+            )
         });
     let reported_lists = &hit_lists[..prefetch_stop
         .as_ref()
@@ -666,7 +672,10 @@ pub(super) fn prefetch_reported_subjects(
             titles.batch_prefetch(
                 database,
                 loaded(span.start),
-                database::ListedTitles::reported_ranks(&hit_lists[span.clone()]),
+                (
+                    database::ListedTitles::reported_ranks(&hit_lists[span.clone()]),
+                    None,
+                ),
                 &crate::algorithm::common::database::PrefetchQueries::new(span.start, &scope)
                     .where_reports_unchanged_by_load_throws(reports_unchanged_by_load_throws),
             )?;
@@ -753,16 +762,20 @@ pub(super) fn prefetch_reported_subjects(
                     .where_reports_unchanged_by_load_throws(reports_unchanged_by_load_throws);
                     let messages = match psiblast_prefetched.as_ref() {
                         Some(ranks) => {
+                            // NCBI's map counts the whole traceback hit lists, of which the
+                            // prefetch reads those of `prefetched_ranks` (review of the merge of
+                            // line DBID pfoff-9, L1).
+                            let traceback = ranks[batch.searched.clone()].concat();
                             let prefetched = titles.prefetched_ranks(
                                 database,
-                                &ranks[batch.searched.clone()].concat(),
+                                &traceback,
                                 (prefetch_taxids, &hit_loads),
                                 &scope,
                             )?;
                             titles.batch_prefetch(
                                 database,
                                 loaded(batch.searched.start),
-                                prefetched,
+                                (traceback, Some(&prefetched)),
                                 &queries,
                             )?
                         }
@@ -778,7 +791,7 @@ pub(super) fn prefetch_reported_subjects(
                             titles.batch_prefetch(
                                 database,
                                 loaded(batch.searched.start),
-                                database::ListedTitles::reported_ranks(lists),
+                                (database::ListedTitles::reported_ranks(lists), None),
                                 &queries,
                             )?
                         }

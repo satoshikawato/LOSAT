@@ -104,6 +104,10 @@ pub struct SubjectNames {
     /// `Hit` loads it (`of_thrown`, `db_subject::HitLoad::Throws`): the writer of each document
     /// decides what the `Hit` is (`XmlHit::lookup_throws`).
     pub lookup_throws: Option<crate::ncbi_exception::NcbiException>,
+    /// The length that the `Hit` of XML2 and JSON writes in place of the record's own
+    /// (`XmlHit::of`): that of the sequence that the lookup of the Seq-align id gives, where its
+    /// Bioseq's build throws (`of_thrown`, `ParsedSubject::given_length`); `None` for the others.
+    pub given_length: Option<usize>,
 }
 
 impl SubjectNames {
@@ -125,6 +129,7 @@ impl SubjectNames {
             defline_thrown: false,
             unloaded: false,
             lookup_throws: None,
+            given_length: None,
         })
     }
 
@@ -153,6 +158,7 @@ impl SubjectNames {
             defline_thrown: true,
             unloaded: false,
             lookup_throws: None,
+            given_length: None,
         }
     }
 
@@ -165,7 +171,8 @@ impl SubjectNames {
     /// only `GetBioseqNoData` throws while `GetSequenceLength` succeeds
     /// (`ParsedSubject::bioseq_load_throws`, line DBID pfoff-9), XML2 and JSON catch the load
     /// throw, succeed in `sequence::GetLength`, and write the `HitDescr` of the id alone with the
-    /// real length and caught HSPs (`unloaded: true`, `lookup_throws: None`), while outfmt 5
+    /// length that it reads (the record's own, or that of the sequence the lookup gives,
+    /// `given_length`) and caught HSPs (`unloaded: true`, `lookup_throws: None`), while outfmt 5
     /// writes `Unknown`, `Hit_len` 0 and caught HSPs; otherwise XML2 and JSON raise `exception`
     /// (`lookup_throws`).
     pub fn of_thrown(
@@ -175,6 +182,7 @@ impl SubjectNames {
         if subject.bioseq_load_throws() {
             return SubjectNames {
                 unloaded: true,
+                given_length: subject.given_length(),
                 ..Self::of_unknown(subject.alignment_fasta())
             };
         }
@@ -229,6 +237,7 @@ impl SubjectNames {
             defline_thrown: false,
             unloaded: false,
             lookup_throws: None,
+            given_length: None,
         })
     }
 
@@ -252,6 +261,7 @@ impl SubjectNames {
             defline_thrown: false,
             unloaded: false,
             lookup_throws: None,
+            given_length: None,
         }
     }
 
@@ -321,6 +331,7 @@ impl SubjectNames {
             defline_thrown: false,
             unloaded: false,
             lookup_throws: None,
+            given_length: None,
         }
     }
 }

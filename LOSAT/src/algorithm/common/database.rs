@@ -3153,9 +3153,15 @@ impl<'a> HeaderReader<'a> {
                             resolution.gives_keys = loader_keeps(&set, subject)
                                 .then(|| subject.shown_keys(&set, sequence));
                             // Where `x_GetOid` keeps it and no line holds the id, `GetBioseq`
-                            // throws (`scope_bioseq`): NCBI's prefetch stops there.
-                            resolution.gives_throws =
-                                other_bioseq(&set, other, subject).is_some_and(|read| read.throws);
+                            // throws (`scope_bioseq`): NCBI's prefetch stops there, and with the
+                            // prefetch off its formats catch the throw with that sequence's
+                            // length (`given_length`).
+                            if other_bioseq(&set, other, subject).is_some_and(|read| read.throws) {
+                                match self.given_length(other) {
+                                    Ok(length) => resolution.gives_throws = Some(length),
+                                    Err(error) => return failed(resolution, error),
+                                }
+                            }
                         }
                         Some(FoundInstead::Sequence(sequence))
                     }
@@ -3167,6 +3173,21 @@ impl<'a> HeaderReader<'a> {
                 self.unrecorded_holders(subject, ordinal, Some((lookup, first)));
         }
         resolution
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:312-319
+    /// The length of the sequence `ordinal` that the lookup of a Seq-align id gives
+    /// (`GetSequenceLength`: `GetSeqLength` of the OID that `SeqidToOid` gives), in the database's
+    /// letters: residues of a protein, bases of a nucleotide (read from the index, and for a
+    /// nucleotide the last byte of its packed bases; `ScopeResolution::gives_throws`).
+    fn given_length(&self, ordinal: u32) -> std::result::Result<usize, SeqDbError> {
+        match self.db.seqtype() {
+            SeqType::Protein => self
+                .db
+                .protein_length(ordinal)
+                .map(|residues| residues as usize),
+            SeqType::Nucleotide => self.db.nucleotide_length(ordinal),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-396
@@ -9280,6 +9301,59 @@ fn prefetched_subjects<'s>(
     (map, reached)
 }
 
+/// Whether NCBI's prefetch of a query batch whose reported sequences are `subjects` (in any
+/// order; psiblast's whole traceback hit lists) stops the run with its `BLAST Database error`
+/// ([`batch_prefetch`]), in the scope of `queries`: [`stops_before_failure`] of the subjects that
+/// it reaches, in the map of them all ([`prefetched_subjects`]). The one answer of the batch,
+/// for [`batch_prefetch`] and for the programs that cut their reports there (BLASTP's and
+/// psiblast's `ListedTitles::prefetch_stop`, TBLASTN's `prefetch_stop`, BLASTX's
+/// `ReportedSubjects::for_batch`).
+pub(crate) fn batch_stops<'s>(
+    db: &SeqDb,
+    subjects: impl IntoIterator<Item = PrefetchSubject<'s>>,
+    queries: &PrefetchQueries<'_>,
+) -> bool {
+    let subjects: Vec<PrefetchSubject<'s>> = subjects.into_iter().collect();
+    if !subjects.iter().any(PrefetchSubject::stops) {
+        return false;
+    }
+    let (map, reached) = prefetched_subjects(db, subjects, queries);
+    stops_before_failure(db, &reached, map)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-396 (cited
+// at `prefetch_stop`)
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:767-788
+// The loads go in the order of the map's handles, and the first lookup that throws ends them: one
+// that throws on its id with an exception that the prefetch catches (its warning; the reports
+// then read the subjects one by one), one that fails on a file or whose Bioseq's build throws
+// with a `CSeqDBException` that it rethrows (the run stops). Whichever comes first decides.
+/// Whether the prefetch of a batch whose reached subjects are `subjects` (`map`: [`batch_map`] of
+/// the whole batch, [`prefetched_subjects`]) stops: one of them stops it
+/// ([`PrefetchSubject::stops`]), unless a lookup that throws on its id
+/// (`ParsedSubject::prefetch_fails`) surely comes before every stopping one (`Yes` in the order of
+/// the stopping batch's loads, [`load_before_stop`]), which ends the loads there: the batch's
+/// prefetch fails, and its reports read the stopping subjects one by one, as where it is off
+/// (review of the merge of line DBID pfoff-9, M1). Where such a lookup may come before a stop or
+/// not, the batch stops, and [`prefetch_stop`] refuses it.
+fn stops_before_failure(
+    db: &SeqDb,
+    subjects: &[PrefetchSubject<'_>],
+    map: Option<&'static str>,
+) -> bool {
+    let fails = |subject: &PrefetchSubject<'_>| {
+        subject.parsed.is_some_and(|parsed| parsed.prefetch_fails())
+    };
+    if !subjects.iter().any(PrefetchSubject::stops) || !subjects.iter().any(fails) {
+        return subjects.iter().any(PrefetchSubject::stops);
+    }
+    !load_before_stop(db, subjects, map)
+        .at_first_stop()
+        .iter()
+        .zip(subjects)
+        .any(|(before, subject)| *before == LoadBeforeStop::Yes && fails(subject))
+}
+
 /// NCBI's prefetch of one query batch's reported subjects on standard error, for a first format
 /// that prefetches ([`prefetches_subjects`]) and a batch whose prefetch is on: the posts of the
 /// taxonomy database's texts of the loads (those of [`prefetch_messages`], none without
@@ -9310,7 +9384,10 @@ fn prefetched_subjects<'s>(
 /// exception, as in a list of version 5 databases with and without the accession table, or the
 /// build of the Bioseq of the sequence that the lookup gives) stops the run there, unless a query
 /// of the batch's scope takes its place (`ParsedSubject::hidden_by_query`, which leaves the
-/// subject out of the prefetch's lookups and loads, not out of its map: [`prefetched_subjects`]): `Err` with an [`ErrorAfterBatchReports`] of the query that `queries` names
+/// subject out of the prefetch's lookups and loads, not out of its map: [`prefetched_subjects`])
+/// or a lookup that throws on its id surely comes before it (the prefetch fails there, and the
+/// stopping subject is a load after the failure, not made: [`stops_before_failure`], the batch's
+/// one answer, [`batch_stops`]): `Err` with an [`ErrorAfterBatchReports`] of the query that `queries` names
 /// (`PrefetchQueries::error_query`) whose error is NCBI's `BLAST Database error: <message>`
 /// (exit status 2), after the texts of the loads that NCBI's prefetch makes before it in the order
 /// of the batch's Seq-id handles ([`load_before_stop`]). Each program writes then what NCBI wrote
@@ -9332,8 +9409,31 @@ pub(crate) fn batch_prefetch<'s, 'b>(
     program: &str,
     queries: &PrefetchQueries<'_>,
 ) -> Result<crate::report::diag_log::Posts> {
-    let (map, subjects) = prefetched_subjects(db, subjects, queries);
-    if subjects.iter().any(PrefetchSubject::stops) {
+    batch_prefetch_reading(db, run, before, (subjects, &|_| true), program, queries)
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3346-3366 (cited at `batch_map`)
+/// [`batch_prefetch`] of a batch whose prefetch reads, of its subjects `subjects` (whose Seq-align
+/// ids NCBI's map counts, `GetBioseqHandles`' ids: one that a query hides or that the lookup
+/// finds nowhere too), those for which `reads` holds (by ordinal id): psiblast's traceback hit
+/// lists, of which `ListedTitles::prefetched_ranks` keeps those that the prefetch reads (review of
+/// the merge of line DBID pfoff-9, L1).
+pub(crate) fn batch_prefetch_reading<'s, 'b>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    before: impl IntoIterator<Item = PrefetchSubject<'b>>,
+    (subjects, reads): (
+        impl IntoIterator<Item = PrefetchSubject<'s>>,
+        &dyn Fn(u32) -> bool,
+    ),
+    program: &str,
+    queries: &PrefetchQueries<'_>,
+) -> Result<crate::report::diag_log::Posts> {
+    let (map, mut subjects) = prefetched_subjects(db, subjects, queries);
+    let stops = stops_before_failure(db, &subjects, map);
+    // The loads that it reads; not a stopping one after the failure.
+    subjects.retain(|subject| reads(subject.ordinal) && (stops || !subject.stops()));
+    if stops {
         run.keep_loaded(None, before);
         return Err(prefetch_stop(db, run, &subjects, map, program, queries));
     }
@@ -10293,7 +10393,6 @@ impl LoadOrder {
     }
 
     /// [`LoadOrder::before`] where the loads end at the first stopping lookup.
-    #[cfg(test)]
     fn at_first_stop(&self) -> Vec<LoadBeforeStop> {
         let first = self.first_stop_key();
         self.before(first, first)
@@ -10608,7 +10707,9 @@ fn prefetch_stop(
         *before != LoadBeforeStop::No
             && subject.parsed.is_some_and(|parsed| parsed.prefetch_fails())
     }) {
-        return refuse("another of its subjects has an id whose lookup throws, which the prefetch catches and which ends its loads, and which comes before it or may");
+        // One that surely comes before every stop makes the batch a failed prefetch
+        // (`stops_before_failure`).
+        return refuse("another of its subjects has an id whose lookup throws, which the prefetch catches and which ends its loads, and which may come before it");
     }
     // The loads before the stop, then those whose order LOSAT does not know, then the sequences
     // that a skipped stopping lookup is given instead (loaded by that stopping id). The bytes of a

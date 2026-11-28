@@ -315,11 +315,7 @@ fn subject_values<'a>(
                     gi: 0,
                     all_ids: std::borrow::Cow::Borrowed(&[]),
                     titles: None,
-                    length: if parsed.bioseq_load_throws() {
-                        subject.placement().length
-                    } else {
-                        0
-                    },
+                    length: parsed.thrown_length(subject.placement().length),
                     taxonomy: no_taxonomy,
                     failed: Some(FailedValues::thrown(parsed, exception)),
                 };
@@ -346,7 +342,10 @@ fn subject_values<'a>(
                         .get(oid)
                         .map_or(&[][..], |title| title)],
                 }),
-                length: subject.placement().length,
+                // `GetSequenceLength`'s, by the Seq-align id.
+                length: parsed.map_or(subject.placement().length, |parsed| {
+                    parsed.read_length(subject.placement().length)
+                }),
                 taxonomy: reported.tabular_taxonomy(oid).unwrap_or(no_taxonomy),
                 // No ids: `GetSeqIdList` throws, for the general id of a sequence without
                 // parsed Seq-ids (`TabularSubjectId::Unknown`) in `SetSubjectId` and

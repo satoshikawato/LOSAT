@@ -158,13 +158,14 @@ pub struct XmlHit<'a> {
 }
 
 impl<'a> XmlHit<'a> {
-    /// The `Hit` of a subject with the names `names` and the record length `len`.
+    /// The `Hit` of a subject with the names `names` and the record length `len`, or the length
+    /// that NCBI reads in its place (`SubjectNames::given_length`; NCBI's `int`).
     pub(crate) fn of(names: &'a SubjectNames, len: i32) -> Self {
         XmlHit {
             id: &names.id,
             title: &names.title,
             accession: &names.accession,
-            len,
+            len: names.given_length.map_or(len, |given| given as i32),
             taxid: names.taxid,
             taxonomy: &names.taxonomy,
             descriptions: &names.descriptions,

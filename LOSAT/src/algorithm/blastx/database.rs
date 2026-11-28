@@ -804,13 +804,26 @@ impl ReportedSubjects {
             utf8: _,
         } = titles;
         // A batch whose prefetch looks up a Seq-align id whose lookup or Bioseq load fails stops
-        // the run there (`shared::batch_prefetch`), before any of its reports: none of their
-        // checks and reads is made.
+        // the run there (`shared::batch_prefetch`; the batch's one answer, `shared::batch_stops`,
+        // of the subjects that its prefetch reads, `prefetch_subjects`), before any of its
+        // reports: none of their checks and reads is made.
         let scope = std::cell::OnceCell::new();
         let reports = !(prefetched
-            && parsed
-                .values()
-                .any(|subject| subject.prefetch_stops_in(|| scope.get_or_init(prefetch_scope))));
+            && !parsed.is_empty()
+            && shared::batch_stops(
+                &database.db,
+                batches
+                    .iter()
+                    .flat_map(|batch| batch.queries.iter().flatten())
+                    .filter(|list| super::report::reported(list, gapped))
+                    .filter_map(|list| {
+                        Some(shared::PrefetchSubject::unflipped(
+                            u32::try_from(list.oid).ok()?,
+                            parsed.get(&list.oid).map(Arc::as_ref),
+                        ))
+                    }),
+                &shared::PrefetchQueries::new(0, prefetch_scope),
+            ));
         if reports && joined && !parsed.is_empty() {
             for batch in batches.iter() {
                 for (qidx, lists) in batch.queries.iter().enumerate() {

@@ -169,7 +169,8 @@ impl<'a> SubjectValues<'a> {
 
     /// The values of the database sequence `subject` whose load throws with `exception`
     /// (`common::tabular::SubjectValues::thrown`): its rows print none of its own values, and
-    /// NCBI reads none of its ids, titles or taxonomy.
+    /// NCBI reads none of its ids, titles or taxonomy; of `length`, its own length, the rows print
+    /// the length that NCBI reads after the `catch` (`ParsedSubject::thrown_length`).
     fn thrown(
         subject: &ParsedSubject,
         exception: &'a crate::ncbi_exception::NcbiException,
@@ -182,11 +183,7 @@ impl<'a> SubjectValues<'a> {
             gi: 0,
             all_ids: Vec::new(),
             titles: None,
-            length: if subject.bioseq_load_throws() {
-                length
-            } else {
-                0
-            },
+            length: subject.thrown_length(length),
             taxonomy: Cow::Owned(TabularTaxonomy::default()),
             failed: Some(FailedValues::thrown(subject, exception)),
         }
@@ -396,11 +393,7 @@ impl<'a> TabularSubjects<'a> {
                     loads.thrown(s_idx),
                     parsed.get(s_idx).and_then(Option::as_deref),
                 ) {
-                    let slen = if shows_length && subject.bioseq_load_throws() {
-                        length(s_idx)
-                    } else {
-                        0
-                    };
+                    let slen = if shows_length { length(s_idx) } else { 0 };
                     return Ok(SubjectValues::thrown(subject, exception, slen));
                 }
                 // `None`: the lookup throws (`common::tabular::SubjectId`).
@@ -445,7 +438,12 @@ impl<'a> TabularSubjects<'a> {
                                     .map(|defline| defline.title.as_deref().unwrap_or_default())
                                     .collect(),
                             ),
-                            length,
+                            // `GetSequenceLength`'s, by the Seq-align id.
+                            length: if shows_length {
+                                subject.read_length(length)
+                            } else {
+                                0
+                            },
                             taxonomy,
                             failed,
                         })

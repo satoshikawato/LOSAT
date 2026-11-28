@@ -60,6 +60,12 @@ per letter, BACK), with the Seq-ids `pdb|1AB1|A` and `pdb|1AB2|A` as makeblastdb
 `q_pdb1ab1.fna` the query `pdb|1AB1|A` of the duplicated record's letters back-translated: NCBI's scope finds the query
 (`q_pdb1ab1.faa` in TBLASTN, `q_pdb1ab1.fna` in BLASTN and TBLASTX) for `1AB1`.
 
+`pdbtagdual` (line DBID pf9b, review of the merge of item pfoff-9, M1) holds the three records of
+`../ids/pordtagc.faa` (`gnl|BL_ORD_ID|x051`, a packed text tag whose lookup throws on its id) and `pdbdual`'s `dual`
+and `first`; `pdbntagdual` is its back-translation, and `q_tagdual.faa` / `q_tagdual.fna` the queries `qd` (the
+duplicated record's letters) and `qa`, `qb` of `../ids/nordtag_q.faa`. NCBI's prefetch fails at the text tag before it
+looks `dual` up, and the reports read `dual` one by one, as with the prefetch off.
+
 The sequence index files (`.psd`, `.psi`) keep the ids as makeblastdb wrote them except that the letter
 that ends a pdb key is the low byte of the stored chain (`GetChain()` cast to `char`, as
 `CPDB_seq_id` forms the chain of a Seq-id without a chain-id), lower case, the keys the search looks
@@ -173,6 +179,25 @@ DUAL = [
     ("gb|AB600004.1| alt", None, []),
 ]
 
+# The records of `pdbdualx` (protein) and `pdbndualx` (its back-translation), line DBID pf9b (review 2 of item
+# pfoff-9, M1): `first` and `dual` of DUAL, then X, whose one pdb Seq-id `pdb|1AB1|C` is rewritten to 1AB1 chain 65
+# without a chain-id (the Seq-align id `pdb|1AB1|A`, whose lookup gives `dual` first) and whose letters are ALT_X
+# letters of `alt_letters`, so that X's length differs from `dual`'s.
+DUALX = [
+    ("gb|AB600001.1| first", 0, []),
+    ("pdb|1AB1|A|pdb|1AB1|B dual", 1, [("1AB1", 321), ("1AB1", 65)]),
+    ("pdb|1AB1|C other", None, [("1AB1", 65)]),
+]
+ALT_X = 200
+
+# The records of `pdbtagdual` (protein) and `pdbntagdual` (its back-translation), line DBID pf9b (review of the merge
+# of item pfoff-9, M1): the three records of TAGC (an accession, `gnl|BL_ORD_ID|x051`, a packed text tag whose lookup
+# throws on its id, and another accession), then `dual` and `first` of DUAL. NCBI's prefetch looks the packed handles
+# up first: its lookup of the text tag fails before that of `dual`'s Seq-align id `pdb|1AB1|A`, which it never makes.
+# The FASTA lines of the first three are TAGC's; their Seq-ids are not rewritten.
+TAGC = os.path.join("tests", "db_search", "ids", "pordtagc.faa")
+TAGDUAL = [(None, None, [])] * 3 + [DUAL[1], DUAL[0]]
+
 # The databases: name -> whether each record has the gb Seq-id before the pdb one.
 DATABASES = {
     "pdbchain": True,
@@ -183,6 +208,10 @@ DATABASES = {
     "pdbnonly": False,
     "pdbdual": False,
     "pdbndual": False,
+    "pdbdualx": False,
+    "pdbndualx": False,
+    "pdbtagdual": False,
+    "pdbntagdual": False,
 }
 
 # One codon per letter: the back-translation of `pdbn` and `q_pdb1ab1.fna`.
@@ -286,9 +315,11 @@ def alt_letters(n=220):
 def patch(base, db, nucl=False):
     """Rewrites the stored deflines of the version 4 database `base` (one record each of CHAINS, or
     of NORMALIZED for `pdbnorm`, of TWO_LINES for `pdbtwo`, of CHAINS[:1] for `pdbnonly`, of DUAL for
-    `pdbdual` and `pdbndual`) and the header offsets of its index file."""
+    `pdbdual` and `pdbndual`, of DUALX for `pdbdualx` and `pdbndualx`, of TAGDUAL for `pdbtagdual` and
+    `pdbntagdual`) and the header offsets of its index file."""
     rows = {"pdbnorm": NORMALIZED, "pdbtwo": TWO_LINES, "pdbnonly": CHAINS[:1], "pdbdual": DUAL,
-            "pdbndual": DUAL}.get(db, CHAINS)
+            "pdbndual": DUAL, "pdbdualx": DUALX, "pdbndualx": DUALX, "pdbtagdual": TAGDUAL,
+            "pdbntagdual": TAGDUAL}.get(db, CHAINS)
     idx_ext, hdr_ext = ("nin", "nhr") if nucl else ("pin", "phr")
     index = bytearray(open(f"{base}.{idx_ext}", "rb").read())
     version, = struct.unpack(">I", index[0:4])
@@ -307,7 +338,7 @@ def patch(base, db, nucl=False):
                    for record, (mol, _, chain, rel, chain_id) in zip(records, rows)]
     elif db == "pdbtwo":
         records = [with_first_pdb(record, mol, 321) for record, (mol, _) in zip(records, rows)]
-    elif db in ("pdbdual", "pdbndual"):
+    elif db in ("pdbdual", "pdbndual", "pdbdualx", "pdbndualx", "pdbtagdual", "pdbntagdual"):
         records = [with_pdbs(record, shapes) for record, (_, _, shapes) in zip(records, rows)]
     else:
         records = [with_chain(record, chain) for record, (_, _, chain) in zip(records, rows)]
@@ -346,6 +377,22 @@ def patch_keys(base, db, nucl=False):
     open(f"{base}.{sd_ext}", "wb").write(b"\n".join(out) + b"\n")
 
 
+# `q_tagdual.faa`'s queries after `qd` (qa hits the record with the text tag, qb the accessions).
+TAG_QUERIES = os.path.join("tests", "db_search", "ids", "nordtag_q.faa")
+
+
+def fasta_records(path):
+    """The (FASTA line, letters) of each record of the FASTA file `path`."""
+    records = []
+    for line in open(path):
+        line = line.rstrip("\n")
+        if line.startswith(">"):
+            records.append((line[1:], ""))
+        else:
+            records[-1] = (records[-1][0], records[-1][1] + line.strip())
+    return records
+
+
 def record_letters(seq, k):
     """The letters of the database records' k-th record: `seq` with one letter changed."""
     changed = list(seq)
@@ -380,13 +427,26 @@ def main(ncbi_bin, names):
     with open(os.path.join(HERE, "q_dual2.fna"), "w") as f:
         f.write(">qnalt pdbndual's alt record\n" + back(alt) + "\n>qndual the duplicated record's letters "
                 "back-translated\n" + back(seq) + "\n")
+    alt_x = alt_letters(ALT_X)
+    with open(os.path.join(HERE, "q_dualx.faa"), "w") as f:
+        f.write(">qx the letters of pdbdualx's X record\n" + alt_x + "\n")
+    with open(os.path.join(HERE, "q_dualx.fna"), "w") as f:
+        f.write(">qnx the letters of pdbdualx's X record back-translated\n" + back(alt_x) + "\n")
+    tags = fasta_records(TAGC)
+    queries = [("qd the duplicated record's letters", seq)] + fasta_records(TAG_QUERIES)
+    for name, translate in (("q_tagdual.faa", str), ("q_tagdual.fna", back)):
+        with open(os.path.join(HERE, name), "w") as f:
+            f.write("".join(f">{line}\n{translate(letters_q)}\n" for line, letters_q in queries))
     for db in names:
         fasta = os.path.join(work, f"{db}.faa")
-        if db in ("pdbdual", "pdbndual"):
-            nucl = db == "pdbndual"
+        if db in ("pdbdual", "pdbndual", "pdbdualx", "pdbndualx", "pdbtagdual", "pdbntagdual"):
+            nucl = db in ("pdbndual", "pdbndualx", "pdbntagdual")
+            rows, other = (DUALX, alt_x) if db in ("pdbdualx", "pdbndualx") else (DUAL, alt)
+            records = [(line, other if k is None else record_letters(seq, k)) for line, k, _ in rows]
+            if db in ("pdbtagdual", "pdbntagdual"):
+                records = tags + [(line, record_letters(seq, k)) for line, k, _ in TAGDUAL[3:]]
             with open(fasta, "w") as f:
-                for line, k, _ in DUAL:
-                    letters_k = alt if k is None else record_letters(seq, k)
+                for line, letters_k in records:
                     f.write(f">{line}\n" + (back(letters_k) if nucl else letters_k) + "\n")
             base = os.path.join(HERE, db)
             subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype",

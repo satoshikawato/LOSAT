@@ -2900,6 +2900,20 @@ run (`BLAST Database error`, exit status 2), and with `PRE_FETCH_SEQS_LIMIT=0` e
 lookup that fails on a file, but that `GetLength` succeeds (`slen`, the XML2 and JSON `Hit_len`). `pdbchain/q_dual2.faa`
 (the `alt` record's letters, then the duplicated record's, those of `ids/pdup_q.faa`) with `-evalue 1e-10` and `BATCH_SIZE=1` reports the first batch before the
 second's prefetch stops; `q_dual.fna` and `q_dual2.fna` are the nucleotide queries of the same letters.
+`pdbchain/pdbdualx` (line DBID pf9b, review 2 of item pfoff-9, M1; rows `db.pdbchain.pf9b.*`) holds `pdbdual`'s first two
+records and X, the line `pdb|1AB1|C` `other` rewritten to `pdb 1AB1` chain 65 without a chain-id, of 200 other letters;
+`pdbchain/pdbndualx` is its nucleotide database (back-translated), `q_dualx.faa` and `q_dualx.fna` the queries of X's
+letters. NCBI's lookup of X's Seq-align id (`pdb|1AB1|A`) gives the dual record first, whose Bioseq's build throws: X's
+load throws as the dual record's own, and with `PRE_FETCH_SEQS_LIMIT=0` each format catches it as the dual record's,
+with the dual record's length (220 residues, 660 bases) where `GetLength` reads it (`slen`, the XML2 and JSON `len`).
+Without `-evalue` both X and the dual record are reported.
+`pdbchain/pdbtagdual` (line DBID pf9b, review of the merge of item pfoff-9, M1; rows `db.pdbchain.tagdual.*`) holds the
+three records of `ids/pordtagc.faa` (`gnl|BL_ORD_ID|x051`, a packed text tag whose lookup throws on its id) and
+`pdbdual`'s dual record and `first`; `pdbchain/pdbntagdual` is its nucleotide database, `q_tagdual.faa` and
+`q_tagdual.fna` the queries `qd` (the duplicated record's letters) and `qa`, `qb` of `ids/nordtag_q.faa`. NCBI's prefetch
+looks the packed handles up first: it fails at the text tag (`Error pre-fetching sequence data`) before the dual record's
+lookup, and the reports read the dual record one by one, exit 0, as with `PRE_FETCH_SEQS_LIMIT=0`. The rows are outfmt 5,
+15, 16 and 18: the tables' and outfmt 0's rows of the text tag's sequence end NCBI with a null pointer (exit 255).
 `pdbchain/q_pdb1ab1.faa` (decision KB-12-1 of line RG-KB item 12; rows `db.pdbchain.seen.*`) is the query `pdb|1AB1|A`
 of the duplicated record's letters: read with `-parse_deflines`, its Bioseq holds the id of the handle of `1AB1` chain 321
 (chain 65), so NCBI's scope finds the query for that sequence of `pdbonly` and `pdbtwo`: the tables show the query's ids,

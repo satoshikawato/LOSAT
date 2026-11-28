@@ -2359,7 +2359,7 @@ fn search(
         // its prefetch (`database::prefetch_stop`): as a batch that a database file failed, it is
         // not reported, nor are the batches after it; its error is made after the prefetches of
         // the batches before (below), which look the taxonomy up first.
-        let prefetch_stop = if database.is_some() && first_prefetches {
+        let prefetch_stop = if let Some(database) = database.filter(|_| first_prefetches) {
             let spans: Vec<std::ops::Range<usize>> = query_input
                 .batches(batch_size)
                 .into_iter()
@@ -2367,6 +2367,7 @@ fn search(
                 .filter(|searched| !searched.is_empty() && searched.end <= results.len())
                 .collect();
             super::database::prefetch_stop(
+                &database.db,
                 &titles,
                 &results,
                 &spans,

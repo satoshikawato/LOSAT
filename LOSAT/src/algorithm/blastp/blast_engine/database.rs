@@ -2335,12 +2335,14 @@ impl ListedTitles<'_> {
     }
 
     /// The searched queries of the first batch of `batches` (each batch's searched queries, in
-    /// order) whose prefetch is on (`prefetch`) and reads a subject whose lookup fails on a file
-    /// with NCBI's exception (`ParsedSubject::prefetch_stops`): NCBI's prefetch stops the run
-    /// there (`shared::batch_prefetch`), before that batch's reports and those of the batches
-    /// after it. `ranks` gives the ranks that a batch's prefetch reads, by its searched queries.
+    /// order) whose prefetch is on (`prefetch`) and stops at a subject whose load throws NCBI's
+    /// exception (`ParsedSubject::prefetch_stops`; the batch's one answer, `shared::batch_stops`):
+    /// NCBI's prefetch stops the run there (`shared::batch_prefetch`), before that batch's reports
+    /// and those of the batches after it. `ranks` gives the ranks whose Seq-align ids a batch's
+    /// prefetch gives NCBI's map (psiblast's whole traceback hit lists), by its searched queries.
     pub(super) fn prefetch_stop<I: IntoIterator<Item = usize>>(
         &self,
+        database: &BlastpDatabase,
         batches: &[std::ops::Range<usize>],
         prefetch: &shared::BatchPrefetch,
         ranks: impl Fn(std::ops::Range<usize>) -> I,
@@ -2355,12 +2357,14 @@ impl ListedTitles<'_> {
                 if span.is_empty() || !prefetch.prefetches(span.start) {
                     return false;
                 }
-                let scope = std::cell::OnceCell::new();
-                ranks((*span).clone()).into_iter().any(|rank| {
-                    self.parsed_subject(rank).is_some_and(|subject| {
-                        subject.prefetch_stops_in(|| scope.get_or_init(|| batch_scope(span)))
-                    })
-                })
+                let scope = || batch_scope(span);
+                shared::batch_stops(
+                    &database.db,
+                    ranks((*span).clone())
+                        .into_iter()
+                        .map(|rank| self.prefetch_subject(rank)),
+                    &shared::PrefetchQueries::new(span.start, &scope),
+                )
             })
             .cloned()
     }
@@ -2377,18 +2381,30 @@ impl ListedTitles<'_> {
     /// before it, for which NCBI's BLAST database data loader loaded the subjects of ranks
     /// `before` (read only where the batch stops; `shared::batch_loads`; the outfmt 5 reports
     /// before it, `shared::PrefetchQueries::after_xml_reports`).
+    /// `read`: psiblast's ranks that the prefetch reads (`prefetched_ranks`) of `ranks`, its whole
+    /// traceback hit lists, whose Seq-align ids NCBI's map counts
+    /// (`shared::batch_prefetch_reading`); `None` where it reads every one of `ranks`.
     pub(super) fn batch_prefetch(
         &self,
         database: &BlastpDatabase,
         before: impl IntoIterator<Item = usize>,
-        ranks: impl IntoIterator<Item = usize>,
+        (ranks, read): (impl IntoIterator<Item = usize>, Option<&[usize]>),
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<crate::report::diag_log::Posts> {
-        shared::batch_prefetch(
+        let read: Option<std::collections::HashSet<u32>> = read.map(|read| {
+            read.iter()
+                .map(|&rank| self.listed.ordinals[rank])
+                .collect()
+        });
+        let reads = |ordinal: u32| read.as_ref().is_none_or(|read| read.contains(&ordinal));
+        shared::batch_prefetch_reading(
             &database.db,
             &database.taxdb,
             before.into_iter().map(|rank| self.prefetch_subject(rank)),
-            ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
+            (
+                ranks.into_iter().map(|rank| self.prefetch_subject(rank)),
+                &reads,
+            ),
             self.program,
             queries,
         )
@@ -2631,9 +2647,11 @@ impl ListedTitles<'_> {
                 };
                 let ordinal = self.listed.ordinals[rank];
                 // A lookup that fails on a file with NCBI's exception (a list of version 5
-                // databases with and without the accession table), or that throws on the id
-                // itself (`gnl|PIG|abc`, line DBID pfoff-7): the read catches it, so the PSSM
-                // reads no letters (`Failed to retrieve sequence`) and loads nothing.
+                // databases with and without the accession table), that throws on the id itself
+                // (`gnl|PIG|abc`, line DBID pfoff-7), or that gives a sequence whose Bioseq's
+                // build throws (this record or another, `ParsedSubject::bioseq_load_throws`, line
+                // DBID pfoff-9): the read catches it, so the PSSM reads no letters (`Failed to
+                // retrieve sequence`) and loads nothing.
                 if subject.prefetch_stops().is_some() || subject.prefetch_fails() {
                     reads.read.insert(rank, None);
                     if any_loads {

@@ -4263,30 +4263,63 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-424
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:312-319
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3288-3297
 // Review 1 of line DBID pfoff-9, M3, M4: a record whose Seq-align id's lookup gives another
 // sequence whose Bioseq's build throws stops NCBI's prefetch with the same message as one whose
 // own build throws, in the words of what throws; a query of the batch's scope that holds the id
 // takes the place of either, so neither stops (`ParsedSubject::hidden_by_query`, one rule).
+// Review 2, M1 and L1 (line DBID pf9b): where the prefetch is off, its load throws as the other
+// sequence's own does (`bioseq_load_throws`, one rule), and the length that NCBI reads after the
+// `catch` is that sequence's (`GetSequenceLength` of the OID that `SeqidToOid` gives: probe
+// `dualx2`, 220 for a record of 200 letters).
 #[test]
 fn a_lookup_that_gives_a_sequence_whose_bioseq_build_throws_stops_the_prefetch() {
     let other = lines(vec![vec![pdb_id("1AB1", Some(65), Some("A"))]]).resolved(ScopeResolution {
         found: Some(FoundInstead::Sequence(DbSequence::of_unrestricted(1))),
         gives: Some(DbSequence::of_unrestricted(1)),
-        gives_throws: true,
+        gives_throws: Some(220),
         ..ScopeResolution::default()
     });
     let no_target = crate::seqdb::NO_TARGET_IN_HEADERS.as_bytes();
     assert_eq!(other.prefetch_stops(), Some(no_target));
-    assert!(!other.bioseq_load_throws());
-    // Where the prefetch is off, the formats' answers differ from the record's own (LOSAT's
-    // refusal of what the lookup gives stays).
-    assert_eq!(other.lookup_throws(), None);
+    assert!(other.bioseq_load_throws());
+    // Where the prefetch is off, every format answers the throw as the other sequence's own.
+    let thrown = other.lookup_throws().expect("the Bioseq's build throws");
+    assert_eq!(thrown.get_msg(), no_target);
+    assert_eq!(
+        thrown,
+        crate::ncbi_exception::NcbiException::new(crate::seqdb::GET_BIOSEQ_SITE, no_target)
+    );
+    assert_eq!(other.given_length(), Some(220));
+    assert_eq!(other.thrown_length(200), 220);
+    assert_eq!(other.fetched(false, HitLoad::Throws), Ok(()));
     let words = other.prefetch_stop_words().unwrap();
     assert!(
         words.contains("by which NCBI BLAST+'s lookup gives database sequence 1, whose Bioseq load in the database throws (Error: oid headers do not contain target gi/seq_id.;"),
         "{words}"
     );
+    // The refusals that remain name the sequence whose build throws (L1).
+    let refused = other
+        .fetched(false, HitLoad::Refused(ThrowRefusal::Format))
+        .unwrap_err();
+    assert!(
+        refused.starts_with("has the Seq-align id pdb|1AB1|A, by which NCBI BLAST+'s lookup gives database sequence 1, whose Bioseq load in the database throws (Error: oid headers do not contain target gi/seq_id.;"),
+        "{refused}"
+    );
+    assert!(refused.contains(ThrowRefusal::Format.words()), "{refused}");
+    // A record whose own build throws reads its own length; a lookup that throws on a file, none.
+    let own = lines(vec![vec![
+        pdb_id("1AB1", Some(321), None),
+        pdb_id("1AB1", Some(65), None),
+    ]]);
+    assert!(own.bioseq_load_throws());
+    assert_eq!((own.given_length(), own.thrown_length(200)), (None, 200));
+    let failed = lines(vec![vec![pdb_id("1AB1", Some(65), Some("A"))]]).resolved(ScopeResolution {
+        found: Some(FoundInstead::Failed(LookupFailure::ncbi(no_target))),
+        ..ScopeResolution::default()
+    });
+    assert_eq!(failed.thrown_length(200), 0);
     let kept = lines(vec![vec![pdb_id("1AB1", Some(65), Some("A"))]]).resolved(ScopeResolution {
         found: Some(FoundInstead::Sequence(DbSequence::of_unrestricted(1))),
         gives: Some(DbSequence::of_unrestricted(1)),
@@ -4301,10 +4334,9 @@ fn a_lookup_that_gives_a_sequence_whose_bioseq_build_throws_stops_the_prefetch()
     );
     scope.add_ids_of([&query]);
     let empty = crate::blastinput::query_batch::QueryScope::default();
+    assert!(other.prefetch_stops().is_some());
     assert!(other.hidden_by_query(|| &scope));
-    assert!(!other.prefetch_stops_in(|| &scope));
     assert!(!other.hidden_by_query(|| &empty));
-    assert!(other.prefetch_stops_in(|| &empty));
     // A subject whose load neither throws nor gives an empty handle is not asked (its id of a
     // query is `common::database::refuse_id_of_a_query`'s refusal).
     assert!(

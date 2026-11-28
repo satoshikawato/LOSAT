@@ -1,0 +1,44 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q1 query one"
+                  }
+                }
+              },
+              title "q1 query one"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 120,
+              seq-data ncbi2na '64BEACFB5890D6735F0B211ADDB9510CC7BCE213E8FE52
+43BC26594FDC88'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+ 

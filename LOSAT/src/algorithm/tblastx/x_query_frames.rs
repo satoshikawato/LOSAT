@@ -33,9 +33,9 @@
 //!
 //! Programs that reach it: only TBLASTX (`-subject` and `-db`, every query batch of
 //! `search_query_batch`, with either value of `-soft_masking`). The translation of the frames (at most a few ms per batch) stays serial.
-//! BLASTX already masks the contexts of a large batch on the pool (at 2+ threads,
-//! `blastx/query_setup.rs`) and prepares the chunks of a split query in parallel
-//! (`blastx/split.rs`).
+//! BLASTX masks the contexts of a batch searched with the pool inside as an item set (at 2+
+//! threads, `blastx/query_setup.rs`, `utils::xitems::x_map`) and prepares the chunks of a split
+//! query the same way (`blastx/split.rs`).
 
 use std::sync::OnceLock;
 

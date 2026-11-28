@@ -553,13 +553,31 @@ impl<R: Read> AsnSource for StreamSource<R> {
 const END_OF_TEXT: u32 = 0x100;
 
 /// The index of the first byte of `bytes` from `i` (at most its length) on that is not `' '`,
-/// or its length when the bytes from `i` on are all spaces.
+/// or its length when the bytes from `i` on are all spaces. Eight bytes a step (most of an ASN.1
+/// text's bytes are the spaces of its indentation): the bytes that are not spaces are the bytes
+/// of the eight, read as one little-endian number, that differ from those of eight spaces, the
+/// first of them its lowest; the last bytes one at a time.
 #[inline]
 fn after_spaces(bytes: &[u8], mut i: usize) -> usize {
+    const SPACES: u64 = u64::from_le_bytes([b' '; 8]);
+    while i + 8 <= bytes.len() {
+        let eight: [u8; 8] = bytes[i..i + 8].try_into().expect("eight bytes");
+        let other = u64::from_le_bytes(eight) ^ SPACES;
+        if other != 0 {
+            return i + (other.trailing_zeros() / 8) as usize;
+        }
+        i += 8;
+    }
     while bytes.get(i) == Some(&b' ') {
         i += 1;
     }
     i
+}
+
+/// A byte that `SkipWhiteSpace` reads on from: white space, or a `-` that may start a comment.
+#[inline(always)]
+fn is_white_space_or_dash(c: u8) -> bool {
+    matches!(c, b' ' | b'\t' | b'\r' | b'\n' | b'-')
 }
 
 /// `FirstIdChar` (objistrasn.cpp:118-121).
@@ -894,11 +912,20 @@ impl<S: AsnSource> Reader<S> {
     /// and the byte.
     #[inline]
     pub(crate) fn white_space_at(&mut self, pos: usize) -> Result<(usize, u8)> {
-        // A value or a punctuation mark at the position: nothing to skip. A byte not kept yet is
-        // read by `white_space_from`.
-        if let Some(&c) = self.src.rest(pos).first() {
-            if !matches!(c, b' ' | b'\t' | b'\r' | b'\n' | b'-') {
+        // A value or a punctuation mark at the position: nothing to skip; one space before it
+        // (between a member's name and its value): that space. A byte not kept yet is read by
+        // `white_space_from`.
+        let rest = self.src.rest(pos);
+        if let Some(&c) = rest.first() {
+            if !is_white_space_or_dash(c) {
                 return Ok((pos, c));
+            }
+            if c == b' ' {
+                if let Some(&c) = rest.get(1) {
+                    if !is_white_space_or_dash(c) {
+                        return Ok((pos + 1, c));
+                    }
+                }
             }
         }
         match self.white_space_from(pos) {
@@ -917,7 +944,29 @@ impl<S: AsnSource> Reader<S> {
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-274
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:213-253
     #[inline(never)]
-    fn white_space_from(&mut self, mut pos: usize) -> (usize, u32) {
+    fn white_space_from(&mut self, pos: usize) -> (usize, u32) {
+        // The white space between the values of a text that NCBI wrote, in one pass over the
+        // kept bytes: a line feed or none, then spaces (the indentation), then the byte found
+        // (a `-` of a negative number too). Any other white space (a tab, a carriage return,
+        // another line end, a comment, the end of the kept bytes) is read from `pos` again by
+        // `white_space_rest`.
+        let rest = self.src.rest(pos);
+        let line_feed = usize::from(rest.first() == Some(&b'\n'));
+        let i = after_spaces(rest, line_feed);
+        if let Some(&c) = rest.get(i) {
+            if !is_white_space_or_dash(c)
+                || (c == b'-' && rest.get(i + 1).is_some_and(|&next| next != b'-'))
+            {
+                self.add_lines(line_feed);
+                return (pos + i, c.into());
+            }
+        }
+        self.white_space_rest(pos)
+    }
+
+    /// [`white_space_from`](Self::white_space_from) of any white space.
+    #[inline(never)]
+    fn white_space_rest(&mut self, mut pos: usize) -> (usize, u32) {
         // The line ends found, added to `line` once (when there are any).
         let mut lines = 0;
         loop {

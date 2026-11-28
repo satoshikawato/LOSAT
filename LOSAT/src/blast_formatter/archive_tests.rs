@@ -205,7 +205,7 @@ fn a_failed_writer_of_the_caller_ends_the_run_with_the_write_failure() {
     // `CATCH_ALL`'s text, wherever the diagnostics go. NCBI's runtime on a failed standard output
     // of the command line (`std::terminate`): `blast_formatter_standard_output_failure_aborts` of
     // tests/masker_fixtures.rs.
-    for outfmt in ["8", "9", "12"] {
+    for outfmt in ["8", "9", "11", "12"] {
         assert_eq!(
             run_archive_full(&["-outfmt", outfmt]),
             (6, "BLAST failed to write output\n".to_string()),

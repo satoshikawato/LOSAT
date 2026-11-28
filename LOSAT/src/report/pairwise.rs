@@ -275,24 +275,6 @@ impl PairwiseConfig {
     }
 }
 
-/// `write_prolog`'s `html` of a report of `-html` links `links` (`None`: the plain report): the
-/// links and the sink of the report's posts (`QueryWarnings::html_posts_sink`: the run's
-/// diagnostics), which a `-html` report of outfmt 0 to 4 gets at any place among the run's
-/// formats (`query_warnings::report_posts`, `ReportFormat::writes_html_links`). One without them
-/// is LOSAT's internal error (its posts would be lost).
-pub(crate) fn html_with_diagnostics<'w>(
-    links: Option<&'w super::html_ids::HtmlLinks>,
-    warnings: Option<&'w mut super::query_warnings::QueryWarnings<'_>>,
-) -> io::Result<Option<(&'w super::html_ids::HtmlLinks, &'w mut dyn Write)>> {
-    match (links, warnings) {
-        (None, _) => Ok(None),
-        (Some(links), Some(warnings)) => Ok(Some((links, warnings.html_posts_sink()))),
-        (Some(_), None) => Err(io::Error::other(
-            super::query_warnings::HTML_POSTS_WITHOUT_WARNINGS,
-        )),
-    }
-}
-
 impl PairwiseConfig {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1525-1528
     /// Whether the report is TBLASTX's (`m_Program` is "tblastx"): the sorts and the description
@@ -2832,10 +2814,11 @@ fn write_prolog_endl(writer: &mut (impl ReportWrite + ?Sized)) -> io::Result<()>
 /// NCBI's `m_DisableKAStats` (blastn's matrix-only scoring, `BlastnIntro::matrix_only`): a
 /// blastn search then names `rmblastn` in the version line and writes RMBlast's reference, three
 /// lines with no line end after the last, in NCBI's four insertions, before the `NcbiEndl` pair;
-/// the references after it are blastn's. `NcbiEndl` is `std::endl`, which flushes in every NCBI
-/// program: each is a flush of NCBI's here, in every program and also in an `-html` prolog (line
-/// RG item T6a: the flush is where these bytes reach the device and where a failed write shows;
-/// line RG T4a2 review B4: blastp's `-html -out /dev/full` with `GETURL_DEBUG` wrote
+/// the references after it are blastn's. Every program (including blastp's driver and tblastn)
+/// writes its prolog before its search, for every sink. `NcbiEndl` is `std::endl`, which flushes
+/// in every NCBI program: each is a flush of NCBI's here, in every program and also in an `-html`
+/// prolog (line RG item T6a: the flush is where these bytes reach the device and where a failed
+/// write shows; line RG T4a2 review B4: blastp's `-html -out /dev/full` with `GETURL_DEBUG` wrote
 /// `REGISTRY: .ncbirc` before NCBI's write error). The references and the database lines after
 /// the pair stay in NCBI's buffer (`ReportStream`) until a post on `cerr` (tied to `cout`) or its
 /// buffer writes them, so `GETURL_DEBUG`'s `REGISTRY:` line, which is not a post
@@ -3463,9 +3446,9 @@ fn write_final_database_report<W: Write>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-441
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1589
-/// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCK):
-/// false for the query blocks after the first of blastp's block search, whose first block wrote
-/// it), each query's section, and the epilog when `epilog` is set. `query_gapped_k` is
+/// The report of `queries`: each query's section and the epilog when `epilog` is set. The prolog
+/// is not part of it: the search writes it before the first query batch, as NCBI does
+/// (`write_blastp_pairwise_prolog`, the driver's `write_pairwise_prologs`). `query_gapped_k` is
 /// rpsblast's gapped K of each query's footer (`rps_search::engine::batch_gapped_k`), `None` for
 /// blastp and psiblast (the report's `gapped_karlin`).
 pub fn write_blastp_pairwise_report<W: crate::report::ostream::ReportWrite>(
@@ -3482,7 +3465,6 @@ pub fn write_blastp_pairwise_report<W: crate::report::ostream::ReportWrite>(
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
-    prolog: bool,
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     loads: &crate::report::db_subject::HitLoads,
@@ -3502,7 +3484,6 @@ pub fn write_blastp_pairwise_report<W: crate::report::ostream::ReportWrite>(
         database,
         probe,
         warnings,
-        prolog,
         epilog,
         x_pool,
         None,
@@ -3513,9 +3494,9 @@ pub fn write_blastp_pairwise_report<W: crate::report::ostream::ReportWrite>(
 
 /// The queries `query_range` of a BLASTP pairwise report, whose `hits` are those queries' (the
 /// rows of a caller that makes them a window of queries at a time, as BLASTN's and TBLASTX's
-/// do, `x_pairwise_par::query_windows`): the prolog with the report's first query, the epilog
-/// with its last. `anchored`: the sequences of the query-anchored sections (`config.view` of
-/// outfmt 1 to 4; `None` for outfmt 0).
+/// do, `x_pairwise_par::query_windows`): the epilog with its last query (the prolog is the
+/// search's, `write_blastp_pairwise_report`). `anchored`: the sequences of the query-anchored
+/// sections (`config.view` of outfmt 1 to 4; `None` for outfmt 0).
 #[allow(clippy::too_many_arguments)]
 pub fn write_blastp_pairwise_window<W: crate::report::ostream::ReportWrite>(
     hits: &[PairwiseHit],
@@ -3532,7 +3513,6 @@ pub fn write_blastp_pairwise_window<W: crate::report::ostream::ReportWrite>(
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
-    prolog: bool,
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
@@ -3542,30 +3522,6 @@ pub fn write_blastp_pairwise_window<W: crate::report::ostream::ReportWrite>(
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
-
-    if prolog && query_range.start == 0 {
-        write_prolog(
-            writer,
-            blastp_family_program(&config.program),
-            &report.version,
-            false,
-            false,
-            false,
-            html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
-        )?;
-        // The prolog ends with one blank line; each query's preamble starts with two
-        // (blast_format.cpp:1491), after the query's warnings.
-        match database {
-            Some(database) => write_blast_database_header(writer, database)?,
-            None => write_blastp_database_header_spacing(
-                writer,
-                &report.database_name,
-                report.database_num_sequences,
-                report.database_total_letters,
-                1,
-            )?,
-        }
-    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
     // Each hit keeps its index in `hits` (the final result order), which identifies it
@@ -4288,8 +4244,8 @@ pub struct BlastnPairwiseQuery {
 /// Run-level data of the BLASTN pairwise report.
 #[derive(Debug, Clone)]
 pub struct BlastnPairwiseReport {
-    pub version: String,
-    /// The program line and references of the prolog (`-task megablast`, matrix-only scoring).
+    /// The task and its scoring (`BlastnIntro`), of which the report follows matrix-only scoring
+    /// (the prolog, which follows the rest too, is the search's: `write_blastn_pairwise_prolog`).
     pub intro: BlastnIntro,
     pub database_name: Vec<u8>,
     /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
@@ -4319,9 +4275,6 @@ pub struct BlastnPairwiseReport {
     /// Whether NCBI's epilog (the database and statistics footer, `PrintEpilog`) ends the
     /// report.
     pub epilog: bool,
-    /// Whether the report starts with NCBI's prolog (`PrintProlog`); false when the caller
-    /// wrote it before the search, as NCBI does.
-    pub prolog: bool,
     /// The database sequences with parsed Seq-ids by subject index (empty without them): their
     /// descriptions and headings come from their definition lines (`db_subject::ParsedSubject`).
     pub parsed_subjects: Vec<Option<Arc<crate::report::db_subject::ParsedSubject>>>,
@@ -5125,8 +5078,9 @@ pub fn write_blastn_pairwise_prolog<W: ReportWrite>(
 ///
 /// `hits` is the final hit list of those queries in its order (queries in input order, then
 /// subjects and HSPs in result order); each hit's index in it identifies it to the probe. The
-/// prolog comes with the first query of `queries`, the epilog with the last: the reports of
-/// consecutive ranges written in turn are the report of all of them.
+/// epilog comes with the last query of `queries`: the reports of consecutive ranges written in
+/// turn are the report of all of them. The prolog is not part of it: the search writes it before
+/// the first query batch, as NCBI does (`write_blastn_pairwise_prolog`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1589
 // Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
@@ -5142,7 +5096,7 @@ pub fn write_blastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
     subject_titles: &[Arc<[u8]>],
     report: &BlastnPairwiseReport,
     probe: Option<&mut FormatProbe<'_>>,
-    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
     // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
@@ -5152,21 +5106,8 @@ pub fn write_blastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    // The prolog with the report's first query, the epilog with its last (`query_range` is all of
-    // `queries`, or one window of a caller that makes the rows a window at a time,
-    // `x_pairwise_par::query_windows`).
-    if report.prolog && query_range.start == 0 {
-        write_blastn_pairwise_prolog(
-            writer,
-            &report.version,
-            report.intro,
-            &report.database_name,
-            report.database_num_sequences,
-            report.database_total_letters,
-            report.database.as_ref(),
-            html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
-        )?;
-    }
+    // The epilog with the report's last query (`query_range` is all of `queries`, or one window
+    // of a caller that makes the rows a window at a time, `x_pairwise_par::query_windows`).
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = (hit.hit.q_idx as usize)
@@ -5527,7 +5468,6 @@ pub struct TblastxPairwiseQuery {
 /// Run-level data of the TBLASTX pairwise report.
 #[derive(Debug, Clone)]
 pub struct TblastxPairwiseReport {
-    pub version: String,
     pub database_name: Vec<u8>,
     /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
     pub database_num_sequences: i64,
@@ -5545,9 +5485,6 @@ pub struct TblastxPairwiseReport {
     pub unsearched: Vec<bool>,
     /// Whether NCBI's epilog (`PrintEpilog`) ends the report.
     pub epilog: bool,
-    /// Whether the report starts with NCBI's prolog (`PrintProlog`); false when the caller
-    /// wrote it before the search, as NCBI does.
-    pub prolog: bool,
     /// The database sequences with parsed Seq-ids by subject index (empty without them), as
     /// BLASTN's (`BlastnPairwiseReport::parsed_subjects`).
     pub parsed_subjects: Vec<Option<Arc<crate::report::db_subject::ParsedSubject>>>,
@@ -5748,13 +5685,6 @@ fn write_tblastx_epilog<W: crate::report::ostream::ReportWrite>(
 /// A `double` written to a C++ stream with the default flags: `%g` with precision 6
 /// (`1e+06` for 1000000, `1.23457e+06` for 1234567).
 pub(crate) fn cpp_default_double(value: f64) -> String {
-    fn trim(text: &str) -> &str {
-        if text.contains('.') {
-            text.trim_end_matches('0').trim_end_matches('.')
-        } else {
-            text
-        }
-    }
     // glibc's `%g` keeps the sign of a zero (segmasker's `-locut -0` in `algo-options`).
     if value == 0.0 {
         return if value.is_sign_negative() { "-0" } else { "0" }.to_string();
@@ -5771,6 +5701,141 @@ pub(crate) fn cpp_default_double(value: f64) -> String {
         }
         .to_string();
     }
+    match g_of_shortest(value) {
+        Some(text) => text,
+        None => g_exact(value),
+    }
+}
+
+/// `%g` with precision 6 of a normal `value`, from the shortest decimal `S` that reads back as
+/// `value` (`{:e}`), where `S` decides it; `None` where it may not (`g_exact` decides). `S` and
+/// `value` lie in an interval of the decimals that read back as `value`, a few units of
+/// `value`'s 16th significant digit wide, in which no decimal has fewer digits than `S`. With at
+/// most 6 significant digits, `S` is the 6-digit decimal nearest `value`: `%g`'s. With 8 or more,
+/// no decimal of 7 digits or fewer lies between `value` and `S` (it would lie in the interval), so
+/// rounding either at its 6th digit gives the same digits, and neither is a midpoint of 6-digit
+/// decimals (a midpoint has 7 digits). With 7, `S` may be such a midpoint, which `value` itself
+/// lies above, on or below.
+fn g_of_shortest(value: f64) -> Option<String> {
+    if !value.is_normal() {
+        return None;
+    }
+    let mut shortest = Bytes32::default();
+    std::fmt::Write::write_fmt(&mut shortest, format_args!("{:e}", value.abs())).ok()?;
+    let text = shortest.bytes();
+    let e = text.iter().position(|&c| c == b'e')?;
+    let mut exponent: i32 = std::str::from_utf8(&text[e + 1..]).ok()?.parse().ok()?;
+    // The first 6 significant digits (0 past the last), the 7th, and how many there are.
+    let mut kept = [0u8; 6];
+    let mut seventh = 0;
+    let mut count = 0;
+    for &c in text[..e].iter().filter(|&&c| c != b'.') {
+        match count {
+            0..=5 => kept[count] = c - b'0',
+            6 => seventh = c - b'0',
+            _ => {}
+        }
+        count += 1;
+    }
+    if count == 7 {
+        return None;
+    }
+    // 8 digits or more: up from a 7th digit of 5 or more (one of 5 has nonzero digits after it).
+    if count > 7 && seventh >= 5 {
+        let mut i = 5;
+        loop {
+            if kept[i] < 9 {
+                kept[i] += 1;
+                break;
+            }
+            kept[i] = 0;
+            if i == 0 {
+                kept[0] = 1;
+                exponent += 1;
+                break;
+            }
+            i -= 1;
+        }
+    }
+    let digits = 6 - kept.iter().rev().take_while(|&&d| d == 0).count();
+    let mut out = Bytes32::default();
+    let digit = |i: usize| b'0' + kept[i];
+    if value < 0.0 {
+        out.push(b'-');
+    }
+    if !(-4..6).contains(&exponent) {
+        out.push(digit(0));
+        if digits > 1 {
+            out.push(b'.');
+            (1..digits).for_each(|i| out.push(digit(i)));
+        }
+        out.push(b'e');
+        out.push(if exponent < 0 { b'-' } else { b'+' });
+        // At least two digits (at most 308).
+        let magnitude = exponent.unsigned_abs();
+        let decimal = |d: u32| b'0' + (d % 10) as u8;
+        if magnitude >= 100 {
+            out.push(decimal(magnitude / 100));
+        }
+        out.push(decimal(magnitude / 10));
+        out.push(decimal(magnitude));
+    } else if exponent >= 0 {
+        let whole = exponent as usize + 1;
+        (0..whole).for_each(|i| out.push(digit(i)));
+        if digits > whole {
+            out.push(b'.');
+            (whole..digits).for_each(|i| out.push(digit(i)));
+        }
+    } else {
+        out.push(b'0');
+        out.push(b'.');
+        (1..-exponent).for_each(|_| out.push(b'0'));
+        (0..digits).for_each(|i| out.push(digit(i)));
+    }
+    std::str::from_utf8(out.bytes()).ok().map(String::from)
+}
+
+/// Up to 32 bytes of text kept on the stack (`g_of_shortest`): a double in `{:e}` or in `%g`.
+#[derive(Default)]
+struct Bytes32 {
+    bytes: [u8; 32],
+    len: usize,
+}
+
+impl Bytes32 {
+    fn bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+
+    /// Appends `byte` (`%g` of a double has at most 13 bytes).
+    fn push(&mut self, byte: u8) {
+        self.bytes[self.len] = byte;
+        self.len += 1;
+    }
+}
+
+impl std::fmt::Write for Bytes32 {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        let end = self.len + text.len();
+        self.bytes
+            .get_mut(self.len..end)
+            .ok_or(std::fmt::Error)?
+            .copy_from_slice(text.as_bytes());
+        self.len = end;
+        Ok(())
+    }
+}
+
+/// `%g` with precision 6 of a finite `value` other than 0, by the exact conversions of `{:.5e}`
+/// and `{:.N}`.
+fn g_exact(value: f64) -> String {
+    fn trim(text: &str) -> &str {
+        if text.contains('.') {
+            text.trim_end_matches('0').trim_end_matches('.')
+        } else {
+            text
+        }
+    }
     let scientific = format!("{value:.5e}");
     let (mantissa, exponent) = scientific.split_once('e').expect("exponent");
     let exponent: i32 = exponent.parse().expect("exponent digits");
@@ -5786,9 +5851,10 @@ pub(crate) fn cpp_default_double(value: f64) -> String {
 ///
 /// `hits` is the final hit list of those queries in its order (queries in input order, then
 /// subjects and HSPs in result order); each hit's index in it identifies it to the probe. The
-/// prolog comes with the first query of `queries`, the epilog with the last: the reports of
-/// consecutive ranges written in turn are the report of all of them. The probe numbers the HSPs
-/// over the whole report, so a caller with a probe passes every query (`0..queries.len()`).
+/// epilog comes with the last query of `queries`: the reports of consecutive ranges written in
+/// turn are the report of all of them. The prolog is not part of it: the search writes it before
+/// the first query batch, as NCBI does (`write_tblastx_pairwise_prolog`). The probe numbers the
+/// HSPs over the whole report, so a caller with a probe passes every query (`0..queries.len()`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1589
 // Kept out of line: this runs only for outfmt 0.
@@ -5804,7 +5870,7 @@ pub fn write_tblastx_pairwise_report<W: crate::report::ostream::ReportWrite>(
     report: &TblastxPairwiseReport,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
-    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     // The sequences of the query-anchored sections (outfmt 1 to 4, `config.view`; `None` for
     // outfmt 0).
@@ -5816,19 +5882,8 @@ pub fn write_tblastx_pairwise_report<W: crate::report::ostream::ReportWrite>(
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    // The prolog with the report's first query, the epilog with its last (`query_range` is all of
-    // `queries`, or one window of a caller that makes the rows a window at a time).
-    if report.prolog && query_range.start == 0 {
-        write_tblastx_pairwise_prolog(
-            writer,
-            &report.version,
-            &report.database_name,
-            report.database_num_sequences,
-            report.database_total_letters,
-            database,
-            html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
-        )?;
-    }
+    // The epilog with the report's last query (`query_range` is all of `queries`, or one window
+    // of a caller that makes the rows a window at a time).
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = (hit.hit.q_idx as usize)
@@ -6098,10 +6153,10 @@ pub fn write_tblastn_pairwise_prolog<W: ReportWrite>(
 /// `query_titles` and `subject_titles` are the title bytes of the records by query and
 /// subject index (`Query=`, the description table and the alignment headings; `subject_sources`
 /// the sources from which NCBI makes an empty stored title, `stored_source`); the
-/// `query_name` of `queries` is not read. `program` is the program line's name (`TBLASTN`, or
-/// `PSITBLASTN` with `-in_pssm`).
+/// `query_name` of `queries` is not read. The prolog is not part of it: the search writes it
+/// before the first query batch, as NCBI does (`write_tblastn_pairwise_prolog`,
+/// `tblastn_app::search`).
 pub fn write_tblastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
-    program: &str,
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
@@ -6115,7 +6170,7 @@ pub fn write_tblastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
-    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     epilog: bool,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
     // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
@@ -6136,28 +6191,6 @@ pub fn write_tblastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
         ));
     }
     let mut writer = io::BufWriter::new(writer);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:372-424:
-    write_prolog(
-        &mut writer,
-        program,
-        &report.version,
-        false,
-        false,
-        false,
-        html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
-    )?;
-    // The prolog ends with one blank line; each query's preamble starts with two
-    // (blast_format.cpp:1491), after the query's warnings.
-    match database {
-        Some(database) => write_blast_database_header(&mut writer, database)?,
-        None => write_blastp_database_header_spacing(
-            &mut writer,
-            &report.database_name,
-            report.database_num_sequences,
-            report.database_total_letters,
-            1,
-        )?,
-    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
     // Each hit keeps its index in `hits` (the final result order), which identifies it

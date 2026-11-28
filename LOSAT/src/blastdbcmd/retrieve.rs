@@ -50,6 +50,12 @@ pub(super) enum Stop {
     /// such read (`Source::deflines`), before the record's text. `Run::write` posts it and
     /// writes the record again; the warning is posted once.
     Utf8Post(String),
+    /// A failed binary ASN.1 header read that first replaced non-VisibleString bytes with `#`
+    /// (`Error: (803.7)`), then stopped with `after`.
+    ReplacedThen {
+        posts: Vec<crate::report::serial::encoder::ReplacedChar>,
+        after: Box<Stop>,
+    },
     /// A write found the pipe closed where SIGPIPE ends NCBI's process (`OutputFile::closed`):
     /// the retrieval ends at once, exit status 0, no message. Any other failed write is
     /// dropped by the `OutputFile` and the retrieval goes on.
@@ -185,11 +191,24 @@ impl<'a> Source<'a> {
     }
 
     /// The stop of a read of the header at `at` that failed with `error`: NCBI's warning first
-    /// where its read took a UTF8String before the failure (`utf8_post`), else the error.
+    /// where its read took a UTF8String before the failure (`utf8_post`), then any `#`-replaced
+    /// character posts before a binary ASN.1 failure, else the error.
     #[cold]
     #[inline(never)]
     fn failed_read(&self, at: SeqLocation, error: crate::seqdb::SeqDbError) -> Stop {
-        self.utf8_post(at).unwrap_or_else(|| error.into())
+        if let Some(post) = self.utf8_post(at) {
+            return post;
+        }
+        if matches!(error, crate::seqdb::SeqDbError::Ncbi(_)) {
+            let posts = self.db.header_replaced_char_posts_at(at);
+            if !posts.is_empty() {
+                return Stop::ReplacedThen {
+                    posts,
+                    after: Box::new(error.into()),
+                };
+            }
+        }
+        error.into()
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:411-425
@@ -204,18 +223,15 @@ impl<'a> Source<'a> {
             .map_err(|_| Stop::Ncbi(OID_NOT_FOUND.to_string()))
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
-    /// `GetSeqLength` of `oid`: signed 32-bit `int` for proteins (wrapping `>= 2^31` to negative
-    /// as in NCBI's `GetSeqLengthProt`), widened unsigned 32-bit for nucleotides.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-323
+    /// `GetSeqLength` of `oid`: signed 32-bit `int` as returned by NCBI's `GetSeqLengthProt`
+    /// and `GetSeqLengthExact`.
     pub fn length(&self, oid: u32) -> Result<i64, Stop> {
         let at = self.at(oid)?;
         if self.protein {
             Ok(i64::from(self.db.protein_length_i32_at(at)?))
         } else {
-            let length = self.db.nucleotide_length_at(at)?;
-            u32::try_from(length)
-                .map(i64::from)
-                .map_err(|_| Stop::refused(format!("sequence {oid} is longer than 32 bits")))
+            Ok(i64::from(self.db.nucleotide_length_i32_at(at)?))
         }
     }
 
@@ -299,7 +315,7 @@ impl<'a> Source<'a> {
             let block = self.db.read_sequence_at(at)?;
             return Ok(DbSeqData::Ncbistdaa(block.protein(0).to_vec()));
         }
-        let block = self.db.read_sequence_at(at)?;
+        let block = self.db.read_nucleotide_search_sequence_at(at)?;
         Ok(match block.nucleotide_seq_data(0)? {
             (true, bytes) => DbSeqData::Ncbi2na(bytes),
             (false, bytes) => DbSeqData::Ncbi4na(bytes),
@@ -343,7 +359,7 @@ impl<'a> Source<'a> {
             let block = self.db.read_sequence_at(at)?;
             Ok(protein_string_letters(slice(block.protein(0), range)))
         } else {
-            self.nucleotide_letters(oid, range)
+            self.nucleotide_letters(oid, range, true)
         }
     }
 
@@ -358,12 +374,28 @@ impl<'a> Source<'a> {
             let block = self.db.read_sequence_at(at)?;
             Ok(protein_fasta_letters(slice(block.protein(0), range)))
         } else {
-            self.nucleotide_letters(oid, range)
+            self.nucleotide_letters(oid, range, false)
         }
     }
 
-    fn nucleotide_letters(&self, oid: u32, range: Option<(u32, u32)>) -> Result<Vec<u8>, Stop> {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1619-1628
+    fn nucleotide_letters(
+        &self,
+        oid: u32,
+        range: Option<(u32, u32)>,
+        error_when_empty: bool,
+    ) -> Result<Vec<u8>, Stop> {
         let at = self.at(oid)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1627-1628
+        if self.db.nucleotide_length_i32_at(at)? < 1 {
+            return if error_when_empty {
+                Err(Stop::Ncbi(
+                    "Error: could not get sequence or range.".to_string(),
+                ))
+            } else {
+                Ok(Vec::new())
+            };
+        }
         Ok(match range {
             Some((from, to)) => {
                 self.db
@@ -508,6 +540,16 @@ impl Output<'_, '_> {
     /// NCBI's insertions and flushes `text` (`CutBuffer`), emptied.
     pub fn insertions(&mut self, text: &mut CutBuffer) -> Result<(), Stop> {
         text.write_to(self.out).map_err(Stop::write)
+    }
+
+    /// NCBI's errors (`803.7`) for non-VisibleString bytes replaced with `#`
+    /// (`Diag::post_replaced`), after the output so far, as `post`.
+    pub fn post_replaced_chars(
+        &mut self,
+        posts: &[crate::report::serial::encoder::ReplacedChar],
+    ) -> Result<(), Stop> {
+        self.diag.post_replaced(posts);
+        self.closed()
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:816-828
@@ -715,6 +757,22 @@ pub(super) fn process(
             debug_assert!(false, "a post that no write took");
             diag.post_utf8_string(&path);
             0
+        }
+        Err(Stop::ReplacedThen { posts, after }) => {
+            diag.post_replaced(&posts);
+            match *after {
+                Stop::Ncbi(message) => {
+                    diag.err_post(&message);
+                    1
+                }
+                Stop::NcbiBytes(message) => {
+                    diag.err_post_bytes(&message);
+                    1
+                }
+                Stop::Refused(reason) => diag.refuse(&reason),
+                Stop::ClosedPipe => 0,
+                Stop::Utf8Post(_) | Stop::ReplacedThen { .. } => 1,
+            }
         }
     }
 }
@@ -1192,6 +1250,10 @@ impl Run<'_, '_, '_> {
             .write(self.source, oid, config, target, &mut self.output)
         {
             Err(Stop::Utf8Post(path)) => self.write_after_utf8_post(&path, oid, config, target),
+            Err(Stop::ReplacedThen { posts, after }) => {
+                self.output.post_replaced_chars(&posts)?;
+                Err(*after)
+            }
             written => written,
         }
     }
@@ -1232,8 +1294,16 @@ impl Run<'_, '_, '_> {
         target: Option<&[u8]>,
     ) -> Result<(), Stop> {
         self.output.post_utf8_string(path)?;
-        self.formatter
+        match self
+            .formatter
             .write(self.source, oid, config, target, &mut self.output)
+        {
+            Err(Stop::ReplacedThen { posts, after }) => {
+                self.output.post_replaced_chars(&posts)?;
+                Err(*after)
+            }
+            written => written,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:411-416

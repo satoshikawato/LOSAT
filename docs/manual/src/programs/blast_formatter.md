@@ -1,6 +1,6 @@
 # blast_formatter
 
-`losat blast_formatter` writes the reports of a search again from its BLAST archive, without running the search again. Use it when you saved a search with `-outfmt 11` and want its Seq-aligns later, in ASN.1 or JSON.
+`losat blast_formatter` writes the reports of a search again from its BLAST archive, without running the search again. Use it when you saved a search with `-outfmt 11` and want its Seq-aligns or a re-emitted BLAST archive later, in ASN.1, JSON or XML.
 
 It writes the same bytes as NCBI's `blast_formatter` 2.17.0, for archives of every search program with `-subject` or `-db`.
 
@@ -23,7 +23,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | Option | Meaning |
 | --- | --- |
 | `-archive` | The BLAST archive to read. |
-| `-outfmt` | `8`, `9` or `12`. |
+| `-outfmt` | `8`, `9`, `11` or `12`. |
 | `-out` | Output file. |
 | `-max_target_seqs`, `-num_descriptions`, `-num_alignments` | How many subject sequences, descriptions and alignments the reports keep, as in NCBI. |
 | `-sorthits`, `-sorthsps`, `-line_length`, `-show_gis`, `-html`, `-parse_deflines` | Read as in NCBI. |
@@ -36,20 +36,22 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | --- | --- |
 | `8` | The Seq-aligns as ASN.1 text. |
 | `9` | The Seq-aligns as binary ASN.1. |
+| `11` | The BLAST archive (`Blast4-archive`), controlled by `ARCHIVE_FORMAT` (default ASN.1 text; `xml` for XML; `bin*` for binary ASN.1; other values write nothing). |
 | `12` | The Seq-aligns as JSON. |
 
 ## Differences from NCBI BLAST+
 
-None that change the output of a normal run. The options, NCBI's help and usage texts, argument errors, messages and exit statuses are NCBI's, also where the output cannot be written: `-out /dev/full` gives NCBI's messages and exit status, and a standard output on a full device or a closed pipe ends the program as NCBI's does (`terminate called after throwing an instance of 'std::__ios_failure'`, exit status 134), or, after a full standard error, with exit status 6, as NCBI's. See [Differences from NCBI BLAST+](../differences.md).
+None that change the output of a normal run. The options, NCBI's help and usage texts, argument errors, messages and exit statuses are NCBI's, also where the output cannot be written: `-out /dev/full` gives NCBI's messages and exit status, and a standard output on a full device or a closed pipe ends the program as NCBI's does (`terminate called after throwing an instance of 'std::__ios_failure'`, exit status 134), or, after a full standard error, with exit status 6, as NCBI's. One difference: when the standard error is a pipe whose reader has closed, NCBI's `blast_formatter` is ended by the signal at an archive's warning (exit status 141 in a shell, no report); LOSAT's writes the whole report and exits with status 0 (6 when its standard output is full), as LOSAT's search programs do. See [Differences from NCBI BLAST+](../differences.md).
 
 ## What LOSAT refuses
 
 `blast_formatter` stops with its own error message in these cases:
 
-- `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `10`, `11`, `13`, `14`, `15`, `16`, `17`, `18` and `20`.
+- `-outfmt` `0`, `1`, `2`, `3`, `4`, `5`, `6`, `7`, `10`, `13`, `14`, `15`, `16`, `17`, `18` and `20`.
 - A database named in the archive that cannot be opened here as NCBI opens it. NCBI BLAST+ then asks NCBI's servers for its sequences.
 - `PRE_FETCH_SEQS_LIMIT=2147483647` with `-outfmt` `8`, `9` or `12`: NCBI BLAST+ then loads every subject sequence ahead, from NCBI's servers where the database lacks one.
 - Archives that NCBI's own programs do not write and on which NCBI BLAST+ has no defined result, a stored message of severity Fatal, and archives of the mapper.
+- `-outfmt 11` of an archive whose queries are a list of sequence locations (`seq-loc-list`): NCBI BLAST+ fetches those sequences through its data loaders.
 - A value in an archive's results that LOSAT does not yet write in the output format, such as a NaN or an infinite real number in `-outfmt` `12`.
 - `-rid`: the results of a search that NCBI's servers ran. The search programs refuse `-remote` in the same way.
 

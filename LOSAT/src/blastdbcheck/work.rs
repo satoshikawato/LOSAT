@@ -14,19 +14,18 @@ use crate::ncbi_app::files::{standard_output_file, Cin, OutputFile};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::NcbiException;
 use crate::seqdb::find::find_blast_dbs;
-use crate::seqdb::taxdb::LazyTaxDb;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::utils::random_gen::NcbiRandom;
 use crate::writedb::time::LocalTime;
 
 use super::alias::alias_file_test;
 use super::log::{Log, Stop, BRIEF, DETAILS, SUMMARY};
-use super::volume::{Flags, Test, Tests};
+use super::volume::{CddDelta, Flags, Test, Tests};
 use super::PROGRAM;
 
 /// The OIDs checked so far in the run (`TSeen`): an OID number met again, in any later volume, is
-/// not checked again.
-pub(super) type Seen = HashSet<i32>;
+/// not checked again. Widened to `i64` for `-ends`/`-stride` exact arithmetic (`Q-D2b-OV=A`).
+pub(super) type Seen = HashSet<i64>;
 
 /// An exception that a `catch` of blastdbcheck takes: whether it is a `CSeqDBException`, and its
 /// text (`what()`), `None` where LOSAT does not give NCBI's text of it.
@@ -67,8 +66,8 @@ pub(super) fn caught(error: &SeqDbError) -> Result<Caught, Stop> {
         return Err(Stop::Refused(losat_reader_error(error, PROGRAM)));
     }
     let what = match error {
-        // NCBI's text of a failed integrity check names a line of its source; LOSAT's words do not.
-        SeqDbError::Integrity { .. } => None,
+        // NCBI's `SEQDB_FILE_ASSERT` throws `Validation failed: [...] at <file>:<line>`.
+        SeqDbError::Integrity { .. } => error.integrity_exception().map(|exc| exc.what()),
         _ => error.ncbi_request_message().and_then(|message| {
             error
                 .throw_site()
@@ -255,14 +254,12 @@ fn check(
         list.push(sample(200)?);
     }
     if args.flag("cdd_delta") {
-        return Err(Stop::Refused(format!(
-            "-cdd_delta (the check of a CDD database's headers for DELTA-BLAST), which is not \
-             supported by LOSAT's {PROGRAM}"
-        )));
+        log.line(SUMMARY, &[b"Testing CDD files' headers for DELTA-BLAST"])?;
+        list.push(Test::CddDelta(CddDelta::default()));
     }
     log.line(SUMMARY, &[])?;
     let path = search_path(settings);
-    let mut tests = Tests::new(list, flags, LazyTaxDb::new(path.clone()));
+    let mut tests = Tests::new(list, flags, path.clone());
     let seqtype = match dbtype {
         "prot" => Some(SeqType::Protein),
         "nucl" => Some(SeqType::Nucleotide),

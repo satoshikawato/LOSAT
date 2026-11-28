@@ -1810,7 +1810,14 @@ fn nonasc_cross_program_parity() {
 /// LOSAT's refusal where NCBI crashes (exit status 1, `Error: ...not supported by LOSAT`, no
 /// standard output).
 fn assert_tail_refusal(label: &str, got: &(Vec<u8>, Vec<u8>, i32)) {
-    assert!(got.0.is_empty(), "{label}: stdout {:?}", text(&got.0));
+    assert_tail_refusal_after(label, got, b"");
+}
+
+/// LOSAT's refusal where NCBI crashes after writing `before`, the results of the query batches
+/// it finished (in LOSAT's words).
+fn assert_tail_refusal_after(label: &str, got: &(Vec<u8>, Vec<u8>, i32), before: &[u8]) {
+    let before = losat::wording::losat_output_bytes(before);
+    assert_eq!(text(&got.0), text(&before), "{label}: stdout");
     assert_eq!(got.2, 1, "{label}: expected rc=1, err={:?}", text(&got.1));
     assert!(
         got.1.starts_with(b"Error: ") && text(&got.1).contains("not supported by LOSAT"),
@@ -2076,6 +2083,98 @@ fn nonasc_mt_reads_past_range_end_in_later_volume() {
         assert!(seen.len() >= 30, "{} (pad, E, threads) cells", seen.len());
         assert!(
             refused >= 20 && completed >= 20,
+            "{refused} refused, {completed} completed"
+        );
+    } else {
+        assert!(refused + completed > 0, "every row skipped");
+    }
+    let _ = fs::remove_dir_all(&root);
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-406
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:684-710
+/// The reads past an alias OID range's end where a subject's id is answered without a lookup
+/// (RG-D2 tail R3). `s3db/` holds the volumes `v0` (150 sequences before the range, with long
+/// local ids: its string ISAM data file is the largest file), `v1` (G: a GI, and a second line
+/// that holds `gb|AB900001.1|`), `v2` (S, whose only id is `gb|AB900001.1|`, and the range's end)
+/// and `v3`, under the alias `n`, and the alias `r` of the range from G to the fourth OID of `v2`.
+/// Each query batch's prefetch resolves G's GI first, whose blob registers S's id, so NCBI never
+/// looks S's id up nor measures a string ISAM, and its chunks past the range's end stay small.
+/// `s3_reach.tsv` holds NCBI's exit status at 2 and 4 threads with the OID `poked_oid` of `v2`
+/// made to crash (`BATCH_SIZE=1000`: three query batches of `s3_q.fna`) and the length of its
+/// standard output; `s3_held.out` NCBI's rows where it completes, whose start is what NCBI
+/// writes before a crash in a later batch. A row at more threads than the host's CPUs runs the threads that run
+/// (`effective_threads`) against their row.
+#[test]
+fn nonasc_mt_reads_past_range_end_after_held_ids() {
+    let root = scratch("s3-held");
+    let _ = fs::remove_dir_all(&root);
+    let run_dir = root.join("run");
+    fs::create_dir_all(&run_dir).unwrap();
+    let root = root.canonicalize().unwrap();
+    let run_dir = run_dir.canonicalize().unwrap();
+    let base = fixtures().join("nonasc_xprog");
+    for entry in fs::read_dir(base.join("s3db")).unwrap() {
+        let entry = entry.unwrap();
+        fs::copy(entry.path(), run_dir.join(entry.file_name())).unwrap();
+    }
+    let query = base.join("s3_q.fna");
+    let query = query.to_str().unwrap().to_string();
+    let held = fs::read(base.join("s3_held.out")).unwrap();
+    let count = |volume: &str| nin_v4_layout(&fs::read(run_dir.join(volume)).unwrap()).0;
+    let v2_start = count("v0.nin") + count("v1.nin");
+    let nin = run_dir.join("v2.nin");
+    let clean = fs::read(&nin).unwrap();
+    let table = fs::read_to_string(base.join("s3_reach.tsv")).unwrap();
+    let rows: Vec<Vec<i64>> = table
+        .lines()
+        .skip(1)
+        .map(|line| line.split('\t').map(|c| c.parse().unwrap()).collect())
+        .collect();
+    let (mut refused, mut completed, mut skipped) = (0, 0, 0);
+    for cell in &rows {
+        let (threads, poked) = (cell[0], cell[1]);
+        let run = effective_threads(threads);
+        let Some((ncbi_rc, ncbi_out)) = rows
+            .iter()
+            .find(|row| row[..2] == [run, poked])
+            .map(|row| (row[2] as i32, row[3] as usize))
+        else {
+            skipped += 1;
+            continue;
+        };
+        poke_amb_offset(&nin, poked as usize - v2_start, true);
+        let args = [
+            "-query",
+            &query,
+            "-db",
+            "r",
+            "-outfmt",
+            "6 qseqid sstart send evalue bitscore",
+            "-num_threads",
+            &run.to_string(),
+        ];
+        let got = run_losat_sub_prefixed(
+            &root,
+            &run_dir,
+            &["/usr/bin/env", "BATCH_SIZE=1000"],
+            "blastn",
+            &args,
+        );
+        fs::write(&nin, &clean).unwrap();
+        let label = format!("threads {threads} poke {poked}");
+        if ncbi_rc == -11 {
+            refused += 1;
+            assert_tail_refusal_after(&label, &got, &held[..ncbi_out]);
+        } else {
+            completed += 1;
+            assert_eq!(ncbi_out, held.len(), "{label}: frozen rows");
+            assert_tail_row(&label, &got, (ncbi_rc, &held, b""));
+        }
+    }
+    if skipped == 0 {
+        assert!(
+            refused >= 2 && completed >= 40,
             "{refused} refused, {completed} completed"
         );
     } else {

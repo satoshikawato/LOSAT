@@ -1585,6 +1585,75 @@ fn a_weak_match_is_refused_only_where_the_batch_reads_one_by_one() {
         .contains("weakly"));
 }
 
+// Line RG D2 tail R3 (NCBI BLAST+ 2.17.0 probe `D/d2/tail/work_r2/probe/t_scope.py`, `held`):
+// the prefetch resolves the holder's gi first, whose blob registers `gb|AB900001.1|`, so the
+// subject's id is answered by the loader's `m_Ids` and never looked up (NCBI measures no string
+// ISAM); without that line the subject's id is looked up. The walk records only the lookups.
+#[test]
+fn the_walk_records_only_the_lookups_that_no_place_answers() {
+    let x = gb("AB900001", 1);
+    let own = vec![ParsedSeqId::Gi(1001), gb("ZZ001001", 1)];
+    let holder =
+        lines(vec![own.clone(), vec![x.clone()]]).in_database(DbSequence::of_unrestricted(0));
+    let plain = lines(vec![own]).in_database(DbSequence::of_unrestricted(0));
+    let subject = sequence(vec![x.clone()], 1);
+    let holder_id = holder.loader_id().into_owned();
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.record_lookups();
+    let answers = walk.bulk([(0, &holder), (1, &subject)]);
+    assert_eq!(answers[&1], shown(Some(0), ShownBy::Holder));
+    let lookups = walk.take_lookups();
+    assert_eq!(lookups.sure, [holder_id.clone()].into());
+    assert!(lookups.maybe.is_empty());
+    // The next batch's prefetch: `m_Ids` holds both handles.
+    walk.enter(Some(1));
+    walk.enter(Some(2));
+    walk.bulk([(0, &holder), (1, &subject)]);
+    assert_eq!(walk.take_lookups(), LoaderLookups::default());
+    // Without the holder's line, each id is looked up; a walk that does not record keeps none.
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.record_lookups();
+    assert_eq!(walk.bulk([(0, &plain), (1, &subject)])[&1], HitLoad::Loaded);
+    assert_eq!(walk.take_lookups().sure, [holder_id, x].into());
+    let mut quiet = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    quiet.bulk([(0, &plain), (1, &subject)]);
+    assert_eq!(quiet.take_lookups(), LoaderLookups::default());
+}
+
+// Line RG D2 tail R3: two local ids have one place in `CSeq_id_Handle`'s order, so whether the
+// holder's blob registers the subject's id before the subject's load comes to the lookup is not
+// known: that lookup is made or not; the holder's own is made.
+#[test]
+fn a_lookup_that_a_tie_may_answer_first_is_made_or_not() {
+    let local = |id: &str| ParsedSeqId::Local(ObjectId::Str(id.as_bytes().to_vec()));
+    let holder = lines(vec![vec![local("G1")], vec![local("S1")]])
+        .in_database(DbSequence::of_unrestricted(0));
+    let subject = sequence(vec![local("S1")], 1);
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.record_lookups();
+    walk.bulk([(0, &holder), (1, &subject)]);
+    let lookups = walk.take_lookups();
+    assert_eq!(lookups.sure, [local("G1")].into());
+    assert_eq!(lookups.maybe, [local("S1")].into());
+    // A run that may keep one scope or not walks both ways: sure only where both are.
+    let mut either = LoaderLookups {
+        sure: [local("G1"), local("S1")].into(),
+        maybe: Default::default(),
+    }
+    .either(LoaderLookups {
+        sure: [local("G1")].into(),
+        maybe: [local("T1")].into(),
+    });
+    assert_eq!(either.sure, [local("G1")].into());
+    assert_eq!(either.maybe, [local("S1"), local("T1")].into());
+    either.extend(LoaderLookups {
+        sure: [local("T1")].into(),
+        maybe: [local("G1")].into(),
+    });
+    assert_eq!(either.sure, [local("G1"), local("T1")].into());
+    assert_eq!(either.maybe, [local("S1")].into());
+}
+
 // Line DBID P1: what NCBI's prefetch reads for a subject that no report shows (psiblast's
 // traceback hit list beyond -max_target_seqs), from what its lookup finds.
 #[test]

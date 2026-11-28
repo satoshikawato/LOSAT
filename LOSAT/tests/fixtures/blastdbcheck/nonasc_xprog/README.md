@@ -91,3 +91,18 @@ Frozen outputs of official NCBI BLAST+ 2.17.0 (`blastdbcmd`, `blastp`, `blastx`,
   `pv1.psq` empty or missing, NCBI's 2-thread scan stops before `pv1` and completes. `v1gap`: the
   negative OID is OID 1 of `pv1`, after its first OID (a missing file is NCBI's memory map error).
   `emptyv1_skipfirst`: no stop before the empty `pv1.psq` (`SIGSEGV`). LOSAT matches every row.
+- `s3db` (RG-D2 tail R3, 2026-11-28): four nucleotide volumes made with NCBI `makeblastdb
+  -parse_seqids -blastdb_version 4` (probe `D/d2/tail/work_r2/probe/freeze_s3.py`): `v0`, 150
+  sequences with long local ids before the range (its `v0.nsd`, 15,380 bytes, is the largest
+  file); `v1`, G (`gi|751|gb|ZZ000751.1|`, with a second definition line `gb|AB900001.1|`); `v2`,
+  40 sequences with S (`gb|AB900001.1|` alone) at OID 152; `v3`; the alias `n` of the four and the
+  alias `r` (`FIRST_OID 151`, `LAST_OID 155`: OIDs 150..154). `s3_q.fna`: three queries of 1,060
+  bases, three batches with `BATCH_SIZE=1000`. `s3_reach.tsv`: NCBI `blastn -outfmt "6 qseqid
+  sstart send evalue bitscore"` exit status at 2 and 4 threads with the ambiguity offset of the
+  OID `poked_oid` (155..190) set to 2^28, and the length of its standard output; `s3_held.out`:
+  NCBI's rows where it completes (the same for every such OID). Each batch's prefetch resolves
+  G's GI first, whose blob registers S's id, so NCBI never looks S's id up, measures no string
+  ISAM, and crashes only for OIDs 155..156 (2 threads; at 156 in the second batch, after writing
+  the first batch's 573 bytes of rows) and 155 (4 threads); LOSAT matches all 72 rows (test
+  `nonasc_mt_reads_past_range_end_after_held_ids`; before R3 it refused 11 rows that NCBI
+  completes).

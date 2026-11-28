@@ -24,7 +24,11 @@
 //! - the scan: the sequence file of each volume it reads, at its first read (the same);
 //! - after a query batch's search: the header file of the volume of each subject whose
 //!   Seq-align the batch makes, and the ISAM and header files that the data loader's lookups of
-//!   the Seq-align ids read (`SeqDb::note_header_reads`, `SeqDb::note_lookup_reads`);
+//!   the Seq-align ids read (`SeqDb::note_header_reads`, `SeqDb::note_lookup_reads`), only where
+//!   the loader looks the id up: a load that the scope or the loader's `m_Ids` answers (another
+//!   sequence's blob that holds the id) reads none, and a lookup that LOSAT does not know whether
+//!   NCBI makes (an order of the loads it does not follow) keeps its files apart
+//!   ([`Atlas::maybe`]; `report::db_subject::LoaderLookups`);
 //! - the repeat search of `-filtering_db`, before each batch's search: the files of the repeat
 //!   database, measured by its own reader (`Atlas::absorb`).
 //!
@@ -59,6 +63,8 @@ struct State {
     pending: Vec<PathBuf>,
     /// The largest length of the files read so far.
     largest: u64,
+    /// The largest file of each piece of work that NCBI may or may not do ([`Atlas::maybe`]).
+    maybe: Vec<u64>,
 }
 
 impl Atlas {
@@ -80,11 +86,34 @@ impl Atlas {
             let state = other.state.lock().expect("the atlas's files");
             state.noted.iter().cloned().collect()
         };
+        let maybe = other.maybe_largest();
         for path in noted {
             self.size(path);
         }
         let mut state = self.state.lock().expect("the atlas's files");
         state.largest = state.largest.max(largest);
+        for length in maybe {
+            if !state.maybe.contains(&length) {
+                state.maybe.push(length);
+            }
+        }
+    }
+
+    /// The files that a piece of work NCBI may or may not do would measure, noted in `other` (a
+    /// lookup of the data loader that a place before it may answer instead,
+    /// `report::db_subject::LoaderLookups`): NCBI's largest file is [`Atlas::largest`] or, where
+    /// it did that work, the largest of these ([`Atlas::maybe_largest`]).
+    pub(crate) fn maybe(&self, other: &Atlas) {
+        let length = other.largest();
+        let mut state = self.state.lock().expect("the atlas's files");
+        if length > 0 && !state.maybe.contains(&length) {
+            state.maybe.push(length);
+        }
+    }
+
+    /// The largest file of each piece of work that NCBI may or may not do ([`Atlas::maybe`]).
+    pub(crate) fn maybe_largest(&self) -> Vec<u64> {
+        self.state.lock().expect("the atlas's files").maybe.clone()
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:496-501,597
@@ -174,6 +203,30 @@ mod tests {
         other.size(&c);
         atlas.absorb(&other);
         assert_eq!(atlas.largest(), 200);
+    }
+
+    // Line RG D2 tail R3: a lookup that NCBI's data loader may or may not make keeps its largest
+    // file apart; the sure largest does not take it, and another reader's atlas carries it.
+    #[test]
+    fn a_lookup_that_may_not_be_made_keeps_its_largest_file_apart() {
+        let dir = crate::utils::test_dir::TempDir::unique("atlas");
+        let small = dir.join("small");
+        let large = dir.join("large");
+        std::fs::write(&small, vec![0u8; 30]).unwrap();
+        std::fs::write(&large, vec![0u8; 900]).unwrap();
+        let atlas = Atlas::default();
+        atlas.size(&small);
+        let lookup = Atlas::default();
+        lookup.size(&large);
+        lookup.size(&small);
+        atlas.maybe(&lookup);
+        atlas.maybe(&lookup);
+        atlas.maybe(&Atlas::default());
+        assert_eq!(atlas.largest(), 30);
+        assert_eq!(atlas.maybe_largest(), vec![900]);
+        let run = Atlas::default();
+        run.absorb(&atlas);
+        assert_eq!((run.largest(), run.maybe_largest()), (30, vec![900]));
     }
 
     #[test]

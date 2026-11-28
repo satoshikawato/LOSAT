@@ -8534,6 +8534,13 @@ fn run_in_pool(
         outputs.other_outfmts,
         args.html_links.is_some(),
     ));
+    // The data loader's lookups that the run's walk makes, for NCBI's atlas where a batch's reads
+    // can change a later batch's scan (`BlastnDatabase::note_batch_lookups`).
+    if let SubjectSource::Database(database) = source {
+        if database.notes_batch_lookups() {
+            run_loads.record_lookups();
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
     // error ends the reading there; that comes in the batch being read when the records
@@ -9363,6 +9370,7 @@ fn run_in_pool(
                                 cuts: xml_cuts,
                             },
                             &batch_hit_lists,
+                            start,
                             !args.ungapped,
                             &prefetch_queries.after_xml_reports(xml_before.as_ref()),
                         )
@@ -9427,7 +9435,7 @@ fn run_in_pool(
             // NCBI's atlas measures the files that the data loader's lookups of the batch's loads
             // read, before the next batch's scan (`BlastnDatabase::note_batch_lookups`).
             database.note_batch_lookups(
-                &titles,
+                (&titles, &run_loads),
                 &batch_hit_lists,
                 !args.ungapped,
                 (database::prefetch_format(&output_formats), first_rows),

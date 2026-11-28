@@ -731,18 +731,21 @@ impl BlastnDatabase {
     /// NCBI's data loader loaded them (`LoadedBefore`), read only where the batch stops; the outfmt
     /// 5 reports before the batch are the queries' (`shared::PrefetchQueries::after_xml_reports`).
     /// What the prefetch gives for each Seq-align id is the run's one walk's (`run`,
-    /// `RunLoads::prefetched`).
+    /// `RunLoads::prefetched`), in the scope of the batch whose first query is `start`
+    /// (`shared::walk_batch_prefetch`).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn batch_prefetch(
         &self,
         (titles, run): (&DatabaseTitles, &crate::report::db_subject::RunLoads),
         before: LoadedBefore<'_>,
         hit_lists: &[Option<BlastnHitList>],
+        start: usize,
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<crate::report::diag_log::Posts> {
         let subjects: Vec<shared::PrefetchSubject<'_>> =
             Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every).collect();
-        let loads = shared::walk_prefetch(&self.taxdb, run, &subjects);
+        let loads = shared::walk_batch_prefetch(&self.taxdb, run, Some(start), &subjects);
         shared::batch_prefetch(
             &self.db,
             &self.taxdb,
@@ -847,43 +850,61 @@ impl BlastnDatabase {
             })
     }
 
+    /// Whether the run notes the lookups of its batches' loads in NCBI's atlas
+    /// (`note_batch_lookups`): a database with parsed Seq-ids whose batches' reads can change a
+    /// later batch's scan (`SeqDb::notes_batch_reads`). The run's walk then records them
+    /// (`RunLoads::record_lookups`).
+    pub(super) fn notes_batch_lookups(&self) -> bool {
+        self.parsed_seqids() && self.db.notes_batch_reads()
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-406
-    /// Notes in NCBI's atlas the files that the data loader's lookups of the Seq-align ids of the
-    /// sequences it loads for a query batch whose final hit lists are `hit_lists` read
-    /// (`loaded_subjects` of the batch alone, `rows`: the first format's;
-    /// `SeqDb::note_lookup_reads`), where they can change a later batch's scan
-    /// (`SeqDb::notes_batch_reads`). A giim id is not looked up in a version 4 database
-    /// (`HeaderReader::resolution`), and a version 5 database looks it up in its LMDB files. A
-    /// lookup table that does not open fails where the reports' lookups do
-    /// (`HeaderReader::resolution`), not here.
+    /// Notes in NCBI's atlas the files that the data loader's lookups of the Seq-ids of the loads
+    /// of a query batch whose final hit lists are `hit_lists` read (`SeqDb::note_lookup_reads`),
+    /// where they can change a later batch's scan (`notes_batch_lookups`). A load looks its id up
+    /// only where neither the scope nor the loader's `m_Ids` answers it (step 4 of
+    /// `report::db_subject::ScopeWalk`): a subject whose id another sequence's definition lines
+    /// also hold may be answered by that sequence's blob and read no file. A batch whose prefetch
+    /// runs makes its loads there, before its reports, whose loads then find the prefetch's
+    /// answers: the lookups that the run's walk records at the prefetch (`run`,
+    /// `RunLoads::take_lookups`), surely or perhaps (`SeqDb::note_maybe_lookup_reads`). A batch
+    /// whose reports load one by one (its prefetch off, or failed at a lookup that throws on the
+    /// id, `BatchPrefetch::report_read`) looks up the id of each subject that the rows of the
+    /// first format read (`rows`; `prefetch_subjects`), there or at a load of the same id before:
+    /// such a load that another sequence answers is LOSAT's refusal
+    /// (`ParsedSubject::fetched`); a failed prefetch's loads before its failure are made or not.
+    /// A giim id is not looked up in a version 4 database (`HeaderReader::resolution`), and a
+    /// version 5 database looks a text id up in its LMDB files. A lookup table that does not open
+    /// fails where the reports' lookups do (`HeaderReader::resolution`), not here.
     pub(super) fn note_batch_lookups(
         &self,
-        titles: &DatabaseTitles,
+        (titles, run): (&DatabaseTitles, &crate::report::db_subject::RunLoads),
         hit_lists: &[Option<BlastnHitList>],
         gapped: bool,
         (format, rows): (shared::PrefetchFormat, SubjectFetch),
     ) {
-        if !self.parsed_seqids() || !self.db.notes_batch_reads() {
+        if !self.notes_batch_lookups() {
             return;
         }
-        let batch = [0..hit_lists.len()];
-        let loaded = Self::loaded_subjects(
-            titles,
-            LoadedBefore {
-                hits: hit_lists,
-                spans: &batch,
-                format,
-                rows,
-                cuts: shared::XmlCuts::NONE,
-            },
-            gapped,
-        );
-        let ids: Vec<&crate::seqid::ParsedSeqId> = loaded
-            .filter_map(|subject| subject.parsed)
-            .map(|subject| subject.alignment_id())
-            .filter(|id| !matches!(id, crate::seqid::ParsedSeqId::Giim(_)))
-            .collect();
-        let _ = self.db.note_lookup_reads(ids);
+        let walked = run.take_lookups();
+        let read = batches_prefetch(format, (hit_lists, titles), 0, &[], gapped).report_read(0, 0);
+        let (sure, mut maybe) = if read.one_by_one {
+            let rows: std::collections::BTreeSet<crate::seqid::ParsedSeqId> =
+                Self::prefetch_subjects(titles, hit_lists, gapped, rows)
+                    .filter_map(|subject| subject.parsed)
+                    .map(|subject| subject.loader_id().into_owned())
+                    .collect();
+            (rows, walked.sure.into_iter().chain(walked.maybe).collect())
+        } else {
+            (walked.sure, walked.maybe)
+        };
+        maybe.retain(|id| !sure.contains(id));
+        let looked_up =
+            |id: &&crate::seqid::ParsedSeqId| !matches!(id, crate::seqid::ParsedSeqId::Giim(_));
+        let _ = self.db.note_lookup_reads(sure.iter().filter(looked_up));
+        let _ = self
+            .db
+            .note_maybe_lookup_reads(maybe.iter().filter(looked_up));
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).

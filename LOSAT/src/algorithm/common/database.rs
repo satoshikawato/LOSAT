@@ -9471,13 +9471,28 @@ pub(crate) fn walk_prefetch<'s>(
     run: &crate::report::db_subject::RunLoads,
     subjects: &[PrefetchSubject<'s>],
 ) -> Vec<PrefetchSubject<'s>> {
+    walk_batch_prefetch(taxdb, run, None, subjects)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314 (cited at
+// `ScopeWalk::enter`)
+/// [`walk_prefetch`] of the query batch `batch` (its first query, as the run's walks number the
+/// batches; `None`: the batch of the walk's loads before): NCBI's formatter emptied the scope at
+/// the end of the batch before (`ResetScopeHistory`), so the prefetch finds no id of it in the
+/// scope's cache, but where the run keeps one scope (outfmt 5).
+pub(crate) fn walk_batch_prefetch<'s>(
+    taxdb: &TaxdbRun,
+    run: &crate::report::db_subject::RunLoads,
+    batch: Option<usize>,
+    subjects: &[PrefetchSubject<'s>],
+) -> Vec<PrefetchSubject<'s>> {
     // Each sequence once (TBLASTX gives one for each HSP).
     let set: std::collections::BTreeMap<usize, &crate::report::db_subject::ParsedSubject> =
         subjects
             .iter()
             .filter_map(|subject| Some((subject.ordinal as usize, subject.parsed?)))
             .collect();
-    let answers = run.prefetched(taxdb.loads_before(None), set);
+    let answers = run.prefetched(taxdb.loads_before(batch), set);
     subjects
         .iter()
         .map(|&subject| PrefetchSubject {

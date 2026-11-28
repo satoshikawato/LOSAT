@@ -2,7 +2,8 @@
   a damaged database (an ambiguity offset past the sequence file): LOSAT now refuses exactly where NCBI BLAST+ crashes reading
   past the range's end. How far NCBI BLAST+ reads there depends on the largest database file it has read so far, which LOSAT
   now follows through earlier query batches, `-db_soft_mask` and `-db_hard_mask`, `-filtering_db`, an alias file's id list
-  and an alias file's `LENGTH 0`.
+  and an alias file's `LENGTH 0`, including a subject whose id another sequence's definition lines also hold, which NCBI
+  BLAST+ reads without looking it up in the database's identifier index.
 - `blastn`, `blastp` and `blastx -db` with `-num_threads` above 1: a volume whose sequence file is empty or missing, after the
   point where NCBI BLAST+'s scan stops (a sequence of negative length in a damaged index, or a first sequence at offset 0 of
   an empty `.nsq`), no longer makes LOSAT refuse or fail; the search completes as NCBI BLAST+'s does.

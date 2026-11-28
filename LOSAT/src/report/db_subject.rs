@@ -1569,6 +1569,9 @@ struct AloneResult {
     /// `(handle, registrant, maybe)` for the item's own handle use before `load_blob`.
     requested_use: Option<(HandleKey, Registrant, bool)>,
     blob_load: Option<AloneBlobLoad>,
+    /// The data loader's lookup of the item alone: `Some(true)` made, `Some(false)` made or not
+    /// ([`ScopeWalk::note_lookup`]).
+    lookup: Option<bool>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1769-1810, 2195-2230
@@ -1628,6 +1631,61 @@ pub struct ScopeWalk {
     keeps_scope: bool,
     /// The walk that keeps one scope where this one does not, where LOSAT does not know which.
     other: Option<Box<ScopeWalk>>,
+    /// The data loader's lookups that the walk's loads made, where it records them
+    /// ([`ScopeWalk::record_lookups`]).
+    lookups: Option<Box<LoaderLookups>>,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-406
+/// The BLAST database data loader's lookups (`SeqidToOid`, step 4 of [`ScopeWalk`]) that a walk's
+/// loads made, by the Seq-id each looks up ([`ParsedSubject::loader_id`]): `sure`, or `maybe`
+/// where a place before the lookup may have answered instead, in an order of the loads or a
+/// state of the loader's `m_Ids` that LOSAT does not know. A load that the scope or the loader's
+/// `m_Ids` answers looks nothing up, though another sequence's blob holds the id. NCBI's atlas
+/// measures the files that a lookup reads, whose largest sets the chunks of a later query batch's
+/// multithreaded scan (`seqdb::atlas`, `SeqDb::note_lookup_reads`; line RG D2 tail R3).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LoaderLookups {
+    pub sure: std::collections::BTreeSet<ParsedSeqId>,
+    pub maybe: std::collections::BTreeSet<ParsedSeqId>,
+}
+
+impl LoaderLookups {
+    /// Notes a lookup of `id`, made surely where `sure`; a lookup made surely once is sure.
+    fn note(&mut self, id: ParsedSeqId, sure: bool) {
+        if sure {
+            self.maybe.remove(&id);
+            self.sure.insert(id);
+        } else if !self.sure.contains(&id) {
+            self.maybe.insert(id);
+        }
+    }
+
+    /// Adds the lookups of `other`.
+    pub fn extend(&mut self, other: LoaderLookups) {
+        for id in other.sure {
+            self.note(id, true);
+        }
+        for id in other.maybe {
+            self.note(id, false);
+        }
+    }
+
+    /// The lookups of a run that makes those of one of two walks, `self` or `other`, LOSAT not
+    /// knowing which ([`ScopeWalk::other`]): sure where both make it surely.
+    fn either(self, other: LoaderLookups) -> LoaderLookups {
+        let sure: std::collections::BTreeSet<ParsedSeqId> =
+            self.sure.intersection(&other.sure).cloned().collect();
+        let maybe = self
+            .sure
+            .into_iter()
+            .chain(self.maybe)
+            .chain(other.sure)
+            .chain(other.maybe)
+            .filter(|id| !sure.contains(id))
+            .collect();
+        LoaderLookups { sure, maybe }
+    }
 }
 
 impl ScopeWalk {
@@ -1650,6 +1708,38 @@ impl ScopeWalk {
             in_record: true,
             keeps_scope: keeps_scope.unwrap_or(false),
             other,
+            lookups: None,
+        }
+    }
+
+    /// Records the data loader's lookups that the walk's loads make from here on
+    /// ([`LoaderLookups`], [`ScopeWalk::take_lookups`]).
+    pub fn record_lookups(&mut self) {
+        if let Some(other) = &mut self.other {
+            other.record_lookups();
+        }
+        self.lookups.get_or_insert_with(Default::default);
+    }
+
+    /// The lookups recorded since the last call ([`ScopeWalk::record_lookups`]); with two walks
+    /// (`other`), [`LoaderLookups::either`] of theirs.
+    pub fn take_lookups(&mut self) -> LoaderLookups {
+        let own = self
+            .lookups
+            .as_mut()
+            .map(|lookups| std::mem::take(&mut **lookups))
+            .unwrap_or_default();
+        match &mut self.other {
+            Some(other) => own.either(other.take_lookups()),
+            None => own,
+        }
+    }
+
+    /// Notes the data loader's lookup of `subject`'s Seq-align id, made surely where `sure`
+    /// (`record_lookups`).
+    fn note_lookup(&mut self, subject: &ParsedSubject, sure: bool) {
+        if let Some(lookups) = &mut self.lookups {
+            lookups.note(subject.loader_id().into_owned(), sure);
         }
     }
 
@@ -1947,13 +2037,16 @@ impl ScopeWalk {
             let registrant = match self.ids.held(handle) {
                 Held::Present(registrant) => Some(registrant),
                 // Where LOSAT does not know whether `m_Ids` still holds the handle, the lookup
-                // that would answer instead gives the same sequence, or LOSAT does not know.
+                // that would answer instead gives the same sequence, or LOSAT does not know;
+                // that lookup is made or not (`note_lookup`).
                 Held::Maybe(registrant)
                     if registrant.sure && self.looked_up(subject) == Some(registrant.sequence) =>
                 {
+                    self.note_lookup(subject, false);
                     Some(registrant)
                 }
                 Held::Maybe(registrant) => {
+                    self.note_lookup(subject, false);
                     self.ids.maybe_use(handle, registrant);
                     return Some(match subject.mine(registrant.sequence) {
                         true => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
@@ -1984,9 +2077,12 @@ impl ScopeWalk {
         }
         if self.before.unrecorded {
             if let Some(holder) = subject.resolution.unrecorded.loader.first() {
+                self.note_lookup(subject, false);
                 return Some(Resolved::Unknown(holder, ShownBy::Calls));
             }
         }
+        // Step 4, the lookup, whatever it gives.
+        self.note_lookup(subject, true);
         if matches!(
             subject.resolution.found,
             Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
@@ -2296,6 +2392,15 @@ impl ScopeWalk {
         let start = u32::try_from(self.scope.loads.len()).unwrap_or(u32::MAX);
         let mut additions: Vec<(&ParsedSubject, LoadedBlobRef)> = Vec::new();
         for (_, subject) in subjects {
+            // Its lookup, where neither the cache nor `m_Ids` surely answers, is made or not.
+            if self.lookups.is_some()
+                && subject.id_handle().is_none_or(|handle| {
+                    self.cached(handle).is_none()
+                        && !matches!(self.ids.held(handle), Held::Present(_))
+                })
+            {
+                self.note_lookup(subject, false);
+            }
             let Some(blob) = self.first_blob(subject) else {
                 continue;
             };
@@ -2440,6 +2545,7 @@ impl ScopeWalk {
                         resolved: None,
                         requested_use: None,
                         blob_load: None,
+                        lookup: None,
                     };
                 }
                 let blob_load = if self.many_blobs() {
@@ -2488,16 +2594,20 @@ impl ScopeWalk {
                     resolved: Some(resolved),
                     requested_use: None,
                     blob_load,
+                    lookup: None,
                 };
             }
         }
         // Steps 3 and 4 (`scope = false`): check `self.ids`, then `unrecorded`, then lookup.
         if let Some(handle) = handle {
+            // As `loader`: a handle that `m_Ids` may no longer hold may be looked up.
+            let mut lookup = None;
             let registrant = match self.ids.held(handle) {
                 Held::Present(registrant) => Some(registrant),
                 Held::Maybe(registrant)
                     if registrant.sure && self.looked_up(subject) == Some(registrant.sequence) =>
                 {
+                    lookup = Some(false);
                     Some(registrant)
                 }
                 Held::Maybe(registrant) => {
@@ -2508,6 +2618,7 @@ impl ScopeWalk {
                         }),
                         requested_use: Some((handle, registrant, true)),
                         blob_load: None,
+                        lookup: Some(false),
                     };
                 }
                 Held::Absent => None,
@@ -2521,6 +2632,7 @@ impl ScopeWalk {
                         )),
                         requested_use: Some((handle, registrant, false)),
                         blob_load: None,
+                        lookup,
                     };
                 }
                 let blob_load = if subject.mine(registrant.sequence) {
@@ -2541,6 +2653,7 @@ impl ScopeWalk {
                     resolved: Some(Resolved::Blob(registrant.sequence, ShownBy::Holder)),
                     requested_use: Some((handle, registrant, false)),
                     blob_load,
+                    lookup,
                 };
             }
         }
@@ -2550,6 +2663,7 @@ impl ScopeWalk {
                     resolved: Some(Resolved::Unknown(holder, ShownBy::Calls)),
                     requested_use: None,
                     blob_load: None,
+                    lookup: Some(false),
                 };
             }
         }
@@ -2561,6 +2675,7 @@ impl ScopeWalk {
                 resolved: Some(Resolved::Throws),
                 requested_use: None,
                 blob_load: None,
+                lookup: Some(true),
             };
         }
         let Some(blob) = subject.loaded_blob_ref() else {
@@ -2568,6 +2683,7 @@ impl ScopeWalk {
                 resolved: None,
                 requested_use: None,
                 blob_load: None,
+                lookup: Some(true),
             };
         };
         let sequence = blob.sequence();
@@ -2580,6 +2696,7 @@ impl ScopeWalk {
             resolved: Some(Resolved::Blob(sequence, ShownBy::Holder)),
             requested_use: handle.map(|h| (h, Registrant::of(sequence), false)),
             blob_load: Some(self.plan_alone_blob(sequence, line, handle, external)),
+            lookup: Some(true),
         }
     }
 
@@ -2712,6 +2829,14 @@ impl ScopeWalk {
                 }
             }
             answers.insert(key, answer);
+            // The item's lookup alone is made only where no other item whose blob registers its
+            // handle came first, in an order that LOSAT does not know.
+            if let Some(sure) = results[index].lookup {
+                let registered = handle
+                    .and_then(|handle| target_hits.get(&handle))
+                    .is_some_and(|hits| hits.iter().any(|&(other, _)| other != index));
+                self.note_lookup(subject, sure && !registered);
+            }
         }
 
         // Pass 3: commit cache, scope loads, blob ids, `m_Ids`, and active `blobs`.
@@ -6652,6 +6777,10 @@ pub struct RunLoads {
     /// The walk of the reports' loads so far, after the record that it started from
     /// ([`RunLoads::loads`]).
     walk: std::cell::RefCell<Option<ScopeWalk>>,
+    /// Whether the walks record the data loader's lookups ([`RunLoads::record_lookups`]), and
+    /// those of the walks that a new one replaced since they were last taken.
+    recording: std::cell::Cell<bool>,
+    lookups: std::cell::RefCell<LoaderLookups>,
 }
 
 impl RunLoads {
@@ -6662,7 +6791,28 @@ impl RunLoads {
             answer: answer.into(),
             ended: std::cell::Cell::new(false),
             walk: std::cell::RefCell::new(None),
+            recording: std::cell::Cell::new(false),
+            lookups: Default::default(),
         }
+    }
+
+    /// Records the data loader's lookups that the run's walks make from here on
+    /// ([`ScopeWalk::record_lookups`]), for NCBI's atlas, which measures the files they read
+    /// (`SeqDb::note_lookup_reads`).
+    pub fn record_lookups(&self) {
+        self.recording.set(true);
+        if let Some(walk) = self.walk.borrow_mut().as_mut() {
+            walk.record_lookups();
+        }
+    }
+
+    /// The lookups that the run's walks made since the last call ([`RunLoads::record_lookups`]).
+    pub fn take_lookups(&self) -> LoaderLookups {
+        let mut taken = std::mem::take(&mut *self.lookups.borrow_mut());
+        if let Some(walk) = self.walk.borrow_mut().as_mut() {
+            taken.extend(walk.take_lookups());
+        }
+        taken
     }
 
     /// The run's answer to a subject whose lookup throws, as `new` took it (what its reports do
@@ -6727,7 +6877,14 @@ impl RunLoads {
                 .as_ref()
                 .is_none_or(|walk| !walk.before.same_record(&before))
             {
-                *walk = Some(ScopeWalk::new(before, self.answer.keeps_scope()));
+                if let Some(old) = walk.as_mut() {
+                    self.lookups.borrow_mut().extend(old.take_lookups());
+                }
+                let mut new = ScopeWalk::new(before, self.answer.keeps_scope());
+                if self.recording.get() {
+                    new.record_lookups();
+                }
+                *walk = Some(new);
             }
             walk.as_mut().expect("set above")
         })

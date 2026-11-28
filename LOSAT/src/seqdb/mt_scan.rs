@@ -98,6 +98,10 @@ pub(super) fn last_chunk_reach<E>(
     }
 }
 
+/// LOSAT's refusal of a scan whose reads past the range's end crash or not by whether NCBI's data
+/// loader made a lookup that LOSAT does not know it made (`SeqDb::mt_check_past_range_end`).
+const MAYBE_LOOKUP_DECIDES: &str = "whether NCBI BLAST+ 2.17.0's multithreaded scan crashes reading past the end of the alias file's OID range depends on whether its reports looked a subject's Seq-align id up in the database, which they do or not in an order of the loads that LOSAT does not know (another subject's definition lines also hold the id)";
+
 impl SeqDb {
     /// The volume after the first whose OIDs include `end`, the iteration range's end, with an
     /// OID of the volume after it: where NCBI's volume-relative comparison with the end lets a
@@ -125,18 +129,21 @@ impl SeqDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:126-133
-    /// Notes in the atlas the header file of the volume of each sequence of `ordinals` whose
+    /// Notes in the atlas the header file of the volume of each sequence of `ordinals` (ordinal
+    /// ids: an alias file's range or list numbers its sequences from 0, [`SeqDb::oid`]) whose
     /// header NCBI reads (its first read opens the file): the subjects of a batch's Seq-aligns.
     pub(crate) fn note_header_reads(&self, ordinals: impl IntoIterator<Item = u32>) {
+        let count = self
+            .filter
+            .as_deref()
+            .map_or(self.num_oids(), |filter| filter.count());
         let mut last = None;
         for ordinal in ordinals {
-            if ordinal >= self.num_oids() {
+            if ordinal >= count {
                 continue;
             }
-            let at = self
-                .volume_starts
-                .partition_point(|&start| start <= ordinal)
-                - 1;
+            let oid = self.oid(ordinal).get();
+            let at = self.volume_starts.partition_point(|&start| start <= oid) - 1;
             if last != Some(at) {
                 self.atlas
                     .size(with_extension(self.volumes[at].base(), self.seqtype, "hr"));
@@ -155,6 +162,22 @@ impl SeqDb {
         let lookup = self.seqid_lookup()?;
         for id in ids {
             lookup.note_sized_files(id, &self.atlas);
+        }
+        Ok(())
+    }
+
+    /// [`SeqDb::note_lookup_reads`] of lookups that NCBI's data loader may or may not make (a
+    /// place before the lookup may answer, in an order LOSAT does not know): the files of each
+    /// are noted apart ([`Atlas::maybe`]).
+    pub(crate) fn note_maybe_lookup_reads<'i>(
+        &self,
+        ids: impl IntoIterator<Item = &'i crate::seqid::ParsedSeqId>,
+    ) -> Result<(), SeqDbError> {
+        let lookup = self.seqid_lookup()?;
+        for id in ids {
+            let files = Atlas::default();
+            lookup.note_sized_files(id, &files);
+            self.atlas.maybe(&files);
         }
         Ok(())
     }
@@ -270,7 +293,10 @@ impl SeqDb {
     /// measures); of the OIDs after `end`, the first that stops the scan decides: a negative
     /// length ends it with nothing left to fail, a read that crashes fails the search when the
     /// chunks reach it. A volume whose OIDs past `end` that a chunk can reach all read cleanly
-    /// takes no walk (`crash_within_reach`). `Ok` in every other case.
+    /// takes no walk (`crash_within_reach`). `Ok` in every other case. Where NCBI may or may not
+    /// have made a data loader's lookup that would measure a larger file ([`Atlas::maybe_largest`]),
+    /// the reads are known only where both largest files give the same: else LOSAT refuses the
+    /// database.
     pub(super) fn mt_check_past_range_end(&self, begin: u32, end: u32) -> Result<(), SeqDbError> {
         if self.mt_threads == 0 || self.seqtype != SeqType::Nucleotide || begin >= end {
             return Ok(());
@@ -281,28 +307,104 @@ impl SeqDb {
         let volume = &self.volumes[at];
         let start = self.volume_starts[at];
         let first_file = self.largest_file_before_chunks(begin, at);
-        self.atlas
-            .size(with_extension(volume.base(), self.seqtype, "sq"));
+        let sequences = with_extension(volume.base(), self.seqtype, "sq");
+        self.atlas.size(&sequences);
         let later_file = self.atlas.largest();
-        if !self.crash_within_reach(at, end, mt_chunk_budget(self.mt_threads, later_file))? {
-            return Ok(());
-        }
-        let walk = ChunkWalk {
-            threads: self.mt_threads,
-            first_file,
-            later_file,
-            start: begin.max(start) - start,
-            num_oids: volume.num_oids(),
-            volume_start: start,
-            range_end: end,
+        let reads = |first_file: u64, later_file: u64| -> Result<(), SeqDbError> {
+            if !self.crash_within_reach(at, end, mt_chunk_budget(self.mt_threads, later_file))? {
+                return Ok(());
+            }
+            let walk = ChunkWalk {
+                threads: self.mt_threads,
+                first_file,
+                later_file,
+                start: begin.max(start) - start,
+                num_oids: volume.num_oids(),
+                volume_start: start,
+                range_end: end,
+            };
+            last_chunk_reach(&walk, |oid| volume.x_scan_length_i32(oid, start + oid)).map(|_| ())
         };
-        last_chunk_reach(&walk, |oid| volume.x_scan_length_i32(oid, start + oid)).map(|_| ())
+        let known = reads(first_file, later_file);
+        for maybe in self.atlas.maybe_largest() {
+            if maybe <= first_file {
+                continue;
+            }
+            if reads(first_file.max(maybe), later_file.max(maybe)).is_ok() != known.is_ok() {
+                return Err(SeqDbError::Unsupported {
+                    path: sequences,
+                    message: MAYBE_LOOKUP_DECIDES.to_string(),
+                });
+            }
+        }
+        known
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{last_chunk_reach, mt_chunk_budget, ChunkWalk};
+    use super::{last_chunk_reach, mt_chunk_budget, ChunkWalk, MAYBE_LOOKUP_DECIDES};
+
+    // Line RG D2 tail R3 (fixture `tests/fixtures/blastdbcheck/nonasc_xprog/s3db`, frozen from NCBI
+    // BLAST+ 2.17.0 by the probe `D/d2/tail/work_r2/probe/freeze_s3.py`): the 2-thread scan of the
+    // alias `r` (OIDs 150..154) with OID 157 of `v2` made to crash completes where NCBI has
+    // measured no string ISAM, as when the subject's id `gb|AB900001.1|` is answered by another
+    // sequence's blob without a lookup. That lookup would measure `v0.nsd` (15,380 bytes), whose
+    // budget lets the chunks reach OID 157: made, the scan crashes; made or not, LOSAT does not
+    // know whether NCBI crashes and refuses the database.
+    #[test]
+    fn a_lookup_that_may_not_be_made_decides_or_refuses() {
+        use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/blastdbcheck/nonasc_xprog/s3db");
+        let dir = crate::utils::test_dir::TempDir::unique("mt-maybe-lookup");
+        for entry in std::fs::read_dir(&fixture).unwrap() {
+            let entry = entry.unwrap();
+            std::fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
+        }
+        // `v2.nin`: the ambiguity offset of OID 6 of `v2` (OID 157) 2^28, past the sequence file.
+        let nin = dir.join("v2.nin");
+        let mut bytes = std::fs::read(&nin).unwrap();
+        let word = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+        let mut at = 8;
+        at += 4 + word(at);
+        at += 4 + word(at);
+        let count = word(at);
+        let amb = at + 16 + 8 * (count + 1);
+        bytes[amb + 24..amb + 28].copy_from_slice(&0x1000_0000u32.to_be_bytes());
+        std::fs::write(&nin, &bytes).unwrap();
+        let held = crate::seqid::ParsedSeqId::Genbank(crate::seqid::model::TextseqId {
+            accession: Some(b"AB900001".to_vec()),
+            version: Some(1),
+            ..Default::default()
+        });
+        let scan = |note: fn(&SeqDb, &crate::seqid::ParsedSeqId)| {
+            let path = SearchPath::new(&dir, None, None);
+            let mut db = SeqDb::open_search_in(b"r", SeqType::Nucleotide, &path).unwrap();
+            db.set_mt_stop_at_negative(true);
+            db.set_mt_threads(2);
+            note(&db, &held);
+            let mut first = 0;
+            while let Some(range) = db.next_block(first, 1 << 20) {
+                first = range.end_ordinal();
+                db.read_nucleotide_search_block(range)?;
+            }
+            Ok::<(), SeqDbError>(())
+        };
+        scan(|_, _| {}).unwrap();
+        let made = scan(|db, id| db.note_lookup_reads([id]).unwrap()).unwrap_err();
+        assert!(
+            matches!(&made, SeqDbError::Format { message, .. }
+                if message.contains("passes the end of the file")),
+            "{made:?}"
+        );
+        let unknown = scan(|db, id| db.note_maybe_lookup_reads([id]).unwrap()).unwrap_err();
+        assert!(
+            matches!(&unknown, SeqDbError::Unsupported { path, message }
+                if message == MAYBE_LOOKUP_DECIDES && path.ends_with("v2.nsq")),
+            "{unknown:?}"
+        );
+    }
 
     /// The lengths of the 30 OIDs of the volume after the first (3 OIDs) in the cases below.
     fn lens() -> Vec<i32> {

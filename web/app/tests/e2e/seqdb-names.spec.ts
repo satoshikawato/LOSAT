@@ -23,7 +23,7 @@ import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { nativeRun } from './support/makeblastdb-native';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { openParameters, openSearch, paste, pickRun, program, result, submit, waitStatus } from './support/search';
+import { described, openParameters, openSearch, paste, pickRun, program, result, submit, waitStatus } from './support/search';
 import { test } from './support/test';
 
 test.setTimeout(300_000);
@@ -144,7 +144,7 @@ test('a database named with a double quote is refused where it is chosen, with t
 
   // WindowMasker's -in of -infmt blastdb.
   await page.getByTestId('tab-windowmasker').click();
-  await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await described(page, 'wm-panel', 'ready');
   await page.getByTestId('wm-param-infmt').selectOption('blastdb');
   await page.getByTestId('wm-in-files').setInputFiles([named('q"wm.nin'), named('q"wm.nsq')]);
   const wmRefused = `A database named "q"wm" cannot be in -in: ${REASON}.`;
@@ -175,7 +175,7 @@ test('a database named with a double quote is refused where it is chosen, with t
 
   // makeblastdb's -in of -input_type blastdb: the Input block, the check and Run LOSAT (WW4d R1).
   await page.getByTestId('tab-makeblastdb').click();
-  await expect(page.getByTestId('mk-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await described(page, 'mk-panel', 'ready');
   await page.getByTestId('mk-param-input_type').selectOption('blastdb');
   await page.getByTestId('mk-db-files').setInputFiles([named('q"mk.nin'), named('q"mk.nsq')]);
   const mkRefused = `A database named "q"mk" cannot be in -in: ${REASON}.`;
@@ -192,7 +192,7 @@ test('a database named with a double quote is refused where it is chosen, with t
 
   // The Masking tab's dustmasker -in of -infmt blastdb (WW4c), a SeqDB name list as WindowMasker's (WW4d R1 probe).
   await page.getByTestId('tab-masking').click();
-  await expect(page.getByTestId('ms-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+  await described(page, 'ms-panel', 'ready');
   await page.getByTestId('ms-param-infmt').fill('blastdb');
   await page.getByTestId('ms-in-files').setInputFiles([named('q"ms.nin'), named('q"ms.nsq')]);
   const msRefused = `A database named "q"ms" cannot be in -in: ${REASON}.`;
@@ -300,7 +300,7 @@ test.describe('real engine: database names with a space are the native command l
       copyInto(wmDb, filesOf(wmDb, 'wm'), join(work, 'my db'));
       await openSearch(page);
       await page.getByTestId('tab-windowmasker').click();
-      await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+      await described(page, 'wm-panel', 'ready');
       await page.getByTestId('wm-param-infmt').selectOption('blastdb');
       await page.getByTestId('wm-in-folder').setInputFiles(join(work, 'my db'));
       await expect(page.getByTestId('wm-in-name')).toHaveValue('"my db/wm"');
@@ -318,7 +318,7 @@ test.describe('real engine: database names with a space are the native command l
       // 2. makeblastdb -out "my db": the command line takes no name with a space there (NCBI's message, exit status 1).
       const nucl = readFileSync(join(LOSAT, 'tests/dropin_corpus/ns.fna'));
       await page.getByTestId('tab-makeblastdb').click();
-      await expect(page.getByTestId('mk-panel')).toHaveAttribute('data-describe', 'ready');
+      await described(page, 'mk-panel', 'ready');
       await page.getByTestId('mk-fasta-input').fill(nucl.toString('utf8'));
       await page.getByTestId('mk-param-dbtype-nucl').check();
       await page.getByTestId('mk-param-out').fill('my db');
@@ -352,7 +352,7 @@ test.describe('real engine: database names with a space are the native command l
 
       // 4. The Masking tab's dustmasker -infmt blastdb on the database in the folder "my db" (WW4c; WW4d R1).
       await page.getByTestId('tab-masking').click();
-      await expect(page.getByTestId('ms-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
+      await described(page, 'ms-panel', 'ready');
       await page.getByTestId('ms-param-infmt').fill('blastdb');
       await page.getByTestId('ms-in-folder').setInputFiles(join(work, 'my db'));
       await expect(page.getByTestId('ms-in-name')).toHaveValue('"my db/wm"');

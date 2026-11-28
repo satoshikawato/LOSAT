@@ -9,7 +9,7 @@ import { normalizeRunPath } from '../domain/blast-db';
 import { countsName } from '../domain/counts';
 import type { ListOption } from '../domain/list-flags';
 import type { FieldValue, FormValues } from '../domain/parameters';
-import { buildWindowMaskerArgv } from '../domain/tool-argv';
+import { buildWindowMaskerArgv, handedOverName } from '../domain/tool-argv';
 import {
   defaultCountsOutName,
   stageOptionParameters,
@@ -382,8 +382,9 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
   }
 }
 
+/** Counts made by a run of this session, under their name in this run's directory (`handedOverName`: `../c.counts` is `c.counts`). */
 function sessionCountsChoice(runId: string, runNumber: number, key: string, name: string, size: number): ToolCountsChoice {
-  return { kind: 'session', runId, runNumber, key, name, size };
+  return { kind: 'session', runId, runNumber, key, name: handedOverName(name), size };
 }
 
 function savedCountsChoice(taxid: number, size: number): ToolCountsChoice {

@@ -303,13 +303,6 @@ export function changedToolOptionsCount(
   return changedOptionsCount(params, values, extra);
 }
 
-/** Normalizes simple relative prefixes (`./foo` -> `foo`) so `-out ./x -logfile x` matches `x`. */
-function normalizeRelName(name: string): string {
-  let out = name.trim();
-  while (out.startsWith('./')) out = out.slice(2);
-  return out;
-}
-
 /** Reads the last value of `flag` in `argv` (supporting both `-flag val` and `-flag=val`). */
 export function toolOptionValue(argv: readonly string[], flag: string): string | undefined {
   let found: string | undefined;
@@ -324,13 +317,15 @@ export function toolOptionValue(argv: readonly string[], flag: string): string |
   return found;
 }
 
-function namedOutPath(argv: readonly string[]): string | undefined {
-  const out = toolOptionValue(argv, '-out');
-  return out !== undefined && out !== '-' ? normalizeRelName(out) : undefined;
-}
-
 // The engine's model of a Linux path walk (`LOSAT/src/report/run_files.rs`: `Walk`, `LINKS`, `SELF`, `THREAD`,
-// `MAX_LINKS`, `WORKING_TREE`), for the names that it opens as the run's standard output (`OutputName::Stdout`).
+// `MAX_LINKS`, `WORKING_TREE`, `working_directory`, `file_key`), for the names that it opens as the run's standard
+// output (`OutputName::Stdout`) and for the run's files that an option names (`runFileNamed`).
+/**
+ * The working directory's tree on LOSAT Web's Linux (`WORKING_TREE`): the run's working directory is a chain of these
+ * components, deeper than a name's `..` reach (`workingDirectory`), as a user's command line runs in a directory of the
+ * user's own.
+ */
+const WORKING_TREE = '/\0';
 /** LOSAT Web's process in procfs: `/proc/self` links to it; its id is a NUL byte, which no typed name holds. */
 const PROC_SELF = '/proc/\0';
 /** LOSAT Web's thread in procfs (`/proc/thread-self`). */
@@ -392,27 +387,126 @@ function walkedPath(name: string, cwd: string): string | undefined {
 }
 
 /**
+ * The working directory in which the engine reads the name `name` (`working_directory`): the working directory's tree
+ * one level deeper than the name's `..` parts reach, so that no name climbs out of it.
+ */
+function workingDirectory(name: string): string {
+  return WORKING_TREE.repeat(name.split('/').filter((part) => part === '..').length + 1);
+}
+
+/**
+ * The file that the path `path` (as `walkedPath` gives it) is, read in the working directory `cwd` (`file_key`): a path
+ * in the working directory's tree by its place from the working directory (`\0` and how many directories above it,
+ * then the rest: `\0` + `0/m.asnb` for `m.asnb`, `sub/../m.asnb` and `/proc/self/cwd/m.asnb`; `\0` + `1/m.asnb` for
+ * `../m.asnb`), as each name has a working directory of its own depth; any other path is itself (`/tmp/m.asnb`).
+ */
+function fileKey(path: string, cwd: string): string {
+  const depth = cwd.length / WORKING_TREE.length;
+  let rest = path;
+  let inside = 0;
+  while (inside < depth && rest.startsWith(WORKING_TREE) && (rest.length === WORKING_TREE.length || rest[WORKING_TREE.length] === '/')) {
+    rest = rest.slice(WORKING_TREE.length);
+    inside += 1;
+  }
+  return inside > 0 ? `\0${depth - inside}${rest}` : path;
+}
+
+/**
+ * The file that the system opens for the output name `name` as typed (`-out`; a name that the engine gives a run's
+ * file, `host_file_name`): its walk in its working directory (`walkedPath`, `workingDirectory`) as `fileKey`. A name whose
+ * last part is empty, `.` or `..` is a directory and opens no file; undefined then and past `MAX_PATH_LINKS` links.
+ */
+function outputFile(name: string): string | undefined {
+  const parts = name.split('/');
+  if (['', '.', '..'].includes(parts[parts.length - 1]!)) return undefined;
+  const cwd = workingDirectory(name);
+  const path = walkedPath(name, cwd);
+  return path === undefined ? undefined : fileKey(path, cwd);
+}
+
+/** The bytes that NCBI's `NStr::TruncateSpaces` takes off both ends of a string (C `isspace`). */
+const NCBI_SPACES: ReadonlySet<string> = new Set([' ', '\t', '\n', '\v', '\f', '\r']);
+/** The bytes of the name of its log file that NCBI keeps (`log_file_name`). */
+const NCBI_LOG_NAME_BYTES = 2047;
+
+/** `NStr::TruncateSpaces` of `text`. */
+function truncateSpaces(text: string): string {
+  let start = 0;
+  let end = text.length;
+  while (start < end && NCBI_SPACES.has(text[start]!)) start += 1;
+  while (end > start && NCBI_SPACES.has(text[end - 1]!)) end -= 1;
+  return text.slice(start, end);
+}
+
+/**
+ * NCBI's `NormalizePath` of an absolute path without links (`PathRules::normalize`, Unix): without its `.` and empty
+ * parts, each `..` taking off the part before it (none at the root). It reads the path's words only: `a/..` is gone
+ * where `a` is a link or no folder at all.
+ */
+function lexicalPath(path: string): string {
+  const parts: string[] = [];
+  for (const part of path.split('/')) {
+    if (part === '..') parts.pop();
+    else if (part !== '' && part !== '.') parts.push(part);
+  }
+  return `/${parts.join('/')}`;
+}
+
+/**
+ * The file that the `-logfile` value `name` opens (`log_file_name` of `LOSAT/src/blastinput/ncbi_environment.rs` on
+ * Unix, then the system's walk, `log_key` of `run_files.rs`) as `fileKey`: NCBI makes a relative name absolute in the
+ * working directory, its spaces at both ends cut (`absolute_path`), and reads it by its words (`lexicalPath`:
+ * `sub/../run.log` is `run.log`, `/var/run/../tmp/run.log` is `/var/tmp/run.log`, where the system's walk of `-out`
+ * reaches `/tmp`), keeps its first 2047 bytes, and the system opens what is left. Undefined for NCBI's special names (`-`
+ * is the standard error; the empty name and `/dev/null` keep no messages) and past `MAX_PATH_LINKS` links.
+ */
+function logFile(name: string): string | undefined {
+  if (name === '-' || name === '' || name === '/dev/null') return undefined;
+  const typed = truncateSpaces(name);
+  const cwd = workingDirectory(typed);
+  const absolute = name.startsWith('/') ? name : lexicalPath(`${cwd}/${typed.startsWith('/') ? typed.slice(1) : typed}`);
+  const bytes = new TextEncoder().encode(absolute);
+  const kept = bytes.length > NCBI_LOG_NAME_BYTES ? new TextDecoder().decode(bytes.subarray(0, NCBI_LOG_NAME_BYTES)) : absolute;
+  const path = walkedPath(lexicalPath(kept), cwd);
+  return path === undefined ? undefined : fileKey(path, cwd);
+}
+
+/**
+ * Whether the run's file `fileName` (the name that the engine gives it: its path from the run's directory, `m.asnb`,
+ * `sub/m.asnb`, `../m.asnb`, or outside the working directory's tree its path, `/tmp/m.asnb`; `host_file_name`) is
+ * the file that the value `value` of `option` opens: `-out` as the system opens the name typed (`outputFile`), `-logfile`
+ * as NCBI reads it (`logFile`). Each name is read in the run's working directory by the engine's model (`fileKey`), so
+ * every spelling of one file is that file: `sub/../m.asnb` (with a folder `sub`), `.//m.asnb`, `sub//m.asnb` and
+ * `/proc/self/cwd/m.asnb` are `m.asnb` and `sub/m.asnb` (WW4e, 2026-11-28; before, only `./` was cut). A name through a
+ * folder that the run's directory does not have (`nosub/../m.asnb`) opens no file: its run fails with NCBI's "File is
+ * not accessible" (exit status 1), as `isStandardOutputName` takes a name that the system refuses.
+ */
+function runFileNamed(option: '-out' | '-logfile', value: string, fileName: string): boolean {
+  const opened = option === '-out' ? (value === '-' ? undefined : outputFile(value)) : logFile(value);
+  return opened !== undefined && opened === outputFile(fileName);
+}
+
+/**
  * Whether the engine opens the output file name `name` as the run's standard output, as the command line on Linux
  * does (`OutputName::Stdout` of `run_files.rs`'s `output_name`): a name whose walk ends at the process's or the
  * thread's descriptor 1 (`/dev/stdout`, `/dev/fd/1`, `/proc/self/fd/1`, `/proc/thread-self/fd/1`, or a path to one of
  * them such as `//dev/./stdout` or `/proc/self/root/dev/stdout`). A relative name never is: the working directory is
  * deeper than its `..` reach (`WORKING_TREE`). A name that the system refuses fails the run instead (review of WW4c,
- * F5; the list in `web/adapter/tests/standard_output_names.json` is checked against the engine and this function).
+ * F5; the list in `web/adapter/tests/standard_output_names.tsv` is checked against the engine and this function).
  */
 export function isStandardOutputName(name: string): boolean {
   const parts = name.split('/');
   if (['', '.', '..'].includes(parts[parts.length - 1]!)) return false;
-  const cwd = '/\0'.repeat(parts.filter((part) => part === '..').length + 1);
-  const path = walkedPath(name, cwd);
+  const path = walkedPath(name, workingDirectory(name));
   return path === `${PROC_SELF}/fd/1` || path === `${PROC_THREAD}/fd/1`;
 }
 
-/** Identifies which option(s) (`-out`, `-logfile`) named an output file produced by a tool run. */
+/** Identifies which option(s) (`-out`, `-logfile`) named an output file produced by a tool run (`runFileNamed`). */
 export function toolFileOptionLabel(argv: readonly string[], fileName: string): string | undefined {
-  const target = normalizeRelName(fileName);
+  const out = toolOptionValue(argv, '-out');
   const log = toolOptionValue(argv, '-logfile');
-  const matchesOut = namedOutPath(argv) === target;
-  const matchesLog = log !== undefined && normalizeRelName(log) === target;
+  const matchesOut = out !== undefined && runFileNamed('-out', out, fileName);
+  const matchesLog = log !== undefined && runFileNamed('-logfile', log, fileName);
   if (matchesOut && matchesLog) return '-out, -logfile';
   if (matchesOut) return '-out';
   if (matchesLog) return '-logfile';
@@ -422,7 +516,8 @@ export function toolFileOptionLabel(argv: readonly string[], fileName: string): 
 /** Whether `fileName` is the counts output file of WindowMasker `-mk_counts` or `-convert` (eligible for "Use in BLASTN" / "Mask with these counts"). */
 export function isCountsOutputFile(stage: ToolStage, argv: readonly string[], fileName: string, tool: ToolId = 'windowmasker'): boolean {
   if (tool !== 'windowmasker' || (stage !== 'mk_counts' && stage !== 'convert')) return false;
-  return namedOutPath(argv) === normalizeRelName(fileName);
+  const out = toolOptionValue(argv, '-out');
+  return out !== undefined && runFileNamed('-out', out, fileName);
 }
 
 /**
@@ -452,8 +547,9 @@ export function maskOutfmtDefault(tool: ToolId, stage: ToolStage, description: T
 
 /**
  * The name under which an output of a tool run goes to makeblastdb's `-mask_data` ("Use as -mask_data in makeblastdb"),
- * or undefined for an output that is not mask data: the `-out` file of a masking run whose effective `-outfmt` writes
- * mask data that makeblastdb reads (`maskinfo_asn1_bin`, `maskinfo_asn1_text`; not `maskinfo_xml`, see `MASK_DATA_FORMATS`), or
+ * or undefined for an output that is not mask data: the `-out` file (`runFileNamed`: any spelling of it; under the name
+ * that the engine gives the file, `handedOverName`) of a masking run whose effective `-outfmt` writes mask data that
+ * makeblastdb reads (`maskinfo_asn1_bin`, `maskinfo_asn1_text`; not `maskinfo_xml`, see `MASK_DATA_FORMATS`), or
  * its standard output when it has no `-out` or an `-out` that the engine opens as the standard output
  * (`isStandardOutputName`: `/dev/stdout`, `/dev/fd/1`, …), named for the run (`windowmasker-run3.asnb`, `convert2blastmask-run4.asnt`). The effective `-outfmt` is the argv's
  * value, else the run's `outfmtDefault` (`maskOutfmtDefault`). The one rule for every masking tool.
@@ -475,8 +571,18 @@ export function maskDataName(
   if (given === undefined || given === '-' || isStandardOutputName(given)) {
     return entry.key === 'stdout' ? `${run.tool}-run${run.number}.${extension}` : undefined;
   }
-  const out = normalizeRelName(given);
-  return entry.key !== 'stdout' && entry.key !== 'stderr' && normalizeRelName(entry.name) === out ? entry.name : undefined;
+  return entry.key !== 'stdout' && entry.key !== 'stderr' && runFileNamed('-out', given, entry.name) ? handedOverName(entry.name) : undefined;
+}
+
+/**
+ * The name in another run's directory of a run's file that is handed over to it (the name that the engine gave the file,
+ * `runFileNamed`): as makeblastdb's `-mask_data` (`maskDataName`), WindowMasker's `-ustat` or `-convert` input ("Mask with
+ * these counts") or BLASTN's `-window_masker_db` ("Use in BLASTN"). The file's path where it is a file of its run's
+ * directory (`m.asnb`, `sub/m.asnb`), else its name alone (`../m.asnb` and `/tmp/m.asnb` are `m.asnb`), as no run
+ * directory holds a path above it or from the root.
+ */
+export function handedOverName(name: string): string {
+  return name.startsWith('/') || name.split('/').includes('..') ? name.slice(name.lastIndexOf('/') + 1) : name;
 }
 
 /**

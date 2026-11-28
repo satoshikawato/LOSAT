@@ -13,7 +13,7 @@ import { test } from './support/test';
 import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { openSearch, paste, program, submit, waitStatus } from './support/search';
+import { described, openSearch, paste, program, submit, waitStatus } from './support/search';
 
 const BF_DIR = join(REPOSITORY, 'LOSAT/tests/blast_formatter');
 const SCREENSHOT_DIR = process.env['LOSAT_E2E_SCREENSHOT_DIR'];
@@ -63,7 +63,7 @@ async function openFormatArchive(page: Page): Promise<void> {
   await openSearch(page);
   await clickBfTab(page);
   await expectBfPanelVisible(page);
-  await expect(page.getByTestId('bf-panel')).toHaveAttribute('data-describe', 'ready');
+  await described(page, 'bf-panel', 'ready');
 }
 
 /** Runs the Format Archive form as run `run` of the session, and waits until it exits 0. */

@@ -74,10 +74,10 @@ pub(crate) fn run_in(
     crate::ncbi_app::run_in(&TOOL, words, files, (input, out, err), work::run)
 }
 
-/// The checks of a convert2blastmask run before it opens a file (LOSAT Web's validation of the words,
-/// `web_adapter::check_convert2blastmask`; line NP WW4c): `run_in` with the body `check`. The standard input
-/// is empty; the exit status, with the standard error on `err` and the file of `-logfile` to
-/// `files`.
+/// The checks of a convert2blastmask run up to its opening of `-out` (LOSAT Web's validation of the
+/// words, `web_adapter::check_convert2blastmask`; line NP WW4c, WW4f): `run_in` with the body
+/// `work::check`. The standard input is empty; the exit status, with the standard error on `err`
+/// and the file of `-logfile` to `files`.
 pub(crate) fn check_in(
     words: &[OsString],
     files: &crate::report::run_files::RunFiles,
@@ -89,27 +89,8 @@ pub(crate) fn check_in(
         words,
         files,
         (&mut std::io::empty(), out, err),
-        check,
+        work::check,
     )
-}
-
-/// `Run` up to `-out` (LOSAT Web's check of the words, `check_in`): nothing fails after the
-/// arguments until the run's first steps, `-in` opened and its reader made (`work::reaches_out`).
-/// When they fail, the run ends there with NCBI's error, which the check leaves to the run
-/// (D-WW3-10); when they pass, the run opens `-out`, and an `-out` that LOSAT Web refuses is
-/// refused here as the run refuses it (`seqmasks_io::run::check_output`; review of WW4c, F1).
-fn check(
-    args: &crate::ncbi_app::args::Args,
-    _settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
-    stdin: &mut crate::ncbi_app::files::Cin<'_>,
-    _out: &mut dyn Write,
-    diag: &mut crate::ncbi_app::Diag,
-) -> i32 {
-    if work::reaches_out(args, stdin) {
-        crate::seqmasks_io::run::check_output(args, diag, PROGRAM)
-    } else {
-        0
-    }
 }
 
 // No NCBI counterpart: LOSAT Web reads `-logfile` against the input names the run opens for

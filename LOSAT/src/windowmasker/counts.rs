@@ -33,7 +33,7 @@ use super::work::{
 };
 
 /// Where the counts go (`CSeqMaskerOstat`'s stream).
-enum Sink<'o> {
+pub(super) enum Sink<'o> {
     /// NCBI's stream: the standard output (`-out -`) or a file opened by name
     /// (`OpenFiles::create`); after a failed write the rest is lost, as NCBI's `ofstream` loses it
     /// (`OutputFile`).
@@ -41,6 +41,14 @@ enum Sink<'o> {
     /// A name that did not open: NCBI's writer writes to its failed `ofstream`, which loses
     /// everything without a message.
     Lost,
+}
+
+/// The output of the counts of `args` (`-mk_counts`, `-convert`): `open_sink` of `-out` in the
+/// format of `-sformat` and `-smem`, which LOSAT Web's check of `-mk_counts` without an id list
+/// takes too (`app::check`, where `-out` is the run's first file; line NP WW4f, 2026-11-28).
+pub(super) fn counts_sink<'o>(args: &Args, stdout: &'o mut dyn Write) -> Result<Sink<'o>, Failure> {
+    let output = args.os_value("out").expect("-out has a default");
+    open_sink(output, counts_format(args), stdout, args.files())
 }
 
 /// The output of a counts writer of `format` made with `-out` `name`
@@ -341,7 +349,7 @@ fn make_counts(
     let database = infmt == "blastdb";
     let output = args.os_value("out").expect("-out has a default");
     let format = counts_format(args);
-    let mut sink = open_sink(output, format, stdout, args.files())?;
+    let mut sink = counts_sink(args, stdout)?;
     let meta = args.bytes("meta").unwrap_or_default();
     let mut writer = CountsWriter::new(format, &meta);
     let mut source = GenomeInput {
@@ -439,7 +447,6 @@ pub(super) fn check_convert(args: &Args) -> Result<(), Failure> {
 fn convert_file(args: &Args, stdout: &mut dyn Write, diag: &mut Diag) -> Result<i32, Failure> {
     check_convert(args)?;
     let input = args.os_value("in").expect("-in has a default");
-    let output = args.os_value("out").expect("-out has a default");
     diag.post("reading counts...");
     let file = format!("-in {}", input.to_string_lossy());
     let istat = open_counts(
@@ -456,7 +463,7 @@ fn convert_file(args: &Args, stdout: &mut dyn Write, diag: &mut Diag) -> Result<
     let metadata = if meta.is_empty() { istat.note() } else { &meta };
     let format = counts_format(args);
     let mut writer = CountsWriter::new(format, metadata);
-    let mut sink = open_sink(output, format, stdout, args.files())?;
+    let mut sink = counts_sink(args, stdout)?;
     // The messages come after NCBI's writes of the output so far (the binary format's extra
     // word); a closed pipe ends the run at the first, as SIGPIPE ends NCBI's.
     let mut closed = false;

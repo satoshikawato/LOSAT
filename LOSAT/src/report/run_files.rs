@@ -655,22 +655,6 @@ impl OpenFiles {
         }
     }
 
-    /// LOSAT Web's refusal reason for a tool's `-out` `name` (without opening or creating the
-    /// file, for the checks of `validate` where they know that the run reaches `-out`:
-    /// `windowmasker::app::check`, `seqmasks_io::run::check_output`): `Some(reason)` when `self`
-    /// is a `Receiver` and `create` would refuse `name` (`receiver_output_name` resolves it to
-    /// `OutputName::Existing`, the case-2 refusal, or to `OutputName::StandardError` or
-    /// `OutputName::Special`, the standard error, a device or a file of procfs; line NP WW4c,
-    /// 2026-11-28), with `create`'s reason; else `None`. Always `None` on `Disk`.
-    pub(crate) fn refused_output(&self, name: &OsStr) -> Option<String> {
-        let table = self.table.as_ref()?;
-        match receiver_output_name(table.receiver.as_ref(), name.as_encoded_bytes()) {
-            OutputName::Existing => Some(existing_output_refusal(name)),
-            OutputName::StandardError | OutputName::Special => Some(special_output_refusal(name)),
-            _ => None,
-        }
-    }
-
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201 (cited at
     // `writedb::makeblastdb::run_with`)
     /// The file of the `-logfile` value `name` that a tool opens as an output to append its log to,
@@ -689,9 +673,8 @@ impl OpenFiles {
     /// device, a file of procfs and a file of the run's directory where the run writes none
     /// (`log_output_refusal`).
     pub(crate) fn log_output(&self, name: &OsStr) -> Result<LogOutput, Unopened> {
-        let bytes = name.as_encoded_bytes();
         let Some(table) = &self.table else {
-            if bytes.is_empty() {
+            if name.is_empty() {
                 return Err(Unopened);
             }
             return std::fs::OpenOptions::new()
@@ -701,46 +684,102 @@ impl OpenFiles {
                 .map(|file| LogOutput::File(OpenedFile::Disk(file)))
                 .map_err(|_| Unopened);
         };
-        let receiver = table.receiver.as_ref();
-        let here = |key: &[u8]| {
-            receiver
-                .writes_working_directory()
-                .then(|| run_directory_path(key))
-                .flatten()
-        };
-        let in_run_directory = |path: Vec<u8>| {
-            append_in_run_directory(&path)
+        Ok(match log_place(table.receiver.as_ref(), name)? {
+            LogPlace::RunDirectory(path) => append_in_run_directory(&path)
                 .map(|file| LogOutput::File(OpenedFile::Disk(file)))
-                .ok_or(Unopened)
-        };
-        let named = receiver_output_name(receiver, bytes);
-        if let Some(reason) = log_output_refusal(name, &named) {
-            return Ok(LogOutput::Refused(reason));
-        }
-        match named {
-            OutputName::Unopened => Err(Unopened),
-            OutputName::File {
+                .ok_or(Unopened)?,
+            LogPlace::Shared {
                 name: host_name,
                 key,
-            } => match here(&key) {
-                Some(path) => in_run_directory(path),
-                None => Ok(LogOutput::File(OpenedFile::Shared(table.open(
-                    &host_name,
-                    key,
-                    Opening::Append,
-                )))),
-            },
-            OutputName::Existing => match output_key(bytes).as_deref().and_then(here) {
-                Some(path) => in_run_directory(path),
-                None => Ok(LogOutput::Refused(existing_log_refusal(name))),
-            },
-            OutputName::Stdout => Ok(LogOutput::Stdout),
-            OutputName::StandardError => Ok(LogOutput::Stderr),
-            OutputName::Discard => Ok(LogOutput::File(OpenedFile::Discard)),
-            OutputName::Full => Ok(LogOutput::File(OpenedFile::Full)),
-            OutputName::Special => unreachable!("refused above (`log_output_refusal`)"),
-        }
+            } => LogOutput::File(OpenedFile::Shared(table.open(
+                &host_name,
+                key,
+                Opening::Append,
+            ))),
+            LogPlace::Stdout => LogOutput::Stdout,
+            LogPlace::Stderr => LogOutput::Stderr,
+            LogPlace::Discard => LogOutput::File(OpenedFile::Discard),
+            LogPlace::Full => LogOutput::File(OpenedFile::Full),
+            LogPlace::Refused(reason) => LogOutput::Refused(reason),
+        })
     }
+
+    // No NCBI counterpart: LOSAT Web's check of makeblastdb's words (line NP WW4f, 2026-11-28).
+    /// What `log_output` of `name` gives, without opening anything (LOSAT Web's check of
+    /// makeblastdb, `writedb::makeblastdb::check_in`): `Err` where the command line cannot open it
+    /// (`log_place`, the model of the names), `Ok(Some(reason))` with LOSAT's refusal, `Ok(None)`
+    /// where it opens. A file of a working directory that the run writes is taken as opening where
+    /// the model finds its folder (the system's other refusals, such as a folder that the user
+    /// cannot write, are the run's: LOSAT Web's working directory has none). Always `Ok(None)` on
+    /// `Disk`, where only the opening knows.
+    pub(crate) fn log_output_check(&self, name: &OsStr) -> Result<Option<String>, Unopened> {
+        let Some(table) = &self.table else {
+            return Ok(None);
+        };
+        Ok(match log_place(table.receiver.as_ref(), name)? {
+            LogPlace::Refused(reason) => Some(reason),
+            _ => None,
+        })
+    }
+}
+
+/// Where the opening of the `-logfile` value `name` as an output that a tool appends its log to
+/// (`OpenFiles::log_output`) writes, for `receiver`, before it opens anything: the name as the
+/// command line of a user on Linux opens it in the run's working directory (`output_name`); `Err`
+/// where that command line cannot open it.
+fn log_place(receiver: &dyn FileReceiver, name: &OsStr) -> Result<LogPlace, Unopened> {
+    let bytes = name.as_encoded_bytes();
+    let here = |key: &[u8]| {
+        receiver
+            .writes_working_directory()
+            .then(|| run_directory_path(key))
+            .flatten()
+    };
+    let named = receiver_output_name(receiver, bytes);
+    if let Some(reason) = log_output_refusal(name, &named) {
+        return Ok(LogPlace::Refused(reason));
+    }
+    Ok(match named {
+        OutputName::Unopened => return Err(Unopened),
+        OutputName::File {
+            name: host_name,
+            key,
+        } => match here(&key) {
+            Some(path) => LogPlace::RunDirectory(path),
+            None => LogPlace::Shared {
+                name: host_name,
+                key,
+            },
+        },
+        OutputName::Existing => match output_key(bytes).as_deref().and_then(here) {
+            Some(path) => LogPlace::RunDirectory(path),
+            None => LogPlace::Refused(existing_log_refusal(name)),
+        },
+        OutputName::Stdout => LogPlace::Stdout,
+        OutputName::StandardError => LogPlace::Stderr,
+        OutputName::Discard => LogPlace::Discard,
+        OutputName::Full => LogPlace::Full,
+        OutputName::Special => unreachable!("refused above (`log_output_refusal`)"),
+    })
+}
+
+/// Where a log's opening writes (`log_place`).
+enum LogPlace {
+    /// The file of this path of a working directory that the run writes, through the file system
+    /// (`append_in_run_directory`).
+    RunDirectory(Vec<u8>),
+    /// The run's file of this host name and path (`FileTable::open`, appending).
+    Shared { name: Vec<u8>, key: Vec<u8> },
+    /// The run's standard output.
+    Stdout,
+    /// The run's standard error.
+    Stderr,
+    /// Lost writes (the null device).
+    Discard,
+    /// Failing writes (`/dev/full`).
+    Full,
+    /// LOSAT's refusal of the name, the reason.
+    Refused(String),
 }
 
 impl RunFiles {

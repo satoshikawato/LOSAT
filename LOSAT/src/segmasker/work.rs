@@ -110,7 +110,28 @@ pub(super) fn run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    match run_masks(args, settings, stdin, out, diag) {
+    report(run_masks(args, settings, stdin, out, diag), diag)
+}
+
+// No NCBI counterpart: LOSAT Web's check of the words (line NP WW4c; line NP WW4f, 2026-11-28).
+/// `Run` up to where it reads the input past its start (LOSAT Web's check, `super::check_in`): its
+/// first steps (`opened`: `-in` opened and its reader made, then `-out` opened), whose failure is
+/// the check's, as `run` reports it; 0 where they pass, as the run then goes on to read the input.
+/// The check's files are LOSAT Web's check's (`web_adapter::check_tool_in`), which make no file.
+pub(super) fn check(
+    args: &Args,
+    settings: &ApplicationSettings,
+    stdin: &mut Cin<'_>,
+    out: &mut dyn Write,
+    diag: &mut Diag,
+) -> i32 {
+    report(opened(args, settings, stdin, out).map(drop), diag)
+}
+
+/// The exit status of `run_masks`'s `result`, with what `Run`'s `catch` and the application write
+/// for its failure (`run`).
+fn report(result: Result<(), Failure>, diag: &mut Diag) -> i32 {
+    match result {
         Ok(()) => 0,
         Err(Failure::Caught(exception)) => {
             diag.cerr(&[exception.what().as_slice(), b"\n"].concat());
@@ -144,15 +165,9 @@ fn run_masks(
     let outfmt = value("outfmt");
     let parse_seqids = args.flag("parse_seqids");
     let masker = seg_masker(window, locut, hicut);
-    let mut source = source(args, settings, stdin)?;
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
-    let mut out = args.output_file("out", out).map_err(file_failure)?;
-    // LOSAT Web's refusal of an output that it does not write (`OpenFiles::create`), as soon as
-    // `-out` is opened (windowmasker's place and words).
-    if let Some(reason) = out.refusal() {
-        return Err(Failure::Refused(unsupported(reason)));
-    }
+    let (mut source, mut out) = opened(args, settings, stdin, out)?;
     let mut writer = writer(outfmt, window, locut, hicut);
     let result = (|| {
         while let Some(record) = source.next_record()? {
@@ -253,33 +268,32 @@ enum Source<'a> {
     Database(Box<MaskBdbReader>),
 }
 
-// No NCBI counterpart: `run_masks` up to `-out`, which LOSAT Web's check takes too (review of
-// WW4c, F1, 2026-11-28).
-/// The first steps of `run_masks`: `-in` opened and its reader made (`reader`), before `-out`.
-fn source<'a>(
+// NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:152-196
+/// The first steps of `run_masks`, which LOSAT Web's check takes too (`check`; review of WW4c, F1;
+/// line NP WW4f): `-in` opened and its reader made (`reader`), then `-out` opened (`AsOutputFile`,
+/// whose `CArgException` `Run` catches: `file_failure`), and LOSAT Web's refusal of an output that
+/// it does not write (`OpenFiles::create`), as soon as `-out` is opened (windowmasker's place and
+/// words).
+fn opened<'a, 'o>(
     args: &Args,
     settings: &ApplicationSettings,
     stdin: &'a mut Cin<'_>,
-) -> Result<Source<'a>, Failure> {
+    out: &'o mut dyn Write,
+) -> Result<(Source<'a>, crate::ncbi_app::files::OutputFile<'o>), Failure> {
     let value = |name| args.value(name).expect("a key with a default");
-    reader(
+    let source = reader(
         value("infmt"),
         args.os_value("in").expect("-in has a default"),
         args.flag("parse_seqids"),
         prints_title(value("outfmt")),
         settings.database(),
         stdin,
-    )
-}
-
-/// Whether the run with `args` reaches `-out`: its first steps (`source`) pass (LOSAT Web's check,
-/// `super::check`, refuses `-out` only then; review of WW4c, F1).
-pub(super) fn reaches_out(
-    args: &Args,
-    settings: &ApplicationSettings,
-    stdin: &mut Cin<'_>,
-) -> bool {
-    source(args, settings, stdin).is_ok()
+    )?;
+    let out = args.output_file("out", out).map_err(file_failure)?;
+    if let Some(reason) = out.refusal() {
+        return Err(Failure::Refused(unsupported(reason)));
+    }
+    Ok((source, out))
 }
 
 /// `x_GetReader`: `CMaskFastaReader` of `-in` (a protein reader), or `CMaskBDBReader` of the

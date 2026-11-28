@@ -720,53 +720,30 @@ fn verify_input_files(
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1146-1201
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1273-1276
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1294-1296
-// The title defaults to the whole value of `-in`, several names included. After a
-// successful build makeblastdb opens the new database with its reader and writes
-// the JSON metadata file (`open_new_database`); an error of that open ends
-// makeblastdb with "BLAST Database error" and exit status 2 although the database
-// was written.
-//
-// For `-input_type blastdb` the output must be named apart from `-in` (the same string is an
-// error even when `-out` is given), the title defaults to the title of the one input database,
-// which is opened for it before the log is opened (several names need `-title`), and the
-// indices are always full (`x_ShouldParseSeqIds`: every input but FASTA has its Seq-ids
-// parsed).
-/// `CMakeBlastDBApp::x_BuildDatabase`. The log goes to `out` (makeblastdb's
-/// standard output, or the file of `-logfile`), warnings and diagnostics to
-/// `err`; `stdin` is read when `-in` is `-`. `now` is the local time for the
-/// database's date (`None` where the platform has no clock), `platform` the
-/// platform whose makeblastdb the files follow ([`Platform::host`] for a build).
-///
-/// `logfile_error` is the error of a `-logfile` that could not be opened, raised where
-/// makeblastdb opens the file. `end_messages` gets the messages of `~CBuildDatabase` (no
-/// sequence matched a mask, `-taxid_map` matched no sequence), which makeblastdb posts after
-/// everything else, the error of the build included.
-#[allow(clippy::too_many_arguments)]
-fn build_database_with_log(
+/// The reader of `-input_type`'s ASN.1 formats; `None` for the others.
+fn asn_format(args: &MakedbArgs) -> Option<AsnFormat> {
+    match args.input_type.as_str() {
+        "asn1_txt" => Some(AsnFormat::Text),
+        "asn1_bin" => Some(AsnFormat::Binary),
+        _ => None,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1146-1197
+/// The first steps of `x_BuildDatabase` (`build_database_with_log`), before it opens the log of
+/// `-logfile`: the database version, the checks of the database's name and the title (for
+/// `-input_type blastdb` without `-title`, the title of the input database, which it opens);
+/// `(version, dbname, title)`. LOSAT Web's check takes them too (`check_in`; line NP WW4f,
+/// 2026-11-28).
+fn database_names(
     args: &MakedbArgs,
-    env: MakedbEnv,
     settings: &ApplicationSettings,
-    now: Option<&LocalTime>,
-    platform: Platform,
-    stdin: &mut dyn Read,
-    out: &mut dyn Write,
-    cout: Option<&mut dyn Write>,
-    err: &mut dyn Write,
-    logfile_error: Option<MakedbError>,
-    end_messages: &mut Vec<Vec<u8>>,
-) -> Result<(), MakedbError> {
+) -> Result<(DbVersion, Vec<u8>, Vec<u8>), MakedbError> {
     let registry_blastdb = registry_blastdb(settings);
     let version = db_version(args)?;
     let is_protein = args.dbtype == "prot";
     let blastdb_input = args.input_type == "blastdb";
-    let asn_format = match args.input_type.as_str() {
-        "asn1_txt" => Some(AsnFormat::Text),
-        "asn1_bin" => Some(AsnFormat::Binary),
-        _ => None,
-    };
+    let asn_format = asn_format(args);
 
     let input_bytes = crate::utils::os_bytes::os_str_bytes(&args.input);
     let out_bytes = args
@@ -810,6 +787,53 @@ fn build_database_with_log(
     if title == b"-" {
         return Err(options_error("Please provide a title using -title"));
     }
+    Ok((version, dbname.to_vec(), title))
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1146-1201
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1273-1276
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1294-1296
+// The title defaults to the whole value of `-in`, several names included. After a
+// successful build makeblastdb opens the new database with its reader and writes
+// the JSON metadata file (`open_new_database`); an error of that open ends
+// makeblastdb with "BLAST Database error" and exit status 2 although the database
+// was written.
+//
+// For `-input_type blastdb` the output must be named apart from `-in` (the same string is an
+// error even when `-out` is given), the title defaults to the title of the one input database,
+// which is opened for it before the log is opened (several names need `-title`), and the
+// indices are always full (`x_ShouldParseSeqIds`: every input but FASTA has its Seq-ids
+// parsed).
+/// `CMakeBlastDBApp::x_BuildDatabase`. The log goes to `out` (makeblastdb's
+/// standard output, or the file of `-logfile`), warnings and diagnostics to
+/// `err`; `stdin` is read when `-in` is `-`. `now` is the local time for the
+/// database's date (`None` where the platform has no clock), `platform` the
+/// platform whose makeblastdb the files follow ([`Platform::host`] for a build).
+///
+/// `logfile_error` is the error of a `-logfile` that could not be opened, raised where
+/// makeblastdb opens the file. `end_messages` gets the messages of `~CBuildDatabase` (no
+/// sequence matched a mask, `-taxid_map` matched no sequence), which makeblastdb posts after
+/// everything else, the error of the build included.
+#[allow(clippy::too_many_arguments)]
+fn build_database_with_log(
+    args: &MakedbArgs,
+    env: MakedbEnv,
+    settings: &ApplicationSettings,
+    now: Option<&LocalTime>,
+    platform: Platform,
+    stdin: &mut dyn Read,
+    out: &mut dyn Write,
+    cout: Option<&mut dyn Write>,
+    err: &mut dyn Write,
+    logfile_error: Option<MakedbError>,
+    end_messages: &mut Vec<Vec<u8>>,
+) -> Result<(), MakedbError> {
+    let registry_blastdb = registry_blastdb(settings);
+    let is_protein = args.dbtype == "prot";
+    let blastdb_input = args.input_type == "blastdb";
+    let asn_format = asn_format(args);
+    let input_bytes = crate::utils::os_bytes::os_str_bytes(&args.input);
+    let (version, dbname, title) = database_names(args, settings)?;
     if let Some(error) = logfile_error {
         return Err(error);
     }
@@ -829,7 +853,7 @@ fn build_database_with_log(
         ));
     };
     let mut db = BuildDatabase::new(
-        dbname,
+        &dbname,
         &title,
         is_protein,
         out,
@@ -1672,12 +1696,7 @@ pub(crate) fn run_in(
         Ok(LogOutput::Stdout) => Ok(Box::new(Shared(&out)) as Box<dyn Write>),
         Ok(LogOutput::Stderr) => Ok(Box::new(Shared(&err)) as Box<dyn Write>),
         Ok(LogOutput::Refused(reason)) => Err(MakedbError::Unsupported(reason)),
-        Err(Unopened) => {
-            let mut msg = b"Argument \"logfile\". File is not accessible:  `".to_vec();
-            msg.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(name));
-            msg.push(b'\'');
-            Err(MakedbError::Argument(msg))
-        }
+        Err(Unopened) => Err(log_unopened(name)),
     };
     match opened {
         Ok(file) => {
@@ -1718,6 +1737,56 @@ pub(crate) fn run_in(
             finish(result, &end_messages, &mut diag)
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-620
+/// NCBI's `CArgException` of the log of `-logfile` `name` that does not open (`AsOutputFile`).
+fn log_unopened(name: &std::ffi::OsStr) -> MakedbError {
+    let mut msg = b"Argument \"logfile\". File is not accessible:  `".to_vec();
+    msg.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(name));
+    msg.push(b'\'');
+    MakedbError::Argument(msg)
+}
+
+// No NCBI counterpart: LOSAT Web's check of makeblastdb's words (line NP WW4f, 2026-11-28).
+/// The steps of `run_in` up to the log's opening, which opens nothing (LOSAT Web's check,
+/// `api::tools::makeblastdb_call` with `MakeblastdbCall::WebCheck`): the log's opening of
+/// `-logfile` as `files` resolves it (`OpenFiles::log_output_check`: NCBI's `File is not
+/// accessible` where it does not open, LOSAT Web's refusal), raised after the first steps of the
+/// build (`database_names`), as `build_database_with_log` raises it. The exit status, with the
+/// error written as `run_in` writes it: to `err`, or with `-logfile` where the diagnostics go
+/// (`target`, the check's target of the start, which keeps the file of `-logfile` in memory).
+pub(crate) fn check_in(
+    args: &MakedbArgs,
+    settings: &ApplicationSettings,
+    files: &OpenFiles,
+    target: &DiagTarget,
+    err: &mut dyn Write,
+) -> i32 {
+    let name = args
+        .logfile
+        .as_deref()
+        .filter(|name| crate::utils::os_bytes::os_str_bytes(name).as_ref() != b"-");
+    let logfile_error = name.and_then(|name| match files.log_output_check(name) {
+        Ok(None) => None,
+        Ok(Some(reason)) => Some(MakedbError::Unsupported(reason)),
+        Err(Unopened) => Some(log_unopened(name)),
+    });
+    let result = database_names(args, settings).and_then(|_| logfile_error.map_or(Ok(()), Err));
+    if name.is_none() {
+        return finish(result, &[], err);
+    }
+    // One lifetime for both streams (`LogDiagnostics`), as in `run_in`.
+    let mut sink = std::io::sink();
+    let (out, err): (&mut dyn Write, &mut dyn Write) = (&mut sink, &mut *err);
+    let out = RefCell::new(out);
+    let err = RefCell::new(err);
+    let mut diag = LogDiagnostics {
+        target: Some(target),
+        out: &out,
+        err: &err,
+    };
+    finish(result, &[], &mut diag)
 }
 
 /// One of the run's standard streams, which makeblastdb's diagnostics, its log and its writer

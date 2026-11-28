@@ -220,7 +220,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
   }
 
   /**
-   * Checks the words of a tool (`windowmasker`) as the command line does before the tool opens a file (`ToolEngine.validateTool`),
+   * Checks the words of a tool (`windowmasker`) as the command line does before the tool reads the contents of a file (`ToolEngine.validateTool`),
    * on the Engine worker's loaded instance (the serial one when none is: it disturbs no runtime that the searches use), with
    * `options.directory` opened there as for `runTool` (the check reads the run's registry files). It takes its turn in the
    * worker like a run: behind the run in progress, if there is one. It makes the engine no busier: a run may start while it is

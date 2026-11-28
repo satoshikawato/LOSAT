@@ -108,13 +108,12 @@ pub(crate) fn run_in(
     crate::ncbi_app::run_in(&TOOL, words, files, (input, out, err), app::run)
 }
 
-/// The checks of a windowmasker run before it reads its input or opens a file (LOSAT Web's
+/// The checks of a windowmasker run up to where it reads the contents of a file (LOSAT Web's
 /// validation of the words, `web_adapter::check_windowmasker`; line NP WW3a, D-WW3-7, 2026-11-22,
-/// and D-WW3-10): `run_in` with the body `app::check`, which ends where `Run` would read or open
-/// its first file. The standard input is
-/// empty and the standard output dropped (a help or a version is printed in place of a run, which
-/// is valid); the exit status, with the standard error on `err` and the file of `-logfile` to
-/// `files`.
+/// D-WW3-10; line NP WW4f): `run_in` with the body `app::check`, which takes `Run`'s steps up to
+/// its opening of `-out` where nothing is read before it. The standard input is empty and the
+/// standard output dropped (a help or a version is printed in place of a run, which is valid); the
+/// exit status, with the standard error on `err` and the file of `-logfile` to `files`.
 pub(crate) fn check_in(
     words: &[OsString],
     files: &crate::report::run_files::RunFiles,

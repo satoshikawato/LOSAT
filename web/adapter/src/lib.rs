@@ -186,8 +186,8 @@ pub unsafe extern "C" fn losat_web2_start(argv_ptr: *const u8, argv_len: usize) 
 pub unsafe extern "C" fn losat_web2_validate(argv_ptr: *const u8, argv_len: usize) -> i32 {
     guarded(|| {
         let argv = words(text(argv_ptr, argv_len, "argv")?);
-        // A tool's argv: the command line's checks before the tool opens a file, no *validation*
-        // (line NP WW3a, D-WW3-7).
+        // A tool's argv: the command line's checks before the tool reads the contents of a file,
+        // no *validation* (line NP WW3a, D-WW3-7; line NP WW4f).
         if argv.first().is_some_and(|name| tool::TOOLS.contains(name)) {
             tool::validate(&argv)?;
             return Ok(0);

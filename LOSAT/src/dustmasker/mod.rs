@@ -74,10 +74,10 @@ pub(crate) fn run_in(
     crate::ncbi_app::run_in(&TOOL, words, files, (input, out, err), app::run)
 }
 
-/// The checks of a dustmasker run before it opens a file (LOSAT Web's validation of the words,
-/// `web_adapter::check_dustmasker`; line NP WW4c): `run_in` with the body `check`. The standard input
-/// is empty; the exit status, with the standard error on `err` and the file of `-logfile` to
-/// `files`.
+/// The checks of a dustmasker run up to its opening of `-out`, its first file (LOSAT Web's
+/// validation of the words, `web_adapter::check_dustmasker`; line NP WW4c, WW4f): `run_in` with the
+/// body `app::check`. The standard input is empty; the exit status, with the standard error on
+/// `err` and the file of `-logfile` to `files`.
 pub(crate) fn check_in(
     words: &[OsString],
     files: &crate::report::run_files::RunFiles,
@@ -89,19 +89,8 @@ pub(crate) fn check_in(
         words,
         files,
         (&mut std::io::empty(), out, err),
-        check,
+        app::check,
     )
-}
-
-/// `Run` up to where it opens its first file (`seqmasks_io::run::check_output`).
-fn check(
-    args: &crate::ncbi_app::args::Args,
-    _settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
-    _stdin: &mut crate::ncbi_app::files::Cin<'_>,
-    _out: &mut dyn Write,
-    diag: &mut crate::ncbi_app::Diag,
-) -> i32 {
-    crate::seqmasks_io::run::check_output(args, diag, PROGRAM)
 }
 
 // No NCBI counterpart: LOSAT Web reads `-logfile` and `-out` against the input names the run

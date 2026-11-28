@@ -545,8 +545,11 @@ fn makeblastdb_started(
     if let Err(reason) = checked {
         return (1, Err(refused(recorded, reason.as_bytes())));
     }
+    // LOSAT Web's check goes on with the build's steps up to the log's opening of `-logfile`, which
+    // it resolves without opening it (`makeblastdb::check_in`; line NP WW4f, 2026-11-28).
     if call == MakeblastdbCall::WebCheck {
-        return (0, Ok(()));
+        let status = makeblastdb::check_in(&args, &settings, files, &opened.target, &mut recorded);
+        return (status, outcome(status, recorded.bytes));
     }
     let now = LocalTime::now();
     let status = makeblastdb::run_in(

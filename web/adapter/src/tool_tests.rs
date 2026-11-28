@@ -438,10 +438,10 @@ fn a_tool_run_prints_and_fails_as_the_command_line() {
 }
 
 /// The validation of a tool's argv (D-WW3-7, D-WW3-10): the command line's checks before the tool
-/// reads its input or opens a file pass a good argv (also one of a missing input, which the run
-/// reads, and one whose error comes after a file: the masking's `-ids` with `-exclude_ids`, after
-/// `-in`; `-infmt seqids` after the id list), and refuse the others with the command line's error:
-/// its standard error, without the last line end; nothing emitted.
+/// reads the contents of a file pass a good argv (also one of a missing input, which the run
+/// reads after `-out`, and one whose error comes after a file: the masking's `-ids` with
+/// `-exclude_ids`, after `-in` and `-out`; `-infmt seqids` after the id list), and refuse the others
+/// with the command line's error: its standard error, without the last line end; nothing emitted.
 #[test]
 fn a_tool_s_argv_is_checked_as_the_command_line_checks_it() {
     emitted();
@@ -449,12 +449,13 @@ fn a_tool_s_argv_is_checked_as_the_command_line_checks_it() {
         validate(&["windowmasker", "-mk_counts", "-in", "missing.fa"]),
         Ok(())
     );
+    let fasta = fixture("winmask/fasta/dm2L_3k.fa");
     for passed in [
         &[
             "-ustat",
             "c",
             "-in",
-            "missing.fa",
+            fasta.as_str(),
             "-ids",
             "a",
             "-exclude_ids",
@@ -708,12 +709,14 @@ fn the_masking_tools_print_and_fail_as_the_command_line() {
     }
 }
 
-/// The validation of the masking tools' argv (line NP WW4c): the command line's checks before the
-/// tool opens a file pass a good argv (also one of a missing input, which the run opens) and a help
-/// or version word, refuse NCBI's errors of the arguments with the command line's standard error
-/// (an unknown option; convert2blastmask's mandatory `-masking_algorithm`), and refuse an `-out` that
-/// is a file of the run's directory or the standard error and a `-logfile` that is the tool's input,
-/// as the run does once it reaches `-out` (an input it opens: review of WW4c, F1); nothing emitted.
+/// The validation of the masking tools' argv (line NP WW4c): the command line's checks up to the
+/// tool's opening of `-out` pass a good argv and a help or version word, refuse NCBI's errors of the
+/// arguments with the command line's standard error (an unknown option; convert2blastmask's
+/// mandatory `-masking_algorithm`), and refuse an `-out` that is a file of the run's directory or
+/// the standard error and a `-logfile` that is the tool's input, as the run does once it reaches
+/// `-out` (an input it opens: review of WW4c, F1); nothing emitted. A missing input is the run's
+/// for dustmasker, which opens it after `-out`, and the check's for the others, which open it
+/// first (line NP WW4f: `the_check_ends_as_the_run_s_first_steps_end`).
 #[test]
 fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
     emitted();
@@ -730,20 +733,25 @@ fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
         });
         let input = input.as_str();
         for passed in [
-            &["-in", "ww4c-missing.fa"][..],
+            &["-in", input][..],
             &[
                 "-in",
-                "x.fa",
+                input,
                 "-outfmt",
                 "maskinfo_asn1_bin",
                 "-out",
-                "x.asnb",
+                "ww4f-x.asnb",
             ],
-            &["-in", "x.fa", "-logfile", "run.log"],
+            &["-in", input, "-logfile", "ww4f-run.log"],
         ] {
             let words = [&[tool][..], passed, extra].concat();
             assert_eq!(validate(&words), Ok(()), "{tool} {passed:?}");
         }
+        assert_eq!(
+            validate(&[&[tool, "-in", "ww4c-missing.fa"][..], extra].concat()).is_ok(),
+            tool == "dustmasker",
+            "{tool}: a missing input"
+        );
         for word in ["-h", "-help", "-xmlhelp", "-version"] {
             assert_eq!(validate(&[tool, word]), Ok(()), "{tool} {word}");
         }
@@ -773,17 +781,20 @@ fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
             "{tool}: {error}"
         );
         // dustmasker opens -out before -in: an -out that names its missing -in is refused, as
-        // the command line would make -in empty; segmasker and convert2blastmask read -in first.
+        // the command line would make -in empty; segmasker and convert2blastmask read -in first,
+        // and end there with NCBI's error of the missing input, in the check too.
         let same = validate(&[&[tool, "-in", "m.fa", "-out", "m.fa"][..], extra].concat());
-        if tool == "dustmasker" {
-            assert!(
-                same.as_ref()
-                    .is_err_and(|error| error.contains("an output file 'm.fa'")),
-                "{tool}: {same:?}"
-            );
-        } else {
-            assert_eq!(same, Ok(()), "{tool}");
-        }
+        let refused_out = same
+            .as_ref()
+            .is_err_and(|error| error.contains("an output file 'm.fa'"));
+        let input_error = same
+            .as_ref()
+            .is_err_and(|error| error.contains("Argument \"in\". File is not accessible:  `m.fa'"));
+        assert_eq!(
+            (refused_out, input_error),
+            (tool == "dustmasker", tool != "dustmasker"),
+            "{tool}: {same:?}"
+        );
     }
     let missing = ["-in", "x.fa", "-masking_options", "o"];
     let error = validate(&[&["convert2blastmask"][..], &missing].concat()).unwrap_err();
@@ -793,12 +804,15 @@ fn the_masking_tools_argv_is_checked_as_the_command_line_checks_it() {
     assert!(emitted().is_empty());
 }
 
-/// Review of WW4c, F1: a run that opens its input before `-out` (segmasker, convert2blastmask,
-/// windowmasker's masking, blast_formatter's `-archive`) ends with NCBI's error of an input that it
-/// cannot open, before it reaches `-out`; the check takes the run's steps in its order, so it leaves
-/// such an argv to the run (D-WW3-10) instead of refusing its `-out`. dustmasker opens `-out` first
-/// and refuses it there, in the check too. Where the run reaches `-out` (an input that opens), the
-/// check refuses what the run refuses (above, and `ustat missing -out same` below).
+/// Review of WW4c, F1, and line NP WW4f: a run that opens its input before `-out` (segmasker,
+/// convert2blastmask, windowmasker's masking, blast_formatter's `-archive`) ends with NCBI's error of
+/// an input that it cannot open, before it reaches `-out`. The check takes the run's steps in its
+/// order, through the run's own functions, up to where it reads a file's contents: it ends with the
+/// run's error of the input that the masking tools open (LOSAT Web's check has their input in the
+/// run's directory), and leaves blast_formatter's archive, whose contents it does not read, to the
+/// run (D-WW3-10); neither refuses the `-out` that the run does not reach. dustmasker opens `-out`
+/// first and refuses it there, in the check too. Where the run reaches `-out` (an input that
+/// opens), the check refuses what the run refuses.
 #[test]
 fn the_check_refuses_out_only_where_the_run_reaches_it() {
     emitted();
@@ -848,7 +862,7 @@ fn the_check_refuses_out_only_where_the_run_reaches_it() {
                 1,
             ),
         ] {
-            assert_eq!(validate(&words), Ok(()), "{label} {out}: validate");
+            let checked = validate(&words);
             run(&words).unwrap();
             let calls = emitted();
             assert_eq!(
@@ -864,6 +878,12 @@ fn the_check_refuses_out_only_where_the_run_reaches_it() {
                 diag.contains("f1-missing") && !diag.contains("an output file"),
                 "{label} {out}: {diag}"
             );
+            if label == "blast_formatter" {
+                assert_eq!(checked, Ok(()), "{label} {out}: validate");
+            } else {
+                let error = diag.strip_suffix('\n').unwrap_or(&diag).to_string();
+                assert_eq!(checked, Err(error), "{label} {out}");
+            }
             assert!(frames(&calls).is_empty(), "{label} {out}: no file");
         }
         // dustmasker opens `-out` before `-in`: its refusal, in the check and the run.
@@ -900,6 +920,107 @@ fn the_check_refuses_out_only_where_the_run_reaches_it() {
         );
         assert!(frames(&calls).is_empty(), "windowmasker {out}: no file");
     }
+}
+
+/// Line NP WW4f (2026-11-28): the check ends as the run's steps up to its opening of `-out` end,
+/// with the run's standard error (without its last line end) for the run's failure. An `-out` that
+/// does not open (in a folder that the run's directory does not have, also before `..`; through a
+/// file; a name ending in `/`; a folder; `.`) is NCBI's `File is not accessible` in the four tools
+/// that open it there (dustmasker first; segmasker, convert2blastmask and windowmasker's masking
+/// after their input), and an input that the last three open before `-out` and cannot open or read
+/// (missing, a name ending in `/`, a folder, the empty name) is NCBI's error of it. Where the run
+/// passes those steps the check passes: dustmasker's input, which it opens after `-out` and its
+/// writer, and `-mk_counts`, whose counts to an `-out` that does not open are lost without an error,
+/// as NCBI's `ofstream` loses them. Before WW4f the check passed every one of these argvs.
+#[test]
+fn the_check_ends_as_the_run_s_first_steps_end() {
+    emitted();
+    let counts = fixture("winmask/counts/dm2L_u9.binary");
+    let c2b = ["-masking_algorithm", "dust", "-masking_options", "o"];
+    let wm = ["-ustat", counts.as_str()];
+    let tools = [
+        ("dustmasker", fixture("dustmasker/in/basic.fa"), &[][..]),
+        ("segmasker", fixture("segmasker/in/basic.fa"), &[][..]),
+        (
+            "convert2blastmask",
+            fixture("convert2blastmask/in/lc.fa"),
+            &c2b[..],
+        ),
+        ("windowmasker", fixture("winmask/fasta/dm2L_3k.fa"), &wm[..]),
+    ];
+    // The run of `words`: its exit status and standard error; the check's result.
+    let ends = |words: &[&str]| {
+        let checked = validate(words);
+        run(words).unwrap();
+        let calls = emitted();
+        let (code, response) = calls.last().unwrap();
+        assert_eq!(*code, STREAM_RESPONSE, "{words:?}");
+        let status = String::from_utf8_lossy(response).into_owned();
+        let diag = String::from_utf8_lossy(&joined(&calls, STREAM_DIAGNOSTICS)).into_owned();
+        (checked, status, diag, !frames(&calls).is_empty())
+    };
+    for (tool, input, extra) in &tools {
+        for out in [
+            "ww4f-nosub/m.out",
+            "ww4f-nosub/../m.out",
+            "Cargo.toml/../m.out",
+            "Cargo.toml/m.out",
+            "ww4f-m.out/",
+            "src",
+            "src/",
+            ".",
+        ] {
+            let words = [&[*tool, "-in", input.as_str(), "-out", out][..], extra].concat();
+            let (checked, status, diag, files) = ends(&words);
+            assert_eq!(
+                (status.as_str(), files),
+                ("{\"status\":1}", false),
+                "{tool} -out {out}"
+            );
+            assert!(
+                diag.contains(&format!(
+                    "Argument \"out\". File is not accessible:  `{out}'"
+                )),
+                "{tool} -out {out}: {diag}"
+            );
+            assert_eq!(
+                checked,
+                Err(diag.strip_suffix('\n').unwrap_or(&diag).to_string()),
+                "{tool} -out {out}"
+            );
+        }
+        let slashed = format!("{input}/");
+        for name in ["ww4f-missing.fa", slashed.as_str(), "src", ""] {
+            let words = [&[*tool, "-in", name, "-out", "ww4f-m.out"][..], extra].concat();
+            let (checked, status, diag, _) = ends(&words);
+            assert_ne!(status, "{\"status\":0}", "{tool} -in {name:?}");
+            if *tool == "dustmasker" {
+                assert_eq!(checked, Ok(()), "{tool} -in {name:?}");
+            } else {
+                assert_eq!(
+                    checked,
+                    Err(diag.strip_suffix('\n').unwrap_or(&diag).to_string()),
+                    "{tool} -in {name:?}"
+                );
+            }
+        }
+    }
+    let fasta = &tools[3].1;
+    let words = [
+        "windowmasker",
+        "-mk_counts",
+        "-in",
+        fasta,
+        "-unit",
+        "5",
+        "-out",
+        "ww4f-nosub/c.counts",
+    ];
+    let (checked, status, _, files) = ends(&words);
+    assert_eq!(
+        (checked, status.as_str(), files),
+        (Ok(()), "{\"status\":0}", false)
+    );
 }
 
 /// Review of WW4c, F5: the output file names of `tests/standard_output_names.tsv`, which the app's
@@ -1732,6 +1853,65 @@ fn a_makeblastdb_argv_is_checked_as_the_command_line_checks_it() {
         let _ = taken(&folder);
     }
     assert!(emitted().is_empty());
+    std::fs::remove_dir_all(&folder).unwrap();
+}
+
+/// Line NP WW4f (2026-11-28): the check of makeblastdb takes the build's steps up to the log's
+/// opening of `-logfile`, which it resolves as the run's opening does without opening it: a log
+/// that does not open (in a folder that the run's directory does not have, also before `..`;
+/// through a file; ending in `/`; a folder; `.`) is NCBI's `File is not accessible`, after the
+/// checks of the database's name (a name with a space comes first), with the run's standard error
+/// and no file made. Before WW4f the check passed them all and the run failed.
+#[test]
+fn a_makeblastdb_check_ends_where_the_run_opens_its_log() {
+    emitted();
+    let folder = folder("makeblastdb-ww4f");
+    let db = folder.join("db");
+    let db = db.to_str().unwrap();
+    let prot = fixture("seqdb/prot.faa");
+    for (log, out) in [
+        ("ww4f-nosub/mk.log", db),
+        ("ww4f-nosub/../mk.log", db),
+        ("Cargo.toml/../mk.log", db),
+        ("Cargo.toml/mk.log", db),
+        ("ww4f-mk.log/", db),
+        ("src", db),
+        (".", db),
+        ("ww4f-nosub/mk.log", "my db"),
+    ] {
+        let words = [
+            "makeblastdb",
+            "-in",
+            &prot,
+            "-dbtype",
+            "prot",
+            "-out",
+            out,
+            "-logfile",
+            log,
+        ];
+        let error = validate(&words).unwrap_err();
+        assert!(taken(&folder).is_empty(), "{log}: no file at the check");
+        run(&words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":1}".to_vec()),
+            "{log} {out}"
+        );
+        assert_eq!(
+            format!("{error}\n").into_bytes(),
+            joined(&calls, STREAM_DIAGNOSTICS),
+            "{log} {out}"
+        );
+        let first = if out == "my db" {
+            "Please provide a database name using -out".to_string()
+        } else {
+            format!("Argument \"logfile\". File is not accessible:  `{log}'")
+        };
+        assert!(error.contains(&first), "{log} {out}: {error}");
+        assert!(taken(&folder).is_empty(), "{log}: no file at the run");
+    }
     std::fs::remove_dir_all(&folder).unwrap();
 }
 

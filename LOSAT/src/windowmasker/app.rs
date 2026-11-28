@@ -49,64 +49,46 @@ pub(super) fn run(
     }
 }
 
-/// The checks of `run` before it reads its input or opens a file, as `run` makes and reports
-/// them (LOSAT Web's validation of the words, `super::check_in`; line NP WW3a, D-WW3-10,
-/// 2026-11-23): the mode (`s_DetermineAppType`); for `-mk_counts` the id lists' exclusion
-/// (`exclusive_id_lists`) and, without an id list to read, its refusal of `-infmt seqids`
-/// (`counts::check_mk_counts`); for `-convert` its exception for `-in -`
-/// (`counts::check_convert`); for the masking, its first steps (`masking_source`), whose failure is
-/// the run's error, left to the run. An `-out` that LOSAT Web refuses (`RunFiles::refused_output`)
-/// is refused here only where the check knows that the run reaches `-out`: `-mk_counts` without an
-/// id list to read, whose first file is `-out`, and the masking once its first steps pass. Where
-/// the run reads the contents of a file first (an id list; `-convert`'s counts), the run refuses
-/// `-out` when it reaches it (review of WW4c, F1). 0 for an argv that passes them, as `run` goes on
-/// to open its files.
+// No NCBI counterpart: LOSAT Web's check of the words (line NP WW3a, D-WW3-10, 2026-11-23; review
+// of WW4c, F1; line NP WW4f, 2026-11-28).
+/// `run` up to where it reads the contents of a file, through `run`'s own steps, whose failure is
+/// the check's, as `run` reports it (LOSAT Web's validation of the words, `super::check_in`): the
+/// mode (`s_DetermineAppType`); for `-mk_counts` the id lists' exclusion (`exclusive_id_lists`)
+/// and, without an id list to read, its refusal of `-infmt seqids` (`counts::check_mk_counts`) and
+/// its opening of `-out`, its first file (`counts::counts_sink`: a name that does not open loses
+/// the counts without an error, as NCBI's `ofstream`; LOSAT Web's refusal of an output that it
+/// does not write); for `-convert` its exception for `-in -` (`counts::check_convert`); for the
+/// masking, its first steps (`masking_opened`: `-in` opened and its reader made, then `-out`
+/// opened). Where the run reads the contents of a file first (an id list; `-convert`'s counts),
+/// the rest is the run's. 0 for an argv that passes them, as `run` goes on to read its files. The
+/// check's files are LOSAT Web's check's (`web_adapter::check_tool_in`), which make no file.
 pub(super) fn check(
     args: &Args,
     settings: &ApplicationSettings,
     stdin: &mut Cin<'_>,
-    _out: &mut dyn Write,
+    out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    // Whether the check knows that the run reaches `-out` (see above).
-    let mut reaches_out = false;
     let checked = if args.flag("mk_counts") {
         exclusive_id_lists(args).and_then(|()| {
             let lists = ["ids", "exclude_ids"]
                 .iter()
                 .any(|name| !args.os_value(name).unwrap_or_default().is_empty());
-            reaches_out = !lists;
             if lists {
                 // `id_lists` reads the list before `mk_counts` refuses -infmt seqids.
                 Ok(())
             } else {
                 counts::check_mk_counts(args)
+                    .and_then(|()| counts::counts_sink(args, out).map(drop))
             }
         })
     } else if args.flag("convert") {
         counts::check_convert(args)
     } else if args.given("ustat") {
-        reaches_out = masking_source(&options(args, settings), stdin).is_ok();
-        Ok(())
+        masking_opened(args, &options(args, settings), stdin, out).map(drop)
     } else {
         Err(no_mode())
     };
-    let checked = checked.and_then(|()| {
-        if !reaches_out {
-            return Ok(());
-        }
-        let out = args.os_value("out").unwrap_or_default();
-        let to_stdout = out == "-"
-            || (out.is_empty()
-                && (args.flag("mk_counts") || args.flag("convert"))
-                && args.value("sformat") == Some("ascii"));
-        if !to_stdout {
-            if let Some(reason) = args.files().refused_output(out) {
-                return Err(Failure::Refused(unsupported(&reason)));
-            }
-        }
-        Ok(())
-    });
     match checked {
         Ok(()) => 0,
         Err(failure) => report(failure, diag),
@@ -174,12 +156,7 @@ fn masking_run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> Result<i32, Failure> {
-    let mut source = masking_source(options, stdin)?;
-    let mut output = args.output_file("out", out).map_err(Failure::Arg)?;
-    // LOSAT Web's refusal of an output that it does not write (`OpenFiles::create`).
-    if let Some(reason) = output.refusal() {
-        return Err(Failure::Refused(unsupported(reason)));
-    }
+    let (mut source, mut output) = masking_opened(args, options, stdin, out)?;
     let writer = work::writer(options.outfmt);
     let text_match = args
         .boolean("text_match")
@@ -193,15 +170,25 @@ fn masking_run(
     work::run(options, source, writer, &lists, &mut output, diag)
 }
 
-/// The first steps of the masking (`masking_run`) before `-out`: `-in` opened (none for
-/// `-infmt blastdb`) and its reader made (`work::reader`), which LOSAT Web's check takes too
-/// (`check`; review of WW4c, F1).
+/// The masking's source and output (`masking_opened`).
+type Opened<'a, 'o> = (
+    Option<Box<dyn work::SequenceSource + 'a>>,
+    crate::ncbi_app::files::OutputFile<'o>,
+);
+
+/// The first steps of the masking (`masking_run`), which LOSAT Web's check takes too (`check`;
+/// review of WW4c, F1; line NP WW4f): `-in` opened (none for `-infmt blastdb`) and its reader made
+/// (`work::reader`), then `-out` opened (`AsOutputFile`, whose `CArgException` the application
+/// reports as an argument error) and LOSAT Web's refusal of an output that it does not write
+/// (`OpenFiles::create`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:375-401
-fn masking_source<'a>(
+fn masking_opened<'a, 'o>(
+    args: &Args,
     options: &Options<'_>,
     stdin: &'a mut Cin<'_>,
-) -> Result<Option<Box<dyn work::SequenceSource + 'a>>, Failure> {
+    out: &'o mut dyn Write,
+) -> Result<Opened<'a, 'o>, Failure> {
     let input = if options.infmt == "blastdb" {
         None
     } else {
@@ -214,7 +201,12 @@ fn masking_source<'a>(
             ))
         })?)
     };
-    work::reader(options, input)
+    let source = work::reader(options, input)?;
+    let output = args.output_file("out", out).map_err(Failure::Arg)?;
+    if let Some(reason) = output.refusal() {
+        return Err(Failure::Refused(unsupported(reason)));
+    }
+    Ok((source, output))
 }
 
 /// The exception of `-ids` with `-exclude_ids`, which `CWinMaskConfig` throws before it reads

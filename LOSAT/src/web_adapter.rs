@@ -518,8 +518,8 @@ fn check_tool_in(
 }
 
 /// Checks `words` (the command line after `windowmasker`) as the command line reads them before
-/// `windowmasker` reads its input or opens a file (`windowmasker::check_in`; line NP WW3a,
-/// D-WW3-10, 2026-11-23). `Err` with what the command line writes for the words that it refuses:
+/// `windowmasker` reads the contents of a file, up to its opening of `-out` (`windowmasker::check_in`;
+/// line NP WW3a, D-WW3-10, 2026-11-23; line NP WW4f). `Err` with what the command line writes for the words that it refuses:
 /// its standard error, then the file of `-logfile` where the argv has one, without the last line
 /// end.
 pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
@@ -557,8 +557,8 @@ pub fn run_dustmasker(
     crate::dustmasker::run_in(&words, run_files, input, out, err)
 }
 
-/// Checks `words` (the command line after `dustmasker`) as the command line reads them before
-/// `dustmasker` opens a file (`dustmasker::check_in`; line NP WW4c). `Err` with what the command line
+/// Checks `words` (the command line after `dustmasker`) as the command line reads them, up to
+/// `dustmasker`'s opening of `-out` (`dustmasker::check_in`; line NP WW4c, WW4f). `Err` with what the command line
 /// writes for the words that it refuses: its standard error, then the file of `-logfile`, without
 /// the last line end.
 pub fn check_dustmasker(words: &[&str]) -> Result<(), String> {
@@ -591,8 +591,8 @@ pub fn run_segmasker(
     crate::segmasker::run_in(&words, run_files, input, out, err)
 }
 
-/// Checks `words` (the command line after `segmasker`) as the command line reads them before
-/// `segmasker` opens a file (`segmasker::check_in`; line NP WW4c). `Err` with what the command line
+/// Checks `words` (the command line after `segmasker`) as the command line reads them, up to
+/// `segmasker`'s opening of `-out` (`segmasker::check_in`; line NP WW4c, WW4f). `Err` with what the command line
 /// writes for the words that it refuses: its standard error, then the file of `-logfile`, without
 /// the last line end.
 pub fn check_segmasker(words: &[&str]) -> Result<(), String> {
@@ -625,8 +625,8 @@ pub fn run_convert2blastmask(
     crate::convert2blastmask::run_in(&words, run_files, input, out, err)
 }
 
-/// Checks `words` (the command line after `convert2blastmask`) as the command line reads them before
-/// `convert2blastmask` opens a file (`convert2blastmask::check_in`; line NP WW4c). `Err` with what the command line
+/// Checks `words` (the command line after `convert2blastmask`) as the command line reads them, up
+/// to `convert2blastmask`'s opening of `-out` (`convert2blastmask::check_in`; line NP WW4c, WW4f). `Err` with what the command line
 /// writes for the words that it refuses: its standard error, then the file of `-logfile`, without
 /// the last line end.
 pub fn check_convert2blastmask(words: &[&str]) -> Result<(), String> {

@@ -1098,12 +1098,21 @@ def tool() -> list[dict]:
             # (line NP WW4c, 2026-11-28).
             ("refusal.out_dev_stderr", f"{mask} -in fa/dm2L_3k.fa -out /dev/stderr", "refusal"),
             # The masking opens -in before -out: an input that it cannot open ends the run first with NCBI's error,
-            # which the check leaves to the run; -convert reads its counts before -out, so the run refuses an -out
-            # that LOSAT Web does not write only when it reaches it, and the check leaves it to the run (review of
-            # WW4c, F1, 2026-11-28).
-            ("late_failure.in_missing.out_dev_stderr", f"{mask} -in missing.fa -out /dev/stderr", "late_failure"),
+            # at the check too, which takes the run's steps up to -out (line NP WW4f, 2026-11-28); -convert reads its
+            # counts before -out, so the run refuses an -out that LOSAT Web does not write only when it reaches it, and
+            # the check leaves it to the run (review of WW4c, F1, 2026-11-28).
+            ("in_missing.out_dev_stderr", f"{mask} -in missing.fa -out /dev/stderr", True),
+            ("in_missing", f"{mask} -in missing.fa", True),
             ("run_refusal.convert.out_dev_stderr", "-convert -in counts/u4.ascii -sformat obinary -out /dev/stderr",
-             "run_refusal")):
+             "run_refusal"),
+            # An -out that does not open (NCBI's `File is not accessible`), where the masking opens it after its
+            # input, at the check too; -mk_counts loses its counts to such an -out without an error, as NCBI's ofstream
+            # (line NP WW4f, 2026-11-28).
+            ("out_missing_directory", f"{mask} -in fa/dm2L_3k.fa -out nodir/x.txt", True),
+            ("out_missing_directory.dotdot", f"{mask} -in fa/dm2L_3k.fa -out nodir/../x.txt", True),
+            ("out_through_file", f"{mask} -in fa/dm2L_3k.fa -out fa/dm2L_3k.fa/../x.txt", True),
+            ("out_directory", f"{mask} -in fa/dm2L_3k.fa -out fa", True),
+            ("mk.out_missing_directory", "-mk_counts -in fa/dm2L_60k.fa -unit 5 -out nodir/c.counts", False)):
         add(f"validate.{case_id}", words, failure, kind="validate")
 
     # blast_formatter (`losat_web2_tool` and `losat_web2_validate`; line RG-F3p7):
@@ -1286,13 +1295,23 @@ def masking() -> list[dict]:
                  "refusal"),
                 ("refusal.logfile_missing_input", base.replace(base.split()[1], "m.fa", 1) + " -logfile m.fa",
                  "refusal"),
-                ("late_failure.in_missing", f"{base.replace(base.split()[1], 'missing.fa', 1)} -out out.res",
-                 "late_failure"),
-                # An input that the run cannot open, with an -out that LOSAT Web does not write: dustmasker opens -out
-                # first and refuses it; segmasker and convert2blastmask end at the input with NCBI's error before -out,
-                # which the check leaves to the run (review of WW4c, F1, 2026-11-28).
+                # An input that the run cannot open: dustmasker opens it after -out and its writer, which the check
+                # leaves to the run; segmasker and convert2blastmask open it first and end there with NCBI's error, at
+                # the check too, which takes the run's steps up to -out (line NP WW4f, 2026-11-28).
+                ("in_missing", f"{base.replace(base.split()[1], 'missing.fa', 1)} -out out.res",
+                 "late_failure" if program == "dustmasker" else True),
+                ("in_directory", f"{base.replace(base.split()[1], 'dm', 1)} -out out.res",
+                 "late_failure" if program == "dustmasker" else True),
+                # With an -out that LOSAT Web does not write: dustmasker opens -out first and refuses it; segmasker and
+                # convert2blastmask end at the input with NCBI's error before -out (review of WW4c, F1; WW4f).
                 ("in_missing.out_dev_stderr", f"{base.replace(base.split()[1], 'missing.fa', 1)} -out /dev/stderr",
-                 "refusal" if program == "dustmasker" else "late_failure")):
+                 "refusal" if program == "dustmasker" else True),
+                # An -out that does not open: NCBI's `File is not accessible`, as the run's (line NP WW4f).
+                ("out_missing_directory", f"{base} -out nodir/x.res", True),
+                ("out_missing_directory.dotdot", f"{base} -out nodir/../x.res", True),
+                ("out_through_file", f"{base} -out dm/nruns.fa/../x.res", True),
+                ("out_trailing_slash", f"{base} -out x.res/", True),
+                ("out_directory", f"{base} -out dm", True)):
             add(program, f"validate.{case_id}", words, failure, kind="validate")
     # dustmasker's options, its gzipped input, its database input and its error after `-out` opens.
     add("dustmasker", "options", "-in dm/long.fa -window 32 -level 15 -linker 3 -outfmt maskinfo_asn1_text")
@@ -1331,8 +1350,7 @@ def masking() -> list[dict]:
     add("dustmasker", "validate.refusal.out_blastdb_missing", "-infmt blastdb -in none -out none.nal", "refusal",
         kind="validate")
     add("segmasker", "error.out_blastdb_missing", "-infmt blastdb -in none -out none.pal", failure=True)
-    add("segmasker", "validate.late_failure.out_blastdb_missing", "-infmt blastdb -in none -out none.pal",
-        "late_failure", kind="validate")
+    add("segmasker", "validate.out_blastdb_missing", "-infmt blastdb -in none -out none.pal", True, kind="validate")
     # convert2blastmask's mandatory options, its inputs and its formats.
     add("convert2blastmask", "lc", f"-in c2b/lc.fa {c2b} -outfmt maskinfo_asn1_bin -out out.res")
     add("convert2blastmask", "prot", f"-in c2b/prot.fa {c2b} -outfmt maskinfo_xml")
@@ -1500,10 +1518,20 @@ def makeblastdb() -> list[dict]:
             ("logfile.dev_stdout", "-in pq.faa -dbtype prot -out db -logfile /dev/stdout", None),
             ("logfile.outside", "-in pq.faa -dbtype prot -out db -logfile /tmp/<id>.log", None),
             ("no_dbtype.logfile.dev_stderr", "-in ns.fna -out db -logfile /dev/stderr", "failure"),
-            ("no_dbtype.logfile.nodir", "-in ns.fna -out db -logfile nodir/mk.log", "failure")):
+            ("no_dbtype.logfile.nodir", "-in ns.fna -out db -logfile nodir/mk.log", "failure"),
+            # The build's steps up to the log's opening, which the check takes too (line NP WW4f, 2026-11-28): a log
+            # that does not open (NCBI's `File is not accessible`), and the checks of the database's name before it.
+            ("logfile.nodir", "-in ns.fna -dbtype nucl -out db -logfile nodir/mk.log", "failure"),
+            ("logfile.nodir_dotdot", "-in ns.fna -dbtype nucl -out db -logfile nodir/../mk.log", "failure"),
+            ("logfile.through_file", "-in ns.fna -dbtype nucl -out db -logfile ns.fna/../mk.log", "failure"),
+            ("logfile.trailing_slash", "-in ns.fna -dbtype nucl -out db -logfile mk.log/", "failure"),
+            ("out_space", "-in ns.fna -dbtype nucl -out 'my db'", "failure"),
+            ("logfile.nodir.out_space", "-in ns.fna -dbtype nucl -out 'my db' -logfile nodir/mk.log", "failure")):
         add(f"validate.{case_id}", words, expect, kind="validate")
     # A `-logfile` that names a folder of the run's folder (finding 2): its messages stay on the standard error.
     add("validate.no_dbtype.logfile.folder", "-in ns.fna -out db -logfile sub", "failure", kind="validate",
+        published=with_folder)
+    add("validate.logfile.folder", "-in ns.fna -dbtype nucl -out db -logfile sub", "failure", kind="validate",
         published=with_folder)
     return rows
 

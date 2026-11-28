@@ -1516,7 +1516,14 @@ fn custom_tabular_reports_give_the_off_bytes() {
         args[5] = &title;
         let what = format!("-db {title} outfmt {outfmt}");
         let (off, on, _) = refused_late(&what, &args, threads, &[]);
-        assert!(off.report.is_empty(), "{what}: off, no row");
+        // No row without the switch; outfmt 20's line of the field names came before the search
+        // (NCBI's `PrintProlog`), as in the reference.
+        let names = if outfmt.starts_with("20 ") {
+            &reference.as_bytes()[..=reference.find('\n').expect("the field names")]
+        } else {
+            &b""[..]
+        };
+        assert_eq!(off.report.as_slice(), names, "{what}: off, no row");
         reports_before(
             &what,
             &off,

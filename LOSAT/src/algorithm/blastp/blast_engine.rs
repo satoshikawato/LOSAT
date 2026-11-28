@@ -8043,17 +8043,20 @@ fn write_pairwise_prologs(
                 }),
             )?;
             writer.flush()?;
-        } else if let (Some(spec), true) = (
-            super::tabular::custom_tabular_spec(format.outfmt, args.app),
-            before_search,
-        ) {
-            crate::report::tabular::write_field_names(
-                spec,
-                crate::blastinput::app::Program::Blastp,
-                &mut format.sink,
-            )?;
         } else if before_search {
-            // The other formats' prologs come with the first report.
+            // Outfmt 20's line of the field names (the format's number first: the other formats
+            // parse no field list here); the other formats' prologs come with the first report.
+            let spec = (number
+                == crate::blastinput::app::output_format::COMMA_SEPARATED_VALUES_WITH_HEADER)
+                .then(|| super::tabular::custom_tabular_spec(format.outfmt, args.app))
+                .flatten();
+            if let Some(spec) = spec {
+                crate::report::tabular::write_field_names(
+                    spec,
+                    crate::blastinput::app::Program::Blastp,
+                    &mut format.sink,
+                )?;
+            }
         } else if let Some(kind) = blastp_xml2_kind(format.outfmt) {
             // The XML2 and JSON documents start with their prolog too.
             let mut writer = format.sink.open()?;

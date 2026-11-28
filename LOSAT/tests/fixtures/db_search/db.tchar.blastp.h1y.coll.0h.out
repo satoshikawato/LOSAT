@@ -1,0 +1,114 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTP 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: tc h3 h1 alias
+           4 sequences; 270 total letters
+
+
+
+<b>Query=</b> qa clean
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+k0 clean                                                              <a href=#BL_ORD_ID:0>125</a>     8e-45
+
+
+><a name=BL_ORD_ID:0></a> k0 clean
+Length=60
+
+ Score = 125 bits (313),  Expect = 8e-45, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+
+Query  1   QSADKKATTWDSIQAEIDALCNMFATITDANVKYEMCDSWKAQYRKQLGRTVEQYCRDRK  60
+           QSADKKATTWDSIQAEIDALCNMFATITDANVKYEMCDSWKAQYRKQLGRTVEQYCRDRK
+Sbjct  1   QSADKKATTWDSIQAEIDALCNMFATITDANVKYEMCDSWKAQYRKQLGRTVEQYCRDRK  60
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.126    0.391    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 10656
+
+
+<b>Query=</b> qb bad
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+k1 cee#                                                               <a href=#BL_ORD_ID:1>170</a>     4e-62
+
+
+><a name=BL_ORD_ID:1></a> k1 cee#
+Length=80
+
+ Score = 170 bits (430),  Expect = 4e-62, Method: Compositional matrix adjust.
+ Identities = 80/80 (100%), Positives = 80/80 (100%), Gaps = 0/80 (0%)
+
+Query  1   NRHARVGRHRMWPTMNKAVRFWCFWLDKAIPYFGSECPPKFLGVYVVWTIKQRNGPINCD  60
+           NRHARVGRHRMWPTMNKAVRFWCFWLDKAIPYFGSECPPKFLGVYVVWTIKQRNGPINCD
+Sbjct  1   NRHARVGRHRMWPTMNKAVRFWCFWLDKAIPYFGSECPPKFLGVYVVWTIKQRNGPINCD  60
+
+Query  61  KQNRFDDCTVWIAIMIWMHN  80
+           KQNRFDDCTVWIAIMIWMHN
+Sbjct  61  KQNRFDDCTVWIAIMIWMHN  80
+
+
+
+Lambda      K        H        a         alpha
+   0.331    0.142    0.556    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 13650
+
+
+  Database: tc h3 h1 alias
+    Posted date:  Nov 28, 2026  1:40 PM
+  Number of letters in database: 270
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

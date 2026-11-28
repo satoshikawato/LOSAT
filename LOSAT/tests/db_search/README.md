@@ -3050,11 +3050,13 @@ those of OIDs 0 to 197 or 198 and 256 (with OIDs 1 and 257, 200 or 201 Seq-align
 `BATCH_SIZE=50` (rows `h1.*`: the batch whose load looks the taxid up first writes the damaged taxonomy database's
 text; `h1.later.*` and `h1.off.*` of outfmt 0, 5, 16 and 18 write the second batch's formatter posts, and in outfmt
 5, 16 and 18 the offset errors of the report's own taxonomy lookups after them; `h1.null.6t` with an empty
-`taxdb.btd`, where that lookup gives the offset error); `tc_h2_*` holds a clean title of taxid 99990, which `tc_qh2`
+`taxdb.btd`, where that lookup gives the offset error, and `h1y.null.*` in outfmt 0, 5, 16 and 18); `tc_h2_*` holds
+a clean title of taxid 99990, which `tc_qh2`
 reads in `tc_h12_*` before `tc_h1_*`'s title with 0xFF (row `h1.vol.r6t`: NCBI's taxonomy cache is the volume's, so the
 second batch writes the offset error again); `tc_h3_*` holds two clean titles of the taxids 99990 and 100246 (one slot
 of that cache; the script rewrites the second taxid), which no query hits (row `h1.coll.6t`: `tc_h31_*` with
-`tc_qh1`, the other volume's slot does not change `tc_h1_*`'s); `tc_qslotu` reads OID 258
+`tc_qh1`, the other volume's slot does not change `tc_h1_*`'s; `h1y.coll.*` in outfmt 0, 5, 16 and 18); `tc_qslotu`
+reads OID 258
 with OIDs 4 to 13 (11 loads), then OIDs 2 and 258 (rows `slot.r6t`; `tc_qslotu1`, its first query, is the near
 input of BLASTN's, which writes that batch's rows before it refuses).
 NCBI BLAST+ 2.17.0 reads a reported subject's definition line where it makes the Seq-aligns of its query batch, and

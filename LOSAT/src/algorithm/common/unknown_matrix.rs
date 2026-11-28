@@ -14,14 +14,14 @@
 /// message of each query)
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:919-926
 pub(crate) fn unknown_matrix_message_of(messages: impl IntoIterator<Item = Vec<String>>) -> String {
-    let mut message = String::new();
+    use crate::ncbi_exception::Severity;
+    use crate::report::query_warnings::push_search_message;
+    let mut message = Vec::new();
     for query in messages {
-        message.push_str("Error: Unknown error code -1 ");
+        push_search_message(&mut message, Severity::Error, b"Unknown error code -1");
         for warning in crate::report::query_warnings::sorted_query_messages(&query) {
-            message.push_str("Warning: ");
-            message.push_str(warning);
-            message.push(' ');
+            push_search_message(&mut message, Severity::Warning, warning.as_bytes());
         }
     }
-    message
+    String::from_utf8(message).expect("messages of text are text")
 }

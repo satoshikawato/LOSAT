@@ -8280,7 +8280,6 @@ fn blastn_query_scopes(
     let query_range = parse_optional_range(args.query_loc.as_deref(), RangeRole::Query)
         .ok()
         .flatten();
-    let minus_strand = QueryStrand::from_option(&args.strand) == QueryStrand::Minus;
     crate::blastinput::query_batch::QueryScopes::of_search(
         args.parse_deflines,
         subject_records,
@@ -8297,7 +8296,7 @@ fn blastn_query_scopes(
         scopes
             .with_refusal(args.scope_refusal.clone())
             .with_query_range(query_range)
-            .with_minus_strand(minus_strand)
+            .with_strand(QueryStrand::from_option(&args.strand))
             .with_query_masks(args.query_masks())
     })
 }
@@ -8820,17 +8819,10 @@ fn run_in_pool(
         {
             write_reports_before!();
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
-            let mut message = format!("{ENGINE_ERROR} ");
-            for _ in start..end {
-                message.push_str("Warning: ");
-                message.push_str(NO_DATA_MESSAGE);
-                message.push(' ');
-            }
-            message.push('\n');
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: message.into(),
-            }
+            return Err(crate::report::query_warnings::each_query_error(
+                NO_DATA_MESSAGE.as_bytes(),
+                end - start,
+            )
             .into());
         }
         warnings[start].append(&batch_title_warnings);

@@ -3618,8 +3618,7 @@ fn tblastx_query_scopes(
     )
     .ok()
     .flatten();
-    let minus_strand = crate::algorithm::blastn::args::QueryStrand::from_option(&args.strand)
-        == crate::algorithm::blastn::args::QueryStrand::Minus;
+    let strand = crate::algorithm::blastn::args::QueryStrand::from_option(&args.strand);
     crate::blastinput::query_batch::QueryScopes::of_search(
         args.parse_deflines,
         subject_records,
@@ -3634,7 +3633,7 @@ fn tblastx_query_scopes(
         }
         .with_refusal(args.scope_refusal.clone())
         .with_query_range(query_range)
-        .with_minus_strand(minus_strand)
+        .with_strand(strand)
         .with_xml_matrix_failure(xml_matrix)
     })
 }
@@ -3953,17 +3952,10 @@ fn run_batch_loop(
         {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            let mut message = format!("{ENGINE_ERROR} ");
-            for _ in 0..no_data_queries {
-                message.push_str("Warning: ");
-                message.push_str(NO_DATA_MESSAGE);
-                message.push(' ');
-            }
-            message.push('\n');
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: message.into(),
-            }
+            return Err(crate::report::query_warnings::each_query_error(
+                NO_DATA_MESSAGE.as_bytes(),
+                no_data_queries,
+            )
             .into());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182 (the score block of

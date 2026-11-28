@@ -696,12 +696,9 @@ pub(crate) struct QueryScopes {
     /// know (`with_xml_matrix_failure`), for the refusals that the failure takes
     /// (`ScopeRefusal::xml_takes`).
     xml_matrix: Option<XmlMatrixFailure>,
-    /// The `-query_loc` range of the search (`with_query_range`), by which NCBI cuts each
-    /// searched record's `CSeq_loc` interval (`x_FastaToSeqLoc`).
-    query_range: Option<crate::blastinput::seq_range::SequenceRange>,
-    /// Whether the search reads only the minus strand of a nucleotide query (`-strand minus`,
-    /// `with_minus_strand`): NCBI's `CSeqMap_CI::x_Push` then reads from the interval's upper end.
-    minus_strand: bool,
+    /// What NCBI's set-up of a batch reads of each record (`SetUpReading`: `with_query_range`,
+    /// `with_strand`).
+    reading: SetUpReading,
     /// The filtering that reads a batch's letters before its records are set up (BLASTN's,
     /// `with_query_masks`).
     query_masks: QueryMasks,
@@ -910,6 +907,91 @@ enum SetUpRead {
     PastFirst { pos: usize },
 }
 
+/// What NCBI's set-up of a batch reads of each of its records (`read`): the search's `-query_loc`
+/// range, the strand it reads, and the letters of the shortest interval with an initial context.
+#[derive(Clone, Copy, Debug)]
+struct SetUpReading {
+    /// The `-query_loc` range of the search (`QueryScopes::with_query_range`), by which NCBI cuts
+    /// each searched record's `CSeq_loc` interval (`x_FastaToSeqLoc`).
+    query_range: Option<crate::blastinput::seq_range::SequenceRange>,
+    /// The strand of a nucleotide query that the search reads (`QueryScopes::with_strand`): on
+    /// `-strand minus` NCBI's `CSeqMap_CI::x_Push` reads from the interval's upper end.
+    strand: crate::algorithm::blastn::args::QueryStrand,
+    /// One letter, or one codon in the programs that translate the query (`s_QueryInfo_SetContext`
+    /// gives a shorter frame no letters).
+    min_context_len: usize,
+}
+
+impl SetUpReading {
+    /// The reading of a search of `program` without `-query_loc`, on both strands.
+    fn of_program(program: &str) -> Self {
+        Self {
+            query_range: None,
+            strand: crate::algorithm::blastn::args::QueryStrand::Both,
+            min_context_len: if matches!(program, "BLASTX" | "TBLASTX" | "RPSTBLASTN") {
+                3
+            } else {
+                1
+            },
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:433-460
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:175-255
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:485-652
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:482-512
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:567-577
+    // NCBI reference (598d8ae6): c++/src/objmgr/seq_map_ci.cpp:483-507
+    // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:695-718
+    /// How NCBI's set-up reads a record of `length` letters whose ids meet the scope as `meets`
+    /// (`Meets::New` for one without ids of its own) and that is searched (`is_searched`: not
+    /// skipped by a `-query_loc` range): its interval of the record (`x_FastaToSeqLoc`), read in the
+    /// record's own letters or in its earlier record's (`CBlastSeqVectorOM`). `None` for a record
+    /// that LOSAT does not follow there (`Meets::Other`, or a repeat whose ids find two earlier
+    /// records).
+    fn read(self, meets: Meets, length: usize, is_searched: bool) -> Option<SetUpRead> {
+        use crate::blastinput::seq_range::{record_interval, RecordInterval};
+        if !is_searched {
+            return Some(SetUpRead::Skipped);
+        }
+        let (from, end) = match self
+            .query_range
+            .map(|range| record_interval(&range, length))
+        {
+            None => (0, length),
+            Some(RecordInterval::Letters { from, to }) => (from, to + 1),
+            Some(RecordInterval::Empty | RecordInterval::PastEnd) => (length, length),
+        };
+        let has_context = end.saturating_sub(from) >= self.min_context_len;
+        match meets {
+            _ if end <= from => Some(SetUpRead::Empty),
+            Meets::New => Some(SetUpRead::Own { has_context }),
+            Meets::Repeat { first: Some(first) } if end <= first => {
+                Some(SetUpRead::InFirst { has_context })
+            }
+            Meets::Repeat { first: Some(first) } => Some(SetUpRead::PastFirst {
+                pos: match self.strand {
+                    crate::algorithm::blastn::args::QueryStrand::Minus => 0,
+                    _ => first.saturating_sub(from),
+                },
+            }),
+            Meets::Repeat { first: None } | Meets::Other => None,
+        }
+    }
+
+    /// The reads of `records`, records that are first in the scope with their ids or have none of
+    /// their own (`read` with `Meets::New`).
+    fn of_new_records<R>(
+        self,
+        records: impl Iterator<Item = (R, usize, bool)>,
+    ) -> impl Iterator<Item = SetUpRead> {
+        records.map(move |(_, length, is_searched)| {
+            self.read(Meets::New, length, is_searched)
+                .expect("a new record is followed")
+        })
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:176-230
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:164-189
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:307-373
@@ -925,7 +1007,9 @@ enum SetUpRead {
 /// filtering, with the text of that failure (NCBI BLAST+ 2.17.0, probes 1 and 2 of line RG-KB item
 /// 7b: `blastn` with two such records in a batch, `CSeqVector_CI: cannot locate segment at 90`
 /// twice with DUST or WindowMasker, at 90 and at 135 with `-dust no`, and that pair of messages as
-/// the message of each record with `-dust no -filtering_db`).
+/// the message of each record with `-dust no -filtering_db`; probe 3 `blastn.sub.pfE.fd.f6`: with
+/// DUST and `-filtering_db`, a batch whose searched records are all empty passes DUST and fails
+/// the repeat search, `Warning: Warning: Sequence contains no data  ` for each).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum QueryMasks {
     /// No filtering reads the letters (`-dust no` without repeat or WindowMasker filtering; every
@@ -933,8 +1017,9 @@ pub(crate) enum QueryMasks {
     #[default]
     None,
     /// DUST (`-dust`, on by default), or WindowMasker without DUST and repeat filtering: the first
-    /// mask made reads the records in the batch's order.
-    Reads,
+    /// mask made reads the records in the batch's order; where it passes, the repeat search
+    /// follows (`then_repeats`: DUST with `-filtering_db`).
+    Reads { then_repeats: bool },
     /// Repeat filtering without DUST: its search's set-up of the batch.
     Repeats,
 }
@@ -946,22 +1031,14 @@ impl QueryMasks {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:460-466
     pub(crate) fn of_blastn(dust: bool, repeats: bool, window_masker: bool) -> Self {
         match (dust, repeats, window_masker) {
-            (true, _, _) | (false, false, true) => Self::Reads,
+            (true, then_repeats, _) => Self::Reads { then_repeats },
+            (false, false, true) => Self::Reads {
+                then_repeats: false,
+            },
             (false, true, _) => Self::Repeats,
             (false, false, false) => Self::None,
         }
     }
-}
-
-/// What NCBI's `SetupQueries_OMF` does with a refused batch whose records it reads as `reads`
-/// (`setup_queries_failure`).
-#[derive(Debug, PartialEq, Eq)]
-enum SetUpQueries {
-    /// A context stays valid: the set-up goes on (`refused_batch_error`).
-    Passes,
-    /// No context is valid and a record has a message: NCBI's error, the message of each such
-    /// record (`ENGINE_ERROR` and `Warning: <message> ` each; exit 3).
-    Fails(String),
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:518-652
@@ -974,19 +1051,23 @@ enum SetUpQueries {
 /// record's end: `CSeqVector_CI: cannot locate segment at <pos>`; one without letters: `Sequence
 /// contains no data`); a context of no letters is invalid too (a translated query below one codon,
 /// `s_QueryInfo_SetContext`). Where no context is valid and a record has a message, NCBI throws
-/// the messages of the batch (`TSearchMessages::ToString`, each after its severity) with exit 3,
-/// before the batch's `BLAST_MainSetUp` and the subjects' checks.
-fn setup_queries_failure(reads: &[SetUpRead], masks: QueryMasks) -> SetUpQueries {
+/// the messages of the batch (`report::query_warnings::push_search_message`) with exit 3, before
+/// the batch's `BLAST_MainSetUp` and the subjects' checks: that error, `None` where a context stays
+/// valid and the set-up goes on (`refused_batch_error`).
+fn setup_queries_failure(
+    reads: &[SetUpRead],
+    masks: QueryMasks,
+) -> Option<crate::cli::NativeError> {
+    use crate::ncbi_exception::Severity;
+    use crate::report::query_warnings::{each_query_error, push_search_message};
     let searched = || reads.iter().filter(|&&read| read != SetUpRead::Skipped);
+    let searched_count = searched().count();
     let past_first = searched().find_map(|&read| match read {
         SetUpRead::PastFirst { pos } => Some(pos),
         _ => None,
     });
-    // `TSearchMessages::ToString` of one message for each searched record.
-    let each_searched =
-        |message: &str| -> String { searched().map(|_| format!("Warning: {message} ")).collect() };
     // The set-up without filtering: each record's own message, where no context is valid.
-    let own_messages = || -> Option<String> {
+    let own_messages = || -> Option<Vec<u8>> {
         if searched().any(|&read| {
             matches!(
                 read,
@@ -995,27 +1076,40 @@ fn setup_queries_failure(reads: &[SetUpRead], masks: QueryMasks) -> SetUpQueries
         }) {
             return None;
         }
-        let text: String = searched()
-            .filter_map(|&read| match read {
-                SetUpRead::Empty => Some(format!("Warning: {NO_DATA_MESSAGE} ")),
-                SetUpRead::PastFirst { pos } => {
-                    Some(format!("Warning: {PAST_FIRST_MESSAGE} {pos} "))
-                }
-                SetUpRead::Skipped | SetUpRead::Own { .. } | SetUpRead::InFirst { .. } => None,
+        let mut messages = Vec::new();
+        for &read in searched() {
+            match read {
+                SetUpRead::Empty => push_search_message(
+                    &mut messages,
+                    Severity::Warning,
+                    NO_DATA_MESSAGE.as_bytes(),
+                ),
+                SetUpRead::PastFirst { pos } => push_search_message(
+                    &mut messages,
+                    Severity::Warning,
+                    format!("{PAST_FIRST_MESSAGE} {pos}").as_bytes(),
+                ),
+                SetUpRead::Skipped | SetUpRead::Own { .. } | SetUpRead::InFirst { .. } => {}
+            }
+        }
+        (!messages.is_empty()).then_some(messages)
+    };
+    // The repeat search's set-up of the batch throws its messages (`CBlastException`), which each
+    // searched record's set-up posts.
+    let repeats = || own_messages().map(|messages| each_query_error(&messages, searched_count));
+    let own =
+        || own_messages().map(|messages| crate::blastinput::app::engine_native_error(&messages));
+    match masks {
+        QueryMasks::None => own(),
+        QueryMasks::Reads { then_repeats } => past_first
+            .map(|pos| {
+                each_query_error(
+                    format!("{PAST_FIRST_MESSAGE} {pos}").as_bytes(),
+                    searched_count,
+                )
             })
-            .collect();
-        (!text.is_empty()).then_some(text)
-    };
-    let read_failure = |pos: usize| each_searched(&format!("{PAST_FIRST_MESSAGE} {pos}"));
-    let text = match masks {
-        QueryMasks::None => own_messages(),
-        QueryMasks::Reads => past_first.map(read_failure).or_else(own_messages),
-        // The repeat search's set-up of the batch throws its messages (`CBlastException`).
-        QueryMasks::Repeats => own_messages().map(|search_failure| each_searched(&search_failure)),
-    };
-    match text {
-        Some(text) => SetUpQueries::Fails(format!("{ENGINE_ERROR} {text}\n")),
-        None => SetUpQueries::Passes,
+            .or_else(|| if then_repeats { repeats() } else { own() }),
+        QueryMasks::Repeats => repeats(),
     }
 }
 
@@ -1031,16 +1125,16 @@ pub(crate) struct ScopeRefusal {
     /// the batch reads it (`SetUpRead`), where LOSAT can follow NCBI's set-up of every searched
     /// record of the batch; `None` otherwise.
     reads: Option<Vec<SetUpRead>>,
-    /// NCBI's `SetupQueries_OMF` failure message (`CSeqVector_CI: cannot locate segment at ...`
-    /// and `Sequence contains no data` in batch order, exit 3) where every searched record of the
+    /// NCBI's `SetupQueries_OMF` failure (`CSeqVector_CI: cannot locate segment at ...` and
+    /// `Sequence contains no data` in batch order, exit 3) where every searched record of the
     /// batch lacks a valid initial context after `SetupQueries_OMF` and at least one posted a
     /// message (`setup_queries_error`; `None` for PSIBLAST, which crashes there in NCBI 2.17.0).
-    setup_queries_message: Option<String>,
+    setup_failure: Option<crate::cli::NativeError>,
     /// Whether NCBI's run formats the batch before its XML failure for the run's matrix name, or
     /// fails in it (`QueryScopes::with_xml_matrix_failure`, `HeldIds::reaches`): where the batch's
     /// set-up passes, NCBI has then shown nothing that the letters of the batch's repeated records
     /// decide, the refusal gives way to the failure (`refused_batch_error`), and the reading goes
-    /// on past the batch (`read_query_batches`). Always `false` when `setup_queries_message` is
+    /// on past the batch (`read_query_batches`). Always `false` when `setup_failure` is
     /// set, because NCBI stops at this batch before reaching any later batch.
     xml_takes: bool,
 }
@@ -1079,14 +1173,7 @@ impl ScopeRefusal {
     /// fails `SetupQueries_OMF` or has zero-length initial contexts and at least one posts a
     /// warning (`CSeqVector_CI: cannot locate segment at ...` / `Sequence contains no data`).
     pub(crate) fn setup_queries_error(&self) -> Option<anyhow::Error> {
-        let message = self.setup_queries_message.as_ref()?;
-        Some(
-            crate::cli::NativeError {
-                exit: 3,
-                message: message.clone().into(),
-            }
-            .into(),
-        )
+        self.setup_failure.clone().map(Into::into)
     }
 
     /// Whether the run's XML failure for its matrix name may take the refusal (`xml_takes`): the
@@ -1227,8 +1314,7 @@ impl QueryScopes {
             added: 0,
             refusals_ahead: Default::default(),
             xml_matrix: None,
-            query_range: None,
-            minus_strand: false,
+            reading: SetUpReading::of_program(program),
             query_masks: QueryMasks::None,
             held: HeldIds::default(),
         }
@@ -1278,14 +1364,17 @@ impl QueryScopes {
         mut self,
         query_range: Option<crate::blastinput::seq_range::SequenceRange>,
     ) -> Self {
-        self.query_range = query_range;
+        self.reading.query_range = query_range;
         self
     }
 
-    /// With `minus_strand` (`-strand minus` on a nucleotide query), where NCBI's `CSeqMap_CI::x_Push`
-    /// reads from the upper end of the interval first.
-    pub(crate) fn with_minus_strand(mut self, minus_strand: bool) -> Self {
-        self.minus_strand = minus_strand;
+    /// With `strand` (`-strand` of a nucleotide query): on the minus strand NCBI's
+    /// `CSeqMap_CI::x_Push` reads from the upper end of the interval first.
+    pub(crate) fn with_strand(
+        mut self,
+        strand: crate::algorithm::blastn::args::QueryStrand,
+    ) -> Self {
+        self.reading.strand = strand;
         self
     }
 
@@ -1470,9 +1559,14 @@ impl QueryScopes {
         let scope = self.scopes.last_mut().expect("pushed above");
         let before = scope.records;
         let mut message: Option<String> = None;
-        // By record of the batch, how NCBI's set-up reads it, while every searched record is one
-        // that LOSAT can follow there.
+        // By record of the batch, how NCBI's set-up reads it (`SetUpRead`), while every searched
+        // record is one that LOSAT can follow there (`None` once one is not). Empty until the
+        // batch's first record that meets the scope (`meets` other than `Meets::New`), when the
+        // records before it are read as the new ones they are (`SetUpReading::of_new_records`), or
+        // until a refusal of a batch of new records only: a batch that is not refused and holds
+        // no repeat (every run without repeated ids) reads none.
         let mut reads = Some(Vec::new());
+        let reading = self.reading;
         let mut records_read = 0;
         // The searched queries of the batch so far, whether the batch holds the run's first, and
         // the held report's lead as they meet it.
@@ -1481,64 +1575,25 @@ impl QueryScopes {
         let mut lead: BatchLead<'r> = None;
         let records = records.into_iter();
         let batch_records = records.clone();
-        let min_context_len = if matches!(self.program, "BLASTX" | "TBLASTX" | "RPSTBLASTN") {
-            3
-        } else {
-            1
-        };
         for (place, (believed, length, is_searched)) in records.enumerate() {
             records_read = place + 1;
             let meets = believed.map(|believed| scope.meets(&believed.ids, self.program));
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:433-460
-            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:175-255
-            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:485-652
-            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:473-482
-            // NCBI reference (598d8ae6): c++/src/objmgr/seq_map_ci.cpp:483-507
-            // NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:695-718
-            let (from, end_excl) = if !is_searched {
-                (0, 0)
-            } else if let Some(range) = self.query_range {
-                use crate::blastinput::seq_range::{record_interval, RecordInterval};
-                match record_interval(&range, length) {
-                    RecordInterval::Letters { from, to } => (from, to + 1),
-                    RecordInterval::Empty | RecordInterval::PastEnd => (length, length),
+            let read_meets = meets.unwrap_or(Meets::New);
+            if let Some(batch_reads) = reads
+                .as_mut()
+                .filter(|batch_reads| read_meets != Meets::New || !batch_reads.is_empty())
+            {
+                if batch_reads.is_empty() {
+                    batch_reads.extend(reading.of_new_records(batch_records.clone().take(place)));
                 }
-            } else {
-                (0, length)
-            };
-            let interval_len = end_excl.saturating_sub(from);
-            let has_context = interval_len >= min_context_len;
-            let read = |meets: Meets| {
-                if !is_searched {
-                    return Some(SetUpRead::Skipped);
+                match reading.read(read_meets, length, is_searched) {
+                    Some(read) => batch_reads.push(read),
+                    None => reads = None,
                 }
-                if interval_len == 0 {
-                    return Some(SetUpRead::Empty);
-                }
-                match meets {
-                    Meets::New => Some(SetUpRead::Own { has_context }),
-                    Meets::Repeat { first: Some(first) } if end_excl <= first => {
-                        Some(SetUpRead::InFirst { has_context })
-                    }
-                    Meets::Repeat { first: Some(first) } => {
-                        let pos = if self.minus_strand {
-                            0
-                        } else {
-                            first.saturating_sub(from)
-                        };
-                        Some(SetUpRead::PastFirst { pos })
-                    }
-                    _ => None,
-                }
-            };
+            }
             // Whether an earlier id of the scope may be one of the record's in another form.
             let mut other_form = false;
-            if let (Some(believed), Some(meets)) = (believed, meets) {
-                let follows = read(meets);
-                reads = reads.zip(follows).map(|(mut reads, follows)| {
-                    reads.push(follows);
-                    reads
-                });
+            if let Some(believed) = believed {
                 let record = (before + place, length);
                 other_form = if message.is_some() {
                     scope.add_after_refusal(&believed.ids, record)
@@ -1552,8 +1607,6 @@ impl QueryScopes {
                         }
                     }
                 };
-            } else if let Some(reads) = reads.as_mut() {
-                reads.extend(read(Meets::New));
             }
             if is_searched {
                 let id = believed.map(|believed| &believed.best);
@@ -1577,24 +1630,25 @@ impl QueryScopes {
         let Some(message) = message else {
             return Ok(());
         };
+        // A refused batch none of whose records met the scope (`duplicate_id` also meets an id
+        // twice in one record): each read as a new one.
+        if let Some(batch_reads) = reads.as_mut().filter(|batch_reads| batch_reads.is_empty()) {
+            batch_reads.extend(reading.of_new_records(batch_records));
+        }
         // NCBI crashes (SIGSEGV) where PSIBLAST's set-up of such a batch fails (NCBI BLAST+
         // 2.17.0, probe 1 of line RG-KB item 7b): its refusal stays.
-        let set_up = reads
+        let setup_failure = reads
             .as_deref()
             .filter(|_| self.program != "PSIBLAST")
-            .map(|batch_reads| setup_queries_failure(batch_reads, self.query_masks));
-        let setup_queries_message = match set_up {
-            Some(SetUpQueries::Fails(message)) => Some(message),
-            Some(SetUpQueries::Passes) | None => None,
-        };
-        let xml_takes = setup_queries_message.is_none()
+            .and_then(|batch_reads| setup_queries_failure(batch_reads, self.query_masks));
+        let xml_takes = setup_failure.is_none()
             && self
                 .xml_matrix
                 .is_some_and(|failure| self.held.reaches(failure, holds_first, first_searched));
         Err(ScopeRefusal {
             message,
             reads,
-            setup_queries_message,
+            setup_failure,
             xml_takes,
         }
         .into())
@@ -2113,19 +2167,9 @@ fn no_data_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
     if !batch.iter().all(|record| record.seq().is_empty()) {
         return None;
     }
-    let mut message = format!("{ENGINE_ERROR} ");
-    for _ in batch {
-        message.push_str("Warning: ");
-        message.push_str(NO_DATA_MESSAGE);
-        message.push(' ');
-    }
-    message.push('\n');
     Some(
-        crate::cli::NativeError {
-            exit: 3,
-            message: message.into(),
-        }
-        .into(),
+        crate::report::query_warnings::each_query_error(NO_DATA_MESSAGE.as_bytes(), batch.len())
+            .into(),
     )
 }
 

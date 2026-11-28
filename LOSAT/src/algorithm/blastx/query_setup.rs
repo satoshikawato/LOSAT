@@ -35,6 +35,14 @@ pub struct PreparedQueryBatch {
     /// the batch is searched in several units (`reader_batch.rs`); `None` when the unit is the
     /// whole batch.
     pub(crate) reader_shape: Option<std::sync::Arc<super::reader_batch::ReaderBatchShape>>,
+    /// Whether a context of the reader batch before this unit is valid (`reader_batch::attach`):
+    /// NCBI's sum statistics carry their e-value over all the batch's contexts
+    /// (`parameters::context_cutoffs`). False for a unit that is the whole batch, and in phase 1,
+    /// whose minima over the batch stay exact without it only because every gapped context reads
+    /// one block and one search space: the first valid context's sum cutoff is then the smallest
+    /// (later contexts start from the e-value of a score of 1, so their cutoff is not lower). A
+    /// block per context would need the carry in phase 1 too.
+    pub(crate) batch_valid_before: bool,
     /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): whether `sequence_start` is on the path of the seed
     /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`, another matrix than BLOSUM62
     /// `query_fits_of`; false with the switch off).
@@ -62,6 +70,7 @@ impl PreparedQueryBatch {
             sequence_start_nomask: Vec::new(),
             lookup_segments: Vec::new(),
             reader_shape: self.reader_shape.clone(),
+            batch_valid_before: self.batch_valid_before,
             x_ungap_sent: self.x_ungap_sent,
             subject_option_spaces: self.subject_option_spaces.clone(),
         }
@@ -354,41 +363,43 @@ pub(crate) fn prepare_unit_queries(
         .x_with_trim_memo()
     });
     // SEG reads only the residues of its own context and the hard masking below writes only there,
-    // so the contexts of a large batch (the six frames of the full query) are filtered on the
-    // search pool before the loop consumes the intervals in context order.
+    // so for a batch searched with a pool of 2+ threads inside (not one batch per thread,
+    // `runtime::x_inner_serial`) the contexts are filtered before the loop consumes the intervals
+    // in context order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
     // NCBI filters the contexts one after another in this loop. SEG of one context reads only that
-    // context, so with a pool of 2+ threads the contexts of a large batch are filtered in parallel
-    // and the intervals are kept in seg_ready; the loop below still consumes them in context order.
+    // context, so for such a batch this thread filters the contexts in context order and the
+    // pool's idle threads filter the next ones (`utils::xitems::x_map`: this thread runs no other
+    // job of the pool meanwhile, so this step never waits for another batch's search or helper);
+    // the intervals are kept in seg_ready and the loop below still consumes them in context order.
+    // Inside an item (a chunk of a split query, `split.rs`) the set runs its contexts in a loop on
+    // the item's thread (`xitems::in_item`), though `LOSAT_X_REACH` counts this rule's side.
     #[allow(unused_mut)]
     let mut seg_ready: Vec<Option<Vec<(i32, i32)>>> = Vec::new();
     #[cfg(feature = "parallel")]
     if let Some(masker) = seg_masker.as_ref() {
         if super::runtime::x_bx_par_rule(|| {
-            buffer.len() >= 60_000
-                && !super::runtime::x_inner_serial()
+            !super::runtime::x_inner_serial()
                 && rayon::current_thread_index().is_some()
                 && rayon::current_num_threads() > 1
         }) {
-            use rayon::prelude::*;
             let buffer = &buffer;
-            // Diagnostic (LOSAT_TIMING): the parallel SEG's wall time for the common line
+            let contexts = &contexts;
+            // Diagnostic (LOSAT_TIMING): the SEG's wall time for the common line
             // (utils/xtiming.rs). No NCBI counterpart.
             let t_seg = crate::utils::xtiming::clock();
-            seg_ready = contexts
-                .par_iter()
-                .map(|context| {
-                    context.is_valid.then(|| {
-                        masker
-                            .mask_sequence(
-                                &buffer[context.offset + 1..context.offset + 1 + context.length],
-                            )
-                            .into_iter()
-                            .map(|r| (r.start as i32, r.end as i32 - 1))
-                            .collect()
-                    })
+            seg_ready = crate::utils::xitems::x_map(contexts.len(), |index| {
+                let context = &contexts[index];
+                context.is_valid.then(|| {
+                    masker
+                        .mask_sequence(
+                            &buffer[context.offset + 1..context.offset + 1 + context.length],
+                        )
+                        .into_iter()
+                        .map(|r| (r.start as i32, r.end as i32 - 1))
+                        .collect()
                 })
-                .collect();
+            });
             crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
         }
     }
@@ -461,6 +472,7 @@ pub(crate) fn prepare_unit_queries(
         sequence_start_nomask: nomask,
         lookup_segments,
         reader_shape: None,
+        batch_valid_before: false,
         x_ungap_sent,
         subject_option_spaces: None,
     })

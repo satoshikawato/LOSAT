@@ -2118,6 +2118,7 @@ fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
             bioseq: false,
             length: false,
             lineless: false,
+            map_length: false,
         })
     );
     assert_eq!(
@@ -3294,7 +3295,7 @@ fn a_failed_lookup_is_held_where_a_holder_was_loaded_before() {
     // It reads nothing of its own (the taxonomy texts' reads leave it to `fetched`).
     assert!(!held_first.loaded(1));
     // A table of `sacc` whose report's first row throws: NCBI's run ends there (the null pointer,
-    // which `tabular::check_failed_lookups` refuses), so no later report holds the subject; at a
+    // where `tabular::row_stop_end` ends the run), so no later report holds the subject; at a
     // later row the run goes on and the next report holds it.
     let sacc = RunThrow {
         first_row_ends: true,

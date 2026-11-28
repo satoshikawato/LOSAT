@@ -36,7 +36,6 @@ pub(crate) struct MaskRange<'a> {
 /// The Karlin-Altschul parameters of the results: (lambda, K, H), ungapped and gapped, 0.0 where
 /// the reply has no block of the kind.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[cfg(test)] // read by the formats of later pull requests (decision C3-3)
 pub(crate) struct KarlinBlocks {
     pub(crate) ungapped: (f64, f64, f64),
     pub(crate) gapped: (f64, f64, f64),
@@ -44,7 +43,6 @@ pub(crate) struct KarlinBlocks {
 
 /// What `GetResultSet` reads of the search statistics.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg(test)] // read by the formats of later pull requests (decision C3-3)
 pub(crate) struct SearchStats {
     pub(crate) effective_search_space: i64,
     pub(crate) length_adjustment: i64,
@@ -187,7 +185,6 @@ impl Results {
     /// The Karlin-Altschul blocks as `GetResultSet` takes them: in order, a gapped block sets
     /// the gapped parameters and another the ungapped ones, until both kinds are found.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2218-2238
-    #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
     pub(crate) fn karlin_blocks(&self) -> KarlinBlocks {
         let mut out = KarlinBlocks::default();
         let (mut gapped, mut ungapped) = (false, false);
@@ -220,48 +217,30 @@ impl Results {
     /// has one gives it); for `rpsblast` and `rpstblastn`, the first string (as left) with
     /// "Matrix: " gives the matrix, the rest after the text is removed.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2187-2215
-    #[cfg(test)] // the numbers are read by the formats of later pull requests (decision C3-3)
     pub(crate) fn search_stats(&self, service: &[u8]) -> SearchStats {
-        let (effective_search_space, length_adjustment, matrix) = self.stats_parts(service);
-        SearchStats {
-            effective_search_space,
-            length_adjustment,
-            matrix,
-        }
-    }
-
-    /// The matrix of the search statistics of an `rpsblast` or `rpstblastn` service, which
-    /// `GetResultSet` sets on the options of the first search object (`search_stats`).
-    pub(crate) fn rps_matrix(&self, service: &[u8]) -> Option<Vec<u8>> {
-        self.stats_parts(service).2
-    }
-
-    /// `search_stats` as its parts.
-    fn stats_parts(&self, service: &[u8]) -> (i64, i64, Option<Vec<u8>>) {
-        let (mut effective_search_space, mut length_adjustment) = (0, 0);
+        let mut out = SearchStats::default();
         let mut stats: Vec<Vec<u8>> = match self.reply().get("search-stats") {
             Some(list) => list.items().map(|text| text.str().to_vec()).collect(),
-            None => return (0, 0, None),
+            None => return out,
         };
         let number = |text: &[u8]| crate::ncbi_str::string_to_int8(text, 0).unwrap_or(0);
         for text in &mut stats {
             if replace_all(text, b"Effective search space used: ") {
-                effective_search_space = number(text);
+                out.effective_search_space = number(text);
             }
             if replace_all(text, b"Length adjustment: ") {
-                length_adjustment = number(text);
+                out.length_adjustment = number(text);
             }
         }
-        let mut matrix = None;
         if service == b"rpsblast" || service == b"rpstblastn" {
             for mut text in stats {
                 if replace_all(&mut text, b"Matrix: ") {
-                    matrix = Some(text);
+                    out.matrix = Some(text);
                     break;
                 }
             }
         }
-        (effective_search_space, length_adjustment, matrix)
+        out
     }
 }
 

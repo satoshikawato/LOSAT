@@ -69,10 +69,19 @@ fn a_row_of_the_minus_strand_counts_its_columns() {
     let scores = row_scores(&read[0], &spec).unwrap();
     let plan = row_plan(&read[0], scores, &ctx).unwrap();
     assert_eq!(plan.subject_range(&ctx), Some((10, 19)));
+    // The rows' strands as `CAlnVec` reads them (the Dense-seg reversed: the query plus).
+    let [query_plus, subject_plus] = plan.rows_plus().expect("a Dense-seg");
     let letters = RowLetters {
-        query: b"ACGTACGTAC",
-        subject: b"AAAAAAAAAA",
-        subject_from: 10,
+        query: RowSequence {
+            letters: RowSource::Held(b"ACGTACGTAC", 0),
+            size: 10,
+            minus: !query_plus,
+        },
+        subject: RowSequence {
+            letters: RowSource::Held(b"AAAAAAAAAA", 10),
+            size: 20,
+            minus: !subject_plus,
+        },
         codes: &BLASTN_CODES,
     };
     let mut buffers = RowBuffers::default();
@@ -95,9 +104,8 @@ fn a_row_without_counted_fields_reads_no_letters() {
     assert!(!reads_letters(&spec, true));
     let ctx = blastn_context(&spec);
     let empty = RowLetters {
-        query: b"",
-        subject: b"",
-        subject_from: 0,
+        query: RowSequence::NONE,
+        subject: RowSequence::NONE,
         codes: &BLASTN_CODES,
     };
     let mut buffers = RowBuffers::default();
@@ -166,9 +174,16 @@ fn a_blastx_std_seg_reads_its_query_translated_in_its_frame() {
     let codes = GeneticCodes::new(1, 0);
     let ctx = translated_context(&spec, 4, [true, false], &codes);
     let letters = RowLetters {
-        query: b"ATGGCCTTTAAA",
-        subject: b"MAFK",
-        subject_from: 0,
+        query: RowSequence {
+            letters: RowSource::Held(b"ATGGCCTTTAAA", 0),
+            size: 12,
+            minus: false,
+        },
+        subject: RowSequence {
+            letters: RowSource::Held(b"MAFK", 0),
+            size: 4,
+            minus: false,
+        },
         codes: &codes,
     };
     let mut buffers = RowBuffers::default();
@@ -196,9 +211,16 @@ fn a_minus_strand_query_row_runs_down_in_a_negative_frame() {
     let ctx = translated_context(&spec, 4, [true, false], &codes);
     // Letters 3..=11 are AAAGGCCAT, whose reverse complement is ATGGCCTTT (MAF).
     let letters = RowLetters {
-        query: b"CCCAAAGGCCAT",
-        subject: b"MAFK",
-        subject_from: 0,
+        query: RowSequence {
+            letters: RowSource::Held(b"CCCAAAGGCCAT", 0),
+            size: 12,
+            minus: true,
+        },
+        subject: RowSequence {
+            letters: RowSource::Held(b"MAFK", 0),
+            size: 4,
+            minus: false,
+        },
         codes: &codes,
     };
     let mut buffers = RowBuffers::default();
@@ -225,9 +247,8 @@ fn a_query_row_without_letters_ends_the_row_at_the_query_block() {
     assert!(plan.leaves);
     let mut buffers = RowBuffers::default();
     let empty = RowLetters {
-        query: b"",
-        subject: b"",
-        subject_from: 0,
+        query: RowSequence::NONE,
+        subject: RowSequence::NONE,
         codes: &codes,
     };
     let row = row_hsp(&plan, &ctx, &empty, &mut buffers).unwrap();

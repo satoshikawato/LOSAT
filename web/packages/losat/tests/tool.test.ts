@@ -3,10 +3,11 @@
 // as Blobs, `ReactorAbi.tool` and `validateTool` over a fake engine, the Gateway's run with a fake Engine worker (the
 // sinks take the chunks before the run's result), and, with LOSAT_WEB_REACTORS (the folder of
 // web/adapter/tools/build_reactors.py's output, as database.test.ts), `windowmasker` on the serial reactor in Node.
-import { closeSync, openAsBlob, openSync, readFileSync, readSync } from 'node:fs';
+import { closeSync, openAsBlob, openSync, readdirSync, readFileSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
+import { parseToolDescription } from '../src/domain/tool-description.ts';
 import { FRAME_BEGIN, FRAME_BYTES, FRAME_END, FRAME_TRUNCATE, ownedFrame, parseToolFrame, type ToolFrame } from '../src/domain/tool-frames.ts';
 import { RunCancelledError, type EngineGateway, type EngineRunRequest, type ToolFileSink } from '../src/ports/engine.ts';
 import { ABI_VERSION, EngineCallError, ReactorAbi, type AbiExports } from '../src/infra/reactor/abi.ts';
@@ -345,7 +346,12 @@ function fakeEngine(options: { tool?: (emit: Emit, argv: string[]) => number; va
     new Uint8Array(memory.buffer, 100_000, bytes.length).set(bytes);
     ref.abi!.emit(stream, 100_000, bytes.length);
   };
-  const argvOf = (ptr: number, len: number) => text(new Uint8Array(memory.buffer, ptr, len).slice()).split('\0');
+  // The adapter's reading of an argv (web/adapter/src/lib.rs `words`): NUL-separated words, the empty one after the last NUL dropped.
+  const argvOf = (ptr: number, len: number) => {
+    const words = text(new Uint8Array(memory.buffer, ptr, len).slice()).split('\0');
+    if (words.at(-1) === '') words.pop();
+    return words;
+  };
   const exports = {
     memory,
     losat_web2_abi_version: () => ABI_VERSION,
@@ -378,8 +384,8 @@ function fakeEngine(options: { tool?: (emit: Emit, argv: string[]) => number; va
 }
 
 describe('ReactorAbi.tool and validateTool', () => {
-  it('speaks ABI version 16 and the module check wants losat_web2_tool', () => {
-    expect(ABI_VERSION).toBe(16);
+  it('speaks ABI version 17 and the module check wants losat_web2_tool', () => {
+    expect(ABI_VERSION).toBe(17);
     expect(ABI_EXPORTS).toContain('losat_web2_tool');
   });
 
@@ -1232,5 +1238,209 @@ describe.skipIf(REACTORS === undefined)('windowmasker through the host', () => {
     expect(!verdict.ok && verdict.message).toContain(mode);
     // Another program is no tool: the engine's message, before any stream.
     expect(() => abi.tool(['blastp'], { stdout: () => undefined, stderr: () => undefined, file: () => undefined })).toThrow('blastp is not available in the browser (ABI v2)');
+  }, 120_000);
+});
+
+describe.skipIf(REACTORS === undefined)('blast_formatter through the host', () => {
+  it('formats -subject and -db archives in outfmt 8, 9 and 12, writes -out/-logfile, describes options, and validates', async () => {
+    const { module } = await compileReactor(readFileSync(join(REACTORS!, 'losat-web-serial.wasm')));
+    const bfDir = join(LOSAT, 'tests/blast_formatter');
+    const paths = new Map<Blob, string>();
+    const open = async (rel: string) => {
+      const full = join(bfDir, rel);
+      const blob = await openAsBlob(full);
+      paths.set(blob, full);
+      return { name: rel, file: blob };
+    };
+    const entries = [
+      await open('in/bn.asn'),
+      await open('in/db.asn'),
+      await open('in/batch.asn'),
+      ...(await Promise.all(
+        readdirSync(join(bfDir, 'in/db'))
+          .sort()
+          .map((file) => open(`in/db/${file}`)),
+      )),
+    ];
+    const directory = new RunDirectory(undefined, (blob, start, end) => {
+      const full = paths.get(blob);
+      if (full === undefined) throw new Error('unknown blob');
+      const bytes = new Uint8Array(end - start);
+      const descriptor = openSync(full, 'r');
+      try {
+        return bytes.subarray(0, readSync(descriptor, bytes, 0, bytes.length, start));
+      } finally {
+        closeSync(descriptor);
+      }
+    });
+    const { abi } = await instantiateSerial(module, directory);
+    const run = async (argv: string[]) => {
+      const router = new ToolOutputRouter(undefined, (error) => {
+        throw error;
+      });
+      const status = abi.tool(argv, {
+        stdout: (bytes) => router.stdout(bytes.slice()),
+        stderr: (bytes) => router.stderr(bytes.slice()),
+        file: (parsed) => router.frame(ownedFrame(parsed)),
+      });
+      return { status, ...(await router.finish()) };
+    };
+    directory.open(entries);
+
+    // -xmlhelp parses cleanly into a ToolDescription.
+    const xmlRun = await run(['blast_formatter', '-xmlhelp']);
+    expect(xmlRun.status).toBe(0);
+    const parsed = parseToolDescription(await xmlRun.stdout.text());
+    expect(parsed.tool).toBe('blast_formatter');
+    const flags = new Set(parsed.parameters.map((p) => p.flag));
+    expect(flags).toContain('-archive');
+    expect(flags).toContain('-outfmt');
+    expect(flags).toContain('-out');
+    expect(flags).toContain('-max_target_seqs');
+
+    // -subject archive and local -db archive across supported formats (8, 9, 12).
+    for (const archive of ['in/bn.asn', 'in/db.asn']) {
+      for (const outfmt of ['8', '9', '12']) {
+        const words = ['blast_formatter', '-archive', archive, '-outfmt', outfmt];
+        expect(abi.validateTool(words)).toEqual({ ok: true });
+        const res = await run(words);
+        expect(res.status, `${archive} outfmt ${outfmt}`).toBe(0);
+        expect(res.stdout.size, `${archive} outfmt ${outfmt}`).toBeGreaterThan(0);
+        expect(await res.stderr.text()).toBe('');
+
+        // Writing to -out + -logfile produces the exact same bytes on stream 12.
+        const toFile = await run([...words, '-out', 'report.out', '-logfile', 'run.log']);
+        expect(toFile.status).toBe(0);
+        expect(toFile.stdout.size).toBe(0);
+        expect(toFile.files.map((f) => f.name).sort()).toEqual(['report.out', 'run.log']);
+        const fileBytes = Buffer.from(await toFile.files.find((f) => f.name === 'report.out')!.file.arrayBuffer());
+        const stdoutBytes = Buffer.from(await res.stdout.arrayBuffer());
+        expect(fileBytes.equals(stdoutBytes), `${archive} outfmt ${outfmt} file parity`).toBe(true);
+      }
+    }
+
+    // -rid is refused at both validateTool and runTool.
+    const ridVerdict = abi.validateTool(['blast_formatter', '-rid', 'ABCDEFGH01R']);
+    expect(ridVerdict.ok).toBe(false);
+    expect(!ridVerdict.ok && ridVerdict.message).toContain("not supported by LOSAT's BLAST_FORMATTER");
+    const ridRun = await run(['blast_formatter', '-rid', 'ABCDEFGH01R']);
+    expect(ridRun.status).toBe(1);
+    expect(await ridRun.stderr.text()).toContain("not supported by LOSAT's BLAST_FORMATTER");
+
+    // An empty last word reaches the engine (encodeArgv ends every word with NUL, the adapter's words() reads it back):
+    // `-rid ''` is the CLI's empty RID, not a -rid without its value.
+    const emptyRid = abi.validateTool(['blast_formatter', '-rid', '']);
+    expect(emptyRid).toEqual({ ok: false, message: 'LOSAT engine error: Empty RID string specified' });
+    const emptyRidRun = await run(['blast_formatter', '-rid', '']);
+    expect(emptyRidRun.status).toBe(3);
+    expect(await emptyRidRun.stderr.text()).toBe('LOSAT engine error: Empty RID string specified\n');
+
+    // Overwriting an existing run-directory file with -out is refused by the run, when it reaches -out (after it has
+    // read the archive's first search, which may fail first with NCBI's error); the check leaves it to the run, so
+    // that both give the command line's first error (review of WW4c, F1).
+    const overwriteArgv = ['blast_formatter', '-archive', 'in/bn.asn', '-outfmt', '8', '-out', 'in/bn.asn'];
+    expect(abi.validateTool(overwriteArgv)).toEqual({ ok: true });
+    const overwrite = await run(overwriteArgv);
+    expect(overwrite.status).toBe(1);
+    expect(await overwrite.stderr.text()).toContain("an output file 'in/bn.asn' that is a file of the run's directory");
+  }, 120_000);
+});
+
+// dustmasker, segmasker and convert2blastmask (line NP WW4c, 2026-11-28): the package runs them as any tool, by name; the
+// bytes are NCBI BLAST+ 2.17.0's of the same words (LOSAT/tests/<tool>/ncbi/<row>.{out,err,rc}, the rows of cases.tsv).
+describe.skipIf(REACTORS === undefined)('the masking tools through the host', () => {
+  const rows = [
+    { tool: 'dustmasker', row: 'basic_maskinfo_asn1_bin', words: ['-in', 'in/basic.fa', '-outfmt', 'maskinfo_asn1_bin'] },
+    { tool: 'segmasker', row: 'basic_maskinfo_asn1_text', words: ['-in', 'in/basic.fa', '-outfmt', 'maskinfo_asn1_text'] },
+    { tool: 'convert2blastmask', row: 'lc_txt', words: ['-in', 'in/lc.fa', '-masking_algorithm', 'dust', '-masking_options', 'o'] },
+  ] as const;
+  for (const { tool, row, words } of rows) {
+    it(`${tool}: describes its options, writes NCBI's bytes to the standard output and to -out, and refuses as the command line`, async () => {
+      const { module } = await compileReactor(readFileSync(join(REACTORS!, 'losat-web-serial.wasm')));
+      const dir = join(LOSAT, 'tests', tool);
+      const input = words[1];
+      const path = join(dir, input);
+      const blob = await openAsBlob(path);
+      const directory = new RunDirectory(undefined, (file, start, end) => {
+        expect(file).toBe(blob);
+        const bytes = new Uint8Array(end - start);
+        const descriptor = openSync(path, 'r');
+        try {
+          return bytes.subarray(0, readSync(descriptor, bytes, 0, bytes.length, start));
+        } finally {
+          closeSync(descriptor);
+        }
+      });
+      const { abi } = await instantiateSerial(module, directory);
+      const run = async (argv: string[]) => {
+        const router = new ToolOutputRouter(undefined, (error) => {
+          throw error;
+        });
+        const status = abi.tool(argv, {
+          stdout: (bytes) => router.stdout(bytes.slice()),
+          stderr: (bytes) => router.stderr(bytes.slice()),
+          file: (parsed) => router.frame(ownedFrame(parsed)),
+        });
+        return { status, ...(await router.finish()) };
+      };
+      directory.open([{ name: input, file: blob }]);
+      const ncbi = (suffix: string) => readFileSync(join(dir, 'ncbi', `${row}.${suffix}`));
+
+      const described = await run([tool, '-xmlhelp']);
+      expect(described.status).toBe(0);
+      const description = parseToolDescription(await described.stdout.text());
+      expect(description.tool).toBe(tool);
+      expect(description.parameters.map((param) => param.flag)).toEqual(expect.arrayContaining(['-in', '-out', '-outfmt', '-parse_seqids']));
+
+      const argv = [tool, ...words];
+      expect(abi.validateTool(argv)).toEqual({ ok: true });
+      const printed = await run(argv);
+      expect(printed.status).toBe(Number(ncbi('rc').toString().trim()));
+      expect(Buffer.from(await printed.stdout.arrayBuffer()).equals(ncbi('out')), `${tool} ${row} stdout`).toBe(true);
+      expect(Buffer.from(await printed.stderr.arrayBuffer()).equals(ncbi('err')), `${tool} ${row} stderr`).toBe(true);
+
+      const written = await run([...argv, '-out', 'mask.out', '-logfile', 'run.log']);
+      expect(written.status).toBe(0);
+      expect(written.stdout.size).toBe(0);
+      expect(written.files.map((file) => file.name)).toEqual(['run.log', 'mask.out']);
+      const file = written.files.find((entry) => entry.name === 'mask.out')!.file;
+      expect(Buffer.from(await file.arrayBuffer()).equals(ncbi('out')), `${tool} ${row} -out`).toBe(true);
+
+      // An -out that names a file of the run's directory is LOSAT Web's refusal, at the check and at the run.
+      const existing = [...argv, '-out', input];
+      const verdict = abi.validateTool(existing);
+      expect(verdict.ok).toBe(false);
+      expect(!verdict.ok && verdict.message).toContain(`an output file '${input}'`);
+      const refused = await run(existing);
+      expect(refused.status).toBe(1);
+      expect(refused.files).toEqual([]);
+      expect(await refused.stderr.text()).toContain(`an output file '${input}'`);
+    }, 120_000);
+  }
+
+  it("convert2blastmask without -masking_algorithm: the command line's exit status and text, at the check and at the run", async () => {
+    const { module } = await compileReactor(readFileSync(join(REACTORS!, 'losat-web-serial.wasm')));
+    const { abi } = await instantiateSerial(module, new RunDirectory(undefined, () => new Uint8Array(0)));
+    const argv = ['convert2blastmask', '-in', 'in/lc.fa', '-masking_options', 'o'];
+    // NCBI's record (LOSAT/tests/convert2blastmask/ncbi/noalgo.err) in LOSAT's words (losat::wording, which the command
+    // line's own test applies): the usage of NCBI's text, then the error without NCBI's exception class.
+    const ncbi = readFileSync(join(LOSAT, 'tests/convert2blastmask/ncbi/noalgo.err')).toString();
+    const verdict = abi.validateTool(argv);
+    expect(verdict.ok).toBe(false);
+    const message = verdict.ok ? '' : verdict.message;
+    expect(message.startsWith(ncbi.slice(0, ncbi.indexOf('Error:')))).toBe(true);
+    expect(message).toContain('Error:  Argument "masking_algorithm". Mandatory value is missing:  `String\'');
+    const router = new ToolOutputRouter(undefined, (error) => {
+      throw error;
+    });
+    const status = abi.tool(argv, {
+      stdout: (bytes) => router.stdout(bytes.slice()),
+      stderr: (bytes) => router.stderr(bytes.slice()),
+      file: (parsed) => router.frame(ownedFrame(parsed)),
+    });
+    const result = await router.finish();
+    expect(status).toBe(Number(readFileSync(join(LOSAT, 'tests/convert2blastmask/ncbi/noalgo.rc')).toString().trim()));
+    // The check's text is the run's standard error without its last line end (abi_v2.md §4).
+    expect(await result.stderr.text()).toBe(`${message}\n`);
   }, 120_000);
 });

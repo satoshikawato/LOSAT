@@ -33,15 +33,32 @@ import {
   type ValidationResult,
 } from 'losat/ports';
 import { optionValue } from '../../domain/argv';
+import { seqdbNames } from '../../domain/list-flags';
 import { customOutfmt, OUTFMT_FLAG, outfmtOption } from '../../domain/output-format';
 import { PROGRAMS } from '../../domain/programs';
 import { toolOptionValue } from '../../domain/tool-argv';
-import { WINDOWMASKER_HELP_FLAGS, WINDOWMASKER_VERSION_FLAGS } from '../../domain/tools';
+import { toolHelpFlag, toolPrintsKind } from '../../domain/tools';
 import DESCRIBE from './describe.json';
+import BLAST_FORMATTER_XMLHELP_DOC from './blast_formatter-xmlhelp.json';
+import CONVERT2BLASTMASK_XMLHELP_DOC from './convert2blastmask-xmlhelp.json';
+import DUSTMASKER_XMLHELP_DOC from './dustmasker-xmlhelp.json';
+import MAKEBLASTDB_XMLHELP_DOC from './makeblastdb-xmlhelp.json';
+import SEGMASKER_XMLHELP_DOC from './segmasker-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from './windowmasker-xmlhelp.json';
 import { fakeReaderError, fakeRecordKeys } from './fake-fasta';
 
-const WINDOWMASKER_XMLHELP: string = WINDOWMASKER_XMLHELP_DOC.xml;
+/**
+ * Each tool's `-xmlhelp`, as the engine prints it (file snapshots of tests/unit/engine-runtime.test.ts:
+ * compared with the reactor when one is built, and written again with `vitest -u`).
+ */
+const TOOL_XMLHELP: Readonly<Record<string, string>> = {
+  windowmasker: WINDOWMASKER_XMLHELP_DOC.xml,
+  blast_formatter: BLAST_FORMATTER_XMLHELP_DOC.xml,
+  makeblastdb: MAKEBLASTDB_XMLHELP_DOC.xml,
+  dustmasker: DUSTMASKER_XMLHELP_DOC.xml,
+  segmasker: SEGMASKER_XMLHELP_DOC.xml,
+  convert2blastmask: CONVERT2BLASTMASK_XMLHELP_DOC.xml,
+};
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
 
@@ -53,7 +70,7 @@ export interface FakeEngineOptions {
 export class FakeEngine implements EngineGateway, ToolEngine {
   private readonly cancelled = new Set<string>();
   private readonly phaseDelayMs: number;
-  private windowMaskerDescription: ToolDescription | undefined;
+  private readonly toolDescriptions = new Map<string, ToolDescription>();
 
   constructor(options: FakeEngineOptions = {}) {
     this.phaseDelayMs = options.phaseDelayMs ?? 0;
@@ -72,23 +89,34 @@ export class FakeEngine implements EngineGateway, ToolEngine {
   }
 
   async describeTool(tool: string): Promise<ToolDescription> {
-    if (tool !== 'windowmasker') throw new Error(`unknown tool: ${tool}`);
-    this.windowMaskerDescription ??= parseToolDescription(WINDOWMASKER_XMLHELP);
-    return this.windowMaskerDescription;
+    const xml = Object.hasOwn(TOOL_XMLHELP, tool) ? TOOL_XMLHELP[tool] : undefined;
+    if (xml === undefined) throw new Error(`unknown tool: ${tool}`);
+    let description = this.toolDescriptions.get(tool);
+    if (description === undefined) {
+      description = parseToolDescription(xml);
+      this.toolDescriptions.set(tool, description);
+    }
+    return description;
   }
 
+  /**
+   * Refuses an unknown tool, a word that is not an option of the tool's `-xmlhelp`, a value outside its
+   * list or range, options that exclude each other, and a required option left out (NCBI's message);
+   * the engine's other checks are not imitated.
+   */
   async validateTool(argv: readonly string[]): Promise<ToolValidation> {
     const tool = argv[0];
-    if (tool !== 'windowmasker') return { ok: false, message: `unknown tool: ${tool}` };
+    if (tool === undefined || !Object.hasOwn(TOOL_XMLHELP, tool)) return { ok: false, message: `unknown tool: ${tool}` };
     const description = await this.describeTool(tool);
     const byFlag = new Map(description.parameters.map((param) => [param.flag, param]));
     const seen = new Set<string>();
+    const values = new Map<string, string>();
     for (let i = 1; i < argv.length; i++) {
       const word = argv[i]!;
       const [flag, inline] = word.split(/=(.*)/s, 2);
-      if (WINDOWMASKER_HELP_FLAGS.has(flag!) || WINDOWMASKER_VERSION_FLAGS.has(flag!)) return { ok: true };
+      if (toolPrintsKind([tool, flag!]) !== null) return { ok: true };
       const param = byFlag.get(flag!);
-      const extraValued = flag === '-logfile' || flag === '-conffile';
+      const extraValued = flag === '-logfile' || flag === '-conffile' || (tool === 'blast_formatter' && flag === '-rid');
       if (param === undefined && !extraValued) {
         return { ok: false, message: `Argument error: Unknown argument: "${word}"` };
       }
@@ -100,6 +128,7 @@ export class FakeEngine implements EngineGateway, ToolEngine {
           if (i + 1 >= argv.length) return { ok: false, message: `Argument error: Missing value for "${flag}"` };
           value = argv[++i]!;
         }
+        values.set(flag!, value);
         if (param?.choices !== undefined && !param.choices.includes(value)) {
           return { ok: false, message: `Argument error: Invalid value "${value}" for "${flag}"` };
         }
@@ -122,8 +151,34 @@ export class FakeEngine implements EngineGateway, ToolEngine {
         return { ok: false, message: `Argument error: ${first} and ${second} are mutually exclusive` };
       }
     }
-    if (!seen.has('-mk_counts') && !seen.has('-convert') && !seen.has('-ustat')) {
+    for (const param of description.parameters) {
+      if (param.mandatory && !seen.has(param.flag)) {
+        const name = param.flag.slice(1);
+        return {
+          ok: false,
+          message: `Error: (CArgException::eNoArg) Argument "${name}". Mandatory value is missing:  \`${param.kind}'`,
+        };
+      }
+    }
+    if (tool === 'windowmasker' && !seen.has('-mk_counts') && !seen.has('-convert') && !seen.has('-ustat')) {
       return { ok: false, message: 'Argument error: One of -mk_counts, -convert, or -ustat must be specified' };
+    }
+    if (tool === 'makeblastdb' && !seen.has('-dbtype')) {
+      return { ok: false, message: "Command line argument error: Argument \"dbtype\". Mandatory value is missing:  `String, `nucl', `prot'" };
+    }
+    if (tool === 'blast_formatter') {
+      if (seen.has('-rid') && seen.has('-archive')) {
+        return { ok: false, message: 'Argument error: -rid and -archive are mutually exclusive' };
+      }
+      if (!seen.has('-archive')) {
+        if (!seen.has('-rid')) {
+          return { ok: false, message: 'Command line argument error: Argument "rid". The argument has no value' };
+        }
+        if ((values.get('-rid') ?? '') === '') {
+          return { ok: false, message: 'LOSAT engine error: Empty RID string specified' };
+        }
+        return { ok: false, message: "Error: -rid (the results of a search on NCBI's servers) is not supported by LOSAT's BLAST_FORMATTER" };
+      }
     }
     return { ok: true };
   }
@@ -164,17 +219,15 @@ export class FakeEngine implements EngineGateway, ToolEngine {
       return finish(1);
     }
 
-    const words = argv.slice(1).map((word) => word.split('=', 1)[0]!);
-    if (words.includes('-xmlhelp')) {
-      await writeStdout(WINDOWMASKER_XMLHELP);
+    const toolName = argv[0] ?? 'windowmasker';
+    const prints = toolPrintsKind(argv);
+    if (prints === 'version') {
+      await writeStdout(`${toolName}: 0.2.0 (${FAKE_MARKER})\n`);
       return finish(0);
     }
-    if (words.some((w) => WINDOWMASKER_HELP_FLAGS.has(w))) {
-      await writeStdout(`USAGE\n  windowmasker ... (${FAKE_MARKER})\n`);
-      return finish(0);
-    }
-    if (words.some((w) => WINDOWMASKER_VERSION_FLAGS.has(w))) {
-      await writeStdout(`windowmasker: 0.2.0 (${FAKE_MARKER})\n`);
+    if (prints === 'help') {
+      if (toolHelpFlag(argv) === '-xmlhelp') await writeStdout(TOOL_XMLHELP[toolName] ?? '');
+      else await writeStdout(`USAGE\n  ${toolName} ... (${FAKE_MARKER})\n`);
       return finish(0);
     }
 
@@ -200,6 +253,16 @@ export class FakeEngine implements EngineGateway, ToolEngine {
 
     await pause();
     checkAborted();
+
+    if (toolName === 'makeblastdb') {
+      // The volume's three files under `-out` (or the first name of `-in`'s list, `seqdbNames`), each the marker: no database is made.
+      const db = outName ?? seqdbNames(toolOptionValue(argv, '-in') ?? '')[0] ?? 'db';
+      const letter = toolOptionValue(argv, '-dbtype') === 'prot' ? 'p' : 'n';
+      for (const ext of ['hr', 'in', 'sq']) await writeFile(`${db}.${letter}${ext}`, [bodyText]);
+      if (logName !== undefined) await writeFile(logName, [logText]);
+      await writeStdout(`\n\nBuilding a new DB, current time: (${FAKE_MARKER})\nNew DB name:   ${db}\n`);
+      return finish(0);
+    }
 
     const sameOutAndLog = outName !== undefined && outName !== '-' && logName !== undefined && outName === logName;
     if (sameOutAndLog) {

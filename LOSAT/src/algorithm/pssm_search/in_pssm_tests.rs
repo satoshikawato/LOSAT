@@ -459,6 +459,39 @@ fn the_request_holds_the_pssm_as_read_and_the_engines_errors_come_in_order() {
     assert!(search.request_pssm().is_some_and(|pssm| *pssm == comment));
 }
 
+// A request whose ASN.1 text write NCBI stops in with its exception (a delayed member of another
+// format that NCBI reads again with an error: NCBI BLAST+ 2.17.0 writes its outfmt 0 prolog, then
+// part of the strategy file, rows `db.xml.ps.dl_ovf.strat` and `db.xml.tbn.dl_ovf.strat`): the
+// read keeps no request and LOSAT's refusal is the stop where that write starts, after NCBI's
+// check of the PSSM (review T4b-f O-1); without the strategy the PSSM is searched.
+#[test]
+fn a_request_that_ncbis_write_stops_in_is_refused_where_the_write_starts() {
+    use crate::algorithm::pssm_search::PssmQueryStop;
+    let pssm = crate::blastinput::pssm_text::read_pssm_xml(&fixture("pssm/ps9_xml_dl_ovf.xml"))
+        .result
+        .unwrap();
+    let reader = |strategy| PssmReader {
+        strategy,
+        ..PssmReader::PSIBLAST
+    };
+    let (search, file) = psi_search_and_object(pssm.clone(), reader(true)).unwrap();
+    assert!(search.request.is_none() && file.valid);
+    let Some(PssmQueryStop::RequestRefused(refusal)) = search.stop_before_search(true, true) else {
+        panic!("{:?}", search.stop_before_search(true, true));
+    };
+    assert_eq!(
+        refusal,
+        "-export_search_strategy with a PSSM whose author names (a member read into a delay buffer of another format) NCBI reads again with an error (NCBI BLAST+ writes part of the file and stops with a C++ exception) is not supported by LOSAT's PSIBLAST"
+    );
+    assert_eq!(
+        search.stop_before_search(true, false),
+        Some(PssmQueryStop::Bl2seq)
+    );
+    let (search, _) = psi_search_and_object(pssm, reader(false)).unwrap();
+    assert!(search.request.is_none() && search.request_refusal.is_none());
+    assert_eq!(search.stop_before_search(false, true), None);
+}
+
 // A PSSM of frequency ratios only (the tk PSSM without its scores) gets NCBI's engine's
 // scores, which are the tk PSSM's own (NCBI 2.17.0 searches both to the same bytes, fixture
 // rows db.ps.inpssm.cbs.ratios.6 and db.ps.inpssm.cbs.tk.6), and the engine's gapped values;

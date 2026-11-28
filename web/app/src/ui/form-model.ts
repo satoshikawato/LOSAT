@@ -1,11 +1,16 @@
 // Shared form model for ParameterField, ParameterForm and ParameterPair (WW3b DESIGN §2.3):
 // both the Search form (`searchFormModel`) and tool forms provide one, so one field component
 // draws every option with its defaults, changed marker, help tip and refusal marks.
+import type { ToolParameterDescription } from 'losat/domain';
 import type { ParameterDescription } from 'losat/ports';
+import type { BlastFormatterDraft, BlastFormatterDraftState } from '../application/blast-formatter-draft';
 import { registryName } from '../application/conffile';
 import type { CountsLoader } from '../application/counts';
 import type { DatabasePickDraft, DraftState, SearchDraft } from '../application/draft';
+import type { MakeblastdbDraft, MakeblastdbDraftState } from '../application/makeblastdb-draft';
+import type { MaskingDraft, MaskingDraftState } from '../application/masking-draft';
 import type { ToolDraft, ToolDraftState } from '../application/tool-draft';
+import type { ToolFormState } from '../application/tool-draft-core';
 import {
   fieldList,
   knownDefault,
@@ -23,7 +28,19 @@ import {
 import { NO_TAXID_EXPANSION_FLAG } from '../domain/blast-db';
 import { programById, type ParameterField, type ParameterSection } from '../domain/programs';
 import { refusedToolFields } from '../domain/tool-argv';
-import { allStageParameters, stageOptionParameters, toToolEngineOption, toToolParameterField } from '../domain/tools';
+import {
+  allBlastFormatterParameters,
+  allMaskingParameters,
+  allStageParameters,
+  blastFormatterOptionParameters,
+  makeblastdbOptionSections,
+  makeblastdbParameters,
+  maskingOptionParameters,
+  stageOptionParameters,
+  toToolEngineOption,
+  toToolParameterField,
+  WINDOWMASKER_VERSION_FLAGS,
+} from '../domain/tools';
 import { refusal, REFUSAL_ID } from './refusal';
 
 export interface FormRefusal {
@@ -171,28 +188,54 @@ export const WM_REFUSAL_ID = 'wm-argv-validation-message';
 const WM_EXTRA_HELP =
   'Other options of the losat windowmasker command line, written as there: -logfile run.log -conffile app.ini -h -version-full';
 
-/** Adapts `ToolDraft` + `ToolDraftState` into a `FormModel` driven by `-xmlhelp`. */
-export function windowMaskerFormModel(draft: ToolDraft, state: ToolDraftState): FormModel {
-  const stage = state.stage;
-  const allParams = allStageParameters(state.description, stage);
+/** DOM id of the Format Archive argv refusal element, pointed to by refused fields via `aria-describedby`. */
+export const BF_REFUSAL_ID = 'bf-argv-validation-message';
+
+const BF_EXTRA_HELP =
+  'Other options of the losat blast_formatter command line, written as there: -logfile run.log -conffile app.ini -h -version';
+
+/** DOM id of the Masking argv refusal element, pointed to by refused fields via `aria-describedby`. */
+export const MS_REFUSAL_ID = 'ms-argv-validation-message';
+
+/** What a tool tab's form model takes from its draft besides the state that every tool draft holds. */
+interface ToolFormParts {
+  readonly key: string;
+  readonly idPrefix: string;
+  readonly refusalId: string;
+  readonly extraHelp: string;
+  readonly values: FormValues;
+  readonly extra: string;
+  /** Every option of the form (its blocks' too), for the defaults and the help. */
+  readonly all: readonly ToolParameterDescription[];
+  /** The options of the form's options section. */
+  readonly shown: readonly ToolParameterDescription[];
+  /** The form's options in sections of their own (makeblastdb's groups), in place of one "Options" section of `shown`. */
+  readonly sections?: readonly { readonly title: string; readonly parameters: readonly ToolParameterDescription[] }[];
+  readonly setFile: (flag: string, file: File | undefined) => void;
+}
+
+/** A tool draft as a `FormModel` driven by `-xmlhelp` (WindowMasker, Masking, Format Archive, makeblastdb). */
+function toolFormModel(
+  draft: { setField(flag: string, value: FieldValue): void; setExtra(text: string): void },
+  state: ToolFormState,
+  parts: ToolFormParts,
+): FormModel {
   const options: readonly ParameterDescription[] | undefined =
-    state.description === undefined ? undefined : allParams.map(toToolEngineOption);
-  const optionFields = stageOptionParameters(state.description, stage).map(toToolParameterField);
+    state.description === undefined ? undefined : parts.all.map(toToolEngineOption);
+  const grouped = parts.sections ?? [{ title: 'Options', parameters: parts.shown }];
   const sections: readonly ParameterSection[] =
-    state.descriptionUnavailable === true || optionFields.length === 0
+    state.descriptionUnavailable === true
       ? []
-      : [{ title: 'Options', placement: 'algorithm', fields: optionFields }];
-  const values = state.values[stage];
+      : grouped
+          .map((section): ParameterSection => ({ title: section.title, placement: 'algorithm', fields: section.parameters.map(toToolParameterField) }))
+          .filter((section) => section.fields.length > 0);
   const files: Record<string, File> = {};
   for (const entry of state.runFiles) {
     if (entry.flag !== undefined) files[entry.flag] = entry.file;
   }
-  const currentRefusal =
-    state.validation.state === 'invalid' ? refusedToolFields(state.validation.message, state.extra[stage]) : undefined;
-
   return {
-    key: `wm-${stage}`,
-    values,
+    key: parts.key,
+    values: parts.values,
     options,
     files,
     knownDefault: (flag) => {
@@ -200,14 +243,86 @@ export function windowMaskerFormModel(draft: ToolDraft, state: ToolDraftState): 
       return def === undefined ? undefined : { defaultValue: def };
     },
     fieldList: () => [],
-    refusal: currentRefusal,
-    refusalId: WM_REFUSAL_ID,
-    idPrefix: 'wm-param',
+    refusal: state.validation.state === 'invalid' ? refusedToolFields(state.validation.message, parts.extra) : undefined,
+    refusalId: parts.refusalId,
+    idPrefix: parts.idPrefix,
     ...descriptionFields(state),
     ...draftActions(draft),
-    setFile: (flag, file) => draft.setOptionFile(flag, file),
+    setFile: parts.setFile,
     sections,
-    extra: state.extra[stage],
-    extraHelp: WM_EXTRA_HELP,
+    extra: parts.extra,
+    extraHelp: parts.extraHelp,
   };
+}
+
+/** Adapts `ToolDraft` + `ToolDraftState` into a `FormModel` driven by `-xmlhelp`. */
+export function windowMaskerFormModel(draft: ToolDraft, state: ToolDraftState): FormModel {
+  const stage = state.stage;
+  return toolFormModel(draft, state, {
+    key: `wm-${stage}`,
+    idPrefix: 'wm-param',
+    refusalId: WM_REFUSAL_ID,
+    extraHelp: WM_EXTRA_HELP,
+    values: state.values[stage],
+    extra: state.extra[stage],
+    all: allStageParameters(state.description, stage),
+    shown: stageOptionParameters(state.description, stage),
+    setFile: (flag, file) => draft.setOptionFile(flag, file),
+  });
+}
+
+/** Adapts `BlastFormatterDraft` + `BlastFormatterDraftState` into a `FormModel` driven by `-xmlhelp`. */
+export function blastFormatterFormModel(draft: BlastFormatterDraft, state: BlastFormatterDraftState): FormModel {
+  return toolFormModel(draft, state, {
+    key: 'bf-format',
+    idPrefix: 'bf-param',
+    refusalId: BF_REFUSAL_ID,
+    extraHelp: BF_EXTRA_HELP,
+    values: state.values,
+    extra: state.extra,
+    all: allBlastFormatterParameters(state.description),
+    shown: blastFormatterOptionParameters(state.description),
+    setFile: () => undefined,
+  });
+}
+
+/** Adapts `MaskingDraft` + `MaskingDraftState` into a `FormModel` driven by the `-xmlhelp` of the tool shown. */
+export function maskingFormModel(draft: MaskingDraft, state: MaskingDraftState): FormModel {
+  const { tool, description } = state;
+  // The tool's own version word (convert2blastmask has -version, dustmasker and segmasker -version-full).
+  const version = description?.parameters.find((param) => WINDOWMASKER_VERSION_FLAGS.has(param.flag))?.flag ?? '-version';
+  return toolFormModel(draft, state, {
+    key: `ms-${tool}`,
+    idPrefix: 'ms-param',
+    refusalId: MS_REFUSAL_ID,
+    extraHelp: `Other options of the losat ${tool} command line, written as there: -logfile run.log -conffile app.ini -h ${version}`,
+    values: state.values[tool],
+    extra: state.extra[tool],
+    all: allMaskingParameters(description, tool),
+    shown: maskingOptionParameters(description, tool),
+    setFile: () => undefined,
+  });
+}
+
+/** DOM id of the makeblastdb argv refusal element, pointed to by refused fields via `aria-describedby`. */
+export const MK_REFUSAL_ID = 'mk-argv-validation-message';
+
+const MK_EXTRA_HELP =
+  'Other options of the losat makeblastdb command line, written as there: -randomize -logfile run.log -conffile app.ini -help-full -version';
+
+/** Adapts `MakeblastdbDraft` + `MakeblastdbDraftState` into a `FormModel` driven by `-xmlhelp`, its options in the groups of `-help`. */
+export function makeblastdbFormModel(draft: MakeblastdbDraft, state: MakeblastdbDraftState): FormModel {
+  const sections = makeblastdbOptionSections(state.description);
+  return toolFormModel(draft, state, {
+    key: 'mk-build',
+    idPrefix: 'mk-param',
+    refusalId: MK_REFUSAL_ID,
+    extraHelp: MK_EXTRA_HELP,
+    values: state.values,
+    extra: state.extra,
+    all: makeblastdbParameters(state.description),
+    shown: sections.flatMap((section) => section.parameters),
+    sections,
+    setFile: (flag, file) => draft.setOptionFile(flag, file),
+  });
 }

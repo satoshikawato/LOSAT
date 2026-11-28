@@ -77,7 +77,13 @@ pub(crate) struct BlastnTabular<'a> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
 pub(crate) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -> Result<()> {
     let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
-    TabularWriter::new(spec, &version, None).prolog(writer)?;
+    TabularWriter::new(
+        spec,
+        crate::blastinput::app::Program::Blastn,
+        &version,
+        None,
+    )
+    .prolog(writer)?;
     Ok(())
 }
 
@@ -129,7 +135,12 @@ pub(crate) fn write_blastn_tabular(
         }
     }
     let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
-    let table = TabularWriter::new(spec, &version, None);
+    let table = TabularWriter::new(
+        spec,
+        crate::blastinput::app::Program::Blastn,
+        &version,
+        None,
+    );
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
@@ -351,19 +362,34 @@ pub(crate) fn write_blastn_tabular(
                         .rows
                         .then_some((query_row.as_slice(), subject_row.as_slice())),
                 );
-                match probe.as_deref_mut() {
-                    // One printed row is one HSP; the probe marks it without changing it.
-                    Some(probe) => {
-                        buf.clear();
-                        table.row(&mut buf, &mut rows, &query, &subject, kept.as_ref(), &row);
-                        writer.flush()?;
-                        probe.begin(hsp_index);
-                        writer.write_all(&buf)?;
-                        writer.flush()?;
-                        probe.end(hsp_index);
-                        buf.clear();
-                    }
-                    None => table.row(&mut buf, &mut rows, &query, &subject, kept.as_ref(), &row),
+                if probe.is_some() {
+                    buf.clear();
+                }
+                // A row where NCBI has no result ends the run after the bytes before its stop.
+                if let Some(stop) =
+                    table.row(&mut buf, &mut rows, &query, &subject, kept.as_ref(), &row)
+                {
+                    return Err(crate::report::tabular::row_stop_end(
+                        writer,
+                        &buf,
+                        stop,
+                        tab.subjects.stopped_subject(stop.subject, stop.lineless),
+                        PROGRAM,
+                        || {
+                            if let Some(warnings) = warnings.as_deref_mut() {
+                                warnings.end_run();
+                            }
+                        },
+                    ));
+                }
+                // One printed row is one HSP; the probe marks it without changing it.
+                if let Some(probe) = probe.as_deref_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                    writer.write_all(&buf)?;
+                    writer.flush()?;
+                    probe.end(hsp_index);
+                    buf.clear();
                 }
                 hsp_index += 1;
             }

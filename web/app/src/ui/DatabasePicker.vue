@@ -7,13 +7,16 @@
 import { computed, ref, useId } from 'vue';
 import type { SequenceKind } from 'losat/domain';
 import type { DatabasePickDraft } from '../application/draft';
-import { databaseTaxonomy, matchingDatabases, noMatchingDatabaseMessage } from '../domain/blast-db';
+import { chooseAgainMessage, databaseTaxonomy, defaultDatabase, matchingDatabases, noMatchingDatabaseMessage, rememberedPickKind } from '../domain/blast-db';
+import { listNameRefusal } from '../domain/list-flags';
 import { formatBytes } from './format';
 import LosatLoader from './LosatLoader.vue';
 
 const props = withDefaults(
   defineProps<{
     pick: DatabasePickDraft;
+    /** The option that the chosen database is written in (`-db`, `-filtering_db`), whose list cannot carry every name. */
+    flag: string;
     moleculeKind: SequenceKind;
     contextLabel: string;
     testIdPrefix: string;
@@ -34,12 +37,17 @@ const filesInput = ref<HTMLInputElement | null>(null);
 
 const discovery = computed(() => props.pick.discovery);
 const matches = computed(() => matchingDatabases(discovery.value, props.moleculeKind));
-const selected = computed(() => matches.value.find((db) => db.name === props.pick.selected) ?? matches.value[0]);
+const selected = computed(() => matches.value.find((db) => db.name === props.pick.selected) ?? defaultDatabase(matches.value));
 const mismatch = computed(() =>
   discovery.value !== undefined && !props.pick.scanning && matches.value.length === 0
     ? noMatchingDatabaseMessage(discovery.value, props.moleculeKind, props.contextLabel)
     : undefined,
 );
+/**
+ * Why the chosen database cannot be written in the option (a name with a double quote, line WW, WW4d), as "Run LOSAT"
+ * says it. Not an alert: the check's line, which is live, says the same sentence (WW4d R2).
+ */
+const refusal = computed(() => (selected.value === undefined ? undefined : listNameRefusal({ flag: props.flag }, selected.value.name, 'database')));
 const taxonomySummary = computed(() => {
   if (discovery.value === undefined || selected.value === undefined) return '';
   const tax = databaseTaxonomy(discovery.value, selected.value.name);
@@ -114,7 +122,7 @@ function optionText(db: (typeof matches.value)[number]): string {
     </p>
 
     <p v-else-if="discovery === undefined && pick.remembered !== undefined" class="note db-reload" role="status" :data-testid="`${testIdPrefix}-reload`">
-      Previous database: <code>{{ pick.remembered.name }}</code>. Choose the folder again.
+      Previous database: <code>{{ pick.remembered.name }}</code>. {{ chooseAgainMessage(rememberedPickKind(pick.remembered)) }}
     </p>
 
     <template v-else-if="discovery !== undefined">
@@ -137,6 +145,9 @@ function optionText(db: (typeof matches.value)[number]): string {
           <span v-if="selected.volumes && selected.volumes.length > 1" class="muted"> ({{ selected.volumes.length }} volumes)</span>
           <span v-else-if="selected.entry === 'alias'" class="muted"> (alias)</span>
           <span v-if="selected.title && selected.title !== selected.name" class="muted"> — {{ selected.title }}</span>
+        </p>
+        <p v-if="refusal !== undefined" class="error db-refused" :data-testid="`${testIdPrefix}-refused`">
+          {{ refusal }}
         </p>
         <p class="db-meta muted" :data-testid="`${testIdPrefix}-meta`">
           {{ discovery.files.length }} {{ discovery.files.length === 1 ? 'file' : 'files' }} ({{ formatBytes(discovery.totalBytes) }})<template

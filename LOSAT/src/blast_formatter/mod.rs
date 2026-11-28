@@ -6,6 +6,7 @@
 //! servers, is refused (`refusals`), as the search programs refuse `-remote`.
 
 mod archive;
+mod archive_out;
 mod formatting;
 pub(crate) mod refusals;
 mod search_program;
@@ -19,6 +20,7 @@ use crate::cli::NativeError;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{self, Cin};
 use crate::ncbi_app::{Diag, Tool};
+use crate::report::run_files::RunFiles;
 
 use refusals::Refusal;
 
@@ -86,6 +88,55 @@ pub(crate) fn run_with(
     crate::ncbi_app::run_with(&TOOL, words, input, out, err, run_body)
 }
 
+/// `run_with` of LOSAT Web's run (`ncbi_app::run_in`): the files that the run writes (`-out FILE`,
+/// `-logfile FILE`) go to `files`, and `-xmlhelp` prints NCBI's XML, as on the command line.
+pub(crate) fn run_in(
+    words: &[OsString],
+    files: &RunFiles,
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_in(&TOOL, words, files, (input, out, err), run_body)
+}
+
+/// The checks of a blast_formatter run before it opens `-archive` (LOSAT Web's validation of the
+/// words, `web_adapter::check_blast_formatter`): `run_in` with `check_body`, which stops where
+/// `Run` would open `-archive`. The standard input is empty; the exit status is 0 for a valid argv
+/// (including help/version words), with errors on `err` and the `-logfile` target in `files`.
+pub(crate) fn check_in(
+    words: &[OsString],
+    run_files: &RunFiles,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_in(
+        &TOOL,
+        words,
+        run_files,
+        (&mut std::io::empty(), out, err),
+        check_body,
+    )
+}
+
+// No NCBI counterpart: LOSAT Web checks `-logfile` against the input names the run opens for
+// reading, so a `-logfile` naming `-archive` (even when missing) is refused instead of creating
+// the file before `-archive` reads it. `-out` is opened only after `-archive` is read, so
+// `for_out` is empty (existing files in the run directory are still refused by `OpenFiles`).
+/// The input file names that a `blast_formatter` run with `words` opens for reading:
+/// `(for_logfile, for_out)`.
+pub(crate) fn read_files<S: AsRef<OsStr>>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    let mut for_logfile = Vec::new();
+    crate::ncbi_app::args::scan_argv(TOOL.program, words, |name, value| {
+        if name == "archive" {
+            if let Some(path) = value.filter(|v| !v.is_empty() && *v != OsStr::new("-")) {
+                for_logfile.push(path.as_encoded_bytes().to_vec());
+            }
+        }
+    });
+    (for_logfile, Vec::new())
+}
+
 /// The command line of a run that formats an archive (`format_archive`), as `PrintFormattedOutput`
 /// reads it for each archive object (blast_formatter.cpp:329-343): the formatting arguments
 /// (`formatting::extract_formatting` reads `-outfmt` and the counts there, after the object), the
@@ -143,10 +194,8 @@ impl Options {
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:499-545
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:879-884
 /// blast_formatter's `Run`: the archive of `-archive` (`-` is the standard input `input`), read
-/// and formatted by `format_archive`; without `-archive`, `-rid`'s value: none is NCBI's error of
-/// the argument without a value (NCBI BLAST+ 2.17.0 `blast_formatter` alone, probe P2.205), the
-/// empty one NCBI's error of `CRemoteBlast` (P2.221), any other LOSAT's refusal where NCBI asks its
-/// servers for the search (`Refusal::Rid`). The errors are `CATCH_ALL`'s (`catch_all`).
+/// and formatted by `format_archive`; without `-archive`, `-rid`'s value (`rid`). The errors are
+/// `CATCH_ALL`'s (`catch_all`).
 fn run_body(
     args: &Args,
     settings: &ApplicationSettings,
@@ -173,6 +222,36 @@ fn run_body(
             diag,
         );
     }
+    rid(args, diag)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:499-545
+/// The checks of `run_body` before opening `-archive` (LOSAT Web's validation, `check_in`):
+/// none when `-archive` is given (the run opens `-out` only once it has read the archive's first
+/// search, so an `-out` that LOSAT Web refuses is the run's refusal, made when the run reaches
+/// `-out`; review of WW4c, F1); without `-archive`, `run_body`'s own `-rid` steps (`rid`), which
+/// open no files.
+fn check_body(
+    args: &Args,
+    _settings: &ApplicationSettings,
+    _input: &mut Cin<'_>,
+    _out: &mut dyn Write,
+    diag: &mut Diag,
+) -> i32 {
+    if args.os_value("archive").is_some() {
+        return 0;
+    }
+    rid(args, diag)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:499-545
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:879-884
+/// `Run` without `-archive` (`run_body`, and `check_body` of LOSAT Web's validation, which opens no
+/// file here either): `-rid`'s value. None is NCBI's error of the argument without a value (NCBI
+/// BLAST+ 2.17.0 `blast_formatter` alone, probe P2.205), the empty one NCBI's error of
+/// `CRemoteBlast` (P2.221), any other LOSAT's refusal where NCBI asks its servers for the search
+/// (`Refusal::Rid`). The errors are `CATCH_ALL`'s (`catch_all`).
+fn rid(args: &Args, diag: &mut Diag) -> i32 {
     let rid = match args.as_bytes("rid") {
         Ok(rid) => rid,
         Err(error) => {

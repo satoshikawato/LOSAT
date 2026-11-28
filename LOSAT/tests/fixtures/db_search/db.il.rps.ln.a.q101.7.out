@@ -1,0 +1,11 @@
+# RPSBLAST 2.17.0+
+# Query: q101
+# Database: rps_mini
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+q101	CDD:101	100.000	190	0	0	1	190	1	190	1.69e-114	312
+q101	CDD:103	50.000	10	5	0	180	189	149	158	3.4	14.7
+q101	CDD:102	42.857	7	4	0	87	93	29	35	4.4	14.3
+q101	CDD:102	20.000	25	16	1	30	54	90	110	6.6	13.5
+q101	CDD:102	22.222	9	7	0	169	177	159	167	7.2	13.5
+# BLAST processed 1 queries

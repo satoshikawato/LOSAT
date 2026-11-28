@@ -314,7 +314,13 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         qcovhsp: 100,
     };
     let mut out = Vec::new();
-    TabularWriter::new(&spec, "BLASTP 2.17.0+", None).row(
+    let stop = TabularWriter::new(
+        &spec,
+        crate::blastinput::app::Program::Blastp,
+        "BLASTP 2.17.0+",
+        None,
+    )
+    .row(
         &mut out,
         &mut crate::report::tabular::TabularRows::default(),
         &TabularQuery::local(b"q", 1),
@@ -322,6 +328,7 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         None,
         &hsp,
     );
+    assert_eq!(stop, None);
     let row = text(out.strip_suffix(b"\n").expect("one row"));
     Some(row.split('\t').map(str::to_string).collect())
 }
@@ -1190,6 +1197,54 @@ fn weak_keys_find_the_ids_that_ncbis_scope_matches_weakly() {
     let mut weak = Vec::new();
     weak_keys(&ParsedSeqId::Gi(777), &mut weak);
     assert!(weak.is_empty());
+}
+
+/// `ScopeIndex::finds` looks a Bioseq up as NCBI's scope does (`x_GetSeqMatch`): a Bioseq of the
+/// id itself first, else those that the id matches weakly. A versioned text Seq-id finds no Bioseq
+/// of its accession without a version, nor of another version; one without a version finds its
+/// own first, else every version (NCBI 2.17.0 rows of7_ver_db* of tests/blast_formatter, review
+/// R1 of PR 1683, finding 1).
+#[test]
+fn scope_index_finds_the_id_itself_before_its_weak_matches() {
+    use super::id_scope::{scope_finds, ScopeIndex};
+    let text = |accession: &str, version: Option<i32>| TextseqId {
+        name: None,
+        accession: Some(accession.as_bytes().to_vec()),
+        release: None,
+        version,
+    };
+    let gb = |accession: &str, version| ParsedSeqId::Genbank(text(accession, version));
+    let local = |tag: &[u8]| ParsedSeqId::Local(ObjectId::Str(tag.to_vec()));
+    let mut index = ScopeIndex::default();
+    index.add(0, &gb("AB000011", None));
+    index.add(1, &gb("AB000011", Some(1)));
+    index.add(2, &gb("AB000011", Some(2)));
+    index.add(3, &local(b"seq1"));
+    index.add(3, &gb("AB000099", Some(1)));
+    let none: [usize; 0] = [];
+    assert_eq!(index.finds(&gb("AB000011", None)), [0]);
+    assert_eq!(index.finds(&gb("ab000011", Some(1))), [1]);
+    assert_eq!(index.finds(&gb("AB000011", Some(3))), none);
+    assert_eq!(index.finds(&local(b"SEQ1")), [3]);
+    assert_eq!(index.finds(&gb("AB000099", Some(1))), [3]);
+    let mut versions = ScopeIndex::default();
+    versions.add(0, &gb("AB000011", Some(1)));
+    versions.add(1, &gb("AB000011", Some(2)));
+    assert_eq!(versions.finds(&gb("AB000011", None)), [0, 1]);
+    assert_eq!(versions.finds(&gb("AB000011", Some(2))), [1]);
+    assert!(!scope_finds(
+        &gb("AB000011", None),
+        &gb("AB000011", Some(1))
+    ));
+    assert!(scope_finds(&gb("AB000011", Some(1)), &gb("AB000011", None)));
+    assert!(scope_finds(
+        &gb("AB000011", Some(1)),
+        &ParsedSeqId::Embl(text("AB000011", Some(1)))
+    ));
+    assert!(!scope_finds(
+        &gb("AB000011", Some(1)),
+        &gb("AB000011", Some(2))
+    ));
 }
 
 /// Header records that NCBI BLAST+ 2.17.0's read fails on, each the record of OID 0 of a

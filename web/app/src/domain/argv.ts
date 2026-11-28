@@ -1,6 +1,7 @@
 // Search conditions are represented only as a LOSAT CLI argv (plan §5.3). The same argv
 // is validated and run by the engine, shown as the CLI command, and stored in sessions.
 import { CUSTOM_OUTPUT, type ProgramId, type RunOutput } from 'losat/domain';
+import { seqdbNameList } from './list-flags';
 import { FILES_OUT, isFilesOutput, OUTFMT_FLAG, outfmtOption } from './output-format';
 
 /**
@@ -47,7 +48,11 @@ export interface ArgvInput {
   readonly queryFile?: { readonly flag: '-in_pssm' | '-in_msa'; readonly name: string };
   /** Subject FASTA name (`-subject`). Provide either `subjectName` or `databaseName`. */
   readonly subjectName?: string;
-  /** Local BLAST database name (`-db`). Takes precedence over `subjectName` when present. */
+  /**
+   * Local BLAST database name (`-db`), as the database is called (`my dbs/nt`): the argv writes it as the command line
+   * reads it (`seqdbNameList`: `"my dbs/nt"`), and throws for a name it cannot carry (a double quote). Takes precedence
+   * over `subjectName` when present.
+   */
   readonly databaseName?: string;
   /** Parameters the user set explicitly, in display order. `true` means a bare flag. */
   readonly parameters: ReadonlyArray<readonly [flag: string, value: string | true]>;
@@ -77,7 +82,7 @@ export function buildArgv(input: ArgvInput): readonly string[] {
       : ['-query', input.queryName ?? PASTED_NAMES.query];
   const subjectPair: readonly [string, string] =
     input.databaseName !== undefined
-      ? ['-db', input.databaseName]
+      ? ['-db', seqdbNameList('-db', [input.databaseName])]
       : ['-subject', input.subjectName ?? PASTED_NAMES.subject];
   const argv = [input.program, ...queryPair, ...subjectPair];
   for (const [flag, value] of input.parameters) {

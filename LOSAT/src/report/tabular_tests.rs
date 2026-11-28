@@ -324,7 +324,12 @@ fn taxonomy_names_get_ncbis_fillers() {
             delimiter: Vec::new(),
         };
         let spec = blastp_spec(format, &choice).unwrap();
-        let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
+        let writer = TabularWriter::new(
+            &spec,
+            crate::blastinput::app::Program::Blastn,
+            "BLASTN 2.17.0+",
+            None,
+        );
         let subject = TabularSubject {
             id: b"s",
             accession: b"s",
@@ -360,7 +365,7 @@ fn taxonomy_names_get_ncbis_fillers() {
             qcovhsp: 100,
         };
         let mut out = Vec::new();
-        writer.row(
+        let stop = writer.row(
             &mut out,
             &mut TabularRows::default(),
             &TabularQuery::local(b"q", 10),
@@ -368,6 +373,7 @@ fn taxonomy_names_get_ncbis_fillers() {
             None,
             &hsp,
         );
+        assert_eq!(stop, None);
         String::from_utf8(out).unwrap()
     };
     let two = TabularTaxonomy {
@@ -537,7 +543,12 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
         index: 0,
     };
     let row = |spec: &TabularSpec, num_ident: usize, rows: Option<(&[u8], &[u8])>| {
-        let writer = TabularWriter::new(spec, "BLASTP 2.17.0+", Some(ScoringMatrix::Blosum62));
+        let writer = TabularWriter::new(
+            spec,
+            crate::blastinput::app::Program::Blastp,
+            "BLASTP 2.17.0+",
+            Some(ScoringMatrix::Blosum62),
+        );
         let hsp = TabularHsp {
             q_start: 1,
             q_end: 6,
@@ -557,7 +568,7 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
             qcovhsp: 100,
         };
         let mut out = Vec::new();
-        writer.row(
+        let stop = writer.row(
             &mut out,
             &mut TabularRows::default(),
             &TabularQuery::local(b"q", 6),
@@ -565,6 +576,7 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
             None,
             &hsp,
         );
+        assert_eq!(stop, None);
         String::from_utf8(out).unwrap()
     };
     let frames = spec(ReportFormat::Tabular, "qseqid frames sframe");
@@ -589,6 +601,7 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
     let commented = spec(ReportFormat::TabularWithComments, "qseqid");
     let writer = TabularWriter::new(
         &commented,
+        crate::blastinput::app::Program::Blastp,
         "PSIBLAST 2.17.0+",
         Some(ScoringMatrix::Blosum62),
     );
@@ -653,7 +666,13 @@ fn id_columns_are_the_subject_s_own() {
         qcovhsp: 100,
     };
     let mut out = Vec::new();
-    TabularWriter::new(&spec, "BLASTP 2.17.0+", None).row(
+    let stop = TabularWriter::new(
+        &spec,
+        crate::blastinput::app::Program::Blastp,
+        "BLASTP 2.17.0+",
+        None,
+    )
+    .row(
         &mut out,
         &mut TabularRows::default(),
         &TabularQuery::local(b"q1", 6),
@@ -661,6 +680,7 @@ fn id_columns_are_the_subject_s_own() {
         None,
         &hsp,
     );
+    assert_eq!(stop, None);
     assert_eq!(
         String::from_utf8(out).unwrap(),
         "q1\tq1\tq1\tgb|AE000111.1|\tAE000111\tAE000111.1\t42\tfirst title\tfirst title<>N/A\n"
@@ -668,7 +688,8 @@ fn id_columns_are_the_subject_s_own() {
 }
 
 /// The rows of `subjects` (failed or found, in order) of one query under `fields`, with a
-/// nucleotide HSP of 450 letters (qcovs 99, qcovhsp 50) and query length 900.
+/// nucleotide HSP of 450 letters (qcovs 99, qcovhsp 50) and query length 900; a row that stops
+/// where NCBI has no result (`RowStop`) ends them with `<stop N>`, N its subject index.
 fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
     let spec = blastp_spec(
         ReportFormat::Tabular,
@@ -697,7 +718,12 @@ fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
         ops: &[],
         qcovhsp: 50,
     };
-    let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
+    let writer = TabularWriter::new(
+        &spec,
+        crate::blastinput::app::Program::Blastn,
+        "BLASTN 2.17.0+",
+        None,
+    );
     let mut rows = TabularRows::default();
     let mut out = Vec::new();
     for subject in subjects {
@@ -705,14 +731,17 @@ fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
         let kept = rows
             .last_found()
             .and_then(|index| subjects.iter().find(|subject| subject.index == index));
-        writer.row(
+        if let Some(stop) = writer.row(
             &mut out,
             &mut rows,
             &TabularQuery::local(b"nq1", 900),
             subject,
             kept.filter(|_| writer.fails(subject)),
             &hsp,
-        );
+        ) {
+            out.extend_from_slice(format!("<stop {}>", stop.subject).as_bytes());
+            break;
+        }
     }
     String::from_utf8(out).unwrap()
 }
@@ -786,6 +815,117 @@ fn failed_lookups_write_ncbis_catch_row() {
         ),
         "nq1\tSubject_9\t0.0\n"
     );
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108 (cited at
+    // `row_stop_field`)
+    // The row stops at the first field where NCBI has no result: `sacc` or `saccver` of the empty
+    // `m_SubjectId` at any row, `staxid` at the query's first row; the rows before it and the
+    // row's fields before that one, each after its delimiter, are NCBI's bytes (probe of line
+    // RG-KB item 18b, `blastn.nq.s_gb.f6sacc`: `nq1\ts2\t...\nnq1\tUnknown\t`).
+    let found_then_bad = [subject(b"s2", None, 1), bad(b"Subject_2")];
+    assert_eq!(
+        failed_rows("qseqid sseqid sacc evalue", &found_then_bad),
+        "nq1\ts2\ts2\t0.0\nnq1\tUnknown\t<stop 9>"
+    );
+    assert_eq!(
+        failed_rows("saccver qseqid", &found_then_bad),
+        "s2\tnq1\n<stop 9>"
+    );
+    assert_eq!(
+        failed_rows("qseqid evalue staxid sacc", &[bad(b"Subject_2")]),
+        "nq1\t0.0\t<stop 9>"
+    );
+    // A later row's `staxid` prints what the row before set (`N/A` of a FASTA subject): the stop
+    // is at `saccver` (probe `blastn.nq.s_bg.f6tax`: `nq1\tN/A\ts2\n...nq1\tN/A\t`).
+    assert_eq!(
+        failed_rows("qseqid staxid saccver", &found_then_bad),
+        "nq1\tN/A\ts2\nnq1\tN/A\t<stop 9>"
+    );
+    // A found subject, or a failed one whose fields read neither, writes its whole row.
+    assert_eq!(
+        failed_rows("qseqid sseqid evalue", &found_then_bad),
+        "nq1\ts2\t0.0\nnq1\tUnknown\t0.0\n"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-43
+// The default fields (`qaccver saccver ...`): a row whose `saccver` is NCBI's null pointer stops
+// after `qaccver` and its tab; a load that throws stops only at the query's first row
+// (`TabularRows::write_thrown_default` writes the later ones).
+#[test]
+fn default_rows_stop_at_saccver() {
+    let mut rows = TabularRows::default();
+    let failed = LookupFailure {
+        subject_id: true,
+        ..LookupFailure::default()
+    };
+    assert_eq!(rows.default_stop(b"q1", None, 0), None);
+    let (written, stop) = rows.default_stop(b"q1", Some(failed), 3).unwrap();
+    assert_eq!(written, b"q1\t");
+    assert_eq!(stop.subject, 3);
+    assert_eq!(stop.reason, FAILED_LOOKUP_NULL_POINTER);
+    assert!(rows
+        .default_stop(b"q1", Some(LookupFailure::thrown()), 4)
+        .is_some());
+    rows.found(0);
+    assert!(rows.default_stop(b"q1", Some(failed), 3).is_some());
+    assert_eq!(
+        rows.default_stop(b"q1", Some(LookupFailure::thrown()), 4),
+        None
+    );
+}
+
+// The end of the run at a stop: the bytes before it, flushed (`ncbi_flush` and `flush`), the
+// reads ended, and LOSAT's refusal naming the subject and the program.
+#[test]
+fn row_stop_end_writes_the_bytes_before_and_refuses() {
+    struct Spy {
+        bytes: Vec<u8>,
+        ncbi_flushed: bool,
+        flushed: bool,
+    }
+    impl std::io::Write for Spy {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushed = true;
+            Ok(())
+        }
+    }
+    impl crate::report::ostream::ReportWrite for Spy {
+        fn ncbi_flush(&mut self) -> std::io::Result<()> {
+            self.ncbi_flushed = true;
+            Ok(())
+        }
+    }
+    let mut out = Spy {
+        bytes: Vec::new(),
+        ncbi_flushed: false,
+        flushed: false,
+    };
+    let mut ended = false;
+    let error = row_stop_end(
+        &mut out,
+        b"q1\t",
+        RowStop {
+            subject: 1,
+            reason: FAILED_LOOKUP_NULL_POINTER,
+            lineless: false,
+        },
+        failed_record_title(1, b"Subject_9"),
+        "BLASTN",
+        || ended = true,
+    );
+    assert_eq!(out.bytes, b"q1\t");
+    assert!(out.ncbi_flushed);
+    assert!(out.flushed);
+    assert!(ended);
+    assert!(error.downcast_ref::<FailedLookupRefusal>().is_some());
+    let text = error.to_string();
+    assert!(text.starts_with("subject record 2 (Subject_9) has a title"));
+    assert!(text.contains("null pointer exception"));
+    assert!(text.ends_with("which is not supported by LOSAT's BLASTN"));
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 (the catch of the subject block, `SetSubjectId` of `list`, then a return of -1)
@@ -811,6 +951,7 @@ fn a_load_that_throws_writes_the_kept_row() {
         id: b"gb|AAA00001.1|".to_vec(),
         gi: 7,
         accession: b"AAA00001".to_vec(),
+        lineless: false,
     }];
     let found = TabularSubject {
         id: b"gb|AAA00001.1|",
@@ -882,8 +1023,8 @@ fn a_load_that_throws_writes_the_kept_row() {
         failed_rows("qseqid sseqid sgi stitle sallseqid evalue", &[thrown]),
         "nq1\tUnknown\t0\tN/A\tgi|5|gb|BBB00002.1|\t0.0\n"
     );
-    // The refusals before the report: a first row with `sacc`, `saccver` (the default fields)
-    // or `staxid`; a later one has a result.
+    // The stops (`row_stop_end`): a first row with `sacc`, `saccver` (the default fields) or
+    // `staxid`; a later one has a result.
     let spec = |fields: &str| {
         blastp_spec(
             ReportFormat::Tabular,
@@ -902,7 +1043,10 @@ fn a_load_that_throws_writes_the_kept_row() {
     assert!(failed_lookup_stop(Some(&spec("qseqid saccver")), thrown, false).is_none());
     assert!(failed_lookup_stop(Some(&spec("staxid")), thrown, true).is_some());
     assert!(failed_lookup_stop(Some(&spec("qseqid sseqid")), thrown, true).is_none());
-    assert!(may_stop_at_failed_lookup(Some(&spec("staxid ssciname"))));
+    assert!(stops_at_lookup_failure_for(
+        Some(&spec("staxid ssciname")),
+        crate::blastinput::app::Program::Blastp
+    ));
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 (the catch of the subject block) for the default fields (probe of
@@ -1090,6 +1234,7 @@ fn a_lookup_failing_after_the_first_definition_line_keeps_its_ids() {
         id: b"gb|AB000001.1|".to_vec(),
         gi: 0,
         accession: b"AB000001".to_vec(),
+        lineless: false,
     }];
     let subject = TabularSubject {
         id: b"gb|AB000001.1|",
@@ -1152,6 +1297,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
             bioseq: false,
             length: false,
             lineless: false,
+            map_length: false,
         };
         failed_lookup_stop(spec.as_ref(), failure, first).is_some()
     };
@@ -1171,44 +1317,38 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         bioseq: false,
         length: false,
         lineless: false,
+        map_length: false,
     };
     assert!(failed_lookup_stop(Some(&spec("qseqid saccver sallseqid")), only_all, false).is_none());
     assert!(failed_lookup_stop(None, only_all, true).is_none());
-    assert!(!may_stop_at_failed_lookup(Some(&spec(
-        "qseqid sseqid sallseqid evalue"
-    ))));
-    assert!(may_stop_at_failed_lookup(None));
-    let record = |s_idx| (s_idx == 1).then(|| LookupFailure::of_plain(false));
-    let result = check_failed_lookups(
-        Some(&spec("qseqid sseqid staxid")),
-        [vec![0, 1], vec![1, 0]],
-        record,
-        |s_idx, _| failed_record_title(s_idx, b"Subject_9"),
-        crate::blastinput::app::Program::Blastn,
-        "BLASTN",
-        true,
-    );
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .starts_with("subject record 2 (Subject_9) has a title"));
-    assert!(check_failed_lookups(
-        Some(&spec("qseqid sseqid staxid")),
-        [vec![0, 1], vec![0, 1]],
-        record,
-        |s_idx, _| failed_record_title(s_idx, b"x"),
-        crate::blastinput::app::Program::Blastn,
-        "BLASTN",
-        true,
-    )
-    .is_ok());
+    assert!(!stops_at_lookup_failure_for(
+        Some(&spec("qseqid sseqid sallseqid evalue")),
+        crate::blastinput::app::Program::Blastp
+    ));
+    assert!(stops_at_lookup_failure_for(
+        None,
+        crate::blastinput::app::Program::Blastp
+    ));
+    // The field of the stop (`row_stop_field`): the first that NCBI has no result for.
+    let field = |fields: Option<&str>, failure, first| {
+        row_stop_field(fields.map(spec).as_ref(), failure, first).map(|(at, _)| at)
+    };
+    let failed = LookupFailure {
+        subject_id: true,
+        ..LookupFailure::default()
+    };
+    assert_eq!(field(None, failed, false), Some(1));
+    assert_eq!(field(Some("qseqid staxid sacc"), failed, true), Some(1));
+    assert_eq!(field(Some("qseqid staxid sacc"), failed, false), Some(2));
+    assert_eq!(field(Some("qseqid sseqid staxid"), failed, false), None);
+    assert_eq!(field(Some("qseqid sseqid evalue"), failed, true), None);
 }
 
 // Line RG D1c-1c-b PR 2b (NCBI BLAST+ 2.17.0 probe `D/logs/d1c1cb/probe`: `6 qseqid sallacc` exits
 // 255 after `<query>\t<the accessions of the lines before>;`): the `sallacc` of a subject with a
 // definition line without a Seq-id takes the label of that line's null best id at every row,
-// with no `catch`; the other fields have a result (`Unknown`, 0, `N/A`). LOSAT refuses the
-// report there, naming the subject and the program.
+// with no `catch`; the other fields have a result (`Unknown`, 0, `N/A`). LOSAT writes NCBI's
+// bytes before the stop and refuses the report there, naming the subject and the program.
 #[test]
 fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
     let spec = |fields: &str| {
@@ -1239,71 +1379,96 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
         .is_none());
         assert!(failed_lookup_stop(None, lineless, first).is_none());
     }
-    assert!(may_stop_at_failed_lookup(Some(&spec("qseqid sallacc"))));
-    let result = check_failed_lookups(
+    assert!(stops_at_lineless_accession(Some(&spec("qseqid sallacc"))));
+    assert!(!stops_at_lookup_failure_for(
         Some(&spec("qseqid sallacc")),
-        [vec![0], vec![1, 0]],
-        |s_idx| (s_idx == 1).then_some(lineless),
-        describe_database_subject,
+        crate::blastinput::app::Program::Blastp
+    ));
+    let all_ids = [
+        DeflineIds {
+            id: b"gb|AAA00001.1|".to_vec(),
+            gi: 0,
+            accession: b"AAA00001".to_vec(),
+            lineless: false,
+        },
+        DeflineIds {
+            id: b"Unknown".to_vec(),
+            gi: 0,
+            accession: Vec::new(),
+            lineless: true,
+        },
+    ];
+    let none = TabularTaxonomy::default();
+    let subject = TabularSubject {
+        id: b"gb|AAA00001.1|",
+        accession: b"AAA00001",
+        accession_version: b"AAA00001.1",
+        gi: 0,
+        all_ids: &all_ids,
+        length: 100,
+        titles: None,
+        taxonomy: &none,
+        names: None,
+        nucleotide: false,
+        qcovs: 100,
+        qcovus: -1,
+        lookup: SubjectLookup::Found,
+        index: 1,
+    };
+    let query = TabularQuery::local(b"q1", 100);
+    let hsp = TabularHsp {
+        q_start: 1,
+        q_end: 10,
+        s_start: 1,
+        s_end: 10,
+        evalue: 1e-5,
+        bit_score: 30.0,
+        score: 60,
+        length: 10,
+        gap_opens: 0,
+        gaps: 0,
+        num_ident: 10,
+        q_frame: 0,
+        s_frame: 0,
+        rows: None,
+        ops: &[],
+        qcovhsp: 10,
+    };
+    let s = spec("qseqid sallacc evalue");
+    let writer = TabularWriter::new(
+        &s,
         crate::blastinput::app::Program::Blastp,
-        "BLASTP",
-        true,
+        "BLASTP 2.17.0+",
+        None,
     );
+    let mut rows = TabularRows::default();
+    let mut buf = Vec::new();
+    let stop = writer.row(&mut buf, &mut rows, &query, &subject, None, &hsp);
+    assert_eq!(buf, b"q1\tAAA00001;");
     assert_eq!(
-        result.unwrap_err().to_string(),
+        stop,
+        Some(RowStop {
+            subject: 1,
+            reason: LINELESS_ACCESSION_NULL_POINTER,
+            lineless: true,
+        })
+    );
+    let mut out = Vec::new();
+    let error = row_stop_end(
+        &mut out,
+        &buf,
+        stop.unwrap(),
+        failed_database_subject(1, None, None, true),
+        "BLASTP",
+        || {},
+    );
+    assert_eq!(out, b"q1\tAAA00001;");
+    assert_eq!(
+        error.to_string(),
         format!(
             "database sequence 1 has a definition line without a Seq-id (a hand-edited database); \
              {LINELESS_ACCESSION_NULL_POINTER}, which is not supported by LOSAT's BLASTP"
         )
-    );
-}
-
-fn describe_database_subject(s_idx: usize, failure: LookupFailure) -> String {
-    failed_database_subject(s_idx, None, None, failure)
-}
-
-// The refusal names the result set where NCBI stops; TBLASTN and TBLASTX write the reports of
-// the query batches before the batch of that set (`FailedLookupRefusal::batch_start`).
-#[test]
-fn a_failed_lookup_refusal_names_the_first_query_of_the_batch_it_stops() {
-    let lineless = LookupFailure {
-        lineless: true,
-        ..LookupFailure::default()
-    };
-    let spec = blastp_spec(
-        ReportFormat::Tabular,
-        &FormatChoice {
-            number: 6,
-            spec: b"qseqid sallacc".to_vec(),
-            delimiter: Vec::new(),
-        },
-    )
-    .unwrap();
-    let fail_subject_1 = |s_idx| (s_idx == 1).then_some(lineless);
-    let error = check_failed_lookups(
-        Some(&spec),
-        [vec![0], vec![], vec![0], vec![2, 1]],
-        fail_subject_1,
-        describe_database_subject,
-        crate::blastinput::app::Program::Tblastn,
-        "TBLASTN",
-        true,
-    )
-    .unwrap_err();
-    assert_eq!(
-        error.downcast_ref::<FailedLookupRefusal>().unwrap().set(),
-        3
-    );
-    // One query per batch, two per batch, the stopping set at a batch's start, one batch.
-    assert_eq!(FailedLookupRefusal::batch_start(&error, 0..4), 3);
-    assert_eq!(FailedLookupRefusal::batch_start(&error, [0, 2]), 2);
-    assert_eq!(FailedLookupRefusal::batch_start(&error, [0, 3]), 3);
-    assert_eq!(FailedLookupRefusal::batch_start(&error, [0, 1, 4]), 1);
-    assert_eq!(FailedLookupRefusal::batch_start(&error, []), 0);
-    // Another error stops the first batch.
-    assert_eq!(
-        FailedLookupRefusal::batch_start(&anyhow::anyhow!("another error"), [0, 2]),
-        0
     );
 }
 
@@ -1517,7 +1682,11 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
         .unwrap()
     };
     let empty = LookupFailure::empty_handle();
-    let plain = LookupFailure::of_plain(true);
+    let plain = LookupFailure {
+        subject_id: true,
+        all_ids: true,
+        ..LookupFailure::default()
+    };
     // Subject-block field catches the empty handle before the alignment block runs.
     assert!(!spec("sseqid sseq").empty_handle_throws(Program::Blastp));
     assert!(!spec("sseqid qseq").empty_handle_throws(Program::Blastn));
@@ -1596,52 +1765,140 @@ fn empty_handle_tabular_fields_stop_only_without_subject_block_catch() {
             );
         }
     }
-    // `check_failed_lookups` passes when every empty-handle row is plus-strand and refuses when
-    // any empty-handle row is minus-strand.
+    // `TabularWriter::row` writes plus-strand empty-handle rows and stops before writing any byte
+    // of a minus-strand empty-handle row (with earlier rows intact).
     let frame_spec = spec("qseqid qstart sframe");
-    assert!(check_failed_lookups(
-        Some(&frame_spec),
-        [[CheckedRow {
-            subject: 0,
-            minus_subject_frame: false,
-        }]],
-        |_| Some(empty),
-        |_, _| "database sequence 0".to_string(),
-        Program::Tblastn,
-        "TBLASTN",
-        true,
-    )
-    .is_ok());
-    let err = check_failed_lookups(
-        Some(&frame_spec),
-        [[
-            CheckedRow {
-                subject: 0,
-                minus_subject_frame: false,
-            },
-            CheckedRow {
-                subject: 0,
-                minus_subject_frame: true,
-            },
-        ]],
-        |_| Some(empty),
-        |_, _| "database sequence 0".to_string(),
-        Program::Tblastn,
-        "TBLASTN",
-        true,
-    )
-    .unwrap_err()
-    .to_string();
-    assert!(err.contains("null pointer exception"), "{err}");
+    let writer = TabularWriter::new(&frame_spec, Program::Tblastn, "TBLASTN 2.17.0+", None);
+    let none = TabularTaxonomy::default();
+    let empty_subject = TabularSubject {
+        id: b"pdb|1AB3|",
+        accession: b"1AB3",
+        accession_version: b"1AB3",
+        gi: 0,
+        all_ids: &[],
+        length: 0,
+        titles: None,
+        taxonomy: &none,
+        names: None,
+        nucleotide: true,
+        qcovs: 100,
+        qcovus: -1,
+        lookup: SubjectLookup::Failed(FailedLookup {
+            full: b"pdb|1AB3|",
+            accession: b"1AB3",
+            subject_id: true,
+            all_ids: None,
+            empty_handle: true,
+        }),
+        index: 0,
+    };
+    let query = TabularQuery::local(b"q1", 100);
+    let mut hsp = TabularHsp {
+        q_start: 1,
+        q_end: 10,
+        s_start: 1,
+        s_end: 30,
+        evalue: 1e-5,
+        bit_score: 30.0,
+        score: 60,
+        length: 10,
+        gap_opens: 0,
+        gaps: 0,
+        num_ident: 10,
+        q_frame: 0,
+        s_frame: 1,
+        rows: None,
+        ops: &[],
+        qcovhsp: 10,
+    };
+    let mut rows = TabularRows::default();
+    let mut buf = Vec::new();
+    let mut write_row = |out: &mut Vec<u8>, hsp: &TabularHsp<'_>| {
+        writer.row(out, &mut rows, &query, &empty_subject, None, hsp)
+    };
+    assert!(write_row(&mut buf, &hsp).is_none());
+    let first_row = buf.clone();
+    assert_eq!(first_row, b"q1\t1\t1\n");
+    hsp.s_frame = -1;
+    let stop = write_row(&mut buf, &hsp).unwrap();
+    assert_eq!(buf, first_row);
+    assert!(stop.reason.contains("null pointer exception"), "{stop:?}");
     // Standalone `sframe`/`frames` never open the alignment block.
     assert!(!spec("qseqid sframe frames").empty_handle_throws(Program::Tblastx));
     assert!(!spec("qseqid sframe frames").empty_handle_throws(Program::Tblastn));
-    assert!(may_stop_at_failed_lookup_for(
+    assert!(stops_at_lookup_failure_for(
         Some(&spec("qseqid sseq")),
         Program::Blastp
     ));
-    assert!(!may_stop_at_failed_lookup_for(
+    assert!(!stops_at_lookup_failure_for(
         Some(&spec("qseqid evalue")),
         Program::Blastp
     ));
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:836-877 (the subject block: `SetSubjectId`, then `GetBioseqLength`, whose throw the catch takes)
+// A -subject Bioseq of 4294967295 letters whose map BL2SEQ_LEGACY's prefetch made (probes
+// of6_t_huge1, of6_t_huge1_all of agent E3 and of6_l_huge1x2_ids of agent E3L, 2026-11-27): the
+// row's ids are the subject's own, `sall*` add the Seq-align id row by row, `slen` and the counts
+// are `x_ResetFields`' 0; before a found row `staxid` reads NCBI's uninitialised member.
+#[test]
+fn a_length_that_throws_writes_the_subject_s_own_ids() {
+    let taxonomy = TabularTaxonomy::default();
+    let subject = |id: &'static [u8], thrown: bool, index| TabularSubject {
+        id,
+        accession: id,
+        accession_version: id,
+        gi: 0,
+        all_ids: &[],
+        length: 500,
+        titles: None,
+        taxonomy: &taxonomy,
+        names: None,
+        nucleotide: true,
+        qcovs: 100,
+        qcovus: -1,
+        lookup: if thrown {
+            SubjectLookup::MapLength(MapLengthLookup {
+                full: b"Subject_1",
+                gi: 0,
+                accession: b"Subject_1",
+                subject_id: false,
+            })
+        } else {
+            SubjectLookup::Found
+        },
+        index,
+    };
+    let (sb, sa) = (subject(b"sb", false, 1), subject(b"sa", true, 0));
+    assert_eq!(
+        failed_rows(
+            "qseqid sseqid sallseqid sallacc sallgi slen evalue",
+            &[sb, sa, sa]
+        ),
+        "nq1\tsb\tsb\tsb\t0\t500\t0.0\n\
+         nq1\tsa\tsb;Subject_1\tsb;Subject_1\t0;0\t0\t0.0\n\
+         nq1\tsa\tsb;Subject_1;Subject_1\tsb;Subject_1;Subject_1\t0;0;0\t0\t0.0\n"
+    );
+    assert_eq!(
+        failed_rows("std slen sstrand qcovhsp", &[sa]),
+        "nq1\tsa\t0.000\t0\t0\t0\t0\t0\t0\t0\t0.0\t812\t0\tN/A\t50\n"
+    );
+    // Without a field of the subject block no catch runs: the row is the found one's.
+    assert!(failed_rows("qseqid length", &[sa]).starts_with("nq1\t450"));
+    let spec = |fields: &str| {
+        blastp_spec(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
+            },
+        )
+    };
+    let SubjectLookup::MapLength(thrown) = sa.lookup else {
+        unreachable!()
+    };
+    let first = |fields: &str| failed_lookup_stop(spec(fields).as_ref(), thrown.failure(), true);
+    assert_eq!(first("std sacc"), None, "m_SubjectId is the subject's");
+    assert!(first("qseqid staxid").is_some(), "an uninitialised staxid");
 }

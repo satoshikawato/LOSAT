@@ -4,7 +4,7 @@
 // writable directory, the overlay of the run's files on the user's (line NP WW4b1, D-WW4b-1, 2026-11-27): each call
 // that makeblastdb's `std::fs` makes, answered as Linux answers it, and the files that the run leaves.
 import { describe, expect, it } from 'vitest';
-import { AHEAD_BYTES, AHEAD_FILES, CHUNK_BYTES, FILE_FD_BASE, pathNames, PREOPEN_FD, RUN_DIRECTORY, RunDirectory, TABLE_BYTES, type BlobReader } from '../src/infra/reactor/run-directory.ts';
+import { AHEAD_BYTES, CHUNK_BYTES, FILE_FD_BASE, pathNames, KEEP_BYTES, KEEP_PIECES, PREOPEN_FD, RUN_DIRECTORY, RunDirectory, TABLE_BYTES, type BlobReader } from '../src/infra/reactor/run-directory.ts';
 
 const ERRNO = {
   SUCCESS: 0,
@@ -243,42 +243,139 @@ describe("the run's working directory", () => {
       expect(Math.max(...pieces.map(([start, end]) => end - start))).toBe(AHEAD_BYTES);
     }
     expect(reads.get(blobOf.get(fasta)!)!.length).toBe(4 + Math.ceil((fasta.length - 983040) / AHEAD_BYTES));
-    // Reads elsewhere take their own bytes; one that goes on from the last reads ahead again, from 64 KiB, and its bytes
-    // replace those read ahead at the file's end.
-    reads.clear();
-    const first = AHEAD_BYTES + 5;
-    const second = first - 4096;
+  });
+
+  /** A directory of one file `name` of `bytes`, and fd_pread of it that checks the bytes it gives against `bytes`. */
+  function preadOf(name: string, bytes: Uint8Array) {
+    const { directory, reader } = binaryDirectoryOf({ [name]: bytes });
+    const g = guest(directory);
+    const { fd } = g.open(name);
     const pread = (offset: number, length: number) => {
       g.view().setUint32(3072, 4096, true);
       g.view().setUint32(3076, length, true);
-      expect(g.wasi.fd_pread!(a, 3072, 1, BigInt(offset), 2048)).toBe(ERRNO.SUCCESS);
-      expect([...new Uint8Array(g.view().buffer, 4096, length)]).toEqual([...fasta.subarray(offset, offset + length)]);
+      expect(g.wasi.fd_pread!(fd, 3072, 1, BigInt(offset), 2048)).toBe(ERRNO.SUCCESS);
+      expect(g.view().getUint32(2048, true)).toBe(Math.min(length, Math.max(0, bytes.length - offset)));
+      expect(Buffer.from(new Uint8Array(g.view().buffer, 4096, Math.min(length, Math.max(0, bytes.length - offset)))).equals(Buffer.from(bytes.subarray(offset, offset + length)))).toBe(true);
     };
+    return { directory, reader, pread };
+  }
+
+  it('takes only its own bytes for a read elsewhere, keeps them, and reads ahead from 64 KiB where a read goes on from them', () => {
+    const fasta = new Uint8Array(5 * AHEAD_BYTES + 123).map((_, i) => (i * 7) % 251);
+    const { reader, pread } = preadOf('in.fa', fasta);
+    const first = AHEAD_BYTES + 5;
+    const second = first - 4096;
     pread(first, 100);
     pread(second, 100);
     pread(second + 100, 50);
     pread(second + 150, 50);
     pread(fasta.length - 100, 100);
-    expect(reads.get(blobOf.get(fasta)!)).toEqual([
+    expect(reader.reads).toEqual([
       [first, first + 100],
       [second, second + 100],
       [second + 100, second + 100 + 65536],
       [fasta.length - 100, fasta.length],
     ]);
+    // Bytes read before are kept: a read of them again (a search fetches a sequence that it found more than once, an index's
+    // last offset is read for each block) and a read across two pieces take no read of the Blob.
+    reader.reads.length = 0;
+    pread(fasta.length - 100, 100);
+    pread(fasta.length - 60, 20);
+    pread(first - 10, 120);
+    pread(second, 4096 + 100);
+    expect(reader.reads).toEqual([]);
   });
 
-  it('keeps the bytes read ahead of the AHEAD_FILES files read last', () => {
+  it("reads each place of a file ahead, however the reads of its places alternate (a database's index read in two places)", () => {
+    const index = new Uint8Array(4 * AHEAD_BYTES).map((_, i) => (i * 11) % 239);
+    const { reader, pread } = preadOf('db.pin', index);
+    const B = 2 * AHEAD_BYTES;
+    for (let at = 0; at < AHEAD_BYTES; at += 16384) {
+      pread(at, 16384);
+      pread(B + at, 16384);
+    }
+    const a = reader.reads.filter(([start]) => start < B);
+    const b = reader.reads.filter(([start]) => start >= B);
+    // Each place's reads follow one another, as a file read alone is read: twice as far ahead each time.
+    for (const reads of [a, b]) reads.slice(1).forEach(([start], i) => expect(start).toBe(reads[i]![1]));
+    expect(a.map(([start, end]) => end - start)).toEqual([65536, 131072, 262144, 524288, 1048576]);
+    // The second place begins elsewhere (its own bytes), and goes on from there.
+    expect(b.map(([start, end]) => end - start)).toEqual([16384, 65536, 131072, 262144, 524288, 1048576]);
+  });
+
+  it('goes on in order from a read that begins inside the last one (a block of protein letters begins at the NUL before it)', () => {
+    const letters = new Uint8Array(3 * AHEAD_BYTES).map((_, i) => (i * 5) % 233);
+    const { reader, pread } = preadOf('db.psq', letters);
+    // Blocks of 50,000 bytes (the guest's memory is 64 KiB), each from one byte before the last one's end.
+    const block = 50_000;
+    let blocks = 0;
+    for (let at = 0; at + block <= letters.length; at += block - 1) {
+      pread(at, block);
+      blocks++;
+    }
+    // One read of the Blob after another, each where the last ended, far fewer than the blocks.
+    reader.reads.slice(1).forEach(([start], i) => expect(start).toBe(reader.reads[i]![1]));
+    expect(blocks).toBe(62);
+    expect(reader.reads.length).toBeLessThanOrEqual(8);
+  });
+
+  it('keeps at most KEEP_BYTES of the bytes it read, in at most KEEP_PIECES pieces: those used last', () => {
+    // Pieces: KEEP_PIECES + 1 small files read once each; the one used longest ago goes.
     const files: Record<string, Uint8Array> = {};
-    for (let i = 0; i <= AHEAD_FILES; i++) files[`f${i}`] = new Uint8Array(200_000);
+    for (let i = 0; i <= KEEP_PIECES; i++) files[`f${i}`] = new Uint8Array(200).fill(i);
     const { directory, reader } = binaryDirectoryOf(files);
     const g = guest(directory);
     const fds = Object.keys(files).map((name) => g.open(name).fd);
     for (const fd of fds) expect(g.read(fd, 10).errno).toBe(ERRNO.SUCCESS);
-    expect(reader.reads).toEqual(fds.map(() => [0, 65536]));
+    expect(reader.reads).toEqual(fds.map(() => [0, 200]));
     reader.reads.length = 0;
-    // The file read longest ago (f0) let its bytes go: its next read takes the Blob again (in order: twice as far ahead).
-    for (const fd of [fds[1]!, fds.at(-1)!, fds[0]!]) expect(g.read(fd, 10)).toEqual({ errno: 0, bytes: '\0'.repeat(10) });
-    expect(reader.reads).toEqual([[10, 10 + 131072]]);
+    for (const fd of [fds[1]!, fds.at(-1)!]) expect(g.read(fd, 10).errno).toBe(ERRNO.SUCCESS);
+    expect(reader.reads).toEqual([]);
+    // f0's bytes went: its next read is a read elsewhere.
+    expect(g.read(fds[0]!, 10).errno).toBe(ERRNO.SUCCESS);
+    expect(reader.reads).toEqual([[10, 20]]);
+    // Bytes: a file of twice KEEP_BYTES read in order keeps no more than KEEP_BYTES, its last bytes.
+    const big = new Uint8Array(2 * KEEP_BYTES).map((_, i) => i % 249);
+    const one = preadOf('big.fa', big);
+    for (let at = 0; at < big.length; at += 32768) {
+      one.pread(at, 32768);
+      expect(one.directory.keptBytes).toBeLessThanOrEqual(KEEP_BYTES);
+    }
+    expect(one.directory.keptBytes).toBeGreaterThan(KEEP_BYTES - 2 * AHEAD_BYTES);
+    one.reader.reads.length = 0;
+    one.pread(big.length - 32768, 32768);
+    expect(one.reader.reads).toEqual([]);
+    one.pread(0, 32768);
+    expect(one.reader.reads).toEqual([[0, 65536]]);
+    // The next run's files: nothing of the last run's is kept.
+    one.directory.open([]);
+    expect(one.directory.keptBytes).toBe(0);
+  });
+
+  it('keeps nothing of a read of a Blob that failed, and reads it again', () => {
+    const bytes = new TextEncoder().encode('abcdef');
+    const file = new Blob([bytes]);
+    let fail = true;
+    const reads: Array<[number, number]> = [];
+    const directory = new RunDirectory(undefined, (_blob, start, end) => {
+      reads.push([start, end]);
+      if (fail) throw new DOMException('the file changed', 'NotReadableError');
+      return bytes.slice(start, end);
+    });
+    directory.open([{ name: 'a', file }]);
+    const g = guest(directory);
+    const { fd } = g.open('a');
+    expect(g.pread(fd, 3, 0n).errno).toBe(ERRNO.IO);
+    expect(directory.keptBytes).toBe(0);
+    fail = false;
+    expect(g.pread(fd, 3, 0n)).toEqual({ errno: 0, bytes: 'abc' });
+    expect(g.pread(fd, 3, 3n)).toEqual({ errno: 0, bytes: 'def' });
+    // At the end of the file: the read ahead stops there, and a read past it gives no bytes.
+    expect(g.pread(fd, 3, 6n)).toEqual({ errno: 0, bytes: '' });
+    expect(reads).toEqual([
+      [0, 6],
+      [0, 6],
+    ]);
   });
 
   it("answers for its folders and for what it does not hold as a file system does", () => {

@@ -1143,7 +1143,7 @@ def tool() -> list[dict]:
     add_bf("error.rid_empty", "-rid ''", failure=True)
     add_bf("error.rid_refused", "-rid ABCDEFGH01R", failure=True)
     add_bf("error.rid_archive", "-rid ABCDEFGH01R -archive in/bn.asn", failure=True)
-    add_bf("error.of6_refused", "-archive in/bn.asn -outfmt 6", failure=True)
+    add_bf("error.of5_refused", "-archive in/bn.asn -outfmt 5", failure=True)
     add_bf("error.missing_archive", "-archive in/no_such.asn -outfmt 8", failure=True)
     add_bf("error.empty_archive", "-archive in/empty.asn -outfmt 8", failure=True)
     add_bf("error.cut_archive", "-archive in/cut2.asn -outfmt 8", failure=True)
@@ -1165,7 +1165,7 @@ def tool() -> list[dict]:
             ("rid_refused", "-rid ABCDEFGH01R", True),
             ("rid_archive", "-rid X -archive in/bn.asn", True),
             ("unknown_opt", "-archive in/bn.asn -nosuchopt", True),
-            ("late_of6", "-archive in/bn.asn -outfmt 6", "late_failure"),
+            ("late_of5", "-archive in/bn.asn -outfmt 5", "late_failure"),
             ("refusal.logfile_existing", "-archive in/bn.asn -outfmt 8 -logfile in/bn.asn", "refusal"),
             ("refusal.logfile_missing_archive", "-archive missing.asn -outfmt 8 -logfile missing.asn", "refusal"),
             # The run opens -out once it has read the archive's first search: an -out that LOSAT Web does not write

@@ -6866,11 +6866,9 @@ struct ReportRanges<'a> {
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
     if subjects.is_empty() {
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
-        }
-        .into());
+        return Err(crate::blastinput::app::engine_error(
+            "Empty CBlastQueryVector",
+        ));
     }
     Ok(())
 }
@@ -8267,6 +8265,39 @@ fn batches_follow(
     input_start < records || (reading.reads_past_records() && !reading_ended)
 }
 
+/// Under `-parse_deflines`, the scopes of the run's query batches (`QueryScopes`), with what
+/// NCBI's set-up of a refused batch reads (`-query_loc`, `-strand minus`, the filtering of the
+/// letters: `ScopeRefusal`).
+fn blastn_query_scopes(
+    args: &BlastnArgs,
+    queries: &x_query_stream::Queries<'_>,
+    subject_records: bool,
+    xml: bool,
+) -> Option<crate::blastinput::query_batch::QueryScopes> {
+    let query_range = parse_optional_range(args.query_loc.as_deref(), RangeRole::Query)
+        .ok()
+        .flatten();
+    crate::blastinput::query_batch::QueryScopes::of_search(
+        args.parse_deflines,
+        subject_records,
+        xml,
+        "BLASTN",
+    )
+    .map(|scopes| match queries {
+        x_query_stream::Queries::Records { input, .. } if xml && !subject_records => {
+            scopes.with_whole_run_of(input)
+        }
+        _ => scopes,
+    })
+    .map(|scopes| {
+        scopes
+            .with_refusal(args.scope_refusal.clone())
+            .with_query_range(query_range)
+            .with_strand(QueryStrand::from_option(&args.strand))
+            .with_query_masks(args.query_masks())
+    })
+}
+
 /// Searches the queries in NCBI's query batches and writes the results of all of them.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-300
@@ -8337,19 +8368,7 @@ fn run_in_pool(
     // (`x_query_drop::Rule`), and `-parse_deflines` reads no query as a stream.
     let subject_records = matches!(source, SubjectSource::Prepared(_));
     let xml = output_formats.contains(&BlastnOutputFormat::Xml);
-    let mut query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
-        args.parse_deflines,
-        subject_records,
-        xml,
-        "BLASTN",
-    )
-    .map(|scopes| match &queries {
-        x_query_stream::Queries::Records { input, .. } if xml && !subject_records => {
-            scopes.with_whole_run_of(input)
-        }
-        _ => scopes,
-    })
-    .map(|scopes| scopes.with_refusal(args.scope_refusal.clone()));
+    let mut query_scopes = blastn_query_scopes(&args, &queries, subject_records, xml);
     // The query Bioseqs that NCBI's scope finds for reported sequences (`report::query_bioseq`),
     // noted at each batch's refusal of a sequence with the id of a query of its scope (below).
     let mut query_bioseqs = crate::report::query_bioseq::QueryBioseqs::default();
@@ -8422,11 +8441,9 @@ fn run_in_pool(
     // 0) reads no query, so the first batch fails after the prolog (outfmt 0).
     if batching.batch_size == 0 {
         write_pairwise_prologs(outputs, &output_formats, intro, &shown, false)?;
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
-        }
-        .into());
+        return Err(crate::blastinput::app::engine_error(
+            "Empty CBlastQueryVector",
+        ));
     }
 
     // The lengths of the searched queries (their intervals with `-query_loc`; with
@@ -8627,11 +8644,9 @@ fn run_in_pool(
         if start == end {
             write_reports_before!();
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
-            }
-            .into());
+            return Err(crate::blastinput::app::engine_error(
+                "Empty CBlastQueryVector",
+            ));
         }
         // LOSAT's refusal of two queries of the batch's scope with one id, in the one form of every
         // program (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
@@ -8798,17 +8813,10 @@ fn run_in_pool(
         {
             write_reports_before!();
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
-            let mut message = format!("{ENGINE_ERROR} ");
-            for _ in start..end {
-                message.push_str("Warning: ");
-                message.push_str(NO_DATA_MESSAGE);
-                message.push(' ');
-            }
-            message.push('\n');
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: message.into(),
-            }
+            return Err(crate::report::query_warnings::each_query_error(
+                NO_DATA_MESSAGE.as_bytes(),
+                end - start,
+            )
             .into());
         }
         warnings[start].append(&batch_title_warnings);
@@ -8855,8 +8863,10 @@ fn run_in_pool(
         // BLASTN's formats have no failure of a matrix name (`QueryScopes::with_xml_matrix_failure`):
         // every refusal stops its batch.
         if let Some(refusal) = scope_refusal.take() {
+            let mut setup_ran = false;
             if let Err(error) =
                 crate::blastinput::query_batch::refused_batch_error(refusal, false, |first| {
+                    setup_ran = true;
                     refused_batch_setup_error(
                         &args,
                         batch_records.searched(),
@@ -8879,8 +8889,8 @@ fn run_in_pool(
                 })
             {
                 // The first batch's set-up wrote the prologs before its error
-                // (`database_search_error`).
-                if input_start == 0 && error.is::<crate::cli::NativeError>() {
+                // (`database_search_error`); a `SetupQueries_OMF` error before set-up has not.
+                if input_start == 0 && setup_ran && error.is::<crate::cli::NativeError>() {
                     warnings[start].write(&mut *outputs.diagnostics, archive)?;
                     return Err(error);
                 }

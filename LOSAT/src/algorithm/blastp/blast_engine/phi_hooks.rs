@@ -434,7 +434,7 @@ pub(super) fn phi_start<'p>(
         Err(PhiError::Ncbi(message)) => {
             return Ok(PhiStart::EngineError {
                 query: 0,
-                text: format!("Warning: {message} "),
+                text: crate::report::query_warnings::setup_error(message),
             });
         }
         // `validate_requested_blastp_support` has refused it.
@@ -481,7 +481,9 @@ pub(super) fn phi_start<'p>(
             Err(error) => {
                 return Ok(PhiStart::EngineError {
                     query,
-                    text: format!("Warning: {} ", String::from_utf8_lossy(&error.message())),
+                    text: crate::report::query_warnings::setup_error(&String::from_utf8_lossy(
+                        &error.message(),
+                    )),
                 });
             }
         }

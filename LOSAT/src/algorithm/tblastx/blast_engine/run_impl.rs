@@ -11,7 +11,6 @@ use crate::algorithm::tblastx::subjects::{SubjectSetNumbers, Subjects, SubjectsU
 use crate::blastinput::report_counts::ReportCounts;
 use crate::report::diag_log::Posts;
 use crate::report::tabular::SubjectFetch;
-use crate::wording::ENGINE_ERROR;
 use std::sync::Arc;
 
 use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
@@ -1172,11 +1171,9 @@ fn read_subject_set(
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 fn check_subjects_not_empty(subjects: &[FastaRecord]) -> Result<()> {
     if subjects.is_empty() {
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
-        }
-        .into());
+        return Err(crate::blastinput::app::engine_error(
+            "Empty CBlastQueryVector",
+        ));
     }
     Ok(())
 }
@@ -3612,6 +3609,65 @@ fn refuse_tblastx_qseq_past_seen_query_len(
     Ok(())
 }
 
+/// Under `-parse_deflines`, the scopes of the run's query batches (`QueryScopes`): with outfmt 5
+/// against a database every input record's ids from the start (`with_whole_run_of`), with what
+/// NCBI's set-up of a refused batch reads (`-query_loc`, `-strand minus`: `ScopeRefusal`) and the
+/// run's XML failure for its matrix name (`xml_matrix`).
+fn tblastx_query_scopes(
+    args: &TblastxArgs,
+    input_records: &[FastaRecord],
+    subject_records: bool,
+    xml: bool,
+    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+) -> Option<crate::blastinput::query_batch::QueryScopes> {
+    let query_range = crate::blastinput::seq_range::parse_optional_range(
+        args.query_loc.as_deref(),
+        crate::blastinput::seq_range::RangeRole::Query,
+    )
+    .ok()
+    .flatten();
+    let strand = crate::algorithm::blastn::args::QueryStrand::from_option(&args.strand);
+    crate::blastinput::query_batch::QueryScopes::of_search(
+        args.parse_deflines,
+        subject_records,
+        xml,
+        "TBLASTX",
+    )
+    .map(|scopes| {
+        if xml && !subject_records {
+            scopes.with_whole_run_of(input_records)
+        } else {
+            scopes
+        }
+        .with_refusal(args.scope_refusal.clone())
+        .with_query_range(query_range)
+        .with_strand(strand)
+        .with_xml_matrix_failure(xml_matrix)
+    })
+}
+
+/// The error of a query batch (of the input records from `input_start`) before its queries are
+/// set up, in NCBI's order: the query splitter reads its environment variables for every batch
+/// (`check_query_split_environment`), and the first batch meets an error there; then, for a batch
+/// that LOSAT refuses (`scope_refusal`), `SetupQueries_OMF`'s failure with `CSeqVector_CI` /
+/// `Sequence contains no data` (`ScopeRefusal::setup_queries_error`), which comes before
+/// `BLAST_MainSetUp` checks the matrix name (`TblastxMatrix::Unknown`, line RG-KB item 7b).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:485-652
+fn batch_error_before_setup(
+    input_start: usize,
+    scope_refusal: Option<&anyhow::Error>,
+) -> Option<anyhow::Error> {
+    if input_start == 0 {
+        if let Err(error) = crate::blastinput::app::check_query_split_environment(true, true) {
+            return Some(error);
+        }
+    }
+    scope_refusal
+        .and_then(crate::blastinput::query_batch::ScopeRefusal::of)
+        .and_then(crate::blastinput::query_batch::ScopeRefusal::setup_queries_error)
+}
+
 /// The batch loop of `run_in_pool`: reads the batches, checks them, takes each one's search
 /// result from `take`, and writes the reports: each batch's when the loop takes it with `stream`
 /// (`report_stream`), else all of them after the loop.
@@ -3643,21 +3699,13 @@ fn run_batch_loop(
             outputs.formats.iter().map(|format| format.outfmt),
         );
     let query_scopes = &reports.query_scopes;
-    *query_scopes.borrow_mut() = crate::blastinput::query_batch::QueryScopes::of_search(
-        args.parse_deflines,
+    *query_scopes.borrow_mut() = tblastx_query_scopes(
+        args,
+        query_runs.input_records,
         subject_records,
         xml,
-        "TBLASTX",
-    )
-    .map(|scopes| {
-        if xml && !subject_records {
-            scopes.with_whole_run_of(query_runs.input_records)
-        } else {
-            scopes
-        }
-        .with_refusal(args.scope_refusal.clone())
-        .with_xml_matrix_failure(reports.xml_matrix_failure(outputs))
-    });
+        reports.xml_matrix_failure(outputs),
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
     // A structured format (outfmt 5, 8, 9, 12) writes none of a query's own warnings
     // (`ReportFormat::writes_query_warnings`; outfmt 5 puts them in the Iteration's message,
@@ -3836,11 +3884,9 @@ fn run_batch_loop(
         if start == end {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
-            }
-            .into());
+            return Err(crate::blastinput::app::engine_error(
+                "Empty CBlastQueryVector",
+            ));
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:178-181
         // LOSAT's refusal of two queries of the batch's scope with one id, in the one form of every
@@ -3883,15 +3929,11 @@ fn run_batch_loop(
             )?;
             batch_warnings.append(&strategy.take_all_posts());
         }
-        // The query splitter reads its environment variables for every batch, before the
-        // queries are set up (`check_query_split_environment`); the first batch meets an
-        // error there.
-        if input_start == 0 {
-            if let Err(error) = crate::blastinput::app::check_query_split_environment(true, true) {
-                reports.write_before_failed_batch(outputs, done, &warnings)?;
-                batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                return Err(error);
-            }
+        // The errors of the batch before its queries' set-up (`batch_error_before_setup`).
+        if let Some(error) = batch_error_before_setup(input_start, scope_refusal.as_ref()) {
+            reports.write_before_failed_batch(outputs, done, &warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            return Err(error);
         }
         let batch_queries = &query_records[start..end];
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
@@ -3916,17 +3958,10 @@ fn run_batch_loop(
         {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            let mut message = format!("{ENGINE_ERROR} ");
-            for _ in 0..no_data_queries {
-                message.push_str("Warning: ");
-                message.push_str(NO_DATA_MESSAGE);
-                message.push(' ');
-            }
-            message.push('\n');
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: message.into(),
-            }
+            return Err(crate::report::query_warnings::each_query_error(
+                NO_DATA_MESSAGE.as_bytes(),
+                no_data_queries,
+            )
             .into());
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182 (the score block of
@@ -3971,7 +4006,13 @@ fn run_batch_loop(
                         .collect();
                     match set_up(&records) {
                         Ok(batch) if batch.searched => BatchSetUp::Searched,
-                        Ok(_) => BatchSetUp::Unknown,
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+                        // None of the given records has a valid context (review 2 B1/B2): whether
+                        // the subjects pass the checks of a batch with one (`subject_setup_checks`).
+                        Ok(_) => BatchSetUp::NoValidContext {
+                            subjects_pass: subject_setup_checks(subjects.subjects, &subjects.numbers)
+                                .is_ok(),
+                        },
                         Err(error) if error.is::<SubjectsUnreadable>() => stores_error
                             .take()
                             .and_then(|error| {
@@ -4990,6 +5031,42 @@ impl Drop for XEndBatch<'_> {
     }
 }
 
+/// A subject set without sequences or letters that is not an unreadable database
+/// (`search_query_batch` searches it with nothing, before any check of its set-up).
+fn no_subjects(subjects: Subjects<'_>, numbers: &SubjectSetNumbers) -> bool {
+    subjects.count() == 0 && numbers.total == 0 && !matches!(subjects, Subjects::Unreadable)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+/// The checks of the set-up of a batch with a valid context that read the subjects alone
+/// (`search_query_batch`, before `context_cutoffs::context_cutoffs`), in NCBI's order. A count of
+/// 0 (of a positive total) is the division by 0 where NCBI's setup of this first batch with a
+/// valid context crashes, before it reads a sequence: LOSAT's refusal
+/// (`common::database::check_setup_count`, D1a-5 of line RG), after the reports of the batches
+/// before, also where the sequences could not be read (NCBI 2.17.0: `NSEQ 0` over a volume without
+/// its `.nsq`, SIGFPE; review A of D1a-5, F1). A run whose batches have no valid context does not
+/// reach them and is reported as NCBI's. Then a `-db` whose sequences could not be read (this
+/// first batch with a valid context fails: `run_in_pool` raises the kept read error,
+/// `SubjectsUnreadable`) and the average subject length
+/// (`context_cutoffs::subject_length_check`). A refused batch without a valid context asks them
+/// for a context that NCBI's letters of its repeats may have (`BatchSetUp::NoValidContext`).
+fn subject_setup_checks(subjects: Subjects<'_>, numbers: &SubjectSetNumbers) -> Result<()> {
+    if no_subjects(subjects, numbers) {
+        return Ok(());
+    }
+    crate::algorithm::common::database::check_setup_count(
+        numbers.total,
+        i32::try_from(numbers.count).unwrap_or(i32::MAX),
+        false,
+        "TBLASTX",
+    )
+    .map_err(ErrorAfterBatchReports::new)?;
+    if matches!(subjects, Subjects::Unreadable) {
+        return Err(SubjectsUnreadable.into());
+    }
+    context_cutoffs::subject_length_check(numbers.total, numbers.count, subjects)
+}
+
 /// Searches one query batch against the subjects and returns its hits and query statistics: the
 /// set-up of the batch (the flags, the queries' frames, the lookup table: `batch_setup.rs`; the
 /// diagonal table, the offset arrays and the seed release: `seed_tables.rs`; the cutoffs, length
@@ -5089,11 +5166,7 @@ fn search_query_batch<S: TbxScore>(
     // An unreadable database is not empty: its first batch with a valid context fails
     // (`SubjectsUnreadable`, below). A database that a list left without sequences has
     // statistics (`SeqDb::statistics_numbers`) and its queries are reported with them.
-    if queries_raw.is_empty()
-        || (subjects.count() == 0
-            && numbers.total == 0
-            && !matches!(subjects, Subjects::Unreadable))
-    {
+    if queries_raw.is_empty() || no_subjects(subjects, numbers) {
         return Ok(TblastxBatch {
             hits: Vec::new(),
             searched: true,
@@ -5290,25 +5363,7 @@ fn search_query_batch<S: TbxScore>(
             fetched_utf8: None,
         });
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-    // A count of 0 (of a positive total) is the division by 0 where NCBI's setup of this first
-    // batch with a valid context crashes, before it reads a sequence: LOSAT's refusal
-    // (`common::database::check_setup_count`, D1a-5 of line RG), after the reports of the batches
-    // before, also where the sequences could not be read (NCBI 2.17.0: `NSEQ 0` over a volume
-    // without its `.nsq`, SIGFPE; review A of D1a-5, F1). A run whose batches have no valid context
-    // does not reach it and is reported as NCBI's.
-    crate::algorithm::common::database::check_setup_count(
-        db_length_nucl,
-        i32::try_from(db_num_seqs).unwrap_or(i32::MAX),
-        false,
-        "TBLASTX",
-    )
-    .map_err(ErrorAfterBatchReports::new)?;
-    // `-db` whose sequences could not be read: this first batch with a valid context fails
-    // (`run_in_pool` raises the kept read error).
-    if matches!(subjects, Subjects::Unreadable) {
-        return Err(SubjectsUnreadable.into());
-    }
+    subject_setup_checks(subjects, numbers)?;
     // `-db`: the read of the database that failed in this batch's search, if one does (a database
     // changed or damaged after the check, an error of the file system): the batch fails with it
     // once every subject before it is searched (`XReadFailure`).
@@ -5329,7 +5384,6 @@ fn search_query_batch<S: TbxScore>(
         numbers,
         db_length_nucl,
         db_num_seqs,
-        subjects,
         evalue_threshold,
         diag_enabled,
         debug_cutoffs_all,

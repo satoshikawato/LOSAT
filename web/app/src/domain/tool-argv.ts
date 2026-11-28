@@ -5,7 +5,6 @@
 // omitted; Make counts and Convert counts write `-out wmasker.<sformat>` until the user edits it.
 import type { ToolDescription, ToolParameterDescription } from 'losat/domain';
 import { splitOptions } from './argv';
-import { COMMA_LIST_FLAGS } from './list-flags';
 import { writtenValue, type FieldValue, type FormValues } from './parameters';
 import {
   allMaskingParameters,
@@ -19,6 +18,7 @@ import {
   makeblastdbParameters,
   stageOptionParameters,
   toToolParameterField,
+  TOOL_FILE_LIST_FLAGS,
   TOOL_WRITTEN_TEXT_FLAGS,
   WINDOWMASKER_BLOCK_FLAGS,
   type MaskingTool,
@@ -29,9 +29,12 @@ import {
 
 export interface WindowMaskerArgvInput {
   readonly stage: WindowMaskerStage;
-  /** Value for `-in` (FASTA file name, combined_input.fa, counts file for Convert, or blastdb name). */
+  /**
+   * Value for `-in` (FASTA file name, combined_input.fa, counts file for Convert, or blastdb name), written as it is: a
+   * file's name as the run directory holds it (the draft trims a name that the user types).
+   */
   readonly inputName?: string;
-  /** Value for `-ustat` (Mask stage only). */
+  /** Value for `-ustat` (Mask stage only): the counts file's name as the run directory holds it, written as it is. */
   readonly ustatName?: string;
   /**
    * Value for `-out`: undefined uses the stage default (`wmasker.<sformat>` for `mk_counts`/`convert`,
@@ -44,17 +47,42 @@ export interface WindowMaskerArgvInput {
   readonly description?: ToolDescription;
   /** Extra words parsed from "Additional options" (`splitOptions`). */
   readonly extra?: readonly string[];
+  /** The names of the files of the run (`runFileNames`): an option's value that names them is written as it is. */
+  readonly fileNames?: ReadonlySet<string>;
+}
+
+const NO_FILES: ReadonlySet<string> = new Set();
+
+/**
+ * Whether an option's value names files of the run as they are (`fileNames`: the files chosen for an option or added to
+ * the run directory, under the names that the run directory holds): the value is one of those names, or for an option
+ * that lists files (`TOOL_FILE_LIST_FLAGS`) each of its entries between commas is. Such a value comes from the files, not
+ * from typing (line WQA's D33, R2 H2).
+ */
+function namesRunFiles(flag: string, value: string, fileNames: ReadonlySet<string>): boolean {
+  if (fileNames.size === 0) return false;
+  return (TOOL_FILE_LIST_FLAGS.has(flag) ? value.split(',') : [value]).every((name) => fileNames.has(name));
 }
 
 /**
  * What a tool form writes for an option: a text that the tool writes or stores as given (`TOOL_WRITTEN_TEXT_FLAGS`)
- * as typed, white space and all, as the command line passes it; any other field as the search forms write it
- * (`writtenValue`: names, numbers and keywords without the white space around them). An empty box writes nothing;
- * an empty value is given in Additional options (`-title ''`; review of WW4c, F3).
+ * as typed, white space and all, as the command line passes it; a value that names files of the run (`namesRunFiles`)
+ * as it is, so that the argv names a file as the run directory holds it, a space at its start or end included (the one
+ * rule for the names of every tool tab: a name that comes from a file is written unchanged; line WQA's D33, R2 H2);
+ * any other field as the search forms write it (`writtenValue`: names, numbers and keywords that the user types
+ * without the white space around them). An empty box writes nothing; an empty value is given in Additional options
+ * (`-title ''`; review of WW4c, F3).
  */
-function toolWrittenValue(param: ToolParameterDescription, value: FieldValue | undefined): string | boolean | undefined {
+function toolWrittenValue(
+  param: ToolParameterDescription,
+  value: FieldValue | undefined,
+  fileNames: ReadonlySet<string> = NO_FILES,
+): string | boolean | undefined {
   const field = toToolParameterField(param);
-  if (field.kind === 'text' && TOOL_WRITTEN_TEXT_FLAGS.has(param.flag)) {
+  if (
+    (field.kind === 'text' && TOOL_WRITTEN_TEXT_FLAGS.has(param.flag)) ||
+    (typeof value === 'string' && namesRunFiles(param.flag, value, fileNames))
+  ) {
     return typeof value === 'string' && value !== '' && value !== param.defaultValue ? value : undefined;
   }
   const known = param.defaultValue === undefined ? undefined : { defaultValue: param.defaultValue };
@@ -70,10 +98,11 @@ function pushOptionWords(
   ordered: readonly ToolParameterDescription[],
   values: FormValues,
   skip: ReadonlySet<string>,
+  fileNames: ReadonlySet<string> = NO_FILES,
 ): void {
   if (ordered.length > 0) {
     for (const param of ordered) {
-      const written = toolWrittenValue(param, values[param.flag]);
+      const written = toolWrittenValue(param, values[param.flag], fileNames);
       if (written === true) argv.push(param.flag);
       else if (typeof written === 'string') argv.push(param.flag, written);
     }
@@ -83,7 +112,7 @@ function pushOptionWords(
     if (skip.has(flag)) continue;
     if (val === true) argv.push(flag);
     else if (typeof val === 'string') {
-      const text = TOOL_WRITTEN_TEXT_FLAGS.has(flag) ? val : val.trim();
+      const text = TOOL_WRITTEN_TEXT_FLAGS.has(flag) || namesRunFiles(flag, val, fileNames) ? val : val.trim();
       if (text !== '') argv.push(flag, text);
     }
   }
@@ -125,11 +154,11 @@ export function buildWindowMaskerArgv(input: WindowMaskerArgvInput): readonly st
   } else if (stage === 'convert') {
     argv.push('-convert');
   } else {
-    const ustat = input.ustatName?.trim() ?? '';
+    const ustat = input.ustatName ?? '';
     if (ustat !== '') argv.push('-ustat', ustat);
   }
 
-  const inputName = input.inputName?.trim() ?? '';
+  const inputName = input.inputName ?? '';
   if (inputName !== '' && (stage !== 'mask' || inputName !== '-')) {
     argv.push('-in', inputName);
   }
@@ -147,7 +176,7 @@ export function buildWindowMaskerArgv(input: WindowMaskerArgvInput): readonly st
 
   // Remaining block selects (-infmt, -sformat, -outfmt) and WindowMasker options in usage order.
   const ordered = allStageParameters(description, stage).filter((param) => !WINDOWMASKER_NAMED_FLAGS.has(param.flag));
-  pushOptionWords(argv, ordered, values, WINDOWMASKER_NAMED_FLAGS);
+  pushOptionWords(argv, ordered, values, WINDOWMASKER_NAMED_FLAGS, input.fileNames);
   pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
 }
@@ -156,7 +185,7 @@ export function buildWindowMaskerArgv(input: WindowMaskerArgvInput): readonly st
 const WINDOWMASKER_NAMED_FLAGS: ReadonlySet<string> = new Set(['-in', '-out', '-ustat']);
 
 export interface BlastFormatterArgvInput {
-  /** Archive file name in the run directory (`-archive`), omitted when empty. */
+  /** Archive file name in the run directory (`-archive`), written as it is, omitted when empty. */
   readonly archiveName?: string;
   /** Output format string (`-outfmt`), omitted when empty or NCBI's default `'0'`. */
   readonly outfmt?: string;
@@ -168,6 +197,8 @@ export interface BlastFormatterArgvInput {
   readonly description?: ToolDescription;
   /** Extra words parsed from "Additional options" (`splitOptions`). */
   readonly extra?: readonly string[];
+  /** The names of the files of the run (`runFileNames`): an option's value that names them is written as it is. */
+  readonly fileNames?: ReadonlySet<string>;
 }
 
 /**
@@ -176,7 +207,7 @@ export interface BlastFormatterArgvInput {
  */
 export function buildBlastFormatterArgv(input: BlastFormatterArgvInput): readonly string[] {
   const argv: string[] = ['blast_formatter'];
-  const archiveName = input.archiveName?.trim() ?? '';
+  const archiveName = input.archiveName ?? '';
   if (archiveName !== '') argv.push('-archive', archiveName);
 
   const outfmt = input.outfmt?.trim() ?? '';
@@ -185,7 +216,7 @@ export function buildBlastFormatterArgv(input: BlastFormatterArgvInput): readonl
   const outName = input.outName?.trim() ?? '';
   if (outName !== '' && outName !== '-') argv.push('-out', outName);
 
-  pushOptionWords(argv, blastFormatterOptionParameters(input.description), input.values, BLAST_FORMATTER_BLOCK_FLAGS);
+  pushOptionWords(argv, blastFormatterOptionParameters(input.description), input.values, BLAST_FORMATTER_BLOCK_FLAGS, input.fileNames);
   pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
 }
@@ -201,7 +232,10 @@ export function changedBlastFormatterOptionsCount(
 
 export interface MaskingArgvInput {
   readonly tool: MaskingTool;
-  /** Value for `-in` (a FASTA file name, `combined_input.fa`, or a BLAST database name), omitted when empty. */
+  /**
+   * Value for `-in` (a FASTA file name, `combined_input.fa`, or a BLAST database name), written as it is (the draft
+   * trims a name that the user types), omitted when empty.
+   */
   readonly inputName?: string;
   /** Value for `-out`, omitted when empty or `'-'` (standard output, the command line's default). */
   readonly outName?: string;
@@ -211,12 +245,14 @@ export interface MaskingArgvInput {
   readonly description?: ToolDescription;
   /** Extra words parsed from "Additional options" (`splitOptions`). */
   readonly extra?: readonly string[];
+  /** The names of the files of the run (`runFileNames`): an option's value that names them is written as it is. */
+  readonly fileNames?: ReadonlySet<string>;
 }
 
 export interface MakeblastdbArgvInput {
   /**
    * `-in`'s value as the command line takes it, omitted when empty: the files of the run as one list
-   * (`makeblastdbInputList`), or a database's name or list as the user typed it.
+   * (`seqdbNameList`), or a database's name or list as the user typed it.
    */
   readonly input: string;
   /** Option values keyed by `-flag` (`-input_type`, `-dbtype`, `-out`, and the options of the groups). */
@@ -225,6 +261,8 @@ export interface MakeblastdbArgvInput {
   readonly description?: ToolDescription;
   /** Extra words parsed from "Additional options" (`splitOptions`). */
   readonly extra?: readonly string[];
+  /** The names of the files of the run (`runFileNames`): an option's value that names them is written as it is. */
+  readonly fileNames?: ReadonlySet<string>;
 }
 
 /** The words that the Masking builder writes from the blocks (the file names). */
@@ -237,49 +275,14 @@ const MASKING_NAMED_FLAGS: ReadonlySet<string> = new Set(['-in', '-out']);
  */
 export function buildMaskingArgv(input: MaskingArgvInput): readonly string[] {
   const argv: string[] = [input.tool];
-  const inputName = input.inputName?.trim() ?? '';
+  const inputName = input.inputName ?? '';
   if (inputName !== '') argv.push('-in', inputName);
   const outName = input.outName?.trim() ?? '';
   if (outName !== '' && outName !== '-') argv.push('-out', outName);
   const ordered = allMaskingParameters(input.description, input.tool).filter((param) => !MASKING_NAMED_FLAGS.has(param.flag));
-  pushOptionWords(argv, ordered, input.values, MASKING_NAMED_FLAGS);
+  pushOptionWords(argv, ordered, input.values, MASKING_NAMED_FLAGS, input.fileNames);
   pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
-}
-
-/**
- * Why a name cannot be written in the list of names that `flag` takes, as the command line splits the list, or undefined
- * when it can (and for an option that takes one name). The one rule for every list option: makeblastdb's `-in`
- * (`SeqDB_SplitQuoted`: spaces separate the names and a double quote starts or ends a name with spaces, so no name can
- * hold a double quote) and the options of `COMMA_LIST_FLAGS` (`-mask_data` and the other lists that `NStr::Split` cuts
- * at commas, so no entry can hold a comma). `what` says what the name is of: a file opened, or a database that the
- * files of the run hold.
- */
-export function listNameRefusal(flag: string, name: string, what: 'file' | 'database' = 'file'): string | undefined {
-  const split = flag === '-in' ? IN_LIST_SPLIT : COMMA_LIST_FLAGS.has(flag) ? COMMA_LIST_SPLIT : undefined;
-  if (split === undefined || !name.includes(split.mark)) return undefined;
-  return `A ${what} named "${name}" cannot be in ${flag}: ${split.reason}.`;
-}
-
-/** What a list option's splitter takes out of a name (`listNameRefusal`): the mark, and why. */
-interface ListSplit {
-  readonly mark: string;
-  readonly reason: string;
-}
-
-const IN_LIST_SPLIT: ListSplit = { mark: '"', reason: 'a double quote there starts or ends a name' };
-const COMMA_LIST_SPLIT: ListSplit = { mark: ',', reason: 'a comma separates its files' };
-
-/**
- * `-in`'s value for several names, as makeblastdb reads it (`SeqDB_SplitQuoted`) and writes it
- * (`SeqDB_CombineAndQuote`): the names separated by spaces, a name with a space between double quotes. A name with a
- * double quote cannot be written (`listNameRefusal`).
- */
-export function makeblastdbInputList(names: readonly string[]): string {
-  return names
-    .filter((name) => name.trim() !== '')
-    .map((name) => (name.includes(' ') ? `"${name}"` : name))
-    .join(' ');
 }
 
 /**
@@ -291,7 +294,7 @@ export function buildMakeblastdbArgv(input: MakeblastdbArgvInput): readonly stri
   const argv: string[] = ['makeblastdb'];
   if (input.input.trim() !== '') argv.push('-in', input.input);
   const ordered = makeblastdbParameters(input.description).filter((param) => param.flag !== '-in');
-  pushOptionWords(argv, ordered, input.values, MAKEBLASTDB_NAMED_FLAGS);
+  pushOptionWords(argv, ordered, input.values, MAKEBLASTDB_NAMED_FLAGS, input.fileNames);
   pushExtraWords(argv, input.extra);
   return Object.freeze(argv);
 }
@@ -314,13 +317,22 @@ export function changedMakeblastdbOptionsCount(values: FormValues, extra: string
   return changedOptionsCount(makeblastdbOptionParameters(description), values, extra);
 }
 
-/** The names of a comma-separated list of files (`-mask_data a.asnb,b.asnb`), without empty entries. */
-export function fileListNames(value: unknown): readonly string[] {
+/**
+ * The names of a comma-separated list of files (`-mask_data a.asnb,b.asnb`), without empty entries: an entry that names a
+ * file of the run (`fileNames`) as it is, a space at its start or end included, any other (typed) entry without the white
+ * space around it (`namesRunFiles`; line WQA's D33, R2 H2).
+ */
+export function fileListNames(value: unknown, fileNames: ReadonlySet<string> = NO_FILES): readonly string[] {
   if (typeof value !== 'string') return [];
   return value
     .split(',')
-    .map((name) => name.trim())
+    .map((name) => (fileNames.has(name) ? name : name.trim()))
     .filter((name) => name !== '');
+}
+
+/** The names of the files of the run (`ToolExtraFile`s), which an option's value names as they are (`namesRunFiles`). */
+export function runFileNames(files: readonly { readonly name: string }[]): ReadonlySet<string> {
+  return new Set(files.map((file) => file.name));
 }
 
 /** The command words as shown beside Run LOSAT and in Run details (`losat windowmasker ...`). */
@@ -339,6 +351,15 @@ export function changedToolOptionsCount(
   return changedOptionsCount(params, values, extra);
 }
 
+/**
+ * Whether words of Additional options name the option `flag` themselves (`-in`, `-in=…`): the one rule of the tool tabs
+ * for an option that their form writes too (makeblastdb's, WindowMasker's and the Masking tools' `-in`): the words give
+ * it, so the form writes no value that it found itself (the database of the run's files), refuses none, and asks for none.
+ */
+export function namesOption(words: readonly string[], flag: string): boolean {
+  return words.some((word) => word === flag || word.startsWith(`${flag}=`));
+}
+
 /** Reads the last value of `flag` in `argv` (supporting both `-flag val` and `-flag=val`). */
 export function toolOptionValue(argv: readonly string[], flag: string): string | undefined {
   let found: string | undefined;
@@ -354,8 +375,9 @@ export function toolOptionValue(argv: readonly string[], flag: string): string |
 }
 
 // The engine's model of a Linux path walk (`LOSAT/src/report/run_files.rs`: `Walk`, `LINKS`, `SELF`, `THREAD`,
-// `MAX_LINKS`, `WORKING_TREE`, `working_directory`, `file_key`), for the names that it opens as the run's standard
-// output (`OutputName::Stdout`) and for the run's files that an option names (`runFileNamed`).
+// `MAX_LINKS`, `WORKING_TREE`, `working_directory`, `in_working_tree`, `file_key`, `host_file_name`), for the names that
+// it opens as the run's standard output (`OutputName::Stdout`), for the run's files that an option names
+// (`runFileNamed`) and for the names that the engine gives them (`runFileName`).
 /**
  * The working directory's tree on LOSAT Web's Linux (`WORKING_TREE`): the run's working directory is a chain of these
  * components, deeper than a name's `..` reach (`workingDirectory`), as a user's command line runs in a directory of the
@@ -390,9 +412,11 @@ const MAX_PATH_LINKS = 40;
 /**
  * The path that the system opens for `name` in the working directory `cwd`, its links followed and its `.` and `..`
  * taken (the engine's `Walk::resolve`, without the directories that a user cannot search, which fail the run's open);
- * undefined past `MAX_PATH_LINKS` links.
+ * undefined past `MAX_PATH_LINKS` links. With `folder`, each folder of the name (every part but the last) is looked up
+ * as the engine's `output_name` looks it up (`folder_present` after each step): undefined where `folder` says that the
+ * path walked so far is no folder.
  */
-function walkedPath(name: string, cwd: string): string | undefined {
+function walkedPath(name: string, cwd: string, folder?: (path: string) => boolean): string | undefined {
   let resolved = '';
   let links = 0;
   let refused = false;
@@ -418,8 +442,13 @@ function walkedPath(name: string, cwd: string): string | undefined {
     }
   };
   if (!name.startsWith('/')) walk(cwd);
-  walk(name);
-  return refused ? undefined : resolved === '' ? '/' : resolved;
+  const parts = name.split('/');
+  for (const [index, part] of parts.entries()) {
+    step(part);
+    if (refused) return undefined;
+    if (folder !== undefined && index < parts.length - 1 && !folder(resolved === '' ? '/' : resolved)) return undefined;
+  }
+  return resolved === '' ? '/' : resolved;
 }
 
 /**
@@ -431,12 +460,11 @@ function workingDirectory(name: string): string {
 }
 
 /**
- * The file that the path `path` (as `walkedPath` gives it) is, read in the working directory `cwd` (`file_key`): a path
- * in the working directory's tree by its place from the working directory (`\0` and how many directories above it,
- * then the rest: `\0` + `0/m.asnb` for `m.asnb`, `sub/../m.asnb` and `/proc/self/cwd/m.asnb`; `\0` + `1/m.asnb` for
- * `../m.asnb`), as each name has a working directory of its own depth; any other path is itself (`/tmp/m.asnb`).
+ * Where the path `path` (as `walkedPath` gives it) sits from the working directory `cwd` (`in_working_tree`): in the
+ * working directory's tree, `up` directories above `cwd`, then `rest` (without a leading `/`; empty for `cwd` and the
+ * directories above it); undefined for a path outside the tree (`/tmp/m.asnb`).
  */
-function fileKey(path: string, cwd: string): string {
+function inWorkingTree(path: string, cwd: string): { readonly up: number; readonly rest: string } | undefined {
   const depth = cwd.length / WORKING_TREE.length;
   let rest = path;
   let inside = 0;
@@ -444,20 +472,84 @@ function fileKey(path: string, cwd: string): string {
     rest = rest.slice(WORKING_TREE.length);
     inside += 1;
   }
-  return inside > 0 ? `\0${depth - inside}${rest}` : path;
+  return inside > 0 ? { up: depth - inside, rest: rest.startsWith('/') ? rest.slice(1) : rest } : undefined;
+}
+
+/**
+ * A file that a name opens: the file itself (`key`, the engine's `file_key`: a path in the working directory's tree by
+ * its place from the working directory, `\0` and how many directories above it, then the rest: `\0` + `0/m.asnb` for
+ * `m.asnb`, `sub/../m.asnb` and `/proc/self/cwd/m.asnb`; `\0` + `1/m.asnb` for `../m.asnb`, as each name has a working
+ * directory of its own depth; any other path itself, `/tmp/m.asnb`), and the name that the engine gives the run's file
+ * (`name`, `host_file_name`: in the working directory's tree its path from the run's directory, `m.asnb`, `sub/m.asnb`,
+ * `../m.asnb`; outside it the path that the option's reading opens, `opened`).
+ */
+interface OpenedFile {
+  readonly key: string;
+  readonly name: string;
+}
+
+/**
+ * The run's directory as the engine has it (docs/web/abi_v2.md §3): the folders that the paths of its files give (`sub`
+ * of `sub/x.txt`, `a` and `a/b` of `a/b/c.fa`), its files being no folders. A name is then read as the engine reads it
+ * in that directory (`folder_present`, `run_entry`): every folder that the name looks up inside the run's directory must
+ * be one of these (`nosub/../m.asnb`, `input.fa/../m.asnb` open no file), and a name that is one of them is a folder,
+ * which opens no file (`-out sub`). Undefined where the run's directory is not known: no folder is looked up.
+ */
+type RunFolders = ReadonlySet<string> | undefined;
+
+/** The folders of a run's directory whose files have the paths `names` (`DirectoryFile.name`; `RunFolders`). */
+function runFolders(names: readonly string[]): ReadonlySet<string> {
+  const folders = new Set<string>();
+  for (const name of names) {
+    const parts = name.split('/');
+    for (let end = 1; end < parts.length; end++) folders.add(parts.slice(0, end).join('/'));
+  }
+  return folders;
+}
+
+/**
+ * The lookup of the folders of a name read in the working directory `cwd` (`walkedPath`'s `folder`): inside the run's
+ * directory a folder of `folders`; any other path a folder (the model's, which the engine knows better: above the run's
+ * directory a home's folders, `../nosub/../m.asnb` opening `../m.asnb`, and outside the working directory's tree "the
+ * directories that the name gives" where a user makes files, docs/web/abi_v2.md §4, where the engine's lists of the
+ * host's directories also refuse a name, `/etc/x/m.asnb`, which the app does not have). Undefined without `folders`.
+ */
+function folderLookup(folders: RunFolders, cwd: string): ((path: string) => boolean) | undefined {
+  if (folders === undefined) return undefined;
+  return (path) => !path.startsWith(`${cwd}/`) || folders.has(path.slice(cwd.length + 1));
+}
+
+/**
+ * The file that the walked path `path` is, opened by a name read in `cwd` (`OpenedFile`; `opened`: the name that the
+ * engine gives a file outside the working directory's tree), or undefined where it is no file: the working directory or
+ * a directory above it (`/proc/self/cwd`), and a folder of the run's directory (`folders`).
+ */
+function openedFile(path: string, opened: string, cwd: string, folders: RunFolders): OpenedFile | undefined {
+  const place = inWorkingTree(path, cwd);
+  if (place === undefined) return { key: path, name: opened };
+  if (place.rest === '' || (place.up === 0 && folders?.has(place.rest) === true)) return undefined;
+  return { key: `\0${place.up}/${place.rest}`, name: `${'../'.repeat(place.up)}${place.rest}` };
 }
 
 /**
  * The file that the system opens for the output name `name` as typed (`-out`; a name that the engine gives a run's
- * file, `host_file_name`): its walk in its working directory (`walkedPath`, `workingDirectory`) as `fileKey`. A name whose
- * last part is empty, `.` or `..` is a directory and opens no file; undefined then and past `MAX_PATH_LINKS` links.
+ * file, `host_file_name`), walked in its working directory (`walkedPath`, `workingDirectory`), its folders looked up in
+ * the run's directory (`folders`), as the engine's `output_name` opens it. A name whose last part is empty, `.` or `..`
+ * is a directory and opens no file, and `-` and a name that the engine opens as the run's standard output
+ * (`isStandardOutputName`) open none of the run's files; undefined then, for a name through a folder that the run's
+ * directory does not have, and past `MAX_PATH_LINKS` links. Outside the working directory's tree the engine names the
+ * file by the name read by its words where that walks to the file, else by its path (`/var/run/../tmp/m.asnb` makes
+ * `/tmp/m.asnb`, as the system steps back from the link's target).
  */
-function outputFile(name: string): string | undefined {
+function outputFile(name: string, folders?: RunFolders): OpenedFile | undefined {
   const parts = name.split('/');
-  if (['', '.', '..'].includes(parts[parts.length - 1]!)) return undefined;
+  if (name === '-' || ['', '.', '..'].includes(parts[parts.length - 1]!)) return undefined;
   const cwd = workingDirectory(name);
-  const path = walkedPath(name, cwd);
-  return path === undefined ? undefined : fileKey(path, cwd);
+  const path = walkedPath(name, cwd, folderLookup(folders, cwd));
+  if (path === undefined || path === `${PROC_SELF}/fd/1` || path === `${PROC_THREAD}/fd/1`) return undefined;
+  // A relative name stays in the working directory's tree, whose files the engine names by their place.
+  const typed = lexicalPath(name);
+  return openedFile(path, name.startsWith('/') && walkedPath(typed, cwd) === path ? typed : path, cwd, folders);
 }
 
 /** The bytes that NCBI's `NStr::TruncateSpaces` takes off both ends of a string (C `isspace`). */
@@ -489,37 +581,96 @@ function lexicalPath(path: string): string {
 }
 
 /**
- * The file that the `-logfile` value `name` opens (`log_file_name` of `LOSAT/src/blastinput/ncbi_environment.rs` on
- * Unix, then the system's walk, `log_key` of `run_files.rs`) as `fileKey`: NCBI makes a relative name absolute in the
- * working directory, its spaces at both ends cut (`absolute_path`), and reads it by its words (`lexicalPath`:
- * `sub/../run.log` is `run.log`, `/var/run/../tmp/run.log` is `/var/tmp/run.log`, where the system's walk of `-out`
- * reaches `/tmp`), keeps its first 2047 bytes, and the system opens what is left. Undefined for NCBI's special names (`-`
- * is the standard error; the empty name and `/dev/null` keep no messages) and past `MAX_PATH_LINKS` links.
+ * NCBI's `CDirEntry::Reset` of a path (`PathRules::reset`, Unix): without the `/`s at its end, a lone `/` kept.
  */
-function logFile(name: string): string | undefined {
+function resetPath(path: string): string {
+  return path === '/' ? path : path.replace(/\/+$/, '');
+}
+
+/**
+ * The directory that NCBI checks for the `-logfile` name `name` before it opens its log (`LogFileName::directory` of
+ * `log_file_name`: `GetDir` of the name as written, `Reset`): its part before the last `/` (`sub/..` of
+ * `sub/../run.log`, `.` for `run.log`), or undefined where NCBI checks none (a name of `/`s only). An empty directory
+ * (`//run.log`) is none, which no log opens in.
+ */
+function logDirectory(name: string): string | undefined {
+  const reset = resetPath(name);
+  if (reset === '') return undefined;
+  const at = reset.lastIndexOf('/');
+  return resetPath(at < 0 ? './' : reset.slice(0, at + 1));
+}
+
+/**
+ * The file that the `-logfile` value `name` opens (`log_file_name` of `LOSAT/src/blastinput/ncbi_environment.rs` on
+ * Unix, then the system's walk, `log_name` and `log_key` of `run_files.rs`): NCBI checks that the directory of the name
+ * as written is one (`logDirectory`, walked as the system walks it: `nosub/../run.log` without a folder `nosub` opens no
+ * log), makes a relative name absolute in the working directory, its spaces at both ends cut (`absolute_path`), and
+ * reads it by its words (`lexicalPath`: `sub/../run.log` is `run.log`, `/var/run/../tmp/run.log` is `/var/tmp/run.log`,
+ * where the system's walk of `-out` reaches `/tmp`), keeps its first 2047 bytes, and the system opens what is left, the
+ * name that the engine gives a file outside the working directory's tree. The folders are looked up in the run's
+ * directory (`folders`). Undefined for NCBI's special names (`-` is the standard error; the empty name and `/dev/null`
+ * keep no messages), for a name that opens no file (the messages then stay on the standard error) and past
+ * `MAX_PATH_LINKS` links.
+ */
+function logFile(name: string, folders?: RunFolders): OpenedFile | undefined {
   if (name === '-' || name === '' || name === '/dev/null') return undefined;
   const typed = truncateSpaces(name);
   const cwd = workingDirectory(typed);
+  const folder = folderLookup(folders, cwd);
+  const directory = logDirectory(name);
+  if (directory === '') return undefined;
+  if (directory !== undefined) {
+    const walked = walkedPath(directory, cwd, folder);
+    if (walked === undefined || (folder !== undefined && !folder(walked))) return undefined;
+  }
   const absolute = name.startsWith('/') ? name : lexicalPath(`${cwd}/${typed.startsWith('/') ? typed.slice(1) : typed}`);
   const bytes = new TextEncoder().encode(absolute);
   const kept = bytes.length > NCBI_LOG_NAME_BYTES ? new TextDecoder().decode(bytes.subarray(0, NCBI_LOG_NAME_BYTES)) : absolute;
-  const path = walkedPath(lexicalPath(kept), cwd);
-  return path === undefined ? undefined : fileKey(path, cwd);
+  const opened = lexicalPath(kept);
+  const path = walkedPath(opened, cwd, folder);
+  return path === undefined ? undefined : openedFile(path, opened, cwd, folders);
 }
 
 /**
  * Whether the run's file `fileName` (the name that the engine gives it: its path from the run's directory, `m.asnb`,
  * `sub/m.asnb`, `../m.asnb`, or outside the working directory's tree its path, `/tmp/m.asnb`; `host_file_name`) is
  * the file that the value `value` of `option` opens: `-out` as the system opens the name typed (`outputFile`), `-logfile`
- * as NCBI reads it (`logFile`). Each name is read in the run's working directory by the engine's model (`fileKey`), so
+ * as NCBI reads it (`logFile`). Each name is read in the run's working directory by the engine's model (`file_key`), so
  * every spelling of one file is that file: `sub/../m.asnb` (with a folder `sub`), `.//m.asnb`, `sub//m.asnb` and
- * `/proc/self/cwd/m.asnb` are `m.asnb` and `sub/m.asnb` (WW4e, 2026-11-28; before, only `./` was cut). A name through a
- * folder that the run's directory does not have (`nosub/../m.asnb`) opens no file: its run fails with NCBI's "File is
- * not accessible" (exit status 1), as `isStandardOutputName` takes a name that the system refuses.
+ * `/proc/self/cwd/m.asnb` are `m.asnb` and `sub/m.asnb` (WW4e, 2026-11-28; before, only `./` was cut). The run made the
+ * file, so its folders are not looked up: a name through a folder that the run's directory does not have
+ * (`nosub/../m.asnb`) opens no file (`runFileName`), and its run fails with NCBI's "File is not accessible" (exit
+ * status 1) or, for `-logfile`, keeps its messages on the standard error.
  */
 function runFileNamed(option: '-out' | '-logfile', value: string, fileName: string): boolean {
-  const opened = option === '-out' ? (value === '-' ? undefined : outputFile(value)) : logFile(value);
-  return opened !== undefined && opened === outputFile(fileName);
+  const opened = option === '-out' ? outputFile(value) : logFile(value);
+  return opened !== undefined && opened.key === outputFile(fileName)?.key;
+}
+
+/**
+ * The name that the engine gives the run's file that the value `value` of `option` opens (`host_file_name` of
+ * `LOSAT/src/report/run_files.rs`, the name of the file of a tool's run, `ToolFile.name`): `-out` as the system opens
+ * the name typed (`output_name`), `-logfile` as NCBI reads it (`log_name`). In the working directory's tree, the file's
+ * path from the run's directory (`m.asnb` for `m.asnb`, `./m.asnb`, `sub/../m.asnb` and `/proc/self/cwd/m.asnb`;
+ * `sub/m.asnb` for `sub//m.asnb`; `../m.asnb` for `sub/../../m.asnb`; `run.log` for `-logfile run.log/` and
+ * ` run.log`); outside it, the path that the option's reading opens (`/tmp/m.asnb` for `-out /var/run/../tmp/m.asnb`,
+ * `/var/tmp/run.log` for `-logfile /var/run/../tmp/run.log`). `directory`, the paths of the files of the run's
+ * directory (`DirectoryFile.name`), gives its folders (`RunFolders`): a name through a folder that the run's directory
+ * does not have or through one of its files (`nosub/../m.asnb`, `input.fa/../m.asnb`, `-logfile nosub/../run.log`), a
+ * folder of the run (`sub`) and a directory (`m.asnb/`, `/proc/self/cwd`) open no file. Undefined there, for `-` and the
+ * names of `-logfile` that keep no messages (`""`, `/dev/null`), and for an `-out` that the engine opens as the run's
+ * standard output (`/dev/stdout`). Without `directory`, no folder is looked up.
+ *
+ * The model of the names is the app's (`walkedPath`), which the engine knows better (WW4h, 2026-11-28): folders outside
+ * the run's directory are present (above it, a home's folders, as docs/web/abi_v2.md §4 has it: `../nosub/../m.asnb`
+ * is `../m.asnb` on the engine too; outside the working directory's tree, also where the engine's lists of the host's
+ * directories refuse the name, `/etc/x/m.asnb`), the devices and the files of procfs are files (`/dev/null`,
+ * `/dev/stderr`: the engine loses or refuses their writes), a file of the run's directory is named (`-out input.fa`:
+ * LOSAT Web refuses it), and the system's limits of a name's length are not checked.
+ */
+export function runFileName(option: '-out' | '-logfile', value: string, directory?: readonly string[]): string | undefined {
+  const folders = directory === undefined ? undefined : runFolders(directory);
+  return (option === '-out' ? outputFile(value, folders) : logFile(value, folders))?.name;
 }
 
 /**

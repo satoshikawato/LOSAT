@@ -92,11 +92,15 @@ pub const TRACEBACK_FAILED: &str = "Traceback failed";
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 pub fn engine_error(message: impl AsRef<[u8]>) -> anyhow::Error {
+    engine_native_error(message.as_ref()).into()
+}
+
+/// `engine_error` as the `NativeError` itself.
+pub(crate) fn engine_native_error(message: &[u8]) -> NativeError {
     NativeError {
         exit: 3,
-        message: [ENGINE_ERROR.as_bytes(), b" ", message.as_ref(), b"\n"].concat(),
+        message: [ENGINE_ERROR.as_bytes(), b" ", message, b"\n"].concat(),
     }
-    .into()
 }
 
 /// An error of a reader of NCBI's objtools (`CObjReaderParseException`: the FASTA reader's, the

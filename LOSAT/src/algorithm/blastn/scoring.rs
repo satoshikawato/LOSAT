@@ -9,7 +9,7 @@ use crate::blastinput::report_counts::{run_report_counts_with, ReportCounts};
 use crate::cli::NativeError;
 use crate::config::NuclScoringSpec;
 use crate::stats::{ungapped_beta, KarlinParams, NuclValues};
-use crate::wording::{ENGINE_ERROR, QUERY_OPTIONS_ERROR};
+use crate::wording::QUERY_OPTIONS_ERROR;
 
 fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
     let (reward, penalty, gap_open, gap_extend) = determine_scoring_params(args);
@@ -233,23 +233,16 @@ pub(crate) fn karlin_error(
     message: &str,
     empty_queries: impl IntoIterator<Item = bool>,
 ) -> anyhow::Error {
-    let mut text = format!("{ENGINE_ERROR} ");
+    use crate::ncbi_exception::Severity;
+    use crate::report::query_warnings::push_search_message;
+    let mut messages = Vec::new();
     for empty in empty_queries {
-        text.push_str("Error: ");
-        text.push_str(message);
-        text.push(' ');
+        push_search_message(&mut messages, Severity::Error, message.as_bytes());
         if empty {
-            text.push_str("Warning: ");
-            text.push_str(NO_DATA_MESSAGE);
-            text.push(' ');
+            push_search_message(&mut messages, Severity::Warning, NO_DATA_MESSAGE.as_bytes());
         }
     }
-    text.push('\n');
-    NativeError {
-        exit: 3,
-        message: text.into(),
-    }
-    .into()
+    crate::blastinput::app::engine_error(messages)
 }
 
 /// The hit list size and the counts of the pairwise report of a run that writes the output

@@ -1,0 +1,183 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q1 long query minus"
+                  }
+                }
+              },
+              title "q1 long query minus"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 2048,
+              seq-data ncbi2na '0020C1B93B4F7D3023B43B6CCD69D63DC45BDC9E567C72
+17784B7C440D953A136D0D3363ACCAB8E2C295EBDF1F5E0C6FC9283F83B1272DDDE3F5064ED451
+C88237721F8447A16F9576CAA95C26F0C8D9DE6F383E48E15ED7EACB09527D0F2003C1B2D93608
+1F6E733C96B69BA97754546BD034277B375FBB265B130A1BDFB58E519DB078988247634D6FB811
+63A4A98A65505C2C37FA5A1451AA27D5CB3A66B116C0370FB50955FD4434DCD487988A450C3367
+6DCFA57920681601BAB21D4C1FA6DD86D5F0880488A92C209CB95B0B5BC138BCA2E41C292C5C7A
+BF40E63B48648E9C5ECC3ADA9B17F339A6D5A6DAC1857EAB16DA21537980E7673BF28786CC8ED4
+1DC1F004130BD998CB0AC68CE997E67A31750AEEA65B58C5979310A870EEF32ABBC115CA7146B3
+60CC3B71C560E38B70D7ABAD998884ED2B2341186229ADCCE9D35098A83DCCD3C254128EF77773
+6ED3A86075E24447569479F40F4D2598423E1641AF6FC5FEA995729910879EC3E8F90B71C2EF54
+5440C823CC55F2C1BF383895B7C5E8858B5637E850AF6101F2F6AEA3F39D6F2831EAEA59AAA0C9
+CC95EAF9CB418240ECCF3C866164B089B3B113DD5CAF913820E25ACE4ADCFA782D5DF44090E7D2
+A6289181A9743B37C011FFC33335B4F973F53E49E5BE07E9CAE4127FCC2AA68885EBF174AF2B5E
+0C28A0FEB35D6C03AFC73F65C4F1A13AFF83E4E280'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">s1 long subject"
+                }
+              }
+            },
+            title "s1 long subject"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 3000,
+            seq-data iupacna "TTTCCTCATGCAATTCAAAACCATGTCCGTAATGTAGGCGAAATAGTA
+AACCATTTTACGGAGGATACCAAATTCCTCCTTATTCAGGACCTAACCTGAGGTAAACCAGGTCTCTCCGCCCCCTTA
+TAAAAGCTGTTGCACCTAGCCAAGTTCAACGGCAGCTGCAATGGAAATAGGCAATGACGGATATATATTAAAAAGTGT
+TTTAAGATACATTGAGGCCCGTTCGTGCTCCTCGCCCTGAAGCATTGCTTTGTGAAGAGGGACTTCAGCCAATAGACC
+TGCATACCGGCTCATTCTTCATGTGCAACCTAGGGAGAATGTGTACATACGCTCTTACTGCGGTCGCGTCTAATAATA
+TACATTTGCTTCGTTGACTAGCAACCCAGGGCTATAGCTATTCCCCCCGCGGCCCACCCAGTATTCCTAACGGAGCAT
+AAATCCCACCCGAACTAAGTTTGTCGAACCTTGGTCCAAGATCGGGACTCGGTCTCCAGGTAAGACGGGCTCATTCAT
+AAACGTTACTAAGGGGTATAATCTTCTATTTGTGGGTGGGAACACTTAGTAGACTTGCAATCCAATTACAGCAGTCTT
+GTGCGCCTAGGGGCGCCCCAAAGGTAAACGAACCGTTGCGGTCAATCTTGTCGCGGCTGATGAATTTGAAGCAGTGGC
+CGGGAGTGTGTGCTCAGGAGTTCGTCCCATGACACGATAGAGAGAGAACATCCTGTTGGGCTTAATGATATAGAATTC
+CCTCGCTTGGATGAGCCATATAGACCGCCTCTCGTCGTGTTGATCTACCTGACATGTCTCTCGCGCGACCACCCAGGA
+TTAGACTCATCATTCGGGTAGTAGACATTATATTCGATACCGTGGTAGCCTAGGGTGTTAACACCCCTATAACACATT
+AGTCCCTTGTATGCAGGCGGTATCGGACGGCGCCCACACCTTGGAGGTATCCAGCGCAAGGCGCCATATCCGTACCTT
+ACTATCGCGCGAACTT"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 6068505
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 2048
+          },
+          {
+            id str "blast_score",
+            value int 2048
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 378305878222168, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 2048
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            2048
+          },
+          strands {
+            minus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 6068505",
+      "Effective search space used: 6068505",
+      "Length adjustment: 15"
+    }
+  }
+}

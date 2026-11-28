@@ -1421,9 +1421,13 @@ fn x_count_tbn_lut(which: usize) {
 }
 
 /// The `[X_STATS] TBNLUTLEAN lean= chain=` line (printed by `main` at exit) with `LOSAT_X_STATS`,
-/// when TBLASTN built any table.
+/// when TBLASTN built any table (the counters count only with `LOSAT_X_STATS`; the test here is
+/// the one `utils/xexit.rs` asks of every report).
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn x_tbn_lut_print_summary() {
+    if std::env::var_os("LOSAT_X_STATS").is_none() {
+        return;
+    }
     let [lean, chain] = X_TBN_LUT_BUILDS
         .each_ref()
         .map(|c| c.load(std::sync::atomic::Ordering::Relaxed));

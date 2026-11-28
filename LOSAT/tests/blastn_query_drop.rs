@@ -12,13 +12,15 @@
 //! on it and that the default run took the new path where the rule says so: with `LOSAT_TIMING`
 //! the default run prints `[TIMING] x_bn_q_drop: batches= records= letters=` and
 //! `[TIMING] x_bn_q_pack: records= letters= ...`, and `=0` prints no such line. The formats that
-//! show no query letter (outfmt 6, 7, 8, 9, 12 and SAM without `SQ`)
+//! show no query letter (outfmt 6, 7, 8, 9, 12 and SAM without `SR`)
 //! drop the letters of every record, in a search of several batches (`BATCH_SIZE`) with a query
 //! without letters and a query without a valid context among them; the formats that show them
-//! (outfmt 0, 5, SAM with `SQ`) and `-query_loc` keep them; a batch split into query chunks
-//! (`CHUNK_SIZE`), which cuts its chunks from the records' letters after the encoding, drops them
-//! after its chunks. The records are packed whatever the size of the file and from standard input.
-//! That those bytes equal NCBI's is the business of the fixture suites.
+//! (outfmt 0, 5, SAM `SQ SR`) and `-query_loc` keep them, and so does SAM's `SQ` against a
+//! database with parsed Seq-ids without `-parse_deflines`, whose sequences can carry a query's
+//! generated id (line RG item X7-1, `x_query_drop::Rule::found_queries`); a batch split into
+//! query chunks (`CHUNK_SIZE`), which cuts its chunks from the records' letters after the
+//! encoding, drops them after its chunks. The records are packed whatever the size of the file
+//! and from standard input. That those bytes equal NCBI's is the business of the fixture suites.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -232,7 +234,7 @@ fn the_reports_without_query_letters_do_not_depend_on_the_drop() {
         // records leave with their batch): the store holds the records read before the search.
         let base = [("BATCH_SIZE", "3000"), ("LOSAT_X_QSTREAM", "0")];
         for subjects in [("-subject", subject.as_path()), ("-db", db.as_path())] {
-            for format in ["6", "7", "8", "9", "12", "17"] {
+            for format in ["6", "7", "8", "9", "12", "17", "17 SQ"] {
                 let words = ["-outfmt", format];
                 let what = format!("{task} {} -outfmt {format:?}", subjects.0);
                 let run = |threads: u32, extra: &[(&'static str, &'static str)]| {
@@ -262,27 +264,38 @@ fn the_reports_without_query_letters_do_not_depend_on_the_drop() {
 
 // The formats that show the queries' letters, and `-query_loc`, keep them (no line); the reports
 // are those of `LOSAT_X_BNQPACK=0`. SAM's `SQ` without `SR` shows the subject's letters, which a
-// query that NCBI finds for the subject by its generated id replaces (line RG item X7-1 compares
-// them, `BlastnOutputFormat::reads_query_letters`).
+// query that NCBI finds for a database sequence by its generated id replaces (line RG item X7-1
+// compares them, `BlastnOutputFormat::reads_found_letters`): only a database with parsed Seq-ids
+// read without `-parse_deflines` keeps them for it. A `-subject` sequence's id is generated as
+// `Subject_N` (NCBI 2.17.0 blast_input_aux.cpp:237), never a query's: NCBI 2.17.0 writes the
+// subject's letters in all 17 SEQ fields of `-outfmt "17 SQ"` on these inputs, and LOSAT, which
+// drops the letters there, writes the same bytes but `@PG` (2026-11-28, X7-1 fix round 3).
 #[test]
 fn the_reports_with_query_letters_keep_them() {
     let dir = TestDir::new("letters");
-    let (query, _) = inputs(&dir);
+    let (query, db) = inputs(&dir);
+    let parsed = parsed_db(&dir);
     let subject = fasta("LC738868.fasta");
-    let subjects = ("-subject", subject.as_path());
-    let cases: [&[&str]; 5] = [
-        &["-outfmt", "0"],
-        &["-outfmt", "5"],
-        &["-outfmt", "17 SQ"],
-        &["-outfmt", "17 SQ SR"],
-        &["-outfmt", "6", "-query_loc", "101-1900"],
+    let subject = ("-subject", subject.as_path());
+    let parsed = ("-db", parsed.as_path());
+    let cases: [(_, &[&str], bool); 9] = [
+        (subject, &["-outfmt", "0"], true),
+        (subject, &["-outfmt", "5"], true),
+        (subject, &["-outfmt", "17 SQ SR"], true),
+        (subject, &["-outfmt", "6", "-query_loc", "101-1900"], true),
+        (subject, &["-outfmt", "17 SQ"], false),
+        (("-db", db.as_path()), &["-outfmt", "17 SQ"], false),
+        (parsed, &["-outfmt", "17 SQ"], true),
+        (parsed, &["-outfmt", "17 SQ", "-parse_deflines"], false),
+        (parsed, &["-outfmt", "17"], false),
     ];
-    for words in cases {
-        let what = format!("megablast {words:?}");
+    for (subjects, words, keeps) in cases {
+        let what = format!("megablast {} {words:?}", subjects.0);
         let (default, messages, counts) =
             search("megablast", &query, subjects, words, 1, &[TIMING]);
         assert!(!default.is_empty(), "{what}: no report");
-        assert_eq!(counts, None, "{what}: letters dropped");
+        let expected = if keeps { None } else { Some([1, 5, 6_050]) };
+        assert_eq!(counts, expected, "{what}: letters dropped");
         let (report, off_messages, _) = search(
             "megablast",
             &query,
@@ -294,6 +307,26 @@ fn the_reports_with_query_letters_keep_them() {
         assert_eq!(report, default, "{what} {SWITCH_OFF:?}");
         assert_eq!(off_messages, messages, "{what} {SWITCH_OFF:?}");
     }
+}
+
+/// A database of LC738868 made with `losat makeblastdb -parse_seqids` in `dir`.
+fn parsed_db(dir: &TestDir) -> PathBuf {
+    let db = dir.0.join("lc738868_parsed");
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .arg("makeblastdb")
+        .arg("-in")
+        .arg(fasta("LC738868.fasta"))
+        .args(["-dbtype", "nucl", "-parse_seqids"])
+        .arg("-out")
+        .arg(&db)
+        .output()
+        .expect("run LOSAT makeblastdb");
+    assert!(
+        output.status.success(),
+        "makeblastdb -parse_seqids: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    db
 }
 
 // A batch split into query chunks (`BATCH_SIZE=10000` and `CHUNK_SIZE=2500`: the 6,000 letters of

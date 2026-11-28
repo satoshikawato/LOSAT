@@ -30,12 +30,13 @@
 //!
 //! The rule (`Rule::acts`; the reach of the switch is recorded where `search_cli` decides): every
 //! output format reads no query letter after the search (`BlastnOutputFormat::reads_query_letters`:
-//! the tabular formats 6 and 7, the Seq-aligns of 8, 9 and 12, and SAM without `SQ`; not outfmt 0,
-//! 5, 11, 13 to 16, nor SAM with `SQ`, whose subject letters line RG item X7-1 compares with a
-//! query's that NCBI finds for the subject) and no caller takes the hits' records (their
-//! query rows), without `-query_loc` (its input records keep their letters), and for the records
-//! read before the search only (not a streamed search, and not `run_local`, whose caller holds its
-//! records).
+//! the tabular formats 6 and 7, the Seq-aligns of 8, 9 and 12, and SAM without `SR`; not outfmt
+//! 0, 5, 11, 13 to 16, nor SAM's `SQ SR`; nor SAM's `SQ` against a database with parsed Seq-ids
+//! without `-parse_deflines` (`Rule::found_queries`), whose subject letters line RG item X7-1
+//! compares with a query's that NCBI finds for the subject) and no caller takes the hits' records
+//! (their query rows), without `-query_loc` (its input records keep their letters), and for the
+//! records read before the search only (not a streamed search, and not `run_local`, whose caller
+//! holds its records).
 //!
 //! Why the reports are the same. The records keep their local IDs, titles and messages; every
 //! length the search and the reports read after the encoding comes from the lengths taken before

@@ -220,6 +220,39 @@ test('makeblastdb tab: the options in the groups of -xmlhelp, the command, a mis
   expect(external, 'requests outside the origin').toEqual([]);
 });
 
+test("makeblastdb input: the Input block says why a name is refused, and when the pasted FASTA's name is taken (WW4b2 R3 F3, F4)", async ({ page }) => {
+  const external = trackNet(page);
+  await openMakeblastdb(page);
+  await page.getByTestId('mk-param-dbtype-nucl').check();
+
+  // A name that -in's list cannot carry (the command line reads a double quote as the end of a quoted name).
+  await page.getByTestId('mk-input-files').setInputFiles({ name: 'my"seqs.fa', mimeType: 'text/plain', buffer: Buffer.from(NUCL_FASTA) });
+  const problem = page.getByTestId('mk-input-block').getByTestId('mk-input-error');
+  await expect(problem).toHaveText('A file named "my"seqs.fa" cannot be in -in: a double quote there starts or ends a name.');
+  await expect(page.getByTestId('mk-input-list')).toHaveCount(0);
+
+  // The pasted FASTA's name taken by an opened file: one rule whichever came first, said in the Input block.
+  const taken = 'A file named "input.fa" is open, the name of the pasted FASTA in the run directory: remove the file or clear the pasted text.';
+  await page.getByTestId('mk-input-files').setInputFiles({ name: 'input.fa', mimeType: 'text/plain', buffer: Buffer.from(NUCL_FASTA) });
+  await expect(problem).toHaveCount(0);
+  await page.getByTestId('mk-fasta-input').fill(NUCL_FASTA);
+  await expect(problem).toHaveText(taken);
+  await expect(page.getByTestId('mk-argv-validation')).toHaveAttribute('data-state', 'invalid');
+  await expect(page.getByTestId('mk-argv-validation')).toHaveText(taken);
+  await shots(page, 'mk-input-problem');
+  await expectLayout(page, 'mk-panel', MOBILE);
+  await page.setViewportSize(DESKTOP);
+  await page.getByTestId('mk-input-remove-0').click();
+  await expect(problem).toHaveCount(0);
+  await page.getByTestId('mk-input-files').setInputFiles({ name: 'input.fa', mimeType: 'text/plain', buffer: Buffer.from(NUCL_FASTA) });
+  await expect(problem).toHaveText(taken);
+  await page.getByTestId('mk-fasta-clear').click();
+  await expect(problem).toHaveCount(0);
+  await expect(page.getByTestId('mk-command')).toHaveText('losat makeblastdb -in input.fa -dbtype nucl');
+
+  expect(external, 'requests outside the origin').toEqual([]);
+});
+
 test('makeblastdb run: the files it made, Download all, Use as Database (-db), Use as Repeats database (-filtering_db)', async ({ page }) => {
   const external = trackNet(page);
   await openMakeblastdb(page);

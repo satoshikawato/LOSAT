@@ -249,7 +249,9 @@ impl BatchCount {
             return own;
         };
         let counted = match self.scope.meets(&believed.ids, self.program) {
-            Meets::Repeat { first: Some(first) } if !skipped => first,
+            Meets::Repeat {
+                first: Some((_, first)),
+            } if !skipped => first,
             _ => own,
         };
         let record = (self.scope.records, length);
@@ -335,15 +337,15 @@ enum Meets {
     /// Every Seq-id of the record is one of an earlier record: NCBI's scope finds the earlier
     /// record by the id. Its reader counts the record into its batch by the earlier record's
     /// length (`GetLength` of the id in the scope, `BatchCount`), and its set-up reads the record's
-    /// interval in the earlier record's letters. `first`: that length, where the ids find one
-    /// earlier record; `None` where they find two, or ids that the scope holds without a record of
-    /// their own (`QueryScopes::with_whole_run`). NCBI BLAST+ 2.17.0 (`r5r/probe` of line WQA D10,
+    /// interval in the earlier record's letters. `first`: that record (its number in the scope) and
+    /// its length, where the ids find one earlier record; `None` where they find two, or ids that
+    /// the scope holds without a record of their own (`QueryScopes::with_whole_run`). NCBI BLAST+ 2.17.0 (`r5r/probe` of line WQA D10,
     /// 2026-11-20): with `BATCH_SIZE=210`, a `q1` of 300 `X` (or `N`), then `q1` of 200 letters,
     /// `q4` of 200 `X`, `q2` of 400 letters and subjects too short for `-searchsp 1000`, every
     /// program writes `q1`'s Karlin-Altschul warning twice and the error of the subjects: the
     /// second `q1` fills a batch of its own, which is not searched, and `q4`'s warning goes with
     /// the failed batch of `q4` and `q2`.
-    Repeat { first: Option<usize> },
+    Repeat { first: Option<(usize, usize)> },
     /// Any other meeting: some ids new and some not, a name with and without an accession, an
     /// accession with and without a version (BLASTN). NCBI's scope finds a record by its best
     /// choice of the ids (`FindBestChoice`): its reader counted `>gi|5|lcl|q1` after `>q1` by its
@@ -424,7 +426,7 @@ impl QueryScope {
                 && crate::seqid::id_scope::version_keys(id)
                     .is_some_and(|(_, version)| self.keys.contains(&version));
         }
-        let first = first.flatten().map(|(_, letters)| letters);
+        let first = first.flatten();
         match (known, new, other) {
             (false, _, false) => Meets::New,
             (true, false, false) => Meets::Repeat { first },
@@ -704,6 +706,75 @@ pub(crate) struct QueryScopes {
     /// The Seq-ids of the run's searched queries as NCBI's formatter meets them where it holds a
     /// query's report (`HeldIds`, `xml_failing_query`).
     held: HeldIds,
+    /// Whether the search writes its search strategy (`-export_search_strategy`, `with_export`):
+    /// a batch with a repeated id stays refused (`refused_batch_error`).
+    export: bool,
+    /// The input records that the batches added before the one being added (skipped ones too),
+    /// and the input record of the first record of the last scope: a record's number in its
+    /// scope from there is its input record (`PastFirstQuery::first_input`).
+    input_records: usize,
+    scope_input: usize,
+    /// The searched queries of the batches added whose set-up reads past their earlier record
+    /// in a batch that NCBI searches (`PastFirstQuery`), ascending; empty in a run without them.
+    past_first: Vec<(usize, PastFirstQuery)>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:629-652
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:474-482
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:532-545
+/// A searched query whose set-up read passes the end of its earlier record
+/// (`SetUpRead::PastFirst`) in a batch where another context is valid: NCBI's `SetupQueries_OMF`
+/// posts `CSeqVector_CI: cannot locate segment at <pos>` (`message`) as the query's warning,
+/// invalidates its contexts (which keep the length of its interval) and goes on, so the batch's
+/// other queries are searched and this one reports no hits (NCBI BLAST+ 2.17.0, probe 1 of line
+/// RG-KB item 7b and probe 4 of item 7d: `>q1` of 30 letters then `>q1` of 80 in one batch,
+/// exit 0, `Warning: [blastp] q1 a: CSeqVector_CI: cannot locate segment at 30`). NCBI's scope
+/// finds the query's Bioseq by its id: the earlier record (`first_input`), whose title every
+/// report and message of the query shows (`Query= q1 a`, the XML family's definition, the id of
+/// the warning) and whose length outfmt 0's `Length=` shows; the XML family's length is that of
+/// the query's own interval (`GetLength` of its `Seq-loc`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PastFirstQuery {
+    /// Where the read stops in the interval (`SetUpRead::PastFirst`).
+    pub(crate) pos: usize,
+    /// The earlier record: its input record, numbered as the records were added to the scopes
+    /// from the first (`QueryScopes::add_batch`: the run's input records, skipped ones too), and
+    /// its letters (the whole record).
+    pub(crate) first_input: usize,
+    pub(crate) first_length: usize,
+}
+
+impl PastFirstQuery {
+    /// The query's warning, as `SetupQueries_OMF` posts it.
+    pub(crate) fn message(self) -> String {
+        format!("{PAST_FIRST_MESSAGE} {}", self.pos)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:629-640
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2791
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1041-1043
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:1023-1025
+    /// The searched record `record` of the query as the program's set-up meets it: the title of
+    /// the earlier record (`first_title`), whose Bioseq NCBI's scope finds for the id, and in place
+    /// of its letters a run of as many `X` (a protein query) or `N` (`nucleotide`) as its interval
+    /// has. NCBI's set-up keeps the interval's length in the query's contexts (the batch's average
+    /// query length of the linking cutoffs and its total length read them), leaves no letters of
+    /// the query in its buffer and marks the contexts invalid, so no word of them enters the lookup
+    /// table and no Karlin-Altschul block is made for them; a context of only `X` (or `N`, and
+    /// their translations) is invalid for every program in the same way (its Karlin-Altschul block
+    /// fails: no positive score), which leaves the program's set-up of the other queries as
+    /// NCBI's. The program writes the query's own warning (`message`) where it would write the
+    /// failed block's, and outfmt 0's `Length=` of the earlier record (`first_length`).
+    pub(crate) fn set_up_view(
+        self,
+        record: &mut crate::blastinput::fasta_reader::FastaRecord,
+        first_title: &[u8],
+        nucleotide: bool,
+    ) {
+        record.title = first_title.to_vec();
+        let filler = if nucleotide { b'N' } else { b'X' };
+        record.sequence.iter_mut().for_each(|letter| *letter = filler);
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392 (cited at
@@ -902,8 +973,8 @@ enum SetUpRead {
     /// Such a record whose searched interval passes the earlier record's end: the read stops at
     /// `pos` in the `CSeqVector` (`0` on `-strand minus`, else `first.saturating_sub(from)`), and
     /// `SetupQueries_OMF` posts `CSeqVector_CI: cannot locate segment at <pos>` and invalidates
-    /// its contexts.
-    PastFirst { pos: usize },
+    /// its contexts. `first`: the earlier record (its number in the scope) and its length.
+    PastFirst { pos: usize, first: (usize, usize) },
 }
 
 /// What NCBI's set-up of a batch reads of each of its records (`read`): the search's `-query_loc`
@@ -965,14 +1036,15 @@ impl SetUpReading {
         match meets {
             _ if end <= from => Some(SetUpRead::Empty),
             Meets::New => Some(SetUpRead::Own { has_context }),
-            Meets::Repeat { first: Some(first) } if end <= first => {
-                Some(SetUpRead::InFirst { has_context })
-            }
+            Meets::Repeat {
+                first: Some((_, letters)),
+            } if end <= letters => Some(SetUpRead::InFirst { has_context }),
             Meets::Repeat { first: Some(first) } => Some(SetUpRead::PastFirst {
                 pos: match self.strand {
                     crate::algorithm::blastn::args::QueryStrand::Minus => 0,
-                    _ => first.saturating_sub(from),
+                    _ => first.1.saturating_sub(from),
                 },
+                first,
             }),
             Meets::Repeat { first: None } | Meets::Other => None,
         }
@@ -1062,7 +1134,7 @@ fn setup_queries_failure(
     let searched = || reads.iter().filter(|&&read| read != SetUpRead::Skipped);
     let searched_count = searched().count();
     let past_first = searched().find_map(|&read| match read {
-        SetUpRead::PastFirst { pos } => Some(pos),
+        SetUpRead::PastFirst { pos, .. } => Some(pos),
         _ => None,
     });
     // The set-up without filtering: each record's own message, where no context is valid.
@@ -1083,7 +1155,7 @@ fn setup_queries_failure(
                     Severity::Warning,
                     NO_DATA_MESSAGE.as_bytes(),
                 ),
-                SetUpRead::PastFirst { pos } => push_search_message(
+                SetUpRead::PastFirst { pos, .. } => push_search_message(
                     &mut messages,
                     Severity::Warning,
                     format!("{PAST_FIRST_MESSAGE} {pos}").as_bytes(),
@@ -1110,6 +1182,73 @@ fn setup_queries_failure(
             .or_else(|| if then_repeats { repeats() } else { own() }),
         QueryMasks::Repeats => repeats(),
     }
+}
+
+/// NCBI's view of the input records `records` of the batches added (`scopes`; `ordinal`: the input
+/// record of a searched query), where a searched query reads past its earlier record in a batch
+/// that NCBI searches: that query's record as NCBI's set-up holds it
+/// (`PastFirstQuery::set_up_view` of its whole record, so that a `-query_loc` cut of it is too).
+/// `None` where no query does: a run without such a batch copies nothing. The program searches and
+/// reports the views in place of the records it read (the batches, which the records decided,
+/// stay).
+pub(crate) fn past_first_views(
+    scopes: Option<&QueryScopes>,
+    records: &[FastaRecord],
+    ordinal: impl Fn(usize) -> usize,
+    nucleotide: bool,
+) -> Option<Vec<FastaRecord>> {
+    let past_first = &scopes?.past_first;
+    if past_first.is_empty() {
+        return None;
+    }
+    let mut views = records.to_vec();
+    for &(query, past) in past_first {
+        let Some(title) = records.get(past.first_input).map(|first| first.title.clone()) else {
+            continue;
+        };
+        if let Some(view) = views.get_mut(ordinal(query)) {
+            past.set_up_view(view, &title, nucleotide);
+        }
+    }
+    Some(views)
+}
+
+/// The searched queries of a batch read as `reads` (by record of the batch; the first searched is
+/// the run's `first_searched`, the scope's first record the input record `scope_input`) that NCBI's
+/// set-up reads past their earlier records' ends (`PastFirstQuery`), where every repeat of the
+/// batch is one: `None` where there is none, or a repeat is read within its earlier record's
+/// letters (`SetUpRead::InFirst`), which LOSAT does not search in those letters (the refusal).
+fn past_first_queries(
+    reads: &[SetUpRead],
+    first_searched: usize,
+    scope_input: usize,
+) -> Option<Vec<(usize, PastFirstQuery)>> {
+    if reads
+        .iter()
+        .any(|read| matches!(read, SetUpRead::InFirst { .. }))
+    {
+        return None;
+    }
+    let past_first: Vec<(usize, PastFirstQuery)> = reads
+        .iter()
+        .filter(|&&read| read != SetUpRead::Skipped)
+        .enumerate()
+        .filter_map(|(searched, &read)| match read {
+            SetUpRead::PastFirst {
+                pos,
+                first: (record, letters),
+            } => Some((
+                first_searched + searched,
+                PastFirstQuery {
+                    pos,
+                    first_input: scope_input + record,
+                    first_length: letters,
+                },
+            )),
+            _ => None,
+        })
+        .collect();
+    (!past_first.is_empty()).then_some(past_first)
 }
 
 /// LOSAT's refusal of a query record with the id of another query record of its scope
@@ -1316,6 +1455,10 @@ impl QueryScopes {
             reading: SetUpReading::of_program(program),
             query_masks: QueryMasks::None,
             held: HeldIds::default(),
+            export: false,
+            input_records: 0,
+            scope_input: 0,
+            past_first: Vec::new(),
         }
     }
 
@@ -1382,6 +1525,28 @@ impl QueryScopes {
     pub(crate) fn with_query_masks(mut self, query_masks: QueryMasks) -> Self {
         self.query_masks = query_masks;
         self
+    }
+
+    /// With `export` (`-export_search_strategy`): NCBI's request of a batch holds the earlier
+    /// record's letters for a repeated id (`refused_batch_error`), so a batch whose repeats read
+    /// past their earlier records stays refused (`PastFirstQuery`).
+    pub(crate) fn with_export(mut self, export: bool) -> Self {
+        self.export = export;
+        self
+    }
+
+    /// Whether the searched query `query` of the batches added reads past its earlier record in
+    /// a batch that NCBI searches (`PastFirstQuery`; `scopes`: the run's scopes, `None` without
+    /// `-parse_deflines`).
+    pub(crate) fn past_first(scopes: Option<&Self>, query: usize) -> Option<PastFirstQuery> {
+        let past_first = &scopes?.past_first;
+        if past_first.is_empty() {
+            return None;
+        }
+        past_first
+            .binary_search_by_key(&query, |&(searched, _)| searched)
+            .ok()
+            .map(|at| past_first[at].1)
     }
 
     /// The query of the run's XML failure `failure`, of the batches added (`scopes`: the run's
@@ -1554,6 +1719,7 @@ impl QueryScopes {
             }
             self.scopes.push(QueryScope::default());
             self.starts.push(first_searched);
+            self.scope_input = self.input_records;
         }
         let scope = self.scopes.last_mut().expect("pushed above");
         let before = scope.records;
@@ -1623,6 +1789,7 @@ impl QueryScopes {
             }
         }
         scope.records += records_read;
+        self.input_records += records_read;
         if let Some((query, id)) = lead {
             self.held.lead = Some((query, id.cloned()));
         }
@@ -1640,6 +1807,17 @@ impl QueryScopes {
             .as_deref()
             .filter(|_| self.program != "PSIBLAST")
             .and_then(|batch_reads| setup_queries_failure(batch_reads, self.query_masks));
+        // Where a context stays valid, NCBI's set-up goes on past the records whose read passes
+        // their earlier record's end: a batch whose repeats are all such records is searched as
+        // NCBI searches it, they being invalid queries (`PastFirstQuery`; line RG-KB item 7d).
+        if let Some(past_first) = reads
+            .as_deref()
+            .filter(|_| setup_failure.is_none() && !self.export && self.program != "PSIBLAST")
+            .and_then(|batch_reads| past_first_queries(batch_reads, first_searched, self.scope_input))
+        {
+            self.past_first.extend(past_first);
+            return Ok(());
+        }
         let xml_takes = setup_failure.is_none()
             && self
                 .xml_matrix
@@ -1735,6 +1913,11 @@ impl<'a> QueryScopesFrom<'a> {
             }),
             ..show
         }
+    }
+
+    /// `QueryScopes::past_first` of the call's query `query`.
+    pub(crate) fn past_first(&self, query: usize) -> Option<PastFirstQuery> {
+        QueryScopes::past_first(Some(self.scopes), self.first + query)
     }
 }
 

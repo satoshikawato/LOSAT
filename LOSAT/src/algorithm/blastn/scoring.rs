@@ -211,8 +211,8 @@ use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
 
 /// NCBI's error for scores or gap costs without Karlin-Altschul values, raised when the
 /// first batch with a valid query is set up: every query of that batch gets the message,
-/// and a query without letters (`true` in `empty_queries`, one item per query of the
-/// batch) keeps its set-up warning after it.
+/// and a query invalid from its set-up (`setup_messages`, one item per query of the batch:
+/// `setup_message`) keeps its set-up warning after it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:94-102
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1013-1024
@@ -231,18 +231,45 @@ use crate::core::subject_split::DBSEQ_CHUNK_OVERLAP;
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 pub(crate) fn karlin_error(
     message: &str,
-    empty_queries: impl IntoIterator<Item = bool>,
+    setup_messages: impl IntoIterator<Item = Option<String>>,
 ) -> anyhow::Error {
     use crate::ncbi_exception::Severity;
     use crate::report::query_warnings::push_search_message;
     let mut messages = Vec::new();
-    for empty in empty_queries {
+    for setup in setup_messages {
         push_search_message(&mut messages, Severity::Error, message.as_bytes());
-        if empty {
-            push_search_message(&mut messages, Severity::Warning, NO_DATA_MESSAGE.as_bytes());
+        if let Some(setup) = setup {
+            push_search_message(&mut messages, Severity::Warning, setup.as_bytes());
         }
     }
     crate::blastinput::app::engine_error(messages)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:629-652
+/// The warning of a query whose contexts NCBI's set-up (`SetupQueries_OMF`) makes invalid: one
+/// whose read passes the end of its earlier record (`past_first`, line RG-KB item 7d:
+/// `PastFirstQuery::message`), else one without letters (`empty`: `NO_DATA_MESSAGE`); `None` for
+/// every other query, which its set-up leaves valid.
+pub(crate) fn setup_message(
+    past_first: Option<crate::blastinput::query_batch::PastFirstQuery>,
+    empty: bool,
+) -> Option<String> {
+    match past_first {
+        Some(past_first) => Some(past_first.message()),
+        None => empty.then(|| NO_DATA_MESSAGE.to_string()),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2791
+/// The warning of a query without a valid context (its first searched context has no
+/// Karlin-Altschul block): its set-up's (`setup_message`), else that of its Karlin-Altschul
+/// parameters (`INVALID_QUERY_MESSAGE`).
+pub(crate) fn invalid_query_message(
+    past_first: Option<crate::blastinput::query_batch::PastFirstQuery>,
+    empty: bool,
+) -> String {
+    setup_message(past_first, empty)
+        .unwrap_or_else(|| crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string())
 }
 
 /// The hit list size and the counts of the pairwise report of a run that writes the output

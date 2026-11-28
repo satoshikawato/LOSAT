@@ -66,23 +66,47 @@ fn gap_costs(matrix: Option<&std::ffi::OsStr>) -> (i32, i32) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:85-101
 /// The messages of a query's result (the warnings the other formats write to standard error,
-/// `report::query_warning`): the Karlin-Altschul message of a batch NCBI did not search (a
-/// translated query posts it only when no context of the batch is valid) and the message of a
-/// record without letters. TBLASTX posts nothing for an invalid query of a searched batch
-/// (blast_stat.c:2783-2790).
-fn query_messages(query: &FastaRecord, searched: bool, filtered_empty: bool) -> Vec<String> {
-    let mut messages = Vec::new();
+/// `report::query_warning`; `run_batch_loop` makes them for both): those of its set-up
+/// (`setup_messages`; `past_first`: the query's read past its earlier record), the
+/// Karlin-Altschul message of a batch NCBI did not search (a translated query posts it only when
+/// no context of the batch is valid, for every query of the batch, the query read past its
+/// earlier record too) and the message of a list that left the database empty. TBLASTX posts
+/// nothing for an invalid query of a searched batch (blast_stat.c:2783-2790), the query read past
+/// its earlier record included.
+pub(super) fn query_messages(
+    query: &FastaRecord,
+    past_first: Option<crate::blastinput::query_batch::PastFirstQuery>,
+    searched: bool,
+    filtered_empty: bool,
+) -> Vec<String> {
+    let mut messages = setup_messages(query, past_first);
     if !searched {
         messages.push(INVALID_QUERY_MESSAGE.to_string());
-    }
-    if query.seq().is_empty() {
-        messages.push(crate::algorithm::blastn::blast_engine::NO_DATA_MESSAGE.to_string());
     }
     if filtered_empty && searched {
         messages.push(EMPTY_DATABASE_MESSAGE.to_string());
     }
     messages
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:615-640
+/// The messages of a query's set-up (`SetupQueries_OMF`, kept by the query's id): the failure of
+/// the read of a query whose interval passes the end of its earlier record
+/// (`query_batch::PastFirstQuery::message`, `past_first`), else `Sequence contains no data` of a
+/// record without letters.
+pub(super) fn setup_messages(
+    query: &FastaRecord,
+    past_first: Option<crate::blastinput::query_batch::PastFirstQuery>,
+) -> Vec<String> {
+    match past_first {
+        Some(past_first) => vec![past_first.message()],
+        None if query.seq().is_empty() => {
+            vec![crate::algorithm::blastn::blast_engine::NO_DATA_MESSAGE.to_string()]
+        }
+        None => Vec::new(),
+    }
 }
 
 /// The `Statistics` of a query: the first valid context's length adjustment, effective search
@@ -237,7 +261,12 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         .iter()
         .enumerate()
         .map(|(q_idx, query)| {
-            let messages = query_messages(query, run.searched[q_idx], run.filtered_empty);
+            let messages = query_messages(
+                query,
+                run.query_scopes.and_then(|scopes| scopes.past_first(q_idx)),
+                run.searched[q_idx],
+                run.filtered_empty,
+            );
             let has_hits = !query_hits[q_idx].is_empty();
             // A query whose names no written result shows (`names_unshown_in`) has its message.
             if crate::blastinput::query_batch::names_unshown_in(

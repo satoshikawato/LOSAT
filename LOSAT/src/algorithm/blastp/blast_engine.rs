@@ -6484,6 +6484,7 @@ fn search(
         scopes
             .with_refusal(args.scope_refusal.clone())
             .with_query_range(args.query_range)
+            .with_export(args.strategy.is_some())
             .with_xml_matrix_failure(blastp_xml_matrix_failure(
                 &args,
                 outputs,
@@ -6539,6 +6540,23 @@ fn search(
         &query_input,
         batches,
     );
+    // A query whose set-up NCBI reads past its earlier record in a batch that it searches is an
+    // invalid query of the earlier record's title: the run searches and reports NCBI's view of the
+    // records (`query_batch::past_first_views`; line RG-KB item 7d).
+    let past_first_records = crate::blastinput::query_batch::past_first_views(
+        batches.query_scopes.as_ref(),
+        query_records,
+        |query| query_input.ordinal(query),
+        false,
+    );
+    let query_records: &[FastaRecord] = past_first_records.as_deref().unwrap_or(query_records);
+    let searched_queries = match (&past_first_records, args.query_range.as_ref()) {
+        (None, _) => searched_queries,
+        (Some(_), Some(range)) => {
+            std::borrow::Cow::Owned(seq_range::cut_queries(query_records, range).records)
+        }
+        (Some(_), None) => std::borrow::Cow::Borrowed(query_records),
+    };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262
     // LOSAT's refusal of a strategy file on a report stream comes where NCBI writes its first
     // request: once its first batch is read, before it is searched (`first_request_end`; this
@@ -9824,7 +9842,15 @@ fn ungapped_setup_failure(
                     file,
                     "BLASTP",
                 ),
-                None => unknown_matrix_message(&call_in.query_records[first.searched.clone()]),
+                None => unknown_matrix_message(
+                    &call_in.query_records[first.searched.clone()],
+                    |query| {
+                        call_in
+                            .reports
+                            .query_scopes
+                            .and_then(|scopes| scopes.past_first(first.searched.start + query))
+                    },
+                ),
             }));
         }
     }
@@ -11385,14 +11411,26 @@ fn run_call(
 /// NCBI's error of a query batch whose score block cannot load an unknown `-matrix` name
 /// (`blastx::query_setup::unknown_matrix_message`): the error of each query, then the messages of
 /// its reader, as NCBI's `TSearchMessages::ToString` writes them: the O warning of a protein
-/// query and `Sequence contains no data` of a record without letters (`query_messages`).
+/// query and `Sequence contains no data` of a record without letters (`query_messages`), or the
+/// failure of a query's read past its earlier record (`past_first` of the record's place).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182 (cited at
 /// `blastx::query_setup::unknown_matrix_message`)
-fn unknown_matrix_message(records: &[FastaRecord]) -> String {
-    crate::algorithm::common::unknown_matrix::unknown_matrix_message_of(records.iter().map(
-        |record| crate::report::query_warnings::query_messages(record.seq(), true, false, false),
-    ))
+fn unknown_matrix_message(
+    records: &[FastaRecord],
+    past_first: impl Fn(usize) -> Option<crate::blastinput::query_batch::PastFirstQuery>,
+) -> String {
+    crate::algorithm::common::unknown_matrix::unknown_matrix_message_of(
+        records.iter().enumerate().map(|(query, record)| {
+            crate::report::query_warnings::query_messages(
+                record.seq(),
+                past_first(query),
+                true,
+                false,
+                false,
+            )
+        }),
+    )
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54

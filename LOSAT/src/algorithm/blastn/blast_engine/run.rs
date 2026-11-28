@@ -4993,12 +4993,19 @@ fn blastn_pairwise_report(
         .map(|(q_idx, query)| BlastnPairwiseQuery {
             query_name: query_titles[q_idx].to_vec(),
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:742-744
-            // The length of the query's record, also where `-query_loc` searches part of it.
+            // The length of the query's record, also where `-query_loc` searches part of it; of a
+            // query read past its earlier record, the earlier record's, whose Bioseq NCBI's scope
+            // finds for the id (`PastFirstQuery::first_length`, line RG-KB item 7d).
             query_length: report
-                .ranges
-                .queries
-                .placements
-                .length(q_idx, query.seq().len()),
+                .query_scopes
+                .and_then(|scopes| scopes.past_first(q_idx))
+                .map_or_else(
+                    || {
+                        let placements = &report.ranges.queries.placements;
+                        placements.length(q_idx, query.seq().len())
+                    },
+                    |past_first| past_first.first_length,
+                ),
             karlin: context_karlin[2 * q_idx + first_context]
                 .map(|blocks| (blocks.ungapped, blocks.gapped)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-104
@@ -6093,7 +6100,8 @@ fn write_custom_tabular(
         },
     };
     // Outfmt 18, the organism report: the `Query=` block shows the query record's length, also
-    // with `-query_loc` (as outfmt 0's, `QueryNames`).
+    // with `-query_loc` (as outfmt 0's, `QueryNames`), and of a query read past its earlier record
+    // the earlier record's (`PastFirstQuery::first_length`, line RG-KB item 7d).
     if spec.kind == crate::report::tabular::TabularKind::TaxReport {
         let queries: Vec<crate::report::tax_report::TaxQuery<'_>> = hit_lists
             .iter()
@@ -6103,10 +6111,15 @@ fn write_custom_tabular(
                     .get(q_idx)
                     .map_or(&b""[..], |title| title.as_ref()),
                 length: report
-                    .ranges
-                    .queries
-                    .placements
-                    .length(q_idx, query_lengths.get(q_idx).copied().unwrap_or_default()),
+                    .query_scopes
+                    .and_then(|scopes| scopes.past_first(q_idx))
+                    .map_or_else(
+                        || {
+                            let length = query_lengths.get(q_idx).copied().unwrap_or_default();
+                            report.ranges.queries.placements.length(q_idx, length)
+                        },
+                        |past_first| past_first.first_length,
+                    ),
                 // A query of a batch that NCBI did not search has no Seq-align-set.
                 hsps: (!unsearched.get(q_idx).copied().unwrap_or(false)).then(|| {
                     hit_list
@@ -8207,6 +8220,9 @@ enum BatchStage<'a> {
         masks_outside: &'a [MasksOutside],
         last: bool,
         setup_only: SetupOnly,
+        /// By query of the batch, those that NCBI's set-up reads past their earlier records
+        /// (`query_batch::PastFirstQuery`, line RG-KB item 7d): empty in every other batch.
+        past_first: &'a [Option<crate::blastinput::query_batch::PastFirstQuery>],
     },
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
@@ -8296,7 +8312,59 @@ fn blastn_query_scopes(
             .with_query_range(query_range)
             .with_strand(QueryStrand::from_option(&args.strand))
             .with_query_masks(args.query_masks())
+            // The BLAST archive (outfmt 11) holds each batch's request as the strategy does, with
+            // the earlier record's Bioseq for a repeated id: a batch whose repeats read past their
+            // earlier records stays refused there too (line RG-KB item 7d).
+            .with_export(args.strategy.is_some() || args.archive.is_some())
     })
+}
+
+/// The batch of the input records `input` (`batch`, from `queries`) added to the run's scopes of
+/// the queries under `-parse_deflines` (`QueryScopes::add_batch`; `scopes`): LOSAT's refusal of the
+/// batch (`query_batch::ScopeRefusal`), and by query of the batch those that NCBI's set-up reads
+/// past their earlier records in a batch that it searches (`query_batch::PastFirstQuery`, line
+/// RG-KB item 7d), whose records `batch` then holds as NCBI's set-up holds them
+/// (`x_query_stream::Queries::past_first_views`, whose refusal is the batch's where it cannot make
+/// them). Empty where no query of the batch is one, as in every other run: nothing is copied.
+fn add_batch_to_scopes<'a>(
+    scopes: Option<&mut crate::blastinput::query_batch::QueryScopes>,
+    queries: x_query_stream::Queries<'a>,
+    batch: &mut x_query_stream::BatchRecords<'a>,
+    kept: &mut x_query_stream::Kept,
+    query_input: &QueryInput,
+    input: std::ops::Range<usize>,
+) -> (
+    Option<anyhow::Error>,
+    Vec<Option<crate::blastinput::query_batch::PastFirstQuery>>,
+) {
+    let Some(scopes) = scopes else {
+        return (None, Vec::new());
+    };
+    let searched = query_input.searched_in(input.clone());
+    if let Err(refusal) = scopes.add_batch(
+        batch.input(),
+        &query_input.skipped[input.clone()],
+        searched.start,
+    ) {
+        return (Some(refusal), Vec::new());
+    }
+    let past_first =
+        |query| crate::blastinput::query_batch::QueryScopes::past_first(Some(&*scopes), query);
+    if !searched.clone().any(|query| past_first(query).is_some()) {
+        return (None, Vec::new());
+    }
+    let past_first: Vec<_> = searched.clone().map(past_first).collect();
+    match queries.past_first_views(
+        batch,
+        &past_first,
+        kept,
+        query_input,
+        input.start,
+        searched.start,
+    ) {
+        Ok(()) => (None, past_first),
+        Err(refusal) => (Some(refusal), Vec::new()),
+    }
 }
 
 /// Searches the queries in NCBI's query batches and writes the results of all of them.
@@ -8654,17 +8722,17 @@ fn run_in_pool(
         // record's letters for the repeated id (no request of the batch is written); else after the
         // batch's checks before its set-up, where the set-up of the batch's records that are first
         // in the scope gives NCBI's error of the subjects or the refusal comes, before the search.
-        // (Round 4 refused after the search, and wrote the batch's request.)
-        let mut scope_refusal = None;
-        if let Some(scopes) = query_scopes.as_mut() {
-            if let Err(refusal) = scopes.add_batch(
-                batch_records.input(),
-                &query_input.skipped[input_start..input_end],
-                start,
-            ) {
-                scope_refusal = Some(refusal);
-            }
-        }
+        // (Round 4 refused after the search, and wrote the batch's request.) Queries that NCBI's
+        // set-up reads past their earlier records leave the batch as NCBI holds it (`past_first`,
+        // by query of the batch; line RG-KB item 7d).
+        let (mut scope_refusal, past_first) = add_batch_to_scopes(
+            query_scopes.as_mut(),
+            queries,
+            &mut batch_records,
+            &mut kept,
+            query_input,
+            input_start..input_end,
+        );
         if let Some(refusal) = scope_refusal.take_if(|_| args.strategy.is_some()) {
             write_reports_before!();
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
@@ -8925,6 +8993,7 @@ fn run_in_pool(
                     masks_outside: &masks_outside,
                     last,
                     setup_only: SetupOnly::No,
+                    past_first: &past_first,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -8946,6 +9015,7 @@ fn run_in_pool(
                     masks_outside: &masks_outside,
                     last,
                     setup_only: SetupOnly::No,
+                    past_first: &past_first,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -9461,11 +9531,10 @@ fn run_in_pool(
             }
             let mut messages = Vec::new();
             if karlin.is_none() {
-                messages.push(if lengths[start + index] == 0 {
-                    NO_DATA_MESSAGE.to_string()
-                } else {
-                    crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string()
-                });
+                messages.push(super::super::scoring::invalid_query_message(
+                    past_first.get(index).copied().flatten(),
+                    lengths[start + index] == 0,
+                ));
             }
             if batch.searched && filtered_empty {
                 messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
@@ -9554,7 +9623,9 @@ fn run_in_pool(
                         context_karlin: &batch_karlin,
                         query_eff_searchsp: &batch_searchsp,
                         batches: &[],
-                        query_scopes: None,
+                        // Numbered from the batch's first (`written`): its queries read past
+                        // their earlier records (`QueryScopesFrom::past_first`).
+                        query_scopes: query_scopes.as_ref(),
                     },
                     false,
                     written,
@@ -9838,8 +9909,9 @@ struct BatchResults<'a> {
     /// when the call is one batch.
     batches: &'a [std::ops::Range<usize>],
     /// Under `-parse_deflines`, the run's scopes of the queries (numbered from the run's first),
-    /// how NCBI's XML family formats show each query's result (`QueryScopesFrom::xml_show`);
-    /// `None` for the reports that write no XML document of the queries.
+    /// how NCBI's XML family formats show each query's result (`QueryScopesFrom::xml_show`) and
+    /// which queries NCBI's set-up read past their earlier records (`QueryScopesFrom::past_first`:
+    /// their warnings and outfmt 0's `Length=`); `None` for the reports without queries.
     query_scopes: Option<&'a crate::blastinput::query_batch::QueryScopes>,
 }
 
@@ -10664,6 +10736,7 @@ fn refused_batch_setup_error(
         } else {
             SetupOnly::Whole
         },
+        past_first: &[],
     };
     let queries = x_query_drop::BatchQueries::Shared(&records);
     let set_up = if args.ungapped {

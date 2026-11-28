@@ -38,6 +38,9 @@ pub use crate::cli::{exit_on_native_error, NativeError};
 // a query batch): a child module, so that it calls the private functions of this file.
 mod run_parts;
 use run_parts::{read_subjects, ArchiveBatch, RunSetup, SubjectRead};
+// The delivery of the reader batches to the loop (`BatchTake::deliver_views`): a child module, for
+// the parts of `BatchTake` it shares with the loop's take.
+mod batch_views;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 pub(crate) fn engine(message: impl fmt::Display) -> anyhow::Error {
@@ -521,9 +524,12 @@ fn run_inner(
             program.upper,
         )
         .map(|scopes| {
-            scopes.with_query_range(query_range).with_strand(
-                crate::algorithm::blastn::args::QueryStrand::from_option(&options.strand),
-            )
+            scopes
+                .with_query_range(query_range)
+                .with_strand(crate::algorithm::blastn::args::QueryStrand::from_option(
+                    &options.strand,
+                ))
+                .with_export(strategy.is_some())
         })
     };
     let mut read_ahead_scopes = None;
@@ -838,7 +844,9 @@ fn run_inner(
     // (a query without letters in a batch without a valid context, `Warning: Sequence contains no
     // data`; the sequence file of `-db`) has one, and the file is apart from the reports. An empty
     // batch has none: its `Empty CBlastQueryVector` comes before it. Each unit of a batch the
-    // search split takes it once (`StrategyExport::takes`).
+    // search split takes it once (`StrategyExport::takes`). A query read past an earlier record
+    // that the batches no longer hold shows its title, read again (`reread_query_title`).
+    let reread = |input| batch_views::reread_query_title(args, &query_settings, batch_size, input);
     let batch_take = BatchTake::new(
         &query_scopes,
         strategy.as_ref(),
@@ -848,7 +856,8 @@ fn run_inner(
         &search_error,
         database.is_none().then_some(&subjects[..]),
     )
-    .with_held(held.as_ref());
+    .with_held(held.as_ref())
+    .with_earlier_titles(&reread);
     // NCBI's scope of the query records at each batch's prefetch (`BatchScopes`).
     let batch_scopes = BatchScopes::new(options.outfmt == 5, database.as_ref());
     let render_batch = |writer: &mut crate::cli::NcbiOstream<'static>,
@@ -975,6 +984,7 @@ fn run_inner(
     if batch_size == 0 && !query_stream.at_eof() {
         return Err(engine("Empty CBlastQueryVector"));
     }
+    // Each batch as the loop searches and reports it (`BatchTake::deliver_views`).
     let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
                     warn: &mut dyn FnMut(&[u8]) -> Result<()>|
      -> Result<()> {
@@ -982,7 +992,7 @@ fn run_inner(
             args.lcase_masking,
             batch_size,
             query_range.as_ref(),
-            deliver,
+            &mut |queries| batch_take.deliver_views(queries, deliver),
             warn,
         )
     };
@@ -1886,8 +1896,10 @@ pub(crate) type BatchRender<'r> = dyn FnMut(
 // `take`: the batch's query factory, then its request, before its search)
 /// The add of the reader batch `queries` (its first query `queries_before` of the run) to the
 /// scopes of the queries (`query_scopes`), where the loop takes the batch: once per batch
-/// (`taken`: the batch taken last, whose units the loop takes one by one), after the batch's reader
-/// messages and the reports of the batches before, before the batch's request and search. LOSAT's
+/// (`taken`: the batch added last; the loop takes a batch's units one by one, and the reader's
+/// delivery adds each batch before the loop takes it, `BatchTake::deliver_views`, RPSTBLASTN's
+/// window after the batches read behind it), after the batch's reader messages and the reports of
+/// the batches before, before the batch's request and search. LOSAT's
 /// refusal of two queries of one scope with one id stops the run there, in the one form of every
 /// program (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20): with
 /// `-export_search_strategy` (`export`) no request of the batch is written; else NCBI's error of
@@ -1909,9 +1921,10 @@ pub(super) fn add_batch_scope(
     subjects: Subjects<'_>,
     search_error: &dyn Fn(anyhow::Error) -> anyhow::Error,
 ) -> Result<()> {
-    if taken.replace(Some(queries_before)) == Some(queries_before) {
+    if taken.get().is_some_and(|added| added >= queries_before) {
         return Ok(());
     }
+    taken.set(Some(queries_before));
     // Every record read, those that the range skipped among them (`input::scope_records`).
     let ordered = super::input::scope_records(queries);
     let Some(scopes) = query_scopes.borrow_mut().as_mut().map(|scopes| {
@@ -1968,6 +1981,8 @@ pub(super) struct BatchTake<'a> {
     options: &'a super::args::ResolvedOptions,
     subjects: Subjects<'a>,
     search_error: &'a dyn Fn(anyhow::Error) -> anyhow::Error,
+    /// The batches delivered to the loop (`deliver_views`).
+    delivered: batch_views::Delivered<'a>,
 }
 
 impl<'a> BatchTake<'a> {
@@ -1992,7 +2007,18 @@ impl<'a> BatchTake<'a> {
             options,
             subjects,
             search_error,
+            delivered: Default::default(),
         }
+    }
+
+    /// The title of an earlier input record that a query read past it shows where the batch
+    /// being delivered does not hold it (`deliver_views`): `None` where it cannot be read.
+    pub(super) fn with_earlier_titles(
+        mut self,
+        earlier: &'a dyn Fn(usize) -> Result<Option<Vec<u8>>>,
+    ) -> Self {
+        self.delivered.earlier = Some(earlier);
+        self
     }
 
     // No NCBI counterpart: attaches LOSAT's `HeldOutput` so strategy request releases interleave

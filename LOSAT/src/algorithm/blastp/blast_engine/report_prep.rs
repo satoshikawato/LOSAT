@@ -124,6 +124,7 @@ pub(super) fn query_warning_lines(
         .map(|(q_idx, record)| {
             let mut messages = crate::report::query_warnings::query_messages(
                 record.seq(),
+                reports.query_scopes.and_then(|scopes| scopes.past_first(q_idx)),
                 query_valid[q_idx],
                 reports.x_queries_before + q_idx < reports.identity_warned,
                 filtered_empty && !query_batch_skipped[q_idx],
@@ -190,6 +191,7 @@ pub(super) fn phi_result_warnings(
             // Karlin-Altschul parameters (`psiblast_stop_at_invalid_query`).
             let mut messages = crate::report::query_warnings::query_messages(
                 record.seq(),
+                reports.query_scopes.and_then(|scopes| scopes.past_first(q_idx)),
                 true,
                 reports.x_queries_before + q_idx < reports.identity_warned,
                 filtered_empty && !query_batch_skipped[q_idx],

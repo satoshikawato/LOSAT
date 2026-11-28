@@ -389,11 +389,21 @@ pub(super) fn write_blastx_tabular(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
     mut probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
     first_hsp: crate::api::local_blast::HspIndex,
 ) -> Result<()> {
     if spec.kind == crate::report::tabular::TabularKind::TaxReport {
-        return write_blastx_tax_report(writer, stderr, options, queries, subjects, shown, batches);
+        return write_blastx_tax_report(
+            writer,
+            stderr,
+            options,
+            queries,
+            subjects,
+            shown,
+            batches,
+            query_scopes,
+        );
     }
     let needs = spec.needs();
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:183
@@ -434,8 +444,17 @@ pub(super) fn write_blastx_tabular(
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
+            // A query read past its earlier record (`PastFirstQuery`; the scopes number the
+            // batch's queries as `queries`).
+            let past_first =
+                query_scopes.and_then(|scopes| scopes.past_first(batch.query_ordinal + qidx));
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
-            stderr.write_all(&query_warning(options, query, batch.search_skipped))?;
+            stderr.write_all(&query_warning(
+                options,
+                query,
+                batch.search_skipped,
+                past_first,
+            ))?;
             stderr.write_all(shown.query_fetches(batch.query_ordinal + qidx))?;
             // The texts of the subjects that the query's rows read one by one, written where they
             // read each (`ReadCursor`, the query's only).
@@ -892,6 +911,7 @@ fn write_blastx_tax_report(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, TaxHsp, TaxPlain, TaxQuery};
     let program = options.program().upper;
@@ -924,7 +944,15 @@ fn write_blastx_tax_report(
         .zip(&titles)
         .map(|((ordinal, lists, alignment_set), title)| TaxQuery {
             title,
-            length: queries[ordinal].placement().length,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:874-888
+            // The length of the query's Bioseq, as outfmt 0's: of the earlier record whose Bioseq
+            // the scope finds for a query read past it (`PastFirstQuery`).
+            length: query_scopes
+                .and_then(|scopes| scopes.past_first(ordinal))
+                .map_or_else(
+                    || queries[ordinal].placement().length,
+                    |past_first| past_first.first_length,
+                ),
             // A query without an alignment set (`BatchResults::has_alignment_set`: of a batch
             // that NCBI did not search, but for the merge of several volumes) has no
             // Seq-align-set.
@@ -1007,7 +1035,9 @@ fn write_blastx_tax_report(
             let query = &queries[batch.query_ordinal + qidx];
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
             // `cerr` is tied to `cout`: the report before the texts reaches the output first.
-            let warning = query_warning(options, query, batch.search_skipped);
+            let past_first =
+                query_scopes.and_then(|scopes| scopes.past_first(batch.query_ordinal + qidx));
+            let warning = query_warning(options, query, batch.search_skipped, past_first);
             if !warning.is_empty() {
                 writer.flush()?;
             }

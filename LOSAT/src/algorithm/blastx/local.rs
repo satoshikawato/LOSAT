@@ -172,6 +172,7 @@ fn search_records(
         query_range,
         batch_size,
         archive.is_some() || args.strategy.is_some(),
+        args.strategy.is_some(),
         true,
         xml_matrix,
         args.parse_deflines,
@@ -321,12 +322,13 @@ fn query_strand(resolved: &[ResolvedOptions]) -> crate::algorithm::blastn::args:
 /// in memory, read into the search's reader batches as the command line's `prescan_queries` reads
 /// the file, and at the same place: before the subjects' warnings). With outfmt 5 among the
 /// formats every report is written. `keep_whole`: the search keeps the whole letters of a cut
-/// record (the archive's). Under `-parse_deflines` (`parse_deflines`) the read adds each batch
-/// that the reader delivers to the scopes of the queries (`QueryScan::query_scopes`, read ahead),
-/// as the command line's read does (`blast_xml::scan_query_stream`): LOSAT's refusal of two
-/// queries of one scope with one id stops the run at its batch (`QueryScopes::read_ahead`; line WQA
-/// D10 round 4, 2026-11-20), and the batch that a reader error ends adds nothing (review M3,
-/// 2026-11-20).
+/// record (the archive's). `export`: the run writes its search strategy, which keeps LOSAT's
+/// refusal of a query read past its earlier record (`QueryScopes::with_export`). Under
+/// `-parse_deflines` (`parse_deflines`) the read adds each batch that the reader delivers to the
+/// scopes of the queries (`QueryScan::query_scopes`, read ahead), as the command line's read does
+/// (`blast_xml::scan_query_stream`): LOSAT's refusal of two queries of one scope with one id stops
+/// the run at its batch (`QueryScopes::read_ahead`; line WQA D10 round 4, 2026-11-20), and the
+/// batch that a reader error ends adds nothing (review M3, 2026-11-20).
 
 #[allow(clippy::too_many_arguments)]
 fn scan_xml_titles(
@@ -337,6 +339,7 @@ fn scan_xml_titles(
     query_range: Option<SequenceRange>,
     batch_size: usize,
     keep_whole: bool,
+    export: bool,
     subject_set: bool,
     xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
     parse_deflines: bool,
@@ -360,6 +363,7 @@ fn scan_xml_titles(
             .with_query_range(query_range)
             .with_strand(strand)
             .with_xml_matrix_failure(xml_matrix)
+            .with_export(export)
     });
     let count = crate::blastinput::query_batch::BatchCount::of(query_scopes.as_ref());
     // A matrix name that NCBI's BLAST XML report data does not know fails the report data before
@@ -703,6 +707,7 @@ fn write_run(
                 .with_refusal(scope_refusal.cloned())
                 .with_query_range(query_range)
                 .with_strand(strand)
+                .with_export(strategy.is_some())
         })
     }));
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
@@ -760,6 +765,29 @@ fn write_run(
             || database
                 .as_ref()
                 .is_some_and(|run| run.database.prefetch_can_stop()));
+    // A query read past an earlier record that the batches no longer hold shows its title, of
+    // the records in memory (the input records, those that `-query_loc` skips among them:
+    // `keep_skipped`).
+    let earlier = |input: usize| -> Result<Option<Vec<u8>>> {
+        Ok(query_records.get(input).map(|record| record.title.clone()))
+    };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264 (cited at
+    // `native::run_inner`'s `batch_take`)
+    // The loop's takes of a reader batch, as the command line's (`native::BatchTake`): the batch
+    // joins the scopes of the queries (line WQA D10 round 5, 2026-11-20) and, with LOSAT Web's
+    // `-export_search_strategy` (the library refuses the option, `api::search::file_options`), its
+    // request is written before the loop looks at the batch's search.
+    let batch_take = super::native::BatchTake::new(
+        &query_scopes,
+        strategy,
+        archive,
+        search_options,
+        search_subjects,
+        search_error,
+        database.is_none().then_some(subjects),
+    )
+    .with_earlier_titles(&earlier);
+    // Each batch as the loop searches and reports it (`native::BatchTake::deliver_views`).
     let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
                     warn: &mut dyn FnMut(&[u8]) -> Result<()>|
      -> Result<()> {
@@ -778,7 +806,7 @@ fn write_run(
                 xml,
                 "BLASTX",
             ),
-            deliver,
+            &mut |queries| batch_take.deliver_views(queries, deliver),
             warn,
         )
     };
@@ -795,21 +823,6 @@ fn write_run(
     let mut subject_places = std::collections::HashMap::new();
     let mut first_hsp = 0;
     let asks = ReportedAsks::of_all(resolved, other_outfmts);
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:261-264 (cited at
-    // `native::run_inner`'s `batch_take`)
-    // The loop's takes of a reader batch, as the command line's (`native::BatchTake`): the batch
-    // joins the scopes of the queries (line WQA D10 round 5, 2026-11-20) and, with LOSAT Web's
-    // `-export_search_strategy` (the library refuses the option, `api::search::file_options`), its
-    // request is written before the loop looks at the batch's search.
-    let batch_take = super::native::BatchTake::new(
-        &query_scopes,
-        strategy,
-        archive,
-        search_options,
-        search_subjects,
-        search_error,
-        database.is_none().then_some(subjects),
-    );
     // NCBI's scope of the query records at each batch's prefetch (`native::BatchScopes`).
     let batch_scopes =
         super::native::BatchScopes::new(xml, database.as_ref().map(|run| run.database));
@@ -1362,6 +1375,7 @@ fn search_database(
         query_range,
         batch_size,
         archive.is_some() || args.strategy.is_some(),
+        args.strategy.is_some(),
         false,
         xml_matrix,
         args.parse_deflines,

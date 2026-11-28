@@ -213,6 +213,7 @@ pub(crate) fn run_subject_report(ops: Vec<GapEditOp>, outfmt: &str) -> SubjectRe
                     &shown,
                     &[batch],
                     None,
+                    None,
                     0,
                 )
             }

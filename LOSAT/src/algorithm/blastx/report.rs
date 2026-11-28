@@ -676,8 +676,19 @@ pub(super) fn render_queries_with(
     }
     if options.pairwise_view().is_some() {
         return write_pairwise(
-            writer, stderr, options, queries, subjects, shown, batches, made_hits, probe,
-            first_hsp, pool, html_posts,
+            writer,
+            stderr,
+            options,
+            queries,
+            subjects,
+            shown,
+            batches,
+            query_scopes,
+            made_hits,
+            probe,
+            first_hsp,
+            pool,
+            html_posts,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1444
@@ -783,7 +794,17 @@ pub(super) fn render_queries_with(
         }
     }
     super::tabular::write_blastx_tabular(
-        writer, stderr, options, spec, queries, subjects, shown, batches, probe, first_hsp,
+        writer,
+        stderr,
+        options,
+        spec,
+        queries,
+        subjects,
+        shown,
+        batches,
+        query_scopes,
+        probe,
+        first_hsp,
     )
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1420
@@ -797,6 +818,7 @@ fn write_pairwise(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
     made_hits: Option<&[crate::report::pairwise::PairwiseHit]>,
     probe: Option<&mut crate::api::local_blast::FormatProbe<'_>>,
     first_hsp: crate::api::local_blast::HspIndex,
@@ -818,6 +840,9 @@ fn write_pairwise(
             let query = &queries[absolute];
             let first = (qidx * 6..qidx * 6 + 6).find(|&c| batch.parameters[c].valid);
             let stat = first.map(|c| &batch.parameters[c]);
+            // A query read past its earlier record (`PastFirstQuery`; the scopes number the
+            // batch's queries as `queries`).
+            let past_first = query_scopes.and_then(|scopes| scopes.past_first(absolute));
             qinfo.push(BlastpPairwiseQuery {
                 // The footer's Karlin blocks (`write_translated_query_footer`).
                 valid: first.is_some(),
@@ -825,12 +850,18 @@ fn write_pairwise(
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:630-637
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-743
                 query_name: query.query_line().into_owned(),
-                query_length: query.placement().length,
+                // The query record's length, also with `-query_loc`; of the earlier record whose
+                // Bioseq the scope finds for a query read past it.
+                query_length: past_first.map_or_else(
+                    || query.placement().length,
+                    |past_first| past_first.first_length,
+                ),
                 ungapped_karlin: stat.map_or(batch.parameters[qidx * 6].ungapped, |p| p.ungapped),
                 effective_search_space: stat.map_or(0, |p| p.search_space),
             });
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
-            let mut query_warnings = query_warning(options, query, batch.search_skipped);
+            let mut query_warnings =
+                query_warning(options, query, batch.search_skipped, past_first);
             query_warnings.extend_from_slice(shown.query_fetches(batch.query_ordinal + qidx));
             warnings.push(crate::report::diag_log::Posts::of_lines(query_warnings));
             reads.push(shown.query_reads(batch.query_ordinal + qidx).clone());
@@ -1532,10 +1563,20 @@ pub(crate) fn write_epilog(
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1042-1052
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_types.hpp:294-303
 // Global errorId0 "Could..." precedes per-query "Sequence..." after Combine.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:154-156
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:246-247
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:196-221
+/// `past_first`: a query whose set-up read passes its earlier record's end
+/// (`query_batch::PastFirstQuery`), whose message takes the place of `Sequence contains no data`.
+/// A batch NCBI did not search posts the Karlin-Altschul message (id `kBlastMessageNoContext`)
+/// for every query, this one too, and it stays first: its id is below the query's, and the last
+/// sort of the query's messages, where the batch's search is skipped, meets it after the query's
+/// own message (`TSearchMessages::Combine`; `CSearchMessage::operator<` orders by any field).
 pub(super) fn query_warning(
     options: &ResolvedOptions,
     query: &FastaRecord,
     search_skipped: bool,
+    past_first: Option<crate::blastinput::query_batch::PastFirstQuery>,
 ) -> Vec<u8> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:173
     // RPSTBLASTN's results of a database of several volumes are merged, which keeps the
@@ -1544,7 +1585,7 @@ pub(super) fn query_warning(
         return Vec::new();
     }
     let empty_database = options.filtered_empty && !search_skipped;
-    if !query.sequence.is_empty() && !search_skipped && !empty_database {
+    if !query.sequence.is_empty() && !search_skipped && !empty_database && past_first.is_none() {
         return Vec::new();
     }
     // The id and the title, cut as every program's query warning (`RecordNames::warning_query_id`).
@@ -1555,7 +1596,10 @@ pub(super) fn query_warning(
     if search_skipped {
         bytes.extend_from_slice(b"Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options ");
     }
-    if query.sequence.is_empty() {
+    if let Some(past_first) = past_first {
+        bytes.extend_from_slice(past_first.message().as_bytes());
+        bytes.push(b' ');
+    } else if query.sequence.is_empty() {
         bytes.extend_from_slice(b"Sequence contains no data ");
     }
     if empty_database {

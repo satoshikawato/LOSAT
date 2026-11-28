@@ -503,6 +503,7 @@ pub(super) fn write_xml(
             }
             let mut messages = crate::report::query_warnings::query_messages(
                 record.seq(),
+                reports.query_scopes.and_then(|scopes| scopes.past_first(q_idx)),
                 query_valid[q_idx],
                 reports.x_queries_before + q_idx < reports.identity_warned,
                 filtered_empty && !query_batch_skipped[q_idx],
@@ -938,8 +939,15 @@ pub(super) fn write_pairwise(
         .map(|(q_idx, &query_length)| BlastpPairwiseQuery {
             query_name: Vec::new(),
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:742-744
-            // The query record's length, also with `-query_loc`.
-            query_length: ranges.query_input.placements.length(q_idx, query_length),
+            // The query record's length, also with `-query_loc`; of the earlier record whose
+            // Bioseq the scope finds for a query read past it (`PastFirstQuery`).
+            query_length: reports
+                .query_scopes
+                .and_then(|scopes| scopes.past_first(q_idx))
+                .map_or_else(
+                    || ranges.query_input.placements.length(q_idx, query_length),
+                    |past_first| past_first.first_length,
+                ),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:87,100
             ungapped_karlin: psi_report_karlin
                 .map_or(contexts[q_idx].karlin_params, |karlin| karlin.ungapped),

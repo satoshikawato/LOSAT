@@ -24,7 +24,7 @@ use super::{
 };
 use crate::algorithm::blastn::query_split::{ReadFails, SetupCheckFailure, UnmetChecks};
 use crate::algorithm::blastn::scoring::{
-    check_greedy_matrix_only, context_blocks, context_blocks_ungapped, karlin_error,
+    check_greedy_matrix_only, context_blocks, context_blocks_ungapped, karlin_error, setup_message,
 };
 use crate::report::pairwise::BlastnIntro;
 use crate::wording::ENGINE_ERROR;
@@ -126,6 +126,7 @@ fn karlin_blocks<const UNGAPPED: bool>(
         query_lengths,
         batching,
         first_batch,
+        stage,
         intro,
         shown,
         ..
@@ -155,14 +156,24 @@ fn karlin_blocks<const UNGAPPED: bool>(
             // queries (the error does not depend on the queries, so the first batch with a valid
             // query meets it; NCBI writes the results and warnings of the batches before it).
             // The contexts of a query without letters are invalid from their set-up and put
-            // no message here (`context_ungapped_blocks`). LOSAT's refusal comes where NCBI's
-            // search of the batch would crash: after the reports of the batches before (whose
-            // queries were all invalid) in both paths of LOSAT_X_RPTSTREAM, or in the first
-            // batch after the prologs (`setup_failure`).
+            // no message here (`context_ungapped_blocks`), nor do those of a query whose read
+            // passes its earlier record (`BatchStage::Search`'s `past_first`, line RG-KB item 7d).
+            // LOSAT's refusal comes where NCBI's search of the batch would crash: after the
+            // reports of the batches before (whose queries were all invalid) in both paths of
+            // LOSAT_X_RPTSTREAM, or in the first batch after the prologs (`setup_failure`).
+            let past_first = match stage {
+                BatchStage::Search { past_first, .. } => past_first,
+                BatchStage::ChunkPrelim { .. } => &[],
+            };
+            let past_first_of = |query: usize| past_first.get(query).copied().flatten();
             if query_contexts
                 .iter()
                 .zip(context_ungapped)
-                .any(|(context, block)| context.len != 0 && block.is_none())
+                .any(|(context, block)| {
+                    context.len != 0
+                        && block.is_none()
+                        && past_first_of(context.query_idx as usize).is_none()
+                })
             {
                 let refusal = anyhow::anyhow!(
                     "these scoring options have no Karlin-Altschul values, and the query batch (up to {} residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not supported by LOSAT's BLASTN",
@@ -177,14 +188,18 @@ fn karlin_blocks<const UNGAPPED: bool>(
                     shown,
                 ));
             }
-            // A query without letters (also a `-query_loc` interval that holds none) keeps its
-            // warning in the error (`karlin_error`).
-            let empty_queries = query_lengths.iter().map(|&length| length == 0);
+            // A query invalid from its set-up (without letters, also a `-query_loc` interval that
+            // holds none; or read past its earlier record) keeps its warning in the error
+            // (`karlin_error`).
+            let setup_messages = query_lengths
+                .iter()
+                .enumerate()
+                .map(|(query, &length)| setup_message(past_first_of(query), length == 0));
             // A batch after the first: every batch before it had only invalid queries (one
             // with a valid query would have raised the error), and NCBI has written their
             // reports (`run_in_pool`).
             if !first_batch {
-                return Err(after_batch_reports(karlin_error(&message, empty_queries)));
+                return Err(after_batch_reports(karlin_error(&message, setup_messages)));
             }
             // The prologs that come with the first report (outfmt 0 to 4's were written before
             // the search).
@@ -198,7 +213,7 @@ fn karlin_blocks<const UNGAPPED: bool>(
                     write_format_prolog(format, output_format, intro, shown, posts)?;
                 }
             }
-            return Err(karlin_error(&message, empty_queries));
+            return Err(karlin_error(&message, setup_messages));
         }
     };
     Ok((context_karlin, round_down_evalue_score))

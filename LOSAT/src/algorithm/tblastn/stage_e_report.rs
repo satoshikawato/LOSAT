@@ -1798,8 +1798,16 @@ fn write_pairwise(
             // TBLASTN's report reads the query's title bytes by query index (`query_titles`).
             query_name: Vec::new(),
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:742-744
-            // The query record's length, also with `-query_loc`.
-            query_length: ranges.queries.length(q_idx, query.seq().len()),
+            // The query record's length, also with `-query_loc`; of the earlier record whose
+            // Bioseq the scope finds for a query read past it (`PastFirstQuery`).
+            query_length: crate::blastinput::query_batch::QueryScopes::past_first(
+                ranges.query_scopes,
+                q_idx,
+            )
+            .map_or_else(
+                || ranges.queries.length(q_idx, query.seq().len()),
+                |past_first| past_first.first_length,
+            ),
             ungapped_karlin: karlin,
             effective_search_space: length.eff_searchsp,
         })

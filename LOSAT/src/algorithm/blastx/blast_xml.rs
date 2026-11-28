@@ -237,15 +237,24 @@ pub(super) fn observe_query_stats(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:615-640
 /// The messages of a query's result (the warnings the other formats write to standard error,
 /// `report::query_warning`): the Karlin-Altschul message of a batch NCBI did not search, and
-/// the message of a record without letters.
-fn query_messages(query: &FastaRecord, search_skipped: bool, filtered_empty: bool) -> Vec<String> {
+/// the message of a record without letters, or in its place that of a query whose set-up read
+/// passes its earlier record's end (`past_first`, `query_batch::PastFirstQuery::message`).
+fn query_messages(
+    query: &FastaRecord,
+    past_first: Option<crate::blastinput::query_batch::PastFirstQuery>,
+    search_skipped: bool,
+    filtered_empty: bool,
+) -> Vec<String> {
     let mut messages = Vec::new();
     if search_skipped {
         messages.push(INVALID_QUERY_MESSAGE.to_string());
     }
-    if query.sequence.is_empty() {
+    if let Some(past_first) = past_first {
+        messages.push(past_first.message());
+    } else if query.sequence.is_empty() {
         messages.push("Sequence contains no data".to_string());
     }
     if filtered_empty && !search_skipped {
@@ -1075,10 +1084,13 @@ impl<S: Write> Write for HeldFormatWriter<S> {
 /// The `QueryText` of a query, refused as the writer refuses it. `search_skipped`: NCBI did not
 /// search the query's batch (its message then carries the query's id, made of its title).
 /// `labelled`: no written result shows the query's names (`query_batch::names_unshown_in`), so it
-/// has its message alone (`names::labelled_query_text`).
+/// has its message alone (`names::labelled_query_text`). `past_first`: the query's set-up read
+/// passes its earlier record's end (`query_messages`).
+#[allow(clippy::too_many_arguments)]
 fn query_text(
     program: &str,
     query: &FastaRecord,
+    past_first: Option<crate::blastinput::query_batch::PastFirstQuery>,
     search_skipped: bool,
     filtered_empty: bool,
     has_hits: bool,
@@ -1089,7 +1101,7 @@ fn query_text(
     let messages = if merged_volumes {
         Vec::new()
     } else {
-        query_messages(query, search_skipped, filtered_empty)
+        query_messages(query, past_first, search_skipped, filtered_empty)
     };
     if labelled {
         return Ok(names::labelled_query_text(
@@ -1284,11 +1296,23 @@ pub(super) fn scan_queries(
             // shows that earlier record of the batch when this result is written.
             let check = if holds_back && show.joins_held {
                 Ok(())
+            } else if show.label.is_none()
+                && crate::blastinput::query_batch::QueryScopes::past_first(
+                    query_scopes.as_ref(),
+                    written + index,
+                )
+                .is_some()
+            {
+                // A query read past its earlier record shows that record's title
+                // (`PastFirstQuery`), which the batch does not hold (an earlier batch's record,
+                // checked by its own result, or one that `-query_loc` skips).
+                Ok(())
             } else {
                 let shown = show.label.map_or(query, |label| &batch[label - written]);
                 query_text(
                     options.program().upper,
                     shown,
+                    None,
                     false,
                     false,
                     true,
@@ -1587,6 +1611,9 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
             texts.push(query_text(
                 options.program().upper,
                 query,
+                // A query read past its earlier record (`PastFirstQuery`; the scopes number the
+                // batch's queries as `queries`).
+                query_scopes.and_then(|scopes| scopes.past_first(batch.query_ordinal + qidx)),
                 batch.search_skipped,
                 options.filtered_empty,
                 has_hits,

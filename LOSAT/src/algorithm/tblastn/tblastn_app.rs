@@ -1646,6 +1646,7 @@ fn tblastn_query_scopes(
         scopes
             .with_refusal(args.scope_refusal.clone())
             .with_query_range(resolved.query_range)
+            .with_export(args.strategy.is_some())
             .with_xml_matrix_failure(super::stage_e_report::xml_matrix_failure(
                 &outputs.formats,
                 &resolved.matrix_name,
@@ -1902,6 +1903,23 @@ fn search(
             (compo_adjust_mode, scoring),
         )
     });
+    // A query whose set-up NCBI reads past its earlier record in a batch that it searches is an
+    // invalid query of the earlier record's title: the run searches and reports NCBI's view of the
+    // records (`query_batch::past_first_views`; line RG-KB item 7d).
+    let past_first_records = crate::blastinput::query_batch::past_first_views(
+        batches.query_scopes.as_ref(),
+        input_records,
+        |query| query_input.ordinal(query),
+        false,
+    );
+    let input_records: &[FastaRecord] = past_first_records.as_deref().unwrap_or(input_records);
+    let searched_queries = match (&past_first_records, resolved.query_range.as_ref()) {
+        (None, _) => searched_queries,
+        (Some(_), Some(range)) => {
+            std::borrow::Cow::Owned(seq_range::cut_queries(input_records, range).records)
+        }
+        (Some(_), None) => std::borrow::Cow::Borrowed(input_records),
+    };
     // NCBI crashes with IDENTITY's compressed lookup table once it searches a query batch, and
     // LOSAT's limits of the search apply where it searches (`check_search_limits`): a run that
     // stops at its first batch (or before it, `pssm_stop` above) gives NCBI's error.
@@ -2485,6 +2503,10 @@ fn search(
                 }
                 let messages = crate::report::query_warnings::query_messages(
                     query.seq(),
+                    crate::blastinput::query_batch::QueryScopes::past_first(
+                        batches.query_scopes.as_ref(),
+                        index,
+                    ),
                     *valid,
                     index < identity_warned,
                     filtered_empty && !query_batch_skipped[index],

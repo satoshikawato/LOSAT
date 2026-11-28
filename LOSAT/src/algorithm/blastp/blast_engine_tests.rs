@@ -389,7 +389,7 @@ fn the_unknown_matrix_error_names_each_querys_messages() {
         FastaRecord::new("Query_4", b"d", b"MKVL"),
     ];
     assert_eq!(
-        unknown_matrix_message(&records),
+        unknown_matrix_message(&records, |_| None),
         "Error: Unknown error code -1 Warning: One or more O characters replaced by X for alignment score calculations at positions 2 \
              Error: Unknown error code -1 Warning: Sequence contains no data \
              Error: Unknown error code -1 Warning: One or more O characters replaced by X for alignment score calculations at positions 0, 3 \

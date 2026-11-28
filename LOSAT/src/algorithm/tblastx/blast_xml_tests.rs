@@ -63,23 +63,45 @@ fn the_length_adjustment_is_computed_again_from_the_context_and_the_subject_set(
 }
 
 // TBLASTX posts the Karlin-Altschul message only for a batch that was not searched; an empty
-// record has its own message (blast_setup.hpp:190-198).
+// record has its own message (blast_setup.hpp:190-198), and so has a query read past its earlier
+// record (blast_setup_cxx.cpp:632-640), for which a batch not searched posts its message too
+// (blast_aux_priv.cpp:94-101).
 #[test]
 fn the_messages_of_a_query_follow_its_batch_and_its_letters() {
     let query = FastaRecord::new("Query_1", b"q", b"ACGTACGTA");
-    assert!(query_messages(&query, true, false).is_empty());
+    assert!(query_messages(&query, None, true, false).is_empty());
     assert_eq!(
-        query_messages(&query, true, true),
+        query_messages(&query, None, true, true),
         vec![EMPTY_DATABASE_MESSAGE.to_string()]
     );
-    assert!(query_messages(&query, false, true)
+    assert!(query_messages(&query, None, false, true)
         .iter()
         .all(|message| message != EMPTY_DATABASE_MESSAGE));
     assert_eq!(
-        query_messages(&query, false, false),
+        query_messages(&query, None, false, false),
         vec![INVALID_QUERY_MESSAGE.to_string()]
     );
     let empty = FastaRecord::new("Query_2", b"e", b"");
-    assert_eq!(query_messages(&empty, true, false).len(), 1);
-    assert_eq!(query_messages(&empty, false, false).len(), 2);
+    assert_eq!(query_messages(&empty, None, true, false).len(), 1);
+    assert_eq!(query_messages(&empty, None, false, false).len(), 2);
+    let past_first = crate::blastinput::query_batch::PastFirstQuery {
+        pos: 30,
+        first_input: 0,
+        first_length: 30,
+    };
+    assert_eq!(
+        query_messages(&query, Some(past_first), true, false),
+        vec!["CSeqVector_CI: cannot locate segment at 30".to_string()]
+    );
+    assert_eq!(
+        query_messages(&query, Some(past_first), false, false),
+        vec![
+            "CSeqVector_CI: cannot locate segment at 30".to_string(),
+            INVALID_QUERY_MESSAGE.to_string()
+        ]
+    );
+    assert_eq!(
+        setup_messages(&empty, None),
+        vec![crate::algorithm::blastn::blast_engine::NO_DATA_MESSAGE.to_string()]
+    );
 }

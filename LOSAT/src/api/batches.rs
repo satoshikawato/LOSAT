@@ -358,6 +358,32 @@ fn run_scopes(
     )
 }
 
+/// LOSAT's refusal of the batch of the query records `batch` (the run's scope of the queries
+/// `scopes`, `run_scopes`, to which the batch was added: its searched queries are numbered from
+/// `batch.start`) where NCBI's set-up reads a query of it past its earlier record and that record
+/// is of an earlier batch (`query_batch::PastFirstQuery`, line RG-KB item 7d): NCBI reports the
+/// query as an invalid query with that record's title (and outfmt 0's `Length=` of it), which the
+/// call, holding the batch's records alone, cannot show (its own scope meets the query as a new
+/// one). `None` where no query of the batch is such a one; a query whose earlier record is of the
+/// batch is the call's own (its scope finds it). No query is looked up in a run without such
+/// queries (`QueryScopes::past_first`).
+fn past_first_before_call(
+    scopes: &crate::blastinput::query_batch::QueryScopes,
+    batch: Range<usize>,
+) -> Option<anyhow::Error> {
+    use crate::blastinput::query_batch::QueryScopes;
+    batch.clone().find_map(|query| {
+        let past_first = QueryScopes::past_first(Some(scopes), query)?;
+        (past_first.first_input < batch.start).then(|| {
+            anyhow::anyhow!(
+                "a query of the query batch from query record {} has the Seq-ids of query record {}, of an earlier query batch, under -parse_deflines and is searched past that record's end, where NCBI BLAST+ reports it as a query without hits with that record's title; that is not supported by LOSAT's run_batches, each of whose calls holds the records of its batch alone",
+                batch.start + 1,
+                past_first.first_input + 1
+            )
+        })
+    })
+}
+
 /// NCBI's count of the query records into the batches under `-parse_deflines`
 /// (`query_batch::BatchCount`), whose scope spans the run with `-subject` and a batch with a
 /// database (the batches' reports are tabular); `None` without the option or with a PSSM query
@@ -453,6 +479,13 @@ impl Batches<'_> {
             },
             _ => None,
         };
+        if let Some(refusal) = self
+            .run_scopes
+            .as_ref()
+            .and_then(|scopes| past_first_before_call(scopes, range.clone()))
+        {
+            return Err(Error::search(&refusal));
+        }
         match &mut command {
             Commands::Blastn(args) => {
                 args.one_query_batch = true;

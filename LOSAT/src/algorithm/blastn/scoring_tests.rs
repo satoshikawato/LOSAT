@@ -250,7 +250,10 @@ fn the_counts_a_run_derives_give_the_refusals_of_the_options() {
 
 #[test]
 fn table_errors_repeat_for_each_query_of_the_batch() {
-    let error = karlin_error("Substitution scores 1 and -6 are not supported", [false; 2]);
+    let error = karlin_error(
+        "Substitution scores 1 and -6 are not supported",
+        [None, None],
+    );
     assert_eq!(
         error.downcast::<NativeError>().unwrap().message,
         b"LOSAT engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported \n"
@@ -258,7 +261,7 @@ fn table_errors_repeat_for_each_query_of_the_batch() {
     // A query without letters keeps its warning after the error (NCBI 2.17.0).
     let error = karlin_error(
         "Substitution scores 1 and -6 are not supported",
-        [true, false],
+        [setup_message(None, true), setup_message(None, false)],
     );
     assert_eq!(
         error.downcast::<NativeError>().unwrap().message,

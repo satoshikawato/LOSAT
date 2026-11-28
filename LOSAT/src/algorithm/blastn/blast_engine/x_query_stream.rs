@@ -121,6 +121,7 @@ use crate::blastinput::fasta_reader::{
     FastaInputSource, FastaRecord, ParseErrorCode, QueryEnd, ReadError, ReaderConfig,
 };
 use crate::blastinput::input_files::InputFile;
+use crate::blastinput::query_batch::PastFirstQuery;
 use crate::blastinput::seq_range::{
     record_interval, Placements, QueryInput, RecordInterval, RecordPlacement, SequenceRange,
 };
@@ -1081,6 +1082,13 @@ impl<'a> Queries<'a> {
     /// `run_in_pool`).
     pub(super) fn before<'s>(&'s self, kept: &'s Kept, start: usize) -> ReportQueries<'s> {
         match self {
+            Queries::Records { .. } if kept.past_first.is_some() => {
+                let all = self.all(kept);
+                ReportQueries {
+                    searched: &all.searched[..start],
+                    ..all
+                }
+            }
             Queries::Records { input, searched } => ReportQueries {
                 searched: &searched[..start],
                 input,
@@ -1100,19 +1108,151 @@ impl<'a> Queries<'a> {
         }
     }
 
-    /// Every record, for the reports after the loop (`before` with every query).
+    /// Every record, for the reports after the loop (`before` with every query). Of records read
+    /// before the search, NCBI's view of them where a batch held a query that its set-up reads past
+    /// its earlier record (`Kept::past_first`).
     pub(super) fn all<'s>(&'s self, kept: &'s Kept) -> ReportQueries<'s> {
-        match self {
-            Queries::Records { input, searched } => ReportQueries {
+        match (self, &kept.past_first) {
+            (Queries::Records { .. }, Some(views)) => ReportQueries {
+                searched: views.searched.as_deref().unwrap_or(&views.input),
+                input: &views.input,
+                first: 0,
+            },
+            (Queries::Records { input, searched }, None) => ReportQueries {
                 searched,
                 input,
                 first: 0,
             },
-            Queries::Streamed(_) | Queries::Taken(_) => ReportQueries {
+            (Queries::Streamed(_) | Queries::Taken(_), _) => ReportQueries {
                 searched: &kept.searched,
                 input: &kept.input,
                 first: 0,
             },
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:629-652
+    /// Line RG-KB item 7d: the loop's batch `batch` (its first input record `input_start`, its
+    /// first searched query `start`) as NCBI's set-up holds it where it reads queries of the batch
+    /// past their earlier records in a batch that it searches (`past_first`, by query of the batch,
+    /// `query_batch::PastFirstQuery`; empty where no query does: nothing is done). Each such
+    /// query's input record takes its earlier record's title and letters of `N`
+    /// (`PastFirstQuery::set_up_view`), and with `-query_loc` its searched record is cut from that
+    /// again, so the search and every report read NCBI's view (an invalid query of that title).
+    /// The reports after the batch read it through `kept`: records read before the search get a
+    /// copy made at the first such batch (`Kept::past_first`), and the loop keeps the records of a
+    /// batch taken (`Kept::keep`). The earlier record is in the batch or, where the scope spans the
+    /// run (`-subject`, outfmt 5), in a batch before: read before the search, or kept by the loop.
+    /// Where the loop no longer holds it (LOSAT_X_RPTSTREAM writes each batch's reports and drops
+    /// its records, `run_in_pool`'s `keep`), LOSAT's refusal of the batch, which is left as it was.
+    pub(super) fn past_first_views(
+        &self,
+        batch: &mut BatchRecords<'a>,
+        past_first: &[Option<PastFirstQuery>],
+        kept: &mut Kept,
+        query_input: &QueryInput,
+        input_start: usize,
+        start: usize,
+    ) -> Result<()> {
+        if past_first.is_empty() {
+            return Ok(());
+        }
+        let ranged = query_input.placements.ranged();
+        // The titles of the earlier records, all found before any record changes.
+        let mut titles: Vec<Option<Vec<u8>>> = Vec::with_capacity(past_first.len());
+        for (index, past) in past_first.iter().enumerate() {
+            let Some(past) = past else {
+                titles.push(None);
+                continue;
+            };
+            let first = past.first_input;
+            let earlier = match self {
+                Queries::Records { input, .. } => input.get(first),
+                _ if first >= input_start => batch.input().get(first - input_start),
+                _ if ranged => kept.input.get(first),
+                // Without `-query_loc` every input record is a searched one.
+                _ => kept.searched.get(first),
+            };
+            let Some(earlier) = earlier else {
+                anyhow::bail!(
+                    "query record {} has the Seq-ids of query record {}, of an earlier query batch, under -parse_deflines and is searched past that record's end, where NCBI BLAST+ reports it as a query without hits with that record's title; LOSAT's BLASTN no longer holds that record where it writes the reports of each query batch as it searches it (LOSAT_X_RPTSTREAM with LOSAT_X_BNQPACK), which is not supported",
+                    query_input.ordinal(start + index) + 1,
+                    first + 1
+                );
+            };
+            titles.push(Some(earlier.title.clone()));
+        }
+        match self {
+            Queries::Records { input, searched } => {
+                let views = kept.past_first.get_or_insert_with(|| PastFirstRecords {
+                    input: input.to_vec(),
+                    searched: ranged.then(|| searched.to_vec()),
+                });
+                let PastFirstRecords {
+                    input: view_input,
+                    searched: view_searched,
+                } = views;
+                set_up_views(
+                    (past_first, titles.as_slice()),
+                    query_input,
+                    start,
+                    (view_input.as_mut_slice(), 0),
+                    view_searched.as_deref_mut().map(|cut| (cut, 0)),
+                );
+                let input_end = input_start + batch.input().len();
+                let end = start + batch.searched().len();
+                *batch = BatchRecords::Read {
+                    input: Arc::new(view_input[input_start..input_end].to_vec()),
+                    cut: view_searched.as_ref().map(|cut| cut[start..end].to_vec()),
+                };
+            }
+            Queries::Streamed(_) | Queries::Taken(_) => match batch {
+                BatchRecords::Taken(records) => set_up_views(
+                    (past_first, titles.as_slice()),
+                    query_input,
+                    start,
+                    (records.as_mut_slice(), input_start),
+                    None,
+                ),
+                BatchRecords::Read { input, cut } => set_up_views(
+                    (past_first, titles.as_slice()),
+                    query_input,
+                    start,
+                    (Arc::make_mut(input).as_mut_slice(), input_start),
+                    cut.as_deref_mut().map(|cut| (cut, start)),
+                ),
+                BatchRecords::Borrowed { .. } => {
+                    unreachable!("only records read before the search are borrowed (`batch_in`)")
+                }
+            },
+        }
+        Ok(())
+    }
+}
+
+/// Line RG-KB item 7d: `PastFirstQuery::set_up_view` of the input records of the queries
+/// `past_first` (by searched query from `start`, with the titles of their earlier records:
+/// `titles`) in `input` (whose first is input record `input_first`), and with `-query_loc` their
+/// searched records in `cut` (whose first is searched query `cut_first`) cut from those again, as
+/// `cut_queries` cuts them.
+fn set_up_views(
+    (past_first, titles): (&[Option<PastFirstQuery>], &[Option<Vec<u8>>]),
+    query_input: &QueryInput,
+    start: usize,
+    (input, input_first): (&mut [FastaRecord], usize),
+    mut cut: Option<(&mut [FastaRecord], usize)>,
+) {
+    for (index, (past, title)) in past_first.iter().zip(titles).enumerate() {
+        let (Some(past), Some(title)) = (past, title) else {
+            continue;
+        };
+        let query = start + index;
+        let record = &mut input[query_input.ordinal(query) - input_first];
+        past.set_up_view(record, title, true);
+        if let Some((cut, cut_first)) = cut.as_mut() {
+            let from = query_input.placements.offset(query);
+            let searched = &mut cut[query - *cut_first];
+            *searched = record.cut(from, from + searched.seq().len());
         }
     }
 }
@@ -1136,6 +1276,18 @@ pub(super) struct ReportQueries<'a> {
 pub(super) struct Kept {
     pub(super) searched: Vec<FastaRecord>,
     pub(super) input: Vec<FastaRecord>,
+    /// Line RG-KB item 7d: of records read before the search (`Queries::Records`), NCBI's view of
+    /// them where a batch held a query that its set-up reads past its earlier record
+    /// (`Queries::past_first_views`); `None` in every other run.
+    past_first: Option<PastFirstRecords>,
+}
+
+/// Line RG-KB item 7d: the records read before the search as NCBI's set-up of their batches holds
+/// them (`Queries::past_first_views`): the input records, and with `-query_loc` the searched
+/// records cut from them (`None`: the input records are searched).
+struct PastFirstRecords {
+    input: Vec<FastaRecord>,
+    searched: Option<Vec<FastaRecord>>,
 }
 
 impl Kept {

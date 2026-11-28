@@ -167,8 +167,9 @@ pub(super) fn write_tblastx_tabular(
         },
     };
     let names = run.tabular_names;
-    // Outfmt 18, the organism report: the `Query=` block shows the query record's length, also
-    // with `-query_loc` (as outfmt 0's).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:874-888
+    // Outfmt 18, the organism report: the `Query=` block shows the length of the query's Bioseq
+    // as outfmt 0's (`TblastxReportRun::query_bioseq_length`).
     if spec.kind == crate::report::tabular::TabularKind::TaxReport {
         let mut queries: Vec<crate::report::tax_report::TaxQuery<'_>> = run
             .queries
@@ -176,7 +177,7 @@ pub(super) fn write_tblastx_tabular(
             .enumerate()
             .map(|(q_idx, query)| crate::report::tax_report::TaxQuery {
                 title: tab.query_titles[q_idx],
-                length: run.ranges.input.placements.length(q_idx, query.seq().len()),
+                length: run.query_bioseq_length(q_idx, query.seq().len()),
                 // A query of a batch that NCBI did not search has no Seq-align-set.
                 hsps: (!tab.unsearched[q_idx]).then(Vec::new),
             })

@@ -1470,18 +1470,27 @@ pub const EMPTY_DATABASE_MESSAGE: &str = "Filtering resulted in an empty databas
 /// (`IDENTITY_CBS_RESET_MESSAGE`, for the queries of the first query batch), a record without
 /// letters or else a query without a valid context (`INVALID_QUERY_MESSAGE`), and a database that
 /// a list left empty (`EMPTY_DATABASE_MESSAGE`). `query_warning` sorts them as NCBI does.
+/// `past_first`: a query whose set-up read passes its earlier record's end
+/// (`query_batch::PastFirstQuery`, whose letters NCBI never reads: no O warning), with that
+/// failure's message in place of the others of its letters.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:615-640
 pub fn query_messages(
     seq: &[u8],
+    past_first: Option<crate::blastinput::query_batch::PastFirstQuery>,
     valid: bool,
     identity_cbs_reset: bool,
     empty_database: bool,
 ) -> Vec<String> {
     let mut messages = Vec::new();
-    messages.extend(replaced_o_message(seq));
+    if past_first.is_none() {
+        messages.extend(replaced_o_message(seq));
+    }
     if identity_cbs_reset {
         messages.push(IDENTITY_CBS_RESET_MESSAGE.to_string());
     }
-    if seq.is_empty() {
+    if let Some(past_first) = past_first {
+        messages.push(past_first.message());
+    } else if seq.is_empty() {
         messages.push(crate::blastinput::query_batch::NO_DATA_MESSAGE.to_string());
     } else if !valid {
         messages.push(INVALID_QUERY_MESSAGE.to_string());

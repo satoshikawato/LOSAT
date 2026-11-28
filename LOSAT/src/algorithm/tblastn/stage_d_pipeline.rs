@@ -1190,7 +1190,7 @@ impl SetupEngineError {
             crate::algorithm::common::unknown_matrix::unknown_matrix_message_of(
                 queries
                     .iter()
-                    .map(|query| query_messages(query, true, false, false)),
+                    .map(|query| query_messages(query, None, true, false, false)),
             ),
         ))
     }

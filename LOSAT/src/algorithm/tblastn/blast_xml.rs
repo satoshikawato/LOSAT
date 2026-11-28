@@ -244,6 +244,7 @@ pub(super) fn prepare(
         .map(|(q_idx, ((query, hitlist), &valid))| {
             let messages = query_messages(
                 query.seq(),
+                scopes.and_then(|scopes| scopes.past_first(q_idx)),
                 valid,
                 q_idx < values.identity_warned,
                 values.filtered_empty && !query_batch_skipped[q_idx],

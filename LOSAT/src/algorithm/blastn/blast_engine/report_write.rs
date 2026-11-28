@@ -16,7 +16,6 @@ use super::{
 use crate::algorithm::blastn::pairwise::shown_query_masks;
 use crate::algorithm::blastn::sam;
 use crate::blastinput::fasta_reader::FastaRecord;
-use crate::blastinput::query_batch::NO_DATA_MESSAGE;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::record::{QueryNames, SubjectNames};
 use anyhow::Result;
@@ -379,11 +378,12 @@ pub(super) fn write_structured_xml(
         .map(|(q_idx, query)| {
             let mut messages = Vec::new();
             if report.context_karlin[2 * q_idx + report.first_context].is_none() {
-                messages.push(if query.seq().is_empty() {
-                    NO_DATA_MESSAGE.to_string()
-                } else {
-                    crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string()
-                });
+                messages.push(crate::algorithm::blastn::scoring::invalid_query_message(
+                    report
+                        .query_scopes
+                        .and_then(|scopes| scopes.past_first(q_idx)),
+                    query.seq().is_empty(),
+                ));
             }
             if !unsearched[q_idx]
                 && report

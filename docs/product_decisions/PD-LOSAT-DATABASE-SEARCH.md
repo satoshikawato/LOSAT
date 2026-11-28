@@ -1232,13 +1232,18 @@ holder, for its Seq-align id, LOSAT writes NCBI's record of the holder in outfmt
 16, 18 and 20 of BLASTP, psiblast, BLASTN, BLASTX, TBLASTN and TBLASTX: the ids and title of the
 holder's definition line that NCBI loaded it by, its other lines, tax ids, length and letters, with
 the subject's coordinates and scores (rows `db.hr2.*` and the rows that hr-2 re-froze). It still
-refuses, naming the holder, outfmt 0 to 4 and 17; a holder that the call does not report; a holder
+refuses, naming the holder, outfmt 0 to 4 and 17; a holder
 shorter than the subject's aligned range (in TBLASTN and TBLASTX, of another length); a holder of
 other letters in BLASTP and in a table that prints identities of BLASTX, TBLASTN and TBLASTX; a table
 whose only field of the subject is `slen`; a subject that one of its loads gives as itself or as a
 failing lookup; a load whose line is not known (`ShownBy::Order`, hr-1's ties); a positive id list; a
-UTF8String header; taxonomy database texts; and a holder whose own Seq-align id is the subject's in
-other letter case only.
+UTF8String header; taxonomy database texts where the subject's or the holder's lines have a tax id
+that a lookup writes them for (any tax id for the texts of opening, one of the offset error's slot of
+the volume's cache); a subject or a holder whose Seq-align id the scope of a `-parse_deflines` query
+finds (NCBI writes the query's record for the subject, or never loads the holder); and a holder
+whose own Seq-align id is the subject's in other letter case only. The holder's record is read by
+its ordinal id, also where an earlier query batch reported it (BLASTX's batches). The library's
+record of the subject (`ReportedSubject`) gives the holder's `saccver` and length, as the tables do.
 
 A definition line without a Seq-id (a hand-edited database: makeblastdb writes none; under any list,
 also one left without ids or taxids, NCBI's header read erases such a line and LOSAT does the same:

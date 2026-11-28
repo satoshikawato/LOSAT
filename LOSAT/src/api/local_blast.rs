@@ -502,9 +502,12 @@ pub struct ReportedSubject {
     /// The sequence's OID in the database (the `n` of `gnl|BL_ORD_ID|n`), the same in every
     /// search of the database, also one that a taxid or Seq-id list restricts.
     pub oid: u32,
-    /// The `saccver` of the default tabular report, its bytes.
+    /// The `saccver` of the default tabular report, its bytes: where NCBI's places give another
+    /// database sequence's Bioseq for the sequence's Seq-align id (its holder), the holder's, as
+    /// the tables write it.
     pub id: crate::api::Id,
-    /// Its letters.
+    /// The letters of the sequence whose `saccver` `id` is (the holder's length, the tables'
+    /// `slen`, where `id` is the holder's).
     pub length: usize,
 }
 

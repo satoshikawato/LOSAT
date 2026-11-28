@@ -583,9 +583,11 @@ fn shown_records(
             loads,
             oid,
             (ordinal, subject),
-            |holder| parsed.get(&(holder as usize)).map(Arc::as_ref),
             (ends.get(&oid).copied().unwrap_or(0), false),
             (light_length, false),
+            // The scope's queries are noted after the batch's subjects (`refuse_ids_of_queries`,
+            // which refuses a holder that they find).
+            crate::report::query_bioseq::SeenFrom::default(),
         )?
         else {
             continue;
@@ -1633,6 +1635,25 @@ impl ReportedSubjects {
                         run,
                         PROGRAM,
                     )?;
+                }
+            }
+        }
+        // A holder whose record the reports write for a subject (`shown_records`) and whose
+        // Seq-align id a query's scope finds (`shared::ShownHolders::shown`'s refusal, which
+        // BLASTX makes here, where `seen` is filled).
+        for (rank, record) in self.parsed.iter().enumerate() {
+            let Some(record) = record.as_deref() else {
+                continue;
+            };
+            if let Some(holder) = record.database_sequence() {
+                if holder.ordinal() != self.ordinals[rank] && self.seen.finds(holder.ordinal()) {
+                    return Err(shared::shown_holder_refusal(
+                        self.oids[rank],
+                        record,
+                        holder,
+                        shared::HOLDER_FOUND_BY_QUERY,
+                        PROGRAM,
+                    ));
                 }
             }
         }

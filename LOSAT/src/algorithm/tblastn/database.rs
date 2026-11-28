@@ -915,14 +915,13 @@ impl ReportedSubjects {
     pub(super) fn library_subjects(
         &self,
         database: &TblastnDatabase,
-    ) -> Vec<crate::api::local_blast::ReportedSubject> {
+    ) -> Result<Vec<crate::api::local_blast::ReportedSubject>> {
         shared::library_subjects(
             &database.db,
             &self.records,
             &self.ordinals,
             &self.parsed,
             &self.sources,
-            |rank| self.lengths[rank],
             PROGRAM,
         )
     }
@@ -1399,12 +1398,12 @@ pub(super) fn reported_subjects(
                         &loads,
                         ordinal as usize,
                         (ordinal, subject),
-                        |holder| titled(holder as usize),
                         (
                             shared::x_nucleotide_length(&database.db, ordinal, PROGRAM)?,
                             true,
                         ),
                         (shown.light_length, seen_all.contains(&ordinal)),
+                        seen,
                     )?
                 } else {
                     None

@@ -1972,6 +1972,30 @@ struct LookupTexts {
 }
 
 impl LookupTexts {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1169 (cited
+    // at `HeaderReader::source_taxname`: a load looks the taxids of its record's lines up)
+    /// Whether the loads of `records` (a held subject's and its holder's record) can write texts
+    /// of these lookups: a load looks up the positive taxids of its record's lines, so a text of
+    /// opening (or of a database that does not open) needs such a taxid, and the offset error one
+    /// of its taxid's slot of the volume's 256-slot cache (`taxid & 255`), whose other taxids
+    /// decide whether a lookup of it asks the database again.
+    fn written_at(&self, records: [&crate::report::db_subject::ParsedSubject; 2]) -> bool {
+        let mut taxids = records.into_iter().flat_map(|record| {
+            record.deflines().iter().flat_map(|defline| {
+                defline
+                    .taxid
+                    .into_iter()
+                    .chain(defline.links.iter().flatten().copied())
+                    .filter(|&taxid| taxid > 0)
+            })
+        });
+        if self.open || self.unknown {
+            return taxids.next().is_some();
+        }
+        self.offset_error_taxid
+            .is_some_and(|error| taxids.any(|taxid| taxid & 255 == error & 255))
+    }
+
     /// The texts of the lookups of the taxonomy database of `db`.
     fn of(db: &SeqDb) -> Self {
         if !db.taxdb_found() {
@@ -3539,19 +3563,12 @@ fn reported_header(
             crate::report::db_subject::ParsedSubject::new(set)
                 .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))
                 .map(|subject| {
-                    if subject.replaced_title_bytes() {
-                        db.note_replaced_title();
-                    }
                     let resolution = headers.resolution(&subject, ordinal);
                     ReportedHeader::Parsed(std::sync::Arc::new(
-                        subject
-                            .with_source(db.seqtype() == SeqType::Protein, |taxid| {
-                                headers.source_taxname(Some(taxid))
-                            })
-                            .showing_gis(db.reports_show_gis())
-                            .under_positive_list(db.has_positive_list())
-                            .resolved(resolution)
-                            .in_database(db.sequence(ordinal)),
+                        database_record(db, subject, ordinal, |taxid| {
+                            headers.source_taxname(Some(taxid))
+                        })
+                        .resolved(resolution),
                     ))
                 })
         }
@@ -3583,6 +3600,26 @@ fn reported_header(
             ))
         }
     }
+}
+
+/// The record `subject` of the sequence `ordinal` of `db` as every report reads a database
+/// sequence with parsed Seq-ids (`reported_header`, before the lookup of its Seq-align id, and
+/// `ShownHolders::holder_record`): the name of its Bioseq's source (`names` of its taxid), the
+/// database's GIs and positive list, and its sequence.
+fn database_record(
+    db: &SeqDb,
+    subject: crate::report::db_subject::ParsedSubject,
+    ordinal: u32,
+    names: impl FnOnce(i32) -> crate::report::defline::SourceTaxname,
+) -> crate::report::db_subject::ParsedSubject {
+    if subject.replaced_title_bytes() {
+        db.note_replaced_title();
+    }
+    subject
+        .with_source(db.seqtype() == SeqType::Protein, names)
+        .showing_gis(db.reports_show_gis())
+        .under_positive_list(db.has_positive_list())
+        .in_database(db.sequence(ordinal))
 }
 
 /// With `-parse_deflines`, LOSAT's refusal of a reported database sequence whose Seq-align id is
@@ -4398,50 +4435,43 @@ impl<'d> ShownHolders<'d> {
 
     /// The Bioseq that the record writers write for the subject `key` of `loads` (`ordinal`, with
     /// the record `subject`) where its loads give another sequence's (`HitLoads::written_holder`):
-    /// that sequence's record as the program read it (`holder_record` of its ordinal id: `None`
-    /// where the call does not report it), loaded by its line, with its length. `subject_end` is
+    /// that sequence's record as the reports read it (`holder_record`, by its ordinal id: also
+    /// where an earlier query batch or call reported it), loaded by its line, with its length.
+    /// `subject_end` is
     /// the end (exclusive, 0-based, in the subject's letters) of the subject's ranges in its
     /// HSPs, or with `exact` the subject's length, which a translated subject's holder must have
     /// (NCBI translates its letters and numbers its minus frames by the holder's length, from the
     /// Seq-align's coordinates of the subject's); `light_length` whether a table writes `slen`
     /// without reading the Bioseq
     /// (`TabularSpec::reads_subject_bioseq`), which NCBI looks up apart (a light call by the
-    /// Seq-align id). `None` where the loads give the subject itself. LOSAT's refusals: a holder
-    /// that the call does not report, a database with a positive list (its Seq-aligns'
+    /// Seq-align id). `None` where the loads give the subject itself. LOSAT's refusals: a
+    /// database with a positive list (its Seq-aligns'
     /// `use_this_seqid`), a header read with a UTF8String or a taxonomy database whose lookups
-    /// write texts (the holder's load writes them where the subject's would not), a subject that
-    /// a query's scope finds (`seen_by_scope`), a holder shorter than the subject's ranges
+    /// write texts where the subject's or the holder's record has a taxid that they look up
+    /// (`LookupTexts::written_at`: the holder's load writes them where the subject's would not), a
+    /// subject that a query's scope finds (`seen_by_scope`), a holder that the scope of a query of
+    /// `queries` finds (NCBI's data loader may not load it), a holder shorter than the subject's
+    /// ranges
     /// (NCBI's rows then end in gaps) or of another length where `exact`, the light `slen`, and
     /// a holder whose own Seq-align id is the subject's in other letter case
     /// (`differs_in_case_only`).
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn shown<'r>(
+    pub(crate) fn shown(
         &self,
         loads: &crate::report::db_subject::HitLoads,
         key: usize,
         (ordinal, subject): (u32, &crate::report::db_subject::ParsedSubject),
-        holder_record: impl FnOnce(u32) -> Option<&'r crate::report::db_subject::ParsedSubject>,
         (subject_end, exact): (usize, bool),
         (light_length, seen_by_scope): (bool, bool),
+        queries: crate::report::query_bioseq::SeenFrom<'_>,
     ) -> Result<Option<crate::report::shown_bioseq::ShownBioseq>> {
         let Some((holder, line)) = loads.written_holder(key) else {
             return Ok(None);
         };
         let refuse = |why: &str| {
-            parsed_refusal(
-                self.db.oid(ordinal),
-                &format!(
-                    "has the Seq-align id {}, for which NCBI BLAST+ 2.17.0 writes the record of database sequence {holder} (its places give that sequence's Bioseq): LOSAT does not write that record {why}",
-                    String::from_utf8_lossy(&subject.alignment_fasta())
-                ),
-                self.program,
-            )
+            shown_holder_refusal(self.db.oid(ordinal), subject, holder, why, self.program)
         };
-        let Some(record) = holder_record(holder.ordinal()) else {
-            return Err(refuse(
-                "where that sequence is not reported in the same call",
-            ));
-        };
+        let record = self.holder_record(holder)?;
         if self.db.has_positive_list() {
             return Err(refuse(
                 "under a positive list (the Seq-aligns' use_this_seqid)",
@@ -4452,13 +4482,16 @@ impl<'d> ShownHolders<'d> {
                 "where a query's scope finds the subject's Seq-align id",
             ));
         }
+        if queries.finds(holder.ordinal()) {
+            return Err(refuse(HOLDER_FOUND_BY_QUERY));
+        }
         if subject.header_utf8() || record.header_utf8() {
             return Err(refuse(
                 "where a header holds a UTF8String (NCBI posts its warning at the load that reads it)",
             ));
         }
         let texts = *self.texts.get_or_init(|| LookupTexts::of(self.db));
-        if texts.open || texts.offset_error_taxid.is_some() || texts.unknown {
+        if texts.written_at([subject, &record]) {
             return Err(refuse(
                 "where the taxonomy database writes texts at its lookups (the holder's load writes them)",
             ));
@@ -4487,7 +4520,7 @@ impl<'d> ShownHolders<'d> {
             )));
         }
         let bioseq = crate::report::shown_bioseq::ShownBioseq::new(
-            record,
+            &record,
             holder,
             line,
             subject.alignment_id(),
@@ -4502,6 +4535,34 @@ impl<'d> ShownHolders<'d> {
             ));
         }
         Ok(Some(bioseq))
+    }
+
+    /// The record of the holder `holder` as the reports read a reported sequence
+    /// (`database_record`), read by its ordinal id: every program writes this one, whichever
+    /// query batch or call of the run reported the holder (the scope and the loader keep it). Its
+    /// own lookup is not made (`ParsedSubject::shown_by` takes the places' answer).
+    fn holder_record(
+        &self,
+        holder: crate::seqdb::DbSequence,
+    ) -> Result<crate::report::db_subject::ParsedSubject> {
+        let ordinal = holder.ordinal();
+        let header = self
+            .db
+            .read_header(ordinal)
+            .map_err(|error| database_error(error, self.program))?;
+        let crate::seqdb::SequenceHeader::Parsed(set) = header else {
+            return Err(parsed_refusal(
+                self.db.oid(ordinal),
+                "holds the Seq-align id of another sequence without parsed Seq-ids (internal error)",
+                self.program,
+            ));
+        };
+        let subject = crate::report::db_subject::ParsedSubject::new(set)
+            .map_err(|reason| parsed_refusal(self.db.oid(ordinal), &reason, self.program))?;
+        let headers = HeaderReader::new(self.db, false);
+        Ok(database_record(self.db, subject, ordinal, |taxid| {
+            headers.source_taxname(Some(taxid))
+        }))
     }
 
     /// LOSAT's refusal of the subject `ordinal` (with the record `subject`) whose holder `holder`
@@ -4531,6 +4592,32 @@ impl<'d> ShownHolders<'d> {
         ))
     }
 }
+
+/// LOSAT's refusal of the subject `oid` (with the record `subject`, or the holder's record written
+/// for it: its Seq-align id is the subject's) for which NCBI writes the record of `holder`
+/// (`ShownHolders::shown`), with the reason `why`.
+pub(crate) fn shown_holder_refusal(
+    oid: crate::seqdb::Oid,
+    subject: &crate::report::db_subject::ParsedSubject,
+    holder: crate::seqdb::DbSequence,
+    why: &str,
+    program: &str,
+) -> anyhow::Error {
+    parsed_refusal(
+        oid,
+        &format!(
+            "has the Seq-align id {}, for which NCBI BLAST+ 2.17.0 writes the record of database sequence {holder} (its places give that sequence's Bioseq): LOSAT does not write that record {why}",
+            String::from_utf8_lossy(&subject.alignment_fasta())
+        ),
+        program,
+    )
+}
+
+/// The reason of `shown_holder_refusal` for a holder whose Seq-align id the scope of a query
+/// finds (`report::query_bioseq::QueryBioseqs::finds`): NCBI's scope gives that query for the
+/// holder's own Seq-align id, so its data loader may never load the holder, whose lines then hold
+/// nothing for the subject (NCBI writes the subject's own record in the batch of that query).
+pub(crate) const HOLDER_FOUND_BY_QUERY: &str = "where a query's scope finds that sequence's Seq-align id (NCBI's scope then gives the query for it, so its data loader may not load that sequence)";
 
 /// Whether an id of `ids` (a holder's own Seq-align id, `ShownHolders::shown`) is the Seq-align id
 /// `alignment` (its FASTA form) in other letter case: NCBI's handles compare such ids without
@@ -4606,19 +4693,29 @@ pub(crate) fn tabular_subject_ids(
 /// A reported sequence as a caller of the library reads it (`FormatObserver::database_subjects`):
 /// the id of the default tabular report (`tabular_subject_ids`) of the sequence `ordinal` with the
 /// stored title `title` and the source `source` of its Bioseq (with parsed Seq-ids: `parsed`), and
-/// `length` letters. A sequence whose tabular id LOSAT refuses shows the first word of its title:
-/// only a tabular report refuses that id, not the search.
-#[allow(clippy::too_many_arguments)]
+/// the length of the sequence whose record that is (`slen`): the holder's where the reports write
+/// another sequence's record for the subject (`ParsedSubject::database_sequence` of a record of
+/// `ParsedSubject::shown_by`), whose id and length the tables write. The OID stays the subject's.
+/// A sequence whose tabular id LOSAT refuses shows the first word of its title: only a tabular
+/// report refuses that id, not the search.
 pub(crate) fn library_subject(
     db: &SeqDb,
     title: &[u8],
     source: &crate::report::defline::SourceTaxname,
     ordinal: u32,
     parsed: Option<&crate::report::db_subject::ParsedSubject>,
-    length: usize,
     protein: bool,
     program: &str,
-) -> crate::api::local_blast::ReportedSubject {
+) -> Result<crate::api::local_blast::ReportedSubject> {
+    let read = parsed
+        .and_then(crate::report::db_subject::ParsedSubject::database_sequence)
+        .map_or(ordinal, crate::seqdb::DbSequence::ordinal);
+    let length = if protein {
+        db.protein_length(read).map(|length| length as usize)
+    } else {
+        db.nucleotide_length(read)
+    }
+    .map_err(|error| database_error(error, program))?;
     let id = match parsed {
         // No `saccver`: the lookup throws; the library names it as one without parsed ids.
         Some(subject) => subject
@@ -4638,11 +4735,11 @@ pub(crate) fn library_subject(
             .unwrap_or_default()
             .to_vec()
     });
-    crate::api::local_blast::ReportedSubject {
+    Ok(crate::api::local_blast::ReportedSubject {
         oid: db.oid(ordinal).get(),
         id: crate::api::Id::new(&id),
         length,
-    }
+    })
 }
 
 /// `library_subject` of each reported sequence of a nucleotide database, by rank: `records` hold
@@ -4653,9 +4750,8 @@ pub(crate) fn library_subjects(
     ordinals: &[u32],
     parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     sources: &[crate::report::defline::SourceTaxname],
-    length: impl Fn(usize) -> usize,
     program: &str,
-) -> Vec<crate::api::local_blast::ReportedSubject> {
+) -> Result<Vec<crate::api::local_blast::ReportedSubject>> {
     records
         .iter()
         .zip(ordinals)
@@ -4670,7 +4766,6 @@ pub(crate) fn library_subjects(
                     .unwrap_or(&crate::report::defline::UNNAMED_SOURCE),
                 ordinal,
                 subject,
-                length(rank),
                 false,
                 program,
             )

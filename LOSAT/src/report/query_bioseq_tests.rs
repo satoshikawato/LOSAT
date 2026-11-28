@@ -289,6 +289,29 @@ fn hides_ordinal_requires_every_reporting_query() {
 }
 
 #[test]
+fn finds_any_query_that_the_scope_gives_for_a_sequence() {
+    let queries = [(believed("pdb|1AB1|A"), &b"q"[..], 46)];
+    let mut seen = QueryBioseqs::default();
+    assert!(!seen.finds(3));
+    assert!(!seen.numbered_from(0).finds(3));
+    seen.note(
+        0,
+        3,
+        &keys("pdb|1AB1|A"),
+        0..1,
+        0..1,
+        records(&queries),
+        true,
+    )
+    .unwrap();
+    assert!(seen.finds(3));
+    assert!(!seen.finds(4));
+    // Any query of the run: the view's numbering does not matter.
+    assert!(seen.numbered_from(1).finds(3));
+    assert!(!SeenFrom::default().finds(3));
+}
+
+#[test]
 fn tblastx_qseq_throws_matches_seqvector_clipping() {
     // Inside the found query Bioseq (`end <= len`): never throws.
     assert!(!tblastx_qseq_throws(true, 0, 300, 300));

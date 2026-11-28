@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "pPt4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "pPt4",
+  "number-of-letters": 280,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-28T16:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 703,
+  "bytes-to-cache": 371,
+  "files": [
+    "pPt4.phr",
+    "pPt4.pin",
+    "pPt4.pog",
+    "pPt4.psd",
+    "pPt4.psi",
+    "pPt4.psq"
+  ]
+}

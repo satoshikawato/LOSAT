@@ -2480,7 +2480,6 @@ pub(super) fn reported_subjects(
                     &loads,
                     ordinal as usize,
                     (ordinal, subject),
-                    |holder| titled_parsed(titles, holder as usize),
                     (
                         subject_ends
                             .get(ordinals.binary_search(&ordinal).unwrap_or(usize::MAX))
@@ -2489,6 +2488,7 @@ pub(super) fn reported_subjects(
                         false,
                     ),
                     (shown.light_length, seen_all.contains(&ordinal)),
+                    seen,
                 )? {
                     shared::check_reported_parsed(
                         db,
@@ -2694,16 +2694,14 @@ impl ReportedSubjects {
         &self,
         database: &BlastnDatabase,
     ) -> Result<Vec<crate::api::local_blast::ReportedSubject>> {
-        let lengths = database.sam_lengths(&self.ordinals)?;
-        Ok(shared::library_subjects(
+        shared::library_subjects(
             &database.db,
             &self.records,
             &self.ordinals,
             &self.parsed,
             &self.sources,
-            |rank| lengths[rank],
             PROGRAM,
-        ))
+        )
     }
 }
 

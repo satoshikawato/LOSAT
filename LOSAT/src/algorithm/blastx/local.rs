@@ -1035,19 +1035,24 @@ fn write_run(
                 if let (Some(run), Some(reported)) = (database, reported.as_ref()) {
                     let rank = hit.hit.s_idx as usize;
                     let ordinal = reported.ordinal(rank);
-                    let place = *subject_places.entry(ordinal).or_insert_with(|| {
-                        run_subjects.push(library_subject(
-                            run.database.x_seqdb(),
-                            reported.stored_titles()[rank].as_ref(),
-                            crate::report::pairwise::stored_source(reported.sources(), rank as u32),
-                            ordinal,
-                            reported.parsed_subject(rank),
-                            reported.records()[rank].sequence.len(),
-                            true,
-                            "BLASTX",
-                        ));
-                        run_subjects.len() - 1
-                    });
+                    let place = match subject_places.entry(ordinal) {
+                        std::collections::hash_map::Entry::Occupied(place) => *place.get(),
+                        std::collections::hash_map::Entry::Vacant(place) => {
+                            run_subjects.push(library_subject(
+                                run.database.x_seqdb(),
+                                reported.stored_titles()[rank].as_ref(),
+                                crate::report::pairwise::stored_source(
+                                    reported.sources(),
+                                    rank as u32,
+                                ),
+                                ordinal,
+                                reported.parsed_subject(rank),
+                                true,
+                                "BLASTX",
+                            )?);
+                            *place.insert(run_subjects.len() - 1)
+                        }
+                    };
                     hit.hit.s_idx = u32::try_from(place)?;
                 }
                 run_hits.push(hit);

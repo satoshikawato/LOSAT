@@ -4867,7 +4867,7 @@ impl BatchReports<'_> {
                 // The library's records name a database's sequences through this event.
                 if outputs.hits.is_some() {
                     if let Some(observer) = outputs.observer.as_deref_mut() {
-                        observer.database_subjects(reported_subjects.library_subjects(database));
+                        observer.database_subjects(reported_subjects.library_subjects(database)?);
                     }
                 }
                 (

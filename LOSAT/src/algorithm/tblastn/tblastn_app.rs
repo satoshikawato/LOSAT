@@ -2499,7 +2499,7 @@ fn search(
             outputs.hits.is_some(),
             outputs.observer.as_deref_mut(),
         ) {
-            observer.database_subjects(reported.library_subjects(database));
+            observer.database_subjects(reported.library_subjects(database)?);
         }
         drop(database_stores);
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (cited at

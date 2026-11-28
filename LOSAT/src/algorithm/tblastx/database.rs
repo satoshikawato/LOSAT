@@ -1221,10 +1221,6 @@ pub(crate) fn reported_subjects(
     let mut sources = Vec::new();
     // The holders whose records the writers write for subjects (`shared::ShownHolders`).
     let holders = shared::ShownHolders::new(&database.db, false, PROGRAM);
-    let titled = |ordinal: u32| match titles.get(&ordinal) {
-        Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
-        _ => None,
-    };
     for (rank, &ordinal) in ordinals.iter().enumerate() {
         // The sequence whose letters and length the reports read: the subject's, or its holder's.
         let mut read_ordinal = ordinal;
@@ -1258,12 +1254,12 @@ pub(crate) fn reported_subjects(
                         &loads,
                         ordinal as usize,
                         (ordinal, subject),
-                        titled,
                         (
                             shared::x_nucleotide_length(&database.db, ordinal, PROGRAM)?,
                             true,
                         ),
                         (shown.light_length, seen_all.contains(&ordinal)),
+                        seen,
                     )?
                 } else {
                     None
@@ -1405,14 +1401,13 @@ impl ReportedSubjects {
     pub(crate) fn library_subjects(
         &self,
         database: &TblastxDatabase,
-    ) -> Vec<crate::api::local_blast::ReportedSubject> {
+    ) -> Result<Vec<crate::api::local_blast::ReportedSubject>> {
         shared::library_subjects(
             &database.db,
             &self.records,
             &self.ordinals,
             &self.parsed,
             &self.sources,
-            |rank| self.lengths[rank] as usize,
             PROGRAM,
         )
     }

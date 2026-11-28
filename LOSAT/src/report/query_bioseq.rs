@@ -165,6 +165,13 @@ impl QueryBioseqs {
         }
     }
 
+    /// Whether the scope of some query of the run finds a query for the database sequence
+    /// `ordinal` (a noted pair of any query): NCBI's data loader may then not load it, so the
+    /// lines of its record may not hold ids for others (`common::database::ShownHolders::shown`).
+    pub fn finds(&self, ordinal: u32) -> bool {
+        !self.seen.is_empty() && self.seen.keys().any(|&(_, seen)| seen == ordinal)
+    }
+
     /// Whether every reporting query in `queries` resolves `ordinal` to a noted query Bioseq:
     /// NCBI's scope then finds the query before calling the BLAST database data loader in every
     /// batch that reports `ordinal`.
@@ -282,6 +289,12 @@ impl<'a> SeenFrom<'a> {
     #[inline]
     pub fn any(&self) -> bool {
         self.seen.is_some()
+    }
+
+    /// Whether the scope of some query of the run finds a query for the database sequence
+    /// `ordinal` (`QueryBioseqs::finds`).
+    pub fn finds(&self, ordinal: u32) -> bool {
+        self.seen.is_some_and(|seen| seen.finds(ordinal))
     }
 
     /// The subject index by which a check of the rows of the call's query `query` takes the

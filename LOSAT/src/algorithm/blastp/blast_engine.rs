@@ -10980,7 +10980,7 @@ fn run_call(
         outputs.hits.is_some(),
         outputs.observer.as_deref_mut(),
     ) {
-        observer.database_subjects(titles.library_subjects(database));
+        observer.database_subjects(titles.library_subjects(database)?);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1553-1554

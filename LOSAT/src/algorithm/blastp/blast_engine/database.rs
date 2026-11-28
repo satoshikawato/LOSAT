@@ -3068,7 +3068,7 @@ impl ListedTitles<'_> {
     pub(super) fn library_subjects(
         &self,
         database: &BlastpDatabase,
-    ) -> Vec<crate::api::local_blast::ReportedSubject> {
+    ) -> Result<Vec<crate::api::local_blast::ReportedSubject>> {
         (0..self.listed.ordinals.len())
             .map(|rank| {
                 shared::library_subject(
@@ -3077,7 +3077,6 @@ impl ListedTitles<'_> {
                     self.source(rank),
                     self.listed.ordinals[rank],
                     self.parsed_subject(rank),
-                    self.listed.x_lengths[rank] as usize,
                     true,
                     self.program,
                 )
@@ -3238,17 +3237,13 @@ impl ListedTitles<'_> {
         flags: (bool, bool),
     ) -> Result<Option<crate::report::shown_bioseq::ShownBioseq>> {
         let ordinal = self.listed.ordinals[rank];
-        let holder_record = |holder: u32| {
-            let rank = self.listed.ordinals.binary_search(&holder).ok()?;
-            self.parsed_subject(rank)
-        };
         let Some(bioseq) = holders.shown(
             loads,
             rank,
             (ordinal, subject),
-            holder_record,
             (0, false),
             flags,
+            self.seen(),
         )?
         else {
             return Ok(None);

@@ -227,11 +227,11 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-phi_pattern` with two or more queries and `-num_iterations` other than 1 | Refused. NCBI crashes at the second query. |
+| `-phi_pattern` with two or more queries and `-num_iterations` other than 1 | Refused at the second query, after the first query's reports. NCBI crashes at the second query; it has written the first query's reports before, except what its output buffer still holds (with `-outfmt` 0, 5 and 18 and in the `-out_ascii_pssm` file, their end). |
 | `-phi_pattern` with `-outfmt` 13 to 16 | Refused: not yet supported. `-outfmt` 8, 9 and 12 get NCBI's own error (exit status 3) where an alignment is found, and no output otherwise. |
 | `-phi_pattern` with `-sum_stats true` | Refused: not yet supported. |
 | `-phi_pattern` with a subject longer than 5,000,000 residues | Refused: not yet supported. NCBI searches such a sequence in overlapping parts. |
-| `-phi_pattern`: the order of these refusals | NCBI's own errors come first: a pattern that NCBI rejects, a query without the pattern, a last query record without letters, and with `-outfmt 11` NCBI's error archive. With a matrix and gap costs that have no pattern statistics, LOSAT gives NCBI's answer (its message and no hits), in one round whatever `-num_iterations` says. |
+| `-phi_pattern`: the order of these refusals | NCBI's own errors come first: a pattern that NCBI rejects, a query without the pattern, a last query record without letters, and with `-outfmt 11` NCBI's error archive. With a matrix and gap costs that have no pattern statistics, LOSAT gives NCBI's answer (its message and no hits), in one round whatever `-num_iterations` says; with `-outfmt 18`, where NCBI's report stops with a null pointer exception, LOSAT refuses there. |
 | A `-phi_pattern` pattern with an unterminated `(`, `{` or `x(` | Refused. NCBI reads past the end of the pattern and crashes. |
 | A `-phi_pattern` pattern with `x(n,m)` that does not give two numbers (`x(a,b)`, `x(3,)`) | Refused. NCBI reads values that were never set, and its result changes from run to run. |
 | A `-phi_pattern` pattern with a count outside 32-bit integers | Refused. NCBI's count overflows. |

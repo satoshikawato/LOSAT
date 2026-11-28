@@ -35,6 +35,11 @@ pub(crate) struct BlastpXml<'a> {
     /// By query: the warning messages of its result (the O characters read as X, a query
     /// without letters, an invalid query).
     pub messages: Vec<Vec<String>>,
+    /// By query, where its result carries the messages of another query, that query's record,
+    /// whose id the message names (psiblast `-phi_pattern`: each occurrence's result carries the
+    /// messages of its batch's query of the same index, `PhiCall::message_queries`); `None`: each
+    /// result's own query.
+    pub message_records: Option<&'a [crate::blastinput::fasta_reader::FastaRecord]>,
     pub subjects: XmlSubjects<'a>,
     /// NCBI's messages about the taxonomy database that come before the `Hit`s' own
     /// (XML2 and JSON with `-db`; nothing otherwise).
@@ -99,7 +104,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                 .any(|hsp_list| !hsp_list.hsps.is_empty())
         })
     };
-    let texts = names::query_texts(
+    let mut texts = names::query_texts(
         program,
         &xml.queries.records[..reports],
         true,
@@ -114,6 +119,20 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             )
         },
     )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:258-293
+    // A result that carries another query's messages names that query in its message
+    // (`message_records`).
+    if let Some(records) = xml.message_records {
+        for (q_idx, (text, record)) in texts.iter_mut().zip(records).enumerate() {
+            text.message = names::labelled_query_text(
+                record.warning_id(),
+                &record.title,
+                &xml.messages[q_idx],
+                has_hits(q_idx),
+            )
+            .message;
+        }
+    }
     // The names of the subjects with hits in the written reports, made once each; a title NCBI
     // crashes on is refused here, before the first byte.
     let mut subjects = SubjectNameCache::new(&xml.subjects);

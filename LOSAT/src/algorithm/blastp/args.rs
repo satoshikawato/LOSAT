@@ -363,6 +363,12 @@ pub struct BlastpArgs {
     /// `-subject`, the call's (`api::run`, from its application start); `None` in LOSAT Web, which
     /// has no file system. Not a public option.
     pub matrix_search: Option<crate::blastinput::ncbi_environment::MatrixSearch>,
+    /// The posts of the database handler's reading of the taxid or seqid list of `-db`
+    /// (`DbFilterArgs::resolve`: a missing taxonomy file, a dropped token of a seqid list), set
+    /// where the run reads the list (`blast_engine::resolve_db_list`): psiblast's second
+    /// `SetOptions` of a PHI-BLAST search with rounds runs that handler again and posts them again
+    /// (`PhiRounds::posts`). Empty elsewhere. Not a public option.
+    pub(crate) db_handler_posts: Vec<u8>,
     /// `SERIAL_VERIFY_DATA_WRITE` of the run's application settings when it changes what NCBI
     /// writes (`ncbi_environment::WriteVerification`), set with the settings by the command line's
     /// `run` and the library's entries; `-in_pssm`'s reader refuses a PSSM that the run would write
@@ -472,6 +478,7 @@ impl BlastpArgs {
             app: Default::default(),
             taxdb_setting: Default::default(),
             matrix_search: Default::default(),
+            db_handler_posts: Default::default(),
             write_verification: Default::default(),
             read_verification: Default::default(),
             inclusion_ethresh: Default::default(),
@@ -1422,10 +1429,14 @@ impl BlastpArgs {
 
     /// NCBI's second `SetOptions` of a PHI-BLAST search with rounds (item PS8b): psiblast removes
     /// the pattern from the arguments and makes the PSI-BLAST options handle of the rounds after
-    /// round 1 with every argument handler again (`check_options_with` of the arguments without
-    /// `-phi_pattern`), which posts the handlers' warnings again and validates the options as
-    /// PSI-BLAST's (the lookup table's checks that PHI-BLAST skips). The options differ from
-    /// PHI-BLAST's in what the PHI-BLAST handle leaves out (`PhiLaterOptions`).
+    /// round 1 with every argument handler again, which posts the handlers' warnings again and
+    /// validates the options as PSI-BLAST's (the lookup table's checks that PHI-BLAST skips): the
+    /// database handler's reading of the taxid or seqid list first (its posts as the first reading
+    /// made them, `db_handler_posts`), then the others (`check_options_with` of the arguments
+    /// without `-phi_pattern`). The options differ from PHI-BLAST's in what the PHI-BLAST handle
+    /// leaves out (`PhiLaterOptions`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2464-2512
     #[cold]
     #[inline(never)]
     fn phi_second_set_options(&self, read_files: bool) -> PhiRounds {
@@ -1433,7 +1444,7 @@ impl BlastpArgs {
         if let Some(pssm) = psi.psiblast_pssm.as_mut() {
             pssm.phi_pattern = None;
         }
-        let mut posts = Vec::new();
+        let mut posts = self.db_handler_posts.clone();
         let later = psi
             .check_options_with(read_files, &mut posts)
             .map(|resolved| PhiLaterOptions {
@@ -1461,7 +1472,8 @@ impl BlastpArgs {
 /// end, and fails first (`psi_round::run_queries`).
 #[derive(Debug, Clone)]
 pub(crate) struct PhiRounds {
-    /// The second `SetOptions`' posts (the formatting handler's warnings).
+    /// The second `SetOptions`' posts: the database handler's (`BlastpArgs::db_handler_posts`),
+    /// then the formatting handler's warnings.
     pub(crate) posts: Vec<u8>,
     /// The PSI-BLAST options of the later rounds, or the second `SetOptions`' error.
     pub(crate) later: std::result::Result<PhiLaterOptions, PhiRoundsError>,

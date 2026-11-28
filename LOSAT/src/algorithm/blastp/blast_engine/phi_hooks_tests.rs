@@ -185,3 +185,87 @@ fn split_hit_list_by_occurrence_keeps_indices_past_u16_max_and_reordered_ties_se
         .iter()
         .all(|hsp| hsp.subject_frame == 0));
 }
+
+fn phi_call<'p>(
+    pattern: &'p crate::algorithm::phi_search::pattern::PhiPattern,
+    queries: &[&str],
+    batches: Vec<PhiBatch>,
+    no_statistics: Option<String>,
+) -> PhiCall<'p> {
+    use crate::algorithm::phi_search::pattern::AMINOACID_TO_NCBISTDAA;
+    let rows =
+        crate::utils::matrix::protein_score_rows(crate::config::compat::ScoringMatrix::Blosum62);
+    let score = |q: u8, s: u8| rows.score(q, s);
+    let searches = queries
+        .iter()
+        .map(|text| {
+            let query: Vec<u8> = text
+                .bytes()
+                .map(|byte| AMINOACID_TO_NCBISTDAA[byte as usize])
+                .collect();
+            (no_statistics.is_none() && !query.is_empty()).then(|| {
+                engine::setup(&PhiSetup {
+                    pattern,
+                    query: &query,
+                    segments: &[(0, query.len() - 1)],
+                    score: &score,
+                    karlin: stats::phi_karlin("BLOSUM62", 11, 1).unwrap(),
+                    db_length: 100,
+                    db_num_seqs: 1,
+                    evalue: 10.0,
+                    gap_open: 11,
+                    gap_extend: 1,
+                    x_drop_bits: 15.0,
+                    x_drop_final_bits: 25.0,
+                })
+                .unwrap()
+            })
+        })
+        .collect();
+    PhiCall {
+        searches,
+        shown_gaps: vec![None; queries.len()],
+        batches,
+        lookup_hits: AtomicI64::new(0),
+        refusal: Mutex::new(None),
+        no_statistics,
+        occurrence_lists: Vec::new(),
+    }
+}
+
+// psiblast `-phi_pattern` in BLAST XML and the reports' warnings (PS8b fix round 1): result `i`
+// of a batch carries the messages of the batch's query `i` and none past its last query (NCBI
+// BLAST+ 2.17.0 `PS/ps8b/fix1/ncbi/o2.5`, `e_o2.5`); where nothing is searched each query of the
+// batch is a result of its own (`n.b90.two.5`).
+#[test]
+fn each_phi_result_carries_the_messages_of_the_batch_query_of_its_index() {
+    let pattern = crate::algorithm::phi_search::pattern::PhiPattern::compile(b"G-K-S").unwrap();
+    let batches = vec![
+        PhiBatch {
+            queries: 0..1,
+            searched: 0,
+        },
+        PhiBatch {
+            queries: 1..3,
+            searched: 2,
+        },
+    ];
+    let queries = ["MKAGKSTLLWGKSAA", "", "MGKSWGKSLGKSAAA"];
+    let searched = phi_call(&pattern, &queries, batches.clone(), None);
+    assert_eq!(searched.message_queries(&batches[0]), [Some(0), None]);
+    assert_eq!(
+        searched.message_queries(&batches[1]),
+        [Some(1), Some(2), None]
+    );
+    assert_eq!(searched.results(), 5);
+    let per_query = [b"a".to_vec(), b"b".to_vec(), b"c".to_vec()];
+    assert_eq!(searched.result_warnings(&batches[1], &per_query), b"bc");
+    let unsearched = phi_call(
+        &pattern,
+        &queries,
+        batches.clone(),
+        Some("Matrix BLOSUM90 not allowed in PHI-BLAST\n".to_string()),
+    );
+    assert_eq!(unsearched.message_queries(&batches[1]), [Some(1), Some(2)]);
+    assert_eq!(unsearched.results(), 3);
+}

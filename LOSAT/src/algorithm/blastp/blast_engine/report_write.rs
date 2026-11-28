@@ -663,6 +663,7 @@ fn write_xml_of<const PHI: bool>(
         queries: &query_names,
         stats: xml_stats,
         messages: xml_messages,
+        message_records: None,
         subjects: xml_subjects,
         taxdb_notes: xml_taxdb_notes,
         masks: xml_masks,
@@ -785,6 +786,7 @@ fn write_phi_xml(
     writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: &mut Option<QueryWarnings<'_>>,
 ) -> Result<()> {
+    use crate::report::pairwise::psiblast_round::phi_round::PhiFooter;
     let ReportView {
         reports,
         ranges,
@@ -851,18 +853,28 @@ fn write_phi_xml(
             searched_lengths: &lengths,
             placements: &placements,
         };
+        // The statistics of the batch's first query's context, as its footer
+        // (`PhiCall::footer`): none without NCBI's Karlin block or letters in that context.
+        let footer = phi.call.footer(batch);
         let stats = result_queries
             .iter()
-            .map(|&q_idx| match search {
-                Some(search) => XmlStats {
+            .map(|_| match (search, footer) {
+                (Some(search), PhiFooter::Searched) => XmlStats {
                     hsp_len: search.pattern.min_match_length as i32,
                     eff_space: search.search_space,
                     kappa: search.karlin.k,
                     lambda: search.karlin.lambda,
                     entropy: search.karlin.h,
                 },
-                None => xml.stats[q_idx],
+                _ => XmlStats::NONE,
             })
+            .collect();
+        // Each result's messages are those of its batch's query of the same index
+        // (`PhiCall::message_queries`), under that query's id.
+        let message_queries = phi.call.message_queries(batch);
+        let message_records: Vec<FastaRecord> = message_queries
+            .iter()
+            .map(|&q_idx| query_records[q_idx.unwrap_or(batch.first())].clone())
             .collect();
         let masks = result_queries
             .iter()
@@ -880,10 +892,13 @@ fn write_phi_xml(
             run,
             queries: &names,
             stats,
-            messages: result_queries
+            messages: message_queries
                 .iter()
-                .map(|&q_idx| xml.messages[q_idx].clone())
+                .map(|&q_idx| {
+                    q_idx.map_or_else(Vec::new, |q_idx| phi.result_messages[q_idx].clone())
+                })
                 .collect(),
+            message_records: Some(&message_records),
             taxdb_notes: Default::default(),
             masks,
             searched: result_queries
@@ -935,6 +950,9 @@ pub(super) struct PhiPairwise<'a> {
     #[allow(clippy::type_complexity)]
     pub(super) rows_of_lists:
         &'a dyn Fn(&[Option<BlastpHitList>], usize) -> Result<Vec<PairwiseHit>>,
+    /// Each query's messages (`report_prep::phi_result_messages`), which BLAST XML writes in the
+    /// `Iteration_message` of each result that carries them (`PhiCall::message_queries`).
+    pub(super) result_messages: &'a [Vec<String>],
     /// Each query's messages as PHI-BLAST's report writes them before the query's report
     /// (`report_prep::phi_result_warnings`).
     pub(super) result_warnings: &'a [Vec<u8>],
@@ -942,17 +960,18 @@ pub(super) struct PhiPairwise<'a> {
 
 impl<'a> PhiPairwise<'a> {
     /// The reports of PHI-BLAST's call `call` (`None` without a pattern) with its queries'
-    /// messages `result_warnings` (`None` likewise).
+    /// messages and the warnings that write them, `results` (`None` likewise).
     #[allow(clippy::type_complexity)]
     pub(super) fn of(
         call: Option<&'a super::phi_hooks::PhiCall<'a>>,
         rows_of_lists: &'a dyn Fn(&[Option<BlastpHitList>], usize) -> Result<Vec<PairwiseHit>>,
-        result_warnings: Option<&'a [Vec<u8>]>,
+        results: Option<(&'a [Vec<String>], &'a [Vec<u8>])>,
     ) -> Option<Self> {
-        call.zip(result_warnings)
-            .map(|(call, result_warnings)| Self {
+        call.zip(results)
+            .map(|(call, (result_messages, result_warnings))| Self {
                 call,
                 rows_of_lists,
+                result_messages,
                 result_warnings,
             })
     }
@@ -1746,6 +1765,7 @@ pub(super) fn write_custom_tabular(
                 &mut writer,
                 warnings.as_mut(),
                 args.is_html,
+                phi.call.no_statistics.as_deref(),
             )?;
             writer.flush()?;
             return Ok(());

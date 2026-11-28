@@ -164,19 +164,18 @@ pub(super) fn query_warning_lines(
     (lines, later.then_some(later_lines))
 }
 
-/// psiblast `-phi_pattern`: each query's messages as PHI-BLAST's report writes them on its output
-/// (`query_warnings::phi_result_warning`), those of `query_warning_lines` and NCBI's message of a
-/// matrix and gap costs without its table's Karlin block (`no_statistics`, for every query).
+/// psiblast `-phi_pattern`: each query's messages as PHI-BLAST's results carry them, those of
+/// `query_warning_lines` and NCBI's message of a matrix and gap costs without its table's Karlin
+/// block (`no_statistics`, for every query). The reports write them on the output
+/// (`phi_result_warnings`), BLAST XML in each result's `Iteration_message`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:170
-pub(super) fn phi_result_warnings(
+pub(super) fn phi_result_messages(
     prep: &ReportPrep<'_, '_>,
     no_statistics: Option<&str>,
-) -> Vec<Vec<u8>> {
+) -> Vec<Vec<String>> {
     let ReportPrep {
-        args,
         reports,
-        ranges,
         query_records,
         query_batch_skipped,
         filtered_empty,
@@ -195,12 +194,34 @@ pub(super) fn phi_result_warnings(
                 filtered_empty && !query_batch_skipped[q_idx],
             );
             messages.extend(no_statistics.map(str::to_string));
+            messages
+        })
+        .collect()
+}
+
+/// The messages of each query (`phi_result_messages`) as PHI-BLAST's report writes them on its
+/// output (`query_warnings::phi_result_warning`).
+pub(super) fn phi_result_warnings(
+    prep: &ReportPrep<'_, '_>,
+    messages: &[Vec<String>],
+) -> Vec<Vec<u8>> {
+    let ReportPrep {
+        args,
+        ranges,
+        query_records,
+        ..
+    } = *prep;
+    query_records
+        .iter()
+        .zip(messages)
+        .enumerate()
+        .map(|(q_idx, (record, messages))| {
             crate::report::query_warnings::phi_result_warning(
                 args.first_query_ordinal
                     + ranges.x_ordinal_base
                     + ranges.query_input.ordinal(q_idx),
                 record,
-                &messages,
+                messages,
             )
         })
         .collect()

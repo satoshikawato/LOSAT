@@ -19,7 +19,7 @@ Output formats:
 - `-outfmt 18` with a taxonomy database that names a taxid of a shown group with the text `<@bl_taxid@>` is refused. NCBI writes an uninitialised number. LOSAT stops before the first byte.
 - `-outfmt 18` with a `./.ncbirc` that has a syntax error is refused. NCBI's report stops with an exception. LOSAT stops before the first byte.
 - `-outfmt 18` with `[NCBI] .Inherits` in the `.ncbirc` is refused. NCBI reads the files it names.
-- `-outfmt 18` with a query batch that NCBI does not search is refused. No query of it has a valid context ("Could not calculate ungapped Karlin-Altschul parameters", such as one query of only `N` or `X`).
+- `-outfmt 18` with a query batch that NCBI does not search is refused. No query of it has a valid context ("Could not calculate ungapped Karlin-Altschul parameters", such as one query of only `N` or `X`), or, with `psiblast -phi_pattern`, the matrix and gap costs have no pattern statistics ("Matrix BLOSUM90 not allowed in PHI-BLAST").
 - There NCBI stops with a null pointer exception (exit status 255). LOSAT writes what NCBI writes before it, then stops with the error.
 - A query without a valid context in a batch that NCBI does search gets the report of a query without hits, as in NCBI.
 - `-sorthits` is refused when the description table lists every subject and only the last subject has a total score above 99999 bits. NCBI pads that row with spaces without end and never finishes the report. LOSAT writes what NCBI writes before the table, then stops.

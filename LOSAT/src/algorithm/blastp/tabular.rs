@@ -795,6 +795,8 @@ pub(super) struct PhiTaxBatch {
 /// the scope finds as the query shows it in each (`seen_at` of the batch's query with letters).
 /// The reports are made before the first byte (`tax_report::report_batch`). The texts of the
 /// subjects' reads are not placed by query here (the warnings' sink takes the lookups' texts).
+/// Without NCBI's Karlin block for the matrix and gap costs (`no_statistics`, the message) no
+/// batch is searched, and LOSAT refuses the report there, where NCBI's throws.
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2058-2065
 #[cold]
 pub(super) fn write_phi_tax_report(
@@ -804,6 +806,7 @@ pub(super) fn write_phi_tax_report(
     writer: &mut crate::cli::NcbiOstream<'_>,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     html: bool,
+    no_statistics: Option<&str>,
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, TaxQuery};
     let mut queries = Vec::new();
@@ -835,6 +838,10 @@ pub(super) fn write_phi_tax_report(
         html,
         Some(&seen),
     )?;
+    let report = match no_statistics {
+        Some(cause) => report.with_unsearched_cause(cause),
+        None => report,
+    };
     let mut result = 0;
     for batch in batches {
         if let Some(warnings) = warnings.as_deref_mut() {

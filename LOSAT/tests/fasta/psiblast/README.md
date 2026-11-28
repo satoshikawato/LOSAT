@@ -125,3 +125,7 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
 - `ps8b_q3_first.faa` (line PS, PS8b): the first query of `ps8_q3.faa` alone, NCBI's run of row
   `db.phi.b.q3first.it2.6` that writes the rows LOSAT writes before its refusal of `db.phi.b.q3.it2.6` (NCBI crashes at
   the second query of three).
+- `ps8b_o2.faa` and `ps8b_e_o2.faa` (line PS, PS8b fix round 1): RAS2 of *S. cerevisiae* with an `O` as its 201st
+  letter and a second place of `tests/fixtures/phi/ploop.pat` (two results of one PHI query, the first with the query's
+  message), and the same after a record without letters (`empty first`: each result carries the message of the
+  batch's record of its index), rows `db.phi.b.o2.5` and `db.phi.b.eo2.5`.

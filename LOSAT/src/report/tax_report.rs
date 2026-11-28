@@ -933,6 +933,9 @@ enum Step {
 pub struct TaxReport {
     lookups: TaxLookups,
     queries: Vec<Option<(Vec<Step>, Text)>>,
+    /// NCBI's message by which its queries without a report are not searched where it is not a
+    /// query's invalid context (`with_unsearched_cause`), for LOSAT's refusal of their report.
+    unsearched_cause: Option<String>,
     /// Whether the batch's first lookup has written its texts (the texts of opening with it).
     wrote_first: std::cell::Cell<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:899
@@ -988,9 +991,37 @@ impl TaxReport {
         Ok(TaxReport {
             lookups,
             queries,
+            unsearched_cause: None,
             wrote_first: std::cell::Cell::new(false),
             html,
         })
+    }
+
+    /// The report whose queries without a report are not searched because of NCBI's message
+    /// `cause` (psiblast `-phi_pattern` with a matrix and gap costs that PHI-BLAST's table has no
+    /// Karlin block for, `PhiCall::no_statistics`), which LOSAT's refusal of their report names
+    /// (`write_result`).
+    #[cold]
+    pub fn with_unsearched_cause(mut self, cause: &str) -> Self {
+        self.unsearched_cause = Some(cause.trim_end().to_string());
+        self
+    }
+
+    /// LOSAT's refusal of the report of a query that is not searched (`write_result`).
+    #[cold]
+    #[inline(never)]
+    fn unsearched_refusal(&self) -> TaxReportRefusal {
+        let cause = match &self.unsearched_cause {
+            Some(cause) => format!("-phi_pattern: \"{cause}\""),
+            None => format!(
+                "no query of its batch has a valid context: \"{}\"",
+                crate::report::query_warnings::INVALID_QUERY_MESSAGE
+            ),
+        };
+        TaxReportRefusal(format!(
+            "the organism report (outfmt 18) of a query that is not searched ({cause}), where NCBI BLAST+ stops with a null pointer exception; this is not supported by LOSAT's {}",
+            self.lookups.program
+        ))
     }
 
     /// Writes the report of query `q_idx` (of the `queries` given to `new`): the caption, the
@@ -1073,12 +1104,7 @@ impl TaxReport {
         // after the `Query=` block, before `CTaxFormat` reads `./.ncbirc`. No result to check: LOSAT
         // refuses there (PD-LOSAT-NCBI-DEFECTS rule 3).
         let Some((steps, text)) = &self.queries[q_idx] else {
-            return Err(TaxReportRefusal(format!(
-                "the organism report (outfmt 18) of a query that is not searched (no query of its batch has a valid context: \"{}\"), where NCBI BLAST+ stops with a null pointer exception; this is not supported by LOSAT's {}",
-                crate::report::query_warnings::INVALID_QUERY_MESSAGE,
-                self.lookups.program
-            ))
-            .into());
+            return Err(self.unsearched_refusal().into());
         };
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:165-173
         // The report's two reads of `./.ncbirc` (`x_InitTaxFormat`) post before its reads and

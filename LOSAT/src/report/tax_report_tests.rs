@@ -649,6 +649,41 @@ fn a_query_that_ncbi_did_not_search_is_refused_after_its_query_block() {
     }
 }
 
+/// psiblast `-phi_pattern` with a matrix and gap costs without PHI-BLAST's statistics: NCBI
+/// searches no query and its report stops with the same null pointer exception (NCBI BLAST+
+/// 2.17.0, `PS/tmp/rev8b/ncbi/n.b90.18`); LOSAT's refusal names NCBI's message (PS8b fix round 1).
+#[test]
+fn the_refusal_of_an_unsearched_phi_query_names_ncbis_message() {
+    let subjects = Subjects(vec![vec![line("AAA00001", "a_title", 9606)]]);
+    let queries = [TaxQuery {
+        title: b"q1",
+        length: 250,
+        hsps: None,
+    }];
+    let report = TaxReport::new(&queries, &subjects, lookups(None), false)
+        .unwrap()
+        .with_unsearched_cause("Matrix BLOSUM90 not allowed in PHI-BLAST\n");
+    let mut out = Vec::new();
+    let mut sink = OutputSink::Writer(&mut out);
+    let error = report
+        .write_query(
+            0,
+            &mut crate::cli::NcbiOstream::sink(&mut sink).unwrap(),
+            &mut io::sink(),
+            None,
+            queries[0].title,
+            queries[0].length,
+        )
+        .unwrap_err();
+    assert!(error.is::<TaxReportRefusal>(), "{error}");
+    assert!(
+        error.to_string().starts_with(
+            "the organism report (outfmt 18) of a query that is not searched (-phi_pattern: \"Matrix BLOSUM90 not allowed in PHI-BLAST\"), where NCBI BLAST+ stops with a null pointer exception"
+        ),
+        "{error}"
+    );
+}
+
 /// `Subjects` whose loads throw for the subjects `thrown` (a batch whose prefetch is off).
 struct ThrowingSubjects(Subjects, Vec<usize>);
 

@@ -4577,11 +4577,8 @@ pub fn run(
     // and before `CStdCmdLineArgs`, which opens the query and the output: its warning before
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
-    let list = match &args.db {
-        Some(_) => match args
-            .db_filter
-            .resolve(&settings, args.app.ncbi_name(), &mut *diagnostics)
-        {
+    let list = match args.db {
+        Some(_) => match resolve_db_list(&mut args, &settings, &mut *diagnostics) {
             Ok(list) => list,
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -5563,6 +5560,23 @@ pub fn run_local_database(
     })
 }
 
+/// The taxid or seqid list of `-db` as the handler of the database arguments reads it
+/// (`DbFilterArgs::resolve`), its posts written to `diagnostics` and kept in `args` for psiblast's
+/// second `SetOptions`, which runs that handler again (`BlastpArgs::db_handler_posts`).
+fn resolve_db_list(
+    args: &mut BlastpArgs,
+    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
+    diagnostics: &mut dyn Write,
+) -> Result<Option<crate::seqdb::DbList>> {
+    let mut posts = Vec::new();
+    let list = args
+        .db_filter
+        .resolve(settings, args.app.ncbi_name(), &mut posts);
+    diagnostics.write_all(&posts)?;
+    args.db_handler_posts = posts;
+    list
+}
+
 /// `run_local_database` from the taxid or seqid list on.
 fn search_database(
     mut args: BlastpArgs,
@@ -5572,9 +5586,7 @@ fn search_database(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     // The handler of the database arguments reads the list before the other handlers (`run`).
-    let list =
-        args.db_filter
-            .resolve(&settings, args.app.ncbi_name(), &mut *outputs.diagnostics)?;
+    let list = resolve_db_list(&mut args, &settings, &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     args.matrix_search = Some(settings.matrix_search.clone());
@@ -10926,13 +10938,18 @@ fn run_call(
     };
     let (mut query_warning_lines, kept) = report_prep::query_warning_lines(&prep);
     // PHI-BLAST's reports (`report_write::write_phi_report`) with each query's messages.
-    let phi_result_warnings = phi_call
+    let phi_result_messages = phi_call
         .as_ref()
-        .map(|call| report_prep::phi_result_warnings(&prep, call.no_statistics.as_deref()));
+        .map(|call| report_prep::phi_result_messages(&prep, call.no_statistics.as_deref()));
+    let phi_result_warnings = phi_result_messages
+        .as_deref()
+        .map(|messages| report_prep::phi_result_warnings(&prep, messages));
     let phi_reports = report_write::PhiPairwise::of(
         phi_call.as_ref(),
         &rows_of_lists,
-        phi_result_warnings.as_deref(),
+        phi_result_messages
+            .as_deref()
+            .zip(phi_result_warnings.as_deref()),
     );
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,

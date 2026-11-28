@@ -301,8 +301,8 @@ pub(crate) struct RoundOutcome {
     /// come after the round's report, before the PSSM's error.
     pub(crate) next_warnings: super::pssm::PssmReadMessages,
     pub(crate) searched: Option<(crate::core::psi::KarlinBlk, crate::core::psi::KarlinBlk)>,
-    /// The result sets of the round (BLAST XML's `Iteration`s): 1, or PHI-BLAST's pattern
-    /// occurrences (item PS8b).
+    /// The result sets of the round (BLAST XML's `Iteration`s): 1, or PHI-BLAST's results (item
+    /// PS8b, `PhiCall::results`: its pattern occurrences, one for a query that is not searched).
     pub(crate) result_sets: usize,
     /// PHI-BLAST's round 1 (item PS8b): its batch's context 0 as the options handle keeps it
     /// (`phi_hooks::request_searched`). NCBI's archive of each later round is written with that

@@ -218,16 +218,33 @@ impl PhiCall<'_> {
         }
     }
 
+    /// The query whose messages each result of the batch carries (`BlastBuildSearchResultSet`
+    /// gives result `i` the messages of the search's query `i`): the batch's query `i`, `None`
+    /// for a result past the batch's last query (an occurrence after the first of a batch of one
+    /// query carries none, NCBI BLAST+ 2.17.0 `PS/ps8b/fix1/ncbi/o2.5`).
+    pub(super) fn message_queries(&self, batch: &PhiBatch) -> Vec<Option<usize>> {
+        (0..self.result_queries(batch).len())
+            .map(|result| Some(batch.queries.start + result).filter(|q| batch.queries.contains(q)))
+            .collect()
+    }
+
+    /// The count of the call's results: each batch's (`result_queries`), one `Iteration` each in
+    /// BLAST XML.
+    pub(super) fn results(&self) -> usize {
+        self.batches
+            .iter()
+            .map(|batch| self.result_queries(batch).len())
+            .sum()
+    }
+
     /// The messages that the batch's report writes before it (`PrintPhiResult` writes each
-    /// result's warnings): result `i` carries the messages of the batch's query `i`, written as
+    /// result's warnings): those of the query of each result (`message_queries`), written as
     /// `per_query` holds them (`query_warnings::phi_result_warning`).
     pub(super) fn result_warnings(&self, batch: &PhiBatch, per_query: &[Vec<u8>]) -> Vec<u8> {
-        let results = self.result_queries(batch).len();
-        per_query[batch.queries.clone()]
-            .iter()
-            .take(results)
+        self.message_queries(batch)
+            .into_iter()
             .flatten()
-            .copied()
+            .flat_map(|q_idx| per_query[q_idx].iter().copied())
             .collect()
     }
 

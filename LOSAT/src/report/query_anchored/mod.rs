@@ -1739,8 +1739,11 @@ fn write_feature_line<D: super::pairwise::RowDecoration>(
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1594-1627
 /// (`k_IdStartMargin`, `k_StartSequenceMargin` and `k_SeqStopMargin` are 2, showalign.cpp:96-98;
 /// the `size_t` sum of `maxStartLen` less `startLen`, plus 2, is at least 1.) `html`: the view's
-/// `eHtml` (`View::html`), which `x_OutputSeq` reads for the row's masks only.
+/// `eHtml` (`View::html`), which `x_OutputSeq` reads for the row's masks only. Inlined into each
+/// instance of its one caller (`display_row_data_set`), as the compiler inlines it into a caller
+/// of one instance: the row lines of every program's outfmt 1 to 4 make no call.
 #[allow(clippy::too_many_arguments)]
+#[inline(always)]
 fn display_sequence_line(
     out: &mut Vec<u8>,
     rows: &RowData,

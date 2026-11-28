@@ -1126,17 +1126,17 @@ pub(super) fn round_outcome(
         next,
         next_warnings,
         searched,
-        result_sets: phi.map_or(1, |phi| phi.occurrences(0)),
+        result_sets: phi.map_or(1, super::phi_hooks::PhiCall::results),
         phi_handle: phi.and_then(|phi| super::phi_hooks::round_handle(phi, contexts)),
     });
     Ok(found_before)
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:290-310
-/// The result of the first pattern occurrence of PHI-BLAST's round 1 (`(*results)[0]`, the
-/// Seq-aligns and the ancillary data that the next round's PSSM reads): the query's hit list split
-/// by occurrence as its reports split it (`phi_hooks::split_hit_list_by_occurrence`), its first
-/// part.
+/// The result of the first pattern occurrence of PHI-BLAST's round 1 (the first result of the
+/// round's result set, whose Seq-aligns and ancillary data the next round's PSSM reads): the
+/// query's hit list split by occurrence as its reports split it
+/// (`phi_hooks::split_hit_list_by_occurrence`), its first part.
 #[cold]
 #[inline(never)]
 fn phi_first_occurrence(

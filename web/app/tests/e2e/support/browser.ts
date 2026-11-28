@@ -11,6 +11,7 @@ import { SESSION_LOCK_PREFIX, TMP_DIRECTORY } from '../../../src/infra/data/sess
 import { navigate } from './navigate';
 import { E2E_ORIGIN } from './origin';
 import { described, paste, showOutput, submit } from './search';
+import { test } from './test';
 
 export const ORIGIN = E2E_ORIGIN;
 
@@ -155,13 +156,25 @@ const TYPES: Readonly<Record<string, string>> = {
 };
 
 /**
+ * How long the hook or test that builds the harness (`buildHarness`) may take at least: the application build's limit
+ * (playwright.config.ts, `webServer.timeout`). The build is this process's CPU work (Vite bundles tests/e2e/harness and
+ * reads and hashes both engine modules), so its time follows the machine's load, and Playwright gives a `beforeAll` hook
+ * the project's 30 s whatever the file's `test.setTimeout` says: makeblastdb.spec.ts's hook ran out of it in Firefox at a
+ * local load average of 39-52 (line WW, WW4g's gate) and passed on rerun.
+ */
+export const HARNESS_BUILD_TIMEOUT = 180_000;
+
+/**
  * Builds tests/e2e/harness in memory with Vite; the application build is not touched. The
  * harness build has the engine modules of LOSAT_WEB_REACTORS and the verification table (the
  * composition root imports both), as the application build does, and the test hooks of the
  * Engine worker (`__LOSAT_TEST_HOOKS__`). `reactors` replaces the modules of
- * LOSAT_WEB_REACTORS (a measurement of another form of the same modules).
+ * LOSAT_WEB_REACTORS (a measurement of another form of the same modules). The hook or test
+ * that calls it gets at least `HARNESS_BUILD_TIMEOUT`, or the test's own limit if longer.
  */
 export async function buildHarness(reactors: Reactors | undefined = REACTORS): Promise<HarnessFiles> {
+  const limit = test.info().timeout;
+  test.setTimeout(limit === 0 ? 0 : Math.max(limit, HARNESS_BUILD_TIMEOUT));
   const result = await build({
     root: fileURLToPath(new URL('../harness/', import.meta.url)),
     base: '/__harness/',

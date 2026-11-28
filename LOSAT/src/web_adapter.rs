@@ -93,34 +93,22 @@ pub fn blast_formatter_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>
 }
 
 /// File names that `seqdb` checks or opens for a search's `-db` (`dbs`) and BLASTN's
-/// `-filtering_db` (`filtering_dbs`), plus the taxonomy lookup files
-/// (`seqdb::taxdb::lookup_files_for_use`) when `outfmt` consults `taxdb`
-/// (`algorithm::common::database::outfmt_taxdb_use`) and `taxonomy4blast.sqlite3` when
-/// `expands_taxids` is true and a taxonomy file exists on the search path (line WQA D19b).
+/// `-filtering_db` (`filtering_dbs`), for what the search's `arguments` ask of them
+/// (`report::log_inputs::db_use`), and the taxonomy files that the search looks for along the
+/// search path (`seqdb::taxdb::lookup_files`: `taxdb.bti` and the `taxdb.btd` beside it for a
+/// search of a database or one whose report looks every taxid up, `taxonomy4blast.sqlite3` for a
+/// taxonomy filter that is widened), as the command line's refusal of `-logfile` reads them
+/// (lines WQA D19b, D26, D35).
 pub fn search_database_read_files(
     program: crate::api::Program,
     arguments: &[&str],
     registry: &dyn RegistryFiles,
     dbs: &[&str],
     filtering_dbs: &[&str],
-    outfmt: &str,
-    expands_taxids: bool,
 ) -> Vec<Vec<u8>> {
-    use crate::algorithm::common::database::{
-        outfmt_prefetches_taxdb, outfmt_taxdb_use, OutfmtTaxdbUse,
-    };
-    use crate::report::archive::options::RequestKind;
-    let request_kind = match program {
-        crate::api::Program::Blastp => RequestKind::Blastp,
-        crate::api::Program::Blastn => RequestKind::Blastn,
-        crate::api::Program::Blastx => RequestKind::Blastx,
-        crate::api::Program::Tblastn => RequestKind::Tblastn,
-        crate::api::Program::Tblastx => RequestKind::Tblastx,
-        crate::api::Program::Psiblast => RequestKind::Psiblast,
-    };
-    let has_db = !dbs.is_empty();
-    let taxdb_use = outfmt_taxdb_use(outfmt, request_kind, has_db);
-    if !has_db && filtering_dbs.is_empty() && taxdb_use == OutfmtTaxdbUse::None {
+    let db_use = crate::report::log_inputs::db_use(program.name(), arguments);
+    let reads_database = !dbs.is_empty() || !filtering_dbs.is_empty();
+    if !db_use.reads_taxonomy_names(reads_database) {
         return Vec::new();
     }
     let blastdb = crate::blastinput::ncbi_environment::ApplicationStart::with_files(
@@ -140,7 +128,6 @@ pub fn search_database_read_files(
         | crate::api::Program::Tblastn
         | crate::api::Program::Tblastx => crate::seqdb::SeqType::Nucleotide,
     };
-    let db_use = crate::report::log_inputs::db_use(program.name(), arguments);
     let mut out = Vec::new();
     let push_db = |out: &mut Vec<Vec<u8>>, db: &str, db_type: crate::seqdb::SeqType| {
         let trimmed = crate::seqdb::db_argument_name_bytes(db.as_bytes());
@@ -154,19 +141,11 @@ pub fn search_database_read_files(
     for db in dbs {
         push_db(&mut out, db, seqtype);
     }
-    let prefetches = has_db && outfmt_prefetches_taxdb(outfmt);
-    out.extend(crate::seqdb::taxdb::lookup_files_for_use(
+    out.extend(crate::seqdb::taxdb::lookup_files(
         blastdb.as_deref(),
-        taxdb_use,
-        prefetches,
+        db_use,
+        reads_database,
     ));
-    if has_db && expands_taxids {
-        let tax_file = crate::blastinput::db_filter::TAXONOMY_FILE.as_bytes();
-        let search = crate::seqdb::SearchPath::from_environment(blastdb.as_deref());
-        if search.resolve_file(tax_file).is_some() {
-            out.push(tax_file.to_vec());
-        }
-    }
     for fdb in filtering_dbs {
         push_db(&mut out, fdb, crate::seqdb::SeqType::Nucleotide);
     }

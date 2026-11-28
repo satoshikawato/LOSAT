@@ -1171,32 +1171,20 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         };
         assert_eq!(run_err, want, "{label}: run");
     }
-    // Finding 1: formats that do not read `taxdb.bti` when absent (`-outfmt 6`, `0`, `5`,
-    // `6 ... staxids`, `6 ... ssciname`, `18`) pass `validate` and `run` with `-logfile taxdb.bti`
-    // and return the exact same hits as `-logfile run.log`.
-    let prot_ctrl = [
-        "blastp",
-        "-query",
-        "q.fa",
-        "-db",
-        prot_db,
-        "-outfmt",
-        "6",
-        "-num_threads",
-        "1",
-        "-logfile",
-        "run.log",
-    ];
-    let (ctrl_res, ctrl_streams) = run_db_of(&prot_ctrl);
-    ctrl_res.unwrap();
-    let prot_ctrl_hits = stream_text(&ctrl_streams, 6);
-    assert!(!prot_ctrl_hits.is_empty(), "prot db control returns hits");
+    // Line WQA D35 (WQA DECISIONS 62): a search of a database looks for `taxdb.bti` along its
+    // search path whatever its report (the native open trace), so `-logfile taxdb.bti` is refused
+    // with every format, as on the command line; a `-subject` search looks for it only where its
+    // report looks every taxid up (the plural names above, the organism report), so the other
+    // formats run with `-logfile taxdb.bti` and give the hits of `-logfile run.log`.
     for fmt in [
         "6",
         "0",
         "5",
         "6 qseqid sseqid staxids",
         "6 qseqid sseqid ssciname",
+        "6 qseqid pident",
+        "8",
+        "11",
         "18",
     ] {
         let words = [
@@ -1212,13 +1200,52 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
             "-logfile",
             "taxdb.bti",
         ];
-        validate(&words).unwrap_or_else(|e| panic!("outfmt {fmt} validate: {e}"));
-        let (res, streams) = run_db_of(&words);
-        res.unwrap_or_else(|e| panic!("outfmt {fmt} run: {e}"));
+        let want = refusal("blastp", "taxdb.bti");
+        assert_eq!(validate(&words).unwrap_err(), want, "db outfmt {fmt}: validate");
+        assert_eq!(run_db_of(&words).0.unwrap_err(), want, "db outfmt {fmt}: run");
+    }
+    let subject_18 = [
+        "blastp",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-outfmt",
+        "18",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "taxdb.bti",
+    ];
+    let want = refusal("blastp", "taxdb.bti");
+    assert_eq!(validate(&subject_18).unwrap_err(), want, "subject 18: validate");
+    assert_eq!(run_of(&subject_18).0.unwrap_err(), want, "subject 18: run");
+    let subject_with = |fmt: &'static str, log: &'static str| {
+        vec![
+            "blastp",
+            "-query",
+            "q.fa",
+            "-subject",
+            "s.fa",
+            "-outfmt",
+            fmt,
+            "-num_threads",
+            "1",
+            "-logfile",
+            log,
+        ]
+    };
+    for fmt in ["6", "0", "5", "6 qseqid sseqid staxids", "6 qseqid sseqid ssciname"] {
+        let (ctrl, ctrl_streams) = run_of(&subject_with(fmt, "run.log"));
+        ctrl.unwrap();
+        let words = subject_with(fmt, "taxdb.bti");
+        validate(&words).unwrap_or_else(|e| panic!("subject outfmt {fmt} validate: {e}"));
+        let (res, streams) = run_of(&words);
+        res.unwrap_or_else(|e| panic!("subject outfmt {fmt} run: {e}"));
         assert_eq!(
             stream_text(&streams, 6),
-            prot_ctrl_hits,
-            "outfmt {fmt} with -logfile taxdb.bti returns the same hits as CLI"
+            stream_text(&ctrl_streams, 6),
+            "subject outfmt {fmt} with -logfile taxdb.bti returns the hits of -logfile run.log"
         );
     }
     // Control: `-db` with `-logfile run.log` succeeds and returns hits.
@@ -1248,9 +1275,29 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         run_files(&streams),
         Some(vec![("run.log".to_string(), String::new())])
     );
-    // Controls that CLI does NOT read back when the companion file is absent:
-    // `-logfile taxdb.btd` without `taxdb.bti`, and `-logfile taxonomy4blast.sqlite3` without one
-    // on the search path.
+    // Controls that the command line does not read: `-logfile taxdb.btd` without a `taxdb.bti`
+    // on the search path (the data file is looked for only beside the index found), and
+    // `-logfile taxonomy4blast.sqlite3` of a search that does not widen a taxonomy filter
+    // (`-no_taxid_expansion`; line WQA D35: with the widening the run looks for the file along
+    // its search path even when there is none, and finds its own log there).
+    let sqlite_absent = [
+        "blastp",
+        "-query",
+        "q.fa",
+        "-db",
+        prot_db,
+        "-taxids",
+        "9606",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "taxonomy4blast.sqlite3",
+    ];
+    let want = refusal("blastp", "taxonomy4blast.sqlite3");
+    assert_eq!(validate(&sqlite_absent).unwrap_err(), want, "sqlite absent: validate");
+    assert_eq!(run_db_of(&sqlite_absent).0.unwrap_err(), want, "sqlite absent: run");
     for (label, words) in [
         (
             "taxdb.btd without taxdb.bti",
@@ -1269,7 +1316,7 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
             ],
         ),
         (
-            "taxonomy4blast.sqlite3 when absent",
+            "taxonomy4blast.sqlite3 with -no_taxid_expansion",
             vec![
                 "blastp",
                 "-query",
@@ -1278,6 +1325,7 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
                 prot_db,
                 "-taxids",
                 "9606",
+                "-no_taxid_expansion",
                 "-outfmt",
                 "6",
                 "-num_threads",
@@ -1399,12 +1447,10 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         refusal("blastp", "taxonomy4blast.sqlite3"),
         "taxonomy4blast.sqlite3 shadowing BLASTDB: validate"
     );
-    // When `taxdb.bti` exists in BLASTDB, `-outfmt 18`, singular `-outfmt "6 ... ssciname"`, and
-    // default `-outfmt 6` (whose `saccver` column uses `GenerateDefline` on databases without
-    // `-parse_seqids`) refuse `-logfile taxdb.bti` (which would shadow BLASTDB's file), while a
-    // tabular format without subject id or taxonomy-name columns (`-outfmt "6 qseqid pident"`)
-    // passes.
-    for fmt in ["18", "6 qseqid sseqid ssciname", "6"] {
+    // When `taxdb.bti` exists in BLASTDB, every format of a search of a database refuses
+    // `-logfile taxdb.bti`, which the run would find first, in place of BLASTDB's file (line WQA
+    // D35).
+    for fmt in ["18", "6 qseqid sseqid ssciname", "6", "6 qseqid pident"] {
         let shadow_bti = [
             "blastp",
             "-conffile",
@@ -1431,7 +1477,9 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
             "shadow taxdb.bti under BLASTDB for outfmt {fmt}: run"
         );
     }
-    let no_tax_under_blastdb = [
+    // A `-logfile` named like BLASTDB's own data file is that file: refused; one named like a
+    // data file beside no index found is not read (above).
+    let blastdb_btd = [
         "blastp",
         "-conffile",
         "d19b_tax_conf.ini",
@@ -1444,12 +1492,13 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         "-num_threads",
         "1",
         "-logfile",
-        "taxdb.bti",
+        btd_str,
     ];
-    validate(&no_tax_under_blastdb).unwrap();
-    run_db_of(&no_tax_under_blastdb)
-        .0
-        .expect("outfmt without subject id or tax names passes with taxdb in BLASTDB");
+    assert_eq!(
+        validate(&blastdb_btd).unwrap_err(),
+        refusal("blastp", btd_str),
+        "BLASTDB's taxdb.btd with outfmt 6 qseqid pident: validate"
+    );
 
     // Finding 2 (GXR R1 cases B and C):
     // - Case B: alias in BLASTDB (`B/dbs/a.pal` with `DBLIST v1`, volume `B/dbs/v1.pin`),

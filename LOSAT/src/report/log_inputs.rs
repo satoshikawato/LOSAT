@@ -62,21 +62,49 @@ impl RunInputs {
     }
 }
 
-/// What the run of `program` with `words` can open of the files of its databases: for a search
-/// (`db_seqtypes` names them, `rpsblast` and `rpstblastn` among them) what its options ask for
-/// ([`DbUse::note_option`]), for any other program (a tool) every file of the database that a
-/// tool may open. The one reader of the options, for the command line and for LOSAT Web.
+/// What the run of `program` with `words` can open of the files of its databases and of the
+/// taxonomy files beside them: for a search (`db_seqtypes` names them, `rpsblast` and
+/// `rpstblastn` among them) what its options ask for ([`DbUse::note_option`],
+/// [`DbUse::note_flag`], and a report that looks every taxid up, [`DbUse::note_every_taxid`]), for
+/// any other program (a tool) every file of the database that a tool may open. The one reader of
+/// the options, for the command line and for LOSAT Web.
 pub(crate) fn db_use<S: AsRef<OsStr>>(program: &str, words: &[S]) -> DbUse {
     if !SEARCH_PROGRAMS.contains(&program) {
         return DbUse::TOOL;
     }
     let mut db_use = DbUse::search(program);
-    scan_argv_kinds(program, words, |name, _, value| {
-        if value.is_some() {
+    scan_argv_kinds(program, words, |name, _, value| match value {
+        Some(value) => {
             db_use.note_option(name);
+            if name == "outfmt" && outfmt_looks_up_every_taxid(program, value) {
+                db_use.note_every_taxid();
+            }
         }
+        None => db_use.note_flag(name),
     });
     db_use
+}
+
+/// Whether the report of the search `program` in the `-outfmt` `value` looks every taxid of its
+/// subjects up, `-subject` too (`common::database::outfmts_need_subject_taxdb`: the plural names,
+/// the organism report).
+fn outfmt_looks_up_every_taxid(program: &str, value: &OsStr) -> bool {
+    use crate::report::archive::options::RequestKind;
+    let kind = match program {
+        "blastn" => RequestKind::Blastn,
+        "blastp" => RequestKind::Blastp,
+        "blastx" => RequestKind::Blastx,
+        "tblastn" => RequestKind::Tblastn,
+        "tblastx" => RequestKind::Tblastx,
+        "psiblast" => RequestKind::Psiblast,
+        "rpsblast" => RequestKind::Rpsblast,
+        "rpstblastn" => RequestKind::Rpstblastn,
+        _ => return false,
+    };
+    crate::algorithm::common::database::outfmts_need_subject_taxdb(
+        [value.as_encoded_bytes()],
+        kind,
+    )
 }
 
 /// The programs that search a database.
@@ -230,7 +258,7 @@ pub(crate) fn collect_run_inputs<S: AsRef<OsStr>>(
     words: &[S],
     start: &ApplicationStart,
 ) -> RunInputs {
-    let mut inputs = RunInputs::new(db_use(program, words));
+    let mut inputs = RunInputs::new(DbUse::search(program));
     for path in start.registry_inputs() {
         push_file(&mut inputs.files, path.clone());
     }
@@ -238,6 +266,7 @@ pub(crate) fn collect_run_inputs<S: AsRef<OsStr>>(
     if matches!(preparse(&word_refs), Preparsed::Version(_)) {
         return inputs;
     }
+    inputs.db_use = db_use(program, words);
     match program {
         "windowmasker" => collect_windowmasker_inputs(words, &mut inputs),
         "makeblastdb" => collect_makeblastdb_inputs(words, &mut inputs),
@@ -534,7 +563,8 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
 }
 
 /// Whether any path in `candidates` refers to the same file (or missing target) as any input in
-/// `inputs`.
+/// `inputs`: its files, the files of its databases, the taxonomy files that the run looks for
+/// along the search path (`seqdb::taxdb::read_paths`) and its MegaBLAST index.
 fn matches_any_input(
     program: &str,
     candidates: &[PathBuf],
@@ -550,11 +580,21 @@ fn matches_any_input(
             return true;
         }
     }
-    if inputs.databases.is_empty() && inputs.mb_index.is_none() {
+    let reads_database = !inputs.databases.is_empty();
+    if !reads_database
+        && inputs.mb_index.is_none()
+        && !inputs.db_use.reads_taxonomy_names(false)
+    {
         return false;
     }
     let registry_blastdb = start.settings().ok().and_then(|s| s.blastdb);
     let search_path = SearchPath::from_environment(registry_blastdb.as_deref());
+    if crate::seqdb::taxdb::read_paths(&search_path, inputs.db_use, reads_database)
+        .iter()
+        .any(|file| matches_bytes_path(candidates, file))
+    {
+        return true;
+    }
     let seqtypes = db_seqtypes(program, inputs.dbtype);
     let mut volumes_of: Vec<(&OsStr, Vec<Vec<u8>>)> = Vec::with_capacity(inputs.databases.len());
     for db in &inputs.databases {

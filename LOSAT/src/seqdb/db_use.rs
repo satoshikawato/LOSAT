@@ -1,11 +1,20 @@
-//! What a run can open of a database's files, by its program and options (line WQA D26 round 1).
+//! What a run can open of a database's files, by its program and options (line WQA D26 round 1),
+//! and of the taxonomy files found beside them on the search path (line WQA D35).
 //!
 //! No NCBI counterpart: `-logfile` must not name a file that the run reads
-//! ([`SeqDb::read_paths`](super::SeqDb::read_paths)), and which of a database's files a run can
-//! open depends on what it is asked to do: its sequence, header and index files always, the
-//! files of an id list or a taxonomy filter only with an option that asks for one, the masks only
-//! with a mask option, the RPS files only for the RPS searches. A name that the run cannot open
-//! is not a file it reads, so it is not refused (it is the run's log).
+//! ([`SeqDb::read_paths`](super::SeqDb::read_paths), [`taxdb::read_paths`](super::taxdb::read_paths)),
+//! and which of a database's files a run can open depends on what it is asked to do: its
+//! sequence, header and index files always, the files of an id list or a taxonomy filter only
+//! with an option that asks for one, the masks only with a mask option, the RPS files only for
+//! the RPS searches. A name that the run cannot open is not a file it reads, so it is not
+//! refused (it is the run's log).
+//!
+//! The taxonomy files are looked for along the search path, the working directory first: NCBI's
+//! taxonomy name database (`taxdb.bti`, then the `taxdb.btd` beside the one found) by every run
+//! that reads a database and by a search whose report looks every taxid up without one, and
+//! `taxonomy4blast.sqlite3` by a run that widens a taxonomy filter of its database to the taxids
+//! below (WQA DECISIONS 62: the files that the native open trace shows the run checking or
+//! opening).
 
 /// What a run can open of the files of a database (see the module).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +38,14 @@ pub(crate) struct DbUse {
     /// The run is a tool that is not a search (`blastdbcmd`, `windowmasker`, ...): every file of
     /// the database that a tool of its kind may open, whatever its options say.
     tool: bool,
+    /// The run looks NCBI's taxonomy name database up even without a database: a report of the
+    /// search looks every taxid of its subjects up, those of `-subject` too (the plural names and
+    /// the organism report, `TabularSpec::looks_up_every_taxid`), or the run imports a search
+    /// strategy, which may name a database.
+    looks_up_taxonomy: bool,
+    /// `-no_taxid_expansion`: a taxonomy filter keeps its own taxids, and the run does not look
+    /// for `taxonomy4blast.sqlite3`.
+    no_taxid_expansion: bool,
 }
 
 impl DbUse {
@@ -41,6 +58,8 @@ impl DbUse {
         taxids: true,
         rps: false,
         tool: true,
+        looks_up_taxonomy: false,
+        no_taxid_expansion: false,
     };
 
     /// The use of the search `program` before its options are read: its sequence, header and
@@ -54,6 +73,8 @@ impl DbUse {
             taxids: false,
             rps: matches!(program, "rpsblast" | "rpstblastn"),
             tool: false,
+            looks_up_taxonomy: false,
+            no_taxid_expansion: false,
         }
     }
 
@@ -68,16 +89,30 @@ impl DbUse {
             "taxids" | "negative_taxids" | "taxidlist" | "negative_taxidlist" => {
                 self.taxids = true;
             }
-            // The strategy file may hold any of the options above.
+            // The strategy file may hold any of the options above, and a database.
             "import_search_strategy" => {
                 self.masks = true;
                 self.gi_lists = true;
                 self.ipg_lists = true;
                 self.seqid_lists = true;
                 self.taxids = true;
+                self.looks_up_taxonomy = true;
             }
             _ => {}
         }
+    }
+
+    /// Takes in the flag `name` (its canonical name) of the run's arguments.
+    pub(crate) fn note_flag(&mut self, name: &str) {
+        if name == "no_taxid_expansion" {
+            self.no_taxid_expansion = true;
+        }
+    }
+
+    /// Takes in that a report of the search looks every taxid of its subjects up in NCBI's
+    /// taxonomy name database (`TabularSpec::looks_up_every_taxid` of an `-outfmt`).
+    pub(crate) fn note_every_taxid(&mut self) {
+        self.looks_up_taxonomy = true;
     }
 
     /// Whether the run can open the GI-mask files of the database's `MASKLIST` and the column
@@ -117,5 +152,21 @@ impl DbUse {
     /// Whether the run can open the metadata file `.<mol>js` of an alias file.
     pub(super) fn reads_alias_metadata(self) -> bool {
         self.tool
+    }
+
+    /// Whether the run looks for NCBI's taxonomy name database on its search path
+    /// (`taxdb::read_paths`): every run that reads a database (`reads_database`: `-db`, BLASTN's
+    /// `-filtering_db`, a tool's database; the database's reader looks for `taxdb.bti` whatever
+    /// the report), and a search that looks it up without one (`looks_up_taxonomy`).
+    pub(crate) fn reads_taxonomy_names(self, reads_database: bool) -> bool {
+        reads_database || self.looks_up_taxonomy
+    }
+
+    /// Whether the run looks for `taxonomy4blast.sqlite3` on its search path to widen the
+    /// taxonomy filter of the database it reads (`reads_database`) to the taxids below
+    /// (`blastinput::db_filter`, `blastdbcmd -taxids`): a taxonomy filter without
+    /// `-no_taxid_expansion`.
+    pub(crate) fn reads_taxonomy_tree(self, reads_database: bool) -> bool {
+        (reads_database || self.looks_up_taxonomy) && self.taxids && !self.no_taxid_expansion
     }
 }

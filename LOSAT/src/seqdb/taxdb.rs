@@ -61,7 +61,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use super::file::DbFile;
-use super::{SearchPath, SeqDbError};
+use super::{DbUse, SearchPath, SeqDbError};
 
 /// Header of `taxdb.bti`: magic, count, four reserved words (seqdbtax.cpp,
 /// `data_start`).
@@ -84,78 +84,59 @@ fn data_name_for(index_name: &[u8]) -> Vec<u8> {
     data_name
 }
 
-// No NCBI counterpart: LOSAT Web reads `-logfile` against the taxonomy files that a search
-// checks or opens (`INDEX_FILE`, and its paired `.btd` when `INDEX_FILE` already exists), gated
-// by how the run's `-outfmt` consults taxdb so formats that do not read `taxdb.bti` are not
-// refused while formats that do cannot suppress the missing-taxdb warning, shadow an existing
-// `taxdb.bti`, or feed the log into `TaxDb::open` (line WQA D19b).
-/// Taxonomy database file names that a search checks or opens in the working directory and in
-/// each directory of `SearchPath::from_environment(blastdb)`, keeping paths under the working
-/// directory relative so `run_files` matches them without making missing parent folders present:
-/// - `OutfmtTaxdbUse::Always`: `taxdb.bti` in every search directory, plus its paired `taxdb.btd`
-///   where `taxdb.bti` already exists;
-/// - `OutfmtTaxdbUse::WhenPresent`: the same when `taxdb.bti` already exists on the search path,
-///   else only `taxdb.bti` beside an already-present `taxdb.btd`;
-/// - `OutfmtTaxdbUse::None`: only `taxdb.bti` beside an already-present `taxdb.btd` when
-///   `check_existing_btd` is true (database prefetch formats), else empty.
-pub(crate) fn lookup_files_for_use(
-    blastdb: Option<&[u8]>,
-    use_kind: crate::algorithm::common::database::OutfmtTaxdbUse,
-    check_existing_btd: bool,
-) -> Vec<Vec<u8>> {
-    use crate::algorithm::common::database::OutfmtTaxdbUse;
-    use crate::utils::os_bytes::path_of_bytes;
-    let search = SearchPath::from_environment(blastdb);
-    let include_all = match use_kind {
-        OutfmtTaxdbUse::Always => true,
-        OutfmtTaxdbUse::WhenPresent => search.resolve_file(INDEX_FILE.as_bytes()).is_some(),
-        OutfmtTaxdbUse::None => false,
-    };
-    let check_btd = !include_all && (use_kind == OutfmtTaxdbUse::WhenPresent || check_existing_btd);
-    if !include_all && !check_btd {
-        return Vec::new();
-    }
-    let index = INDEX_FILE.as_bytes();
-    let data_file = data_name_for(index);
-    let cwd = super::alias::fix_delimiters(search.cwd_bytes());
-    let norm_cwd = super::alias::normalize_dir(&cwd);
+// No NCBI counterpart: `-logfile` must not name a file that the run reads (line WQA D23,
+// `Q-D23=A`). The command line (`report::log_inputs`) and LOSAT Web's receiver
+// (`web_adapter::search_database_read_files`, `report::log_inputs::tool_read_files`) read a name
+// against the taxonomy files that the run checks or opens (line WQA D35, WQA DECISIONS 62), as the
+// native open trace shows them: every run that reads a database looks for `taxdb.bti` along its
+// search path whatever its report (a `-logfile taxdb.bti` would be found first, in the working
+// directory, in place of the user's database), and so does a search whose report looks every
+// taxid up without a database.
+/// The taxonomy files that a run of `db_use`, which reads a database or not (`reads_database`),
+/// checks or opens along `search`, each once, in the order that it looks for them; a missing one
+/// is listed too, since the run would find a file made there:
+/// - NCBI's taxonomy name database ([`DbUse::reads_taxonomy_names`]): `taxdb.bti` in each
+///   directory of the path up to the first that holds one ([`TaxDb::open`]), and the `taxdb.btd`
+///   beside the one found;
+/// - `taxonomy4blast.sqlite3` in each directory up to the first that holds one
+///   ([`DbUse::reads_taxonomy_tree`]).
+///
+/// Which of them a run then opens depends on its subjects' taxids and on its report; the list
+/// holds every file that it can open.
+pub(crate) fn read_paths(search: &SearchPath, db_use: DbUse, reads_database: bool) -> Vec<Vec<u8>> {
     let mut out = Vec::new();
-    let push_rel = |out: &mut Vec<Vec<u8>>, path: Vec<u8>| {
-        let rel = super::alias::strip_dir_prefix(&path, &norm_cwd)
-            .or_else(|| super::alias::strip_dir_prefix(&path, &cwd))
-            .unwrap_or(path.as_slice())
-            .to_vec();
-        if !out.contains(&rel) {
-            out.push(rel);
+    if db_use.reads_taxonomy_names(reads_database) {
+        let (checked, found) = search.resolve_file_checking(INDEX_FILE.as_bytes());
+        out.extend(checked);
+        if let Some(index) = found {
+            out.push(data_name_for(&index));
         }
-    };
-    for dir in super::alias::split_search_dirs(search.as_bytes()) {
-        let dir = super::alias::fix_delimiters(dir);
-        let idx = super::alias::combine_path(&dir, index);
-        if include_all {
-            let idx_exists = super::alias::exists(&path_of_bytes(&idx));
-            push_rel(&mut out, idx.clone());
-            if idx_exists {
-                push_rel(&mut out, data_name_for(&idx));
-            }
-        } else {
-            let btd = super::alias::combine_path(&dir, &data_file);
-            if super::alias::exists(&path_of_bytes(&btd)) {
-                push_rel(&mut out, idx);
-            }
-        }
+    }
+    if db_use.reads_taxonomy_tree(reads_database) {
+        let tree = crate::blastinput::db_filter::TAXONOMY_FILE.as_bytes();
+        out.extend(search.resolve_file_checking(tree).0);
     }
     out
 }
 
-/// [`lookup_files_for_use`] with [`OutfmtTaxdbUse::Always`], for tests.
-#[cfg(test)]
-pub(crate) fn lookup_files(blastdb: Option<&[u8]>) -> Vec<Vec<u8>> {
-    lookup_files_for_use(
-        blastdb,
-        crate::algorithm::common::database::OutfmtTaxdbUse::Always,
-        false,
-    )
+/// [`read_paths`] along the engine's own search path ([`SearchPath::from_environment`], with the
+/// registry's `[BLAST] BLASTDB` value `blastdb`), each once, the paths inside the working
+/// directory relative to it (`alias::database_files`): LOSAT Web's receiver.
+pub(crate) fn lookup_files(
+    blastdb: Option<&[u8]>,
+    db_use: DbUse,
+    reads_database: bool,
+) -> Vec<Vec<u8>> {
+    let search = SearchPath::from_environment(blastdb);
+    let relative_of = super::alias::under_working_directory(&search);
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    for path in read_paths(&search, db_use, reads_database) {
+        let relative = relative_of(&path);
+        if !out.contains(&relative) {
+            out.push(relative);
+        }
+    }
+    out
 }
 
 /// `ERR_POST` text (seqdbtax.cpp:`CTaxDBFileInfo::CTaxDBFileInfo`): the magic number is wrong.

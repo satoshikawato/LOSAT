@@ -1021,42 +1021,65 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
 }
 
 #[test]
-fn lookup_files_includes_bti_and_paired_btd_when_bti_exists() {
-    use crate::algorithm::common::database::OutfmtTaxdbUse;
-    let dir = TempDir::unique("taxdb-lookup-files");
-    let dir_bytes = dir.as_os_str().as_encoded_bytes();
-    let has_path = |list: &[Vec<u8>], path: &std::path::Path| {
-        let want = path.as_os_str().as_encoded_bytes();
-        list.iter().any(|p| p.as_slice() == want)
-    };
-    let lookup = |u, btd| super::lookup_files_for_use(Some(dir_bytes), u, btd);
-    // Without taxdb.bti in `dir`, Always lists taxdb.bti (not taxdb.btd), while WhenPresent and
-    // None return empty (when no taxdb exists on disk).
-    let without = super::lookup_files(Some(dir_bytes));
-    let dir_bti = dir.join("taxdb.bti");
-    let dir_btd = dir.join("taxdb.btd");
-    assert!(without.iter().any(|p| p == b"taxdb.bti"));
-    assert!(has_path(&without, &dir_bti));
-    assert!(!has_path(&without, &dir_btd));
-    assert!(lookup(OutfmtTaxdbUse::WhenPresent, true).is_empty());
-    assert!(lookup(OutfmtTaxdbUse::None, true).is_empty());
-    // When only taxdb.btd exists in `dir`, prefetch / WhenPresent lists its paired taxdb.bti.
-    std::fs::write(&dir_btd, [0u8; 32]).unwrap();
-    let with_btd_only = lookup(OutfmtTaxdbUse::None, true);
-    assert!(has_path(&with_btd_only, &dir_bti));
-    assert!(!with_btd_only.iter().any(|p| p == b"taxdb.bti"));
-    assert!(lookup(OutfmtTaxdbUse::None, false).is_empty());
-    std::fs::remove_file(&dir_btd).unwrap();
-    // Once taxdb.bti exists in `dir`, both Always and WhenPresent list cwd taxdb.bti (shadow) and
-    // dir's paired taxdb.btd, while None remains empty.
-    std::fs::write(&dir_bti, [0u8; 32]).unwrap();
-    let with = super::lookup_files(Some(dir_bytes));
-    assert!(has_path(&with, &dir_btd));
-    let when_present = lookup(OutfmtTaxdbUse::WhenPresent, false);
-    assert!(when_present.iter().any(|p| p == b"taxdb.bti"));
-    assert!(has_path(&when_present, &dir_btd));
-    assert!(
-        lookup(OutfmtTaxdbUse::None, true).is_empty(),
-        "None stays empty when taxdb.bti exists"
+fn read_paths_are_the_places_that_the_run_looks_at_up_to_the_one_found() {
+    // Line WQA D35 (WQA DECISIONS 62): the taxonomy files that a run checks or opens, as the
+    // native open trace shows them: `taxdb.bti` in each directory of the search path up to the
+    // first that holds one, the `taxdb.btd` beside that one, and `taxonomy4blast.sqlite3` in the
+    // same way for a taxonomy filter that is widened.
+    use crate::seqdb::DbUse;
+    let cwd = TempDir::unique("taxdb-read-cwd");
+    let dir = TempDir::unique("taxdb-read-dir");
+    let search = SearchPath::new(&cwd, Some(dir.as_os_str()), None);
+    let bytes = |path: PathBuf| path.into_os_string().into_encoded_bytes();
+    let at = |root: &Path, name: &str| bytes(root.join(name));
+    let search_use = DbUse::search("blastp");
+    let mut every_taxid = DbUse::search("blastp");
+    every_taxid.note_every_taxid();
+    let mut filtered = DbUse::search("blastp");
+    filtered.note_option("taxids");
+    let mut kept = filtered;
+    kept.note_flag("no_taxid_expansion");
+
+    // No taxonomy file anywhere: a search of a database looks in every directory, whatever its
+    // report; a `-subject` search only for a report that looks every taxid up.
+    let nowhere = vec![at(&cwd, "taxdb.bti"), at(&dir, "taxdb.bti")];
+    assert_eq!(read_paths(&search, search_use, true), nowhere);
+    assert_eq!(read_paths(&search, DbUse::TOOL, true), {
+        let mut with_tree = nowhere.clone();
+        with_tree.extend([at(&cwd, "taxonomy4blast.sqlite3"), at(&dir, "taxonomy4blast.sqlite3")]);
+        with_tree
+    });
+    assert!(read_paths(&search, search_use, false).is_empty());
+    assert_eq!(read_paths(&search, every_taxid, false), nowhere);
+
+    // The database in `dir` (`BLASTDB`): the working directory's name is looked at first (a
+    // `-logfile taxdb.bti` would be found there), then `dir`'s, and its data file is opened.
+    std::fs::write(dir.join("taxdb.bti"), [0u8; 32]).unwrap();
+    std::fs::write(dir.join("taxdb.btd"), [0u8; 32]).unwrap();
+    let in_dir = vec![
+        at(&cwd, "taxdb.bti"),
+        at(&dir, "taxdb.bti"),
+        at(&dir, "taxdb.btd"),
+    ];
+    assert_eq!(read_paths(&search, search_use, true), in_dir);
+    assert_eq!(read_paths(&search, every_taxid, false), in_dir);
+
+    // A widened taxonomy filter looks for `taxonomy4blast.sqlite3` the same way; with
+    // `-no_taxid_expansion` it does not.
+    std::fs::write(dir.join("taxonomy4blast.sqlite3"), [0u8; 32]).unwrap();
+    let mut with_tree = in_dir.clone();
+    with_tree.extend([
+        at(&cwd, "taxonomy4blast.sqlite3"),
+        at(&dir, "taxonomy4blast.sqlite3"),
+    ]);
+    assert_eq!(read_paths(&search, filtered, true), with_tree);
+    assert_eq!(read_paths(&search, kept, true), in_dir);
+
+    // A database in the working directory hides `dir`'s: the run looks no further, and a name
+    // in `dir` is not one that it reads.
+    std::fs::write(cwd.join("taxdb.bti"), [0u8; 32]).unwrap();
+    assert_eq!(
+        read_paths(&search, search_use, true),
+        vec![at(&cwd, "taxdb.bti"), at(&cwd, "taxdb.btd")]
     );
 }

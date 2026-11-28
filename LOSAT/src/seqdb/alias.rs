@@ -464,10 +464,6 @@ impl SearchPath {
         &self.path
     }
 
-    /// `CDir::GetCwd()` held by this search path.
-    pub(super) fn cwd_bytes(&self) -> &[u8] {
-        &self.cwd
-    }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:330-374
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:232-262
@@ -526,6 +522,17 @@ impl SearchPath {
     /// regular file `filename`, joined with it (`None`: NCBI's empty string).
     pub fn resolve_file(&self, filename: &[u8]) -> Option<Vec<u8>> {
         self.find(filename, None)
+    }
+
+    /// [`Self::resolve_file`] of `filename`, with every path that it checks in its order, the one
+    /// found last: `(checked, found)` (`taxdb::read_paths`).
+    pub(super) fn resolve_file_checking(
+        &self,
+        filename: &[u8],
+    ) -> (Vec<Vec<u8>>, Option<Vec<u8>>) {
+        let mut checked = Vec::new();
+        let found = self.find_recording(filename, None, Some(&mut checked));
+        (checked, found)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:464-470
@@ -940,22 +947,29 @@ fn push_unique(names: &mut Vec<Vec<u8>>, name: Vec<u8>) {
     }
 }
 
-/// Non-empty directory entries of a `BLASTDB`-formatted path list (`SearchPath::find`,
-/// `database_lookup_files`, `taxdb::lookup_files_for_use`).
-pub(super) fn split_search_dirs(raw: &[u8]) -> impl Iterator<Item = &[u8]> {
+/// Non-empty directory entries of a `BLASTDB`-formatted path list (`SearchPath::find`).
+fn split_search_dirs(raw: &[u8]) -> impl Iterator<Item = &[u8]> {
     raw.split(|&byte| byte == path_splitter())
         .filter(|road| !road.is_empty())
 }
 
-/// Normalised directory path (`normalize_path`) for relativising paths under `cwd`
-/// (`database_lookup_files`, `taxdb::lookup_files_for_use`).
-pub(super) fn normalize_dir(path: &[u8]) -> Vec<u8> {
-    normalize_path(path)
+/// A path that `search` gives, relative to its working directory when it lies inside it, so that
+/// `run_files` matches it without making missing parent folders present; any other path as it is
+/// (`database_files`, `taxdb::lookup_files`).
+pub(super) fn under_working_directory(search: &SearchPath) -> impl Fn(&[u8]) -> Vec<u8> {
+    let cwd = fix_delimiters(&search.cwd);
+    let norm_cwd = normalize_path(&cwd);
+    move |path| {
+        strip_dir_prefix(path, &norm_cwd)
+            .or_else(|| strip_dir_prefix(path, &cwd))
+            .unwrap_or(path)
+            .to_vec()
+    }
 }
 
 /// Strips directory prefix `dir` (with its path separator) from `path`, returning the non-empty
 /// relative tail when `path` lies strictly inside `dir`.
-pub(super) fn strip_dir_prefix<'a>(path: &'a [u8], dir: &[u8]) -> Option<&'a [u8]> {
+fn strip_dir_prefix<'a>(path: &'a [u8], dir: &[u8]) -> Option<&'a [u8]> {
     if dir.is_empty() {
         return None;
     }
@@ -997,15 +1011,11 @@ pub(crate) fn database_files(
 ) -> DatabaseFiles {
     let search = SearchPath::from_environment(blastdb);
     let read = super::SeqDb::read_paths(dbname, seqtype, &search, db_use);
-    let cwd = fix_delimiters(&search.cwd);
-    let norm_cwd = normalize_path(&cwd);
+    let relative_of = under_working_directory(&search);
     let mut seen = std::collections::HashSet::with_capacity(read.files.len());
     let mut files = DatabaseFiles::default();
     for (index, path) in read.files.iter().enumerate() {
-        let relative = strip_dir_prefix(path, &norm_cwd)
-            .or_else(|| strip_dir_prefix(path, &cwd))
-            .unwrap_or(path.as_slice())
-            .to_vec();
+        let relative = relative_of(path);
         if !seen.insert(relative.clone()) {
             continue;
         }

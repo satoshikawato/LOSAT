@@ -867,6 +867,108 @@ fn database_files_that_the_run_cannot_open_are_the_log() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+// Line WQA D35 (WQA DECISIONS 62): the taxonomy files that a run looks for along its search path
+// (the working directory first, then `BLASTDB`) are files it reads, as the native open trace shows
+// them: `taxdb.bti` up to the first found and the `taxdb.btd` beside it, for every search of a
+// database whatever its format and for a `-subject` search whose report looks every taxid up;
+// `taxonomy4blast.sqlite3` likewise for a taxonomy filter that is widened. A `-logfile` of such a
+// name would be found by the run in place of the user's file (the names of outfmt 18 lost), so it
+// is refused, before the file is made; a name that the run does not look at is the run's log.
+#[test]
+fn taxonomy_files_that_the_run_looks_for_are_refused() {
+    let dir = fresh_dir("d35-taxonomy");
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let folder = dir.join("protdb");
+    fs::create_dir_all(&folder).unwrap();
+    for entry in fs::read_dir(tests.join("db_search/taxfilter")).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_str().unwrap().to_string();
+        if name.starts_with("tfp.") || name == "taxonomy4blast.sqlite3" {
+            fs::copy(&path, folder.join(&name)).unwrap();
+        }
+    }
+    for name in ["taxdb.bti", "taxdb.btd"] {
+        fs::copy(tests.join("seqdb/taxdb/good").join(name), folder.join(name)).unwrap();
+    }
+    fs::copy(tests.join("db_search/taxfilter/q.faa"), dir.join("q.faa")).unwrap();
+    let blastdb = [("BLASTDB", "protdb")];
+    let search = |extra: &[&str], log: &str| -> Vec<String> {
+        let mut args: Vec<String> = ["blastp", "-query", "q.faa", "-num_threads", "1"]
+            .iter()
+            .map(|word| word.to_string())
+            .collect();
+        args.extend(extra.iter().map(|word| word.to_string()));
+        args.extend(["-logfile".to_string(), log.to_string()]);
+        args
+    };
+    let refused = |args: &[String], made: &str, label: &str| {
+        let words: Vec<&str> = args.iter().map(String::as_str).collect();
+        let out = run_in(&dir, &words, &blastdb);
+        assert_refused_and_unchanged(&out, &[], label);
+        assert!(!dir.join(made).exists(), "{label}: {made} was made");
+    };
+    let runs = |args: &[String], made: &str, label: &str| -> Vec<u8> {
+        let words: Vec<&str> = args.iter().map(String::as_str).collect();
+        let out = run_in(&dir, &words, &blastdb);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(0), "{label}: {stderr}");
+        let _ = fs::remove_file(dir.join(made));
+        out.stdout
+    };
+    let db = ["-db", "protdb/tfp"];
+    // A search of a database: every format looks for `taxdb.bti` in the working directory first.
+    for fmt in ["0", "6", "7", "6 qseqid evalue", "8", "11", "18", "6 std sscinames"] {
+        let args = search(&[&db[..], &["-outfmt", fmt]].concat(), "taxdb.bti");
+        refused(&args, "taxdb.bti", &format!("-db outfmt {fmt}: taxdb.bti"));
+    }
+    // The data file beside the index found in `BLASTDB`, and the user's own files there.
+    for name in ["protdb/taxdb.btd", "protdb/taxdb.bti"] {
+        let before = snapshot(&dir.join(name));
+        let args = search(&[&db[..], &["-outfmt", "6"]].concat(), name);
+        let words: Vec<&str> = args.iter().map(String::as_str).collect();
+        let out = run_in(&dir, &words, &blastdb);
+        assert_refused_and_unchanged(&out, &[(&dir.join(name), &before)], name);
+    }
+    // `taxdb.btd` in the working directory is not looked at (the index is found in `BLASTDB`).
+    runs(
+        &search(&[&db[..], &["-outfmt", "6"]].concat(), "taxdb.btd"),
+        "taxdb.btd",
+        "-db taxdb.btd",
+    );
+    // A widened taxonomy filter looks for `taxonomy4blast.sqlite3` the same way.
+    let taxids = [&db[..], &["-outfmt", "6", "-taxids", "9606"]].concat();
+    refused(
+        &search(&taxids, "taxonomy4blast.sqlite3"),
+        "taxonomy4blast.sqlite3",
+        "-taxids: taxonomy4blast.sqlite3",
+    );
+    let kept = [&taxids[..], &["-no_taxid_expansion"]].concat();
+    runs(
+        &search(&kept, "taxonomy4blast.sqlite3"),
+        "taxonomy4blast.sqlite3",
+        "-no_taxid_expansion: taxonomy4blast.sqlite3",
+    );
+    runs(
+        &search(&[&db[..], &["-outfmt", "6"]].concat(), "taxonomy4blast.sqlite3"),
+        "taxonomy4blast.sqlite3",
+        "no taxonomy filter: taxonomy4blast.sqlite3",
+    );
+    // A `-subject` search looks for `taxdb.bti` only for a report that looks every taxid up; the
+    // others run with that log and write the bytes they write with another.
+    let subject = ["-subject", "q.faa"];
+    for fmt in ["18", "6 std sscinames"] {
+        let args = search(&[&subject[..], &["-outfmt", fmt]].concat(), "taxdb.bti");
+        refused(&args, "taxdb.bti", &format!("-subject outfmt {fmt}: taxdb.bti"));
+    }
+    for fmt in ["6", "0", "6 std ssciname staxids"] {
+        let format = [&subject[..], &["-outfmt", fmt]].concat();
+        let with_bti = runs(&search(&format, "taxdb.bti"), "taxdb.bti", fmt);
+        let with_log = runs(&search(&format, "run.log"), "run.log", fmt);
+        assert_eq!(with_bti, with_log, "-subject outfmt {fmt}");
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 // Line WQA D26 item 7 (D19b review follow-up): the entries that `windowmasker -mk_counts
 // -fa_list true` reads from its list file are inputs of the run, as the list file is.
 #[test]

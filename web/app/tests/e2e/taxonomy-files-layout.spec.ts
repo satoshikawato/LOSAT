@@ -1,9 +1,12 @@
 // The run's directory is the user's directory (line WQA D35, 2026-11-28): with a database folder picked, the
 // folder's `taxdb.*` and `taxonomy4blast.sqlite3` are where the user has them (`protdb/`), the engine finds them
 // through the shown command's `BLASTDB=protdb`, and no copy of them lies at the run's root. So a `-logfile` named
-// like one of them is a new file there, and runs as the shown command runs on the command line, with its bytes.
+// like one of them that the run does not look for is a new file there, and runs as the shown command runs on the
+// command line, with its bytes; one that the run looks for (`taxdb.bti` in a search of a database, the run's
+// working directory first; `taxonomy4blast.sqlite3` with `-taxids`) is refused, as the command line refuses it
+// (WQA DECISIONS 62).
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from '@playwright/test';
@@ -14,7 +17,7 @@ import { openParameters, openSearch, paste, program, result, runMessage, submit,
 import { test } from './support/test';
 
 const LOSAT = join(REPOSITORY, 'LOSAT');
-const TAXONOMY_NAMES = ['taxdb.bti', 'taxdb.btd', 'taxonomy4blast.sqlite3'] as const;
+const RUNNING_NAMES = ['taxdb.btd', 'taxonomy4blast.sqlite3'] as const;
 
 /** `work/protdb/`: the protein database `tfp` with its taxonomy files, as a user's folder holds them. */
 function userFolder(work: string): string {
@@ -43,7 +46,7 @@ test.describe('the folder picked for -db: its taxonomy files stay where the user
   test.skip(NATIVE === undefined, NO_NATIVE_REASON);
   test.setTimeout(300_000);
 
-  for (const name of TAXONOMY_NAMES) {
+  for (const name of RUNNING_NAMES) {
     test(`-logfile ${name} runs and gives the bytes of the shown command`, async ({ page }) => {
       const work = mkdtempSync(join(tmpdir(), 'losat-d35-e2e-'));
       try {
@@ -68,6 +71,38 @@ test.describe('the folder picked for -db: its taxonomy files stay where the user
         const expected = native(['blastp', '-query', queryPath, '-db', 'protdb/tfp', '-logfile', name], work, 6);
         expect(expected.status, expected.stderr).toBe(0);
         expect(output).toBe(expected.stdout);
+      } finally {
+        rmSync(work, { recursive: true, force: true });
+      }
+    });
+  }
+
+  for (const [label, extra, name] of [
+    ['taxdb.bti, which the search looks for first in its working directory', '', 'taxdb.bti'],
+    ['taxonomy4blast.sqlite3 with -taxids', '-taxids 9606 ', 'taxonomy4blast.sqlite3'],
+  ] as const) {
+    test(`-logfile ${label} is refused as the shown command is`, async ({ page }) => {
+      const work = mkdtempSync(join(tmpdir(), 'losat-d35-e2e-'));
+      try {
+        const folder = userFolder(work);
+        const queryPath = join(LOSAT, 'tests/db_search/taxfilter/q.faa');
+        await openSearch(page);
+        await program(page, 'blastp');
+        await paste(page, 'query', readFileSync(queryPath, 'utf8'));
+        await page.getByTestId('subject-source-database').check();
+        await page.getByTestId('subject-db-folder-input').setInputFiles(folder);
+        await expect(page.getByTestId('subject-db-selected')).toContainText('protdb/tfp');
+        await openParameters(page);
+        await page.getByTestId('param-extra').fill(`${extra}-logfile ${name}`);
+        await submit(page);
+        await waitStatus(page, 1, 'failed');
+        expect(await runMessage(page, 1)).toContain(`a -logfile file '${name}' that is`);
+        // The shown command on the command line: refused before the file is made.
+        const args = ['blastp', '-query', queryPath, '-db', 'protdb/tfp', ...extra.trim().split(' ').filter(Boolean), '-logfile', name];
+        const cli = native(args, work, 6);
+        expect(cli.status, cli.stderr).toBe(1);
+        expect(cli.stderr).toContain(`a -logfile file '${name}' that is also an input file read by this run`);
+        expect(existsSync(join(work, name))).toBe(false);
       } finally {
         rmSync(work, { recursive: true, force: true });
       }

@@ -7586,116 +7586,29 @@ impl TaxdbSetting {
     }
 }
 
-/// How a `-outfmt` value consults NCBI's taxonomy database (`taxdb.bti` / `taxdb.btd`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum OutfmtTaxdbUse {
-    /// The format neither checks `taxdb.bti` presence nor reads taxonomy names for its output
-    /// (outfmt 5, 8, 9, 11, 12, 17, and 6/7/10/20 without taxonomy name fields — including
-    /// `staxid` and `staxids`).
-    None,
-    /// The format reads taxonomy names only when `taxdb.bti` already exists on the search path
-    /// (tabular singular name fields `ssciname`/`scomname`/`sblastname`/`sskingdom`, organism
-    /// report 18, and pairwise/query-anchored 0..=4 for titleless database sequences with a
-    /// taxid): creating a missing `taxdb.bti` when none is on the search path leaves CLI output
-    /// unchanged, whereas shadowing an existing `taxdb.bti` (or creating its paired
-    /// `taxdb.btd`) changes it.
-    WhenPresent,
-    /// The format checks `taxdb.bti` presence even when no `taxdb.bti` is on the search path,
-    /// so creating a missing `taxdb.bti` changes CLI output or stderr:
-    /// - XML2/JSON formats 13, 14, 15, 16 on `-db` (`Xml2Kind::of`, `x_InitCommon`);
-    /// - Tabular/CSV formats 6, 7, 10, 20 with plural taxonomy name fields
-    ///   (`TabularSpec::checks_taxdb`, `x_CheckTaxDB`), for both `-db` and `-subject`.
-    Always,
-}
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-135
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:582-606
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:95-110
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-386
-/// Parsed `-outfmt` report format and optional tabular specification for `app`, shared by
-/// [`outfmt_taxdb_use`] and [`outfmts_need_subject_taxdb`].
-fn parse_outfmt_for_taxdb(
+/// The tabular specification of the `-outfmt` value `outfmt` for `app` (`None`: not a tabular
+/// format, or a value that does not parse) ([`outfmts_need_subject_taxdb`]).
+fn tabular_spec_for_taxdb(
     outfmt: impl AsRef<[u8]>,
     app: crate::report::archive::options::RequestKind,
-) -> Option<(
-    crate::blastinput::app::ReportFormat,
-    Option<crate::report::tabular::TabularSpec>,
-)> {
+) -> Option<crate::report::tabular::TabularSpec> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     let report = crate::blastinput::app::ReportFormat::from_number(choice.number)?;
-    let tabular = crate::report::tabular::TabularSpec::of_app(report, &choice, app);
-    Some((report, tabular))
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:522-532
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
-/// How an `-outfmt` string consults NCBI's taxonomy database for `app` (and whether the search
-/// uses `-db`, `is_db`), sharing the engine's own `parse_formatting_string`, `Xml2Kind::of`,
-/// `ReportFormat::writes_html_links`, `TabularSpec::of_app` and `PrintedIds::of` rules
-/// (line WQA D19b).
-///
-/// On `-db` searches, tabular formats (6, 7, 10, 20) that print a subject id column
-/// (`PrintedIds`: `sseqid`, `sacc`, `saccver`, `sallseqid`, `sallacc`, including the default
-/// `std` fields of outfmt 6 and 7) derive the replacement word for `gnl|BL_ORD_ID|n` on
-/// databases without `-parse_seqids` from `GenerateDefline`, which uses `taxdb` when a sequence's
-/// stored title is empty, so they return [`OutfmtTaxdbUse::WhenPresent`].
-pub(crate) fn outfmt_taxdb_use(
-    outfmt: impl AsRef<[u8]>,
-    app_kind: crate::report::archive::options::RequestKind,
-    is_db: bool,
-) -> OutfmtTaxdbUse {
-    use crate::blastinput::app::ReportFormat;
-    use crate::report::tabular::PrintedIds;
-    let Some((report, tabular)) = parse_outfmt_for_taxdb(outfmt, app_kind) else {
-        return OutfmtTaxdbUse::None;
-    };
-    if is_db && crate::report::blast_xml2::Xml2Kind::of(report).is_some() {
-        return OutfmtTaxdbUse::Always;
-    }
-    if let Some(spec) = tabular {
-        if spec.checks_taxdb() {
-            return OutfmtTaxdbUse::Always;
-        }
-        if is_db && (spec.needs().taxonomy_names || PrintedIds::of(Some(&spec)).any()) {
-            return OutfmtTaxdbUse::WhenPresent;
-        }
-        return OutfmtTaxdbUse::None;
-    }
-    if is_db
-        && (report.writes_html_links()
-            || (matches!(
-                report,
-                ReportFormat::Tabular | ReportFormat::TabularWithComments
-            ) && PrintedIds::of(None).any()))
-    {
-        return OutfmtTaxdbUse::WhenPresent;
-    }
-    OutfmtTaxdbUse::None
+    crate::report::tabular::TabularSpec::of_app(report, &choice, app)
 }
 
 /// Whether any format in `outfmts` looks every taxid up for a `-subject` search (`x_CheckTaxDB`
 /// plural names or outfmt 18, `TabularSpec::looks_up_every_taxid`), shared by
-/// `api::run::taxdb_setting`.
+/// `api::run::taxdb_setting` and the taxonomy files of a run (`report::log_inputs::db_use`).
 pub(crate) fn outfmts_need_subject_taxdb<O: AsRef<[u8]>>(
     outfmts: impl IntoIterator<Item = O>,
     kind: crate::report::archive::options::RequestKind,
 ) -> bool {
     outfmts.into_iter().any(|outfmt| {
-        parse_outfmt_for_taxdb(outfmt, kind)
-            .and_then(|(_, spec)| spec)
-            .is_some_and(|spec| spec.looks_up_every_taxid())
+        tabular_spec_for_taxdb(outfmt, kind).is_some_and(|spec| spec.looks_up_every_taxid())
     })
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:756-772
-/// Whether a `-db` search with `-outfmt` `outfmt` prefetches reported subjects (`prefetch_messages`,
-/// outfmt 0..=7 and 17): when `taxdb.btd` already exists on disk in a search directory, creating a
-/// `taxdb.bti` log file beside it causes `TaxDb::open` to read that file during prefetch.
-pub(crate) fn outfmt_prefetches_taxdb(outfmt: impl AsRef<[u8]>) -> bool {
-    let Ok(choice) = crate::blastinput::app::parse_formatting_string(outfmt) else {
-        return false;
-    };
-    matches!(choice.number, 0..=7 | 17)
 }
 
 /// What the tabular reports of a `-subject` search know of the taxonomy database

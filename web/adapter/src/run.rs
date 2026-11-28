@@ -612,8 +612,9 @@ struct SearchRunFiles {
 /// - `read`: with `-db`, the list files of its filters (`-gilist`, `-negative_gilist`,
 ///   `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`,
 ///   `-negative_taxidlist`), the database lookup files (`search_database_read_files`, including
-///   BLASTN's `-filtering_db` even with `-subject`) and taxonomy lookup files, kept apart from
-///   `registered` so a missing file does not make its parent folders present.
+///   BLASTN's `-filtering_db` even with `-subject`) and the taxonomy files that the search looks
+///   for (line WQA D35: for a search of a database, or one whose report looks every taxid up),
+///   kept apart from `registered` so a missing file does not make its parent folders present.
 fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
     use losat::web_adapter::{
         preparse, scan_program_argv, search_database_read_files, Preparsed, RegistryFiles as _,
@@ -656,15 +657,8 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     let mut read_always: Vec<Vec<u8>> = Vec::new();
     let mut dbs: Vec<String> = Vec::new();
     let mut filtering_dbs: Vec<String> = Vec::new();
-    let mut outfmt: Option<String> = None;
-    let mut has_taxids = false;
-    let mut no_taxid_expansion = false;
     let is_blastn = program == Program::Blastn;
     scan_program_argv(program_name, arguments, |name, value| {
-        if name == "no_taxid_expansion" && value.is_none() {
-            no_taxid_expansion = true;
-            return;
-        }
         let Some(value) = value else {
             return;
         };
@@ -675,16 +669,8 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             "window_masker_taxid" if is_blastn => push_taxid(&mut registered, value),
             "db" => dbs.push(value.to_string()),
             "filtering_db" if is_blastn => filtering_dbs.push(value.to_string()),
-            "outfmt" => outfmt = Some(value.to_string()),
-            "taxids" | "negative_taxids" => has_taxids = true,
-            "taxidlist" | "negative_taxidlist" => {
-                has_taxids = true;
-                if !value.is_empty() {
-                    list_files.push(value.as_bytes().to_vec());
-                }
-            }
             "gilist" | "negative_gilist" | "ipglist" | "negative_ipglist" | "seqidlist"
-            | "negative_seqidlist" => {
+            | "negative_seqidlist" | "taxidlist" | "negative_taxidlist" => {
                 if !value.is_empty() {
                     list_files.push(value.as_bytes().to_vec());
                 }
@@ -722,8 +708,6 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
         registry,
         &db_refs,
         &filtering_db_refs,
-        outfmt.as_deref().unwrap_or("0"),
-        has_taxids && !no_taxid_expansion,
     ));
     SearchRunFiles { registered, read }
 }

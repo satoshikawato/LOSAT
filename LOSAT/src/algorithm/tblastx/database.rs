@@ -1079,13 +1079,16 @@ pub(crate) fn prefetch_format(
 
 /// Whether each batch's prefetch loads its subjects where LOSAT writes the run's reads of their
 /// titles (`common::database::TitleReads::Prefetched`, `batch_title_posts`), for the reports
-/// `formats`.
-pub(crate) fn titles_prefetched(formats: &[crate::api::local_blast::FormatOutput<'_>]) -> bool {
+/// `formats` at the run's `PRE_FETCH_SEQS_LIMIT` `limit` ([`parsed_shown`]).
+pub(crate) fn titles_prefetched(
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+    limit: Option<i32>,
+) -> bool {
     let shown: Vec<_> = formats
         .iter()
         .map(|format| super::report::output_format(format.outfmt))
         .collect();
-    parsed_shown(&shown, prefetch_format(formats)).titles == shared::TitleReads::Prefetched
+    parsed_shown(&shown, prefetch_format(formats), limit).titles == shared::TitleReads::Prefetched
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (cited at
@@ -1123,10 +1126,12 @@ pub(crate) fn batches_prefetch(
 /// What the reports `formats` show of a reported sequence with parsed Seq-ids
 /// (`reported_subjects`, `report_stream`'s check of each format, the batches' refusal of a
 /// subject with the id of a query): the batches prefetch the subjects for the first format, as
-/// NCBI's prefetch asks it (`prefetch_format`).
+/// NCBI's prefetch asks it (`prefetch_format`), at the run's `PRE_FETCH_SEQS_LIMIT` `limit`
+/// (`shared::prefetch_seqs_limit`, read once by the run: review 3 of line RG-KB item 9b-2, R3-L2).
 pub(crate) fn parsed_shown(
     formats: &[super::report::TblastxOutputFormat],
     prefetch_format: shared::PrefetchFormat,
+    limit: Option<i32>,
 ) -> ParsedShown {
     let pairwise = formats.iter().any(|format| format.is_pairwise());
     ParsedShown {
@@ -1158,13 +1163,14 @@ pub(crate) fn parsed_shown(
         ),
         prefetched: formats
             .first()
-            .is_some_and(|format| format.prefetches_subjects())
-            && !shared::prefetch_always_off(prefetch_format),
+            .is_some_and(|format| format.prefetches_subjects(limit))
+            && !shared::prefetch_always_off_at(prefetch_format, limit),
         titles: shared::TitleReads::of_outfmts(
             crate::report::archive::options::RequestKind::Tblastx,
             formats
                 .iter()
                 .map(|format| format.report_format().map_or(-1, |format| format as i32)),
+            limit,
         ),
     }
 }

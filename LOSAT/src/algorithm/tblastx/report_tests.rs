@@ -563,7 +563,8 @@ fn the_structured_formats_read_no_displayed_counts_and_write_no_query_warnings()
         ("16", true),
     ] {
         assert_eq!(
-            output_format(outfmt).prefetches_subjects(),
+            output_format(outfmt)
+                .prefetches_subjects(crate::algorithm::common::database::prefetch_seqs_limit()),
             prefetches,
             "{outfmt}"
         );

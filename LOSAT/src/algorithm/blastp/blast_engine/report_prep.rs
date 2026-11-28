@@ -423,15 +423,18 @@ pub(super) fn prefetch_reported_subjects(
     // (`HitLoads::reaches`; review 3 of line DBID pfoff-3, N1). The writer ends the run at that
     // report with its error.
     let prefetch_stop = prefetch_stop.filter(|span| hit_loads.reaches(span.start));
+    // What the call's reports read of the titles, at the call's limit
+    // (`shared::BatchPrefetch::limit`).
+    let title_reads = crate::algorithm::common::database::TitleReads::of_outfmts(
+        args.app.request_kind(),
+        outputs
+            .formats
+            .iter()
+            .map(|format| format.report_format().map_or(-1, |format| format as i32)),
+        batch_prefetch.limit(),
+    );
     if let Some(titles) = listed_titles.as_ref() {
         let db = database.expect("listed titles are a database's");
-        let title_reads = crate::algorithm::common::database::TitleReads::of_outfmts(
-            args.app.request_kind(),
-            outputs
-                .formats
-                .iter()
-                .map(|format| format.report_format().map_or(-1, |format| format as i32)),
-        );
         titles.check_reported_titles(db, reported_lists, title_reads)?;
         // For psiblast and rpsblast (`prunes_after_traceback`), Seq-aligns read subjects beyond
         // `-max_target_seqs` before `PruneSeqalign`: refuse any replaced title read before the cut
@@ -915,13 +918,7 @@ pub(super) fn prefetch_reported_subjects(
     // NCBI's posts of the titles that the batches' Seq-aligns read come before their prefetches'
     // (`query_warnings::query_posts` sorts them by the batch's first query, stably), with those
     // of the prefetches' loads where LOSAT writes the run's reads.
-    let prefetched = crate::algorithm::common::database::TitleReads::of_outfmts(
-        args.app.request_kind(),
-        outputs
-            .formats
-            .iter()
-            .map(|format| format.report_format().map_or(-1, |format| format as i32)),
-    ) == crate::algorithm::common::database::TitleReads::Prefetched;
+    let prefetched = title_reads == crate::algorithm::common::database::TitleReads::Prefetched;
     let (posts, title_decodes) = match (listed_titles.as_ref(), database) {
         (Some(titles), Some(database)) => (
             titles
@@ -1612,12 +1609,19 @@ pub(super) fn report_values(
         _ => None,
     };
     let prefetch_format = prefetch_format(args.app, requested_formats);
+    // The call's `PRE_FETCH_SEQS_LIMIT`, read once: the batches' prefetch below
+    // (`shared::BatchPrefetch::limit`) and the reads of the titles
+    // (`prefetch_reported_subjects`) answer by it (review 3 of line RG-KB item 9b-2, R3-L2).
+    let prefetch_limit = crate::algorithm::common::database::prefetch_seqs_limit();
     // Whether the batches prefetch the subjects of a database, and whether that looks their
     // taxids up (`prefetch_reported_subjects`'s `prefetch_messages`).
     let batches_prefetch = listed_titles.is_some()
-        && requested_formats
-            .first()
-            .is_some_and(|outfmt| outfmt.prefetches_subjects(args.app));
+        && requested_formats.first().is_some_and(|outfmt| {
+            crate::algorithm::common::database::prefetches_subjects_at(
+                Some(outfmt.prefetch_format(args.app)),
+                prefetch_limit,
+            )
+        });
     let prefetch_taxids =
         batches_prefetch && database.is_some_and(|database| database.taxdb_found());
     // Whether that prefetch reads the subjects though the first format reads nothing of them
@@ -1681,27 +1685,31 @@ pub(super) fn report_values(
         .iter()
         .map(|batch| batch.searched.clone())
         .collect();
-    let batch_prefetch = crate::algorithm::common::database::BatchPrefetch::of(
+    let batch_prefetch = crate::algorithm::common::database::BatchPrefetch::at(
+        prefetch_limit,
         prefetch_format,
         hit_lists.len(),
         0,
         &batch_ranges,
-        |span| {
-            blastp_seq_aligns(&hit_lists[span.clone()], !args.ungapped)
-                + setup
-                    .unlisted
-                    .get(span)
-                    .map_or(0, |counts| counts.iter().sum())
-        },
-        // The prefetch reads the subjects of the batch's results before the cut, as the count.
-        |span| {
-            listed_titles.as_ref().is_some_and(|titles| {
-                crate::algorithm::common::database::BatchPrefetch::prefetch_fails_among(
-                    database::ListedTitles::reported_ranks(&hit_lists[span])
-                        .map(|rank| titles.parsed_subject(rank)),
-                )
-            })
-        },
+        (
+            |span: Range<usize>| {
+                blastp_seq_aligns(&hit_lists[span.clone()], !args.ungapped)
+                    + setup
+                        .unlisted
+                        .get(span)
+                        .map_or(0, |counts| counts.iter().sum())
+            },
+            // The prefetch reads the subjects of the batch's results before the cut, as the
+            // count.
+            |span: Range<usize>| {
+                listed_titles.as_ref().is_some_and(|titles| {
+                    crate::algorithm::common::database::BatchPrefetch::prefetch_fails_among(
+                        database::ListedTitles::reported_ranks(&hit_lists[span])
+                            .map(|rank| titles.parsed_subject(rank)),
+                    )
+                })
+            },
+        ),
     );
     // The numbers of HSPs of psiblast's lists before the formatter's cut (`# N hits found` of
     // outfmt 7), and the cut: here for psiblast's XML report, after the PSSMs otherwise.

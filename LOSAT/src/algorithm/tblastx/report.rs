@@ -1470,11 +1470,15 @@ impl TblastxOutputFormat {
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
     /// reports (outfmt 0 to 7 and 13 to 18, 10 and 20 as 6 and 7; with
     /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as the
-    /// call's first report, the posts of that prefetch go with the query warnings.
-    pub(crate) fn prefetches_subjects(self) -> bool {
+    /// call's first report, the posts of that prefetch go with the query warnings. `limit` is the
+    /// run's `PRE_FETCH_SEQS_LIMIT` (`common::database::prefetch_seqs_limit`, read once by the run).
+    pub(crate) fn prefetches_subjects(self, limit: Option<i32>) -> bool {
         // The archive fetches nothing; the XML2 and JSON `Hit`s write only the texts of their own
         // lookups (`database::RowLookups::Taxids`).
-        crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format()))
+        crate::algorithm::common::database::prefetches_subjects_at(
+            Some(self.prefetch_format()),
+            limit,
+        )
     }
 
     /// The format as the first format of a TBLASTX run that NCBI's prefetch of each query batch

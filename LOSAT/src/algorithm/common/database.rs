@@ -2185,12 +2185,6 @@ impl PrefetchFormat {
         self.reads_at(limit) && !prefetch_off_at(limit, seq_aligns)
     }
 
-    /// Whether a batch's prefetch reads its Seq-aligns where `PRE_FETCH_SEQS_LIMIT` allows its
-    /// count (`PrefetchFormat::reads_at`): the format's part of the rule.
-    pub(crate) fn reads_seq_aligns(self) -> bool {
-        self.reads_at(prefetch_seqs_limit())
-    }
-
     /// Whether the prefetch of a query batch whose results hold `seq_aligns` Seq-aligns (one for
     /// each HSP of a gapped search, the count of outfmt 7's `# N hits found`, one for each subject
     /// of an ungapped one: [`subject_seq_aligns`]) runs: the one answer of every program.
@@ -2209,8 +2203,11 @@ impl PrefetchFormat {
 /// integer stops NCBI before its report; LOSAT refuses it in
 /// `blastinput::app::check_prefetch_environment` (not for an archive that NCBI writes without the
 /// prefetch).
-pub(crate) fn prefetch_may_be_off(format: PrefetchFormat) -> bool {
-    let limit = prefetch_seqs_limit();
+///
+/// `limit` is the run's limit ([`prefetch_seqs_limit`]), which the caller reads once for the run
+/// (review 3 of line RG-KB item 9b-2, R3-L2: a read of the environment per batch costs every
+/// run).
+pub(crate) fn prefetch_may_be_off(format: PrefetchFormat, limit: Option<i32>) -> bool {
     !format.reads_at(limit) || limit.is_some_and(|limit| limit != i32::MAX)
 }
 
@@ -2432,7 +2429,13 @@ pub(crate) fn subject_seq_aligns(hsps: usize, gapped: bool) -> usize {
 /// ([`prefetch_off`] of a batch without Seq-aligns). A run whose reports then read no subject
 /// looks no taxid up, so it has no refusal of NCBI's taxonomy cache to ask for.
 pub(crate) fn prefetch_always_off(format: PrefetchFormat) -> bool {
-    prefetch_off(format, 0)
+    prefetch_always_off_at(format, prefetch_seqs_limit())
+}
+
+/// [`prefetch_always_off`] with the limit `limit`, the run's [`prefetch_seqs_limit`]
+/// ([`prefetch_may_be_off`]).
+pub(crate) fn prefetch_always_off_at(format: PrefetchFormat, limit: Option<i32>) -> bool {
+    !format.runs_at(limit, 0)
 }
 
 /// Whether the prefetch of each query's batch reads the batch's reported subjects
@@ -2449,7 +2452,13 @@ pub(crate) fn prefetch_always_off(format: PrefetchFormat) -> bool {
 /// leaves its later loads to its reports, which load its subjects one by one too
 /// ([`BatchPrefetch::loads_one_by_one`]; line DBID pfoff-7).
 #[derive(Debug)]
-pub(crate) struct BatchPrefetch(Batches, BatchStarts, BatchFails);
+pub(crate) struct BatchPrefetch(Batches, BatchStarts, BatchFails, Limit);
+
+/// The run's `PRE_FETCH_SEQS_LIMIT` that decided a call's [`BatchPrefetch`]
+/// ([`prefetch_seqs_limit`]), for the call's other answers of the limit
+/// ([`BatchPrefetch::limit`]).
+#[derive(Debug)]
+struct Limit(Option<i32>);
 
 /// Whether the prefetch of the batch of each query of a call runs and fails at a subject whose
 /// lookup throws on the id ([`BatchPrefetch`]).
@@ -2500,8 +2509,9 @@ impl BatchPrefetch {
         )
     }
 
-    /// [`BatchPrefetch::of`] with the limit `limit` (`prefetch_seqs_limit`).
-    fn at(
+    /// [`BatchPrefetch::of`] with the limit `limit`, the run's [`prefetch_seqs_limit`] read once by
+    /// the caller ([`prefetch_may_be_off`]).
+    pub(crate) fn at(
         limit: Option<i32>,
         format: PrefetchFormat,
         queries: usize,
@@ -2557,7 +2567,13 @@ impl BatchPrefetch {
                 }
             }
         }
-        Self(every, starts, BatchFails(failing))
+        Self(every, starts, BatchFails(failing), Limit(limit))
+    }
+
+    /// The run's `PRE_FETCH_SEQS_LIMIT` that decided the call's batches, for its other answers of
+    /// the limit (`TitleReads::of_outfmts`) without reading the environment again.
+    pub(crate) fn limit(&self) -> Option<i32> {
+        self.3 .0
     }
 
     /// Whether the batch of the call's query `query` prefetches; `None` for a query of no batch.
@@ -2695,7 +2711,7 @@ impl BatchReads {
 /// value that NCBI cannot convert stops the first batch before its prefetch
 /// (`app::check_prefetch_environment`), so no batch's prefetch is decided by it: the plans made
 /// before the search count it as unset.
-fn prefetch_seqs_limit() -> Option<i32> {
+pub(crate) fn prefetch_seqs_limit() -> Option<i32> {
     crate::blastinput::app::prefetch_seqs_limit().ok().flatten()
 }
 
@@ -4965,9 +4981,13 @@ impl TitleReads {
     ///   `PruneSeqalign` cuts them to `-max_target_seqs`.
     ///
     /// None of those extra reads or per-batch/per-volume caches is modelled.
+    ///
+    /// `limit` is the run's `PRE_FETCH_SEQS_LIMIT` ([`prefetch_seqs_limit`]), which the caller
+    /// reads once for the run (review 3 of line RG-KB item 9b-2, R3-L2).
     pub(crate) fn of_outfmts(
         app: crate::report::archive::options::RequestKind,
         outfmts: impl IntoIterator<Item = i32>,
+        limit: Option<i32>,
     ) -> Self {
         use crate::blastinput::app::ReportFormat;
         if matches!(
@@ -4998,19 +5018,13 @@ impl TitleReads {
         let seq_aligns = |number: i32| {
             ReportFormat::from_number(number).is_some_and(ReportFormat::writes_seqaligns)
         };
-        if seq_aligns(first)
-            && second.into_iter().chain(outfmts).all(seq_aligns)
-            && !prefetches_subjects(Some(prefetch))
-        {
+        let prefetches = prefetches_subjects_at(Some(prefetch), limit);
+        if seq_aligns(first) && second.into_iter().chain(outfmts).all(seq_aligns) && !prefetches {
             return TitleReads::SeqAligns;
         }
         let written = ReportFormat::from_number(first)
             .is_some_and(|format| FormatterTitleReads::of(format).written());
-        if second.is_none()
-            && written
-            && prefetches_subjects(Some(prefetch))
-            && !prefetch_may_be_off(prefetch)
-        {
+        if second.is_none() && written && prefetches && !prefetch_may_be_off(prefetch, limit) {
             TitleReads::Prefetched
         } else {
             TitleReads::Reports
@@ -5669,9 +5683,10 @@ pub(crate) struct TaxdbRun {
     found: std::sync::OnceLock<bool>,
     /// What the lookups of the run can write ([`TaxdbRun::prefetch_texts`]).
     texts: std::sync::OnceLock<PrefetchTexts>,
-    /// The refusal of the reads of a run with a volume where NCBI's cache can make the fetches
-    /// write the offset error more than once, as a reader's refusal ([`TaxdbRun::cache_collision`]).
-    collision: std::sync::OnceLock<Option<(std::path::PathBuf, String)>>,
+    /// The volumes where NCBI's cache can make the fetches write the offset error more than once,
+    /// with the refusal of the reads of such a run as a reader's refusal
+    /// ([`TaxdbRun::cache_collision`]).
+    collision: std::sync::OnceLock<Option<CacheCollision>>,
     /// The texts of opening the database when the rows of a tabular report opened it, kept for
     /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
     rows_open: std::sync::OnceLock<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
@@ -5755,6 +5770,16 @@ struct TitleLookups {
     /// The volumes where a load looked the offset error's taxid up, whose slot of the volume's
     /// cache holds it from then on where no other taxid of the volume takes that slot.
     offset_volumes: std::collections::HashSet<usize>,
+}
+
+/// The volumes of a run's database that hold the offset error's taxid `L` and another positive
+/// taxid of its slot of NCBI's taxonomy cache of a volume ([`TaxdbRun::cache_collision`]).
+#[derive(Debug)]
+struct CacheCollision {
+    /// `(path of taxdb.bti, reason)` of LOSAT's refusals, which names the first such volume.
+    refusal: (std::path::PathBuf, String),
+    /// Every such volume, by index in the database ([`TaxdbRun::collision_volume`]).
+    volumes: Vec<usize>,
 }
 
 /// The size 256 of `CSeqDBVol::m_TaxCache`: the slots of a volume's taxonomy cache.
@@ -7275,17 +7300,19 @@ impl TaxdbRun {
     /// prefetch, those that NCBI's data source may hold included) may write a text of the run's
     /// taxonomy database or throw, after the loads of the batches before
     /// ([`TaxdbRun::note_title_loads`]): a load of a sequence with a positive taxid (or taxids
-    /// LOSAT cannot read) where every lookup can (a null mapping, a file that throws), or before
-    /// the run's first lookup where opening the database writes texts, and a load with the offset
-    /// error's taxid in a volume where no load before looked it up, or where another taxid of the
-    /// volume can take its slot ([`TaxdbRun::cache_collision`]).
+    /// LOSAT cannot read) where every lookup can (a file that throws), where it looks up a taxid
+    /// other than the last entry's with a null mapping (NCBI faults there, which LOSAT refuses
+    /// apart: the last entry's lookup gives the offset error, [`TaxdbRun::volume_load`]; review 3
+    /// of line RG-KB item 9b-2, R3-L1), or before the run's first lookup where opening the
+    /// database writes texts, and a load with the offset error's taxid in a volume where no load
+    /// before looked it up, or where another taxid of that volume can take its slot
+    /// ([`TaxdbRun::collision_volume`]; R3-N1: NCBI's cache is the volume's).
     fn title_loads_write_texts(&self, db: &SeqDb, loads: impl IntoIterator<Item = u32>) -> bool {
         if !self.loads_write_texts(db) {
             return false;
         }
         let texts = self.prefetch_texts(db);
-        let every = texts.maps_null || self.load_throws(db);
-        let collision = self.cache_collision(db).is_some();
+        let throws = self.load_throws(db);
         let before = self.title_lookups.lock().expect("the title lookups");
         loads.into_iter().any(|ordinal| {
             let taxids = db.defline_taxids(ordinal).ok();
@@ -7295,14 +7322,21 @@ impl TaxdbRun {
             {
                 return false;
             }
-            every
+            let faults = texts.maps_null
+                && taxids.as_ref().is_none_or(|taxids| {
+                    taxids
+                        .iter()
+                        .any(|&taxid| taxid > 0 && Some(taxid) != texts.offset_error_taxid)
+                });
+            throws
+                || faults
                 || (texts.opening && !before.opened)
                 || texts.offset_error_taxid.is_some_and(|last| {
                     taxids.as_ref().is_none_or(|taxids| taxids.contains(&last))
-                        && (collision
-                            || db
-                                .volume_index(ordinal)
-                                .map_or(true, |volume| !before.offset_volumes.contains(&volume)))
+                        && db.volume_index(ordinal).map_or(true, |volume| {
+                            self.collision_volume(db, volume)
+                                || !before.offset_volumes.contains(&volume)
+                        })
                 })
         })
     }
@@ -7372,16 +7406,29 @@ impl TaxdbRun {
     /// the XML2 and JSON reports' too (they prefetch as the other formats,
     /// [`prefetches_subjects`]), and refuse what that order does not decide.
     fn cache_collision(&self, db: &SeqDb) -> Option<&(std::path::PathBuf, String)> {
+        self.collisions(db).map(|collision| &collision.refusal)
+    }
+
+    /// Whether the volume `volume` of `db` is one of [`TaxdbRun::cache_collision`]'s: NCBI's cache
+    /// is the volume's (`CSeqDBVol::m_TaxCache`), so another volume's taxids never take its slots.
+    fn collision_volume(&self, db: &SeqDb, volume: usize) -> bool {
+        self.collisions(db)
+            .is_some_and(|collision| collision.volumes.contains(&volume))
+    }
+
+    /// [`CacheCollision`] of the run, found once ([`taxonomy_cache_collisions`]).
+    fn collisions(&self, db: &SeqDb) -> Option<&CacheCollision> {
         self.collision
             .get_or_init(|| {
                 let last = self.prefetch_texts(db).offset_error_taxid?;
-                let (volume, other) = taxonomy_cache_collision(db, last)?;
+                let volumes = taxonomy_cache_collisions(db, last);
+                let &(volume, other) = volumes.first()?;
                 let path = db.search_path()?.resolve_file(b"taxdb.bti")?;
                 let volume_name = db
                     .volumes()
                     .get(volume)
                     .map_or_else(String::new, |vol| vol.base().display().to_string());
-                Some((
+                let refusal = (
                     crate::utils::os_bytes::path_from_bytes(path),
                     format!(
                         "taxid {last}, the last entry of the taxonomy database, begins past the \
@@ -7392,7 +7439,11 @@ impl TaxdbRun {
                          order of fetches that LOSAT does not reproduce",
                         crate::seqdb::taxdb::MSG_OFFSET_ERROR
                     ),
-                ))
+                );
+                Some(CacheCollision {
+                    refusal,
+                    volumes: volumes.into_iter().map(|(volume, _)| volume).collect(),
+                })
             })
             .as_ref()
     }
@@ -11228,19 +11279,22 @@ fn prefetch_stop(
     })
 }
 
-/// The volume of `db` that holds the taxid `last` and another positive taxid of the same slot of
-/// NCBI's taxonomy cache of a volume (`taxid & 255`, `TaxdbRun::cache_collision`), with that
-/// taxid; `None` when no volume does. Every definition line's taxid of every sequence, parsed
-/// Seq-ids or not, in one pass over the headers; a header whose taxids do not decode is skipped.
-fn taxonomy_cache_collision(db: &SeqDb, last: i32) -> Option<(usize, i32)> {
+/// The volumes of `db` that hold the taxid `last` and another positive taxid of the same slot of
+/// NCBI's taxonomy cache of a volume (`taxid & 255`, `TaxdbRun::cache_collision`), each with
+/// that taxid (the first met), in volume order; empty when no volume does. Every definition
+/// line's taxid of every sequence, parsed Seq-ids or not, in one pass over the headers, which
+/// leaves a volume once it is found; a header whose taxids do not decode is skipped.
+fn taxonomy_cache_collisions(db: &SeqDb, last: i32) -> Vec<(usize, i32)> {
     let slot = tax_cache_slot;
     let volumes = db.volumes().len();
     let mut holds_last = vec![false; volumes];
     let mut same_slot: Vec<Option<i32>> = vec![None; volumes];
-    let mut found = None;
+    let found = |holds_last: &[bool], same_slot: &[Option<i32>], volume: usize| {
+        same_slot[volume].filter(|_| holds_last[volume])
+    };
     for range in db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS) {
         let volume = range.volume;
-        if volume >= volumes {
+        if volume >= volumes || found(&holds_last, &same_slot, volume).is_some() {
             continue;
         }
         db.visit_defline_set_taxids(range, |_ordinal, taxids| {
@@ -11254,19 +11308,12 @@ fn taxonomy_cache_collision(db: &SeqDb, last: i32) -> Option<(usize, i32)> {
                     same_slot[volume].get_or_insert(taxid);
                 }
             }
-            match same_slot[volume] {
-                Some(other) if holds_last[volume] => {
-                    found = Some((volume, other));
-                    false
-                }
-                _ => true,
-            }
+            found(&holds_last, &same_slot, volume).is_none()
         });
-        if found.is_some() {
-            return found;
-        }
     }
-    None
+    (0..volumes)
+        .filter_map(|volume| Some((volume, found(&holds_last, &same_slot, volume)?)))
+        .collect()
 }
 
 /// The end of the reason of a refusal by [`prefetch_reads`] where no report reads the
@@ -11650,7 +11697,7 @@ pub(crate) fn seq_annots_prefetch(format: Option<PrefetchFormat>) -> bool {
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:262-266 (cited at
 // `PrefetchFormat`)
 /// Whether the first format `format` of a call is one whose batches prefetch their reported
-/// subjects where the limit allows ([`PrefetchFormat::reads_seq_aligns`]): outfmt 0 to 7 and 13
+/// subjects where the limit allows (`PrefetchFormat::reads_at`): outfmt 0 to 7 and 13
 /// to 18 (`s_IsPrefetchFormat` leaves out 8, 9, 11 and 12 alone), with
 /// `PRE_FETCH_SEQS_LIMIT=2147483647` the Seq-annots 8, 9 and 12 too, and there psiblast's archive
 /// 11, whose rounds prefetch before their test of the archive. The posts of a batch's prefetch
@@ -11662,11 +11709,16 @@ pub(crate) fn seq_annots_prefetch(format: Option<PrefetchFormat>) -> bool {
 /// archive of the other applications, which write it without calling the prefetch, prefetches
 /// nothing.
 pub(crate) fn prefetches_subjects(format: Option<PrefetchFormat>) -> bool {
+    prefetches_subjects_at(format, prefetch_seqs_limit())
+}
+
+/// [`prefetches_subjects`] with the limit `limit`, the run's [`prefetch_seqs_limit`]
+/// ([`prefetch_may_be_off`]).
+pub(crate) fn prefetches_subjects_at(format: Option<PrefetchFormat>, limit: Option<i32>) -> bool {
     // `s_IsPrefetchFormat` takes the query-anchored formats 1 to 4 as 0 (DECISIONS T3-4); the
     // limit's rule of the Seq-annots and of psiblast's archive is that of the prefetch's reads.
-    format.is_some_and(|format| {
-        matches!(format.outfmt(), 0..=9 | 11..=17) && format.reads_seq_aligns()
-    })
+    format
+        .is_some_and(|format| matches!(format.outfmt(), 0..=9 | 11..=17) && format.reads_at(limit))
 }
 
 /// How many taxonomy database entries cost as much to check as one database sequence: the

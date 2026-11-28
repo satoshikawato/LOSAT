@@ -3665,15 +3665,18 @@ fn run_batch_loop(
     // with the query warnings: the first format is outfmt 0, 5, 6 or 7, or with
     // `PRE_FETCH_SEQS_LIMIT=2147483647` 8, 9 or 12 (`TblastxOutputFormat::prefetches_subjects`;
     // see the batch's prefetch below).
-    let prefetches = outputs
-        .formats
-        .first()
-        .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // The run's `PRE_FETCH_SEQS_LIMIT`, read once for the batches (review 3 of line RG-KB item
+    // 9b-2, R3-L2).
+    let prefetch_limit = crate::algorithm::common::database::prefetch_seqs_limit();
+    let prefetches = outputs.formats.first().is_some_and(|format| {
+        report::output_format(format.outfmt).prefetches_subjects(prefetch_limit)
+    });
     // The first format, whose prefetch each batch asks (`database::prefetch_format`).
     let prefetch_format = super::super::database::prefetch_format(&outputs.formats);
     // Whether each batch's prefetch loads its subjects where LOSAT writes the run's reads of
     // their titles (`database::titles_prefetched`).
-    let title_prefetch = super::super::database::titles_prefetched(&outputs.formats);
+    let title_prefetch =
+        super::super::database::titles_prefetched(&outputs.formats, prefetch_limit);
     // The query records that NCBI's scope holds at the prefetch of the batch of the input records
     // `input` (`shared::PrefetchQueries`, made only where the batch stops): those that NCBI's
     // reader added for the batch (the records that `-query_loc` drops included, numbered in the
@@ -4181,7 +4184,7 @@ fn run_batch_loop(
                         .map(|hsp| (start + hsp.hit.q_idx as usize, hsp.hit.s_idx)),
                     database.oid_map(),
                     scopes,
-                    super::super::database::parsed_shown(&formats, prefetch_format),
+                    super::super::database::parsed_shown(&formats, prefetch_format, prefetch_limit),
                     &mut reports.seen.borrow_mut(),
                     &run,
                     "TBLASTX",
@@ -4725,7 +4728,11 @@ impl BatchReports<'_> {
                     .collect();
                 // The first format, whose prefetch the batches ask (`database::prefetch_format`).
                 let prefetch_format = super::super::database::prefetch_format(&outputs.formats);
-                let shown = super::super::database::parsed_shown(&formats, prefetch_format);
+                let shown = super::super::database::parsed_shown(
+                    &formats,
+                    prefetch_format,
+                    crate::algorithm::common::database::prefetch_seqs_limit(),
+                );
                 // The queries of each batch (`done.spans`, in the numbering of `hits`), whose
                 // prefetch decides the subjects that only the prefetch reads; the hits' engine
                 // identities tell which rows of `nident` alone read a subject.

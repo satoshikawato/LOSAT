@@ -8,4 +8,4 @@
   its memory, or one whose header shares NCBI's header cache slot with such a sequence; and, until LOSAT
   reproduces them, where the prefetch can be off (`PRE_FETCH_SEQS_LIMIT` set to another value), on a database
   with parsed ids, where NCBI's object manager settings (`OBJMGR_*`) are set, and in a query batch whose prefetch
-  makes a damaged taxonomy database write a message (its first lookup, or one that NCBI's cache does not hold).
+  makes a damaged taxonomy database write a message (its first lookup, or one that NCBI's cache does not hold or may not hold).

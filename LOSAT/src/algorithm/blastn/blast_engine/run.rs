@@ -8342,8 +8342,11 @@ fn run_in_pool(
     let mut titles = database::DatabaseTitles::new();
     // Whether each batch's prefetch loads its subjects where LOSAT writes the run's reads of
     // their titles (`shared::TitleReads::Prefetched`; `DatabaseTitles::batch_titles`).
-    let title_prefetch = database::parsed_shown(&output_formats).titles
-        == crate::algorithm::common::database::TitleReads::Prefetched;
+    // What the reports show of the reported database sequences (`database::parsed_shown`), made
+    // once for the run: its batches and reports take it (`ReportSubjects::parsed`).
+    let parsed_shown = database::parsed_shown(&output_formats);
+    let title_prefetch =
+        parsed_shown.titles == crate::algorithm::common::database::TitleReads::Prefetched;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`), added as the
     // loop cuts the batches.
     // With outfmt 5 against a database, every query's ids from the start (`with_whole_run_of`):
@@ -8406,6 +8409,7 @@ fn run_in_pool(
             ReportSubjects {
                 source,
                 shown: &shown,
+                parsed: parsed_shown,
                 titles: &titles,
                 seen: &query_bioseqs,
             },
@@ -8585,6 +8589,7 @@ fn run_in_pool(
                         ReportSubjects {
                             source,
                             shown: &shown,
+                            parsed: parsed_shown,
                             titles: &titles,
                             seen: &query_bioseqs,
                         },
@@ -8698,6 +8703,7 @@ fn run_in_pool(
                     ReportSubjects {
                         source,
                         shown: &shown,
+                        parsed: parsed_shown,
                         titles: &titles,
                         seen: &query_bioseqs,
                     },
@@ -9089,6 +9095,7 @@ fn run_in_pool(
                 ReportSubjects {
                     source,
                     shown: &shown,
+                    parsed: parsed_shown,
                     titles: &titles,
                     seen: &query_bioseqs,
                 },
@@ -9157,7 +9164,7 @@ fn run_in_pool(
                     }),
                 database.oid_map(),
                 scopes,
-                database::parsed_shown(&output_formats),
+                parsed_shown,
                 &mut query_bioseqs,
                 &run,
                 "BLASTN",
@@ -9543,6 +9550,7 @@ fn run_in_pool(
                     ReportSubjects {
                         source,
                         shown: &shown,
+                        parsed: parsed_shown,
                         titles: &titles,
                         seen: &query_bioseqs,
                     },
@@ -9598,6 +9606,7 @@ fn run_in_pool(
             ReportSubjects {
                 source,
                 shown: &shown,
+                parsed: parsed_shown,
                 titles: &titles,
                 seen: &query_bioseqs,
             },
@@ -9634,6 +9643,7 @@ fn run_in_pool(
             ReportSubjects {
                 source,
                 shown: &shown,
+                parsed: parsed_shown,
                 titles: &titles,
                 seen: &query_bioseqs,
             },
@@ -9893,6 +9903,9 @@ fn write_before_failed_batch(
 struct ReportSubjects<'a> {
     source: SubjectSource<'a>,
     shown: &'a ShownSubjects,
+    /// What the reports show of the reported database sequences, the run's
+    /// (`database::parsed_shown`, made once in `run_in_pool`).
+    parsed: crate::algorithm::common::database::ParsedShown,
     titles: &'a database::DatabaseTitles,
     /// The query Bioseqs that NCBI's scope finds for reported sequences, by the run's searched
     /// query (`report::query_bioseq`).
@@ -10062,10 +10075,7 @@ fn write_reports_untimed(
                 subjects.titles,
                 &mut hit_lists,
                 letters,
-                (
-                    database::parsed_shown(output_formats),
-                    database::prefetch_format(output_formats),
-                ),
+                (subjects.parsed, database::prefetch_format(output_formats)),
                 (
                     database::after_throw(
                         output_formats,

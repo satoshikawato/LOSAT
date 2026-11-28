@@ -1,0 +1,6 @@
+Error: (803.7) [rpsblast] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x81] in string at line 24
+YP_009220476.1 xÅy envelope protein [White spot syndrome virus]
+Error: (802.4) [rpsblast] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+BLAST failed to write output
+Error: (802.5) [rpsblast] CObjectOStream: error at byte 619: stack is empty: write fault

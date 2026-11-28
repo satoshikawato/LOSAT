@@ -661,21 +661,15 @@ impl ArchiveHandle {
         written
     }
 
-    /// Writes `text` to `diagnostics` without saving it: NCBI's posts while it writes an archive,
-    /// which its `ResetMessages` after the archive drops (blastn_app.cpp:305-306).
-    pub fn write_unsaved(&self, diagnostics: &mut dyn Write, text: &[u8]) -> std::io::Result<()> {
-        let muted = self.with_state(|state| std::mem::replace(&mut state.muted, true));
-        let written = diagnostics.write_all(text);
-        self.with_state(|state| state.muted = muted);
-        written
-    }
-
     /// Whether messages are saved since the last archive.
     pub fn has_messages(&self) -> bool {
         self.with_state(|state| !state.log.is_empty())
     }
 
-    /// The messages saved since the last archive.
+    /// The messages saved since the last archive. An archive takes them before its write (NCBI's
+    /// `WriteArchive` copies them into the archive, blast_format.cpp:1114-1116) and again after a
+    /// write that returned, to drop the posts made while it was written (`ResetMessages`,
+    /// `writer::write_archive`).
     pub fn take_messages(&self) -> Vec<Message> {
         self.with_state(|state| state.log.take())
     }
@@ -702,9 +696,12 @@ impl ArchiveHandle {
 /// Posts error 803.7 of each byte that NCBI's stream replaced in an archive of the run of the
 /// application `application` (`encoder::ReplacedChar`, with its prefix: `SetDiagPostPrefix`
 /// of the application name, such as "blastn"; `ArchiveRequest::application`) on `diagnostics`,
-/// without saving them as messages of the run's archive `archive`:
-/// NCBI's `ResetMessages` after the archive drops them (`ArchiveHandle::write_unsaved`). The
-/// search strategy's posts are saved (`strategy::StrategyExport::take_posts`).
+/// and saves each as one message of the run's archive `archive` (`ArchiveHandle::write_post`), as
+/// NCBI's handler saves every post. They come after the archive took its messages, so they are
+/// not in it: the application's `ResetMessages` after a written archive drops them, and where the
+/// write throws they stay, after the archive's messages, for the error archive
+/// (`writer::write_archive`). The search strategy's posts are saved too
+/// (`strategy::StrategyExport::take_posts`).
 pub(crate) fn post_replaced(
     diagnostics: &mut dyn Write,
     archive: &ArchiveHandle,
@@ -712,7 +709,7 @@ pub(crate) fn post_replaced(
     replaced: &[crate::report::serial::encoder::ReplacedChar],
 ) -> std::io::Result<()> {
     for byte in replaced {
-        archive.write_unsaved(diagnostics, &byte.post(Some(application)))?;
+        archive.write_post(diagnostics, ERROR, &byte.post(Some(application)))?;
     }
     Ok(())
 }

@@ -1,0 +1,6 @@
+Error: (803.7) [blastp] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x81] in string at line 23
+p01 xÅy first protein [Test organism]
+Error: (802.4) [blastp] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+BLAST failed to write output
+Error: (802.5) [blastp] CObjectOStream: error at byte 589: stack is empty: write fault

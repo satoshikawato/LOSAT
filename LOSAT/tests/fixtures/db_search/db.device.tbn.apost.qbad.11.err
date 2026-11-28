@@ -1,0 +1,6 @@
+Error: (803.7) [tblastn] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x81] in string at line 24
+BDT61857.1 xÅy innexin [Penaeus monodon majanivirus A]
+Error: (802.4) [tblastn] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+BLAST failed to write output
+Error: (802.5) [tblastn] CObjectOStream: error at byte 608: stack is empty: write fault

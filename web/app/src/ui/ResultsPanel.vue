@@ -22,6 +22,7 @@ import {
 import type { CountsLoader } from '../application/counts';
 import { OutputSaver } from '../application/outputs';
 import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
+import { shellWords } from '../domain/argv';
 import { recordName } from '../domain/dataset';
 import { fromText, inputLabel, leavesOut, readDifferenceText } from '../domain/input-parts';
 import { customOutfmt, FORMAT_NAMES, formatNumber } from '../domain/output-format';
@@ -376,8 +377,9 @@ async function toAlignments(id: HspId): Promise<void> {
             <template v-if="selectedSearch.snapshot.prints === undefined">
               <template v-if="selectedSearch.snapshot.queryFile">
                 <dt>Query file</dt>
+                <!-- Quoted as Run details and the command write it (line WQA's D33, R2 L-d). -->
                 <dd data-testid="results-query-file">
-                  {{ selectedSearch.snapshot.queryFile.flag }} {{ selectedSearch.snapshot.queryFile.name }}
+                  {{ shellWords([selectedSearch.snapshot.queryFile.flag, selectedSearch.snapshot.queryFile.name]) }}
                 </dd>
               </template>
               <template v-else-if="queryRecords.length === 1">

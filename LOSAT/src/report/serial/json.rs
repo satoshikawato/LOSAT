@@ -103,36 +103,54 @@ impl<'b> JsonEncoder<'b> {
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:731-754
     /// (The table of upper-case hex digits, objostrjson.cpp:570.)
     fn write_string(&mut self, value: &[u8]) {
-        const HEX: &[u8; 16] = b"0123456789ABCDEF";
         self.out.push(b'"');
-        for &byte in value {
+        self.write_encoded(value);
+        self.out.push(b'"');
+    }
+
+    /// The bytes of `value` as `WriteEncodedChar` writes each, up to the first NUL byte (then
+    /// `false`): the runs of bytes copied as they are go to `out` whole, the others escaped.
+    fn write_encoded(&mut self, mut value: &[u8]) -> bool {
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        loop {
+            let copied = value
+                .iter()
+                .position(|&byte| byte < 0x20 || byte == b'"' || byte == b'\\')
+                .unwrap_or(value.len());
+            self.out.extend_from_slice(&value[..copied]);
+            let Some(&byte) = value.get(copied) else {
+                return true;
+            };
             match byte {
-                0 => break,
+                0 => return false,
                 b'"' => self.out.extend_from_slice(b"\\\""),
                 b'\\' => self.out.extend_from_slice(b"\\\\"),
-                byte if byte < 0x20 => {
+                byte => {
                     self.out.extend_from_slice(b"\\u00");
                     self.out.push(HEX[usize::from(byte >> 4)]);
                     self.out.push(HEX[usize::from(byte & 0xf)]);
                 }
-                byte => self.out.push(byte),
             }
+            value = &value[copied + 1..];
         }
-        self.out.push(b'"');
     }
 
-    /// `WriteKey`: the key with every `-` replaced by `_` (`m_PreserveKeys` is false), then
-    /// the name separator.
+    /// `WriteKey`: the key with every `-` replaced by `_` (`m_PreserveKeys` is false), written
+    /// as a string (`x_WriteString`), then the name separator.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:780-788
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:858-865
     fn write_key(&mut self, key: &str) {
-        let key: Vec<u8> = key
-            .bytes()
-            .map(|byte| if byte == b'-' { b'_' } else { byte })
-            .collect();
-        self.write_string(&key);
-        self.out.extend_from_slice(b": ");
+        self.out.push(b'"');
+        for (i, part) in key.as_bytes().split(|&byte| byte == b'-').enumerate() {
+            if i > 0 {
+                self.out.push(b'_');
+            }
+            if !self.write_encoded(part) {
+                break;
+            }
+        }
+        self.out.extend_from_slice(b"\": ");
     }
 }
 

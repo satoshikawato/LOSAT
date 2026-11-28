@@ -8237,7 +8237,12 @@ fn write_reports_without_queries(
 /// <text>`, exit status 3. LOSAT searches all batches together, so the failure is the first
 /// searched batch's: the call's first batch, or, when that batch holds invalid queries only,
 /// which NCBI does not search (local_blast.cpp:177-180), a later one, after the reports of the
-/// batches before it (`unsearched_batches_then_engine_error`). `first_batch` is an error of the
+/// batches before it, every format's (`reports_then_engine_error`; NCBI 2.17.0 blastp
+/// `BATCH_SIZE=1`, an all-X query before tk, with `-subject` of `MK`, ``, `` and `-searchsp 1000`,
+/// or `-db` of an empty database: outfmt 0 and 7, exit 3, line PS DECISIONS 28 and 30; `OLD_FSC`
+/// and `BATCH_SIZE=1` with two all-X queries before a valid one, blastp `-subject` of `MK`, ``, ``
+/// (outfmt 0, 5, 7 and 11) and rpsblast's `n1000rps` (outfmt 0, 5 and 7): exit 3, line RG item
+/// bp-SF2). `first_batch` is an error of the
 /// call's first batch whatever its queries' validity: a split query's chunk (its batch is
 /// searched; its call has no search strategy requests, `search_split_query_batches` writes them),
 /// or RPS-BLAST's files, which NCBI sets up before it checks the batch's queries
@@ -8259,7 +8264,24 @@ fn preliminary_search_error(
     text: &[u8],
 ) -> anyhow::Error {
     if !(first_batch || query_batch_skipped.first() == Some(&false)) {
-        return unsearched_batches_then_engine_error(
+        // The call's first searched batch, which meets the error: a batch with a valid context
+        // (no other batch's search reads the subjects or sets them up).
+        let Some(batch) = query_batches
+            .iter()
+            .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start])
+        else {
+            let searched = if database_name.is_empty() {
+                "the subjects".to_string()
+            } else {
+                format!("the database {}", String::from_utf8_lossy(database_name))
+            };
+            return anyhow::anyhow!(
+                "a search of {searched} that fails with NCBI BLAST+'s error \"{}\" without a query batch that NCBI BLAST+ searches is not supported by LOSAT's {}",
+                String::from_utf8_lossy(text),
+                args.app.name()
+            );
+        };
+        return reports_then_engine_error(
             args,
             query_records,
             subject_source,
@@ -8268,9 +8290,7 @@ fn preliminary_search_error(
             pool,
             ranges,
             reports,
-            query_batches,
-            query_batch_skipped,
-            database_name,
+            batch,
             text,
         );
     }
@@ -8749,70 +8769,15 @@ fn write_request_posts(args: &ResolvedBlastpArgs, diagnostics: &mut dyn Write) -
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-/// The error `text` of a query batch's search (`BLAST engine error: <text>`, exit status 3) when
-/// the call's first batch holds invalid queries only: NCBI does not search such a batch and
-/// reports its queries, so the reports of the batches before the first searched one come first
-/// (searched again here, alone and without the epilog: none of their queries is searched), then
-/// that batch's reader messages and the error (NCBI 2.17.0 blastp `BATCH_SIZE=1`, an all-X query
-/// before tk, with `-subject` of `MK`, ``, `` and `-searchsp 1000`, or `-db` of an empty
-/// database: outfmt 0 and 7, exit 3; line PS DECISIONS 28 and 30). LOSAT refuses where this is
-/// not ported: no searched batch, another program, or a format other than 0 to 4, 6, 7 and 10.
+/// The engine error of the search of `batch` (`text`, `BLAST engine error: <text>`, exit status 3),
+/// after the reports of the batches before it, which the search of that prefix of the queries
+/// writes without the epilog, in this call (a block of the block search too, LOSAT_X_BPQBLOCK:
+/// the prefix is the block's, after the blocks before), then that batch's reader messages: the
+/// call's first batch holds invalid queries only, which NCBI does not search and reports
+/// (`preliminary_search_error`), or psiblast's PHI-BLAST batch after the first
+/// (`phi_setup_error`). Cold and out of line (no NCBI counterpart: code placement only).
 #[cold]
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
-fn unsearched_batches_then_engine_error(
-    args: &ResolvedBlastpArgs,
-    query_records: &[FastaRecord],
-    subject_source: BlastpSubjectSource<'_>,
-    subject_label: &str,
-    outputs: &mut ReportOutputs<'_>,
-    pool: &crate::utils::threading::SearchPool<'_>,
-    ranges: &BlastpRanges<'_>,
-    reports: &BlastpReports<'_>,
-    query_batches: &[seq_range::RangedBatch],
-    query_batch_skipped: &[bool],
-    database_name: &[u8],
-    text: &[u8],
-) -> anyhow::Error {
-    let first_searched = query_batches
-        .iter()
-        .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start]);
-    let ported_formats = outputs.formats.iter().all(|format| {
-        crate::blastinput::app::parse_formatting_string(format.outfmt).is_ok_and(|choice| {
-            matches!(choice.number, 6 | 7 | 10) || blastp_pairwise_view_of(choice.number).is_some()
-        })
-    });
-    let Some(batch) = first_searched
-        .filter(|_| ported_formats && args.app == BlastpApp::Blastp && args.archive.is_none())
-    else {
-        let searched = if database_name.is_empty() {
-            "the subjects".to_string()
-        } else {
-            format!("the database {}", String::from_utf8_lossy(database_name))
-        };
-        return anyhow::anyhow!(
-            "a search of {searched} that fails with NCBI BLAST+'s error \"{}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
-            String::from_utf8_lossy(text),
-            args.app.name()
-        );
-    };
-    reports_then_engine_error(
-        args,
-        query_records,
-        subject_source,
-        subject_label,
-        outputs,
-        pool,
-        ranges,
-        reports,
-        batch,
-        text,
-    )
-}
-
-/// The engine error of the search of `batch` (`text`, `unsearched_batches_then_engine_error`),
-/// after the reports of the batches before it, which the search of that prefix of the queries
-/// writes without the epilog.
 #[allow(clippy::too_many_arguments)]
 fn reports_then_engine_error(
     args: &ResolvedBlastpArgs,
@@ -8869,7 +8834,7 @@ fn reports_then_engine_error(
         x_queries_before: reports.x_queries_before,
         x_xml2_carry: reports.x_xml2_carry,
         // The engine error follows this report and ends the run: it is the run's last report
-        // call (the XML formats, the only readers of `last_call`, keep the refusal before here).
+        // call (`BlastpXml::stops`: an XML2 or JSON report that NCBI holds back is not written).
         last_call: true,
         psi_round: None,
         // BLASTP and psiblast's PHI-BLAST round (no PSSM): no psiblast PSSM stops here.

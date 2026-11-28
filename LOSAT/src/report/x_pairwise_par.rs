@@ -71,7 +71,7 @@ use std::io;
 use std::sync::{Arc, OnceLock};
 
 use super::pairwise::PairwiseHit;
-use super::query_warnings::{QueryWarnings, ReportHook, ReportPlace};
+use super::query_warnings::{QueryWarnings, ReportHook, ReportHooks, ReportPlace};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::ostream::{DisplaySeqalign, ReportWrite};
 use crate::utils::threading::SearchPool;
@@ -615,7 +615,7 @@ pub(crate) trait QuerySections: Sync {
         writer: &mut W,
         q_idx: usize,
         group: Option<&QueryGroup<'_>>,
-        place: ReportHook<'_, W>,
+        place: ReportHook<'_, '_, W>,
     ) -> io::Result<()>;
 
     /// The alignments of the HSPs `part` of subject `s_idx` of the query (`group`), the
@@ -629,7 +629,7 @@ pub(crate) trait QuerySections: Sync {
         group: &QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
-        place: ReportHook<'_, W>,
+        place: ReportHook<'_, '_, W>,
     ) -> io::Result<()>;
 
     /// The run's `-html` links (`PairwiseConfig::html_links`), whose reads of NCBI's formatter
@@ -837,22 +837,22 @@ fn alignment_start<S: QuerySections, W: ReportWrite>(
     position: usize,
     s_idx: u32,
     writer: &mut W,
-    place: ReportHook<'_, W>,
+    place: ReportHook<'_, '_, W>,
 ) -> io::Result<()> {
     if position > 0 || sections.html_links().is_none() {
         end_here(end, position)?;
-        return place(ReportPlace::Load(s_idx), writer);
+        return place.at(ReportPlace::Load(s_idx), writer);
     }
     let ncbirc = ReportPlace::Html(super::html_ids::HtmlPost::Ncbirc);
     if sections.alignment_id_is_local(s_idx) {
-        place(ncbirc, writer)?;
+        place.at(ncbirc, writer)?;
         html_links_densegs(sections, group, writer)?;
         end_here(end, position)?;
-        place(ReportPlace::Load(s_idx), writer)
+        place.at(ReportPlace::Load(s_idx), writer)
     } else {
         end_here(end, position)?;
-        place(ReportPlace::Load(s_idx), writer)?;
-        place(ncbirc, writer)?;
+        place.at(ReportPlace::Load(s_idx), writer)?;
+        place.at(ncbirc, writer)?;
         html_links_densegs(sections, group, writer)
     }
 }
@@ -909,13 +909,28 @@ pub(crate) fn at_place<W: io::Write>(
             None => Ok(()),
         },
         ReportPlace::Titles(s_idx, reads) => match warnings {
-            Some(warnings) if warnings.title_posts(s_idx) => {
-                (0..reads).try_for_each(|_| warnings.title_read(s_idx, writer))
-            }
-            _ => Ok(()),
+            Some(warnings) => title_reads(warnings, s_idx, reads, writer),
+            None => Ok(()),
         },
         ReportPlace::Html(post) => html_at_place(warnings, links, post, writer),
     }
+}
+
+/// `at_place` of `reads` reads of the definition line of subject `s_idx` (`ReportPlace::Titles`),
+/// out of line: the hooks call it only where a read of some subject's posts
+/// (`ReportHooks::titles`), and `at_place` stays small enough to inline at each load.
+#[cold]
+#[inline(never)]
+fn title_reads<W: io::Write>(
+    warnings: &mut QueryWarnings<'_>,
+    s_idx: u32,
+    reads: u8,
+    writer: &mut W,
+) -> io::Result<()> {
+    if !warnings.title_posts(s_idx) {
+        return Ok(());
+    }
+    (0..reads).try_for_each(|_| warnings.title_read(s_idx, writer))
 }
 
 /// `at_place` of a `-html` read `post`: what it writes (`HtmlLinks::posts_of` of the run's `links`
@@ -972,9 +987,11 @@ fn write_serial<S: QuerySections, W: ReportWrite>(
         // (`QueryWarnings::subject_read`); with `-html` its formatter reads its registries
         // (`ReportPlace::Html`).
         let links = sections.html_links();
-        let mut place = |place: ReportPlace, writer: &mut W| {
+        let titles = warnings.as_deref().is_some_and(QueryWarnings::reads_titles);
+        let mut at = |place: ReportPlace, writer: &mut W| {
             at_place(warnings.as_deref_mut(), links, q_idx, place, writer)
         };
+        let mut place = ReportHooks::new(&mut at, titles);
         sections.head(writer, q_idx, group.as_ref(), &mut place)?;
         if let Some(group) = &group {
             let mut display = DisplaySeqalign::default();
@@ -1238,12 +1255,15 @@ fn format_piece<S: QuerySections>(
 ) -> Formatted {
     let mut buffer = crate::report::ostream::CutBuffer::default();
     let mut places: Vec<(usize, ReportPlace)> = Vec::new();
-    let mut mark = |place: ReportPlace, buffer: &mut crate::report::ostream::CutBuffer| {
+    let mut at = |place: ReportPlace, buffer: &mut crate::report::ostream::CutBuffer| {
         if marks {
             places.push((buffer.bytes.len(), place));
         }
         Ok(())
     };
+    // The reads of the definition lines are marked where the piece's places are (`marks`: also
+    // where some subject's read posts, `QueryWarnings::reads_titles`).
+    let mut mark = ReportHooks::new(&mut at, marks);
     let result = (|| match piece.part {
         Part::Head => sections.head(&mut buffer, piece.query, group, &mut mark),
         Part::Alignments((first, first_hsp), (last, end_hsp)) => {

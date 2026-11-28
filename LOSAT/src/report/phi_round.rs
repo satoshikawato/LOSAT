@@ -159,9 +159,13 @@ pub(crate) fn write_phi_round_report(
     }
     // NCBI loads each subject that the query's batch did not prefetch at its description line,
     // or one the tables do not show at its alignment's heading (`QueryWarnings::subject_read`).
-    let mut place = |place: ReportPlace, writer: &mut io::BufWriter<RoundWriter<'_>>| {
+    let titles = warnings
+        .as_deref()
+        .is_some_and(crate::report::query_warnings::QueryWarnings::reads_titles);
+    let mut at = |place: ReportPlace, writer: &mut io::BufWriter<RoundWriter<'_>>| {
         crate::report::x_pairwise_par::at_place(warnings.as_deref_mut(), None, q_idx, place, writer)
     };
+    let mut place = crate::report::query_warnings::ReportHooks::new(&mut at, titles);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2118-2128
     for group in &groups {
         match group {
@@ -206,7 +210,7 @@ pub(crate) fn write_phi_round_report(
             // Each occurrence's alignments are one `CDisplaySeqalign` (its region and its flush).
             let mut display = DisplaySeqalign::default();
             for &s_idx in &aligned[..end.map_or(aligned.len(), |(at, _)| at)] {
-                place(ReportPlace::Load(s_idx), &mut *writer)?;
+                place.at(ReportPlace::Load(s_idx), &mut *writer)?;
                 display.enter(writer)?;
                 sections.phi_subject(writer, probe.as_deref_mut(), group, s_idx, &pattern)?;
             }

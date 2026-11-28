@@ -891,7 +891,7 @@ fn write_subject_alignments_part<W: Write>(
     hsp_indices: &[HspIndex],
     part: std::ops::Range<usize>,
     html: Option<HtmlHeading<'_>>,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
     write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
     if hits.iter().any(|hit| hit.skips_pairwise_hsp()) {
@@ -985,11 +985,11 @@ fn place_heading_posts<W: Write>(
     html: HtmlHeading<'_>,
     made: bool,
     writer: &mut W,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
 ) -> io::Result<()> {
     for post in html.take_posts() {
         if made {
-            place(super::query_warnings::ReportPlace::Html(post), writer)?;
+            place.at(super::query_warnings::ReportPlace::Html(post), writer)?;
         }
     }
     Ok(())
@@ -1004,7 +1004,7 @@ fn later_part_posts<W: Write>(
     html: HtmlHeading<'_>,
     skipped: &io::Result<Option<Vec<u8>>>,
     writer: &mut W,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
 ) -> io::Result<()> {
     let made = !matches!(skipped, Ok(None));
     place_heading_posts(html, made, writer, place)
@@ -1090,7 +1090,7 @@ impl SubjectHeading<'_> {
         html: Option<HtmlHeading<'_>>,
         parsed: ParsedSubjects<'_>,
         s_idx: u32,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<Option<Vec<u8>>> {
         match self {
             SubjectHeading::Database(db_heading) => write_database_subject_heading(
@@ -1201,7 +1201,7 @@ fn write_subject_part<'h, W: Write>(
     records: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     oids: Option<&[u32]>,
     heading_of: impl Fn(u32) -> SubjectHeading<'h>,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
     write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
     let posts = std::cell::RefCell::new(Vec::new());
@@ -1245,7 +1245,7 @@ fn write_blastp_subject_part<W: crate::report::ostream::ReportWrite, D: RowDecor
     s_idx: u32,
     part: std::ops::Range<usize>,
     row_masks: HtmlRowMasks<'_>,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
     decoration: &D,
 ) -> io::Result<()> {
     if let Some(id) = config.unreadable_query_id(parsed_subjects, s_idx) {
@@ -1323,7 +1323,7 @@ fn write_hsps_or_skips<W: Write>(
     part: std::ops::Range<usize>,
     mut skipped: Option<Vec<u8>>,
     mut retry: Option<(impl FnMut() -> io::Result<Option<Vec<u8>>>, HtmlHeading<'_>)>,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
     mut write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
     for (at, (hit, &hsp_index)) in hits[part.clone()]
@@ -1390,7 +1390,7 @@ fn write_database_subject_alignments_part<W: Write>(
     hsp_indices: &[HspIndex],
     part: std::ops::Range<usize>,
     html: Option<HtmlHeading<'_>>,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
     write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
     if hits.iter().any(|hit| hit.skips_pairwise_hsp()) {
@@ -1476,7 +1476,7 @@ fn write_subject_with_skips<W: Write>(
     hsp_indices: &[HspIndex],
     part: std::ops::Range<usize>,
     html: Option<HtmlHeading<'_>>,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
     mut write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
     let skip_id = heading.skip_id(parsed, oids, s_idx);
@@ -1656,7 +1656,7 @@ impl<'a> DatabaseHeading<'a> {
         writer: &mut W,
         protein: bool,
         html: Option<HtmlHeading<'_>>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<Option<Vec<u8>>> {
         let lines = match (self, html) {
             (_, Some(html)) => {
@@ -1789,14 +1789,14 @@ fn write_database_subject_heading<W: Write>(
     protein: bool,
     (s_idx, length): (u32, Option<usize>),
     html: Option<HtmlHeading<'_>>,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
 ) -> io::Result<Option<Vec<u8>>> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2296-2303
     // The heading of a loaded subject (`x_PrintDefLine`) reads its definition line once, before
     // its bytes and the reads of its links, posting for the bytes of its title that NCBI replaces
     // (the formatter reads at `common::database::check_reported_title`).
     if !matches!(heading, DatabaseHeading::Skipped(_)) {
-        place(super::query_warnings::ReportPlace::Titles(s_idx, 1), writer)?;
+        place.titles(s_idx, 1, writer)?;
     }
     if let Some(id) = heading.write_lines(writer, protein, html, place)? {
         return Ok(Some(id));
@@ -2653,7 +2653,7 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     subject_labels: &[DescriptionLabel],
     show_sum_n: bool,
     columns: Option<SortColumns>,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
     // `-html`: the rows' links with what the report does after a throw, the subjects with parsed
     // Seq-ids by subject index and what the report's loads do at each subject (`HtmlRows`).
     html: Option<(
@@ -4047,7 +4047,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
@@ -4144,7 +4144,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         write_blastp_subject_part(
             writer,
@@ -4357,7 +4357,7 @@ fn write_description_table<W: Write>(
     show_sum_n: bool,
     columns: Option<SortColumns>,
     mut label_of: impl FnMut(u32) -> DescriptionLabel,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
     // `-html`: the rows' links (`HtmlRows`); `None`: the plain table.
     html: Option<HtmlRows<'_>>,
     // Where the table's read of its rows' ranges throws (`described_row_range`: BLASTX's HSPs with
@@ -4370,7 +4370,7 @@ fn write_description_table<W: Write>(
     // (`-num_descriptions 0`): its posts come before the table's bytes (line RG T4a2 probes
     // `bp_nd0`, `bx`: after the query's `Length=` line).
     if html.is_some() {
-        place(
+        place.at(
             super::query_warnings::ReportPlace::Html(super::html_ids::HtmlPost::Ncbirc),
             writer,
         )?;
@@ -4481,7 +4481,7 @@ fn write_description_table<W: Write>(
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1587-1589
         // Each line loads its subject (`x_GetDeflineInfo` of `x_DisplayDeflineTableBody`) after
         // the lines before it are written (`QueryWarnings::subject_read`).
-        place(super::query_warnings::ReportPlace::Load(*s_idx), writer)?;
+        place.at(super::query_warnings::ReportPlace::Load(*s_idx), writer)?;
         super::x_pairwise_par::end_here(end, index)?;
         let bits = format_bitscore_ncbi(table_scores(*best).0);
         write_description_row_start(
@@ -4762,7 +4762,7 @@ fn write_description_row_start<W: Write>(
     bits: &str,
     max_score: usize,
     html: Option<HtmlRows<'_>>,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
 ) -> io::Result<()> {
     match html {
         None => {
@@ -4773,10 +4773,7 @@ fn write_description_row_start<W: Write>(
             // title that NCBI replaces (the formatter reads at
             // `common::database::check_reported_title`).
             if !label.caught {
-                place(
-                    super::query_warnings::ReportPlace::Titles(rank.0, 2),
-                    writer,
-                )?;
+                place.titles(rank.0, 2, writer)?;
             }
             label.write_cut(writer)?;
             write!(writer, "  {bits:<max_score$}")
@@ -4831,25 +4828,26 @@ impl<'a> HtmlRows<'a> {
         (s_idx, rank): (u32, usize),
         bits: &str,
         max_score: usize,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let parsed = self.parsed.get(s_idx as usize).and_then(Option::as_deref);
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:396-397
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:494-498
         // The two reads of the subject's definition line (`write_description_row_start`) come
         // before and after the id link's reads of the registry (`GetIDUrl`).
-        let title_read =
-            |place: super::query_warnings::ReportHook<'_, W>, writer: &mut W| match label.caught {
-                false => place(super::query_warnings::ReportPlace::Titles(s_idx, 1), writer),
+        let title_read = |place: super::query_warnings::ReportHook<'_, '_, W>, writer: &mut W| {
+            match label.caught {
+                false => place.titles(s_idx, 1, writer),
                 true => Ok(()),
-            };
+            }
+        };
         title_read(&mut *place, writer)?;
         let mut posts = Vec::new();
         let links = self
             .report
             .description_links(parsed, s_idx, rank, label.caught, &mut posts);
         for post in posts {
-            place(super::query_warnings::ReportPlace::Html(post), writer)?;
+            place.at(super::query_warnings::ReportPlace::Html(post), writer)?;
         }
         title_read(&mut *place, writer)?;
         let (link, score) = links?;
@@ -4915,7 +4913,7 @@ fn write_blastn_description_table<W: Write>(
     show_sum_n: bool,
     protein: bool,
     columns: Option<SortColumns>,
-    place: super::query_warnings::ReportHook<'_, W>,
+    place: super::query_warnings::ReportHook<'_, '_, W>,
     // `-html`: the report's links and OIDs (`PairwiseConfig::html`), with what it does after a
     // throw (`PairwiseConfig::html_rows`).
     html: Option<(
@@ -5218,7 +5216,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1489-1491
@@ -5297,7 +5295,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             })
         {
             if self.config.html.is_some() {
-                place(
+                place.at(
                     super::query_warnings::ReportPlace::Html(super::html_ids::HtmlPost::Ncbirc),
                     writer,
                 )?;
@@ -5334,7 +5332,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let config = self.config;
         // The HSP header: the raw score alone under matrix-only scoring
@@ -5866,7 +5864,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1489-1491
@@ -5918,7 +5916,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let config = self.config;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3971-3980
@@ -6208,7 +6206,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491
@@ -6305,7 +6303,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let config = self.config;
         // A PSSM query whose letters the display cannot read (`UnreadableQuery`): NCBI's line in
@@ -6753,7 +6751,7 @@ impl BlastxSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let config = self.config;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3650-3668:
@@ -6844,7 +6842,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let query = &self.queries[q_idx];
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1492
@@ -6908,7 +6906,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         group: &super::x_pairwise_par::QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
-        place: super::query_warnings::ReportHook<'_, W>,
+        place: super::query_warnings::ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let hits = &group.subject_hits[&s_idx];
         let stop = mapper_rewrites(self.remaps(), hits)

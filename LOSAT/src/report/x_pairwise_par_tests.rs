@@ -63,15 +63,15 @@ impl QuerySections for Marks {
         writer: &mut W,
         q_idx: usize,
         group: Option<&QueryGroup<'_>>,
-        place: ReportHook<'_, W>,
+        place: ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let subjects = group.map_or(0, |group| group.subject_order.len());
         writeln!(writer, "head {q_idx} subjects {subjects}")?;
         // One line per subject, each loaded and its title read twice before it (as a
         // description line).
         for &s_idx in group.map_or(&[][..], |group| group.subject_order.as_slice()) {
-            place(ReportPlace::Load(s_idx), writer)?;
-            place(ReportPlace::Titles(s_idx, 2), writer)?;
+            place.at(ReportPlace::Load(s_idx), writer)?;
+            place.titles(s_idx, 2, writer)?;
             writeln!(writer, "line {s_idx}")?;
         }
         Ok(())
@@ -84,11 +84,11 @@ impl QuerySections for Marks {
         group: &QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
-        place: ReportHook<'_, W>,
+        place: ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         // The heading reads the title once (as `x_PrintDefLine`).
         if part.start == 0 {
-            place(ReportPlace::Titles(s_idx, 1), writer)?;
+            place.titles(s_idx, 1, writer)?;
             writeln!(writer, "subject {s_idx}")?;
         }
         for hsp in part {

@@ -454,7 +454,10 @@ fn heading_of(title: &[u8]) -> String {
         &[0],
         0..1,
         None,
-        &mut crate::report::query_warnings::no_places,
+        &mut crate::report::query_warnings::ReportHooks::new(
+            &mut crate::report::query_warnings::no_places,
+            false,
+        ),
         |writer: &mut Vec<u8>, _, _| writer.write_all(b"<hsp>\n"),
     )
     .unwrap();
@@ -1678,12 +1681,13 @@ fn later_part_html_posts_wait_for_first_shown_hsp_with_class_n() {
                 rank: 1,
                 posts: &posts,
             };
-            let mut hook = |place: ReportPlace, writer: &mut Vec<u8>| -> io::Result<()> {
+            let mut at = |place: ReportPlace, writer: &mut Vec<u8>| -> io::Result<()> {
                 if let ReportPlace::Html(post) = place {
                     placed.push((writer.len(), post));
                 }
                 Ok(())
             };
+            let mut hook = crate::report::query_warnings::ReportHooks::new(&mut at, false);
             write_database_subject_alignments_part(
                 &mut out,
                 None,
@@ -1797,12 +1801,13 @@ fn tblastn_nullb_skip_split_parts_match_serial_for_record_and_database_html() {
                 rank: 1,
                 posts: &posts,
             };
-            let mut hook = |place: ReportPlace, writer: &mut Vec<u8>| -> io::Result<()> {
+            let mut at = |place: ReportPlace, writer: &mut Vec<u8>| -> io::Result<()> {
                 if let ReportPlace::Html(post) = place {
                     placed.push((writer.len(), post));
                 }
                 Ok(())
             };
+            let mut hook = crate::report::query_warnings::ReportHooks::new(&mut at, false);
             if is_db {
                 write_database_subject_alignments_part(
                     &mut out,

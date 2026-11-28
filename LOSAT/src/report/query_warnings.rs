@@ -502,7 +502,7 @@ pub type SubjectReadHook<'r, W> = &'r mut dyn FnMut(u32, &mut W) -> io::Result<(
 /// subject's definition line (`Titles`: the subject and the number of reads, each with its posts,
 /// `QueryWarnings::title_read`) or, with `-html`, a read of NCBI's formatter registries (`Html`:
 /// `report::html_ids::HtmlPost`, whose text the run's `-html` links give, `HtmlLinks::posts_of`).
-/// The writers call their `ReportHook` at each, in the report's order; one that formats into a
+/// The writers call their `ReportHooks` at each, in the report's order; one that formats into a
 /// buffer keeps them with their offsets (`x_pairwise_par::format_piece`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReportPlace {
@@ -511,11 +511,45 @@ pub enum ReportPlace {
     Html(crate::report::html_ids::HtmlPost),
 }
 
-/// The pairwise writers' call at each `ReportPlace` of a query's report, with the report written so
-/// far (`x_pairwise_par::at_place`, or a writer's own marks).
-pub type ReportHook<'r, W> = &'r mut dyn FnMut(ReportPlace, &mut W) -> io::Result<()>;
+/// The pairwise writers' calls at the `ReportPlace`s of a query's report (`ReportHooks`).
+pub type ReportHook<'r, 'h, W> = &'r mut ReportHooks<'h, W>;
 
-/// A [`ReportHook`] that writes nothing, for the tests of the writers.
+/// The pairwise writers' call at each `ReportPlace` of a query's report, with the report written so
+/// far (`at`: `x_pairwise_par::at_place`, or a writer's own marks), and whether it takes the reads
+/// of the definition lines (`titles`): only where a read of some subject's posts
+/// (`QueryWarnings::reads_titles`), so that a report whose reads post nothing, the default, makes
+/// no call for them (review of line RG-KB item 9b-2's PR2 cost: a call at each description line
+/// and heading).
+pub struct ReportHooks<'h, W> {
+    at: &'h mut dyn FnMut(ReportPlace, &mut W) -> io::Result<()>,
+    titles: bool,
+}
+
+impl<'h, W> ReportHooks<'h, W> {
+    /// The calls `at`, which take the reads of the definition lines where `titles`.
+    pub fn new(at: &'h mut dyn FnMut(ReportPlace, &mut W) -> io::Result<()>, titles: bool) -> Self {
+        ReportHooks { at, titles }
+    }
+
+    /// The call at `place`, after the report written so far (`writer`).
+    #[inline]
+    pub fn at(&mut self, place: ReportPlace, writer: &mut W) -> io::Result<()> {
+        (self.at)(place, writer)
+    }
+
+    /// `reads` reads of the definition line of subject `subject` (`ReportPlace::Titles`): no
+    /// call where these calls do not take them.
+    #[inline]
+    pub fn titles(&mut self, subject: u32, reads: u8, writer: &mut W) -> io::Result<()> {
+        if self.titles {
+            (self.at)(ReportPlace::Titles(subject, reads), writer)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// The call of a [`ReportHooks`] that writes nothing, for the tests of the writers.
 #[cfg(test)]
 pub fn no_places<W>(_place: ReportPlace, _writer: &mut W) -> io::Result<()> {
     Ok(())

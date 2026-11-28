@@ -427,7 +427,10 @@ fn html_description_rows_are_ncbis() {
             false,
             true,
             None,
-            &mut crate::report::query_warnings::no_places,
+            &mut crate::report::query_warnings::ReportHooks::new(
+                &mut crate::report::query_warnings::no_places,
+                false,
+            ),
             Some((
                 &report,
                 crate::report::db_subject::AfterThrow::SkipsAlignment { html: true },
@@ -490,7 +493,10 @@ fn description_table_shows_the_linked_set_column() {
         true,
         false,
         None,
-        &mut crate::report::query_warnings::no_places,
+        &mut crate::report::query_warnings::ReportHooks::new(
+            &mut crate::report::query_warnings::no_places,
+            false,
+        ),
         None,
         &crate::report::db_subject::HitLoads::default(),
         None,
@@ -559,7 +565,10 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         false,
         true,
         columns,
-        &mut crate::report::query_warnings::no_places,
+        &mut crate::report::query_warnings::ReportHooks::new(
+            &mut crate::report::query_warnings::no_places,
+            false,
+        ),
         None,
         &crate::report::db_subject::HitLoads::default(),
         None,
@@ -610,7 +619,10 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         true,
         false,
         columns,
-        &mut crate::report::query_warnings::no_places,
+        &mut crate::report::query_warnings::ReportHooks::new(
+            &mut crate::report::query_warnings::no_places,
+            false,
+        ),
         None,
         &crate::report::db_subject::HitLoads::default(),
         None,
@@ -656,7 +668,10 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         false,
         true,
         columns,
-        &mut crate::report::query_warnings::no_places,
+        &mut crate::report::query_warnings::ReportHooks::new(
+            &mut crate::report::query_warnings::no_places,
+            false,
+        ),
         None,
         &crate::report::db_subject::HitLoads::default(),
         None,
@@ -707,7 +722,10 @@ fn sorthits_refuses_a_last_total_wider_than_its_column() {
             false,
             true,
             columns,
-            &mut crate::report::query_warnings::no_places,
+            &mut crate::report::query_warnings::ReportHooks::new(
+                &mut crate::report::query_warnings::no_places,
+                false,
+            ),
             None,
             &crate::report::db_subject::HitLoads::default(),
             None,
@@ -762,7 +780,10 @@ fn blastx_description_row_is_the_highest_bit_score() {
             &ids,
             show_sum_n,
             None,
-            &mut crate::report::query_warnings::no_places,
+            &mut crate::report::query_warnings::ReportHooks::new(
+                &mut crate::report::query_warnings::no_places,
+                false,
+            ),
             None,
             None,
         )
@@ -1071,7 +1092,10 @@ fn a_title_of_unknown_encoding_is_unknown_and_its_alignments_are_skipped() {
         false,
         false,
         None,
-        &mut crate::report::query_warnings::no_places,
+        &mut crate::report::query_warnings::ReportHooks::new(
+            &mut crate::report::query_warnings::no_places,
+            false,
+        ),
         None,
         &crate::report::db_subject::HitLoads::default(),
         None,
@@ -1091,7 +1115,10 @@ fn a_title_of_unknown_encoding_is_unknown_and_its_alignments_are_skipped() {
         &[0, 1],
         0..hits[&0].len(),
         None,
-        &mut crate::report::query_warnings::no_places,
+        &mut crate::report::query_warnings::ReportHooks::new(
+            &mut crate::report::query_warnings::no_places,
+            false,
+        ),
         |_, _, _| panic!("no HSP is written"),
     )
     .unwrap();
@@ -1181,7 +1208,10 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         false,
         false,
         None,
-        &mut crate::report::query_warnings::no_places,
+        &mut crate::report::query_warnings::ReportHooks::new(
+            &mut crate::report::query_warnings::no_places,
+            false,
+        ),
         None,
         &loads,
         None,
@@ -1221,7 +1251,10 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         false,
         false,
         None,
-        &mut crate::report::query_warnings::no_places,
+        &mut crate::report::query_warnings::ReportHooks::new(
+            &mut crate::report::query_warnings::no_places,
+            false,
+        ),
         Some((&report, AfterThrow::SkipsAlignment { html: true })),
         &loads,
         None,
@@ -1248,7 +1281,10 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         &[1, 2],
         0..2,
         None,
-        &mut crate::report::query_warnings::no_places,
+        &mut crate::report::query_warnings::ReportHooks::new(
+            &mut crate::report::query_warnings::no_places,
+            false,
+        ),
         |_, _, _| panic!("no HSP is written"),
     )
     .unwrap();

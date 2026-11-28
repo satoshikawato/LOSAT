@@ -23,7 +23,7 @@ use super::{
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::ostream::ReportWrite;
 use crate::report::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi};
-use crate::report::query_warnings::{ReportHook, ReportPlace};
+use crate::report::query_warnings::{ReportHook, ReportHooks, ReportPlace};
 use crate::report::x_pairwise_par::{QueryGroup, QuerySections};
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -201,7 +201,7 @@ impl<'a> RoundSections<'a> {
         writer: &mut W,
         group: &QueryGroup<'_>,
         found_before: &[bool],
-        place: ReportHook<'_, W>,
+        place: ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let [repeated, new] = crate::report::x_pairwise_par::two_part_lines(
             group.hsps(),
@@ -238,11 +238,11 @@ impl<'a> RoundSections<'a> {
         group: &QueryGroup<'_>,
         part: &[(u32, Vec<&PairwiseHit>)],
         repeat_pass: bool,
-        place: ReportHook<'_, W>,
+        place: ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let html = self.html_rows();
         if html.is_some() {
-            place(
+            place.at(
                 ReportPlace::Html(crate::report::html_ids::HtmlPost::Ncbirc),
                 writer,
             )?;
@@ -294,7 +294,7 @@ impl<'a> RoundSections<'a> {
         let end = html.and_then(|html| html.end(&rows.iter().map(|row| row.0).collect::<Vec<_>>()));
         for (index, (s_idx, best, _)) in rows.iter().enumerate() {
             // Each line loads its subject (`write_description_table`).
-            place(ReportPlace::Load(*s_idx), writer)?;
+            place.at(ReportPlace::Load(*s_idx), writer)?;
             crate::report::x_pairwise_par::end_here(end, index)?;
             let (bits, e_value) = table_scores(*best);
             let bits = format_bitscore_ncbi(bits);
@@ -336,7 +336,7 @@ impl<'a> RoundSections<'a> {
             s_idx,
             0..group.subject_hits[&s_idx].len(),
             HtmlRowMasks::new(None, 0),
-            &mut |_, _| Ok(()),
+            &mut ReportHooks::new(&mut |_, _| Ok(()), false),
             decoration,
         )
     }
@@ -385,7 +385,7 @@ impl QuerySections for RoundSections<'_> {
         writer: &mut W,
         q_idx: usize,
         group: Option<&QueryGroup<'_>>,
-        place: ReportHook<'_, W>,
+        place: ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
         writeln!(writer, "Results from round {}", self.round.number)?;
@@ -449,7 +449,7 @@ impl QuerySections for RoundSections<'_> {
         group: &QueryGroup<'_>,
         s_idx: u32,
         part: std::ops::Range<usize>,
-        place: ReportHook<'_, W>,
+        place: ReportHook<'_, '_, W>,
     ) -> io::Result<()> {
         write_blastp_subject_part(
             writer,

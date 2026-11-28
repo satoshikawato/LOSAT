@@ -3124,6 +3124,26 @@ impl SeqDb {
         )
     }
 
+    /// No NCBI counterpart (only where the bytes are kept): [`SeqDb::read_sequence`] with the
+    /// bytes in `kept` (`Volume::x_read_block_into`): a sequence of
+    /// `utils::x_mapped::X_MAPPED_FROM` bytes or more that `kept` does not hold takes a buffer of
+    /// `utils::x_mapped::X_BYTES`, an idle one with its pages resident where there is one;
+    /// [`SequenceBlock::x_give_back`] returns it. The reads, checks and errors of `read_sequence`.
+    pub fn x_read_sequence_into(
+        &self,
+        ordinal: u32,
+        kept: &mut Vec<u8>,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let at = self.find_volume(ordinal)?;
+        self.volumes[at.volume].x_read_block_into(
+            at.vol_oid,
+            at.vol_oid + 1,
+            at.id,
+            self.location_oid(&at),
+            kept,
+        )
+    }
+
     /// The number of residues of protein `ordinal`, read from the index
     /// alone (`read_sequence(ordinal)`'s `protein(0).len()`).
     pub fn protein_length(&self, ordinal: u32) -> Result<u32, SeqDbError> {

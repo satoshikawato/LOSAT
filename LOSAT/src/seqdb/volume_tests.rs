@@ -1027,3 +1027,61 @@ fn mt_scan_reads_the_excluded_oids_after_the_last_included_one() {
     assert!(block.stopped_at_negative());
     assert_eq!(block.len(), 1);
 }
+
+// PS8a-3c: `SeqDb::x_read_sequence_into` with an empty `kept` reads what `read_sequence` reads,
+// with its errors; a protein whose block holds `X_MAPPED_FROM` bytes or more takes a buffer of
+// `X_BYTES` (glibc), which `x_give_back` hands back (the block is left without bytes), while a
+// shorter one keeps its own buffer.
+#[test]
+fn a_long_protein_read_into_the_pool_is_read_sequences_and_goes_back() {
+    use crate::seqdb::{SearchPath, SeqDb, SeqDbError};
+    use crate::utils::test_dir::TempDir;
+    use crate::utils::x_mapped::{X_MAPPED_ALLOCATOR, X_MAPPED_FROM};
+
+    let dir = TempDir::unique("x-read-into-pool");
+    let root: &std::path::Path = &dir;
+    let long = X_MAPPED_FROM as u32 + 1000;
+    let letters: Vec<u8> = (0..long).map(|i| 1 + (i % 24) as u8).collect();
+    let short = [5u8; 40];
+    let second = 42u32;
+    let end = second + long + 1;
+    write_v4_index(
+        &root.join("lp.pin"),
+        SeqType::Protein,
+        u64::from(40 + long),
+        long,
+        &[1, second, end],
+        None,
+    );
+    write_sparse_psq(
+        &root.join("lp.psq"),
+        u64::from(end),
+        &[(1, &short), (u64::from(second), &letters)],
+    );
+    std::fs::write(root.join("lp.phr"), b"").unwrap();
+    let path = SearchPath::new(root, None, None);
+    let db = SeqDb::open_search_in(b"lp", SeqType::Protein, &path).unwrap();
+    for ordinal in [0u32, 1] {
+        let new = db.read_sequence(ordinal).unwrap();
+        let mut pooled = db.x_read_sequence_into(ordinal, &mut Vec::new()).unwrap();
+        assert_eq!(pooled.len(), 1);
+        assert_eq!(
+            pooled.protein_with_sentinels(0),
+            new.protein_with_sentinels(0),
+            "ordinal {ordinal}"
+        );
+        let to_pool = X_MAPPED_ALLOCATOR && ordinal == 1;
+        assert_eq!(
+            pooled.data.capacity() >= X_MAPPED_FROM,
+            ordinal == 1,
+            "ordinal {ordinal}"
+        );
+        pooled.x_give_back();
+        assert_eq!(pooled.data.capacity() == 0, to_pool, "ordinal {ordinal}");
+    }
+    assert_eq!(db.read_sequence(1).unwrap().protein(0), &letters[..]);
+    assert!(matches!(
+        db.x_read_sequence_into(2, &mut Vec::new()),
+        Err(SeqDbError::Range(_))
+    ));
+}

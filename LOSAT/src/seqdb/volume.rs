@@ -2750,7 +2750,7 @@ impl SequenceBlock {
     /// buffer of `File::x_read_range_mapped` of 1 MiB or more; smaller ones are dropped). No NCBI
     /// counterpart: only where the bytes go.
     pub fn x_recycle(mut self) {
-        crate::utils::x_mapped::X_BYTES.give(&mut self.data);
+        self.x_give_back();
     }
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): gives the buffer of a block of
@@ -2759,6 +2759,15 @@ impl SequenceBlock {
     /// the bytes are kept.
     pub fn x_into_kept(self, kept: &mut Vec<u8>) {
         crate::utils::x_mapped::X_BYTES.x_keep(kept, self.data);
+    }
+
+    /// No NCBI counterpart (only where the bytes are kept): gives the block's buffer to
+    /// `utils::x_mapped::X_BYTES` when its capacity is `X_MAPPED_FROM` bytes or more
+    /// (`XPool::give`; the block is left without bytes), as [`SequenceBlock::x_into_kept`] does
+    /// for a reader without a buffer of its own; a smaller buffer stays. For a block dropped where
+    /// it is held (`XRedoSubject`) and [`SequenceBlock::x_recycle`].
+    pub fn x_give_back(&mut self) {
+        crate::utils::x_mapped::X_BYTES.give(&mut self.data);
     }
 
     /// The bytes of a block of one nucleotide cut to its 2-bit

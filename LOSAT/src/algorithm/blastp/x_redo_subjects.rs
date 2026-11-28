@@ -54,6 +54,7 @@ use anyhow::Result;
 use super::encoding::EncodedProtein;
 use crate::algorithm::common::db_mask_search::{mask_protein_letters, SubjectMasks};
 use crate::seqdb::{SeqDb, SequenceBlock};
+use crate::utils::x_mapped::x_is_mapped;
 
 /// The stored residues of pyrrolysine (O) and of the gap character (`blast_engine.rs` `STORED_O`,
 /// `STORED_GAP`).
@@ -92,8 +93,18 @@ pub(crate) struct XDbSubjects<'a> {
 /// A subject as the redo reads it: its residues, without the sentinels.
 pub(crate) enum XRedoSubject<'a> {
     Encoded(&'a [u8]),
-    /// The sequence read from the database.
+    /// The sequence read from the database (`XDbSubjects::read`).
     Read(SequenceBlock),
+}
+
+impl Drop for XRedoSubject<'_> {
+    /// A read's buffer of `X_MAPPED_FROM` bytes or more, a buffer of `utils::x_mapped::X_BYTES`
+    /// (`XDbSubjects::read`), goes back to the pool; a smaller one is freed.
+    fn drop(&mut self) {
+        if let Self::Read(block) = self {
+            block.x_give_back();
+        }
+    }
 }
 
 impl XRedoSubject<'_> {
@@ -166,7 +177,18 @@ impl XDbSubjects<'_> {
     #[inline(never)]
     fn read(&self, rank: u32) -> Result<SequenceBlock> {
         let ordinal = self.ordinals[rank as usize];
-        let mut block = self.db.read_sequence(ordinal).map_err(|error| {
+        // No NCBI counterpart (only where the bytes are kept; NCBI reads the subject in its
+        // mapping of the volume): a subject whose block holds `X_MAPPED_FROM` bytes or more (its
+        // letters and the sentinel byte on each side) is read into a buffer of `X_BYTES`, an idle
+        // one whose pages the preliminary stage's blocks already made resident, as those blocks
+        // are (`x_db_keep.rs`); dropping the `XRedoSubject` gives it back. A smaller one is read
+        // into a new buffer.
+        let read = if x_is_mapped(self.lengths[rank as usize] as usize + 2) {
+            self.db.x_read_sequence_into(ordinal, &mut Vec::new())
+        } else {
+            self.db.read_sequence(ordinal)
+        };
+        let mut block = read.map_err(|error| {
             crate::algorithm::common::database::database_error(error, self.program)
         })?;
         if x_has_recounted_residue(block.protein(0)) {

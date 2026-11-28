@@ -308,6 +308,13 @@ fn check_deflines_and_single_reads(db: &SeqDb, entries: &[Entry], name: &str) {
         let block = db.read_sequence(entry.ordinal).expect("read sequence");
         assert_eq!(block.len(), 1);
         check_sequence(&block, 0, &entry.seq, &what);
+        // PS8a-3c: the read of the redo's long subjects (`XDbSubjects::read`) reads the same.
+        let mut pooled = db
+            .x_read_sequence_into(entry.ordinal, &mut Vec::new())
+            .expect("read sequence into the pool");
+        assert_eq!(pooled.len(), 1);
+        check_sequence(&pooled, 0, &entry.seq, &format!("{what}, pooled read"));
+        pooled.x_give_back();
     }
     assert!(matches!(
         db.deflines(db.num_seqs()),
@@ -319,6 +326,10 @@ fn check_deflines_and_single_reads(db: &SeqDb, entries: &[Entry], name: &str) {
     ));
     assert!(matches!(
         db.read_sequence(db.num_seqs()),
+        Err(SeqDbError::Range(_))
+    ));
+    assert!(matches!(
+        db.x_read_sequence_into(db.num_seqs(), &mut Vec::new()),
         Err(SeqDbError::Range(_))
     ));
 }

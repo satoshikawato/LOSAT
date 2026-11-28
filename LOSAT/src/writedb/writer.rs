@@ -1029,7 +1029,8 @@ impl WriteDb {
     /// `name` is the name of the mask file for makeblastdb (with `-gi_mask`, the name of the
     /// algorithm's GI-mask files). The first registration creates the mask column; with
     /// `-gi_mask` every registration creates the GI masks of the algorithm instead.
-    pub fn register_mask_algorithm(
+    #[cfg(test)]
+    pub(crate) fn register_mask_algorithm(
         &mut self,
         program: i32,
         options: &[u8],

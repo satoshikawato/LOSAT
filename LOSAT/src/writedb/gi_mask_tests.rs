@@ -263,8 +263,22 @@ fn gi_masks_rebuild_makeblastdb_s_files_byte_for_byte() {
 fn an_algorithm_without_gis_writes_nothing_and_loses_its_name() {
     let out = TempDir::unique("writedb-gi-mask-empty");
     let mut masks = GiMasks::default();
-    masks.add(2, base_in(&out, "used").as_bytes(), b"dust:", 0, dates());
-    masks.add(3, base_in(&out, "unused").as_bytes(), b"dust:x", 0, dates());
+    masks.add(
+        2,
+        base_in(&out, "used").as_bytes(),
+        base_in(&out, "used").as_bytes(),
+        b"dust:",
+        0,
+        dates(),
+    );
+    masks.add(
+        3,
+        base_in(&out, "unused").as_bytes(),
+        base_in(&out, "unused").as_bytes(),
+        b"dust:x",
+        0,
+        dates(),
+    );
     // `SetMaskData` passes no sequence without a GI (`super::super::mask_data`).
     masks.add_gi_mask(2, &[5, 3], &[(1, 4)]).unwrap();
     // An algorithm that was never registered is ignored, as `m_MaskAlgoMap` has no entry for it.
@@ -327,7 +341,7 @@ fn two_algorithms_writing_one_data_file_at_once_are_refused() {
         (10, base_in(&out, "missing/x")),
         (11, upper.clone()),
     ] {
-        masks.add(id, name.as_bytes(), b"dust:", 0, dates());
+        masks.add(id, name.as_bytes(), name.as_bytes(), b"dust:", 0, dates());
     }
     // Registrations write nothing, and an algorithm of the same files that writes nothing is
     // not refused.
@@ -373,8 +387,8 @@ fn data_volumes_written_one_after_another_are_written_in_turn() {
     let x = base_in(&out, "x");
     let mut masks = GiMasks::default();
     // Room for one record of one range (12 bytes) per volume.
-    masks.add(2, x.as_bytes(), b"dust:", 20, dates());
-    masks.add(3, x.as_bytes(), b"dust:y", 20, dates());
+    masks.add(2, x.as_bytes(), x.as_bytes(), b"dust:", 20, dates());
+    masks.add(3, x.as_bytes(), x.as_bytes(), b"dust:y", 20, dates());
     masks.add_gi_mask(2, &[1], &RANGE).unwrap();
     // Volume 1 of the first algorithm; its volume 0 is closed.
     masks.add_gi_mask(2, &[2], &RANGE).unwrap();
@@ -412,8 +426,22 @@ fn a_directory_reached_through_a_link_is_the_same_directory() {
     std::os::unix::fs::symlink(&out, out.join("link")).unwrap();
     let mut masks = GiMasks::default();
     let linked = base_in(&out, "link/x");
-    masks.add(2, base_in(&out, "x").as_bytes(), b"dust:", 0, dates());
-    masks.add(3, linked.as_bytes(), b"dust:", 0, dates());
+    masks.add(
+        2,
+        base_in(&out, "x").as_bytes(),
+        base_in(&out, "x").as_bytes(),
+        b"dust:",
+        0,
+        dates(),
+    );
+    masks.add(
+        3,
+        linked.as_bytes(),
+        linked.as_bytes(),
+        b"dust:",
+        0,
+        dates(),
+    );
     masks.add_gi_mask(2, &[1], &RANGE).unwrap();
     assert_refused(
         masks.add_gi_mask(3, &[2], &RANGE),

@@ -66,11 +66,11 @@ pub struct BuildDatabase<'a> {
     /// writes `ib=...,n4sz=...` directly to `cout`, not to the log file).
     cout: Option<&'a mut dyn Write>,
     output_db: WriteDb,
-    output_dbname: Vec<u8>,
-    /// The path of the database's files: `output_dbname`, or where the run's files place them
-    /// (`OpenFiles::place`: LOSAT Web's database outside the run's directory).
+    /// The path of the database's files: NCBI's name of the database (`m_OutputDbName`, the
+    /// absolute name), or where the run's files place them (`OpenFiles::place`: LOSAT Web's
+    /// database outside the run's directory).
     database_path: Vec<u8>,
-    /// The run's files (`new_in`), which place the files of the GI masks too.
+    /// The run's files (`new`), which place the files of the GI masks too.
     files: OpenFiles,
     /// `m_ParseIDs` (`-parse_seqids`).
     parse_ids: bool,
@@ -571,40 +571,17 @@ impl<'a> BuildDatabase<'a> {
     /// `indices` `indexing` (`eFullIndex` for `-parse_seqids`, `eAddHash` for
     /// `-hash_index`). `title` is bytes: the title of an input database (`-input_type
     /// blastdb`) is copied as it is stored.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        dbname: &[u8],
-        title: &[u8],
-        is_protein: bool,
-        log: &'a mut dyn Write,
-        now: &LocalTime,
-        version: DbVersion,
-        platform: Platform,
-        indices: Indices,
-    ) -> Result<Self, WriteDbError> {
-        Self::new_in(
-            dbname,
-            title,
-            is_protein,
-            log,
-            now,
-            version,
-            platform,
-            indices,
-            OpenFiles::disk(),
-        )
-    }
-
+    ///
+    /// The folder of the database is checked and made as the run's `files` answer
+    /// (`create_directories_in`), and its files are made where `files` places them
+    /// (`OpenFiles::place`: LOSAT Web's database outside the run's directory, in a folder of the
+    /// host's, whose files the run hands back under their names, `OpenFiles::hand_back`); the
+    /// command line's `files` (`OpenFiles::disk`) leave both to the file system. The name in the
+    /// log and in the deletion's message is NCBI's (`m_OutputDbName`) wherever the files are.
     // No NCBI counterpart for `files` (line NP WW4i, 2026-11-28): see `create_directories_in` and
     // `OpenFiles::place`.
-    /// `new` for the run whose files are `files`: its folder checked and made as `files` answers
-    /// (`create_directories_in`), and its files made where `files` places them
-    /// (`OpenFiles::place`: LOSAT Web's database outside the run's directory, in a folder of the
-    /// host's, whose files the run hands back under their names, `OpenFiles::hand_back`). The
-    /// name in the log and of the deletion's message is NCBI's (`output_dbname`) wherever the
-    /// files are.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new_in(
+    pub fn new(
         dbname: &[u8],
         title: &[u8],
         is_protein: bool,
@@ -678,7 +655,6 @@ impl<'a> BuildDatabase<'a> {
             log,
             cout: None,
             output_db,
-            output_dbname,
             database_path,
             files,
             parse_ids: indices.full,
@@ -719,7 +695,7 @@ impl<'a> BuildDatabase<'a> {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1583-1594
     /// `RegisterMaskingAlgorithm` of a program, its options and a name: see
-    /// [`WriteDb::register_mask_algorithm`].
+    /// [`WriteDb::register_mask_algorithm_at`].
     ///
     /// With `-gi_mask` the files of the algorithm's GI masks are made where the run's files place
     /// `name` (`OpenFiles::place`: LOSAT Web's names outside the run's directory, as the
@@ -806,13 +782,8 @@ impl<'a> BuildDatabase<'a> {
         self.output_db.set_column_date(index, date);
     }
 
-    /// `GetOutputDbName`: the absolute name of the database.
-    pub fn output_dbname(&self) -> &[u8] {
-        &self.output_dbname
-    }
-
-    /// The path of the database's files (`new_in`): `output_dbname`, or where the run's files
-    /// placed them.
+    /// The path of the database's files (`new`): NCBI's name of the database
+    /// (`GetOutputDbName`), or where the run's files placed them.
     pub(crate) fn database_path(&self) -> &[u8] {
         &self.database_path
     }

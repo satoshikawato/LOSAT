@@ -307,6 +307,7 @@ fn build_version(
             version,
             LINUX,
             Indices::default(),
+            crate::report::run_files::OpenFiles::disk(),
         )?;
         db.set_max_file_size(max_file_size);
         let mut warn = |line: &[u8]| {

@@ -1055,7 +1055,11 @@ fn walked_folder(view: &RunView<'_>, d: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
             return None;
         }
     }
-    folder_present(walk.path(), &cwd, Some(&entry), true).then(|| (walk.path().to_vec(), cwd))
+    if !folder_present(walk.path(), &cwd, Some(&entry), true) {
+        return None;
+    }
+    let path = walk.path().to_vec();
+    Some((path, cwd))
 }
 
 impl FileTable {

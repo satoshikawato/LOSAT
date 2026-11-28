@@ -737,7 +737,7 @@ fn verify_input_files(
 /// everything else, the error of the build included.
 ///
 /// The database's folder is checked and made, and its files made, as the run's `files` answer
-/// and place them (`BuildDatabase::new_in`: LOSAT Web's database outside the run's directory;
+/// and place them (`BuildDatabase::new`: LOSAT Web's database outside the run's directory;
 /// the caller hands its files back, `handed_back`).
 #[allow(clippy::too_many_arguments)]
 fn build_database_with_log(
@@ -824,7 +824,7 @@ fn build_database_with_log(
             "this platform has no clock for the database's date",
         ));
     };
-    let mut db = BuildDatabase::new_in(
+    let mut db = BuildDatabase::new(
         dbname,
         &title,
         is_protein,

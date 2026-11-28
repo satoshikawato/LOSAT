@@ -145,6 +145,7 @@ pub(super) fn run_case_with(
             case.version,
             LINUX,
             indices,
+            crate::report::run_files::OpenFiles::disk(),
         )
         .unwrap();
         for (i, date) in column_dates.iter().enumerate() {
@@ -1284,6 +1285,7 @@ fn the_message_of_a_run_without_matching_masks_is_ncbi_s() {
         DbVersion::V4,
         LINUX,
         Indices::default(),
+        crate::report::run_files::OpenFiles::disk(),
     )
     .unwrap();
     let mut messages: Vec<u8> = Vec::new();

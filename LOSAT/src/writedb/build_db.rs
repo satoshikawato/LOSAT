@@ -731,12 +731,10 @@ impl<'a> BuildDatabase<'a> {
         name: &[u8],
     ) -> Result<i32, WriteDbError> {
         let placed = if self.output_db.uses_gi_masks() {
-            self.files
-                .place(name)
-                .map_err(|source| WriteDbError::Io {
-                    path: crate::utils::os_bytes::path_from_bytes(name.to_vec()),
-                    source,
-                })?
+            self.files.place(name).map_err(|source| WriteDbError::Io {
+                path: crate::utils::os_bytes::path_from_bytes(name.to_vec()),
+                source,
+            })?
         } else {
             None
         };

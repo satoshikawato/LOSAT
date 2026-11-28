@@ -876,7 +876,8 @@ impl OpenFiles {
         } else {
             [cwd.as_slice(), b"/", d].concat()
         };
-        let Some(path) = crate::blastinput::ncbi_environment::PathRules::Unix.normalize(&joined, None)
+        let Some(path) =
+            crate::blastinput::ncbi_environment::PathRules::Unix.normalize(&joined, None)
         else {
             return Some(MadeFolder::Outside(false));
         };
@@ -885,7 +886,11 @@ impl OpenFiles {
         }
         let mut prefix = path.as_slice();
         loop {
-            let at = if prefix.is_empty() { b"/".as_slice() } else { prefix };
+            let at = if prefix.is_empty() {
+                b"/".as_slice()
+            } else {
+                prefix
+            };
             if let Some(found) = Walk::resolve(at, &cwd) {
                 if folder_present(&found, &cwd, Some(&entry), true) {
                     return Some(MadeFolder::Outside(
@@ -947,7 +952,8 @@ impl OpenFiles {
                 placed.len() - 1
             }
         };
-        let mut path = crate::utils::os_bytes::os_str_bytes(placed[index].folder.as_os_str()).into_owned();
+        let mut path =
+            crate::utils::os_bytes::os_str_bytes(placed[index].folder.as_os_str()).into_owned();
         path.push(b'/');
         path.extend_from_slice(last);
         Ok(Some(path))
@@ -964,7 +970,8 @@ impl OpenFiles {
         let Some(table) = &self.table else {
             return Ok(());
         };
-        let placed = std::mem::take(&mut *table.placed.lock().unwrap_or_else(PoisonError::into_inner));
+        let placed =
+            std::mem::take(&mut *table.placed.lock().unwrap_or_else(PoisonError::into_inner));
         let mut result = Ok(());
         for place in placed {
             result = result.and(hand_back_folder(table, &place.typed, &place.folder));
@@ -988,7 +995,9 @@ fn hand_back_folder(table: &FileTable, typed: &[u8], folder: &std::path::Path) -
     let mut result = Ok(());
     for (name, path, _) in entries.iter().filter(|(_, _, folder)| !folder) {
         let typed = [typed, name.as_slice()].concat();
-        if let OutputName::File { name, key } = receiver_output_name(table.receiver.as_ref(), &typed) {
+        if let OutputName::File { name, key } =
+            receiver_output_name(table.receiver.as_ref(), &typed)
+        {
             let mut opening = table.open(&name, key, Opening::Create);
             result = result.and(copy_file(path, &mut opening));
         }

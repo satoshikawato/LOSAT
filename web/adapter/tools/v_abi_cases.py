@@ -1371,7 +1371,8 @@ def makeblastdb() -> list[dict]:
     D-WW4b-3, 2026-11-27): nucleotide and protein, versions 4 and 5, `-parse_seqids`, `-hash_index`, volumes of
     `-max_file_sz`, `-mask_data` (dust, seg and windowmasker masks, binary and text, `-mask_id`, `-mask_desc`,
     `-gi_mask`, `-gi_mask_name`, and the refusal of two GI masks in one file under two spellings), `-taxid` and
-    `-taxid_map`, the inputs `blastdb`, `asn1_txt`, `asn1_bin` and a gzipped FASTA file, an `-out` with folders, a
+    `-taxid_map`, the inputs `blastdb`, `asn1_txt`, `asn1_bin` and a gzipped FASTA file, an `-out` with folders, an `-out`
+    outside the run's folder (`../db`, `/tmp/<id>/db`), whose files come on stream 12 (line NP WW4i, 2026-11-28), a
     database that replaces an older one of its name, `-logfile` (new, and appended to; the device model of
     docs/web/abi_v2.md §4: the null device, `/dev/stdout`, `/dev/stderr`, `/dev/full`, a file outside the run's folder,
     which comes on stream 12 (`<id>`: a name of the harness's run), a name in a missing folder and a folder; line NP
@@ -1473,6 +1474,30 @@ def makeblastdb() -> list[dict]:
                              f"-gi_mask_name {missing}/m -out db", None),
             ("metadata_output_prefix", f"-in pq.faa -dbtype prot -out db -metadata_output_prefix {missing}/", None)):
         add(f"outside_missing.{case_id}", words, expect)
+    # A database outside the run's folder where the model's user makes files (abi_v2.md §4; line NP WW4i, 2026-11-28;
+    # before, the engine refused `-out ../db` and `-out /tmp/db`): the folder above it (`..`, through a folder of the
+    # run's, `sub/../..`, a folder made there, `../nosub`, and the folder `work` beside the run's, `../work`) and a
+    # folder of the system's temporary folder (`/tmp/<id>`): made as on the command line and given on stream 12 under
+    # its names, with its log and GI masks there; a name through a folder that the run's folder does not have
+    # (`nodir/..`) or through a file (`pq.faa/..`) and root's folders (`/proc`, `/work`) fail as on the command line.
+    gi = "-in gi/nucl.fa -dbtype nucl -parse_seqids -title t -mask_data gi/dust.asnb -gi_mask"
+    for case_id, words, expect, published, threaded in (
+            ("parent", "-in pq.faa -dbtype prot -out ../db", None, None, True),
+            ("parent.nucl.v4", "-in ns.fna -dbtype nucl -blastdb_version 4 -out ../db", None, None, False),
+            ("parent.volumes", "-in ns.fna -dbtype nucl -parse_seqids -max_file_sz 4000 -out ../db", None, None, False),
+            ("parent.nosub", "-in pq.faa -dbtype prot -out ../nosub/db", None, None, False),
+            ("parent.through_folder", "-in pq.faa -dbtype prot -out sub/../../db", None, with_folder, False),
+            ("parent.work", "-in pq.faa -dbtype prot -out ../work/db", None, None, False),
+            ("parent.logfile", "-in pq.faa -dbtype prot -out ../db -logfile ../mk.log", None, None, False),
+            ("parent.gi_mask", f"{gi} -gi_mask_name ../m -out ../db", None, None, False),
+            ("tmp", "-in pq.faa -dbtype prot -out /tmp/<id>/db", None, None, True),
+            ("tmp.nosub", "-in ns.fna -dbtype nucl -out /tmp/<id>/nosub/db -logfile /tmp/<id>.log", None, None, False),
+            ("tmp.gi_mask", f"{gi} -gi_mask_name /tmp/<id>-m -out db", None, None, False),
+            ("nodir", "-in pq.faa -dbtype prot -out nodir/../db", "failure", None, False),
+            ("through_file", "-in pq.faa -dbtype prot -out pq.faa/../db", "failure", None, False),
+            ("proc", "-in pq.faa -dbtype prot -out /proc/db", "failure", None, False),
+            ("work", "-in pq.faa -dbtype prot -out /work/db", "failure", None, False)):
+        add(f"outside.{case_id}", words, expect, published=published, threaded=threaded)
     # Errors: NCBI's reader (no -dbtype, a bad value, an unknown option), the options (a missing input, mask data that
     # is none, a numeric -mask_id, -randomize of FASTA), with -logfile too.
     add("error.no_dbtype", "-in ns.fna -out db", "failure")
@@ -1499,6 +1524,8 @@ def makeblastdb() -> list[dict]:
             ("mask_data", "-in mask/nucl.fna -dbtype nucl -mask_data bad.asnb -out db", "late_failure"),
             ("logfile.dev_stdout", "-in pq.faa -dbtype prot -out db -logfile /dev/stdout", None),
             ("logfile.outside", "-in pq.faa -dbtype prot -out db -logfile /tmp/<id>.log", None),
+            ("outside.parent", "-in pq.faa -dbtype prot -out ../db", None),
+            ("outside.tmp", "-in pq.faa -dbtype prot -out /tmp/<id>/db", None),
             ("no_dbtype.logfile.dev_stderr", "-in ns.fna -out db -logfile /dev/stderr", "failure"),
             ("no_dbtype.logfile.nodir", "-in ns.fna -out db -logfile nodir/mk.log", "failure")):
         add(f"validate.{case_id}", words, expect, kind="validate")

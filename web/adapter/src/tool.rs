@@ -210,7 +210,9 @@ impl Outside {
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
-            std::fs::create_dir_all(&folder).ok().map(|()| Outside(folder))
+            std::fs::create_dir_all(&folder)
+                .ok()
+                .map(|()| Outside(folder))
         }
     }
 }

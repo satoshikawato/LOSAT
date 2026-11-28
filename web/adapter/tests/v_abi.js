@@ -407,9 +407,11 @@ function registerTaxidCounts(reactor, counts, search) {
 // The serial reactor; `directory`, the run's working directory that it preopens as `/work` (a search of -db, a tool's
 // run); `env`, its environment (LOSAT Web's host gives `TZ` alone: abi_v2.md §3; none here unless a row needs it), or
 // `environment`, a function that gives it each time the module reads it (`environImports`: a host whose `TZ` changes
-// between runs).
-async function openSerial(wasmPath, directory, env = {}, environment = undefined) {
-  const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env, ...(directory === undefined ? {} : { preopens: { "/work": directory } }) });
+// between runs); `outside`, an empty folder that it preopens as `/outside`, where a tool run makes the files that the
+// engine puts outside its run directory and hands back on stream 12 (abi_v2.md §3; line NP WW4i, 2026-11-28).
+async function openSerial(wasmPath, directory, env = {}, environment = undefined, outside = undefined) {
+  const preopens = { ...(directory === undefined ? {} : { "/work": directory }), ...(outside === undefined ? {} : { "/outside": outside }) };
+  const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env, ...(directory === undefined ? {} : { preopens }) });
   let reactor, memory;
   // A folder of the run's directory opened for reading fails its reads with EISDIR, as on Linux and in the browser
   // host (directoryReads, LOSAT/tests/wasi_files.js).
@@ -428,12 +430,13 @@ async function openSerial(wasmPath, directory, env = {}, environment = undefined
   return { reactor, close: async () => {} };
 }
 
-// The threaded reactor; `directory` and `environment` as openSerial's.
-async function openThreads(wasmPath, directory, environment = undefined) {
+// The threaded reactor; `directory`, `environment` and `outside` as openSerial's.
+async function openThreads(wasmPath, directory, environment = undefined, outside = undefined) {
   let reactor;
   const host = await createThreadHost(wasmPath, "threaded-reactor", [], {
     directory,
     environment,
+    outside,
     imports: { losat_host: { emit: (stream, ptr, len) => reactor.emit(stream, ptr, len) } },
   });
   reactor = new Reactor(host.instance.exports, () => host.memory);
@@ -1883,31 +1886,65 @@ function withoutSeconds(bytes) {
 // One row of makeblastdb (v_abi_cases.py, `makeblastdb`; line NP WW4b1, D-WW4b-1 to D-WW4b-3, 2026-11-27): the engine's
 // run (`losat_web2_tool`) on an instance whose `/work` is a folder of the row's files, with the row's `TZ`, and the
 // CLI's run of the same words in another folder of the same files with the same `TZ`. The exit status, the standard
-// output and error, and every file and folder that the two folders hold afterwards are compared, byte for byte but the
-// seconds (`withoutSeconds`); a run that crossed a minute is made again once. A `"names"` row compares the names and
+// output and error, every file and folder that the two folders hold afterwards, and the files that the CLI wrote outside
+// its folder (above it, `../db`, and at a name of the run, `/tmp/<id>/db`), which the engine gives on stream 12 and
+// makes in its `/outside` (left empty; line NP WW4i, 2026-11-28), are compared, byte for byte but the seconds
+// (`withoutSeconds`); a run that crossed a minute is made again once. A `"names"` row compares the names and
 // sizes. `validate` (`losat_web2_validate`) gives the CLI's verdict and writes nothing to the folder. Returns the row.
 async function checkMakeblastdb(engine, search, options, scratch) {
   const label = `${engine.name} ${search.cases.join(",")}`;
   const env = { TZ: search.tz };
   for (let attempt = 1; ; attempt++) {
-    // A file outside the run's folder: a name of this attempt, which the CLI writes and the engine gives on stream 12.
+    // Names outside the run's folder: a name of this attempt (`<id>`), which the CLI writes and the engine gives on
+    // stream 12 (`/tmp/<id>.log`, `/tmp/<id>/db`, `/tmp/<id>-m`: every file and folder beside the name's part that holds
+    // the id whose name begins with that part), and the folder above the run's (`../db`): each run's folder is `run` in
+    // a folder of its own, whose other files the CLI wrote above it (line NP WW4i, 2026-11-28).
     const id = `losat-v-abi-mk-${process.pid}-${engine.name}-${search.cases[0]}-${attempt}`;
     const words = ["makeblastdb", ...search.argv.map((word) => word.replace("<id>", id))];
-    const outside = words.find((word) => word.includes(id));
-    const cliFolder = fs.mkdtempSync(path.join(scratch, "makeblastdb.cli."));
-    const engineFolder = fs.mkdtempSync(path.join(scratch, "makeblastdb.engine."));
+    const roots = words.flatMap((word) => word.split(",")).filter((name) => name.includes(id)).map((name) => {
+      const end = name.indexOf("/", name.indexOf(id) + id.length);
+      return end < 0 ? name : name.slice(0, end);
+    });
+    const cliParent = fs.mkdtempSync(path.join(scratch, "makeblastdb.cli."));
+    const engineParent = fs.mkdtempSync(path.join(scratch, "makeblastdb.engine."));
+    // The engine's folder `/outside` (abi_v2.md §3), which it leaves empty.
+    const outsideFolder = fs.mkdtempSync(path.join(scratch, "makeblastdb.outside."));
+    const cliFolder = path.join(cliParent, "run");
+    const engineFolder = path.join(engineParent, "run");
+    fs.mkdirSync(cliFolder);
+    fs.mkdirSync(engineFolder);
     writeToolFiles(cliFolder, search.files);
     writeToolFiles(engineFolder, search.files);
     const before = treeOf(engineFolder);
-    const instance = await engine.open(engineFolder, env);
+    // The files that a run wrote outside its folder, by the names that the engine gives them: `../<path>` above it, the
+    // path of each name of `roots`.
+    const rooted = () => [...new Set(roots.flatMap((root) => {
+      const folder = path.dirname(root);
+      return (fs.existsSync(folder) ? fs.readdirSync(folder) : []).filter((name) => name.startsWith(path.basename(root)))
+        .map((name) => path.join(folder, name));
+    }))];
+    const outsideFiles = (parent) => [
+      ...treeOf(parent).filter(([name, bytes]) => bytes !== null && !name.startsWith(`run${path.sep}`))
+        .map(([name, bytes]) => [`../${name}`, bytes]),
+      ...rooted().flatMap((entry) => (fs.statSync(entry).isDirectory()
+        ? treeOf(entry).filter(([, bytes]) => bytes !== null).map(([name, bytes]) => [`${entry}/${name}`, bytes])
+        : [[entry, fs.readFileSync(entry)]])),
+    ].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const removeRoots = () => { for (const entry of rooted()) fs.rmSync(entry, { recursive: true, force: true }); };
+    const instance = await engine.open(engineFolder, env, undefined, outsideFolder);
     try {
       const reactor = instance.reactor;
-      const place = (bytes) => Buffer.from(bytes.toString("latin1").split(cliFolder).join("/work"), "latin1");
+      // The CLI's folder is the engine's `/work`, and the folder above it the root (`../db` is `/db` there).
+      const place = (bytes) => Buffer.from(bytes.toString("latin1").split(cliFolder).join("/work").split(cliParent).join(""), "latin1");
+      const nothingOutside = (what) => {
+        assert.deepEqual(outsideFiles(engineParent), [], `${label}: ${what} writes no file outside`);
+        assert.deepEqual(treeOf(outsideFolder), [], `${label}: ${what} leaves /outside empty`);
+      };
       if (search.tool === "validate") {
         const validated = reactor.call("losat_web2_validate", words.join("\0"));
-        assert.ok(outside === undefined || !fs.existsSync(outside), `${label}: validate writes no file outside`);
+        nothingOutside("validate");
         const cli = nativeOnPipes(options.native, words, cliFolder, env);
-        if (outside !== undefined) fs.rmSync(outside, { force: true });
+        removeRoots();
         assert.equal(validated.streams.size, 0, `${label}: validate emits nothing`);
         assert.deepEqual(treeOf(engineFolder), before, `${label}: validate writes nothing to the run's folder`);
         if (search.expect === "failure") {
@@ -1929,25 +1966,26 @@ async function checkMakeblastdb(engine, search, options, scratch) {
       const run = reactor.call("losat_web2_tool", words.join("\0"));
       const frames = (reactor.chunks.get(12) || []).map((chunk) => Buffer.from(chunk));
       if (instance.waitForWorkers) await instance.waitForWorkers();
-      assert.ok(outside === undefined || !fs.existsSync(outside), `${label}: the engine writes no file outside`);
+      nothingOutside("the engine");
       const cli = nativeOnPipes(options.native, words, cliFolder, env);
-      const cliOutside = outside !== undefined && fs.existsSync(outside) ? fs.readFileSync(outside) : undefined;
-      if (outside !== undefined) fs.rmSync(outside, { force: true });
+      const cliOutside = outsideFiles(cliParent);
+      removeRoots();
       assert.equal(run.status, 0, `${label}: ${run.error}`);
       const status = JSON.parse(run.streams.get(2).toString()).status;
       assert.equal(status, cli.status, `${label}: the exit status (${run.streams.get(3) || ""} / ${cli.stderr})`);
       assert.equal(status !== 0, search.expect === "failure", `${label}: the run ${status !== 0 ? "fails" : "completes"} (exit ${status})`);
       for (const stream of [0, 1, 4, 5, 6, 7, 8, 9, 10]) assert.ok(!run.streams.has(stream), `${label}: no stream ${stream}`);
-      // Stream 12: the file outside the run's folder alone, with the bytes that the CLI wrote there.
+      // Stream 12: the files outside the run's folder, with the bytes that the CLI wrote there.
       const given = toolFiles(frames);
-      assert.deepEqual(given.map((file) => file.name), cliOutside === undefined ? [] : [outside], `${label}: the files of stream 12`);
+      assert.deepEqual(given.map((file) => file.name).sort(), cliOutside.map(([name]) => name), `${label}: the files of stream 12`);
       const engineTree = treeOf(engineFolder);
       const cliTree = treeOf(cliFolder).map(([name, bytes]) => [name, bytes === null ? null : place(bytes)]);
       assert.deepEqual(engineTree.map(([name, bytes]) => [name, bytes === null]), cliTree.map(([name, bytes]) => [name, bytes === null]),
                        `${label}: the files and folders of the run's folder`);
       const compared = (bytes) => (bytes === null ? "folder" : search.expect === "names" ? bytes.length : sha256(withoutSeconds(bytes)));
       const differing = [
-        ...given.filter((file) => !withoutSeconds(file.bytes).equals(withoutSeconds(place(cliOutside)))).map((file) => file.name),
+        ...given.filter((file) => compared(file.bytes) !== compared(place(cliOutside.find(([name]) => name === file.name)[1])))
+          .map((file) => file.name),
         ...(sha256(withoutSeconds(run.streams.get(11) || Buffer.alloc(0))) === sha256(withoutSeconds(place(cli.stdout))) || search.expect === "names" ? [] : ["standard output"]),
         ...(withoutSeconds(run.streams.get(3) || Buffer.alloc(0)).equals(withoutSeconds(place(cli.stderr))) ? [] : ["standard error"]),
         ...engineTree.filter(([name, bytes], i) => compared(bytes) !== compared(cliTree[i][1])).map(([name]) => name),
@@ -1959,11 +1997,12 @@ async function checkMakeblastdb(engine, search, options, scratch) {
       assert.deepEqual(differing, [], `${label}: as the CLI's (${(run.streams.get(3) || "").toString()})`);
       console.log(`ok ${label}`);
       return { engine: engine.name, threads: 0, program: search.program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
-               tool: "run", status, files: engineTree.filter(([, bytes]) => bytes !== null).map(([name, bytes]) => [name, bytes.length]) };
+               tool: "run", status, files: engineTree.filter(([, bytes]) => bytes !== null).map(([name, bytes]) => [name, bytes.length]),
+               outside: given.map((file) => [file.name, file.bytes.length]) };
     } finally {
       await instance.close();
-      fs.rmSync(cliFolder, { recursive: true, force: true });
-      fs.rmSync(engineFolder, { recursive: true, force: true });
+      removeRoots();
+      for (const folder of [cliParent, engineParent, outsideFolder]) fs.rmSync(folder, { recursive: true, force: true });
     }
   }
 }
@@ -2203,10 +2242,12 @@ async function main() {
   const results = [];
   const selected = (options.engines || "serial,threads").split(",");
   const engines = [
-    { name: "serial", open: (directory, env, environment) => openSerial(options.serial, directory, env, environment), threads: [1] },
+    { name: "serial", open: (directory, env, environment, outside) => openSerial(options.serial, directory, env, environment, outside),
+      threads: [1] },
     // The threaded host gives its threads this process's environment at the instance's start
     // (LOSAT/tests/wasi_thread_worker.js), which the module reads at each run's start: `env` is set for the start.
-    { name: "threads", open: (directory, env, environment) => withEnvironment(env, () => openThreads(options.threads, directory, environment)),
+    { name: "threads", open: (directory, env, environment, outside) =>
+      withEnvironment(env, () => openThreads(options.threads, directory, environment, outside)),
       threads: [1, 2, 4] },
   ].filter((engine) => selected.includes(engine.name));
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));

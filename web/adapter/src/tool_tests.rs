@@ -1495,16 +1495,24 @@ fn report_minute(report: &[u8]) -> Vec<u8> {
         .unwrap_or_default()
 }
 
-/// A makeblastdb tool run (D-WW4b-1) builds the database in the run's working directory as the
-/// library's run of the same words on the disk does: the same files and bytes, the same standard
-/// output (stream 11) and standard error (stream 3), the exit status 0 on stream 2 last, no frame
-/// of stream 12; protein of version 5 with `-parse_seqids` and `-hash_index`, nucleotide of
-/// version 4, and several volumes (`-max_file_sz`, an alias file). The two runs are made in one
-/// minute (the dates of the files; again where the minute changed between them).
+/// A makeblastdb tool run (D-WW4b-1) builds the database as the library's run of the same words on
+/// the disk does: the same files and bytes, the same standard output (stream 11) and standard error
+/// (stream 3), the exit status 0 on stream 2 last; protein of version 5 with `-parse_seqids` and
+/// `-hash_index`, nucleotide of version 4, several volumes (`-max_file_sz`, an alias file), and a
+/// folder that the run makes (`-out sub/db`). Each in a folder of the run's working directory
+/// (the tests' working directory, web/adapter), where the run writes the files, without a frame
+/// of stream 12, and in a folder outside it (the system's temporary folder), whose files come on
+/// stream 12 under their names (`/tmp/.../db.pin`), none on the disk there (line NP WW4i,
+/// 2026-11-28; abi_v2.md §4). The two runs are made in one minute (the dates of the files; again
+/// where the minute changed between them).
 #[test]
 fn a_makeblastdb_run_builds_the_command_line_s_database() {
     emitted();
-    let folder = folder("makeblastdb");
+    let outside = folder("makeblastdb");
+    let inside =
+        std::path::PathBuf::from(format!("ww4i-adapter-makeblastdb-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&inside);
+    std::fs::create_dir_all(&inside).unwrap();
     for case in [
         &[
             "-in",
@@ -1533,77 +1541,107 @@ fn a_makeblastdb_run_builds_the_command_line_s_database() {
         ],
         &["-in", "prot.faa", "-dbtype", "prot", "-out", "sub/db"],
     ] {
-        let words: Vec<String> = case
-            .iter()
-            .enumerate()
-            .map(
-                |(at, word)| match at.checked_sub(1).map(|before| case[before]) {
-                    Some("-in") => fixture(&format!("seqdb/{word}")),
-                    Some("-out") => folder.join(word).to_str().unwrap().to_string(),
-                    _ => (*word).to_string(),
-                },
-            )
-            .chain(
-                (!case.contains(&"-out"))
-                    .then(|| {
-                        [
-                            "-out".to_string(),
-                            folder.join("db").to_str().unwrap().to_string(),
-                        ]
-                    })
-                    .into_iter()
-                    .flatten(),
-            )
-            .collect();
-        let words: Vec<&str> = words.iter().map(String::as_str).collect();
-        let place = if case.contains(&"-out") {
-            folder.join("sub")
-        } else {
-            folder.clone()
-        };
-        let mut attempts = 0;
-        loop {
-            attempts += 1;
-            let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
-            losat::api::run_makeblastdb(&words, &mut io::empty(), &mut stdout, &mut stderr)
-                .unwrap();
-            let library = taken(&place);
-            run(&[&["makeblastdb"][..], &words].concat()).unwrap();
-            let calls = emitted();
-            let tool = taken(&place);
-            let printed = joined(&calls, STREAM_PRINTED);
-            if report_minute(&printed) != report_minute(&stdout) && attempts < 2 {
-                continue;
+        for folder in [&inside, &outside] {
+            let in_run = folder == &inside;
+            let words: Vec<String> = case
+                .iter()
+                .enumerate()
+                .map(
+                    |(at, word)| match at.checked_sub(1).map(|before| case[before]) {
+                        Some("-in") => fixture(&format!("seqdb/{word}")),
+                        Some("-out") => folder.join(word).to_str().unwrap().to_string(),
+                        _ => (*word).to_string(),
+                    },
+                )
+                .chain(
+                    (!case.contains(&"-out"))
+                        .then(|| {
+                            [
+                                "-out".to_string(),
+                                folder.join("db").to_str().unwrap().to_string(),
+                            ]
+                        })
+                        .into_iter()
+                        .flatten(),
+                )
+                .collect();
+            let words: Vec<&str> = words.iter().map(String::as_str).collect();
+            let place = if case.contains(&"-out") {
+                folder.join("sub")
+            } else {
+                folder.clone()
+            };
+            let mut attempts = 0;
+            loop {
+                attempts += 1;
+                let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+                losat::api::run_makeblastdb(&words, &mut io::empty(), &mut stdout, &mut stderr)
+                    .unwrap();
+                let library = taken(&place);
+                // The tool's run makes the folder that the library's made.
+                if place != *folder {
+                    std::fs::remove_dir(&place).unwrap();
+                }
+                run(&[&["makeblastdb"][..], &words].concat()).unwrap();
+                let calls = emitted();
+                let printed = joined(&calls, STREAM_PRINTED);
+                let handed = files(&frames(&calls));
+                let tool = if in_run {
+                    assert!(handed.is_empty(), "{case:?}: no frame of stream 12");
+                    taken(&place)
+                } else {
+                    assert!(
+                        !place.exists() || taken(&place).is_empty(),
+                        "{case:?}: no file there"
+                    );
+                    let prefix = format!("{}/", place.to_str().unwrap());
+                    handed
+                        .into_iter()
+                        .map(|(name, bytes)| {
+                            let name = String::from_utf8(name).unwrap();
+                            let name = name
+                                .strip_prefix(&prefix)
+                                .unwrap_or_else(|| panic!("{case:?}: {name} is not in {prefix}"));
+                            (name.to_string(), bytes)
+                        })
+                        .collect()
+                };
+                if report_minute(&printed) != report_minute(&stdout) && attempts < 2 {
+                    continue;
+                }
+                assert_eq!(
+                    calls.last().unwrap(),
+                    &(STREAM_RESPONSE, b"{\"status\":0}".to_vec()),
+                    "{case:?} {folder:?}"
+                );
+                assert!(!library.is_empty(), "{case:?}");
+                assert_eq!(
+                    library.keys().collect::<Vec<_>>(),
+                    tool.keys().collect::<Vec<_>>(),
+                    "{case:?} {folder:?}"
+                );
+                for (name, bytes) in &library {
+                    assert!(
+                        tool[name] == *bytes,
+                        "{case:?} {folder:?}: the bytes of {name}"
+                    );
+                }
+                assert_eq!(
+                    report_masked(&printed),
+                    report_masked(&stdout),
+                    "{case:?} {folder:?}: stream 11"
+                );
+                assert_eq!(
+                    joined(&calls, STREAM_DIAGNOSTICS),
+                    stderr,
+                    "{case:?} {folder:?}: stream 3"
+                );
+                break;
             }
-            assert_eq!(
-                calls.last().unwrap(),
-                &(STREAM_RESPONSE, b"{\"status\":0}".to_vec()),
-                "{case:?}"
-            );
-            assert!(frames(&calls).is_empty(), "{case:?}: no frame of stream 12");
-            assert!(!library.is_empty(), "{case:?}");
-            assert_eq!(
-                library.keys().collect::<Vec<_>>(),
-                tool.keys().collect::<Vec<_>>(),
-                "{case:?}"
-            );
-            for (name, bytes) in &library {
-                assert!(tool[name] == *bytes, "{case:?}: the bytes of {name}");
-            }
-            assert_eq!(
-                report_masked(&printed),
-                report_masked(&stdout),
-                "{case:?}: stream 11"
-            );
-            assert_eq!(
-                joined(&calls, STREAM_DIAGNOSTICS),
-                stderr,
-                "{case:?}: stream 3"
-            );
-            break;
         }
     }
-    std::fs::remove_dir_all(&folder).unwrap();
+    std::fs::remove_dir_all(&inside).unwrap();
+    std::fs::remove_dir_all(&outside).unwrap();
 }
 
 /// A makeblastdb tool run prints and fails as the command line: the help and NCBI's XML of
@@ -1745,8 +1783,13 @@ fn a_makeblastdb_argv_is_checked_as_the_command_line_checks_it() {
 fn a_makeblastdb_log_goes_where_the_command_line_writes_it() {
     emitted();
     let folder = folder("makeblastdb-log");
-    let out = folder.join("db");
-    let out = out.to_str().unwrap();
+    // The database in a folder of the run's working directory (web/adapter), whose files the run
+    // writes there (a database outside it comes on stream 12, too: line NP WW4i).
+    let inside = format!("ww4i-adapter-makeblastdb-log-{}", std::process::id());
+    let _ = std::fs::remove_dir_all(&inside);
+    std::fs::create_dir_all(&inside).unwrap();
+    let out = format!("{inside}/db");
+    let out = out.as_str();
     let file = folder.join("mk.log");
     let prot = fixture("seqdb/prot.faa");
     let words = |log: &str| -> Vec<String> {
@@ -1844,6 +1887,7 @@ fn a_makeblastdb_log_goes_where_the_command_line_writes_it() {
     );
     assert!(frames(&calls).is_empty());
     std::fs::remove_dir_all(&folder).unwrap();
+    std::fs::remove_dir_all(&inside).unwrap();
 }
 
 /// A check of makeblastdb's words whose `-logfile` does not open (a name in a folder that the
@@ -1868,6 +1912,219 @@ fn a_makeblastdb_check_leaves_an_unopened_log_s_messages_on_the_standard_error()
     assert!(!std::path::Path::new("ww4b1-r2-nodir").exists());
     assert!(std::path::Path::new("src").is_dir());
     assert!(emitted().is_empty());
+}
+
+/// A makeblastdb tool run whose database the model puts outside the run's working directory, in a
+/// folder where the model's user makes files (line NP WW4i, 2026-11-28; before, `-out ../db` and
+/// `-out /tmp/x/db` were written on the host's disk as typed, where LOSAT Web's host refuses them,
+/// "You do not have write permissions on '..'" and "Failed to create directory 'x'", while the
+/// command line writes the database): above it (`../`), through a folder of the run's
+/// (`src/../../`, `src` of the tests' working directory, web/adapter), and in a folder of the
+/// system's temporary folder that the command line makes (`<tmp>/nosub/`), of one and of several
+/// volumes, with a log beside it. The check passes the words; the database's files and the log
+/// come on stream 12 under the names that the command line's files have (`../db.pin`), with the
+/// bytes of the library's database of the same name on the disk, and nothing is written there;
+/// the standard output (with the database's name in the run, `New DB name:`) and error and the
+/// exit status 0 are the library's. The two runs are made in one minute (again where the minute
+/// changed between them).
+#[test]
+fn a_makeblastdb_database_outside_the_run_s_directory_comes_on_stream_12() {
+    emitted();
+    let folder = folder("makeblastdb-outside");
+    let library_folder = folder.to_str().unwrap().to_string();
+    let pid = std::process::id();
+    let above = std::env::current_dir().unwrap();
+    let above = above.parent().unwrap().to_str().unwrap().to_string();
+    let nosub = format!("{library_folder}/nosub");
+    let prot = fixture("seqdb/prot.faa");
+    let nucl = fixture("seqdb/nucl.fna");
+    // The folder as the tool's words name it, as stream 12 names its files and as the report shows
+    // it; the input and the other words; whether a log goes beside the database.
+    let nosub_folder = format!("{nosub}/");
+    let cases: [(&str, &str, &str, &str, &[&str], bool); 4] = [
+        ("../", "../", &above, &prot, &["-dbtype", "prot"], false),
+        (
+            "src/../../",
+            "../",
+            &above,
+            &nucl,
+            &["-dbtype", "nucl", "-blastdb_version", "4"],
+            false,
+        ),
+        (
+            "../",
+            "../",
+            &above,
+            &nucl,
+            &["-dbtype", "nucl", "-max_file_sz", "1000", "-parse_seqids"],
+            true,
+        ),
+        (
+            &nosub_folder,
+            &nosub_folder,
+            &nosub,
+            &prot,
+            &["-dbtype", "prot", "-parse_seqids", "-hash_index"],
+            true,
+        ),
+    ];
+    for (n, (typed, named, shown, input, extra, log)) in cases.into_iter().enumerate() {
+        let base = format!("ww4i-adapter-{n}-{pid}");
+        let words = |at: &str| -> Vec<String> {
+            let mut words = vec!["-in".to_string(), input.to_string()];
+            words.extend(extra.iter().map(|word| word.to_string()));
+            words.extend(["-out".to_string(), format!("{at}{base}")]);
+            if log {
+                words.extend(["-logfile".to_string(), format!("{at}{base}.log")]);
+            }
+            words
+        };
+        let (library_words, tool_words) = (words(&format!("{library_folder}/")), words(typed));
+        let library_words: Vec<&str> = library_words.iter().map(String::as_str).collect();
+        let tool_words: Vec<&str> = [
+            &["makeblastdb"][..],
+            &tool_words.iter().map(String::as_str).collect::<Vec<_>>(),
+        ]
+        .concat();
+        let label = format!("{:?}", &tool_words[1..]);
+        assert_eq!(validate(&tool_words), Ok(()), "{label}: validate");
+        let shown_name = |bytes: &[u8]| {
+            String::from_utf8_lossy(bytes)
+                .replace(&format!("{library_folder}/"), &format!("{shown}/"))
+                .into_bytes()
+        };
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+            losat::api::run_makeblastdb(&library_words, &mut io::empty(), &mut stdout, &mut stderr)
+                .unwrap();
+            let library = taken(&folder);
+            run(&tool_words).unwrap();
+            let calls = emitted();
+            let printed = joined(&calls, STREAM_PRINTED);
+            if report_minute(&printed) != report_minute(&stdout) && attempts < 2 {
+                continue;
+            }
+            assert_eq!(
+                calls.last().unwrap(),
+                &(STREAM_RESPONSE, b"{\"status\":0}".to_vec()),
+                "{label}: {}",
+                String::from_utf8_lossy(&joined(&calls, STREAM_DIAGNOSTICS))
+            );
+            let tool: std::collections::BTreeMap<String, Vec<u8>> = files(&frames(&calls))
+                .into_iter()
+                .map(|(name, bytes)| {
+                    let name = String::from_utf8(name).unwrap();
+                    let file = name
+                        .strip_prefix(named)
+                        .unwrap_or_else(|| panic!("{label}: {name} is not in {named}"));
+                    assert!(
+                        !std::path::Path::new(&name).exists(),
+                        "{label}: {name} is not on the disk"
+                    );
+                    (file.to_string(), bytes)
+                })
+                .collect();
+            assert!(library.len() >= 4, "{label}: {:?}", library.keys());
+            assert_eq!(
+                library.keys().collect::<Vec<_>>(),
+                tool.keys().collect::<Vec<_>>(),
+                "{label}: the files of stream 12"
+            );
+            for (name, bytes) in &library {
+                if name.ends_with(".log") {
+                    assert_eq!(
+                        report_masked(&tool[name]),
+                        report_masked(&shown_name(bytes)),
+                        "{label}: the log"
+                    );
+                } else {
+                    assert!(tool[name] == *bytes, "{label}: the bytes of {name}");
+                }
+            }
+            assert_eq!(
+                report_masked(&printed),
+                report_masked(&shown_name(&stdout)),
+                "{label}: stream 11"
+            );
+            assert_eq!(
+                joined(&calls, STREAM_DIAGNOSTICS),
+                stderr,
+                "{label}: stream 3"
+            );
+            assert!(
+                !std::path::Path::new(&nosub).exists(),
+                "{label}: no folder made"
+            );
+            break;
+        }
+    }
+    std::fs::remove_dir_all(&folder).unwrap();
+}
+
+/// A makeblastdb tool run whose database's folder the system does not reach or the user cannot
+/// write fails as the command line (line NP WW4i, 2026-11-28; the model's Linux, abi_v2.md §4): a
+/// name through a folder that the run's directory does not have (`nodir/../db`) or through a
+/// file (`Cargo.toml/../db`, in the tests' working directory) with "You do not have write
+/// permissions on '..'", as the library's run of the same words on the disk; a folder of root's
+/// that the system has (`/proc`) with that message for it; one that it does not have and the
+/// user cannot make (`/work`, `/etc/<x>`) with "Failed to create directory"; the exit status 255.
+/// The check passes the words (the command line's run fails after it starts), and no file is
+/// made.
+#[test]
+fn a_makeblastdb_database_where_the_user_cannot_write_fails_as_the_command_line() {
+    emitted();
+    let prot = fixture("seqdb/prot.faa");
+    let pid = std::process::id();
+    let nodir = format!("ww4i-nodir-{pid}/../ww4i-db-{pid}");
+    let through_file = format!("Cargo.toml/../ww4i-db-{pid}");
+    let etc = format!("/etc/ww4i-{pid}/db");
+    let etc_message = format!("Failed to create directory 'ww4i-{pid}'");
+    let cases: [(&str, &str); 5] = [
+        (&nodir, "You do not have write permissions on '..'"),
+        (&through_file, "You do not have write permissions on '..'"),
+        ("/proc/db", "You do not have write permissions on 'proc'"),
+        ("/work/db", "Failed to create directory 'work'"),
+        (&etc, &etc_message),
+    ];
+    for (out, message) in cases {
+        let words = ["-in", &prot, "-dbtype", "prot", "-out", out];
+        let tool_words = [&["makeblastdb"][..], &words].concat();
+        assert_eq!(validate(&tool_words), Ok(()), "{out}: validate");
+        run(&tool_words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":255}".to_vec()),
+            "{out}"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&joined(&calls, STREAM_DIAGNOSTICS)),
+            format!("Error: {message}\n\n"),
+            "{out}: stream 3"
+        );
+        assert!(
+            joined(&calls, STREAM_PRINTED).is_empty(),
+            "{out}: stream 11"
+        );
+        assert!(frames(&calls).is_empty(), "{out}: no frame of stream 12");
+        if !out.starts_with('/') {
+            let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+            let result =
+                losat::api::run_makeblastdb(&words, &mut io::empty(), &mut stdout, &mut stderr);
+            assert!(result.is_err(), "{out}: the library's run");
+            assert!(stdout.is_empty(), "{out}: the library's standard output");
+            assert_eq!(
+                String::from_utf8_lossy(&stderr),
+                format!("Error: {message}\n\n"),
+                "{out}: the library's standard error"
+            );
+        }
+    }
+    assert!(!std::path::Path::new(&format!("ww4i-nodir-{pid}")).exists());
+    assert!(!std::path::Path::new(&format!("../ww4i-db-{pid}.pin")).exists());
+    assert!(!std::path::Path::new(&format!("ww4i-db-{pid}.pin")).exists());
 }
 
 #[test]

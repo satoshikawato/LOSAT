@@ -1810,3 +1810,136 @@ fn a_check_of_a_run_that_writes_its_directory_chooses_the_run_s_target() {
         DiagTarget::Memory(_)
     ));
 }
+
+/// A receiver whose run writes its working directory, whose host gives a folder for the files
+/// that the run makes outside it (makeblastdb of LOSAT Web, `FileReceiver::outside_directory`),
+/// taking its other files as they are written (`Streamed`).
+struct PlacesOutside(Streamed, std::path::PathBuf);
+
+impl FileReceiver for PlacesOutside {
+    fn receive(&self, name: &[u8], _bytes: &[u8]) -> io::Result<()> {
+        panic!("a whole file: {}", String::from_utf8_lossy(name));
+    }
+
+    fn open(&self, name: &[u8]) -> Option<Box<dyn FileStream>> {
+        self.0.open(name)
+    }
+
+    fn writes_working_directory(&self) -> bool {
+        true
+    }
+
+    fn outside_directory(&self) -> Option<std::path::PathBuf> {
+        Some(self.1.clone())
+    }
+}
+
+/// The folder of a database (makeblastdb of LOSAT Web; line NP WW4i, 2026-11-28): a receiver's
+/// run answers the questions of `CreateDirectories` on the model of the other tools' outputs
+/// (`OpenFiles::folder_is_directory`, `make_folder`, `folder_writable`; the tests' working
+/// directory is LOSAT's, with `src` and `Cargo.toml`): the folders of the run's directory are the
+/// file system's, those outside it the model's, `..` read as the system reads it (`nodir/..` and
+/// `Cargo.toml/..` are no directory). Where the host gives a folder for the files outside the
+/// directory, the files of a name whose folder is outside it where the user makes entries are
+/// made in a folder of the host's, one per path (`../` and `src/../../` are one), and handed back
+/// under their names, the host's folder left empty; a name of the directory, of root's folders,
+/// of a folder that the system does not reach, and every name without the host's folder or on
+/// `Disk` are not placed.
+#[test]
+fn a_run_answers_for_its_database_s_folder_and_places_its_files_outside() {
+    let directory = OpenFiles::new(&RunFiles::Receiver(Arc::new(WritesDirectory::default())));
+    for (d, is_directory, made, writable) in [
+        ("..", true, MadeFolder::Outside(true), true),
+        ("../nosub", true, MadeFolder::Outside(true), true),
+        (
+            "src",
+            true,
+            MadeFolder::InRunDirectory(b"src".to_vec()),
+            true,
+        ),
+        ("src/..", true, MadeFolder::Outside(true), true),
+        (
+            "nosub",
+            false,
+            MadeFolder::InRunDirectory(b"nosub".to_vec()),
+            false,
+        ),
+        ("nosub/..", false, MadeFolder::Outside(true), false),
+        ("Cargo.toml/..", false, MadeFolder::Outside(true), false),
+        ("/tmp/ww4i-x", true, MadeFolder::Outside(true), true),
+        ("/proc", true, MadeFolder::Outside(true), false),
+        ("/etc/ww4i-x", false, MadeFolder::Outside(false), false),
+        ("/work", false, MadeFolder::Outside(false), false),
+    ] {
+        let d = d.as_bytes();
+        assert_eq!(
+            directory.folder_is_directory(d),
+            Some(is_directory),
+            "{d:?}"
+        );
+        assert_eq!(directory.make_folder(d), Some(made), "{d:?}");
+        assert_eq!(directory.folder_writable(d), Some(writable), "{d:?}");
+        assert_eq!(OpenFiles::disk().folder_is_directory(d), None);
+        assert_eq!(OpenFiles::disk().make_folder(d), None);
+        assert_eq!(OpenFiles::disk().folder_writable(d), None);
+    }
+    assert_eq!(directory.place(b"../db").unwrap(), None, "no host's folder");
+    assert_eq!(OpenFiles::disk().place(b"../db").unwrap(), None);
+
+    let host = std::env::temp_dir().join(format!("ww4i-run-files-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&host);
+    std::fs::create_dir_all(&host).unwrap();
+    let receiver = PlacesOutside(Streamed::default(), host.clone());
+    let events = receiver.0 .0.clone();
+    let files = OpenFiles::new(&RunFiles::Receiver(Arc::new(receiver)));
+    let placed = |name: &str| {
+        files
+            .place(name.as_bytes())
+            .unwrap()
+            .map(|path| String::from_utf8(path).unwrap())
+    };
+    let at = |index: usize, name: &str| Some(format!("{}/{index}/{name}", host.display()));
+    for name in [
+        "db",
+        "src/db",
+        "/proc/db",
+        "nodir/../db",
+        "/etc/ww4i-x/db",
+        "../",
+    ] {
+        assert_eq!(placed(name), None, "{name}");
+    }
+    assert_eq!(placed("../db"), at(0, "db"));
+    assert_eq!(placed("src/../../m"), at(0, "m"));
+    assert_eq!(placed("/tmp/ww4i-x/db"), at(1, "db"));
+    assert_eq!(placed("../nosub/db"), at(2, "db"));
+    std::fs::write(host.join("0/db.pin"), b"p").unwrap();
+    std::fs::write(host.join("0/m.gnd"), b"g").unwrap();
+    std::fs::write(host.join("1/db.nal"), b"a").unwrap();
+    std::fs::create_dir_all(host.join("1/v")).unwrap();
+    std::fs::write(host.join("1/v/x"), b"x").unwrap();
+    files.hand_back().unwrap();
+    assert_eq!(
+        std::fs::read_dir(&host).unwrap().count(),
+        0,
+        "the host's folder is empty"
+    );
+    drop(files);
+    let written: Vec<String> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|event| event.contains(" @"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        written,
+        [
+            "../db.pin @0 p",
+            "../m.gnd @0 g",
+            "/tmp/ww4i-x/db.nal @0 a",
+            "/tmp/ww4i-x/v/x @0 x"
+        ]
+    );
+    std::fs::remove_dir_all(&host).unwrap();
+}

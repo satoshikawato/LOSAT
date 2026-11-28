@@ -731,6 +731,61 @@ fn record_past_32_bits() {
     );
 }
 
+/// The NCBI4na bytes of a delta whose literals are of both codings (`pack_iupacna`: NCBI2na for a
+/// run of `A`, `C`, `G`, `T`, `U` long enough to be a segment of its own, its blocks by
+/// comparisons; NCBI4na for runs with other letters, by the table; `Ncbi4naBuilder::push_literal`)
+/// and whose gaps put the literals at even and odd places: those of the table for the letters,
+/// each gap as `N`.
+#[test]
+fn delta_literals_of_both_codings_are_the_table() {
+    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for round in 0..300 {
+        let mut input = format!(">r{round}\n").into_bytes();
+        let mut letters = Vec::new();
+        let parts = 2 + next() % 5;
+        for part in 0..parts {
+            let length = 1 + (next() % 1500) as usize;
+            let ambiguity = [0u64, 0, 2, 64][(next() % 4) as usize];
+            let run: Vec<u8> = (0..length)
+                .map(|_| {
+                    let r = next();
+                    if r % 128 < ambiguity {
+                        b"NRYKMSWBDHV"[((r >> 8) % 11) as usize]
+                    } else {
+                        b"ACGTU"[((r >> 16) % 5) as usize]
+                    }
+                })
+                .collect();
+            for line in run.chunks(60) {
+                input.extend_from_slice(line);
+                input.push(b'\n');
+            }
+            letters.extend_from_slice(&run);
+            if part + 1 < parts {
+                let gap = 1 + next() % 300;
+                input.extend_from_slice(format!(">?{gap}\n").as_bytes());
+                letters.extend(std::iter::repeat_n(b'N', gap as usize));
+            }
+        }
+        let bioseq = one(&input, false);
+        assert_eq!(
+            (bioseq.length, bioseq.seq_data, bioseq.delta_fix),
+            (
+                letters.len() as u64,
+                Some(SeqData::Ncbi4na(pack::iupacna_to_ncbi4na(&letters))),
+                None
+            ),
+            "round {round}"
+        );
+    }
+}
+
 /// Past 2^32 residues (here past 64, `with_seq_pos_modulus`) the record keeps those since its
 /// position last wrapped, and its gaps are at their wrapped positions (line RG DECISIONS
 /// KC-11d): a nucleotide's pieces then repeat or skip residues and `s_FixBioseqDeltas` gives

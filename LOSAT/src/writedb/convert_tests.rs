@@ -483,6 +483,130 @@ fn short_nucleotide_data_is_found_at_each_boundary() {
     assert_eq!(short(SeqData::Other, 22), None);
 }
 
+// `ncbi4na_to_binary` before its blocks: NCBI's loop, its body written out here, a byte at a time.
+fn ncbi4na_to_binary_byte_by_byte(ncbi4na: &[u8], base_length: u32) -> BinarySequence {
+    let inp_bytes = base_length.div_ceil(2) as usize;
+    let blast_bytes = (base_length / 4 + 1) as usize;
+    let last_byte = blast_bytes - 1;
+    let mut ambiguities = AmbigDataBuilder::new(base_length);
+    let mut seq = vec![0u8; blast_bytes];
+    for (i, &inp) in ncbi4na.iter().enumerate().take(inp_bytes) {
+        let mut b1 = inp >> 4;
+        let mut b2 = inp & 0xF;
+        let c1 = NA4_TO_NA2[usize::from(b1)];
+        let c2 = NA4_TO_NA2[usize::from(b2)];
+        let mut half = 0u8;
+        if (c1 | c2) & 0x80 == 0 {
+            half = (c1 << 2) | c2;
+        } else {
+            if b1 == 0 {
+                b1 = 0xF;
+            }
+            let second = (i as u32) * 2 + 1;
+            if b2 == 0 && second < base_length {
+                b2 = 0xF;
+            }
+            half |= ambiguities.check(b1, second - 1) << 2;
+            half |= ambiguities.check(b2, second);
+        }
+        seq[i / 2] |= if i & 1 == 1 { half } else { half << 4 };
+    }
+    seq[last_byte] &= 255 - 3;
+    seq[last_byte] |= (base_length & 3) as u8;
+    BinarySequence {
+        seq,
+        ambig: ambiguities.get_ambig(),
+    }
+}
+
+/// The arithmetic of the blocks is `NA4_TO_NA2` for all sixteen NCBI4na bases: `ambiguity_bits`
+/// is 0 exactly where the table has a code, and `ncbi2na_code_of_base` is that code.
+#[test]
+fn ncbi4na_codes_are_the_table() {
+    for base in 0..16u8 {
+        let code = NA4_TO_NA2[usize::from(base)];
+        assert_eq!(ambiguity_bits(base) == 0, code & 0x80 == 0, "{base}");
+        if code & 0x80 == 0 {
+            assert_eq!(ncbi2na_code_of_base(base), code, "{base}");
+        }
+    }
+}
+
+/// `ncbi4na_to_binary` (its blocks, the bytes after them, and a sequence shorter than a block)
+/// gives the bytes and the ambiguity data of NCBI's loop a byte at a time.
+#[test]
+fn ncbi4na_blocks_are_the_byte_by_byte_loop() {
+    let check = |ncbi4na: &[u8], base_length: u32| {
+        let byte_length = base_length.div_ceil(2) as usize;
+        assert_eq!(
+            ncbi4na_to_binary(ncbi4na, byte_length, base_length, &mut Vec::new()),
+            ncbi4na_to_binary_byte_by_byte(ncbi4na, base_length),
+            "{ncbi4na:02x?} of {base_length} bases"
+        );
+    };
+    // An empty record (no byte read).
+    check(&[], 0);
+    // Every byte at every place of the first two blocks (and the byte after them) among
+    // unambiguous bytes, with base counts that end before the first block is full, at the end of
+    // a block, after it, inside the last byte, and at the byte changed (its second base then the
+    // half byte past the end of an odd count).
+    let clean: Vec<u8> = (0..200)
+        .map(|i| [0x12, 0x48, 0x84, 0x21, 0x14][i % 5])
+        .collect();
+    for place in 0..2 * NCBI4NA_BLOCK + 1 {
+        for byte in 0..=u8::MAX {
+            let mut data = clean.clone();
+            data[place] = byte;
+            for base_length in [
+                62,
+                64,
+                128,
+                131,
+                200,
+                2 * place as u32 + 1,
+                2 * place as u32 + 2,
+            ] {
+                check(&data, base_length);
+            }
+        }
+    }
+    // Every base count from 1 to 1,500 twice, with data of the bytes read, more and fewer; the
+    // bases unambiguous or, at a density from 1 in 1,024 to every base, any of the sixteen
+    // codes (gaps among them).
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for round in 0..3000u32 {
+        let base_length = round % 1500 + 1;
+        let bytes = base_length.div_ceil(2) as usize;
+        let density = [0u32, 1, 4, 16, 64, 256, 1024][(next() % 7) as usize];
+        let data: Vec<u8> = (0..bytes + 3)
+            .map(|_| {
+                let r = next();
+                let nibble = |shift: u32| {
+                    let roll = ((r >> shift) & 0x3FF) as u32;
+                    if roll < density {
+                        ((r >> (shift + 10)) & 0xF) as u8
+                    } else {
+                        [1u8, 2, 4, 8][((r >> (shift + 14)) & 3) as usize]
+                    }
+                };
+                (nibble(0) << 4) | nibble(16)
+            })
+            .collect();
+        check(&data[..bytes], base_length);
+        check(&data, base_length);
+        check(
+            &data[..bytes.saturating_sub(1 + round as usize % 3)],
+            base_length,
+        );
+    }
+}
+
 // NCBI `x_ConvertIupacnaTo4na` (`sequtil_convert_imp.cpp:328-337`): the pair loop indexes
 // `sm_IupacnaTo4na` with a signed `char` (undefined for byte >= 0x80), while the odd overhang
 // casts to `Uint1` (defined). Bytes < 0x80 and other codings are defined.

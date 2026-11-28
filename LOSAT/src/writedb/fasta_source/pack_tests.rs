@@ -177,7 +177,7 @@ fn ncbi4na_of_pieces() {
     assert_eq!(
         bytes(
             &|b| {
-                b.push_iupacna(b"AC");
+                b.push_literal(b"AC", false);
                 b.push_run(15, 1);
             },
             3
@@ -187,10 +187,10 @@ fn ncbi4na_of_pieces() {
     assert_eq!(
         bytes(
             &|b| {
-                b.push_iupacna(b"A");
-                b.push_iupacna(b"CGT");
+                b.push_literal(b"A", false);
+                b.push_literal(b"CGT", false);
                 b.push_run(15, 3);
-                b.push_iupacna(b"ACG");
+                b.push_literal(b"ACG", false);
                 b.push_run(15, 0);
                 b.push_run(15, 2);
             },
@@ -200,16 +200,84 @@ fn ncbi4na_of_pieces() {
     );
     for split in 0..=9 {
         let src = b"ACGTNRYKMS";
-        let whole = bytes(&|b| b.push_iupacna(src), 10);
+        let whole = bytes(&|b| b.push_literal(src, false), 10);
         assert_eq!(whole, iupacna_to_ncbi4na(src));
         let parts = bytes(
             &|b| {
-                b.push_iupacna(&src[..split]);
-                b.push_iupacna(&src[split..]);
+                b.push_literal(&src[..split], false);
+                b.push_literal(&src[split..], false);
             },
             10,
         );
         assert_eq!(parts, whole, "split {split}");
+    }
+}
+
+/// The codes without a table are the table's for every byte whose best coding is NCBI2na (`A`,
+/// `C`, `G`, `T`, `U` in either case), and 0 for every other byte.
+#[test]
+fn the_codes_of_ncbi2na_letters_are_the_table() {
+    for byte in 0..=u8::MAX {
+        let code = ncbi4na_code_of_ncbi2na_letter(byte);
+        if is_ncbi2na_best(byte) {
+            assert_eq!(code, NCBI4NA_CODES[usize::from(byte)], "{byte:#04x}");
+        } else {
+            assert_eq!(code, 0, "{byte:#04x}");
+        }
+    }
+}
+
+/// The NCBI4na bytes of an NCBI2na literal (`Ncbi4naBuilder::push_literal`, by comparisons),
+/// after an even and after an odd count of letters, are those of the table's loop (the same
+/// letters as another literal: a pair of table codes a byte): every letter of
+/// an NCBI2na literal at every place of the first two blocks (and the letter after them), in
+/// lengths that end at that letter, at the end of the second block and after it, and every length
+/// up to 200.
+#[test]
+fn ncbi2na_letters_are_the_table_of_every_letter() {
+    let built = |push: &dyn Fn(&mut Ncbi4naBuilder, &[u8]), first: &[u8], src: &[u8]| {
+        let mut builder = Ncbi4naBuilder::with_letters(first.len() + src.len()).unwrap();
+        builder.push_literal(first, false);
+        push(&mut builder, src);
+        assert_eq!(builder.letters(), first.len() + src.len());
+        builder.into_bytes()
+    };
+    let check = |src: &[u8]| {
+        for first in [&b""[..], b"N", b"AC", b"TGA"] {
+            assert_eq!(
+                built(&|b, s| b.push_literal(s, true), first, src),
+                built(&|b, s| b.push_literal(s, false), first, src),
+                "{first:?} then {src:?}"
+            );
+        }
+    };
+    let letters = b"ACGTUacgtu";
+    let bases: Vec<u8> = (0..200).map(|i| letters[(i * 7 + i / 10) % 10]).collect();
+    for place in 0..2 * NCBI2NA_LETTER_BLOCK + 1 {
+        for &letter in letters {
+            let mut src = bases.clone();
+            src[place] = letter;
+            for length in [
+                place + 1,
+                2 * NCBI2NA_LETTER_BLOCK,
+                2 * NCBI2NA_LETTER_BLOCK + 3,
+            ] {
+                check(&src[..length.max(place + 1)]);
+            }
+        }
+    }
+    for length in 0..=bases.len() {
+        check(&bases[..length]);
+    }
+}
+
+/// The shift and OR of a pair as a 16-bit number is `first << 4 | second` for every pair of
+/// bytes.
+#[test]
+fn pair_bytes_are_the_shift_and_or() {
+    for pair in 0..=u16::MAX {
+        let [first, second] = pair.to_be_bytes();
+        assert_eq!(pair_byte([first, second]), first << 4 | second, "{pair}");
     }
 }
 
@@ -258,7 +326,7 @@ fn ncbi8na_of_both_codings() {
         );
     }
     let mut seq4na = Ncbi4naBuilder::with_letters(6).unwrap();
-    seq4na.push_iupacna(b"ACGTUN");
+    seq4na.push_literal(b"ACGTUN", false);
     assert_eq!(seq4na.into_bytes(), [0x12, 0x48, 0x8f]);
 }
 

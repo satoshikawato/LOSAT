@@ -1214,3 +1214,42 @@ fn a_loaded_line_holds_the_seq_align_id_in_other_letter_case() {
     ));
     assert!(!differs_in_case_only(b"lcl|abc", &[]));
 }
+
+// Line DBID hr-2 (rows db.hr2.bp.zpA.{txbm,txbm0,txoe}.*): a load looks the positive tax ids of
+// its record's lines up, so a taxonomy database's texts of opening need one in the held subject's
+// or the holder's lines, and its offset error one of the error tax id's slot (`taxid & 255`).
+#[test]
+fn taxonomy_texts_need_a_tax_id_that_a_load_looks_up() {
+    let record = |name: &str, ordinal: u32| {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/db_search/hr2")
+            .join(name);
+        let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+        crate::report::db_subject::ParsedSubject::new(db.defline_set(ordinal).unwrap()).unwrap()
+    };
+    // pP4 and zpApP4 have no tax id; pPt4 has 100001, zpApPt4 100002 and 100003.
+    let (plain, holder) = (record("pP4", 1), record("zpApP4", 0));
+    let (taxed, taxed_holder) = (record("pPt4", 1), record("zpApPt4", 0));
+    let open = LookupTexts {
+        open: true,
+        ..LookupTexts::default()
+    };
+    assert!(!open.written_at([&plain, &holder]));
+    assert!(open.written_at([&plain, &taxed_holder]));
+    assert!(open.written_at([&taxed, &holder]));
+    let unknown = LookupTexts {
+        unknown: true,
+        ..LookupTexts::default()
+    };
+    assert!(!unknown.written_at([&plain, &holder]));
+    assert!(unknown.written_at([&taxed, &taxed_holder]));
+    let slot = |taxid| LookupTexts {
+        offset_error_taxid: Some(taxid),
+        ..LookupTexts::default()
+    };
+    // 100003 & 255 = 163: the holder's second line; 100001 + 256 shares pPt4's slot.
+    assert!(slot(100_003).written_at([&plain, &taxed_holder]));
+    assert!(slot(100_001 + 256).written_at([&taxed, &holder]));
+    assert!(!slot(100_004).written_at([&taxed, &taxed_holder]));
+    assert!(!LookupTexts::default().written_at([&taxed, &taxed_holder]));
+}

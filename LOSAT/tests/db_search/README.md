@@ -2969,11 +2969,12 @@ including `psiblast` one-round and multi-round runs and `rpsblast`/`rpstblastn` 
   negative-pair gaps (`q_neg_gap*`, `q_first`), valid letters only in a gap (`q_gapvalid`),
   unsearchable batch (`q_alln310`), and split duplicate-id batches (`q_dup300`, `q_dup_lc_both`,
   `q_dup_lc_first`, `q_dup_alln`).
-- `hr2/` (rows `db.hr2.bp.zpA.{pl4,qs,qsh,u8,txbm}.reject`, `db.hr2.bp.zpA.{txbm0,txoe}.6`, `db.hr2.bx.L1e.*`, line DBID
-  hr-2): `pP4` and `zpApP4` are `-blastdb_version 4` copies of `multidb/pP` and `multidb/zpApP` (the prefetch's bulk
+- `hr2/` (rows `db.hr2.bp.zpA.{pl4,qs,qsh,u8,txbm}.reject`, `db.hr2.bp.zpA.{txbm0,txoe}.6`, `db.hr2.bx.{L1e.*,qsh.reject}`,
+  line DBID hr-2): `pP4` and `zpApP4` are `-blastdb_version 4` copies of `multidb/pP` and `multidb/zpApP` (the prefetch's bulk
   pass gives `zpApP`'s `ref|XP_000050.1| ^A ref|NP_100001.1|` for `pP`'s `ref|NP_100001.1|`), `pPt4` and `zpApPt4` the
   same with tax ids (`-taxid 100001`; `-taxid_map` XP_000050.1 100002, NP_100001.1 100003), `u8/` the copies whose
   holder's first title is tagged as a UTF8String (0x1A to 0x0C, the patch of `t5/make_t5.py`), `c_both.txt` a positive
   list of both ids, `pq_self.faa` and `pq_self_xp.faa` the query `multidb/pq_2.faa` whose `-parse_deflines` id is the
   subject's or the holder's; `zlxpP` (from `zlxpP.fa`: `ref|XP_000061.1| ^A ref|NP_100001.1|`) with `nq_XBx.fna`
-  (two proteins back-translated: `qpX` hits `zlxpP` alone, `qpB` hits `pP`'s `ref|NP_100001.1|`) gives BLASTX's loader hold of a holder reported in an earlier query batch.
+  (two proteins back-translated: `qpX` hits `zlxpP` alone, `qpB` hits `pP`'s `ref|NP_100001.1|`) gives BLASTX's loader hold of a holder reported in an earlier query batch; `nq_XBxh.fna` is
+  `nq_XBx.fna` whose first query has the holder's `-parse_deflines` id `ref|XP_000061.1|`.

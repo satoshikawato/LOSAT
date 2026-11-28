@@ -646,6 +646,7 @@ request_inputs = None
 app = Blastp
 taxdb_setting = None
 matrix_search = None
+db_handler_posts = []
 write_verification = None
 read_verification.read = None
 read_verification.get = None

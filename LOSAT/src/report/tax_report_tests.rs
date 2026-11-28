@@ -68,7 +68,7 @@ fn hsp(subject: usize, evalue: f64, bit_score: f64) -> TaxHsp {
 
 /// The organism report (without the caption and the `Query=` block) and its reads and lookups.
 fn report(
-    subjects: &Subjects,
+    subjects: &dyn TaxSubjects,
     hsps: &[TaxHsp],
     names: Option<&TabularNames>,
 ) -> (Vec<u8>, Vec<Step>) {
@@ -288,6 +288,77 @@ fn consecutive_hsps_of_a_found_subject_give_one_row() {
             .count(),
         2
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1031-1034
+/// A database sequence with a definition line without a Seq-id (x1 OID6 of line RG D1c-1c-b:
+/// `NP_000110 g1`, then a line without a Seq-id; 3 HSPs, NCBI BLAST+ 2.17.0 probe `x.bp.x1.o18`
+/// shows `NP_000110 g1` three times): its walk ends before that line and the sequence is taken as
+/// shown, so its row comes once, with its first HSP's scores, and its later HSPs read nothing
+/// (approved exception 37 of PD-LOSAT-NCBI-DEFECTS).
+#[test]
+fn a_subject_with_a_line_without_a_seq_id_gives_its_rows_once() {
+    use crate::report::db_subject::ParsedSubject;
+    use crate::seqid::{BlastDefline, DeflineSet, ParsedSeqId};
+    let refseq = |accession: &str| {
+        vec![ParsedSeqId::Other(crate::seqid::model::TextseqId {
+            accession: Some(accession.as_bytes().to_vec()),
+            version: Some(1),
+            ..Default::default()
+        })]
+    };
+    let subject = |lines: Vec<(Vec<ParsedSeqId>, &str, i32)>| {
+        let deflines = lines
+            .into_iter()
+            .map(|(ids, title, taxid)| BlastDefline {
+                ids,
+                title: Some(title.as_bytes().to_vec()),
+                taxid: Some(taxid),
+                ..BlastDefline::default()
+            })
+            .collect();
+        let set = DeflineSet {
+            deflines,
+            utf8: false,
+        };
+        Some(std::sync::Arc::new(ParsedSubject::new(set).unwrap()))
+    };
+    let parsed = [
+        subject(vec![(refseq("NP_000110"), "g1", 9606), (vec![], "g2", 10090)]),
+        subject(vec![(refseq("NP_000101"), "alpha", 9606)]),
+    ];
+    let queries = [TaxQuery {
+        title: b"x1",
+        length: 150,
+        hsps: Some(vec![
+            hsp(0, 2.2, 15.4),
+            hsp(0, 5.2, 14.6),
+            hsp(0, 6.8, 14.2),
+            hsp(1, 3.0, 15.0),
+        ]),
+    }];
+    let source = crate::report::defline::SourceTaxname::Unnamed;
+    let plain = |subject: usize| TaxPlain::Stored {
+        oid: crate::seqdb::Oid::of_unrestricted(subject as u32),
+        title: b"",
+        source: &source,
+        taxid: 9606,
+    };
+    let table = SubjectTable::new(&queries, &parsed, plain, true, None, "BLASTP");
+    let names = names(Some("of18"));
+    let hsps = queries[0].hsps.as_deref().unwrap();
+    let (out, steps) = report(&table, hsps, names.as_ref());
+    let rows: Vec<&[u8]> = out
+        .split(|&b| b == b'\n')
+        .filter(|row| row.starts_with(b" NP_"))
+        .collect();
+    let want: [&[u8]; 2] = [
+        b" NP_000110                  g1                                                         15.4  2.2     ",
+        b" NP_000101                  alpha                                                      15.0  3.0     ",
+    ];
+    assert_eq!(rows, want, "{}", String::from_utf8_lossy(&out));
+    // The taxid of the line without a Seq-id is never looked up, and the subject is read once.
+    assert_eq!(steps, [Step::Read(0), Step::LookUp(9606), Step::Read(1)]);
 }
 
 #[test]

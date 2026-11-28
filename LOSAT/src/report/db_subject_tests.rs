@@ -3957,22 +3957,41 @@ fn a_line_without_a_seq_id_is_unknown_in_the_tabular_ids_and_its_sallacc_stops()
     assert_eq!(plain.lookup_failure(true).unwrap(), None);
 }
 
-// The organism report stops at the line without a Seq-id (Owner question Q-D1c1cb-18): refused
-// there, the lines before it as always; a set with no Seq-id at all gets no Seq-align (PR 2a) and
-// is an internal error here.
+// The organism report's lines end before the first line without a Seq-id (NCBI's walk stops
+// there), none where it is the first line; LOSAT then takes the subject as shown, so its rows come
+// once (approved exception 37). A set with no Seq-id at all gets no Seq-align (PR 2a) and is an
+// internal error here.
 #[test]
-fn the_organism_report_refuses_a_line_without_a_seq_id_and_a_set_without_any_is_internal() {
+fn the_organism_report_ends_before_a_line_without_a_seq_id_and_a_set_without_any_is_internal() {
     use crate::report::tax_report::TaxTitle;
-    let subject = titled(vec![
+    let labels = |subject: &ParsedSubject| {
+        subject
+            .tax_deflines(true)
+            .into_iter()
+            .map(|line| {
+                let TaxTitle::Text(title) = line.title else {
+                    panic!("{line:?}");
+                };
+                (text(&line.label).to_owned(), text(&title).to_owned())
+            })
+            .collect::<Vec<_>>()
+    };
+    let one = |label: &str, title: &str| vec![(label.to_owned(), title.to_owned())];
+    // An id line, the line without a Seq-id, an id line after it (x1 OID1, `beta1` alone).
+    let middle = titled(vec![
         (vec![gb("A00001", 1)], Some("a")),
         (vec![], Some("b")),
+        (vec![gb("A00003", 1)], Some("c")),
     ]);
-    let lines = subject.tax_deflines(true);
-    assert!(matches!(&lines[0].title, TaxTitle::Text(title) if title == b"a"));
-    assert!(matches!(
-        &lines[1].title,
-        TaxTitle::Refused { reason, shown_only: false } if reason == LINELESS_TAX_REPORT
-    ));
+    assert_eq!(labels(&middle), one("A00001", "a"));
+    // An untitled or empty-titled line without a Seq-id ends it the same way (x1 OID4, OID6).
+    for title in [None, Some("")] {
+        let last = titled(vec![(vec![gb("A00001", 1)], Some("e1")), (vec![], title)]);
+        assert_eq!(labels(&last), one("A00001", "e1"), "{title:?}");
+    }
+    // The line without a Seq-id first (x1 OID3): no line.
+    let first = titled(vec![(vec![], None), (vec![gb("A00002", 1)], Some("delta2"))]);
+    assert!(labels(&first).is_empty());
     let none = DeflineSet {
         deflines: vec![BlastDefline {
             title: Some(b"t".to_vec()),

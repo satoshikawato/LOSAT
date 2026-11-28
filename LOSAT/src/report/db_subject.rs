@@ -34,10 +34,6 @@ use super::defline::{
 };
 use super::html_ids::{self, HtmlHeading};
 
-/// LOSAT's refusal of the organism report (outfmt 18) at a definition line without a Seq-id
-/// (`ParsedSubject::tax_deflines`).
-const LINELESS_TAX_REPORT: &str = "has a definition line without a Seq-id, at which NCBI BLAST+'s organism report (outfmt 18) stops for each HSP of the sequence and shows the lines before it once per HSP";
-
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:144-145
 /// `kMaxDescrLength`: the length past which the outfmt 0 description's walk of the definition
 /// lines stops (`ParsedSubject::description_meets_lineless_line`).
@@ -4835,6 +4831,14 @@ impl ParsedSubject {
     /// (`with_source`). NCBI BLAST+ 2.17.0 keeps the positive list in an ungapped search too
     /// (probe `T/t2/fix1` `f1.d3.*.sl*`: tblastx and `blastn -ungapped` with `-seqidlist` show the
     /// listed line alone for a subject of 2 to 5 HSPs).
+    ///
+    /// The lines end before the first definition line without a Seq-id (none where it is the
+    /// first line): NCBI's walk takes the label of the line's best id before anything else of
+    /// the line (`x_FillTaxDispParams` calls `MatchSeqInSeqList`, which reads the null best id,
+    /// before it looks at the positive list) and stops there. The report then takes the subject
+    /// as shown, so a subject of several HSPs gives its rows once, with its first HSP
+    /// (PD-LOSAT-NCBI-DEFECTS approved exception 37: NCBI's `catch` skips that mark and shows
+    /// the rows again for each HSP of the subject).
     pub fn tax_deflines(&self, protein: bool) -> Vec<crate::report::tax_report::TaxDefline> {
         use crate::report::tax_report::{generated_title, TaxDefline, TaxTitle};
         let label_of = |id: Option<&ParsedSeqId>| {
@@ -4865,20 +4869,21 @@ impl ParsedSubject {
                 taxid: 0,
             }];
         }
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:944-947
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1031-1034
+        // `x_FillTaxDispParams` takes the label of the line's best id first, null for a line
+        // without a Seq-id: the `catch` of `x_InitTaxInfoMap` drops the rest of the subject.
+        // NCBI does not then mark the subject shown (`previousId`), so its next HSP shows the
+        // lines before again; LOSAT shows them once (approved exception 37, the Owner's answer
+        // to line RG's question Q-D1c1cb-18 of 2026-11-28): the walk ends there as a whole one.
         self.set
             .deflines
             .iter()
+            .take_while(|defline| !defline.ids.is_empty())
             .filter(|defline| self.heading_shows(defline))
             .map(|defline| TaxDefline {
                 label: label_of(defline.display_id()),
                 title: match defline.title.as_deref() {
-                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:944-947
-                    // `x_FillTaxDispParams` takes the label of the line's best id first, null for a
-                    // line without a Seq-id: the `catch` of `x_InitTaxInfoMap` drops the rest of the
-                    // HSP's subject without marking it shown, so its next HSP shows the lines before
-                    // again (Owner question Q-D1c1cb-18 of line RG D1c-1c-b; LOSAT refuses it until
-                    // it is answered).
-                    _ if defline.ids.is_empty() => refused(LINELESS_TAX_REPORT, false),
                     Some(title) if !title.is_empty() => TaxTitle::Text(title.to_vec()),
                     _ => generated(),
                 },

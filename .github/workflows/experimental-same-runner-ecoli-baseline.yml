@@ -1,0 +1,332 @@
+# Isolated Ecoli-only baseline benchmark, prepared 2026-11-28.
+# This job performs builds, parity checks, and timings on the runner itself.
+# It does not download dependencies merely to relay them into another environment.
+name: Experimental Ecoli same-runner BLAST baseline
+on:
+  push:
+    branches: [experiment/ncbi-compatible-seed-ecoli-20261128]
+    paths:
+      - .github/workflows/experimental-same-runner-ecoli-baseline.yml
+      - LOSAT/**
+      - rust-toolchain.toml
+permissions:
+  contents: read
+concurrency:
+  group: experimental-same-runner-ecoli-baseline
+  cancel-in-progress: false
+env:
+  BASELINE_SHA: f58753e096b9f7e2d7021c7cec650f79d821eca6
+  COMPARE_CANDIDATE: "false"
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  LC_ALL: C
+  LANG: C
+  TZ: UTC
+jobs:
+  compare:
+    if: github.repository == 'satoshikawato/LOSAT' && github.ref == 'refs/heads/experiment/ncbi-compatible-seed-ecoli-20261128'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout experiment
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Checkout exact LOSAT baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.BASELINE_SHA }}
+          path: baseline
+          persist-credentials: false
+      - name: Rust used by repository CI
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: 1.92.0
+      - name: Build actual baseline release before installing comparison programs
+        working-directory: baseline/LOSAT
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/targets/baseline
+        run: cargo build --release --locked --bin losat
+      - name: Build actual candidate release, only after Rust integration exists
+        if: env.COMPARE_CANDIDATE == 'true'
+        working-directory: LOSAT
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/targets/candidate
+        run: cargo build --release --locked --bin losat
+      - name: Install official comparison programs and record their identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p comparison-tools evidence
+          curl --fail --location --retry 3 \
+            --output comparison-tools/ncbi.tar.gz \
+            'https://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/2.17.0/ncbi-blast-2.17.0%2B-x64-linux.tar.gz'
+          tar -xzf comparison-tools/ncbi.tar.gz -C comparison-tools
+          cat > comparison-tools/ncbi-executables.sha256 <<'HASHES'
+          5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e  comparison-tools/ncbi-blast-2.17.0+/bin/blastp
+          0dac09bed17043dfdf93ad71d50e6e177f273d5311897b9e653e45142bb3ef80  comparison-tools/ncbi-blast-2.17.0+/bin/blastx
+          fea14b77d4452a524a003196824f414812126bd3fb64d950feec8bacccf4976c  comparison-tools/ncbi-blast-2.17.0+/bin/tblastn
+          583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804  comparison-tools/ncbi-blast-2.17.0+/bin/tblastx
+          HASHES
+          sha256sum --check comparison-tools/ncbi-executables.sha256
+          curl --fail --location --retry 3 \
+            --output comparison-tools/diamond.tar.gz \
+            'https://github.com/bbuchfink/diamond/releases/download/v2.2.9/diamond-linux64.tar.gz'
+          echo 'cb0cf1a14b7254e624934a247665605b7d73991c83319337b36c5a827b1d6622  comparison-tools/diamond.tar.gz' | sha256sum --check
+          tar -xzf comparison-tools/diamond.tar.gz -C comparison-tools
+          sha256sum comparison-tools/*.tar.gz comparison-tools/diamond \
+            comparison-tools/ncbi-blast-2.17.0+/bin/makeblastdb \
+            targets/baseline/release/losat > evidence/executables.sha256
+          rustc -vV > evidence/rustc.txt
+          cargo -V > evidence/cargo.txt
+          uname -a > evidence/platform.txt
+          lscpu > evidence/cpu.txt
+          cat /proc/meminfo > evidence/meminfo.txt
+          comparison-tools/diamond version > evidence/diamond-version.txt
+          comparison-tools/ncbi-blast-2.17.0+/bin/blastp -version > evidence/ncbi-version.txt
+          comparison-tools/ncbi-blast-2.17.0+/bin/makeblastdb -version > evidence/makeblastdb-version.txt
+          targets/baseline/release/losat blastp -version > evidence/losat-version.txt
+          git rev-parse HEAD > evidence/experiment-sha.txt
+          git -C baseline rev-parse HEAD > evidence/baseline-sha.txt
+      - name: Genuine 4321-protein Ecoli workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p comparison-inputs
+          curl --fail --location --retry 3 \
+            --output comparison-inputs/Ecoli_K12_MG1655.faa \
+            'https://raw.githubusercontent.com/cdanielmachado/carveme/5b25ce504de41060fb5dbaf4c87e13627c650632/carveme/data/benchmark/fasta/Ecoli_K12_MG1655.faa'
+          echo '295d1df9c925468db10e67919b20e36ac6217b539785b0284544bb83c6c8978f  comparison-inputs/Ecoli_K12_MG1655.faa' | sha256sum --check
+      - name: Same-runner parity and formal single-thread timing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import csv, hashlib, importlib.util, json, os, pathlib, platform, signal
+          import statistics, subprocess, time
+          R = pathlib.Path.cwd()
+          E = R / "evidence"
+          E.mkdir(exist_ok=True)
+          O = R / "comparison-tools/ncbi-blast-2.17.0+/bin"
+          D = R / "comparison-tools/diamond"
+          L = R / "targets/baseline/release/losat"
+          C = R / "targets/candidate/release/losat"
+          WITH_CANDIDATE = os.environ["COMPARE_CANDIDATE"] == "true"
+          CPU = min(os.sched_getaffinity(0))
+          THREADS = 1
+          TIMEOUT = 120
+          DEADLINE = time.monotonic() + 1200
+          rows = []
+          prep = []
+          def sha(p):
+              h = hashlib.sha256()
+              with pathlib.Path(p).open("rb") as f:
+                  for b in iter(lambda: f.read(1024 * 1024), b""):
+                      h.update(b)
+              return h.hexdigest()
+          def save(name, value):
+              (E / name).write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+          def prepare(cmd, label):
+              before = time.perf_counter()
+              p = subprocess.run([str(x) for x in cmd], capture_output=True, timeout=TIMEOUT)
+              (E / (label + ".stdout")).write_bytes(p.stdout)
+              (E / (label + ".stderr")).write_bytes(p.stderr)
+              prep.append({"label": label, "command": [str(x) for x in cmd],
+                           "seconds": time.perf_counter() - before, "returncode": p.returncode})
+              save("database-preparation.json", prep)
+              if p.returncode:
+                  raise RuntimeError("database preparation failed: " + label)
+          # The existing mapping is the repository's declared wording exception.
+          module_path = R / "baseline/LOSAT/tests/losat_wording.py"
+          spec = importlib.util.spec_from_file_location("losat_wording", module_path)
+          wording = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(wording)
+          ecoli = R/"comparison-inputs/Ecoli_K12_MG1655.faa"
+          cases = [("ecoli-self-blastp", "blastp", ecoli, ecoli, "prot")]
+          inputs = sorted({p for _, _, q, s, _ in cases for p in (q, s)})
+          save("inputs.json", [{"path": str(p.relative_to(R)), "bytes": p.stat().st_size,
+                               "sha256": sha(p)} for p in inputs])
+          binaries = [L, D] + [O/m for m in ("blastp", "blastx", "tblastn", "tblastx", "makeblastdb")]
+          if WITH_CANDIDATE:
+              binaries.append(C)
+          save("environment.json", {
+              "baseline_sha": os.environ["BASELINE_SHA"],
+              "experiment_sha": os.environ.get("GITHUB_SHA"),
+              "candidate_enabled": WITH_CANDIDATE,
+              "platform": platform.platform(), "python": platform.python_version(),
+              "allowed_cpus": sorted(os.sched_getaffinity(0)), "pinned_cpu": CPU,
+              "threads": THREADS, "warmups": 1, "retained_trials": 3,
+              "binaries": [{"path": str(p.relative_to(R)), "sha256": sha(p)} for p in binaries],
+              "release_build_command": "cargo build --release --locked --bin losat",
+              "ncbi": "2.17.0 official Linux binaries", "diamond": "2.2.9, default and --sensitive separately",
+              "max_target_seqs": 500, "evalue": 10,
+              "timing_scope": "complete CLI with prebuilt databases; load/search/report/output included",
+              "database_build_time": "separate database-preparation.json",
+              "rss_method": "GNU time per-process maximum resident set size, KiB",
+              "interpretation": "DIAMOND is a separate algorithmic comparator, never a parity oracle. Its default label means default sensitivity; both profiles explicitly use max-target-seqs 500. No TBLASTN/TBLASTX DIAMOND mode is inferred.",
+              "prototype": "The standalone C kernel is not compared as a complete search executable."
+          })
+          dbs = {}
+          for _, _, _, subject, kind in cases:
+              if subject in dbs:
+                  continue
+              key = "db-" + str(len(dbs))
+              db = E/key
+              prepare([O/"makeblastdb", "-in", subject, "-dbtype", kind,
+                       "-parse_seqids", "-blastdb_version", "4", "-out", db], key+"-ncbi")
+              dmnd = None
+              if kind == "prot":
+                  dmnd = E/(key+"-diamond")
+                  prepare([D, "makedb", "--in", subject, "--db", dmnd, "--threads", "1"],
+                          key+"-diamond")
+              dbs[subject] = (db, dmnd)
+          save("database-files.json", [{"path": str(p.relative_to(R)), "bytes": p.stat().st_size,
+                                       "sha256": sha(p)} for p in sorted(E.glob("db-*")) if p.is_file()])
+          FIELDS = ["qseqid","sseqid","pident","length","mismatch","gapopen",
+                    "qstart","qend","sstart","send","evalue","bitscore"]
+          def first_diff(expected, actual):
+              ea, aa = expected.splitlines(), actual.splitlines()
+              for i in range(max(len(ea), len(aa))):
+                  x = ea[i] if i < len(ea) else b""
+                  y = aa[i] if i < len(aa) else b""
+                  if x != y:
+                      xx, yy = x.decode("utf-8", "replace").split("\t"), y.decode("utf-8", "replace").split("\t")
+                      return {"line_1based": i+1, "expected": x.decode("utf-8","replace"),
+                              "actual": y.decode("utf-8","replace"),
+                              "fields": {k: {"expected": xx[j] if j<len(xx) else None,
+                                             "actual": yy[j] if j<len(yy) else None}
+                                         for j,k in enumerate(FIELDS)
+                                         if (xx[j] if j<len(xx) else None) != (yy[j] if j<len(yy) else None)}}
+              return None
+          output = E/"search.out" # exactly the same sink for all compared programs
+          def run(case, engine, phase, trial):
+              name, mode, query, subject, _ = case
+              db, dmnd = dbs[subject]
+              if engine.startswith("diamond-"):
+                  cmd = [D, mode, "--query", query, "--db", dmnd, "--threads", "1",
+                         "--evalue", "10", "--max-target-seqs", "500", "--outfmt", "6", "--out", output]
+                  if engine == "diamond-sensitive":
+                      cmd += ["--sensitive"]
+              else:
+                  prefix = [O/mode] if engine == "ncbi" else [C if engine=="candidate" else L, mode]
+                  cmd = prefix + ["-query", query, "-db", db, "-outfmt", "6", "-num_threads", "1",
+                                  "-evalue", "10", "-max_target_seqs", "500",
+                                  "-matrix", "BLOSUM62", "-word_size", "3", "-out", output]
+                  if mode in ("blastx", "tblastx"):
+                      cmd += ["-query_gencode", "1"]
+                  if mode in ("tblastn", "tblastx"):
+                      cmd += ["-db_gencode", "1"]
+              cmd = [str(x) for x in cmd]
+              timer = E/"process-time.tsv"
+              wrapped = ["/usr/bin/time", "-f", "%U\t%S\t%M", "-o", str(timer),
+                         "taskset", "-c", str(CPU)] + cmd
+              remaining = DEADLINE - time.monotonic()
+              if remaining <= 0:
+                  save("failure.json", {"failure": "1200-second benchmark budget exceeded",
+                                       "case": name, "engine": engine, "phase": phase})
+                  raise RuntimeError("benchmark time budget exceeded")
+              output.unlink(missing_ok=True)
+              before = time.perf_counter()
+              process = subprocess.Popen(wrapped, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                         start_new_session=True)
+              try:
+                  stdout, stderr = process.communicate(timeout=min(TIMEOUT, remaining))
+                  p = subprocess.CompletedProcess(wrapped, process.returncode, stdout, stderr)
+              except subprocess.TimeoutExpired as error:
+                  os.killpg(process.pid, signal.SIGKILL)
+                  process.communicate()
+                  rec = {"case": name, "engine": engine, "phase": phase, "trial": trial,
+                         "command": cmd, "wrapped_command": wrapped,
+                         "wall_seconds": time.perf_counter()-before, "status": "timeout"}
+                  with (E/"raw.jsonl").open("a") as f:
+                      f.write(json.dumps(rec, sort_keys=True)+"\n")
+                  save("failure.json", rec)
+                  raise RuntimeError("search timeout: "+name+" "+engine) from error
+              wall = time.perf_counter() - before
+              prefix = name+"-"+engine+"-"+phase+"-"+str(trial)
+              (E/(prefix+".stderr")).write_bytes(p.stderr)
+              rec = {"case": name, "mode": mode, "engine": engine, "phase": phase, "trial": trial,
+                     "command": cmd, "wrapped_command": wrapped, "wall_seconds": wall,
+                     "returncode": p.returncode, "stdout_sha256": hashlib.sha256(p.stdout).hexdigest(),
+                     "stderr_sha256": hashlib.sha256(p.stderr).hexdigest(),
+                     "output_sha256": sha(output) if output.exists() else None}
+              if p.returncode == 0:
+                  user, system, rss = timer.read_text().strip().split("\t")
+                  rec.update(user_seconds=float(user), system_seconds=float(system), max_rss_kib=int(rss))
+              with (E/"raw.jsonl").open("a") as f:
+                  f.write(json.dumps(rec, sort_keys=True)+"\n")
+              if p.returncode:
+                  raise RuntimeError("search failed: "+prefix)
+              rows.append(rec)
+              print("RAW_JSON "+json.dumps(rec, sort_keys=True), flush=True)
+              return output.read_bytes(), p.stderr
+          for ci, case in enumerate(cases):
+              engines = ["baseline"] + (["candidate"] if WITH_CANDIDATE else []) + ["ncbi"]
+              if case[1] in ("blastp", "blastx"):
+                  engines += ["diamond-default", "diamond-sensitive"]
+              warm = {}
+              for engine in engines:
+                  warm[engine] = run(case, engine, "warmup", 0)
+              oracle = wording.losat_output_bytes(warm["ncbi"][0])
+              oracle_err = wording.losat_bytes(warm["ncbi"][1])
+              for engine in ("baseline", "candidate") if WITH_CANDIDATE else ("baseline",):
+                  if warm[engine] != (oracle, oracle_err):
+                      save("first-divergence.json", {"case": case[0], "engine": engine,
+                            "stdout": first_diff(oracle, warm[engine][0]),
+                            "stderr_expected": oracle_err.decode("utf-8","replace"),
+                            "stderr_actual": warm[engine][1].decode("utf-8","replace")})
+                      raise RuntimeError("NCBI parity failed before retained timings: "+case[0])
+              for trial in range(3):
+                  rotation = (ci + trial) % len(engines)
+                  order = engines[rotation:] + engines[:rotation]
+                  for engine in order:
+                      actual = run(case, engine, "measured", trial)
+                      if actual[0] != warm[engine][0] or (
+                              not engine.startswith("diamond-") and actual[1] != warm[engine][1]):
+                          raise RuntimeError("unstable output: "+case[0]+" "+engine)
+          summary = []
+          for name, _, _, _, _ in cases:
+              for engine in sorted({r["engine"] for r in rows if r["case"]==name}):
+                  sample = [r for r in rows if r["case"]==name and r["engine"]==engine and r["phase"]=="measured"]
+                  assert len(sample)==3
+                  row = {"case": name, "engine": engine, "retained_trials": 3}
+                  for field in ("wall_seconds", "user_seconds", "system_seconds", "max_rss_kib"):
+                      values = [r[field] for r in sample]
+                      row.update({field+"_median": statistics.median(values),
+                                  field+"_min": min(values), field+"_max": max(values)})
+                  row["output_sha256"] = sample[0]["output_sha256"]
+                  summary.append(row)
+          save("summary.json", {"status": "pass", "gate": "NCBI mapped outfmt6 and stderr, declared cases only",
+                                "rows": summary})
+          with (E/"summary.csv").open("w", newline="") as f:
+              w = csv.DictWriter(f, fieldnames=list(summary[0]))
+              w.writeheader(); w.writerows(summary)
+          print(json.dumps({"status": "pass", "cases": len(cases), "processes": len(rows)}))
+          print("SUMMARY_JSON "+json.dumps({"status": "pass", "rows": summary}, sort_keys=True), flush=True)
+          PY
+      - name: Preserve result evidence, including first failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: same-runner-ecoli-baseline-${{ github.sha }}
+          path: |
+            evidence/raw.jsonl
+            evidence/summary.json
+            evidence/summary.csv
+            evidence/environment.json
+            evidence/inputs.json
+            evidence/database-preparation.json
+            evidence/database-files.json
+            evidence/first-divergence.json
+            evidence/failure.json
+            evidence/executables.sha256
+            evidence/*-version.txt
+            evidence/*-sha.txt
+            evidence/rustc.txt
+            evidence/cargo.txt
+            evidence/platform.txt
+            evidence/cpu.txt
+            evidence/meminfo.txt
+          if-no-files-found: error
+          retention-days: 1

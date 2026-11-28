@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE, ORIGIN } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { asNative, folderOf, maskedFiles, nativeMakeblastdb, type Written } from './support/makeblastdb-native';
+import { asNative, downloadAll, folderOf, maskedFiles, nativeRun, type Written } from './support/makeblastdb-native';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { openSearch, paste, pickRun, result, waitStatus } from './support/search';
 import { test } from './support/test';
@@ -134,36 +134,6 @@ async function expectLayout(page: Page, panel: string, viewport: { readonly widt
   expect(report.overflow, `horizontal scroll at ${viewport.width}px`).toBeLessThanOrEqual(1);
   expect(report.alone, `"?" alone on a line at ${viewport.width}px`).toEqual([]);
   expect(report.cut, `cut-off labels at ${viewport.width}px`).toEqual([]);
-}
-
-/** The names and bytes of the files in a tar archive (ustar, with pax `path` records). */
-function untar(bytes: Buffer): Map<string, Buffer> {
-  const files = new Map<string, Buffer>();
-  let at = 0;
-  let paxPath: string | undefined;
-  while (at + 512 <= bytes.length) {
-    const header = bytes.subarray(at, at + 512);
-    if (header.every((byte) => byte === 0)) break;
-    const field = (from: number, length: number) => header.subarray(from, from + length).toString('utf8').replace(/\0.*$/s, '');
-    const size = Number.parseInt(field(124, 12).trim(), 8);
-    const type = String.fromCharCode(header[156]!);
-    const body = bytes.subarray(at + 512, at + 512 + size);
-    if (type === 'x') {
-      paxPath = /\d+ path=(.*)\n/.exec(body.toString('utf8'))?.[1];
-    } else {
-      const prefix = field(345, 155);
-      const name = paxPath ?? (prefix === '' ? field(0, 100) : `${prefix}/${field(0, 100)}`);
-      files.set(name, Buffer.from(body));
-      paxPath = undefined;
-    }
-    at += 512 + Math.ceil(size / 512) * 512;
-  }
-  return files;
-}
-
-async function downloadAll(page: Page): Promise<{ readonly name: string; readonly files: Map<string, Buffer> }> {
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('tool-made-files-download-all').click()]);
-  return { name: download.suggestedFilename(), files: untar(readFileSync((await download.path())!)) };
 }
 
 /** Runs the makeblastdb form as run `run` and waits until the run's view shows it finished. */
@@ -356,7 +326,7 @@ test("WindowMasker's mask data goes to makeblastdb's -mask_data (Use as -mask_da
 
 /** The native makeblastdb's run of `argv` in a folder of `inputs`, in the browser's zone; a run that fails stops the test. */
 function nativeMade(argv: readonly string[], inputs: ReadonlyMap<string, Buffer>): Written {
-  const run = nativeMakeblastdb(argv, inputs, ZONE);
+  const run = nativeRun(argv, inputs, ZONE);
   if (run.status !== 0) throw new Error(`native ${argv.join(' ')} exited ${run.status}: ${run.stderr.toString()}`);
   return run;
 }

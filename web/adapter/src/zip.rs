@@ -4,7 +4,8 @@
 //! header, and the same modification time (1980-01-01 00:00, the first time that MS-DOS dates
 //! hold), so that the archive of a run is the same bytes every time. ZIP64 records come only where
 //! the classic fields cannot hold a value: 65,535 entries or more, or an offset or the central
-//! directory's size of 4 GiB - 1 or more.
+//! directory's size of 4 GiB - 1 or more. An entry may carry a comment in its central header
+//! (`add_with_comment`): stream 8's archive gives there the option that names each file.
 
 use std::io::{self, Write};
 
@@ -54,6 +55,7 @@ struct Entry {
     crc: u32,
     size: u32,
     offset: u64,
+    comment: Vec<u8>,
 }
 
 /// A ZIP archive that writes each entry to `out` as it is added and the central directory at
@@ -82,6 +84,19 @@ impl<W: Write> ZipStream<W> {
     /// Adds the file `name` with the contents `bytes` (stored). A file of 4 GiB - 1 bytes or more
     /// (a size that needs ZIP64's) is refused: a browser's memory cannot hold one.
     pub fn add(&mut self, name: &[u8], bytes: &[u8]) -> io::Result<()> {
+        self.add_with_comment(name, bytes, b"")
+    }
+
+    /// `add`, with the file comment `comment` in the entry's central header (APPNOTE 4.4.18),
+    /// which a ZIP reader that does not look for it passes over by its length.
+    pub fn add_with_comment(
+        &mut self,
+        name: &[u8],
+        bytes: &[u8],
+        comment: &[u8],
+    ) -> io::Result<()> {
+        u16::try_from(comment.len())
+            .map_err(|_| io::Error::other("a file comment of 64 KiB or more in a ZIP archive"))?;
         let size = u32::try_from(bytes.len())
             .ok()
             .filter(|&size| size != u32::MAX)
@@ -116,6 +131,7 @@ impl<W: Write> ZipStream<W> {
             crc,
             size,
             offset,
+            comment: comment.to_vec(),
         });
         Ok(())
     }
@@ -126,7 +142,7 @@ impl<W: Write> ZipStream<W> {
         let entries = std::mem::take(&mut self.entries);
         for entry in &entries {
             let zip64 = entry.offset >= u64::from(u32::MAX);
-            let mut header = Vec::with_capacity(46 + entry.name.len() + 12);
+            let mut header = Vec::with_capacity(46 + entry.name.len() + 12 + entry.comment.len());
             header.extend_from_slice(&CENTRAL_HEADER.to_le_bytes());
             let version = if zip64 { VERSION_ZIP64 } else { VERSION };
             header.extend_from_slice(&version.to_le_bytes()); // made by (MS-DOS)
@@ -140,7 +156,7 @@ impl<W: Write> ZipStream<W> {
             header.extend_from_slice(&entry.size.to_le_bytes());
             header.extend_from_slice(&(entry.name.len() as u16).to_le_bytes());
             header.extend_from_slice(&(if zip64 { 12u16 } else { 0 }).to_le_bytes());
-            header.extend_from_slice(&0u16.to_le_bytes()); // comment
+            header.extend_from_slice(&(entry.comment.len() as u16).to_le_bytes());
             header.extend_from_slice(&0u16.to_le_bytes()); // disk
             header.extend_from_slice(&0u16.to_le_bytes()); // internal attributes
             header.extend_from_slice(&0u32.to_le_bytes()); // external attributes
@@ -153,6 +169,7 @@ impl<W: Write> ZipStream<W> {
                 header.extend_from_slice(&8u16.to_le_bytes());
                 header.extend_from_slice(&entry.offset.to_le_bytes());
             }
+            header.extend_from_slice(&entry.comment);
             self.put(&header)?;
         }
         let size = self.written - start;
@@ -205,6 +222,15 @@ impl<W: Write> ZipStream<W> {
 /// as `emit::EMITTED`).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read(archive: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
+    read_with_comments(archive)
+        .into_iter()
+        .map(|(name, bytes, _)| (name, bytes))
+        .collect()
+}
+
+/// `read`, with each entry's file comment.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_with_comments(archive: &[u8]) -> Vec<(Vec<u8>, Vec<u8>, Vec<u8>)> {
     let u16_at = |at: usize| u16::from_le_bytes(archive[at..at + 2].try_into().unwrap());
     let u32_at = |at: usize| u32::from_le_bytes(archive[at..at + 4].try_into().unwrap());
     let u64_at = |at: usize| u64::from_le_bytes(archive[at..at + 8].try_into().unwrap());
@@ -224,6 +250,7 @@ pub fn read(archive: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
         assert_eq!(u32_at(at), CENTRAL_HEADER);
         let (crc, size) = (u32_at(at + 16), u32_at(at + 24) as usize);
         let (name_len, extra_len) = (u16_at(at + 28) as usize, u16_at(at + 30) as usize);
+        let comment_len = u16_at(at + 32) as usize;
         let mut offset = u64::from(u32_at(at + 42));
         let name = archive[at + 46..at + 46 + name_len].to_vec();
         if offset == u64::from(u32::MAX) {
@@ -236,8 +263,10 @@ pub fn read(archive: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
         let data = local + 30 + u16_at(local + 26) as usize + u16_at(local + 28) as usize;
         let bytes = archive[data..data + size].to_vec();
         assert_eq!(crc32(&bytes), crc);
-        files.push((name, bytes));
-        at += 46 + name_len + extra_len;
+        let comment_at = at + 46 + name_len + extra_len;
+        let comment = archive[comment_at..comment_at + comment_len].to_vec();
+        files.push((name, bytes, comment));
+        at = comment_at + comment_len;
     }
     files
 }
@@ -279,6 +308,42 @@ mod tests {
         let empty = ZipStream::new(Vec::new()).finish().unwrap();
         assert_eq!(empty.len(), 22);
         assert!(read(&empty).is_empty());
+    }
+
+    // A file comment goes in the entry's central header only, after its name, and reads back with
+    // it; the local header and the bytes are those of an entry without one.
+    #[test]
+    fn a_comment_is_in_the_central_header() {
+        let mut zip = ZipStream::new(Vec::new());
+        zip.add_with_comment(b"s.asn", b"strategy", b"export_search_strategy")
+            .unwrap();
+        zip.add(b"run.log", b"log").unwrap();
+        let archive = zip.finish().unwrap();
+        assert_eq!(
+            read_with_comments(&archive),
+            [
+                (
+                    b"s.asn".to_vec(),
+                    b"strategy".to_vec(),
+                    b"export_search_strategy".to_vec()
+                ),
+                (b"run.log".to_vec(), b"log".to_vec(), Vec::new()),
+            ]
+        );
+        let mut plain = ZipStream::new(Vec::new());
+        plain.add(b"s.asn", b"strategy").unwrap();
+        plain.add(b"run.log", b"log").unwrap();
+        let plain = plain.finish().unwrap();
+        let local = 2 * 30 + "s.asn".len() + "strategy".len() + "run.log".len() + "log".len();
+        assert_eq!(archive[..local], plain[..local]);
+        let central = archive.len() - plain.len();
+        assert_eq!(central, "export_search_strategy".len());
+        let u16_at = |at: usize| u16::from_le_bytes(archive[at..at + 2].try_into().unwrap());
+        assert_eq!(u16_at(local + 32), 22);
+        assert_eq!(
+            &archive[local + 46 + 5..local + 46 + 5 + 22],
+            b"export_search_strategy"
+        );
     }
 
     // An entry whose local header starts at 4 GiB - 1 or later has its offset in a ZIP64 extra field

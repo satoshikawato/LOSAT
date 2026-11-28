@@ -7325,7 +7325,9 @@ fn x_bp_encode_block_subjects(
 // `x_block_xml_run_allowed`; each check where any output is of its kind),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
 // (`blastp_database_search_space`, with `-db` or `-dbsize`), no database whose setup count the
-// reference path refuses (`call_setup::setup_count_refused`), no query that is also a subject under
+// reference path refuses (`call_setup::setup_count_refused`; the search of all queries refuses
+// both after the reports of the batches before the failing one, `split_steps::batch_failure`, the
+// one place of those refusals), no query that is also a subject under
 // `-parse_deflines` where outfmt 0 can fail alone (its refusal of such a record's masks is outfmt
 // 0's alone, `believed::refuse_shared_masks_in`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
@@ -7503,9 +7505,9 @@ fn x_query_block_plan(
         // A database without sequences fails in the first batch (`run_call`). A setup count that
         // LOSAT refuses (`call_setup::setup_count_refused`, with the setup count of a search
         // without RPS, `db_extent`'s: the statistics' count) is refused by the call that holds a
-        // valid query: the call of all queries refuses before any output, a block only after the
-        // reports of the blocks before, whose queries were invalid (review D of line RG D1a-4,
-        // SF1).
+        // valid query, after the reports of the batches before its first searched one
+        // (`split_steps::first_batch_setup`): the plan leaves it to the call of all queries, the
+        // one place of the refusal (review D of line RG D1a-4, SF1; line RG item bp-SF1).
         BlastpSubjectSource::Database(database) => {
             if database.num_sequences() == 0
                 || call_setup::setup_count_refused(args, {
@@ -9800,7 +9802,7 @@ enum UngappedSetupFailure {
     /// NCBI's error of the first batch (`preliminary_search_error` writes it after the outfmt 0
     /// prolog), or LOSAT's refusal of the matrix file that NCBI reads, in its place.
     Engine(String),
-    /// LOSAT's refusal before any output.
+    /// LOSAT's refusal of the first searched batch (after the reports of the batches before).
     Refusal(anyhow::Error),
 }
 
@@ -10122,7 +10124,14 @@ fn run_call(
     if let Some(failure) = failure {
         return Err(match failure {
             UngappedSetupFailure::Engine(text) => setup_error(outputs, true, b"", &text),
-            UngappedSetupFailure::Refusal(error) => error,
+            // The refusal of the first searched batch, after the reports of the batches before,
+            // of invalid queries only, which NCBI writes before it searches that batch
+            // (`split_steps::batch_failure`, line RG item bp-SF1).
+            UngappedSetupFailure::Refusal(error) => split_steps::batch_failure(
+                &args,
+                split_steps::first_searched_query(&query_batches, &query_batch_skipped),
+                error,
+            ),
         });
     }
 
@@ -10179,7 +10188,7 @@ fn run_call(
         option_space_of,
         preliminary_option_spaces,
         preliminary_spaces,
-    } = call_setup::call_search_spaces(&call_statistics)?;
+    } = call_setup::call_search_spaces(&call_statistics, &query_batches)?;
     let (preliminary_search_spaces, preliminary_exact_spaces) = match &preliminary_spaces {
         Some((spaces, exact)) => (spaces, exact),
         None => (&search_spaces, &exact_search_spaces),

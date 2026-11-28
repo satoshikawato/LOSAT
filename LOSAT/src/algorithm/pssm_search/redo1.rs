@@ -1621,8 +1621,8 @@ fn blast_nint(x: f64) -> i32 {
 }
 
 /// `BlastCompo_EarlyTermination`: every query's heap holds its hit list size and its worst
-/// e-value is at most its cutoff, and `evalue` is not at most five times any cutoff (NCBI's
-/// `evalue <= EVALUE_STRETCH * ecutoff` goes on: a NaN best e-value ends the match).
+/// e-value is at most its cutoff, and `evalue` is not at most five times any cutoff (NCBI goes
+/// on only when the e-value is at most five times the cutoff: a NaN best e-value ends the match).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1561-1579
 fn early_termination(evalue: f64, heaps: &[BlastCompoHeap]) -> bool {

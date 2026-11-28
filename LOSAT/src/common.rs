@@ -116,9 +116,9 @@ fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
     }
 }
 
-/// NCBI's `MIN(evalue, best)` (`(a)>(b)?(b):(a)`): `best` only when `evalue` is above it, so a
-/// NaN e-value becomes the best and the next e-value replaces a NaN best; for numbers, the
-/// smaller.
+/// NCBI's MIN macro of the next e-value and the best one, which takes the second argument when
+/// the first is above it and the first otherwise: `best` only when `evalue` is above it, so a NaN
+/// e-value becomes the best and the next e-value replaces a NaN best; for numbers, the smaller.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/ncbi_std.h:112
 #[inline]

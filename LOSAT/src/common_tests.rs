@@ -7,7 +7,7 @@ fn the_best_evalue_is_ncbis_min_from_int4_max_so_a_nan_takes_its_place() {
     assert_eq!(best_evalue([]), 2147483647.0);
     assert_eq!(best_evalue([3.0, 1e-5, 2.0]), 1e-5);
     assert_eq!(best_evalue([0.5, 0.5]), 0.5);
-    // `MIN(evalue, best)` keeps `best` only when the e-value is above it: a NaN e-value becomes
+    // NCBI's MIN keeps the best only when the e-value is above it: a NaN e-value becomes
     // the best, and the e-value after a NaN best replaces it (`<` from INT4_MAX, or `f64::min`,
     // kept INT4_MAX and 1e-5).
     assert!(best_evalue([f64::NAN]).is_nan());

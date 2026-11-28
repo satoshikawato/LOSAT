@@ -914,8 +914,8 @@ pub(super) fn phi_traceback(
 /// The final HSP of a traced PHI-BLAST HSP (`pssm_search::traceback0::final_hsp`) on the letters
 /// `query` and `subject`. The edit script of an HSP that the merge of a long subject's parts gave
 /// the pattern starts of another occurrence (`long_subject_prelim`) may read past the last letter
-/// of either (`BlastpHsp::seqalign_ends`): its counts then read the gap residue there
-/// (`padded_final_hsp`).
+/// of either (`BlastpHsp::seqalign_ends`): its counts then read the gap residue there and compare
+/// the rows as NCBI's reports do (`padded_final_hsp`).
 #[inline]
 fn phi_final_hsp(
     preliminary: &BlastpPreliminaryHsp,
@@ -950,12 +950,14 @@ fn phi_final_hsp(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:282-300
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1006-1020
 /// `phi_final_hsp` of an edit script that reads up to the 0-based ends `q_end` and `s_end`, past
 /// the last letter of `query` or `subject`: the counts on the letters followed by gap residues
-/// up to those ends, the gap character that NCBI's report shows there. NCBI's core counts no
-/// identities for PHI-BLAST (`s_PHITracebackFromHSPList`); its report compares the rows, where a
-/// letter past the end facing a gap is an identity, which the reports' recount gives the HSP
-/// (`recount_shown_identities` of a Seq-align past the letters).
+/// up to those ends, the gap character that NCBI's alignment vector shows there. NCBI's core
+/// counts no identities for PHI-BLAST (`s_PHITracebackFromHSPList`); its reports compare the
+/// rows, where a gap residue facing a gap of the other row (an insertion past the query's end, a
+/// deletion past the subject's) is an identity and a positive, as the recount of the reports
+/// counts it where it counts the HSP again (`recount_shown_identities` of a PHI-BLAST call).
 #[cold]
 #[inline(never)]
 fn padded_final_hsp(
@@ -967,6 +969,7 @@ fn padded_final_hsp(
     q_end: usize,
     s_end: usize,
 ) -> BlastpHsp {
+    use crate::utils::matrix::ncbistdaa::GAP;
     // Only a sequence whose letters end before the edit script's is copied.
     fn padded(letters: &[u8], end: usize) -> std::borrow::Cow<'_, [u8]> {
         if end <= letters.len() {
@@ -974,16 +977,53 @@ fn padded_final_hsp(
         }
         let mut padded = Vec::with_capacity(end);
         padded.extend_from_slice(letters);
-        padded.resize(end, crate::utils::matrix::ncbistdaa::GAP);
+        padded.resize(end, GAP);
         std::borrow::Cow::Owned(padded)
     }
-    crate::algorithm::pssm_search::traceback0::final_hsp(
+    let (query, subject) = (padded(query, q_end), padded(subject, s_end));
+    let mut hsp = crate::algorithm::pssm_search::traceback0::final_hsp(
         preliminary,
         edit_script,
-        &padded(query, q_end),
-        &padded(subject, s_end),
+        &query,
+        &subject,
         matrix,
-    )
+    );
+    // The gap columns whose other row shows a gap residue: identities and positives of the rows.
+    let (mut q, mut s) = (
+        preliminary.query_start as usize,
+        preliminary.subject_start as usize,
+    );
+    let mut facing_gaps = 0usize;
+    for op in hsp.gap_info.as_deref().unwrap_or_default() {
+        let n = op.num() as usize;
+        match *op {
+            GapEditOp::Sub(_) => {
+                q += n;
+                s += n;
+            }
+            GapEditOp::Ins(_) => {
+                facing_gaps += query[q..q + n]
+                    .iter()
+                    .filter(|&&letter| letter == GAP)
+                    .count();
+                q += n;
+            }
+            GapEditOp::Del(_) => {
+                facing_gaps += subject[s..s + n]
+                    .iter()
+                    .filter(|&&letter| letter == GAP)
+                    .count();
+                s += n;
+            }
+        }
+    }
+    if facing_gaps > 0 {
+        hsp.num_ident += facing_gaps;
+        hsp.num_positives += facing_gaps;
+        hsp.mismatch -= facing_gaps as i64;
+        hsp.identity = (hsp.num_ident as f64 * 100.0) / hsp.length as f64;
+    }
+    hsp
 }
 
 /// Splits a query's final hit list into one hit list per pattern occurrence

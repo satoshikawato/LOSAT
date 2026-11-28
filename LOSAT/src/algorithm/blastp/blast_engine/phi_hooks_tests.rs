@@ -188,9 +188,14 @@ fn split_hit_list_by_occurrence_keeps_indices_past_u16_max_and_reordered_ties_se
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:282-300
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1006-1020
 // The final HSP of an edit script that reads past the query's last letter (review PS8a-2 B1:
-// 439 > 429, where `final_hsp` sliced past the query) counts on gap residues there: the HSP keeps
-// its own ends and its columns, and a script inside the letters is `final_hsp`'s.
+// 439 > 429, where `final_hsp` sliced past the query) counts on gap residues there as NCBI's
+// reports compare the rows (MKVLA--- against MKVLAW--: an insertion past the query's end is an
+// identity and a positive, the gap residue against W neither), the same counts as the recount of a
+// PHI-BLAST call (`the_recount_of_a_phi_call_reads_gaps_past_the_end_of_the_query`); so is a
+// deletion past the subject's end. The HSP keeps its own ends and its columns, and a script inside
+// the letters is `final_hsp`'s.
 #[test]
 fn phi_final_hsp_reads_gap_residues_past_the_end() {
     use crate::utils::matrix::ncbistdaa::{A, K, L, M, V, W};
@@ -223,10 +228,28 @@ fn phi_final_hsp_reads_gap_residues_past_the_end() {
         (hsp.q_start, hsp.q_end, hsp.s_start, hsp.s_end),
         (1, 5, 1, 6)
     );
-    assert_eq!((hsp.length, hsp.num_ident, hsp.gapopen), (8, 5, 1));
+    assert_eq!((hsp.length, hsp.num_ident, hsp.gapopen), (8, 7, 1));
+    assert_eq!(
+        (hsp.num_positives, hsp.mismatch, hsp.identity),
+        (7, -1, 87.5)
+    );
     assert_eq!(hsp.gap_letters(), 2);
     assert_eq!(hsp.seqalign_ends(), (8, 6));
     assert_eq!(hsp.gap_info.as_deref(), Some(&script[..]));
+    // MKVLA- against MKVLA-: the deletion's subject letter past the subject's end faces the gap.
+    let past_subject = vec![GapEditOp::Sub(5), GapEditOp::Del(1)];
+    let hsp = phi_final_hsp(
+        &preliminary,
+        past_subject,
+        &query,
+        &query,
+        ScoringMatrix::Blosum62,
+    );
+    assert_eq!(
+        (hsp.length, hsp.num_ident, hsp.num_positives, hsp.mismatch),
+        (6, 6, 6, -1)
+    );
+    assert_eq!(hsp.seqalign_ends(), (5, 6));
     let inside = vec![GapEditOp::Sub(4), GapEditOp::Del(1), GapEditOp::Sub(1)];
     let direct = crate::algorithm::pssm_search::traceback0::final_hsp(
         &preliminary,

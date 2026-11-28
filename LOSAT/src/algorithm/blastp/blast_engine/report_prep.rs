@@ -1808,20 +1808,35 @@ pub(super) fn report_values(
         cut_lists(hit_lists);
     }
     let mut engine_counts = EngineCounts::default();
-    recount_shown_identities(
-        hit_lists,
-        ShownQueries::of(query_records, args, setup.phi),
-        shown_subjects,
-        args.scoring.matrix,
-        // `-db_hard_mask`: the search read `X` over the masks of the database sequences, and the
-        // reports count their stored letters (series NP, M4b).
-        psi_round::searched_other_letters(args)
-            || args
-                .db_mask_resolved
-                .as_ref()
-                .is_some_and(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard),
-        &mut engine_counts,
-    );
+    let queries = ShownQueries::of(query_records, args, setup.phi);
+    // `-db_hard_mask`: the search read `X` over the masks of the database sequences, and the
+    // reports count their stored letters (series NP, M4b).
+    let searched_other_letters = psi_round::searched_other_letters(args)
+        || args
+            .db_mask_resolved
+            .as_ref()
+            .is_some_and(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard);
+    // PHI-BLAST's rows show gap characters past the letters of a sequence where a long subject's
+    // merged HSP runs past them (`phi_gap_past_the_end`).
+    if setup.phi.is_some() {
+        recount_shown_identities::<true>(
+            hit_lists,
+            queries,
+            shown_subjects,
+            args.scoring.matrix,
+            searched_other_letters,
+            &mut engine_counts,
+        );
+    } else {
+        recount_shown_identities::<false>(
+            hit_lists,
+            queries,
+            shown_subjects,
+            args.scoring.matrix,
+            searched_other_letters,
+            &mut engine_counts,
+        );
+    }
     Ok(ReportValues {
         prefetch_format,
         batches_prefetch,

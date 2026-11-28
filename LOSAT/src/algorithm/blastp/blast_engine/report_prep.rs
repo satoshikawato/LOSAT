@@ -1192,8 +1192,10 @@ pub(super) fn refuse_unreportable(
                 )
                 .map_err(fail)?;
             if !pairwise_views.is_empty() {
+                // The scope is made where the check first asks for it (a sequence with a local
+                // display id), as the Seq-align check makes it, not for every batch (XT-X7-1y).
                 let none = crate::blastinput::query_batch::QueryScope::default();
-                let batch_scope = match &queries {
+                let batch_scope = |_: usize| match &queries {
                     crate::blastinput::query_batch::BatchQueries::Generated(generated) => {
                         generated.scope()
                     }
@@ -1203,7 +1205,7 @@ pub(super) fn refuse_unreportable(
                     .refuse_display_ids(
                         hit_lists,
                         batch.searched.clone(),
-                        |_| batch_scope,
+                        batch_scope,
                         true,
                         |q_idx| described(q_idx, false),
                     )

@@ -3654,12 +3654,17 @@ fn x_tested_once(memo: &mut Vec<u8>, index: usize, test: impl FnOnce() -> bool) 
 /// report reads that `num_ident` back for `-sorthits` and `-sorthsps`
 /// (`PairwiseHit::seqalign_num_ident`): the counts of each HSP that the recount changes are
 /// kept in `engine_counts` first.
+///
+/// With `held` (the letters of the holders whose records the reports write for subjects,
+/// `report_prep::HeldLetters`), the HSPs of those subjects alone are counted again, on those
+/// letters (line DBID hr-2: NCBI counts every program's identities but BLASTN's on the letters
+/// of the Bioseq that the scope gives, tabular.cpp:1006-1020 cited above).
 fn recount_shown_identities(
     hit_lists: &mut [Option<BlastpHitList>],
     queries: ShownQueries<'_>,
     subjects: ShownSubjects<'_>,
     matrix: ScoringMatrix,
-    searched_other_letters: bool,
+    (searched_other_letters, held): (bool, Option<&report_prep::HeldLetters>),
     engine_counts: &mut super::seqalign::EngineCounts,
 ) {
     // EXPERIMENT (LOSAT_X_BPRECOUNTO): the answers of the tests by query and by subject index
@@ -3683,14 +3688,17 @@ fn recount_shown_identities(
                     .map(move |(hsp_index, hsp)| (list_index, hsp_index, hsp))
             })
         {
-            let (Some(query), Some(subject)) = (
-                queries.letters(hsp.q_idx as usize),
-                subjects.letters(hsp.s_idx as usize),
-            ) else {
+            let subject = match held {
+                Some(held) => held.letters(hsp.s_idx as usize),
+                None => subjects.letters(hsp.s_idx as usize),
+            };
+            let (Some(query), Some(subject)) = (queries.letters(hsp.q_idx as usize), subject)
+            else {
                 continue;
             };
             // LOSAT_X_BPRECOUNTO: each query's and each subject's letters read once per call.
             let recounted = searched_other_letters
+                || held.is_some()
                 || if x_once {
                     x_tested_once(&mut x_query_o, hsp.q_idx as usize, || query.recounted())
                         || x_tested_once(&mut x_subject_o, hsp.s_idx as usize, || {
@@ -3759,7 +3767,7 @@ fn recount_shown_identities(
                 query.case(),
             );
             if (num_ident, num_positives) != (hsp.num_ident, hsp.num_positives) {
-                engine_counts.save(
+                engine_counts.keep(
                     (q_idx as u32, list_index as u32, hsp_index as u32),
                     (hsp.num_ident, hsp.num_positives),
                 );
@@ -3786,12 +3794,14 @@ fn stored_gap_columns(sequence: &[u8], gap: u8, hit: &Hit, side: RowSide) -> Vec
 }
 
 /// The rows of the final HSPs `hits`, which show the letters of the queries as `queries` reads them
-/// (a PSSM query's Bioseq letters where they are not its record's: `ShownQueries::letters`).
+/// (a PSSM query's Bioseq letters where they are not its record's: `ShownQueries::letters`), and
+/// of a subject whose holder's record the reports write, the holder's letters and length (`held`,
+/// line DBID hr-2).
 #[allow(clippy::too_many_arguments)]
 fn build_pairwise_hits(
     hits: Vec<(Hit, u8, usize, i32)>,
     query_contexts: &[QueryContext],
-    subjects: &[EncodedProtein],
+    (subjects, held): (&[EncodedProtein], &report_prep::HeldLetters),
     matrix: ScoringMatrix,
     render_alignment: bool,
     queries: ShownQueries<'_>,
@@ -3808,7 +3818,8 @@ fn build_pairwise_hits(
         let q_idx = hit.q_idx as usize;
         let s_idx = hit.s_idx as usize;
         let query = query_nomask_sequence(&query_contexts[q_idx]);
-        let subject = &subjects[s_idx].aa_seq[1..subjects[s_idx].aa_seq.len() - 1];
+        let encoded = held.subject(s_idx).unwrap_or(&subjects[s_idx]);
+        let subject = &encoded.aa_seq[1..encoded.aa_seq.len() - 1];
 
         let (query_seq, subject_seq) = if render_alignment {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-824
@@ -3840,8 +3851,8 @@ fn build_pairwise_hits(
         let query_seq = restore_displayed_o(query_seq, query_letters, &hit, RowSide::Query);
         let subject_seq = restore_displayed_o(
             subject_seq,
-            shown_subjects
-                .letters(s_idx)
+            held.letters(s_idx)
+                .or_else(|| shown_subjects.letters(s_idx))
                 .unwrap_or(ShownLetters::Ascii(&[])),
             &hit,
             RowSide::Subject,
@@ -3880,7 +3891,7 @@ fn build_pairwise_hits(
             subject_frame: Some(1),
             positives: Some(positives),
             gaps: Some(gaps),
-            subject_length: Some(subjects[s_idx].aa_len),
+            subject_length: Some(encoded.aa_len),
             subject_title: shown_subjects
                 .title(s_idx)
                 .and_then(crate::blastinput::fasta_reader::hit_subject_title),
@@ -10887,7 +10898,7 @@ fn run_call(
         psi_found_before,
         pssm_made,
         psiblast_hits_found,
-        engine_counts,
+        mut engine_counts,
     } = report_prep::report_values(
         &setup,
         &listed_subjects,
@@ -10921,8 +10932,9 @@ fn run_call(
     // psiblast's later rounds: the reports read the record's letters
     // (`psi_round::report_contexts`).
     let report_contexts = psi_round::report_contexts(&args, &contexts, query_records);
+    let no_holders = report_prep::HeldLetters::default();
     let row_inputs = RowBuildInputs {
-        engine_counts: &engine_counts,
+        held: &no_holders,
         ranges,
         report_contexts: &report_contexts,
         subjects,
@@ -10931,13 +10943,7 @@ fn run_call(
         shown_subjects,
         x_rows_pool,
     };
-    let rows_of_lists =
-        |lists: &[Option<BlastpHitList>], first: usize| row_inputs.build(lists, first);
-    let rows_of = |window: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
-        let end = window.end.min(hit_lists.len());
-        let first = window.start.min(end);
-        rows_of_lists(&hit_lists[first..end], first)
-    };
+    let rows_of = |window| row_inputs.rows(&hit_lists, window, &engine_counts);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1585
     // NCBI makes and prints the alignments of one query's result set at a time: the reports
     // make the rows of a window of queries and drop them before the next window's
@@ -11034,11 +11040,6 @@ fn run_call(
     let phi_result_warnings = phi_call
         .as_ref()
         .map(|call| report_prep::phi_result_warnings(&prep, call.no_statistics.as_deref()));
-    let phi_reports = report_write::PhiPairwise::of(
-        phi_call.as_ref(),
-        &rows_of_lists,
-        phi_result_warnings.as_deref(),
-    );
     let prefetched = report_prep::prefetch_reported_subjects(
         &prep,
         &mut query_warning_lines,
@@ -11072,6 +11073,35 @@ fn run_call(
     if let Some(database::ListedTitles { ref mut parsed, .. }) = listed_titles {
         database::ListedTitles::show_holders(parsed, &prefetched.shown_records);
     }
+    // Their letters and lengths, which every row and count reads (`report_prep::HeldLetters`);
+    // the rows made before (`pairwise_hits`) again where they show such a subject.
+    let held = report_prep::HeldLetters::recounted(
+        &prefetched.shown_records,
+        database,
+        (&mut hit_lists, &mut engine_counts),
+        (
+            row_inputs.shown_queries,
+            shown_subjects,
+            args.scoring.matrix,
+        ),
+        args.app.name(),
+    )?;
+    let row_inputs = RowBuildInputs {
+        held: &held,
+        ..row_inputs
+    };
+    let rows_of_lists =
+        |lists: &[Option<BlastpHitList>], first| row_inputs.build(lists, first, &engine_counts);
+    let rows_of = |window| row_inputs.rows(&hit_lists, window, &engine_counts);
+    let pairwise_hits = match pairwise_hits {
+        Some(_) if !held.is_empty() => Some(std::sync::Arc::new(rows_of(0..hit_lists.len())?)),
+        rows => rows,
+    };
+    let phi_reports = report_write::PhiPairwise::of(
+        phi_call.as_ref(),
+        &rows_of_lists,
+        phi_result_warnings.as_deref(),
+    );
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
     // search's IDs made once for all blocks (`x_subject_meta`).
@@ -11358,6 +11388,7 @@ fn run_call(
         hit_lists: &hit_lists,
         hit_loads: &prefetched.hit_loads,
         engine_counts: &engine_counts,
+        held: &held,
         pairwise_hits: &pairwise_hits,
         psiblast_hits_found: &psiblast_hits_found,
         psi_found_before: &psi_found_before,
@@ -11710,9 +11741,11 @@ fn shift_and_split_hit_lists(
     }
 }
 
-/// Shared inputs for rendering pairwise alignment rows (`PairwiseHit`) from final hit lists.
+/// Shared inputs for rendering pairwise alignment rows (`PairwiseHit`) from final hit lists; the
+/// letters of the holders whose records the reports write for subjects (`held`, line DBID hr-2)
+/// are known after the reports' checks.
 struct RowBuildInputs<'a> {
-    engine_counts: &'a super::seqalign::EngineCounts,
+    held: &'a report_prep::HeldLetters,
     ranges: &'a BlastpRanges<'a>,
     report_contexts: &'a [QueryContext],
     subjects: &'a [EncodedProtein],
@@ -11723,11 +11756,28 @@ struct RowBuildInputs<'a> {
 }
 
 impl RowBuildInputs<'_> {
+    /// The rows of the queries `window` of `hit_lists` (`build`; a window past them is cut there).
+    fn rows(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        window: std::ops::Range<usize>,
+        engine_counts: &super::seqalign::EngineCounts,
+    ) -> Result<Vec<PairwiseHit>> {
+        let end = window.end.min(hit_lists.len());
+        let first = window.start.min(end);
+        self.build(&hit_lists[first..end], first, engine_counts)
+    }
+
     /// Renders pairwise alignment rows (`PairwiseHit`) for `lists` starting at query `first`,
     /// shifting coordinates back to searched letters for alignment rendering and back to record
-    /// coordinates afterwards.
-    fn build(&self, lists: &[Option<BlastpHitList>], first: usize) -> Result<Vec<PairwiseHit>> {
-        let mut hits = collect_hits_and_methods_from_hit_lists(lists, first, self.engine_counts);
+    /// coordinates afterwards (`engine_counts`: the Seq-aligns' counts that the recounts replaced).
+    fn build(
+        &self,
+        lists: &[Option<BlastpHitList>],
+        first: usize,
+        engine_counts: &super::seqalign::EngineCounts,
+    ) -> Result<Vec<PairwiseHit>> {
+        let mut hits = collect_hits_and_methods_from_hit_lists(lists, first, engine_counts);
         for (hit, _, _, _) in hits.iter_mut() {
             let q_shift = self
                 .ranges
@@ -11743,7 +11793,7 @@ impl RowBuildInputs<'_> {
         let mut rows = build_pairwise_hits(
             hits,
             self.report_contexts,
-            self.subjects,
+            (self.subjects, self.held),
             self.matrix,
             true,
             self.shown_queries,

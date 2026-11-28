@@ -3227,9 +3227,8 @@ impl ListedTitles<'_> {
     /// The record of the holder that the reports write for the subject of rank `rank` (with the
     /// record `subject`) where its loads give one (`shared::ShownHolders::shown`; `flags`: a
     /// table's light `slen`, a query's scope that finds the subject): the holder's record of
-    /// this call, by its rank. BLASTP's reports count and show the subject's own letters (the
-    /// recount and the rows, `recount_shown_identities`, read them before the loads are known),
-    /// so a holder of other letters is LOSAT's refusal (`ShownHolders::other_letters`).
+    /// this call, by its rank. The reports read its letters and length too
+    /// (`report_prep::HeldLetters`).
     fn shown_record(
         &self,
         holders: &shared::ShownHolders<'_>,
@@ -3242,28 +3241,14 @@ impl ListedTitles<'_> {
             let rank = self.listed.ordinals.binary_search(&holder).ok()?;
             self.parsed_subject(rank)
         };
-        let Some(bioseq) = holders.shown(
+        holders.shown(
             loads,
             rank,
             (ordinal, subject),
             holder_record,
             (0, false),
             flags,
-        )?
-        else {
-            return Ok(None);
-        };
-        holders.other_letters((ordinal, subject), &bioseq, true, || {
-            let letters = |ordinal| {
-                holders
-                    .db()
-                    .read_sequence(ordinal)
-                    .map(|block| block.protein(0).to_vec())
-                    .map_err(|error| shared::database_error(error, self.program))
-            };
-            Ok(letters(ordinal)? == letters(bioseq.ordinal())?)
-        })?;
-        Ok(Some(bioseq))
+        )
     }
 
     /// What the XML2 and JSON reports of the final hit lists `hit_lists` (in the order of the

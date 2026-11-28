@@ -1238,6 +1238,127 @@ pub(super) fn refuse_unreportable(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:116-121 (cited at
+// `restore_displayed_o`; the rows read the Bioseq that the scope gives for the Seq-align id)
+/// The letters and lengths of the holders whose records the reports write for subjects
+/// (`ReportedPrefetch::shown_records`, line DBID hr-2), by the subject's rank: NCBI's formatters
+/// read the holder's Bioseq for the subject's Seq-align id, so the rows show the holder's letters
+/// at the Seq-align's coordinates (`report::row_letters::shown_subject_row`: the gap residue past
+/// its end), the counts made on them are counted again (`HeldLetters::recounted`), and the lengths
+/// written are the holder's (`slen`, `Hit_len`, `len`, `Length=`). The Seq-aligns keep the
+/// search's counts (`EngineCounts`). Empty where no report writes a holder's record.
+#[derive(Default)]
+pub(super) struct HeldLetters {
+    /// By rank, ascending: the holder's residues between two sentinels, as the rows read them at
+    /// the subject's ranges, and its length (`EncodedProtein::aa_len`).
+    held: Vec<(u32, EncodedProtein)>,
+}
+
+impl HeldLetters {
+    /// The holders' letters of the subjects of `shown_records` (by rank) read from `database`,
+    /// with the HSPs of those subjects in `hit_lists` counted again on them
+    /// (`recount_shown_identities`; `letters`: the queries' and subjects' letters that the reports
+    /// read, and the matrix), after the checks of the reports and before any of their rows.
+    pub(super) fn recounted(
+        shown_records: &[(usize, crate::report::shown_bioseq::ShownBioseq)],
+        database: Option<&database::BlastpDatabase>,
+        (hit_lists, engine_counts): (&mut [Option<BlastpHitList>], &mut EngineCounts),
+        letters: (
+            ShownQueries<'_>,
+            ShownSubjects<'_>,
+            crate::config::ScoringMatrix,
+        ),
+        program: &str,
+    ) -> Result<Self> {
+        let Some(database) = database.filter(|_| !shown_records.is_empty()) else {
+            return Ok(Self::default());
+        };
+        let mut held: Vec<(u32, EncodedProtein)> = Vec::with_capacity(shown_records.len());
+        for (rank, bioseq) in shown_records {
+            let block = database
+                .seqdb()
+                .read_sequence(bioseq.ordinal())
+                .map_err(|error| {
+                    crate::algorithm::common::database::database_error(error, program)
+                })?;
+            let residues = block.protein(0);
+            held.push((
+                *rank as u32,
+                EncodedProtein {
+                    aa_seq: residues.to_vec(),
+                    aa_len: residues.len(),
+                },
+            ));
+        }
+        held.sort_unstable_by_key(|&(rank, _)| rank);
+        // The end (exclusive, 0-based) of each such subject's aligned range, to which the rows read
+        // its holder's letters.
+        let mut ends = vec![0usize; held.len()];
+        for hit_list in hit_lists.iter().flatten() {
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            for hsp in hit_list.hsplist_array[..count]
+                .iter()
+                .flat_map(|list| &list.hsps)
+            {
+                if let Ok(index) = held.binary_search_by_key(&hsp.s_idx, |&(rank, _)| rank) {
+                    ends[index] = ends[index].max(hsp.s_start.max(hsp.s_end));
+                }
+            }
+        }
+        for ((_, holder), end) in held.iter_mut().zip(ends) {
+            let row = crate::report::row_letters::shown_subject_row(
+                &holder.aa_seq,
+                0,
+                &[crate::common::GapEditOp::Sub(end.max(holder.aa_len) as u32)],
+                false,
+                super::STORED_GAP,
+            );
+            let mut aa_seq = Vec::with_capacity(row.len() + 2);
+            aa_seq.push(super::STORED_GAP);
+            aa_seq.extend_from_slice(&row);
+            aa_seq.push(super::STORED_GAP);
+            holder.aa_seq = aa_seq;
+        }
+        let held = Self { held };
+        let (queries, subjects, matrix) = letters;
+        recount_shown_identities(
+            hit_lists,
+            queries,
+            subjects,
+            matrix,
+            (false, Some(&held)),
+            engine_counts,
+        );
+        Ok(held)
+    }
+
+    /// The holder's residues (between two sentinels) and length that the reports read for the
+    /// subject `s_idx`, if they read a holder's.
+    pub(super) fn subject(&self, s_idx: usize) -> Option<&EncodedProtein> {
+        self.held
+            .binary_search_by_key(&(s_idx as u32), |&(rank, _)| rank)
+            .ok()
+            .map(|index| &self.held[index].1)
+    }
+
+    /// Whether the reports read no holder's letters.
+    pub(super) fn is_empty(&self) -> bool {
+        self.held.is_empty()
+    }
+
+    /// The length that the reports write of the subject `s_idx` whose own length is `own`.
+    pub(super) fn length(&self, s_idx: usize, own: usize) -> usize {
+        self.subject(s_idx).map_or(own, |holder| holder.aa_len)
+    }
+
+    /// The letters that the reports read for the subject `s_idx` where they read a holder's: its
+    /// residues as the rows read them (`ShownLetters::Stored`, past its end the gap residue).
+    pub(super) fn letters(&self, s_idx: usize) -> Option<ShownLetters<'_>> {
+        self.subject(s_idx)
+            .map(|holder| ShownLetters::Stored(&holder.aa_seq[1..holder.aa_seq.len() - 1]))
+    }
+}
+
 /// The rows of the call's hits that the reports of query `q_idx` read: every query's where the
 /// call made them (`pairwise_hits`), else the query's own (`rows_of`).
 pub(super) fn query_rows<'r>(
@@ -1836,11 +1957,14 @@ pub(super) fn report_values(
         args.scoring.matrix,
         // `-db_hard_mask`: the search read `X` over the masks of the database sequences, and the
         // reports count their stored letters (series NP, M4b).
-        psi_round::searched_other_letters(args)
-            || args
-                .db_mask_resolved
-                .as_ref()
-                .is_some_and(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard),
+        (
+            psi_round::searched_other_letters(args)
+                || args
+                    .db_mask_resolved
+                    .as_ref()
+                    .is_some_and(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard),
+            None,
+        ),
         &mut engine_counts,
     );
     Ok(ReportValues {

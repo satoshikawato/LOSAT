@@ -7335,7 +7335,14 @@ Scheduling (each value computed by one thread with the original function; order 
 - BXPAR, BXPOOL, BXBATCH, BXCHUNK (graduated 2026-10-22; no variables; class conditional, the names stay in
   `GRADUATED` for the reach table; they were in the strict set) BLASTX scheduling. Their rules stay:
   - BXPAR: query-chunk, redo and per-context SEG parallelism on the search pool of 2+ threads (each stage with its
-    own condition: several chunks, several matches, a large batch); 1 thread runs the serial reference stages;
+    own condition: several chunks, several matches, for SEG a batch searched with the pool inside); 1 thread runs
+    the serial reference stages. The contexts' SEG, the contexts' statistical blocks of a batch searched whole and
+    the chunks' setup of a split query are item sets (`utils/xitems.rs` `x_map`, shared with the TBLASTX work
+    board): the batch's thread takes the items in order, the pool's idle threads the next ones, and the batch's
+    thread runs no other job of the pool while it waits for them, so these steps never wait for another batch's
+    search (since 2026-11-27, line M4b item 5; SEG ran in
+    parallel only from 60,000 letters, as a `par_iter` whose waiting thread ran other batches' searches and
+    redo helpers: 19.6-52.8 s of SEG for 5 batches of q200k `-use_sw_tback` at `BATCH_SIZE` 40000, 16 threads);
   - BXPOOL: one pool for all query batches of the run at 2+ threads (1 thread: the per-batch path);
   - BXBATCH: with that pool, several small query batches searched together, output in input order (2+ threads and
     several query batches);

@@ -306,7 +306,10 @@ pub(crate) fn pack_ncbi4na(src: &[u8], start: usize, end: usize, emit: impl FnMu
     packer.add_boundary(0, Some(coding_of_class(inside == 3)));
     // The residue after `start`: the low half of its byte when `start` is even.
     let mut j = start / 2;
-    if start % 2 == 0 && start + 1 < end && (PAIR_CLASSES[src[j] as usize] ^ inside) & 1 != 0 {
+    if start.is_multiple_of(2)
+        && start + 1 < end
+        && (PAIR_CLASSES[src[j] as usize] ^ inside) & 1 != 0
+    {
         flip(&mut packer, start, start + 1, &mut inside);
     }
     j += 1;
